@@ -395,9 +395,9 @@ export function TabSelect<T extends string>({
               fontSize: 12, fontWeight: active ? 700 : 500,
               background: active ? `color-mix(in srgb, ${accent} 18%, transparent)` : 'transparent',
               color: active ? accent : 'var(--text-secondary)',
-              border: 'none',
-              borderRight: i < options.length - 1 ? '1px solid var(--border)' : 'none',
-              ...(wrap ? { border: `1px solid ${active ? accent : 'var(--border)'}`, borderRadius: 7 } : {}),
+              ...(wrap
+                ? { border: `1px solid ${active ? accent : 'var(--border)'}`, borderRadius: 7 }
+                : { border: 'none', borderRight: i < options.length - 1 ? '1px solid var(--border)' : 'none' }),
               cursor: active ? 'default' : 'pointer',
               fontFamily: 'inherit',
               transition: 'background 0.15s, color 0.15s',

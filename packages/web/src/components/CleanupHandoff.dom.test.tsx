@@ -4,9 +4,9 @@ import { act } from 'react'
 import { DEFAULT_HANDOFF_CONFIG, type CleanWebPlan, type HandoffPanel } from '@agentistics/core'
 
 const plan: CleanWebPlan = { scanId: 'regression', scannedAt: Date.now(), elapsedMs: 100, reclaimable: { bytes: 606 * 1024 ** 2, count: 3 }, items: [
-  { id: 'a', repo: '/repo', project: 'repo', path: '/repo/a', name: 'a', kind: 'remove', bytes: 50 * 1024 ** 2, reason: 'merged and clean', lastActivityMs: 0 },
-  { id: 'b', repo: '/repo', project: 'repo', path: '/repo/b', name: 'b/node_modules', kind: 'node-modules', bytes: 556 * 1024 ** 2, reason: '', lastActivityMs: Date.now() },
-  { id: 'c', repo: '/repo', project: 'repo', path: '/repo/c', name: 'c', kind: 'keep', bytes: 900 * 1024 ** 2, reason: 'dirty', lastActivityMs: Date.now() },
+  { id: 'a', repo: '/repo', project: 'project-with-a-complete-name-of-fifty-characters-12345', path: '/repo/a', name: 'a', kind: 'remove', bytes: 50 * 1024 ** 2, reason: 'merged and clean', lastActivityMs: 0 },
+  { id: 'b', repo: '/repo', project: 'project-with-a-complete-name-of-fifty-characters-12345', path: '/repo/b', name: 'b/node_modules', kind: 'node-modules', bytes: 556 * 1024 ** 2, reason: '', lastActivityMs: Date.now() },
+  { id: 'c', repo: '/another-repo', project: 'project-with-a-complete-name-of-fifty-characters-12345', path: '/repo/c', name: 'c', kind: 'keep', bytes: 900 * 1024 ** 2, reason: 'dirty', lastActivityMs: Date.now() },
 ] }
 const panel: HandoffPanel = { version: 1, sessionId: 'leader-regression', updatedAt: 0, config: DEFAULT_HANDOFF_CONFIG, cutTokens: 250000, contextTokens: 310000, contextWindow: 1000000, level: 'overdue', spentUSD: 18, replies: 84, nextReplyUSD: .39, successorReplyUSD: .15, successorBaseTokens: 40000, handoffOverheadUSD: 1.2, breakEvenReplies: 5, projectionReplies: 20, projections: [], quotaEstimated: true, workInFlight: [], handoffPath: null }
 let createRoot: typeof import('react-dom/client').createRoot
@@ -32,6 +32,14 @@ for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) test(
   try {
     await act(async () => { root.render(<CleanDialog lang={lang} open onClose={() => {}} />) })
     expect(host.querySelector('.clean-summary')!.textContent).toContain('606 MB')
+    // Count repository identities across every row, including kept items and repeated names.
+    expect(host.querySelector('.clean-summary')!.textContent).toContain(lang === 'pt' ? '2 projetos nesta lista' : '2 projects in this list')
+    const projectNames = Array.from(host.querySelectorAll(width < 768 ? '.clean-card-subtitle' : 'tbody td:nth-child(3)'))
+    expect(projectNames).toHaveLength(3)
+    for (const project of projectNames) expect(project.textContent).toContain(plan.items[0]!.project)
+    const chips = host.querySelector<HTMLElement>('.clean-filter-chips > div')!
+    expect(chips.style.flexWrap).toBe('wrap')
+    if (width < 768) expect(host.querySelector<HTMLElement>('.clean-mobile-sort > div')!.style.flexWrap).toBe('wrap')
     expect(document.activeElement).toBe(host.querySelector('[role=dialog]'))
     const names = Array.from(host.querySelectorAll(width < 768 ? '.clean-card-name' : '.clean-folder-label > b')).map(n => n.textContent)
     expect(names).toEqual(['b', 'a', 'c'])

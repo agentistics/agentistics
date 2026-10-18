@@ -22,6 +22,9 @@ The result shows allocated disk size by type, filters with counts, sortable colu
 counts/bytes. Select-all affects the visible filter and preserves choices hidden by other filters.
 On mobile the same data appears in a bottom sheet with cards and 44px controls. Folder names stay
 visible; full paths are available in titles. Colors use the light/dark theme tokens.
+The result header counts distinct repository paths represented in the complete item list, including
+kept items, before filtering. Different worktree/folder names do not add projects to that count.
+Filter and sort chips wrap; project, folder and scan-log names remain readable in full.
 
 Idle time is display metadata, separate from the existing commit-based cleanup eligibility rule.
 On Linux, GNU `du --time` computes the newest nested mtime during the existing size walk; the
@@ -51,7 +54,9 @@ Foreground results may be reused for five minutes. Background results are retain
 so opening the bell's completion action never silently starts a replacement scan. Applying still
 rechecks the selected ids against current facts and repeats all removal guards.
 
-The result keeps its summary, filters and actions in view while only the item list scrolls.
+On desktop the result keeps its summary, filters and actions in view while only the item list
+scrolls. On mobile the result body scrolls together so wrapped controls leave room for whole cards;
+the dialog header and actions stay visible.
 The confirmation shows the selected byte total and count once. Scan logs show timestamps with
 seconds and sizes only after measurement; unfamiliar scan steps fall back to discovery wording.
 Cleanup completion replaces the bell’s earlier progress row, with localized singular/plural counts
@@ -61,4 +66,4 @@ The default All view lists selectable items first, then protected items, descend
 each group. Other sort controls still work. Worktree names wrap in full; dependency rows put
 `/node_modules` on a secondary line. The selection footer includes the number of selected items
 outside the active filter. Opening the dialog focuses its container; keyboard navigation retains
-visible focus rings. Unknown scan phases show a generic “Checking…” label.
+visible focus rings. Unknown scan phases show a generic “Checking” label.

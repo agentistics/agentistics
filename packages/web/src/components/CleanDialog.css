@@ -20,9 +20,9 @@
 .clean-dialog progress::-moz-progress-bar { background: var(--anthropic-orange); }
 .clean-log { min-height: 190px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; font: 11.5px var(--font-mono, monospace); }
 .clean-log-line { display: flex; gap: 9px; align-items: baseline; min-width: 0; }
-.clean-log-line > :not(.clean-ellipsis) { flex-shrink: 0; }
-.clean-log-line > .clean-ellipsis { flex: 1; }
-.clean-ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clean-log-line > :not(.clean-log-name) { flex-shrink: 0; }
+.clean-log-line > .clean-log-name { flex: 1; }
+.clean-log-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .clean-summary > div { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-top: 4px; }
 .clean-type-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; background: var(--border); }
 .clean-type-bar span { flex-basis: 0; min-width: 3px; }
@@ -35,7 +35,7 @@
 .clean-table-wrap { overflow-y: auto; min-height: 44px; flex: 0 1 auto; border: 1px solid var(--border); border-radius: 10px; }
 .clean-table { border-collapse: collapse; table-layout: fixed; width: 100%; text-align: left; font-size: 12px; }
 .clean-table th { position: sticky; top: 0; z-index: 1; background: var(--bg-elevated); font-weight: 500; }
-.clean-table th, .clean-table td { padding: 10px 7px; border-bottom: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clean-table th, .clean-table td { padding: 10px 7px; border-bottom: 1px solid var(--border); white-space: normal; overflow-wrap: anywhere; }
 .clean-table th button { border: 0; padding: 0; background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer; }
 .clean-table tr:last-child td { border-bottom: 0; }
 .clean-table th:last-child, .clean-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
@@ -54,7 +54,7 @@
 .clean-done-counts b { font-size: 22px; }
 .clean-done h3 { font-size: 12px; color: var(--text-secondary); margin: 0 0 8px; }
 .clean-outcome { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 12px; padding: 6px 0; }
-.clean-outcome b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clean-outcome b { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .clean-outcome span { color: var(--text-secondary); text-align: right; }
 .clean-error { overflow-wrap: anywhere; color: var(--accent-red); font-size: 12px; }
 @media (max-width: 767px) {
@@ -63,6 +63,9 @@
   .clean-dialog::before { content: ''; display: block; width: 40px; height: 4px; background: var(--border); border-radius: 2px; align-self: center; flex-shrink: 0; }
   .clean-dialog [data-dialog-actions] > div { flex: none; }
   .clean-content { gap: 14px; }
+  /* Wrapping controls must not squeeze the card list to a sliver on short screens. */
+  .clean-result-content { overflow-y: auto; }
+  .clean-mobile-rows { flex: 0 0 auto; overflow-y: visible; }
   .clean-number { font-size: 32px; }
   .clean-found { padding: 14px; gap: 8px; flex-wrap: wrap; }
   .clean-counters { gap: 12px; }
@@ -83,3 +86,7 @@
 
 .clean-folder-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .clean-folder-label b, .clean-folder-label small { display: block; }
+
+/* Border-box sizing keeps the outer chip borders inside the available row width. */
+.clean-filter-chips > div, .clean-mobile-sort > div { box-sizing: border-box; width: 100% !important; }
+.clean-filter-chips > div > button, .clean-mobile-sort > div > button { flex-shrink: 0; max-width: 100%; box-sizing: border-box; white-space: normal !important; overflow-wrap: anywhere; }
