@@ -1094,15 +1094,20 @@ export const moveTask = (ref: string, index: number, actor?: string) =>
 export function useTaskActivity(ref?: string, limit = 60) {
   const [events, setEvents] = useState<TaskEvent[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const reload = useCallback(async () => {
     const q = new URLSearchParams()
     if (ref) q.set('task', ref)
     q.set('limit', String(limit))
     try {
       const r = await fetch(`/api/tasks/activity?${q}`)
+      if (!r.ok) throw new Error('Task activity unavailable')
       const body = await r.json() as { events?: TaskEvent[] }
-      setEvents((body.events ?? []).map(expandCheckinEvent))
+      if (!Array.isArray(body.events)) throw new Error('Task activity unavailable')
+      setEvents(body.events.map(expandCheckinEvent))
+      setError(false)
     } catch {
+      setError(true)
       // An unreachable server keeps the last log rather than reporting an empty one — the same
       // rule the fleet poller follows. "Nothing happened" and "nobody answered" are different.
     } finally {
@@ -1113,7 +1118,7 @@ export function useTaskActivity(ref?: string, limit = 60) {
   // A check-in round lands in this log while it is on screen; the server announces every round on
   // the shared `checkin` event, so the log follows it instead of waiting for a remount.
   useEffect(() => subscribeEvent('checkin', () => { void reload() }), [reload])
-  return { events, loading, reload }
+  return { events, loading, error, reload }
 }
 
 export interface NextReply {
