@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.140.13': {
+  '2.141.0': {
     features: [
       {
         pt: '"Adicionar conta" agora mostra o link de login com os botões Abrir e Copiar, sem abrir terminal nem navegador sozinho.',
