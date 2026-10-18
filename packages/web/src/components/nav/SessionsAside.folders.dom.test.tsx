@@ -85,16 +85,17 @@ afterEach(async () => {
   await act(async () => root.unmount())
   host.remove()
 })
-const render = async (rows = fleet, width = 1280, lang: 'en' | 'pt' = 'en', valueFilters = filters, activeOnly = false, fellCount = 0) => {
+const render = async (rows = fleet, width = 1280, lang: 'en' | 'pt' = 'en', valueFilters = filters, activeOnly = false, fellCount = 0, sleepingActions = false) => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
   window.matchMedia = ((q: string) => ({ matches: q.includes('max-width') && width < 768, addEventListener() {}, removeEventListener() {} })) as never
   const fallen = new Map(Array.from({ length: fellCount }, (_, i) => {
     const session = { id: `fell-${i}`, title: `Fallen ${i}`, fell: true, verbs: [{ action: 'resume', label: 'Reopen', enabled: true }] }
     return [session.id, session] as const
   }))
+  if (sleepingActions) fallen.set('pin-ended', { id: 'pin-ended', title: 'Maestro', fell: false, verbs: [{ action: 'resume', label: 'Reabrir', enabled: true }] } as never)
   await act(async () => root.render(<MemoryRouter><SessionsAside rows={rows} lang={lang} filters={valueFilters} activeOnly={activeOnly}
     loading={false} unsupported={false} finishedTasks={[]} hideNew={fellCount === 0} rowsById={fallen}
-    {...(fellCount > 0 ? { act: async () => ({ ok: true, message: '' }) } : {})} /></MemoryRouter>))
+    {...(fellCount > 0 || sleepingActions ? { act: async () => ({ ok: true, message: '' }) } : {})} /></MemoryRouter>))
 }
 const folder = (id: string) => host.querySelector<HTMLElement>(`[data-session-folder="${id}"]`)
 const ended = (id: string) => host.querySelector<HTMLButtonElement>(`[data-ended-folders="${id}"]`)!
@@ -245,7 +246,7 @@ for (const width of [1280, 390]) test(`sleeping and pinned leader names wrap, ba
       await click(pin)
       expect(opened).toBe(compact ? 1 : 0)
       await click(open)
-      const resume = Array.from(card.querySelectorAll('button')).find(el => el.textContent === 'Reabrir')!
+      const resume = Array.from(card.querySelectorAll('button')).find(el => el.getAttribute('aria-label') === 'Reabrir')!
       await click(resume)
       await act(async () => markReopening(session.id))
       expect(open.textContent).toContain('Reabrindo…')
@@ -266,7 +267,7 @@ for (const width of [1280, 390]) test(`ended-only groups suppress the false empt
   const heading = folder('archived')!.querySelector<HTMLButtonElement>('button[aria-expanded]')!
   const name = Array.from(heading.querySelectorAll<HTMLElement>('span')).find(el => el.textContent === 'Agentistics Side Tasks')!
   expect(name.style.overflowWrap).toBe('normal')
-  expect(name.nextElementSibling?.getAttribute('style')).toContain('flex-shrink: 0')
+  expect(heading.querySelector('[data-folder-count]')).toBeNull()
 })
 
 test('action feedback uses the session title, reserves space, and can be dismissed', async () => {
@@ -308,7 +309,7 @@ for (const width of [1440, 390]) test(`pinned intent survives active/status filt
   expect(sleeping()).toBeUndefined()
 })
 
-test('folder totals count saved membership even for pinned or not-yet-loaded ended sessions', async () => {
+test('ended folders hide totals even for pinned or not-yet-loaded members', async () => {
   await act(async () => {
     groups.addSessionToGroup('archived', 'pin-ended')
   })
@@ -316,6 +317,21 @@ test('folder totals count saved membership even for pinned or not-yet-loaded end
   await click(ended('root'))
   const header = folder('archived')!.querySelector('button[aria-expanded]')!
   // Two direct memberships (one deferred, one pinned) plus the nested ended member.
-  expect(header.textContent).toContain('0/3')
+  expect(header.querySelector('[data-folder-count]')).toBeNull()
+  expect(folder('parent')?.querySelector('[data-folder-count]')).not.toBeNull()
   expect(folder('archived')!.querySelector('[title="Title pin-ended"]')).toBeNull()
+})
+
+for (const sidebar of [288, 220, 390]) test(`ended folders omit counters and summary separators trail their unit (${sidebar}px)`, async () => {
+  await act(async () => groups.renameSessionGroup('archived', 'Agentistics Side Tasks'))
+  const rows = fleet.map(r => r.id === 'pin-ended' ? { ...r, title: '[ LÍDER ] - Maestro (superskill)' } : r)
+  await render(rows, sidebar === 390 ? 390 : 1440, 'pt', filters, true, 0, true)
+  await click(ended('root'))
+  expect(folder('archived')!.querySelector('[data-folder-count]')).toBeNull()
+  expect(folder('parent')!.querySelector('[data-folder-count]')).not.toBeNull()
+  const units = host.querySelectorAll('[aria-label="Resumo das sessões"] > span')
+  for (const unit of Array.from(units)) expect(unit.firstElementChild?.tagName).toBe('BUTTON')
+  const sleeping = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Dormindo1')!
+  await click(sleeping)
+
 })

@@ -65,6 +65,14 @@ test('the unreachable screen shows the existing animated loader while retrying',
     expect(h).toContain('role="status"')
     expect(h).toContain(lang === 'pt' ? 'Tentando novamente' : 'Retrying')
     expect(h).toContain('<svg')
+    expect(h).toContain('var(--anthropic-orange)')
+    expect(h).toContain('opacity="0.8"')
     expect(h).toContain(lang === 'pt' ? 'a cada poucos segundos' : 'every few seconds')
   }
+})
+
+test('Settings keeps the statistics pull-tab out of its card area', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+  expect(src).toContain("{!location.pathname.startsWith('/settings') && (() => {")
 })

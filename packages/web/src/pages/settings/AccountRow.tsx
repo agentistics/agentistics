@@ -53,7 +53,7 @@ export interface BillingAccountListProps {
   onEdit: (row: BillingRowView) => void
 }
 
-const GRID = 'minmax(0,2.2fr) minmax(150px,1fr) minmax(130px,.8fr) 64px 118px'
+const GRID = 'minmax(100px,1.3fr) minmax(95px,.8fr) minmax(190px,1.8fr) 54px 90px'
 const nowrap: React.CSSProperties = { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
 
 function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
@@ -68,7 +68,7 @@ function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
 }
 
 function Usage({ r, now, lang, t }: { r: BillingRowView; now: number; lang: Lang; t: ReturnType<typeof T> }) {
-  if (r.limits) return <div data-billing-usage style={{ minWidth: 0, overflowWrap: 'anywhere' }}><PlanLimitBars limits={r.limits} now={now} lang={lang} /></div>
+  if (r.limits) return <div data-billing-usage style={{ minWidth: 0, overflowWrap: 'normal' }}><PlanLimitBars limits={r.limits} now={now} lang={lang} /></div>
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>
 }
 

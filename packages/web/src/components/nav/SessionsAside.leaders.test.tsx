@@ -98,9 +98,12 @@ for (const width of [1280, 390]) test(`leaders-only is flat and restores the nor
     act(() => chip().click())
     const list = host.querySelector('[data-leaders-list]')!
     expect(list).toBeTruthy()
-    expect(list.children).toHaveLength(3)
-    for (const id of ['live-pin', 'live-folder', 'live-hidden']) expect(list.textContent).toContain(`Title ${id}`)
-    for (const text of ['Pinned', 'Groups', 'Visible folder marker', 'Hidden folder marker', 'Title worker', 'Title ended', 'Inactive']) {
+    expect(list.children).toHaveLength(2)
+    for (const id of ['live-folder', 'live-hidden']) expect(list.textContent).toContain(`Title ${id}`)
+    expect(host.textContent).toContain('Pinned')
+    expect(host.textContent).toContain('Sleeping')
+    expect(host.querySelectorAll('[title="Title live-pin"]')).toHaveLength(1)
+    for (const text of ['Groups', 'Visible folder marker', 'Hidden folder marker', 'Title ended', 'Inactive']) {
       expect(host.textContent).not.toContain(text)
     }
     expect(host.querySelectorAll('[aria-label="Sessions summary"] button')).toHaveLength(1)
@@ -162,7 +165,7 @@ for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
       expect(host.textContent).not.toContain(emptyText)
       expect(host.textContent).toContain(lang === 'pt' ? 'Lendo as sessões' : 'Reading this machine')
       render(rows)
-      expect(host.querySelector('[data-leaders-list]')!.children).toHaveLength(3)
+      expect(host.querySelector('[data-leaders-list]')!.children).toHaveLength(2)
       expect(host.textContent).not.toContain(emptyText)
     } finally {
       await act(async () => root.unmount())
@@ -200,11 +203,11 @@ for (const width of [1280, 390]) test(`sleeping pins collapse, remember expansio
     act(() => sleeping().click())
     expect(sleeping().getAttribute('aria-expanded')).toBe('true')
     const card = host.querySelector<HTMLElement>('[data-session-row][title="Title ended"]')!
-    expect(card.textContent).toContain('Reopen')
+    expect(card.querySelector('[aria-label="Reopen"]')).not.toBeNull()
     act(() => card.querySelector<HTMLButtonElement>('[data-session-open]')!.click())
     expect(opened).toBe('ended')
     await act(async () => {
-      const reopen = Array.from(card.querySelectorAll<HTMLButtonElement>('button')).find(e => e.textContent === 'Reopen')!
+      const reopen = Array.from(card.querySelectorAll<HTMLButtonElement>('button')).find(e => e.getAttribute('aria-label') === 'Reopen')!
       reopen.click()
     })
     expect(actions).toEqual([{ id: 'ended', action: 'resume' }])

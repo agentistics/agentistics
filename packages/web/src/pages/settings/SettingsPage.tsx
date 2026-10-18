@@ -1,5 +1,5 @@
-import React from 'react'
-import { NavLink, Outlet, useOutletContext } from 'react-router-dom'
+import React, { useEffect, useRef } from 'react'
+import { NavLink, Outlet, useOutletContext, useLocation } from 'react-router-dom'
 import type { AppContext } from '../../lib/app-context'
 import {
   visibleSettingsSections,
@@ -26,6 +26,11 @@ const GROUP_ORDER: SettingsGroup[] = ['personal', 'governance']
 export default function SettingsPage() {
   const ctx = useOutletContext<AppContext>()
   const isMobile = useIsMobile()
+  const menuRef = useRef<HTMLElement>(null)
+  const { pathname } = useLocation()
+  useEffect(() => {
+    if (isMobile) menuRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'start' })
+  }, [pathname, isMobile])
   const pt = ctx.lang === 'pt'
   const { nativeRuntime } = useEngineCaps()
 
@@ -55,13 +60,14 @@ export default function SettingsPage() {
     border: '1px solid ' + (active ? 'var(--border)' : 'transparent'),
     textDecoration: 'none',
     whiteSpace: 'nowrap',
+    ...(isMobile ? { flex: '0 0 100%', boxSizing: 'border-box', textAlign: 'center', scrollSnapAlign: 'start', scrollSnapStop: 'always' } as const : {}),
   })
 
   const menu = (
-    <nav
+    <nav ref={menuRef} aria-label={pt ? 'Seções das configurações' : 'Settings sections'}
       style={
         isMobile
-          ? { display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }
+          ? { display: 'flex', overflowX: 'auto', paddingBottom: 4, scrollSnapType: 'x mandatory', minWidth: 0 }
           : { display: 'flex', flexDirection: 'column', gap: 14 }
       }
     >
@@ -70,12 +76,13 @@ export default function SettingsPage() {
           key={group}
           style={
             isMobile
-              ? { display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }
+              ? { display: 'contents' }
               : { display: 'flex', flexDirection: 'column', gap: 2 }
           }
         >
           <div
             style={{
+              display: isMobile ? 'none' : undefined,
               fontSize: 10.5,
               fontWeight: 700,
               letterSpacing: '0.06em',

@@ -18,8 +18,9 @@ about the web one specifically.
 
 The aside's **N leaders** toggle counts only sessions in the fleet's active states that match the
 current search and harness/project/repository/model filters. When enabled, it displays those
-leaders in one flat list, including leaders that are pinned or filed in hidden folders. Pinned,
-folder, ended and summary-filter sections are suspended until the toggle is turned off; their
+leaders in one flat list, including leaders filed in hidden folders. Pinned and Sleeping stay
+above that list regardless of quick filters, and pinned leaders are not repeated in the flat list.
+Folder, ended and summary-filter sections are suspended until the toggle is turned off; their
 settings are preserved. The toggle stays visible at zero while enabled so it can be turned off.
 The summary filter does not narrow this flat list; its selection is restored in the normal view.
 When no active leaders match, the list says **No active leaders** (**Nenhum líder ativo**), even
@@ -39,7 +40,9 @@ reopened, or unpinned; sleeping never removes the pin. Leader names omit the rol
 an explicit Líder/Leader badge in cards and the tabs menu. Titles wrap without ellipses; the menu
 can grow to the viewport gutter. On phones each tab fits the scrolling track, with mandatory scroll
 snapping and the active tab scrolled into view. Arrow keys, Home and End move the tab's focus;
-Enter or Space opens the focused tab. Row pin/open/reopen controls are separate buttons.
+Enter or Space opens the focused tab. Row pin/open/reopen controls are separate buttons. Reopen
+uses an icon with an explicit label and foreground contrast. At the minimum aside width its two
+action icons stack in the trailing slot so the last word and role badge still fit together.
 
 The notification panel keeps its title, Clear all action and Mute active workers switch together
 in one sticky header while notifications scroll below. Aside action feedback reserves space and uses
@@ -407,11 +410,16 @@ vault is open. A 401/403 clears the card and parks polling until a lock-state tr
 the shared watcher continues checking vault state, so unlocking resumes requests. Unmounting or
 locking cancels the timer and ignores any older in-flight result.
 
-Folder header totals count saved membership, including pinned members drawn in Pinned and ended
-sessions whose history page has not loaded yet. Under filters, `shown/total` counts matching
-resolved members over saved members (including nested folders); an ended-only folder holding one
-session therefore reads `0/1` under Active only, whether that session is pinned or deferred.
+Active folder header totals count saved membership, including pinned members drawn in Pinned and
+ended sessions whose history page has not loaded yet. Under filters, `shown/total` counts matching
+resolved members over saved members (including nested folders). Folders inside Ended omit this
+counter: the section already states how many it holds, and the folder name gets that space.
 
 If the server is unreachable at first start, the retry screen explains that the first opening
 after an update reads the whole history and can take a few minutes. The existing loader stays
 visible while automatic retries continue.
+
+Billing keeps each window’s percentage and renewal time on one line. A renewed window’s longer
+explanation spans the full usage cell below its meter. On mobile, Settings sections snap one
+complete tab at a time and the selected section scrolls into view. The statistics pull-tab stays
+out of Settings so it cannot overlap the card.

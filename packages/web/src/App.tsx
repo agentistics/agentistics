@@ -283,7 +283,7 @@ export function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: str
       </button>
       {autoRetry && (
         <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
-          <AgentisticsLoader size={18} label={lang === 'pt' ? 'Tentando novamente' : 'Retrying'} />
+          <AgentisticsLoader size={18} accent="var(--anthropic-orange)" baseOpacity={0.8} label={lang === 'pt' ? 'Tentando novamente' : 'Retrying'} />
           {lang === 'pt' ? 'Tentando de novo sozinho a cada poucos segundos.' : 'Also retrying on its own every few seconds.'}
         </div>
       )}
@@ -4129,7 +4129,7 @@ export default function AppLayout() {
           page panel. Dashboard only — these are STORED metrics, and a live fleet already states its own
           "Connected · last sync" in the aside. */}
       {/* Guarded by this row's own condition — see `dashboardTopBar`. */}
-      {(() => {
+      {!location.pathname.startsWith('/settings') && (() => {
         return (
           // It hangs from the PAGE PANEL's top edge now, not from the strip: the panel sits
           // `OUTER_GAP` below the strip with a 1px border, and the tab starts right inside that

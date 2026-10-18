@@ -5,6 +5,8 @@ import { animateD1, breatheD1, d1Markup, D1_PATHS } from '../lib/d1Loader'
 export const AGENTISTICS_LOGO_PATHS = D1_PATHS
 
 type AgentisticsLoaderProps = {
+  accent?: string
+  baseOpacity?: number
   size?: number
   label?: string
   className?: string
@@ -16,12 +18,12 @@ type AgentisticsLoaderProps = {
  * `lib/d1Loader.ts`, which the boot splash in `index.html` runs too, so the two cannot differ.
  * The markup is built from constants only, which is why it is set as HTML.
  */
-export function AgentisticsLoader({ size = 16, label, className, style }: AgentisticsLoaderProps) {
+export function AgentisticsLoader({ size = 16, label, className, style, accent, baseOpacity }: AgentisticsLoaderProps) {
   const uid = `ag-d1-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const svgRef = useRef<SVGSVGElement>(null)
   const reducedMotion = useMemo(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches, [])
   const accessibleLabel = label ?? (typeof navigator !== 'undefined' && navigator.language?.toLowerCase().startsWith('pt') ? 'Carregando' : 'Loading')
-  const markup = useMemo(() => d1Markup(size, uid, reducedMotion), [size, uid, reducedMotion])
+  const markup = useMemo(() => d1Markup(size, uid, reducedMotion, accent, baseOpacity), [size, uid, reducedMotion, accent, baseOpacity])
 
   useEffect(() => {
     const svg = svgRef.current

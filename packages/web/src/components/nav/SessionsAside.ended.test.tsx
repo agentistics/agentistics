@@ -59,11 +59,24 @@ test('compact sleeping rows reserve one line for controls and keep the last word
   expect(html).toContain('flex-wrap:nowrap')
   expect(html).toContain('flex:1 1 0')
   expect(html).toContain('white-space:nowrap">(superskill)')
-  expect(html).toContain('Reabrir')
+  expect(html).toContain('aria-label="Reabrir"')
   expect(html).toContain('lucide-pin-off')
   expect(html).not.toContain('text-overflow:ellipsis')
   const unpinned = renderToStaticMarkup(<SessionRow session={session} compact selected={false} cardColor="wash" onOpen={() => {}} onPin={() => {}} lang="pt" />)
   expect(unpinned).toContain('aria-label="Fixar"')
   expect(unpinned).toContain('lucide-pin"')
   expect(unpinned).not.toContain('lucide-pin-off')
+})
+
+test('reopen is an icon control with a full label, foreground contrast and native disabled state', () => {
+  for (const enabled of [true, false]) {
+    const h = renderToStaticMarkup(<SessionRow session={session} compact pinned selected={false} cardColor="wash" lang="pt"
+      onOpen={() => {}} onPin={() => {}} onReopen={() => {}} reopenVerb={{ ...resume, enabled }} />)
+    const button = h.match(/<button[^>]*aria-label="Reabrir"[\s\S]*?<\/button>/)![0]
+    expect(button).toContain('title="Reabrir"')
+    expect(button).toContain('var(--text-primary)')
+    expect(button).toContain('lucide-rotate-ccw')
+    expect(button.replace(/<[^>]+>/g, '')).toBe('')
+    expect(button.includes('disabled=""')).toBe(!enabled)
+  }
 })

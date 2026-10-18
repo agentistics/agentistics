@@ -94,7 +94,8 @@ for (const width of [1440, 390]) test(`renewed Codex usage wraps within its own 
     const usage = h.slice(h.indexOf('data-billing-usage'), h.indexOf('data-billing-usage') + 3000)
     expect(usage).toContain('renovado')
     expect(usage).toContain('white-space:normal')
-    expect(usage).toContain('minmax(0, 2fr)')
+    expect(usage).toContain('grid-column:1 / -1')
+    expect(usage).not.toContain('overflow-wrap:anywhere')
     expect(usage).not.toContain('text-overflow:ellipsis')
   } finally { g.window = { innerWidth: 1280 } }
 })

@@ -1,3 +1,4 @@
+import { IconButton } from '../sessions/RepoSearchView'
 import { ActionNotice } from '../sessions/ActionNotice'
 import { hasLeaderTitle, sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
 import { useEscapeOwner } from '../../lib/overlayStack'
@@ -26,7 +27,7 @@ import { getActivePane } from '../../lib/paneScope'
 import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/splitRoute'
 
 import {
-  BellOff, ChevronDown, ChevronRight, Clock, Crown, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Moon, Pin,
+  BellOff, ChevronDown, ChevronRight, Clock, Crown, Filter, Folder, FolderOpen, FolderPlus, GripVertical, MoreVertical, Moon, Pin,
   PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
@@ -1117,7 +1118,7 @@ export function SessionsAside({
                   ...(tap ? { touchAction: 'none' as const } : {}),
                 }}
               >
-                <GripVertical size={13} />
+                {insideEnded ? (folded ? <Folder size={11} /> : <FolderOpen size={11} />) : <GripVertical size={13} />}
               </span>
             )}
             {/* The body — everything else on the row. Dragging THIS nests the folder into
@@ -1145,8 +1146,8 @@ export function SessionsAside({
                   color: 'var(--text-tertiary)',
                 }}
               >
-                {folded ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-                <Folder size={11} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
+                {!insideEnded && (folded ? <ChevronRight size={11} /> : <ChevronDown size={11} />)}
+                {!(insideEnded && depth === 0) && <Folder size={11} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />}
                 {/* Hidden: the name stays in the layout (so the block is exactly as long as it) and
                     a grey block is painted over it. `role="img"` makes a reader announce the
                     label instead of reading the text out. */}
@@ -1161,7 +1162,7 @@ export function SessionsAside({
                 >
                   {group.name}
                 </span>
-                <span style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupsValue.groups.map(group => ({ group, rows: group.sessionKeys }))), narrowing)}</span>
+                {!insideEnded && <span data-folder-count style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupsValue.groups.map(group => ({ group, rows: group.sessionKeys }))), narrowing)}</span>}
               </button>
               <button
                 onClick={e => {
@@ -1299,7 +1300,7 @@ export function SessionsAside({
   useEscapeOwner(renamingGroup !== null, () => setRenamingGroup(null))
   return (
     <GoToSessionContext.Provider value={onGoToSession ?? null}>
-    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
+    <div style={{ containerType: 'inline-size', containerName: 'sessions-aside', position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
       {/* THE IDLE-REVIEW CARD — the FIRST thing in the column, right under the Dashboard/Sessions
           tabs (desktop) and the Sessions/Metrics tabs (mobile). Owner decision 2026-09-27: it sat
           above Groups, halfway down a list that scrolls, and read as one more row. At the top it
@@ -1369,7 +1370,6 @@ export function SessionsAside({
       >
         {!leadersOnly && summaryParts(summaryNumbers, pt).map((v, i) => (
           <span key={v.part} style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
-            {i > 0 && <span aria-hidden>·</span>}
             <button
               type="button"
               onClick={() => setSummaryFilter(toggleSummaryPart(summaryFilter, v.part))}
@@ -1384,11 +1384,11 @@ export function SessionsAside({
             >
               {v.text}
             </button>
+            {(i < summaryParts(summaryNumbers, pt).length - 1 || leaderCount > 0 || capacityLabel) && <span aria-hidden>·</span>}
           </span>
         ))}
         {(leaderCount > 0 || leadersOnly) && (
           <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
-            {!leadersOnly && <span aria-hidden>·</span>}
             <button
               type="button"
               data-leaders-only
@@ -1408,9 +1408,10 @@ export function SessionsAside({
               {leadersText(leaderCount, pt)}
               {leadersOnly && <X size={11} aria-hidden />}
             </button>
+            {capacityLabel && <span aria-hidden>·</span>}
           </span>
         )}
-        {capacityLabel && (<><span aria-hidden>·</span><span data-testid="aside-capacity">{capacityLabel}</span></>)}
+        {capacityLabel && <span data-testid="aside-capacity" style={{ whiteSpace: 'nowrap' }}>{capacityLabel}</span>}
       </div>
 
       {/*
@@ -1780,35 +1781,6 @@ export function SessionsAside({
           setDraggingGroupId(null)
         }}
       >
-        {leadersOnly ? (
-          <>
-          <div data-leaders-list style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {activeLeaders.map(s => (
-              <SessionRow
-                key={s.id}
-                session={s}
-                selected={rowSelected(s, sessionId)}
-                pinned={pinned.has(pinKeyOf(s))}
-                tap={tap}
-                onPin={() => flip(s)}
-                onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
-                {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
-                onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
-                onFile={(x, y) => setLinking({ id: s.id, x, y })}
-                lang={lang}
-                cardColor={cardColor}
-              />
-            ))}
-          </div>
-          {total === 0 && (
-            <EmptyReason
-              pt={pt} loading={loading} unsupported={unsupported} unavailable={unavailable}
-              leadersOnly searching={false} withheld={0} filterNarrowed={false}
-            />
-          )}
-          </>
-        ) : (
-          <>
         {/* The pinned band, above everything — that is what pinning is for: the two or three
             sessions that must not move when the arrangement changes. */}
         {allPinnedRows.length > 0 && (
@@ -1920,6 +1892,36 @@ export function SessionsAside({
           </div>
         )}
 
+
+        {leadersOnly ? (
+          <>
+          <div data-leaders-list style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {activeLeaders.filter(s => !pinned.has(pinKeyOf(s))).map(s => (
+              <SessionRow
+                key={s.id}
+                session={s}
+                selected={rowSelected(s, sessionId)}
+                pinned={pinned.has(pinKeyOf(s))}
+                tap={tap}
+                onPin={() => flip(s)}
+                onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
+                {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
+                onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
+                onFile={(x, y) => setLinking({ id: s.id, x, y })}
+                lang={lang}
+                cardColor={cardColor}
+              />
+            ))}
+          </div>
+          {total === 0 && (
+            <EmptyReason
+              pt={pt} loading={loading} unsupported={unsupported} unavailable={unavailable}
+              leadersOnly searching={false} withheld={0} filterNarrowed={false}
+            />
+          )}
+          </>
+        ) : (
+          <>
         {/*
           * USER GROUPS — named, manually curated sets ("Saved to later", …), below Pinned and above
           * the automatic Active/Inactive sections. The header (with "+ Novo grupo") always renders,
@@ -2016,7 +2018,7 @@ export function SessionsAside({
           </div>
         )}
         {!foldedGroupsSection && endedRootFolders.length > 0 && (
-          <div data-ended-root-folders style={{ marginTop: 4, padding: '4px 8px', borderRadius: 8, background: 'var(--bg-elevated)' }}>
+          <div data-ended-root-folders style={{ marginTop: 4, padding: '4px 0', borderRadius: 8, background: 'var(--bg-elevated)' }}>
             <button type="button" onClick={() => toggleEnded(ROOT_ENDED_FOLDERS)} aria-expanded={rootEndedOpen}
               data-ended-folders="root"
               style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', minHeight: tap, padding: '3px 4px',
@@ -2753,11 +2755,12 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
   return (
     <div
       data-session-row
+      data-sleeping-pin={compact && pinned && onReopen ? true : undefined}
       style={{
-        display: 'flex', flexWrap: compact ? 'nowrap' : 'wrap', alignItems: 'center', gap: compact ? 2 : 8, width: '100%', boxSizing: 'border-box',
+        display: 'flex', flexWrap: compact ? 'nowrap' : 'wrap', alignItems: 'center', gap: compact ? (tap ? 2 : 0) : 8, fontSize: compact ? 13 : undefined, width: '100%', boxSizing: 'border-box',
         // Left padding is deliberately wider than the right: a live row carries a state edge on its left
         // and the text needs air beside it (the row's own dot used to provide it).
-        padding: compact ? '6px 8px' : '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: compact ? 56 : tap,
+        padding: compact ? (pinned && !tap ? '6px' : '6px 8px') : '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: compact ? 56 : tap,
         // SELECTED is NOT orange. Orange is already the state colour for a row that needs a person
         // (`STATE_COLOR.waiting`), so the selected row wore the same tint as the alarm and the two
         // became one signal: selecting a working session made it look like it was asking for you.
@@ -2828,14 +2831,11 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       </span>
       </button>
       {onReopen && reopenVerb && (
-        <button type="button" tabIndex={reopenVerb.enabled && !reopening ? 0 : -1}
-          aria-disabled={!reopenVerb.enabled || reopening} title={reopenVerb.reason ?? reopenVerb.label}
-          onClick={e => { e.stopPropagation(); if (reopenVerb.enabled && !reopening) onReopen() }}
-          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (reopenVerb.enabled && !reopening) onReopen() } }}
-          style={{ border: 'none', background: 'transparent', font: 'inherit', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: tap ?? 24, flexShrink: 0,
-            color: 'var(--text-secondary)', opacity: reopenVerb.enabled && !reopening ? 1 : 0.5, fontSize: 11 }}>
-          <RotateCcw size={12} />{lang === 'en' ? 'Reopen' : 'Reabrir'}
-        </button>
+        <IconButton label={lang === 'en' ? 'Reopen' : 'Reabrir'} size={tap ?? 22}
+          disabled={!reopenVerb.enabled || reopening} color="var(--text-primary)"
+          onClick={e => { e.stopPropagation(); if (reopenVerb.enabled && !reopening) onReopen() }}>
+          <RotateCcw size={14} />
+        </IconButton>
       )}
       {compact && verbs && verbs.length > 0 && onOpenMenu && (
         <button type="button" tabIndex={0}
