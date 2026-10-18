@@ -1151,3 +1151,11 @@ tr:focus-within .ag-row-actions,
   [data-sleeping-pin] > [aria-label="Reopen"] { grid-column: 3; grid-row: 1; }
   [data-sleeping-pin] > [aria-haspopup="menu"] { grid-column: 3; grid-row: 2; }
 }
+
+/* Keep the crash action inside its button, including the 220px sidebar. */
+[data-fell-short] { display: inline; }
+[data-fell-full] { display: none; }
+@container (min-width: 240px) {
+  [data-fell-short] { display: none; }
+  [data-fell-full] { display: inline; }
+}

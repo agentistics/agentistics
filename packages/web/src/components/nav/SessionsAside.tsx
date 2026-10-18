@@ -1099,7 +1099,7 @@ export function SessionsAside({
         >
           <div style={{
             display: 'flex', alignItems: 'center', gap: 2, borderRadius: 7,
-            padding: '4px 0', minHeight: tap,
+            padding: insideEnded ? '4px' : '4px 0', minHeight: tap,
           }}>
             {/* The grip — the ONLY drag source that reorders, and only TOP-LEVEL folders have one. A
                 nested folder is pinned first under its parent and has no order of its own to change;
@@ -1127,7 +1127,7 @@ export function SessionsAside({
               draggable
               onDragStart={e => { setGroupNestDragPayload(e, group.id); setDraggingGroupId(group.id) }}
               onDragEnd={() => { setNestOverGroupId(null); setDraggingGroupId(null) }}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, cursor: 'grab' }}
+              style={{ display: 'flex', alignItems: 'center', gap: insideEnded ? 2 : 6, flex: 1, minWidth: 0, cursor: 'grab' }}
             >
               <button
                 onClick={() => (fold.toggles === 'dimmed' ? toggleOpenedDimmed(group.id) : toggleUserGroupFold(group.id))}
@@ -1173,7 +1173,7 @@ export function SessionsAside({
                 title={pt ? 'Opções do grupo' : 'Group options'}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: tap ?? 24, height: tap ?? 24, flexShrink: 0, borderRadius: 6,
+                  width: tap ?? (insideEnded ? 20 : 24), height: tap ?? 24, padding: insideEnded ? 0 : undefined, flexShrink: 0, borderRadius: 6,
                   border: 'none', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer',
                 }}
               >
@@ -1366,9 +1366,9 @@ export function SessionsAside({
       <div
         role="group"
         aria-label={pt ? 'Resumo das sessões' : 'Sessions summary'}
-        style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 0', padding: '0 2px', fontSize: 11, color: 'var(--text-tertiary)' }}
+        style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 6px', padding: '0 2px', fontSize: 11, color: 'var(--text-tertiary)' }}
       >
-        {!leadersOnly && summaryParts(summaryNumbers, pt).map((v, i) => (
+        {!leadersOnly && summaryParts(summaryNumbers, pt).map(v => (
           <span key={v.part} style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
             <button
               type="button"
@@ -1384,7 +1384,6 @@ export function SessionsAside({
             >
               {v.text}
             </button>
-            {(i < summaryParts(summaryNumbers, pt).length - 1 || leaderCount > 0 || capacityLabel) && <span aria-hidden>·</span>}
           </span>
         ))}
         {(leaderCount > 0 || leadersOnly) && (
@@ -1408,7 +1407,6 @@ export function SessionsAside({
               {leadersText(leaderCount, pt)}
               {leadersOnly && <X size={11} aria-hidden />}
             </button>
-            {capacityLabel && <span aria-hidden>·</span>}
           </span>
         )}
         {capacityLabel && <span data-testid="aside-capacity" style={{ whiteSpace: 'nowrap' }}>{capacityLabel}</span>}
@@ -1624,7 +1622,7 @@ export function SessionsAside({
         * outcome is a refusal is a button that teaches the wrong thing.
         */}
       {showFell && (
-        <div data-fell-banner style={{ display: 'flex', alignItems: 'stretch', gap: 6, minWidth: 0, margin: '0 2px' }}>
+        <div data-fell-banner style={{ containerType: 'inline-size', display: 'flex', alignItems: 'stretch', gap: 6, minWidth: 0, margin: '0 2px' }}>
           <button type="button" data-fell-reopen
             title={reopenFellSentence} aria-label={reopenFellSentence}
             onClick={() => setPicking('reopen')}
@@ -1637,7 +1635,8 @@ export function SessionsAside({
             }}
           >
             <RotateCcw size={14} style={{ flexShrink: 0 }} />
-            <span>{reopenFellLabel}</span>
+            <span data-fell-full>{reopenFellLabel}</span>
+            <span data-fell-short>{pt ? `Reabrir ${fellCount}` : `Reopen ${fellCount}`}</span>
           </button>
           {/* Hides the banner until a DIFFERENT crash group shows up — never on the server, never
               discarding anything. Every row stays reopenable one at a time from its own menu. */}

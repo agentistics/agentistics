@@ -423,3 +423,8 @@ Billing keeps each window’s percentage and renewal time on one line. A renewed
 explanation spans the full usage cell below its meter. On mobile, Settings sections snap one
 complete tab at a time and the selected section scrolls into view. The statistics pull-tab stays
 out of Settings so it cannot overlap the card.
+
+The aside's crash-reopen banner uses its own available width to choose between a full label and
+`Reopen N` (`Reabrir N`). The full sentence remains its title and accessible label. Closed-folder
+headers reserve space for the complete leading icon and omit totals. Summary filters wrap as
+indivisible units separated by spacing, so no punctuation is stranded at a line boundary.

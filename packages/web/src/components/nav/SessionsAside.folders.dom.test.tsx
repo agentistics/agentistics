@@ -204,7 +204,9 @@ for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) for (
     const label = lang === 'pt' ? (count === 1 ? 'Reabrir 1 que caiu' : `Reabrir ${count} que caíram`) : `Reopen ${count} that fell`
     const sentence = lang === 'pt' ? (count === 1 ? 'Reabrir 1 sessão que caiu' : `Reabrir ${count} sessões que caíram`)
       : (count === 1 ? 'Reopen 1 session that fell' : `Reopen ${count} sessions that fell`)
-    expect(button.textContent).toBe(label)
+    expect(button.querySelector('[data-fell-full]')!.textContent).toBe(label)
+    expect(button.querySelector('[data-fell-short]')!.textContent).toBe(`${lang === 'pt' ? 'Reabrir' : 'Reopen'} ${count}`)
+    expect(banner.style.containerType).toBe('inline-size')
     expect(button.title).toBe(sentence)
     expect(button.getAttribute('aria-label')).toBe(sentence)
     expect(getComputedStyle(button).whiteSpace).toBe('nowrap')
@@ -322,7 +324,7 @@ test('ended folders hide totals even for pinned or not-yet-loaded members', asyn
   expect(folder('archived')!.querySelector('[title="Title pin-ended"]')).toBeNull()
 })
 
-for (const sidebar of [288, 220, 390]) test(`ended folders omit counters and summary separators trail their unit (${sidebar}px)`, async () => {
+for (const sidebar of [288, 220, 390]) test(`ended folders reserve icon space and summary units have no separators (${sidebar}px)`, async () => {
   await act(async () => groups.renameSessionGroup('archived', 'Agentistics Side Tasks'))
   const rows = fleet.map(r => r.id === 'pin-ended' ? { ...r, title: '[ LÍDER ] - Maestro (superskill)' } : r)
   await render(rows, sidebar === 390 ? 390 : 1440, 'pt', filters, true, 0, true)
@@ -331,6 +333,10 @@ for (const sidebar of [288, 220, 390]) test(`ended folders omit counters and sum
   expect(folder('parent')!.querySelector('[data-folder-count]')).not.toBeNull()
   const units = host.querySelectorAll('[aria-label="Resumo das sessões"] > span')
   for (const unit of Array.from(units)) expect(unit.firstElementChild?.tagName).toBe('BUTTON')
+  expect(host.querySelector('[aria-label="Resumo das sessões"]')!.textContent).not.toContain('·')
+  const grip = folder('archived')!.querySelector<HTMLElement>('span[draggable]')!
+  expect(grip.parentElement!.style.padding).toBe('4px')
+  expect(grip.querySelector('svg')).not.toBeNull()
   const sleeping = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Dormindo1')!
   await click(sleeping)
 

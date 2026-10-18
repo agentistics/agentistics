@@ -108,3 +108,13 @@ test('making room for usage preserves full plan names and account subtitles', ()
   expect(h).toContain('minmax(150px,.8fr)')
   expect(h).not.toContain('text-overflow:ellipsis')
 })
+
+for (const width of [1440, 390]) test(`account subtitle separates harness and login without dots at ${width}px`, () => {
+  g.window = { innerWidth: width }
+  try {
+    const h = renderToStaticMarkup(<BillingAccountList {...view([acc('c1', { nickname: 'Principal', label: 'principal@exemplo.com' })], ['claude'])} lang="pt" />)
+    expect(h).toContain('data-billing-subtitle')
+    expect(h).toContain('white-space:nowrap">Claude Code</span><span style="display:block">principal@exemplo.com</span>')
+    expect(h).not.toContain('Claude Code ·')
+  } finally { g.window = { innerWidth: 1280 } }
+})
