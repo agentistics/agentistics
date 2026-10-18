@@ -43,7 +43,7 @@ import type { SessionOrder } from '@agentistics/tui/control/session-order'
 import { displayName, toggleHidden } from '../../lib/groupNameMask'
 import { folderFold } from '../../lib/folderFold'
 import { splitSleepingTabs } from '../../lib/sessionTabs'
-import { splitFolderRows, endedAutoOpen } from '../../lib/folderRows'
+import { activeFolderIds, isFolderSessionActive, splitFolderRows, endedAutoOpen } from '../../lib/folderRows'
 import { ATTN_BAR_CLASS, ATTN_COUNT_CLASS, attentionCount, attentionIds, pruneDismissed } from './AttentionDot'
 import { rowSelected } from '../../lib/fleetSelection'
 import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
@@ -101,6 +101,7 @@ import { applyLeadersOnly, countLeaders, leadersText } from '../../lib/leadersFi
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
 const OPEN_BESIDE = '__open_beside__'
 const SLEEPING_PINS = 'pinned:sleeping'
+const ROOT_ENDED_FOLDERS = 'folders:root-ended'
 
 export interface SessionsAsideProps {
   lang: 'pt' | 'en'
@@ -778,7 +779,14 @@ export function SessionsAside({
     const ids = new Set(matched.map(r => r.id))
     return groupRowsResolved.map(e => ({ ...e, rows: e.rows.filter(r => ids.has(r.id)) }))
   }, [narrowing, matched, groupRowsResolved])
+  // Activity comes from the whole fleet, so a search or value filter cannot archive a live folder.
+  const foldersWithActivity = useMemo(() => activeFolderIds(groupRowsResolved), [groupRowsResolved])
+  const rootFolders = groupRowsShown.filter(g => !g.group.parentId && !groupConcealed(groupsValue, g.group.id))
+  const liveRootFolders = rootFolders.filter(g => foldersWithActivity.has(g.group.id))
+  const endedRootFolders = rootFolders.filter(g => !foldersWithActivity.has(g.group.id))
   const searching = query.trim() !== ''
+  const rootEndedOpen = expandedEnded.has(ROOT_ENDED_FOLDERS)
+    || (searching && endedRootFolders.some(g => folderSessionCount(g.group.id, groupRowsShown) > 0))
   /** Which SET filter dimensions this fleet cannot answer at all, said in one line — never silent. */
   const ignoredNote = useMemo(() => ignoredDimensions(filters, lang), [filters, lang])
 
@@ -856,7 +864,7 @@ export function SessionsAside({
     writeAsideGroupPrefs({ collapsed: [...allAutoKeys] })
   }
   const expandAll = () => {
-    const nextEnded = new Set([...expandedEnded, SLEEPING_PINS])
+    const nextEnded = new Set([...expandedEnded, SLEEPING_PINS, ROOT_ENDED_FOLDERS, ...groupsValue.groups.map(g => g.id)])
     setExpandedEndedState(nextEnded)
     writeAsideGroupPrefs({ expandedEndedGroups: [...nextEnded] })
     setFoldedPinnedState(false)
@@ -916,7 +924,7 @@ export function SessionsAside({
    * folders' (`folderSessionCount`). It used to count direct sessions only, and a parent holding
    * nothing but subfolders read `0`.
    */
-  const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1, parentDimmed = false): React.ReactNode => {
+  const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1, parentDimmed = false, insideEnded = false): React.ReactNode => {
     const { group } = entry
     // What matches in this folder (its nested folders included) — see `groupRowsShown`.
     const shownInFolder = folderSessionCount(group.id, groupRowsShown)
@@ -940,12 +948,15 @@ export function SessionsAside({
     const isReorderTarget = groupReorderOver === group.id
     const nestHover = nestOverGroupId?.id === group.id ? nestOverGroupId : null
     const children = depth === 0 ? source.filter(g => g.group.parentId === group.id && !g.group.hidden) : []
+    // An archived subtree keeps its tree together; it needs no second "Ended" inside each folder.
+    const liveChildren = insideEnded ? children : children.filter(g => foldersWithActivity.has(g.group.id))
+    const endedChildren = insideEnded ? [] : children.filter(g => !foldersWithActivity.has(g.group.id))
     // A folded group hides its rows (and, for a parent, its children too): its own left edge says
     // when one of them is waiting.
     const attn = folded ? attentionCount(gRows, dismissedAttn) : 0
     return (
       <div
-        key={group.id}
+        key={group.id} data-session-folder={group.id}
         style={{ marginLeft: depth * 14, ...(noMatches && !parentDimmed ? { opacity: 0.5 } : {}) }}
       >
         <div
@@ -1121,7 +1132,7 @@ export function SessionsAside({
                     : {})}
                   style={{
                     fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
-                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    minWidth: 0, overflowWrap: 'anywhere', textAlign: 'left',
                   }}
                 >
                   {group.name}
@@ -1151,7 +1162,7 @@ export function SessionsAside({
                   order a file explorer uses, and the reason a freshly nested folder becoming the
                   FIRST child (`moveToFrontAmongSiblings`, core) actually reads as "first" on screen
                   instead of sitting after every session the parent already held. */}
-              {children.map(c => renderGroupBand(c, 1, noMatches || parentDimmed))}
+              {liveChildren.map(c => renderGroupBand(c, 1, noMatches || parentDimmed, insideEnded))}
               {gRows.length === 0 && children.length === 0 ? (
                 <p style={{ margin: '2px 9px 4px 21px', fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
                   {/* Empty because of the FILTERS is not an empty folder — telling someone to drag
@@ -1162,12 +1173,12 @@ export function SessionsAside({
                     ? 'Arraste uma sessão até aqui, ou use "Mover para grupo" no menu dela.'
                     : 'Drag a session here, or use "Move to group" on its menu.'}
                 </p>
-              ) : gRows.length > 0 && (
+              ) : (gRows.length > 0 || endedChildren.length > 0) && (
                 // Indented under the header — a MEMBER, not another top-level row — the same
                 // modest offset the empty-group hint above already lines up with.
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 12, paddingRight: 4, minWidth: 0 }}>
                   {(() => {
-                  const { live, ended } = splitFolderRows(gRows, r => active.has(r.state), sortOrder, sortExplicit)
+                  const { live, ended } = splitFolderRows(gRows, isFolderSessionActive, sortOrder, sortExplicit)
                   const renderRow = (s: ControlSession, compact = false) => {
                     const key = pinKeyOf(s)
                     return (
@@ -1221,14 +1232,16 @@ export function SessionsAside({
                       </div>
                     )
                   }
-                  const endedOpen = expandedEnded.has(group.id) || endedAutoOpen(searching, ended, entry.rows)
+                  const endedOpen = insideEnded || expandedEnded.has(group.id) || endedAutoOpen(searching, ended, entry.rows)
+                    || (searching && endedChildren.some(c => folderSessionCount(c.group.id, groupRowsShown) > 0))
                   return (
                     <>
                       {live.map(s => renderRow(s))}
-                      {ended.length > 0 && (
+                      {!insideEnded && (ended.length > 0 || endedChildren.length > 0) && (
                         <button
                           onClick={() => toggleEnded(group.id)}
                           aria-expanded={endedOpen}
+                          data-ended-folders={group.id}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 6, minHeight: tap, padding: '3px 4px',
                             background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
@@ -1236,10 +1249,16 @@ export function SessionsAside({
                           }}
                         >
                           {endedOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                          {pt ? `Encerradas (${ended.length})` : `Ended (${ended.length})`}
+                          {endedChildren.length === 0
+                            ? (pt ? `Encerradas (${ended.length})` : `Ended (${ended.length})`)
+                            : <><span>{pt ? 'Encerradas' : 'Ended'}</span><span style={{ marginLeft: 'auto' }}>
+                                {endedChildren.length} {pt ? (endedChildren.length === 1 ? 'pasta' : 'pastas') : (endedChildren.length === 1 ? 'folder' : 'folders')}
+                                {ended.length > 0 && ` · ${ended.length} ${pt ? (ended.length === 1 ? 'sessão' : 'sessões') : (ended.length === 1 ? 'session' : 'sessions')}`}
+                              </span></>}
                         </button>
                       )}
                       {endedOpen && ended.map(s => renderRow(s, true))}
+                      {endedOpen && endedChildren.map(c => renderGroupBand(c, 1, noMatches || parentDimmed, true))}
                     </>
                   )
                   })()}
@@ -1935,7 +1954,7 @@ export function SessionsAside({
 
           {/* A HIDDEN folder (and everything inside it) is not drawn; it is listed, with a way back,
               in the arrange panel's "Pastas ocultas". */}
-          {!foldedGroupsSection && groupRowsShown.filter(g => !g.group.parentId && !groupConcealed(groupsValue, g.group.id)).map(entry => renderGroupBand(entry, 0))}
+          {!foldedGroupsSection && liveRootFolders.map(entry => renderGroupBand(entry, 0))}
         </div>
 
         {total === 0 ? (
@@ -1977,6 +1996,20 @@ export function SessionsAside({
                 cardColor={cardColor}
               />
             ))}
+          </div>
+        )}
+        {!foldedGroupsSection && endedRootFolders.length > 0 && (
+          <div data-ended-root-folders style={{ marginTop: 4, padding: '4px 8px', borderRadius: 8, background: 'var(--bg-elevated)' }}>
+            <button type="button" onClick={() => toggleEnded(ROOT_ENDED_FOLDERS)} aria-expanded={rootEndedOpen}
+              data-ended-folders="root"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', minHeight: tap, padding: '3px 4px',
+                background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textAlign: 'left' }}>
+              {rootEndedOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              <span>{pt ? 'Encerradas' : 'Ended'}</span>
+              <span style={{ marginLeft: 'auto' }}>{endedRootFolders.length} {pt ? (endedRootFolders.length === 1 ? 'grupo' : 'grupos') : (endedRootFolders.length === 1 ? 'group' : 'groups')}</span>
+            </button>
+            {rootEndedOpen && endedRootFolders.map(entry => renderGroupBand(entry, 0, false, true))}
           </div>
         )}
           </>

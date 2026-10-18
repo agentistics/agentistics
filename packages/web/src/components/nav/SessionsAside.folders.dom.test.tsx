@@ -1,0 +1,187 @@
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test'
+import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { act } from 'react'
+import type { Root } from 'react-dom/client'
+import type { ControlSession } from '@agentistics/tui/control/session-fleet'
+import type { Filters } from '@agentistics/core'
+
+let createRoot: typeof import('react-dom/client').createRoot
+let MemoryRouter: typeof import('react-router-dom').MemoryRouter
+let SessionsAside: typeof import('./SessionsAside').SessionsAside
+let loadSharedPrefs: typeof import('../../lib/sharedPref').loadSharedPrefs
+let writePrefs: typeof import('../../lib/sessionsAsidePrefs').writeAsideGroupPrefs
+let readPrefs: typeof import('../../lib/sessionsAsidePrefs').readAsideGroupPrefs
+let groups: typeof import('../../lib/sessionUserGroups')
+let originalFetch: typeof fetch
+let originalEventSource: typeof EventSource
+let originalAct: boolean | undefined
+let svgAnimate: PropertyDescriptor | undefined
+const filters = { dateRange: 'all', customStart: '', customEnd: '', projects: [], models: [] } as Filters
+const prefs = {
+  sessionsAside: { leadersOnly: false, collapsedUserGroups: [], expandedEndedGroups: [] },
+  pinnedSessions: ['pin-ended'],
+  sessionGroups: { groups: [
+    { id: 'parent', name: 'Active parent', sessionKeys: ['parent-live', 'parent-ended'] },
+    { id: 'active-child', name: 'Active child', parentId: 'parent', sessionKeys: ['child-live'] },
+    { id: 'idle-child', name: 'Finished child', parentId: 'parent', sessionKeys: ['child-ended'] },
+    { id: 'unknown-child', name: 'Unknown child with a full title that must wrap', parentId: 'parent', sessionKeys: ['child-unknown'] },
+    { id: 'empty-child', name: 'Empty child', parentId: 'parent', sessionKeys: [] },
+    { id: 'archived', name: 'Archived parent', sessionKeys: ['archived-direct'] },
+    { id: 'archived-child', name: 'Archived child', parentId: 'archived', sessionKeys: ['archived-nested'] },
+    { id: 'hidden', name: 'Hidden folder', hidden: true, sessionKeys: ['hidden-live'] },
+  ] },
+}
+const row = (id: string, state: ControlSession['state']) => ({
+  id, title: `Title ${id}`, harness: 'codex', state, stateLabel: state, cwd: '/p', project: 'p',
+  searchFields: { name: `Title ${id}`, folder: '', harness: 'codex', note: '', task: '', prompt: '' },
+  actionable: true, attached: false,
+}) as ControlSession
+const fleet = [row('parent-live', 'working'), row('parent-ended', 'exited'), row('child-live', 'waiting'),
+  row('child-ended', 'closed'), row('child-unknown', 'unknown'), row('archived-direct', 'closed'),
+  row('archived-nested', 'exited'), row('hidden-live', 'working'), row('loose', 'waiting'), row('pin-ended', 'closed')]
+
+beforeAll(async () => {
+  originalFetch = globalThis.fetch
+  originalEventSource = globalThis.EventSource
+  originalAct = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
+  GlobalRegistrator.register({ width: 1280, height: 900 })
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  globalThis.EventSource = class { close() {} addEventListener() {} removeEventListener() {} } as never
+  svgAnimate = Object.getOwnPropertyDescriptor(SVGElement.prototype, 'animate')
+  Object.defineProperty(SVGElement.prototype, 'animate', { configurable: true, value: undefined })
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method && init.method !== 'GET') return Response.json({ ok: true })
+    if (String(input) === '/api/user-prefs') return Response.json(prefs, { headers: { 'X-Prefs-Writable': 'false' } })
+    if (String(input) === '/api/session-roles') return Response.json({ roles: {} })
+    return Response.json({ rows: [], sessions: [] })
+  }) as typeof fetch
+  createRoot = (await import('react-dom/client')).createRoot
+  MemoryRouter = (await import('react-router-dom')).MemoryRouter
+  SessionsAside = (await import('./SessionsAside')).SessionsAside
+  loadSharedPrefs = (await import('../../lib/sharedPref')).loadSharedPrefs
+  const asidePrefs = await import('../../lib/sessionsAsidePrefs')
+  writePrefs = asidePrefs.writeAsideGroupPrefs
+  readPrefs = asidePrefs.readAsideGroupPrefs
+  groups = await import('../../lib/sessionUserGroups')
+})
+afterAll(async () => {
+  await new Promise(resolve => setTimeout(resolve, 50))
+  if (svgAnimate) Object.defineProperty(SVGElement.prototype, 'animate', svgAnimate)
+  else delete (SVGElement.prototype as unknown as { animate?: unknown }).animate
+  globalThis.fetch = originalFetch
+  globalThis.EventSource = originalEventSource
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = originalAct
+  await GlobalRegistrator.unregister()
+})
+let host: HTMLDivElement
+let root: Root
+beforeEach(async () => {
+  await loadSharedPrefs()
+  act(() => writePrefs({ leadersOnly: false, foldedPinned: false, foldedGroupsSection: false, collapsedUserGroups: [], expandedEndedGroups: [] }))
+  host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
+})
+afterEach(async () => {
+  await act(async () => root.unmount())
+  host.remove()
+})
+const render = async (rows = fleet, width = 1280, lang: 'en' | 'pt' = 'en', valueFilters = filters, activeOnly = false) => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+  window.matchMedia = ((q: string) => ({ matches: q.includes('max-width') && width < 768, addEventListener() {}, removeEventListener() {} })) as never
+  await act(async () => root.render(<MemoryRouter><SessionsAside rows={rows} lang={lang} filters={valueFilters} activeOnly={activeOnly}
+    loading={false} unsupported={false} finishedTasks={[]} hideNew /></MemoryRouter>))
+}
+const folder = (id: string) => host.querySelector<HTMLElement>(`[data-session-folder="${id}"]`)
+const ended = (id: string) => host.querySelector<HTMLButtonElement>(`[data-ended-folders="${id}"]`)!
+const click = async (button: HTMLElement) => { await act(async () => button.click()) }
+
+for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
+  test(`idle folders collect once at the end of their parent and the list (${lang}, ${width}px)`, async () => {
+    document.documentElement.dataset.theme = lang === 'pt' ? 'light' : 'dark'
+    await render(fleet, width, lang)
+    expect(folder('active-child')).not.toBeNull()
+    for (const id of ['idle-child', 'unknown-child', 'empty-child', 'archived', 'archived-child', 'hidden']) expect(folder(id)).toBeNull()
+    expect(ended('parent').textContent).toContain(lang === 'pt' ? '3 pastas' : '3 folders')
+    expect(ended('parent').textContent).toContain(lang === 'pt' ? '1 sessão' : '1 session')
+    expect(ended('parent').getAttribute('aria-expanded')).toBe('false')
+    expect(ended('root').textContent).toContain(lang === 'pt' ? '1 grupo' : '1 group')
+    expect(host.querySelector('[data-ended-root-folders]')!.parentElement!.lastElementChild).toBe(host.querySelector('[data-ended-root-folders]'))
+    expect(host.textContent).toContain(lang === 'pt' ? 'Dormindo' : 'Sleeping')
+    await click(ended('parent'))
+    expect(folder('idle-child')).not.toBeNull()
+    expect(folder('unknown-child')?.textContent).toContain('Unknown child with a full title that must wrap')
+    expect(folder('parent')?.querySelectorAll('[data-ended-folders]')).toHaveLength(1)
+    expect(folder('idle-child')?.textContent).toContain('Title child-ended')
+    const parent = folder('parent')!
+    expect(parent.querySelector('[data-ended-folders]')!.compareDocumentPosition(parent.querySelector('[title="Title parent-live"]')!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    await click(ended('root'))
+    expect(folder('archived')?.contains(folder('archived-child'))).toBe(true)
+    expect(folder('archived')?.textContent).toContain('Title archived-direct')
+    expect(folder('archived')?.textContent).toContain('Title archived-nested')
+    expect(folder('archived')?.querySelector('[data-ended-folders]')).toBeNull()
+    expect(folder('archived')?.querySelector('[title="Drag to reorder"], [title="Arrastar para reordenar"]')?.getAttribute('draggable')).toBe('true')
+    expect(folder('idle-child')?.querySelector('[draggable="true"]')).not.toBeNull()
+    expect(readPrefs().expandedEndedGroups).toContain('parent')
+    await act(async () => root.unmount())
+    root = createRoot(host)
+    await render(fleet, width, lang)
+    expect(ended('parent').getAttribute('aria-expanded')).toBe('true')
+    expect(ended('root').getAttribute('aria-expanded')).toBe('true')
+  })
+}
+
+test('new activity restores a child and its root to the original tree and order', async () => {
+  await render()
+  const resumed = fleet.map(r => r.id === 'child-ended' || r.id === 'archived-nested' ? { ...r, state: 'waiting-approval' as const } : r)
+  await render(resumed)
+  expect(folder('parent')?.contains(folder('idle-child'))).toBe(true)
+  expect(folder('idle-child')?.contains(ended('parent'))).toBe(false)
+  expect(ended('parent').textContent).toContain('2 folders')
+  expect(folder('archived')?.contains(folder('archived-child'))).toBe(true)
+  expect(host.querySelector('[data-ended-root-folders]')).toBeNull()
+  expect(Array.from(host.querySelectorAll('[data-session-folder]')).map(el => el.getAttribute('data-session-folder')))
+    .toEqual(['parent', 'active-child', 'idle-child', 'archived', 'archived-child'])
+  expect(groups.getSessionGroups().groups.map(g => g.id)).toEqual(prefs.sessionGroups.groups.map(g => g.id))
+})
+
+test('filters never reclassify live folders; ended results can still be found with search', async () => {
+  await render(fleet, 390, 'en', { ...filters, harnesses: ['claude'] })
+  expect(folder('parent')).not.toBeNull()
+  expect(folder('archived')).toBeNull()
+  await render()
+  const search = host.querySelector<HTMLInputElement>('input[type="search"], input[placeholder*="Search"]')!
+  const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+  await act(async () => { setValue.call(search, 'archived-nested'); search.dispatchEvent(new window.Event('input', { bubbles: true })) })
+  expect(ended('root').getAttribute('aria-expanded')).toBe('true')
+  expect(folder('archived-child')?.textContent).toContain('Title archived-nested')
+})
+
+test('an archived folder grip still reorders through the original drag handler', async () => {
+  await render()
+  await click(ended('root'))
+  const grip = folder('archived')!.querySelector('[title="Drag to reorder"]')!
+  const data = new window.DataTransfer()
+  const event = (type: string) => {
+    const e = new window.Event(type, { bubbles: true, cancelable: true })
+    Object.defineProperty(e, 'dataTransfer', { value: data })
+    return e
+  }
+  await act(async () => { grip.dispatchEvent(event('dragstart')) })
+  await act(async () => { folder('parent')!.firstElementChild!.dispatchEvent(event('drop')) })
+  const roots = groups.getSessionGroups().groups.filter(g => !g.parentId).map(g => g.id)
+  expect(roots.indexOf('archived')).toBeLessThan(roots.indexOf('parent'))
+  expect(groups.getSessionGroups().groups.find(g => g.id === 'archived-child')?.parentId).toBe('archived')
+})
+
+
+test('ended trees remain readable while Active only is on, and their expansion starts collapsed', async () => {
+  await render(fleet, 390, 'en', filters, true)
+  expect(ended('root').getAttribute('aria-expanded')).toBe('false')
+  await click(ended('root'))
+  const archived = folder('archived')!
+  const heading = archived.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+  await click(heading)
+  expect(archived.textContent).toContain('Title archived-direct')
+  const child = folder('archived-child')!
+  await click(child.querySelector<HTMLButtonElement>('button[aria-expanded]')!)
+  expect(child.textContent).toContain('Title archived-nested')
+})

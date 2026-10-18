@@ -36,6 +36,15 @@ This row starts collapsed and remembers expansion with the existing ended-sectio
 The Pinned header counts only its live rows. Sleeping cards can still be opened for reading,
 reopened, or unpinned; sleeping never removes the pin.
 
+Folders with no `working`, `waiting` or `waiting-approval` session in their visible subtree move
+under **Ended** (**Encerradas**) at the end of their parent. The same section also holds that
+parent's ended sessions, with separate folder and session counts. Entire idle root groups move to
+one Ended section at the bottom of the list. These sections start collapsed and remember their
+expansion in `expandedEndedGroups`; folder structure, membership and drag order stay intact.
+When activity returns, the folder and its parents return to their normal positions. Search and
+filters narrow what a folder shows without reclassifying its activity. Archived trees show their
+ended sessions directly as compact rows, without repeating Ended under every folder.
+
 The check-in details modal uses one column on desktop and mobile: headline, needs, delivered,
 in progress, next steps, health, then earlier rounds. Text wraps throughout. Health is a list of
 status dots, labels and full explanations; below 480px explanations move under their labels.
