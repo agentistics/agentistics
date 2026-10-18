@@ -107,3 +107,25 @@ positional default for the `--session`s that follow) and every reopen.
   an existing name), so a stale entry in a root is repaired.
 - Antigravity and opencode have no isolation variable: an account root is refused for them in words
   (`account-unsupported`).
+
+
+## Usage area
+
+The Usage area reads the same plan-limit store as the composer and Nay. `/usage` shows one card
+per account (including registered accounts awaiting a reading), ordered by the surface harness
+registry and account label. Accounts excluded from agent routing remain visible to the owner.
+Capacity without a measured rate is described as unmeasured; it does not become a zero.
+Harnesses without subscription plans have registration links to Settings → Billing. The native
+runtime uses provider billing rather than subscription plans and is excluded from that list.
+
+`/usage/plan` accepts a positive number of hours, defaulting to four, and uses the shared
+`planSessions` helper for sustainable parallel capacity and pause times. `/usage/limits` renders
+the same `NayLimitsTab` as the usage modal. `/usage/history` shows account readings for the weekly
+and five-hour windows and states that history begins when the server starts. History is held in
+memory; these pages add no persistence or polling loop.
+
+Expected usage is a straight line from zero at the current window's start to 100% at renewal.
+Actual percentages retain their measured values on the same percentage scale, without independent
+normalization. Without a renewal time, no expected line is invented. Agora compares the current
+weekly window; history retains older observed readings, with the expected line limited to the
+current known window.

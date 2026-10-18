@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid,
+  ResponsiveContainer, CartesianGrid, LineChart, Line, Legend,
 } from 'recharts'
 import { format, parseISO } from 'date-fns'
 
@@ -265,4 +265,27 @@ export function ActivityChart({
       )}
     </div>
   )
+}
+
+/** Percent comparisons share the activity chart's frame, with a fixed scale and no normalization. */
+export function ActivityPercentChart({ data, series, lang, height = 220 }: {
+  data: { at: number; [key: string]: number | null }[]
+  series: { key: string; label: string; color: string; expected?: boolean; connectNulls?: boolean }[]
+  lang: 'pt' | 'en'
+  height?: number
+}) {
+  const locale = lang === 'pt' ? 'pt-BR' : 'en-US'
+  const dateLabel = (at: number) => new Date(at).toLocaleString(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return <div style={{ minWidth: 0 }} role="img" aria-label={series.map(s => s.label).join(' · ')}>
+    <ResponsiveContainer width="100%" height={height}>
+      <LineChart data={data} margin={{ left: 0, right: 8, top: 8 }}>
+        <CartesianGrid stroke="var(--border)" vertical={false} />
+        <XAxis dataKey="at" type="number" domain={['dataMin', 'dataMax']} tickFormatter={dateLabel} tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={50} />
+        <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} width={38} tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }} axisLine={false} tickLine={false} />
+        <Tooltip labelFormatter={v => dateLabel(Number(v))} formatter={v => v == null ? '—' : `${Number(v).toFixed(1)}%`} contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10 }} />
+        <Legend wrapperStyle={{ fontSize: 11, overflowWrap: 'anywhere' }} />
+        {series.map(s => <Line key={s.key} dataKey={s.key} name={s.label} stroke={s.color} strokeDasharray={s.expected ? '5 4' : undefined} strokeWidth={1.5} type="linear" dot={!s.expected} connectNulls={s.connectNulls ?? false} isAnimationActive={false} />)}
+      </LineChart>
+    </ResponsiveContainer>
+  </div>
 }
