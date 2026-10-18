@@ -593,6 +593,7 @@ test('the production poller wiring carries resolveProcessLog — the collision g
   expect(opts.resolveProcessLog).toBe(resolveProcessLog)
   expect(opts.readProcessConversation).toBe(readProcessConversation)
   expect(typeof opts.recordConversation).toBe('function')
+  expect(typeof opts.endSessions).toBe('function')
 })
 
 /**

@@ -98,7 +98,8 @@ export function createRetireRunner(d: RetireRunnerDeps): RetireRunner {
           if (streak) streaks.set(row.id, streak)
           else streaks.delete(row.id)
         }
-        // No further IO between this activity check and backend.kill.
+        // No further probes between this activity check and the kill operation (which records the
+        // end decision before removing the pane, just like the CLI/web kill paths).
         if (snap.unavailable || !running(view) ||
           (req.successorId && (!successor || ['exited', 'lost', 'closed'].includes(successor.status) || successor.activity === 'exited')) ||
           activityReasons(req, { activity: view?.activity, streak }).length ||
@@ -285,7 +286,7 @@ async function attachRetireRunner(log: (line: string) => void): Promise<(() => v
     const runner = createRetireRunner({
       readRegistry: reg.readRegistry,
       patch: reg.patchSession,
-      kill: id => backend.kill(id),
+      kill: id => reg.killAndRetireSession(id, () => backend.kill(id)),
       readFresh: () => hub.refresh(),
       markEnded: id => reg.retireSession(id),
       fileInFolder: (f, row) => fileInFolder(f, row),

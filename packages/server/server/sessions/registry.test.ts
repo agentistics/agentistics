@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { conversationOwnedElsewhere, createSessionRegistry, linkConversationVerified, newSessionId, retireFallenSessions, retireSession } from './registry'
+import { conversationOwnedElsewhere, createSessionRegistry, killAndRetireSession, linkConversationVerified, newSessionId, retireFallenSessions, retireSession } from './registry'
+import { planCrashGroup } from './crash-group'
 
 let dir = ''
 let file = ''
@@ -21,6 +22,25 @@ const session = (id: string) => ({
 })
 
 describe('createSessionRegistry', () => {
+  it('records kill before the pane disappears, including while the backend is still confirming', async () => {
+    const reg = createSessionRegistry(file)
+    await reg.add({ ...session('killed'), lastSeenMs: Date.now() })
+    expect(await killAndRetireSession('killed', async () => {
+      expect(planCrashGroup({ entries: await reg.read(), backendIds: new Set() })).toBeNull()
+      return true
+    }, reg)).toBe(true)
+    expect(planCrashGroup({ entries: await createSessionRegistry(file).read(), backendIds: new Set() })).toBeNull()
+  })
+
+  it('restores the previous state when a kill is refused or throws', async () => {
+    const reg = createSessionRegistry(file)
+    await reg.add(session('live'))
+    expect(await killAndRetireSession('live', async () => false, reg)).toBe(false)
+    expect((await reg.read())[0]!.endedAt).toBeUndefined()
+    await expect(killAndRetireSession('live', async () => { throw new Error('unreachable') }, reg)).rejects.toThrow('unreachable')
+    expect((await reg.read())[0]!.endedAt).toBeUndefined()
+  })
+
   it('starts empty and never throws on a missing file', async () => {
     expect(await createSessionRegistry(file).read()).toEqual([])
   })

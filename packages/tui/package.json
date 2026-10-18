@@ -1,6 +1,6 @@
 {
   "name": "@agentistics/tui",
-  "version": "2.140.12",
+  "version": "2.141.0",
   "license": "FSL-1.1-ALv2",
   "private": true,
   "type": "module",

@@ -4,6 +4,18 @@
 sessions are hosted by tmux on its own socket (`-L agentop`), so they survive `agentop` exiting and
 never mix with your own tmux sessions.
 
+An ended session is never part of the "sessions that fell" recovery group. The poller persists
+`endedAt` when the backend reports a dead command; structured drivers record normal termination
+before dropping their records, and boot consumes relay-recorded exits before discarding dead relays.
+A confirmed session kill records the decision before removing its pane (a refused kill restores
+the previous value). None of these rules depends on the harness or on leader/worker role.
+
+The poller must observe a tmux command's exit while its dead pane still exists. If the command ends
+while the application server is stopped and the tmux backend then disappears before the next poll,
+there is no durable termination evidence to distinguish it from a session lost in a reboot.
+Structured relays retain their own exit records and do not have this gap. Older sessions without
+recorded termination cannot be classified retrospectively with certainty.
+
 Large or multiline launch arguments (including hand-off context and initial briefs) travel through
 a private `0600` shell launcher under `session-context/<session-id>/` in the agentistics data
 directory. tmux receives only the launcher path; the launcher execs the harness with the complete

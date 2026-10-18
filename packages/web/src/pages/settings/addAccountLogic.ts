@@ -14,12 +14,16 @@ export const NO_SECOND_ACCOUNT: ReadonlySet<HarnessId> = new Set<HarnessId>(['an
 export interface RootRowView {
   harness: HarnessId
   root: string
-  status: 'pending' | 'bound' | 'retired'
+  status: 'pending' | 'bound' | 'retired' | 'failed'
   pendingId?: string
   accountId?: string
-  loginSessionId?: string
+  login?: LoginInfoView
+  label?: string
+  plan?: string
+  error?: string
 }
 
+export interface LoginInfoView { kind: 'paste' | 'device'; url: string; code?: string; expiresAt: number; error?: 'invalid_code' }
 export type AddView =
   | { kind: 'off' }
   | { kind: 'on'; addable: HarnessId[]; unsupported: HarnessId[] }
@@ -44,6 +48,10 @@ export function anyResolved(before: readonly RootRowView[], after: readonly Root
 
 /** Refusal codes of `POST/DELETE /api/accounts/roots`, in the user's language; the server sentence is the en fallback. */
 const REFUSALS: Record<string, { pt: string; en: string }> = {
+  login_timeout: { pt: 'O login expirou. Comece de novo para obter outro link e código.', en: 'Sign-in expired. Start again to get a new link and code.' },
+  login_failed: { pt: 'O login não foi concluído. Comece de novo.', en: 'Sign-in did not finish. Start again.' },
+  plaintext_refused: { pt: 'O cofre de credenciais do sistema está indisponível. O Copilot não conseguiu salvar o login com segurança; salvar o token em texto simples foi recusado.', en: 'The system keychain is unavailable. Copilot could not save the login securely; storing the token in plain text was refused.' },
+  invalid_code: { pt: 'O código não foi aceito. Abra o link atual e cole um novo código de autorização.', en: 'The code was not accepted. Open the current link and paste a new authorization code.' },
   root_in_use: { pt: 'Ainda há uma sessão aberta nesta conta. Encerre-a primeiro.', en: 'A session is still running in this account. End it first.' },
   unsupported: { pt: 'Este assistente mantém um só login por computador, então não dá para separar uma segunda conta.', en: 'This assistant keeps a single login per computer, so a second account cannot be kept apart.' },
   unsafe_path: { pt: 'A pasta de contas contém um atalho, então foi deixada como está.', en: 'The accounts folder contains a link, so it was left alone.' },
@@ -63,21 +71,33 @@ export function addErrorText(body: unknown, pt: boolean): string {
   return pt ? 'Não foi possível concluir. Tente de novo.' : 'Could not complete this. Try again.'
 }
 
-/** Whether the pending row can open its login session. */
-export const loginTarget = (r: RootRowView): string | null =>
-  r.loginSessionId ? `/sessions/${encodeURIComponent(r.loginSessionId)}?view=terminal` : null
-
 export const ADD_COPY = (pt: boolean) => ({
+  openLink: pt ? 'Abrir link' : 'Open link',
+  copyLink: pt ? 'Copiar link' : 'Copy link',
+  copyCode: pt ? 'Copiar código' : 'Copy code',
+  copied: pt ? 'Copiado' : 'Copied',
+  linkStep: pt ? 'Abra este link e entre com a outra conta' : 'Open this link and sign in with the other account',
+  pasteStep: pt ? 'Cole aqui o código que a página mostrar' : 'Paste the code shown by the page here',
+  deviceStep: pt ? 'Na página, digite este código' : 'Enter this code on the page',
+  kimiStep: pt ? 'O link já leva o código; confira se a página mostra este' : 'The link includes the code; check that the page shows this one',
+  submit: pt ? 'Confirmar' : 'Confirm',
+  awaitingCode: pt ? 'Cole o código mostrado pela página para continuar.' : 'Paste the code shown by the page to continue.',
+  submitted: pt ? 'Esperando você entrar…' : 'Waiting for you to sign in…',
+  expires: (minutes: number) => pt ? `O código vale por mais ${minutes} min.` : `The code expires in ${minutes} min.`,
+  done: pt ? 'Conta adicionada' : 'Account added',
+  doneNote: pt ? 'Ela já aparece na lista da Cobrança. Dê um nome a ela lá, se quiser.' : 'It now appears in Billing. You can give it a name there.',
+  finish: pt ? 'Pronto' : 'Done',
+  close: pt ? 'Fechar' : 'Close',
+  account: pt ? 'Conta' : 'Account',
+  plan: pt ? 'Plano' : 'Plan',
+  noPlan: pt ? 'Não informado' : 'Not reported',
   add: pt ? 'Adicionar conta' : 'Add account',
   addTo: (label: string) => (pt ? `Adicionar conta do ${label}` : `Add a ${label} account`),
   title: (label: string) => (pt ? `Adicionar uma conta do ${label}` : `Add a ${label} account`),
-  message: (label: string) => (pt
-    ? `Vamos abrir uma sessão de login do ${label}. Entre com a outra conta no Terminal dessa sessão. Quando terminar, a conta aparece aqui sozinha.`
-    : `We will open a ${label} login session. Sign in with the other account in that session's Terminal tab. When you finish, the account shows up here by itself.`),
   confirm: pt ? 'Abrir login' : 'Open login',
   cancel: pt ? 'Agora não' : 'Not now',
   working: pt ? 'Abrindo…' : 'Opening…',
-  workingNote: pt ? 'Abrindo a sessão de login — leva alguns segundos.' : 'Opening the sign-in session — this takes a few seconds.',
+  workingNote: pt ? 'Iniciando o assistente e aguardando o link de login…' : 'Starting the assistant and waiting for its sign-in link…',
   cancelling: pt ? 'Cancelando…' : 'Cancelling…',
   waiting: pt ? 'Aguardando login' : 'Waiting for sign-in',
   openLogin: pt ? 'Abrir login' : 'Open login',

@@ -105,14 +105,20 @@ export function buildAuditEvent(input: AuditInput, now: Date): AuditEvent {
 }
 
 /** Fire-and-forget: an audit write must never break the request it is describing. */
-export async function writeAudit(input: AuditInput): Promise<void> {
+export async function writeAudit(input: AuditInput, onFailure?: () => void): Promise<void> {
   try {
     const db = await getMongoDb()
     await db.collection<AuditEvent>('audit').insertOne(buildAuditEvent(input, new Date()))
   } catch {
     // Swallowed on purpose. A failing audit sink is an operational problem, not a reason to
-    // deny a legitimate login.
+    // deny a legitimate login. Callers may report failure without exposing database diagnostics.
+    onFailure?.()
   }
+}
+
+/** Default report for a failed fire-and-forget audit write: op and target only. */
+export function reportAuditFailure(op: unknown, targetId: string | undefined): void {
+  console.error('[audit] write failed:', op, targetId)
 }
 
 /** Owner-only reader, newest first. */

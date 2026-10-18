@@ -24,14 +24,15 @@ import { randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readdir, rm, stat, symlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
-import { HARNESS_LABELS, HARNESS_ORDER, featureOn, type HarnessId } from '@agentistics/core'
+import { HARNESS_ORDER, featureOn, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, PORT } from './config'
 import {
   ISOLATION_ENV, IDENTITY_PROBES, bind as bindAccount, byId, forceProbe, readAccounts, retireAccount,
   type AccountIdentity,
 } from './harness-accounts'
 import { agentisticsMcpLaunch, rootMcpRegistration } from './mcp-launch'
-import { writeAudit } from './audit'
+import { reportAuditFailure, writeAudit } from './audit'
+import { LOGIN_ADAPTERS, LOGIN_MESSAGES, LoginFailure, startAccountLogin, type LoginError, type LoginHandle, type LoginInfo, type LoginOptions } from './account-login'
 import { applyAccountToPlan } from './sessions/account-plan'
 
 export { applyAccountToPlan }
@@ -60,15 +61,7 @@ export const ROOT_CONFIG_SUBDIR: Record<HarnessId, string> = {
  * How each harness signs in, read from the CLI's own `--help` (claude 2.1 `auth login`, codex `login`,
  * copilot `login`, kimi `login`). gemini has no login subcommand: its first run asks. `null`: no roots.
  */
-export const LOGIN_START: Record<HarnessId, { argv: string[] } | null> = {
-  claude: { argv: ['claude', 'auth', 'login'] },
-  codex: { argv: ['codex', 'login'] },
-  copilot: { argv: ['copilot', 'login'] },
-  gemini: { argv: ['gemini'] },
-  kimi: { argv: ['kimi', 'login'] },
-  antigravity: null,
-  opencode: null,
-}
+export const LOGIN_START = LOGIN_ADAPTERS
 
 /**
  * A file whose EXISTENCE (never its content) shows a harness without an identity probe has been
@@ -113,7 +106,7 @@ export const looksLikeCredential = (name: string): boolean => CREDENTIAL_NAME.te
 
 const say = (en: string) => en
 
-export type RootRefusal = 'disabled' | 'unsupported' | 'unknown_harness' | 'login_unavailable' | 'unsafe_path'
+export type RootRefusal = 'disabled' | 'unsupported' | 'unknown_harness' | 'login_unavailable' | 'unsafe_path' | LoginError
 export interface RootCreated {
   ok: true
   pendingId: string
@@ -123,22 +116,18 @@ export interface RootCreated {
 }
 export interface RootRefused { ok: false; reason: RootRefusal; message: string }
 
-export interface PendingRoot { pendingId: string; harness: HarnessId; root: string; loginSessionId?: string }
+export interface PendingRoot { pendingId: string; harness: HarnessId; root: string; login?: LoginInfo }
 export interface RootRow {
   harness: HarnessId
   root: string
   /** `pending`: waiting for the login to finish. `bound`: an account owns it. `retired`: its account was removed. */
-  status: 'pending' | 'bound' | 'retired'
+  status: 'pending' | 'bound' | 'retired' | 'failed'
   pendingId?: string
   accountId?: string
-  loginSessionId?: string
-}
-
-export interface LoginSpawn {
-  harness: HarnessId
-  cwd: string
-  label: string
-  account: { env: Record<string, string>; loginArgv: string[] }
+  label?: string
+  plan?: string
+  error?: LoginError
+  login?: LoginInfo
 }
 
 export interface AccountRootsDeps {
@@ -146,12 +135,10 @@ export interface AccountRootsDeps {
   base?: string
   flagOn?: () => boolean
   defaultDir?: (harness: HarnessId) => string
-  /** Starts the login managed session; the real one goes through the control host. */
-  spawn?: (req: LoginSpawn) => Promise<{ ok: boolean; message: string; id?: string }>
-  /** Is this managed session still running? */
+  login?: typeof startAccountLogin
+  loginOptions?: LoginOptions
+  /** Is an account session still running? */
   sessionLive?: (sessionId: string) => Promise<boolean>
-  /** Ends a managed session (the login session this module spawned, on Cancel). */
-  endSession?: (sessionId: string) => Promise<boolean>
   /** Managed sessions started with this account id (D3 stamps `accountId` on the row). */
   sessionsOfAccount?: (accountId: string) => Promise<string[]>
   registerMcp?: (harness: HarnessId, root: string) => Promise<void>
@@ -161,6 +148,8 @@ export interface AccountRootsDeps {
   getAccount?: typeof byId
   listAccounts?: typeof readAccounts
   audit?: typeof writeAudit
+  /** Told when an audit write fails (op + target only, never the sink's diagnostic). */
+  onAuditFailure?: (op: unknown, targetId: string | undefined) => void
 }
 
 // `<data>/accounts`. The backup exclusion of the roots (credentials live inside) is its own row in
@@ -197,8 +186,16 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   const flagOn = deps.flagOn ?? (() => featureOn('multi-account'))
   const defaultDir = deps.defaultDir ?? ((h: HarnessId) => DEFAULT_CONFIG_DIR[h]())
   const audit = deps.audit ?? writeAudit
-  const logins = new Map<string, string>() // pendingId -> login managed session id
-  const loginHarness = new Map<string, HarnessId>()
+  const onAuditFailure = deps.onAuditFailure ?? reportAuditFailure
+  // Audit delivery may wait on a remote database. Keep the record without holding the login
+  // response or serialized root mutations behind that connection timeout.
+  const auditLater = (input: Parameters<typeof writeAudit>[0]) => {
+    const reportFailure = () => onAuditFailure(input.meta?.op, input.targetId)
+    void Promise.resolve().then(() => audit(input, reportFailure)).catch(reportFailure)
+  }
+  const logins = new Map<string, LoginHandle>()
+  const failures = new Map<string, RootRow & { failedAt: number }>()
+  const login = deps.login ?? startAccountLogin
   const probe = deps.probe ?? ((h: HarnessId, root: string) => forceProbe(h, root))
   const bind = deps.bind ?? bindAccount
   const retire = deps.retire ?? retireAccount
@@ -206,8 +203,14 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   const listAccounts = deps.listAccounts ?? readAccounts
   const sessionLive = deps.sessionLive ?? (async () => false)
   const sessionsOfAccount = deps.sessionsOfAccount ?? (async () => [])
-  const endSession = deps.endSession ?? (async () => false)
   const registerMcp = deps.registerMcp ?? defaultRegisterMcp
+  let mutations: Promise<unknown> = Promise.resolve()
+  const serialized = <T>(run: () => Promise<T>): Promise<T> => {
+    const next = mutations.then(run, run)
+    mutations = next.catch(() => {})
+    return next
+  }
+  let polling = false
   let timer: ReturnType<typeof setInterval> | undefined
 
   /** A path is a root only if it is exactly `<base>/<harness>/<id>`: nothing else is ever removed. */
@@ -236,7 +239,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
       for (const pendingId of names) {
         const root = join(base(), harness, pendingId)
         try { if (!(await lstat(root)).isDirectory()) continue } catch { continue }
-        out.push({ pendingId, harness, root, ...(logins.has(pendingId) ? { loginSessionId: logins.get(pendingId)! } : {}) })
+        out.push({ pendingId, harness, root, ...(logins.get(pendingId)?.info() ? { login: logins.get(pendingId)!.info() } : {}) })
       }
     }
     return out
@@ -250,9 +253,13 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
       rows.push({
         harness: dir.harness, root: dir.root, pendingId: dir.pendingId,
         status: !owner ? 'pending' : owner.retired ? 'retired' : 'bound',
-        ...(owner ? { accountId: owner.id } : {}),
-        ...(dir.loginSessionId ? { loginSessionId: dir.loginSessionId } : {}),
+        ...(owner ? { accountId: owner.id, label: owner.label, plan: owner.plan } : {}),
+        ...(dir.login ? { login: dir.login } : {}),
       })
+    }
+    for (const [id, row] of failures) {
+      if (Date.now() - row.failedAt > 900_000) failures.delete(id)
+      else { const { failedAt, ...publicRow } = row; rows.push(publicRow) }
     }
     return rows
   }
@@ -284,60 +291,91 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     if (config !== root) await chmod(config, 0o700)
     const linked = await linkSharedFiles(shared, defaultDir(harness), config)
     await registerMcp(harness, root).catch(() => {})
-    await audit({ action: 'account.update', ip: 'local', targetId: pendingId, meta: { op: 'root_create', harness } })
+    auditLater({ action: 'account.update', ip: 'local', targetId: pendingId, meta: { op: 'root_create', harness } })
     return { ok: true, pendingId, root, env: rootEnv(harness, root), linked }
   }
 
-  async function startLogin(harness: HarnessId, pendingId: string, root: string): Promise<{ ok: boolean; message: string; id?: string }> {
-    const start = LOGIN_START[harness]
-    if (!start || !deps.spawn) return { ok: false, message: say('Signing in is not available for this assistant.') }
-    const out = await deps.spawn({
-      harness, cwd: homedir(), label: `Login · ${HARNESS_LABELS[harness] ?? harness}`,
-      account: { env: rootEnv(harness, root), loginArgv: start.argv },
-    })
-    if (out.ok && out.id) { logins.set(pendingId, out.id); loginHarness.set(pendingId, harness) }
-    return out
+  async function discardPendingUnlocked(harness: HarnessId, pendingId: string, root: string, error: LoginError) {
+    // A timeout racing a successful bind must never remove a bound account's credentials.
+    if ((await listAccounts()).accounts.some(a => a.root && resolve(a.root) === resolve(root))) return
+    failures.set(pendingId, { harness, pendingId, root, status: 'failed', error, failedAt: Date.now() })
+    logins.delete(pendingId)
+    if (isRootPath(root) && !(await hasSymlinkPart(root))) await rm(root, { recursive: true, force: true })
   }
 
-  /** Create the root and open the login session in it. A failed login start leaves no empty root behind. */
-  async function addRoot(harness: HarnessId): Promise<{ ok: true; pendingId: string; root: string; sessionId?: string; message: string } | RootRefused> {
+  async function startLogin(harness: HarnessId, pendingId: string, root: string, signal?: AbortSignal): Promise<LoginInfo> {
+    const handle = await login({ harness, pendingId, root, env: rootEnv(harness, root) },
+      reason => serialized(() => discardPendingUnlocked(harness, pendingId, root, reason)), deps.loginOptions)
+    logins.set(pendingId, handle)
+    if (signal?.aborted) await handle.stop()
+    try { return await handle.ready } catch (error) { await handle.stop(); logins.delete(pendingId); throw error }
+  }
+
+  /** Create a private root and wait for the CLI's link/code, without creating a managed session. */
+  async function addRoot(harness: HarnessId, signal?: AbortSignal): Promise<({ ok: true; pendingId: string; root: string } & LoginInfo) | RootRefused> {
     const made = await createRoot(harness)
     if (!made.ok) return made
-    const out = await startLogin(harness, made.pendingId, made.root).catch(error => ({
-      ok: false as const, message: error instanceof Error ? error.message : say('Signing in could not be started.'),
-    }))
-    if (!out.ok) {
-      await rm(made.root, { recursive: true, force: true })
-      return { ok: false, reason: 'login_unavailable', message: out.message }
+    const cancelled = () => { void removeRoot(made.pendingId).catch(() => {}) }
+    signal?.addEventListener('abort', cancelled, { once: true })
+    try {
+      if (signal?.aborted) throw new LoginFailure('login_failed')
+      const info = await startLogin(harness, made.pendingId, made.root, signal)
+      if (signal?.aborted) { await removeRoot(made.pendingId); throw new LoginFailure('login_failed') }
+      ensurePoller()
+      return { ok: true, pendingId: made.pendingId, root: made.root, ...info }
+    } catch (error) {
+      await serialized(async () => {
+        const bound = (await listAccounts()).accounts.some(a => a.root && resolve(a.root) === resolve(made.root))
+        if (!bound && isRootPath(made.root) && !(await hasSymlinkPart(made.root))) await rm(made.root, { recursive: true, force: true })
+        failures.delete(made.pendingId)
+      })
+      const reason = error instanceof LoginFailure ? error.reason : 'login_unavailable'
+      return { ok: false, reason, message: LOGIN_MESSAGES[reason] }
+    } finally { signal?.removeEventListener('abort', cancelled) }
+  }
+
+  async function submitCode(id: string, code: unknown) {
+    const handle = logins.get(id)
+    if (!handle) return { ok: false as const, reason: 'not_found', message: 'This sign-in is no longer available.' }
+    try { await handle.submit(code); return { ok: true as const } }
+    catch (error) {
+      const reason = error instanceof LoginFailure ? error.reason : 'login_failed'
+      return { ok: false as const, reason, message: LOGIN_MESSAGES[reason] }
     }
-    ensurePoller()
-    return { ok: true, pendingId: made.pendingId, root: made.root, ...(out.id ? { sessionId: out.id } : {}), message: out.message }
   }
 
   /** One pass: probe each pending root; a confirmed identity mints or adopts the account. */
-  async function pollPending(): Promise<string[]> {
-    const bound: string[] = []
-    const accounts = (await listAccounts()).accounts
-    for (const dir of await listDirs()) {
-      if (accounts.some(a => a.root && resolve(a.root) === resolve(dir.root))) continue
-      let identity: AccountIdentity | null = null
-      if (IDENTITY_PROBES[dir.harness]) {
-        const found = await probe(dir.harness, dir.root).catch(() => null)
-        if (found && found.key !== 'default') identity = found
-      } else {
-        // No probe: only the harness's own marker on disk shows a login, and the fallback key is never an identity.
-        if (await hasLoginMarker(dir.harness, dir.root)) {
+  async function pollPendingUnlocked(): Promise<string[]> {
+    if (polling) return []
+    polling = true
+    try {
+      const bound: string[] = []
+      const accounts = (await listAccounts()).accounts
+      for (const dir of await listDirs()) {
+        if (accounts.some(a => a.root && resolve(a.root) === resolve(dir.root))) continue
+        let identity: AccountIdentity | null = null
+        if (IDENTITY_PROBES[dir.harness]) {
           const found = await probe(dir.harness, dir.root).catch(() => null)
           if (found && found.key !== 'default') identity = found
+        } else {
+          // No probe: only the harness's own marker on disk shows a login, and the fallback key is never an identity.
+          if (await hasLoginMarker(dir.harness, dir.root)) {
+            const found = await probe(dir.harness, dir.root).catch(() => null)
+            if (found && found.key !== 'default') identity = found
+          }
         }
+        if (!identity) continue
+        const { account } = await bind(dir.root, { harness: dir.harness, ...identity })
+        await logins.get(dir.pendingId)?.stop()
+        logins.delete(dir.pendingId)
+        bound.push(account.id)
+        auditLater({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_login', harness: dir.harness } })
       }
-      if (!identity) continue
-      const { account } = await bind(dir.root, { harness: dir.harness, ...identity })
-      bound.push(account.id)
-      await audit({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_login', harness: dir.harness } })
-    }
-    return bound
+      return bound
+    } finally { polling = false }
   }
+
+  const pollPending = () => serialized(pollPendingUnlocked)
 
   /** Boot pass (spec §4.3): every claude/copilot root gets the MCP registration again. Best effort. */
   async function reregisterMcp(): Promise<void> {
@@ -348,7 +386,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     }
   }
 
-  function ensurePoller(intervalMs = 60_000): void {
+  function ensurePoller(intervalMs = 2000): void {
     if (timer) return
     timer = setInterval(() => {
       void pollPending().then(async () => {
@@ -363,37 +401,38 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
    * Remove a root. `id` is an account id or a pending id. A live session in it refuses (409
    * `root_in_use`); the account is retired; the directory goes only with `confirm === root`.
    */
-  async function removeRoot(id: string, body: { confirm?: unknown } = {}): Promise<
+  async function removeRootUnlocked(id: string, body: { confirm?: unknown } = {}): Promise<
     { ok: true; retired: boolean; removedDir: boolean; root: string; confirmWith?: string }
     | { ok: false; status: 404 | 409 | 400; reason: string; message: string }
   > {
-    const account = await getAccount(id)
+    if (failures.delete(id)) return { ok: true, retired: false, removedDir: true, root: '' }
+    let account = await getAccount(id)
     const dir = (await listDirs()).find(d => d.pendingId === id
       || (account?.root ? resolve(d.root) === resolve(account.root) : false))
+    if (!account && dir) account = (await listAccounts()).accounts.find(a => a.root && resolve(a.root) === resolve(dir.root)) ?? null
+    if (account && dir?.pendingId === id) return { ok: true, retired: false, removedDir: false, root: account.root! }
     const root = account?.root ?? dir?.root
     if (!root) return { ok: false, status: 404, reason: 'not_found', message: say('No such account root.') }
     if (body.confirm !== undefined && body.confirm !== root) {
       return { ok: false, status: 400, reason: 'confirm_mismatch', message: say('The confirmation must be the exact folder path of this root.') }
     }
     // A pending root (no account yet) is ours and holds nothing but the login: Cancel ends the login
-    // session THIS module spawned and drops the folder. Any other session in it still refuses.
+    // process THIS module spawned and drops the folder. Any other session in it still refuses.
     const pending = !account && !!dir
-    const own = pending && dir && logins.has(dir.pendingId) ? logins.get(dir.pendingId)! : undefined
     const watched = [id, ...(dir ? [dir.pendingId] : [])]
     const sessions = new Set<string>()
     for (const w of watched) {
-      if (logins.has(w) && !pending) sessions.add(logins.get(w)!)
-      for (const s of await sessionsOfAccount(w)) if (s !== own) sessions.add(s)
+      for (const s of await sessionsOfAccount(w)) sessions.add(s)
     }
     for (const s of sessions) {
       if (await sessionLive(s).catch(() => true)) {
         return { ok: false, status: 409, reason: 'root_in_use', message: say('A session is still running in this account. End it first.') }
       }
     }
-    if (own && await sessionLive(own).catch(() => true)) {
-      if (!(await endSession(own).catch(() => false))) {
-        return { ok: false, status: 409, reason: 'root_in_use', message: say('The sign-in session could not be ended. End it first.') }
-      }
+    if (pending && dir) {
+      try { await logins.get(dir.pendingId)?.stop() }
+      catch { return { ok: false, status: 409, reason: 'root_in_use', message: 'The sign-in process could not be stopped. Try again.' } }
+      logins.delete(dir.pendingId)
     }
     // Pending roots are dropped without a typed confirmation: there is no account to keep.
     if (pending && body.confirm === undefined) body = { confirm: root }
@@ -402,18 +441,20 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
       if (bad) return { ok: false, status: 400, reason: 'not_a_root', message: say('That folder is not an account root.') }
     }
     let retired = false
-    if (account) { await retire(account.id); retired = true; await audit({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_retire', harness: account.harness } }) }
+    if (account) { await retire(account.id); retired = true; auditLater({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_retire', harness: account.harness } }) }
     let removedDir = false
     if (body.confirm === root) {
       await rm(root, { recursive: true, force: true })
       removedDir = true
       if (dir) logins.delete(dir.pendingId)
-      await audit({ action: 'account.delete', ip: 'local', targetId: account?.id ?? dir?.pendingId ?? id, meta: { op: 'root_delete', harness: account?.harness ?? dir?.harness } })
+      auditLater({ action: 'account.delete', ip: 'local', targetId: account?.id ?? dir?.pendingId ?? id, meta: { op: 'root_delete', harness: account?.harness ?? dir?.harness } })
     }
     return { ok: true, retired, removedDir, root, ...(removedDir ? {} : { confirmWith: root }) }
   }
 
-  return { createRoot, startLogin, addRoot, list, pollPending, ensurePoller, stopPoller, removeRoot, reregisterMcp, flagOn }
+  const removeRoot = (id: string, body: { confirm?: unknown } = {}) => serialized(() => removeRootUnlocked(id, body))
+
+  return { createRoot, startLogin, addRoot, submitCode, list, pollPending, ensurePoller, stopPoller, removeRoot, reregisterMcp, flagOn }
 }
 
 export interface McpChild { exited: Promise<number>; kill: (signal?: string) => void }
@@ -448,16 +489,7 @@ const defaultRegisterMcp = (harness: HarnessId, root: string) => registerRootMcp
 let instance: ReturnType<typeof createAccountRoots> | undefined
 export function accountRoots(deps?: AccountRootsDeps): ReturnType<typeof createAccountRoots> {
   if (deps) return createAccountRoots(deps)
-  return (instance ??= createAccountRoots({ spawn: defaultLoginSpawn, sessionLive: defaultSessionLive, sessionsOfAccount: defaultSessionsOfAccount, endSession: defaultEndSession }))
-}
-
-/** The login session goes through the control host, with the env decided HERE, never from a request body. */
-async function defaultLoginSpawn(req: LoginSpawn) {
-  const { hostForFleet } = await import('./sessions/fleet-web')
-  const host = await hostForFleet('en')
-  if (!host.spawnSession) return { ok: false, message: 'The session manager is not available.' }
-  const out = await host.spawnSession({ harness: req.harness, cwd: req.cwd, label: req.label, attach: false, account: req.account })
-  return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}) }
+  return (instance ??= createAccountRoots({ sessionLive: defaultSessionLive, sessionsOfAccount: defaultSessionsOfAccount }))
 }
 
 async function defaultSessionLive(sessionId: string): Promise<boolean> {
@@ -469,11 +501,4 @@ async function defaultSessionLive(sessionId: string): Promise<boolean> {
 async function defaultSessionsOfAccount(accountId: string): Promise<string[]> {
   const { readRegistry } = await import('./sessions/registry')
   return (await readRegistry()).filter(m => (m as { accountId?: string }).accountId === accountId).map(m => m.id)
-}
-
-async function defaultEndSession(sessionId: string): Promise<boolean> {
-  const { hostForFleet } = await import('./sessions/fleet-web')
-  const host = await hostForFleet('en')
-  if (!host.killSession) return false
-  return (await host.killSession(sessionId)).ok
 }
