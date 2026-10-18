@@ -1,3 +1,4 @@
+import { HandoffMeter } from '../components/sessions/HandoffWarning'
 /**
  * SessionsPage — the CENTRE of the sessions workspace.
  *
@@ -2610,6 +2611,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
                 fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}>{selected.title}</div>
+              {isMobile && <HandoffMeter id={selected.id} pt={pt} act={act} />}
               {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
               <SessionTitleFlag
                 session={{
@@ -2810,6 +2812,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         }}>
           {selected.title}
         </div>
+        <HandoffMeter id={selected.id} pt={pt} act={act} />
         {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
       </div>
       {/* `display: flex` is the load-bearing part, not `flex: 1`.

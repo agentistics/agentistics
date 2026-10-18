@@ -26,7 +26,10 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger', icon }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger', icon, maxWidth = 420, mobileSheet = false }: {
+  /** Optional wider content and phone bottom-sheet presentation; defaults preserve confirmations. */
+  maxWidth?: number
+  mobileSheet?: boolean
   open: boolean
   title: string
   message: string
@@ -90,13 +93,13 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   if (!open) return null
   return (
     <div onClick={onCancel} style={{
-      position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: 16,
+      position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: mobileSheet && isMobile ? 'flex-end' : 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: mobileSheet && isMobile ? 0 : 16,
     }}>
       <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
         onClick={e => e.stopPropagation()} style={{ outline: 'none',
-        width: '100%', maxWidth: 420, background: 'var(--bg-card)', border: '1px solid var(--border)',
-        borderRadius: 12, padding: 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
+        width: '100%', maxWidth: mobileSheet && isMobile ? '100%' : maxWidth, ...(mobileSheet ? { boxSizing: 'border-box' as const, maxHeight: 'calc(92dvh / var(--ui-zoom, 1))', overflowY: 'auto' as const } : {}), background: 'var(--bg-card)', border: '1px solid var(--border)',
+        borderRadius: mobileSheet && isMobile ? '18px 18px 0 0' : 12, padding: mobileSheet && isMobile ? '18px 16px max(18px, env(safe-area-inset-bottom))' : 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

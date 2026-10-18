@@ -1,3 +1,5 @@
+import { readPreferences } from '../preferences'
+import { normalizeHandoffConfig, handoffCut } from '@agentistics/core'
 /**
  * fleet-web.ts — the WEB dashboard's window onto the session fleet.
  *
@@ -284,6 +286,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
       const titles = new Map(fleet.sessions.map(row => [row.id, fleetRow(row, s).title]))
       const byId = new Map(registry.map(row => [row.id, row]))
       const baseSamples = handoffBaseSamples(registry)
+      const cutTokens = handoffCut(normalizeHandoffConfig((await readPreferences()).handoffConfig))
       const rows: HandoffHintRow[] = await Promise.all(raw.sessions.map(async view => {
         const managed = byId.get(view.id)
         const handoff = await findHandoffFile(view.cwd)
@@ -294,7 +297,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           await patchSession(view.id, { handoffBaseTokens: view.contextTokens }).catch(() => false)
         }
         return {
-          baseSamples,
+          baseSamples, cutTokens,
           ...(view.calls !== undefined ? { calls: view.calls } : {}),
           id: view.id,
           title: titles.get(view.id) ?? '',
@@ -405,6 +408,7 @@ export async function readHandoffWhy(lang: CliLang, id: string): Promise<ReturnT
   if (!view) return null
   const managed = registry.find(row => row.id === id)
   const row: HandoffHintRow = {
+    cutTokens: handoffCut(normalizeHandoffConfig((await readPreferences()).handoffConfig)),
     id,
     title: managed?.label ?? '',
     ...(managed?.leader ? { leader: true } : {}),
@@ -428,6 +432,53 @@ export async function readHandoffWhy(lang: CliLang, id: string): Promise<ReturnT
     model: view.model ?? managed?.model,
     ...(handoff ? { handoffPath: handoff.path, handoffBytes: handoff.bytes } : {}),
   })
+}
+
+/** Read-only panel: all screens consume this one contract; workers have no panel. */
+const handoffQuotaSamples = new Map<string, import('./handoff-panel').QuotaObservation>()
+export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?: number): Promise<import('@agentistics/core').HandoffPanel | null> {
+  await hostFor(lang)
+  const [raw, registry, prefs] = await Promise.all([
+    fleetSessionHub().then(h => h.read()), readRegistry().catch(() => [] as ManagedSession[]), readPreferences(),
+  ])
+  const view = raw.sessions.find(r => r.id === id)
+  const managed = registry.find(r => r.id === id)
+  if (!view || !managed || view.status === 'closed' || view.activity === 'exited' || !isLeaderRow({ title: managed.label ?? '', leader: managed.leader })) return null
+  const { computeHandoffPanel, quotaRate } = await import('./handoff-panel')
+  const { planLimitsPayload } = await import('../plan-limits')
+  const limits = await planLimitsPayload(prefs.billing)
+  const accounts = limits.limits.filter(l => l.harness === view.harness)
+  const limit = managed.accountId ? accounts.find(l => l.account === managed.accountId) : accounts.length === 1 ? accounts[0] : undefined
+  const peers = limit ? raw.sessions.filter(v => {
+    const m = registry.find(r => r.id === v.id)
+    return v.harness === view.harness && (m?.accountId === limit.account || (!m?.accountId && accounts.length === 1))
+  }) : []
+  const observation: import('./handoff-panel').QuotaObservation = {
+    at: Date.now(), totalUSD: peers.reduce((sum, v) => sum + (v.costUSD ?? 0), 0),
+    population: peers.map(v => v.id).sort().join(','),
+    ...(limit?.windows.find(w => w.kind === '5h') ? { fiveHour: limit.windows.find(w => w.kind === '5h')! } : {}),
+    ...(limit?.windows.find(w => w.kind === 'week') ? { week: limit.windows.find(w => w.kind === 'week')! } : {}),
+  }
+  const measuredPeers = peers.length > 0 && peers.every(v => Number.isFinite(v.costUSD))
+  const key = limit && measuredPeers ? `${limit.harness}:${limit.account}` : ''
+  const previous = handoffQuotaSamples.get(key)
+  const quota = quotaRate(previous, observation)
+  // Retain a baseline long enough for quota meters to move; never cross renewal/population changes.
+  if (key && (!previous || observation.at - previous.at >= 5 * 60_000 || previous.population !== observation.population
+    || previous.fiveHour?.resetsAt !== observation.fiveHour?.resetsAt || previous.week?.resetsAt !== observation.week?.resetsAt)) {
+    if (handoffQuotaSamples.size >= 100) handoffQuotaSamples.delete(handoffQuotaSamples.keys().next().value!)
+    handoffQuotaSamples.set(key, observation)
+  }
+  const file = await findHandoffFile(view.cwd)
+  return computeHandoffPanel({
+    id, title: managed.label ?? '', leader: true,
+    contextTokens: view.contextTokens, contextWindow: view.contextWindow,
+    model: view.model ?? managed.model, turns: view.turns, costUSD: view.costUSD, calls: view.calls,
+    baseSamples: handoffBaseSamples(registry),
+    ...(file ? { handoffPath: file.path, handoffBytes: file.bytes } : {}),
+    workInFlight: [...(view.activity === 'working' ? ['main-response'] : []), ...(view.background ? ['background-work'] : [])],
+  }, extraPercent !== undefined && Number.isInteger(extraPercent) && extraPercent >= 0 && extraPercent <= 100
+    ? { ...normalizeHandoffConfig(prefs.handoffConfig), extraPercent } : prefs.handoffConfig, quota)
 }
 
 /**

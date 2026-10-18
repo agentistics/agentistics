@@ -1,0 +1,18 @@
+.handoff-settings { color: var(--text-primary); }
+.handoff-settings p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+.handoff-settings fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.handoff-profiles { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.handoff-profiles button { display: flex; flex-direction: column; gap: 6px; padding: 14px; text-align: left; }
+.handoff-settings button { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-card); color: var(--text-primary); font: inherit; font-size: 13px; cursor: pointer; }
+.handoff-profiles .selected { border-color: var(--anthropic-orange); background: var(--anthropic-orange-dim); }
+.handoff-profiles small { color: var(--text-secondary); line-height: 1.5; }
+.handoff-setting-row, .handoff-warning { display: flex; align-items: center; gap: 10px; padding: 10px 0; font-size: 13px; }
+.handoff-setting-row { justify-content: space-between; flex-wrap: wrap; }
+.handoff-warning span { flex: 1; }
+.handoff-warning small { color: var(--text-tertiary); white-space: nowrap; }
+.handoff-settings input[type=number] { box-sizing: border-box; width: 105px; min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-base); color: var(--text-primary); font: inherit; }
+.handoff-settings-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.handoff-settings-actions button { min-height: 38px; padding: 8px 14px; }
+.handoff-settings .primary { background: var(--anthropic-orange); color: var(--text-on-accent, #fff); }
+.handoff-settings button:disabled { opacity: .5; cursor: default; }
+@media(max-width:768px) { .handoff-settings input[type=number] { font-size:16px; min-height:44px; } .handoff-settings button,.handoff-warning { min-height:44px; } }
