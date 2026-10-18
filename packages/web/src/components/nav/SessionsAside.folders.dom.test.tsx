@@ -20,6 +20,7 @@ const filters = { dateRange: 'all', customStart: '', customEnd: '', projects: []
 const prefs = {
   sessionsAside: { leadersOnly: false, collapsedUserGroups: [], expandedEndedGroups: [] },
   pinnedSessions: ['pin-ended'],
+  fellDismissed: [],
   sessionGroups: { groups: [
     { id: 'parent', name: 'Active parent', sessionKeys: ['parent-live', 'parent-ended'] },
     { id: 'active-child', name: 'Active child', parentId: 'parent', sessionKeys: ['child-live'] },
@@ -84,11 +85,16 @@ afterEach(async () => {
   await act(async () => root.unmount())
   host.remove()
 })
-const render = async (rows = fleet, width = 1280, lang: 'en' | 'pt' = 'en', valueFilters = filters, activeOnly = false) => {
+const render = async (rows = fleet, width = 1280, lang: 'en' | 'pt' = 'en', valueFilters = filters, activeOnly = false, fellCount = 0) => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
   window.matchMedia = ((q: string) => ({ matches: q.includes('max-width') && width < 768, addEventListener() {}, removeEventListener() {} })) as never
+  const fallen = new Map(Array.from({ length: fellCount }, (_, i) => {
+    const session = { id: `fell-${i}`, title: `Fallen ${i}`, fell: true, verbs: [{ action: 'resume', label: 'Reopen', enabled: true }] }
+    return [session.id, session] as const
+  }))
   await act(async () => root.render(<MemoryRouter><SessionsAside rows={rows} lang={lang} filters={valueFilters} activeOnly={activeOnly}
-    loading={false} unsupported={false} finishedTasks={[]} hideNew /></MemoryRouter>))
+    loading={false} unsupported={false} finishedTasks={[]} hideNew={fellCount === 0} rowsById={fallen}
+    {...(fellCount > 0 ? { act: async () => ({ ok: true, message: '' }) } : {})} /></MemoryRouter>))
 }
 const folder = (id: string) => host.querySelector<HTMLElement>(`[data-session-folder="${id}"]`)
 const ended = (id: string) => host.querySelector<HTMLButtonElement>(`[data-ended-folders="${id}"]`)!
@@ -185,3 +191,31 @@ test('ended trees remain readable while Active only is on, and their expansion s
   await click(child.querySelector<HTMLButtonElement>('button[aria-expanded]')!)
   expect(child.textContent).toContain('Title archived-nested')
 })
+
+
+for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) for (const count of [1, 4, 128]) {
+  test(`reopen-fell stays on one line beside its fixed dismiss control (${lang}, ${count}, ${width}px)`, async () => {
+    host.style.width = width === 390 ? '390px' : '288px'
+    await render(fleet, width, lang, filters, false, count)
+    const banner = host.querySelector<HTMLElement>('[data-fell-banner]')!
+    const button = banner.querySelector<HTMLButtonElement>('[data-fell-reopen]')!
+    const dismiss = banner.querySelector<HTMLButtonElement>('[data-fell-dismiss]')!
+    const label = lang === 'pt' ? (count === 1 ? 'Reabrir 1 que caiu' : `Reabrir ${count} que caíram`) : `Reopen ${count} that fell`
+    const sentence = lang === 'pt' ? (count === 1 ? 'Reabrir 1 sessão que caiu' : `Reabrir ${count} sessões que caíram`)
+      : (count === 1 ? 'Reopen 1 session that fell' : `Reopen ${count} sessions that fell`)
+    expect(button.textContent).toBe(label)
+    expect(button.title).toBe(sentence)
+    expect(button.getAttribute('aria-label')).toBe(sentence)
+    expect(getComputedStyle(button).whiteSpace).toBe('nowrap')
+    expect(getComputedStyle(button).textOverflow).not.toBe('ellipsis')
+    expect(button.querySelector('svg')!.style.flexShrink).toBe('0')
+    expect(dismiss.parentElement).toBe(banner)
+    expect(button.nextElementSibling).toBe(dismiss)
+    expect(getComputedStyle(dismiss).flexShrink).toBe('0')
+    expect(dismiss.style.width).toBe(width === 390 ? '44px' : '30px')
+    expect(dismiss.style.minWidth).toBe(width === 390 ? '44px' : '30px')
+    expect(dismiss.querySelector('svg')).not.toBeNull()
+    await click(dismiss)
+    expect(host.querySelector('[data-fell-banner]')).toBeNull()
+  })
+}

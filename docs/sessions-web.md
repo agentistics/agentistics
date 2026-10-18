@@ -45,6 +45,10 @@ When activity returns, the folder and its parents return to their normal positio
 filters narrow what a folder shows without reclassifying its activity. Archived trees show their
 ended sessions directly as compact rows, without repeating Ended under every folder.
 
+The crash-group reopen banner keeps its count in a single-line label (**Reabrir N que caíram** /
+**Reopen N that fell**). The title and accessible label keep the full sentence naming the sessions.
+The adjacent dismiss control keeps its own width: 30px on desktop and 44px on mobile.
+
 The check-in details modal uses one column on desktop and mobile: headline, needs, delivered,
 in progress, next steps, health, then earlier rounds. Text wraps throughout. Health is a list of
 status dots, labels and full explanations; below 480px explanations move under their labels.

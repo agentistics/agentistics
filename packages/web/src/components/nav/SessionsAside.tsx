@@ -418,6 +418,13 @@ export function SessionsAside({
   // the rest are still down), that is a new fact and the banner is shown again. See `fellDismissal.ts`.
   const fellDismissed = fellGroupDismissed(dismissedFell, fellIds)
   const showFell = canAct && groupRows.fellRows.length > 0 && !fellDismissed
+  const fellCount = groupRows.fellRows.length
+  const reopenFellLabel = pt
+    ? (fellCount === 1 ? 'Reabrir 1 que caiu' : `Reabrir ${fellCount} que caíram`)
+    : `Reopen ${fellCount} that fell`
+  const reopenFellSentence = pt
+    ? (fellCount === 1 ? 'Reabrir 1 sessão que caiu' : `Reabrir ${fellCount} sessões que caíram`)
+    : (fellCount === 1 ? 'Reopen 1 session that fell' : `Reopen ${fellCount} sessions that fell`)
   const dismissFell = () => { setDismissedFell(fellIds); writeDismissedFell(fellIds) }
   // One session is not a broadcast — the row's own composer is right there and says so better.
   const showSend = canAct && groupRows.sendable > 1
@@ -1599,31 +1606,30 @@ export function SessionsAside({
         * outcome is a refusal is a button that teaches the wrong thing.
         */}
       {showFell && (
-        <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 2px' }}>
-          <button
+        <div data-fell-banner style={{ display: 'flex', alignItems: 'stretch', gap: 6, minWidth: 0, margin: '0 2px' }}>
+          <button type="button" data-fell-reopen
+            title={reopenFellSentence} aria-label={reopenFellSentence}
             onClick={() => setPicking('reopen')}
             style={{
-              flex: 1, minWidth: 0,
+              flex: 1, minWidth: 0, whiteSpace: 'nowrap',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
               padding: '9px 12px', borderRadius: 9, cursor: 'pointer', minHeight: tap,
               border: '1px solid var(--anthropic-orange)', background: 'rgba(232,146,90,0.08)',
               color: 'var(--anthropic-orange)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
             }}
           >
-            <RotateCcw size={14} />
-            {pt
-              ? (groupRows.fellRows.length === 1 ? 'Reabrir 1 sessão que caiu' : `Reabrir ${groupRows.fellRows.length} sessões que caíram`)
-              : (groupRows.fellRows.length === 1 ? 'Reopen 1 session that fell' : `Reopen ${groupRows.fellRows.length} sessions that fell`)}
+            <RotateCcw size={14} style={{ flexShrink: 0 }} />
+            <span>{reopenFellLabel}</span>
           </button>
           {/* Hides the banner until a DIFFERENT crash group shows up — never on the server, never
               discarding anything. Every row stays reopenable one at a time from its own menu. */}
-          <button
+          <button type="button" data-fell-dismiss
             onClick={dismissFell}
             aria-label={pt ? 'Dispensar' : 'Dismiss'}
             title={pt ? 'Dispensar' : 'Dismiss'}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-              width: tap ?? 30, minHeight: tap, padding: 0, borderRadius: 9, cursor: 'pointer',
+              width: tap ?? 30, minWidth: tap ?? 30, minHeight: tap, padding: 0, borderRadius: 9, cursor: 'pointer',
               border: '1px solid var(--border-subtle)', background: 'transparent',
               color: 'var(--text-tertiary)', fontFamily: 'inherit',
             }}
