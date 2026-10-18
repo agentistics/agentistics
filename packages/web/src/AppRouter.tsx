@@ -13,6 +13,8 @@ const RepoDetailPage = lazy(() => import('./pages/RepoDetailPage'))
 const TagsPage = lazy(() => import('./pages/TagsPage'))
 const VaultPage = lazy(() => import('./pages/VaultPage'))
 const TasksPage = lazy(() => import('./pages/TasksPage'))
+const TaskActivityPage = lazy(() => import('./pages/TaskActivityPage'))
+const ActionsPage = lazy(() => import('./pages/ActionsPage'))
 const TagDetailPage = lazy(() => import('./pages/TagDetailPage'))
 const ToolsPage = lazy(() => import('./pages/ToolsPage'))
 const CustomPage = lazy(() => import('./pages/CustomPage'))
@@ -81,8 +83,10 @@ export default function AppRouter() {
               A bookmark, a pinned tab or an old link still lands somewhere that answers. */}
           <Route path="projects" element={<Navigate to="/repositories" replace />} />
           <Route path="repositories" element={<Suspense fallback={<PageFallback />}><RepositoriesPage /></Suspense>} />
+          <Route path="repositories/actions" element={<Suspense fallback={<PageFallback />}><ActionsPage /></Suspense>} />
           <Route path="repo/:id" element={<Suspense fallback={<PageFallback />}><RepoDetailPage /></Suspense>} />
           <Route path="tasks" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
+          <Route path="tasks/activity" element={<Suspense fallback={<PageFallback />}><TaskActivityPage /></Suspense>} />
           <Route path="tasks/:id" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
           <Route path="tags" element={<Suspense fallback={<PageFallback />}><TagsPage /></Suspense>} />
           <Route path="vault" element={<Suspense fallback={<PageFallback />}><VaultPage /></Suspense>} />
