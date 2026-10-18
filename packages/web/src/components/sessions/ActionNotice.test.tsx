@@ -38,3 +38,12 @@ test('expanded notice diagnostics have a bounded keyboard-scrollable region', ()
     expect(html).toContain(lang === 'pt' ? 'Detalhes do aviso' : 'Notice details')
   }
 })
+
+test('multiline feedback reserves space before the details disclosure and its focus ring', () => {
+  const html = renderToStaticMarkup(<ActionNotice message={'memory queue diagnostics '.repeat(20)} lang="en" onDismiss={() => {}} />)
+  const root = html.split('><div')[0]!
+  expect(root).toContain('flex-shrink:0')
+  expect(root).toContain('display:flex;flex-direction:column;gap:6px')
+  expect(html).toContain('overflow-wrap:anywhere')
+  expect(html).not.toMatch(/line-clamp|position:absolute|height:0/)
+})

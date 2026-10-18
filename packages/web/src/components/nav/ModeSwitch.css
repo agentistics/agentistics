@@ -1,0 +1,9 @@
+/* Preserve both words and the attention count at the aside's 220px minimum.
+   Decorative icons give their space to labels before the control gets crowded. */
+@container workspace-mode (max-width: 240px) {
+  .ag-mode-segment {
+    --mode-gap: 4px;
+    --mode-padding: 4px;
+    --mode-icon-display: none;
+  }
+}

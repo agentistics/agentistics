@@ -18,6 +18,8 @@ export function actionNoticeSummary(message: string, lang: string): string {
 export function ActionNotice({ message, lang, onDismiss }: { message: string; lang: string; onDismiss: () => void }) {
   const summary = actionNoticeSummary(message, lang)
   return <div data-action-notice style={{ flexShrink: 0, minWidth: 0, padding: '6px 8px', borderRadius: 6,
+    // The disclosure's 2px focus outline + 2px offset must clear the last line of feedback.
+    display: 'flex', flexDirection: 'column', gap: 6,
     background: 'var(--bg-card)', color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.45 }}>
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
       <span role="status" style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{summary}</span>
