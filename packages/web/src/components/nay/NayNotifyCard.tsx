@@ -26,6 +26,7 @@
  * `cardPlacement` put it.
  */
 
+import { cleanSize } from '../../lib/cleanPresentation'
 import { limitNoticeText } from '../../lib/planLimits'
 import { PlanLimitMeter } from '../PlanLimitMeter'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
@@ -126,6 +127,7 @@ function bottomInset(isMobile: boolean): number {
 }
 
 const SAY: Record<NayAlert['kind'], { pt: string; en: string }> = {
+  clean: { pt: 'Ei, a varredura está pronta.', en: 'Hey, the scan is ready.' },
   turn: { pt: 'Ei, a sessão respondeu.', en: 'Hey, the session replied.' },
   approval: { pt: 'Ei, olha essa sessão: ela pediu permissão.', en: 'Hey, look at this session: it is asking for permission.' },
   stale: { pt: 'Ei, essa sessão está parada faz tempo.', en: 'Hey, this session has been waiting a while.' },
@@ -134,6 +136,7 @@ const SAY: Record<NayAlert['kind'], { pt: string; en: string }> = {
 }
 
 const STATE_CHIP: Record<NayAlert['kind'], { pt: string; en: string; fg: string; bg: string }> = {
+  clean: { pt: 'pronto · ver e limpar', en: 'ready · review and clean', fg: 'var(--anthropic-orange)', bg: 'var(--anthropic-orange-dim)' },
   turn: { pt: 'precisa de você', en: 'needs you', fg: 'var(--anthropic-orange-light)', bg: 'var(--anthropic-orange-dim)' },
   approval: { pt: 'pede aprovação', en: 'needs approval', fg: 'var(--accent-red)', bg: 'var(--accent-red-dim)' },
   stale: { pt: 'sem abrir', en: 'not opened', fg: 'var(--text-secondary)', bg: 'var(--border)' },
@@ -582,7 +585,11 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
             {alert.model && <span style={chipStyle}>{alert.model}</span>}
             <span style={{ ...chipStyle, border: 'none', background: chip.bg, color: chip.fg }}>{chip[lang]}</span>
           </div>
-          {alert.limit ? (
+          {alert.clean ? (
+            <div data-nay-clean style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+              {pt ? `Dá para liberar ${cleanSize(alert.clean.bytes, lang)} em ${alert.clean.count} itens. ${alert.clean.kept} mantidos por segurança.` : `${cleanSize(alert.clean.bytes, lang)} can be freed across ${alert.clean.count} items. ${alert.clean.kept} kept for safety.`}
+            </div>
+          ) : alert.limit ? (
             <div data-nay-limit style={{ display: 'grid', gap: 6 }}>
               <PlanLimitMeter
                 window={{ kind: alert.limit.window, usedPct: alert.limit.pct, resetsAt: alert.limit.resetsAt }}
@@ -611,6 +618,10 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
         )}
         </div>
         <div data-rise data-nay-actions style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0 }}>
+          {alert.clean && <button type="button" style={primary} onClick={() => void close(() => {
+            dismissAlert(alert.key)
+            window.dispatchEvent(new CustomEvent('agentistics:open-clean'))
+          })}>{pt ? 'Ver e limpar' : 'Review and clean'}</button>}
           {alert.limit && onOpenLimits && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onOpenLimits() })}>
               {pt ? 'Ver limites' : 'See limits'}
@@ -624,17 +635,17 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
               {pt ? `Continuar no ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}` : `Continue in ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}`}
             </button>
           )}
-          {!alert.demo && !alert.limit && !ck && (
+          {!alert.demo && !alert.limit && !alert.clean && !ck && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(alert.sessionId) })}>
               {pt ? 'Responder' : 'Reply'}
             </button>
           )}
-          {!alert.demo && !alert.limit && !ck && (
+          {!alert.demo && !alert.limit && !alert.clean && !ck && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(`/sessions/${encodeURIComponent(alert.sessionId)}`) })}>
               {pt ? 'Ir para a sessão' : 'Go to session'}
             </button>
           )}
-          {!alert.demo && !alert.limit && !ck && (
+          {!alert.demo && !alert.limit && !alert.clean && !ck && (
             <button
               type="button"
               aria-label={pt ? 'Silenciar esta sessão' : 'Mute this session'}

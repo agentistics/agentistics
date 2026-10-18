@@ -1,158 +1,154 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Checkbox, ConfirmModal, DialogActions, dialogButtonStyle, RecordCard, SectionHeader, StatusDot } from '../pages/settings/primitives'
+import { useEffect, useMemo, useState } from 'react'
+import { Check, Search, Trash2, X } from 'lucide-react'
+import type { CleanJob, CleanKind, CleanScanState, CleanWebItem } from '@agentistics/core'
+import { Checkbox, ConfirmModal, DialogActions, dialogButtonStyle, RecordCard, TabSelect } from '../pages/settings/primitives'
 import { pushNotification } from '../lib/notifications'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { backgroundCleanScan, cancelCleanScan, finalizeCleanScan, startCleanScan, useCleanScan } from '../lib/cleanScan'
+import { cleanIdle, cleanKind, cleanMatches, cleanName, cleanReason, cleanSize, sortCleanItems, initialCleanSelection, toggleCleanVisible, type CleanFilter, type CleanSort } from '../lib/cleanPresentation'
+import './CleanDialog.css'
 
-type Item = { id: string; repo: string; path: string; kind: string; bytes: number; reason: string }
-type Plan = { items: Item[]; reclaimable: { bytes: number; count: number } }
-type Job = { id?: string; state: string; progress: number; result?: { freedBytes: number; worktrees: number; nodeModules: number; skipped: Array<{ path: string; reason: string }>; errors: string[] } }
+const COLORS: Record<CleanKind, string> = { remove: 'var(--anthropic-orange)', 'node-modules': 'var(--accent-purple)', prune: 'var(--accent-cyan)', keep: 'var(--text-tertiary)' }
+const STEP = {
+  discovering: ['localizando os projetos', 'finding projects'], measuring: ['medindo o tamanho de cada pasta', 'measuring each folder'], preparing: ['preparando o resultado', 'preparing results'],
+} as const
+const jobStage = (state: string, pt: boolean) => (({ verifying: pt ? 'Conferindo novamente…' : 'Checking again…', 'removing worktrees': pt ? 'Removendo worktrees…' : 'Removing worktrees…', 'removing node_modules': pt ? 'Removendo node_modules…' : 'Removing node_modules…', pruning: pt ? 'Limpando registros do git…' : 'Cleaning git records…' } as Record<string, string>)[state] ?? '')
+const time = (ms: number, lang: string) => new Date(ms).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' })
 
-const size = (n: number) => n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : n >= 1024 ** 2 ? `${Math.round(n / 1024 ** 2)} MB` : `${Math.round(n / 1024)} KB`
-const stage = (state: string, pt: boolean) => ({ verifying: pt ? 'Conferindo…' : 'Checking…', 'removing worktrees': pt ? 'Removendo worktrees…' : 'Removing worktrees…', 'removing node_modules': pt ? 'Removendo node_modules…' : 'Removing node_modules…', pruning: pt ? 'Limpando registros do git…' : 'Cleaning git records…', done: pt ? 'Concluído' : 'Done' }[state] ?? (pt ? 'Limpando…' : 'Cleaning…'))
-const kindLabel = (kind: string, pt: boolean) => ({ remove: pt ? 'worktree merged e limpo' : 'merged, clean worktree', prune: pt ? 'registro de worktree ausente' : 'missing worktree record', 'node-modules': 'node_modules' }[kind] ?? kind)
-const reasonLabel = (reason: string, pt: boolean) => {
-  const labels: Record<string, [string, string]> = {
-    'merged and clean': ['merged e limpo', 'merged and clean'],
-    'directory is gone': ['a pasta não existe mais', 'directory is gone'],
-    'no commit in 30+ days': ['sem commit há 30+ dias', 'no commit in 30+ days'],
-    'changed since the plan': ['mudou desde o plano', 'changed since the plan'],
-    'the server working directory': ['diretório do servidor', 'server working directory'],
-    'an active session': ['sessão ativa', 'active session'],
-    'a process is running inside it (or its location is unknown)': ['há um processo dentro (ou localização desconhecida)', 'a process is running inside it (or its location is unknown)'],
-  }
-  return labels[reason]?.[pt ? 0 : 1] ?? reason
+export function CleanScanView({ scan, lang }: { scan: CleanScanState | null; lang: 'pt' | 'en' }) {
+  const pt = lang === 'pt'
+  return <div className="clean-scan" data-testid="clean-scan">
+    <div className="clean-found">
+      <div><span className="clean-muted">{pt ? 'Encontrado até agora' : 'Found so far'}</span><strong className="clean-number">{cleanSize(scan?.foundBytes ?? 0, lang)}</strong></div>
+      <div className="clean-counters"><div><b>{scan?.itemCount ?? 0}</b><span>{pt ? 'itens' : 'items'}</span></div><div><b>{scan?.projectCount ?? 0} {pt ? 'de' : 'of'} {scan?.projectTotal ?? 0}</b><span>{pt ? 'projetos' : 'projects'}</span></div></div>
+    </div>
+    <div><div className="clean-step"><span>{pt ? 'Etapa' : 'Step'} {scan?.step ?? 1} {pt ? 'de' : 'of'} 3 · {STEP[scan?.label ?? 'discovering'][pt ? 0 : 1]}</span><span className="clean-muted">{Math.round((scan?.progress ?? 0) * 100)}% · {scan?.etaMs ? (pt ? `cerca de ${Math.ceil(scan.etaMs / 1000)} s` : `about ${Math.ceil(scan.etaMs / 1000)} s`) : (pt ? 'estimando tempo…' : 'estimating time…')}</span></div><progress aria-label={pt ? 'Progresso da varredura' : 'Scan progress'} max={1} value={scan?.progress ?? 0} /></div>
+    <div><p className="clean-muted">{pt ? 'O que está acontecendo' : 'What is happening'}</p><div className="clean-log" role="log" aria-live="polite" aria-relevant="additions text">
+      {(scan?.log ?? []).slice(-8).map((line, index) => <div className="clean-log-line" key={`${line.at}-${index}`}>
+        <span style={{ color: line.state === 'done' ? 'var(--accent-green)' : line.state === 'running' ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }}>{line.state === 'done' ? '✓' : line.state === 'running' ? '›' : '·'}</span>
+        <time className="clean-muted">{time(line.at, lang)}</time><span className="clean-ellipsis" title={line.name}>{line.state === 'queued' ? (pt ? 'na fila: ' : 'queued: ') : line.state === 'running' ? (pt ? 'medindo ' : 'measuring ') : ''}{line.name}</span>
+        {line.bytes !== undefined && <span className="clean-muted">{cleanSize(line.bytes, lang)}</span>}
+      </div>)}
+      {!scan?.log.length && <span className="clean-muted">{pt ? 'Localizando as pastas dos seus projetos…' : 'Finding your project folders…'}</span>}
+    </div></div>
+  </div>
 }
 
 export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: boolean; onClose: () => void }) {
-  const pt = lang === 'pt'
-  const isMobile = useIsMobile()
-  const [plan, setPlan] = useState<Plan | null>(null)
+  const pt = lang === 'pt', mobile = useIsMobile()
+  const { scan, plan, error } = useCleanScan()
   const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [filter, setFilter] = useState<CleanFilter>('all')
+  const [sort, setSort] = useState<CleanSort>('bytes')
+  const [descending, setDescending] = useState(true)
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [job, setJob] = useState<Job | null>(null)
-  const [error, setError] = useState(false)
-  const [retry, setRetry] = useState(0)
-  const [scanProgress, setScanProgress] = useState(0)
-  const resultRef = useRef<HTMLDivElement>(null)
-  const keptPaths = useRef(new Set<string>())
-  const selectFreshItems = (items: Item[]) => new Set(items.filter(i => i.kind !== 'node-modules' && !keptPaths.current.has(i.path)).map(i => i.id))
-
+  const [submitting, setSubmitting] = useState(false)
+  const [job, setJob] = useState<CleanJob | null>(null)
+  const [notice, setNotice] = useState('')
+  const [showRemoved, setShowRemoved] = useState(false)
+  const done = job?.state === 'done' ? job.result : undefined
+  const scanning = !plan && !done && !busy && !error
+  useEffect(() => { if (open && !busy && !done) void startCleanScan() }, [open])
   useEffect(() => {
-    if (!open) return
-    setPlan(null); setJob(null); setBusy(false); setConfirm(false); setError(false)
-    keptPaths.current = new Set()
-    let stopped = false
-    const pollPlan = async () => {
-      try {
-        const response = await fetch('/api/clean/plan')
-        if (!response.ok) throw new Error('plan failed')
-        const value = await response.json() as Plan | { state: string; progress?: number }
-        if (stopped) return
-        if ('items' in value) {
-          setPlan(value)
-          setPicked(selectFreshItems(value.items))
-          return
-        }
-        if (typeof value.progress === 'number') setScanProgress(value.progress)
-        window.setTimeout(pollPlan, 300)
-      } catch {
-        if (!stopped) { setError(true); setPlan(null) }
-      }
+    if (plan) {
+      setPicked(initialCleanSelection(plan.items))
+      setFilter('all'); setConfirm(false)
     }
-    void pollPlan()
-    return () => { stopped = true }
-  }, [open, retry])
-
+  }, [plan?.scanId])
   useEffect(() => {
     if (!busy) return
     let stopped = false
+    let timer: ReturnType<typeof setTimeout>
     const poll = async () => {
       try {
         const response = await fetch('/api/clean/job')
-        if (!response.ok) throw new Error('job failed')
-        const value = await response.json() as Job
+        if (!response.ok) throw new Error('job unavailable')
+        const next = await response.json() as CleanJob
         if (stopped) return
-        setJob(value)
-        if (value.state !== 'done') window.setTimeout(poll, 350)
-        else {
-          keptPaths.current = new Set(value.result?.skipped.map(item => item.path) ?? [])
-          setBusy(false)
-          window.setTimeout(() => {
-            resultRef.current?.scrollIntoView({ block: 'nearest' })
-            void refreshPlan()
-          }, 0)
-        }
-      } catch {
-        if (!stopped) window.setTimeout(poll, 1000)
-      }
+        setJob(next)
+        if (next.state === 'done') { setBusy(false); void finalizeCleanScan().catch(() => {}) }
+        else timer = setTimeout(() => void poll(), 500)
+      } catch { if (!stopped) timer = setTimeout(() => void poll(), 1500) }
     }
     void poll()
-    return () => { stopped = true }
+    return () => { stopped = true; clearTimeout(timer) }
   }, [busy])
 
-  const refreshPlan = async () => {
-    try {
-      const response = await fetch('/api/clean/plan')
-      if (!response.ok) throw new Error('plan failed')
-      const value = await response.json() as Plan | { state: string; progress?: number }
-      if ('items' in value) {
-        setPlan(value)
-        setPicked(selectFreshItems(value.items))
-      } else window.setTimeout(() => void refreshPlan(), 300)
-    } catch { /* the completed result remains visible if the refresh fails */ }
+  const now = plan?.scannedAt ?? Date.now()
+  const items = plan?.items ?? []
+  const rows = useMemo(() => sortCleanItems(items.filter(i => cleanMatches(i, filter, now)), sort, descending), [plan, filter, sort, descending])
+  const selectable = rows.filter(i => i.kind !== 'keep')
+  const allSelected = selectable.length > 0 && selectable.every(i => picked.has(i.id))
+  const selected = items.filter(i => i.kind !== 'keep' && picked.has(i.id))
+  const selectedBytes = selected.reduce((n, i) => n + i.bytes, 0)
+  const toggle = (id: string) => setPicked(current => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next })
+  const toggleAll = () => setPicked(current => toggleCleanVisible(current, rows))
+  const reorder = (value: CleanSort) => { setSort(value); setDescending(sort === value ? !descending : value === 'bytes') }
+  const fail = () => setNotice(pt ? 'Não foi possível concluir esta ação. Tente novamente.' : 'Could not complete this action. Try again.')
+  const background = async () => { try { await backgroundCleanScan(); onClose() } catch { fail() } }
+  const close = async () => {
+    if (confirm) { setConfirm(false); return }
+    if (scanning) { await background(); return }
+    if (!busy) { try { await finalizeCleanScan() } catch { fail(); return }; setJob(null); setPicked(new Set()); setShowRemoved(false) }
+    setNotice(''); onClose()
   }
-
-  const grouped = useMemo(() => {
-    const groups = new Map<string, Item[]>()
-    for (const item of plan?.items ?? []) groups.set(item.repo, [...(groups.get(item.repo) ?? []), item])
-    return [...groups]
-  }, [plan])
-  const selectedBytes = [...picked].reduce((total, id) => total + (plan?.items.find(i => i.id === id)?.bytes ?? 0), 0)
-  const toggle = (id: string) => setPicked(current => {
-    const next = new Set(current)
-    next.has(id) ? next.delete(id) : next.add(id)
-    return next
-  })
+  const cancel = async () => { try { await cancelCleanScan(); onClose() } catch { fail() } }
   const run = async () => {
-    setBusy(true); setConfirm(false)
+    if (submitting) return
+    setSubmitting(true); setConfirm(false); setNotice('')
     try {
-      const response = await fetch('/api/clean/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [...picked] }) })
+      const response = await fetch('/api/clean/apply', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: selected.map(i => i.id) }) })
       if (!response.ok) throw new Error('apply failed')
-      setJob(await response.json() as Job)
+      setJob(await response.json() as CleanJob); setBusy(true)
       pushNotification({ type: 'info', code: 'clean.started' })
-    } catch {
-      setBusy(false); pushNotification({ type: 'error', code: 'clean.failed' })
-    }
+    } catch { pushNotification({ type: 'error', code: 'clean.failed' }); fail() }
+    finally { setSubmitting(false) }
   }
-  const cancel = () => { if (confirm) setConfirm(false); else onClose() }
-  const title = confirm ? (pt ? 'Confirmar limpeza' : 'Confirm cleanup') : (pt ? 'O que dá para limpar' : 'What can be cleaned')
+  const cleanLabel = `${pt ? 'Limpar' : 'Clean'} ${cleanSize(selectedBytes, lang)}`
+  const button = (kind: 'primary' | 'secondary' | 'danger', disabled = false) => ({ ...dialogButtonStyle(kind, mobile, disabled), ...(kind === 'primary' ? { background: 'var(--anthropic-orange)', color: 'var(--text-on-accent, #fff)' } : {}) })
+  const filters: Array<{ value: CleanFilter; label: string }> = [
+    { value: 'all', label: pt ? 'Todos' : 'All' }, { value: 'worktrees', label: 'Worktrees' }, { value: 'node-modules', label: 'node_modules' }, { value: 'idle', label: pt ? 'Parados há +7 dias' : 'Idle for 7+ days' },
+  ].map(f => ({ ...f, value: f.value as CleanFilter, label: `${f.label} ${items.filter(i => cleanMatches(i, f.value as CleanFilter, now)).length}` }))
+  const title = done ? (pt ? `${cleanSize(done.freedBytes, lang)} liberados` : `${cleanSize(done.freedBytes, lang)} freed`) : busy ? (pt ? 'Limpando com segurança' : 'Cleaning safely') : confirm ? (pt ? 'Confirmar limpeza' : 'Confirm cleanup') : scanning ? (pt ? 'Procurando o que dá para limpar' : 'Looking for cleanup options') : (pt ? 'O que dá para limpar' : 'What can be cleaned')
+  const message = scanning ? (pt ? 'Olhando worktrees, node_modules e registros do git nas pastas dos seus projetos. Nada é apagado nesta etapa.' : 'Checking worktrees, node_modules and git records in your project folders. Nothing is deleted during this step.') : confirm ? (pt ? 'Nada em andamento será tocado. Os branches permanecem. Os itens serão conferidos novamente antes de remover.' : 'Nothing in progress will be touched. Branches stay. Items are checked again before removal.') : ''
+  const sortHeading = (value: CleanSort, label: string) => <th scope="col" aria-sort={sort === value ? descending ? 'descending' : 'ascending' : 'none'}><button type="button" onClick={() => reorder(value)}>{label}{sort === value ? descending ? ' ↓' : ' ↑' : ''}</button></th>
+  const checkbox = (item: CleanWebItem) => <Checkbox checked={picked.has(item.id)} disabled={busy || item.kind === 'keep'} onChange={() => toggle(item.id)} label="" ariaLabel={item.path} />
 
-  return (
-    <ConfirmModal
-      open={open}
-      title={title}
-      message={confirm ? (pt ? 'Nada em andamento será tocado. Os branches permanecem.' : 'Nothing in progress will be touched. Branches stay.') : (pt ? 'Escolha os worktrees e dados que podem ser removidos com segurança.' : 'Choose the worktrees and data that can be safely removed.')}
-      confirmLabel={pt ? 'Limpar' : 'Clean'}
-      cancelLabel={pt ? 'Fechar' : 'Close'}
-      onConfirm={() => void run()}
-      onCancel={cancel}
-      tone={confirm ? 'danger' : 'default'}
-      footer={<DialogActions>
-        <button type="button" onClick={cancel} style={dialogButtonStyle('secondary', isMobile)}>{confirm ? (pt ? 'Voltar' : 'Back') : (pt ? 'Fechar' : 'Close')}</button>
-        {!confirm && <button type="button" disabled={busy || picked.size === 0 || !plan} onClick={() => setConfirm(true)} style={dialogButtonStyle('primary', isMobile, busy || picked.size === 0 || !plan)}>{pt ? 'Limpar' : 'Clean'}</button>}
-        {confirm && <button type="button" onClick={() => void run()} disabled={busy || picked.size === 0} style={dialogButtonStyle('danger', isMobile, busy || picked.size === 0)}>{pt ? 'Confirmar' : 'Confirm'}</button>}
-      </DialogActions>}
-    >
-      <div style={{ maxHeight: 'calc(60vh / var(--ui-zoom, 1))', overflowY: 'auto' }}>
-        {busy && job && <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 12 }}><StatusDot state={job.state === 'done' ? 'ok' : 'warn'} /><span>{stage(job.state, pt)} ({job.progress}%)</span></div>}
-      {error && <div role="alert" style={{ color: 'var(--text-secondary)', fontSize: 13 }}><p>{pt ? 'Não foi possível carregar a limpeza.' : 'Could not load cleanup options.'}</p><button type="button" onClick={() => setRetry(value => value + 1)} style={dialogButtonStyle('secondary', isMobile)}>{pt ? 'Tentar novamente' : 'Retry'}</button></div>}
-      {!error && !plan && <p>{pt ? `Conferindo… ${Math.round(scanProgress * 100)}%` : `Checking… ${Math.round(scanProgress * 100)}%`}</p>}
-      {!error && plan && plan.items.length === 0 && <p>{pt ? 'Nada para limpar.' : 'Nothing to clean.'}</p>}
-      {!error && plan && grouped.map(([repo, items]) => <section key={repo}><SectionHeader label={repo} /><div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{items.map(item => <RecordCard key={item.id} title={item.path} subtitle={reasonLabel(item.reason, pt)} leading={<Checkbox checked={picked.has(item.id)} onChange={() => toggle(item.id)} label="" ariaLabel={item.path} disabled={busy} />} fields={[{ label: pt ? 'Tipo' : 'Kind', value: kindLabel(item.kind, pt) }, { label: pt ? 'Tamanho' : 'Size', value: size(item.bytes) }]} />)}</div></section>)}
-      {plan && plan.items.length > 0 && <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 0 }}>{size(selectedBytes)}</p>}
-        {job?.state === 'done' && job.result && <div ref={resultRef} role="status"><p>{pt ? `${size(job.result.freedBytes)} liberados; ${job.result.skipped.length} mantidos por segurança.` : `${size(job.result.freedBytes)} freed; ${job.result.skipped.length} kept for safety.`}</p>{job.result.skipped.length > 0 && <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{job.result.skipped.map(item => <li key={item.path}><code>{item.path}</code> — {reasonLabel(item.reason, pt)}</li>)}</ul>}</div>}
-      </div>
-    </ConfirmModal>
-  )
+  return <ConfirmModal className="clean-dialog" headerAction={mobile && !scanning ? <button type="button" className="clean-close" aria-label={pt ? 'Fechar' : 'Close'} onClick={() => void close()}><X size={18} /></button> : undefined} open={open} title={title} message={message} tone={confirm ? 'danger' : 'default'} icon={done ? <Check size={20} /> : scanning ? <Search size={20} /> : <Trash2 size={20} />}
+    confirmLabel={cleanLabel} cancelLabel={pt ? 'Fechar' : 'Close'} onConfirm={() => void run()} onCancel={() => void close()}
+    footer={<DialogActions start={scanning ? <span className="clean-muted">{pt ? 'Pode fechar: a Nay avisa quando terminar.' : 'You can close this: Nay will let you know when it is ready.'}</span> : plan && !done && !busy ? <span className="clean-selected"><b>{selected.length}</b> {pt ? 'marcados' : 'selected'} · {cleanSize(selectedBytes, lang)}</span> : undefined}>
+      {scanning ? <><button type="button" style={button('secondary')} onClick={() => void cancel()}>{pt ? 'Cancelar' : 'Cancel'}</button><button type="button" data-testid="clean-background" style={button('primary')} onClick={() => void background()}>{pt ? 'Continuar em segundo plano' : 'Continue in background'}</button></> : <>
+        {done && <button type="button" style={button('secondary')} onClick={() => setShowRemoved(v => !v)}>{showRemoved ? (pt ? 'Ocultar detalhes' : 'Hide details') : (pt ? 'Ver o que foi removido' : 'See what was removed')}</button>}
+        <button type="button" style={button(done ? 'primary' : 'secondary')} onClick={() => void close()}>{confirm ? (pt ? 'Voltar' : 'Back') : (pt ? 'Fechar' : 'Close')}</button>
+        {plan && !done && !busy && <button type="button" data-testid="clean-apply" disabled={!selected.length || submitting} style={button(confirm ? 'danger' : 'primary', !selected.length || submitting)} onClick={() => confirm ? void run() : setConfirm(true)}><Trash2 size={15} />{confirm ? (pt ? 'Confirmar' : 'Confirm') : cleanLabel}</button>}
+      </>}
+    </DialogActions>}>
+    <div className="clean-content">
+      {notice && <p role="alert">{notice}</p>}
+      {error && !done && <div role="alert"><p>{pt ? 'Não foi possível carregar a limpeza.' : 'Could not load cleanup options.'}</p><button type="button" style={button('secondary')} onClick={() => void finalizeCleanScan().then(startCleanScan).catch(fail)}>{pt ? 'Tentar novamente' : 'Retry'}</button></div>}
+      {scanning && <CleanScanView scan={scan} lang={lang} />}
+      {busy && <div role="status"><p>{jobStage(job?.state ?? 'verifying', pt)}</p><progress aria-label={pt ? 'Progresso da limpeza' : 'Cleanup progress'} max={100} value={job?.progress ?? 0} /><p className="clean-muted">{pt ? 'Você pode fechar esta janela; a limpeza continua.' : 'You can close this window; cleanup will continue.'}</p></div>}
+      {done && <div className="clean-done" role="status" data-testid="clean-done">
+        <p className="clean-muted">{done.diskFreeBefore !== null && done.diskFreeAfter !== null ? `${pt ? 'Disco' : 'Disk'}: ${cleanSize(done.diskFreeBefore, lang)} → ${cleanSize(done.diskFreeAfter, lang)} ${pt ? 'livres' : 'free'} · ` : ''}{pt ? 'levou' : 'took'} {Math.ceil(done.elapsedMs / 1000)} s</p>
+        <div className="clean-done-counts">{[[done.removedWorktrees, pt ? 'worktrees removidos' : 'worktrees removed'], [done.pruned, pt ? 'registros consertados' : 'records repaired'], [done.skipped.length, pt ? 'mantidos por segurança' : 'kept for safety']].map(([n, label]) => <div key={label}><b>{n}</b><span className="clean-muted">{label}</span></div>)}</div>
+        {done.skipped.length > 0 && <section><h3>{pt ? 'Mantidos por segurança' : 'Kept for safety'}</h3>{done.skipped.map(item => <div className="clean-outcome" key={item.path}><b title={item.path}>{cleanName({ ...item, name: '', kind: 'keep' })}</b><span>{cleanReason(item.reason, pt)}</span></div>)}</section>}
+        {done.errors.length > 0 && <section role="alert"><h3>{pt ? 'Não foi possível remover' : 'Could not remove'}</h3>{done.errors.map((e, i) => <p className="clean-error" key={i}>{e}</p>)}</section>}
+        {showRemoved && <section><h3>{pt ? 'Removidos' : 'Removed'}</h3>{done.removed.map(item => <div className="clean-outcome" key={`${item.path}:${item.kind}`}><b title={item.path}>{cleanName({ ...item, name: '' })}</b><span>{cleanSize(item.bytes, lang)}</span></div>)}</section>}
+      </div>}
+      {plan && !done && !busy && <>
+        <div className="clean-summary" data-testid="clean-summary"><span className="clean-muted">{pt ? 'Dá para liberar' : 'You can free up'}</span><div><strong className="clean-number">{cleanSize(plan.reclaimable.bytes, lang)}</strong><span className="clean-muted">{plan.reclaimable.count} {pt ? 'itens' : 'items'} · {new Set(items.map(i => i.repo)).size} {pt ? 'projetos' : 'projects'} · {pt ? 'varrido às' : 'scanned at'} {time(plan.scannedAt, lang)}</span></div></div>
+        {confirm ? <p>{selected.length} {pt ? 'itens serão removidos' : 'items will be removed'} · {cleanSize(selectedBytes, lang)}</p> : <>
+          <div className="clean-types"><div className="clean-type-bar" aria-hidden="true">{(Object.keys(COLORS) as CleanKind[]).map(kind => { const bytes = items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0); return bytes > 0 && <span key={kind} style={{ flexGrow: bytes, background: COLORS[kind] }} /> })}</div><div className="clean-legend">{(Object.keys(COLORS) as CleanKind[]).map(kind => <div key={kind}><i style={{ background: COLORS[kind] }} /><span>{cleanKind(kind, pt)} <small>({items.filter(i => i.kind === kind).length})</small></span><b>{cleanSize(items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0), lang)}</b></div>)}</div></div>
+          <TabSelect wrap options={filters} value={filter} onChange={setFilter} buttonMinHeight={mobile ? 44 : 30} />
+          {mobile ? <>
+            <div className="clean-mobile-select"><Checkbox checked={allSelected} onChange={toggleAll} label={pt ? 'Marcar todos' : 'Select all'} disabled={!selectable.length} /><span>{selected.length} · {cleanSize(selectedBytes, lang)}</span></div>
+            <div className="clean-mobile-sort"><span className="clean-muted">{pt ? 'Ordenar por' : 'Sort by'}</span><TabSelect wrap options={[{ value: 'bytes', label: pt ? 'Tamanho' : 'Size' }, { value: 'name', label: pt ? 'Pasta' : 'Folder' }, { value: 'idle', label: pt ? 'Parado há' : 'Idle for' }]} value={sort} onChange={value => reorder(value)} buttonMinHeight={44} /></div>
+            <div className="clean-mobile-rows">{rows.map(item => <RecordCard key={item.id} title={<span title={item.path}>{cleanName(item)}</span>} subtitle={item.kind === 'keep' ? `${item.project} · ${cleanReason(item.reason, pt)}` : `${item.project} · ${item.kind === 'node-modules' ? (pt ? 'reinstalável' : 'reinstallable') : item.kind === 'prune' ? (pt ? 'registro' : 'record') : 'merged'} · ${pt ? 'parado há' : 'idle for'} ${cleanIdle(item.lastActivityMs, now, lang)}`} leading={checkbox(item)} badge={<b>{cleanSize(item.bytes, lang)}</b>} fields={[]} onClick={item.kind !== 'keep' ? () => toggle(item.id) : undefined} />)}</div>
+          </> : <div className="clean-table-wrap"><table className="clean-table"><colgroup><col style={{ width: 34 }} /><col /><col style={{ width: '20%' }} /><col style={{ width: 84 }} /><col style={{ width: 78 }} /></colgroup><thead><tr><th><Checkbox checked={allSelected} onChange={toggleAll} label="" ariaLabel={pt ? 'Marcar todos os itens visíveis' : 'Select all visible items'} disabled={!selectable.length} /></th>{sortHeading('name', pt ? 'Pasta' : 'Folder')}{sortHeading('project', pt ? 'Projeto' : 'Project')}{sortHeading('idle', pt ? 'Parado há' : 'Idle for')}{sortHeading('bytes', pt ? 'Tamanho' : 'Size')}</tr></thead><tbody>{rows.map(item => <tr key={item.id} data-kept={item.kind === 'keep'}><td>{checkbox(item)}</td><td title={`${item.path}\n${cleanReason(item.reason, pt)}`}><span className="clean-folder"><i style={{ background: COLORS[item.kind] }} /><b className="clean-ellipsis">{cleanName(item)}</b></span></td><td title={item.repo}>{item.project}</td><td>{cleanIdle(item.lastActivityMs, now, lang)}</td><td>{cleanSize(item.bytes, lang)}</td></tr>)}</tbody></table></div>}
+          {rows.length === 0 && <p className="clean-muted">{pt ? 'Nenhum item neste filtro.' : 'No items match this filter.'}</p>}
+        </>}
+      </>}
+    </div>
+  </ConfirmModal>
 }

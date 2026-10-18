@@ -104,3 +104,4 @@ export * from './newProject'
 export * from './injectedHeader'
 
 export * from './handoffConfig'
+export type { CleanKind, CleanWebItem, CleanScanLog, CleanScanState, CleanWebPlan, CleanResult, CleanJob } from './clean'
