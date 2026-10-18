@@ -24,7 +24,7 @@ import { randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readdir, rm, stat, symlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
-import { HARNESS_ORDER, featureOn, type HarnessId } from '@agentistics/core'
+import { HARNESS_LABELS, HARNESS_ORDER, featureOn, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, PORT } from './config'
 import {
   ISOLATION_ENV, IDENTITY_PROBES, bind as bindAccount, byId, forceProbe, readAccounts, retireAccount,
@@ -150,6 +150,8 @@ export interface AccountRootsDeps {
   spawn?: (req: LoginSpawn) => Promise<{ ok: boolean; message: string; id?: string }>
   /** Is this managed session still running? */
   sessionLive?: (sessionId: string) => Promise<boolean>
+  /** Ends a managed session (the login session this module spawned, on Cancel). */
+  endSession?: (sessionId: string) => Promise<boolean>
   /** Managed sessions started with this account id (D3 stamps `accountId` on the row). */
   sessionsOfAccount?: (accountId: string) => Promise<string[]>
   registerMcp?: (harness: HarnessId, root: string) => Promise<void>
@@ -204,6 +206,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   const listAccounts = deps.listAccounts ?? readAccounts
   const sessionLive = deps.sessionLive ?? (async () => false)
   const sessionsOfAccount = deps.sessionsOfAccount ?? (async () => [])
+  const endSession = deps.endSession ?? (async () => false)
   const registerMcp = deps.registerMcp ?? defaultRegisterMcp
   let timer: ReturnType<typeof setInterval> | undefined
 
@@ -289,7 +292,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     const start = LOGIN_START[harness]
     if (!start || !deps.spawn) return { ok: false, message: say('Signing in is not available for this assistant.') }
     const out = await deps.spawn({
-      harness, cwd: homedir(), label: `Sign in · ${harness}`,
+      harness, cwd: homedir(), label: `Login · ${HARNESS_LABELS[harness] ?? harness}`,
       account: { env: rootEnv(harness, root), loginArgv: start.argv },
     })
     if (out.ok && out.id) { logins.set(pendingId, out.id); loginHarness.set(pendingId, harness) }
@@ -372,17 +375,28 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     if (body.confirm !== undefined && body.confirm !== root) {
       return { ok: false, status: 400, reason: 'confirm_mismatch', message: say('The confirmation must be the exact folder path of this root.') }
     }
+    // A pending root (no account yet) is ours and holds nothing but the login: Cancel ends the login
+    // session THIS module spawned and drops the folder. Any other session in it still refuses.
+    const pending = !account && !!dir
+    const own = pending && dir && logins.has(dir.pendingId) ? logins.get(dir.pendingId)! : undefined
     const watched = [id, ...(dir ? [dir.pendingId] : [])]
     const sessions = new Set<string>()
     for (const w of watched) {
-      if (logins.has(w)) sessions.add(logins.get(w)!)
-      for (const s of await sessionsOfAccount(w)) sessions.add(s)
+      if (logins.has(w) && !pending) sessions.add(logins.get(w)!)
+      for (const s of await sessionsOfAccount(w)) if (s !== own) sessions.add(s)
     }
     for (const s of sessions) {
       if (await sessionLive(s).catch(() => true)) {
         return { ok: false, status: 409, reason: 'root_in_use', message: say('A session is still running in this account. End it first.') }
       }
     }
+    if (own && await sessionLive(own).catch(() => true)) {
+      if (!(await endSession(own).catch(() => false))) {
+        return { ok: false, status: 409, reason: 'root_in_use', message: say('The sign-in session could not be ended. End it first.') }
+      }
+    }
+    // Pending roots are dropped without a typed confirmation: there is no account to keep.
+    if (pending && body.confirm === undefined) body = { confirm: root }
     if (body.confirm === root) {
       const bad = !isRootPath(root) || await hasSymlinkPart(root)
       if (bad) return { ok: false, status: 400, reason: 'not_a_root', message: say('That folder is not an account root.') }
@@ -434,7 +448,7 @@ const defaultRegisterMcp = (harness: HarnessId, root: string) => registerRootMcp
 let instance: ReturnType<typeof createAccountRoots> | undefined
 export function accountRoots(deps?: AccountRootsDeps): ReturnType<typeof createAccountRoots> {
   if (deps) return createAccountRoots(deps)
-  return (instance ??= createAccountRoots({ spawn: defaultLoginSpawn, sessionLive: defaultSessionLive, sessionsOfAccount: defaultSessionsOfAccount }))
+  return (instance ??= createAccountRoots({ spawn: defaultLoginSpawn, sessionLive: defaultSessionLive, sessionsOfAccount: defaultSessionsOfAccount, endSession: defaultEndSession }))
 }
 
 /** The login session goes through the control host, with the env decided HERE, never from a request body. */
@@ -455,4 +469,11 @@ async function defaultSessionLive(sessionId: string): Promise<boolean> {
 async function defaultSessionsOfAccount(accountId: string): Promise<string[]> {
   const { readRegistry } = await import('./sessions/registry')
   return (await readRegistry()).filter(m => (m as { accountId?: string }).accountId === accountId).map(m => m.id)
+}
+
+async function defaultEndSession(sessionId: string): Promise<boolean> {
+  const { hostForFleet } = await import('./sessions/fleet-web')
+  const host = await hostForFleet('en')
+  if (!host.killSession) return false
+  return (await host.killSession(sessionId)).ok
 }

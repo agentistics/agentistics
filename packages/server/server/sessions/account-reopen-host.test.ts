@@ -20,6 +20,7 @@ import { addSession, removeSession } from './registry'
 import { newestRowOfConversation } from './spawn-account-io'
 import { __setSpawnBudgetForTest } from './memory-probe'
 import { exactLinksOnDisk } from './reopen-link'
+import { __setHarnessAgentsReaderForTest } from './harness-agents-io'
 import { resetHarnessAvailability } from './harness-available'
 import { spawnAccountStatus } from './spawn-account'
 import type { ManagedSession, SessionBackend } from './types'
@@ -52,10 +53,13 @@ beforeAll(() => {
   savedFlag = process.env.AGENTISTICS_MULTI_ACCOUNT
   process.env.AGENTISTICS_MULTI_ACCOUNT = '1'
   __setSessionBackendForTest(backend)
+  // The reopen lock asks `claude agents --json`; the machine's real CLI is not part of this test.
+  __setHarnessAgentsReaderForTest(async () => [])
 })
 afterEach(() => { spawned.length = 0 })
 afterAll(() => {
   __setSessionBackendForTest(null)
+  __setHarnessAgentsReaderForTest(null)
   __setFleetHostForTest('en', null)
   if (savedFlag === undefined) delete process.env.AGENTISTICS_MULTI_ACCOUNT
   else process.env.AGENTISTICS_MULTI_ACCOUNT = savedFlag

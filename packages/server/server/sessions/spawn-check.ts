@@ -32,7 +32,10 @@ export async function spawnDeath(
   const startedAt = Date.now()
   const deadline = startedAt + deadlineMs
   let observed = false
-  while (Date.now() < deadline) {
+  // At least ONE look, however short the deadline: on a loaded machine the clock can already be
+  // past a tiny deadline at the first check, and a session nobody looked at was never observed —
+  // neither its death nor its staying up would be recorded.
+  for (let first = true; first || Date.now() < deadline; first = false) {
     await new Promise(r => setTimeout(r, POLL_MS))
     let frame: string[]
     try { frame = await backend.capture(id, 40) } catch { continue }

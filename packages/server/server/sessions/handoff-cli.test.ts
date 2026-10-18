@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
 import { start } from './cli-session'
 import { parseSessionArgs } from './cli-parse'
 import { addSession, patchSession, readRegistry } from './registry'
@@ -7,10 +7,14 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { passPinForKill } from './handoff-relay-io'
+import { __setHarnessAgentsReaderForTest } from './harness-agents-io'
 import { readPreferences, updatePreferences } from '../preferences'
 import type { ManagedSession, SessionBackend } from './types'
 
 const saved = process.env.AGENTOP_MANAGED_ID
+// The CLI flow asks `claude agents --json`; the machine's real CLI is not part of this test.
+beforeAll(() => __setHarnessAgentsReaderForTest(async () => []))
+afterAll(() => __setHarnessAgentsReaderForTest(null))
 afterEach(() => { if (saved === undefined) delete process.env.AGENTOP_MANAGED_ID; else process.env.AGENTOP_MANAGED_ID = saved })
 
 const mkBackend = (onSpawn: (id: string) => Promise<void> = async () => {}) => ({
@@ -25,7 +29,8 @@ async function runHandoff(parent: string, harness: string, backend: SessionBacke
   if (cmd.kind !== 'start') throw new Error('not a start')
   const log = console.log; const err = console.error
   console.log = () => {}; console.error = () => {}
-  try { return await start(cmd, backend, provesCaller ? { provesCaller } : {}) } finally { console.log = log; console.error = err }
+  // A mock pane never dies, so the real settle wait (5 s) would prove nothing and only cost time.
+  try { return await start(cmd, backend, { settleMs: 50, ...(provesCaller ? { provesCaller } : {}) }) } finally { console.log = log; console.error = err }
 }
 
 const addLeader = async (id: string, conversationId: string) => {

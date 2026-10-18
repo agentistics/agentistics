@@ -10,8 +10,8 @@
  */
 import { afterAll, describe, expect, it } from 'bun:test'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { readFile, readlink } from 'node:fs/promises'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { readdir, readFile, readlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { kimiTranscriptFromFds } from './process-transcript'
@@ -45,19 +45,48 @@ afterAll(() => {
  */
 const HOLD = (file: string) => `(exec 3>>"${file}"; exec sleep 30)`
 
-/** `sh` as the pane; the script decides which children hold what. Returns once the children exist. */
-async function pane(script: string, env: Record<string, string>): Promise<number> {
+/** Every descendant of `pid` with its exe basename and the files its descriptors name. */
+async function descendants(pid: number): Promise<{ pid: number; exe: string; files: Set<string> }[]> {
+  const out: { pid: number; exe: string; files: Set<string> }[] = []
+  const queue = [pid]
+  while (queue.length > 0) {
+    const p = queue.shift()!
+    let kids: number[] = []
+    try { kids = (await readFile(`/proc/${p}/task/${p}/children`, 'utf-8')).trim().split(/\s+/).filter(Boolean).map(Number) } catch {}
+    for (const k of kids) {
+      queue.push(k)
+      try {
+        const exe = basename(await readlink(`/proc/${k}/exe`))
+        const files = new Set<string>()
+        for (const fd of await readdir(`/proc/${k}/fd`)) {
+          try { files.add(await readlink(`/proc/${k}/fd/${fd}`)) } catch {}
+        }
+        out.push({ pid: k, exe, files })
+      } catch {}
+    }
+  }
+  return out
+}
+
+/**
+ * `sh` as the pane; the script decides which children hold what. Returns once the tree has reached
+ * its final shape: every file in `env` held by a descendant running `holderExe`.
+ *
+ * "A child exists" is not that shape. The holder is a SUBSHELL that first opens the file and then
+ * execs `sleep`, so for a moment the child is an `sh` holding nothing, then an `sh` holding the file,
+ * and only then the `sleep` the test asks about — a walk landing in that window answered `undefined`
+ * on a loaded machine.
+ */
+async function pane(script: string, env: Record<string, string>, holderExe = 'sleep'): Promise<number> {
   const c = spawn('/bin/sh', ['-c', script], { env: { ...process.env, ...env }, stdio: 'ignore', detached: true })
   started.push(c)
-  // Wait for the children to be there (the walk reads `/proc/<pid>/task/*/children`).
-  for (let i = 0; i < 100; i++) {
-    try {
-      const kids = (await readFile(`/proc/${c.pid}/task/${c.pid}/children`, 'utf-8')).trim()
-      if (kids) return c.pid!
-    } catch {}
+  const wanted = Object.values(env)
+  for (let i = 0; i < 250; i++) {
+    const tree = await descendants(c.pid!)
+    if (wanted.every(f => tree.some(d => d.exe === holderExe && d.files.has(f)))) return c.pid!
     await new Promise(r => setTimeout(r, 20))
   }
-  return c.pid!
+  throw new Error(`the pane never reached its shape: ${JSON.stringify(env)} held by ${holderExe}`)
 }
 
 describe.skipIf(!linux)('resolveHolderFile on the real /proc', () => {
@@ -90,8 +119,8 @@ describe.skipIf(!linux)('resolveHolderFile on the real /proc', () => {
     // and a new child on the new binary holds the session files. Here the wrapper is `sh` and the
     // child an inner `sh` holding fd 3; the grandchild `sleep` (not a holder) inherits it and must
     // NOT be the answer.
-    const pid = await pane(`(exec 3>>"$F"; exec /bin/sh -c 'sleep 30; true'); true`, { F: F1 })
-    const sh = basename(await readlink(`/proc/${pid}/exe`))
+    const sh = basename(realpathSync('/bin/sh'))
+    const pid = await pane(`(exec 3>>"$F"; exec /bin/sh -c 'sleep 30; true'); true`, { F: F1 }, sh)
     const got = await resolveHolderFile(pid, [sh], kimiTranscriptFromFds)
     expect(got?.file).toBe(F1)
     expect(got?.holder).not.toBe(pid)
