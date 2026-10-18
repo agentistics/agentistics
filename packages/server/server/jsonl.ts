@@ -1,6 +1,6 @@
 import { readFile } from 'fs/promises'
 import type { SessionDayUsage, SessionMeta, TurnEvent } from '@agentistics/core'
-import { activeMinutesOf, charCount, emptyActiveTime, foldActiveTime, finishActiveTime } from '@agentistics/core'
+import { sessionDay, activeMinutesOf, charCount, emptyActiveTime, foldActiveTime, finishActiveTime } from '@agentistics/core'
 import type { ActiveTimeState } from '@agentistics/core'
 import { getSessionFileStats } from './git'
 import { countGitCommands } from './harness-activity'
@@ -522,10 +522,10 @@ export interface ClaudeParseState {
   modelFirst200: string
 }
 
-/** The day this line falls on, created on first sight. UTC, per `tagSessionDay`. */
+/** The machine-local activity day this line falls on, created on first sight. */
 function dayOf(daily: Map<string, SessionDayUsage>, iso: string | undefined): SessionDayUsage | null {
-  if (!iso || iso.length < 10) return null
-  const key = iso.slice(0, 10)
+  const key = sessionDay(iso)
+  if (!key) return null
   let d = daily.get(key)
   if (!d) {
     d = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, messages: 0, hours: {} }
@@ -817,7 +817,7 @@ export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>
           // The day this turn happened on, exactly as `dayOf` keys it — a turn with no readable
           // timestamp contributes to the lifetime totals and to no day, and retracting it later must
           // touch no bucket either.
-          dayKey: ts && ts.length >= 10 ? ts.slice(0, 10) : undefined,
+          dayKey: sessionDay(ts) || undefined,
         }
 
         const decision = resolveUsage(msg.id, state.countedUsage, next)

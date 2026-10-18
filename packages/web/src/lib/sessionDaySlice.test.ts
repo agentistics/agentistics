@@ -8,7 +8,7 @@ const day = (n: number) => ({
 
 /** A session open since the 3rd and still running — the shape the whole feature exists for. */
 const LONG = {
-  start_time: '2026-09-03T23:23:46.121Z',
+  start_time: '2026-09-03T23:23:46.121',
   daily: {
     '2026-09-03': day(10),
     '2026-09-04': day(1000),
@@ -45,7 +45,7 @@ describe('sliceSession', () => {
   it('a session with NO daily cannot be sliced, and says so', () => {
     // `null`, never zero: a session that cannot be split is not a session that did nothing. The
     // store is full of records written before the field existed.
-    expect(sliceSession({ start_time: '2026-09-06T10:00:00Z' }, new Set(['2026-09-06']))).toBeNull()
+    expect(sliceSession({ start_time: '2026-09-06T10:00:00' }, new Set(['2026-09-06']))).toBeNull()
   })
 })
 
@@ -58,7 +58,7 @@ describe('activeInDays', () => {
 
   it('an unsliceable session falls back to its START day', () => {
     // The rule this product has always given, kept for exactly the records that cannot be checked.
-    const plain = { start_time: '2026-09-06T10:00:00Z' }
+    const plain = { start_time: '2026-09-06T10:00:00' }
     expect(activeInDays(plain, new Set(['2026-09-06']))).toBe(true)
     expect(activeInDays(plain, new Set(['2026-09-05']))).toBe(false)
   })
@@ -66,32 +66,32 @@ describe('activeInDays', () => {
   it('a day with a zeroed entry is not activity', () => {
     // The parser only creates a day for a turn, but an older writer could leave a hollow one, and
     // counting it would place a session in a day it sat out.
-    const hollow = { start_time: '2026-09-01T00:00:00Z', daily: { '2026-09-06': day(0) } }
+    const hollow = { start_time: '2026-09-01T00:00:00', daily: { '2026-09-06': day(0) } }
     expect(activeInDays(hollow, new Set(['2026-09-06']))).toBe(false)
   })
 })
 
 describe('daysBetween', () => {
   it('is inclusive at both ends', () => {
-    const d = daysBetween(Date.parse('2026-09-04T00:00:00Z'), Date.parse('2026-09-06T23:59:59Z'))
+    const d = daysBetween(Date.parse('2026-09-04T00:00:00'), Date.parse('2026-09-06T23:59:59'))
     expect(d).toEqual(['2026-09-04', '2026-09-05', '2026-09-06'])
   })
 
   it('one day is one key', () => {
-    expect(daysBetween(Date.parse('2026-09-06T00:00:00Z'), Date.parse('2026-09-06T23:59:59.999Z')))
+    expect(daysBetween(Date.parse('2026-09-06T00:00:00'), Date.parse('2026-09-06T23:59:59.999')))
       .toEqual(['2026-09-06'])
   })
 
   it('is bounded, and a reversed range yields nothing', () => {
     expect(daysBetween(0, Number.MAX_SAFE_INTEGER).length).toBeLessThanOrEqual(400)
-    expect(daysBetween(Date.parse('2026-09-06T00:00:00Z'), Date.parse('2026-09-01T00:00:00Z'))).toEqual([])
+    expect(daysBetween(Date.parse('2026-09-06T00:00:00'), Date.parse('2026-09-01T00:00:00'))).toEqual([])
     expect(daysBetween(NaN, NaN)).toEqual([])
   })
 })
 
 describe('dayKey', () => {
-  it('is the UTC slice every other day rule in this repo uses', () => {
-    expect(dayKey('2026-09-06T23:59:59.999Z')).toBe('2026-09-06')
+  it('uses local activity days', () => {
+    expect(dayKey('2026-09-06T23:59:59.999')).toBe('2026-09-06')
     expect(dayKey(undefined)).toBe('')
     expect(dayKey('x')).toBe('')
   })
@@ -106,46 +106,46 @@ describe('activeInWindow', () => {
     // and every session with a per-day split was judged against a window it could not fall in.
     // Measured before the fix: 397 of 662 sessions dropped out of the default view, and the
     // sessions workspace drew "no activity" over a fleet that was plainly running.
-    const days = new Set(daysBetween(0, ms('2026-09-06T23:59:59Z')))
+    const days = new Set(daysBetween(0, ms('2026-09-06T23:59:59')))
     expect(days.size).toBe(MAX_RANGE_DAYS)
     expect(activeInDays(LONG, days)).toBe(false)          // the set could never have said yes
-    expect(activeInWindow(LONG, 0, ms('2026-09-06T23:59:59Z'))).toBe(true)
+    expect(activeInWindow(LONG, 0, ms('2026-09-06T23:59:59'))).toBe(true)
   })
 
   it('answers the same as the day set wherever the set is usable', () => {
     // The two must agree, or a range one day either side of the cap would report a different fleet.
-    const from = ms('2026-09-05T00:00:00Z')
-    const to = ms('2026-09-06T23:59:59Z')
+    const from = ms('2026-09-05T00:00:00')
+    const to = ms('2026-09-06T23:59:59')
     expect(activeInWindow(LONG, from, to)).toBe(activeInDays(LONG, new Set(daysBetween(from, to))))
-    const outside = [ms('2026-01-01T00:00:00Z'), ms('2026-01-31T23:59:59Z')] as const
+    const outside = [ms('2026-01-01T00:00:00'), ms('2026-01-31T23:59:59')] as const
     expect(activeInWindow(LONG, outside[0], outside[1]))
       .toBe(activeInDays(LONG, new Set(daysBetween(outside[0], outside[1]))))
   })
 
   it('a session with no `daily` keeps the START-DAY rule', () => {
-    const plain = { start_time: '2026-09-06T10:00:00Z' }
-    expect(activeInWindow(plain, ms('2026-09-06T00:00:00Z'), ms('2026-09-06T23:59:59Z'))).toBe(true)
-    expect(activeInWindow(plain, ms('2026-09-01T00:00:00Z'), ms('2026-09-05T23:59:59Z'))).toBe(false)
-    expect(activeInWindow({}, 0, ms('2026-09-06T00:00:00Z'))).toBe(false)
+    const plain = { start_time: '2026-09-06T10:00:00' }
+    expect(activeInWindow(plain, ms('2026-09-06T00:00:00'), ms('2026-09-06T23:59:59'))).toBe(true)
+    expect(activeInWindow(plain, ms('2026-09-01T00:00:00'), ms('2026-09-05T23:59:59'))).toBe(false)
+    expect(activeInWindow({}, 0, ms('2026-09-06T00:00:00'))).toBe(false)
   })
 
   it('a hollow day is not activity here either', () => {
     const hollow = {
-      start_time: '2026-01-01T00:00:00Z',
+      start_time: '2026-01-01T00:00:00',
       daily: { '2026-09-06': { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, messages: 0 } },
     }
-    expect(activeInWindow(hollow, ms('2026-09-06T00:00:00Z'), ms('2026-09-06T23:59:59Z'))).toBe(false)
+    expect(activeInWindow(hollow, ms('2026-09-06T00:00:00'), ms('2026-09-06T23:59:59'))).toBe(false)
   })
 
   it('a reversed or unreadable window yields nothing, never everything', () => {
-    expect(activeInWindow(LONG, ms('2026-09-06T00:00:00Z'), ms('2026-09-01T00:00:00Z'))).toBe(false)
+    expect(activeInWindow(LONG, ms('2026-09-06T00:00:00'), ms('2026-09-01T00:00:00'))).toBe(false)
     expect(activeInWindow(LONG, Number.NaN, Number.NaN)).toBe(false)
   })
 })
 
 describe('dayKeyOfMs', () => {
-  it('is the same UTC rule as `dayKey`', () => {
-    expect(dayKeyOfMs(Date.parse('2026-09-06T23:59:59.999Z'))).toBe('2026-09-06')
+  it('uses the same local rule as `dayKey`', () => {
+    expect(dayKeyOfMs(Date.parse('2026-09-06T23:59:59.999'))).toBe('2026-09-06')
     expect(dayKeyOfMs(0)).toBe('1970-01-01')
     expect(dayKeyOfMs(Number.NaN)).toBe('')
   })
@@ -158,7 +158,7 @@ describe('the hours a session worked INSIDE the range', () => {
    * so a conversation open since the 3rd brought every hour it had ever run in into today's chart.
    */
   const OPEN_SINCE_TUESDAY = {
-    start_time: '2026-09-03T23:23:46.121Z',
+    start_time: '2026-09-03T23:23:46.121',
     daily: {
       '2026-09-03': { ...day(10), hours: { '16': 40, '22': 12 } },
       '2026-09-08': { ...day(30), hours: { '8': 19, '9': 15 } },

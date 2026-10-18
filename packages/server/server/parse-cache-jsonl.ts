@@ -54,7 +54,7 @@ export async function cachedParseSession(
   // appended to since. It is not hypothetical: the async-agent fix (#373) changed what an
   // invocation carries, and every transcript already in this cache kept answering in the shape from
   // before it. Bump this whenever `SessionMeta` gains, loses or re-means a field this parser fills.
-  const variant = `${SESSION_SHAPE}:${source}`
+  const variant = `${SESSION_SHAPE}:${Intl.DateTimeFormat().resolvedOptions().timeZone}:${source}`
   const hit = cache.get<SessionMeta>('session', stamp, variant)
   if (hit) return hit
 
@@ -88,7 +88,8 @@ export async function cachedParseSession(
 // v6: `agentMetrics` re-means — one billed response counts ONCE per session (`claimSessionUsage`),
 // last-wins inside a subagent file, and a background fork is nested by its own `meta.parentAgentId`.
 // Same bytes, different numbers: exactly the case this stamp exists for.
-const SESSION_SHAPE = 'v6'
+// v7: activity days follow the machine's local calendar, not UTC.
+const SESSION_SHAPE = 'v7'
 
 /** Everything `scanProjectDir` needs from a transcript whose session already exists in
  *  Claude's own session-meta — which carries none of it. */
@@ -152,7 +153,8 @@ export interface EnrichResult {
 // response counts ONCE per session, across the main transcript and every subagent file
 // (`claimSessionUsage`). A v4 row carries no ids, so the enrichment it feeds would double-count every
 // fork's replayed launch forever on a finished session.
-const ENRICH_SHAPE = 'v5'
+// v6: rebuild daily activity buckets in the machine's local calendar.
+const ENRICH_SHAPE = 'v6'
 
 /**
  * The whole enrichment of one transcript, cached as a unit.
@@ -181,7 +183,7 @@ export async function cachedEnrich(
   const stamp = await stampOf(filePath)
   if (!stamp) return null
 
-  const variant = `${ENRICH_SHAPE}:${metaModel}`
+  const variant = `${ENRICH_SHAPE}:${Intl.DateTimeFormat().resolvedOptions().timeZone}:${metaModel}`
   const hit = cache.get<EnrichResult>('enrich', stamp, variant)
   if (hit) return withSubagentNumbers(hit, filePath)
 

@@ -166,7 +166,7 @@ describe('P1 §8 properties', () => {
 
   test('name and version are the contract\'s', () => {
     expect(sessionMetaProjection.name).toBe('session-meta')
-    expect(sessionMetaProjection.version).toBe(2)
+    expect(sessionMetaProjection.version).toBe(3)
   })
 })
 
@@ -602,4 +602,23 @@ describe('turn time (D25) — active_minutes and user_response_times', () => {
     const mixed = [old[0]!, ...syntheticSession().slice(1), start(2, iso(0)), lastLine(3, iso(1))]
     expect('active_minutes' in project(sessionMetaProjection, mixed).meta).toBe(false)
   })
+})
+
+
+test('response daily tokens follow the machine-local BRT calendar', () => {
+  const previous = process.env.TZ
+  process.env.TZ = 'America/Sao_Paulo'
+  try {
+    const main = mainAgentIdOf(CONV)
+    const result = project(sessionMetaProjection, [
+      ...syntheticSession(),
+      completed(main, 'claude-opus-5', { input: 10, output: 1 }, '2026-10-18T01:00:00Z'),
+      completed(main, 'claude-opus-5', { input: 20, output: 2 }, '2026-10-18T02:59:00Z'),
+    ])
+    expect(Object.keys(result.meta.daily_tokens!)).toEqual(['2026-10-17'])
+    expect(result.meta.daily_tokens!['2026-10-17']!.input).toBe(30)
+  } finally {
+    if (previous === undefined) delete process.env.TZ
+    else process.env.TZ = previous
+  }
 })
