@@ -173,9 +173,9 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           {leading && <span onClick={e => e.stopPropagation()} style={{ display: 'flex', flexShrink: 0 }}>{leading}</span>}
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: 'anywhere' }}>{title}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: fieldLayout === 'stacked' ? undefined : 'ellipsis', whiteSpace: fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: 'anywhere' }}>{title}</div>
             {subtitle && (
-              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: 'anywhere', marginTop: 1 }}>{subtitle}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: fieldLayout === 'stacked' ? undefined : 'ellipsis', whiteSpace: fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: 'anywhere', marginTop: 1 }}>{subtitle}</div>
             )}
           </div>
           {badge && <span style={{ flexShrink: 0 }}>{badge}</span>}
@@ -504,7 +504,7 @@ export function RowSwitch({ on, onToggle, label, sub, icon, disabled, dimmed, wr
         }}>{label}</div>
         {sub && (
           <div style={{
-            fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1,
+            fontSize: wrap ? 13 : 11, color: wrap ? 'var(--text-secondary)' : 'var(--text-tertiary)', marginTop: 1,
             opacity: dimmed ? 0.55 : 1,
             overflow: wrap ? undefined : 'hidden', textOverflow: wrap ? undefined : 'ellipsis', whiteSpace: wrap ? 'normal' : 'nowrap', overflowWrap: 'anywhere',
           }}>{sub}</div>

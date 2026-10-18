@@ -61,6 +61,17 @@ describe('AccountPlans', () => {
   })
 })
 
+test('Billing agent toggles align with the padded account title', () => {
+  for (const width of [390, 1440]) {
+    g.window = { innerWidth: width }
+    try {
+      const html = renderToStaticMarkup(<AccountPlans {...base('claude', [acc('c1')])} />)
+      expect(html).toContain('<div style="padding:0 12px"><button type="button" role="switch"')
+      expect(html).toContain('padding:0 2px')
+    } finally { g.window = { innerWidth: 1280 } }
+  }
+})
+
 describe('FirstDetectionNotice', () => {
   test('asks which plan, names the account by nickname, offers confirm and dismiss', () => {
     const h = renderToStaticMarkup(<FirstDetectionNotice lang="en" account={acc('c2', { nickname: 'Work', label: 'me@private.io' })} onAnswer={() => {}} onDismiss={() => {}} />)

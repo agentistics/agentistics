@@ -104,7 +104,7 @@ export function AccountPlanRow({ a, p }: { a: BillingAccount; p: AccountPlansPro
           <button type="button" style={dialogButtonStyle('secondary', false)} onClick={() => p.onEdit(a)}>{t.edit}</button>
         </div>
       )}
-      <RowSwitch on={a.available} onToggle={() => p.onToggle(a)} disabled={busy} label={`${t.agents} · ${title}`} />
+      <div style={{ padding: '0 12px' }}><RowSwitch on={a.available} onToggle={() => p.onToggle(a)} disabled={busy} label={`${t.agents} · ${title}`} /></div>
       {p.failedIds.has(a.id) && <p role="alert" style={{ margin: '0 14px 8px', fontSize: 12, color: 'var(--accent-red)' }}>{t.saveFailed(title)}</p>}
     </div>
   )

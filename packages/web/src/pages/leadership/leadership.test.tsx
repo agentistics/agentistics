@@ -55,7 +55,7 @@ for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
   })
   test('check-in latest rounds use status pills and keep global defaults', () => {
     const reports: CheckinState[] = (['ok', 'resolved', 'needs_you'] as const).map((state, i) => ({
-      ...checkinDefaults(), session: `conversation-${i === 0 ? 'a' : i}`, lastRunAt: i * 1000, nextRunAt: null,
+      ...checkinDefaults(), session: `conversation-${['a', 'b', 'c'][i]}`, lastRunAt: i * 1000, nextRunAt: null,
       last: { state, summary: `Round summary ${state}`, at: i * 1000 },
     }))
     const html = atWidth(width, () => renderToStaticMarkup(<CheckinsContent lang="pt" reports={reports} rows={rows} />))
@@ -65,23 +65,34 @@ for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
     expect(html).toContain('data-testid="checkin-defaults-section"')
     expect(html.indexOf('Round summary needs_you')).toBeLessThan(html.indexOf('Round summary ok'))
   })
-  test('ended check-ins never expose UUID titles, wrap summaries, and limit the first page', () => {
-    const reports: CheckinState[] = Array.from({ length: 63 }, (_, index) => ({
-      ...checkinDefaults(), session: `e1bc704c-692f-4fc6-a9ff-4b45c8604d${index}`, lastRunAt: index, nextRunAt: null,
-      last: { state: 'ok', summary: `Summary text ${index}`, at: index },
+  test('check-ins omit orphaned sessions instead of repeating unknown titles', () => {
+    const orphaned: CheckinState[] = Array.from({ length: 77 }, (_, index) => ({
+      ...checkinDefaults(), session: `gone-${index}`, lastRunAt: index, nextRunAt: null,
+      last: { state: 'ok', summary: `Orphan summary ${index}`, at: index },
     }))
+    const live: CheckinState = { ...checkinDefaults(), session: 'conversation-a', lastRunAt: 100, nextRunAt: null,
+      last: { state: 'ok', summary: 'Current leader round', at: 100 } }
     for (const lang of ['pt', 'en'] as const) {
-      const html = atWidth(width, () => renderToStaticMarkup(<CheckinsContent lang={lang} reports={reports} rows={[]} />))
-      expect(html).not.toContain('e1bc704c')
-      expect(html.match(new RegExp(lang === 'pt' ? 'Sessão desconhecida' : 'Unknown session', 'g'))).toHaveLength(10)
-      expect(html).toContain(lang === 'pt' ? 'Mostrar mais (53)' : 'Show more (53)')
-      expect(html).toContain('Summary text 62')
-      expect(html).not.toContain('Summary text 0<')
-      expect(html).not.toContain('>Summary<')
-      expect(html).not.toContain('>Round<')
-      expect(html).toContain('text-align:left')
-      expect(html).toContain('white-space:normal')
+      const render = (reports: CheckinState[]) => atWidth(width, () => renderToStaticMarkup(<CheckinsContent lang={lang} reports={reports} rows={rows} />))
+      const html = render([...orphaned, live])
+      expect(html).toContain('Session a')
+      expect(html).toContain('Current leader round')
+      for (const raw of ['Unknown session', 'Sessão desconhecida', 'Orphan summary', 'gone-', 'Show more (', 'Mostrar mais (']) expect(html).not.toContain(raw)
+      expect(render(orphaned)).toContain(lang === 'pt' ? 'Nenhuma rodada de check-in registrada ainda.' : 'No check-in rounds recorded yet.')
     }
+  })
+  test('matching check-ins still paginate at ten and keep summaries left aligned', () => {
+    const manyRows = Array.from({ length: 12 }, (_, index) => row(`leader-${index}`))
+    const reports: CheckinState[] = manyRows.map((leader, index) => ({
+      ...checkinDefaults(), session: leader.id, lastRunAt: index, nextRunAt: null,
+      last: { state: 'ok', summary: `Leader round ${index}`, at: index },
+    }))
+    const html = atWidth(width, () => renderToStaticMarkup(<CheckinsContent lang="en" reports={reports} rows={manyRows} />))
+    expect(html).toContain('Show more (2)')
+    expect(html).toContain('Leader round 11')
+    expect(html).not.toContain('Leader round 0<')
+    expect(html).toContain('text-align:left')
+    expect(html).toContain('min-height:44px')
   })
   test('leader labels use product names and waiting states use the attention tone', () => {
     for (const lang of ['pt', 'en'] as const) {
@@ -111,7 +122,10 @@ for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
       expect(switchRow).toContain('white-space:normal')
       expect(switchRow).not.toContain('text-overflow:ellipsis')
       __setAwayForTest({ ...AWAY_OFF, on: true })
-      expect(render()).toContain('Ausente até você voltar')
+      expect(render().match(/até você voltar/g)).toHaveLength(1)
+      expect(render()).not.toContain('>Disponibilidade<')
+      expect(render()).not.toContain('text-transform:uppercase')
+      expect(render()).toContain('font-size:13px;color:var(--text-secondary)')
     } finally { __setAwayForTest(null) }
   })
 })

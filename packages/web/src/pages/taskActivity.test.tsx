@@ -56,6 +56,8 @@ describe('board activity in human language', () => {
       expect(html).not.toContain(lang === 'pt' ? '>Atividade<' : '>Activity<')
       expect(html).not.toContain(lang === 'pt' ? '>Quando<' : '>When<')
       expect(html).toContain('<time ')
+      expect(html).toContain(new Date(handback.at).toLocaleString(lang === 'pt' ? 'pt-BR' : 'en-US'))
+      expect(html).not.toContain('text-overflow:ellipsis')
       if (isMobile) expect(html).toContain('min-height:44px')
     }
   })

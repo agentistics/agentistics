@@ -66,7 +66,7 @@ describe('usage account cards', () => {
       expect(now).toContain(lang === 'pt' ? 'Acima do ritmo' : 'Over pace')
       expect(now).not.toContain('0.19 / 0.19')
       expect(now).toContain('0 / 1')
-      expect(plan).toContain(lang === 'pt' ? '1 sessões em paralelo' : '1 parallel sessions')
+      expect(plan).toContain(lang === 'pt' ? '1 sessão em paralelo' : '1 parallel session')
       expect(plan).not.toContain(lang === 'pt' ? 'Sem medida ainda' : 'Not measured yet')
       expect(now).toContain('grid-template-rows:subgrid')
       expect(now).toContain('data-usage-metrics')
@@ -102,10 +102,32 @@ describe('usage account cards', () => {
         const html = render(page, 390, lang)
         expect(html).toContain(lang === 'pt' ? 'acaba ~' : 'runs out ~')
         expect(html).toContain(lang === 'pt' ? 'atenção' : 'attention')
+        expect(html).toContain(`aria-label="${lang === 'pt' ? 'atenção' : 'attention'}"`)
+        expect(html).toContain('points="10,1 19,18 1,18"')
         expect(html).not.toContain(lang === 'pt' ? 'com folga' : 'room to spare')
       }
       const calm = render(<PlanUsageCard limits={limit(row({ weekPct: 10 }))} now={NOW} lang={lang} />, 390, lang)
       expect(calm).toContain(lang === 'pt' ? 'com folga' : 'room to spare')
+    }
+  })
+  test('overview names the plan once per account and never promises no pause for an over-pace plan', () => {
+    seed([row({ plan: 'Claude Max 5x', status: 'tight', pauseUntil: undefined })])
+    for (const lang of ['pt', 'en'] as const) {
+      const html = render(<UsageNowPage />, 390, lang)
+      expect(html.match(/Claude Max 5x/g)).toHaveLength(1)
+      expect(html).toContain(lang === 'pt' ? 'N/A — sem horário recomendado' : 'N/A — no recommended time')
+      expect(html).not.toContain(lang === 'pt' ? '>Sem pausa<' : '>No pause<')
+    }
+  })
+  test('planning explains sustainable capacity and renders pause and unmeasured states', () => {
+    for (const lang of ['pt', 'en'] as const) {
+      seed([row({ status: 'hold', pauseUntil: NOW + 3_600_000 }), row({ harness: 'codex', freeSlotsMeasured: false })])
+      const html = render(<UsagePlanPage />, 390, lang)
+      expect(html).toContain(lang === 'pt' ? 'Em pausa até' : 'Paused until')
+      expect(html).toContain(lang === 'pt' ? 'Sem medida ainda' : 'Not measured yet')
+      expect(html).toContain(lang === 'pt' ? 'Período planejado' : 'Planning window')
+      expect(html).toContain(lang === 'pt' ? '4 horas' : '4 hours')
+      expect(html).toContain(lang === 'pt' ? 'aumentar as horas não aumenta a capacidade' : 'increasing hours does not increase plan capacity')
     }
   })
   test('planning distinguishes identical account nicknames by harness and plan', () => {
@@ -180,9 +202,12 @@ describe('usage account cards', () => {
   })
   test('history explains its in-memory lifetime and empty readings', () => {
     __setPlanLimitsForTest([], NOW)
-    const html = render(<UsageHistoryPage />)
-    expect(html).toContain('Histórico desde que o servidor iniciou.')
-    expect(html).toContain('Ainda não há histórico de uso registrado desde que o servidor iniciou. As leituras atuais aparecem em Agora.')
+    for (const lang of ['pt', 'en'] as const) {
+      const html = render(<UsageHistoryPage />, 390, lang)
+      const scope = lang === 'pt' ? /desde que o servidor iniciou/g : /since the server started/g
+      expect(html.match(scope)).toHaveLength(1)
+      expect(html).toContain(lang === 'pt' ? 'As leituras atuais aparecem em Agora.' : 'Current readings appear in Now.')
+    }
   })
 })
 

@@ -25,7 +25,7 @@ export function CheckinsContent({ lang, reports, rows, error = false, capable = 
   const [visible, setVisible] = useState(10)
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
-  const rounds = (reports ?? []).filter(report => report.last).slice().sort((a, b) => (b.last?.at ?? b.lastRunAt ?? 0) - (a.last?.at ?? a.lastRunAt ?? 0))
+  const rounds = (reports ?? []).filter(report => report.last && rows.some(row => row.id === report.session || row.conversationId === report.session)).slice().sort((a, b) => (b.last?.at ?? b.lastRunAt ?? 0) - (a.last?.at ?? a.lastRunAt ?? 0))
   return <div style={{ minWidth: 0 }}>
     <PageHeader lang={lang} areaId="leadership" pageId="checkins" />
     {!capable ? <p role="status">{pt ? 'Check-ins indisponíveis nesta instância.' : 'Check-ins are unavailable on this instance.'}</p> : <>
@@ -37,7 +37,7 @@ export function CheckinsContent({ lang, reports, rows, error = false, capable = 
           const round = report.last!
           const row = rows.find(row => row.id === report.session || row.conversationId === report.session)
           const at = round.at ?? report.lastRunAt
-          return <RecordCard key={report.session} fieldLayout="stacked" title={row?.title?.trim() || (pt ? 'Sessão desconhecida' : 'Unknown session')}
+          return <RecordCard key={report.session} fieldLayout="stacked" title={row?.title?.trim() || (pt ? 'Check-in da sessão' : 'Session check-in')}
             subtitle={at != null ? <time dateTime={new Date(at).toISOString()}>{new Date(at).toLocaleString(pt ? 'pt-BR' : 'en-US')}</time> : undefined}
             badge={<Pill tone={round.state === 'needs_you' ? 'warn' : 'ok'}>{round.state === 'needs_you' ? (pt ? 'Precisa de você' : 'Needs you') : round.state === 'resolved' ? (pt ? 'Resolvido' : 'Resolved') : 'OK'}</Pill>}
             fields={[

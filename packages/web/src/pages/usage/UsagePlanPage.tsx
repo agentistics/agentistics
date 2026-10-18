@@ -28,6 +28,7 @@ export default function UsagePlanPage() {
     </div>
     {!valid && <p id={errorId} role="status">{pt ? 'Informe um número de horas maior que zero.' : 'Enter a number of hours greater than zero.'}</p>}
     {valid && !rows.length && <p>{pt ? 'Nenhum plano com leitura de uso ainda.' : 'No plans with usage readings yet.'}</p>}
+    {valid && rows.length > 0 && <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{pt ? 'O paralelo recomendado segue o ritmo sustentável até a renovação; aumentar as horas não aumenta a capacidade do plano.' : 'Recommended parallel sessions follow the sustainable pace until renewal; increasing hours does not increase plan capacity.'}</p>}
     <div className="ag-grid cols-2" style={isMobile ? { gridTemplateColumns: 'minmax(0, 1fr)' } : undefined}>
       {rows.map((row, i) => <RecordCard fieldLayout="stacked" key={`${row.harness}:${row.account}`} title={`${HARNESS_LABELS[budgetRows[i]!.harness]} · ${row.label}`} subtitle={budgetRows[i]!.plan} fields={[{
         label: pt ? 'Disponibilidade' : 'Availability',
@@ -35,7 +36,10 @@ export default function UsagePlanPage() {
           ? (pt ? `Em pausa até ${fmtWhen(row.pauseUntil, now, lang)}` : `Paused until ${fmtWhen(row.pauseUntil, now, lang)}`)
           : row.parallel === null ? unmeasured(lang)
           : row.reason === 'hold' ? (pt ? 'Em pausa — aguardando renovação do plano' : 'Paused — waiting for plan renewal')
-          : (pt ? `${row.parallel} sessões em paralelo` : `${row.parallel} parallel sessions`),
+          : (pt ? `${row.parallel} ${row.parallel === 1 ? 'sessão' : 'sessões'} em paralelo` : `${row.parallel} parallel ${row.parallel === 1 ? 'session' : 'sessions'}`),
+      }, {
+        label: pt ? 'Período planejado' : 'Planning window',
+        value: pt ? `${duration} ${duration === 1 ? 'hora' : 'horas'}` : `${duration} ${duration === 1 ? 'hour' : 'hours'}`,
       }]} />)}
     </div>
   </div>

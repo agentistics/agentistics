@@ -42,7 +42,7 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
     <div className="ag-grid cols-2" style={{ marginBottom: 20, ...(isMobile ? { gridTemplateColumns: 'minmax(0, 1fr)' } : {}) }}>
       {cards.map(row => {
         if (!('paceStatus' in row)) return <div key={accountKey(row)} data-usage-account={accountKey(row)} style={cardRows}><Section title={row.plan} style={cardRows} contentStyle={contentRows}>
-          <PlanUsageCard embedded limits={limits?.find(l => l.harness === row.harness && l.account === (row.account ?? 'default')) ?? null} pending={row} accountLabel={row.accountLabel} now={now} lang={lang} />
+          <PlanUsageCard embedded showPlan={false} limits={limits?.find(l => l.harness === row.harness && l.account === (row.account ?? 'default')) ?? null} pending={row} accountLabel={row.accountLabel} now={now} lang={lang} />
         </Section></div>
         const limitsForAccount = limits?.find(l => l.harness === row.harness && l.account === (row.account ?? 'default')) ?? null
         const pace = usagePaceState(row)
@@ -51,11 +51,11 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
         const measured = hasMeasuredPace(row)
         return <div key={accountKey(row)} data-usage-account={accountKey(row)} style={{ ...cardRows, overflowWrap: 'anywhere' }}>
           <Section title={row.plan} style={cardRows} contentStyle={contentRows} action={<Pill tone={hold ? 'error' : over ? 'warn' : 'ok'}>{hold ? (pt ? 'Em pausa' : 'On hold') : over ? (pt ? 'Acima do ritmo' : 'Over pace') : (pt ? 'No ritmo' : 'On pace')}</Pill>}>
-            <PlanUsageCard embedded limits={limitsForAccount} pending={{ harness: row.harness, plan: row.plan }} accountLabel={accountLabel(row)} now={now} lang={lang} />
+            <PlanUsageCard embedded showPlan={false} limits={limitsForAccount} pending={{ harness: row.harness, plan: row.plan }} accountLabel={accountLabel(row)} now={now} lang={lang} />
             <div data-usage-metrics style={{ alignSelf: 'start', minWidth: 0 }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 12 }}>
                 {measured && <StatTile label={pt ? 'Em paralelo / recomendado' : 'Parallel / recommended'} value={`${row.liveSessions.length} / ${row.suggestedParallel}`} />}
-                <StatTile label={pt ? 'Pausar até' : 'Pause until'} value={row.pauseUntil !== undefined && row.pauseUntil > now ? fmtWhen(row.pauseUntil, now, lang) : (pt ? 'Sem pausa' : 'No pause')} />
+                <StatTile label={pt ? 'Pausar até' : 'Pause until'} value={row.pauseUntil !== undefined && row.pauseUntil > now ? fmtWhen(row.pauseUntil, now, lang) : (hold || over ? (pt ? 'N/A — sem horário recomendado' : 'N/A — no recommended time') : (pt ? 'Sem pausa' : 'No pause'))} />
                 {limitsForAccount?.windows.some(w => w.kind === 'week') && row.weekResetsAt > now && <StatTile label={pt ? 'Semana: esperado' : 'Week: expected'} value={`${Math.max(0, Math.min(100, (1 - (row.weekResetsAt - now) / (7 * 24 * 3_600_000)) * 100)).toFixed(1)}%`} />}
                 {row.weekResetsAt > now && <StatTile label={pt ? 'Renova em' : 'Renews in'} value={fmtSpan(row.weekResetsAt - now, lang)} />}
               </div>

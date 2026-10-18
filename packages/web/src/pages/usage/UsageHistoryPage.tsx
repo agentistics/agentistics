@@ -10,7 +10,7 @@ export default function UsageHistoryPage() {
   const isMobile = useIsMobile()
   const { budgets, limits, readings } = usePlanLimits()
   return <div style={{ minWidth: 0 }}>
-    <PageHeader lang={lang} areaId="usage" pageId="history" isMobile={isMobile} status={lang === 'pt' ? 'Histórico desde que o servidor iniciou.' : 'History since the server started.'} />
+    <PageHeader lang={lang} areaId="usage" pageId="history" isMobile={isMobile} status={readings.some(reading => reading.points.some(point => point.weekPct !== null || point.fiveHourPct !== null)) ? (lang === 'pt' ? 'Histórico desde que o servidor iniciou.' : 'History since the server started.') : undefined} />
     <UsageCharts budgets={budgets} limits={limits} readings={readings} lang={lang} bothWindows />
   </div>
 }
