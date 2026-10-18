@@ -72,12 +72,11 @@ export function SessionFacts({ session, selected = false, metaColor, withEffort 
         {sessionDisplayTitle(session.title)}{titleBadge && <span style={{ display: 'inline-block', marginLeft: 6, verticalAlign: 'middle' }}>{titleBadge}</span>}
       </span>
       <span style={{
-        // Metadata wraps with the title so a narrow pinned card keeps every fact readable.
-        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5, minWidth: 0,
+        // Separate facts with space: a wrapping line must never strand a separator.
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 10, rowGap: 3, minWidth: 0,
         fontSize: 10.5, color: wants ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
       }}>
-        <span style={{ flexShrink: 0, color: metaColor }}>{session.stateLabel}</span>
-        <span style={{ opacity: 0.4, flexShrink: 0 }}>·</span>
+        <span style={{ minWidth: 0, overflowWrap: 'anywhere', color: metaColor }}>{session.stateLabel}</span>
         <span style={{
           color: (HARNESS_COLORS as Record<string, string>)[session.harness] ?? 'var(--text-tertiary)',
           fontWeight: 650, minWidth: 0, flexShrink: 1,
@@ -88,20 +87,12 @@ export function SessionFacts({ session, selected = false, metaColor, withEffort 
         {/* The model, when the row knows one. A row that does not is not "some default model" —
             it is unknown, and inventing a name there is the confident-zero defect in words. */}
         {session.model && (
-          <>
-            <span style={{ opacity: 0.4, flexShrink: 0 }}>·</span>
-            {/* Shrinks first (`flexShrink: 3`): the model is the fact a person can least do without
-                the least — the state and the assistant's name are what they scan for. */}
-            <span style={{ minWidth: 0, flexShrink: 3, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
-              {shortModel(session.model)}
-            </span>
-          </>
+          <span style={{ minWidth: 0, flexShrink: 3, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+            {shortModel(session.model)}
+          </span>
         )}
         {withEffort && session.effort && (
-          <>
-            <span style={{ opacity: 0.4, flexShrink: 0 }}>·</span>
-            <span style={{ flexShrink: 0 }}>{session.effort}</span>
-          </>
+          <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{session.effort}</span>
         )}
       </span>
     </span>

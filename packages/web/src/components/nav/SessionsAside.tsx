@@ -1099,7 +1099,7 @@ export function SessionsAside({
         >
           <div style={{
             display: 'flex', alignItems: 'center', gap: 2, borderRadius: 7,
-            padding: insideEnded ? '4px' : '4px 0', minHeight: tap,
+            padding: insideEnded ? '4px 8px' : '4px 0', minHeight: tap,
           }}>
             {/* The grip — the ONLY drag source that reorders, and only TOP-LEVEL folders have one. A
                 nested folder is pinned first under its parent and has no order of its own to change;
@@ -1276,9 +1276,9 @@ export function SessionsAside({
                           {endedOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                           {endedChildren.length === 0
                             ? (pt ? `Encerradas (${ended.length})` : `Ended (${ended.length})`)
-                            : <><span>{pt ? 'Encerradas' : 'Ended'}</span><span style={{ marginLeft: 'auto' }}>
-                                {endedChildren.length} {pt ? (endedChildren.length === 1 ? 'pasta' : 'pastas') : (endedChildren.length === 1 ? 'folder' : 'folders')}
-                                {ended.length > 0 && ` · ${ended.length} ${pt ? (ended.length === 1 ? 'sessão' : 'sessões') : (ended.length === 1 ? 'session' : 'sessions')}`}
+                            : <><span>{pt ? 'Encerradas' : 'Ended'}</span><span style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', columnGap: 10 }}>
+                                <span>{endedChildren.length} {pt ? (endedChildren.length === 1 ? 'pasta' : 'pastas') : (endedChildren.length === 1 ? 'folder' : 'folders')}</span>
+                                {ended.length > 0 && <span>{ended.length} {pt ? (ended.length === 1 ? 'sessão' : 'sessões') : (ended.length === 1 ? 'session' : 'sessions')}</span>}
                               </span></>}
                         </button>
                       )}
@@ -2830,7 +2830,7 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       </span>
       </button>
       {onReopen && reopenVerb && (
-        <IconButton label={lang === 'en' ? 'Reopen' : 'Reabrir'} size={tap ?? 22}
+        <IconButton label={!reopenVerb.enabled && reopenVerb.reason ? reopenVerb.reason : (lang === 'en' ? 'Reopen' : 'Reabrir')} size={tap ?? 22}
           disabled={!reopenVerb.enabled || reopening} color="var(--text-primary)"
           onClick={e => { e.stopPropagation(); if (reopenVerb.enabled && !reopening) onReopen() }}>
           <RotateCcw size={14} />

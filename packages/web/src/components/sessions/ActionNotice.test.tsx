@@ -25,3 +25,16 @@ test('short feedback stays readable and empty conversations have a plain explana
   const h = renderToStaticMarkup(<ActionNotice message="Filed" lang="en" onDismiss={() => {}} />)
   expect(h).not.toContain('<details')
 })
+
+
+test('expanded notice diagnostics have a bounded keyboard-scrollable region', () => {
+  for (const lang of ['pt', 'en']) {
+    const html = renderToStaticMarkup(<ActionNotice message={'diagnostics '.repeat(100)} lang={lang} onDismiss={() => {}} />)
+    expect(html).toContain('role="region"')
+    expect(html).toContain('tabindex="0"')
+    expect(html).toContain('overflow-y:scroll')
+    expect(html).toContain('max-height:min(180px, 20dvh)')
+    expect(html).toContain('border:1px solid var(--border-subtle)')
+    expect(html).toContain(lang === 'pt' ? 'Detalhes do aviso' : 'Notice details')
+  }
+})

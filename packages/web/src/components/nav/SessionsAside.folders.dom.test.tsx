@@ -335,7 +335,7 @@ for (const sidebar of [288, 220, 390]) test(`ended folders reserve icon space an
   for (const unit of Array.from(units)) expect(unit.firstElementChild?.tagName).toBe('BUTTON')
   expect(host.querySelector('[aria-label="Resumo das sessões"]')!.textContent).not.toContain('·')
   const grip = folder('archived')!.querySelector<HTMLElement>('span[draggable]')!
-  expect(grip.parentElement!.style.padding).toBe('4px')
+  expect(grip.parentElement!.style.paddingLeft).toBe('8px')
   expect(grip.querySelector('svg')).not.toBeNull()
   const sleeping = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Dormindo1')!
   await click(sleeping)

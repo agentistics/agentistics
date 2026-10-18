@@ -41,13 +41,16 @@ an explicit Líder/Leader badge in cards and the tabs menu. Titles wrap without 
 can grow to the viewport gutter. On phones each tab fits the scrolling track, with mandatory scroll
 snapping and the active tab scrolled into view. Arrow keys, Home and End move the tab's focus;
 Enter or Space opens the focused tab. Row pin/open/reopen controls are separate buttons. Reopen
-uses an icon with an explicit label and foreground contrast. At the minimum aside width its two
+uses an icon with an explicit label and foreground contrast. Disabled reopen icons expose the same
+localized refusal reason as the row menu in their tooltip and accessible label. At the minimum aside width its two
 action icons stack in the trailing slot so the last word and role badge still fit together.
 
 The notification panel keeps its title, Clear all action and Mute active workers switch together
 in one sticky header while notifications scroll below. Aside action feedback reserves space and uses
 session names in place of managed-id fragments. Long diagnostics live in a Details disclosure;
-the compact notice can be dismissed. Tab action feedback occupies its own row below the session
+the compact notice can be dismissed. Expanded diagnostics have a visibly bordered, keyboard-scrollable
+region capped to the viewport height. Card and rail metadata wrap as spaced facts without dot
+separators at line boundaries. Tab action feedback occupies its own row below the session
 header, including on mobile and in split panes.
 
 Folders with no `working`, `waiting` or `waiting-approval` session in their visible subtree move

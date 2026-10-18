@@ -25,7 +25,10 @@ export function ActionNotice({ message, lang, onDismiss }: { message: string; la
         className="ag-tap-icon" style={{ ...dialogButtonStyle('secondary', false), padding: 3, minHeight: 22, flexShrink: 0 }}><X size={13} /></button>
     </div>
     {summary !== message && <details style={{ minWidth: 0 }}><summary style={{ cursor: 'pointer' }}>{lang === 'pt' ? 'Detalhes' : 'Details'}</summary>
-      <div style={{ maxHeight: 180, overflowY: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{message}</div>
+      <div role="region" aria-label={lang === 'pt' ? 'Detalhes do aviso' : 'Notice details'} tabIndex={0}
+        style={{ maxHeight: 'min(180px, 20dvh)', overflowY: 'scroll', scrollbarGutter: 'stable',
+          border: '1px solid var(--border-subtle)', borderRadius: 4, padding: 6, marginTop: 4,
+          whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{message}</div>
     </details>}
   </div>
 }

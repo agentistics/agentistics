@@ -80,3 +80,17 @@ test('reopen is an icon control with a full label, foreground contrast and nativ
     expect(button.includes('disabled=""')).toBe(!enabled)
   }
 })
+
+
+test('sleeping reopen icons explain the server refusal in both languages', () => {
+  for (const lang of ['pt', 'en'] as const) {
+    const reason = lang === 'pt'
+      ? 'Não dá para reabrir esta sessão daqui: nenhuma conversa retomável foi encontrada para ela.'
+      : 'This session cannot be reopened from here: no resumable conversation was found for it.'
+    const html = renderToStaticMarkup(<SessionRow session={session} compact pinned selected={false} cardColor="wash" lang={lang}
+      onOpen={() => {}} onReopen={() => {}} reopenVerb={{ ...resume, enabled: false, reason }} />)
+    expect(html).toContain(`aria-label="${reason}"`)
+    expect(html).toContain(`title="${reason}"`)
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*aria-label=/)
+  }
+})
