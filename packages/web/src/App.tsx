@@ -1,4 +1,5 @@
 import { ActionNotice } from './components/sessions/ActionNotice'
+import { PageRouteFrame } from './components/PageRouteFrame'
 import { useEscapeOwner } from './lib/overlayStack'
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -4812,27 +4813,16 @@ export default function AppLayout() {
               gap: isMobile ? 14 : 20,
             }
       }>
-        {inSessionsWorkspace || isMobile ? <>{!inSessionsWorkspace && backfillNote}<Outlet context={appCtx} /></> : (
-          <div ref={pageScrollRef} data-page-scroller style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
-            <div style={{
-              // Table pages grow with the screen; the rest keep 1400 — see `pageWidth.ts`.
-              maxWidth: pageMaxWidth(location.pathname), margin: '0 auto', width: '100%',
-              boxSizing: 'border-box', padding: '24px 32px',
-              // At least the panel's own height, so the footer below always sits a scroll away
-              // rather than floating up into a half-empty panel on a short page.
-              minHeight: '100%',
-              display: 'flex', flexDirection: 'column', gap: 20,
-            }}>
-              {/* Only where its tab exists (`dashboardTopBar`), so it can always be closed again. */}
-              {fleetOpen && dashboardTopBar && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>{fleetStrip}</div>
-              )}
-              {backfillNote}
-              <Outlet context={appCtx} />
-            </div>
-            {pageFooter}
-          </div>
-        )}
+        <PageRouteFrame compact={inSessionsWorkspace || isMobile} scrollRef={pageScrollRef}
+          maxWidth={pageMaxWidth(location.pathname)} footer={pageFooter}
+          before={<>
+            {!inSessionsWorkspace && !isMobile && fleetOpen && dashboardTopBar && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>{fleetStrip}</div>
+            )}
+            {!inSessionsWorkspace && backfillNote}
+          </>}>
+          <Outlet context={appCtx} />
+        </PageRouteFrame>
       </main>
 
       {/* Install Modal — shown once after first data load */}
