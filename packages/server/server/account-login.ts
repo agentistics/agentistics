@@ -8,11 +8,11 @@ import { isSessionGoneError, SHELL_SOCKET } from './sessions/tmux-cli'
 
 export type LoginKind = 'paste' | 'device'
 export type LoginError = 'login_unavailable' | 'login_timeout' | 'login_failed' | 'plaintext_refused' | 'invalid_code'
-export interface LoginInfo { kind: LoginKind; url: string; code?: string; expiresAt: number }
+export interface LoginInfo { kind: LoginKind; url: string; code?: string; expiresAt: number; error?: 'invalid_code' }
 interface LoginAdapter { argv: string[]; kind: LoginKind; pty: boolean; hosts: readonly string[]; path: RegExp }
 // @harness-adapters-only: login protocols are facts of each vendor CLI, not a preferred assistant.
 export const LOGIN_ADAPTERS: Record<HarnessId, LoginAdapter | null> = {
-  claude: { argv: ['claude', 'auth', 'login', '--claudeai'], kind: 'paste', pty: true, hosts: ['claude.ai', 'platform.claude.com', 'console.anthropic.com'], path: /^\/oauth\/authorize\/?$/ },
+  claude: { argv: ['claude', 'auth', 'login', '--claudeai'], kind: 'paste', pty: true, hosts: ['claude.com', 'claude.ai', 'platform.claude.com', 'console.anthropic.com'], path: /^\/(?:cai\/)?oauth\/authorize\/?$/ },
   gemini: { argv: ['gemini'], kind: 'paste', pty: true, hosts: ['accounts.google.com'], path: /^\/o\/oauth2\/(?:v2\/)?auth(?:\/|$)/ },
   codex: { argv: ['codex', 'login', '--device-auth'], kind: 'device', pty: false, hosts: ['auth.openai.com'], path: /^\/codex\/device\/?$/ },
   copilot: { argv: ['copilot', 'login', '--device-code'], kind: 'device', pty: false, hosts: ['github.com'], path: /^\/login\/device\/?$/ },
@@ -31,9 +31,9 @@ export class LoginFailure extends Error {
   constructor(readonly reason: LoginError) { super(LOGIN_MESSAGES[reason]) }
 }
 
-export const stripLoginAnsi = (s: string) => s.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\r/g, '')
+export const stripLoginAnsi = (s: string) => s.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\r/g, '')
 export function loginRefusal(output: string): LoginError | undefined {
-  return /keychain unavailable|store token in plaintext|token (?:was |could )?not (?:be )?saved|token was not saved/i.test(stripLoginAnsi(output)) ? 'plaintext_refused' : undefined
+  return /keychain (?:is |was )?(?:unavailable|inaccessible|not available)|(?:failed|unable) to (?:access|open|store.+(?:in|to)) (?:the )?keychain|(?:store|save) (?:the |your )?token in (?:the )?plain\s*text(?: config file)?|token (?:was |could )?not (?:be )?saved/i.test(stripLoginAnsi(output)) ? 'plaintext_refused' : undefined
 }
 /** Accept only authorization URLs on the adapter's hosts, never URLs from arbitrary diagnostics. */
 export function parseLoginOutput(harness: HarnessId, output: string, now = Date.now()): LoginInfo | null {
@@ -41,7 +41,7 @@ export function parseLoginOutput(harness: HarnessId, output: string, now = Date.
   if (!adapter) return null
   const text = stripLoginAnsi(output)
   const urls = text.match(/https:\/\/[^\s<>"'\x00-\x1f]+(?=[\s<>"'\x00-\x1f])/g) ?? []
-  const url = urls.map(s => s.replace(/[),.;]+$/, '')).find(s => {
+  const url = urls.reverse().map(s => s.replace(/[),.;]+$/, '')).find(s => {
     try { const u = new URL(s); return adapter.hosts.includes(u.hostname) && adapter.path.test(u.pathname) && !u.username && !u.password && u.port === '' && !(harness === 'claude' && /^http:\/\/(?:localhost|127\.0\.0\.1)(?::|\/|$)/.test(u.searchParams.get('redirect_uri') ?? '')) } catch { return false }
   })
   if (!url) return null
@@ -51,8 +51,8 @@ export function parseLoginOutput(harness: HarnessId, output: string, now = Date.
     const redirect = u.searchParams.get('redirect_uri')
     if (redirect?.startsWith('http://localhost') || redirect?.startsWith('http://127.0.0.1')) return null
   }
-  const code = text.match(/(?:enter\s+(?:the\s+)?(?:one-time\s+)?code|one-time\s+code)\s*[:\s]*([A-Z0-9]{4}(?:-[A-Z0-9]{4})+)\b/i)?.[1]
-    ?? text.match(/\b([A-Z0-9]{4}-[A-Z0-9]{4})\b/)?.[1]
+  const code = text.match(/(?:enter\s+(?:the\s+)?(?:one-time\s+)?code|one-time\s+code)\s*[:\s]*([A-Z0-9]{4}(?:-[A-Z0-9]{4,5})+)\b/i)?.[1]
+    ?? text.match(/\b([A-Z0-9]{4}-[A-Z0-9]{4,5})\b/)?.[1]
     ?? new URL(url).searchParams.get('user_code') ?? undefined
   if (adapter.kind === 'device' && !code) return null
   const seconds = text.match(/(?:code\s+)?expires in\s+(\d+)\s*s\b/i)?.[1]
@@ -62,6 +62,8 @@ export function parseLoginOutput(harness: HarnessId, output: string, now = Date.
 }
 
 export interface LoginProcess {
+  /** PTY reads replace the visible pane; pipe reads append chunks. */
+  snapshot?: boolean
   read: () => Promise<string | null>
   write: (code: string) => Promise<void>
   stop: () => Promise<void>
@@ -83,7 +85,7 @@ export interface LoginOptions {
 /** The controller holds only public link/device metadata. Pasted codes are written once and discarded. */
 export async function startAccountLogin(req: LoginRequest, onFailure: (reason: LoginError) => Promise<void>, opts: LoginOptions = {}): Promise<LoginHandle> {
   const proc = await (opts.launch ?? launchLoginProcess)(req).catch(() => { throw new LoginFailure('login_unavailable') })
-  let info: LoginInfo | undefined, stopped = false, submitted = false, buffer = ''
+  let info: LoginInfo | undefined, stopped = false, submitted = false, hasSubmitted = false, buffer = ''
   let resolveReady!: (info: LoginInfo) => void, rejectReady!: (e: LoginFailure) => void
   const ready = new Promise<LoginInfo>((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
   // Attach immediately: a process can fail before the HTTP caller starts awaiting `ready`.
@@ -91,6 +93,7 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
   const now = opts.now ?? Date.now
   const deadline = now() + (opts.overallTimeoutMs ?? 900_000)
   let linkAt: number | undefined
+  let invalidCount = 0, invalidAtSubmit = 0, promptCount = 0, promptsAtSubmit = 0
   const stop = async (failure?: LoginError) => {
     if (stopped) return
     stopped = true; buffer = ''; clearTimeout(readyTimer); clearTimeout(expiryTimer)
@@ -109,15 +112,24 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
       while (!stopped) {
         const chunk = await proc.read()
         if (chunk === null) break
-        if (submitted) continue // Do not parse or retain a CLI's possible echo of the pasted secret.
-        buffer = (buffer + chunk).slice(-65536)
-        if (req.harness === 'copilot' && loginRefusal(buffer)) { await fail('plaintext_refused'); return }
-        const parsed = parseLoginOutput(req.harness, buffer, linkAt ?? now())
+        // PTY reads are snapshots. After input, inspect only this snapshot and retain public
+        // metadata, never a pasted code's echo or raw diagnostics between reads.
+        if (!hasSubmitted) buffer = (proc.snapshot ? chunk : buffer + chunk).slice(-65536)
+        const output = hasSubmitted ? chunk : buffer
+        const text = stripLoginAnsi(output)
+        invalidCount = (text.match(/invalid_grant|invalid (?:authorization )?code|(?:authorization |authentication )?code (?:is |was )?(?:invalid|expired)|authentication failed/gi) ?? []).length
+        promptCount = (text.match(/Paste code here|Enter the authorization code/gi) ?? []).length
+        const invalid = submitted && (invalidCount > invalidAtSubmit || promptCount > promptsAtSubmit)
+        if (invalid && info) { submitted = false; info = { ...info, error: 'invalid_code' } }
+        if (req.harness === 'copilot' && loginRefusal(output)) { await fail('plaintext_refused'); return }
+        const parsed = parseLoginOutput(req.harness, output, linkAt ?? now())
         if (parsed) {
           linkAt ??= now()
           parsed.expiresAt = Math.min(parsed.expiresAt, deadline)
-          if (!info || parsed.expiresAt < info.expiresAt) {
-            info = parsed; clearTimeout(readyTimer); clearTimeout(expiryTimer)
+          if (!info || parsed.url !== info.url || parsed.expiresAt < info.expiresAt) {
+            const retry = hasSubmitted && info?.kind === 'paste'
+            if (retry) submitted = false
+            info = { ...parsed, ...(retry || info?.error ? { error: 'invalid_code' as const } : {}) }; clearTimeout(readyTimer); clearTimeout(expiryTimer)
             expiryTimer = setTimeout(() => { void fail('login_timeout').catch(() => {}) }, Math.max(0, parsed.expiresAt - now()))
             expiryTimer.unref?.(); resolveReady(parsed)
           }
@@ -133,7 +145,7 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
     async submit(code) {
       if (stopped || !info || info.kind !== 'paste' || submitted) throw new LoginFailure('login_failed')
       if (typeof code !== 'string' || !code.trim() || code.length > 8192 || /[\x00-\x20\x7f]/.test(code.trim())) throw new LoginFailure('invalid_code')
-      submitted = true; buffer = ''
+      submitted = true; hasSubmitted = true; invalidAtSubmit = invalidCount; promptsAtSubmit = promptCount; buffer = ''; info = { ...info, error: undefined }
       try { await proc.write(code.trim()) } catch { await fail('login_failed'); throw new LoginFailure('login_failed') }
     },
   }
@@ -180,7 +192,7 @@ export async function launchLoginProcess(req: LoginRequest): Promise<LoginProces
   const clean = () => rm(bin, { recursive: true, force: true })
   if (adapter.pty) {
     const name = `account-login-${req.pendingId}`
-    let ended = false, inputSent = false, last = '', wake: (() => void) | undefined
+    let ended = false, last = '', wake: (() => void) | undefined
     let resolveExit!: (code: number) => void
     const exited = new Promise<number>(r => { resolveExit = r })
     try {
@@ -189,24 +201,20 @@ export async function launchLoginProcess(req: LoginRequest): Promise<LoginProces
       await tmux(['new-session', '-d', '-s', name, '-x', '240', '-y', '80', '-c', req.root, command])
     } catch { await clean(); throw new LoginFailure('login_unavailable') }
     return {
-      exited,
+      exited, snapshot: true,
       async read() {
         while (!ended) {
-          if (inputSent) {
-            await new Promise<void>(r => { const t = setTimeout(r, 200); wake = () => { clearTimeout(t); r() } })
-            continue
-          }
           try {
             // -J rejoins soft-wrapped authorization URLs. Nothing is written to disk.
             const out = await tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-100'])
-            if (out !== last) { last = out; return out }
+            const digest = new Bun.CryptoHasher('sha256').update(out).digest('hex')
+            if (digest !== last) { last = digest; return out }
           } catch { ended = true; resolveExit(0); return null }
           await new Promise<void>(r => { const t = setTimeout(r, 200); wake = () => { clearTimeout(t); r() } })
         }
         return null
       },
       async write(code) {
-        inputSent = true; last = ''
         // Feed the code on stdin, never argv, a named file, a log or a shell command.
         const buffer = `login-${req.pendingId}`
         await tmux(['load-buffer', '-b', buffer, '-'], code)

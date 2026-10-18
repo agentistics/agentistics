@@ -23,7 +23,7 @@ export interface RootRowView {
   error?: string
 }
 
-export interface LoginInfoView { kind: 'paste' | 'device'; url: string; code?: string; expiresAt: number }
+export interface LoginInfoView { kind: 'paste' | 'device'; url: string; code?: string; expiresAt: number; error?: 'invalid_code' }
 export type AddView =
   | { kind: 'off' }
   | { kind: 'on'; addable: HarnessId[]; unsupported: HarnessId[] }
@@ -51,7 +51,7 @@ const REFUSALS: Record<string, { pt: string; en: string }> = {
   login_timeout: { pt: 'O login expirou. Comece de novo para obter outro link e código.', en: 'Sign-in expired. Start again to get a new link and code.' },
   login_failed: { pt: 'O login não foi concluído. Comece de novo.', en: 'Sign-in did not finish. Start again.' },
   plaintext_refused: { pt: 'O cofre de credenciais do sistema está indisponível. O Copilot não conseguiu salvar o login com segurança; salvar o token em texto simples foi recusado.', en: 'The system keychain is unavailable. Copilot could not save the login securely; storing the token in plain text was refused.' },
-  invalid_code: { pt: 'Cole o código de autorização mostrado pela página de login.', en: 'Enter the authorization code shown by the sign-in page.' },
+  invalid_code: { pt: 'O código não foi aceito. Abra o link atual e cole um novo código de autorização.', en: 'The code was not accepted. Open the current link and paste a new authorization code.' },
   root_in_use: { pt: 'Ainda há uma sessão aberta nesta conta. Encerre-a primeiro.', en: 'A session is still running in this account. End it first.' },
   unsupported: { pt: 'Este assistente mantém um só login por computador, então não dá para separar uma segunda conta.', en: 'This assistant keeps a single login per computer, so a second account cannot be kept apart.' },
   unsafe_path: { pt: 'A pasta de contas contém um atalho, então foi deixada como está.', en: 'The accounts folder contains a link, so it was left alone.' },
@@ -81,6 +81,7 @@ export const ADD_COPY = (pt: boolean) => ({
   deviceStep: pt ? 'Na página, digite este código' : 'Enter this code on the page',
   kimiStep: pt ? 'O link já leva o código; confira se a página mostra este' : 'The link includes the code; check that the page shows this one',
   submit: pt ? 'Confirmar' : 'Confirm',
+  awaitingCode: pt ? 'Cole o código mostrado pela página para continuar.' : 'Paste the code shown by the page to continue.',
   submitted: pt ? 'Esperando você entrar…' : 'Waiting for you to sign in…',
   expires: (minutes: number) => pt ? `O código vale por mais ${minutes} min.` : `The code expires in ${minutes} min.`,
   done: pt ? 'Conta adicionada' : 'Account added',
@@ -96,7 +97,7 @@ export const ADD_COPY = (pt: boolean) => ({
   confirm: pt ? 'Abrir login' : 'Open login',
   cancel: pt ? 'Agora não' : 'Not now',
   working: pt ? 'Abrindo…' : 'Opening…',
-  workingNote: pt ? 'Preparando o link de login — leva alguns segundos.' : 'Preparing the sign-in link — this takes a few seconds.',
+  workingNote: pt ? 'Iniciando o assistente e aguardando o link de login…' : 'Starting the assistant and waiting for its sign-in link…',
   cancelling: pt ? 'Cancelando…' : 'Cancelling…',
   waiting: pt ? 'Aguardando login' : 'Waiting for sign-in',
   openLogin: pt ? 'Abrir login' : 'Open login',

@@ -31,7 +31,7 @@ import {
   type AccountIdentity,
 } from './harness-accounts'
 import { agentisticsMcpLaunch, rootMcpRegistration } from './mcp-launch'
-import { writeAudit } from './audit'
+import { reportAuditFailure, writeAudit } from './audit'
 import { LOGIN_ADAPTERS, LOGIN_MESSAGES, LoginFailure, startAccountLogin, type LoginError, type LoginHandle, type LoginInfo, type LoginOptions } from './account-login'
 import { applyAccountToPlan } from './sessions/account-plan'
 
@@ -148,6 +148,8 @@ export interface AccountRootsDeps {
   getAccount?: typeof byId
   listAccounts?: typeof readAccounts
   audit?: typeof writeAudit
+  /** Told when an audit write fails (op + target only, never the sink's diagnostic). */
+  onAuditFailure?: (op: unknown, targetId: string | undefined) => void
 }
 
 // `<data>/accounts`. The backup exclusion of the roots (credentials live inside) is its own row in
@@ -184,6 +186,13 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   const flagOn = deps.flagOn ?? (() => featureOn('multi-account'))
   const defaultDir = deps.defaultDir ?? ((h: HarnessId) => DEFAULT_CONFIG_DIR[h]())
   const audit = deps.audit ?? writeAudit
+  const onAuditFailure = deps.onAuditFailure ?? reportAuditFailure
+  // Audit delivery may wait on a remote database. Keep the record without holding the login
+  // response or serialized root mutations behind that connection timeout.
+  const auditLater = (input: Parameters<typeof writeAudit>[0]) => {
+    const reportFailure = () => onAuditFailure(input.meta?.op, input.targetId)
+    void Promise.resolve().then(() => audit(input, reportFailure)).catch(reportFailure)
+  }
   const logins = new Map<string, LoginHandle>()
   const failures = new Map<string, RootRow & { failedAt: number }>()
   const login = deps.login ?? startAccountLogin
@@ -282,7 +291,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     if (config !== root) await chmod(config, 0o700)
     const linked = await linkSharedFiles(shared, defaultDir(harness), config)
     await registerMcp(harness, root).catch(() => {})
-    await audit({ action: 'account.update', ip: 'local', targetId: pendingId, meta: { op: 'root_create', harness } })
+    auditLater({ action: 'account.update', ip: 'local', targetId: pendingId, meta: { op: 'root_create', harness } })
     return { ok: true, pendingId, root, env: rootEnv(harness, root), linked }
   }
 
@@ -360,7 +369,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
         await logins.get(dir.pendingId)?.stop()
         logins.delete(dir.pendingId)
         bound.push(account.id)
-        await audit({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_login', harness: dir.harness } })
+        auditLater({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_login', harness: dir.harness } })
       }
       return bound
     } finally { polling = false }
@@ -432,13 +441,13 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
       if (bad) return { ok: false, status: 400, reason: 'not_a_root', message: say('That folder is not an account root.') }
     }
     let retired = false
-    if (account) { await retire(account.id); retired = true; await audit({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_retire', harness: account.harness } }) }
+    if (account) { await retire(account.id); retired = true; auditLater({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_retire', harness: account.harness } }) }
     let removedDir = false
     if (body.confirm === root) {
       await rm(root, { recursive: true, force: true })
       removedDir = true
       if (dir) logins.delete(dir.pendingId)
-      await audit({ action: 'account.delete', ip: 'local', targetId: account?.id ?? dir?.pendingId ?? id, meta: { op: 'root_delete', harness: account?.harness ?? dir?.harness } })
+      auditLater({ action: 'account.delete', ip: 'local', targetId: account?.id ?? dir?.pendingId ?? id, meta: { op: 'root_delete', harness: account?.harness ?? dir?.harness } })
     }
     return { ok: true, retired, removedDir, root, ...(removedDir ? {} : { confirmWith: root }) }
   }

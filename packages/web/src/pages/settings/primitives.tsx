@@ -110,7 +110,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
             {icon ?? (tone === 'danger' ? <AlertTriangle size={17} /> : <Download size={17} />)}
           </span>
           <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{title}</span>
-          {closeLabel && <button type="button" aria-label={closeLabel} onClick={onCancel} style={{ ...dialogButtonStyle('secondary', false), minHeight: 44, minWidth: 44 }}>×</button>}
+          {closeLabel && <button type="button" aria-label={closeLabel} onClick={onCancel} style={{ ...dialogButtonStyle('secondary', isMobile), width: isMobile ? 44 : undefined, minWidth: isMobile ? 44 : undefined }}>×</button>}
         </div>
         {message && <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>}
         {children}

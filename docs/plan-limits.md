@@ -138,17 +138,28 @@ It never answers yes to that prompt.
 
 `POST /api/accounts/roots` waits for a parsed link and returns
 `{ok, pendingId, root, kind: 'paste' | 'device', url, code?, expiresAt}`. The `code` here is only a
-public device code. `POST /api/accounts/roots/:pendingId/code` accepts `{code}` for a paste login
+public device code (including Codex's 4+5 format). Claude's OSC hyperlinks are stripped before
+validating the authorization URL against the host/path allowlist, including
+`claude.com/cai/oauth/authorize`. `POST /api/accounts/roots/:pendingId/code` accepts `{code}` for a paste login
 and returns only `{ok: true}`. Pasted authorization codes go directly to the private PTY's stdin,
 never to shell arguments, logs, audit records or files. Responses contain fixed refusal sentences,
 never raw CLI output or transport errors. The same local-shell capability, CSRF and authentication
 gates protect both routes.
 
-`GET /api/accounts/roots` includes the active helper's link metadata; bound rows include the
+`GET /api/accounts/roots` includes the active helper's link metadata. After a rejected pasted
+code, `login.error: 'invalid_code'` restores the paste field with a localized explanation; the
+helper selects the latest allowlisted URL when the CLI regenerates it. Raw post-input pane output
+is inspected transiently and never buffered across reads; only public metadata, prompt/error
+counts and a pane digest are retained. Bound rows include the
 reported label and plan. The dialog can resume a pending helper from Billing. Cancel, closing the
 dialog or leaving Settings calls the existing `DELETE` route to stop the helper and remove its
 pending root. Cancellation racing a completed bind preserves the newly added account. Existing
-account deletion still requires the exact root path to remove credentials.
+account deletion still requires the exact root path to remove credentials. The dialog closes
+immediately on Cancel, reports cleanup errors on the Billing page, and remains mounted when the
+viewport crosses 768px. While it is open, its pending card shows only status. URLs wrap across the
+full dialog width, and 44px control minimums apply only on mobile. Root lifecycle audit records
+are dispatched without awaiting the audit sink; delivery failures produce a fixed operational log
+without CLI output or pasted codes.
 
 A helper has 30 seconds to produce its link and a maximum lifetime of 15 minutes; a shorter
 reported device expiry (or Gemini's five-minute prompt window) takes precedence. Timeout and

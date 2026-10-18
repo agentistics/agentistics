@@ -2,15 +2,23 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { LOGIN_ADAPTERS, LoginFailure, parseLoginOutput, startAccountLogin, type LoginProcess, type LoginRequest } from './account-login'
+import claudeCapture from './fixtures/account-login/claude.json'
+import codexCapture from './fixtures/account-login/codex.json'
+import copilotCapture from './fixtures/account-login/copilot.json'
+import geminiPreamble from './fixtures/account-login/gemini.json'
+import geminiRetryCapture from './fixtures/account-login/gemini-url-invalid.json'
+import { LOGIN_ADAPTERS, stripLoginAnsi, loginRefusal, LoginFailure, parseLoginOutput, startAccountLogin, type LoginProcess, type LoginRequest } from './account-login'
 import { createAccountRoots } from './account-roots'
 import { createHarnessAccounts } from './harness-accounts'
 
+// Captured installed CLIs, with one-time codes/state/PKCE replaced by same-shape fakes.
+const [geminiFirst, geminiRetry] = geminiRetryCapture.split('<<<QA: typed fake code qa-fake-123>>>')
 const samples = {
-  claude: "Browser didn't open? Use the url below to sign in\nhttps://claude.ai/oauth/authorize?redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=PUBLIC_STATE\nPaste code here if prompted >",
-  gemini: '\x1b[2JPlease visit the following URL to authorize the application:\nhttps://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fcodeassist.google.com%2Fauthcode\nEnter the authorization code: ',
-  codex: '1. Open this link\nhttps://auth.openai.com/codex/device\n2. Enter this one-time code\nABCD-EFGH\n(expires in 15 minutes)',
-  copilot: 'To authenticate, visit https://github.com/login/device and enter code ABCD-EFGH.\nWaiting for authorization...',
+  claude: claudeCapture,
+  gemini: geminiFirst!,
+  codex: codexCapture,
+  copilot: copilotCapture,
+  // No live Kimi capture was supplied; keep this explicitly synthetic adapter sample.
   kimi: 'Opening browser for Kimi device login: https://www.kimi.com/device?user_code=ABCD-EFGH\nIf the browser did not open, paste the URL above and enter code: ABCD-EFGH\nCode expires in 120s.',
 } as const
 
@@ -47,13 +55,96 @@ describe('headless login adapters', () => {
         expect(info.kind).toBe(LOGIN_ADAPTERS[harness]!.kind)
         expect(info.url).toStartWith('https://')
         expect(info.url).not.toContain('\x1b')
-        if (info.kind === 'device') expect(info.code).toBe('ABCD-EFGH')
+        if (info.kind === 'device') expect(info.code).toBe(parseLoginOutput(harness, samples[harness])!.code)
         else expect(info).not.toHaveProperty('code')
         expect(failures).toEqual([])
       } finally { await handle.stop() }
       expect(cli.stopped()).toBe(true)
     })
   }
+
+  test('OSC 8 BEL and ST terminators cannot consume visible Claude links', () => {
+    for (const raw of [samples.claude, samples.claude.replaceAll('\x07', '\x1b\\')]) {
+      const clean = stripLoginAnsi(raw)
+      expect(clean).not.toContain('\x1b')
+      expect(parseLoginOutput('claude', raw)!.url).toStartWith('https://claude.com/cai/oauth/authorize?')
+    }
+    expect(parseLoginOutput('claude', samples.claude.replaceAll('claude.com/cai', 'evil.test/cai'))).toBeNull()
+  })
+  test('real Codex 4+5 and Copilot 4+4 codes retain their full length', () => {
+    expect(parseLoginOutput('codex', samples.codex)!.code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{5}$/)
+    expect(parseLoginOutput('copilot', samples.copilot)!.code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/)
+    expect(parseLoginOutput('gemini', geminiPreamble)).toBeNull()
+  })
+  for (const harness of ['gemini', 'claude'] as const) {
+    test(`${harness}: rejection refreshes the link and accepts another code without echoing input`, async () => {
+      const cli = fakeCli([samples[harness]])
+      const failures: string[] = []
+      const handle = await startAccountLogin(request(harness), async r => { failures.push(r) }, { launch: async () => cli.proc })
+      try {
+        const first = await handle.ready
+        await handle.submit('qa-fake-123')
+        const retry = harness === 'gemini' ? geminiRetry! : 'Invalid authorization code\n' + samples.claude.replaceAll('state=', 'state=retry-')
+        cli.output(retry)
+        await tick()
+        expect(handle.info()!.error).toBe('invalid_code')
+        expect(handle.info()!.url).not.toBe(first.url)
+        expect(JSON.stringify(handle.info())).not.toContain('qa-fake-123')
+        const latest = handle.info()!.url
+        await handle.submit('SECOND_FAKE_CODE')
+        expect(handle.info()!.error).toBeUndefined()
+        // A PTY snapshot still contains earlier diagnostics; it must not reject this attempt.
+        cli.output(retry + '\nSECOND_FAKE_CODE')
+        await tick()
+        expect(handle.info()!.error).toBeUndefined()
+        expect(handle.info()!.url).toBe(latest)
+        expect(cli.writes).toEqual(['qa-fake-123', 'SECOND_FAKE_CODE'])
+        expect(failures).toEqual([])
+      } finally { await handle.stop() }
+    })
+  }
+  test('PTY redraws replace the pane rather than duplicating prompt counters', async () => {
+    const cli = fakeCli([samples.claude, samples.claude + '\n'])
+    cli.proc.snapshot = true
+    const handle = await startAccountLogin(request('claude'), async () => {}, { launch: async () => cli.proc })
+    try {
+      await handle.ready; await tick()
+      await handle.submit('FIRST_FAKE_CODE')
+      cli.output(samples.claude + '\nFIRST_FAKE_CODE\nPaste code here if prompted > ')
+      await tick()
+      expect(handle.info()!.error).toBe('invalid_code')
+      await handle.submit('SECOND_FAKE_CODE')
+      expect(cli.writes).toHaveLength(2)
+    } finally { await handle.stop() }
+  })
+  test('Claude re-prompt with the same link restores paste without retaining the echo', async () => {
+    const cli = fakeCli([samples.claude])
+    const handle = await startAccountLogin(request('claude'), async () => {}, { launch: async () => cli.proc })
+    try {
+      await handle.ready
+      await handle.submit('FIRST_FAKE_CODE')
+      cli.output(samples.claude + '\nFIRST_FAKE_CODE\nPaste code here if prompted > ')
+      await tick()
+      expect(handle.info()!.error).toBe('invalid_code')
+      expect(JSON.stringify(handle.info())).not.toContain('FIRST_FAKE_CODE')
+      await handle.submit('SECOND_FAKE_CODE')
+      expect(cli.writes).toEqual(['FIRST_FAKE_CODE', 'SECOND_FAKE_CODE'])
+    } finally { await handle.stop() }
+  })
+  for (const prompt of [
+    'Would you like to store the token in the plain text config file instead?',
+    'System keychain is unavailable.', 'Failed to access the keychain.',
+    'Unable to open keychain.', 'Token could not be saved.',
+  ]) test(`Copilot refuses: ${prompt}`, async () => {
+    expect(loginRefusal(prompt)).toBe('plaintext_refused')
+    const cli = fakeCli([samples.copilot]), failures: string[] = []
+    const handle = await startAccountLogin(request('copilot'), async r => { failures.push(r) }, { launch: async () => cli.proc })
+    await handle.ready; cli.output(prompt); await tick()
+    expect(failures).toEqual(['plaintext_refused'])
+    expect(cli.writes).toEqual([])
+    expect(cli.stopped()).toBe(true)
+  })
+
   test('the login boundary never logs raw output or input', async () => {
     const src = await Bun.file(join(import.meta.dir, 'account-login.ts')).text()
     expect(/console\.(?:log|info|warn|error|debug|trace)/.test(src)).toBe(false)

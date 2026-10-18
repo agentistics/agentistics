@@ -19,7 +19,7 @@ export default function AddAccount({ lang, harnesses, onBound }: {
   const [error, setError] = useState<string | null>(null), [submitted, setSubmitted] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const rootsRef = useRef<RootRowView[]>([]), generation = useRef(0), activeRef = useRef<ActiveLogin | null>(null)
-  const creating = useRef<AbortController | null>(null)
+  const creating = useRef<AbortController | null>(null), sending = useRef(false)
   const updateActive = (value: ActiveLogin | null) => { activeRef.current = value; setActive(value) }
   const remove = useCallback(async (id: string) => {
     const res = await fetch(`/api/accounts/roots/${encodeURIComponent(id)}`, { method: 'DELETE' })
@@ -41,21 +41,26 @@ export default function AddAccount({ lang, harnesses, onBound }: {
   }, [remove])
 
   const refresh = useCallback(async () => {
+    const version = generation.current
     try {
       const res = await fetch('/api/accounts/roots')
       if (!res.ok) return
       const next: RootRowView[] = (await res.json()).roots ?? []
+      if (generation.current !== version) return
       if (anyResolved(rootsRef.current, next)) onBound()
       rootsRef.current = next; setRoots(next)
       const current = activeRef.current
-      if (!current?.pendingId) return
+      if (!current?.pendingId || sending.current) return
       const row = next.find(r => r.pendingId === current.pendingId)
       if (row?.status === 'bound') {
         const value = { ...current, bound: row }; activeRef.current = value; setActive(value); setError(null)
       } else if (row?.status === 'failed') {
         setError(addErrorText({ error: row.error }, pt))
       } else if (!row) setError(addErrorText({ error: 'login_timeout' }, pt))
-      else if (row.login) { const value = { ...current, login: row.login }; activeRef.current = value; setActive(value) }
+      else if (row.login) {
+        if (row.login.error === 'invalid_code') { setSubmitted(false); setError(addErrorText({ error: 'invalid_code' }, pt)) }
+        const value = { ...current, login: row.login }; activeRef.current = value; setActive(value)
+      }
     } catch { /* Retry on the next poll; a network failure is not proof of a failed login. */ }
   }, [onBound, pt])
   useEffect(() => { if (flagOn) void refresh() }, [flagOn, refresh])
@@ -86,24 +91,29 @@ export default function AddAccount({ lang, harnesses, onBound }: {
   const close = async () => {
     const current = activeRef.current
     if (!current) return
+    // Invalidate polling and creation callbacks before awaiting process/root cleanup.
+    generation.current++; creating.current?.abort(); creating.current = null; sending.current = false
+    updateActive(null); setError(null); setBusy(false); setSubmitted(false)
     if (current.pendingId && !current.bound) {
-      setBusy(true)
-      try { await remove(current.pendingId) } catch (body) { setError(addErrorText(body, pt)); setBusy(false); return }
+      try { await remove(current.pendingId); setCancelError(null) }
+      catch (body) { setCancelError(addErrorText(body, pt)) }
     }
-    generation.current++; creating.current?.abort(); creating.current = null; updateActive(null); setError(null); setBusy(false); setSubmitted(false)
     await refresh()
   }
+
   const submit = async (code: string) => {
-    const current = activeRef.current, version = generation.current
+    const current = activeRef.current
     if (!current?.pendingId || busy) return
-    setBusy(true); setError(null)
+    const version = ++generation.current; sending.current = true
+    setBusy(true); setError(null); setSubmitted(true)
     try {
       const res = await fetch(`/api/accounts/roots/${encodeURIComponent(current.pendingId)}/code`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })
       if (generation.current !== version) return
-      if (res.ok) setSubmitted(true)
-      else setError(addErrorText(await res.json().catch(() => null), pt))
-    } catch { if (generation.current === version) setError(addErrorText(null, pt)) }
-    finally { if (generation.current === version) setBusy(false) }
+      sending.current = false
+      if (!res.ok) { setSubmitted(false); setError(addErrorText(await res.json().catch(() => null), pt)) }
+      else await refresh()
+    } catch { if (generation.current === version) { setSubmitted(false); setError(addErrorText(null, pt)) } }
+    finally { if (generation.current === version) { sending.current = false; setBusy(false) } }
   }
   const cancelPending = async (row: RootRowView) => {
     if (!row.pendingId) return
@@ -114,10 +124,10 @@ export default function AddAccount({ lang, harnesses, onBound }: {
   const view = addAccountView(flagOn, harnesses)
   if (view.kind === 'off') return <MetricNote>{t.flagOff}</MetricNote>
   const label = (h: HarnessId) => HARNESS_LABELS[h] ?? h
-  const button = { ...dialogButtonStyle('secondary', mobile), minHeight: 44 }
+  const button = dialogButtonStyle('secondary', mobile)
   return <div data-add-account style={{ marginTop: 14 }}>
     {waiting.map(row => <div key={row.pendingId} style={{ marginBottom: 10 }}>
-      <RecordCard title={`${label(row.harness)} · ${t.waiting}`} fields={[]} actions={<>
+      <RecordCard title={`${label(row.harness)} · ${t.waiting}`} fields={[]} actions={active?.pendingId === row.pendingId ? undefined : <>
         {row.login && <button type="button" style={button} onClick={() => { generation.current++; updateActive({ harness: row.harness, pendingId: row.pendingId, login: row.login }); setError(null); setBusy(false); setSubmitted(false) }}>{t.openLogin}</button>}
         <button type="button" style={button} onClick={() => { void cancelPending(row) }}>{t.cancelPending}</button>
       </>} />

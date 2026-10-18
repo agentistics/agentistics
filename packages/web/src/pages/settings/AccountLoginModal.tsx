@@ -14,13 +14,13 @@ export function AccountLoginModal({ harness, lang, login, bound, busy, submitted
   const t = ADD_COPY(lang === 'pt'), mobile = useIsMobile()
   const [code, setCode] = useState(''), [copied, setCopied] = useState<string | null>(null), [now, setNow] = useState(Date.now())
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer) }, [])
-  const button = (primary = false) => ({ ...dialogButtonStyle(primary ? 'primary' : 'secondary', mobile), minHeight: 44 })
+  const button = (primary = false) => dialogButtonStyle(primary ? 'primary' : 'secondary', mobile)
   const copy = async (value: string, which: string) => {
     try { await navigator.clipboard.writeText(value); setCopied(which) } catch { setCopied(null) }
   }
   const footer = <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
     {!bound && login?.kind === 'paste' && !submitted && <button type="button" disabled={busy || !code.trim()} style={button(true)} onClick={() => { onSubmit(code); setCode('') }}>{t.submit}</button>}
-    <button type="button" disabled={busy && !!login} style={button(!!bound)} onClick={onCancel}>{bound ? t.finish : t.cancelPending}</button>
+    <button type="button" style={button(!!bound)} onClick={onCancel}>{bound ? t.finish : t.cancelPending}</button>
   </div>
   return <ConfirmModal open tone="default" maxWidth={560} closeLabel={t.close}
     title={t.title(HARNESS_LABELS[harness] ?? harness)} message="" icon={<HarnessMark harness={harness} size={22} />}
@@ -33,21 +33,22 @@ export function AccountLoginModal({ harness, lang, login, bound, busy, submitted
       <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{t.doneNote}</p>
     </div> : login ? <>
       <div data-login-step="link">
-        <RecordCard wrapTitle title={`1 · ${t.linkStep}`} fields={[{ label: 'URL', value: <span style={{ overflowWrap: 'anywhere', fontFamily: 'monospace' }}>{login.url}</span> }]} />
+        <div style={{ fontSize: 14, fontWeight: 600 }}>{`1 · ${t.linkStep}`}</div>
+        <div data-login-url style={{ display: 'block', width: '100%', minWidth: 0, boxSizing: 'border-box', overflowWrap: 'anywhere', whiteSpace: 'normal', fontFamily: 'monospace', fontSize: 12, padding: '10px 0', textAlign: 'left' }}>{login.url}</div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
           <a href={login.url} target="_blank" rel="noopener noreferrer" style={{ ...button(true), textDecoration: 'none' }}>{t.openLink}</a>
           <button type="button" style={button()} onClick={() => { void copy(login.url, 'link') }}>{copied === 'link' ? t.copied : t.copyLink}</button>
         </div>
       </div>
       <div data-login-step={login.kind}>
-        {login.kind === 'paste' ? <FieldInput label={`2 · ${t.pasteStep}`} value={code} onChange={setCode} type="password" hideReveal maxLength={8192} autoComplete="off" spellCheck={false} minHeight={44} disabled={submitted || busy} /> : <>
+        {login.kind === 'paste' ? <FieldInput label={`2 · ${t.pasteStep}`} value={code} onChange={setCode} type="password" hideReveal maxLength={8192} autoComplete="off" spellCheck={false} minHeight={mobile ? 44 : undefined} disabled={submitted || busy} /> : <>
           <p style={{ fontSize: 14 }}>{`2 · ${harness === 'kimi' ? t.kimiStep : t.deviceStep}`}</p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             <strong style={{ fontFamily: 'monospace', fontSize: 26, letterSpacing: '.12em', overflowWrap: 'anywhere' }}>{login.code}</strong>
             <button type="button" style={button()} onClick={() => { void copy(login.code ?? '', 'code') }}>{copied === 'code' ? t.copied : t.copyCode}</button>
           </div>
         </>}
-        {!error && <p role="status" style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{t.submitted} {t.expires(Math.max(0, Math.ceil((login.expiresAt - now) / 60000)))}</p>}
+        {!error && <p role="status" style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{login.kind === 'paste' && !submitted ? t.awaitingCode : t.submitted} {t.expires(Math.max(0, Math.ceil((login.expiresAt - now) / 60000)))}</p>}
       </div>
     </> : !error && <p role="status">{t.workingNote}</p>}
     {error && <p role="alert" style={{ color: 'var(--accent-red)', overflowWrap: 'anywhere' }}>{error}</p>}

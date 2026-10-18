@@ -31,12 +31,17 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
         expect(html).toContain('max-width:560px')
         expect(html).toContain(t.openLink)
         expect(html).toContain(t.copyLink)
-        expect(html).toContain('min-height:44px')
+        if (width === 390) expect(html).toContain('min-height:44px')
+        else expect(html).not.toContain('min-height:44px')
+        expect(html).toContain('data-login-url=')
+        expect(html).toContain('text-align:left')
         expect(html).toContain(`data-login-step="${paste ? 'paste' : 'device'}"`)
         if (paste) {
           expect(html).toContain('type="password"')
           expect(html).toContain('autoComplete="off"')
           expect(html).toContain(t.submit)
+          expect(html).toContain(t.awaitingCode)
+          expect(html).not.toContain(t.submitted)
         } else {
           expect(html).toContain(t.copyCode)
           expect(html).toContain('ABCD-EFGH')
@@ -52,6 +57,15 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
       expect(html).toContain('value=""')
       expect(html).toContain('disabled=""')
     })
+    test('invalid paste code restores the form with current URL and localized error', () => {
+      const error = addErrorText({ error: 'invalid_code' }, lang === 'pt')
+      const html = render({ harness: 'gemini', error, login: { kind: 'paste', url: 'https://accounts.google.com/auth?state=NEW_FAKE_STATE', expiresAt: Date.now() + 300000 } })
+      expect(html).toContain('state=NEW_FAKE_STATE')
+      expect(html).toContain(error)
+      expect(html).toContain('type="password"')
+      expect(html).not.toMatch(/<input[^>]*disabled/)
+      expect(html).toContain(t.submit)
+    })
     test('success contains bound assistant, identity and plan', () => {
       const bound: RootRowView = { harness: 'codex', status: 'bound', root: '/root', label: 'person@example.test', plan: 'Pro' }
       const html = render({ bound })
@@ -61,7 +75,7 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
       expect(html).toContain(t.finish)
       expect(html).not.toContain(t.copyLink)
     })
-    for (const reason of ['plaintext_refused', 'login_timeout', 'login_failed']) {
+    for (const reason of ['plaintext_refused', 'login_timeout', 'login_failed', 'invalid_code']) {
       test(`${reason}: localized refusal`, () => {
         const message = addErrorText({ error: reason }, lang === 'pt')
         const html = render({ error: message })

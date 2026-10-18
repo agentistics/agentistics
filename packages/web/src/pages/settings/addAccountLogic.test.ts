@@ -62,7 +62,8 @@ describe('copy details', () => {
     for (const pt of [true, false]) {
       const c = ADD_COPY(pt)
       expect(c.confirm).toBe(c.openLogin)
-      expect(c.workingNote).toMatch(pt ? /segundos/ : /seconds/)
+      expect(c.workingNote).toMatch(pt ? /aguardando/ : /waiting/)
+      expect(c.workingNote).not.toMatch(/segundos|seconds/)
     }
   })
   test('buttons are named by assistant, without repeating the verb', () => {

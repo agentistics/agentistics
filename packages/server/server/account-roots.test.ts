@@ -300,3 +300,42 @@ describe('plan + mcp', () => {
     expect(/console\.(log|info|warn|error)/.test(src)).toBe(false)
   })
 })
+
+
+describe('audit latency does not block login or cancellation', () => {
+  test('audit failure is logged safely and does not refuse root creation', async () => {
+    const reports: unknown[][] = []
+    const { roots } = make({
+      audit: async () => { throw new Error('PRIVATE_DATABASE_DIAGNOSTIC') },
+      onAuditFailure: (...args) => { reports.push(args) },
+    })
+    expect((await roots.createRoot('claude')).ok).toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(reports.length).toBeGreaterThan(0)
+    expect(JSON.stringify(reports)).not.toContain('PRIVATE_DATABASE_DIAGNOSTIC')
+  })
+  test('starts the CLI and removes a pending root while the audit sink is still waiting', async () => {
+    const pendingAudits: string[] = []
+    let release!: () => void
+    const blocked = new Promise<void>(resolve => { release = resolve })
+    const { roots, spawned } = make({ audit: async input => { pendingAudits.push(String(input.meta?.op)); await blocked } })
+    let adding: ReturnType<typeof roots.addRoot> | undefined
+    let deleting: ReturnType<typeof roots.removeRoot> | undefined
+    const within = async <T,>(work: Promise<T>) => {
+      let timer!: ReturnType<typeof setTimeout>
+      try { return await Promise.race([work, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('audit blocked the user path')), 1000) })]) }
+      finally { clearTimeout(timer) }
+    }
+    try {
+      adding = roots.addRoot('codex')
+      const out = await within(adding)
+      if (!out.ok) throw new Error('refused')
+      expect(spawned).toHaveLength(1)
+      expect(pendingAudits).toContain('root_create')
+      deleting = roots.removeRoot(out.pendingId)
+      expect((await within(deleting)).ok).toBe(true)
+      await expect(stat(out.root)).rejects.toThrow()
+      expect(pendingAudits).toContain('root_delete')
+    } finally { release(); await adding; await deleting; roots.stopPoller() }
+  })
+})
