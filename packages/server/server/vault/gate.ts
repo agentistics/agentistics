@@ -41,7 +41,7 @@ import {
   abandonPending, adoptPending, ensureVaultOpen, lockVault, noteVaultActivity, openWithRecovery, pendingUnlock, protectorById,
   recoveryStepDone, recoveryTodo, refused, sealToFile, secretFs, sentence, setAutoLockPeriod, vaultAudit, vaultDir, vaultLang,
   presenceWord, presenceCandidates, presenceSoon, chooseAutoProtector, vaultStatus, noteCodeUnlock, dropUnlockWindow, unlockWindowAnchor, onVaultLock,
-  consumeFreshPresence, mintFresh,
+  consumeFreshPresence, mintFresh, autoLockRemainingMs,
 } from './service'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR } from '../config'
 import { realProtectorIo } from './io'
@@ -86,8 +86,8 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   lock: { code: false, gesture: false, grant: null }, // locking only REDUCES exposure
   'set-auto-lock': { code: true, gesture: false, grant: 'read' },
   'set-confirm-each-use': { code: true, gesture: false, grant: 'read' },
-  // VAULT.UI2: "keep it open" — one more idle window. On this computer the vault is already open and the click
-  // is the consent (no proof); from a remote origin it costs the authenticator code, never silently.
+  // VAULT.UI2: "keep it open" — one more idle window. Needs the page's grant (a read grant from the code, or the
+  // keepopen grant a Hello gesture mints) or the code; a remote origin is refused before this row is consulted.
   'extend-open': { code: true, gesture: false, grant: null },
   // Owner decision 2026-10-02: loosening what an unlock asks is an escalation — code AND gesture, fresh.
   'set-unlock-policy': { code: true, gesture: true, grant: null },
@@ -590,17 +590,36 @@ export async function stepUpForRead(code: string, session: string): Promise<Gate
  * locked vault once per 24 h. Loopback/socket only: the service never raises Hello for a remote request.
  */
 export async function stepUpByGesture(ctx: { session: string; loopback: boolean }): Promise<GateResult> {
-  if (!ctx.loopback && !fromSocket(ctx)) return refused('unlock-not-here', sentence('stepup-required'))
+  const pt = vaultLang() === 'pt'
+  const deny = (r: Refusal): Refusal => { vaultAudit({ type: 'vault.stepup-gesture', protector: r.code }); return r }
+  // Never the authenticator code here: with no Hello, or off this computer, the sentence says what to do instead.
+  if (!ctx.loopback && !fromSocket(ctx)) return deny(refused('keepopen-needs-presence', sentence('keepopen-needs-presence')))
   if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
   if ((await loadState()).frozen) return refused('stepup-frozen', sentence('stepup-frozen'))
   const o = await ensureVaultOpen({ create: false, migrate: false })
   if (!o) return refused('locked', sentence('locked'))
-  if (!hasPresence(o.vault)) return refused('stepup-required', sentence('stepup-required'))
+  if (!hasPresence(o.vault)) return deny(refused('keepopen-needs-presence', sentence('keepopen-needs-presence')))
+  // Only while the auto-lock warning is pending: otherwise a local process could raise Hello prompts at will.
+  const left = autoLockRemainingMs()
+  if (left === null || left > KEEPOPEN_WINDOW_MS) {
+    return refused('keepopen-not-due', pt ? 'O cofre ainda não está perto de trancar. Você pode manter aberto quando o aviso aparecer.' : 'The vault is not about to lock yet. You can keep it open when the warning appears.')
+  }
+  const now = _now()
+  const last = _lastGesture.get(ctx.session)
+  if (last !== undefined && now - last < GESTURE_PROMPT_GAP_MS) {
+    return refused('keepopen-too-soon', pt ? 'Aguarde alguns segundos e tente de novo.' : 'Wait a few seconds and try again.')
+  }
+  _lastGesture.set(ctx.session, now)
   const g = await proveGesture(o)
-  if (!g.ok) return g
+  if (!g.ok) return deny(g)
+  vaultAudit({ type: 'vault.stepup-gesture' })
   noteVaultActivity()
   return { ok: true, grant: mintGrant(ctx.session, 'keepopen') }
 }
+
+const KEEPOPEN_WINDOW_MS = 5 * 60_000
+const GESTURE_PROMPT_GAP_MS = 30_000
+const _lastGesture = new Map<string, number>()
 
 /** VAULT.PERSONAL §10: what refuses a phone unlock before anything is unwrapped (recovery mode, frozen). */
 export async function phoneUnlockGuard(): Promise<Refusal | null> {
@@ -1528,6 +1547,7 @@ export function __resetGateForTests(now?: () => number): void {
   _mem = { ...FRESH_STEPUP }
   _now = now ?? (() => Date.now())
   _grantKey = randomBytes(32)
+  _lastGesture.clear()
   dropEnrolSeed()
   dropRecovery()
   _flow = null

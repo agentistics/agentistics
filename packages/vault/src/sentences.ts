@@ -37,6 +37,8 @@ export type VaultRefusal =
   /** SECRETS.4 §3.5 / §2 — the presence and authenticator gate. */
   | 'presence-required'
   | 'stepup-required'
+  /** Keep-open needs the presence gesture; the vault has none, or this is not the computer it lives on. */
+  | 'keepopen-needs-presence'
   | 'stepup-wrong'
   | 'stepup-clock'
   | 'stepup-replayed'
@@ -107,6 +109,7 @@ const EN: Record<VaultRefusal, (a: SentenceArgs) => string> = {
   'presence-required': (a) =>
     `The vault is locked. Confirm with ${a.presence ?? 'your personal confirmation'} to open it — no program can open it without you.`,
   'stepup-required': () => 'This needs your authenticator code.',
+  'keepopen-needs-presence': () => 'Keeping it open needs Windows Hello on this computer. Let it lock and open it again when you need it.',
   'stepup-wrong': (a) => `That code is not right. ${a.left ?? 0} more tries before a pause.`,
   'stepup-clock': (a) => `That code is from ${a.n ?? 0} minutes ${a.direction ?? 'off'} — this computer's clock (or your phone's) is off. Fix the clock and try again.`,
   'stepup-replayed': () => 'That code was already used. Wait for the next one.',
@@ -149,6 +152,7 @@ const PT: Record<VaultRefusal, (a: SentenceArgs) => string> = {
   'presence-required': (a) =>
     `O cofre está trancado. Confirme com ${a.presence ?? 'a sua confirmação pessoal'} para abri-lo — nenhum programa consegue abri-lo sem você.`,
   'stepup-required': () => 'Isto precisa do código do seu autenticador.',
+  'keepopen-needs-presence': () => 'Manter aberto precisa do Windows Hello neste computador. Deixe trancar e abra de novo quando precisar.',
   'stepup-wrong': (a) => `Esse código não está certo. Mais ${a.left ?? 0} tentativas antes de uma pausa.`,
   'stepup-clock': (a) => `Esse código é de ${a.n ?? 0} minutos ${a.direction ?? 'fora'} — o relógio deste computador (ou do seu celular) está errado. Acerte o relógio e tente de novo.`,
   'stepup-replayed': () => 'Esse código já foi usado. Espere o próximo.',

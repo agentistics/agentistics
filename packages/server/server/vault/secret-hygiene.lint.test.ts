@@ -52,6 +52,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     _onInit: 'a reporter', _migrators: 'migrator objects (paths, no values)', _migratedThisOpen: 'a flag', _migrating: 'a pending report', _onUse: 'an activity hook', _beatAt: 'a throttle timestamp', _armAt: 'a throttle timestamp', _heartbeat: 'the tab heartbeat capability stores only its sha256 hash and throttle timestamp, never the token',
   },
   'server/server/vault/gate.ts': {
+    _lastGesture: 'session tag -> time of its last Hello prompt (the 30 s throttle); no secret',
     RECOVERY_ALLOWED: 'action names', _mem: 'the step-up counters (integrity, not secret — §2.3)', _now: 'a clock',
     _grantKey: 'the in-memory HMAC key that signs 5-minute read grants (§2.4: minted at start, never on disk); signs, decrypts nothing',
     _enrolSeed: 'a NEW TOTP seed while it is being enrolled (§2.5): ≤ 10 min, served once, zeroed on confirm/expiry/restart',

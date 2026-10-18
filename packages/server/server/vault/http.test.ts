@@ -57,7 +57,7 @@ async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?
   const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}), ...(cookie ? { cookie } : {}) }
   // VAULT.PERSONAL §10: the gesture unlock answers ONLY the page on this computer, so it is sent as one —
   // and so are the reads (review M3: the no-proof list is the rule for a page on this computer).
-  const local = path === '/api/vault/unlock' || path === '/api/vault/activity' || path === '/api/vault/activity/arm' || path === '/api/vault/extend' || method === 'GET'
+  const local = path === '/api/vault/unlock' || path === '/api/vault/activity' || path === '/api/vault/activity/arm' || path === '/api/vault/extend' || path === '/api/vault/stepup/gesture' || method === 'GET'
   if (local) Object.assign(headers, { host: 'localhost:47292', origin: 'http://localhost:47292' })
   const req = new Request(`${local ? 'http://localhost:47292' : 'http://local'}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
   const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', ...(local ? { peer: '127.0.0.1' } : {}) })
@@ -476,7 +476,7 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     }
   })
 
-  test('unlock by Hello hands the page a read grant, so keep-open needs no code; an already-open vault mints none', async () => {
+  test('unlock by Hello hands the page a keep-open grant, so keep-open needs no code; an already-open vault mints none', async () => {
     lockVault('user')
     const u = await http('POST', '/api/vault/unlock', {})
     expect(u.json.state).toBe('open')
@@ -497,6 +497,65 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     const j = await res!.json() as J
     expect(j.ok).toBe(false)
     expect(j.grant).toBeUndefined()
+  })
+
+  test('stepup/gesture on a vault with no Hello: says Hello is needed, never the authenticator code', async () => {
+    T += 26 * 60_000
+    const r = await http('POST', '/api/vault/stepup/gesture', {})
+    expect(r.json).toMatchObject({ ok: false, code: 'keepopen-needs-presence' })
+    expect(r.json.sentence).toContain('Windows Hello')
+    expect(r.json.sentence).not.toContain('authenticator')
+    expect(r.json.grant).toBeUndefined()
+    expect(readFileSync(join(vaultDir(), 'audit.jsonl'), 'utf8')).toContain('vault.stepup-gesture')
+  })
+
+  test('stepup/gesture success: keepopen grant extends, but arms no heartbeat and changes no setting; throttled; only near the lock', async () => {
+    await enrolOverHttp()
+    restart()
+    expect((await http('POST', '/api/vault/unlock')).json.state).toBe('pending-stepup')
+    expect((await http('POST', '/api/vault/unlock/code', { code: codeAt() })).status).toBe(200)
+    // far from the auto-lock: no prompt at all
+    const g0 = hello.gestures
+    expect((await http('POST', '/api/vault/stepup/gesture', {})).json).toMatchObject({ ok: false, code: 'keepopen-not-due' })
+    expect(hello.gestures).toBe(g0)
+    T += autoLockRemainingMs()! - 4 * 60_000
+    const g = await http('POST', '/api/vault/stepup/gesture', {})
+    expect(g.json.ok).toBe(true)
+    expect(typeof g.json.grant).toBe('string')
+    expect(hello.gestures).toBe(g0 + 1)
+    expect(readFileSync(join(vaultDir(), 'audit.jsonl'), 'utf8')).toContain('vault.stepup-gesture')
+    // the grant extends, with no heartbeat cookie
+    T += 2 * 60_000
+    const before = autoLockRemainingMs()!
+    const ext = await http('POST', '/api/vault/extend', {}, g.json.grant)
+    expect(ext.json.ok).toBe(true)
+    expect(tokenOf(ext)).toBeUndefined()
+    expect(autoLockRemainingMs()!).toBeGreaterThan(before)
+    // ...and nothing else accepts it
+    const arm = await http('POST', '/api/vault/activity/arm', { gesture: true }, g.json.grant)
+    expect(arm.json.ok).toBeFalsy()
+    expect(tokenOf(arm)).toBeUndefined()
+    const al = await http('POST', '/api/vault/auto-lock', { minutes: 10 }, g.json.grant)
+    expect(al.json.ok).toBeFalsy()
+  })
+
+  test('stepup/gesture: a cancelled Hello is audited, says Hello (not the code), and a retry inside 30 s raises no second prompt', async () => {
+    await enrolOverHttp()
+    T += autoLockRemainingMs()! - 4 * 60_000
+    const real = hello.unwrap.bind(hello)
+    hello.unwrap = async () => { hello.gestures++; return { ok: false, kind: 'denied', reason: 'cancelled' } as UnwrapResult }
+    const g0 = hello.gestures
+    const a = await http('POST', '/api/vault/stepup/gesture', {})
+    expect(a.json).toMatchObject({ ok: false, code: 'presence-cancelled' })
+    expect(a.json.sentence).not.toContain('authenticator')
+    expect(hello.gestures).toBe(g0 + 1)
+    T += 10_000
+    expect((await http('POST', '/api/vault/stepup/gesture', {})).json).toMatchObject({ ok: false, code: 'keepopen-too-soon' })
+    expect(hello.gestures).toBe(g0 + 1)
+    T += 25_000
+    hello.unwrap = real
+    expect((await http('POST', '/api/vault/stepup/gesture', {})).json.ok).toBe(true)
+    expect(readFileSync(join(vaultDir(), 'audit.jsonl'), 'utf8').match(/vault\.stepup-gesture/g)!.length).toBe(2)
   })
 
   test('extend: a bare local curl is refused (window unchanged, no token); with the page\'s grant it works, throttled', async () => {

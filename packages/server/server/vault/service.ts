@@ -1131,7 +1131,7 @@ export async function openFromFile(path: string, purpose: string, name: string):
 export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
-  | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.auto-lock-extended' | 'vault.recovered' | 'vault.recover-failed'
+  | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.auto-lock-extended' | 'vault.stepup-gesture' | 'vault.recovered' | 'vault.recover-failed'
   | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-confirm-each-use' | 'vault.set-unlock-policy' | 'vault.set-auth-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-reveal-refused' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.personal-use-asked' | 'vault.personal-use-approved' | 'vault.personal-use-denied' | 'vault.personal-use-expired' | 'vault.personal-use-cancelled' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
   | 'vault.phone-enrol-request' | 'vault.phone-enrol-approve' | 'vault.phone-enrol-deny' | 'vault.phone-key-add' | 'vault.phone-key-remove' | 'vault.phone-unlock-failed'
 
