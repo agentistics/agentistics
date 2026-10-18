@@ -33,8 +33,16 @@ moon when any pinned session sleeps. Its **Sleeping** entries reopen through the
 
 In the aside, those same pinned ended sessions appear under **Sleeping** at the end of **Pinned**.
 This row starts collapsed and remembers expansion with the existing ended-section preferences.
-The Pinned header counts only its live rows. Sleeping cards can still be opened for reading,
-reopened, or unpinned; sleeping never removes the pin.
+The Pinned header counts both live and sleeping pins. Sleeping cards can still be opened for reading,
+reopened, or unpinned; sleeping never removes the pin. Leader names omit the role prefix and keep
+an explicit Líder/Leader badge in cards and the tabs menu. Titles wrap without ellipses; the menu
+can grow to the viewport gutter. On phones each tab fits the scrolling track, with mandatory scroll
+snapping and the active tab scrolled into view. Arrow keys, Home and End move the tab's focus;
+Enter or Space opens the focused tab. Row pin/open/reopen controls are separate buttons.
+
+The notification panel keeps its title, Clear all action and Mute active workers switch together
+in one sticky header while notifications scroll below. Aside action feedback overlays the list for
+five seconds, using session names in place of managed-id fragments.
 
 Folders with no `working`, `waiting` or `waiting-approval` session in their visible subtree move
 under **Ended** (**Encerradas**) at the end of their parent. The same section also holds that

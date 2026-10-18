@@ -197,12 +197,12 @@ describe('sleeping tabs', () => {
     button.getBoundingClientRect = () => ({ left: 12, right: 88, bottom: 70 } as DOMRect)
     act(() => button.click())
     const menu = document.querySelector('[role="menu"]') as HTMLElement
-    expect(menu.style.left).toBe('12px')
+    expect(menu.style.left).toBe(width === 390 ? '8px' : '12px')
     expect(menu.style.top).toBe('74px')
     const entries = Array.from(menu.querySelectorAll('button'))
     const header = entries.find(e => e.textContent === 'Sleeping')!
     expect(header.disabled).toBe(true)
-    expect(entries.find(e => e.textContent === 'Sleeping conversation')).toBeDefined()
+    expect(entries.find(e => e.querySelector('[data-menu-title]')?.textContent === 'Sleeping conversation')).toBeDefined()
     expect(menu.querySelector('[role="separator"]')).not.toBeNull()
   })
 
@@ -213,7 +213,7 @@ describe('sleeping tabs', () => {
     render(shown, async row => { reopened.push(row.id); return { ok: true, message: '' } })
     act(() => (host.querySelector('[aria-label="Open and sleeping tabs"]') as HTMLButtonElement).click())
     await act(async () => {
-      const entry = Array.from(document.querySelectorAll('[role="menu"] button')).find(e => e.textContent === 'Title b') as HTMLButtonElement
+      const entry = Array.from(document.querySelectorAll('[role="menu"] button')).find(e => e.querySelector('[data-menu-title]')?.textContent === 'Title b') as HTMLButtonElement
       entry.click()
     })
     expect(reopened).toEqual(['b'])
@@ -246,3 +246,48 @@ test('opening the check-in modal closes the session info popover', async () => {
     expect(document.querySelector('[data-testid="session-link-panel"]')).toBeNull()
   } finally { act(() => closeCheckinModal()) }
 })
+
+for (const width of [1280, 390]) {
+  test(`arrows, Home and End move focus and the roving stop without opening a tab (${width}px)`, () => {
+    (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height: 800 })
+    render()
+    const key = (el: HTMLElement, k: string) => act(() => el.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })))
+    act(() => tab('a').focus())
+    for (const [from, k, to] of [['a', 'ArrowRight', 'b'], ['b', 'End', 'c'], ['c', 'ArrowRight', 'a'], ['a', 'ArrowLeft', 'c'], ['c', 'Home', 'a']] as const) {
+      key(tab(from), k)
+      expect(document.activeElement).toBe(tab(to))
+      expect(tab(to).tabIndex).toBe(0)
+      expect(host.querySelectorAll('[role="tab"][tabindex="0"]')).toHaveLength(1)
+    }
+    expect(went).toEqual([])
+    key(tab('a'), 'ArrowRight')
+    key(tab('b'), 'Enter')
+    expect(went).toEqual(['b'])
+    act(() => tab('a').focus())
+    expect(tab('a').tabIndex).toBe(0)
+    expect(tab('b').tabIndex).toBe(-1)
+  })
+
+  test(`full titles wrap in the scrolling strip and menu; sleeping leaders keep their badge (${width}px)`, () => {
+    (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height: 800 })
+    act(() => pins.togglePinnedSession('b'))
+    const title = 'Agentistics Side Tasks — all the work ready for review'
+    render(rows.map(r => ({ ...r, title: `[ LÍDER ] - ${title}`, ...(r.id === 'b' ? { state: 'closed' as const } : {}) })))
+    const track = host.querySelector<HTMLElement>('[role="tablist"]')!
+    expect(track.style.overflowX).toBe('auto')
+    expect(track.style.scrollSnapType).toBe('x mandatory')
+    expect(tab('a').textContent).toContain(title)
+    expect(tab('a').textContent).not.toContain('[ LÍDER ]')
+    expect(tab('a').style.scrollSnapAlign).toBe('center')
+    expect(tab('a').style.width).toBe(width === 390 ? '100%' : 'max-content')
+    for (const el of Array.from(tab('a').querySelectorAll<HTMLElement>('*'))) expect(el.style.textOverflow).not.toBe('ellipsis')
+    act(() => host.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!.click())
+    const menu = document.querySelector<HTMLElement>('[role="menu"]')!
+    expect(parseFloat(menu.style.width)).toBeLessThanOrEqual(width - 16)
+    const sleeping = Array.from(menu.querySelectorAll('button')).find(el => el.textContent?.includes('Reopen'))!
+    expect(sleeping.querySelector('[data-menu-title]')?.textContent).toBe(title)
+    expect(sleeping.textContent).toContain('Leader')
+    expect(sleeping.textContent).not.toContain('[ LÍDER ]')
+    expect(sleeping.querySelector('[data-menu-title]')?.parentElement?.style.whiteSpace).toBe('normal')
+  })
+}

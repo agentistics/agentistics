@@ -67,8 +67,8 @@ export function CheckinRoundBody({ round, pt, hideEmpty = false }: { round: Chec
         <Group label={c.progress}>
           {progress.map((p, i) => (
             <div key={i} data-checkin-progress style={{ ...TEXT, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
-              <strong>{p.item}</strong><Pill tone="neutral">{p.stage}</Pill>
-              {p.release && <Pill tone="warn">{c.release} {p.release}</Pill>}
+              <strong>{p.item}</strong><Pill tone="neutral" nowrap>{p.stage}</Pill>
+              {p.release && <Pill tone="warn" nowrap>{c.release} {p.release}</Pill>}
             </div>
           ))}
         </Group>
@@ -153,8 +153,8 @@ export function CheckinModalView({ round, history, pt, isMobile, onClose }: { ro
   return (
     <div data-testid="checkin-modal" className="ag-checkin-modal" style={{ overflowWrap: 'anywhere' }}>
       <style>{`
-        .ag-checkin-health-row { grid-template-columns: 8px 150px minmax(0, 1fr); }
-        .ag-checkin-modal [data-checkin-progress] > span { min-width: 0; max-width: 100%; box-sizing: border-box; }
+        .ag-checkin-health-row { grid-template-columns: 8px fit-content(40%) minmax(0, 1fr); }
+        .ag-checkin-modal [data-checkin-progress] > span { flex-shrink: 0; max-width: 100%; box-sizing: border-box; }
         @media (max-width: 480px) {
           .ag-checkin-health-row { grid-template-columns: 8px minmax(0, 1fr); }
           .ag-checkin-health-value { grid-column: 2; }

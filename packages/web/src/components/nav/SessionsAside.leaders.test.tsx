@@ -104,7 +104,7 @@ for (const width of [1280, 390]) test(`leaders-only is flat and restores the nor
       expect(host.textContent).not.toContain(text)
     }
     expect(host.querySelectorAll('[aria-label="Sessions summary"] button')).toHaveLength(1)
-    act(() => (list.children[0] as HTMLButtonElement).click())
+    act(() => list.children[0]!.querySelector<HTMLButtonElement>('[data-session-open]')!.click())
     expect(opened).toBeDefined()
     act(() => chip().click())
     expect(host.querySelector('[data-leaders-list]')).toBeNull()
@@ -195,16 +195,16 @@ for (const width of [1280, 390]) test(`sleeping pins collapse, remember expansio
     render()
     expect(sleeping().getAttribute('aria-expanded')).toBe('false')
     expect(host.textContent).not.toContain('Title ended')
-    const pinned = Array.from(host.querySelectorAll('button')).find(b => b.textContent === 'Pinned2')
+    const pinned = Array.from(host.querySelectorAll('button')).find(b => b.textContent === 'Pinned3')
     expect(pinned).toBeDefined()
     act(() => sleeping().click())
     expect(sleeping().getAttribute('aria-expanded')).toBe('true')
-    const card = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.title === 'Title ended')!
+    const card = host.querySelector<HTMLElement>('[data-session-row][title="Title ended"]')!
     expect(card.textContent).toContain('Reopen')
-    act(() => card.click())
+    act(() => card.querySelector<HTMLButtonElement>('[data-session-open]')!.click())
     expect(opened).toBe('ended')
     await act(async () => {
-      const reopen = Array.from(card.querySelectorAll<HTMLElement>('[role="button"]')).find(e => e.textContent === 'Reopen')!
+      const reopen = Array.from(card.querySelectorAll<HTMLButtonElement>('button')).find(e => e.textContent === 'Reopen')!
       reopen.click()
     })
     expect(actions).toEqual([{ id: 'ended', action: 'resume' }])
@@ -213,7 +213,7 @@ for (const width of [1280, 390]) test(`sleeping pins collapse, remember expansio
     render()
     expect(sleeping().getAttribute('aria-expanded')).toBe('true')
     expect(host.textContent).toContain('Title ended')
-    const restored = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.title === 'Title ended')!
+    const restored = host.querySelector<HTMLElement>('[data-session-row][title="Title ended"]')!
     act(() => restored.querySelector<HTMLElement>('[aria-label="Unpin"]')!.click())
     expect(sleeping()).toBeUndefined()
   } finally {

@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom'
 import { Pin } from 'lucide-react'
 import { isInsidePortalledMenu, menuMaxHeight, type MenuEntry } from '../../lib/rowMenu'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { RoleChip } from './RoleChip'
 import { BetaTag } from '../BetaTag'
 import { SESSION_ROW_MENU_Z } from '../../lib/zLayers'
 
@@ -24,6 +25,7 @@ export interface SessionRowMenuProps {
   onClose: () => void
   /** Dropdowns stay below their trigger and scroll in the available space. */
   below?: boolean
+  sessionList?: boolean
 }
 
 /**
@@ -34,7 +36,7 @@ export interface SessionRowMenuProps {
  */
 const TASK_ENTRIES = new Set<string>(['link-task', 'unlink-task'])
 
-export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false }: SessionRowMenuProps) {
+export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, sessionList = false }: SessionRowMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   // 44px of finger on a phone, and nowhere else. This menu is reached by a LONG PRESS on touch,
   // so every one of its entries is a touch target by construction.
@@ -50,9 +52,9 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false }
   }, [onClose])
 
   // Flipped rather than clamped: a menu pinned to the viewport edge covers the row it belongs to.
-  const w = 210
+  const w = Math.min(sessionList ? 640 : 210, window.innerWidth - 16)
   const rowH = isMobile ? 44 : 34
-  const left = x + w > window.innerWidth ? Math.max(4, x - w) : x
+  const left = Math.max(8, Math.min(x, window.innerWidth - w - 8))
   // Capped to the viewport and scrollable: a long list (the tab strip's "all tabs") must never put
   // its last entries past the screen edge.
   const maxH = below ? Math.max(0, window.innerHeight - y - 4) : menuMaxHeight(window.innerHeight)
@@ -65,7 +67,7 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false }
       role="menu"
       data-portalled-menu
       style={{
-        position: 'fixed', top, left, width: w, zIndex: SESSION_ROW_MENU_Z,
+        position: 'fixed', top, left, width: w, boxSizing: 'border-box', zIndex: SESSION_ROW_MENU_Z,
         maxHeight: maxH, overflowY: 'auto', overscrollBehavior: 'contain',
         background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10,
         padding: 4, boxShadow: 'var(--ag-shadow-pop)',
@@ -93,9 +95,13 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false }
           onMouseEnter={ev => { if (e.enabled) ev.currentTarget.style.background = 'var(--bg-elevated)' }}
           onMouseLeave={ev => { ev.currentTarget.style.background = 'transparent' }}
         >
-          {e.pinned && <Pin aria-hidden size={11} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} />}
-          {e.color && <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: e.color }} />}
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.label}</span>
+          {(sessionList || e.pinned) && <span aria-hidden style={{ width: 11, flexShrink: 0 }}>{e.pinned && <Pin size={11} style={{ color: 'var(--anthropic-orange)' }} />}</span>}
+          {(sessionList || e.color) && <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: e.color ?? 'transparent' }} />}
+          <span style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.4 }}>
+            <span data-menu-title>{e.label}</span>
+            {e.leader && <span style={{ display: 'inline-block', marginLeft: 6 }}><RoleChip role="leader" pt={e.leaderLabel === 'Líder'} /></span>}
+            {e.detail && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-tertiary)' }}>{e.detail}</span>}
+          </span>
           {e.checked && <span aria-hidden style={{ marginLeft: 'auto', flexShrink: 0, width: 12, color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>✓</span>}
           {/* Same rule as the three-dot menu: where the delivery board reaches into a session
               surface, it says it is in beta. `link-task` is the entry that opens the picker. */}

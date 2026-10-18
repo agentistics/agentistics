@@ -765,6 +765,8 @@ textarea,
 /* The row's pin. Hidden until the row is hovered or something in it has focus — a column of pin
    glyphs down an unpinned list is noise beside the titles they sit next to — but always visible
    once set, and always reachable by keyboard. */
+[data-session-row]:hover .ag-row-pin,
+[data-session-row]:focus-within .ag-row-pin,
 button:hover .ag-row-pin,
 button:focus-within .ag-row-pin,
 .ag-row-pin:focus-visible { opacity: 1 !important; }

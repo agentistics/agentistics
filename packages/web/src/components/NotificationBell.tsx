@@ -168,11 +168,11 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
           background: 'var(--bg-card)', border: '1px solid var(--border)',
           borderRadius: 10, boxShadow: '0 16px 40px rgba(0,0,0,0.45)',
         }}>
+          <div data-bell-sticky-header style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--bg-card)' }}>
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '10px 12px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0,
-            // Above the rows that scroll under it: the toggle below is positioned and would paint on top.
-            zIndex: 1, background: 'var(--bg-card)',
+            padding: '10px 12px', borderBottom: '1px solid var(--border)',
+            background: 'var(--bg-card)',
           }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
               {pt ? 'Notificações' : 'Notifications'}
@@ -201,6 +201,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
             <ToggleSwitch on={muteWorkers} onToggle={() => setMuteWorkers(!muteWorkers)} label={pt ? 'Silenciar workers ativos' : 'Mute active workers'} />
           </div>
 
+          </div>
           {pinnedUpd && (
             <div
               data-testid="bell-pinned-update"

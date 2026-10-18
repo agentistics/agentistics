@@ -1,3 +1,4 @@
+import { hasLeaderTitle, sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { loadClosedFleet } from '../../lib/fleet'
 /**
@@ -450,6 +451,23 @@ export function SessionsAside({
   }
   /** No longer only about pins — the row menu's action results land here too. */
   const [notice, setNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(null), 5000)
+    return () => clearTimeout(timer)
+  }, [notice])
+  // Action replies may name a managed-id prefix; show the same session name as its row.
+  const noticeText = useMemo(() => {
+    let text = notice ?? ''
+    for (const row of rows) {
+      for (const id of [row.id, row.conversationId].filter((id): id is string => Boolean(id))) {
+        for (const length of [...new Set([id.length, 10, 8])].filter(n => n <= id.length)) {
+          text = text.replaceAll(id.slice(0, length), sessionDisplayTitle(row.title))
+        }
+      }
+    }
+    return text
+  }, [notice, rows])
 
   /**
    * USER GROUPS ("Saved to later", …) — same server-side store as pins, for the same reason.
@@ -1081,7 +1099,7 @@ export function SessionsAside({
         >
           <div style={{
             display: 'flex', alignItems: 'center', gap: 2, borderRadius: 7,
-            padding: '4px 4px 4px 5px', minHeight: tap,
+            padding: '4px 0', minHeight: tap,
           }}>
             {/* The grip — the ONLY drag source that reorders, and only TOP-LEVEL folders have one. A
                 nested folder is pinned first under its parent and has no order of its own to change;
@@ -1096,7 +1114,7 @@ export function SessionsAside({
                 title={pt ? 'Arrastar para reordenar' : 'Drag to reorder'}
                 style={{
                   display: 'flex', alignItems: 'center', flexShrink: 0, cursor: 'grab',
-                  color: 'var(--text-tertiary)', padding: '0 2px', minHeight: tap,
+                  color: 'var(--text-tertiary)', padding: 0, minHeight: tap,
                   ...(tap ? { touchAction: 'none' as const } : {}),
                 }}
               >
@@ -1139,12 +1157,12 @@ export function SessionsAside({
                     : {})}
                   style={{
                     fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
-                    minWidth: 0, overflowWrap: 'anywhere', textAlign: 'left',
+                    minWidth: 0, overflowWrap: 'normal', textAlign: 'left',
                   }}
                 >
                   {group.name}
                 </span>
-                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupRowsResolved), narrowing)}</span>
+                <span style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupRowsResolved), narrowing)}</span>
               </button>
               <button
                 onClick={e => {
@@ -1282,7 +1300,7 @@ export function SessionsAside({
   useEscapeOwner(renamingGroup !== null, () => setRenamingGroup(null))
   return (
     <GoToSessionContext.Provider value={onGoToSession ?? null}>
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
       {/* THE IDLE-REVIEW CARD — the FIRST thing in the column, right under the Dashboard/Sessions
           tabs (desktop) and the Sessions/Metrics tabs (mobile). Owner decision 2026-09-27: it sat
           above Groups, halfway down a list that scrolls, and read as one more row. At the top it
@@ -1699,9 +1717,9 @@ export function SessionsAside({
 
       {notice && (
         <p role="status" style={{
-          margin: '0 4px', fontSize: 11, lineHeight: 1.45, color: 'var(--anthropic-orange)',
+          position: 'absolute', top: 0, left: 4, right: 4, zIndex: 5, margin: 0, padding: '6px 8px', borderRadius: 6, background: 'var(--bg-card)', fontSize: 11, lineHeight: 1.45, color: 'var(--anthropic-orange)',
         }}>
-          {notice}
+          {noticeText}
         </p>
       )}
 
@@ -1815,7 +1833,7 @@ export function SessionsAside({
               {foldedPinned ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
               <Pin size={11} />
               <span>{pt ? 'Fixadas' : 'Pinned'}</span>
-              <span style={{ marginLeft: 'auto', fontWeight: 600, opacity: 0.75 }}>{pinnedRows.length}</span>
+              <span style={{ marginLeft: 'auto', fontWeight: 600, opacity: 0.75 }}>{allPinnedRows.length}</span>
             </button>
             {!foldedPinned && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1963,7 +1981,7 @@ export function SessionsAside({
           {!foldedGroupsSection && liveRootFolders.map(entry => renderGroupBand(entry, 0))}
         </div>
 
-        {total === 0 ? (
+        {total === 0 ? (endedRootFolders.length > 0 && !loading && !unsupported && !unavailable && !query && !filterCount ? null :
           <EmptyReason
             pt={pt} loading={loading} unsupported={unsupported}
             unavailable={unavailable} searching={query !== ''}
@@ -2699,7 +2717,8 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
 }) {
   const mutedKeys = useMutedKeys()
   const roleKey = sessionIdentityKey(session)
-  const role = useSessionRole(roleKey)
+  const storedRole = useSessionRole(roleKey)
+  const role = storedRole ?? (hasLeaderTitle(session.title) ? 'leader' : undefined)
   const muteWorkers = useMuteWorkers()
   useEffect(() => { registerSessionRoleAlias(session.id, roleKey) }, [session.id, roleKey])
   const wants = sessionNotify(session)
@@ -2714,10 +2733,10 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
     if (longPress.current !== null) { clearTimeout(longPress.current); longPress.current = null }
   }
   return (
-    <button
-      onClick={onOpen}
+    <div
+      data-session-row
       style={{
-        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, width: '100%', boxSizing: 'border-box',
         // Left padding is deliberately wider than the right: a live row carries a state edge on its left
         // and the text needs air beside it (the row's own dot used to provide it).
         padding: compact ? '6px 8px' : '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: tap,
@@ -2770,30 +2789,37 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       aria-current={selected ? 'true' : undefined}
       title={session.model ? `${session.title}\n${session.model}` : session.title}
     >
+      <button type="button" onClick={onOpen} data-session-open
+        style={{ flex: '1 1 130px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, padding: 0,
+          border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
       {reopening && (
         <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
           <AgentisticsLoader size={12} label={reopeningLabel(lang !== 'en')} />
           {reopeningLabel(lang !== 'en')}
         </span>
       )}
-      {compact ? <CompactSessionFacts session={session} /> : <SessionFacts
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', minWidth: 0 }}>
+      {compact ? <CompactSessionFacts session={session} titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined} /> : <SessionFacts
+        titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined}
         session={session}
         selected={selected}
         {...(lang ? { lang } : {})}
         {...(cardStyle.stateTextColor ? { metaColor: cardStyle.stateTextColor } : {})}
       />}
+      </span>
+      </button>
       {onReopen && reopenVerb && (
-        <span role="button" tabIndex={reopenVerb.enabled && !reopening ? 0 : -1}
+        <button type="button" tabIndex={reopenVerb.enabled && !reopening ? 0 : -1}
           aria-disabled={!reopenVerb.enabled || reopening} title={reopenVerb.reason ?? reopenVerb.label}
           onClick={e => { e.stopPropagation(); if (reopenVerb.enabled && !reopening) onReopen() }}
           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (reopenVerb.enabled && !reopening) onReopen() } }}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: tap ?? 24, flexShrink: 0,
+          style={{ border: 'none', background: 'transparent', font: 'inherit', padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: tap ?? 24, flexShrink: 0,
             color: 'var(--text-secondary)', opacity: reopenVerb.enabled && !reopening ? 1 : 0.5, fontSize: 11 }}>
           <RotateCcw size={12} />{lang === 'en' ? 'Reopen' : 'Reabrir'}
-        </span>
+        </button>
       )}
       {compact && verbs && verbs.length > 0 && onOpenMenu && (
-        <span role="button" tabIndex={0}
+        <button type="button" tabIndex={0}
           aria-label={lang === 'en' ? `Options for ${session.title}` : `Opções de ${session.title}`}
           aria-haspopup="menu"
           onClick={e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); onOpenMenu(r.left, r.bottom, verbs) }}
@@ -2803,15 +2829,12 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
               const r = e.currentTarget.getBoundingClientRect(); onOpenMenu(r.left, r.bottom, verbs)
             }
           }}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: tap ?? 22, height: tap ?? 22 }}
-        ><MoreVertical size={13} /></span>
+          style={{ border: 'none', background: 'transparent', color: 'inherit', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: tap ?? 22, height: tap ?? 22 }}
+        ><MoreVertical size={13} /></button>
       )}
-      {role && <RoleChip role={role} pt={lang === 'pt'} />}
       {/* The assistant, NAMED. It was a 5px dot, which carries the fact in colour alone — and a
           colour is not a name. The model sits with it on the meta line below. */}
-      {/* The pin lives on the row rather than in a menu: it is a one-click decision about the row
-          you are looking at. `role="button"` on a span, because a <button> inside a <button> is
-          invalid HTML and browsers resolve it by dropping one of them. */}
+      {/* Row actions are separate buttons beside the session-opening button. */}
       {goTo && (() => {
         // A SEPARATE control: the row click keeps doing what this mount does with it. Always
         // visible (unlike the pin): it is the one way out of the dock to the workspace, and a
@@ -2820,15 +2843,14 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         const hint = lang === 'en' ? 'Open this session in the Sessions workspace' : 'Abrir esta sessão na tela de Sessões'
         const go = (e: { stopPropagation(): void; preventDefault(): void }) => { e.preventDefault(); e.stopPropagation(); goTo(session.id) }
         return (
-          <span
-            role="button"
+          <button type="button"
             tabIndex={0}
             aria-label={label}
             title={hint}
             onClick={go}
             onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') go(e) }}
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              border: 'none', background: 'transparent', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
               // 44px PAINTED on touch (`tap` is only given there): the row has the height, and a
               // projected `.ag-tap-icon` box would reach into the pin beside it.
               width: tap ? 44 : 22, height: tap ? 44 : 22, borderRadius: 6, cursor: 'pointer', color: 'var(--text-tertiary)',
@@ -2837,7 +2859,7 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-tertiary)' }}
           >
             <SquareArrowOutUpRight size={13} />
-          </span>
+          </button>
         )
       })()}
       {mutedKeys.includes(pinKeyOf(session)) && (
@@ -2856,18 +2878,17 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         <span role="img" aria-label={lang === 'en' ? 'Workers muted' : 'Workers silenciados'} title={lang === 'en' ? 'Workers muted' : 'Workers silenciados'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 18, height: 20, color: 'var(--text-tertiary)' }}><BellOff size={12} /></span>
       )}
       {onPin && (
-        <span
-          role="button"
+        <button type="button"
           tabIndex={0}
-          aria-label={pinned ? 'Unpin' : 'Pin'}
-          title={pinned ? 'Unpin' : 'Pin'}
+          aria-label={pinned ? (lang === 'en' ? 'Unpin' : 'Desafixar') : (lang === 'en' ? 'Pin' : 'Fixar')}
+          title={pinned ? (lang === 'en' ? 'Unpin' : 'Desafixar') : (lang === 'en' ? 'Pin' : 'Fixar')}
           onClick={e => { e.stopPropagation(); onPin() }}
           onKeyDown={e => {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onPin() }
           }}
           style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            width: 20, height: 20, borderRadius: 6, cursor: 'pointer',
+            border: 'none', background: 'transparent', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            width: tap ?? 20, height: tap ?? 20, borderRadius: 6, cursor: 'pointer',
             color: pinned ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
             // A pin nobody set is faint until the row is hovered: a column of pin glyphs down an
             // unpinned list is noise beside the titles they sit next to.
@@ -2879,9 +2900,9 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
           className="ag-row-pin"
         >
           {pinned ? <Pin size={12} /> : <PinOff size={12} />}
-        </span>
+        </button>
       )}
-    </button>
+    </div>
   )
 }
 
