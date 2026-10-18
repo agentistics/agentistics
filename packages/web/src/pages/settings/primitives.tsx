@@ -26,7 +26,7 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger', icon }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger', icon, busy }: {
   open: boolean
   title: string
   message: string
@@ -48,12 +48,14 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   tone?: 'danger' | 'default'
   /** Replaces the tone's icon (the `default` tone's is a download arrow, right for an install only). */
   icon?: React.ReactNode
+  /** The confirmed action is running: the confirm button is disabled until it answers. */
+  busy?: boolean
 }) {
   const isMobile = useIsMobile()
   const [typed, setTyped] = React.useState('')
   // Reset between openings, otherwise the previous answer would pre-arm the next delete.
   React.useEffect(() => { if (open) setTyped('') }, [open])
-  const armed = requireText === undefined || typed === requireText
+  const armed = (requireText === undefined || typed === requireText) && !busy
   // The top-most overlay owns Escape (lib/overlayStack): a Drawer or screen underneath stays open.
   useEscapeOwner(open, onCancel)
   const titleId = React.useId()

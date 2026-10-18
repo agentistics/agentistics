@@ -28,16 +28,21 @@ describe('pending roots', () => {
     expect(anyResolved([], [root({})])).toBe(false)
   })
   test('login target needs a session id', () => {
-    expect(loginTarget(root({ loginSessionId: 'abc' }))).toBe('/sessions/abc')
+    expect(loginTarget(root({ loginSessionId: 'abc' }))).toBe('/sessions/abc?view=terminal')
     expect(loginTarget(root({}))).toBeNull()
   })
 })
 
 describe('addErrorText', () => {
-  test('shows the server message, never the code', () => {
-    const text = addErrorText({ error: 'login_unavailable', message: 'claude is not installed.' }, false)
-    expect(text).toBe('claude is not installed.')
-    expect(text).not.toContain('login_unavailable')
+  test('maps the reason code to the user\'s language, never the raw code', () => {
+    const pt = addErrorText({ error: 'root_in_use', message: 'A session is still running in this account. End it first.' }, true)
+    expect(pt).toContain('Ainda há uma sessão')
+    expect(pt).not.toContain('root_in_use')
+    expect(addErrorText({ error: 'unsupported' }, false)).toContain('single login')
+  })
+  test('an unknown code shows the server sentence in English and a fixed line in Portuguese', () => {
+    expect(addErrorText({ error: 'zzz', message: 'claude is not installed.' }, false)).toBe('claude is not installed.')
+    expect(addErrorText({ error: 'zzz', message: 'claude is not installed.' }, true)).toContain('Tente de novo')
   })
   test('falls back to a fixed sentence in both languages', () => {
     expect(addErrorText(null, true)).toContain('Tente de novo')
@@ -52,6 +57,19 @@ describe('copy', () => {
     expect(ADD_COPY(true).flagOff).toBe('Várias contas é uma função experimental e está desligada neste computador.')
     expect(ADD_COPY(false).flagOff).toContain('turned off')
     for (const pt of [true, false]) expect(ADD_COPY(pt).flagOff).not.toMatch(/Configura|Settings|Experimental →/)
+  })
+})
+
+describe('copy details', () => {
+  test('modal and row say the same thing, in both languages', () => {
+    for (const pt of [true, false]) {
+      const c = ADD_COPY(pt)
+      expect(c.confirm).toBe(c.openLogin)
+      expect(c.workingNote).toMatch(pt ? /segundos/ : /seconds/)
+    }
+  })
+  test('buttons are named by assistant, without repeating the verb', () => {
+    expect(readFileSync(new URL('./AddAccount.tsx', import.meta.url), 'utf8')).toContain('{label(h)}')
   })
 })
 

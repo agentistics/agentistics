@@ -27,11 +27,13 @@ export default function AddAccount({ lang, harnesses, onBound }: {
   const t = ADD_COPY(pt)
   const isMobile = useIsMobile()
   const navigate = useNavigate()
-  const [flagOn, setFlagOn] = useState(false)
+  const [flagOn, setFlagOn] = useState<boolean | null>(null)
   const [roots, setRoots] = useState<RootRowView[]>([])
   const [asking, setAsking] = useState<HarnessId | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState<string | null>(null)
+  const [cancelError, setCancelError] = useState<string | null>(null)
   const rootsRef = useRef<RootRowView[]>([])
 
   useEffect(() => {
@@ -41,7 +43,7 @@ export default function AddAccount({ lang, harnesses, onBound }: {
       .then((b: { features?: { id: string; on: boolean }[] } | null) => {
         if (!cancelled) setFlagOn(b?.features?.find(f => f.id === 'multi-account')?.on === true)
       })
-      .catch(() => { /* unknown reads as off */ })
+      .catch(() => { if (!cancelled) setFlagOn(false) /* unknown reads as off */ })
     return () => { cancelled = true }
   }, [])
 
@@ -65,7 +67,7 @@ export default function AddAccount({ lang, harnesses, onBound }: {
     return () => clearInterval(id)
   }, [flagOn, waiting.length, refresh])
 
-  const view = addAccountView(flagOn, harnesses)
+  const view = addAccountView(flagOn === true, harnesses)
   const label = (h: HarnessId) => HARNESS_LABELS[h] ?? h
 
   const confirm = async () => {
@@ -92,14 +94,21 @@ export default function AddAccount({ lang, harnesses, onBound }: {
   }
 
   const cancelPending = async (r: RootRowView) => {
-    if (!r.pendingId) return
+    if (!r.pendingId || cancelling) return
+    setCancelling(r.pendingId)
+    setCancelError(null)
     try {
-      await fetch(`/api/accounts/roots/${encodeURIComponent(r.pendingId)}`, { method: 'DELETE' })
+      const res = await fetch(`/api/accounts/roots/${encodeURIComponent(r.pendingId)}`, { method: 'DELETE' })
+      if (!res.ok) setCancelError(addErrorText(await res.json().catch(() => null), pt))
+    } catch {
+      setCancelError(addErrorText(null, pt))
     } finally {
+      setCancelling(null)
       await refresh()
     }
   }
 
+  if (flagOn === null) return null
   if (view.kind === 'off') return <MetricNote>{t.flagOff}</MetricNote>
   return (
     <div data-add-account style={{ marginTop: 14 }}>
@@ -118,18 +127,20 @@ export default function AddAccount({ lang, harnesses, onBound }: {
                   <Pill tone="warn" nowrap><StatusDot state="warn" size={7} /> {t.waiting}</Pill>
                 </span>
                 {target && <button type="button" style={dialogButtonStyle('secondary', isMobile)} onClick={() => navigate(target)}>{t.openLogin}</button>}
-                <button type="button" style={dialogButtonStyle('secondary', isMobile)} onClick={() => { void cancelPending(r) }}>{t.cancelPending}</button>
+                <button type="button" style={dialogButtonStyle('secondary', isMobile)} disabled={cancelling !== null} onClick={() => { void cancelPending(r) }}>{cancelling === r.pendingId ? t.cancelling : t.cancelPending}</button>
               </div>
             )
           })}
         </div>
       )}
+      {cancelError && <p role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--accent-red)' }}>{cancelError}</p>}
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>{t.add}</div>
       <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', flexWrap: 'wrap', gap: 8 }}>
         {view.addable.map(h => (
           <button key={h} type="button" aria-label={t.addTo(label(h))}
             style={{ ...dialogButtonStyle('secondary', isMobile), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
             onClick={() => { setError(null); setAsking(h) }}>
-            <HarnessMark harness={h} size={16} />{t.addTo(label(h))}
+            <HarnessMark harness={h} size={16} />{label(h)}
           </button>
         ))}
       </div>
@@ -143,9 +154,11 @@ export default function AddAccount({ lang, harnesses, onBound }: {
         message={asking ? t.message(label(asking)) : ''}
         confirmLabel={busy ? t.working : t.confirm}
         cancelLabel={t.cancel}
+        busy={busy}
         onConfirm={() => { void confirm() }}
         onCancel={() => { if (!busy) setAsking(null) }}
       >
+        {busy && <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>{t.workingNote}</p>}
         {error && <p role="alert" style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--accent-red)' }}>{error}</p>}
       </ConfirmModal>
     </div>

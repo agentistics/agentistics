@@ -41,20 +41,34 @@ export function anyResolved(before: readonly RootRowView[], after: readonly Root
   return pendingRoots(before).some(r => !still.has(r.pendingId))
 }
 
-/** The server's own sentence, never a raw code; a fixed fallback when it sent none. */
+/** Refusal codes of `POST/DELETE /api/accounts/roots`, in the user's language; the server sentence is the en fallback. */
+const REFUSALS: Record<string, { pt: string; en: string }> = {
+  root_in_use: { pt: 'Ainda há uma sessão aberta nesta conta. Encerre-a primeiro.', en: 'A session is still running in this account. End it first.' },
+  unsupported: { pt: 'Este assistente mantém um só login por computador, então não dá para separar uma segunda conta.', en: 'This assistant keeps a single login per computer, so a second account cannot be kept apart.' },
+  unsafe_path: { pt: 'A pasta de contas contém um atalho, então foi deixada como está.', en: 'The accounts folder contains a link, so it was left alone.' },
+  login_unavailable: { pt: 'Não foi possível abrir o login deste assistente. Veja se ele está instalado.', en: 'Could not open this assistant\'s sign-in. Check that it is installed.' },
+  disabled: { pt: 'Várias contas está desligada neste computador.', en: 'Multiple accounts is turned off on this computer.' },
+  unknown_harness: { pt: 'Assistente desconhecido.', en: 'Unknown assistant.' },
+  not_found: { pt: 'Esta conta já não existe.', en: 'This account no longer exists.' },
+}
+
+/** A refusal in the user's language by its code, never the raw code; the server sentence in English; then a fixed fallback. */
 export function addErrorText(body: unknown, pt: boolean): string {
-  const msg = body && typeof body === 'object' ? (body as { message?: unknown }).message : undefined
-  if (typeof msg === 'string' && msg.trim()) return msg
-  return pt ? 'Não foi possível iniciar o login desta conta. Tente de novo.' : 'Could not start signing in to this account. Try again.'
+  const obj = body && typeof body === 'object' ? (body as { message?: unknown; error?: unknown }) : undefined
+  const known = typeof obj?.error === 'string' ? REFUSALS[obj.error] : undefined
+  if (known) return pt ? known.pt : known.en
+  const msg = obj?.message
+  if (!pt && typeof msg === 'string' && msg.trim()) return msg
+  return pt ? 'Não foi possível concluir. Tente de novo.' : 'Could not complete this. Try again.'
 }
 
 /** Whether the pending row can open its login session. */
 export const loginTarget = (r: RootRowView): string | null =>
-  r.loginSessionId ? `/sessions/${encodeURIComponent(r.loginSessionId)}` : null
+  r.loginSessionId ? `/sessions/${encodeURIComponent(r.loginSessionId)}?view=terminal` : null
 
 export const ADD_COPY = (pt: boolean) => ({
   add: pt ? 'Adicionar conta' : 'Add account',
-  addTo: (label: string) => (pt ? `Adicionar conta · ${label}` : `Add account · ${label}`),
+  addTo: (label: string) => (pt ? `Adicionar conta do ${label}` : `Add a ${label} account`),
   title: (label: string) => (pt ? `Adicionar uma conta do ${label}` : `Add a ${label} account`),
   message: (label: string) => (pt
     ? `Vamos abrir uma sessão de login do ${label}. Entre com a outra conta no Terminal dessa sessão. Quando terminar, a conta aparece aqui sozinha.`
@@ -62,8 +76,10 @@ export const ADD_COPY = (pt: boolean) => ({
   confirm: pt ? 'Abrir login' : 'Open login',
   cancel: pt ? 'Agora não' : 'Not now',
   working: pt ? 'Abrindo…' : 'Opening…',
+  workingNote: pt ? 'Abrindo a sessão de login — leva alguns segundos.' : 'Opening the sign-in session — this takes a few seconds.',
+  cancelling: pt ? 'Cancelando…' : 'Cancelling…',
   waiting: pt ? 'Aguardando login' : 'Waiting for sign-in',
-  openLogin: pt ? 'Abrir login' : 'Open sign-in',
+  openLogin: pt ? 'Abrir login' : 'Open login',
   cancelPending: pt ? 'Cancelar' : 'Cancel',
   noSecond: (labels: string) => (pt ? `${labels}: ainda não permite manter uma segunda conta separada.` : `${labels}: cannot keep a second account apart yet.`),
   flagOff: pt
