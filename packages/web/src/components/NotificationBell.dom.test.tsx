@@ -60,3 +60,25 @@ for (const width of [1280, 390]) test(`title, clear and mute switch stay in a si
     host.remove()
   }
 })
+
+test('completion supersedes its progress row and Escape closes the bell', async () => {
+  const { pushLocalNotification, clearNotifications } = await import('../lib/notifications')
+  const host = document.createElement('div'); document.body.appendChild(host)
+  const root = createRoot(host)
+  try {
+    await act(async () => {
+      pushLocalNotification({ type: 'info', code: 'clean.started' })
+      pushLocalNotification({ type: 'success', code: 'clean.done', meta: { freed: '100 MB', worktrees: 2, nodeModules: 0 } })
+      root.render(<MemoryRouter><NotificationBell lang="pt" /></MemoryRouter>)
+    })
+    await act(async () => host.querySelector<HTMLButtonElement>('button[title="Notificações"]')!.click())
+    expect(host.textContent).toContain('Limpeza concluída')
+    expect(host.textContent).not.toContain('Limpeza em andamento')
+    expect(host.textContent).toContain('2 worktrees')
+    expect(host.textContent).not.toContain('0 pasta')
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(host.querySelector('[data-bell-sticky-header]')).toBeNull()
+  } finally {
+    await act(async () => { root.unmount(); clearNotifications() }); host.remove()
+  }
+})

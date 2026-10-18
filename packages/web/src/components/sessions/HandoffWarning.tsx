@@ -35,6 +35,7 @@ export function HandoffMeter({ id, pt, act }: { id: string; pt: boolean; act: Se
     <button ref={anchor} type="button" className="handoff-meter" style={{ '--handoff-tone': tones[p.level] } as CSSProperties}
       aria-label={`${tokens(p.contextTokens, pt)} ${pt ? 'de' : 'of'} ${tokens(p.cutTokens, pt)} · ${handoffLevelLabel(p.level, pt)}`}
       onClick={() => collapsed ? actions.expand(id) : actions.open(id)}>
+      {!collapsed && <span>{pt ? 'Líder' : 'Leader'}</span>}
       {collapsed ? <span>{pt ? 'Hora de passar' : 'Handoff due'}</span> : <span className="handoff-meter-track" aria-hidden="true"><span style={{ width: `${Math.min(100, Math.max(0, (p.contextTokens ?? 0) / p.cutTokens * 100))}%` }} /></span>}
       <span>{tokens(p.contextTokens, pt)}</span>
     </button>
@@ -55,13 +56,13 @@ export function HandoffBand({ id, pt }: { id: string; pt: boolean }) {
   const ratio = p && p.nextReplyUSD !== null && p.successorReplyUSD !== null && p.successorReplyUSD > 0 ? p.nextReplyUSD / p.successorReplyUSD : null
   return <div className={`handoff-band-wrap ${visible ? 'visible' : ''}`} inert={!visible} aria-hidden={!visible}>
     <div className="handoff-band-clip"><div className="handoff-band" style={{ '--handoff-tone': tones[p?.level ?? 'due'] } as CSSProperties}>
-      <div className="handoff-band-copy"><strong>{pt ? 'Hora de passar o líder' : 'Time to hand off the leader'}</strong><span>{tokens(p?.contextTokens ?? null, pt)} {pt ? 'de' : 'of'} {tokens(p?.cutTokens ?? null, pt)}{ratio !== null ? (pt ? ` · cada resposta custa ~${ratio.toFixed(1)}× uma sessão nova` : ` · each reply costs ~${ratio.toFixed(1)}× a new session`) : ''}</span></div>
+      <div className="handoff-band-copy"><strong>{p?.level === 'overdue' ? (pt ? 'Passou do ponto de passar o líder' : 'Leader handoff is overdue') : (pt ? 'Hora de passar o líder' : 'Time to hand off the leader')}</strong><span>{tokens(p?.contextTokens ?? null, pt)} {pt ? 'de' : 'of'} {tokens(p?.cutTokens ?? null, pt)}{ratio !== null ? (pt ? ` · cada resposta custa ~${ratio.toLocaleString(pt ? 'pt-BR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}× uma sessão nova` : ` · each reply costs ~${ratio.toLocaleString(pt ? 'pt-BR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}× a new session`) : ''}</span></div>
       <div className="handoff-actions"><button type="button" onClick={() => actions.open(id)}>{pt ? 'Ver as contas' : 'See the numbers'}</button><button type="button" className="primary" onClick={() => { actions.open(id); window.dispatchEvent(new CustomEvent('agentistics:handoff-confirm', { detail: id })) }}>{pt ? 'Passar agora' : 'Hand off now'}</button><button type="button" className="icon" aria-label={pt ? 'Lembrar depois' : 'Remind me later'} onClick={() => actions.dismiss(id, true)}><X size={16} /></button></div>
     </div></div>
   </div>
 }
 
-function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPanel; open: boolean; pt: boolean; act: SessionChatProps['act'] }) {
+export function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPanel; open: boolean; pt: boolean; act: SessionChatProps['act'] }) {
   const [confirm, setConfirm] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
@@ -91,10 +92,10 @@ function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPanel; op
     finally { setSending(false) }
   }
   const labels = { continue: pt ? 'Continuar aqui' : 'Continue here', extra: pt ? `Continuar +${p.config.extraPercent}%` : `Continue +${p.config.extraPercent}%`, handoff: pt ? 'Passar para uma sessão nova' : 'Hand off to a new session' }
-  return createPortal(<ConfirmModal open={open} maxWidth={640} mobileSheet tone="default" icon={<ArrowRightLeft size={18} />}
+  return createPortal(<ConfirmModal className="handoff-dialog" open={open} maxWidth={640} mobileSheet tone="default" icon={<ArrowRightLeft size={18} />}
     title={pt ? 'Continuar ou passar o líder?' : 'Continue or hand off the leader?'}
     message={handoffLevelLabel(p.level, pt)} confirmLabel="" cancelLabel="" onConfirm={() => {}} onCancel={() => actions.close(p.sessionId)}
-    footer={<div className="handoff-actions handoff-panel-footer"><button type="button" onClick={() => actions.close(p.sessionId)} disabled={sending}>{pt ? 'Fechar' : 'Close'}</button><button type="button" onClick={() => actions.dismiss(p.sessionId, true)} disabled={sending}>{pt ? 'Lembrar em +50 mil' : 'Remind me in +50k'}</button><button type="button" className="primary" disabled={sending} onClick={() => confirm ? void handoff() : setConfirm(true)}>{sending ? (pt ? 'Solicitando…' : 'Requesting…') : confirm ? (pt ? 'Confirmar passagem' : 'Confirm handoff') : (pt ? 'Passar agora' : 'Hand off now')}</button></div>}>
+    footer={<div className="handoff-panel-footer">{confirm && <p role="status">{pt ? 'O líder vai preparar a passagem e abrir o sucessor pelo fluxo existente. O trabalho em andamento será registrado no arquivo de passagem.' : 'The leader will prepare the handoff and open the successor through the existing flow. Work in flight will be recorded in the handoff file.'}</p>}<div className="handoff-actions"><button type="button" onClick={() => actions.close(p.sessionId)} disabled={sending}>{pt ? 'Fechar' : 'Close'}</button><button type="button" onClick={() => actions.dismiss(p.sessionId, true)} disabled={sending}>{pt ? 'Lembrar em +50 mil' : 'Remind me in +50k'}</button><button type="button" className="primary" disabled={sending} onClick={() => confirm ? void handoff() : setConfirm(true)}>{sending ? (pt ? 'Solicitando…' : 'Requesting…') : confirm ? (pt ? 'Confirmar passagem' : 'Confirm handoff') : (pt ? 'Passar agora' : 'Hand off now')}</button></div></div>}>
     <div className="handoff-live-panel">
       <div className="handoff-summary">
         <div><small>{pt ? 'Conversa agora' : 'Context now'}</small><strong>{tokens(p.contextTokens, pt)}</strong><small>{pt ? 'corte: ' : 'cut: '}{tokens(p.cutTokens, pt)}</small></div>
@@ -110,14 +111,13 @@ function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPanel; op
         </div>)}
       </div>
       <label className="handoff-simulation"><span>{pt ? 'Simular continuar mais' : 'Simulate continuing another'}</span><input type="number" min={0} max={100} step={1} value={extraDraft} onChange={e => setExtraDraft(e.target.value)} onBlur={simulate} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); simulate() } }} /> %</label>
-      <small>{pt ? `+${p.config.extraPercent}% da janela de contexto. Ajuste em Configurações › Sessões. Quota estimada pelo consumo medido da conta; “—” indica medição indisponível.` : `+${p.config.extraPercent}% of the context window. Adjust in Settings › Sessions. Quota estimated from measured account consumption; “—” means unavailable.`}</small>
+      <small>{pt ? 'Percentual da janela de contexto. Ajuste em Configurações › Sessões. Quota estimada pelo consumo medido da conta; “—” indica medição indisponível.' : 'Percentage of the context window. Adjust in Settings › Sessions. Quota estimated from measured account consumption; “—” means unavailable.'}</small>
       <div className="handoff-receives"><strong>{pt ? 'O que a sessão nova recebe' : 'What the new session receives'}</strong>
         <p>{pt ? 'Um arquivo durável com o estado do trabalho, suas decisões, sessões ativas e a fila. O líder prepara esse resumo antes de abrir o sucessor.' : 'A durable file with work state, your decisions, active sessions and the queue. The leader prepares this summary before starting the successor.'}</p>
-        <p>{p.handoffPath ?? (pt ? 'O líder prepara o arquivo de passagem antes de abrir o sucessor.' : 'The leader prepares the handoff file before starting the successor.')}</p>
+        {p.handoffPath && <p>{p.handoffPath}</p>}
         <p>{pt ? 'Contexto base estimado: ' : 'Estimated base context: '}{tokens(p.successorBaseTokens, pt)} · {pt ? 'Custo da passagem: ' : 'Handoff overhead: '}{money(p.handoffOverheadUSD)} · {pt ? 'Equilíbrio em respostas: ' : 'Break-even replies: '}{p.breakEvenReplies ?? '—'}</p>
         <p>{pt ? 'Trabalho em andamento: ' : 'Work in flight: '}{p.workInFlight.length ? p.workInFlight.map(w => w === 'main-response' ? (pt ? 'resposta principal' : 'main response') : w === 'background-work' ? (pt ? 'trabalho em segundo plano' : 'background work') : w).join(', ') : (pt ? 'nenhum detectado' : 'none detected')}.</p>
       </div>
-      {confirm && <p role="status">{pt ? 'O líder vai preparar a passagem e abrir o sucessor pelo fluxo existente. O trabalho em andamento será registrado no arquivo de passagem.' : 'The leader will prepare the handoff and open the successor through the existing flow. Work in flight will be recorded in the handoff file.'}</p>}
       {error && <p role="alert">{error}</p>}
     </div>
   </ConfirmModal>, document.body)

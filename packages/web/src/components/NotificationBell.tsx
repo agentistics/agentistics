@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X, Download, Search } from 'lucide-react'
 import { useNotifications, markAllRead, clearNotifications, dismissNotification, pushLocalNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
+import { useEscapeOwner } from '../lib/overlayStack'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { openWhatsNew } from '../whatsNew/open'
 import { requestIdleReview } from '../lib/idleReviewRequest'
@@ -96,7 +97,8 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
   const { scan: cleanScan } = useCleanScan()
   const pinnedClean = cleanScan?.background && (cleanScan.state === 'scanning' || cleanScan.state === 'ready' || cleanScan.state === 'error') ? cleanScan : null
   // The pinned row IS the update news; the popup's own persisted copy would be the same news twice.
-  const notes = pinnedUpd ? allNotes.filter(n => n.code !== 'app.update_available') : allNotes
+  const completedAt = Math.max(0, ...allNotes.filter(n => n.code === 'clean.done' || n.code === 'clean.partial').map(n => n.ts))
+  const notes = allNotes.filter(n => (!pinnedUpd || n.code !== 'app.update_available') && (n.code !== 'clean.started' || n.ts > completedAt))
   const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -104,6 +106,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
   const ref = useRef<HTMLDivElement>(null)
   const unread = notes.filter(n => !n.read).length
   const muteWorkers = useMuteWorkers()
+  useEscapeOwner(open, () => setOpen(false))
 
   useEffect(() => {
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }

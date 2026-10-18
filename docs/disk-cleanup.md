@@ -50,3 +50,9 @@ Additive endpoints:
 Foreground results may be reused for five minutes. Background results are retained until finalized,
 so opening the bell's completion action never silently starts a replacement scan. Applying still
 rechecks the selected ids against current facts and repeats all removal guards.
+
+The result keeps its summary, filters and actions in view while only the item list scrolls.
+The confirmation shows the selected byte total and count once. Scan logs show timestamps with
+seconds and sizes only after measurement; unfamiliar scan steps fall back to discovery wording.
+Cleanup completion replaces the bell’s earlier progress row, with localized singular/plural counts
+and no empty removal categories. Escape closes the notification bell through the shared overlay stack.

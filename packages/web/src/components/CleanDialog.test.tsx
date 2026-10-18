@@ -17,3 +17,16 @@ test('the same state is readable in English, and first render has no stale progr
   expect(initial).toContain('estimating time')
   expect(initial).not.toContain('completed-name')
 })
+test('unknown scan labels degrade to a localized discovery step', () => {
+  for (const lang of ['pt', 'en'] as const) {
+    const html = renderToStaticMarkup(<CleanScanView scan={{ ...scan, label: 'unexpected-step' as CleanScanState['label'] }} lang={lang} />)
+    expect(html).toContain(lang === 'pt' ? 'localizando os projetos' : 'finding projects')
+    expect(html).toContain('46%')
+  }
+})
+test('mini-log shows seconds and only completed rows have measured sizes', () => {
+  const html = renderToStaticMarkup(<CleanScanView scan={{ ...scan, log: [{ at: 1000, state: 'running', name: 'pending', bytes: 0 }, { at: 2000, state: 'done', name: 'measured', bytes: 1024 }] }} lang="pt" />)
+  expect(html).toMatch(/\d{2}:\d{2}:\d{2}/)
+  expect(html).not.toContain('0 B')
+  expect(html).toContain('1 KB')
+})

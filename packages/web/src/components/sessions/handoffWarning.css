@@ -54,3 +54,11 @@
 .handoff-simulation>span { flex:1; }
 .handoff-simulation input { width:66px; box-sizing:border-box; min-height:36px; padding:6px 10px; border:1px solid var(--border); border-radius:8px; background:var(--bg-base); color:var(--text-primary); font:inherit; }
 @media(max-width:768px) { .handoff-simulation input { min-height:44px; font-size:16px; } }
+
+.handoff-dialog { overflow: hidden !important; }
+.handoff-dialog > :not(.handoff-live-panel) { flex-shrink: 0; }
+.handoff-live-panel { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.handoff-panel-footer { flex-shrink: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+.handoff-panel-footer > .handoff-actions { justify-content: flex-end; }
+.handoff-panel-footer p { margin: 0 0 10px; color: var(--text-secondary); font-size: 12.5px; line-height: 1.5; }
+@media(max-width:768px) { .handoff-panel-footer > .handoff-actions { flex-direction: column-reverse; align-items: stretch; } }

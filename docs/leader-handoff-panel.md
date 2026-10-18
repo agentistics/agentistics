@@ -16,7 +16,8 @@ when that warning is enabled. Closing the band folds it into the header meter; i
 way to disable the visible warnings. These switches do not disable the existing message to the leader.
 
 The desktop panel uses the shared confirmation modal; on phones it is a bottom sheet, and the
-comparison table becomes cards. “Hand off now” opens the live panel and asks for confirmation.
+comparison table becomes cards. Only the panel body scrolls; Close, Remind and Hand off stay
+visible in the footer, together with the confirmation message when requested. “Hand off now” opens the live panel and asks for confirmation.
 Confirming sends a prompt to the current leader using the existing fleet prompt action. The leader
 prepares the durable handoff and opens a successor through `agentop session --handoff` /
 `handoff:true`, preserving the existing verification, inheritance, and relay behavior. The button
