@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.140.10': {
+  '2.140.11': {
     features: [
       {
         pt: 'Sessões fixadas que foram encerradas descansam em "Dormindo", no menu das abas e na lista lateral, prontas para reabrir.',
