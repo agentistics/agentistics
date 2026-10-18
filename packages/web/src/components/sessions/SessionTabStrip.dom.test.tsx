@@ -197,7 +197,7 @@ describe('sleeping tabs', () => {
     button.getBoundingClientRect = () => ({ left: 12, right: 88, bottom: 70 } as DOMRect)
     act(() => button.click())
     const menu = document.querySelector('[role="menu"]') as HTMLElement
-    expect(menu.style.left).toBe(width === 390 ? '8px' : '12px')
+    expect(menu.style.left).toBe('12px')
     expect(menu.style.top).toBe('74px')
     const entries = Array.from(menu.querySelectorAll('button'))
     const header = entries.find(e => e.textContent === 'Sleeping')!
@@ -283,12 +283,14 @@ for (const width of [1280, 390]) {
     for (const el of Array.from(tab('a').querySelectorAll<HTMLElement>('*'))) expect(el.style.textOverflow).not.toBe('ellipsis')
     act(() => host.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!.click())
     const menu = document.querySelector<HTMLElement>('[role="menu"]')!
-    expect(parseFloat(menu.style.width)).toBeLessThanOrEqual(width - 16)
-    const sleeping = Array.from(menu.querySelectorAll('button')).find(el => el.textContent?.includes('Reopen'))!
+    expect(menu.style.width).toBe('max-content')
+    expect(parseFloat(menu.style.maxWidth)).toBeLessThanOrEqual(Math.min(340, width - 16))
+    const sleeping = Array.from(menu.querySelectorAll('button')).find(el => el.textContent?.includes('reopen'))!
     expect(sleeping.querySelector('[data-menu-title]')?.textContent).toBe(title)
-    expect(sleeping.textContent).toContain('Leader')
+    expect(sleeping.querySelector('[aria-label="Leader"]')).not.toBeNull()
+    expect(sleeping.querySelector('[data-menu-tail]')?.textContent).toBe('reopen')
     expect(sleeping.textContent).not.toContain('[ LÍDER ]')
-    expect(sleeping.querySelector('[data-menu-title]')?.parentElement?.style.whiteSpace).toBe('normal')
+    expect((sleeping.querySelector('[data-menu-title]') as HTMLElement).style.whiteSpace).toBe('nowrap')
   })
 }
 
@@ -323,5 +325,25 @@ describe('mobile switcher (title bar as the tab menu)', () => {
     const other = rows.map(r => r.id === 'b' ? { ...r, state: 'waiting-approval' as const } : { ...r, state: 'working' as const })
     renderSwitcher(other)
     expect((host.querySelector('[data-switcher-count]') as HTMLElement).style.background).toContain('anthropic-orange')
+  })
+})
+
+describe('compact tabs list menu', () => {
+  test('one line per session: harness, fading title, state at the right; active row highlighted, no checkmark', () => {
+    ;(window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width: 1280, height: 800 })
+    render()
+    act(() => host.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!.click())
+    const menu = document.querySelector<HTMLElement>('[role="menu"]')!
+    expect(parseFloat(menu.style.maxWidth)).toBeLessThanOrEqual(340)
+    const a = Array.from(menu.querySelectorAll('button')).find(b => b.textContent?.includes('Title a'))!
+    expect(a.style.height).toBe('32px')
+    expect(a.style.background).toContain('bg-elevated')
+    expect(a.textContent).not.toContain('✓')
+    expect(a.querySelector('svg, img, [aria-label*="claude" i], [title*="claude" i]')).not.toBeNull()
+    expect(a.querySelector('[data-menu-tail]')?.textContent).toBe('you')
+    const t = a.querySelector<HTMLElement>('[data-menu-title]')!
+    expect(t.style.whiteSpace).toBe('nowrap')
+    expect(t.style.textOverflow).toBe('')
+    expect(menu.textContent).toContain('Close all')
   })
 })

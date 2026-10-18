@@ -34,6 +34,10 @@ export interface RowVerb {
   detail?: string | undefined
   leader?: boolean
   leaderLabel?: string
+  /** Compact session-list rows: the harness mark, and the short state drawn at the right. */
+  harness?: string
+  tail?: string
+  tailAccent?: boolean
   /** A section boundary before this entry, drawn by the shared menu. */
   separatorBefore?: boolean
 }

@@ -348,7 +348,9 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
     const rowEntries: MenuEntry[] = order.map(k => {
       const row = byKey.get(k)
       const t = sessionDisplayTitle(row?.title ?? k.slice(0, 8))
-      return { action: `go:${k}`, label: t, detail: row?.stateLabel, leader: getSessionRole(k) === 'leader' || (row ? hasLeaderTitle(row.title) : false), leaderLabel: pt ? 'Líder' : 'Leader', enabled: true, ...(pins.includes(k) ? { pinned: true } : {}), checked: k === activeKey, ...(row ? { color: STATE_COLOR[row.state] } : {}) }
+      const needs = row !== undefined && needsAttention(row)
+      const tail = row === undefined ? undefined : needs ? (pt ? 'você' : 'you') : row.state === 'working' ? (pt ? 'rodando' : 'working') : ENDED.has(row.state) ? (pt ? 'encerrada' : 'ended') : undefined
+      return { action: `go:${k}`, label: t, ...(row ? { harness: row.harness } : { harness: 'claude' }), ...(tail ? { tail } : {}), ...(needs ? { tailAccent: true } : {}), leader: getSessionRole(k) === 'leader' || (row ? hasLeaderTitle(row.title) : false), leaderLabel: pt ? 'Líder' : 'Leader', enabled: true, ...(pins.includes(k) ? { pinned: true } : {}), checked: k === activeKey, ...(row ? { color: STATE_COLOR[row.state] } : {}) }
     })
     const isEnded = (k: string) => { const row = byKey.get(k); return row ? ENDED.has(row.state) : false }
     setMenu({
@@ -357,7 +359,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
         ...rowEntries,
         ...(sleeping.length > 0 ? [
           { action: 'sleeping', label: pt ? 'Dormindo' : 'Sleeping', enabled: false, separatorBefore: true },
-          ...sleeping.map(k => ({ action: `reopen:${k}`, label: sessionDisplayTitle(byKey.get(k)?.title ?? k), detail: pt ? 'Reabrir' : 'Reopen', leader: getSessionRole(k) === 'leader' || hasLeaderTitle(byKey.get(k)?.title ?? ''), leaderLabel: pt ? 'Líder' : 'Leader', enabled: true, pinned: true })),
+          ...sleeping.map(k => ({ action: `reopen:${k}`, label: sessionDisplayTitle(byKey.get(k)?.title ?? k), harness: byKey.get(k)?.harness ?? 'claude', tail: pt ? 'reabrir' : 'reopen', tailAccent: true, color: 'transparent', leader: getSessionRole(k) === 'leader' || hasLeaderTitle(byKey.get(k)?.title ?? ''), leaderLabel: pt ? 'Líder' : 'Leader', enabled: true, pinned: true })),
         ] : []),
         { action: 'others', label: pt ? 'Fechar outras' : 'Close others', enabled: true, separatorBefore: true },
         { action: 'ended', label: pt ? 'Fechar encerradas' : 'Close ended', enabled: open.some(isEnded) },
