@@ -194,6 +194,55 @@ describe('removeRoot', () => {
   })
 })
 
+describe('removeRoot — cancelling a pending login', () => {
+  test('ends its own live login session, then drops the pending root without confirm', async () => {
+    let live = true
+    const ended: string[] = []
+    const m = make({
+      sessionLive: async () => live,
+      endSession: async id => { ended.push(id); live = false; return true },
+    })
+    const out = await m.roots.addRoot('claude')
+    if (!out.ok) throw new Error('refused')
+    m.roots.stopPoller()
+    const r = await m.roots.removeRoot(out.pendingId)
+    expect(r.ok && r.removedDir).toBe(true)
+    expect(ended).toEqual(['sess1'])
+    await expect(stat(out.root)).rejects.toThrow()
+    expect(await m.roots.list()).toEqual([])
+  })
+  test('the login session title is plain words', async () => {
+    const m = make()
+    await m.roots.addRoot('claude')
+    expect((m.spawned[0] as { label: string }).label).toBe('Login · Claude Code')
+    m.roots.stopPoller()
+  })
+  test('a pending root whose login session cannot be ended still refuses (409)', async () => {
+    const m = make({ sessionLive: async () => true, endSession: async () => false })
+    const out = await m.roots.addRoot('claude')
+    if (!out.ok) throw new Error('refused')
+    m.roots.stopPoller()
+    const r = await m.roots.removeRoot(out.pendingId)
+    expect(!r.ok && r.status === 409).toBe(true)
+    expect((await stat(out.root)).isDirectory()).toBe(true)
+  })
+  test('a FOREIGN session in the pending root still refuses and is never ended', async () => {
+    const ended: string[] = []
+    const m = make({
+      sessionLive: async id => id === 'foreign',
+      sessionsOfAccount: async () => ['foreign'],
+      endSession: async id => { ended.push(id); return true },
+    })
+    const out = await m.roots.addRoot('claude')
+    if (!out.ok) throw new Error('refused')
+    m.roots.stopPoller()
+    const r = await m.roots.removeRoot(out.pendingId)
+    expect(!r.ok && r.status === 409 && r.reason === 'root_in_use').toBe(true)
+    expect(ended).toEqual([])
+    expect((await stat(out.root)).isDirectory()).toBe(true)
+  })
+})
+
 describe('routes', () => {
   const call = (path: string, method: string, body?: unknown, deps = {}) =>
     handleAccountsRequest(new Request(`http://x${path}`, {
@@ -225,10 +274,10 @@ describe('routes', () => {
     expect(created.status).toBe(200)
     const { pendingId, root } = await created.json() as { pendingId: string; root: string }
     expect((await call('/api/accounts/roots', 'POST', { harness: 'antigravity' }, deps)).status).toBe(422)
-    const soft = await call(`/api/accounts/roots/${pendingId}`, 'DELETE', undefined, deps)
-    expect(((await soft.json()) as { removedDir: boolean }).removedDir).toBe(false)
-    const hard = await call(`/api/accounts/roots/${pendingId}`, 'DELETE', { confirm: root }, deps)
-    expect(((await hard.json()) as { removedDir: boolean }).removedDir).toBe(true)
+    // a pending root has no account to keep: Cancel (no body) drops it
+    const gone = await call(`/api/accounts/roots/${pendingId}`, 'DELETE', undefined, deps)
+    expect(((await gone.json()) as { removedDir: boolean }).removedDir).toBe(true)
+    await expect(stat(root)).rejects.toThrow()
   })
 })
 

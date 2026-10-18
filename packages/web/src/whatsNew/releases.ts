@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.140.10': {
+    features: [
+      {
+        pt: 'Configurações → Cobrança tem um botão "Adicionar conta" em cada assistente: ele abre o login de uma segunda conta.',
+        en: 'Settings → Billing has an "Add account" button for each assistant: it opens the sign-in for a second account.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Reabrir ou assumir uma sessão não trava mais o app por alguns segundos quando o Claude Code demora a responder.',
+        en: 'Reopening or taking over a session no longer freezes the app for a few seconds when Claude Code is slow to answer.',
+      },
+    ],
+  },
   '2.140.9': {
     features: [],
     fixes: [
