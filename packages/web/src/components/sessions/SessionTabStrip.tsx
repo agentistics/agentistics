@@ -7,7 +7,7 @@ import { ActionNotice } from './ActionNotice'
  * a pin is `lib/pinnedSessions.ts` (never a second store); how a state looks is `STATE_COLOR`.
  * Every status mark carries its word (`aria-label` + `title`) — colour is never the only signal.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { ChevronDown, Crown, List, Moon, Pin, X } from 'lucide-react'
 import { sessionIdentityKey } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -47,6 +47,12 @@ export interface SessionTabStripProps {
   onReopen: (row: ControlSession) => Promise<{ ok: boolean; message: string }>
   /** Nothing left open: leave for the overview. */
   onNone: () => void
+  /**
+   * Mobile (option M1): no tab row. The session's own title bar IS the switcher — `leading` is the
+   * drawer button, `trailing` whatever else the bar carries — and tapping the title opens the same
+   * menu the strip's list button opens. The strip's bookkeeping (opening/reconciling tabs) still runs.
+   */
+  switcher?: { leading: ReactNode; trailing?: ReactNode }
 }
 
 const keyOf = (r: ControlSession): string => sessionIdentityKey(r)
@@ -184,7 +190,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
   )
 }
 
-export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen, onNone, onNoticeChange }: SessionTabStripProps) {
+export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen, onNone, onNoticeChange, switcher }: SessionTabStripProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
   const touch = useIsCoarsePointer()
@@ -369,6 +375,45 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
         else if (a === 'all') closeKeys([])
       },
     })
+  }
+
+  if (switcher) {
+    const row = active
+    const needsOther = order.some(k => k !== activeKey && (() => { const r = byKey.get(k); return r !== undefined && needsAttention(r) })())
+    const lead = getSessionRole(activeKey) === 'leader' || hasLeaderTitle(row.title)
+    return (
+      <>
+        {switcher.leading}
+        <button
+          type="button" data-session-switcher aria-haspopup="menu"
+          aria-label={pt ? 'Trocar de sessão' : 'Switch session'}
+          onClick={e => listMenu(e.currentTarget)}
+          style={{
+            flex: 1, minWidth: 0, minHeight: 44, display: 'flex', alignItems: 'center', gap: 8, padding: '0 6px',
+            border: 'none', background: 'transparent', color: 'var(--text-primary)', fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
+          }}
+        >
+          <TabStatus state={row.state} label={row.stateLabel} />
+          <span style={{ display: 'inline-flex', flexShrink: 0 }}><HarnessMark harness={row.harness} size={15} /></span>
+          {lead && <Crown size={12} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />}
+          <span data-session-title style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 650, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', maskImage: TITLE_FADE, WebkitMaskImage: TITLE_FADE }}>{sessionDisplayTitle(row.title)}</span>
+          <ChevronDown size={16} aria-hidden style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+          <span
+            data-switcher-count aria-label={pt ? `${order.length} abas abertas` : `${order.length} open tabs`}
+            style={{
+              minWidth: 24, height: 24, padding: '0 6px', boxSizing: 'border-box', borderRadius: 12, flexShrink: 0,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 650,
+              background: needsOther ? 'var(--anthropic-orange)' : 'var(--bg-elevated)', color: needsOther ? '#fff' : 'var(--text-secondary)',
+            }}
+          >{order.length}</span>
+        </button>
+        {switcher.trailing}
+        {menu !== null && (
+          <SessionRowMenu sessionList={menu.below} below={menu.below} x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
+        )}
+        {notice !== null && !onNoticeChange && <ActionNotice message={notice} lang={lang} onDismiss={() => setNotice(null)} />}
+      </>
+    )
   }
 
   return (

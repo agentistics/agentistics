@@ -291,3 +291,37 @@ for (const width of [1280, 390]) {
     expect(sleeping.querySelector('[data-menu-title]')?.parentElement?.style.whiteSpace).toBe('normal')
   })
 }
+
+describe('mobile switcher (title bar as the tab menu)', () => {
+  const renderSwitcher = (shown = rows) => act(() => {
+    root.render(createElement(SessionTabStrip, {
+      lang: 'en', rows: shown, fleetReady: true, active: shown[0]!, onReopen: async () => ({ ok: true, message: '' }),
+      onGo: id => { went.push(id) }, onNone: () => {},
+      switcher: { leading: createElement('button', { 'data-drawer': '' }, 'drawer') },
+    }))
+  })
+  test('no tab row; the title appears once; count badge shows open tabs; tapping opens the menu and picks', () => {
+    ;(window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width: 390, height: 844 })
+    renderSwitcher()
+    expect(host.querySelector('[role="tablist"]')).toBeNull()
+    expect(host.querySelectorAll('[data-session-title]').length).toBe(1)
+    expect(host.querySelector('[data-session-title]')!.textContent).toBe('Title a')
+    expect(host.querySelector('[data-drawer]')).not.toBeNull()
+    expect(host.querySelector('[data-switcher-count]')!.textContent).toBe('3')
+    const sw = host.querySelector('[data-session-switcher]') as HTMLButtonElement
+    expect(sw.style.minHeight).toBe('44px')
+    act(() => sw.click())
+    const menu = document.querySelector('[role="menu"]') as HTMLElement
+    expect(menu).not.toBeNull()
+    expect(menu.textContent).toContain('Title b')
+    expect(menu.textContent).toContain('Close all')
+  })
+  test('the badge is orange only when ANOTHER tab needs you', () => {
+    const calm = rows.map(r => ({ ...r, state: 'working' as const }))
+    renderSwitcher(calm)
+    expect((host.querySelector('[data-switcher-count]') as HTMLElement).style.background).toContain('bg-elevated')
+    const other = rows.map(r => r.id === 'b' ? { ...r, state: 'waiting-approval' as const } : { ...r, state: 'working' as const })
+    renderSwitcher(other)
+    expect((host.querySelector('[data-switcher-count]') as HTMLElement).style.background).toContain('anthropic-orange')
+  })
+})

@@ -938,7 +938,7 @@ function MobileBottomNav({
  */
 const TOPBAR_H = 44
 /** The session tab strip's row above the title line (`SessionTabStrip` is 34px + its hairline). */
-const TABS_ROW_H = 35
+const TABS_ROW_H = 32
 const SIDEBAR_W = 248
 const SIDEBAR_W_COLLAPSED = 64
 /** Room kept between the Filtros / stats tabs and the right-hand aside they hang beside. */
