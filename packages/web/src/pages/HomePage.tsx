@@ -246,10 +246,12 @@ export default function HomePage() {
           <span style={{ fontSize: 11, opacity: 0.7 }}>{lang === 'pt' ? '1ª sessão' : 'first session'}</span>
           <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{format(derived.firstSessionDate, 'MMM d, yyyy')}</span>
           <span style={{ opacity: 0.4 }}>→</span>
-          <span style={{ fontSize: 11, opacity: 0.7 }}>{lang === 'pt' ? 'última sessão' : 'last session'}</span>
-          <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{format(derived.lastSessionDate, 'MMM d, yyyy')}</span>
-          <span style={{ opacity: 0.3, margin: '0 2px' }}>·</span>
-          <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{derived.sessionSpanDays.toLocaleString()}</strong> {lang === 'pt' ? 'dias' : 'days'}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 6 }}>
+            <span style={{ fontSize: 11, opacity: 0.7 }}>{lang === 'pt' ? 'última sessão' : 'last session'}</span>
+            <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{format(derived.lastSessionDate, 'MMM d, yyyy')}</span>
+            <span style={{ opacity: 0.3, margin: '0 2px' }}>·</span>
+            <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{derived.sessionSpanDays.toLocaleString()}</strong> {lang === 'pt' ? 'dias' : 'days'}</span>
+          </span>
         </div>
       )}
 

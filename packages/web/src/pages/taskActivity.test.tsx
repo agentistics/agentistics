@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
@@ -66,4 +67,15 @@ describe('board activity in human language', () => {
     expect(html).toContain('>Tarefa indisponível</a>')
     expect(html).not.toContain('>t-3d092f5797<')
   })
+})
+
+test('task detail chips and settings navigation keep physical mobile touch targets', () => {
+  const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8')
+  const rule = css.slice(css.indexOf('.ag-task-detail :is(button'))
+  expect(rule).toContain('min-width: 44px !important')
+  expect(rule).toContain('min-height: 44px !important')
+  expect(rule).toContain('--ag-tap-grow: 0')
+  expect(readFileSync(new URL('./TasksPage.tsx', import.meta.url), 'utf8')).toContain('className="ag-task-detail"')
+  const settings = readFileSync(new URL('./settings/SettingsPage.tsx', import.meta.url), 'utf8')
+  expect(settings).toContain("minHeight: isMobile ? 44 : undefined, boxSizing: 'border-box'")
 })

@@ -1145,3 +1145,23 @@ tr:focus-within .ag-row-actions,
   }
   .ag-nay-dock :is(.ag-tap, .ag-tap-icon)::after { inset: 0; }
 }
+
+/* KPI actions share physical touch targets, including consumer-supplied chips.
+   Physical boxes prevent overlapping targets in a wrapping control row. */
+@media (max-width: 767px) {
+  .ag-stat-card button {
+    min-width: 44px;
+    min-height: 44px;
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Task chips have inline minimums; keep the target rule authoritative here. */
+  .ag-task-detail :is(button, [role="button"]) {
+    min-width: 44px !important;
+    min-height: 44px !important;
+    --ag-tap-grow: 0;
+    flex-shrink: 0;
+  }
+}

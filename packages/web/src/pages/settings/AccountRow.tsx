@@ -72,7 +72,7 @@ export function AccountPlanRow({ a, p }: { a: BillingAccount; p: AccountPlansPro
   // The e-mail is never drawn beside a nickname: the nickname IS the name, on every surface.
   const whose = a.nickname && !isPlaceholderName(a.nickname) ? null : accountWhose(a, pt)
   const sum = planSummary(p.billing, a, p.today)
-  const planText = sum.name ? (sum.source === 'default' ? `${sum.name} · ${t.harnessPlan}` : sum.name) : t.noPlan
+  const planText = sum.name ? (sum.source === 'default' ? t.harnessPlan : sum.name) : t.noPlan
   const reading = p.limits?.find(l => l.account === a.id) ?? null
   const meter = reading
     ? <PlanLimitBars limits={reading} now={p.now} lang={p.lang} />
@@ -180,7 +180,7 @@ export function BillingAccountsView(p: BillingAccountsViewProps) {
                     </span>
                   </span>
                   <div style={{ minWidth: 0, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
-                    {s.worst ? <PlanLimitBars limits={s.worst} now={p.now} lang={p.lang} /> : t.noMeterShort}
+                    {!open && (s.worst ? <PlanLimitBars limits={s.worst} now={p.now} lang={p.lang} /> : t.noMeterShort)}
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{t.withPlan(priced, mine.length)}</div>
                 </>

@@ -39,7 +39,7 @@ interface StatCardProps {
 export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-orange)', info, onInfoClick, valueTitle, sizeBasis, action, fullPrecision, onTogglePrecision, lang }: StatCardProps) {
   const isMobile = useIsMobile()
   return (
-    <div style={{
+    <div className="ag-stat-card" style={{
       background: 'var(--bg-card)',
       border: '1px solid var(--border)',
       borderRadius: 'var(--radius-lg)',
@@ -88,6 +88,8 @@ export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-or
           )}
           {info && (
             <button
+              type="button"
+              aria-label={lang === 'pt' ? `Sobre ${label}` : `About ${label}`}
               onClick={onInfoClick}
               style={{
                 width: 18, height: 18,

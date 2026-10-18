@@ -574,7 +574,7 @@ function TaskDetailView({ id }: { id: string }) {
   const live = fleetLoading ? null : liveSessionsOf(detail.sessions, fleet.sessions).length
 
   return (
-    <div style={{
+    <div className="ag-task-detail" style={{
       padding: isMobile ? 0 : 18, // @overlay-intentional: the page, not an overlay — the hero runs edge to edge
       // The mobile bottom nav is FIXED, so the last thing on the page sits underneath it and cannot
       // be tapped — measured: "Delete task" was intercepted by `nav.mobile-bottom-nav` at every

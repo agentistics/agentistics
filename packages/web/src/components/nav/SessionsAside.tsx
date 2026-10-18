@@ -2767,6 +2767,9 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       {muteWorkers && role === 'worker' && sessionRunning(session) && !mutedKeys.includes(pinKeyOf(session)) && (
         <span role="img" aria-label={lang === 'en' ? 'Workers muted' : 'Workers silenciados'} title={lang === 'en' ? 'Workers muted' : 'Workers silenciados'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 18, height: 20, color: 'var(--text-tertiary)' }}><BellOff size={12} /></span>
       )}
+      {goTo && !mutedKeys.includes(pinKeyOf(session)) && !(muteWorkers && role === 'worker' && sessionRunning(session)) && (
+        <span aria-hidden="true" data-session-mute-slot style={{ width: 18, height: 20, flexShrink: 0 }} />
+      )}
       {onPin && (
         <span
           role="button"

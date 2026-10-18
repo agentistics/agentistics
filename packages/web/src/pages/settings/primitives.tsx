@@ -167,6 +167,7 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
       style={{
         border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)',
         cursor: onClick ? 'pointer' : 'default', overflow: 'hidden', height: fieldLayout === 'stacked' ? '100%' : undefined,
+        display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
       }}
     >
       <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -196,7 +197,7 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
         <div
           onClick={e => e.stopPropagation()}
           style={{
-            display: 'flex', gap: 1, borderTop: '1px solid var(--border)',
+            display: 'flex', gap: 1, borderTop: '1px solid var(--border)', marginTop: 'auto',
             background: 'var(--border)',
           }}
         >
@@ -229,8 +230,9 @@ export function RecordCardAction({ onClick, children, danger, label, disabled, i
       aria-busy={disabled || undefined}
       style={{
         flex: inline ? '0 0 auto' : 1, minHeight: 44, minWidth: 44, padding: inline ? '0 8px' : undefined, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-        border: 'none', background: inline ? 'transparent' : 'var(--bg-card)',
-        color: danger ? '#ef4444' : 'var(--text-secondary)',
+        border: inline ? '1px solid var(--border)' : 'none', borderRadius: inline ? 8 : undefined,
+        background: inline ? 'var(--bg-elevated)' : 'var(--bg-card)',
+        color: danger ? '#ef4444' : inline ? 'var(--text-primary)' : 'var(--text-secondary)',
         fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
         cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
       }}

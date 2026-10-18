@@ -157,3 +157,12 @@ test('away authorization reads as a sentence in both languages', () => {
     }
   } finally { __setAwayForTest(null) }
 })
+
+for (const lang of ['pt', 'en'] as const) test(`unequal leader titles keep their action footers at the card bottom in ${lang}`, () => {
+  const fixtures = [row('long', { title: 'A long leader title '.repeat(12) }), row('short', { title: 'Motor' })]
+  const html = atWidth(1440, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang={lang} rows={fixtures} roleOf={() => 'leader'} /></MemoryRouter>))
+  expect(html).toContain('A long leader title '.repeat(12).trim())
+  expect(html.match(/height:100%;display:flex;flex-direction:column;box-sizing:border-box/g)).toHaveLength(2)
+  expect(html.match(/border-top:1px solid var\(--border\);margin-top:auto/g)).toHaveLength(2)
+  expect(html).not.toContain('text-overflow:ellipsis')
+})

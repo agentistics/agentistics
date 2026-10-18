@@ -36,8 +36,7 @@ export function ActionsContent({ sessions, lang, onSelect }: {
               <RecordCard fieldLayout="stacked" title={title} fields={[]}
                 badge={<RecordCardAction inline label={`${pt ? 'Abrir' : 'Open'} ${title}`} onClick={() => onSelect(session)}>{pt ? 'Abrir execução' : 'Open run'}</RecordCardAction>}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-                  <span>{session.harness ? (HARNESS_LABELS[session.harness] ?? session.harness) : 'N/A'}</span>
-                  {session.model && <span style={{ overflowWrap: 'anywhere' }}>· {session.model}</span>}
+                  <span style={{ overflowWrap: 'anywhere' }}>{session.harness ? (HARNESS_LABELS[session.harness] ?? session.harness) : 'N/A'}{session.model ? ` · ${session.model}` : ''}</span>
                   {Number.isFinite(at) ? <time dateTime={new Date(at).toISOString()}>{new Date(at).toLocaleString(pt ? 'pt-BR' : 'en-US')}</time> : <span>N/A</span>}
                 </div>
               </RecordCard>

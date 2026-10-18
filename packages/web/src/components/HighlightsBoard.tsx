@@ -99,10 +99,6 @@ export function HighlightsBoard({ sessions, projects, lang, harness }: Highlight
   const avgMessages = avg(sessions.map(s => (s.user_message_count ?? 0) + (s.assistant_message_count ?? 0)).filter(v => v > 0))
   const avgTools    = avg(sessions.map(s => Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)).filter(v => v > 0))
 
-  function truncate(str: string | undefined, len: number) {
-    if (!str) return pt ? 'Sem título' : 'Untitled'
-    return str.length > len ? str.slice(0, len) + '…' : str
-  }
 
   return (
     <>
@@ -129,10 +125,8 @@ export function HighlightsBoard({ sessions, projects, lang, harness }: Highlight
           color: var(--text-primary);
         }
         .hl-prompt {
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
+          white-space: normal;
+          overflow-wrap: anywhere;
           font-size: 12px;
           line-height: 1.5;
           color: var(--text-secondary);
@@ -176,7 +170,7 @@ export function HighlightsBoard({ sessions, projects, lang, harness }: Highlight
             return [`${t.elapsed} ${t.elapsedLabel}`]
           })()}
           comparison={multiplier(sessionRank(longestSession), avgDuration)}
-          prompt={truncate(sessionLabel(longestSession), 90)}
+          prompt={(sessionLabel(longestSession) || (pt ? 'Sem título' : 'Untitled'))}
           project={formatProjectName(longestSession.project_path ?? '')}
         />
 
@@ -186,7 +180,7 @@ export function HighlightsBoard({ sessions, projects, lang, harness }: Highlight
           accent="#3b82f6"
           value={mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '—' : fmt(mostInputTokens.input_tokens)}
           comparison={mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? null : multiplier(mostInputTokens.input_tokens, avgInput)}
-          prompt={mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '' : truncate(sessionLabel(mostInputTokens), 90)}
+          prompt={mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '' : (sessionLabel(mostInputTokens) || (pt ? 'Sem título' : 'Untitled'))}
           project={mostInputTokens.tokens_unavailable || mostInputTokens.input_tokens === undefined ? '' : formatProjectName(mostInputTokens.project_path ?? '')}
         />
 
@@ -196,7 +190,7 @@ export function HighlightsBoard({ sessions, projects, lang, harness }: Highlight
           accent="#8b5cf6"
           value={mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '—' : fmt(mostOutputTokens.output_tokens)}
           comparison={mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? null : multiplier(mostOutputTokens.output_tokens, avgOutput)}
-          prompt={mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '' : truncate(sessionLabel(mostOutputTokens), 90)}
+          prompt={mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '' : (sessionLabel(mostOutputTokens) || (pt ? 'Sem título' : 'Untitled'))}
           project={mostOutputTokens.tokens_unavailable || mostOutputTokens.output_tokens === undefined ? '' : formatProjectName(mostOutputTokens.project_path ?? '')}
         />
 
@@ -209,7 +203,7 @@ export function HighlightsBoard({ sessions, projects, lang, harness }: Highlight
             (mostMessages.user_message_count ?? 0) + (mostMessages.assistant_message_count ?? 0),
             avgMessages
           )}
-          prompt={truncate(sessionLabel(mostMessages), 90)}
+          prompt={(sessionLabel(mostMessages) || (pt ? 'Sem título' : 'Untitled'))}
           project={formatProjectName(mostMessages.project_path ?? '')}
         />
 
@@ -225,7 +219,7 @@ export function HighlightsBoard({ sessions, projects, lang, harness }: Highlight
               Object.values(mostToolCalls.tool_counts ?? {}).reduce((a, b) => a + b, 0),
               avgTools
             )}
-            prompt={truncate(sessionLabel(mostToolCalls), 90)}
+            prompt={(sessionLabel(mostToolCalls) || (pt ? 'Sem título' : 'Untitled'))}
             project={formatProjectName(mostToolCalls.project_path ?? '')}
             style={topProjectEntry ? {} : lastStyle}
           />
@@ -385,7 +379,7 @@ function HighlightCard({
           overflow: 'hidden',
         }}>
           <FolderOpen size={10} style={{ flexShrink: 0, color: accent }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
             {project}
           </span>
         </div>

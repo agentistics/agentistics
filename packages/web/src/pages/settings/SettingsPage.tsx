@@ -45,7 +45,7 @@ export default function SettingsPage() {
   const label = (s: SettingsSection) => (pt ? s.labelPt : s.labelEn)
 
   const linkStyle = (active: boolean): React.CSSProperties => ({
-    display: 'block',
+    display: 'flex', alignItems: 'center', minHeight: isMobile ? 44 : undefined, boxSizing: 'border-box',
     padding: isMobile ? '7px 12px' : '7px 10px',
     borderRadius: 8,
     fontSize: 13,

@@ -13,7 +13,7 @@ import { NayLimitsTab } from '../../components/nay/NayLimitsTab'
 import { updatedPhrase, fmtWhen } from '../../lib/planLimits'
 import { PlanLimitBars, PlanUsageCard } from '../../components/PlanLimitMeter'
 import { usageHeadline } from '../../lib/usagePlan'
-import { usageChartData } from './UsageCharts'
+import { UsageCharts, usageChartData } from './UsageCharts'
 
 const NOW = Date.parse('2026-10-18T12:00:00Z')
 const WEEK = 7 * 24 * 3_600_000
@@ -278,4 +278,26 @@ for (const lang of ['pt', 'en'] as const) test(`overview and limits share the ne
     expect(nay.includes(phrase)).toBe(now === NOW)
     expect(nay).toContain('min-height:44px;min-width:44px')
   }
+})
+
+for (const lang of ['pt', 'en'] as const) for (const width of [390, 1440]) test(`chart account names are unambiguous in ${lang} at ${width}px`, () => {
+  const budgets = [row({ account: 'personal', accountLabel: 'Principal' }),
+    row({ harness: 'codex', account: 'work', accountLabel: 'Principal' }),
+    row({ account: 'second', accountLabel: 'Principal' })]
+  const readings = budgets.map(r => ({ account: r.account!, harness: r.harness,
+    points: [{ at: NOW, weekPct: 30, fiveHourPct: 10 }] }))
+  for (const bothWindows of [false, true]) {
+    const html = render(<UsageCharts budgets={budgets} limits={budgets.map(limit)} readings={readings} lang={lang} bothWindows={bothWindows} />, width, lang)
+    for (const name of ['Claude Code · Principal · personal', 'Claude Code · Principal · second', 'Codex CLI · Principal']) expect(html).toContain(name)
+    expect(html).not.toContain('aria-label="Principal ·')
+  }
+})
+
+for (const lang of ['pt', 'en'] as const) test(`Nay manage plans is a framed 44px action aligned with the cards in ${lang}`, () => {
+  seed([row()])
+  const html = render(<NayLimitsTab lang={lang} isMobile />, 390, lang)
+  expect(html).toContain(lang === 'pt' ? 'Gerenciar planos' : 'Manage plans')
+  expect(html).toContain('border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);color:var(--text-primary)')
+  expect(html).toContain('padding:2px 0 0')
+  expect(html).toContain('min-height:44px;min-width:44px')
 })

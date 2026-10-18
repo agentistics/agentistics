@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { TokenStatCard } from './TokenStatCard'
 import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { StatCard } from './StatCard'
@@ -28,5 +30,26 @@ test('longest-session sub-line stays complete and wraps in the shared card', () 
   expect(html).toContain(sub)
   expect(html).toContain('white-space:pre-line;overflow-wrap:anywhere')
   expect(html).not.toContain('text-overflow:ellipsis')
+  } finally { if (previous === undefined) delete root.window; else root.window = previous }
+})
+
+test('shared KPI touch rule reaches info, currency and other supplied action buttons', () => {
+  const root = globalThis as { window?: unknown }
+  const previous = root.window
+  root.window = { innerWidth: 390 }
+  try {
+    const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8')
+    const rule = css.slice(css.indexOf('.ag-stat-card button {'))
+    expect(rule).toContain('min-width: 44px')
+    expect(rule).toContain('min-height: 44px')
+    for (const lang of ['pt', 'en'] as const) {
+      const html = renderToStaticMarkup(<StatCard label="Cost" lang={lang} value="0" icon={<span />} info={{ source: 'API' }} action={<button>BRL</button>} />)
+      expect(html).toContain('class="ag-stat-card"')
+      expect(html).toContain('<button>BRL</button>')
+      expect(html).toContain(lang === 'pt' ? 'aria-label="Sobre Cost"' : 'aria-label="About Cost"')
+      const tokens = renderToStaticMarkup(<TokenStatCard tokens={{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }} lang={lang} info={{ source: 'API' }} onInfoClick={() => {}} />)
+      expect(tokens).toContain('class="ag-stat-card"')
+      expect(tokens).toContain(lang === 'pt' ? 'Sobre este número' : 'About this number')
+    }
   } finally { if (previous === undefined) delete root.window; else root.window = previous }
 })
