@@ -171,7 +171,8 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '10px 12px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0,
-            background: 'var(--bg-card)',
+            // Above the rows that scroll under it: the toggle below is positioned and would paint on top.
+            zIndex: 1, background: 'var(--bg-card)',
           }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
               {pt ? 'Notificações' : 'Notifications'}
