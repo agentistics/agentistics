@@ -648,6 +648,10 @@ export function pushNotification(n: {
   })
 }
 
+/** Notices whose card is already on screen: they stay in the bell as a record and never pop as a toast. */
+export const BELL_ONLY_CODES: ReadonlySet<string> = new Set(['vault.autolock-soon'])
+export const isBellOnly = (code: string | undefined): boolean => !!code && BELL_ONLY_CODES.has(code)
+
 /** Feedback that must reach the existing toast even when the server is unreachable. */
 export function pushLocalNotification(n: Parameters<typeof pushNotification>[0]): void {
   apply([{ ...n, id: crypto.randomUUID(), ts: Date.now(), read: false }, ...items])

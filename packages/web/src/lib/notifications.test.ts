@@ -475,3 +475,12 @@ describe('cleanup completion wording', () => {
     expect(s.resolveNotification(note('partial', { code: 'clean.partial', meta: { freed: '0 B', skipped: 1, errors: 0 } }), 'pt').message).toBe('0 B liberados. 1 item mantido por segurança.')
   })
 })
+
+describe('bell-only notices', () => {
+  test('the vault auto-lock warning never pops as a toast (its card is on screen)', async () => {
+    const { isBellOnly } = await import('./notifications')
+    expect(isBellOnly('vault.autolock-soon')).toBe(true)
+    expect(isBellOnly('session.waiting')).toBe(false)
+    expect(isBellOnly(undefined)).toBe(false)
+  })
+})

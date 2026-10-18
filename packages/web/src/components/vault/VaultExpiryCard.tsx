@@ -31,7 +31,7 @@ export function VaultExpiryCard({ lang, isMobile, zIndex, enabled = true }: { la
       setShown(true)
       pushNotification({ type: 'warning', code: 'vault.autolock-soon',
         title: pt ? 'Seu cofre vai se trancar em 5 min' : 'Your vault locks in 5 min',
-        message: pt ? 'Abra o chat da Nay para mantê-lo aberto ou trancar agora.' : 'Open the Nay chat to keep it open or lock it now.' })
+        message: pt ? 'O aviso com os botões "Manter aberto" e "Trancar agora" está na tela.' : 'The card with "Keep open" and "Lock now" is on screen.' })
     }
     if (w.autoLockInMs === null || w.autoLockInMs > 5 * 60_000) { setShown(false); setError(null) }
   }, [w.at, w.autoLockInMs, pt])
