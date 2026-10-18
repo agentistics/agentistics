@@ -36,7 +36,7 @@ export function CleanScanView({ scan, lang }: { scan: CleanScanState | null; lan
 
 export function CleanListSummary({ plan, lang }: { plan: CleanWebPlan; lang: 'pt' | 'en' }) {
   const pt = lang === 'pt'
-  return <>{plan.reclaimable.count} {pt ? 'itens para limpar' : 'items to clean'} · {new Set(plan.items.map(i => i.repo)).size} {pt ? 'projetos nesta lista' : 'projects in this list'} · {pt ? 'varrido às' : 'scanned at'} {time(plan.scannedAt, lang)}</>
+  return <>{plan.reclaimable.count} {pt ? 'itens para limpar' : 'items to clean'} · {new Set(plan.items.map(i => i.repo)).size} {pt ? 'projetos nesta lista' : 'projects in this list'} · {pt ? 'varrido às' : 'scanned at'} <span style={{ whiteSpace: 'nowrap' }}>{time(plan.scannedAt, lang)}</span></>
 }
 
 export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: boolean; onClose: () => void }) {
@@ -139,7 +139,7 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
       {busy && <div role="status"><p>{jobStage(job?.state ?? 'verifying', pt)}</p><progress aria-label={pt ? 'Progresso da limpeza' : 'Cleanup progress'} max={100} value={job?.progress ?? 0} /><p className="clean-muted">{pt ? 'Você pode fechar esta janela; a limpeza continua.' : 'You can close this window; cleanup will continue.'}</p></div>}
       {done && <div className="clean-done" role="status" data-testid="clean-done">
         <p className="clean-muted">{done.diskFreeBefore !== null && done.diskFreeAfter !== null ? `${pt ? 'Disco' : 'Disk'}: ${cleanSize(done.diskFreeBefore, lang)} → ${cleanSize(done.diskFreeAfter, lang)} ${pt ? 'livres' : 'free'} · ` : ''}{pt ? 'levou' : 'took'} {Math.ceil(done.elapsedMs / 1000)} s</p>
-        <div className="clean-done-counts">{[[done.removedWorktrees, pt ? 'worktrees removidos' : 'worktrees removed'], [done.pruned, pt ? 'registros consertados' : 'records repaired'], [done.skipped.length, pt ? 'mantidos por segurança' : 'kept for safety']].map(([n, label]) => <div key={label}><b>{n}</b><span className="clean-muted">{label}</span></div>)}</div>
+        <div className="clean-done-counts">{[[done.removedWorktrees, pt ? 'worktrees removidos' : 'worktrees removed'], [done.pruned, pt ? 'registros consertados' : 'records repaired'], [done.skipped.length, pt ? 'pulados na conferência final' : 'skipped by the final check']].map(([n, label]) => <div key={label}><b>{n}</b><span className="clean-muted">{label}</span></div>)}</div>
         {done.skipped.length > 0 && <section><h3>{pt ? 'Mantidos por segurança' : 'Kept for safety'}</h3>{done.skipped.map(item => <div className="clean-outcome" key={item.path}><b title={item.path}>{cleanName({ ...item, name: '', kind: 'keep' })}</b><span>{cleanReason(item.reason, pt)}</span></div>)}</section>}
         {done.errors.length > 0 && <section role="alert"><h3>{pt ? 'Não foi possível remover' : 'Could not remove'}</h3>{done.errors.map((e, i) => <p className="clean-error" key={i}>{e}</p>)}</section>}
         {showRemoved && <section><h3>{pt ? 'Removidos' : 'Removed'}</h3>{done.removed.map(item => <div className="clean-outcome" key={`${item.path}:${item.kind}`}><b title={item.path}>{cleanName({ ...item, name: '' })}</b><span>{cleanSize(item.bytes, lang)}</span></div>)}</section>}

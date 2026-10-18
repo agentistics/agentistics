@@ -81,3 +81,20 @@ for (const pt of [true, false]) test(`handoff explanation occurs once; confirmat
     expect(dialog.querySelector('.handoff-live-panel [role="status"]')).toBeNull()
   } finally { await act(async () => root.unmount()); host.remove() }
 })
+
+for (const lang of ['pt', 'en'] as const) for (const skippedCount of [0, 2]) test(`done counts final-check skips separately from protected scan rows (${lang}, ${skippedCount})`, async () => {
+  const skipped = Array.from({ length: skippedCount }, (_, i) => ({ path: `/repo/skipped-${i}`, reason: 'dirty' }))
+  const job = { id: 'done', state: 'done', progress: 100, result: { freedBytes: 1024, worktrees: 1, removedWorktrees: 1, nodeModules: 0, pruned: 0, skipped, errors: [], elapsedMs: 100, diskFreeBefore: null, diskFreeAfter: null, removed: [] } }
+  globalThis.fetch = (async (url: string) => Response.json(url.endsWith('/scan') ? null : url.endsWith('/apply') || url.endsWith('/job') ? job : plan)) as typeof fetch
+  const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host)
+  try {
+    await act(async () => root.render(<CleanDialog lang={lang} open onClose={() => {}} />))
+    expect(host.textContent).toContain(lang === 'pt' ? 'Mantidos por segurança' : 'Kept for safety')
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="clean-apply"]')!.click())
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="clean-apply"]')!.click())
+    const cards = host.querySelectorAll('.clean-done-counts > div')
+    expect(cards).toHaveLength(3)
+    expect(cards[2]!.querySelector('b')!.textContent).toBe(String(skippedCount))
+    expect(cards[2]!.querySelector('span')!.textContent).toBe(lang === 'pt' ? 'pulados na conferência final' : 'skipped by the final check')
+  } finally { await act(async () => root.unmount()); host.remove() }
+})

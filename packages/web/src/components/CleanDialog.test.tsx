@@ -59,5 +59,6 @@ test('result summary distinguishes cleanup candidates from all rows including ke
     const html = renderToStaticMarkup(<CleanListSummary plan={plan} lang={lang} />).replace(/<!--.*?-->/g, '')
     expect(html).toContain(lang === 'pt' ? '27 itens para limpar · 3 projetos nesta lista' : '27 items to clean · 3 projects in this list')
     expect(html).not.toContain('39')
+    expect(html).toContain(`<span style="white-space:nowrap">${new Date(plan.scannedAt).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>`)
   }
 })
