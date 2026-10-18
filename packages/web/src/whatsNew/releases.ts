@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.141.0': {
+    features: [
+      {
+        pt: '"Adicionar conta" agora mostra o link de login com os botões Abrir e Copiar, sem abrir terminal nem navegador sozinho.',
+        en: '"Add account" now shows the sign-in link with Open and Copy buttons, without opening a terminal or a browser by itself.',
+      },
+      {
+        pt: 'No Claude e no Gemini, você cola o código que a página mostrar; no Codex, Copilot e Kimi, o código aparece grande e a janela fecha sozinha quando você termina de entrar.',
+        en: 'For Claude and Gemini you paste the code the page shows; for Codex, Copilot and Kimi the code is shown large and the window closes by itself once you finish signing in.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Sessões que terminaram normalmente não aparecem mais como "caíram" depois que o app reinicia.',
+        en: 'Sessions that ended normally no longer show up as "fell" after the app restarts.',
+      },
+      {
+        pt: 'Código errado no login mostra um aviso e um link novo, e Cancelar fecha a janela na hora.',
+        en: 'A wrong sign-in code shows a notice and a fresh link, and Cancel closes the window at once.',
+      },
+    ],
+  },
   '2.140.12': {
     features: [
       {

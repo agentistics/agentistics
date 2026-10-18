@@ -58,6 +58,8 @@ export interface StructuredProvider {
   onConversation?(id: string, conversationId: string): void | Promise<void | { retry: true; retryMs?: number }>
   /** A session is now hosted over its protocol (route `structured` only). */
   onStarted?(id: string, driver: StructuredDriverId): void
+  /** Persist a normal end BEFORE its durable/live records disappear. */
+  onEnded?(id: string, endedAt?: string): Promise<unknown>
   /** A structured session fell back to tmux (or could not), for the log / the row's note. */
   onFallback?(id: string, outcome: { reason: string; resumed: boolean }): void
   /**
@@ -319,6 +321,12 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
   const onExit = (id: string, l: Live) => async (e: StructuredExit) => {
     if (live.get(id) !== l) return
     if (e.kind !== 'failed') {
+      // Disposed also covers switching to terminal; that continues under this SAME id.
+      if (e.kind === 'ended') {
+        // Keep the evidence for the next poll/boot if persistence failed (or spawn has not filed
+        // the registry row yet). Deleting it here would turn this known end back into a fall.
+        try { if (await provider.onEnded?.(id) === false) return } catch { return }
+      }
       if (durable && l.route === 'structured') { live.delete(id); l.off(); durable.remove(id) }
       return
     }
@@ -398,7 +406,13 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     reattach() {
       if (!durable) return Promise.resolve()
       reattaching ??= (async () => {
-        for (const id of durable.dead()) durable.remove(id)
+        for (const id of durable.dead()) {
+          const endedAt = durable.endedAt?.(id)
+          if (endedAt) {
+            try { if (await provider.onEnded?.(id, endedAt) === false) continue } catch { continue }
+          }
+          durable.remove(id)
+        }
         const ids = durable.alive().filter(id => !live.has(id))
         if (ids.length === 0) return
         const reg = await provider.structured().catch(() => null)

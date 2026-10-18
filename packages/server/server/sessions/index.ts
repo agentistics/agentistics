@@ -91,6 +91,10 @@ export async function resolveBackend(): Promise<SessionBackend> {
       onStarted(id, driver) {
         void import('./registry').then(r => r.patchSession(id, { structuredDriver: driver })).catch(() => {})
       },
+      async onEnded(id, endedAt) {
+        const { patchSession } = await import('./registry')
+        return patchSession(id, { endedAt: endedAt ?? new Date().toISOString() })
+      },
       async onConversation(id, conversationId) {
         // Refused (and logged) when another row owns that conversation — CROSSBIND, `registry.ts`. A
         // contended lock is retried on the next poll; a live holder later, in case it ends.
