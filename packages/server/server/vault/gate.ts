@@ -591,7 +591,7 @@ export async function stepUpForRead(code: string, session: string): Promise<Gate
  */
 export async function stepUpByGesture(ctx: { session: string; loopback: boolean }): Promise<GateResult> {
   const pt = vaultLang() === 'pt'
-  const deny = (r: Refusal): Refusal => { vaultAudit({ type: 'vault.stepup-gesture', protector: r.code }); return r }
+  const deny = (r: Refusal): Refusal => { vaultAudit({ type: 'vault.stepup-gesture', reason: r.code }); return r }
   // Never the authenticator code here: with no Hello, or off this computer, the sentence says what to do instead.
   if (!ctx.loopback && !fromSocket(ctx)) return deny(refused('keepopen-needs-presence', sentence('keepopen-needs-presence')))
   if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
@@ -605,21 +605,31 @@ export async function stepUpByGesture(ctx: { session: string; loopback: boolean 
     return refused('keepopen-not-due', pt ? 'O cofre ainda não está perto de trancar. Você pode manter aberto quando o aviso aparecer.' : 'The vault is not about to lock yet. You can keep it open when the warning appears.')
   }
   const now = _now()
-  const last = _lastGesture.get(ctx.session)
-  if (last !== undefined && now - last < GESTURE_PROMPT_GAP_MS) {
+  if (_gestureInFlight || (_lastGestureAt !== null && now - _lastGestureAt < GESTURE_PROMPT_GAP_MS)) {
     return refused('keepopen-too-soon', pt ? 'Aguarde alguns segundos e tente de novo.' : 'Wait a few seconds and try again.')
   }
-  _lastGesture.set(ctx.session, now)
-  const g = await proveGesture(o)
-  if (!g.ok) return deny(g)
-  vaultAudit({ type: 'vault.stepup-gesture' })
-  noteVaultActivity()
-  return { ok: true, grant: mintGrant(ctx.session, 'keepopen') }
+  _lastGestureAt = now
+  _gestureInFlight = true
+  try {
+    const g = await proveGesture(o)
+    if (!g.ok) return deny(g.code === 'presence-cancelled'
+      ? refused(g.code, pt
+        ? 'O Windows Hello foi cancelado. O cofre continua aberto até o tempo acabar; pressione Manter aberto para tentar de novo.'
+        : 'Windows Hello was cancelled. The vault stays open until the timer ends; press Keep open to try again.')
+      : g)
+    vaultAudit({ type: 'vault.stepup-gesture' })
+    noteVaultActivity()
+    return { ok: true, grant: mintGrant(ctx.session, 'keepopen') }
+  } finally {
+    _gestureInFlight = false
+  }
 }
 
 const KEEPOPEN_WINDOW_MS = 5 * 60_000
 const GESTURE_PROMPT_GAP_MS = 30_000
-const _lastGesture = new Map<string, number>()
+// One desk and one Hello: caller-controlled session cookies must not buy another prompt.
+let _lastGestureAt: number | null = null
+let _gestureInFlight = false
 
 /** VAULT.PERSONAL §10: what refuses a phone unlock before anything is unwrapped (recovery mode, frozen). */
 export async function phoneUnlockGuard(): Promise<Refusal | null> {
@@ -1547,7 +1557,8 @@ export function __resetGateForTests(now?: () => number): void {
   _mem = { ...FRESH_STEPUP }
   _now = now ?? (() => Date.now())
   _grantKey = randomBytes(32)
-  _lastGesture.clear()
+  _lastGestureAt = null
+  _gestureInFlight = false
   dropEnrolSeed()
   dropRecovery()
   _flow = null

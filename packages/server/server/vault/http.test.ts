@@ -45,14 +45,14 @@ let dir = ''
 let dpapi = fake('dpapi')
 let hello = fake('hello')
 
-function restart(): void {
-  __resetVaultForTests({ dir: join(dir, 'vault'), lang: 'en', protectors: [dpapi, hello], autoInit: { candidates: [dpapi] } })
+function restart(lang: 'en' | 'pt' = 'en'): void {
+  __resetVaultForTests({ dir: join(dir, 'vault'), lang, protectors: [dpapi, hello], autoInit: { candidates: [dpapi] } })
   __setVaultClockForTests(clock)
   __resetGateForTests(clock)
 }
 
 type J = Record<string, any>
-async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string, cookie?: string): Promise<{ status: number; json: J; headers: Headers }> {
+async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?: string, cookie?: string, session = 'session-A'): Promise<{ status: number; json: J; headers: Headers }> {
   // What the dashboard sends: same-origin, JSON (M1 refuses anything else on a POST).
   const headers: Record<string, string> = { 'sec-fetch-site': 'same-origin', ...(method === 'POST' ? { 'content-type': 'application/json' } : {}), ...(grant ? { 'x-vault-grant': grant } : {}), ...(cookie ? { cookie } : {}) }
   // VAULT.PERSONAL §10: the gesture unlock answers ONLY the page on this computer, so it is sent as one —
@@ -60,7 +60,7 @@ async function http(method: 'GET' | 'POST', path: string, body?: unknown, grant?
   const local = path === '/api/vault/unlock' || path === '/api/vault/activity' || path === '/api/vault/activity/arm' || path === '/api/vault/extend' || path === '/api/vault/stepup/gesture' || method === 'GET'
   if (local) Object.assign(headers, { host: 'localhost:47292', origin: 'http://localhost:47292' })
   const req = new Request(`${local ? 'http://localhost:47292' : 'http://local'}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}) })
-  const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', ...(local ? { peer: '127.0.0.1' } : {}) })
+  const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session, ...(local ? { peer: '127.0.0.1' } : {}) })
   if (!res) return { status: 404, json: {}, headers: new Headers() }
   const text = await res.text()
   return { status: res.status, json: text.startsWith('{') ? JSON.parse(text) : {}, headers: res.headers }
@@ -539,23 +539,57 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     expect(al.json.ok).toBeFalsy()
   })
 
-  test('stepup/gesture: a cancelled Hello is audited, says Hello (not the code), and a retry inside 30 s raises no second prompt', async () => {
+  for (const lang of ['en', 'pt'] as const) test(`stepup/gesture: cancelled Hello card text in ${lang}, audited and throttled across sessions`, async () => {
     await enrolOverHttp()
+    restart(lang)
+    await http('POST', '/api/vault/unlock')
+    await http('POST', '/api/vault/unlock/code', { code: codeAt() })
     T += autoLockRemainingMs()! - 4 * 60_000
     const real = hello.unwrap.bind(hello)
     hello.unwrap = async () => { hello.gestures++; return { ok: false, kind: 'denied', reason: 'cancelled' } as UnwrapResult }
     const g0 = hello.gestures
     const a = await http('POST', '/api/vault/stepup/gesture', {})
     expect(a.json).toMatchObject({ ok: false, code: 'presence-cancelled' })
-    expect(a.json.sentence).not.toContain('authenticator')
+    expect(a.json.sentence).toBe(lang === 'pt'
+      ? 'O Windows Hello foi cancelado. O cofre continua aberto até o tempo acabar; pressione Manter aberto para tentar de novo.'
+      : 'Windows Hello was cancelled. The vault stays open until the timer ends; press Keep open to try again.')
+    expect((await vaultStatus()).state).toBe('open')
+    const audit = readFileSync(join(vaultDir(), 'audit.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line)).at(-1)
+    expect(audit).toMatchObject({ type: 'vault.stepup-gesture', reason: 'presence-cancelled' })
+    expect(audit.protector).toBeUndefined()
     expect(hello.gestures).toBe(g0 + 1)
     T += 10_000
-    expect((await http('POST', '/api/vault/stepup/gesture', {})).json).toMatchObject({ ok: false, code: 'keepopen-too-soon' })
+    expect((await http('POST', '/api/vault/stepup/gesture', {}, undefined, 'agentistics-session=rotated', 'session-B')).json).toMatchObject({ ok: false, code: 'keepopen-too-soon' })
     expect(hello.gestures).toBe(g0 + 1)
     T += 25_000
     hello.unwrap = real
     expect((await http('POST', '/api/vault/stepup/gesture', {})).json.ok).toBe(true)
     expect(readFileSync(join(vaultDir(), 'audit.jsonl'), 'utf8').match(/vault\.stepup-gesture/g)!.length).toBe(2)
+  })
+
+  test('stepup/gesture: a pending Hello excludes other sessions even after the throttle expires, and releases on failure', async () => {
+    await enrolOverHttp()
+    T += autoLockRemainingMs()! - 4 * 60_000
+    const real = hello.unwrap.bind(hello)
+    let entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    let fail!: (error: Error) => void
+    hello.unwrap = async () => {
+      hello.gestures++
+      entered()
+      return new Promise<UnwrapResult>((_resolve, reject) => { fail = reject })
+    }
+    const g0 = hello.gestures
+    const pending = http('POST', '/api/vault/stepup/gesture', {})
+    await started
+    T += 30_000
+    expect((await http('POST', '/api/vault/stepup/gesture', {}, undefined, undefined, 'session-B')).json.code).toBe('keepopen-too-soon')
+    expect(hello.gestures).toBe(g0 + 1)
+    fail(new Error('fake Hello failure'))
+    await expect(pending).rejects.toThrow('fake Hello failure')
+    hello.unwrap = real
+    expect((await http('POST', '/api/vault/stepup/gesture', {}, undefined, undefined, 'session-B')).json.ok).toBe(true)
+    expect(hello.gestures).toBe(g0 + 2)
   })
 
   test('extend: a bare local curl is refused (window unchanged, no token); with the page\'s grant it works, throttled', async () => {

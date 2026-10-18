@@ -649,8 +649,11 @@ of §7a/§7b: every record is sealed in the human scope, under the one purpose `
 - **Auto-lock warning and "keep it open".** Five minutes before the idle lock the Nay floating chat shows
   a card ("Seu cofre vai se trancar em 5 min. Manter aberto?" — [Manter aberto] [Trancar agora]) and a
   notification lands in Notificações, once per window (`nextWarn`; an extension or any use re-arms it).
+  Keep-open Hello prompts share a vault-wide 30-second throttle across all sessions, and only one
+  prompt may be in flight. Cancelling keeps the vault open until its existing idle timer ends.
   [Manter aberto] moves the idle clock by ONE window (`extendAutoLock`, audited
-  `vault.auto-lock-extended`): the page's read grant or the authenticator code (`extend-open`).
+  `vault.auto-lock-extended`): a keep-open grant from a local Hello (or an existing read grant).
+  If the page has lost its grant, the card asks Hello; it never asks for the authenticator code.
   The HTTP `/api/vault/extend` route also requires the same `loopbackRequest`
   check as `/activity` and `/activity/arm` before reading the body: loopback TCP peer and Host,
   no proxy headers, and a loopback Origin. It never extends silently, and nobody answering means it locks exactly as before.

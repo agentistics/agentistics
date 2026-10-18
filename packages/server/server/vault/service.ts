@@ -1136,7 +1136,7 @@ export type VaultAuditType =
   | 'vault.phone-enrol-request' | 'vault.phone-enrol-approve' | 'vault.phone-enrol-deny' | 'vault.phone-key-add' | 'vault.phone-key-remove' | 'vault.phone-unlock-failed'
 
 /** `device` is the label the owner gave a phone ('opened from Pixel') — never a key, an id or a secret. */
-export function vaultAudit(e: { type: VaultAuditType; purpose?: string; name?: string; protector?: string; source?: 'host' | 'engine'; device?: string }): void {
+export function vaultAudit(e: { type: VaultAuditType; purpose?: string; name?: string; protector?: string; reason?: string; source?: 'host' | 'engine'; device?: string }): void {
   try {
     mkdirSync(vaultDir(), { recursive: true, mode: 0o700 })
     const file = join(vaultDir(), 'audit.jsonl')
