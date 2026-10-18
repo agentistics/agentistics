@@ -1,5 +1,10 @@
 # Away state and check-in defaults
 
+The global away button stays in the top bar in both states, between the vault and
+notification bell on desktop and mobile. Its activation and return dialogs fit the
+dynamic viewport and device safe areas. The title and actions stay visible while
+the body scrolls, and the dialog covers bottom navigation and the Nay button.
+
 The global away switch covers every session while it is active. Switching it off
 clears every own away flag in the managed registry, including stopped sessions.
 This makes “the owner is back” true for the whole fleet and prevents an inherited

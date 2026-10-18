@@ -57,12 +57,10 @@ import { useStandaloneHeight } from './hooks/useStandaloneHeight'
 import { MagnifierLayer } from './components/a11y/MagnifierLayer'
 import { HideLensesButton } from './components/a11y/HideLensesButton'
 import { MagnifierButton } from './components/a11y/MagnifierButton'
-import { NotificationBell } from './components/NotificationBell'
+import { HeaderStatusButtons } from './components/HeaderStatusButtons'
 import { AgentisticsLoader } from './components/AgentisticsLoader'
-import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
 import { AwayChip, AwayDialogHost, awayMenuItems } from './components/sessions/AwayChip'
 import { useAway } from './lib/awayMode'
-import AwayPill from './components/AwayPill'
 import { HardwareModal } from './components/HardwareModal'
 import { PlanUsageModal } from './components/PlanUsageModal'
 import { subscribePlanUsageModal } from './lib/planUsageModalRequests'
@@ -3687,14 +3685,7 @@ export default function AppLayout() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <MagnifierButton ctx={appCtx} />
         <HideLensesButton ctx={appCtx} />
-        <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
-        <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
-        <NotificationBell lang={lang} buttonStyle={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: 32, height: 32, borderRadius: 8,
-          border: '1px solid var(--border)', background: 'transparent',
-          color: 'var(--text-tertiary)', cursor: 'pointer', position: 'relative',
-        }} />
+        <HeaderStatusButtons lang={lang} isCentral={isCentral} localShell={teamSession?.capabilities?.localShell} />
       </div>
 
       {/* THE `Conversa | Terminal` TOGGLE IS GONE FROM THE HEADER, and its absence is the design.
@@ -4085,14 +4076,7 @@ export default function AppLayout() {
         >
           <Cpu size={14} />
         </button>
-        <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
-        <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
-        <NotificationBell lang={lang} buttonStyle={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: 32, height: 32, borderRadius: 8,
-          border: '1px solid var(--border)', background: 'transparent',
-          color: 'var(--text-tertiary)', cursor: 'pointer', position: 'relative',
-        }} />
+        <HeaderStatusButtons lang={lang} isCentral={isCentral} localShell={teamSession?.capabilities?.localShell} />
         {!isCentral && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px 0 10px', height: 32,
@@ -4586,14 +4570,7 @@ export default function AppLayout() {
               {data?.healthIssues && data.healthIssues.length > 0 && (
                 <HealthWarnings issues={data.healthIssues} lang={lang} />
               )}
-              <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
-        <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
-              <NotificationBell lang={lang} buttonStyle={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                width: 32, height: 32, borderRadius: 8,
-                border: '1px solid var(--border)', background: 'transparent',
-                color: 'var(--text-tertiary)', cursor: 'pointer', position: 'relative',
-              }} />
+              <HeaderStatusButtons lang={lang} isCentral={isCentral} localShell={teamSession?.capabilities?.localShell} />
             </div>
           </div>
         )}

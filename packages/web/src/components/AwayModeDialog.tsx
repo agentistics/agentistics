@@ -47,6 +47,7 @@ export default function AwayModeDialog({ open, lang, onClose }: { open: boolean;
   return (
     <ConfirmModal
       open={open}
+      viewportFit
       tone="default"
       icon={<Moon size={17} />}
       title={pt ? 'Ligar o modo ausente' : 'Turn on away mode'}

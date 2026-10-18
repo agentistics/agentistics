@@ -57,6 +57,7 @@ export default function AwayPill({ lang, enabled, variant = AWAY_PILL_VARIANT }:
       </button>
       <ConfirmModal
         open={confirm}
+        viewportFit
         tone="default"
         icon={<Moon size={17} />}
         title={pt ? 'Voltou?' : 'Back?'}

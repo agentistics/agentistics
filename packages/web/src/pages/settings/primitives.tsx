@@ -26,7 +26,9 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction, viewportFit = false }: {
+  /** Portal above fixed navigation; scroll the body while keeping title and actions visible. */
+  viewportFit?: boolean
   /** Optional wider content and phone bottom-sheet presentation; defaults preserve confirmations. */
   maxWidth?: number
   mobileSheet?: boolean
@@ -97,18 +99,44 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
     }
   }, [open, focusPanel])
   if (!open) return null
-  return (
+  const body = <>
+    <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>
+    {children}
+    {requireText !== undefined && (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {requireTextHint && (
+          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{requireTextHint}</span>
+        )}
+        <input
+          value={typed}
+          onChange={e => setTyped(e.target.value)}
+          autoFocus
+          spellCheck={false}
+          autoComplete="off"
+          style={{
+            width: '100%', boxSizing: 'border-box', padding: isMobile ? '10px 11px' : '8px 11px',
+            background: 'var(--bg-elevated)', border: `1px solid ${armed ? '#ef4444' : 'var(--border)'}`,
+            borderRadius: 7, fontSize: isMobile ? 16 : 13, color: 'var(--text-primary)',
+            outline: 'none', fontFamily: 'inherit',
+          }}
+        />
+      </div>
+    )}
+  </>
+  const modal = (
     <div className={className ? `${className}-backdrop` : undefined} onClick={onCancel} style={{
       position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: mobileSheet && isMobile ? 'flex-end' : 'center', justifyContent: 'center',
       background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: mobileSheet && isMobile ? 0 : 16,
+      ...(viewportFit ? { boxSizing: 'border-box', height: 'calc(100dvh / var(--ui-zoom, 1))', paddingTop: 'max(16px, env(safe-area-inset-top, 0px))', paddingBottom: 'max(16px, env(safe-area-inset-bottom, 0px))' } : {}),
     }}>
-      <div className={className} ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+      <div className={viewportFit ? `ag-dialog-viewport ${className ?? ''}`.trim() : className} ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
         onClick={e => e.stopPropagation()} style={{ outline: 'none',
         width: '100%', maxWidth: mobileSheet && isMobile ? '100%' : maxWidth, ...(mobileSheet ? { boxSizing: 'border-box' as const, maxHeight: 'calc(92dvh / var(--ui-zoom, 1))', overflowY: 'auto' as const } : {}), background: 'var(--bg-card)', border: '1px solid var(--border)',
         borderRadius: mobileSheet && isMobile ? '18px 18px 0 0' : 12, padding: mobileSheet && isMobile ? '18px 16px max(18px, env(safe-area-inset-bottom))' : 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
         display: 'flex', flexDirection: 'column', gap: 14,
+        ...(viewportFit ? { boxSizing: 'border-box', maxHeight: 'calc(100dvh / var(--ui-zoom, 1) - max(16px, env(safe-area-inset-top, 0px)) - max(16px, env(safe-area-inset-bottom, 0px)))', overflow: 'hidden' } : {}),
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           <span style={tone === 'danger'
             ? { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'color-mix(in srgb, #ef4444 15%, transparent)', color: '#ef4444' }
             : { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
@@ -117,30 +145,11 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
           <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', ...(headerAction ? { flex: 1, minWidth: 0 } : {}) }}>{title}</span>
           {headerAction}
         </div>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>
-        {children}
-        {requireText !== undefined && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {requireTextHint && (
-              <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{requireTextHint}</span>
-            )}
-            <input
-              value={typed}
-              onChange={e => setTyped(e.target.value)}
-              autoFocus
-              spellCheck={false}
-              autoComplete="off"
-              style={{
-                width: '100%', boxSizing: 'border-box', padding: isMobile ? '10px 11px' : '8px 11px',
-                background: 'var(--bg-elevated)', border: `1px solid ${armed ? '#ef4444' : 'var(--border)'}`,
-                borderRadius: 7, fontSize: isMobile ? 16 : 13, color: 'var(--text-primary)',
-                outline: 'none', fontFamily: 'inherit',
-              }}
-            />
-          </div>
-        )}
+        {viewportFit ? <div className="ag-dialog-scroll-body" style={{ minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {body}
+        </div> : body}
         {footer ?? <div style={{
-          display: 'flex', gap: 8, marginTop: 2, justifyContent: 'flex-end',
+          display: 'flex', gap: 8, marginTop: 2, justifyContent: 'flex-end', flexShrink: 0,
           flexDirection: isMobile ? 'column-reverse' : 'row',
         }}>
           <button type="button" autoFocus={focusCancel} onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{cancelLabel}</button>
@@ -149,6 +158,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
       </div>
     </div>
   )
+  return viewportFit && typeof document !== 'undefined' ? createPortal(modal, document.body) : modal
 }
 
 // RecordCard

@@ -33,7 +33,7 @@ export default function AwaySection({ lang, capable }: { lang: 'pt' | 'en'; capa
         sub={sub}
         onToggle={() => { if (away.active) setConfirmOff(true); else setDialog(true) }}
       />
-      <ConfirmModal open={confirmOff} tone="default" title={pt ? 'Voltou?' : 'Back?'}
+      <ConfirmModal open={confirmOff} viewportFit tone="default" title={pt ? 'Voltou?' : 'Back?'}
         message={pt ? 'Isto limpa o modo ausente de todas as sessões.' : 'This clears away mode for every session.'}
         confirmLabel={pt ? 'Desligar' : 'Turn off'} cancelLabel={pt ? 'Cancelar' : 'Cancel'}
         onConfirm={() => { setConfirmOff(false); void setAway({ on: false }) }} onCancel={() => setConfirmOff(false)}>
