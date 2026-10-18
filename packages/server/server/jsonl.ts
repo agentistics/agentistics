@@ -1,3 +1,6 @@
+import { iterLines } from './jsonl-lines'
+export { iterLines } from './jsonl-lines'
+import { runCooperatively, runSynchronously } from './cooperative-work'
 import { readFile } from 'fs/promises'
 import type { SessionDayUsage, SessionMeta, TurnEvent } from '@agentistics/core'
 import { activeMinutesOf, charCount, emptyActiveTime, foldActiveTime, finishActiveTime } from '@agentistics/core'
@@ -270,35 +273,6 @@ export function makeEmptySession(
     user_message_timestamps: [],
     harness: 'claude',
     _source: source,
-  }
-}
-
-/**
- * Walk a file's lines WITHOUT materialising them as an array.
- *
- * `content.split('\n')` allocates a second copy of every byte in the file, plus a string header
- * per line — and this parser used to do it TWICE on the same content (once for the main loop, once
- * for `extractAgentMetrics`). On a 25 MB transcript that is ~50 MB of strings for a file already
- * held whole in memory, and `scanProjects` runs 30 of these concurrently.
- *
- * Measured on a real store (862 MB of transcripts across 2.694 files): the boot warm-build peaked
- * at 1.095 MB RSS. The peak is what matters, not the settled figure — it is what makes a laptop
- * swap, and several agentop instances plus the assistants they are watching share that machine.
- *
- * A generator yields each line as it is found, so the peak holds one line at a time on top of the
- * file itself. `trim()` stays the caller's job — the two callers already do it, and doing it here
- * would allocate a second string per line for no gain.
- */
-export function* iterLines(content: string): Generator<string> {
-  let start = 0
-  for (;;) {
-    const nl = content.indexOf('\n', start)
-    if (nl === -1) {
-      if (start < content.length) yield content.slice(start)
-      return
-    }
-    yield content.slice(start, nl)
-    start = nl + 1
   }
 }
 
@@ -644,8 +618,18 @@ export type ClaudeParseSink = (entry: Record<string, unknown>, lineNo: number) =
  */
 
 export function foldClaudeParse(state: ClaudeParseState, lines: Iterable<string>, sink?: ClaudeParseSink): void {
+  runSynchronously(foldClaudeParseSteps(state, lines, sink))
+}
+
+/** Same fold, paused only between records; all counters and last-wins maps stay in one walk. */
+export async function foldClaudeParseYielding(state: ClaudeParseState, lines: Iterable<string>, sink?: ClaudeParseSink): Promise<void> {
+  await runCooperatively(foldClaudeParseSteps(state, lines, sink))
+}
+
+function* foldClaudeParseSteps(state: ClaudeParseState, lines: Iterable<string>, sink?: ClaudeParseSink): Generator<void, void, void> {
   const turnEvents: TurnEvent[] = []
   for (const raw of lines) {
+    yield
     state.lineNo++
     const line = raw.trim()
     if (!line) continue
@@ -1157,6 +1141,6 @@ export async function parseSessionJsonl(
     return makeEmptySession(sessionId, fallbackPath, '', '', source)
   }
   const state = emptyClaudeParse()
-  foldClaudeParse(state, iterLines(content))
+  await foldClaudeParseYielding(state, iterLines(content))
   return finishClaudeSession(state, filePath, sessionId, fallbackPath, source)
 }

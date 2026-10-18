@@ -12,6 +12,7 @@
  * every harness adapter makes.
  */
 
+import { runCooperatively, runSynchronously } from './cooperative-work'
 import { calcCost, totalTokens } from '@agentistics/core'
 import type { AgentInvocation, SessionAgentMetrics } from '@agentistics/core'
 
@@ -106,6 +107,14 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
 
 /** Sum one subagent transcript. Total: malformed input yields an empty summary, never a throw. */
 export function summarizeSubagentTranscript(lines: Iterable<string>): SubagentSummary {
+  return runSynchronously(summarizeSubagentSteps(lines))
+}
+
+export function summarizeSubagentTranscriptYielding(lines: Iterable<string>): Promise<SubagentSummary> {
+  return runCooperatively(summarizeSubagentSteps(lines))
+}
+
+function* summarizeSubagentSteps(lines: Iterable<string>): Generator<void, SubagentSummary, void> {
   /** Per `message.id`, the LAST record wins — see `usage-dedupe.ts`. Insertion order is first-seen. */
   const byId = new Map<string, SubagentResponse>()
   const anonymousByModel = new Map<string, SubagentUsage>()
@@ -120,6 +129,7 @@ export function summarizeSubagentTranscript(lines: Iterable<string>): SubagentSu
   const seenChild = new Set<string>()
 
   for (const raw of lines) {
+    yield
     const line = raw.trim()
     if (!line) continue
 
