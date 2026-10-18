@@ -1,8 +1,10 @@
 /**
- * Header pill shown ONLY while away mode is active — beside the bell, so the person sees at a glance
- * that the fleet believes they are out. Click → confirm → off ("I'm back"). Mobile: icon-only, its 44px projected by `.ag-tap-icon`.
+ * Header moon button beside the bell, always shown when away mode is enabled here.
+ * Click → activation dialog while off, or confirm → off ("I'm back") while active.
+ * Mobile: icon-only, its 44px projected by `.ag-tap-icon`.
  */
 import { AwayImpact } from './AwayImpact'
+import AwayModeDialog from './AwayModeDialog'
 import React, { useState } from 'react'
 import { Moon } from 'lucide-react'
 import { ConfirmModal } from '../pages/settings/primitives'
@@ -24,16 +26,21 @@ export default function AwayPill({ lang, enabled, variant = AWAY_PILL_VARIANT }:
   const away = useAway()
   const isMobile = useIsMobile()
   const [confirm, setConfirm] = useState(false)
-  if (!enabled || !away.active || !away.state) return null
+  const [dialog, setDialog] = useState(false)
+  if (!enabled) return null
   const until = awayUntilLabel(away.state, lang, Date.now())
-  const label = pt ? `Modo ausente ${until} — clique para desligar` : `Away mode ${until} — click to turn off`
+  const label = away.active
+    ? (pt ? `Modo ausente ${until} — clique para desligar` : `Away mode ${until} — click to turn off`)
+    : (pt ? 'Ligar modo ausente' : 'Turn on away mode')
   const accent = 'var(--anthropic-orange)'
   const word = pt ? 'Ausente' : 'Away'
   const base = { flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit', background: 'transparent', color: accent } as const
   let style: React.CSSProperties; let content: React.ReactNode
-  if (variant === 'B' || isMobile) {
+  if (!away.active || variant === 'B' || isMobile) {
     style = { ...base, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8,
-      border: '1px solid currentColor' }
+      color: away.active ? accent : 'var(--text-tertiary)',
+      background: away.active ? 'color-mix(in srgb, var(--anthropic-orange) 12%, transparent)' : 'transparent',
+      border: away.active ? '1px solid currentColor' : '1px solid var(--border)' }
     content = <Moon size={15} aria-hidden />
   } else if (variant === 'C') {
     style = { ...base, display: 'inline-flex', alignItems: 'center', border: 'none', padding: '0 2px', fontSize: 11, fontWeight: 600 }
@@ -45,7 +52,7 @@ export default function AwayPill({ lang, enabled, variant = AWAY_PILL_VARIANT }:
   return (
     <>
       <button type="button" data-testid="away-pill" title={label} aria-label={label}
-        onClick={() => setConfirm(true)} className={isMobile ? 'ag-tap-icon' : undefined} style={style}>
+        onClick={() => { if (away.active) setConfirm(true); else setDialog(true) }} className={isMobile ? 'ag-tap-icon' : undefined} style={style}>
         {content}
       </button>
       <ConfirmModal
@@ -61,6 +68,7 @@ export default function AwayPill({ lang, enabled, variant = AWAY_PILL_VARIANT }:
         onConfirm={() => { setConfirm(false); void setAway({ on: false }) }}
         onCancel={() => setConfirm(false)}
       ><AwayImpact pt={pt} open={confirm} /></ConfirmModal>
+      {dialog && <AwayModeDialog open lang={lang} onClose={() => setDialog(false)} />}
     </>
   )
 }

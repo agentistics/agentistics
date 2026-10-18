@@ -13,8 +13,32 @@ function withWidth(width: number, run: () => void) {
 afterEach(() => __setAwayForTest(null))
 
 describe('top-bar away pill', () => {
-  test('is absent while away is off', () => {
-    withWidth(1440, () => { __setAwayForTest(AWAY_OFF); expect(renderToStaticMarkup(<AwayPill lang="en" enabled />)).toBe('') })
+  test.each(['A', 'B', 'C'] as const)('off uses a neutral moon square even for variant %s', variant => {
+    withWidth(1440, () => {
+      __setAwayForTest(AWAY_OFF)
+      const html = renderToStaticMarkup(<AwayPill lang="en" enabled variant={variant} />)
+      expect(html).toContain('aria-label="Turn on away mode"')
+      expect(html).toContain('width:32px'); expect(html).toContain('height:32px')
+      expect(html).toContain('border:1px solid var(--border)')
+      expect(html).toContain('color:var(--text-tertiary)')
+      expect(html).toContain('background:transparent')
+      expect(html).not.toContain('>Away<')
+      expect(renderToStaticMarkup(<AwayPill lang="pt" enabled />)).toContain('aria-label="Ligar modo ausente"')
+    })
+  })
+  test('disabled renders nothing with either away state', () => {
+    withWidth(1440, () => {
+      for (const on of [false, true]) {
+        __setAwayForTest({ ...AWAY_OFF, on })
+        expect(renderToStaticMarkup(<AwayPill lang="en" enabled={false} />)).toBe('')
+      }
+    })
+  })
+  test('the off button stays visible before the initial state arrives', () => {
+    withWidth(1440, () => {
+      __setAwayForTest(null)
+      expect(renderToStaticMarkup(<AwayPill lang="en" enabled />)).toContain('Turn on away mode')
+    })
   })
   test('default variant B is the 32px rounded square of its neighbours, accent outlined, moon only', () => {
     expect(AWAY_PILL_VARIANT).toBe('B')
@@ -23,6 +47,7 @@ describe('top-bar away pill', () => {
       const pt = renderToStaticMarkup(<AwayPill lang="pt" enabled />)
       expect(pt).toContain('width:32px'); expect(pt).toContain('height:32px'); expect(pt).toContain('border-radius:8px')
       expect(pt).toContain('border:1px solid currentColor'); expect(pt).toContain('color:var(--anthropic-orange)')
+      expect(pt).toContain('background:color-mix(in srgb, var(--anthropic-orange) 12%, transparent)')
       expect(pt).not.toContain('>Ausente<'); expect(pt).toContain('até você voltar')
     })
   })

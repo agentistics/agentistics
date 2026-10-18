@@ -113,3 +113,9 @@ summary. A missing registry `endedAt` is not proof that a session is alive: lost
 closed and registry-only orphan rows do not count or receive away notices. Live external
 rows (`unknown` activity) still count, as they do in the fleet. Global OFF continues to
 clear own away flags on every registry row, including stopped and orphaned sessions.
+
+The global moon button in the top bar is always visible where away mode is available.
+While off it uses the same neutral square as its neighbours and opens the Settings
+activation dialog. While on it has an accent outline and light fill, and opens the
+“Back?” confirmation to clear away mode. On mobile it remains icon-only with a 44px
+touch target.
