@@ -260,12 +260,14 @@ let _grantKey = randomBytes(32)
 
 function sessionTag(session: string): string { return createHash('sha256').update(session).digest('hex').slice(0, 32) }
 
-export function mintGrant(session: string, cls: 'read', nowMs = _now()): string {
+/** 'keepopen' (Hello-minted) is accepted by extend-open ONLY; 'read' (code-minted) is the settings/list class. */
+export type GrantClass = 'read' | 'keepopen'
+export function mintGrant(session: string, cls: GrantClass, nowMs = _now()): string {
   const payload = `${nowMs + GRANT_TTL_MS}.${cls}.${sessionTag(session)}`
   return `${payload}.${createHmac('sha256', _grantKey).update(`${GRANT_DOMAIN}.${payload}`).digest('hex')}`
 }
 
-export function grantValid(token: string | null | undefined, session: string, cls: 'read', nowMs = _now()): boolean {
+export function grantValid(token: string | null | undefined, session: string, cls: GrantClass, nowMs = _now()): boolean {
   if (!token) return false
   const dot = token.lastIndexOf('.')
   if (dot === -1) return false
@@ -411,7 +413,7 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
   // VAULT.V2 (QA r3 C1): "keep it open" needs the page's own read grant (bound to the HTTP session) or the code.
   // A bare loopback request is no longer enough: any local process could otherwise hold the vault open forever.
   if (action === 'extend-open') {
-    if (grantValid(ctx.grant, ctx.session, 'read')) { noteVaultActivity(); return { ok: true } }
+    if (grantValid(ctx.grant, ctx.session, 'read') || grantValid(ctx.grant, ctx.session, 'keepopen')) { noteVaultActivity(); return { ok: true } }
     if (!ctx.code) return refused('stepup-required', sentence('stepup-required'))
     const c = await checkCodeWith(o.dek, o.kid, ctx.code)
     if (!c.ok) return c
@@ -597,7 +599,7 @@ export async function stepUpByGesture(ctx: { session: string; loopback: boolean 
   const g = await proveGesture(o)
   if (!g.ok) return g
   noteVaultActivity()
-  return { ok: true, grant: mintGrant(ctx.session, 'read') }
+  return { ok: true, grant: mintGrant(ctx.session, 'keepopen') }
 }
 
 /** VAULT.PERSONAL §10: what refuses a phone unlock before anything is unwrapped (recovery mode, frozen). */

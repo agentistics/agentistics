@@ -279,6 +279,14 @@ describe('VAULT.UI2 — the grant for a :vault chip, and the extension of an ope
     expect(autoLockRemainingMs()!).toBeLessThan(before - 9 * 60_000)
   })
 
+  test('keepopen grant: accepted by extend-open only; set-auto-lock and set-confirm-each-use still need the code', async () => {
+    const ko = mintGrant(S.session, 'keepopen')
+    expect((await requireVaultStepUp('extend-open', { ...S, grant: ko })).ok).toBe(true)
+    expect(await requireVaultStepUp('set-auto-lock', { ...S, grant: ko })).toMatchObject({ ok: false, code: 'stepup-required' })
+    expect(await requireVaultStepUp('set-confirm-each-use', { ...S, grant: ko })).toMatchObject({ ok: false, code: 'stepup-required' })
+    expect(await requireVaultStepUp('extend-open', { ...S, grant: mintGrant('other-session', 'keepopen') })).toMatchObject({ ok: false, code: 'stepup-required' })
+  })
+
   test('extend-open: needs the page\'s read grant or the code — a bare loopback request is refused', async () => {
     expect(await requireVaultStepUp('extend-open', { ...S, loopback: true })).toMatchObject({ ok: false, code: 'stepup-required' })
     expect(await requireVaultStepUp('extend-open', S)).toMatchObject({ ok: false, code: 'stepup-required' })

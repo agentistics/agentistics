@@ -227,9 +227,9 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     const binding = typeof b.for === 'string' && FRESH_BINDING.test(b.for) ? b.for : null
     const wasOpen = vaultIsOpen()
     const u = await unlockWithGesture(undefined, binding ? { session, binding } : undefined)
-    // A Hello that just opened the vault (inside the 24 h code window) also hands the page its 'read' grant,
+    // A Hello that just opened the vault (inside the 24 h code window) also hands the page a keep-open-only grant,
     // so "keep open" works with no code. Only when THIS call opened it: an already-open vault proves nothing.
-    const grantNow = u.ok && u.state === 'open' && !wasOpen ? { grant: gate.mintGrant(session, 'read') } : {}
+    const grantNow = u.ok && u.state === 'open' && !wasOpen ? { grant: gate.mintGrant(session, 'keepopen') } : {}
     const response = reply(u.ok ? { ok: true, state: u.state, ...(u.fresh ? { fresh: u.fresh } : {}), ...grantNow } : u)
     return u.ok && u.state === 'open' && !wasOpen ? addHeartbeatCookie(response, rotateVaultHeartbeatToken()) : response
   }
