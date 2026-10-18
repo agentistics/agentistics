@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test'
 import { emptyClaudeParse, foldClaudeParse } from './jsonl'
 
 test('Claude activity and replacement usage stay on the local BRT day after UTC midnight', () => {
-  const previous = process.env.TZ
+  // bun test runs in UTC without setting TZ, so `delete` would fall back to the host zone
+  const previous = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone
   process.env.TZ = 'America/Sao_Paulo'
   try {
     const state = emptyClaudeParse()
@@ -17,7 +18,6 @@ test('Claude activity and replacement usage stay on the local BRT day after UTC 
     expect(state.daily.get('2026-10-17')!.output_tokens).toBe(20)
     expect(state.daily.has('2026-10-18')).toBe(false)
   } finally {
-    if (previous === undefined) delete process.env.TZ
-    else process.env.TZ = previous
+    process.env.TZ = previous
   }
 })
