@@ -25,6 +25,22 @@ The summary filter does not narrow this flat list; its selection is restored in 
 When no active leaders match, the list says **No active leaders** (**Nenhum líder ativo**), even
 when workers or ended leaders are pinned.
 
+With the `sessionTabs` flag enabled, pinned sessions in `exited`, `closed`, `lost` or `unknown`
+state sleep in the strip's menu instead of occupying a tab. Unpinned ended tabs stay visible.
+The menu button stays at the left of the scrolling track, counts the visible tabs, and shows a
+moon when any pinned session sleeps. Its **Sleeping** entries reopen through the fleet's existing
+`resume` action and focus the resulting conversation in the current pane.
+
+In the aside, those same pinned ended sessions appear under **Sleeping** at the end of **Pinned**.
+This row starts collapsed and remembers expansion with the existing ended-section preferences.
+The Pinned header counts only its live rows. Sleeping cards can still be opened for reading,
+reopened, or unpinned; sleeping never removes the pin.
+
+The check-in details modal uses one column on desktop and mobile: headline, needs, delivered,
+in progress, next steps, health, then earlier rounds. Text wraps throughout. Health is a list of
+status dots, labels and full explanations; below 480px explanations move under their labels.
+Earlier rounds expand downward in place to show their complete items.
+
 ---
 
 ## The conversation

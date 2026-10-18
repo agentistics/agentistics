@@ -7,7 +7,7 @@
  * Every status mark carries its word (`aria-label` + `title`) — colour is never the only signal.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
-import { ChevronDown, Crown, Pin, X } from 'lucide-react'
+import { ChevronDown, Crown, List, Moon, Pin, X } from 'lucide-react'
 import { sessionIdentityKey } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
@@ -19,7 +19,7 @@ import {
   MAX_PINNED, getPinnedIds, movePinnedSession, pinnedServerSnapshot, subscribePinnedSessions, togglePinnedSession,
 } from '../../lib/pinnedSessions'
 import {
-  closeEnded, closeOthers, closeTab, closeToRight, enterTab, livePins, ownsTabShortcut, reconcileTabs, stepTab, stripOrder, tabAt,
+  ENDED, splitSleepingTabs, closeEnded, closeOthers, closeTab, closeToRight, enterTab, livePins, ownsTabShortcut, reconcileTabs, stepTab, stripOrder, tabAt,
 } from '../../lib/sessionTabs'
 import { getPrevActive, setOpenTabs, setPrevActive, trackStripMount, updateOpenTabs, useOpenTabs } from '../../lib/sessionTabsStore'
 import { getActivePane, usePaneId } from '../../lib/paneScope'
@@ -30,7 +30,6 @@ import { HarnessMark } from './HarnessMark'
 import type { MenuEntry } from '../../lib/rowMenu'
 
 const LEADER_PREFIX = /^\[ (LÍDER|LEADER) \] - /
-const ENDED = new Set(['exited', 'closed', 'lost', 'unknown'])
 
 export interface SessionTabStripProps {
   lang: 'pt' | 'en'
@@ -42,6 +41,8 @@ export interface SessionTabStripProps {
   active: ControlSession
   /** Go to a session (the same path the aside takes). */
   onGo: (id: string) => void
+  /** Reuse the fleet list's resume action, then follow the reopened row in this pane. */
+  onReopen: (row: ControlSession) => Promise<{ ok: boolean; message: string }>
   /** Nothing left open: leave for the overview. */
   onNone: () => void
 }
@@ -171,7 +172,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnp
   )
 }
 
-export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }: SessionTabStripProps) {
+export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen, onNone }: SessionTabStripProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
   const touch = useIsCoarsePointer()
@@ -187,14 +188,18 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
   }, [fleetReady, rows, activeKey])
   // A pin whose session left the fleet outright is not a tab (the aside drops it the same way).
   const pins = useMemo(() => livePins(allPins, knownKeys), [allPins, knownKeys])
-  const order = useMemo(() => stripOrder(open, pins), [open, pins])
   const byKey = useMemo(() => {
     const m = new Map<string, ControlSession>()
     for (const r of rows) { m.set(keyOf(r), r); if (!m.has(r.id)) m.set(r.id, r) }
     return m
   }, [rows])
+  const { drawn: order, sleeping } = useMemo(
+    () => splitSleepingTabs(stripOrder(open, pins), pins, k => byKey.get(k)?.state),
+    [open, pins, byKey],
+  )
+  const drawnPins = pins.filter(k => order.includes(k))
   const [notice, setNotice] = useState<string | null>(null)
-  const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[]; pick: (a: string) => void } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[]; below?: boolean; pick: (a: string) => void } | null>(null)
 
   useEffect(() => {
     if (notice === null) return
@@ -228,11 +233,11 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
     // If the tab on screen was closed, land on the nearest one still open, else the overview.
     const stillThere = nextOpen.includes(activeKey) || pins.includes(activeKey)
     if (stillThere) return
-    const left = stripOrder(nextOpen, pins)
+    const left = splitSleepingTabs(stripOrder(nextOpen, pins), pins, k => byKey.get(k)?.state).drawn
     const at = order.indexOf(activeKey)
     const target = left.find(k => order.indexOf(k) > at) ?? left[left.length - 1]
     if (target) goTo(target); else onNone()
-  }, [pane, activeKey, pins, order, goTo, onNone])
+  }, [pane, activeKey, pins, order, byKey, goTo, onNone])
 
   const close = useCallback((key: string) => {
     const r = closeTab(order, key, activeKey, pins)
@@ -326,15 +331,24 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
     })
     const isEnded = (k: string) => { const row = byKey.get(k); return row ? ENDED.has(row.state) : false }
     setMenu({
-      x: Math.max(4, r.right - 210), y: r.bottom + 4,
+      x: r.left, y: r.bottom + 4, below: true,
       entries: [
         ...rowEntries,
-        { action: 'others', label: pt ? 'Fechar outras' : 'Close others', enabled: true },
+        ...(sleeping.length > 0 ? [
+          { action: 'sleeping', label: pt ? 'Dormindo' : 'Sleeping', enabled: false, separatorBefore: true },
+          ...sleeping.map(k => ({ action: `reopen:${k}`, label: (byKey.get(k)?.title ?? k).replace(LEADER_PREFIX, ''), enabled: true, pinned: true })),
+        ] : []),
+        { action: 'others', label: pt ? 'Fechar outras' : 'Close others', enabled: true, separatorBefore: true },
         { action: 'ended', label: pt ? 'Fechar encerradas' : 'Close ended', enabled: open.some(isEnded) },
         { action: 'all', label: pt ? 'Fechar todas' : 'Close all', enabled: open.length > 0 },
       ],
       pick: a => {
         if (a.startsWith('go:')) goTo(a.slice(3))
+        else if (a.startsWith('reopen:')) {
+          const row = byKey.get(a.slice(7))
+          if (row) void onReopen(row).then(out => { if (!out.ok) setNotice(out.message) })
+            .catch(error => setNotice(String(error)))
+        }
         else if (a === 'others') closeKeys(closeOthers(open, activeKey))
         else if (a === 'ended') closeKeys(closeEnded(open, isEnded))
         else if (a === 'all') closeKeys([])
@@ -345,6 +359,15 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
   return (
     <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0, borderBottom: '1px solid var(--border-subtle)' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0 }}>
+      <button
+        type="button" aria-haspopup="menu" aria-label={pt ? 'Abas abertas e dormindo' : 'Open and sleeping tabs'}
+        onClick={e => listMenu(e.currentTarget)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 30, minWidth: mobile ? 44 : 0, justifyContent: 'center',
+          padding: '0 8px', marginLeft: 6, boxSizing: 'border-box', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
+          cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
+        }}
+      ><List size={13} aria-hidden />{order.length}{sleeping.length > 0 && <Moon size={10} fill="currentColor" aria-hidden style={{ color: 'var(--text-tertiary)' }} />}<ChevronDown size={12} aria-hidden /></button>
       <div
         ref={attach} className="tabscroll" role="tablist" aria-label={pt ? 'Sessões abertas' : 'Open sessions'} onScroll={measure}
         style={{
@@ -356,7 +379,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
       >
         {order.map((k, i) => (
           <span key={k} style={{ display: 'contents' }}>
-            {i === pins.length && pins.length > 0 && (
+            {i === drawnPins.length && drawnPins.length > 0 && (
               <span aria-hidden style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '6px 2px', flexShrink: 0 }} />
             )}
             <Tab
@@ -371,17 +394,8 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
           </span>
         ))}
       </div>
-      <button
-        type="button" aria-haspopup="menu" aria-label={pt ? 'Todas as abas abertas' : 'All open tabs'}
-        onClick={e => listMenu(e.currentTarget)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 30, minWidth: mobile ? 44 : 0, justifyContent: 'center',
-          padding: '0 8px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-tertiary)',
-          cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
-        }}
-      >{order.length}<ChevronDown size={13} /></button>
       {menu !== null && (
-        <SessionRowMenu x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
+        <SessionRowMenu below={menu.below} x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
       )}
     </div>
     {notice !== null && (

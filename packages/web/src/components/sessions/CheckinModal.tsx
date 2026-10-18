@@ -3,12 +3,12 @@
  * dialog on desktop, a full-height sheet at phone width).
  *
  * Reading order: headline + when + state chip, then what NEEDS the person, then the latest round's
- * facts (delivered, in progress, next, health), then earlier rounds as a one-line-each timeline that
+ * facts (delivered, in progress, next, health), then earlier rounds as a wrapped timeline that
  * opens one at a time. It is STANDALONE: `CheckinModalHost` (mounted once in App) draws it from the
  * `checkinModal` store, so the chat row, the ⓘ panel, the bell and Nay all open it alone.
  */
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { Sheet } from '../../pages/vault/vaultUi'
 import { Pill, type PillTone } from '../Pill'
 import { microLabel, surface } from '../tasks/board'
@@ -40,11 +40,11 @@ export function roundTone(state: CheckinRound['state']): PillTone { return state
 
 export function RoundStateChip({ state, pt }: { state: CheckinRound['state']; pt: boolean }) {
   const c = copy(pt)
-  return <Pill tone={roundTone(state)} nowrap>{state === 'needs_you' ? c.needsYou : state === 'resolved' ? c.resolved : c.ok}</Pill>
+  return <Pill tone={roundTone(state)}>{state === 'needs_you' ? c.needsYou : state === 'resolved' ? c.resolved : c.ok}</Pill>
 }
 
 export function Group({ label, children }: { label: string; children: ReactNode }) {
-  return <section style={{ display: 'grid', gap: 6 }}><div style={{ ...microLabel, color: LABEL }}>{label}</div>{children}</section>
+  return <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 6, borderTop: '1px solid var(--border)', paddingTop: 14 }}><div style={{ ...microLabel, color: LABEL }}>{label}</div>{children}</section>
 }
 
 /** The facts of one round, grouped. `needs` leads, in the fault tint, when present. */
@@ -53,20 +53,22 @@ export function CheckinRoundBody({ round, pt, hideEmpty = false }: { round: Chec
   const needs = round.needs ?? [], delivered = round.delivered ?? [], progress = round.inProgress ?? [], next = round.next ?? [], health = round.health ?? []
   const empty = needs.length + delivered.length + progress.length + next.length + health.length === 0
   return (
-    <div data-testid="checkin-round-body" style={{ display: 'grid', gap: 16 }}>
+    <div data-testid="checkin-round-body" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16 }}>
       {needs.length > 0 && (
+        <section style={{ borderTop: '1px solid var(--border)', paddingTop: 14, minWidth: 0 }}>
         <div style={{ ...surface, padding: '10px 12px', display: 'grid', gap: 6, borderColor: 'color-mix(in srgb, var(--accent-red) 40%, var(--border))', background: 'color-mix(in srgb, var(--accent-red) 6%, var(--bg-card))' }}>
           <div style={{ ...microLabel, color: 'var(--accent-red)' }}>{c.needs}</div>
           {needs.map((n, i) => <div key={i} style={TEXT}><strong>{n.subject}</strong> — {n.text}</div>)}
         </div>
+        </section>
       )}
       {delivered.length > 0 && <Group label={c.delivered}>{delivered.map((d, i) => <div key={i} style={TEXT}>{d.text}</div>)}</Group>}
       {progress.length > 0 && (
         <Group label={c.progress}>
           {progress.map((p, i) => (
-            <div key={i} style={{ ...TEXT, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
-              <strong>{p.item}</strong><Pill tone="neutral" nowrap>{p.stage}</Pill>
-              {p.release && <Pill tone="warn" nowrap>{c.release} {p.release}</Pill>}
+            <div key={i} data-checkin-progress style={{ ...TEXT, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+              <strong>{p.item}</strong><Pill tone="neutral">{p.stage}</Pill>
+              {p.release && <Pill tone="warn">{c.release} {p.release}</Pill>}
             </div>
           ))}
         </Group>
@@ -74,14 +76,13 @@ export function CheckinRoundBody({ round, pt, hideEmpty = false }: { round: Chec
       {next.length > 0 && <Group label={c.next}>{next.map((n, i) => <div key={i} style={TEXT}>{n.text}{n.when && <span style={MUTED}> · {n.when}</span>}</div>)}</Group>}
       {health.length > 0 && (
         <Group label={c.health}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 6 }}>
+          <div data-testid="checkin-health-list" style={{ display: 'grid', minWidth: 0 }}>
             {health.map((h, i) => (
-              <div key={i} title={`${h.label}: ${h.value}`} style={{ ...surface, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <span role="img" aria-label={c.health3[h.state]} style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: DOT[h.state] }} />
-                <span style={{ minWidth: 0, display: 'grid', lineHeight: 1.3 }}>
-                  <span style={{ fontSize: 11, color: LABEL, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.label}</span>
-                  <span style={{ ...TEXT, fontSize: 12.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.value}</span>
-                </span>
+              <div key={i} className="ag-checkin-health-row" style={{ ...TEXT, display: 'grid', gap: '4px 10px', padding: '8px 0',
+                borderBottom: i < health.length - 1 ? '1px solid var(--border)' : undefined }}>
+                <span role="img" aria-label={c.health3[h.state]} style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 5, background: DOT[h.state] }} />
+                <span style={{ ...MUTED, minWidth: 0 }}>{h.label}</span>
+                <span className="ag-checkin-health-value" style={TEXT}>{h.value}</span>
               </div>
             ))}
           </div>
@@ -109,14 +110,14 @@ function roundOf(event: TaskEvent): CheckinRound {
     ...(event.next ? { next: event.next } : {}), ...(event.health ? { health: event.health } : {}), ...(event.needs ? { needs: event.needs } : {}) }
 }
 
-/** Earlier rounds: one line each (time + headline + state dot), one open at a time. */
+/** Earlier rounds: a wrapped row each (time + headline + state dot), one open at a time. */
 export function CheckinTimeline({ history, pt, isMobile }: { history: TaskEvent[]; pt: boolean; isMobile: boolean }) {
   const [openId, setOpenId] = useState<string | null>(null)
   const c = copy(pt)
   if (history.length === 0) return null
   return (
     <Group label={c.earlier}>
-      <ol data-testid="checkin-timeline" style={{ listStyle: 'none', margin: 0, padding: 0, ...surface, overflow: 'hidden' }}>
+      <ol data-testid="checkin-timeline" style={{ listStyle: 'none', margin: 0, padding: 0, ...surface, minWidth: 0 }}>
         {history.map((event, i) => {
           const open = openId === event.id
           const when = event.at ? roundWhen(new Date(event.at).getTime(), pt) : `#${i + 1}`
@@ -125,10 +126,10 @@ export function CheckinTimeline({ history, pt, isMobile }: { history: TaskEvent[
             <li key={event.id} style={{ borderTop: i ? '1px solid var(--border)' : 'none' }}>
               <button type="button" aria-expanded={open} onClick={() => setOpenId(open ? null : event.id)}
                 style={{ all: 'unset', boxSizing: 'border-box', width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', minHeight: isMobile ? 44 : 34 }}>
-                {open ? <ChevronDown size={13} style={MUTED} /> : <ChevronRight size={13} style={MUTED} />}
+                <ChevronRight size={13} aria-hidden style={{ ...MUTED, flexShrink: 0, transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }} />
                 <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: tone }} />
                 <span style={{ ...MUTED, fontSize: 12, flexShrink: 0 }}>{when}</span>
-                <span style={{ ...TEXT, fontSize: 12.5, ...(isMobile ? { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' } : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }) }}>{event.headline ?? event.summary ?? ''}</span>
+                <span style={{ ...TEXT, flex: 1, fontSize: 12.5 }}>{event.headline ?? event.summary ?? ''}</span>
               </button>
               {open && <div style={{ padding: '4px 12px 12px 32px' }}><CheckinRoundBody round={roundOf(event)} pt={pt} /></div>}
             </li>
@@ -150,21 +151,23 @@ export function CheckinModalView({ round, history, pt, isMobile, onClose }: { ro
   // The "needs you" box already says it; the chip only speaks when the state is something else.
   const chip = !(round.state === 'needs_you' && (round.needs?.length ?? 0) > 0)
   return (
-    <div data-testid="checkin-modal">
-      <Sheet closeLabel={c.close} isMobile={isMobile} title={checkinTitle(round, pt)} onClose={onClose} maxWidth={960}>
-        <div style={{ display: 'grid', gap: 18 }}>
+    <div data-testid="checkin-modal" className="ag-checkin-modal" style={{ overflowWrap: 'anywhere' }}>
+      <style>{`
+        .ag-checkin-health-row { grid-template-columns: 8px 150px minmax(0, 1fr); }
+        .ag-checkin-modal [data-checkin-progress] > span { min-width: 0; max-width: 100%; box-sizing: border-box; }
+        @media (max-width: 480px) {
+          .ag-checkin-health-row { grid-template-columns: 8px minmax(0, 1fr); }
+          .ag-checkin-health-value { grid-column: 2; }
+        }
+      `}</style>
+      <Sheet closeLabel={c.close} isMobile={isMobile} title={checkinTitle(round, pt)} onClose={onClose} maxWidth={960} closeSize={32}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 18 }}>
           <header style={{ display: 'grid', gap: 6, justifyItems: 'start' }}>
-            <div style={{ color: 'var(--text-primary)', fontSize: 16, fontWeight: 650, lineHeight: 1.35 }}>{round.headline ?? round.summary}</div>
+            <div style={{ ...TEXT, fontSize: 16, fontWeight: 650, lineHeight: 1.35 }}>{round.headline ?? round.summary}</div>
             {chip && <RoundStateChip state={round.state} pt={pt} />}
           </header>
-          {/* Two columns on desktop: the round's story on the left, health + earlier rounds on the right. */}
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: isMobile ? 18 : 20, alignItems: 'start' }}>
-            <CheckinRoundBody round={{ ...round, health: [] }} pt={pt} hideEmpty />
-            <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-              <CheckinRoundBody round={{ state: 'ok', summary: '', health: round.health ?? [] }} pt={pt} hideEmpty />
-              <CheckinTimeline history={earlier} pt={pt} isMobile={isMobile} />
-            </div>
-          </div>
+          <CheckinRoundBody round={round} pt={pt} hideEmpty />
+          <CheckinTimeline history={earlier} pt={pt} isMobile={isMobile} />
         </div>
       </Sheet>
     </div>

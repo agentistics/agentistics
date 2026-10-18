@@ -24,7 +24,7 @@ import { getActivePane } from '../../lib/paneScope'
 import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/splitRoute'
 
 import {
-  BellOff, ChevronDown, ChevronRight, Clock, Crown, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
+  BellOff, ChevronDown, ChevronRight, Clock, Crown, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Moon, Pin,
   PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
@@ -42,6 +42,7 @@ import { SessionsGroupMenu } from './SessionsGroupMenu'
 import type { SessionOrder } from '@agentistics/tui/control/session-order'
 import { displayName, toggleHidden } from '../../lib/groupNameMask'
 import { folderFold } from '../../lib/folderFold'
+import { splitSleepingTabs } from '../../lib/sessionTabs'
 import { splitFolderRows, endedAutoOpen } from '../../lib/folderRows'
 import { ATTN_BAR_CLASS, ATTN_COUNT_CLASS, attentionCount, attentionIds, pruneDismissed } from './AttentionDot'
 import { rowSelected } from '../../lib/fleetSelection'
@@ -52,7 +53,7 @@ import { SessionPickModal } from '../sessions/SessionPickModal'
 import { IdleReviewCard } from '../sessions/IdleReviewCard'
 import { PendingSessionCard } from '../sessions/PendingSessionCard'
 import { markSessionPending, reconcilePendingSessionsNow } from '../../lib/pendingSessionStore'
-import { reopeningLabel, useReopening, withReopening } from '../../lib/reopeningStore'
+import { reopenSession, reopeningLabel, useReopening, withReopening } from '../../lib/reopeningStore'
 import { buildPickRows } from '../../lib/sessionPick'
 import { NOTIFY_TOGGLE, mutedTooltip, notifyMenuExtras, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
@@ -99,6 +100,7 @@ import { applyLeadersOnly, countLeaders, leadersText } from '../../lib/leadersFi
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
 const OPEN_BESIDE = '__open_beside__'
+const SLEEPING_PINS = 'pinned:sleeping'
 
 export interface SessionsAsideProps {
   lang: 'pt' | 'en'
@@ -653,6 +655,17 @@ export function SessionsAside({
     setMenu({ x, y, id: session.id, state: session.state, verbs })
   }
 
+  const reopenRow = async (id: string) => {
+    if (!act) return
+    const out = await reopenSession(id, act)
+    setNotice(out.message)
+    if (out.ok && out.id) {
+      const from = rows.find(r => r.id === id)
+      const r = reopenedSessionRoute(out.id, from ? { id, harness: from.harness, title: from.title } : { id })
+      navigate(r.path, r.options)
+    }
+  }
+
   const pickMenuAction = (action: string) => {
     if (!menu) return
     const { id } = menu
@@ -707,18 +720,8 @@ export function SessionsAside({
       return
     }
     if (!act) return
-    const call = () => act({ id, action })
-    void (action === 'resume' ? withReopening([id], call) : call()).then(out => {
-      setNotice(out.message)
-      // A REOPEN LANDS SOMEWHERE, here too. It retires the row it was asked about, so a reader
-      // sitting on that row is left on an id the next poll drops — and this handler kept only the
-      // message. The row it came FROM names the wait; see `reopenedSessionRoute`.
-      if (out.ok && action === 'resume' && out.id) {
-        const from = rows.find(r => r.id === id)
-        const r = reopenedSessionRoute(out.id, from ? { id, harness: from.harness, title: from.title } : { id })
-        navigate(r.path, r.options)
-      }
-    })
+    if (action === 'resume') { void reopenRow(id); return }
+    void act({ id, action }).then(out => setNotice(out.message))
   }
 
   // The top bar's magnifier focuses this field. An event rather than a prop because the button and
@@ -786,7 +789,12 @@ export function SessionsAside({
   // here), so a pinned session that finished while the person was away vanished from the band the
   // moment its state left `ACTIVE_STATES` — no reload needed, just the ordinary case of a pinned
   // session finishing.
-  const pinnedRows = useMemo(() => resolvePinnedRows(pins, rows, pinKeyOf), [pins, rows])
+  const allPinnedRows = useMemo(() => resolvePinnedRows(pins, rows, pinKeyOf), [pins, rows])
+  const { pinnedRows, sleepingRows } = useMemo(() => {
+    const byKey = new Map(allPinnedRows.map(row => [pinKeyOf(row), row]))
+    const split = splitSleepingTabs([...byKey.keys()], pins, k => byKey.get(k)?.state)
+    return { pinnedRows: split.drawn.map(k => byKey.get(k)!), sleepingRows: split.sleeping.map(k => byKey.get(k)!) }
+  }, [allPinnedRows, pins])
 
   /**
    * TWO bands — Active and Inactive.
@@ -834,6 +842,8 @@ export function SessionsAside({
    * fifth piece of persisted state to keep in sync with the other four.
    */
   const collapseAll = () => {
+    setExpandedEndedState(new Set())
+    writeAsideGroupPrefs({ expandedEndedGroups: [] })
     setFoldedPinnedState(true)
     writeAsideGroupPrefs({ foldedPinned: true })
     setFoldedGroupsSectionState(true)
@@ -846,6 +856,9 @@ export function SessionsAside({
     writeAsideGroupPrefs({ collapsed: [...allAutoKeys] })
   }
   const expandAll = () => {
+    const nextEnded = new Set([...expandedEnded, SLEEPING_PINS])
+    setExpandedEndedState(nextEnded)
+    writeAsideGroupPrefs({ expandedEndedGroups: [...nextEnded] })
     setFoldedPinnedState(false)
     writeAsideGroupPrefs({ foldedPinned: false })
     setFoldedGroupsSectionState(false)
@@ -867,7 +880,7 @@ export function SessionsAside({
   const total = leadersOnly ? activeLeaders.length : bands.reduce(
     (n, b) => n + b.groups.reduce((m, g) => m + g.sessions.length, 0),
     0,
-  ) + pinnedRows.length + groupRowsShown.reduce((n, g) => n + g.rows.length, 0)
+  ) + allPinnedRows.length + groupRowsShown.reduce((n, g) => n + g.rows.length, 0)
   const filterCount = (filters.harnesses?.length ?? 0) + filters.projects.length
     + (filters.repos?.length ?? 0) + filters.models.length
 
@@ -1762,7 +1775,7 @@ export function SessionsAside({
           <>
         {/* The pinned band, above everything — that is what pinning is for: the two or three
             sessions that must not move when the arrangement changes. */}
-        {pinnedRows.length > 0 && (
+        {allPinnedRows.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <button
               onClick={toggleFoldedPinned}
@@ -1842,6 +1855,30 @@ export function SessionsAside({
                 </div>
                 )
               })}
+              {sleepingRows.length > 0 && <>
+                <button type="button" aria-expanded={expandedEnded.has(SLEEPING_PINS)}
+                  onClick={() => toggleEnded(SLEEPING_PINS)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', height: tap ?? 36,
+                    padding: '0 9px', border: '1px dashed var(--border)', borderRadius: 8,
+                    background: 'transparent', color: 'var(--text-tertiary)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer' }}>
+                  {expandedEnded.has(SLEEPING_PINS) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  <Moon size={12} fill="currentColor" aria-hidden />
+                  <span>{pt ? 'Dormindo' : 'Sleeping'}</span>
+                  <span style={{ marginLeft: 'auto', padding: '1px 6px', borderRadius: 5, background: 'var(--bg-elevated)', fontSize: 10 }}>{sleepingRows.length}</span>
+                </button>
+                {expandedEnded.has(SLEEPING_PINS) && sleepingRows.map(s => {
+                  const verbs = rowsById?.get(s.id)?.verbs
+                  const resume = verbs?.find(v => v.action === 'resume')
+                  return <SessionRow key={`sleeping-${s.id}`} session={s} selected={rowSelected(s, sessionId)} compact pinned
+                    {...(tap ? { tap } : {})} onPin={() => flip(s)}
+                    onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
+                    {...(verbs ? { verbs } : {})}
+                    {...(act && resume ? { onReopen: () => { void reopenRow(s.id) }, reopenVerb: resume } : {})}
+                    onOpenMenu={(x, y, rowVerbs) => openMenu(s, x, y, rowVerbs)}
+                    onFile={(x, y) => setLinking({ id: s.id, x, y })} lang={lang} cardColor={cardColor} />
+                })}
+              </>}
+
             </div>
             )}
           </div>
@@ -2599,7 +2636,7 @@ function EmptyReason({
 }
 
 
-export function SessionRow({ session, selected, compact = false, pinned, tap, onPin, onOpen, onMoveBy, verbs, onOpenMenu, onFile, lang, cardColor }: {
+export function SessionRow({ session, selected, compact = false, pinned, tap, onPin, onOpen, onMoveBy, verbs, onOpenMenu, onFile, onReopen, reopenVerb, lang, cardColor }: {
   session: ControlSession; selected: boolean
   compact?: boolean
   /** Minimum row height on mobile — 44px, and undefined on desktop. */
@@ -2609,6 +2646,8 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
   onOpen: () => void
   /** Reorder this pinned row by `delta` places. Only ever passed for a row in the Pinned band. */
   onMoveBy?: (delta: number) => void
+  onReopen?: () => void
+  reopenVerb?: RowVerb
   /** This row's own verbs, for the context menu (Task 6). Absent where the caller has none to offer. */
   verbs?: RowVerb[]
   /** Opens the context menu at a point, carrying the verbs it was opened with. */
@@ -2704,6 +2743,16 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         {...(lang ? { lang } : {})}
         {...(cardStyle.stateTextColor ? { metaColor: cardStyle.stateTextColor } : {})}
       />}
+      {onReopen && reopenVerb && (
+        <span role="button" tabIndex={reopenVerb.enabled && !reopening ? 0 : -1}
+          aria-disabled={!reopenVerb.enabled || reopening} title={reopenVerb.reason ?? reopenVerb.label}
+          onClick={e => { e.stopPropagation(); if (reopenVerb.enabled && !reopening) onReopen() }}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (reopenVerb.enabled && !reopening) onReopen() } }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: tap ?? 24, flexShrink: 0,
+            color: 'var(--text-secondary)', opacity: reopenVerb.enabled && !reopening ? 1 : 0.5, fontSize: 11 }}>
+          <RotateCcw size={12} />{lang === 'en' ? 'Reopen' : 'Reabrir'}
+        </span>
+      )}
       {compact && verbs && verbs.length > 0 && onOpenMenu && (
         <span role="button" tabIndex={0}
           aria-label={lang === 'en' ? `Options for ${session.title}` : `Opções de ${session.title}`}

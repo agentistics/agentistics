@@ -8,7 +8,7 @@
  */
 
 import { useEscapeOwner } from '../../lib/overlayStack'
-import { useEffect, useRef } from 'react'
+import { Fragment, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Pin } from 'lucide-react'
 import { isInsidePortalledMenu, menuMaxHeight, type MenuEntry } from '../../lib/rowMenu'
@@ -22,6 +22,8 @@ export interface SessionRowMenuProps {
   entries: MenuEntry[]
   onPick: (action: string) => void
   onClose: () => void
+  /** Dropdowns stay below their trigger and scroll in the available space. */
+  below?: boolean
 }
 
 /**
@@ -32,7 +34,7 @@ export interface SessionRowMenuProps {
  */
 const TASK_ENTRIES = new Set<string>(['link-task', 'unlink-task'])
 
-export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMenuProps) {
+export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false }: SessionRowMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   // 44px of finger on a phone, and nowhere else. This menu is reached by a LONG PRESS on touch,
   // so every one of its entries is a touch target by construction.
@@ -53,9 +55,9 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
   const left = x + w > window.innerWidth ? Math.max(4, x - w) : x
   // Capped to the viewport and scrollable: a long list (the tab strip's "all tabs") must never put
   // its last entries past the screen edge.
-  const maxH = menuMaxHeight(window.innerHeight)
+  const maxH = below ? Math.max(0, window.innerHeight - y - 4) : menuMaxHeight(window.innerHeight)
   const h = Math.min(entries.length * rowH + 12, maxH)
-  const top = y + h > window.innerHeight ? Math.max(4, y - h) : y
+  const top = below ? y : y + h > window.innerHeight ? Math.max(4, y - h) : y
 
   return createPortal(
     <div
@@ -70,6 +72,8 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
       }}
     >
       {entries.map((e, i) => (
+        <Fragment key={`${e.action}:${i}`}>
+        {e.separatorBefore && <div role="separator" style={{ borderTop: '1px solid var(--border)', margin: '4px 6px' }} />}
         <button
           key={`${e.action}:${i}`}
           role="menuitem"
@@ -97,6 +101,7 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose }: SessionRowMen
               surface, it says it is in beta. `link-task` is the entry that opens the picker. */}
           {TASK_ENTRIES.has(e.action) && i === entries.findIndex(x => TASK_ENTRIES.has(x.action)) && <BetaTag what="Tasks" style={{ marginLeft: 'auto', flexShrink: 0 }} />}
         </button>
+        </Fragment>
       ))}
       {/* A row with a refused verb says why here too, not only on hover: a tooltip is a fact only
           a mouse can reach. */}

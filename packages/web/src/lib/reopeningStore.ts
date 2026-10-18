@@ -35,6 +35,11 @@ export async function withReopening<T>(targets: readonly string[], fn: () => Pro
   try { return await fn() } finally { clearReopening(...targets) }
 }
 
+/** The fleet list's single-session reopen action, shared with sleeping tabs and cards. */
+export function reopenSession<T>(id: string, act: (req: { id: string; action: 'resume' }) => Promise<T>): Promise<T> {
+  return withReopening([id], () => act({ id, action: 'resume' }))
+}
+
 export const getReopening = (): ReadonlySet<string> => ids
 export function useReopening(): ReadonlySet<string> {
   return useSyncExternalStore(subscribe, getReopening, getReopening)
