@@ -21,8 +21,12 @@
 
 import { parseHarnessAgents, type HarnessAgent } from './harness-agents'
 
-/** Ten times the CLI's ordinary answer, and far below a slow one. */
-export const AGENTS_DEADLINE_MS = 2_000
+/**
+ * Twice the slowest answer measured (~5.1 s). The read is asynchronous, so waiting costs nothing but
+ * the caller's own latency — and giving up too early is worse than waiting: the reopen lock and the
+ * takeover then see "nothing holds this conversation" and could reopen one that is still alive.
+ */
+export const AGENTS_DEADLINE_MS = 10_000
 
 type Reader = () => Promise<HarnessAgent[]>
 
@@ -33,23 +37,47 @@ export function __setHarnessAgentsReaderForTest(reader: Reader | null): void {
   override = reader
 }
 
-/** `claude agents --json`, or nothing. Never throws, never waits past the deadline. */
-export async function readHarnessAgents(): Promise<HarnessAgent[]> {
+/**
+ * `claude agents --json`, or nothing. Never throws, never waits past the deadline.
+ *
+ * The child runs in its OWN process group (`detached`), and a late one is killed as a GROUP with its
+ * pipe cancelled: killing only the CLI would leave any helper it forked holding stdout open, and the
+ * read — and the process — would outlive the deadline it was given.
+ */
+export async function readHarnessAgents(deadlineMs: number = AGENTS_DEADLINE_MS): Promise<HarnessAgent[]> {
   if (override) return override()
   let child: ReturnType<typeof Bun.spawn> | undefined
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
+  const stop = () => {
+    if (child?.pid) { try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') } }
+    reader?.cancel().catch(() => {})
+  }
   try {
-    child = Bun.spawn(['claude', 'agents', '--json'], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', env: process.env })
+    child = Bun.spawn(['claude', 'agents', '--json'], {
+      stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', env: process.env, detached: true,
+    })
     const proc = child
-    const out = Promise.all([new Response(proc.stdout as ReadableStream).text(), proc.exited])
-    const late = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), AGENTS_DEADLINE_MS) })
+    reader = (proc.stdout as ReadableStream<Uint8Array>).getReader()
+    const read = reader
+    const text = (async () => {
+      const chunks: Uint8Array[] = []
+      for (;;) {
+        const { done, value } = await read.read()
+        if (done) break
+        chunks.push(value)
+      }
+      return Buffer.concat(chunks).toString()
+    })()
+    const out = Promise.all([text, proc.exited])
+    const late = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), deadlineMs) })
     const done = await Promise.race([out, late])
-    if (!done) { proc.kill(); return [] }
-    const [text, code] = done
-    return code === 0 ? parseHarnessAgents(text) : []
+    if (!done) { stop(); out.catch(() => {}); return [] }
+    const [raw, code] = done
+    return code === 0 ? parseHarnessAgents(raw) : []
   } catch {
     // No CLI on PATH (spawn throws) or a read error: a machine without the CLI behaves as before.
-    child?.kill()
+    stop()
     return []
   } finally {
     if (timer) clearTimeout(timer)
