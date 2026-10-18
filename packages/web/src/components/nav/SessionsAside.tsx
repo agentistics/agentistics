@@ -101,6 +101,7 @@ import { NAY_UNDOCK_SESSION, requestUndockSession, withUndockEntry } from '../..
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { getSessionRole, registerSessionRoleAlias, setSessionRole, useMuteWorkers, useSessionRole, useSessionRoles, type SessionRole } from '../../lib/sessionRoles'
 import { applyLeadersOnly, countLeaders, leadersText } from '../../lib/leadersFilter'
+import { activeBandLabel, inactiveBandLabel } from '../../lib/sessionBandLabels'
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
 const OPEN_BESIDE = '__open_beside__'
@@ -854,14 +855,14 @@ export function SessionsAside({
     return [
       {
         id: 'active',
-        label: pt ? 'Ativas' : 'Active',
+        label: activeBandLabel(pt),
         groups: asideGroups(rest.filter(r => active.has(r.state)), groupBy, lang, order, sortOrder),
       },
       // Never computed while activeOnly is on — those rows are the ones the switch is withholding,
       // not a second list to render beside it.
       {
         id: 'inactive',
-        label: pt ? 'Inativas' : 'Inactive',
+        label: inactiveBandLabel(pt),
         groups: activeOnly ? [] : asideGroups(rest.filter(r => !active.has(r.state)), groupBy, lang, order, sortOrder),
       },
     ]
@@ -2818,7 +2819,7 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       <SessionHoverCard session={session} rect={hover.rect} pt={lang !== 'en'} />
       {compact && pinned && pinControl}
       <button type="button" onClick={() => { if (!closing) onOpen() }} data-session-open
-        onMouseEnter={e => hover.onEnter(e.currentTarget)} onMouseLeave={hover.onLeave} onFocus={e => hover.onEnter(e.currentTarget)} onBlur={hover.onLeave}
+        onMouseEnter={e => hover.onEnter(e.currentTarget.closest<HTMLElement>('[data-session-row]') ?? e.currentTarget)} onMouseLeave={hover.onLeave} onFocus={e => hover.onEnter(e.currentTarget.closest<HTMLElement>('[data-session-row]') ?? e.currentTarget)} onBlur={hover.onLeave}
         style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, padding: 0, minHeight: tap ?? 32, justifyContent: 'center',
           border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
       <SessionRowLine

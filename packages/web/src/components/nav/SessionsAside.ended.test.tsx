@@ -12,7 +12,9 @@ test('every row is ONE line: fading title, no ellipsis, task and model only in t
   const html = renderToStaticMarkup(<SessionRow session={session} compact selected={false} cardColor="wash" onOpen={() => {}} lang="en" />)
   expect(html).toContain('Finished work')
   expect(html).toContain('white-space:nowrap')
-  expect(html).toContain('mask-image:linear-gradient')
+  // the fade is applied only when the title really overflows (measured in the browser), never statically
+  expect(html).toContain('data-fade="off"')
+  expect(html).not.toContain('mask-image')
   expect(html).not.toContain('text-overflow:ellipsis')
   expect(html).toContain('min-height:32px')
   expect(html).not.toContain('Delivery marker')

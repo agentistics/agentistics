@@ -10,13 +10,13 @@ const at = (needle: string) => {
 
 describe('session tab strip sits above the session title', () => {
   test('flag OFF builds no strip at all', () => {
-    expect(src).toContain('const tabStripEl = (switcher?: { leading: ReactNode; trailing?: ReactNode }) => (tabsOn && selected ? (')
+    expect(src).toContain('const tabStripEl = (switcher?: { leading: ReactNode; trailing?: ReactNode; titleHidden?: boolean }) => (tabsOn && selected ? (')
     expect(src).toContain('const tabStripAboveTitle = tabsOn && !isMobile && splitRoute !== null')
   })
   test('the phone draws NO tab row: the title bar is the switcher (one title)', () => {
     expect(src).not.toContain('data-tabs-safe-top')
-    expect(src).toContain('tabStripEl({ leading:')
-    expect(src).toContain("The title is not repeated here")
+    expect(src).toContain('tabStripEl({ titleHidden: sessionDrawer, leading:')
+    expect(src).toContain("The drawer covers the bar, so the drawer names the session")
   })
   test('a split pane renders the strip before its own header', () => {
     const hoist = src.lastIndexOf('{tabStripAboveTitle ? tabStripEl() : null}')

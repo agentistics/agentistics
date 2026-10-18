@@ -17,6 +17,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { RoleChip } from './RoleChip'
 import { BetaTag } from '../BetaTag'
 import { SESSION_ROW_MENU_Z } from '../../lib/zLayers'
+import { FadeText } from './FadeText'
 
 export interface SessionRowMenuProps {
   x: number
@@ -39,7 +40,6 @@ const TASK_ENTRIES = new Set<string>(['link-task', 'unlink-task'])
 
 /** The tabs list never stretches: it is as wide as its longest line, up to this. */
 const SESSION_LIST_MAX_W = 340
-const TITLE_FADE = 'linear-gradient(to right, #000 calc(100% - 28px), transparent calc(100% - 4px))'
 
 export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, sessionList = false }: SessionRowMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -105,7 +105,7 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, 
               <span aria-hidden style={{ width: 11, flexShrink: 0 }}>{e.pinned && <Pin size={11} style={{ color: 'var(--anthropic-orange)' }} />}</span>
               <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: e.color ?? 'transparent' }} />
               <span style={{ display: 'inline-flex', flexShrink: 0 }}><HarnessMark harness={e.harness} size={14} /></span>
-              <span data-menu-title style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', lineHeight: 1.4, fontWeight: e.checked ? 650 : 500, maskImage: TITLE_FADE, WebkitMaskImage: TITLE_FADE }}>{e.label}</span>
+              <FadeText data-menu-title style={{ flex: 1, minWidth: 0, lineHeight: 1.4, fontWeight: e.checked ? 650 : 500 }}>{e.label}</FadeText>
               {e.leader && <Crown size={11} aria-label={e.leaderLabel ?? 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />}
               {e.tail && <span data-menu-tail style={{ flexShrink: 0, fontSize: 11, color: e.tailAccent ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', fontWeight: e.tailAccent ? 650 : 400 }}>{e.tail}</span>}
             </>
@@ -113,6 +113,8 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, 
             <>
               {(sessionList || e.pinned) && <span aria-hidden style={{ width: 11, flexShrink: 0 }}>{e.pinned && <Pin size={11} style={{ color: 'var(--anthropic-orange)' }} />}</span>}
               {(sessionList || e.color) && <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: e.color ?? 'transparent' }} />}
+              {/* Same column as the session rows' harness mark, so "Close others" starts where titles start. */}
+              {sessionList && <span aria-hidden style={{ flexShrink: 0, width: 14 }} />}
               <span style={{ flex: 1, minWidth: 0, whiteSpace: sessionList ? 'nowrap' : 'normal', overflowWrap: 'anywhere', lineHeight: 1.4 }}>
                 <span data-menu-title>{e.label}</span>
                 {e.leader && <span style={{ display: 'inline-block', marginLeft: 6 }}><RoleChip role="leader" pt={e.leaderLabel === 'Líder'} /></span>}

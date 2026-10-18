@@ -54,8 +54,8 @@ test('needs-attention tabs carry no orange bottom inset (the status dot says it)
 })
 
 test('titles stay on one line and fade out instead of an ellipsis', () => {
-  expect(src).toContain("whiteSpace: 'nowrap'")
+  expect(src).toContain('<FadeText data-tab-title')
   expect(src).not.toContain("whiteSpace: 'normal'")
   expect(src).not.toContain('textOverflow')
-  expect(src).toContain('maskImage: TITLE_FADE')
+  expect(src).not.toContain('maskImage: TITLE_FADE')
 })

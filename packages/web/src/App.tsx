@@ -154,6 +154,7 @@ import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { initialSessionView } from './lib/sessionView'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 import { SessionLinkInfo } from './components/sessions/SessionLinkInfo'
+import { FadeText } from './components/sessions/FadeText'
 import { CheckinModalHost } from './components/sessions/CheckinModal'
 import { sessionLinks } from './lib/sessionParent'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
@@ -3637,12 +3638,14 @@ export default function AppLayout() {
       {headerSession && (
         <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'baseline', gap: 7 }}>
           <SessionLinkInfo session={headerSession} links={sessionLinks(headerSession, headerFleet.rows)} lang={lang === 'pt' ? 'pt' : 'en'} onGo={p => navigate(p)} />
-          <span style={{
-            fontSize: '0.8438rem', fontWeight: 650, color: 'var(--text-primary)',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
-          }}>
+          <FadeText data-header-title style={{ fontSize: '0.8438rem', fontWeight: 650, color: 'var(--text-primary)', minWidth: 0 }}>
             {headerSession.title}
-          </span>
+          </FadeText>
+          {headerSession.task && (
+            <FadeText data-header-task style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', minWidth: 0, flexShrink: 2 }}>
+              {headerSession.task}
+            </FadeText>
+          )}
           {headerSession.actionable && <AwayChip id={headerSession.id} away={headerSession.away === true} pt={lang === 'pt'} />}
           {headerMuted && (
             <span role="img" aria-label={mutedTooltip(lang === 'pt')} title={mutedTooltip(lang === 'pt')}
@@ -3661,13 +3664,10 @@ export default function AppLayout() {
               the title etc." */}
           {/* Gives up before the title does: the name is what identifies the session, and the state
               is repeated on its own row in the aside two centimetres away. */}
-          <span style={{
-            fontSize: '0.6875rem', color: 'var(--text-tertiary)', flexShrink: 1000000,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
-          }}>
+          <FadeText data-header-state style={{ fontSize: '0.6875rem', color: 'var(--text-tertiary)', flexShrink: 1000000, minWidth: 0 }}>
             {headerSession.stateLabel}
             {headerSession.project ? ` · ${headerSession.project}` : ''}
-          </span>
+          </FadeText>
         </div>
       )}
 

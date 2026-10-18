@@ -29,7 +29,9 @@ import { useIsMobile, useIsCoarsePointer } from '../../hooks/useIsMobile'
 import { SessionRowMenu } from './SessionRowMenu'
 import { HarnessMark } from './HarnessMark'
 import { ClosingRing } from './ClosingRing'
+import { FadeText } from './FadeText'
 import { useIsClosing } from '../../lib/closingSessions'
+import { loadClosedFleet, needsClosedFleet } from '../../lib/fleet'
 import type { MenuEntry } from '../../lib/rowMenu'
 
 import { sessionDisplayTitle, hasLeaderTitle } from '../../lib/sessionDisplayTitle'
@@ -54,7 +56,7 @@ export interface SessionTabStripProps {
    * drawer button, `trailing` whatever else the bar carries — and tapping the title opens the same
    * menu the strip's list button opens. The strip's bookkeeping (opening/reconciling tabs) still runs.
    */
-  switcher?: { leading: ReactNode; trailing?: ReactNode }
+  switcher?: { leading: ReactNode; trailing?: ReactNode; titleHidden?: boolean }
 }
 
 const keyOf = (r: ControlSession): string => sessionIdentityKey(r)
@@ -97,8 +99,6 @@ interface TabProps {
 }
 
 /** Long titles fade out at the right edge instead of an ellipsis. */
-const TITLE_FADE = 'linear-gradient(to right, #000 calc(100% - 28px), transparent calc(100% - 4px))'
-const SWITCHER_FADE = 'linear-gradient(to right, #000 calc(100% - 28px), transparent calc(100% - 3px))'
 const FOCUS_RING = '2px solid var(--anthropic-orange)'
 /** Enter/Space on the inner controls act on THEM; they must not reach the tab's own handler (which would activate it). */
 const stopKeys = (e: { key: string; stopPropagation(): void }) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation() }
@@ -125,10 +125,10 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
   // conversation below (its background, no bottom edge) and carries a thin accent line on TOP only.
   // "Needs you" is the status dot alone — no second marker on the tab.
   const style: CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
-    minHeight: mobile ? 44 : 32, padding: '0 6px 0 12px', borderRadius: 0, boxSizing: 'border-box',
+    display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
+    minHeight: mobile ? 44 : 32, padding: '0 4px 0 10px', borderRadius: 0, boxSizing: 'border-box',
     fontSize: 12, scrollSnapAlign: 'center', scrollSnapStop: 'always', position: 'relative',
-    minWidth: mobile ? 132 : 110, width: mobile ? '100%' : 'max-content', maxWidth: mobile ? '100%' : 360,
+    minWidth: mobile ? 132 : 96, width: mobile ? '100%' : 'max-content', maxWidth: mobile ? '100%' : 240,
     fontWeight: active || needs ? 650 : 500,
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
     background: active ? 'var(--bg-base)' : hover ? 'color-mix(in srgb, var(--bg-elevated) 60%, transparent)' : 'transparent',
@@ -165,7 +165,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
       {closing ? <ClosingRing label={pt ? 'Encerrando' : 'Closing'} /> : <TabStatus state={state} label={label} />}
       {row && <span style={{ display: 'inline-flex', flexShrink: 0, opacity: active ? 1 : 0.6 }}><HarnessMark harness={row.harness} size={14} /></span>}
       {(role === 'leader' || hasLeaderTitle(row?.title ?? '')) && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0, opacity: active ? 1 : 0.6 }} />}
-      <span data-tab-title style={{ whiteSpace: 'nowrap', overflow: 'hidden', flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1, maskImage: TITLE_FADE, WebkitMaskImage: TITLE_FADE }}>{title}</span>
+      <FadeText data-tab-title style={{ flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1 }}>{title}</FadeText>
       {pinned
         ? (
           <button
@@ -210,6 +210,9 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
     for (const r of rows) k.add(keyOf(r))
     return k
   }, [fleetReady, rows, activeKey])
+  // Pins are explicit intent: a sleeping pin needs the history rows even where no aside is mounted to
+  // ask for them (the phone's switcher), or the pin would look like a session that left the fleet.
+  useEffect(() => { if (fleetReady && needsClosedFleet(true, allPins.length)) loadClosedFleet() }, [fleetReady, allPins])
   // A pin whose session left the fleet outright is not a tab (the aside drops it the same way).
   const pins = useMemo(() => livePins(allPins, knownKeys), [allPins, knownKeys])
   const byKey = useMemo(() => {
@@ -328,7 +331,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
   }, [measure])
-  const fade = tabStripFadeMask(edges)
+  const fade = tabStripFadeMask(edges, 36)
 
   // ── menus ─────────────────────────────────────────────────────────────────────────────────────
   const tabMenu = (key: string, x: number, y: number) => {
@@ -404,7 +407,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
           <TabStatus state={row.state} label={row.stateLabel} />
           <span style={{ display: 'inline-flex', flexShrink: 0 }}><HarnessMark harness={row.harness} size={15} /></span>
           {lead && <Crown size={12} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />}
-          <span data-session-title style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 650, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', marginRight: 4, maskImage: SWITCHER_FADE, WebkitMaskImage: SWITCHER_FADE }}>{sessionDisplayTitle(row.title)}</span>
+          <FadeText data-session-title style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 650, lineHeight: 1.3, marginRight: 4, visibility: switcher.titleHidden ? 'hidden' : 'visible' }}>{sessionDisplayTitle(row.title)}</FadeText>
           <ChevronDown size={16} aria-hidden style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
           <span
             data-switcher-count aria-label={pt ? `${order.length} abas abertas` : `${order.length} open tabs`}

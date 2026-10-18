@@ -22,6 +22,7 @@
  */
 
 import { ClosingRing } from './ClosingRing'
+import { inactiveBandLabel } from '../../lib/sessionBandLabels'
 import { useIsClosing } from '../../lib/closingSessions'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { BellOff, ChevronDown, ChevronUp } from 'lucide-react'
@@ -1290,7 +1291,7 @@ function ClosingFrame({ id, pt, children }: { id: string; pt: boolean; children:
         background: 'var(--bg-base)', border: '1px solid var(--border)', fontSize: 12.5, color: 'var(--text-secondary)',
       }}>
         <ClosingRing size={12} label={pt ? 'Encerrando' : 'Closing'} />
-        {pt ? 'Encerrando a sessão. A conversa fica salva em Encerradas.' : 'Closing the session. The conversation stays in Ended.'}
+        {pt ? `Encerrando a sessão. A conversa fica salva em ${inactiveBandLabel(true)}.` : `Closing the session. The conversation stays in ${inactiveBandLabel(false)}.`}
       </div>
     </div>
   )

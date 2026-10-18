@@ -31,6 +31,7 @@ import { clockLabel, formatNextRun, formatSkipped, useCheckin, type CheckinConfi
 import { RailSection } from '../tasks/RailSection'
 import { CheckinConfigControls } from './CheckinConfigControls'
 import { setSessionAway, useAway } from '../../lib/awayMode'
+import { FadeText } from './FadeText'
 import { openCheckinModal, useCheckinModalRequest } from '../../lib/checkinModal'
 
 export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
@@ -107,7 +108,7 @@ function Row({ t, pt, onGo, touch }: { t: LinkTarget; pt: boolean; onGo: (path: 
   // The TITLE wins the width; the meta keeps its natural size and wraps under the title when it must.
   const inner = (
     <>
-      <span style={{ minWidth: 0, flexBasis: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.label}</span>
+      <FadeText data-link-label style={{ minWidth: 0, flexBasis: '100%' }}>{t.label}</FadeText>
       <span style={{ fontSize: 11, color: 'var(--text-tertiary)', flex: '0 1 auto', display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
         {t.harness && <span role="img" aria-label={harness ?? ''} title={harness ?? ''} style={{ display: 'inline-flex' }}><HarnessMark harness={t.harness} size={12} /></span>}
         {at && <span title={at.full}>· {at.label}</span>}

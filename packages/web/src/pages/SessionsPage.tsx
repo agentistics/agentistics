@@ -141,6 +141,7 @@ import { ShellBand } from '../components/sessions/ShellBand'
 import { openInTerminalFor } from '../components/sessions/OpenInTerminalPane'
 import { targetLabel } from '../lib/terminalTarget'
 import { sessionPlanFactor } from '../lib/costBasis'
+import { FadeText } from '../components/sessions/FadeText'
 
 /** The dimensions a live fleet row can be narrowed by — the same set on both layouts. */
 const FLEET_FILTER_DIMS: Array<'harnesses' | 'repos' | 'projects' | 'models'> =
@@ -1991,7 +1992,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const [tabNotice, setTabNotice] = useState<string | null>(null)
   const tabNoticeEl = tabNotice ? <ActionNotice message={tabNotice} lang={lang} onDismiss={() => setTabNotice(null)} /> : null
   const tabStripAboveTitle = tabsOn && !isMobile && splitRoute !== null
-  const tabStripEl = (switcher?: { leading: ReactNode; trailing?: ReactNode }) => (tabsOn && selected ? (
+  const tabStripEl = (switcher?: { leading: ReactNode; trailing?: ReactNode; titleHidden?: boolean }) => (tabsOn && selected ? (
     <SessionTabStrip
       onNoticeChange={setTabNotice}
       lang={pt ? 'pt' : 'en'}
@@ -2617,12 +2618,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
               <SessionLinkInfo session={selected} links={sessionLinks(selected, fleet.rows)} lang={pt ? 'pt' : 'en'} isMobile onGo={p => navigate(p)} />
-              <div style={{
-                fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
-                overflow: 'hidden', whiteSpace: 'nowrap',
-                maskImage: 'linear-gradient(to right, #000 calc(100% - 28px), transparent calc(100% - 4px))',
-                WebkitMaskImage: 'linear-gradient(to right, #000 calc(100% - 28px), transparent calc(100% - 4px))',
-              }}>{selected.title}</div>
+              <FadeText as="div" style={{ fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0 }}>{selected.title}</FadeText>
               {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
               <SessionTitleFlag
                 session={{
@@ -2808,7 +2804,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         {/* Selection mode's face for this bar — see `ChatSelectionOverlay`. */}
         <ChatSelectionOverlay lang={tPt} padX={10} />
         {tabsOn
-          ? tabStripEl({ leading: <>{sessionDrawerToggle({
+          ? tabStripEl({ titleHidden: sessionDrawer, leading: <>{sessionDrawerToggle({
           open: sessionDrawer, dot: drawerDot, pt,
           onClick: () => (sessionDrawer ? closeSessionDrawer() : openSessionDrawer()),
         })}</>, trailing: selected.actionable ? <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact /> : null })
@@ -2819,7 +2815,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         })}
             <div data-session-title style={{
               flex: 1, minWidth: 0, fontSize: 15, fontWeight: 650, lineHeight: 1.3,
-              color: 'var(--text-primary)',
+              color: 'var(--text-primary)', visibility: sessionDrawer ? 'hidden' : 'visible',
               display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
               overflowWrap: 'anywhere',
             }}>
@@ -2841,7 +2837,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{panel}</div>
 
       <Drawer open={sessionDrawer} side="left" title={drawerHeader} onClose={closeSessionDrawer} lang={tPt}>
-        {/* The title is not repeated here: the bar behind this panel already says it (once per screen). */}
+        {/* The drawer covers the bar, so the drawer names the session (the bar hides its own copy while this is open: once per screen). */}
+        <FadeText as="div" data-drawer-session-title style={{ fontSize: 15, fontWeight: 650, lineHeight: 1.3, color: 'var(--text-primary)', padding: '0 2px' }}>{selected.title}</FadeText>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5, color: 'var(--text-secondary)', padding: '0 2px' }}>
           <span>{selected.stateLabel}</span>
           {selected.project && <><span aria-hidden>·</span><span>{selected.project}</span></>}

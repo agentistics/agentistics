@@ -15,8 +15,7 @@ import { HarnessMark } from './HarnessMark'
 import { ClosingRing } from './ClosingRing'
 import { SessionFacts } from './SessionFacts'
 import { ENDED } from '../../lib/sessionTabs'
-
-const FADE = 'linear-gradient(to right, #000 calc(100% - 28px), transparent calc(100% - 4px))'
+import { FadeText } from './FadeText'
 
 /** The short state at the right of a row. */
 export function rowTail(s: Pick<ControlSession, 'state'>, pt: boolean, closing: boolean): { text: string; accent: boolean } | null {
@@ -42,10 +41,9 @@ export function SessionRowLine({ session, selected, pt, closing, leader, reopeni
           background: ENDED.has(session.state) ? 'transparent' : color, border: ENDED.has(session.state) ? `1.5px solid ${color}` : 'none',
         }} />}
       {showHarness && <span style={{ display: 'inline-flex', flexShrink: 0 }}><HarnessMark harness={session.harness} size={14} /></span>}
-      <span data-row-title style={{
-        flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', lineHeight: 1.4,
-        fontWeight: selected || wants ? 650 : 500, maskImage: FADE, WebkitMaskImage: FADE,
-      }}>{sessionDisplayTitle(session.title)}</span>
+      <FadeText data-row-title style={{
+        flex: 1, minWidth: 0, lineHeight: 1.4, fontWeight: selected || wants ? 650 : 500,
+      }}>{sessionDisplayTitle(session.title)}</FadeText>
       {leader && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />}
       {reopening}
       {tail && <span data-row-tail style={{
