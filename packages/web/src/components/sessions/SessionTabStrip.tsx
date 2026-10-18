@@ -98,6 +98,7 @@ interface TabProps {
 
 /** Long titles fade out at the right edge instead of an ellipsis. */
 const TITLE_FADE = 'linear-gradient(to right, #000 calc(100% - 18px), transparent)'
+const SWITCHER_FADE = 'linear-gradient(to right, #000 calc(100% - 28px), transparent)'
 const FOCUS_RING = '2px solid var(--anthropic-orange)'
 /** Enter/Space on the inner controls act on THEM; they must not reach the tab's own handler (which would activate it). */
 const stopKeys = (e: { key: string; stopPropagation(): void }) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation() }
@@ -403,7 +404,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
           <TabStatus state={row.state} label={row.stateLabel} />
           <span style={{ display: 'inline-flex', flexShrink: 0 }}><HarnessMark harness={row.harness} size={15} /></span>
           {lead && <Crown size={12} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />}
-          <span data-session-title style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 650, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', maskImage: TITLE_FADE, WebkitMaskImage: TITLE_FADE }}>{sessionDisplayTitle(row.title)}</span>
+          <span data-session-title style={{ flex: 1, minWidth: 0, fontSize: 15, fontWeight: 650, lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', marginRight: 4, maskImage: SWITCHER_FADE, WebkitMaskImage: SWITCHER_FADE }}>{sessionDisplayTitle(row.title)}</span>
           <ChevronDown size={16} aria-hidden style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
           <span
             data-switcher-count aria-label={pt ? `${order.length} abas abertas` : `${order.length} open tabs`}

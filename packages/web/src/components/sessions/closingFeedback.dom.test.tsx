@@ -35,6 +35,9 @@ test('row: one line, task only in the hover card; closing dims it, shows the rin
   await act(async () => root.render(createElement(MemoryRouter, null, createElement(SessionRow, { session: s, selected: false, cardColor: 'wash', lang: 'en', onOpen: () => { opened++ } }))))
   const row = host.querySelector<HTMLElement>('[data-session-row]')!
   expect(row.textContent).not.toContain('A very long task title')
+  // plain row: no state tint, no coloured edge — only the open row is highlighted
+  expect(row.style.background).toBe('transparent')
+  expect(row.style.boxShadow).toBe('none')
   expect(row.querySelector('[data-row-tail]')!.textContent).toBe('you')
   expect(row.style.opacity).toBe('1')
   // hover card carries the task and the model

@@ -2769,11 +2769,13 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         // Selection is a fact about where the READER is, so it uses the neutral surface tokens —
         // a lifted background and a full-height accent-free edge — and leaves every colour on this
         // list to mean exactly one thing about the SESSION.
-        background: cardStyle.background,
+        // Plain rows (explorer-style): the STATE is said by the dot and the word at the right, never by
+        // tinting the row. Only the open one is highlighted.
+        background: selected ? 'var(--bg-elevated)' : 'transparent',
         // Two different edges, and they never collide: the STATE edge is the left rule a live row
         // carries in `wash`/`stripe` mode, and SELECTION replaces it with a brighter, full one
         // plus an outline — `sessionCardStyle` already resolves that precedence.
-        boxShadow: selected ? 'inset 2px 0 0 var(--anthropic-orange)' : cardStyle.edge,
+        boxShadow: selected ? 'inset 2px 0 0 var(--anthropic-orange)' : 'none',
         color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
         cursor: 'pointer', fontFamily: 'inherit', minWidth: 0,
         transition: 'background 0.15s',
@@ -2781,7 +2783,7 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       onPointerDown={e => { lastPoint.current = { x: e.clientX, y: e.clientY } }}
       onMouseEnter={e => { if (!selected) e.currentTarget.style.background = 'var(--bg-elevated)' }}
       onMouseLeave={e => {
-        if (!selected) e.currentTarget.style.background = cardStyle.background
+        if (!selected) e.currentTarget.style.background = 'transparent'
       }}
       onKeyDown={e => {
         // alt+arrows, so the plain arrows keep whatever the browser and the list do with them. A

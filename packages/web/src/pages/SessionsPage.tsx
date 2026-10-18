@@ -2619,7 +2619,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               <SessionLinkInfo session={selected} links={sessionLinks(selected, fleet.rows)} lang={pt ? 'pt' : 'en'} isMobile onGo={p => navigate(p)} />
               <div style={{
                 fontSize: 13, fontWeight: 650, color: 'var(--text-primary)', minWidth: 0,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                overflow: 'hidden', whiteSpace: 'nowrap',
+                maskImage: 'linear-gradient(to right, #000 calc(100% - 18px), transparent)',
+                WebkitMaskImage: 'linear-gradient(to right, #000 calc(100% - 18px), transparent)',
               }}>{selected.title}</div>
               {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
               <SessionTitleFlag
