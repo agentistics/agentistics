@@ -1,13 +1,13 @@
 /**
  * SessionTabStrip — the open conversations as tabs, in their own row at the top of the conversation
- * panel (option A of UI.SESSION-TABS: VS Code style, rectangular edge-to-edge tabs; flag `sessionTabs`). The header above it is unchanged.
+ * panel (rounded tabs in a segmented track; flag `sessionTabs`). The header above it is unchanged.
  *
  * It holds NO rule: the order, the neighbour a close lands on and the caps are `lib/sessionTabs.ts`;
  * a pin is `lib/pinnedSessions.ts` (never a second store); how a state looks is `STATE_COLOR`.
  * Every status mark carries its word (`aria-label` + `title`) — colour is never the only signal.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
-import { ChevronDown, Crown, Pin, X } from 'lucide-react'
+import { ChevronDown, Crown, List, Moon, Pin, X } from 'lucide-react'
 import { sessionIdentityKey } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
@@ -19,7 +19,7 @@ import {
   MAX_PINNED, getPinnedIds, movePinnedSession, pinnedServerSnapshot, subscribePinnedSessions, togglePinnedSession,
 } from '../../lib/pinnedSessions'
 import {
-  closeEnded, closeOthers, closeTab, closeToRight, enterTab, livePins, ownsTabShortcut, reconcileTabs, stepTab, stripOrder, tabAt,
+  ENDED, splitSleepingTabs, closeEnded, closeOthers, closeTab, closeToRight, enterTab, livePins, ownsTabShortcut, reconcileTabs, stepTab, stripOrder, tabAt,
 } from '../../lib/sessionTabs'
 import { getPrevActive, setOpenTabs, setPrevActive, trackStripMount, updateOpenTabs, useOpenTabs } from '../../lib/sessionTabsStore'
 import { getActivePane, usePaneId } from '../../lib/paneScope'
@@ -30,7 +30,6 @@ import { HarnessMark } from './HarnessMark'
 import type { MenuEntry } from '../../lib/rowMenu'
 
 const LEADER_PREFIX = /^\[ (LÍDER|LEADER) \] - /
-const ENDED = new Set(['exited', 'closed', 'lost', 'unknown'])
 
 export interface SessionTabStripProps {
   lang: 'pt' | 'en'
@@ -42,6 +41,8 @@ export interface SessionTabStripProps {
   active: ControlSession
   /** Go to a session (the same path the aside takes). */
   onGo: (id: string) => void
+  /** Reuse the fleet list's resume action, then follow the reopened row in this pane. */
+  onReopen: (row: ControlSession) => Promise<{ ok: boolean; message: string }>
   /** Nothing left open: leave for the overview. */
   onNone: () => void
 }
@@ -105,15 +106,15 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnp
   }
   const style: CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
-    height: mobile ? 44 : 34, padding: '0 6px 0 12px', borderRadius: 0, boxSizing: 'border-box',
+    height: mobile ? 44 : 30, padding: '0 6px 0 12px', borderRadius: 8, boxSizing: 'border-box',
     fontSize: 12, whiteSpace: 'nowrap', scrollSnapAlign: 'center',
     minWidth: mobile ? 132 : 110, maxWidth: mobile ? 168 : 240,
     fontWeight: active || needs ? 650 : 500,
-    color: active ? 'var(--text-primary)' : ended ? 'var(--text-tertiary)' : 'var(--text-secondary)',
-    background: active ? 'var(--bg-surface, var(--bg-elevated))' : 'color-mix(in srgb, var(--bg-elevated) 55%, transparent)',
-    border: 'none', borderRight: '1px solid var(--border-subtle)',
-    borderTop: `2px solid ${active ? 'var(--anthropic-orange)' : 'transparent'}`,
-    boxShadow: needs && !active ? 'inset 0 -2px 0 color-mix(in srgb, var(--anthropic-orange) 55%, transparent)' : 'none',
+    color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
+    background: active ? 'var(--bg-elevated)' : hover ? 'color-mix(in srgb, var(--bg-elevated) 50%, transparent)' : 'transparent',
+    border: 'none',
+    boxShadow: active ? 'var(--ag-shadow-seg), 0 0 0 1px var(--border)'
+      : needs ? 'inset 0 -2px 0 color-mix(in srgb, var(--anthropic-orange) 55%, transparent)' : 'none',
   }
   return (
     <div
@@ -138,9 +139,9 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnp
       style={style}
     >
       <TabStatus state={state} label={label} />
-      {row && <span style={{ display: 'inline-flex', flexShrink: 0 }}><HarnessMark harness={row.harness} size={14} /></span>}
-      {role === 'leader' && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0 }} />}
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>{title}</span>
+      {row && <span style={{ display: 'inline-flex', flexShrink: 0, opacity: active ? 1 : 0.6 }}><HarnessMark harness={row.harness} size={14} /></span>}
+      {role === 'leader' && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0, opacity: active ? 1 : 0.6 }} />}
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0, opacity: ended && !active ? 0.7 : 1 }}>{title}</span>
       {pinned
         ? (
           <button
@@ -171,7 +172,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnp
   )
 }
 
-export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }: SessionTabStripProps) {
+export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen, onNone }: SessionTabStripProps) {
   const pt = lang === 'pt'
   const mobile = useIsMobile()
   const touch = useIsCoarsePointer()
@@ -187,14 +188,18 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
   }, [fleetReady, rows, activeKey])
   // A pin whose session left the fleet outright is not a tab (the aside drops it the same way).
   const pins = useMemo(() => livePins(allPins, knownKeys), [allPins, knownKeys])
-  const order = useMemo(() => stripOrder(open, pins), [open, pins])
   const byKey = useMemo(() => {
     const m = new Map<string, ControlSession>()
     for (const r of rows) { m.set(keyOf(r), r); if (!m.has(r.id)) m.set(r.id, r) }
     return m
   }, [rows])
+  const { drawn: order, sleeping } = useMemo(
+    () => splitSleepingTabs(stripOrder(open, pins), pins, k => byKey.get(k)?.state),
+    [open, pins, byKey],
+  )
+  const drawnPins = pins.filter(k => order.includes(k))
   const [notice, setNotice] = useState<string | null>(null)
-  const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[]; pick: (a: string) => void } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[]; below?: boolean; pick: (a: string) => void } | null>(null)
 
   useEffect(() => {
     if (notice === null) return
@@ -228,11 +233,11 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
     // If the tab on screen was closed, land on the nearest one still open, else the overview.
     const stillThere = nextOpen.includes(activeKey) || pins.includes(activeKey)
     if (stillThere) return
-    const left = stripOrder(nextOpen, pins)
+    const left = splitSleepingTabs(stripOrder(nextOpen, pins), pins, k => byKey.get(k)?.state).drawn
     const at = order.indexOf(activeKey)
     const target = left.find(k => order.indexOf(k) > at) ?? left[left.length - 1]
     if (target) goTo(target); else onNone()
-  }, [pane, activeKey, pins, order, goTo, onNone])
+  }, [pane, activeKey, pins, order, byKey, goTo, onNone])
 
   const close = useCallback((key: string) => {
     const r = closeTab(order, key, activeKey, pins)
@@ -326,15 +331,24 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
     })
     const isEnded = (k: string) => { const row = byKey.get(k); return row ? ENDED.has(row.state) : false }
     setMenu({
-      x: Math.max(4, r.right - 210), y: r.bottom + 4,
+      x: r.left, y: r.bottom + 4, below: true,
       entries: [
         ...rowEntries,
-        { action: 'others', label: pt ? 'Fechar outras' : 'Close others', enabled: true },
+        ...(sleeping.length > 0 ? [
+          { action: 'sleeping', label: pt ? 'Dormindo' : 'Sleeping', enabled: false, separatorBefore: true },
+          ...sleeping.map(k => ({ action: `reopen:${k}`, label: (byKey.get(k)?.title ?? k).replace(LEADER_PREFIX, ''), enabled: true, pinned: true })),
+        ] : []),
+        { action: 'others', label: pt ? 'Fechar outras' : 'Close others', enabled: true, separatorBefore: true },
         { action: 'ended', label: pt ? 'Fechar encerradas' : 'Close ended', enabled: open.some(isEnded) },
         { action: 'all', label: pt ? 'Fechar todas' : 'Close all', enabled: open.length > 0 },
       ],
       pick: a => {
         if (a.startsWith('go:')) goTo(a.slice(3))
+        else if (a.startsWith('reopen:')) {
+          const row = byKey.get(a.slice(7))
+          if (row) void onReopen(row).then(out => { if (!out.ok) setNotice(out.message) })
+            .catch(error => setNotice(String(error)))
+        }
         else if (a === 'others') closeKeys(closeOthers(open, activeKey))
         else if (a === 'ended') closeKeys(closeEnded(open, isEnded))
         else if (a === 'all') closeKeys([])
@@ -345,18 +359,28 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
   return (
     <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0, borderBottom: '1px solid var(--border-subtle)' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0 }}>
+      <button
+        type="button" aria-haspopup="menu" aria-label={pt ? 'Abas abertas e dormindo' : 'Open and sleeping tabs'}
+        onClick={e => listMenu(e.currentTarget)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 30, minWidth: mobile ? 44 : 0, justifyContent: 'center',
+          padding: '0 8px', marginLeft: 6, boxSizing: 'border-box', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
+          cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
+        }}
+      ><List size={13} aria-hidden />{order.length}{sleeping.length > 0 && <Moon size={10} fill="currentColor" aria-hidden style={{ color: 'var(--text-tertiary)' }} />}<ChevronDown size={12} aria-hidden /></button>
       <div
         ref={attach} className="tabscroll" role="tablist" aria-label={pt ? 'Sessões abertas' : 'Open sessions'} onScroll={measure}
         style={{
-          display: 'flex', alignItems: 'stretch', gap: 0, overflowX: 'auto', flex: 1, minWidth: 0,
+          display: 'flex', alignItems: 'stretch', gap: 3, overflowX: 'auto', flex: 1, minWidth: 0,
+          background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 3, margin: '4px 6px',
           WebkitOverflowScrolling: 'touch', scrollSnapType: 'x proximity',
           ...(fade !== null ? { maskImage: fade, WebkitMaskImage: fade } : null),
         }}
       >
         {order.map((k, i) => (
           <span key={k} style={{ display: 'contents' }}>
-            {i === pins.length && pins.length > 0 && (
-              <span aria-hidden style={{ width: 2, alignSelf: 'stretch', background: 'var(--border)', flexShrink: 0 }} />
+            {i === drawnPins.length && drawnPins.length > 0 && (
+              <span aria-hidden style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '6px 2px', flexShrink: 0 }} />
             )}
             <Tab
               k={k} row={byKey.get(k)} active={k === activeKey} pinned={pins.includes(k)} mobile={mobile} touch={touch} pt={pt}
@@ -370,17 +394,8 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onNone }
           </span>
         ))}
       </div>
-      <button
-        type="button" aria-haspopup="menu" aria-label={pt ? 'Todas as abas abertas' : 'All open tabs'}
-        onClick={e => listMenu(e.currentTarget)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 34, minWidth: mobile ? 44 : 0, justifyContent: 'center',
-          padding: '0 8px', borderRadius: 0, border: 'none', background: 'transparent', color: 'var(--text-tertiary)',
-          cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
-        }}
-      >{order.length}<ChevronDown size={13} /></button>
       {menu !== null && (
-        <SessionRowMenu x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
+        <SessionRowMenu below={menu.below} x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
       )}
     </div>
     {notice !== null && (

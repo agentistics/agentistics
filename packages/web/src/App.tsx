@@ -112,6 +112,9 @@ import { journalBackfillPollMs } from './lib/journalBackfill'
 import { initialLang } from './lib/lang'
 import { fleetOpenStore, sessionsFiltersOpenStore, sessionTabsStore, studioSeenStore } from './lib/appFlags'
 import { SessionTabStrip } from './components/sessions/SessionTabStrip'
+import { reopenSession } from './lib/reopeningStore'
+import { replaceTab } from './lib/sessionTabs'
+import { getOpenTabs, setOpenTabs } from './lib/sessionTabsStore'
 import { pageMaxWidth } from './lib/pageWidth'
 import {
   DEFAULT_ORDER, sortSessions, type ControlSession,
@@ -4482,6 +4485,17 @@ export default function AppLayout() {
                 fleetReady={!headerFleetUnsupported && headerFleet.rows.length > 0}
                 active={headerSession}
                 onGo={id => navigate(sessionPath(id))}
+                onReopen={async row => {
+                  const out = await reopenSession(row.id, headerFleetAct)
+                  if (out.ok && out.id) {
+                    if (row.conversationId === undefined) {
+                      setOpenTabs('main', replaceTab(getOpenTabs('main'), row.id, out.id))
+                    }
+                    const r = reopenedSessionRoute(out.id, { id: row.id, harness: row.harness, title: row.title })
+                    navigate(r.path, r.options)
+                  }
+                  return out
+                }}
                 onNone={() => navigate('/sessions')}
               />
             ),

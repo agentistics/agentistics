@@ -40,3 +40,36 @@ export function endedAutoOpen(
   const ids = new Set(matching.map(r => r.id))
   return ended.some(r => ids.has(r.id))
 }
+
+
+/** A folder is busy only when someone is working, waiting or asking for approval. */
+export function isFolderSessionActive(row: Pick<ControlSession, 'state'>): boolean {
+  return row.state === 'working' || row.state === 'waiting' || row.state === 'waiting-approval'
+}
+
+/**
+ * Activity belongs to the whole visible subtree, before search/filters narrow its rows.
+ * A parent with only an active child stays in place; a hidden child cannot keep an empty visible
+ * folder looking busy. The set changes with the fleet, without rewriting any folder membership.
+ */
+export function activeFolderIds(entries: readonly {
+  group: { id: string; parentId?: string; hidden?: boolean }
+  rows: readonly Pick<ControlSession, 'state'>[]
+}[]): ReadonlySet<string> {
+  const byId = new Map(entries.map(entry => [entry.group.id, entry]))
+  const active = new Set<string>()
+  for (const entry of entries) {
+    if (!entry.rows.some(isFolderSessionActive)) continue
+    const path = new Set<string>()
+    let current: typeof entry | undefined = entry
+    while (current && !path.has(current.group.id)) {
+      if (current.group.hidden) break
+      path.add(current.group.id)
+      current = current.group.parentId ? byId.get(current.group.parentId) : undefined
+    }
+    // Hidden parents conceal their children, too.
+    if (current?.group.hidden) continue
+    for (const id of path) active.add(id)
+  }
+  return active
+}

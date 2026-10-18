@@ -72,6 +72,7 @@ import { MENTION_ADDED_TOAST } from '../lib/mentionInsert'
 import type { HarnessId } from '@agentistics/core'
 import { freedBytes } from '@agentistics/core'
 import type { AppContext } from '../lib/app-context'
+import { reopenSession } from '../lib/reopeningStore'
 import { loadClosedFleet, useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { FleetOverview } from '../components/sessions/FleetOverview'
@@ -556,14 +557,14 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * in the URL leaves the reader on a session the next poll drops. The state it carries is what
    * makes the wait a wait instead of the fleet overview; the row it came FROM is what names it.
    */
-  const goToReopened = (id: string) => {
+  const goToReopened = (id: string, from = selected) => {
     // SESSION TABS: a row with no conversation id is keyed by its managed id, which the reopen is
     // about to retire — the new id takes that tab's PLACE, so no dead tab is left behind.
-    if (tabsOn && selected && selected.conversationId === undefined) {
-      setOpenTabs(pane, replaceTab(getOpenTabs(pane), selected.id, id))
+    if (tabsOn && from && from.conversationId === undefined) {
+      setOpenTabs(pane, replaceTab(getOpenTabs(pane), from.id, id))
     }
-    const r = reopenedSessionRoute(id, selected
-      ? { id: selected.id, harness: selected.harness, title: selected.title }
+    const r = reopenedSessionRoute(id, from
+      ? { id: from.id, harness: from.harness, title: from.title }
       : undefined)
     // SPLIT: only THIS pane follows the new id; the other side is left exactly where it is. The
     // arrival state rides along for the main pane, whose route it describes.
@@ -1994,6 +1995,11 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       fleetReady={!loading && !pollUnsupported}
       active={selected}
       onGo={goToTab}
+      onReopen={async row => {
+        const out = await reopenSession(row.id, act)
+        if (out.ok && out.id) goToReopened(out.id, row)
+        return out
+      }}
       onNone={closeThisPane}
     />
   ) : null

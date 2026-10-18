@@ -12,20 +12,42 @@ let createRoot: typeof import('react-dom/client').createRoot
 let SessionTabStrip: typeof import('./SessionTabStrip').SessionTabStrip
 let store: typeof import('../../lib/sessionTabsStore')
 let pins: typeof import('../../lib/pinnedSessions')
+let originalFetch: typeof globalThis.fetch
+let originalEventSource: typeof globalThis.EventSource
+let originalActEnvironment: boolean | undefined
+let originalPins: readonly string[]
+let originalScrollIntoView: PropertyDescriptor | undefined
+
 
 beforeAll(async () => {
+  originalFetch = globalThis.fetch
+  originalEventSource = globalThis.EventSource
+  originalActEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
   GlobalRegistrator.register({ width: 1200, height: 800 })
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   ;(globalThis as { EventSource?: unknown }).EventSource ??= class { close() {} addEventListener() {} removeEventListener() {} onerror = null; onmessage = null }
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never
+  originalScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
   Element.prototype.scrollIntoView = () => {}
   ;(globalThis as { fetch?: unknown }).fetch = async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
   createRoot = (await import('react-dom/client')).createRoot
   SessionTabStrip = (await import('./SessionTabStrip')).SessionTabStrip
   store = await import('../../lib/sessionTabsStore')
   pins = await import('../../lib/pinnedSessions')
+  originalPins = [...pins.getPinnedIds()]
+  for (const k of originalPins) pins.togglePinnedSession(k)
 })
-afterAll(async () => { await GlobalRegistrator.unregister() })
+afterAll(async () => {
+  for (const k of originalPins) pins.togglePinnedSession(k)
+  // React's scheduler posts a macrotask even after an act/unmount. Keep window alive until it runs.
+  await new Promise(resolve => setTimeout(resolve, 50))
+  if (originalScrollIntoView) Object.defineProperty(Element.prototype, 'scrollIntoView', originalScrollIntoView)
+  else delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView
+  globalThis.fetch = originalFetch
+  globalThis.EventSource = originalEventSource
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = originalActEnvironment
+  await GlobalRegistrator.unregister()
+})
 
 const mk = (id: string, harness = 'claude') => ({
   id, title: `Title ${id}`, harness, cwd: '/x', project: 'x', state: 'waiting', stateLabel: 'needs you',
@@ -36,8 +58,8 @@ const rows = [mk('a'), mk('b', 'codex'), mk('c', 'gemini')]
 let host: HTMLDivElement
 let root: Root
 let went: string[]
-const render = () => act(() => {
-  root.render(createElement(SessionTabStrip, { lang: 'en', rows, fleetReady: true, active: rows[0]!, onGo: id => { went.push(id) }, onNone: () => {} }))
+const render = (shown = rows, onReopen = async (_row: ControlSession) => ({ ok: true, message: '' })) => act(() => {
+  root.render(createElement(SessionTabStrip, { lang: 'en', rows: shown, fleetReady: true, active: shown[0]!, onReopen, onGo: id => { went.push(id) }, onNone: () => {} }))
 })
 const tab = (id: string) => host.querySelector(`[data-session-tab="${id}"]`) as HTMLElement
 const close = (id: string) => tab(id).querySelector('[aria-label="Close tab"]') as HTMLElement | null
@@ -48,7 +70,13 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); went = []
   act(() => { store.setOpenTabs('main', ['a', 'b', 'c']) })
 })
-afterEach(() => { act(() => root.unmount()); host.remove(); act(() => { for (const k of pins.getPinnedIds()) pins.togglePinnedSession(k) }) })
+afterEach(async () => {
+  await act(async () => {
+    root.unmount()
+    for (const k of pins.getPinnedIds()) pins.togglePinnedSession(k)
+  })
+  host.remove()
+})
 
 describe('desktop', () => {
   test('the active tab shows its ×; the others hide it until hover; the harness icon is drawn', () => {
@@ -147,4 +175,74 @@ describe('keyboard and coarse pointer', () => {
       }
     } finally { window.matchMedia = prev }
   })
+})
+
+
+describe('sleeping tabs', () => {
+  test.each([1200, 390])('menu stays first and outside the track, and counts only drawn tabs (%spx)', width => {
+    ;(window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height: 800 })
+    act(() => { pins.togglePinnedSession('b') })
+    const shown = rows.map(r => r.id === 'b' ? { ...r, state: 'closed' as const, title: '[ LEADER ] - Sleeping conversation' } : r)
+    render(shown)
+    expect(tab('b')).toBeNull()
+    expect(pins.getPinnedIds()).toContain('b')
+    const button = host.querySelector('[aria-label="Open and sleeping tabs"]') as HTMLButtonElement
+    const track = host.querySelector('[role="tablist"]')!
+    expect(button.nextElementSibling).toBe(track)
+    expect(track.contains(button)).toBe(false)
+    expect(button.textContent).toBe('2')
+    expect(button.querySelector('.lucide-moon')).not.toBeNull()
+    expect(button.style.flexShrink).toBe('0')
+    expect(button.style.height).toBe(width === 390 ? '44px' : '30px')
+    button.getBoundingClientRect = () => ({ left: 12, right: 88, bottom: 70 } as DOMRect)
+    act(() => button.click())
+    const menu = document.querySelector('[role="menu"]') as HTMLElement
+    expect(menu.style.left).toBe('12px')
+    expect(menu.style.top).toBe('74px')
+    const entries = Array.from(menu.querySelectorAll('button'))
+    const header = entries.find(e => e.textContent === 'Sleeping')!
+    expect(header.disabled).toBe(true)
+    expect(entries.find(e => e.textContent === 'Sleeping conversation')).toBeDefined()
+    expect(menu.querySelector('[role="separator"]')).not.toBeNull()
+  })
+
+  test('picking a sleeping entry invokes reopen; a live update restores its pinned tab', async () => {
+    act(() => { pins.togglePinnedSession('b') })
+    const shown = rows.map(r => r.id === 'b' ? { ...r, state: 'exited' as const } : r)
+    const reopened: string[] = []
+    render(shown, async row => { reopened.push(row.id); return { ok: true, message: '' } })
+    act(() => (host.querySelector('[aria-label="Open and sleeping tabs"]') as HTMLButtonElement).click())
+    await act(async () => {
+      const entry = Array.from(document.querySelectorAll('[role="menu"] button')).find(e => e.textContent === 'Title b') as HTMLButtonElement
+      entry.click()
+    })
+    expect(reopened).toEqual(['b'])
+    expect(went).toEqual([])
+    render()
+    expect(tab('b')).not.toBeNull()
+    expect(tab('b').querySelector('[aria-label="Unpin"]')).not.toBeNull()
+    expect(host.querySelector('[aria-label="Open and sleeping tabs"] .lucide-moon')).toBeNull()
+  })
+
+  test('an unpinned ended tab is still drawn and no moon is shown', () => {
+    render(rows.map(r => r.id === 'b' ? { ...r, state: 'exited' as const } : r))
+    expect(tab('b')).not.toBeNull()
+    expect(host.querySelector('[aria-label="Open and sleeping tabs"] .lucide-moon')).toBeNull()
+  })
+})
+
+
+test('opening the check-in modal closes the session info popover', async () => {
+  const { SessionLinkInfo } = await import('./SessionLinkInfo')
+  const { openCheckinModal, closeCheckinModal } = await import('../../lib/checkinModal')
+  act(() => root.render(createElement(SessionLinkInfo, { session: { id: 'session-info' }, links: null, lang: 'en', onGo: () => {} })))
+  const button = host.querySelector<HTMLButtonElement>('[data-testid="session-link-info"]')!
+  try {
+    act(() => button.click())
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(document.querySelector('[data-testid="session-link-panel"]')).not.toBeNull()
+    act(() => openCheckinModal('session-info'))
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('[data-testid="session-link-panel"]')).toBeNull()
+  } finally { act(() => closeCheckinModal()) }
 })

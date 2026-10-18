@@ -25,6 +25,31 @@ The summary filter does not narrow this flat list; its selection is restored in 
 When no active leaders match, the list says **No active leaders** (**Nenhum líder ativo**), even
 when workers or ended leaders are pinned.
 
+With the `sessionTabs` flag enabled, pinned sessions in `exited`, `closed`, `lost` or `unknown`
+state sleep in the strip's menu instead of occupying a tab. Unpinned ended tabs stay visible.
+The menu button stays at the left of the scrolling track, counts the visible tabs, and shows a
+moon when any pinned session sleeps. Its **Sleeping** entries reopen through the fleet's existing
+`resume` action and focus the resulting conversation in the current pane.
+
+In the aside, those same pinned ended sessions appear under **Sleeping** at the end of **Pinned**.
+This row starts collapsed and remembers expansion with the existing ended-section preferences.
+The Pinned header counts only its live rows. Sleeping cards can still be opened for reading,
+reopened, or unpinned; sleeping never removes the pin.
+
+Folders with no `working`, `waiting` or `waiting-approval` session in their visible subtree move
+under **Ended** (**Encerradas**) at the end of their parent. The same section also holds that
+parent's ended sessions, with separate folder and session counts. Entire idle root groups move to
+one Ended section at the bottom of the list. These sections start collapsed and remember their
+expansion in `expandedEndedGroups`; folder structure, membership and drag order stay intact.
+When activity returns, the folder and its parents return to their normal positions. Search and
+filters narrow what a folder shows without reclassifying its activity. Archived trees show their
+ended sessions directly as compact rows, without repeating Ended under every folder.
+
+The check-in details modal uses one column on desktop and mobile: headline, needs, delivered,
+in progress, next steps, health, then earlier rounds. Text wraps throughout. Health is a list of
+status dots, labels and full explanations; below 480px explanations move under their labels.
+Earlier rounds expand downward in place to show their complete items.
+
 ---
 
 ## The conversation

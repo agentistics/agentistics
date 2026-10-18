@@ -169,7 +169,7 @@ describe('billingRows — one row per account, nothing said twice', () => {
     const rows = billingRows([acc('acc_1', { harness: 'codex', label: 'Conta padrão' }), acc('', { harness: 'codex', label: 'Conta padrão' })], none, ['codex'], L as never, true)
     expect(rows).toHaveLength(1)
     expect(rows[0]!.title).toBe('Codex CLI')
-    expect(rows[0]!.sub).toBe('conta não informada')
+    expect(rows[0]!.sub).toBe('Codex CLI')
   })
   test('an assistant with no identified account is one row on its own timeline; two unnamed accounts are numbered', () => {
     const rows = billingRows([acc('', { harness: 'gemini', label: 'Conta padrão' }), acc('k1', { harness: 'codex', label: 'Conta padrão' }), acc('k2', { harness: 'codex', label: 'Default account', firstSeen: Date.parse('2026-09-05T00:00:00Z') })], none, ['codex', 'gemini'], L as never, false)
@@ -286,4 +286,16 @@ describe('defaultStart', () => {
   test('never a day in the future', () => {
     expect(defaultStart([{ id: 'a', mode: 'unknown', from: '2026-10-01', to: '2026-10-20' }], '2026-10-17')).toBe('2026-10-17')
   })
+})
+
+
+test('Codex billing never prints the generated ChatGPT id label, keeping real names and emails', () => {
+  const make = (label: string, nickname?: string) => billingRows([
+    acc('codex-id', { harness: 'codex', label, ...(nickname ? { nickname } : {}) }),
+  ], none, ['codex'], () => 'Codex CLI', true)[0]!
+  expect(make('ChatGPT 1a583a5f', 'Principal')).toMatchObject({ title: 'Principal', sub: 'Codex CLI' })
+  expect(make('ChatGPT 1a583a5f')).toMatchObject({ title: 'Codex CLI', sub: 'Codex CLI' })
+  expect(make('person@example.com', 'Principal')).toMatchObject({ title: 'Principal', sub: 'Codex CLI · person@example.com' })
+  expect(make('Jane Doe', 'Principal').sub).toBe('Codex CLI · Jane Doe')
+  expect(make('Jane Doe').title).toBe('Jane Doe')
 })

@@ -204,6 +204,10 @@ export interface BillingRow {
   scope: RowScope
 }
 
+/** Old Codex readers used a ChatGPT id fragment as the login label. It names no person. */
+const billingLogin = (a: BillingAccount): string | null =>
+  isPlaceholderName(a.label) || (a.harness === 'codex' && /^ChatGPT\s+[0-9a-f-]+$/i.test(a.label.trim())) ? null : a.label
+
 export function billingRows(
   accounts: readonly BillingAccount[], billing: BillingSettings, harnesses: readonly HarnessId[],
   harnessLabel: (h: HarnessId) => string, pt: boolean,
@@ -218,13 +222,13 @@ export function billingRows(
       continue
     }
     const shown = foldUnnamed(mine, billing)
-    const unnamed = shown.filter(a => !(a.nickname && !isPlaceholderName(a.nickname)) && isPlaceholderName(a.label))
+    const unnamed = shown.filter(a => !(a.nickname && !isPlaceholderName(a.nickname)) && billingLogin(a) === null)
     for (const a of shown) {
       const nick = a.nickname && !isPlaceholderName(a.nickname) ? a.nickname : null
-      const login = isPlaceholderName(a.label) ? null : a.label
+      const login = billingLogin(a)
       const n = unnamed.indexOf(a)
       const title = nick ?? login ?? (unnamed.length > 1 ? `${label} #${n + 1}` : label)
-      const sub = nick ? (login ? `${label} · ${login}` : label) : login ? label : unknownWho
+      const sub = nick ? (login ? `${label} · ${login}` : label) : login ? label : a.harness === 'codex' ? label : unknownWho
       out.push({ key: a.id, harness: h, account: a, title, sub, scope: rowScope(billing, shown, a) })
     }
   }
