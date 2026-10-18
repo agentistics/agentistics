@@ -8,6 +8,7 @@ import { createHarnessAccounts, ISOLATION_ENV } from './harness-accounts'
 import {
   LOGIN_START, ROOT_SHARED, applyAccountToPlan, createAccountRoots, linkSharedFiles, looksLikeCredential,
 } from './account-roots'
+import { LOGIN_ADAPTERS, type LoginInfo } from './account-login'
 import { handleAccountsRequest } from './accounts-web'
 import { rootMcpRegistration } from './mcp-launch'
 
@@ -27,7 +28,11 @@ function make(over: Partial<Parameters<typeof createAccountRoots>[0]> = {}) {
   const spawned: unknown[] = []
   const roots = createAccountRoots({
     base: join(tmp, 'accounts'), flagOn: () => true, defaultDir: h => defaults[h]!,
-    spawn: async req => { spawned.push(req); return { ok: true, message: 'ok', id: 'sess1' } },
+    login: async req => {
+      spawned.push(req)
+      const info: LoginInfo = { kind: LOGIN_ADAPTERS[req.harness]!.kind, url: 'https://auth.example/login', code: 'ABCD-EFGH', expiresAt: Date.now() + 900000 }
+      return { ready: Promise.resolve(info), info: () => info, submit: async () => {}, stop: async () => {} }
+    },
     registerMcp: async () => {},
     audit: async i => { audits.push(i.action) },
     probe: async () => ({ key: 'default', label: 'x' }),
@@ -100,15 +105,16 @@ describe('addRoot / login / poll', () => {
     const { roots, spawned } = make()
     const out = await roots.addRoot('codex')
     if (!out.ok) throw new Error('refused')
-    expect(out.sessionId).toBe('sess1')
-    const req = spawned[0] as { account: { env: Record<string, string>; loginArgv: string[] } }
-    expect(req.account.loginArgv).toEqual(['codex', 'login'])
-    expect(req.account.env).toEqual({ CODEX_HOME: out.root })
+    expect(out.kind).toBe('device')
+    expect(out).not.toHaveProperty('sessionId')
+    const req = spawned[0] as { env: Record<string, string> }
+    expect(LOGIN_START.codex!.argv).toEqual(['codex', 'login', '--device-auth'])
+    expect(req.env).toEqual({ CODEX_HOME: out.root })
     expect((await roots.list())[0]!.status).toBe('pending')
     roots.stopPoller()
   })
   test('failed login start leaves no root behind', async () => {
-    const { roots } = make({ spawn: async () => ({ ok: false, message: 'no tmux' }) })
+    const { roots } = make({ login: async () => { throw new Error('no tmux') } })
     expect((await roots.addRoot('claude')).ok).toBe(false)
     expect(await roots.list()).toEqual([])
   })
@@ -137,7 +143,7 @@ describe('removeRoot', () => {
     return { ...m, out, id: id! }
   }
   test('refused while a session runs', async () => {
-    const { roots, id } = await bound({ sessionLive: async () => true })
+    const { roots, id } = await bound({ sessionLive: async () => true, sessionsOfAccount: async () => ['foreign'] })
     const r = await roots.removeRoot(id, { confirm: undefined })
     expect(r.ok).toBe(false)
     if (!r.ok) { expect(r.status).toBe(409); expect(r.reason).toBe('root_in_use') }
@@ -194,31 +200,23 @@ describe('removeRoot', () => {
   })
 })
 
-describe('removeRoot — cancelling a pending login', () => {
-  test('ends its own live login session, then drops the pending root without confirm', async () => {
-    let live = true
-    const ended: string[] = []
-    const m = make({
-      sessionLive: async () => live,
-      endSession: async id => { ended.push(id); live = false; return true },
-    })
+describe('removeRoot — cancelling a headless login', () => {
+  test('stops its own process and drops the pending root without confirmation', async () => {
+    let stopped = false
+    const m = make({ login: async () => {
+      const info: LoginInfo = { kind: 'paste', url: 'https://claude.ai/oauth/authorize', expiresAt: Date.now() + 900000 }
+      return { ready: Promise.resolve(info), info: () => info, submit: async () => {}, stop: async () => { stopped = true } }
+    } })
     const out = await m.roots.addRoot('claude')
     if (!out.ok) throw new Error('refused')
     m.roots.stopPoller()
-    const r = await m.roots.removeRoot(out.pendingId)
-    expect(r.ok && r.removedDir).toBe(true)
-    expect(ended).toEqual(['sess1'])
+    expect((await m.roots.removeRoot(out.pendingId)).ok).toBe(true)
+    expect(stopped).toBe(true)
     await expect(stat(out.root)).rejects.toThrow()
     expect(await m.roots.list()).toEqual([])
   })
-  test('the login session title is plain words', async () => {
-    const m = make()
-    await m.roots.addRoot('claude')
-    expect((m.spawned[0] as { label: string }).label).toBe('Login · Claude Code')
-    m.roots.stopPoller()
-  })
-  test('a pending root whose login session cannot be ended still refuses (409)', async () => {
-    const m = make({ sessionLive: async () => true, endSession: async () => false })
+  test('a foreign session still refuses cancellation', async () => {
+    const m = make({ sessionLive: async () => true, sessionsOfAccount: async () => ['foreign'] })
     const out = await m.roots.addRoot('claude')
     if (!out.ok) throw new Error('refused')
     m.roots.stopPoller()
@@ -226,19 +224,16 @@ describe('removeRoot — cancelling a pending login', () => {
     expect(!r.ok && r.status === 409).toBe(true)
     expect((await stat(out.root)).isDirectory()).toBe(true)
   })
-  test('a FOREIGN session in the pending root still refuses and is never ended', async () => {
-    const ended: string[] = []
-    const m = make({
-      sessionLive: async id => id === 'foreign',
-      sessionsOfAccount: async () => ['foreign'],
-      endSession: async id => { ended.push(id); return true },
-    })
-    const out = await m.roots.addRoot('claude')
-    if (!out.ok) throw new Error('refused')
-    m.roots.stopPoller()
-    const r = await m.roots.removeRoot(out.pendingId)
-    expect(!r.ok && r.status === 409 && r.reason === 'root_in_use').toBe(true)
-    expect(ended).toEqual([])
+  test('a cancel racing binding leaves the newly bound account active', async () => {
+    const { roots, store, out, id } = await (async () => {
+      const m = make({ probe: async () => ({ key: 'person', label: 'person@example.test' }) })
+      const out = await m.roots.addRoot('claude')
+      if (!out.ok) throw new Error('refused')
+      const [id] = await m.roots.pollPending(); m.roots.stopPoller()
+      return { ...m, out, id: id! }
+    })()
+    expect((await roots.removeRoot(out.pendingId)).ok).toBe(true)
+    expect((await store.byId(id))!.retired).toBeUndefined()
     expect((await stat(out.root)).isDirectory()).toBe(true)
   })
 })
@@ -266,7 +261,10 @@ describe('routes', () => {
   test('POST creates and DELETE needs confirm for the directory', async () => {
     const deps = {
       base: join(tmp, 'accounts'), flagOn: () => true, defaultDir: (h: HarnessId) => defaults[h]!,
-      spawn: async () => ({ ok: true, message: 'ok', id: 's' }), registerMcp: async () => {}, audit: async () => {},
+      login: async () => {
+        const info: LoginInfo = { kind: 'device', url: 'https://www.kimi.com/device', code: 'ABCD-EFGH', expiresAt: Date.now() + 900000 }
+        return { ready: Promise.resolve(info), info: () => info, submit: async () => {}, stop: async () => {} }
+      }, registerMcp: async () => {}, audit: async () => {},
       listAccounts: async () => ({ version: 2 as const, accounts: [], bindings: {}, segments: {} }),
       getAccount: async () => null,
     }

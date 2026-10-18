@@ -107,3 +107,51 @@ positional default for the `--session`s that follow) and every reopen.
   an existing name), so a stale entry in a root is repaired.
 - Antigravity and opencode have no isolation variable: an account root is refused for them in words
   (`account-unsupported`).
+
+## Adding a login in Billing (experimental `multi-account`)
+
+Settings → Billing → **Add account** opens a link/code dialog. The owner opens the link in their
+own browser; the server never opens a browser. Claude Code and Gemini ask for the authorization
+code shown by the page. Codex, Copilot and Kimi display a device code and wait for authorization.
+Kimi's link already includes its code. The dialog shows the assistant, identity and reported plan
+only after the existing root probe binds the account. A successful CLI exit alone does not bind it.
+Antigravity and opencode still cannot isolate a second account.
+
+| Assistant | Login command | Transport |
+| --- | --- | --- |
+| Claude Code | `claude auth login --claudeai` | Hidden PTY; paste code |
+| Gemini CLI | `NO_BROWSER=true gemini` | Hidden PTY; paste code |
+| Codex | `codex login --device-auth` | Pipes; device code |
+| Copilot | `copilot login --device-code` | Pipes; device code |
+| Kimi | `kimi login` | Pipes; device code |
+
+These processes are private login helpers, never managed sessions, sidebar entries or fleet rows.
+PTY helpers use agentop's existing **utility tmux socket**, separate from the user's tmux and the
+fleet socket. The child receives its account isolation variable and a restricted runtime PATH
+without `xdg-open` or other browser launchers; display variables and inherited access tokens are
+absent. Gemini gets a private settings copy selecting its personal OAuth method, so its first-run
+method picker cannot block the link; the default settings file is never edited.
+
+Copilot must save its login through the system keychain. If it asks to save a token in plain text,
+or reports that the token could not be saved, the helper refuses and the dialog explains why.
+It never answers yes to that prompt.
+
+`POST /api/accounts/roots` waits for a parsed link and returns
+`{ok, pendingId, root, kind: 'paste' | 'device', url, code?, expiresAt}`. The `code` here is only a
+public device code. `POST /api/accounts/roots/:pendingId/code` accepts `{code}` for a paste login
+and returns only `{ok: true}`. Pasted authorization codes go directly to the private PTY's stdin,
+never to shell arguments, logs, audit records or files. Responses contain fixed refusal sentences,
+never raw CLI output or transport errors. The same local-shell capability, CSRF and authentication
+gates protect both routes.
+
+`GET /api/accounts/roots` includes the active helper's link metadata; bound rows include the
+reported label and plan. The dialog can resume a pending helper from Billing. Cancel, closing the
+dialog or leaving Settings calls the existing `DELETE` route to stop the helper and remove its
+pending root. Cancellation racing a completed bind preserves the newly added account. Existing
+account deletion still requires the exact root path to remove credentials.
+
+A helper has 30 seconds to produce its link and a maximum lifetime of 15 minutes; a shorter
+reported device expiry (or Gemini's five-minute prompt window) takes precedence. Timeout and
+refusal stop the helper and remove its unbound directory. A failed row with a fixed reason remains
+in memory for up to 15 minutes so the open dialog can explain what happened. Link metadata and
+failure rows are not persisted; confirmed account bindings keep the existing durable registry.
