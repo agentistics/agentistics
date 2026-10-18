@@ -39,7 +39,7 @@ for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) test(
     for (const project of projectNames) expect(project.textContent).toContain(plan.items[0]!.project)
     const chips = host.querySelector<HTMLElement>('.clean-filter-chips > div')!
     expect(chips.style.flexWrap).toBe('wrap')
-    if (width < 768) expect(host.querySelector<HTMLElement>('.clean-mobile-sort > div')!.style.flexWrap).toBe('wrap')
+    if (width < 768) expect(host.querySelector('.clean-mobile-sort button')!.getAttribute('aria-haspopup')).toBe('listbox')
     expect(document.activeElement).toBe(host.querySelector('[role=dialog]'))
     const names = Array.from(host.querySelectorAll(width < 768 ? '.clean-card-name' : '.clean-folder-label > b')).map(n => n.textContent)
     expect(names).toEqual(['b', 'a', 'c'])
@@ -54,7 +54,7 @@ for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) test(
     await act(async () => button(lang === 'pt' ? 'Parados há +7 dias 1' : 'Idle for 7+ days 1').click())
     expect(host.querySelectorAll(width < 768 ? '.clean-mobile-rows > div' : 'tbody tr')).toHaveLength(1)
     expect(host.querySelector('.clean-selected')!.textContent).not.toContain(lang === 'pt' ? 'fora deste filtro' : 'outside this filter')
-    if (width < 768) expect(host.querySelector('.clean-mobile-select')!.textContent).not.toContain('50 MB')
+    if (width < 768) expect(host.querySelector('.clean-mobile-controls')!.textContent).not.toContain('50 MB')
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="clean-apply"]')!.click())
     expect(host.querySelector('.clean-number')!.textContent).toBe('50 MB')
     expect(host.querySelector('.clean-selected')).toBeNull()

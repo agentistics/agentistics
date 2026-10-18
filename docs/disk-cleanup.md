@@ -24,7 +24,10 @@ On mobile the same data appears in a bottom sheet with cards and 44px controls. 
 visible; full paths are available in titles. Colors use the light/dark theme tokens.
 The result header counts distinct repository paths represented in the complete item list, including
 kept items, before filtering. Different worktree/folder names do not add projects to that count.
-Filter and sort chips wrap; project, folder and scan-log names remain readable in full.
+Filter chips wrap; mobile selection and the shared sort dropdown share one row, and the type/size legend
+can be expanded on demand. Project, folder and scan-log names remain readable in full. The header labels reclaimable candidates as “items
+to clean”; the All filter count also includes protected items. Desktop gives folder names the
+remaining table width, with a narrower project column and fixed idle/size columns.
 
 Idle time is display metadata, separate from the existing commit-based cleanup eligibility rule.
 On Linux, GNU `du --time` computes the newest nested mtime during the existing size walk; the

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { CleanScanState } from '@agentistics/core'
-import { CleanScanView } from './CleanDialog'
+import type { CleanScanState, CleanWebPlan } from '@agentistics/core'
+import { CleanScanView, CleanListSummary } from './CleanDialog'
 import { TabSelect } from '../pages/settings/primitives'
 import { readFileSync } from 'node:fs'
 const scan: CleanScanState = { id: 'scan', state: 'scanning', step: 2, label: 'measuring', progress: .46, etaMs: 40_000, startedAt: 1000, elapsedMs: 10_000,
@@ -49,5 +49,15 @@ test('project, folder and scan-log names wrap without CSS truncation', () => {
     const rule = css.slice(css.indexOf('\n' + selector + ' {')).split('}')[0]!
     expect(rule).toContain('white-space: normal')
     expect(rule).toContain('overflow-wrap: anywhere')
+  }
+})
+
+test('result summary distinguishes cleanup candidates from all rows including kept items', () => {
+  const items = Array.from({ length: 39 }, (_, i) => ({ id: `${i}`, repo: `/repo/${i % 3}`, project: `Project ${i}`, name: `folder-${i}`, path: `/folder/${i}`, kind: i < 27 ? 'remove' as const : 'keep' as const, bytes: 1024, reason: '', lastActivityMs: null }))
+  const plan: CleanWebPlan = { items, reclaimable: { count: 27, bytes: 27 * 1024 }, scannedAt: 1000, scanId: 'test', elapsedMs: 1 }
+  for (const lang of ['pt', 'en'] as const) {
+    const html = renderToStaticMarkup(<CleanListSummary plan={plan} lang={lang} />).replace(/<!--.*?-->/g, '')
+    expect(html).toContain(lang === 'pt' ? '27 itens para limpar · 3 projetos nesta lista' : '27 items to clean · 3 projects in this list')
+    expect(html).not.toContain('39')
   }
 })

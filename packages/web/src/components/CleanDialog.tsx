@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Search, Trash2, X } from 'lucide-react'
-import type { CleanJob, CleanKind, CleanScanState, CleanWebItem } from '@agentistics/core'
-import { Checkbox, ConfirmModal, DialogActions, dialogButtonStyle, RecordCard, TabSelect } from '../pages/settings/primitives'
+import type { CleanJob, CleanKind, CleanScanState, CleanWebItem, CleanWebPlan } from '@agentistics/core'
+import { Checkbox, ConfirmModal, DialogActions, dialogButtonStyle, RecordCard, Select, TabSelect } from '../pages/settings/primitives'
 import { pushNotification } from '../lib/notifications'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { backgroundCleanScan, cancelCleanScan, finalizeCleanScan, startCleanScan, useCleanScan } from '../lib/cleanScan'
@@ -32,6 +32,11 @@ export function CleanScanView({ scan, lang }: { scan: CleanScanState | null; lan
       {!scan?.log.length && <span className="clean-muted">{pt ? 'Localizando as pastas dos seus projetos' : 'Finding your project folders'}</span>}
     </div></div>
   </div>
+}
+
+export function CleanListSummary({ plan, lang }: { plan: CleanWebPlan; lang: 'pt' | 'en' }) {
+  const pt = lang === 'pt'
+  return <>{plan.reclaimable.count} {pt ? 'itens para limpar' : 'items to clean'} · {new Set(plan.items.map(i => i.repo)).size} {pt ? 'projetos nesta lista' : 'projects in this list'} · {pt ? 'varrido às' : 'scanned at'} {time(plan.scannedAt, lang)}</>
 }
 
 export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: boolean; onClose: () => void }) {
@@ -116,6 +121,8 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
   const sortHeading = (value: CleanSort, label: string) => <th scope="col" aria-sort={sort === value ? descending ? 'descending' : 'ascending' : 'none'}><button type="button" onClick={() => reorder(value)}>{label}{sort === value ? descending ? ' ↓' : ' ↑' : ''}</button></th>
   const checkbox = (item: CleanWebItem) => <Checkbox checked={picked.has(item.id)} disabled={busy || item.kind === 'keep'} onChange={() => toggle(item.id)} label="" ariaLabel={item.path} />
 
+  const typeBreakdown = <div className="clean-types"><div className="clean-type-bar" aria-hidden="true">{(Object.keys(COLORS) as CleanKind[]).map(kind => { const bytes = items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0); return bytes > 0 && <span key={kind} style={{ flexGrow: bytes, background: COLORS[kind] }} /> })}</div><div className="clean-legend">{(Object.keys(COLORS) as CleanKind[]).map(kind => <div key={kind}><i style={{ background: COLORS[kind] }} /><span>{cleanKind(kind, pt)} <small>({items.filter(i => i.kind === kind).length})</small></span><b>{cleanSize(items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0), lang)}</b></div>)}</div></div>
+
   return <ConfirmModal focusPanel className="clean-dialog" headerAction={mobile && !scanning ? <button type="button" className="clean-close" aria-label={pt ? 'Fechar' : 'Close'} onClick={() => void close()}><X size={18} /></button> : undefined} open={open} title={title} message={message} tone={confirm ? 'danger' : 'default'} icon={done ? <Check size={20} /> : scanning ? <Search size={20} /> : <Trash2 size={20} />}
     confirmLabel={cleanLabel} cancelLabel={pt ? 'Fechar' : 'Close'} onConfirm={() => void run()} onCancel={() => void close()}
     footer={<DialogActions start={scanning ? <span className="clean-muted">{pt ? 'Pode fechar: a Nay avisa quando terminar.' : 'You can close this: Nay will let you know when it is ready.'}</span> : plan && !done && !busy && !confirm ? <span className="clean-selected"><b>{selected.length}</b> {pt ? 'marcados' : 'selected'} · {cleanSize(selectedBytes, lang)}{hiddenSelected > 0 && ` · ${hiddenSelected} ${pt ? 'fora deste filtro' : 'outside this filter'}`}</span> : undefined}>
@@ -138,15 +145,23 @@ export function CleanDialog({ lang, open, onClose }: { lang: 'pt' | 'en'; open: 
         {showRemoved && <section><h3>{pt ? 'Removidos' : 'Removed'}</h3>{done.removed.map(item => <div className="clean-outcome" key={`${item.path}:${item.kind}`}><b title={item.path}>{cleanName({ ...item, name: '' })}</b><span>{cleanSize(item.bytes, lang)}</span></div>)}</section>}
       </div>}
       {plan && !done && !busy && <>
-        <div className="clean-summary" data-testid="clean-summary"><span className="clean-muted">{confirm ? (pt ? 'Você vai liberar' : 'You will free up') : (pt ? 'Dá para liberar' : 'You can free up')}</span><div><strong className="clean-number">{cleanSize(confirm ? selectedBytes : plan.reclaimable.bytes, lang)}</strong><span className="clean-muted">{confirm ? `${selected.length} ${pt ? 'itens serão removidos' : 'items will be removed'}` : <>{plan.reclaimable.count} {pt ? 'itens' : 'items'} · {new Set(items.map(i => i.repo)).size} {pt ? 'projetos nesta lista' : 'projects in this list'} · {pt ? 'varrido às' : 'scanned at'} {time(plan.scannedAt, lang)}</>}</span></div></div>
+        <div className="clean-summary" data-testid="clean-summary"><span className="clean-muted">{confirm ? (pt ? 'Você vai liberar' : 'You will free up') : (pt ? 'Dá para liberar' : 'You can free up')}</span><div><strong className="clean-number">{cleanSize(confirm ? selectedBytes : plan.reclaimable.bytes, lang)}</strong><span className="clean-muted">{confirm ? `${selected.length} ${pt ? 'itens serão removidos' : 'items will be removed'}` : <CleanListSummary plan={plan} lang={lang} />}</span></div></div>
         {!confirm && <>
-          <div className="clean-types"><div className="clean-type-bar" aria-hidden="true">{(Object.keys(COLORS) as CleanKind[]).map(kind => { const bytes = items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0); return bytes > 0 && <span key={kind} style={{ flexGrow: bytes, background: COLORS[kind] }} /> })}</div><div className="clean-legend">{(Object.keys(COLORS) as CleanKind[]).map(kind => <div key={kind}><i style={{ background: COLORS[kind] }} /><span>{cleanKind(kind, pt)} <small>({items.filter(i => i.kind === kind).length})</small></span><b>{cleanSize(items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0), lang)}</b></div>)}</div></div>
+          {mobile ? <details className="clean-type-details"><summary>{pt ? 'Tipos e tamanhos' : 'Types and sizes'}</summary>{typeBreakdown}</details> : typeBreakdown}
           <div className="clean-filter-chips"><TabSelect wrap options={filters} value={filter} onChange={setFilter} buttonMinHeight={mobile ? 44 : 30} /></div>
           {mobile ? <>
-            <div className="clean-mobile-select"><Checkbox checked={allSelected} onChange={toggleAll} label={pt ? 'Marcar todos' : 'Select all'} disabled={!selectable.length} /></div>
-            <div className="clean-mobile-sort"><span className="clean-muted">{pt ? 'Ordenar por' : 'Sort by'}</span><TabSelect wrap options={[{ value: 'bytes', label: pt ? 'Tamanho' : 'Size' }, { value: 'name', label: pt ? 'Pasta' : 'Folder' }, { value: 'idle', label: pt ? 'Parado há' : 'Idle for' }]} value={sort} onChange={value => reorder(value)} buttonMinHeight={44} /></div>
+            <div className="clean-mobile-controls">
+              <Checkbox checked={allSelected} onChange={toggleAll} label={pt ? 'Marcar todos' : 'Select all'} disabled={!selectable.length} />
+              <div className="clean-mobile-sort" role="group" aria-label={pt ? 'Ordenar por' : 'Sort by'}>
+                <Select value={`${sort}:${descending}`} onChange={value => { const [key, direction] = value.split(':'); setSort(key as CleanSort); setDescending(direction === 'true') }} options={[
+                  { value: 'bytes:true', label: pt ? 'Tamanho ↓' : 'Size ↓' }, { value: 'bytes:false', label: pt ? 'Tamanho ↑' : 'Size ↑' },
+                  { value: 'name:false', label: pt ? 'Pasta ↑' : 'Folder ↑' }, { value: 'name:true', label: pt ? 'Pasta ↓' : 'Folder ↓' },
+                  { value: 'idle:false', label: pt ? 'Parado há ↑' : 'Idle for ↑' }, { value: 'idle:true', label: pt ? 'Parado há ↓' : 'Idle for ↓' },
+                ]} />
+              </div>
+            </div>
             <div className="clean-mobile-rows">{rows.map(item => <RecordCard key={item.id} title={<span className="clean-card-name" title={item.path}>{cleanName(item)}</span>} subtitle={<span className="clean-card-subtitle">{item.kind === 'keep' ? `${item.project} · ${cleanReason(item.reason, pt)}` : `${item.project} · ${item.kind === 'node-modules' ? (pt ? '/node_modules · reinstalável' : '/node_modules · reinstallable') : item.kind === 'prune' ? (pt ? 'registro' : 'record') : 'merged'} · ${pt ? 'parado há' : 'idle for'} ${cleanIdle(item.lastActivityMs, now, lang)}`}</span>} leading={checkbox(item)} badge={<b>{cleanSize(item.bytes, lang)}</b>} fields={[]} onClick={item.kind !== 'keep' ? () => toggle(item.id) : undefined} />)}</div>
-          </> : <div className="clean-table-wrap"><table className="clean-table"><colgroup><col style={{ width: 34 }} /><col /><col style={{ width: '30%' }} /><col style={{ width: 92 }} /><col style={{ width: 108 }} /></colgroup><thead><tr><th><Checkbox checked={allSelected} onChange={toggleAll} label="" ariaLabel={pt ? 'Marcar todos os itens visíveis' : 'Select all visible items'} disabled={!selectable.length} /></th>{sortHeading('name', pt ? 'Pasta' : 'Folder')}{sortHeading('project', pt ? 'Projeto' : 'Project')}{sortHeading('idle', pt ? 'Parado há' : 'Idle for')}{sortHeading('bytes', pt ? 'Tamanho' : 'Size')}</tr></thead><tbody>{rows.map(item => <tr key={item.id} data-kept={item.kind === 'keep'}><td>{checkbox(item)}</td><td title={`${item.path}\n${cleanReason(item.reason, pt)}`}><span className="clean-folder"><i style={{ background: COLORS[item.kind] }} /><span className="clean-folder-label"><b>{cleanName(item)}</b>{item.kind === 'node-modules' && <small className="clean-muted">/node_modules</small>}</span></span></td><td title={item.repo}>{item.project}</td><td>{cleanIdle(item.lastActivityMs, now, lang)}</td><td>{cleanSize(item.bytes, lang)}</td></tr>)}</tbody></table></div>}
+          </> : <div className="clean-table-wrap"><table className="clean-table"><colgroup><col style={{ width: 34 }} /><col /><col className="clean-project-column" /><col style={{ width: 92 }} /><col style={{ width: 108 }} /></colgroup><thead><tr><th><Checkbox checked={allSelected} onChange={toggleAll} label="" ariaLabel={pt ? 'Marcar todos os itens visíveis' : 'Select all visible items'} disabled={!selectable.length} /></th>{sortHeading('name', pt ? 'Pasta' : 'Folder')}{sortHeading('project', pt ? 'Projeto' : 'Project')}{sortHeading('idle', pt ? 'Parado há' : 'Idle for')}{sortHeading('bytes', pt ? 'Tamanho' : 'Size')}</tr></thead><tbody>{rows.map(item => <tr key={item.id} data-kept={item.kind === 'keep'}><td>{checkbox(item)}</td><td title={`${item.path}\n${cleanReason(item.reason, pt)}`}><span className="clean-folder"><i style={{ background: COLORS[item.kind] }} /><span className="clean-folder-label"><b>{cleanName(item)}</b>{item.kind === 'node-modules' && <small className="clean-muted">/node_modules</small>}</span></span></td><td title={item.repo}>{item.project}</td><td>{cleanIdle(item.lastActivityMs, now, lang)}</td><td>{cleanSize(item.bytes, lang)}</td></tr>)}</tbody></table></div>}
           {rows.length === 0 && <p className="clean-muted">{pt ? 'Nenhum item neste filtro.' : 'No items match this filter.'}</p>}
         </>}
       </>}
