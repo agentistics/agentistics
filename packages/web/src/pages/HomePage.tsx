@@ -143,9 +143,6 @@ export default function HomePage() {
           // headline — BRL is ~5× the amount and can carry an extra digit.
           sizeBasis={widerValue(fmtCost(shownUSD, 'USD', brlRate), fmtCost(shownUSD, 'BRL', brlRate))}
           sub={showPlan ? planCostSub(lang) : [costCardSub(lang, filters.harness), estimateNote, d.unpricedTokens > 0 ? UNPRICED_TOTAL_MARKER[lang === 'pt' ? 'pt' : 'en'] : ''].filter(Boolean).join('\n')}
-          // Belt and braces beside the shorter text: every card in a grid row shares its height,
-          // so this one may never be the one that stretches it.
-          subNoWrap={showPlan}
           icon={<TrendingUp size={15} />} accent="var(--anthropic-orange)" info={infoItems[5]} onInfoClick={() => setInfoModalIndex(5)}
           // Only the currency lives here. The API/Plan switch moved to the filter bar, where it
           // was asked for and where people look to change what they are seeing — keeping a second
@@ -181,16 +178,13 @@ export default function HomePage() {
             const t = sessionTime(d.longestSession, lang)
             const msgs = (d.longestSession!.user_message_count ?? 0) + (d.longestSession!.assistant_message_count ?? 0)
             // Both figures are NAMED here ("active" / "elapsed") but NOT explained: the full
-            // definition lives in the ⓘ modal and the value tooltip. Spelled out on the card it
-            // wrapped to three lines and stretched the whole grid row. The project is its folder
-            // name, not the absolute path, for the same reason — and `subNoWrap` guarantees it,
-            // since a long enough folder name would otherwise wrap and bring the row back up.
+            // definition lives in the ⓘ modal and the value tooltip. The complete sub-line wraps
+            // within the card; the project is shown as its folder name.
             return `${t.activeLabel} · ${t.elapsed} ${t.elapsedLabel} · ${msgs} ${lang === 'pt' ? 'msgs' : 'msgs'}`
               + (filters.projects.length === 0 && d.longestSession!.project_path
                 ? ` · ${projectFolder(d.longestSession!.project_path)}`
                 : '')
           })() : ''}
-          subNoWrap
           icon={<Clock size={15} />} accent="var(--accent-purple)" info={infoItems[4]} onInfoClick={() => setInfoModalIndex(4)} />
       )
     } else if (id === 'commits') {

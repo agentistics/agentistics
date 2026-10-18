@@ -1134,3 +1134,14 @@ tr:focus-within .ag-row-actions,
 }
 @media (max-width: 380px) { .ag-code-boxes { gap: 6px; } .ag-code-box { height: 48px; } }
 @media (prefers-reduced-motion: reduce) { .ag-code-boxes.is-shaking { animation: none; } }
+
+/* Shared physical touch targets for chat and every nested dock tab. */
+@media (max-width: 767px) {
+  .ag-nay-dock :is(button, a[href], [role="button"]) {
+    min-width: 44px;
+    min-height: 44px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+  }
+  .ag-nay-dock :is(.ag-tap, .ag-tap-icon)::after { inset: 0; }
+}

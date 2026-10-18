@@ -49,7 +49,7 @@ export function CheckinsContent({ lang, reports, rows, error = false, capable = 
       </div>
       {rounds.length > visible && <RecordCardAction label={pt ? 'Mostrar mais check-ins' : 'Show more check-ins'} onClick={() => setVisible(count => count + 10)}>{pt ? `Mostrar mais (${rounds.length - visible})` : `Show more (${rounds.length - visible})`}</RecordCardAction>}
       <Section title={pt ? 'Padrão para líderes' : 'Leader defaults'}>
-        <CheckinDefaultsSection pt={pt} isMobile={isMobile} />
+        <CheckinDefaultsSection embedded pt={pt} isMobile={isMobile} />
       </Section>
     </>}
   </div>

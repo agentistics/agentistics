@@ -30,16 +30,13 @@ interface StatCardProps {
   /** Size the headline by THIS string instead of the rendered value. For a value that can be
    *  re-rendered in place (USD ⇄ BRL) pass the wider of the two, so the font never jumps. */
   sizeBasis?: string | number
-  /** Keep the sub to a single ellipsized line (full text in its tooltip). A sub that wraps makes
-   *  this card taller than every other one in the grid row. */
-  subNoWrap?: boolean
   action?: React.ReactNode
   fullPrecision?: boolean
   onTogglePrecision?: () => void
   lang?: string
 }
 
-export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-orange)', info, onInfoClick, valueTitle, sizeBasis, subNoWrap, action, fullPrecision, onTogglePrecision, lang }: StatCardProps) {
+export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-orange)', info, onInfoClick, valueTitle, sizeBasis, action, fullPrecision, onTogglePrecision, lang }: StatCardProps) {
   const isMobile = useIsMobile()
   return (
     <div style={{
@@ -75,11 +72,11 @@ export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-or
         background: `linear-gradient(90deg, ${accent}60, ${accent}10, transparent)`,
       }} />
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, minHeight: 36 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', flexDirection: 'column', gap: 6, minHeight: 54 }}>
         <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
           {label}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
           {action}
           {onTogglePrecision && !isMobile && (
             <PrecisionToggle
@@ -135,14 +132,10 @@ export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-or
         {sub && (
           // `pre-line` so a sub can be several short labelled lines instead of one run-on
           // sentence — a card that reports two different quantities has to name both.
-          // `subNoWrap` opts out: one ellipsized line, full text in the tooltip, so a long sub
-          // cannot stretch the whole KPI row (every card in a grid row shares its height).
           <div
-            title={subNoWrap ? sub : undefined}
             style={{
               fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4,
-              whiteSpace: subNoWrap ? 'nowrap' : 'pre-line',
-              ...(subNoWrap ? { overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'help' } : {}),
+              whiteSpace: 'pre-line', overflowWrap: 'anywhere',
             }}
           >
             {sub}

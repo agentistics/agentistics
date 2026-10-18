@@ -27,10 +27,10 @@ const roleOf = (r: ControlSession) => r.id === 'c' ? 'worker' as const : 'leader
 for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
   test('two leaders have title, state, child count and accessible 44px open actions', () => {
     const html = atWidth(width, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang="pt" rows={rows} roleOf={roleOf} now={61_000} /></MemoryRouter>))
-    expect(html).toContain('2 líderes · 1 precisam de você')
+    expect(html).toContain('2 líderes · 1 precisa de você')
     expect(html).toContain('Session a'); expect(html).toContain('Session b'); expect(html).not.toContain('Session c')
     expect(html).toContain('Trabalhando'); expect(html).toContain('Aguardando aprovação')
-    expect(html).toContain('Navigation'); expect(html).toContain('>Filhas<')
+    expect(html).toContain('Navigation'); expect(html).toContain('>Filhas ativas<')
     expect(html).toContain('>1</span>'); expect(html).toContain('>0</span>')
     expect(html.match(/aria-label="Abrir Session /g)).toHaveLength(2)
     expect(html).toContain('min-height:44px')
@@ -128,4 +128,32 @@ for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
       expect(render()).toContain('font-size:13px;color:var(--text-secondary)')
     } finally { __setAwayForTest(null) }
   })
+})
+
+for (const lang of ['pt', 'en'] as const) test(`leader titles, singular status and child scope in ${lang}`, () => {
+  const fixtures = [row('a', { title: '[ LÍDER ] - [ LEADER ] - Motor', state: 'waiting' }), row('child', { parentSessionId: 'a', state: 'exited' })]
+  const html = atWidth(390, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang={lang} rows={fixtures} roleOf={() => 'leader'} /></MemoryRouter>))
+  expect(html).toContain('>Motor</div>')
+  expect(html).toContain(lang === 'pt' ? '1 líder · 1 precisa de você' : '1 leader · 1 needs you')
+  expect(html).toContain(lang === 'pt' ? 'Filhas ativas' : 'Active children')
+  expect(html).toContain('>0</span>')
+  expect(html).not.toContain('text-overflow:ellipsis')
+  const stale = atWidth(390, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang={lang} rows={fixtures} roleOf={() => 'leader'} stale="Offline" /></MemoryRouter>))
+  expect(stale).toContain('>N/A</span>')
+})
+
+for (const lang of ['pt', 'en'] as const) test(`embedded check-in defaults have one heading in ${lang}`, () => {
+  const html = atWidth(390, () => renderToStaticMarkup(<CheckinsContent lang={lang} reports={[]} rows={[]} />))
+  expect(html).toContain(lang === 'pt' ? 'Padrão para líderes' : 'Leader defaults')
+  expect(html).not.toContain(lang === 'pt' ? 'Check-in dos líderes' : 'Leader check-ins')
+})
+
+test('away authorization reads as a sentence in both languages', () => {
+  try {
+    __setAwayForTest({ ...AWAY_OFF, on: true, authorised: ['releases', 'workers', 'merges'] })
+    for (const lang of ['pt', 'en'] as const) {
+      const html = atWidth(390, () => renderToStaticMarkup(<AwayContent lang={lang} capable />))
+      expect(html).toContain(lang === 'pt' ? 'releases que o líder aprovar, abrir sessões de workers, merge de PRs' : 'releases the leader approves, open worker sessions, merge PRs')
+    }
+  } finally { __setAwayForTest(null) }
 })

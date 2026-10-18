@@ -13,7 +13,7 @@ const handback = event({ detail: '{"message":{"to":"6df955de67","kind":"handback
 
 describe('board activity in human language', () => {
   test('message metadata becomes a sentence in both languages', () => {
-    expect(activitySentence(handback, 'pt')).toBe('Enviou uma entrega para revisão.')
+    expect(activitySentence(handback, 'pt')).toBe('Enviou trabalho para revisão.')
     expect(activitySentence(handback, 'en')).toBe('Sent work for review.')
     for (const lang of ['pt', 'en'] as const) {
       for (const kind of ['block', 'question']) {
@@ -49,7 +49,7 @@ describe('board activity in human language', () => {
       expect(html).toContain('href="/tasks/t-3d092f5797"')
       expect(html).not.toContain('>t-3d092f5797<')
       for (const raw of ['{&quot;message', '6df955de67', '688c52cc', 'f7a2961299', '>comment<', '>session<']) expect(html).not.toContain(raw)
-      expect(html).toContain(lang === 'pt' ? 'Enviou uma entrega para revisão.' : 'Sent work for review.')
+      expect(html).toContain(lang === 'pt' ? 'Enviou trabalho para revisão.' : 'Sent work for review.')
       expect(html).toContain(lang === 'pt' ? 'Vinculou uma sessão à tarefa.' : 'Linked a session to the task.')
       if (lang === 'pt') expect(html).not.toContain('on subtask')
       expect(html).toContain('text-align:left')

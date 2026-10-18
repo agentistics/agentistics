@@ -17,3 +17,15 @@ test('Nay tabs get a full wrapping row and 44px targets without clipped labels',
   expect(tabs).toContain("pt ? 'Sessões' : 'Sessions'")
   expect(tabs).toContain("pt ? 'Limites' : 'Limits'")
 })
+
+test('every mobile dock tab shares physical 44px controls, including settings, close and change', () => {
+  const css = readFileSync(join(import.meta.dir, '../../index.css'), 'utf8')
+  expect(source).toContain('className="ag-nay-dock"')
+  const rule = css.slice(css.indexOf('.ag-nay-dock :is(button'))
+  expect(rule).toContain('min-width: 44px')
+  expect(rule).toContain('min-height: 44px')
+  expect(rule).toContain('flex-shrink: 0')
+  const launch = source.slice(source.indexOf('{launchLine && ('), source.indexOf('{pickerOpen && picker'))
+  expect(launch).not.toContain('ellipsis')
+  expect(launch).toContain("whiteSpace: 'normal'")
+})

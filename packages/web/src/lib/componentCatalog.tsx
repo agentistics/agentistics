@@ -183,7 +183,6 @@ export const CATALOG: CatalogItem[] = [
             return `${msgStr} · ${projectFolder(derived.longestSession!.project_path)}`
           return msgStr
         })() : ''}
-        subNoWrap
         icon={<Clock size={15} />}
         accent="var(--accent-purple)"
       />

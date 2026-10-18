@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { subscriptionRows, usePlanLimits } from '../../lib/planLimits'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { PlanUsageCard } from '../PlanLimitMeter'
+import { RecordCardAction } from '../../pages/settings/primitives'
 
 export function NayLimitsTab({ lang, isMobile, onNavigate, embedded = false }: { lang: 'pt' | 'en'; isMobile: boolean; onNavigate?: () => void; embedded?: boolean }) {
   const pt = lang === 'pt'
@@ -30,7 +31,7 @@ export function NayLimitsTab({ lang, isMobile, onNavigate, embedded = false }: {
           ? <PlanUsageCard key={`${r.harness}:${r.limits.account}`} limits={r.limits} accountLabel={r.accountLabel} now={now} lang={lang} />
           : <PlanUsageCard key={`${r.harness}:${r.plan}`} limits={null} accountLabel={r.accountLabel} pending={{ harness: r.harness, plan: r.plan ?? '' }} now={now} lang={lang} />)}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 11.5, color: 'var(--text-tertiary)', padding: '2px 2px 0' }}>
-          <button type="button" onClick={() => { onNavigate?.(); navigate('/settings/billing') }} style={{ border: 0, background: 'transparent', padding: 0, font: 'inherit', color: 'var(--anthropic-orange)', cursor: 'pointer' }}>{pt ? 'Gerenciar planos' : 'Manage plans'}</button>
+          <RecordCardAction inline label={pt ? 'Gerenciar planos' : 'Manage plans'} onClick={() => { onNavigate?.(); navigate('/settings/billing') }}>{pt ? 'Gerenciar planos' : 'Manage plans'}</RecordCardAction>
         </div>
       </>)}
     </div>

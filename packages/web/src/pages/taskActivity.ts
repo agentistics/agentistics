@@ -28,7 +28,7 @@ export function activitySentence(event: TaskEvent, lang: Lang, statuses: readonl
   if (event.kind === 'comment') {
     try {
       const message = JSON.parse(event.detail ?? '').message
-      if (message?.kind === 'handback') return pt ? 'Enviou uma entrega para revisão.' : 'Sent work for review.'
+      if (message?.kind === 'handback') return pt ? 'Enviou trabalho para revisão.' : 'Sent work for review.'
       if (message?.kind === 'block') return pt ? 'Comunicou um bloqueio.' : 'Reported a blocker.'
       if (message?.kind === 'question') return pt ? 'Enviou uma pergunta.' : 'Sent a question.'
     } catch { /* Older comments store a target phrase instead of message metadata. */ }

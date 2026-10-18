@@ -186,7 +186,7 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
             {fields.map(f => (
               <div key={f.label} style={{ display: 'flex', flexDirection: fieldLayout === 'stacked' ? 'column' : 'row', alignItems: 'flex-start', gap: fieldLayout === 'stacked' ? 3 : 10, fontSize: 12 }}>
                 <span style={{ color: 'var(--text-tertiary)', flexShrink: 0, minWidth: 82 }}>{f.label}</span>
-                <span style={{ color: 'var(--text-secondary)', minWidth: 0, maxWidth: '100%', flex: 1, textAlign: fieldLayout === 'stacked' ? 'left' : 'right', overflowWrap: 'anywhere' }}>{f.value}</span>
+                <span style={{ color: 'var(--text-secondary)', minWidth: 0, maxWidth: '100%', flex: fieldLayout === 'stacked' ? undefined : 1, textAlign: fieldLayout === 'stacked' ? 'left' : 'right', overflowWrap: 'anywhere' }}>{f.value}</span>
               </div>
             ))}
           </div>
@@ -210,7 +210,8 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
 // RecordCardAction
 // A footer button for RecordCard: equal share of the row, 44px tall, flat against its neighbours
 // (the 1px gaps in the parent's background show through as hairline dividers).
-export function RecordCardAction({ onClick, children, danger, label, disabled }: {
+export function RecordCardAction({ onClick, children, danger, label, disabled, inline = false }: {
+  inline?: boolean
   onClick: () => void
   children: React.ReactNode
   danger?: boolean
@@ -227,8 +228,8 @@ export function RecordCardAction({ onClick, children, danger, label, disabled }:
       aria-label={label}
       aria-busy={disabled || undefined}
       style={{
-        flex: 1, minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-        border: 'none', background: 'var(--bg-card)',
+        flex: inline ? '0 0 auto' : 1, minHeight: 44, minWidth: 44, padding: inline ? '0 8px' : undefined, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+        border: 'none', background: inline ? 'transparent' : 'var(--bg-card)',
         color: danger ? '#ef4444' : 'var(--text-secondary)',
         fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
         cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
@@ -569,7 +570,7 @@ export function StatusDot({ state, size = 8 }: {
  * included — adding an inline 16px here would be dead code that reads like a live requirement.
  */
 export function FieldInput({
-  label, sub, value, onChange, min, step, invalid, describedBy, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false,
+  label, sub, value, onChange, min, step, invalid, describedBy, unit, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false,
 }: {
   label: string
   sub?: string
@@ -579,6 +580,7 @@ export function FieldInput({
   step?: number | 'any'
   invalid?: boolean
   describedBy?: string
+  unit?: string
   type?: 'text' | 'password' | 'number'
   isMobile?: boolean
   placeholder?: string
@@ -617,11 +619,11 @@ export function FieldInput({
         autoFocus={autoFocus}
         inputMode={inputMode}
         spellCheck={spellCheck}
-        aria-label={label}
+        aria-label={unit ? `${label} (${unit})` : label}
         style={{
           width: '100%', boxSizing: 'border-box', minHeight: isMobile ? 44 : undefined,
           padding: '7px 10px',
-          ...(type === 'password' ? { paddingRight: REVEAL_PAD } : null),
+          ...(type === 'password' ? { paddingRight: REVEAL_PAD } : unit ? { paddingRight: 76 } : null),
           background: 'var(--bg-elevated)',
           border: '1px solid var(--border)',
           borderRadius: 7,
@@ -635,6 +637,7 @@ export function FieldInput({
         onFocus={e => { if (!disabled) e.currentTarget.style.borderColor = 'var(--anthropic-orange)' }}
         onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
       />
+      {unit && <span aria-hidden="true" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', fontSize: 13, pointerEvents: 'none' }}>{unit}</span>}
       {type === 'password' && <RevealButton shown={shown} onToggle={() => setShown(v => !v)} />}
       </div>
     </div>

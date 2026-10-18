@@ -6,28 +6,8 @@
  * was painted straight through the card's right edge; the tag one clipped it to an ellipsis. One
  * tile, one behaviour.
  *
- * ── Why the figure is sized in `cqi` ──────────────────────────────────────────────────────────
- * The value is a headline and must not wrap: a two-line tile is as tall as two lines, and a grid
- * row is as tall as its tallest cell, so ONE wrapped tile leaves every tile beside it two thirds
- * empty. (That is exactly what the first fix here did — it stopped the overflow by allowing the
- * wrap, and traded a value outside its box for a row of half-empty boxes.)
- *
- * Not wrapping means the figure has to FIT, and what it has to fit inside is a grid track whose
- * width nothing in JavaScript knows at render time. So the tile is a size container
- * (`container-type: inline-size`) and the font size is stated as the smaller of the design size and
- * the size at which this many characters still fit:
- *
- *     font-size: min(18px, (100 / (len * CHAR_EM))cqi)
- *
- * `1cqi` is 1 % of the tile's own content box, so the second term is self-correcting at every
- * width — a 3-character count keeps the full 18px on a narrow phone tile, while `USD 15,884.06`
- * steps down only as far as its column actually requires. `CHAR_EM` is the average advance of a
- * digit in the UI font at weight 700, with margin.
- *
- * `containerType` is what makes `cqi` mean anything here; a browser that does not understand the
- * unit drops the whole declaration and falls back to `.ag-stat-value`'s plain 18px in index.css.
- * `nowrap` + `ellipsis` is the backstop under both: if the estimate is ever wrong the figure is
- * clipped inside the card rather than painted outside it, and `title` still carries it whole.
+ * Compact quantities use container sizing; descriptive values longer than 20 characters use a
+ * readable 14px and wrap. A status sentence must never shrink to fit as if it were a number.
  */
 import React from 'react'
 
@@ -55,6 +35,7 @@ export function StatTile({ label, value, accent, title }: {
   accent?: boolean
   title?: string
 }) {
+  const descriptive = value.length > 20
   return (
     <div
       title={title ?? value}
@@ -67,10 +48,11 @@ export function StatTile({ label, value, accent, title }: {
       <span
         className="ag-stat-value"
         style={{
-          fontSize: statValueFontSize(value),
+          fontSize: descriptive ? 14 : statValueFontSize(value),
           fontWeight: 700, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums',
           color: accent ? 'var(--anthropic-orange)' : 'var(--text-primary)',
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          whiteSpace: descriptive ? 'normal' : 'nowrap', overflowWrap: 'anywhere',
+          overflow: descriptive ? undefined : 'hidden', textOverflow: descriptive ? undefined : 'ellipsis',
         }}
       >{value}</span>
       <span style={{

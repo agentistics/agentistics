@@ -57,7 +57,7 @@ export function SessionFacts({ session, selected = false, metaColor, withEffort 
       {session.task && (
         <span style={{
           fontSize: 9.5, color: 'var(--text-tertiary)', fontWeight: 600,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          whiteSpace: 'normal', overflowWrap: 'anywhere',
         }}>
           {session.task}
         </span>
@@ -65,14 +65,13 @@ export function SessionFacts({ session, selected = false, metaColor, withEffort 
       <span style={{
         fontSize: session.task ? 13.5 : 12.5,
         fontWeight: (selected || wants ? 650 : 500) + (session.task ? 50 : 0),
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        whiteSpace: 'normal', overflowWrap: 'anywhere',
       }}>
         {session.title}
       </span>
       <span style={{
-        // `overflow: hidden` is what makes the shrinkable cells below matter: without it a flex row
-        // wider than its card simply paints past the edge, and the harness name ran out of the card.
-        display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, overflow: 'hidden',
+        // Stacked rows keep every fact readable; narrow cards wrap the metadata onto more lines.
+        display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flexWrap: 'wrap',
         fontSize: 10.5, color: wants ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
       }}>
         <span style={{ flexShrink: 0, color: metaColor }}>{session.stateLabel}</span>
@@ -80,7 +79,7 @@ export function SessionFacts({ session, selected = false, metaColor, withEffort 
         <span style={{
           color: (HARNESS_COLORS as Record<string, string>)[session.harness] ?? 'var(--text-tertiary)',
           fontWeight: 650, minWidth: 0, flexShrink: 1,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          whiteSpace: 'normal', overflowWrap: 'anywhere',
         }}>
           {(HARNESS_LABELS as Record<string, string>)[session.harness] ?? session.harness}
         </span>
@@ -89,9 +88,8 @@ export function SessionFacts({ session, selected = false, metaColor, withEffort 
         {session.model && (
           <>
             <span style={{ opacity: 0.4, flexShrink: 0 }}>·</span>
-            {/* Shrinks first (`flexShrink: 3`): the model is the fact a person can least do without
-                the least — the state and the assistant's name are what they scan for. */}
-            <span style={{ minWidth: 0, flexShrink: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {/* Long model ids wrap within the same metadata vocabulary as the session title. */}
+            <span style={{ minWidth: 0, flexShrink: 3, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
               {shortModel(session.model)}
             </span>
           </>

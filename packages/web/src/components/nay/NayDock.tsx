@@ -485,6 +485,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   const panel = dock.open && (
     <div
       ref={panelRef}
+      className="ag-nay-dock"
       role="dialog"
       aria-label="Nay"
       style={isMobile
@@ -858,7 +859,7 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
       {launchLine && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, fontSize: 11.5, color: 'var(--text-tertiary)', minWidth: 0 }}>
           <span style={{ flexShrink: 0 }}>{pt ? 'Com' : 'With'}</span>
-          <span style={{ flex: 1, minWidth: 0, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{launchLine}</span>
+          <span style={{ flex: 1, minWidth: 0, color: 'var(--text-secondary)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{launchLine}</span>
           <button type="button" onClick={onTogglePicker} aria-expanded={pickerOpen} style={{
             flexShrink: 0, border: 'none', background: 'transparent', padding: isMobile ? '10px 4px' : '2px 4px', cursor: 'pointer',
             fontFamily: 'inherit', fontSize: 11.5, color: ORANGE, textDecoration: 'underline', textUnderlineOffset: 3,

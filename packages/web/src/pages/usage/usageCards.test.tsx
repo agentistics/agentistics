@@ -7,7 +7,7 @@ import type { UsageBudgetRow } from '../../lib/usagePlan'
 import { HARNESS_LABELS } from '../../lib/harness'
 import UsageNowPage from './UsageNowPage'
 import UsageHistoryPage from './UsageHistoryPage'
-import UsagePlanPage from './UsagePlanPage'
+import UsagePlanPage, { UsagePlanContent } from './UsagePlanPage'
 import UsageLimitsPage from './UsageLimitsPage'
 import { NayLimitsTab } from '../../components/nay/NayLimitsTab'
 import { updatedPhrase, fmtWhen } from '../../lib/planLimits'
@@ -231,4 +231,51 @@ describe('usage percent series', () => {
     expect(usageChartData(reading, 'week', NOW)[0]).toEqual({ at: NOW - WEEK - 1, actual: 90, expected: null })
     expect(usageChartData(reading, 'week', NOW, true).some(p => p.actual === 90)).toBe(false)
   })
+})
+
+for (const lang of ['pt', 'en'] as const) test(`planning units, spacing and invalid edits retain account context in ${lang}`, () => {
+  seed([row()])
+  const html = render(<UsagePlanPage />, 390, lang)
+  expect(html).toContain(lang === 'pt' ? '>horas</span>' : '>hours</span>')
+  expect(html).toContain('margin:16px 0 20px')
+  expect(html).toContain(lang === 'pt' ? 'Em execução agora' : 'Running now')
+  expect(html).toContain(lang === 'pt' ? 'Renovação semanal' : 'Weekly renewal')
+  for (const initialHours of ['-2', '0', '', 'text']) {
+    const invalid = render(<UsagePlanContent initialHours={initialHours} />, 390, lang)
+    expect(invalid).toContain('aria-invalid="true"')
+    expect(invalid).toContain('aria-describedby=')
+    expect(invalid).toContain('role="alert"')
+    expect(invalid).toContain('color:var(--accent-red)')
+    expect(invalid).toContain('max5x')
+    expect(invalid).toContain('N/A')
+    expect(invalid).not.toContain(lang === 'pt' ? '2 sessões em paralelo' : '2 parallel sessions')
+  }
+})
+
+for (const lang of ['pt', 'en'] as const) test(`descriptive pause tiles wrap at a readable size in ${lang}`, () => {
+  seed([row({ status: 'tight', pauseUntil: undefined })])
+  const html = render(<UsageNowPage />, 390, lang)
+  const phrase = lang === 'pt' ? 'N/A — sem horário recomendado' : 'N/A — no recommended time'
+  expect(html).toContain(`font-size:14px;font-weight:700`)
+  const tile = html.slice(html.indexOf('class="ag-stat-value"', html.indexOf(`title="${phrase}"`)))
+  expect(tile.slice(0, tile.indexOf('</span>'))).toContain('white-space:normal;overflow-wrap:anywhere')
+  expect(tile.slice(0, tile.indexOf('</span>'))).not.toContain('text-overflow:ellipsis')
+})
+
+for (const lang of ['pt', 'en'] as const) test(`overview and limits share the near-renewal forecast rule in ${lang}`, () => {
+  const budget = row({ weekPct: 0, fiveHourPct: 50 })
+  const limits = { ...limit(budget), windows: [{ kind: '5h' as const, usedPct: 50, resetsAt: NOW + 2.5 * 3_600_000 + 1000 }] }
+  const phrase = lang === 'pt' ? 'acaba ~' : 'runs out ~'
+  for (const now of [NOW, NOW + 2000]) {
+    __setPlanLimitsForTest([limits], now, [], [budget])
+    for (const page of [<UsageNowPage />, <UsageLimitsPage />]) {
+      const html = render(page, 390, lang)
+      expect(html.includes(phrase)).toBe(now === NOW)
+      expect(html).toContain('data-plan-forecast-slot')
+      expect(html).toContain('min-height:1.5em')
+    }
+    const nay = render(<NayLimitsTab lang={lang} isMobile />, 390, lang)
+    expect(nay.includes(phrase)).toBe(now === NOW)
+    expect(nay).toContain('min-height:44px;min-width:44px')
+  }
 })

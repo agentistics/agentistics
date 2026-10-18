@@ -19,7 +19,7 @@ export default function AwaySection({ lang, capable, embedded = false }: { lang:
   const [confirmOff, setConfirmOff] = useState(false)
   if (!capable) return null
   const sub = away.active && away.state
-    ? `${embedded ? '' : `${awayUntilLabel(away.state, lang, Date.now())} · `}${away.state.authorised.map(a => AWAY_AUTH_LABEL[a][lang]).join(', ') || (pt ? 'nada pré-autorizado' : 'nothing pre-authorised')}`
+    ? `${embedded ? '' : `${awayUntilLabel(away.state, lang, Date.now())} · `}${away.state.authorised.map(a => AWAY_AUTH_LABEL[a][lang].replace(/^./u, first => first.toLocaleLowerCase(lang === 'pt' ? 'pt-BR' : 'en-US'))).join(', ') || (pt ? 'nada pré-autorizado' : 'nothing pre-authorised')}`
     : (pt ? 'Quando ligado, as sessões não perguntam nada a você: os líderes decidem e registram, os workers reportam ao líder.'
       : 'When on, sessions ask you nothing: leaders decide and record, workers report to their leader.')
   return (

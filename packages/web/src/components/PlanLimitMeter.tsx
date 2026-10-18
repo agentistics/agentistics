@@ -71,13 +71,13 @@ function WindowRow({ w, now, lang, ring, forecast = true }: { w: PlanLimitWindow
   const f = forecast ? warnForecast(w, now) : null
   return <div data-plan-window={w.kind} style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
     <PlanUsageRing pct={pct} size={ring}>{renewed ? '–' : ring >= 44 ? `${Math.round(pct)}%` : Math.round(pct)}</PlanUsageRing>
-    <div style={{ minWidth: 0, flex: 1, fontSize: 12 }}>
+    <div style={{ minWidth: 0, flex: 1, fontSize: 12, lineHeight: 1.5 }}>
       <b style={{ display: 'block', whiteSpace: 'nowrap' }}>{renewed ? `${windowLabel(w.kind, lang)} · –` : `${windowLabel(w.kind, lang)} · ${Math.round(pct)}% ${pt ? 'usado' : 'used'}`}</b>
       <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 5, color: 'var(--text-secondary)' }}>
         {!renewed && <span style={{ whiteSpace: 'nowrap' }}>{pt ? `restam ${100 - Math.round(pct)}%` : `${100 - Math.round(pct)}% left`} ·</span>}
         {windowResetPhrase(w, now, lang).split(/ (\((?:em|in) .+\))$/).filter(Boolean).map((part, i) => <span key={i} style={{ whiteSpace: renewed ? 'normal' : 'nowrap' }}>{part}</span>)}
       </div>
-      {f && <span style={{ display: 'block', color: LIMIT_WARN, fontWeight: 600 }}>{forecastPhrase(f, now, lang)}</span>}
+      {forecast && <span data-plan-forecast-slot style={{ display: 'block', minHeight: '1.5em', color: LIMIT_WARN, fontWeight: 600 }}>{f ? forecastPhrase(f, now, lang) : null}</span>}
     </div>
     <LimitLevelIcon pct={pct} lang={lang} />
   </div>
