@@ -1,3 +1,4 @@
+import { sessionDay } from '@agentistics/core'
 /**
  * Claude Stats — Watcher / Daemon mode with optional OpenTelemetry export.
  *
@@ -174,7 +175,7 @@ async function buildSnapshot(): Promise<OtelSnapshot & { harnessSnapshots: Harne
   for (let i = 0; i <= 365; i++) {
     const d = new Date(today)
     d.setDate(d.getDate() - i)
-    const dateStr = d.toISOString().slice(0, 10)
+    const dateStr = sessionDay(d.getTime())
     if (activeDates.has(dateStr)) streak++
     else if (i > 0) break
   }

@@ -1,3 +1,4 @@
+import { format, parseISO } from 'date-fns'
 import { isLocalModelId, LOCAL_MODEL_PRICE } from './local-models'
 export interface DailyActivity {
   date: string
@@ -1115,7 +1116,7 @@ export const MODEL_PRICING: Record<string, {
  *     `gemini-3.5-flash`, never `gemini-3.5-flash-lite`);
  *  4. otherwise the Sonnet-class fallback.
  */
-/** The `YYYY-MM-DD` day a session belongs to, from a `start_time` of unknown shape.
+/** The machine-local `YYYY-MM-DD` activity day, from a `start_time` of unknown shape.
  *
  *  `SessionMeta.start_time` is a STRING by contract, but an adapter can get that wrong: Kimi wrote
  *  an epoch NUMBER, it reached the consolidate store as written, and the first consumer to call
@@ -1126,12 +1127,10 @@ export const MODEL_PRICING: Record<string, {
  *  row must never be able to blank the product for every other row. Returns '' when there is no day
  *  to be had, which every caller already treats as "skip this session". */
 export function sessionDay(startTime: unknown): string {
-  if (typeof startTime === 'string') return startTime.slice(0, 10)
-  if (typeof startTime === 'number' && Number.isFinite(startTime) && startTime > 0) {
-    const d = new Date(startTime)
-    return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
-  }
-  return ''
+  if (typeof startTime !== 'string' && !(typeof startTime === 'number'
+    && Number.isFinite(startTime) && startTime > 0)) return ''
+  const date = typeof startTime === 'string' ? parseISO(startTime) : new Date(startTime)
+  return Number.isNaN(date.getTime()) ? '' : format(date, 'yyyy-MM-dd')
 }
 
 /** Coerce a session's timestamps to the STRING shape `SessionMeta` declares, in place.
