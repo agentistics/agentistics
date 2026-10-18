@@ -56,6 +56,7 @@ import {
   unknownPeriod, withScopePeriods, type BillingAccount, type SaveError,
 } from './accountBilling'
 import { createAccountMutator } from './accountMutations'
+import AddAccount from './AddAccount'
 import { usePlanLimits } from '../../lib/planLimits'
 
 /** The wire shape of `GET /api/billing/plan-prices`. Declared here rather than imported: the web
@@ -91,6 +92,8 @@ export default function BillingSettings() {
     fetch(`/api/accounts/${encodeURIComponent(id)}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     }))).current
+  const [accountsReload, setAccountsReload] = useState(0)
+  const reloadAccounts = useCallback(() => setAccountsReload(n => n + 1), [])
   useEffect(() => {
     let cancelled = false
     fetch('/api/accounts')
@@ -102,7 +105,7 @@ export default function BillingSettings() {
       })
       .catch(() => { /* the assistants' own timelines still work without the list */ })
     return () => { cancelled = true }
-  }, [])
+  }, [accountsReload])
 
   // Plans are an ADAPTER fact (a subscription to a vendor's CLI): the native harness has none. An
   // assistant is listed when it has sessions here or a signed-in account.
@@ -315,6 +318,7 @@ export default function BillingSettings() {
 
       <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds}
         selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow} />
+      <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
 
       {errPlace === 'page' && saveError && (
         <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>
