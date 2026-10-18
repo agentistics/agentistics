@@ -1,0 +1,86 @@
+import { describe, expect, test } from 'bun:test'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router-dom'
+import type { ControlSession } from '@agentistics/tui/control/session-fleet'
+import { AWAY_OFF } from '@agentistics/core'
+import { LeadersContent } from './LeadersPage'
+import { HandoffsContent } from './HandoffsPage'
+import { CheckinsContent } from './CheckinsPage'
+import { AwayContent } from './AwayPage'
+import { checkinDefaults, type CheckinState } from '../../lib/checkin'
+import { __setAwayForTest } from '../../lib/awayMode'
+
+function atWidth(width: number, render: () => string) {
+  const root = globalThis as { window?: unknown }
+  const previous = root.window
+  root.window = { innerWidth: width, innerHeight: 900, matchMedia: () => ({ matches: width < 768, addEventListener() {}, removeEventListener() {} }) }
+  try { return render() } finally { if (previous === undefined) delete root.window; else root.window = previous }
+}
+const row = (id: string, patch: Partial<ControlSession> = {}) => ({
+  id, title: `Session ${id}`, conversationId: `conversation-${id}`, harness: 'codex',
+  state: 'working', stateLabel: 'Trabalhando', ...patch,
+}) as ControlSession
+const rows = [row('a', { task: 'Navigation', startedAt: 1_000 }), row('b', { state: 'waiting-approval', stateLabel: 'Aguardando aprovação' }), row('c', { parentConversationId: 'conversation-a' })]
+const roleOf = (r: ControlSession) => r.id === 'c' ? 'worker' as const : 'leader' as const
+
+for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
+  test('two leaders have title, state, child count and accessible 44px open actions', () => {
+    const html = atWidth(width, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang="pt" rows={rows} roleOf={roleOf} now={61_000} /></MemoryRouter>))
+    expect(html).toContain('2 líderes · 1 precisam de você')
+    expect(html).toContain('Session a'); expect(html).toContain('Session b'); expect(html).not.toContain('Session c')
+    expect(html).toContain('Trabalhando'); expect(html).toContain('Aguardando aprovação')
+    expect(html).toContain('Navigation'); expect(html).toContain('>Filhas<')
+    expect(html).toContain('>1</span>'); expect(html).toContain('>0</span>')
+    expect(html.match(/aria-label="Abrir Session /g)).toHaveLength(2)
+    expect(html).toContain('min-height:44px')
+  })
+  test('empty fleet says there are no leaders; unavailable and loading never claim zero', () => {
+    const render = (extra: { loading?: boolean; unavailable?: boolean; stale?: string } = {}) => atWidth(width, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang="pt" rows={[]} roleOf={roleOf} {...extra} /></MemoryRouter>))
+    expect(render()).toContain('Nenhuma sessão líder agora.')
+    for (const props of [{ loading: true }, { unavailable: true }, { stale: 'Offline' }]) {
+      expect(render(props)).not.toContain('Nenhuma sessão líder agora.')
+      expect(render(props)).not.toContain('0 líderes')
+    }
+  })
+  test('ended leaders are excluded', () => {
+    const html = atWidth(width, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang="en" rows={[row('ended', { state: 'exited' })]} roleOf={() => 'leader'} /></MemoryRouter>))
+    expect(html).toContain('No leader sessions right now.')
+    expect(html).not.toContain('Session ended')
+  })
+  test('handoffs is an honest placeholder with no pretend controls', () => {
+    const html = atWidth(width, () => renderToStaticMarkup(<HandoffsContent lang="pt" />))
+    expect(html).toContain('A configuração de passagem (limite global, medidor e custo por fatia extra) chega na próxima entrega.')
+    expect(html).not.toMatch(/<(input|button|select)\b/)
+  })
+  test('check-in latest rounds use status pills and keep global defaults', () => {
+    const reports: CheckinState[] = (['ok', 'resolved', 'needs_you'] as const).map((state, i) => ({
+      ...checkinDefaults(), session: `conversation-${i === 0 ? 'a' : i}`, lastRunAt: i * 1000, nextRunAt: null,
+      last: { state, summary: `Round summary ${state}`, at: i * 1000 },
+    }))
+    const html = atWidth(width, () => renderToStaticMarkup(<CheckinsContent lang="pt" reports={reports} rows={rows} />))
+    expect(html).toContain('Session a')
+    expect(html).toContain('>OK<'); expect(html).toContain('>Resolvido<'); expect(html).toContain('>Precisa de você<')
+    expect(html).toContain('Round summary needs_you')
+    expect(html).toContain('data-testid="checkin-defaults-section"')
+    expect(html.indexOf('Round summary needs_you')).toBeLessThan(html.indexOf('Round summary ok'))
+  })
+  test('check-in empty state requires a successful load', () => {
+    const render = (reports: CheckinState[] | null, error = false) => atWidth(width, () => renderToStaticMarkup(<CheckinsContent lang="pt" reports={reports} rows={[]} error={error} />))
+    expect(render([])).toContain('Nenhuma rodada de check-in registrada ainda.')
+    expect(render(null)).toContain('Carregando rodadas…')
+    expect(render(null, true)).not.toContain('Nenhuma rodada')
+  })
+  test('away never claims present before the store has answered and keeps activation dialog reachable', () => {
+    try {
+      __setAwayForTest(null)
+      const render = () => atWidth(width, () => renderToStaticMarkup(<AwayContent lang="pt" capable />))
+      expect(render()).toContain('Carregando modo ausente…')
+      expect(render()).not.toContain('Você está presente.')
+      __setAwayForTest(AWAY_OFF)
+      expect(render()).toContain('Você está presente.')
+      expect(render()).toContain('Estou fora (dormindo, viajando)')
+      __setAwayForTest({ ...AWAY_OFF, on: true })
+      expect(render()).toContain('Ausente até você voltar')
+    } finally { __setAwayForTest(null) }
+  })
+})

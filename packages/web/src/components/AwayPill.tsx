@@ -1,12 +1,11 @@
 /**
  * Header pill shown ONLY while away mode is active — beside the bell, so the person sees at a glance
- * that the fleet believes they are out. Click → confirm → off ("I'm back"). Mobile: icon-only, its 44px projected by `.ag-tap-icon`.
+ * that the fleet believes they are out. Click → Leadership → Away mode. Mobile: icon-only, its 44px projected by `.ag-tap-icon`.
  */
-import { AwayImpact } from './AwayImpact'
-import React, { useState } from 'react'
+import React from 'react'
+import { Link } from 'react-router-dom'
 import { Moon } from 'lucide-react'
-import { ConfirmModal } from '../pages/settings/primitives'
-import { awayUntilLabel, setAway, useAway } from '../lib/awayMode'
+import { awayUntilLabel, useAway } from '../lib/awayMode'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { SESSION_CHIP_STYLE } from './sessions/RoleChip'
 
@@ -23,10 +22,9 @@ export default function AwayPill({ lang, enabled, variant = AWAY_PILL_VARIANT }:
   const pt = lang === 'pt'
   const away = useAway()
   const isMobile = useIsMobile()
-  const [confirm, setConfirm] = useState(false)
   if (!enabled || !away.active || !away.state) return null
   const until = awayUntilLabel(away.state, lang, Date.now())
-  const label = pt ? `Modo ausente ${until} — clique para desligar` : `Away mode ${until} — click to turn off`
+  const label = pt ? `Modo ausente ${until} — abrir modo ausente` : `Away mode ${until} — open away mode`
   const accent = 'var(--anthropic-orange)'
   const word = pt ? 'Ausente' : 'Away'
   const base = { flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit', background: 'transparent', color: accent } as const
@@ -43,24 +41,9 @@ export default function AwayPill({ lang, enabled, variant = AWAY_PILL_VARIANT }:
     content = <><Moon size={11} aria-hidden />{word}</>
   }
   return (
-    <>
-      <button type="button" data-testid="away-pill" title={label} aria-label={label}
-        onClick={() => setConfirm(true)} className={isMobile ? 'ag-tap-icon' : undefined} style={style}>
-        {content}
-      </button>
-      <ConfirmModal
-        open={confirm}
-        tone="default"
-        icon={<Moon size={17} />}
-        title={pt ? 'Voltou?' : 'Back?'}
-        message={pt
-          ? `O modo ausente está ligado ${until}. Desligar limpa o modo ausente de todas as sessões, inclusive as que já estão abertas.`
-          : `Away mode is on ${until}. Turning it off clears away mode for every session, including those already open.`}
-        confirmLabel={pt ? 'Desligar — voltei' : "Turn off — I'm back"}
-        cancelLabel={pt ? 'Continuar fora' : 'Stay away'}
-        onConfirm={() => { setConfirm(false); void setAway({ on: false }) }}
-        onCancel={() => setConfirm(false)}
-      ><AwayImpact pt={pt} open={confirm} /></ConfirmModal>
-    </>
+    <Link to="/leadership/away" data-testid="away-pill" title={label} aria-label={label}
+      className={isMobile ? 'ag-tap-icon' : undefined} style={{ ...style, textDecoration: 'none' }}>
+      {content}
+    </Link>
   )
 }
