@@ -8,6 +8,9 @@ import { HARNESS_LABELS } from '../../lib/harness'
 import UsageNowPage from './UsageNowPage'
 import UsageHistoryPage from './UsageHistoryPage'
 import UsagePlanPage from './UsagePlanPage'
+import UsageLimitsPage from './UsageLimitsPage'
+import { PlanUsageCard } from '../../components/PlanLimitMeter'
+import { usageHeadline } from '../../lib/usagePlan'
 import { usageChartData } from './UsageCharts'
 
 const NOW = Date.parse('2026-10-18T12:00:00Z')
@@ -42,6 +45,45 @@ function seed(rows: UsageBudgetRow[]) {
 afterEach(() => __setPlanLimitsForTest(null, NOW))
 
 describe('usage account cards', () => {
+  test('headline and account pills agree when the budget is tight but recent pace is on', () => {
+    const rows = [row({ status: 'tight', paceStatus: 'on' }), row({ harness: 'codex', status: 'tight', paceStatus: 'on', weekPct: 27, weekResetsAt: NOW + WEEK * 0.93 })]
+    seed(rows)
+    for (const lang of ['pt', 'en'] as const) for (const width of [390, 1440]) {
+      const html = render(<UsageNowPage />, width, lang)
+      expect(html).toContain(usageHeadline(rows, NOW, lang)!)
+      expect(html).toContain(lang === 'pt' ? '2 de 2 planos acima do ritmo.' : '2 of 2 plans over pace.')
+      expect(html.match(new RegExp(lang === 'pt' ? '>Acima do ritmo<' : '>Over pace<', 'g'))?.length).toBe(2)
+      expect(html).not.toContain(lang === 'pt' ? 'planos no ritmo.' : 'plans on pace.')
+    }
+  })
+  test('a low percent with an early exhaustion forecast never claims room to spare', () => {
+    const r = row({ harness: 'codex', weekPct: 27, weekResetsAt: NOW + WEEK * 0.93 })
+    seed([r])
+    for (const lang of ['pt', 'en'] as const) {
+      for (const page of [<UsageNowPage />, <UsageLimitsPage />]) {
+        const html = render(page, 390, lang)
+        expect(html).toContain(lang === 'pt' ? 'acaba ~' : 'runs out ~')
+        expect(html).toContain(lang === 'pt' ? 'atenção' : 'attention')
+        expect(html).not.toContain(lang === 'pt' ? 'com folga' : 'room to spare')
+      }
+      const calm = render(<PlanUsageCard limits={limit(row({ weekPct: 10 }))} now={NOW} lang={lang} />, 390, lang)
+      expect(calm).toContain(lang === 'pt' ? 'com folga' : 'room to spare')
+    }
+  })
+  test('planning distinguishes identical account nicknames by harness and plan', () => {
+    seed([row({ accountLabel: 'Principal' }), row({ harness: 'codex', accountLabel: 'Principal', plan: 'ChatGPT Plus' })])
+    for (const lang of ['pt', 'en'] as const) {
+      const html = render(<UsagePlanPage />, 390, lang)
+      expect(html).toContain(`${HARNESS_LABELS.claude} · Principal`)
+      expect(html).toContain(`${HARNESS_LABELS.codex} · Principal`)
+      expect(html).toContain('ChatGPT Plus')
+      expect(html).toContain('min="0"')
+      expect(html).toContain('step="any"')
+      expect(html).toContain('aria-invalid="false"')
+      expect(html).toContain('text-align:left')
+    }
+  })
+
   test('two accounts of a harness produce two cards, with their own meters', () => {
     seed([row(), row({ account: 'work', accountLabel: 'Work', weekPct: 80 })])
     const html = render()

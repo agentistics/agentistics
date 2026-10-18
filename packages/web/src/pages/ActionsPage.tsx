@@ -16,7 +16,7 @@ export default function ActionsPage() {
 
   return (
     <>
-      <PageHeader lang={lang} areaId="repositories" pageId="actions" status={pt
+      <PageHeader lang={lang} areaId="repositories" pageId="actions" status={!runs ? undefined : pt
         ? `${runs} execuções em ${repos} repositórios`
         : `${runs} runs in ${repos} repositories`} />
       {groups.length === 0

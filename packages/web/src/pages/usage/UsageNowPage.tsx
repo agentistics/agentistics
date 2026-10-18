@@ -9,7 +9,7 @@ import { Pill } from '../../components/Pill'
 import { PlanUsageCard } from '../../components/PlanLimitMeter'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { fmtSpan, fmtWhen, usePlanLimits } from '../../lib/planLimits'
-import { usageHeadline } from '../../lib/usagePlan'
+import { usageHeadline, usagePaceState } from '../../lib/usagePlan'
 import { dialogButtonStyle } from '../settings/primitives'
 import { UsageCharts } from './UsageCharts'
 import { accountKey, accountLabel, orderedBudgets, unmeasured, type Lang } from './usageView'
@@ -36,18 +36,19 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
       { label: pt ? 'Planejar sessões' : 'Plan sessions', onClick: () => navigate('/usage/plan') },
     ]} />
     {!rows.length && !pending.length && <p style={{ color: 'var(--text-secondary)' }}>{pt ? 'Nenhum plano com leitura de uso ainda.' : 'No plans with usage readings yet.'}</p>}
-    <div className="ag-grid cols-3" style={{ marginBottom: 20, ...(isMobile ? { gridTemplateColumns: 'minmax(0, 1fr)' } : {}) }}>
+    <div className="ag-grid cols-2" style={{ marginBottom: 20, ...(isMobile ? { gridTemplateColumns: 'minmax(0, 1fr)' } : {}) }}>
       {cards.map(row => {
-        if (!('paceStatus' in row)) return <div key={accountKey(row)} data-usage-account={accountKey(row)} style={{ minWidth: 0 }}><Section title={row.plan}>
-          <PlanUsageCard limits={limits?.find(l => l.harness === row.harness && l.account === (row.account ?? 'default')) ?? null} pending={row} accountLabel={row.accountLabel} now={now} lang={lang} />
+        if (!('paceStatus' in row)) return <div key={accountKey(row)} data-usage-account={accountKey(row)} style={{ minWidth: 0 }}><Section title={row.plan} style={{ height: '100%' }}>
+          <PlanUsageCard embedded limits={limits?.find(l => l.harness === row.harness && l.account === (row.account ?? 'default')) ?? null} pending={row} accountLabel={row.accountLabel} now={now} lang={lang} />
         </Section></div>
         const limitsForAccount = limits?.find(l => l.harness === row.harness && l.account === (row.account ?? 'default')) ?? null
-        const hold = row.status === 'hold'
-        const over = row.paceStatus === 'over' || row.status === 'tight'
+        const pace = usagePaceState(row)
+        const hold = pace === 'hold'
+        const over = pace === 'over'
         const measured = row.freeSlotsMeasured && row.burnPctPerHour > 0
         return <div key={accountKey(row)} data-usage-account={accountKey(row)} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-          <Section title={row.plan} action={<Pill tone={hold ? 'error' : over ? 'warn' : 'ok'}>{hold ? (pt ? 'Em pausa' : 'On hold') : over ? (pt ? 'Acima do ritmo' : 'Over pace') : (pt ? 'No ritmo' : 'On pace')}</Pill>}>
-            <PlanUsageCard limits={limitsForAccount} pending={{ harness: row.harness, plan: row.plan }} accountLabel={accountLabel(row)} now={now} lang={lang} />
+          <Section title={row.plan} style={{ height: '100%' }} action={<Pill tone={hold ? 'error' : over ? 'warn' : 'ok'}>{hold ? (pt ? 'Em pausa' : 'On hold') : over ? (pt ? 'Acima do ritmo' : 'Over pace') : (pt ? 'No ritmo' : 'On pace')}</Pill>}>
+            <PlanUsageCard embedded limits={limitsForAccount} pending={{ harness: row.harness, plan: row.plan }} accountLabel={accountLabel(row)} now={now} lang={lang} />
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 12 }}>
               {measured && <>
                 <StatTile label={pt ? 'Ritmo / ideal (%/h)' : 'Pace / ideal (%/h)'} value={`${row.burnPctPerHour.toFixed(2)} / ${row.sustainablePctPerHour.toFixed(2)}`} />

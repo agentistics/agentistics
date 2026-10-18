@@ -146,7 +146,8 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
 // 390px, so on mobile each row renders as a stacked card: title + badge, a subtitle, label/value
 // field rows, and a footer of full-width 44px actions. The desktop <table> is kept as-is beside
 // it — this is an additional branch, never a replacement.
-export function RecordCard({ title, subtitle, badge, fields, actions, onClick, leading }: {
+export function RecordCard({ title, subtitle, badge, fields, actions, onClick, leading, fieldLayout = 'inline' }: {
+  fieldLayout?: 'inline' | 'stacked'
   title: React.ReactNode
   subtitle?: React.ReactNode
   /** Role / presence pill, rendered top-right on the title line. */
@@ -164,16 +165,16 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
       onClick={onClick}
       style={{
         border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)',
-        cursor: onClick ? 'pointer' : 'default', overflow: 'hidden',
+        cursor: onClick ? 'pointer' : 'default', overflow: 'hidden', height: fieldLayout === 'stacked' ? '100%' : undefined,
       }}
     >
       <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           {leading && <span onClick={e => e.stopPropagation()} style={{ display: 'flex', flexShrink: 0 }}>{leading}</span>}
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: 'anywhere' }}>{title}</div>
             {subtitle && (
-              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>{subtitle}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: 'anywhere', marginTop: 1 }}>{subtitle}</div>
             )}
           </div>
           {badge && <span style={{ flexShrink: 0 }}>{badge}</span>}
@@ -181,9 +182,9 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
         {fields.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             {fields.map(f => (
-              <div key={f.label} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 12 }}>
+              <div key={f.label} style={{ display: 'flex', flexDirection: fieldLayout === 'stacked' ? 'column' : 'row', alignItems: 'flex-start', gap: fieldLayout === 'stacked' ? 3 : 10, fontSize: 12 }}>
                 <span style={{ color: 'var(--text-tertiary)', flexShrink: 0, minWidth: 82 }}>{f.label}</span>
-                <span style={{ color: 'var(--text-secondary)', minWidth: 0, flex: 1, textAlign: 'right' }}>{f.value}</span>
+                <span style={{ color: 'var(--text-secondary)', minWidth: 0, maxWidth: '100%', flex: 1, textAlign: fieldLayout === 'stacked' ? 'left' : 'right', overflowWrap: 'anywhere' }}>{f.value}</span>
               </div>
             ))}
           </div>
@@ -565,12 +566,16 @@ export function StatusDot({ state, size = 8 }: {
  * included — adding an inline 16px here would be dead code that reads like a live requirement.
  */
 export function FieldInput({
-  label, sub, value, onChange, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false,
+  label, sub, value, onChange, min, step, invalid, describedBy, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false,
 }: {
   label: string
   sub?: string
   value: string
   onChange: (v: string) => void
+  min?: number
+  step?: number | 'any'
+  invalid?: boolean
+  describedBy?: string
   type?: 'text' | 'password' | 'number'
   isMobile?: boolean
   placeholder?: string
@@ -596,6 +601,10 @@ export function FieldInput({
       <input
         type={type === 'password' && shown ? 'text' : type}
         value={value}
+        min={min}
+        step={step}
+        aria-invalid={invalid}
+        aria-describedby={describedBy}
         placeholder={placeholder}
         onChange={e => onChange(e.target.value)}
         disabled={disabled}

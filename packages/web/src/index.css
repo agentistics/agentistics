@@ -39,6 +39,7 @@
   --accent-purple: #8b5cf6;
   --accent-green: #10b981;
   --accent-green-dim: rgba(16, 185, 129, 0.12);
+  --accent-amber: #f59e0b;
   --accent-red: #ef4444;
   --accent-red-dim: rgba(239, 68, 68, 0.12);
   --accent-cyan: #06b6d4;
@@ -86,6 +87,7 @@
   --accent-purple: #7c3aed;
   --accent-green: #047857;
   --accent-green-dim: rgba(4, 120, 87, 0.1);
+  --accent-amber: #92400e;
   --accent-red: #b91c1c;
   --accent-red-dim: rgba(185, 28, 28, 0.1);
   --accent-cyan: #0e7490;

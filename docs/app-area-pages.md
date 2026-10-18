@@ -34,3 +34,30 @@ sentence and no configuration controls. Away mode composes the existing settings
 switch, activation dialog, return confirmation and fleet impact. The top-bar away pill
 links to this page. Existing settings URLs remain usable; digest offers and their
 answers remain in the notification bell, using the existing away digest flow.
+
+## Usage and activity presentation
+
+The Usage overview uses `usagePaceState` for both its headline and its account pills. A plan on
+hold is paused; a tight budget or an over-pace measurement counts as above pace. A recent pace
+measurement that is on target does not cancel a tight budget warning.
+
+The shared detailed plan card also checks each window's exhaustion forecast. An account that
+runs out before renewal shows an attention label even when its absolute percentage is below the
+75% warning threshold. Percent rings continue to show the measured percentage. Forecast text
+uses a theme-specific amber that stays readable on light surfaces.
+
+Overview and planning cards use two columns on desktop and one on phones. Planning titles include
+the harness and account, with the plan beneath them, so matching account nicknames are distinct.
+Metric captions wrap in full; reset times and relative durations wrap as complete phrases. Account
+sections stretch to the row height and reserve space for the optional stale-reading notice.
+
+The board activity page resolves task titles from the shared task list and links to task details.
+`pages/taskActivity.ts` translates event kinds and known message metadata to PT/EN sentences,
+normalizes machine actor identities, and uses a generic sentence for unknown event shapes.
+Raw payloads and identifiers are not fallback display text. Missing task metadata is stated as
+unavailable. `RecordCard`'s stacked field layout keeps each label next to its value on wide screens
+and allows titles and actors to wrap on phones; task links have a 44px minimum height on phones.
+
+Area headers reserve desktop space for the statistics pull-tab. Usage Limits reuses the existing
+limits component without its modal inset. Actions shows its run count when there are runs and a
+single empty-state sentence otherwise.

@@ -9,6 +9,6 @@ export default function UsageLimitsPage() {
   const isMobile = useIsMobile()
   return <div className="ag-settings" style={{ minWidth: 0 }}>
     <PageHeader lang={lang} areaId="usage" pageId="limits" isMobile={isMobile} />
-    <NayLimitsTab lang={lang} isMobile={isMobile} />
+    <NayLimitsTab embedded lang={lang} isMobile={isMobile} />
   </div>
 }

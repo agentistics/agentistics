@@ -75,7 +75,7 @@ export function StatTile({ label, value, accent, title }: {
       >{value}</span>
       <span style={{
         fontSize: 10.5, color: 'var(--text-tertiary)', textTransform: 'uppercase',
-        letterSpacing: '0.05em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        letterSpacing: '0.05em', whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.4,
       }}>{label}</span>
     </div>
   )

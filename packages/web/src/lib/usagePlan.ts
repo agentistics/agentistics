@@ -15,10 +15,16 @@ const hhmm = (ms: number): string => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+/** One decision for the overview sentence and each account's pace pill. */
+export function usagePaceState(row: UsageBudgetRow): 'hold' | 'over' | 'on' {
+  if (row.status === 'hold') return 'hold'
+  return row.paceStatus === 'over' || row.status === 'tight' ? 'over' : 'on'
+}
+
 /** The Uso › Agora status sentence. Null when there is nothing to summarise. */
 export function usageHeadline(rows: readonly UsageBudgetRow[], now: number, lang: 'pt' | 'en'): string | null {
   if (!rows.length) return null
-  const over = rows.filter(r => r.paceStatus === 'over' || r.status === 'hold')
+  const over = rows.filter(r => usagePaceState(r) !== 'on')
   const pauses = over.map(r => r.pauseUntil).filter((p): p is number => p !== undefined && p > now)
   const latest = pauses.length ? Math.max(...pauses) : undefined
   if (!over.length) return lang === 'pt' ? `Todos os ${rows.length} planos no ritmo.` : `All ${rows.length} plans on pace.`

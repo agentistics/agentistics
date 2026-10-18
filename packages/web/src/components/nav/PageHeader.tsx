@@ -18,7 +18,8 @@ export function PageHeader({ lang, areaId, pageId, title, status, actions = [], 
   const page = area.pages.find(p => p.id === pageId)
   const heading = title ?? (page ? pageLabel(page, lang) : pageLabel(area, lang))
   return (
-    <header style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
+    // The desktop stats pull-tab hangs inside the page panel above this header.
+    <header style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 20, paddingTop: isMobile ? 0 : 24, flexWrap: 'wrap' }}>
       <div style={{ flex: '1 1 280px', minWidth: 0 }}>
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 2 }}>
           {pageLabel(area, lang)}{page ? <> <span aria-hidden>›</span> {pageLabel(page, lang)}</> : null}

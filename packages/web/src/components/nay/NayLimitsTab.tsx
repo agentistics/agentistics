@@ -10,14 +10,14 @@ import { subscriptionRows, usePlanLimits, fmtSpan } from '../../lib/planLimits'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { PlanUsageCard } from '../PlanLimitMeter'
 
-export function NayLimitsTab({ lang, isMobile, onNavigate }: { lang: 'pt' | 'en'; isMobile: boolean; onNavigate?: () => void }) {
+export function NayLimitsTab({ lang, isMobile, onNavigate, embedded = false }: { lang: 'pt' | 'en'; isMobile: boolean; onNavigate?: () => void; embedded?: boolean }) {
   const pt = lang === 'pt'
   const navigate = useNavigate()
   const { limits, registered, accountLabels, now } = usePlanLimits()
   const rows = subscriptionRows(limits, registered, accountLabels)
   const newest = Math.max(0, ...(limits ?? []).map(l => l.updatedAt))
   return (
-    <div data-nay-limits style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '8px 10px' : '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div data-nay-limits style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: embedded ? 0 : isMobile ? '8px 10px' : '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
       {limits === null ? (
         <AgentisticsLoader size={14} />
       ) : rows.length === 0 ? (
