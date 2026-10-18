@@ -33,7 +33,7 @@ test('expanded notice diagnostics have a bounded keyboard-scrollable region', ()
     expect(html).toContain('role="region"')
     expect(html).toContain('tabindex="0"')
     expect(html).toContain('overflow-y:scroll')
-    expect(html).toContain('max-height:min(180px, 20dvh)')
+    expect(html).toContain('max-height:min(180px, calc(20dvh / var(--ui-zoom, 1)))')
     expect(html).toContain('border:1px solid var(--border-subtle)')
     expect(html).toContain(lang === 'pt' ? 'Detalhes do aviso' : 'Notice details')
   }

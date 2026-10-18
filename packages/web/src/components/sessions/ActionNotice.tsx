@@ -28,7 +28,7 @@ export function ActionNotice({ message, lang, onDismiss }: { message: string; la
     </div>
     {summary !== message && <details style={{ minWidth: 0 }}><summary style={{ cursor: 'pointer' }}>{lang === 'pt' ? 'Detalhes' : 'Details'}</summary>
       <div role="region" aria-label={lang === 'pt' ? 'Detalhes do aviso' : 'Notice details'} tabIndex={0}
-        style={{ maxHeight: 'min(180px, 20dvh)', overflowY: 'scroll', scrollbarGutter: 'stable',
+        style={{ maxHeight: 'min(180px, calc(20dvh / var(--ui-zoom, 1)))', overflowY: 'scroll', scrollbarGutter: 'stable',
           border: '1px solid var(--border-subtle)', borderRadius: 4, padding: 6, marginTop: 4,
           whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{message}</div>
     </details>}

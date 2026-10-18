@@ -1,3 +1,5 @@
+import { runCooperatively, runSynchronously } from '../cooperative-work'
+import { iterLines } from '../jsonl-lines'
 import type { SessionMeta, TurnEvent } from '@agentistics/core'
 import { activeMinutesOf, charCount } from '@agentistics/core'
 import { canonicalTool, countGitCommands } from '../harness-activity'
@@ -5,8 +7,15 @@ import { canonicalTool, countGitCommands } from '../harness-activity'
 /** Pure: parse a Codex rollout JSONL string into a normalized SessionMeta.
  *  Returns null when the content has no usable lines. */
 export function parseCodexRollout(content: string, fallbackId: string): SessionMeta | null {
-  const lines = content.split('\n').map(l => l.trim()).filter(Boolean)
-  if (lines.length === 0) return null
+  return runSynchronously(parseCodexSteps(content, fallbackId))
+}
+
+export function parseCodexRolloutYielding(content: string, fallbackId: string): Promise<SessionMeta | null> {
+  return runCooperatively(parseCodexSteps(content, fallbackId))
+}
+
+function* parseCodexSteps(content: string, fallbackId: string): Generator<void, SessionMeta | null, void> {
+  let firstLine: string | undefined
 
   let sessionId = ''
   let cwd = ''
@@ -45,7 +54,11 @@ export function parseCodexRollout(content: string, fallbackId: string): SessionM
   // turn itself: `task_complete.duration_ms`, keyed by the same turn_id as `task_started`.
   const turnEvents: TurnEvent[] = []
 
-  for (const raw of lines) {
+  for (const line of iterLines(content)) {
+    yield
+    const raw = line.trim()
+    if (!raw) continue
+    firstLine ??= raw
     let e: any
     try { e = JSON.parse(raw) } catch { continue }
     const outer = e.type as string | undefined
@@ -141,8 +154,9 @@ export function parseCodexRollout(content: string, fallbackId: string): SessionM
     if (lineTs) endTime = lineTs
   }
 
-  if (!startTime && lines[0] !== undefined) {
-    const firstTs = (JSON.parse(lines[0]) as Record<string, unknown>).timestamp
+  if (firstLine === undefined) return null
+  if (!startTime) {
+    const firstTs = (JSON.parse(firstLine) as Record<string, unknown>).timestamp
     if (typeof firstTs === 'string') startTime = firstTs
   }
 

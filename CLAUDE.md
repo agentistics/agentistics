@@ -2111,10 +2111,11 @@ dropped by the 60 s idle timeout at 120 s, 180 s, 240 s — "sometimes the app n
   build stops WAITING, not WORKING — the walk lands in git.ts's memo/disk cache, `deferredRepos` names
   the paths, and a rebuild is requested when the late ones settle. A hard timeout would discard the
   half-done walk and pay it again every build.
-- **A transcript is folded in 1 MB slices with a yield between them** (`foldYielding`,
-  transcript-state.ts). One synchronous fold of a 40 MB file held the event loop ~1 s, which delayed
-  even the quick payload and `/api/health`. Slicing is the append path's own resumability, so the
-  numbers cannot change.
+- **Transcript CPU work yields between records** (`cooperative-work.ts`, `foldClaudeParseYielding`):
+  Claude's main fold, subagent summaries and Codex rollout reads use an 8 ms scheduling budget,
+  with a `setImmediate` turn even for small files. The synchronous and yielding entry points drain
+  the same generator, preserving counters and last-wins usage. One oversized record and the final
+  reduction still run synchronously; validate health latency with real-size data after changes.
 - **The boot build BROADCASTS its progress** (`startFirstBuild`). It used to run with a no-op progress
   function, so a `/api/data-stream` that subscribed to it saw empty bars for the whole build.
 - **Client** (`useData` + `lib/startupLoad.ts`): every request the boot waits on has a deadline; a

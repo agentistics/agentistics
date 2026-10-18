@@ -44,6 +44,15 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       },
     ],
   },
+  '2.140.11': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Com um histórico grande, o app continua respondendo enquanto lê o histórico na primeira abertura depois de uma atualização.',
+        en: 'With a large history, the app keeps answering while it reads the history on the first start after an update.',
+      },
+    ],
+  },
   '2.140.10': {
     features: [
       {
