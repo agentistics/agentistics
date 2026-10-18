@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { ADD_COPY, addAccountView, addErrorText, anyResolved, loginTarget, pendingRoots, type RootRowView } from './addAccountLogic'
+import { ADD_COPY, addAccountView, addErrorText, anyResolved, pendingRoots, type RootRowView } from './addAccountLogic'
 
 const root = (o: Partial<RootRowView>): RootRowView => ({ harness: 'claude', root: '/r', status: 'pending', pendingId: 'p1', ...o })
 
@@ -27,10 +27,7 @@ describe('pending roots', () => {
     expect(anyResolved([root({})], [root({})])).toBe(false)
     expect(anyResolved([], [root({})])).toBe(false)
   })
-  test('login target needs a session id', () => {
-    expect(loginTarget(root({ loginSessionId: 'abc' }))).toBe('/sessions/abc?view=terminal')
-    expect(loginTarget(root({}))).toBeNull()
-  })
+
 })
 
 describe('addErrorText', () => {
@@ -65,7 +62,8 @@ describe('copy details', () => {
     for (const pt of [true, false]) {
       const c = ADD_COPY(pt)
       expect(c.confirm).toBe(c.openLogin)
-      expect(c.workingNote).toMatch(pt ? /segundos/ : /seconds/)
+      expect(c.workingNote).toMatch(pt ? /aguardando/ : /waiting/)
+      expect(c.workingNote).not.toMatch(/segundos|seconds/)
     }
   })
   test('buttons are named by assistant, without repeating the verb', () => {
@@ -81,7 +79,7 @@ describe('wiring', () => {
     expect(page).toContain('onBound={reloadAccounts}')
   })
   test('the component reuses the app pieces and hand-rolls no modal', () => {
-    for (const piece of ['ConfirmModal', 'dialogButtonStyle', 'Pill', 'StatusDot', 'MetricNote']) expect(comp).toContain(piece)
+    for (const piece of ['AccountLoginModal', 'dialogButtonStyle', 'RecordCard', 'MetricNote']) expect(comp).toContain(piece)
     expect(comp).not.toContain('position: \'fixed\'')
     expect(comp).toContain("'/api/accounts/roots'")
     expect(comp).toContain("method: 'DELETE'")

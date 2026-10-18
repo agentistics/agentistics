@@ -300,6 +300,8 @@ export function createSessionsPoller(o: {
    * fell together" answerable at all — see `crash-group.ts`.
    */
   touchSessions?: (ids: readonly string[], atMs: number) => Promise<unknown>
+  /** Persist observed command exits before a reboot can erase the backend's dead panes. */
+  endSessions?: (ids: readonly string[], endedAt: string) => Promise<unknown>
   /**
    * Record the conversation a managed row is EXACTLY known to be driving.
    *
@@ -470,6 +472,14 @@ export function createSessionsPoller(o: {
       ])
       const harnessSessions = resolveManagedIds(harnessSessionsRaw, panePidsRead)
       markFleetPhase('poll: gather (registry/backend.list/scanProcesses/conversations/harnessSessions)', gatherStart)
+
+      const exited = new Set(backendSessions.filter(b => !b.alive).map(b => b.id))
+      const newlyEnded = registry.filter(m => !m.endedAt && exited.has(m.id))
+      if (newlyEnded.length > 0) {
+        const endedAt = new Date(nowMs).toISOString()
+        await o.endSessions?.(newlyEnded.map(m => m.id), endedAt).catch(() => undefined)
+        for (const m of newlyEnded) m.endedAt = endedAt
+      }
 
       const reconciled = reconcileSessions(registry, backendSessions)
       const harnessOf = new Map(registry.map(r => [r.id, r.harness]))

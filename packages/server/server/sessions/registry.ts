@@ -127,7 +127,7 @@ export interface SessionPatch {
   /** See `ManagedSession.pendingContext`. `null` clears it once the first real prompt carried it. */
   pendingContext?: string | null
   attemptId?: string
-  endedAt?: string
+  endedAt?: string | null
   conversationId?: string
   /** See `ManagedSession.conversationLink`. Written beside `conversationId`, never on its own. */
   conversationLink?: 'assigned' | 'observed'
@@ -621,6 +621,24 @@ export async function retireSession(
   registry: SessionRegistry = defaultRegistry,
 ): Promise<void> {
   if (!(await registry.patch(id, { endedAt: new Date().toISOString() }))) await registry.remove(id)
+}
+
+/** Record the decision BEFORE removing the pane; undo it if the backend refuses the kill. */
+export async function killAndRetireSession(
+  id: string,
+  kill: () => Promise<boolean>,
+  registry: SessionRegistry = defaultRegistry,
+): Promise<boolean> {
+  const previous = (await registry.read()).find(m => m.id === id)?.endedAt
+  await registry.patch(id, { endedAt: previous ?? new Date().toISOString() })
+  try {
+    if (await kill()) return true
+  } catch (e) {
+    await registry.patch(id, { endedAt: previous ?? null })
+    throw e
+  }
+  await registry.patch(id, { endedAt: previous ?? null })
+  return false
 }
 
 /** How long a row without a heartbeat is presumed to still be getting its pane. */

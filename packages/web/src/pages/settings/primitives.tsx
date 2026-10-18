@@ -26,7 +26,9 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger', icon, busy }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger', icon, busy, maxWidth = 420, closeLabel }: {
+  maxWidth?: number
+  closeLabel?: string
   open: boolean
   title: string
   message: string
@@ -97,7 +99,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
     }}>
       <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
         onClick={e => e.stopPropagation()} style={{ outline: 'none',
-        width: '100%', maxWidth: 420, background: 'var(--bg-card)', border: '1px solid var(--border)',
+        width: '100%', maxWidth, maxHeight: 'calc(100dvh / var(--ui-zoom, 1) - 32px)', overflowY: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)',
         borderRadius: 12, padding: 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
@@ -107,9 +109,10 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
             : { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
             {icon ?? (tone === 'danger' ? <AlertTriangle size={17} /> : <Download size={17} />)}
           </span>
-          <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
+          <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{title}</span>
+          {closeLabel && <button type="button" aria-label={closeLabel} onClick={onCancel} style={{ ...dialogButtonStyle('secondary', isMobile), width: isMobile ? 44 : undefined, minWidth: isMobile ? 44 : undefined }}>×</button>}
         </div>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>
+        {message && <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>}
         {children}
         {requireText !== undefined && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -148,8 +151,9 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
 // 390px, so on mobile each row renders as a stacked card: title + badge, a subtitle, label/value
 // field rows, and a footer of full-width 44px actions. The desktop <table> is kept as-is beside
 // it — this is an additional branch, never a replacement.
-export function RecordCard({ title, subtitle, badge, fields, actions, onClick, leading }: {
+export function RecordCard({ title, subtitle, badge, fields, actions, onClick, leading, wrapTitle = false }: {
   title: React.ReactNode
+  wrapTitle?: boolean
   subtitle?: React.ReactNode
   /** Role / presence pill, rendered top-right on the title line. */
   badge?: React.ReactNode
@@ -173,7 +177,7 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           {leading && <span onClick={e => e.stopPropagation()} style={{ display: 'flex', flexShrink: 0 }}>{leading}</span>}
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: wrapTitle ? undefined : 'ellipsis', whiteSpace: wrapTitle ? 'normal' : 'nowrap', overflowWrap: wrapTitle ? 'anywhere' : undefined }}>{title}</div>
             {subtitle && (
               <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>{subtitle}</div>
             )}
@@ -567,9 +571,11 @@ export function StatusDot({ state, size = 8 }: {
  * included — adding an inline 16px here would be dead code that reads like a live requirement.
  */
 export function FieldInput({
-  label, sub, value, onChange, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck,
+  label, sub, value, onChange, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, minHeight, hideReveal,
 }: {
   label: string
+  minHeight?: number
+  hideReveal?: boolean
   sub?: string
   value: string
   onChange: (v: string) => void
@@ -607,8 +613,8 @@ export function FieldInput({
         aria-label={label}
         style={{
           width: '100%', boxSizing: 'border-box',
-          padding: '7px 10px',
-          ...(type === 'password' ? { paddingRight: REVEAL_PAD } : null),
+          padding: '7px 10px', minHeight,
+          ...(type === 'password' && !hideReveal ? { paddingRight: REVEAL_PAD } : null),
           background: 'var(--bg-elevated)',
           border: '1px solid var(--border)',
           borderRadius: 7,
@@ -622,7 +628,7 @@ export function FieldInput({
         onFocus={e => { if (!disabled) e.currentTarget.style.borderColor = 'var(--anthropic-orange)' }}
         onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
       />
-      {type === 'password' && <RevealButton shown={shown} onToggle={() => setShown(v => !v)} />}
+      {type === 'password' && !hideReveal && <RevealButton shown={shown} onToggle={() => setShown(v => !v)} />}
       </div>
     </div>
   )

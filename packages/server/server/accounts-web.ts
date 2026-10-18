@@ -20,8 +20,18 @@ export async function handleAccountsRequest(
       try { body = await req.json() } catch { return json({ error: 'Invalid request' }, 400) }
       const harness = body && typeof body.harness === 'string' ? body.harness as HarnessId : null
       if (!harness || !HARNESS_ORDER.includes(harness)) return json({ error: 'Expected a harness' }, 400)
-      const out = await roots.addRoot(harness)
+      const out = await roots.addRoot(harness, req.signal)
       return out.ok ? json(out) : json({ error: out.reason, message: out.message }, out.reason === 'unsupported' || out.reason === 'unsafe_path' ? 422 : out.reason === 'disabled' ? 404 : 502)
+    }
+    const codeMatch = /^\/api\/accounts\/roots\/([^/]+)\/code$/.exec(path)
+    if (codeMatch) {
+      if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
+      if (!(req.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) return json({ error: 'Expected application/json' }, 415)
+      // This endpoint never logs, persists or returns its request body.
+      let body: { code?: unknown } | null
+      try { body = await req.json() } catch { return json({ error: 'invalid_code' }, 400) }
+      const out = await roots.submitCode(decodeURIComponent(codeMatch[1]!), body?.code)
+      return out.ok ? json({ ok: true }) : json({ error: out.reason, message: out.message }, out.reason === 'not_found' ? 404 : 400)
     }
     const m = /^\/api\/accounts\/roots\/([^/]+)$/.exec(path)
     if (!m) return json({ error: 'Not found' }, 404)
