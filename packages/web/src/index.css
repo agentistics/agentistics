@@ -765,6 +765,8 @@ textarea,
 /* The row's pin. Hidden until the row is hovered or something in it has focus — a column of pin
    glyphs down an unpinned list is noise beside the titles they sit next to — but always visible
    once set, and always reachable by keyboard. */
+[data-session-row]:hover .ag-row-pin,
+[data-session-row]:focus-within .ag-row-pin,
 button:hover .ag-row-pin,
 button:focus-within .ag-row-pin,
 .ag-row-pin:focus-visible { opacity: 1 !important; }
@@ -1132,3 +1134,28 @@ tr:focus-within .ag-row-actions,
 }
 @media (max-width: 380px) { .ag-code-boxes { gap: 6px; } .ag-code-box { height: 48px; } }
 @media (prefers-reduced-motion: reduce) { .ag-code-boxes.is-shaking { animation: none; } }
+
+/* A minimum-width aside stacks the two sleeping-row actions in their trailing slot, leaving
+   enough room for the full last word and its role badge. Wider rows keep both actions inline. */
+@container sessions-aside (max-width: 230px) {
+  [data-sleeping-pin] {
+    display: grid !important;
+    grid-template-columns: 20px minmax(0, 1fr) 24px;
+    grid-template-rows: 24px 24px;
+    padding: 6px !important;
+    gap: 2px !important;
+  }
+  [data-sleeping-pin] > .ag-row-pin { grid-column: 1; grid-row: 1 / span 2; }
+  [data-sleeping-pin] > [data-session-open] { grid-column: 2; grid-row: 1 / span 2; }
+  [data-sleeping-pin] > [aria-label="Reabrir"],
+  [data-sleeping-pin] > [aria-label="Reopen"] { grid-column: 3; grid-row: 1; }
+  [data-sleeping-pin] > [aria-haspopup="menu"] { grid-column: 3; grid-row: 2; }
+}
+
+/* Keep the crash action inside its button, including the 220px sidebar. */
+[data-fell-short] { display: inline; }
+[data-fell-full] { display: none; }
+@container (min-width: 240px) {
+  [data-fell-short] { display: none; }
+  [data-fell-full] { display: inline; }
+}

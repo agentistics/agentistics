@@ -41,3 +41,12 @@ test('a live window is unchanged', () => {
   expect(html).toContain('20% left')
   expect(html).not.toContain('estimated reset')
 })
+
+test('compact values stay on one line and renewed explanations span the whole meter', () => {
+  const mixed = { ...limits, windows: [limits.windows[0]!, { kind: 'week', usedPct: 77, resetsAt: now + 3 * 24 * H }] } as PlanLimits
+  const h = renderToStaticMarkup(<PlanLimitBars limits={mixed} now={now} lang="pt" />)
+  expect(h).toContain('data-plan-renewal="true" style="grid-column:1 / -1')
+  expect(h).toMatch(/data-plan-window="week" style="[^"]*white-space:nowrap[^"]*">77% · /)
+  expect(h).not.toContain('overflow-wrap:anywhere')
+  expect(h).not.toContain('break-all')
+})

@@ -47,3 +47,9 @@ describe('D1 · Clássico markup', () => {
     expect(d1Markup(56, 'r', true)).not.toContain('data-d1')
   })
 })
+
+test('a retry indicator can keep the theme accent visible between animated passes', () => {
+  const h = d1Markup(18, 'retry', false, 'var(--anthropic-orange)', 0.8)
+  expect(h).toContain('<g opacity="0.8">')
+  expect(h).toContain('var(--anthropic-orange)')
+})

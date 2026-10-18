@@ -31,7 +31,7 @@ import { clockLabel, formatNextRun, formatSkipped, useCheckin, type CheckinConfi
 import { RailSection } from '../tasks/RailSection'
 import { CheckinConfigControls } from './CheckinConfigControls'
 import { setSessionAway, useAway } from '../../lib/awayMode'
-import { openCheckinModal } from '../../lib/checkinModal'
+import { openCheckinModal, useCheckinModalRequest } from '../../lib/checkinModal'
 
 export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
 
@@ -304,6 +304,8 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
 }) {
   const pt = lang === 'pt'
   const [open, setOpen] = useState(false)
+  const checkinModal = useCheckinModalRequest()
+  useEffect(() => { if (checkinModal) setOpen(false) }, [checkinModal])
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)

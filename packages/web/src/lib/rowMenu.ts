@@ -30,6 +30,12 @@ export interface RowVerb {
   color?: string
   /** Draws the lucide Pin before the label (the tabs list marks its pinned sessions). */
   pinned?: boolean
+  /** Additional session facts, separate from the complete title. */
+  detail?: string | undefined
+  leader?: boolean
+  leaderLabel?: string
+  /** A section boundary before this entry, drawn by the shared menu. */
+  separatorBefore?: boolean
 }
 
 /** Tallest a fixed menu may be, in CSS px. `innerHeight` is ALREADY in CSS px: `zoomGeometry.ts`

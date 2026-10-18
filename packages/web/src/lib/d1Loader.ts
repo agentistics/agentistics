@@ -63,8 +63,9 @@ export const d1Cells = (px: number) => (px >= 40 ? 10 : 7)
  * page: it prefixes the filter and mask ids. Built from constants only — nothing user-supplied.
  * `still` draws the logo at rest, for reduced motion (it then only breathes). `accent` replaces the
  * amber only (a central's teal); the harness colours and the white comet are D1's own.
+ * `baseOpacity` keeps a small retry indicator visible between the animated passes.
  */
-export function d1Markup(px: number, id: string, still = false, accent: string = D1_ACCENT): string {
+export function d1Markup(px: number, id: string, still = false, accent: string = D1_ACCENT, baseOpacity = 0.1): string {
   const O = accent
   if (still) return facePaint(O)
   const n = d1Cells(px), s = 56 / n
@@ -80,7 +81,7 @@ export function d1Markup(px: number, id: string, still = false, accent: string =
   for (let k = 0; k < COMETS; k++) tails += `<path data-d1="tail" d="${D1_PATHS.shell}" fill="none" stroke="${k === 0 ? '#fff6ec' : '#fff3e3'}" stroke-width="3" stroke-linecap="round" filter="url(#${f})" opacity="0"/>`
   const sparks = px >= 40 ? '<circle data-d1="spark" r=".8" fill="#ffd9b3" opacity="0"/>'.repeat(8) : ''
   return `<defs>${glow(f, 1.3)}${glow(h, 3.2)}${maskOf(g, gate)}${maskOf(m, facePaint('#fff'))}</defs>`
-    + `<g opacity=".1">${facePaint(O)}</g><g mask="url(#${g})">${facePaint(O)}</g><g mask="url(#${m})">${flick}</g>`
+    + `<g opacity="${baseOpacity}">${facePaint(O)}</g><g mask="url(#${g})">${facePaint(O)}</g><g mask="url(#${m})">${flick}</g>`
     + `<path data-d1="halo" d="${D1_PATHS.shell}" style="fill:none;stroke:${O};stroke-width:3" filter="url(#${h})" opacity="0"/>`
     + tails + sparks
 }

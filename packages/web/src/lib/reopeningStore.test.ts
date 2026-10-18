@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { getReopening, markReopening, withReopening, reopeningLabel } from './reopeningStore'
+import { getReopening, markReopening, reopenSession, withReopening, reopeningLabel } from './reopeningStore'
 
 describe('reopeningStore', () => {
   it('marks while the request runs and clears when it ends, even on a throw', async () => {
@@ -25,7 +25,7 @@ describe('every reopen surface shows the in-progress state', () => {
     expect(await read('../components/sessions/SessionPickModal.tsx')).toContain("busy && kind === 'reopen' ? reopeningLabel(pt)")
     const aside = await read('../components/nav/SessionsAside.tsx')
     expect(aside).toContain('useReopening().has(session.id)')
-    expect(aside).toContain("withReopening([id], call)")
+    expect(aside).toContain("reopenSession(id, act)")
     expect(await read('../components/RecentSessions.tsx')).toContain("primary.kind === 'resume' && !!busy")
   })
   it('both resume dispatchers go through withReopening', async () => {
@@ -33,4 +33,15 @@ describe('every reopen surface shows the in-progress state', () => {
       expect(await read(f)).toContain("action === 'resume' ? withReopening([row.id], call)")
     }
   })
+})
+
+
+it('the shared single-session reopen dispatches resume with the busy state and returns its new id', async () => {
+  const out = await reopenSession('old', async req => {
+    expect(req).toEqual({ id: 'old', action: 'resume' })
+    expect(getReopening().has('old')).toBe(true)
+    return { ok: true, id: 'new', message: 'Opened' }
+  })
+  expect(out.id).toBe('new')
+  expect(getReopening().has('old')).toBe(false)
 })

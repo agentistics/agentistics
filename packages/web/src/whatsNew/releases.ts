@@ -10,6 +10,40 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.140.12': {
+    features: [
+      {
+        pt: 'Sessões fixadas que foram encerradas descansam em "Dormindo", no menu das abas e na lista lateral, prontas para reabrir.',
+        en: 'Pinned sessions that ended rest under "Sleeping", in the tabs menu and the sidebar, ready to reopen.',
+      },
+      {
+        pt: 'Pastas sem nenhuma sessão ativa vão para "Encerradas" no fim do grupo e voltam sozinhas quando algo começa nelas.',
+        en: 'Folders with no active session move to "Ended" at the end of their group and come back as soon as something starts in them.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'As conversas fixadas continuam visíveis com “Só ativas”. Avisos longos ficam em “Detalhes”, e a primeira abertura após atualizar explica a leitura do histórico enquanto tenta novamente.',
+        en: 'Pinned conversations stay visible with “Active only”. Long notices have a “Details” disclosure, and the first start after updating explains history loading while retrying.',
+      },
+      {
+        pt: 'A sequência e o recorde de dias usam o mesmo dia local: atividade entre 21h e meia-noite não pula mais para o dia seguinte.',
+        en: 'The day streak and the record use the same local day: late-evening activity no longer jumps to the next day.',
+      },
+      {
+        pt: 'As abas das sessões viraram pílulas, com o menu das abas em primeiro lugar à esquerda.',
+        en: 'Session tabs are now pills, with the tabs menu first on the left.',
+      },
+      {
+        pt: 'O check-in da liderança fica em uma coluna, com tudo em sequência e sem textos cortados.',
+        en: 'The leadership check-in is one column, everything in order and no cut-off text.',
+      },
+      {
+        pt: 'No sino, o botão liga/desliga não some mais ao rolar, e o botão de reabrir sessões que caíram cabe numa linha.',
+        en: 'In the bell, the on/off switch no longer scrolls away, and the reopen button for sessions that fell fits on one line.',
+      },
+    ],
+  },
   '2.140.11': {
     features: [],
     fixes: [

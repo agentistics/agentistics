@@ -53,23 +53,30 @@ export interface BillingAccountListProps {
   onEdit: (row: BillingRowView) => void
 }
 
-const GRID = 'minmax(0,2.2fr) minmax(150px,1fr) minmax(130px,.8fr) 64px 118px'
-const nowrap: React.CSSProperties = { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+const GRID = 'minmax(100px,1.3fr) minmax(150px,.8fr) minmax(190px,1.8fr) 54px 90px'
+const cellText: React.CSSProperties = { display: 'block', whiteSpace: 'normal', overflowWrap: 'break-word' }
 
 function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
   if (r.problem) return <span style={{ justifySelf: 'start' }}><Pill tone="error" nowrap>{t.problem}</Pill></span>
   if (!r.plan) return <span style={{ justifySelf: 'start' }}><Pill tone="warn" nowrap>{t.noPlan}</Pill></span>
   return (
     <div style={{ minWidth: 0 }}>
-      <span style={{ ...nowrap, fontSize: 12.5, color: 'var(--text-primary)' }}>{r.plan.name}</span>
-      {r.plan.price && <span style={{ ...nowrap, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{r.plan.price}</span>}
+      <span style={{ ...cellText, fontSize: 12.5, color: 'var(--text-primary)' }}>{r.plan.name}</span>
+      {r.plan.price && <span style={{ ...cellText, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{r.plan.price}</span>}
     </div>
   )
 }
 
 function Usage({ r, now, lang, t }: { r: BillingRowView; now: number; lang: Lang; t: ReturnType<typeof T> }) {
-  if (r.limits) return <PlanLimitBars limits={r.limits} now={now} lang={lang} />
+  if (r.limits) return <div data-billing-usage style={{ minWidth: 0, overflowWrap: 'normal' }}><PlanLimitBars limits={r.limits} now={now} lang={lang} /></div>
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>
+}
+
+/** Keep the assistant and login on separate lines at every row width. */
+function AccountSubtitle({ row }: { row: BillingRowView }) {
+  return <span data-billing-subtitle>{row.sub.split(' · ').map((line, i) =>
+    <span key={i} style={{ display: 'block', ...(i === 0 ? { whiteSpace: 'nowrap' as const } : {}) }}>{line}</span>,
+  )}</span>
 }
 
 const actionLabel = (r: BillingRowView, t: ReturnType<typeof T>) => (r.problem ? t.review : r.plan ? t.edit : t.setPlan)
@@ -95,7 +102,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
               <RecordCard
                 leading={<HarnessMark harness={r.harness} size={22} />}
                 title={r.title}
-                subtitle={r.sub}
+                subtitle={<AccountSubtitle row={r} />}
                 fields={[
                   { label: t.plan, value: r.problem || !r.plan ? <PlanCell r={r} t={t} /> : `${r.plan.name}${r.plan.price ? ` · ${r.plan.price}` : ''}` },
                   { label: t.usage, value: <Usage r={r} now={p.now} lang={p.lang} t={t} /> },
@@ -120,8 +127,8 @@ export function BillingAccountList(p: BillingAccountListProps) {
               <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                 <HarnessMark harness={r.harness} size={22} />
                 <span style={{ minWidth: 0 }}>
-                  <b style={{ ...nowrap, fontSize: 13, color: 'var(--text-primary)' }}>{r.title}</b>
-                  <span title={r.sub} style={{ ...nowrap, fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>{r.sub}</span>
+                  <b style={{ ...cellText, fontSize: 13, color: 'var(--text-primary)' }}>{r.title}</b>
+                  <span title={r.sub.replaceAll(' · ', '\n')} style={{ ...cellText, fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}><AccountSubtitle row={r} /></span>
                 </span>
               </span>
               <PlanCell r={r} t={t} />

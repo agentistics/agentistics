@@ -4797,7 +4797,7 @@ export async function runStart(codeStart?: CodeStart): Promise<StartResult> {
     try {
       const [{ loadTaskWorld }, { sessionDay }] = await Promise.all([import('./sessions/task-source'), import('@agentistics/core')])
       const w = await loadTaskWorld()
-      const today = new Date().toISOString().slice(0, 10)
+      const today = sessionDay(Date.now())
       const filed = new Map<string, string>()
       for (const r of w.rollupRows) if (r.conversationId && r.taskId) filed.set(r.conversationId, r.taskId)
       const byTask = new Map<string, number>()

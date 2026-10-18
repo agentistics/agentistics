@@ -88,3 +88,8 @@ describe('dataUrl', () => {
     expect(dataUrl(true)).toBe('/api/data?partial=1')
   })
 })
+
+test('an unanswered first start explains history reading after updates in both languages', () => {
+  expect(loadErrorText({ kind: 'unreachable', detail: '' }, 'pt', 'host').body).toContain('primeira abertura lê todo o histórico e pode levar alguns minutos')
+  expect(loadErrorText({ kind: 'unreachable', detail: '' }, 'en', 'host').body).toContain('first start reads your whole history and can take a few minutes')
+})

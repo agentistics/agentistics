@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, SurfaceHarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
 import { applyDataPatch, type DataPatch, calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
-import { subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
+import { startOfDay, endOfDay, subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { eventStream, subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
@@ -584,34 +584,6 @@ export function useData() {
   return { data: shown, loading, loadProgress, error, loadError, offline, startup, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval }
 }
 
-/** Start (00:00:00.000) of a Date's UTC calendar day. */
-function utcStartOfDay(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0))
-}
-/** End (23:59:59.999) of a Date's UTC calendar day. */
-function utcEndOfDay(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999))
-}
-/** Parse a `yyyy-MM-dd` string as a UTC calendar date, never through the browser's local
- *  timezone — `parseISO('2026-07-23')` returns LOCAL midnight, which is a different instant
- *  (and can even be a different UTC calendar day) depending on where the browser sits. */
-function utcDateFromDayStr(dayStr: string): Date {
-  const [y, m, d] = dayStr.split('-').map(Number)
-  return new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1))
-}
-
-/**
- * Day boundaries are computed in UTC, matching `sessionDay()` (`@agentistics/core`) — the
- * function that buckets Claude's own `dailyActivity`/`dailyModelTokens` rollup via a plain
- * `.slice(0, 10)` on the ISO `start_time` (always UTC, since that's what the trailing `Z` means).
- * Using the browser's LOCAL day boundary here instead — the previous behavior — made "a day"
- * mean two different 24h windows depending on which screen read it: a date-filtered dashboard KPI
- * (sourced from that UTC-bucketed rollup, see `filteredDailyModelTokens` below) and a Compare-page
- * total for the same nominal day (this function, filtering raw sessions) could disagree by up to a
- * timezone's width of sessions near midnight — enough, since cache tokens dominate the total, to
- * make one screen report billions more or fewer tokens than the other for what a user picked as
- * "the same day". Aligning everything here to UTC is what makes every screen agree.
- */
 /**
  * Whether a session is in the chosen projects. A project is its repository's ROOT, so choosing a root
  * also selects the sessions of its worktrees; choosing one worktree's own path still selects only it.
@@ -622,19 +594,19 @@ export function inProjects(chosen: ReadonlySet<string>, projectPath: string | un
 }
 
 export function getDateRangeFilter(dateRange: DateRange, customStart?: string, customEnd?: string) {
-  const now = utcEndOfDay(new Date())
+  const now = endOfDay(new Date())
   // TODAY is the current day alone, in progress. It ends at the end of the day rather than at this
   // instant: a range that stopped at `now` would exclude a session whose only recorded activity is
   // a few seconds ahead of the browser's clock, and the ranges below already end there.
-  if (dateRange === 'today') return { start: utcStartOfDay(new Date()), end: now }
-  if (dateRange === '7d') return { start: utcStartOfDay(subDays(now, 7)), end: now }
-  if (dateRange === '30d') return { start: utcStartOfDay(subDays(now, 30)), end: now }
-  if (dateRange === '90d') return { start: utcStartOfDay(subDays(now, 90)), end: now }
+  if (dateRange === 'today') return { start: startOfDay(new Date()), end: now }
+  if (dateRange === '7d') return { start: startOfDay(subDays(now, 7)), end: now }
+  if (dateRange === '30d') return { start: startOfDay(subDays(now, 30)), end: now }
+  if (dateRange === '90d') return { start: startOfDay(subDays(now, 90)), end: now }
   // 'all' sem datas customizadas → histórico completo
   if (dateRange === 'all' && !customStart && !customEnd) return { start: new Date(0), end: now }
   // 'all' com datas customizadas (ou qualquer outro caso) → aplica intervalo personalizado
-  const start = customStart ? utcStartOfDay(utcDateFromDayStr(customStart)) : new Date(0)
-  const end = customEnd ? utcEndOfDay(utcDateFromDayStr(customEnd)) : now
+  const start = customStart ? startOfDay(parseISO(customStart)) : new Date(0)
+  const end = customEnd ? endOfDay(parseISO(customEnd)) : now
   return { start, end }
 }
 
@@ -662,6 +634,28 @@ function inRange(date: Date, start: Date, end: Date) {
 /** Streak math lives in @agentistics/core so the terminal UI shares this exact implementation.
  *  Re-exported here to keep every existing `from './useData'` import working. */
 export { calcStreak } from '@agentistics/core'
+
+/** Local activity days for streaks. UTC daily aggregates cannot be rebucketed without
+ * timestamps: one UTC day overlaps two local days. Use recorded turns, falling back to
+ * session endpoints for older adapters. Cache-only history is deliberately omitted. */
+export function localActivityDates(sessions: readonly Pick<SessionMeta,
+  'start_time' | 'end_time' | 'user_message_timestamps'>[]): Set<string> {
+  const dates = new Set<string>()
+  const add = (value: unknown): void => {
+    if (!isDateStr(value)) return
+    const date = parseISO(value)
+    if (!Number.isNaN(date.getTime())) dates.add(format(date, 'yyyy-MM-dd'))
+  }
+  for (const session of sessions) {
+    if (session.user_message_timestamps?.length) {
+      for (const timestamp of session.user_message_timestamps) add(timestamp)
+    } else {
+      add(session.start_time)
+      add(session.end_time)
+    }
+  }
+  return dates
+}
 
 /**
  * Calcula o maior streak já atingido no histórico completo de datas ativas.
@@ -1736,56 +1730,28 @@ export function computeDerivedStats(
       : extendedDailyActivity.reduce((s, d) => s + d.toolCallCount, 0)
         + nonClaudeInRange.reduce((s, sess) => s + Object.values(sess.tool_counts ?? {}).reduce((a, b) => a + b, 0), 0)
 
-    // Streak
-    // When project filter is active, derive active dates from filteredSessions only.
-    // Otherwise, supplement stats-cache dates with all session start dates (fresher than stats-cache).
-    // Session start_times are ISO UTC strings — format() normalises to local date.
-    // Multi-day sessions: use user_message_timestamps when available (most accurate); otherwise
-    // add both start_time and end_time so days beyond the first are not silently dropped.
-    const activeDates = sessionFiltered
-      ? (() => {
-          const set = new Set<string>()
-          for (const s of filteredSessions) {
-            if (!isDateStr(s.start_time)) continue
-            if (s.user_message_timestamps?.length) {
-              for (const ts of s.user_message_timestamps) {
-                if (isDateStr(ts)) set.add(format(parseISO(ts), 'yyyy-MM-dd'))
-              }
-            } else {
-              set.add(format(parseISO(s.start_time), 'yyyy-MM-dd'))
-              if (isDateStr(s.end_time)) set.add(format(parseISO(s.end_time), 'yyyy-MM-dd'))
-            }
-          }
-          return set
-        })()
-      : new Set([
-          ...(effectiveStatsCache.dailyActivity ?? []).map(d => d.date),
-          ...(harnessSessions ?? []).filter(s => isDateStr(s.start_time)).map(s => format(parseISO(s.start_time), 'yyyy-MM-dd')),
-        ])
+    // Both streaks use the same local calendar and ignore the date picker. Aggregate
+    // daily keys have no timezone/turn timestamps and cannot safely supply local days.
+    const streakSessions = harnessSessions.filter(s => {
+      if (projectFiltered && !inProjects(projectSet, s.project_path)) return false
+      if (repoFiltered && !repoSet.has(s.git_remote || '')) return false
+      if (tagMatches && !tagMatches(s)) return false
+      if (modelSet && (!s.model || !modelSet.has(s.model))) return false
+      if (activeOnly && !runningIds.has(s.session_id)) return false
+      return true
+    })
+    const activeDates = localActivityDates(streakSessions)
     const streak = calcStreak(activeDates)
     const streakLastActiveDate = streak === 0 && activeDates.size > 0
       ? (Array.from(activeDates).sort().at(-1) ?? null)
       : null
 
-    // Per-project streaks (for streak breakdown popup)
-    // Uses all sessions (no date-range filter) to mirror the global streak, which also
-    // ignores the date filter (it reads from statsCache.dailyActivity covering all history).
-    // Model filter is preserved when active so per-project streaks remain consistent.
-    // Project filter IS applied so the breakdown only shows projects in the active filter.
+    // Project breakdown uses the same sessions and local day rule as both streaks.
     const projectDateMap: Record<string, Set<string>> = {}
-    for (const sess of harnessSessions) {
-      if (!sess.project_path || !isDateStr(sess.start_time)) continue
-      if (projectFiltered && !inProjects(projectSet, sess.project_path)) continue
-      if (modelSet && (!sess.model || !modelSet.has(sess.model))) continue
+    for (const sess of streakSessions) {
+      if (!sess.project_path) continue
       const dates = projectDateMap[sess.project_path] ?? (projectDateMap[sess.project_path] = new Set())
-      if (sess.user_message_timestamps?.length) {
-        for (const ts of sess.user_message_timestamps) {
-          if (isDateStr(ts)) dates.add(format(parseISO(ts), 'yyyy-MM-dd'))
-        }
-      } else {
-        dates.add(format(parseISO(sess.start_time), 'yyyy-MM-dd'))
-        if (isDateStr(sess.end_time)) dates.add(format(parseISO(sess.end_time), 'yyyy-MM-dd'))
-      }
+      for (const day of localActivityDates([sess])) dates.add(day)
     }
     // Streak day breakdown: which projects were active on each day of the current streak
     const streakDayBreakdown: { date: string; projects: string[] }[] = []
@@ -1802,35 +1768,7 @@ export function computeDerivedStats(
       }
     }
 
-    // Longest streak ever (respects project/model/harness filter, ignores date range)
-    const allTimeActiveDates = (() => {
-      const set = new Set<string>()
-      // Same rule as allTimeTotalSessions: once the scope is narrowed along something the cache
-      // cannot represent, the active days must be derived from the sessions in scope. Reading
-      // dailyActivity here made longestStreak count days from the whole Claude history.
-      if (cacheBlindScope || nonClaudeHarness) {
-        for (const s of (cacheBlindScope ? filteredSessions : harnessSessions)) {
-          if (!isDateStr(s.start_time)) continue
-          if (projectFiltered && !inProjects(projectSet, s.project_path)) continue
-          if (modelSet && (!s.model || !modelSet.has(s.model))) continue
-          if (s.user_message_timestamps?.length) {
-            for (const ts of s.user_message_timestamps) {
-              set.add(format(parseISO(ts), 'yyyy-MM-dd'))
-            }
-          } else {
-            set.add(format(parseISO(s.start_time), 'yyyy-MM-dd'))
-            if (isDateStr(s.end_time)) set.add(format(parseISO(s.end_time), 'yyyy-MM-dd'))
-          }
-        }
-      } else {
-        for (const d of effectiveStatsCache.dailyActivity ?? []) set.add(d.date)
-        for (const s of harnessSessions) {
-          if (s.start_time) set.add(format(parseISO(s.start_time), 'yyyy-MM-dd'))
-        }
-      }
-      return set
-    })()
-    const longestStreak = calcLongestStreak(allTimeActiveDates)
+    const longestStreak = calcLongestStreak(activeDates)
 
     // Heatmap data
     let heatmapData: { date: string; value: number; sessions: number; tools: number }[]
@@ -2108,10 +2046,7 @@ export function computeDerivedStats(
     // attribute to a day becomes `undatedCostUSD`, computed below as an EXACT residue rather than
     // by trying to make two sources agree — see the ApiCostByDay doc comment in @agentistics/core.
     //
-    // The day key is `start_time.slice(0, 10)` (UTC), matching `tagSessionDay` and the billing
-    // module. Deliberately NOT `format(parseISO(...), 'yyyy-MM-dd')` (local), which is used a few
-    // lines above for the session-gap count: mixing the two rules would drift a session across a
-    // billing-period boundary at UTC-3 while the chart beside it plots the other day.
+    // Session-derived costs use the same local activity days as the daily parser.
     const costDays: Partial<Record<SurfaceHarnessId, Record<string, { costUSD: number; tokens: number; sessions: number }>>> = {}
     const addDayCost = (harness: SurfaceHarnessId, day: string, costUSD: number, tokens: number, sessions: number) => {
       const byDay = (costDays[harness] ??= {})
@@ -2121,7 +2056,7 @@ export function computeDerivedStats(
       entry.sessions += sessions
     }
     const dayOf = (s: { start_time?: string }): string | null =>
-      isDateStr(s.start_time) ? s.start_time.slice(0, 10) : null
+      isDateStr(s.start_time) ? dayKey(s.start_time) : null
 
     let totalCostUSD = 0
     let unpricedTokensAll = 0
@@ -2380,7 +2315,7 @@ export function computeDerivedStats(
       if (s.start_time) {
         if (!r.firstActive || s.start_time < r.firstActive) r.firstActive = s.start_time
         if (!r.lastActive || s.start_time > r.lastActive) r.lastActive = s.start_time
-        const day = s.start_time.slice(0, 10)
+        const day = dayKey(s.start_time)
         r.activityByDay[day] = (r.activityByDay[day] ?? 0) + 1
       }
     }
@@ -2448,7 +2383,7 @@ export function computeDerivedStats(
     // Meta coverage range (commits/files only exist in meta sessions)
     const allMetaDates = (data.sessions ?? [])
       .filter(s => s._source === 'meta' && s.start_time)
-      .map(s => s.start_time.slice(0, 10))
+      .map(s => dayKey(s.start_time))
       .sort()
     const metaCoverageFrom = allMetaDates[0] ?? null
     const metaCoverageTo = allMetaDates[allMetaDates.length - 1] ?? null

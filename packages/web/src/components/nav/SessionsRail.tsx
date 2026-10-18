@@ -50,13 +50,23 @@ function stateDot(state: string): string | null {
 const RAIL_MAX = 12
 
 /** The folder tooltip's one line of counts — only the facts that are not zero, so it stays short. */
-function folderCountsLine(c: RailFolderCounts, pt: boolean): string {
+function folderCountParts(c: RailFolderCounts, pt: boolean): string[] {
   const parts: string[] = []
   if (c.folders > 0) parts.push(pt ? `${c.folders} ${c.folders === 1 ? 'pasta' : 'pastas'}` : `${c.folders} ${c.folders === 1 ? 'folder' : 'folders'}`)
   if (c.waiting > 0) parts.push(pt ? `${c.waiting} aguardando` : `${c.waiting} waiting`)
   if (c.active > 0) parts.push(pt ? `${c.active} ${c.active === 1 ? 'ativa' : 'ativas'}` : `${c.active} active`)
   if (c.ended > 0) parts.push(pt ? `${c.ended} ${c.ended === 1 ? 'encerrada' : 'encerradas'}` : `${c.ended} ended`)
-  return parts.join(' · ')
+  return parts
+}
+
+function folderCountsLine(c: RailFolderCounts, pt: boolean): string {
+  return folderCountParts(c, pt).join(', ')
+}
+
+export function RailFolderFacts({ counts, pt }: { counts: RailFolderCounts; pt: boolean }) {
+  return <span style={{ display: 'flex', flexWrap: 'wrap', columnGap: 10, rowGap: 3 }}>
+    {folderCountParts(counts, pt).map(part => <span key={part}>{part}</span>)}
+  </span>
 }
 
 type FolderItem = Extract<RailItem<ControlSession>, { kind: 'folder' }>
@@ -314,7 +324,7 @@ export function SessionsRail({
             {folderTip.folder.name}
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-            {folderCountsLine(folderTip.folder.counts, pt)}
+            <RailFolderFacts counts={folderTip.folder.counts} pt={pt} />
           </div>
         </div>,
         document.body,
@@ -336,7 +346,7 @@ export function SessionsRail({
           <div style={{ padding: '4px 8px 6px' }}>
             <div style={{ fontSize: 12.5, fontWeight: 650, color: 'var(--text-primary)' }}>{openFolderItem.name}</div>
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
-              {folderCountsLine(openFolderItem.counts, pt)}
+              <RailFolderFacts counts={openFolderItem.counts} pt={pt} />
             </div>
           </div>
           {openFolderItem.sections.map((sec, i) => (
