@@ -75,7 +75,7 @@ export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-or
         background: `linear-gradient(90deg, ${accent}60, ${accent}10, transparent)`,
       }} />
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 36 }}>
         <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
           {label}
         </span>

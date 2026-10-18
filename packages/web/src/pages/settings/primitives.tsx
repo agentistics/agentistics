@@ -146,7 +146,8 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
 // 390px, so on mobile each row renders as a stacked card: title + badge, a subtitle, label/value
 // field rows, and a footer of full-width 44px actions. The desktop <table> is kept as-is beside
 // it — this is an additional branch, never a replacement.
-export function RecordCard({ title, subtitle, badge, fields, actions, onClick, leading, fieldLayout = 'inline' }: {
+export function RecordCard({ title, subtitle, badge, fields, actions, onClick, leading, fieldLayout = 'inline', children }: {
+  children?: React.ReactNode
   fieldLayout?: 'inline' | 'stacked'
   title: React.ReactNode
   subtitle?: React.ReactNode
@@ -179,6 +180,7 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
           </div>
           {badge && <span style={{ flexShrink: 0 }}>{badge}</span>}
         </div>
+        {children}
         {fields.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             {fields.map(f => (
@@ -461,13 +463,14 @@ export function Toggle({ on, onToggle, disabled, label }: {
  * control"), same reason a `<label>` wrapper doesn't work here either (a label only forwards
  * clicks to a real form control, never to an element carrying an ARIA role).
  */
-export function RowSwitch({ on, onToggle, label, sub, icon, disabled, dimmed }: {
+export function RowSwitch({ on, onToggle, label, sub, icon, disabled, dimmed, wrap = false }: {
   on: boolean
   onToggle: () => void
   label: string
   sub?: string
   icon?: React.ReactNode
   disabled?: boolean
+  wrap?: boolean
   /** Renders the row de-emphasized with a struck-through label — the picker's "blocked
    *  repository" state. Deliberately not colour-only: a reader who cannot distinguish the
    *  on/off pill colour still sees the strikethrough and the lower opacity. */
@@ -497,13 +500,13 @@ export function RowSwitch({ on, onToggle, label, sub, icon, disabled, dimmed }: 
           fontSize: 13, fontWeight: 500, color: 'var(--text-primary)',
           textDecoration: dimmed ? 'line-through' : 'none',
           opacity: dimmed ? 0.55 : 1,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          overflow: wrap ? undefined : 'hidden', textOverflow: wrap ? undefined : 'ellipsis', whiteSpace: wrap ? 'normal' : 'nowrap', overflowWrap: 'anywhere',
         }}>{label}</div>
         {sub && (
           <div style={{
             fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1,
             opacity: dimmed ? 0.55 : 1,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            overflow: wrap ? undefined : 'hidden', textOverflow: wrap ? undefined : 'ellipsis', whiteSpace: wrap ? 'normal' : 'nowrap', overflowWrap: 'anywhere',
           }}>{sub}</div>
         )}
       </span>

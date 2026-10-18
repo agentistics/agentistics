@@ -25,7 +25,7 @@ export default function AwaySection({ lang, capable }: { lang: 'pt' | 'en'; capa
   return (
     <>
       <SectionHeader label={pt ? 'Modo ausente' : 'Away mode'} />
-      <RowSwitch
+      <RowSwitch wrap
         on={away.active}
         disabled={away.state === null}
         icon={<Moon size={15} />}

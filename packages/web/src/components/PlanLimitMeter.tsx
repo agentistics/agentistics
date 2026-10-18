@@ -14,7 +14,7 @@ import type { ReactNode } from 'react'
 import { HARNESS_LABELS } from '../lib/harness'
 import { HarnessMark } from './sessions/HarnessMark'
 import {
-  currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, shortWhen, SOURCE_LABEL, stalePhrase,
+  currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, SOURCE_LABEL, stalePhrase,
   updatedPhrase, warnForecast, windowLabel, windowShort, fmtWhen, limitLevel, limitLevelWord, subscriptionRows, type RegisteredPlan,
 } from '../lib/planLimits'
 
@@ -113,7 +113,7 @@ export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedd
       <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', color: !limits ? 'var(--text-tertiary)' : level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} size={14} lang={lang} />{state}</span>
     </div>
     {limits && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{limits.windows.map(w => <div key={w.kind} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} lang={lang} ring={48} /></div>)}</div>}
-    <span style={{ minHeight: 14, fontSize: 11, color: LIMIT_WARN }}>{stale}</span>
+    <span style={{ minHeight: 14, fontSize: 11, color: stale ? LIMIT_WARN : 'var(--text-tertiary)' }}>{limits ? updatedPhrase(limits, now, lang) : null}</span>
   </div>
 }
 
@@ -250,8 +250,8 @@ export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: 
             style={{ height: 3, minWidth: 16, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
             <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: '100%', background: limitTone(pct), borderRadius: 2 }} />
           </div>,
-          <span key={`${w.kind}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-            {renewed ? '–' : `${Math.round(pct)}%`} · {renewed ? windowResetPhrase(w, now, lang) : shortWhen(w.resetsAt, now, lang, w.kind)}
+          <span key={`${w.kind}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'normal', overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>
+            {renewed ? '–' : `${Math.round(pct)}%`} · {renewed ? windowResetPhrase(w, now, lang) : fmtWhen(w.resetsAt, now, lang)}
           </span>,
         ]
       })}

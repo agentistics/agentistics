@@ -53,6 +53,9 @@ describe('board activity in human language', () => {
       expect(html).toContain(lang === 'pt' ? 'Vinculou uma sessão à tarefa.' : 'Linked a session to the task.')
       if (lang === 'pt') expect(html).not.toContain('on subtask')
       expect(html).toContain('text-align:left')
+      expect(html).not.toContain(lang === 'pt' ? '>Atividade<' : '>Activity<')
+      expect(html).not.toContain(lang === 'pt' ? '>Quando<' : '>When<')
+      expect(html).toContain('<time ')
       if (isMobile) expect(html).toContain('min-height:44px')
     }
   })

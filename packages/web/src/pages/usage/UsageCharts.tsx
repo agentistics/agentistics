@@ -34,7 +34,7 @@ export function UsageCharts({ budgets, readings, limits, lang, bothWindows = fal
   // Keep readings visible even if their budget is temporarily unavailable.
   const accounts = [...rows.map(r => ({ account: r.account ?? 'default', harness: r.harness, label: accountLabel(r), budget: r })),
     ...readings.filter(r => !rows.some(b => accountKey(b) === `${r.harness}:${r.account}`)).map(r => ({ ...r, label: `${HARNESS_LABELS[r.harness]} · ${r.account}`, budget: undefined }))]
-  const empty = <p style={{ color: 'var(--text-secondary)' }}>{pt ? 'Ainda não há leituras de uso neste período.' : 'No usage readings in this period yet.'}</p>
+  const empty = <p style={{ color: 'var(--text-secondary)' }}>{pt ? 'Ainda não há histórico de uso registrado desde que o servidor iniciou. As leituras atuais aparecem em Agora.' : 'No usage history recorded since the server started. Current readings appear in Now.'}</p>
   const charts = accounts.map(row => {
     const reading = readings.find(r => r.account === row.account && r.harness === row.harness)
     if (!reading) return { row, windows: [] }

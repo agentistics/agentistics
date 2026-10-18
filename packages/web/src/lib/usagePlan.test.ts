@@ -42,13 +42,16 @@ describe('planSessions', () => {
     expect(planSessions([row({ status: 'hold', pauseUntil: at('14:20') })], 1, at('12:00'))[0])
       .toMatchObject({ parallel: 0, pauseUntil: at('14:20'), reason: 'hold' })
   })
-  test('no measured burn or no live session means unknown, never a guess', () => {
-    for (const p of [{ burnPctPerHour: 0, liveSessions: [] }, { liveSessions: [] }, { burnPctPerHour: 0, liveSessions: [live] }]) {
+  test('unmeasured capacity or missing burn means unknown, never a guess', () => {
+    for (const p of [{ burnPctPerHour: 0, liveSessions: [] }, { freeSlotsMeasured: false, liveSessions: [] }, { burnPctPerHour: 0, liveSessions: [live] }]) {
       expect(planSessions([row(p)], 4, 0)[0]).toMatchObject({ parallel: null, pauseUntil: null, reason: 'unmeasured' })
     }
   })
+  test('measured capacity survives the last live session leaving the fleet', () => {
+    expect(planSessions([row({ liveSessions: [], suggestedParallel: 2 })], 4, 0)[0]).toMatchObject({ parallel: 2, reason: 'pace' })
+  })
   test('each account keeps its label and capacity without mutation', () => {
-    const rows = [row({ liveSessions: [live], sustainablePctPerHour: 0.1 }), row({ harness: 'codex', account: undefined, accountLabel: undefined })]
+    const rows = [row({ liveSessions: [live], sustainablePctPerHour: 0.1 }), row({ harness: 'codex', account: undefined, accountLabel: undefined, freeSlotsMeasured: false })]
     const before = structuredClone(rows)
     expect(planSessions(rows, 4, 0)).toEqual([
       { account: 'a', harness: 'claude', label: 'Claude · pessoal', parallel: 0, pauseUntil: null, reason: 'pace' },

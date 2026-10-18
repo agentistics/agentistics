@@ -129,3 +129,16 @@ Actual percentages retain their measured values on the same percentage scale, wi
 normalization. Without a renewal time, no expected line is invented. Agora compares the current
 weekly window; history retains older observed readings, with the expected line limited to the
 current known window.
+
+### Usage area presentation
+
+Usage › Now and Plan use the same measured-capacity test (`freeSlotsMeasured` and a finite,
+positive burn rate). When the last live session leaves the fleet, Plan retains the server's
+`suggestedParallel` recommendation. Unknown capacity is described as unmeasured.
+
+Now omits the recent burn/ideal pair because the account status also considers the weekly
+budget; equal recent rates can coexist with an over-budget week. Its weekly expected tile and
+status remain visible. Current account readings and historical samples have separate lifetimes:
+the charts describe history recorded since server startup, rather than implying no current
+reading exists. Limits show the update age per account, from that account's `updatedAt`, without
+a competing modal-wide age.

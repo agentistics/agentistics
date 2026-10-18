@@ -21,6 +21,11 @@ export function usagePaceState(row: UsageBudgetRow): 'hold' | 'over' | 'on' {
   return row.paceStatus === 'over' || row.status === 'tight' ? 'over' : 'on'
 }
 
+/** Shared by Agora and planning, including accounts with measured capacity but no live session. */
+export function hasMeasuredPace(row: UsageBudgetRow): boolean {
+  return row.freeSlotsMeasured && Number.isFinite(row.burnPctPerHour) && row.burnPctPerHour > 0
+}
+
 /** The Uso › Agora status sentence. Null when there is nothing to summarise. */
 export function usageHeadline(rows: readonly UsageBudgetRow[], now: number, lang: 'pt' | 'en'): string | null {
   if (!rows.length) return null
@@ -34,8 +39,8 @@ export function usageHeadline(rows: readonly UsageBudgetRow[], now: number, lang
 }
 
 /**
- * Parallel sessions at the sustainable rate, per account. Without measured burn and live
- * sessions capacity is unknown. The requested duration does not hide pauses beyond that window.
+ * Parallel sessions at the sustainable rate, per account. Without measured capacity
+ * the recommendation is unknown. The requested duration does not hide pauses beyond that window.
  */
 export function planSessions(rows: readonly UsageBudgetRow[], _hours: number, _now: number): PlanSessionsRow[] {
   return rows.map(r => {
@@ -45,7 +50,9 @@ export function planSessions(rows: readonly UsageBudgetRow[], _hours: number, _n
     }
     if (r.status === 'hold') return { ...base, parallel: 0, reason: 'hold' }
     const live = r.liveSessions.length
-    if (!live || !(r.burnPctPerHour > 0)) return { ...base, parallel: null, reason: 'unmeasured' }
+    if (!hasMeasuredPace(r)) return { ...base, parallel: null, reason: 'unmeasured' }
+    // The server retains its per-account recommendation after live sessions leave the fleet.
+    if (!live) return { ...base, parallel: r.suggestedParallel, reason: 'pace' }
     const perSession = r.burnPctPerHour / live
     // Avoid dropping an exact whole session through floating-point division (1.2 / 0.4).
     const capacity = r.sustainablePctPerHour / perSession

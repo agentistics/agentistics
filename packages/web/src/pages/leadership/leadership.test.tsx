@@ -8,6 +8,7 @@ import { HandoffsContent } from './HandoffsPage'
 import { CheckinsContent } from './CheckinsPage'
 import { AwayContent } from './AwayPage'
 import { checkinDefaults, type CheckinState } from '../../lib/checkin'
+import { HARNESS_LABELS } from '../../lib/harness'
 import { __setAwayForTest } from '../../lib/awayMode'
 
 function atWidth(width: number, render: () => string) {
@@ -64,6 +65,33 @@ for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
     expect(html).toContain('data-testid="checkin-defaults-section"')
     expect(html.indexOf('Round summary needs_you')).toBeLessThan(html.indexOf('Round summary ok'))
   })
+  test('ended check-ins never expose UUID titles, wrap summaries, and limit the first page', () => {
+    const reports: CheckinState[] = Array.from({ length: 63 }, (_, index) => ({
+      ...checkinDefaults(), session: `e1bc704c-692f-4fc6-a9ff-4b45c8604d${index}`, lastRunAt: index, nextRunAt: null,
+      last: { state: 'ok', summary: `Summary text ${index}`, at: index },
+    }))
+    for (const lang of ['pt', 'en'] as const) {
+      const html = atWidth(width, () => renderToStaticMarkup(<CheckinsContent lang={lang} reports={reports} rows={[]} />))
+      expect(html).not.toContain('e1bc704c')
+      expect(html.match(new RegExp(lang === 'pt' ? 'Sessão desconhecida' : 'Unknown session', 'g'))).toHaveLength(10)
+      expect(html).toContain(lang === 'pt' ? 'Mostrar mais (53)' : 'Show more (53)')
+      expect(html).toContain('Summary text 62')
+      expect(html).not.toContain('Summary text 0<')
+      expect(html).not.toContain('>Summary<')
+      expect(html).not.toContain('>Round<')
+      expect(html).toContain('text-align:left')
+      expect(html).toContain('white-space:normal')
+    }
+  })
+  test('leader labels use product names and waiting states use the attention tone', () => {
+    for (const lang of ['pt', 'en'] as const) {
+      const html = atWidth(width, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang={lang}
+        rows={[row('waiting', { harness: 'claude', state: 'waiting', stateLabel: lang === 'pt' ? 'Precisa de você' : 'Needs you' })]} roleOf={() => 'leader'} /></MemoryRouter>))
+      expect(html).toContain(HARNESS_LABELS.claude)
+      expect(html).not.toContain('>claude<')
+      expect(html).toContain('color:var(--anthropic-orange)')
+    }
+  })
   test('check-in empty state requires a successful load', () => {
     const render = (reports: CheckinState[] | null, error = false) => atWidth(width, () => renderToStaticMarkup(<CheckinsContent lang="pt" reports={reports} rows={[]} error={error} />))
     expect(render([])).toContain('Nenhuma rodada de check-in registrada ainda.')
@@ -79,6 +107,9 @@ for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
       __setAwayForTest(AWAY_OFF)
       expect(render()).toContain('Você está presente.')
       expect(render()).toContain('Estou fora (dormindo, viajando)')
+      const switchRow = render().split('role="switch"')[1]!.split('</button>')[0]!
+      expect(switchRow).toContain('white-space:normal')
+      expect(switchRow).not.toContain('text-overflow:ellipsis')
       __setAwayForTest({ ...AWAY_OFF, on: true })
       expect(render()).toContain('Ausente até você voltar')
     } finally { __setAwayForTest(null) }

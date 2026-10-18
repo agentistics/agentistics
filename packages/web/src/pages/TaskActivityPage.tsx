@@ -44,13 +44,13 @@ export function TaskActivityList({ events, titles, statuses = [], lang, isMobile
           color: 'var(--anthropic-orange)', overflowWrap: 'anywhere', whiteSpace: 'normal',
         }}>{titles.get(event.taskId) ?? (pt ? 'Tarefa indisponível' : 'Task unavailable')}</Link>}
         subtitle={<span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{pt ? 'Por' : 'By'} {activityActor(event.actor, lang)}</span>}
-        fields={[
-          { label: pt ? 'Atividade' : 'Activity', value: activitySentence(event, lang, statuses) },
-          { label: pt ? 'Quando' : 'When', value: Number.isFinite(Date.parse(event.at))
-            ? <time dateTime={event.at}>{new Date(event.at).toLocaleString(pt ? 'pt-BR' : 'en-US')}</time>
-            : (pt ? 'Horário indisponível' : 'Time unavailable') },
-        ]}
-      />
+        fields={[]}
+      >
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', textAlign: 'left' }}>{activitySentence(event, lang, statuses)}</p>
+        <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{Number.isFinite(Date.parse(event.at))
+          ? <time dateTime={event.at}>{new Date(event.at).toLocaleString(pt ? 'pt-BR' : 'en-US')}</time>
+          : (pt ? 'Horário indisponível' : 'Time unavailable')}</div>
+      </RecordCard>
     </li>)}
   </ul>
 }
