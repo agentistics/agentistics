@@ -8,10 +8,11 @@ import { SessionRow } from './SessionsAside'
 const resume = { action: 'resume', label: 'Reopen', enabled: true }
 const session = { id: 'ended-row', title: 'Finished work', harness: 'codex', state: 'exited', stateLabel: 'Ended', task: 'Delivery marker', model: 'model-marker' } as ControlSession
 
-test('ended row reuses the rail’s single-line identity without the full card metadata', () => {
+test('ended row reuses the rail’s wrapping identity without the full card metadata', () => {
   const html = renderToStaticMarkup(<SessionRow session={session} compact selected={false} cardColor="wash" onOpen={() => {}} lang="en" />)
   expect(html).toContain('Finished work')
-  expect(html).toContain('white-space:nowrap')
+  expect(html).toContain('white-space:normal')
+  expect(html).not.toContain('ellipsis')
   expect(html).toContain('padding:6px 8px')
   expect(html).not.toContain('Delivery marker')
   // The full model is still in the row tooltip, not a second line.
@@ -34,10 +35,10 @@ test('compact row still opens, pins and exposes its resume actions on mobile and
   expect(html).toContain('min-height:44px')
   expect(html).toContain('Options for Finished work')
   expect(html).toContain('aria-haspopup="menu"')
-  row.props.onClick()
   const event = { stopPropagation() {}, preventDefault() {}, key: 'Enter', currentTarget: { getBoundingClientRect: () => ({ left: 10, bottom: 20 }) } }
   React.Children.forEach(row.props.children, child => {
-    if (!React.isValidElement<{ 'aria-label'?: string; onClick?: (e: typeof event) => void; onKeyDown?: (e: typeof event) => void }>(child)) return
+    if (!React.isValidElement<{ 'aria-label'?: string; 'data-session-open'?: boolean; onClick?: (e: typeof event) => void; onKeyDown?: (e: typeof event) => void }>(child)) return
+    if (child.props['data-session-open']) child.props.onClick!(event)
     if (child.props['aria-label'] === 'Options for Finished work') child.props.onKeyDown!(event)
     if (child.props['aria-label'] === 'Pin') child.props.onClick!(event)
   })

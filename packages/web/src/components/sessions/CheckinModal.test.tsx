@@ -9,7 +9,7 @@ const round: CheckinRound = {
   state: 'needs_you', summary: 's', headline: 'Two releases ready', at: 1,
   needs: [{ subject: 'Release 2.1', text: 'approve the publish' }],
   delivered: [{ text: 'Modal redesign', ref: '#12' }],
-  inProgress: [{ item: 'CHECKIN.MODAL', stage: 'QA', release: '17c' }],
+  inProgress: [{ item: 'CHECKIN.MODAL', stage: 'Em andamento', release: '17c' }],
   next: [{ text: 'Cut release', when: 'tonight' }],
   health: [{ label: 'Fleet', value: '5 up', state: 'ok' }, { label: 'Limits', value: '85%', state: 'warn' }],
 }
@@ -23,7 +23,7 @@ test.each([false, true])('modal shows needs first, then sections, chip and timel
   expect(html).not.toContain('1.5fr')
   expect(html).not.toContain('ellipsis')
   expect(html).not.toContain('line-clamp')
-  expect(html).not.toContain('white-space:nowrap')
+  expect(html).toContain('white-space:nowrap') // stages stay intact within their pills
   expect(html).not.toContain('truncate')
   expect(html).toContain('data-testid="checkin-health-list"')
   expect(html.match(/class="ag-checkin-health-row"/g)).toHaveLength(2)
@@ -84,10 +84,15 @@ test('health wraps below its label on small screens and earlier rounds expand do
   try {
     for (const width of [1280, 390]) {
       ;(window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height: 900 })
-      act(() => root.render(<CheckinModalView round={{ ...round, health: [{ label: 'Fleet', value: fullText, state: 'warn' }] }} history={history} pt={false} isMobile={width < 768} onClose={() => {}} />))
+      act(() => root.render(<CheckinModalView round={{ ...round, health: [{ label: 'Ligações dos assistentes com o agentistics', value: fullText, state: 'warn' }] }} history={history} pt={false} isMobile={width < 768} onClose={() => {}} />))
       const health = host.querySelector<HTMLElement>('.ag-checkin-health-row')!
       expect(health.textContent).toContain(fullText)
-      expect(getComputedStyle(health).gridTemplateColumns).toBe(width <= 480 ? '8px minmax(0, 1fr)' : '8px 150px minmax(0, 1fr)')
+      expect(health.children[1]!.textContent).toBe('Ligações dos assistentes com o agentistics')
+      const pill = host.querySelector<HTMLElement>('[data-checkin-progress] > span')!
+      expect(pill.textContent).toBe('Em andamento')
+      expect(getComputedStyle(pill).whiteSpace).toBe('nowrap')
+      expect(getComputedStyle(pill).flexShrink).toBe('0')
+      expect(getComputedStyle(health).gridTemplateColumns).toBe(width <= 480 ? '8px minmax(0, 1fr)' : '8px fit-content(40%) minmax(0, 1fr)')
       expect(getComputedStyle(health.querySelector('.ag-checkin-health-value')!).gridColumn).toBe(width <= 480 ? '2' : '')
       const timeline = host.querySelector('[data-testid="checkin-timeline"]')!
       const button = timeline.querySelector<HTMLButtonElement>('button')!

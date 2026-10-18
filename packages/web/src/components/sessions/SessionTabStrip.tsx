@@ -12,7 +12,7 @@ import { sessionIdentityKey } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
 import { needsAttention } from '../nav/AttentionDot'
-import { useSessionRole } from '../../lib/sessionRoles'
+import { getSessionRole, useSessionRole } from '../../lib/sessionRoles'
 import { tabStripEdgeFade, tabStripFadeMask } from '../../lib/tabStripEdge'
 import { reorderByDrag, setDragPayload, readDragPayload } from '../../lib/dragReorder'
 import {
@@ -29,7 +29,7 @@ import { SessionRowMenu } from './SessionRowMenu'
 import { HarnessMark } from './HarnessMark'
 import type { MenuEntry } from '../../lib/rowMenu'
 
-const LEADER_PREFIX = /^\[ (LÍDER|LEADER) \] - /
+import { sessionDisplayTitle, hasLeaderTitle } from '../../lib/sessionDisplayTitle'
 
 export interface SessionTabStripProps {
   lang: 'pt' | 'en'
@@ -75,6 +75,9 @@ interface TabProps {
   /** Coarse pointer (touch): sizing/visibility of the × follow it, not only the width. */
   touch: boolean
   pt: boolean
+  onFocused: () => void
+  onFocusTab: (key: string) => void
+  focusable: boolean
   onPick: () => void
   onClose: () => void
   onUnpin: () => void
@@ -87,7 +90,7 @@ const FOCUS_RING = '2px solid var(--anthropic-orange)'
 /** Enter/Space on the inner controls act on THEM; they must not reach the tab's own handler (which would activate it). */
 const stopKeys = (e: { key: string; stopPropagation(): void }) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation() }
 
-function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnpin, onMenu, onDropOn, setRef }: TabProps) {
+function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab, focusable, onPick, onClose, onUnpin, onMenu, onDropOn, setRef }: TabProps) {
   const role = useSessionRole(k)
   const [hover, setHover] = useState(false)
   const [focus, setFocus] = useState(false)
@@ -98,7 +101,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnp
   const label = row?.stateLabel ?? (pt ? 'sem estado' : 'no state')
   const ended = ENDED.has(state)
   const needs = row !== undefined && needsAttention(row)
-  const title = (row?.title ?? k.slice(0, 8)).replace(LEADER_PREFIX, '')
+  const title = sessionDisplayTitle(row?.title ?? k.slice(0, 8))
   const clear = () => { if (press.current !== null) { clearTimeout(press.current); press.current = null } }
   const btn: CSSProperties = {
     display: 'flex', width: big ? 32 : 20, height: big ? 32 : 20, alignItems: 'center', justifyContent: 'center',
@@ -106,9 +109,9 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnp
   }
   const style: CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
-    height: mobile ? 44 : 30, padding: '0 6px 0 12px', borderRadius: 8, boxSizing: 'border-box',
-    fontSize: 12, whiteSpace: 'nowrap', scrollSnapAlign: 'center',
-    minWidth: mobile ? 132 : 110, maxWidth: mobile ? 168 : 240,
+    minHeight: mobile ? 44 : 30, padding: '5px 6px 5px 12px', borderRadius: 8, boxSizing: 'border-box',
+    fontSize: 12, scrollSnapAlign: 'center', scrollSnapStop: 'always',
+    minWidth: mobile ? 132 : 110, width: mobile ? '100%' : 'max-content', maxWidth: mobile ? '100%' : 360,
     fontWeight: active || needs ? 650 : 500,
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
     background: active ? 'var(--bg-elevated)' : hover ? 'color-mix(in srgb, var(--bg-elevated) 50%, transparent)' : 'transparent',
@@ -119,7 +122,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnp
   return (
     <div
       ref={setRef}
-      role="tab" aria-selected={active} tabIndex={active ? 0 : -1} data-session-tab={k}
+      role="tab" aria-selected={active} tabIndex={focusable ? 0 : -1} data-session-tab={k}
       title={row ? `${row.title}\n${label} · ${row.cwd}` : title}
       draggable
       onDragStart={e => setDragPayload(e, k)}
@@ -127,21 +130,23 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onPick, onClose, onUnp
       onDrop={e => { const d = readDragPayload(e); if (d) { e.preventDefault(); onDropOn(d) } }}
       onClick={onPick}
       onKeyDown={e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick() }
+        if (e.target !== e.currentTarget) return
+        if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); onFocusTab(e.key) }
+        else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick() }
         else if ((e.key === 'Delete' || e.key === 'Backspace') && !pinned) { e.preventDefault(); onClose() }
       }}
       onAuxClick={e => { if (e.button === 1) { e.preventDefault(); if (!pinned) onClose() } }}
       onContextMenu={e => { e.preventDefault(); onMenu(e.clientX, e.clientY) }}
       onTouchStart={e => { const t = e.touches[0]; if (t) { clear(); press.current = setTimeout(() => onMenu(t.clientX, t.clientY), 500) } }}
       onTouchEnd={clear} onTouchMove={clear} onTouchCancel={clear}
-      onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
+      onFocus={() => { setFocus(true); onFocused() }} onBlur={() => setFocus(false)}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={style}
     >
       <TabStatus state={state} label={label} />
       {row && <span style={{ display: 'inline-flex', flexShrink: 0, opacity: active ? 1 : 0.6 }}><HarnessMark harness={row.harness} size={14} /></span>}
-      {role === 'leader' && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0, opacity: active ? 1 : 0.6 }} />}
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0, opacity: ended && !active ? 0.7 : 1 }}>{title}</span>
+      {(role === 'leader' || hasLeaderTitle(row?.title ?? '')) && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0, opacity: active ? 1 : 0.6 }} />}
+      <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1 }}>{title}</span>
       {pinned
         ? (
           <button
@@ -198,6 +203,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
     [open, pins, byKey],
   )
   const drawnPins = pins.filter(k => order.includes(k))
+  const [focusedKey, setFocusedKey] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[]; below?: boolean; pick: (a: string) => void } | null>(null)
 
@@ -294,6 +300,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
     tabEls.current.get(activeKey)?.scrollIntoView({ inline: 'center', block: 'nearest' })
   }, [activeKey, measure])
   useEffect(() => {
+    setFocusedKey(activeKey)
     tabEls.current.get(activeKey)?.scrollIntoView({ inline: 'center', block: 'nearest' })
     measure()
   }, [activeKey, order.length, measure])
@@ -326,8 +333,8 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
     const r = el.getBoundingClientRect()
     const rowEntries: MenuEntry[] = order.map(k => {
       const row = byKey.get(k)
-      const t = (row?.title ?? k.slice(0, 8)).replace(LEADER_PREFIX, '')
-      return { action: `go:${k}`, label: `${t} · ${row?.stateLabel ?? ''}`, enabled: true, ...(pins.includes(k) ? { pinned: true } : {}), checked: k === activeKey, ...(row ? { color: STATE_COLOR[row.state] } : {}) }
+      const t = sessionDisplayTitle(row?.title ?? k.slice(0, 8))
+      return { action: `go:${k}`, label: t, detail: row?.stateLabel, leader: getSessionRole(k) === 'leader' || (row ? hasLeaderTitle(row.title) : false), leaderLabel: pt ? 'Líder' : 'Leader', enabled: true, ...(pins.includes(k) ? { pinned: true } : {}), checked: k === activeKey, ...(row ? { color: STATE_COLOR[row.state] } : {}) }
     })
     const isEnded = (k: string) => { const row = byKey.get(k); return row ? ENDED.has(row.state) : false }
     setMenu({
@@ -336,7 +343,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
         ...rowEntries,
         ...(sleeping.length > 0 ? [
           { action: 'sleeping', label: pt ? 'Dormindo' : 'Sleeping', enabled: false, separatorBefore: true },
-          ...sleeping.map(k => ({ action: `reopen:${k}`, label: (byKey.get(k)?.title ?? k).replace(LEADER_PREFIX, ''), enabled: true, pinned: true })),
+          ...sleeping.map(k => ({ action: `reopen:${k}`, label: sessionDisplayTitle(byKey.get(k)?.title ?? k), detail: pt ? 'Reabrir' : 'Reopen', leader: getSessionRole(k) === 'leader' || hasLeaderTitle(byKey.get(k)?.title ?? ''), leaderLabel: pt ? 'Líder' : 'Leader', enabled: true, pinned: true })),
         ] : []),
         { action: 'others', label: pt ? 'Fechar outras' : 'Close others', enabled: true, separatorBefore: true },
         { action: 'ended', label: pt ? 'Fechar encerradas' : 'Close ended', enabled: open.some(isEnded) },
@@ -373,8 +380,8 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
         style={{
           display: 'flex', alignItems: 'stretch', gap: 3, overflowX: 'auto', flex: 1, minWidth: 0,
           background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 3, margin: '4px 6px',
-          WebkitOverflowScrolling: 'touch', scrollSnapType: 'x proximity',
-          ...(fade !== null ? { maskImage: fade, WebkitMaskImage: fade } : null),
+          WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory',
+          ...(!mobile && fade !== null ? { maskImage: fade, WebkitMaskImage: fade } : null),
         }}
       >
         {order.map((k, i) => (
@@ -384,6 +391,12 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
             )}
             <Tab
               k={k} row={byKey.get(k)} active={k === activeKey} pinned={pins.includes(k)} mobile={mobile} touch={touch} pt={pt}
+              onFocused={() => setFocusedKey(k)}
+              focusable={k === (focusedKey && order.includes(focusedKey) ? focusedKey : activeKey)}
+              onFocusTab={key => {
+                const target = key === 'Home' ? order[0] : key === 'End' ? order[order.length - 1] : stepTab(order, k, key === 'ArrowRight' ? 1 : -1)
+                if (target) { setFocusedKey(target); tabEls.current.get(target)?.focus(); tabEls.current.get(target)?.scrollIntoView({ inline: 'center', block: 'nearest' }) }
+              }}
               onPick={() => { if (k !== activeKey) goTo(k) }}
               onClose={() => close(k)}
               onUnpin={() => togglePin(k)}
@@ -395,7 +408,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
         ))}
       </div>
       {menu !== null && (
-        <SessionRowMenu below={menu.below} x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
+        <SessionRowMenu sessionList={menu.below} below={menu.below} x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
       )}
     </div>
     {notice !== null && (

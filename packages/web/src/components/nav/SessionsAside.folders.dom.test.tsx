@@ -219,3 +219,70 @@ for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) for (
     expect(host.querySelector('[data-fell-banner]')).toBeNull()
   })
 }
+
+for (const width of [1280, 390]) test(`sleeping and pinned leader names wrap, badges stay intact, and row buttons are siblings (${width}px)`, async () => {
+  const { SessionRow } = await import('./SessionsAside')
+  const { markReopening, clearReopening } = await import('../../lib/reopeningStore')
+  const name = 'Agentistics Side Tasks — revisão de todas as correções'
+  const session = { ...row('leader-row', 'closed'), title: `[ LÍDER ] - ${name}`, task: 'Perfis de sessão + modus operandi', model: 'claude-opus-5-5' }
+  ;(window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height: 900 })
+  let opened = 0, pinned = 0, resumed = 0
+  try {
+    for (const compact of [false, true]) {
+      await act(async () => root.render(<SessionRow session={session} compact={compact} selected={false} pinned cardColor="wash" lang="pt"
+        onOpen={() => { opened++ }} onPin={() => { pinned++ }} onReopen={() => { resumed++ }}
+        reopenVerb={{ action: 'resume', label: 'Reabrir', enabled: true }} />))
+      const card = host.querySelector<HTMLElement>('[data-session-row]')!
+      const open = card.querySelector<HTMLButtonElement>('[data-session-open]')!
+      const pin = card.querySelector<HTMLButtonElement>('[aria-label="Desafixar"]')!
+      expect(open.textContent).toContain(name)
+      expect(open.textContent).not.toContain('[ LÍDER ]')
+      expect(open.textContent).toContain('Líder')
+      expect(pin.tagName).toBe('BUTTON')
+      expect(pin.parentElement).toBe(open.parentElement)
+      expect(card.querySelector('button button, button [role="button"]')).toBeNull()
+      for (const el of Array.from(card.querySelectorAll<HTMLElement>('*'))) expect(el.style.textOverflow).not.toBe('ellipsis')
+      await click(pin)
+      expect(opened).toBe(compact ? 1 : 0)
+      await click(open)
+      const resume = Array.from(card.querySelectorAll('button')).find(el => el.textContent === 'Reabrir')!
+      await click(resume)
+      await act(async () => markReopening(session.id))
+      expect(open.textContent).toContain('Reabrindo…')
+      const badge = Array.from(open.querySelectorAll<HTMLElement>('span')).find(el => el.textContent === 'Líder' && el.style.whiteSpace === 'nowrap')!
+      expect(badge.style.flexShrink).toBe('0')
+      expect(card.style.flexWrap).toBe('wrap')
+      await act(async () => clearReopening(session.id))
+    }
+    expect(opened).toBe(2); expect(pinned).toBe(2); expect(resumed).toBe(2)
+  } finally { await act(async () => clearReopening(session.id)) }
+})
+
+for (const width of [1280, 390]) test(`ended-only groups suppress the false empty message and names wrap at words (${width}px)`, async () => {
+  await act(async () => { groups.renameSessionGroup('archived', 'Agentistics Side Tasks') })
+  await render(fleet.filter(r => r.id.startsWith('archived-')), width, 'pt')
+  expect(host.textContent).not.toContain('Nenhuma sessão nesta máquina ainda.')
+  await click(ended('root'))
+  const heading = folder('archived')!.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+  const name = Array.from(heading.querySelectorAll<HTMLElement>('span')).find(el => el.textContent === 'Agentistics Side Tasks')!
+  expect(name.style.overflowWrap).toBe('normal')
+  expect(name.nextElementSibling?.getAttribute('style')).toContain('flex-shrink: 0')
+})
+
+test('action feedback uses the session title, floats over the list, and expires in five seconds', async () => {
+  const session = { ...row('b4f46fa8d9-session', 'waiting'), title: '[ LÍDER ] - Maestro' }
+  await act(async () => root.render(<MemoryRouter><SessionsAside rows={[session]} lang="pt" filters={filters} activeOnly={false}
+    loading={false} unsupported={false} finishedTasks={[]} hideNew={false}
+    rowsById={new Map([[session.id, { verbs: [{ action: 'kill', label: 'Encerrar', enabled: true }] }]])}
+    act={async () => ({ ok: true, message: 'b4f46fa8d9 encerrada.' })} /></MemoryRouter>))
+  const card = host.querySelector<HTMLElement>('[data-session-row]')!
+  await act(async () => card.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 })))
+  const kill = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(el => el.textContent === 'Encerrar')!
+  await click(kill)
+  const notice = Array.from(host.querySelectorAll<HTMLElement>('[role="status"]')).find(el => el.textContent === 'Maestro encerrada.')!
+  expect(notice).toBeDefined()
+  expect(notice.style.position).toBe('absolute')
+  expect(notice.textContent).not.toContain('b4f46fa8d9')
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 5100)) })
+  expect(notice.isConnected).toBe(false)
+}, 10000)
