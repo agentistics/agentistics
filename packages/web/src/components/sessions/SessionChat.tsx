@@ -19,6 +19,7 @@
  * session's name — a confident wrong answer the reader has no way to detect.
  */
 
+import { useIsClosing } from '../../lib/closingSessions'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -2107,6 +2108,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * two can never be shown at once or hidden at once.
    */
   const showReopen = !canPrompt && !blocked && !!reopen && !typing
+  // Ending is pending (see `closingSessions`): the composer is hidden and the panel states why.
+  const closing = useIsClosing(session.id)
 
   const stopVerb = row?.verbs.find(v => v.action === 'interrupt')
   /**
@@ -3056,7 +3059,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                   way BACK INTO it. The verb is the row's own `resume`, which the server enables only
                   when it has a conversation to reopen — where it does not, the sentence says why
                   rather than a button that fails. */}
-              {showReopen && reopen && (
+              {showReopen && reopen && !closing && (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
                   padding: '10px 12px', borderRadius: 12,
@@ -3147,7 +3150,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               {/* Loose on the composer's own surface — no second card behind it. It used to sit in
                   its own `--bg-base` box with a border, which read as a field floating inside the
                   field that holds it; dropping both leaves it the same colour as its container. */}
-              <ComposerShell hidden={showReopen} dimmed={!canPrompt}>
+              <ComposerShell hidden={showReopen || closing} dimmed={!canPrompt}>
                 <input
                   ref={fileRef}
                   type="file"

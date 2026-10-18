@@ -21,6 +21,8 @@
  * branch passes neither prop, and the header below returns.
  */
 
+import { ClosingRing } from './ClosingRing'
+import { useIsClosing } from '../../lib/closingSessions'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { BellOff, ChevronDown, ChevronUp } from 'lucide-react'
 import { mutedTooltip, useSessionMuted } from '../../lib/notifyMenu'
@@ -483,6 +485,7 @@ export function SessionPanel({
             {...(onOpened ? { onReopened: onOpened } : {})}
           />
         ) : active === 'chat' ? (
+          <ClosingFrame id={session.id} pt={lang === 'pt'}>
           <SessionChat
             key={session.id}
             session={session} {...(row ? { row } : {})} lang={lang} act={act}
@@ -493,6 +496,7 @@ export function SessionPanel({
             {...(onOpened ? { onReopened: onOpened } : {})}
             {...(onOpenTerminal ? { onOpenTerminal } : {})}
           />
+          </ClosingFrame>
         ) : (
           <div style={{ flex: 1, minHeight: 0, padding: 16, display: 'flex', flexDirection: 'column' }}>
             <ShellBand
@@ -1269,3 +1273,25 @@ function PanelBarBand({
 // that used to live here (`studioBandIconBtn`/`studioBandLabeledBtn`, and a `Segment` component
 // exported for exactly this purpose and never actually imported anywhere) were the drift design
 // item 3 exists to close, not a second one to keep beside it.
+
+/**
+ * While the session's end is pending the conversation is dimmed and inert and a bar says what is
+ * happening (the composer itself is hidden by `SessionChat`). When the session has ended the normal
+ * ended state takes over; on failure the store clears and everything is restored.
+ */
+function ClosingFrame({ id, pt, children }: { id: string; pt: boolean; children: ReactNode }) {
+  const closing = useIsClosing(id)
+  if (!closing) return <>{children}</>
+  return (
+    <div data-closing-frame style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div aria-busy style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', opacity: 0.5, pointerEvents: 'none' }}>{children}</div>
+      <div role="status" data-closing-bar style={{
+        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, margin: 10, padding: '10px 12px', borderRadius: 12,
+        background: 'var(--bg-base)', border: '1px solid var(--border)', fontSize: 12.5, color: 'var(--text-secondary)',
+      }}>
+        <ClosingRing size={12} label={pt ? 'Encerrando' : 'Closing'} />
+        {pt ? 'Encerrando a sessão. A conversa fica salva em Encerradas.' : 'Closing the session. The conversation stays in Ended.'}
+      </div>
+    </div>
+  )
+}

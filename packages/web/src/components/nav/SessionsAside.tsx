@@ -68,7 +68,8 @@ import { RenameSessionDialog } from '../sessions/RenameSessionDialog'
 import { SessionFiling } from '../tasks/SessionFiling'
 import { boardCopy } from '../tasks/copy'
 import { attachSession, detachSession } from '../../lib/tasks'
-import { CompactSessionFacts } from '../sessions/CompactSessionFacts'
+import { SessionRowLine, SessionHoverCard, useRowHoverCard } from '../sessions/SessionRowLine'
+import { useIsClosing } from '../../lib/closingSessions'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { RoleChip } from '../sessions/RoleChip'
 import { reopenedSessionRoute, sessionPath } from '../../lib/sessionRoute'
@@ -2717,6 +2718,8 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
   useEffect(() => { registerSessionRoleAlias(session.id, roleKey) }, [session.id, roleKey])
   const wants = sessionNotify(session)
   const reopening = useReopening().has(session.id)
+  const closing = useIsClosing(session.id)
+  const hover = useRowHoverCard()
   const goTo = useContext(GoToSessionContext)
   const cardStyle = sessionCardStyle(session.state, cardColor, selected)
   const color = STATE_COLOR[session.state] ?? 'var(--text-tertiary)'
@@ -2756,10 +2759,10 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       data-session-row
       data-sleeping-pin={compact && pinned && onReopen ? true : undefined}
       style={{
-        display: 'flex', flexWrap: compact ? 'nowrap' : 'wrap', alignItems: 'center', gap: compact ? (tap ? 2 : 0) : 8, fontSize: compact ? 13 : undefined, width: '100%', boxSizing: 'border-box',
+        display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: tap ? 2 : 4, fontSize: 12.5, width: '100%', boxSizing: 'border-box',
         // Left padding is deliberately wider than the right: a live row carries a state edge on its left
         // and the text needs air beside it (the row's own dot used to provide it).
-        padding: compact ? (pinned && !tap ? '6px' : '6px 8px') : '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: compact ? 56 : tap,
+        padding: '0 6px 0 10px', borderRadius: 7, border: 'none', textAlign: 'left', minHeight: tap ?? 32, position: 'relative', opacity: closing ? 0.55 : 1,
         // SELECTED is NOT orange. Orange is already the state colour for a row that needs a person
         // (`STATE_COLOR.waiting`), so the selected row wore the same tint as the alarm and the two
         // became one signal: selecting a working session made it look like it was asking for you.
@@ -2770,7 +2773,7 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         // Two different edges, and they never collide: the STATE edge is the left rule a live row
         // carries in `wash`/`stripe` mode, and SELECTION replaces it with a brighter, full one
         // plus an outline — `sessionCardStyle` already resolves that precedence.
-        boxShadow: cardStyle.edge,
+        boxShadow: selected ? 'inset 2px 0 0 var(--anthropic-orange)' : cardStyle.edge,
         color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
         cursor: 'pointer', fontFamily: 'inherit', minWidth: 0,
         transition: 'background 0.15s',
@@ -2807,27 +2810,25 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       onTouchEnd={clearLongPress}
       onTouchCancel={clearLongPress}
       aria-current={selected ? 'true' : undefined}
-      title={session.model ? `${session.title}\n${session.model}` : session.title}
+      data-row-name={session.title}
+      aria-busy={closing || undefined}
     >
+      <SessionHoverCard session={session} rect={hover.rect} pt={lang !== 'en'} />
       {compact && pinned && pinControl}
-      <button type="button" onClick={onOpen} data-session-open
-        style={{ flex: compact ? '1 1 0' : '1 1 130px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, padding: 0,
+      <button type="button" onClick={() => { if (!closing) onOpen() }} data-session-open
+        onMouseEnter={e => hover.onEnter(e.currentTarget)} onMouseLeave={hover.onLeave} onFocus={e => hover.onEnter(e.currentTarget)} onBlur={hover.onLeave}
+        style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, padding: 0, minHeight: tap ?? 32, justifyContent: 'center',
           border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
-      {reopening && (
-        <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
-          <AgentisticsLoader size={12} label={reopeningLabel(lang !== 'en')} />
-          {reopeningLabel(lang !== 'en')}
-        </span>
-      )}
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', minWidth: 0 }}>
-      {compact ? <CompactSessionFacts showHarness={!pinned} session={session} titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined} /> : <SessionFacts
-        titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined}
-        session={session}
-        selected={selected}
-        {...(lang ? { lang } : {})}
-        {...(cardStyle.stateTextColor ? { metaColor: cardStyle.stateTextColor } : {})}
-      />}
-      </span>
+      <SessionRowLine
+        session={session} selected={selected} pt={lang !== 'en'} closing={closing} leader={role === 'leader'}
+        showHarness={!(compact && pinned)}
+        reopening={reopening ? (
+          <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
+            <AgentisticsLoader size={12} label={reopeningLabel(lang !== 'en')} />
+            {reopeningLabel(lang !== 'en')}
+          </span>
+        ) : undefined}
+      />
       </button>
       {onReopen && reopenVerb && (
         <IconButton label={!reopenVerb.enabled && reopenVerb.reason ? reopenVerb.reason : (lang === 'en' ? 'Reopen' : 'Reabrir')} size={tap ?? 22}

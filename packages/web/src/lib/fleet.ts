@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { beginClosing, clearClosing, reconcileClosing } from './closingSessions'
 import { followFleet, type Baseline, type FleetWire, type SessionMode } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { fleetSeedNotice, fleetStaleNotice } from './fleetStale'
@@ -563,7 +564,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
 
   const refresh = useCallback(() => { void pollOnce() }, [])
 
-  const act = useCallback<FleetState['act']>(async req => {
+  const actRaw = useCallback<FleetState['act']>(async req => {
     let machineIdAtCall: string | null | undefined
     // A NATIVE session's row verbs go to the engine (`nativeFleet.ts`) — the machine's
     // `/api/fleet/act` has no row by that id. The answer has the same shape, so the menu needs no branch.
@@ -689,6 +690,26 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
       }
     }
   }, [lang])
+
+  // ENDING A SESSION is slow (the pane is torn down and the poll must catch up), so the row says so:
+  // the pending state is shared (`closingSessions`), a second click while it is pending is ignored, and
+  // a refusal restores the row — the caller still gets the failure to show.
+  const act = useCallback<FleetState['act']>(async req => {
+    if (req.action !== 'kill') return actRaw(req)
+    if (!beginClosing(req.id)) return { ok: true, message: '' }
+    try {
+      const out = await actRaw(req)
+      if (!out.ok) clearClosing(req.id)
+      return out
+    } catch (err) {
+      clearClosing(req.id)
+      throw err
+    }
+  }, [actRaw])
+
+  useEffect(() => {
+    if (enabled) reconcileClosing(snapshot.rows, new Set(['exited', 'closed']))
+  })
 
   return {
     fleet: enabled ? snapshot : EMPTY,

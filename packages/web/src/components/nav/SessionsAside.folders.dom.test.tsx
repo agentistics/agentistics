@@ -119,7 +119,7 @@ for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
     expect(folder('parent')?.querySelectorAll('[data-ended-folders]')).toHaveLength(1)
     expect(folder('idle-child')?.textContent).toContain('Title child-ended')
     const parent = folder('parent')!
-    expect(parent.querySelector('[data-ended-folders]')!.compareDocumentPosition(parent.querySelector('[title="Title parent-live"]')!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    expect(parent.querySelector('[data-ended-folders]')!.compareDocumentPosition(parent.querySelector('[data-row-name="Title parent-live"]')!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
     await click(ended('root'))
     expect(folder('archived')?.contains(folder('archived-child'))).toBe(true)
     expect(folder('archived')?.textContent).toContain('Title archived-direct')
@@ -223,7 +223,7 @@ for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) for (
   })
 }
 
-for (const width of [1280, 390]) test(`sleeping and pinned leader names wrap, badges stay intact, and row buttons are siblings (${width}px)`, async () => {
+for (const width of [1280, 390]) test(`sleeping and pinned leader names fade on one line, the crown stays, and row buttons are siblings (${width}px)`, async () => {
   const { SessionRow } = await import('./SessionsAside')
   const { markReopening, clearReopening } = await import('../../lib/reopeningStore')
   const name = 'Agentistics Side Tasks — revisão de todas as correções'
@@ -240,7 +240,8 @@ for (const width of [1280, 390]) test(`sleeping and pinned leader names wrap, ba
       const pin = card.querySelector<HTMLButtonElement>('[aria-label="Desafixar"]')!
       expect(open.textContent).toContain(name)
       expect(open.textContent).not.toContain('[ LÍDER ]')
-      expect(open.textContent).toContain('Líder')
+      expect(open.querySelector('[aria-label="Líder"]')).not.toBeNull()
+      expect((open.querySelector('[data-row-title]') as HTMLElement).style.whiteSpace).toBe('nowrap')
       expect(pin.tagName).toBe('BUTTON')
       expect(pin.parentElement).toBe(open.parentElement)
       expect(card.querySelector('button button, button [role="button"]')).toBeNull()
@@ -252,9 +253,7 @@ for (const width of [1280, 390]) test(`sleeping and pinned leader names wrap, ba
       await click(resume)
       await act(async () => markReopening(session.id))
       expect(open.textContent).toContain('Reabrindo…')
-      const badge = Array.from(open.querySelectorAll<HTMLElement>('span')).find(el => el.textContent === 'Líder' && el.style.whiteSpace === 'nowrap')!
-      expect(badge.style.flexShrink).toBe('0')
-      expect(card.style.flexWrap).toBe(compact ? 'nowrap' : 'wrap')
+      expect(card.style.flexWrap).toBe('nowrap')
       await act(async () => clearReopening(session.id))
     }
     expect(opened).toBe(2); expect(pinned).toBe(2); expect(resumed).toBe(2)
@@ -321,7 +320,7 @@ test('ended folders hide totals even for pinned or not-yet-loaded members', asyn
   // Two direct memberships (one deferred, one pinned) plus the nested ended member.
   expect(header.querySelector('[data-folder-count]')).toBeNull()
   expect(folder('parent')?.querySelector('[data-folder-count]')).not.toBeNull()
-  expect(folder('archived')!.querySelector('[title="Title pin-ended"]')).toBeNull()
+  expect(folder('archived')!.querySelector('[data-row-name="Title pin-ended"]')).toBeNull()
 })
 
 for (const sidebar of [288, 220, 390]) test(`ended folders reserve icon space and summary units have no separators (${sidebar}px)`, async () => {

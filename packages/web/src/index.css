@@ -1159,3 +1159,8 @@ tr:focus-within .ag-row-actions,
   [data-fell-short] { display: none; }
   [data-fell-full] { display: inline; }
 }
+
+/* A session being closed: the status dot becomes a small ring that turns until the row leaves. */
+@keyframes ag-closing-spin { to { transform: rotate(360deg); } }
+.ag-closing-ring { animation: ag-closing-spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .ag-closing-ring { animation: none; } }

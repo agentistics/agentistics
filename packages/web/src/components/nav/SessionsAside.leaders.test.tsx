@@ -102,7 +102,7 @@ for (const width of [1280, 390]) test(`leaders-only is flat and restores the nor
     for (const id of ['live-folder', 'live-hidden']) expect(list.textContent).toContain(`Title ${id}`)
     expect(host.textContent).toContain('Pinned')
     expect(host.textContent).toContain('Sleeping')
-    expect(host.querySelectorAll('[title="Title live-pin"]')).toHaveLength(1)
+    expect(host.querySelectorAll('[data-row-name="Title live-pin"]')).toHaveLength(1)
     for (const text of ['Groups', 'Visible folder marker', 'Hidden folder marker', 'Title ended', 'Inactive']) {
       expect(host.textContent).not.toContain(text)
     }
@@ -202,7 +202,7 @@ for (const width of [1280, 390]) test(`sleeping pins collapse, remember expansio
     expect(pinned).toBeDefined()
     act(() => sleeping().click())
     expect(sleeping().getAttribute('aria-expanded')).toBe('true')
-    const card = host.querySelector<HTMLElement>('[data-session-row][title="Title ended"]')!
+    const card = host.querySelector<HTMLElement>('[data-session-row][data-row-name="Title ended"]')!
     expect(card.querySelector('[aria-label="Reopen"]')).not.toBeNull()
     act(() => card.querySelector<HTMLButtonElement>('[data-session-open]')!.click())
     expect(opened).toBe('ended')
@@ -216,7 +216,7 @@ for (const width of [1280, 390]) test(`sleeping pins collapse, remember expansio
     render()
     expect(sleeping().getAttribute('aria-expanded')).toBe('true')
     expect(host.textContent).toContain('Title ended')
-    const restored = host.querySelector<HTMLElement>('[data-session-row][title="Title ended"]')!
+    const restored = host.querySelector<HTMLElement>('[data-session-row][data-row-name="Title ended"]')!
     act(() => restored.querySelector<HTMLElement>('[aria-label="Unpin"]')!.click())
     expect(sleeping()).toBeUndefined()
   } finally {

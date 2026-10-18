@@ -28,6 +28,8 @@ import { matchTabShortcut } from '../../lib/panelShortcuts'
 import { useIsMobile, useIsCoarsePointer } from '../../hooks/useIsMobile'
 import { SessionRowMenu } from './SessionRowMenu'
 import { HarnessMark } from './HarnessMark'
+import { ClosingRing } from './ClosingRing'
+import { useIsClosing } from '../../lib/closingSessions'
 import type { MenuEntry } from '../../lib/rowMenu'
 
 import { sessionDisplayTitle, hasLeaderTitle } from '../../lib/sessionDisplayTitle'
@@ -110,7 +112,8 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
   const state = row?.state ?? 'unknown'
   const label = row?.stateLabel ?? (pt ? 'sem estado' : 'no state')
   const ended = ENDED.has(state)
-  const needs = row !== undefined && needsAttention(row)
+  const closing = useIsClosing(row?.id ?? k)
+  const needs = row !== undefined && needsAttention(row) && !closing
   const title = sessionDisplayTitle(row?.title ?? k.slice(0, 8))
   const clear = () => { if (press.current !== null) { clearTimeout(press.current); press.current = null } }
   const btn: CSSProperties = {
@@ -131,6 +134,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
     border: 'none',
     borderRight: '1px solid var(--border-subtle)',
     boxShadow: active ? 'inset 0 1px 0 var(--anthropic-orange)' : 'none',
+    opacity: closing ? 0.55 : 1,
   }
   return (
     <div
@@ -141,7 +145,8 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
       onDragStart={e => setDragPayload(e, k)}
       onDragOver={e => e.preventDefault()}
       onDrop={e => { const d = readDragPayload(e); if (d) { e.preventDefault(); onDropOn(d) } }}
-      onClick={onPick}
+      onClick={() => { if (!closing) onPick() }}
+      aria-busy={closing || undefined}
       onKeyDown={e => {
         if (e.target !== e.currentTarget) return
         if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); onFocusTab(e.key) }
@@ -156,7 +161,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={style}
     >
-      <TabStatus state={state} label={label} />
+      {closing ? <ClosingRing label={pt ? 'Encerrando' : 'Closing'} /> : <TabStatus state={state} label={label} />}
       {row && <span style={{ display: 'inline-flex', flexShrink: 0, opacity: active ? 1 : 0.6 }}><HarnessMark harness={row.harness} size={14} /></span>}
       {(role === 'leader' || hasLeaderTitle(row?.title ?? '')) && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0, opacity: active ? 1 : 0.6 }} />}
       <span data-tab-title style={{ whiteSpace: 'nowrap', overflow: 'hidden', flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1, maskImage: TITLE_FADE, WebkitMaskImage: TITLE_FADE }}>{title}</span>

@@ -8,17 +8,19 @@ import { SessionRow } from './SessionsAside'
 const resume = { action: 'resume', label: 'Reopen', enabled: true }
 const session = { id: 'ended-row', title: 'Finished work', harness: 'codex', state: 'exited', stateLabel: 'Ended', task: 'Delivery marker', model: 'model-marker' } as ControlSession
 
-test('ended row reuses the rail’s wrapping identity without the full card metadata', () => {
+test('every row is ONE line: fading title, no ellipsis, task and model only in the hover card', () => {
   const html = renderToStaticMarkup(<SessionRow session={session} compact selected={false} cardColor="wash" onOpen={() => {}} lang="en" />)
   expect(html).toContain('Finished work')
-  expect(html).toContain('white-space:normal')
+  expect(html).toContain('white-space:nowrap')
+  expect(html).toContain('mask-image:linear-gradient')
   expect(html).not.toContain('text-overflow:ellipsis')
-  expect(html).toContain('padding:6px 8px')
+  expect(html).toContain('min-height:32px')
   expect(html).not.toContain('Delivery marker')
   // The full model is still in the row tooltip, not a second line.
   expect(html).not.toContain('>model-marker</span>')
   const normal = renderToStaticMarkup(<SessionRow session={session} selected={false} cardColor="wash" onOpen={() => {}} />)
-  expect(normal).toContain('Delivery marker')
+  expect(normal).not.toContain('Delivery marker')
+  expect(normal).toContain('min-height:32px')
 })
 
 test('compact row still opens, pins and exposes its resume actions on mobile and keyboard', () => {
@@ -32,7 +34,7 @@ test('compact row still opens, pins and exposes its resume actions on mobile and
     return row
   }
   const html = renderToStaticMarkup(<Row />)
-  expect(html).toContain('min-height:56px')
+  expect(html).toContain('min-height:44px')
   expect(html).toContain('Options for Finished work')
   expect(html).toContain('aria-haspopup="menu"')
   const event = { stopPropagation() {}, preventDefault() {}, key: 'Enter', currentTarget: { getBoundingClientRect: () => ({ left: 10, bottom: 20 }) } }
@@ -58,7 +60,8 @@ test('compact sleeping rows reserve one line for controls and keep the last word
     onOpenMenu={() => {}} verbs={[resume]} lang="pt" />)
   expect(html).toContain('flex-wrap:nowrap')
   expect(html).toContain('flex:1 1 0')
-  expect(html).toContain('white-space:nowrap">(superskill)')
+  expect(html).toContain('Maestro (superskill)')
+  expect(html).toContain('aria-label="Líder"')
   expect(html).toContain('aria-label="Reabrir"')
   expect(html).toContain('lucide-pin-off')
   expect(html).not.toContain('text-overflow:ellipsis')
