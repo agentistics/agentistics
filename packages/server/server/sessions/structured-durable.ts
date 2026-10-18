@@ -183,6 +183,8 @@ export interface DurableStore {
   lastActivityMs(id: string): number
   /** Ids with a directory whose relay is gone (collected at boot). */
   dead(): string[]
+  /** A relay-recorded child exit, distinct from a relay lost in a reboot. */
+  endedAt?(id: string): string | null
   /** Say WHY the child is about to end, so its exit is not read as a failure to fall back from. */
   markEnding(id: string, why: string): void
   ending(id: string): string | null
@@ -230,6 +232,13 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
   const store: DurableStore = {
     root,
     dirOf,
+    endedAt(id) {
+      try {
+        const exit = JSON.parse(read(id, FILES.exit) ?? 'null')
+        return typeof exit?.at === 'number' && Number.isFinite(exit.at)
+          ? new Date(exit.at).toISOString() : null
+      } catch { return null }
+    },
     create(id, saved) {
       const dir = dirOf(id)
       rmSync(dir, { recursive: true, force: true })

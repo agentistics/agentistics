@@ -40,7 +40,7 @@ import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { handoffSpawnDefaults, handoffTitle } from './handoff-inherit'
-import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
+import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, killAndRetireSession } from './registry'
 import { callerHoldsIdentity, callerProof, type CallerProof } from './session-identity'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
 import { newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
@@ -1463,7 +1463,10 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
   }, await resolveLang())
   if (flushed.warning) console.error(flushed.warning)
 
-  const confirmed = await backend.kill(id)
+  const confirmed = await killAndRetireSession(id, async () => {
+    const killed = await backend.kill(id)
+    return killed || statusBefore === 'lost' || statusBefore === 'exited'
+  })
   // A session that was already `lost` (the backend has nothing by this id — there was never
   // anything for `kill` to do) or `exited` (the hosted command already finished) is safe to clear
   // even on a backend report we cannot trust, because the reconciled view established BEFORE this
@@ -1476,7 +1479,6 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
   // MARKED finished, never deleted — see `retireSession`'s own docstring. A session filed under a
   // task must go on resolving in `loadTaskWorld`'s rows after `agentop session kill`, exactly as it
   // already does behind the web/cockpit kill verb.
-  await retireSession(id)
   console.log(`Killed ${id}.`)
   const f = folder ? folderByRef.get(folder) : undefined
   if (f) {

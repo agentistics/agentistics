@@ -72,6 +72,7 @@ function fakeSession(req: StructuredSpawn) {
     // test controls
     ask(a: StructuredAttention) { open = a; state = 'waiting-approval' },
     fail(reason: string) { state = 'exited'; for (const cb of exits) cb({ kind: 'failed', reason }) },
+    end() { state = 'exited'; for (const cb of exits) cb({ kind: 'ended' }) },
   }
   return s
 }
@@ -257,6 +258,20 @@ describe('withStructured — routing', () => {
 })
 
 describe('withStructured — fallback', () => {
+  test('a normal end records termination without triggering fallback', async () => {
+    const eng = fakeEngine()
+    const calls: string[] = []
+    const b = withStructured(fakeBase(), provider(eng.reg, {
+      onEnded: async id => { calls.push(`ended:${id}`) },
+      onFallback: () => { calls.push('fallback') },
+    }))
+    await b.spawn(web('gemini'))
+    eng.sessions[0]!.end()
+    await new Promise(r => setTimeout(r, 0))
+    expect(calls).toEqual(['ended:m-1'])
+    expect((await b.list()).find(s => s.id === 'm-1')?.alive).toBe(false)
+  })
+
   test('a refused structured start goes to tmux with the same request', async () => {
     const base = fakeBase()
     const eng = fakeEngine({ refuse: 'login needed' })

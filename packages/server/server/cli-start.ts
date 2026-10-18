@@ -191,7 +191,7 @@ import { withResumeLock } from './sessions/resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
 import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
 import {
-  addSession, adoptSessionRecords, newSessionId, linkConversationVerified, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession, touchSessions,
+  addSession, adoptSessionRecords, newSessionId, linkConversationVerified, patchSession, patchSessions, readRegistry, removeSession, retireFallenSessions, killAndRetireSession, touchSessions,
 } from './sessions/registry'
 import {
   createSessionsPoller, linkProcessConversation, sampleProcessLinks, SESSION_POLL_MS, type SessionsPoller,
@@ -1565,6 +1565,7 @@ let sessionsPoller: SessionsPoller | null = null
 export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeof createSessionsPoller>[0] {
   return {
     backend, readRegistry, scanProcesses, loadConversations, touchSessions,
+    endSessions: (ids, endedAt) => patchSessions(ids, { endedAt }),
     loadHarnessSessions,
     // The exact-link reopen (`reopen-target.ts`): without it a row whose conversation the store
     // lacks — every agy session agentop started — offers no reopen.
@@ -3907,13 +3908,12 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // HANDOFF.RELAY: a predecessor's last answer to the owner reaches its successor before it dies.
       const { flushBeforeKill } = await import('./sessions/handoff-relay-io')
       const flushed = await flushBeforeKill(id, async (to, text) => (await this.promptSession!(to, text)).ok, lang)
-      if (!(await backend.kill(id))) return { ok: false, message: s.sessKillUnconfirmed(id) }
+      if (!(await killAndRetireSession(id, () => backend.kill(id)))) return { ok: false, message: s.sessKillUnconfirmed(id) }
       // MARKED finished, never deleted — see `retireSession`'s own docstring. Removing the row
       // took with it the only record of which conversation this was — the store had not caught up,
       // so there was nothing left to offer as reopenable and the session simply vanished from the
       // screen. A session you end is still a thing that happened, and picking it back up is the
       // ordinary next thing to want.
-      await retireSession(id)
       forgetConversations()
       return { ok: true, message: flushed.warning ? `${s.sessKilled(id)} ${flushed.warning}` : s.sessKilled(id) }
     },
