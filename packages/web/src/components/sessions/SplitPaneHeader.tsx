@@ -1,3 +1,4 @@
+import { HandoffMeter } from './HandoffWarning'
 /**
  * SplitPaneHeader — one side's own header in the split sessions workspace.
  *
@@ -88,6 +89,7 @@ export function SplitPaneHeader(p: SplitPaneHeaderProps) {
         </span>
       </div>
 
+      <HandoffMeter id={s.id} pt={pt} act={p.act} />
       {s.conversationId !== undefined && (
         <SessionStatsMenu
           harness={s.harness}

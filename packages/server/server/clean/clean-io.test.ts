@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
@@ -64,5 +64,45 @@ describe('clean io (real git)', () => {
     const started = Date.now()
     expect(await repoOf(target, { env: { ...env, PATH: root }, timeoutMs: 25 })).toBeNull()
     expect(Date.now() - started).toBeLessThan(1000)
+  })
+})
+
+
+describe('live scan callbacks and cancellation', () => {
+  test('emits one start and completed fact per worktree without changing the plan', async () => {
+    const { r } = repo()
+    const started: string[] = [], completed: string[] = []
+    let total = 0
+    const facts = await worktreeFacts(r, { env, onDiscover: count => { total = count }, onItemStart: path => started.push(path), onItem: fact => completed.push(fact.path) })
+    expect(total).toBe(facts.length)
+    expect([...started].sort()).toEqual(facts.map(f => f.path).sort())
+    expect([...completed].sort()).toEqual([...started].sort())
+  })
+  test('a pre-cancelled scan starts no process and emits no completed item', async () => {
+    const controller = new AbortController(); controller.abort()
+    const completed: string[] = []
+    await expect(worktreeFacts('/does-not-exist', { env, signal: controller.signal, onItem: f => completed.push(f.path) })).rejects.toThrow()
+    expect(completed).toEqual([])
+  })
+  test('cancellation interrupts a process even when its child holds stdout open', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'clean-abort-'))); dirs.push(root)
+    const fakeBin = join(root, 'git'); writeFileSync(fakeBin, '#!/bin/sh\nsleep 10\n'); chmodSync(fakeBin, 0o755)
+    const target = join(root, 'repo'); mkdirSync(target)
+    const controller = new AbortController()
+    const task = repoOf(target, { env: { ...env, PATH: `${root}:/usr/bin:/bin` }, signal: controller.signal })
+    const started = Date.now()
+    const timeout = setTimeout(() => controller.abort(), 25)
+    try { await expect(task).rejects.toThrow(); expect(Date.now() - started).toBeLessThan(1000) }
+    finally { clearTimeout(timeout) }
+  })
+  test.skipIf(process.platform !== 'linux')('newest nested mtime wins over the commit without another walk', async () => {
+    const { root, r } = repo()
+    const nested = join(root, 'wip', 'node_modules', 'x', 'f')
+    const future = new Date(Date.now() + 86_400_000)
+    utimesSync(nested, future, future)
+    const facts = await worktreeFacts(r, { env })
+    const wip = facts.find(f => f.path === join(root, 'wip'))!
+    expect(wip.lastActivityMs!).toBeGreaterThanOrEqual(Math.floor(future.getTime() / 1000) * 1000)
+    expect(wip.lastActivityMs!).toBeGreaterThan(wip.lastCommitMs!)
   })
 })

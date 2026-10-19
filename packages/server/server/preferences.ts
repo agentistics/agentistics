@@ -78,6 +78,8 @@ export interface CustomGridItem {
 }
 
 export interface Preferences {
+  /** Owner-selected leader handoff cut and visible warnings. */
+  handoffConfig?: import('@agentistics/core').HandoffConfig
   /** Server-owned leadership check-in agendas, keyed by conversation id. */
   checkin?: Record<string, unknown>
   /** Live defaults for leader agendas without an individual override. */

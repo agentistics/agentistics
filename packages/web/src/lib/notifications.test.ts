@@ -461,3 +461,17 @@ test('every retirement expiry reason code has translated copy, including multipl
     expect(message).not.toMatch(/\{\w+\}/)
   }
 })
+
+describe('cleanup completion wording', () => {
+  test('uses real plurals and omits empty categories in both languages', async () => {
+    const s = await freshStore()
+    const completion = (meta: Record<string, unknown>, lang: 'pt' | 'en') => s.resolveNotification(note('done', { code: 'clean.done', meta: { freed: '100 MB', ...meta } }), lang).message
+    expect(completion({ worktrees: 1, nodeModules: 0 }, 'pt')).toBe('100 MB liberados. Removidos: 1 worktree.')
+    expect(completion({ worktrees: 0, nodeModules: 1 }, 'pt')).toBe('100 MB liberados. Removidos: 1 pasta de dependências.')
+    expect(completion({ worktrees: 2, nodeModules: 2 }, 'pt')).toContain('2 worktrees e 2 pastas de dependências')
+    expect(completion({ worktrees: 1, nodeModules: 0 }, 'en')).toBe('100 MB freed. Removed: 1 worktree.')
+    expect(completion({ worktrees: 0, nodeModules: 1 }, 'en')).toBe('100 MB freed. Removed: 1 dependency folder.')
+    expect(completion({ worktrees: 2, nodeModules: 2 }, 'en')).toContain('2 worktrees and 2 dependency folders')
+    expect(s.resolveNotification(note('partial', { code: 'clean.partial', meta: { freed: '0 B', skipped: 1, errors: 0 } }), 'pt').message).toBe('0 B liberados. 1 item mantido por segurança.')
+  })
+})

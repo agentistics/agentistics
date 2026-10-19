@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.142.0': {
+    features: [
+      {
+        pt: 'Nova limpeza de disco: a varredura mostra o progresso, pode seguir em segundo plano pelo sino e termina numa lista com filtros, tamanhos e o que dá para liberar.',
+        en: 'New disk cleanup: the scan shows its progress, can keep going in the background from the bell, and ends in a list with filters, sizes and what can be freed.',
+      },
+      {
+        pt: 'Sessões líderes mostram um medidor da conversa no topo e, na hora certa, um aviso com o painel "continuar ou passar o líder", com custos lado a lado.',
+        en: 'Leader sessions show a conversation meter at the top and, when it is time, a notice with the "continue or hand off" panel, costs side by side.',
+      },
+      {
+        pt: 'Em Configurações › Sessões dá para escolher quando avisar sobre a passagem de líder.',
+        en: 'Settings › Sessions lets you choose when to be told about a leader hand-off.',
+      },
+    ],
+    fixes: [],
+  },
   '2.141.0': {
     features: [
       {

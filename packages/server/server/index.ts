@@ -88,7 +88,7 @@ import { validateSecret, ensureSessionSecret } from './secret-store'
 import { requiresStepUp, verifyStepUp, STEPUP_HEADER } from './stepup'
 import { writeAudit, ensureAuditIndexes, listAudit } from './audit'
 import { safeError } from './errors'
-import { cleanPlanResponse, applyCleanSelection, cleanJob } from './clean/clean-web'
+import { cleanPlanResponse, applyCleanSelection, cleanJob, cleanScanState, backgroundCleanScan, cancelCleanScan, finalizeCleanScan } from './clean/clean-web'
 import { LIMITS, readJsonLimited } from './limits'
 // Type only, and from the LEAF: `sessions/fleet-web.ts` reaches `cli-start.ts` and through it Ink
 // and React, so this server names only `fleet-row.ts` — the two handlers load the implementation by
@@ -1059,6 +1059,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         return json(result)
       } catch (err) { return json({ error: String(err) }, 500) }
     }
+    if (url.pathname === '/api/clean/scan' && req.method === 'GET') return json(cleanScanState())
+    if (url.pathname === '/api/clean/background' && req.method === 'POST') return json(backgroundCleanScan())
+    if (url.pathname === '/api/clean/cancel' && req.method === 'POST') return json(cancelCleanScan())
+    if (url.pathname === '/api/clean/finalize' && req.method === 'POST') { finalizeCleanScan(); return json({ ok: true }) }
     if (url.pathname === '/api/clean/apply' && req.method === 'POST') {
       try {
         const body = await req.json() as { ids?: unknown }
@@ -1204,6 +1208,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/preferences' && req.method === 'PUT') {
       try {
         let body = await req.json() as Preferences
+        if (body.handoffConfig !== undefined) {
+          const { normalizeHandoffConfig } = await import('@agentistics/core')
+          body.handoffConfig = normalizeHandoffConfig(body.handoffConfig)
+        }
         // C1: never let a PUT wipe `connections[]`. An old cached tab still PUTs a full flat solo
         // `team` object to disconnect (the current UI uses DELETE /api/team/connections/:id), and
         // that payload carries `connections: []` — which mergeTeamPayload honours as an explicit
@@ -2772,6 +2780,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const body = await readFleetBody(fleetLang(url.searchParams.get('lang')), readFleetView(url))
       return new Response(body, {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const handoffPanel = url.pathname.match(/^\/api\/sessions\/([^/]+)\/handoff-panel$/)
+    if (handoffPanel && req.method === 'GET') {
+      const { readHandoffPanel, fleetLang } = await import('./sessions/fleet-web')
+      const extra = url.searchParams.get('extraPercent')
+      const out = await readHandoffPanel(fleetLang(url.searchParams.get('lang')), decodeURIComponent(handoffPanel[1]!), extra !== null && extra.trim() !== '' ? Number(extra) : undefined)
+      return new Response(JSON.stringify(out ?? { error: 'not_found' }), {
+        status: out ? 200 : 404,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       })
     }
 

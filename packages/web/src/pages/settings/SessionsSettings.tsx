@@ -1,3 +1,4 @@
+import HandoffSettings from './HandoffSettings'
 import React, { useState, useEffect } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { Check, HardDrive, FolderClock, ExternalLink, DatabaseZap } from 'lucide-react'
@@ -258,6 +259,8 @@ export default function SessionsSettings() {
 
   return (
     <div>
+      <HandoffSettings pt={pt} />
+      <Divider />
       <CheckinDefaultsSection pt={pt} isMobile={isMobile} />
 
       <Divider />
