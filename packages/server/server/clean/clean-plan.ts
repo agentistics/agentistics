@@ -19,6 +19,8 @@ export interface WorktreeFacts {
   dirty: boolean
   /** Epoch ms of the last commit, null when unknown. */
   lastCommitMs: number | null
+  /** Newest observed mtime or commit; display only, never changes removal eligibility. */
+  lastActivityMs?: number | null
   sizeBytes: number
   nodeModulesBytes: number
 }
