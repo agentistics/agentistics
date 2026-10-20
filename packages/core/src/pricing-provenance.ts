@@ -23,6 +23,10 @@ const OPENAI = 'developers.openai.com/api/docs/pricing'
 
 /** One entry per `MODEL_PRICING` key, transcribed from the comments beside each row. */
 export const PRICE_PROVENANCE: Record<string, PriceProvenance> = {
+  'gemini-3.8-flash': { source: GOOGLE, verifiedAt: '2026-10-20' },
+  'gpt-6.1-sol': { source: OPENAI, verifiedAt: '2026-10-20' },
+  'gpt-6-astra': { source: OPENAI, verifiedAt: '2026-10-20' },
+  'gpt-6-luna': { source: OPENAI, verifiedAt: '2026-10-20' },
   'claude-fable-5': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
   'claude-mythos-5': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
   'claude-opus-5': { source: ANTHROPIC, verifiedAt: '2026-07-27' },

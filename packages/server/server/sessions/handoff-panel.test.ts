@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test'
-import { computeHandoffPanel, quotaRate, type QuotaObservation } from './handoff-panel'
+import { computeHandoffPanel, createHandoffQuotaSampler, handoffMetrics, quotaRate, type QuotaObservation } from './handoff-panel'
+import { toConversation } from './conversations'
+import type { HarnessId, SessionMeta } from '@agentistics/core'
 import { computeHandoffWhy, planHandoffHints } from './handoff-hint'
 
 const leader = { id: 'leader', title: '[ LEADER ] - test', contextTokens: 256_000, contextWindow: 1_000_000, model: 'claude-opus-4-6', turns: 84, costUSD: 18.4, calls: 150 }
@@ -58,5 +60,79 @@ describe('measured plan quota estimates', () => {
       expect(quotaRate(before, current)).toEqual({ fiveHourPctPerUSD: null, weekPctPerUSD: null })
     }
     expect(quotaRate(previous, { ...current, fiveHour: { usedPct: 1, resetsAt: 8_888_888 } })).toEqual({ fiveHourPctPerUSD: null, weekPctPerUSD: .5 })
+  })
+})
+
+describe('recorded metrics across harnesses', () => {
+  const cases: [HarnessId, string, string, number, number][] = [
+    ['claude', 'opus', 'claude-opus-5-5', .2, 1.8],
+    ['codex', 'gpt-6.1-sol', 'gpt-6.1-sol', .1, .9],
+    ['gemini', 'auto', 'gemini-3.8-flash', .075, .525],
+    ['copilot', 'auto', 'gpt-6.1-sol', .1, .9],
+    ['antigravity', 'gemini-3.8-flash-high', 'gemini-3.8-flash-high', .075, .525],
+    ['kimi', 'default', 'claude-opus-5-5', .2, 1.8],
+    ['opencode', 'default', 'gpt-6-astra', 1, 7],
+  ]
+  for (const [harness, spawnModel, model, cacheRate, spent] of cases) {
+    it(`${harness}: uses observed usage and model instead of the spawn alias`, () => {
+      const conversation = toConversation({
+        session_id: harness === 'gemini' ? 'project/session-2026-10-20.json' : 'native-id',
+        native_session_id: harness === 'gemini' ? 'native-id' : undefined,
+        harness, model, project_path: '/work/task', start_time: '2026-10-20T12:00:00Z',
+        input_tokens: 100_000, output_tokens: 20_000, cache_read_input_tokens: 5_000_000,
+        cache_creation_input_tokens: 0, assistant_message_count: 84, user_message_count: 12,
+        context_tokens: 186_875, context_window: 1_000_000,
+      } as SessionMeta)
+      const row = handoffMetrics({ id: 'managed', title: 'Leader', harness, model: spawnModel, conversationId: 'native-id' }, [conversation])
+      const p = computeHandoffPanel(row, null, { fiveHourPctPerUSD: 2, weekPctPerUSD: .5 })
+      expect(p.spentUSD).toBeCloseTo(spent)
+      expect(p.replies).toBe(84)
+      expect(p.nextReplyUSD).toBeCloseTo(186_875 / 1_000_000 * cacheRate)
+      expect(p.successorReplyUSD).toBeCloseTo(.1 * cacheRate)
+      expect(p.handoffOverheadUSD).toBeGreaterThan(0)
+      for (const projection of p.projections) {
+        expect(projection.costUSD).toBeGreaterThan(0)
+        expect(projection.fiveHourPct).toBeCloseTo(projection.costUSD! * 2)
+        expect(projection.weekPct).toBeCloseTo(projection.costUSD! * .5)
+      }
+    })
+  }
+  it('does not borrow a different conversation or harness, even in the same directory', () => {
+    const c = { sessionId: 'other-id', harness: 'claude', cwd: '/work', model: 'claude-opus-5-5', costUSD: 7 } as const
+    const row = { id: 'm', title: 'Leader', harness: 'claude', conversationId: 'missing', model: 'opus' }
+    for (const source of [[c], [{ ...c, sessionId: 'missing', harness: 'gemini' as const }], []]) {
+      const p = computeHandoffPanel(handoffMetrics(row, source as ReturnType<typeof toConversation>[]), null)
+      expect(p.spentUSD).toBeNull()
+      expect(p.nextReplyUSD).toBeNull()
+    }
+  })
+})
+
+describe('quota calibration lifecycle', () => {
+  const sample = (at: number, totalUSD: number, five = 20, week = 30): QuotaObservation => ({
+    at, totalUSD, population: 'a,b',
+    fiveHour: { usedPct: five, resetsAt: 50_000_000 },
+    week: { usedPct: week, resetsAt: 500_000_000 },
+  })
+  it('keeps a useful baseline past five minutes and holds the rate between rounded readings', () => {
+    const sampler = createHandoffQuotaSampler()
+    expect(sampler.observe('codex:a', sample(0, 10))).toEqual({ fiveHourPctPerUSD: null, weekPctPerUSD: null })
+    sampler.observe('codex:a', sample(6 * 60_000, 11))
+    expect(sampler.observe('codex:a', sample(7 * 60_000, 12, 24, 31))).toEqual({ fiveHourPctPerUSD: 2, weekPctPerUSD: .5 })
+    expect(sampler.observe('codex:a', sample(8 * 60_000, 13, 24, 31))).toEqual({ fiveHourPctPerUSD: 2, weekPctPerUSD: .5 })
+    expect(sampler.observe('codex:a', sample(9 * 60_000, 14, 28, 32))).toEqual({ fiveHourPctPerUSD: 2, weekPctPerUSD: .5 })
+  })
+  it('isolates harnesses/accounts, renewals, population changes and missing or stale data', () => {
+    const sampler = createHandoffQuotaSampler()
+    sampler.observe('claude:a', sample(0, 10))
+    expect(sampler.observe('claude:a', sample(60_000, 12, 24, 31))).toEqual({ fiveHourPctPerUSD: 2, weekPctPerUSD: .5 })
+    expect(sampler.observe('codex:a', sample(60_000, 12, 24, 31)).fiveHourPctPerUSD).toBeNull()
+    expect(sampler.observe('claude:b', sample(60_000, 12, 24, 31)).weekPctPerUSD).toBeNull()
+    expect(sampler.observe('claude:a', { ...sample(120_000, 13, 1, 31), fiveHour: { usedPct: 1, resetsAt: 60_000_000 } })).toEqual({ fiveHourPctPerUSD: null, weekPctPerUSD: .5 })
+    expect(sampler.observe('claude:a', { ...sample(180_000, 14), population: 'a' }).weekPctPerUSD).toBeNull()
+    expect(sampler.observe('claude:a', { ...sample(240_000, 15), week: undefined }).weekPctPerUSD).toBeNull()
+    expect(sampler.observe('claude:a', sample(40 * 60_000, 20, 40, 40))).toEqual({ fiveHourPctPerUSD: null, weekPctPerUSD: null })
+    sampler.forget('claude:a')
+    expect(sampler.observe('claude:a', sample(41 * 60_000, 21, 42, 41)).fiveHourPctPerUSD).toBeNull()
   })
 })

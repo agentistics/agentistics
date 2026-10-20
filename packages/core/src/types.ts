@@ -1044,6 +1044,8 @@ const BASE_MODEL_PRICING: Record<string, { input: number; output: number; cacheR
   'claude-haiku-3-5-20241022':  { input: 0.80, output: 4,    cacheRead: 0.08, cacheWrite: 1.00  },
   'claude-3-haiku-20240307':    { input: 0.25, output: 1.25, cacheRead: 0.03, cacheWrite: 0.30  },
   // Google (Gemini CLI, Antigravity CLI) — verified from ai.google.dev/gemini-api/docs/pricing
+  // Gemini 3.8 introductory Standard rates through 2026-12-31, checked 2026-10-20.
+  'gemini-3.8-flash':       { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   // (3.6/lite rows re-checked 2026-07-27; the rest 2026-06-22).
   // Gemini has no separate cache-write charge; cacheWrite is set to the input rate
   // and is unused in practice.
@@ -1067,6 +1069,10 @@ const BASE_MODEL_PRICING: Record<string, { input: number; output: number; cacheR
   // OpenAI has no separate cache-write charge; cacheWrite is set to the input rate
   // and is unused in practice (the Codex parser always sets cache_creation tokens to 0).
   'gpt-5.6-sol':    { input: 5,    output: 30, cacheRead: 0.50,  cacheWrite: 5    },
+  // Standard short-context rates, developers.openai.com/api/docs/pricing, checked 2026-10-20.
+  'gpt-6.1-sol':    { input: 2,    output: 10, cacheRead: 0.10, cacheWrite: 2.5 },
+  'gpt-6-astra':    { input: 10,   output: 50, cacheRead: 1,    cacheWrite: 12.5 },
+  'gpt-6-luna':     { input: 0.1,  output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   'gpt-5.6-terra':  { input: 2.5,  output: 15, cacheRead: 0.25,  cacheWrite: 2.5  },
   'gpt-5.6-luna':   { input: 1,    output: 6,  cacheRead: 0.10,  cacheWrite: 1    },
   'gpt-5.5':        { input: 5,    output: 30, cacheRead: 0.50,  cacheWrite: 5    },
