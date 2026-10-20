@@ -84,8 +84,10 @@ describe('desktop', () => {
     expect(host.querySelectorAll('[role="tab"]').length).toBe(3)
     expect(opacity(close('a')!)).toBe('1')
     expect(opacity(close('b')!)).toBe('0')
+    expect(parseFloat(close('b')!.style.width)).toBe(0)
     act(() => { tab('b').dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true })) })
     expect(opacity(close('b')!)).toBe('1')
+    expect(close('b')!.style.width).toBe('20px')
     for (const [id, h] of [['a', 'claude'], ['b', 'codex'], ['c', 'gemini']] as const) {
       const mark = tab(id).querySelector('[data-harness-mark]') ?? tab(id).querySelector(`[aria-label*="${h}" i], [title*="${h}" i]`)
       expect(mark).not.toBeNull()
@@ -268,7 +270,7 @@ for (const width of [1280, 390]) {
     expect(tab('b').tabIndex).toBe(-1)
   })
 
-  test(`full titles wrap in the scrolling strip and menu; sleeping leaders keep their badge (${width}px)`, () => {
+  test(`tab titles stay on one line and menus retain full titles; sleeping leaders keep their badge (${width}px)`, () => {
     (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height: 800 })
     act(() => pins.togglePinnedSession('b'))
     const title = 'Agentistics Side Tasks — all the work ready for review'
@@ -276,7 +278,7 @@ for (const width of [1280, 390]) {
     const track = host.querySelector<HTMLElement>('[role="tablist"]')!
     expect(track.style.overflowX).toBe('auto')
     expect(track.style.scrollSnapType).toBe('x mandatory')
-    expect(tab('a').textContent).toContain(title)
+    expect(tab('a').querySelector('[data-session-title]')?.textContent).toBe('Agentistics Side Tasks — all')
     expect(tab('a').textContent).not.toContain('[ LÍDER ]')
     expect(tab('a').style.scrollSnapAlign).toBe('center')
     expect(tab('a').style.width).toBe(width === 390 ? '100%' : 'max-content')
@@ -288,6 +290,32 @@ for (const width of [1280, 390]) {
     expect(sleeping.querySelector('[data-menu-title]')?.textContent).toBe(title)
     expect(sleeping.textContent).toContain('Leader')
     expect(sleeping.textContent).not.toContain('[ LÍDER ]')
-    expect(sleeping.querySelector('[data-menu-title]')?.parentElement?.style.whiteSpace).toBe('normal')
+    expect(sleeping.querySelector<HTMLElement>('[data-menu-title]')?.style.whiteSpace).toBe('nowrap')
+  })
+}
+
+for (const width of [1280, 390]) {
+  test(`long titles use a word boundary and fade without ellipses; short titles stay whole (${width}px)`, () => {
+    (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height: 800 })
+    const title = 'Descoberta icone nay fora da aplicacao com opcao ligavel e desligavel diretamente no icone flutuante'
+    expect(title.length).toBe(100)
+    render([{ ...mk('a'), title }, mk('b'), { ...mk('c'), title: 'x'.repeat(100) }])
+    const long = tab('a').querySelector<HTMLElement>('[data-session-title]')!
+    expect(long.textContent).toBe('Descoberta icone nay fora da')
+    expect(long.textContent!.length).toBeLessThanOrEqual(28)
+    expect(long.textContent).not.toContain('…')
+    expect(long.style.whiteSpace).toBe('nowrap')
+    expect(long.style.overflow).toBe('hidden')
+    expect(long.style.maskImage).toContain('linear-gradient')
+    expect(long.title).toBe(title)
+    expect(tab('a').title).toContain(title)
+    expect(tab('c').querySelector('[data-session-title]')!.textContent).toBe('x'.repeat(28))
+    const short = tab('b').querySelector<HTMLElement>('[data-session-title]')!
+    expect(short.textContent).toBe('Title b')
+    expect(short.style.maskImage).toBe('')
+    expect(tab('a').style.height).toBe(tab('b').style.height)
+    expect(tab('a').style.maxWidth).toBe(width === 390 ? '100%' : '240px')
+    expect(parseFloat(tab('a').style.minWidth)).toBe(width === 390 ? 132 : 0)
+    expect(long.parentElement!.style.flex).toBe('0 0 auto')
   })
 }

@@ -1,4 +1,5 @@
 import { ActionNotice } from './ActionNotice'
+import { SessionTitleLine, TAB_TITLE_BUDGET } from './SessionTitleLine'
 /**
  * SessionTabStrip — the open conversations as tabs, in their own row at the top of the conversation
  * panel (rounded tabs in a segmented track; flag `sessionTabs`). The header above it is unchanged.
@@ -98,6 +99,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
   const [focus, setFocus] = useState(false)
   const [btnFocus, setBtnFocus] = useState(false)
   const big = mobile || touch
+  const showClose = active || hover || focus || btnFocus || big
   const press = useRef<ReturnType<typeof setTimeout> | null>(null)
   const state = row?.state ?? 'unknown'
   const label = row?.stateLabel ?? (pt ? 'sem estado' : 'no state')
@@ -107,13 +109,13 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
   const clear = () => { if (press.current !== null) { clearTimeout(press.current); press.current = null } }
   const btn: CSSProperties = {
     display: 'flex', width: big ? 32 : 20, height: big ? 32 : 20, alignItems: 'center', justifyContent: 'center',
-    borderRadius: 4, flexShrink: 0, padding: 0, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+    borderRadius: 4, flexShrink: 0, marginLeft: mobile ? 'auto' : undefined, padding: 0, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
   }
   const style: CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
-    minHeight: mobile ? 44 : 30, padding: '5px 6px 5px 12px', borderRadius: 8, boxSizing: 'border-box',
+    height: big ? 44 : 30, padding: '5px 6px 5px 12px', borderRadius: 8, boxSizing: 'border-box',
     fontSize: 12, scrollSnapAlign: 'center', scrollSnapStop: 'always',
-    minWidth: mobile ? 132 : 110, width: mobile ? '100%' : 'max-content', maxWidth: mobile ? '100%' : 360,
+    minWidth: mobile ? 132 : 0, width: mobile ? '100%' : 'max-content', maxWidth: mobile ? '100%' : 240,
     fontWeight: active || needs ? 650 : 500,
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
     background: active ? 'var(--bg-elevated)' : hover ? 'color-mix(in srgb, var(--bg-elevated) 50%, transparent)' : 'transparent',
@@ -148,7 +150,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
       <TabStatus state={state} label={label} />
       {row && <span style={{ display: 'inline-flex', flexShrink: 0, opacity: active ? 1 : 0.6 }}><HarnessMark harness={row.harness} size={14} /></span>}
       {(role === 'leader' || hasLeaderTitle(row?.title ?? '')) && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0, opacity: active ? 1 : 0.6 }} />}
-      <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1 }}>{title}</span>
+      <SessionTitleLine title={title} budget={TAB_TITLE_BUDGET} opacity={ended && !active ? 0.7 : 1} />
       {pinned
         ? (
           <button
@@ -168,9 +170,9 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
             onKeyDown={stopKeys}
             onFocus={() => setBtnFocus(true)} onBlur={() => setBtnFocus(false)}
             style={{
-              ...btn, color: 'var(--text-secondary)',
+              ...btn, width: showClose ? btn.width : 0, overflow: 'hidden', color: 'var(--text-secondary)',
               background: hover ? 'var(--bg-elevated)' : 'transparent',
-              opacity: active || hover || focus || btnFocus || big ? 1 : 0,
+              opacity: showClose ? 1 : 0,
               outline: btnFocus ? FOCUS_RING : 'none',
             }}
           ><X size={13} /></button>

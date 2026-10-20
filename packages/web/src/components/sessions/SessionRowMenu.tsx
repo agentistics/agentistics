@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom'
 import { Pin } from 'lucide-react'
 import { isInsidePortalledMenu, menuMaxHeight, type MenuEntry } from '../../lib/rowMenu'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { SessionTitleLine } from './SessionTitleLine'
 import { RoleChip } from './RoleChip'
 import { BetaTag } from '../BetaTag'
 import { SESSION_ROW_MENU_Z } from '../../lib/zLayers'
@@ -98,8 +99,13 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, 
           {(sessionList || e.pinned) && <span aria-hidden style={{ width: 11, flexShrink: 0 }}>{e.pinned && <Pin size={11} style={{ color: 'var(--anthropic-orange)' }} />}</span>}
           {(sessionList || e.color) && <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: '50%', background: e.color ?? 'transparent' }} />}
           <span style={{ flex: 1, minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.4 }}>
-            <span data-menu-title>{e.label}</span>
-            {e.leader && <span style={{ display: 'inline-block', marginLeft: 6 }}><RoleChip role="leader" pt={e.leaderLabel === 'Líder'} /></span>}
+            {sessionList ? <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <SessionTitleLine title={e.label} menu />
+              {e.leader && <span style={{ flexShrink: 0 }}><RoleChip role="leader" pt={e.leaderLabel === 'Líder'} /></span>}
+            </span> : <>
+              <span data-menu-title>{e.label}</span>
+              {e.leader && <span style={{ display: 'inline-block', marginLeft: 6 }}><RoleChip role="leader" pt={e.leaderLabel === 'Líder'} /></span>}
+            </>}
             {e.detail && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-tertiary)' }}>{e.detail}</span>}
           </span>
           {e.checked && <span aria-hidden style={{ marginLeft: 'auto', flexShrink: 0, width: 12, color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>✓</span>}

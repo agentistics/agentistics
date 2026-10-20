@@ -37,8 +37,12 @@ This row starts collapsed and remembers expansion with the existing ended-sectio
 The Pinned header counts both live and sleeping pins. Pins load their deferred ended sessions even
 with Active only enabled; status/value filters leave them visible, while search narrows them. Sleeping cards can still be opened for reading,
 reopened, or unpinned; sleeping never removes the pin. Leader names omit the role prefix and keep
-an explicit Líder/Leader badge in cards and the tabs menu. Titles wrap without ellipses; the menu
-can grow to the viewport gutter. On phones each tab fits the scrolling track, with mandatory scroll
+an explicit Líder/Leader badge in cards and the tabs menu. Tab titles stay on one line in constant-height tabs, capped at 240px on desktop. They show up to
+28 characters, measuring the available space after icons and controls to fit whole words whenever
+possible and fading without ellipses. Desktop tabs hug the fitted title and controls; mobile tabs
+fill the track. Full titles
+remain in tooltips and the tabs menu, whose title line fades only when clipped; the menu can grow
+to the viewport gutter. Card titles can wrap. On phones each tab fits the scrolling track, with mandatory scroll
 snapping and the active tab scrolled into view. Arrow keys, Home and End move the tab's focus;
 Enter or Space opens the focused tab. Row pin/open/reopen controls are separate buttons. Reopen
 uses an icon with an explicit label and foreground contrast. Disabled reopen icons expose the same
