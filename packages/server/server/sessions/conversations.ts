@@ -27,6 +27,8 @@ export interface Conversation {
    */
   nativeId?: string
   harness: HarnessId
+  /** Model actually recorded by the harness, rather than the spawn option/alias. */
+  model?: string
   cwd: string
   /** `sessionLabel()`: the user's own name, else the harness title, else the opening prompt. */
   title: string
@@ -122,6 +124,7 @@ export function toConversation(s: SessionMeta): Conversation {
     sessionId: s.session_id,
     ...(s.native_session_id ? { nativeId: s.native_session_id } : {}),
     harness,
+    ...(s.model ? { model: s.model } : {}),
     startedMs: Date.parse(s.start_time) || 0,
     // Where the session IS: a worktree session records it as `current_cwd` while `project_path`
     // stays at the root, and reopening it should land where the work was happening.

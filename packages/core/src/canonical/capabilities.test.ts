@@ -354,7 +354,7 @@ describe('LEGACY_FALSE_NOTES — the classification of every legacy false', () =
     'codex.agents': 'not_supported', 'codex.gitLines': 'not_supported', 'codex.dynamicWorkflows': 'unknown',
     'codex.compaction': 'not_supported', 'codex.skills': 'unknown', 'codex.mcpServers': 'not_supported',
     'gemini.agents': 'not_supported', 'gemini.gitLines': 'not_supported', 'gemini.dynamicWorkflows': 'unknown',
-    'gemini.contextWindow': 'unknown', 'gemini.compaction': 'not_supported', 'gemini.skills': 'unknown',
+    'gemini.compaction': 'not_supported', 'gemini.skills': 'unknown',
     'gemini.mcpServers': 'not_supported',
     'copilot.agents': 'not_supported', 'copilot.dynamicWorkflows': 'unknown', 'copilot.contextWindow': 'not_supported',
     'copilot.compaction': 'not_supported', 'copilot.skills': 'unknown', 'copilot.mcpServers': 'not_supported',

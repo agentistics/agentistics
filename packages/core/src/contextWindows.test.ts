@@ -16,12 +16,12 @@ describe('CONTEXT_WINDOWS — provenance is structural', () => {
     }
   })
 
-  it('holds no model whose window could not be verified', () => {
-    // OpenAI and Google publish no citable input-token limit (checked 2026-08-14), so their models
-    // are ABSENT rather than estimated. Codex does not need them — it reports its own window.
-    for (const id of Object.keys(CONTEXT_WINDOWS)) {
-      expect(id.startsWith('claude-')).toBe(true)
-    }
+  it('uses the verified Gemini 3.8 input limit, including effort suffixes', () => {
+    expect(resolveContextWindow('gemini-3.8-flash')).toEqual({
+      tokens: 1_048_576, verifiedAt: '2026-10-20',
+      source: 'ai.google.dev/gemini-api/docs/models/gemini-3.8-flash',
+    })
+    expect(resolveContextWindow('gemini-3.8-flash-high')?.tokens).toBe(1_048_576)
   })
 })
 

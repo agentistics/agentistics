@@ -1,6 +1,21 @@
 import { describe, test, test as it, expect } from 'bun:test'
 import { parseGeminiChat } from './gemini-parse'
 
+test('current context uses the newest measured prompt, including cache, never accumulated input', () => {
+  const messages = [
+    { type: 'gemini', timestamp: '2026-10-20T12:01:00Z', content: 'newer', tokens: { input: 120_000, cached: 100_000 } },
+    { type: 'gemini', timestamp: '2026-10-20T12:00:00Z', content: 'older', tokens: { input: 220_000, cached: 180_000 } },
+    { type: 'gemini', timestamp: '2026-10-20T12:02:00Z', content: 'missing', tokens: { cached: 200_000 } },
+    { type: 'gemini', timestamp: '2026-10-20T12:03:00Z', content: 'invalid', tokens: { input: -1 } },
+  ]
+  const rich = parseGeminiChat(JSON.stringify({ messages }), 'id', '/work')!
+  const jsonl = parseGeminiChat([{ sessionId: 'id' }, ...messages].map(m => JSON.stringify(m)).join('\n'), 'id', '/work')!
+  for (const session of [rich, jsonl]) expect(session.context_tokens).toBe(120_000)
+  for (const message of [{ type: 'gemini', content: 'no usage' }, { type: 'gemini', content: 'invalid usage', tokens: { input: null } }]) {
+    expect(parseGeminiChat(JSON.stringify({ messages: [message] }), 'id', '/work')!.context_tokens).toBeUndefined()
+  }
+})
+
 // ---------------------------------------------------------------------------
 // Rich JSON format — the real format used by Gemini CLI for actual conversations.
 // Top-level object with messages[] array; each 'gemini' message carries tokens/model.

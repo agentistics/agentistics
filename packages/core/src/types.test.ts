@@ -121,6 +121,10 @@ function usage(overrides: Partial<ModelUsage> = {}): ModelUsage {
 // getModelPrice
 
 describe('getModelPrice', () => {
+  test('current Claude cache discounts do not inherit older prefix prices', () => {
+    expect(getModelPrice('claude-sonnet-5-5').cacheRead).toBe(.10)
+    expect(getModelPrice('claude-fable-5-1').cacheRead).toBe(.25)
+  })
   test('claude-opus-5-5 has its own row, not the claude-opus-5 prefix fallback', () => {
     // platform.claude.com/docs/en/about-claude/pricing, read 2026-09-25. Without the row the
     // prefix match priced Opus 5.5 at Opus 5's $5/$25 — double.

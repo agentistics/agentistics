@@ -179,6 +179,7 @@ function parseRichJson(content: string, fallbackId: string, projectPath: string)
     ? Math.max(0, (new Date(lastUpdated).getTime() - new Date(startTime).getTime()) / 60000)
     : 0
 
+  const contextTokens = latestGeminiPrompt(parsed.messages)
   return {
     session_id: fallbackId,
     ...(nativeId ? { native_session_id: nativeId } : {}),
@@ -199,6 +200,7 @@ function parseRichJson(content: string, fallbackId: string, projectPath: string)
     languages: [],
     git_commits: gitCommits,
     git_pushes: gitPushes,
+    ...(contextTokens !== undefined ? { context_tokens: contextTokens } : {}),
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     cache_read_input_tokens: cacheRead,
@@ -362,6 +364,19 @@ export function uncachedInput(input: number | undefined, cached: number | undefi
   return Math.max(0, i - c)
 }
 
+/** The last measured prompt, including cache, never the session's accumulated input. */
+function latestGeminiPrompt(messages: readonly { type?: string; timestamp?: string; tokens?: { input?: number } }[] | undefined): number | undefined {
+  let latest: { tokens: number; at: number } | undefined
+  for (const message of messages ?? []) {
+    const input = message.tokens?.input
+    if (message.type !== 'gemini' || typeof input !== 'number' || !Number.isFinite(input) || input <= 0) continue
+    const timestamp = Date.parse(message.timestamp ?? '')
+    const at = Number.isFinite(timestamp) ? timestamp : latest?.at ?? 0
+    if (!latest || at >= latest.at) latest = { tokens: input, at }
+  }
+  return latest?.tokens
+}
+
 function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
   const { projectPath, startTime, endTime, messages } = data
 
@@ -446,6 +461,7 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
     ? Math.max(0, (new Date(closeAt).getTime() - new Date(startTime).getTime()) / 60000)
     : 0
 
+  const contextTokens = latestGeminiPrompt(messages)
   return {
     session_id: data.fallbackId,
     ...(data.nativeId ? { native_session_id: data.nativeId } : {}),
@@ -466,6 +482,7 @@ function buildJsonlSessionMeta(data: JsonlParsedData): SessionMeta | null {
     languages: [],
     git_commits: 0,
     git_pushes: 0,
+    ...(contextTokens !== undefined ? { context_tokens: contextTokens } : {}),
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     ...(sawTokens ? {} : { tokens_unavailable: true as const }),

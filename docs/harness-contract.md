@@ -118,6 +118,9 @@ the window. Rules:
   `usage.record`s are session totals; the per-turn `last_token_usage` / individual `usage.record`
   are what qualify. If the harness reports only running totals, `contextWindow: false` — even
   though `tokens: true`.
+- **Gemini rich/JSONL chats retain the latest measured `tokens.input`** (the API prompt token count,
+  already including cache). It is selected by message timestamp and is never summed to compute
+  current context. Gemini 3.8 Flash uses the verified input limit in the shared window table.
 - **Count the INPUT side only.** The prompt that was sent is fresh input + cache read + cache
   write; output is what came back and is not in the window when the turn is issued.
 - **A subagent's window is not the session's.** Where a harness folds child agents into one

@@ -97,10 +97,9 @@ const COMPACTION: LegacyFalseNote = {
  * The recorded reasons for today's legacy `false` cells. A reason is here only when a sentence
  * ALREADY EXISTED for it — a field docstring or entry comment in `types.ts`, a `HARNESS_INFO`
  * `missing` entry, the master spec — and `source` names which. A `false` with no such sentence has
- * NO entry and therefore reads as `unknown`; that is deliberate for eleven cells today
+ * NO entry and therefore reads as `unknown`; that is deliberate for ten cells today
  * (`dynamicWorkflows` on all five non-Claude harnesses — every source says only that it is
- * Claude-only, never that the others lack an orchestration tool; gemini `contextWindow` — its only
- * written reason says gemini carries no token data, which the table itself contradicts; `skills` on
+ * Claude-only, never that the others lack an orchestration tool; `skills` on
  * antigravity, codex, gemini, copilot and kimi — the only source for "the concept is absent" was the
  * `skills` docstring's "no other harness has the concept", which `sessions/skill-source.ts` shows
  * false for agy's own skill directories; an absence nobody verified is `unknown`, not a fact, and

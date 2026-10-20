@@ -48,17 +48,27 @@ The response contains:
 
 Unknown measurements are **null**, never guessed zeros. Money is estimated API-equivalent USD,
 using the known model's cache-read price, matching the existing `computeHandoffWhy` calculations.
+The exact linked conversation supplies its recorded model and per-model session spend through
+`toConversation` / `sessionCostUSD`; a spawn alias such as `opus` or `auto` is not a price identity.
+This applies to every harness, including Gemini's native-id/store-key distinction. Unlinked
+conversations never borrow measurements from another session in the same directory.
 The continue row estimates 20 replies at current context. The extra row estimates 20 replies at
 current context + X% of the *reported context window*, not X% of the cut. The successor row
 includes the existing one-off handoff overhead plus 20 replies at the existing successor base.
 An unknown model price or context window leaves dependent cells null.
 
 Quota percentages estimate **additional percentage points** of the account's 5-hour/week windows,
-not the share of remaining allowance. The adapter observes the plan-limits meters and the same
-account's fleet spend: positive utilization delta divided by positive spend delta, separately for
+not the share of remaining allowance. The adapter observes the existing plan-limits meters and the same
+account's fleet spend on passive fleet polls (at most once per 30 seconds), so calibration starts
+before the panel is opened. An open panel refreshes that same calibration on its normal poll.
+The rate is positive utilization delta divided by positive spend delta, separately for
 each window, multiplied by each projected cost. It requires unchanged account/session population
 and reset boundaries, and recent samples (at most 30 minutes apart). Unknown account attribution,
-missing measurements, renewal, unchanged utilization, or no observed spend leave quota cells null.
+missing measurements, renewal, or no observed spend leave quota cells null. Each window keeps
+its baseline for up to 30 minutes rather than discarding it every five minutes; after a positive
+measurement, its last useful rate survives unchanged rounded meter readings. Missing, expired,
+or stale meters (over 30 minutes old), population changes, counter decreases and renewals discard
+the affected calibration. The 5-hour and week baselines remain independent.
 These estimates include other work in the account and are labeled estimates on screen.
 
 ## Engine boundary
@@ -77,3 +87,18 @@ accepting the change.
 The cost panel opens with focus on the dialog container and its summary visible at the top,
 including on mobile. The simulation percentage input receives focus through keyboard navigation
 or a click, rather than automatically when the panel opens.
+
+Current price rows added for this panel's coverage use the central `MODEL_PRICING` table and
+`PRICE_PROVENANCE`, checked on 2026-10-20 against
+[Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing),
+[OpenAI pricing](https://developers.openai.com/api/docs/pricing) and
+[Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing). GPT-6.1 Sol, GPT-6 Astra and
+GPT-6 Luna use Standard short-context rates, consistent with the existing API-equivalent estimates.
+Gemini 3.8 Flash uses the introductory Standard price through 2026-12-31; that row needs review
+when the introductory period ends. This change does not introduce tier or historical price accounting.
+
+Gemini rich JSON and JSONL chats supply current context from the latest measured per-response
+`tokens.input` (including cached input), rather than the session total. The existing context-window
+table now includes the [documented Gemini 3.8 Flash input limit](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash):
+1,048,576 tokens, checked 2026-10-20. A conversation with no prompt measurement still has no
+current-context projection, even if it has cumulative tokens or a known model price.
