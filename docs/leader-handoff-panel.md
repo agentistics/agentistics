@@ -95,3 +95,9 @@ Current price rows added for this panel's coverage use the central `MODEL_PRICIN
 GPT-6 Luna use Standard short-context rates, consistent with the existing API-equivalent estimates.
 Gemini 3.8 Flash uses the introductory Standard price through 2026-12-31; that row needs review
 when the introductory period ends. This change does not introduce tier or historical price accounting.
+
+Gemini rich JSON and JSONL chats supply current context from the latest measured per-response
+`tokens.input` (including cached input), rather than the session total. The existing context-window
+table now includes the [documented Gemini 3.8 Flash input limit](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash):
+1,048,576 tokens, checked 2026-10-20. A conversation with no prompt measurement still has no
+current-context projection, even if it has cumulative tokens or a known model price.

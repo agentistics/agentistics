@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { computeHandoffPanel, createHandoffQuotaSampler, handoffMetrics, quotaRate, type QuotaObservation } from './handoff-panel'
 import { toConversation } from './conversations'
 import type { HarnessId, SessionMeta } from '@agentistics/core'
+import { parseGeminiChat } from '../adapters/gemini-parse'
 import { computeHandoffWhy, planHandoffHints } from './handoff-hint'
 
 const leader = { id: 'leader', title: '[ LEADER ] - test', contextTokens: 256_000, contextWindow: 1_000_000, model: 'claude-opus-4-6', turns: 84, costUSD: 18.4, calls: 150 }
@@ -64,6 +65,28 @@ describe('measured plan quota estimates', () => {
 })
 
 describe('recorded metrics across harnesses', () => {
+  it('fills Gemini projections from its real rich JSON and JSONL prompt records', () => {
+    const messages = [
+      { id: 'u', type: 'user', timestamp: '2026-10-20T12:00:00Z', content: 'Inspect the task' },
+      { id: 'g1', type: 'gemini', timestamp: '2026-10-20T12:00:10Z', model: 'gemini-3.8-flash', content: 'Inspecting', tokens: { input: 220_000, cached: 180_000, output: 100 } },
+      // A later, smaller prompt after compaction must win over the largest prompt.
+      { id: 'g2', type: 'gemini', timestamp: '2026-10-20T12:01:00Z', model: 'gemini-3.8-flash', content: 'Done', tokens: { input: 120_000, cached: 100_000, output: 200 } },
+      { id: 'g3', type: 'gemini', timestamp: '2026-10-20T12:01:01Z', content: 'No usage on this record' },
+    ]
+    const header = { sessionId: 'native-gemini', startTime: '2026-10-20T12:00:00Z', lastUpdated: '2026-10-20T12:01:01Z' }
+    for (const content of [JSON.stringify({ ...header, messages }), [header, ...messages].map(m => JSON.stringify(m)).join('\n')]) {
+      const session = parseGeminiChat(content, 'project/file', '/work')!
+      expect(session.context_tokens).toBe(120_000)
+      expect(session.input_tokens).toBe(60_000)
+      const conversation = toConversation(session)
+      const p = computeHandoffPanel(handoffMetrics({ id: 'm', title: 'Leader', harness: 'gemini', conversationId: 'native-gemini', model: 'auto' }, [conversation]), null)
+      expect(p.contextWindow).toBe(1_048_576)
+      expect(p.spentUSD).toBeCloseTo(.067125)
+      expect(p.nextReplyUSD).toBeCloseTo(.009)
+      expect(p.projections.every(r => r.costUSD !== null)).toBe(true)
+      expect(p.projections.every(r => r.fiveHourPct === null && r.weekPct === null)).toBe(true)
+    }
+  })
   const cases: [HarnessId, string, string, number, number][] = [
     ['claude', 'opus', 'claude-opus-5-5', .2, 1.8],
     ['codex', 'gpt-6.1-sol', 'gpt-6.1-sol', .1, .9],

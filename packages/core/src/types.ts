@@ -94,7 +94,7 @@ export interface HarnessCapabilities {
    * total is not a context size. A long session with compaction sums to far more than was ever in
    * the window at once, so a harness that reports only running totals gets `false` here even
    * though `tokens` is `true`. What qualifies is a PER-TURN prompt size (or a gauge the harness
-   * measures itself), which is why codex and kimi qualify on their per-turn records while copilot,
+   * measures itself), which is why codex, gemini and kimi qualify on their per-turn records while copilot,
    * whose only token report is a cumulative one written at shutdown, does not.
    */
   contextWindow: boolean
@@ -140,7 +140,8 @@ export const HARNESS_CAPABILITIES: Record<SurfaceHarnessId, HarnessCapabilities>
   // Gemini's chat files carry `toolCalls: [{ name, args }]` per message, and a shell call puts its
   // command in `args.command` — so tools and commits are real. `gitLines` stays false: the calls
   // name the file they touched but carry no diff counters.
-  gemini:  { tokens: true,  cost: true,  model: true,  tools: true,  agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true,  contextWindow: false, compaction: false, skills: false, mcpServers: false },
+  // Per-response tokens.input records the full prompt (cache included), retained as current context.
+  gemini:  { tokens: true,  cost: true,  model: true,  tools: true,  agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true,  contextWindow: true, compaction: false, skills: false, mcpServers: false },
   // `tools` was false while `tool.execution_start` had been carrying the tool name and its
   // arguments all along — the flag was out of date, not the data missing. Verified against a real
   // events.jsonl before flipping it.
