@@ -90,6 +90,7 @@ or a click, rather than automatically when the panel opens.
 
 Current price rows added for this panel's coverage use the central `MODEL_PRICING` table and
 `PRICE_PROVENANCE`, checked on 2026-10-20 against
+[Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing),
 [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and
 [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing). GPT-6.1 Sol, GPT-6 Astra and
 GPT-6 Luna use Standard short-context rates, consistent with the existing API-equivalent estimates.
