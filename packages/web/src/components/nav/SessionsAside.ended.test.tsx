@@ -45,11 +45,11 @@ test('compact row still opens, pins and exposes its resume actions on mobile and
   expect(opened).toBe(1); expect(pinned).toBe(1); expect(menu).toBe(1)
 })
 
-test('expanded ended members select compact rows while live members keep full rows', () => {
+test('expanded ended folder members show when they ended, live members how long they have run', () => {
   const src = readFileSync(new URL('./SessionsAside.tsx', import.meta.url), 'utf8')
   expect(src).toContain('{live.map(s => renderRow(s))}')
   expect(src).toContain('{endedOpen && ended.map(s => renderRow(s, true))}')
-  expect(src).toContain('compact={compact}')
+  expect(src).toContain('time={compact ? endedAge(s, now, pt) : liveAge(s, now, pt)}')
 })
 
 test('compact sleeping rows reserve one line for controls and keep the last word with its badge', () => {

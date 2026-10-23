@@ -68,6 +68,17 @@ export interface SessionsGroupMenuProps {
   onShowFolder: (id: string) => void
   /** How many options differ from the default (`arrangeChangedCount`) — the trigger's badge. */
   changed: number
+  /**
+   * CONTROLLED mode: the panel is opened from somewhere else (the aside's overflow menu) at this
+   * point, and no trigger of its own is drawn. `null` = closed. Absent = the self-triggered menu.
+   */
+  openAt?: { left: number; top: number } | null
+  onClose?: () => void
+  /**
+   * The aside draws teams and folders, not automatic project/task/status groups, so the options
+   * that only shaped those groups (grouping, group order, card colour) have nothing to act on there.
+   */
+  teamLayout?: boolean
 }
 
 /** The words for each ordering. `state` is first and the default: it puts what is waiting on you on
@@ -114,27 +125,30 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
   const panel = useRef<HTMLDivElement>(null)
   // Desktop: two columns of grouped sections, like the filter popover. Phone: one column, full width.
   const { width, columns } = groupMenuLayout(window.innerWidth, isMobile)
+  const controlled = p.openAt !== undefined
+  const isOpen = controlled ? p.openAt != null : open
+  const pos = controlled ? (p.openAt ?? null) : at
+  const close = () => { if (controlled) p.onClose?.(); else setOpen(false) }
 
   useEffect(() => {
-    if (!open) return
+    if (!isOpen) return
     // Capture-phase on `window` so scrolling the PAGE (or any ancestor) closes a panel that can no
     // longer follow its trigger — but that also fires when the panel's OWN option list scrolls
     // (e.g. reaching the Card Color section past the fold on a fleet with many groups), which
     // closed the menu before that scroll could ever land. Only close for a scroll whose target is
     // outside this panel's own DOM subtree — same fix as PickerMenu's, in settings/primitives.tsx.
     const onScroll = (e: Event) => {
-      if (panel.current && !panel.current.contains(e.target as Node)) setOpen(false)
+      if (panel.current && !panel.current.contains(e.target as Node)) close()
     }
-    const close = () => setOpen(false)
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', close)
     return () => {
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', close)
     }
-  }, [open])
+  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEscapeOwner(open, () => setOpen(false))
+  useEscapeOwner(isOpen, close)
 
   // Shared with the panel rail's and the pinned-sessions band's own drag: `reorderByDrag` /
   // `stepOrder` in `dragReorder.ts`. This menu's reorder was the reference implementation that
@@ -162,7 +176,7 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
 
   return (
     <>
-      <button
+      {!controlled && <button
         ref={trigger}
         onClick={() => {
           if (open) { setOpen(false); return }
@@ -197,19 +211,19 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
             fontSize: 8.5, fontWeight: 700, lineHeight: 1,
           }}>{p.changed}</span>
         )}
-      </button>
+      </button>}
 
-      {open && at && createPortal(
+      {isOpen && pos && createPortal(
         <>
-          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 1199 }} />
+          <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 1199 }} />
           <div ref={panel} role="dialog" aria-label={pt ? 'Opções de exibição' : 'View options'} style={{
-            position: 'fixed', left: at.left, top: at.top, width, zIndex: 1200,
+            position: 'fixed', left: pos.left, top: pos.top, width, zIndex: 1200,
             borderRadius: 12, border: '1px solid var(--border-subtle)',
             background: 'var(--bg-elevated)', padding: 10,
             display: 'grid', gridTemplateColumns: columns === 1 ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))', gap: 10, alignItems: 'start',
             boxSizing: 'border-box',
             boxShadow: 'var(--ag-shadow-menu)',
-            maxHeight: `min(560px, calc(100vh / var(--ui-zoom, 1) - ${at.top + 12}px))`, overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain',
+            maxHeight: `min(560px, calc(100vh / var(--ui-zoom, 1) - ${pos.top + 12}px))`, overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain',
           }}>
             <HiddenFoldersSection lang={p.lang} isMobile={isMobile} hiddenFolders={p.hiddenFolders} onShowFolder={p.onShowFolder} />
             {/* ORDERING — what comes first, inside each group and among the groups. */}
@@ -236,7 +250,7 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
                   onToggle={() => p.onSort({ by: p.sort.by, dir: p.sort.dir === 'desc' ? 'asc' : 'desc' })}
                 />
               </div>
-              {p.groups.length > 1 && (
+              {!p.teamLayout && p.groups.length > 1 && (
                 <>
                   <div style={sectionLabel}>{pt ? 'Ordem dos grupos' : 'Group order'}</div>
                   {p.groups.map((g, i) => (
@@ -277,30 +291,32 @@ export function SessionsGroupMenu(p: SessionsGroupMenuProps) {
 
             <div style={{ display: 'grid', gap: 10, minWidth: 0, gridTemplateColumns: 'minmax(0, 1fr)' }}>
               {/* GROUPING — which dimension the sessions are sub-grouped by. */}
-              <section style={card} aria-label={pt ? 'Agrupamento' : 'Grouping'}>
+              {!p.teamLayout && <section style={card} aria-label={pt ? 'Agrupamento' : 'Grouping'}>
                 <div style={heading}>{pt ? 'Agrupamento' : 'Grouping'}</div>
                 {ASIDE_GROUP_BY_VALUES.map(v => (
                   <button key={v} onClick={() => p.onGroupBy(v)} style={rowStyle(p.groupBy === v)}>
                     {GROUP_BY_LABEL[v][p.lang]}
                   </button>
                 ))}
-              </section>
+              </section>}
 
               {/* DISPLAY — how the cards look, and folding everything at once. */}
               <section style={card} aria-label={pt ? 'Exibição' : 'Display'}>
                 <div style={heading}>{pt ? 'Exibição' : 'Display'}</div>
+                {!p.teamLayout && <>
                 <div style={sectionLabel}>{pt ? 'Cor dos cards' : 'Card color'}</div>
                 {ASIDE_CARD_COLOR_VALUES.map(v => (
                   <button key={v} onClick={() => p.onCardColor(v)} style={rowStyle(p.cardColor === v)}>
                     {CARD_COLOR_LABEL[v][p.lang]}
                   </button>
                 ))}
+                </>}
                 <div style={sectionLabel}>{pt ? 'Recolher / expandir' : 'Collapse / expand'}</div>
-                <button onClick={() => { p.onCollapseAll(); setOpen(false) }} style={rowStyle(false)}>
+                <button onClick={() => { p.onCollapseAll(); close() }} style={rowStyle(false)}>
                   <ChevronsDownUp size={13} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
                   {pt ? 'Recolher tudo' : 'Collapse all'}
                 </button>
-                <button onClick={() => { p.onExpandAll(); setOpen(false) }} style={rowStyle(false)}>
+                <button onClick={() => { p.onExpandAll(); close() }} style={rowStyle(false)}>
                   <ChevronsUpDown size={13} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />
                   {pt ? 'Expandir tudo' : 'Expand all'}
                 </button>

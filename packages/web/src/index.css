@@ -1159,3 +1159,7 @@ tr:focus-within .ag-row-actions,
   [data-fell-short] { display: none; }
   [data-fell-full] { display: inline; }
 }
+
+/* The sessions aside's one-line rows (`SessionLine.tsx`): the hover lift sits on the open button, so a
+   selected row's own background is never overridden by a style attribute. */
+[data-session-line]:hover > [data-session-open] { background: var(--bg-elevated); }
