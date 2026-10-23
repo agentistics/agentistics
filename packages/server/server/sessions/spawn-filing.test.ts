@@ -301,8 +301,11 @@ describe('folder', () => {
     expect(p1.warnings).not.toContain('no_folder')
     expect(ok(planFiling(base({ taskRef: 't-1', groups: g, caller: R('lead2', { taskId: 't-1' }) }))).folderSource).toBe('none')
   })
-  test('no task and no explicit folder → none', () => {
-    expect(ok(planFiling(base({ groups, rows, caller: R('caller') })))).toMatchObject({ folderSource: 'none' })
+  test('no task and no explicit folder inherits the parent folder', () => {
+    expect(ok(planFiling(base({ groups, rows, caller: R('caller') })))).toMatchObject({ folderId: 'other', folderSource: 'parent' })
+  })
+  test('no task, explicit folder or parent folder → none', () => {
+    expect(ok(planFiling(base({ groups, rows, caller: R('folderless-parent') })))).toMatchObject({ folderSource: 'none' })
   })
 })
 
@@ -439,7 +442,7 @@ describe('a spawn with no parent and no role is a PERSON, not a worker (H1)', ()
 })
 
 describe('ORQ.FORA — verified parent continuation', () => {
-  const caller = R('parent', { taskId: 't-1', subtaskId: 's-1' })
+  const caller = R('parent', { taskId: 't-1', subtaskId: 's-1', cwd: '/home/u/agentistics/.claude/worktrees/x' })
   test('worker inherits task without inheriting the leader subtask', () => {
     expect(ok(planFiling(base({ caller })))).toMatchObject({ taskId: 't-1' })
     expect(ok(planFiling(base({ caller }))).subtaskId).toBeUndefined()
