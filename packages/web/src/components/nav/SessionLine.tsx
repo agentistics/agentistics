@@ -111,7 +111,7 @@ export function SessionLine({
       onTouchEnd={clearLongPress}
       onTouchCancel={clearLongPress}
       style={{
-        display: 'flex', alignItems: 'center', gap: 4, width: '100%', boxSizing: 'border-box', minWidth: 0,
+        position: 'relative', display: 'flex', alignItems: 'center', gap: 4, width: '100%', boxSizing: 'border-box', minWidth: 0,
         minHeight: tap ?? (lead ? 34 : 30), padding: '0 4px 0 0', borderRadius: 7,
         background: selected ? 'var(--bg-elevated)' : 'transparent',
         color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
@@ -133,21 +133,26 @@ export function SessionLine({
         }}
       >
         {leader && <Crown size={13} aria-label={pt ? 'líder' : 'leader'} style={{ flexShrink: 0, color: 'var(--accent-purple)' }} />}
-        <span style={{
-          flex: 1, minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.35,
-          fontSize: 13, fontWeight: lead || waiting ? 600 : 500,
-          color: fell ? STATE_COLOR.lost : undefined,
-        }}>
-          {title}
+        {pinned && !lead && <Pin size={11} fill="currentColor" aria-label={pt ? 'fixada' : 'pinned'} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />}
+        {/* Title and the folded team's summary share one wrapping box: the summary drops under the
+            name when the line is short, instead of crushing the name to a letter per line. */}
+        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 1 }}>
+          <span style={{
+            flex: '0 1 auto', minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.35,
+            fontSize: 13, fontWeight: lead || waiting ? 600 : 500,
+            color: fell ? STATE_COLOR.lost : undefined,
+          }}>
+            {title}
+          </span>
+          {summary && (
+            <span data-team-summary style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{summary}</span>
+          )}
         </span>
         {reopening && (
           <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
             <AgentisticsLoader size={12} label={reopeningLabel(pt)} />
             {reopeningLabel(pt)}
           </span>
-        )}
-        {summary && (
-          <span data-team-summary style={{ flexShrink: 0, fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{summary}</span>
         )}
         {time && (
           <span data-line-time style={{
@@ -194,16 +199,28 @@ export function SessionLine({
           <MoreVertical size={13} />
         </button>
       )}
-      {onPin && (
+      {onPin && (lead || !tap) && (
         <button type="button"
           aria-pressed={pinned}
           aria-label={pinned ? (pt ? 'Desafixar' : 'Unpin') : (pt ? 'Fixar no topo' : 'Pin to the top')}
           title={pinned ? (pt ? 'Fixada no topo' : 'Pinned to the top') : (pt ? 'Fixar no topo' : 'Pin to the top')}
           onClick={e => { e.stopPropagation(); onPin() }}
-          className={pinned || tap ? undefined : 'ag-row-pin'}
-          style={{ ...iconBtn, color: pinned ? 'var(--text-primary)' : 'var(--text-tertiary)', opacity: pinned || tap ? 1 : 0, transition: 'opacity 0.15s' }}
+          // Only the LEADER line keeps a pin column (prototype): on every other row the toggle is a
+          // hover/focus overlay on the right edge, so the time and the dot line up with the rows
+          // around them instead of stopping short of an invisible slot. A phone keeps it in flow.
+          className={lead || tap ? undefined : 'ag-row-pin'}
+          style={{
+            ...iconBtn,
+            color: pinned ? 'var(--text-primary)' : 'var(--text-tertiary)',
+            // The leader's pin is always there, faint until set (prototype); elsewhere it is the overlay.
+            opacity: lead ? (pinned || tap ? 1 : 0.45) : 0, transition: 'opacity 0.15s',
+            ...(lead || tap ? {} : {
+              position: 'absolute', right: 2, top: '50%', transform: 'translateY(-50%)',
+              background: 'var(--bg-elevated)',
+            }),
+          }}
         >
-          <Pin size={12} fill={pinned ? "currentColor" : "none"} />
+          <Pin size={12} fill={pinned ? 'currentColor' : 'none'} />
         </button>
       )}
     </div>

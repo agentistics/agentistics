@@ -103,13 +103,15 @@ import { applyLeadersOnly, countLeaders, leadersText } from '../../lib/leadersFi
 import { SegmentedTabs } from './SegmentedTabs'
 import { GoToSessionContext, SessionLine, type SessionLineProps } from './SessionLine'
 import {
-  autoUnfold, buildTeams, endedAge, endedSections, liveAge, teamSummary, waitingIds, type AsideTab, type Team,
+  autoUnfold, buildTeams, endedAge, endedSections, fellAge, liveAge, teamSummary, waitingIds, type AsideTab, type Team,
 } from '../../lib/asideTabs'
 import { toggleFoldedTeam, useAsideTab, useFoldedTeams } from '../../lib/sessionsAsidePrefs'
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
 const OPEN_BESIDE = '__open_beside__'
 const SLEEPING_PINS = 'pinned:sleeping'
+/** The row menu's client-side pin toggle. */
+const PIN_TOGGLE = '__pin_toggle__'
 const ROOT_ENDED_FOLDERS = 'folders:root-ended'
 
 export interface SessionsAsideProps {
@@ -724,6 +726,12 @@ export function SessionsAside({
     if (action === 'move-to-group') {
       // Anchored where the menu was, same as `link-task` — the gesture stays in one place.
       setGroupPicker({ id, x: menu.x, y: menu.y })
+      setMenu(null)
+      return
+    }
+    if (action === PIN_TOGGLE) {
+      const target = rows.find(r => r.id === id)
+      if (target) flip(target)
       setMenu(null)
       return
     }
@@ -1399,7 +1407,7 @@ export function SessionsAside({
   const renderEndedLine = (s: ControlSession, fell = false) => {
     const resume = rowsById?.get(s.id)?.verbs.find(v => v.action === 'resume')
     return renderLine(s, {
-      time: endedAge(s, now, pt), fell,
+      time: fell ? fellAge(s, now, pt) : endedAge(s, now, pt), fell,
       ...(act && resume ? { onReopen: () => { void reopenRow(s.id) }, reopenVerb: resume } : {}),
     })
   }
@@ -2020,6 +2028,13 @@ export function SessionsAside({
               }] : []),
               ...taskMenuEntries(rows.find(r => r.id === menu.id)?.task, pt),
               ...groupMenuExtras(rows.find(r => r.id === menu.id), groupOfKey, pt),
+              // Pinning from the menu — the only door on a phone, where only a leader line carries a pin.
+              ...(() => {
+                const r = rows.find(x => x.id === menu.id)
+                if (!r) return []
+                const on = pinned.has(pinKeyOf(r))
+                return [{ action: PIN_TOGGLE, label: on ? (pt ? 'Desafixar' : 'Unpin') : (pt ? 'Fixar no topo' : 'Pin to the top'), enabled: true }]
+              })(),
               ...roleExtras(rows.find(r => r.id === menu.id), pt),
               ...notifyExtras(rows.find(r => r.id === menu.id), mutedKeys, pt),
             ],

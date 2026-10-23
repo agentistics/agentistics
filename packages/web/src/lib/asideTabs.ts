@@ -186,3 +186,10 @@ export function endedAge(row: TeamRow, now: number, pt: boolean): string | null 
   if (sameLocalDay(at, now - 86_400_000)) return pt ? 'ontem' : 'yesterday'
   return shortSpan(now - at, pt)
 }
+
+/** The time of a FALLEN row: how long ago it went down ("há 3 h") — the prototype's wording. */
+export function fellAge(row: TeamRow, now: number, pt: boolean): string | null {
+  if (row.endedAt === undefined) return null
+  const span = shortSpan(now - row.endedAt, pt)
+  return span === (pt ? 'agora' : 'now') ? span : pt ? `há ${span}` : `${span} ago`
+}
