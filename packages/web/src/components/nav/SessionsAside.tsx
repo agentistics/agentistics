@@ -1841,7 +1841,9 @@ export function SessionsAside({
               )
             })}
             {shownLoose.length > 0 && (
-              <div data-team-loose>
+              // Padded by exactly a team card's border + padding (1 + 4), so these rows' time, dot and
+              // trailing slots sit in the same columns as the rows inside the cards above.
+              <div data-team-loose style={{ padding: '0 5px' }}>
                 <div style={sectionHeading}>{pt ? 'Sem líder' : 'No leader'}</div>
                 {shownLoose.map(r => renderLine(r))}
               </div>
@@ -1900,7 +1902,7 @@ export function SessionsAside({
                     fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textAlign: 'left' }}>
                   {rootEndedOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                   <span>{pt ? 'Encerradas' : 'Ended'}</span>
-                  <span style={{ marginLeft: 'auto' }}>{endedRootFolders.length} {pt ? (endedRootFolders.length === 1 ? 'grupo' : 'grupos') : (endedRootFolders.length === 1 ? 'group' : 'groups')}</span>
+                  <span style={{ marginLeft: 'auto' }}>{endedRootFolders.length} {pt ? (endedRootFolders.length === 1 ? 'pasta' : 'pastas') : (endedRootFolders.length === 1 ? 'folder' : 'folders')}</span>
                 </button>
                 {rootEndedOpen && endedRootFolders.map(entry => renderGroupBand(entry, 0, false, true))}
               </div>

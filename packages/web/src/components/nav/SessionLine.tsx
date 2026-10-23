@@ -128,12 +128,11 @@ export function SessionLine({
         title={title}
         style={{
           flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
-          minHeight: tap ?? (lead ? 32 : 28), padding: leading ? '3px 4px' : '3px 6px', borderRadius: 6,
+          minHeight: tap ?? (lead ? 32 : 28), padding: leading ? '3px 6px 3px 4px' : '3px 6px', borderRadius: 6,
           border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer',
         }}
       >
         {leader && <Crown size={13} aria-label={pt ? 'líder' : 'leader'} style={{ flexShrink: 0, color: 'var(--accent-purple)' }} />}
-        {pinned && !lead && <Pin size={11} fill="currentColor" aria-label={pt ? 'fixada' : 'pinned'} style={{ flexShrink: 0, color: 'var(--text-tertiary)' }} />}
         {/* Title and the folded team's summary share one wrapping box: the summary drops under the
             name when the line is short, instead of crushing the name to a letter per line. */}
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 1 }}>
@@ -188,8 +187,12 @@ export function SessionLine({
           <SquareArrowOutUpRight size={13} />
         </button>
       )}
-      {/* On a phone the menu also has a visible door; on desktop it is the right click / menu key. */}
-      {tap && canMenu && (
+      {/*
+        * THE TRAILING COLUMNS ARE ONE GRID: time, dot, then (on a phone) the ⋮ slot, then the pin slot —
+        * reserved on EVERY row, empty where the row has nothing to put there, so leaders, members,
+        * loose rows and folder rows line up column for column.
+        */}
+      {tap && (canMenu ? (
         <button type="button"
           aria-label={pt ? `Opções de ${title}` : `Options for ${title}`}
           aria-haspopup="menu"
@@ -198,31 +201,25 @@ export function SessionLine({
         >
           <MoreVertical size={13} />
         </button>
-      )}
-      {onPin && (lead || !tap) && (
+      ) : <span aria-hidden data-slot="menu" style={{ width: iconSize, flexShrink: 0 }} />)}
+      {/* The pin: a leader shows it faint until set (prototype); any other row shows it when pinned,
+          and on desktop on hover/focus. On a phone a non-leader pins from its ⋮ menu instead. */}
+      {onPin && (lead || pinned || !tap) ? (
         <button type="button"
           aria-pressed={pinned}
           aria-label={pinned ? (pt ? 'Desafixar' : 'Unpin') : (pt ? 'Fixar no topo' : 'Pin to the top')}
           title={pinned ? (pt ? 'Fixada no topo' : 'Pinned to the top') : (pt ? 'Fixar no topo' : 'Pin to the top')}
           onClick={e => { e.stopPropagation(); onPin() }}
-          // Only the LEADER line keeps a pin column (prototype): on every other row the toggle is a
-          // hover/focus overlay on the right edge, so the time and the dot line up with the rows
-          // around them instead of stopping short of an invisible slot. A phone keeps it in flow.
-          className={lead || tap ? undefined : 'ag-row-pin'}
+          className={lead || pinned || tap ? undefined : 'ag-row-pin'}
           style={{
             ...iconBtn,
             color: pinned ? 'var(--text-primary)' : 'var(--text-tertiary)',
-            // The leader's pin is always there, faint until set (prototype); elsewhere it is the overlay.
-            opacity: lead ? (pinned || tap ? 1 : 0.45) : 0, transition: 'opacity 0.15s',
-            ...(lead || tap ? {} : {
-              position: 'absolute', right: 2, top: '50%', transform: 'translateY(-50%)',
-              background: 'var(--bg-elevated)',
-            }),
+            opacity: pinned ? 1 : lead ? 0.45 : tap ? 1 : 0, transition: 'opacity 0.15s',
           }}
         >
           <Pin size={12} fill={pinned ? 'currentColor' : 'none'} />
         </button>
-      )}
+      ) : <span aria-hidden data-slot="pin" style={{ width: iconSize, flexShrink: 0 }} />}
     </div>
   )
 }

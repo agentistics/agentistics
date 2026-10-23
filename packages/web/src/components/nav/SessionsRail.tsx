@@ -222,6 +222,7 @@ export function SessionsRail({
       <div style={{ width: 44, flexShrink: 0 }}>
         <SegmentedTabs<AsideTab>
           collapsed
+          badgeOutside
           ariaLabel={pt ? 'Sessões' : 'Sessions'}
           containerName="aside-tabs"
           className="ag-aside-tabs"

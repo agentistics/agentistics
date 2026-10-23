@@ -29,7 +29,7 @@ const BADGE: Record<NonNullable<SegmentedTab<string>['badgeTone']>, React.CSSPro
   alert: { background: 'color-mix(in srgb, var(--accent-red) 22%, transparent)', color: 'var(--accent-red)' },
 }
 
-export function SegmentedTabs<Id extends string>({ tabs, value, onChange, collapsed = false, ariaLabel, containerName = 'workspace-mode', className, equal = false }: {
+export function SegmentedTabs<Id extends string>({ tabs, value, onChange, collapsed = false, ariaLabel, containerName = 'workspace-mode', className, equal = false, badgeOutside = false }: {
   tabs: readonly SegmentedTab<Id>[]
   value: Id
   onChange: (id: Id) => void
@@ -41,6 +41,8 @@ export function SegmentedTabs<Id extends string>({ tabs, value, onChange, collap
   className?: string
   /** Equal-width segments (the aside's three tabs); otherwise each takes its content's width. */
   equal?: boolean
+  /** Collapsed only: the count sits on the segment's corner, clear of the icon (the sessions rail). */
+  badgeOutside?: boolean
 }) {
   return (
     <div
@@ -91,12 +93,15 @@ export function SegmentedTabs<Id extends string>({ tabs, value, onChange, collap
                 aria-label={tab.badgeLabel ?? String(tab.badge)}
                 style={{
                   position: collapsed ? 'absolute' : 'static',
-                  top: collapsed ? 2 : undefined, right: collapsed ? 2 : undefined,
+                  top: collapsed ? (badgeOutside ? -5 : 2) : undefined, right: collapsed ? (badgeOutside ? -7 : 2) : undefined,
                   flexShrink: 0,
                   minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8,
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 10, fontWeight: 700, lineHeight: 1,
                   ...BADGE[tab.badgeTone ?? 'accent'],
+                  // Outside the icon, a quiet count needs a ground of its own or it reads as part of the glyph.
+                  ...(collapsed && badgeOutside && tab.badgeTone === 'quiet'
+                    ? { background: 'var(--bg-surface)', boxShadow: 'inset 0 0 0 1px var(--border)' } : {}),
                 }}
               >
                 {tab.badge}

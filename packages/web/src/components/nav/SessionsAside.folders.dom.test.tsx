@@ -110,7 +110,7 @@ for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
     expect(ended('parent').textContent).toContain(lang === 'pt' ? '3 pastas' : '3 folders')
     expect(ended('parent').textContent).toContain(lang === 'pt' ? '1 sessão' : '1 session')
     expect(ended('parent').getAttribute('aria-expanded')).toBe('false')
-    expect(ended('root').textContent).toContain(lang === 'pt' ? '1 grupo' : '1 group')
+    expect(ended('root').textContent).toContain(lang === 'pt' ? '1 pasta' : '1 folder')
     // The ended folders close the tree; only "New folder" follows them.
     expect(host.querySelector('[data-ended-root-folders]')!.nextElementSibling).toBe(host.querySelector('[data-new-folder]'))
     await click(ended('parent'))
