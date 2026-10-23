@@ -805,7 +805,9 @@ task is allowed. Setting a role to leader warns when another live leader already
 it does not block the change.
 
 Filing is checked again after registry creation and before the process starts. A filing failure
-prevents the worker's first prompt from running. Folder and handoff preferences are applied after
+prevents the worker's first prompt from running. Permission or read-only filesystem errors at the
+session CLI boundary exit non-zero with the affected path and instructions to make the data directory
+writable; a failure before launch starts no process. Folder and handoff preferences are applied after
 startup. Failed configuration steps receive one idempotent retry; start/batch JSON and API results
 report `configuration.ready`, `applied` and `pending`. A running session with incomplete configuration
 is reported with its existing id and a repair message; do not retry by spawning another session.

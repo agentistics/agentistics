@@ -176,6 +176,33 @@ describe('structuredRegistry / stubDriver / answerFits (engine-api, pure)', () =
 })
 
 describe('withStructured — routing', () => {
+  for (const origin of ['background', 'terminal', 'web'] as const) {
+    test(`flag ON + ${origin} origin: ${origin === 'terminal' ? 'tmux' : 'structured driver'}`, async () => {
+      const base = fakeBase()
+      const eng = fakeEngine()
+      let asked = 0
+      const b = withStructured(base, provider(eng.reg, {
+        structured: async () => { asked++; return eng.reg },
+      }))
+      const req = web('gemini')
+      req.structured = { ...req.structured!, origin }
+      await b.spawn(req)
+      if (origin === 'terminal') {
+        expect(base.calls).toEqual([['spawn', req]])
+        expect(asked).toBe(0)
+        expect(eng.started).toEqual([])
+        expect(b.structuredSessions()).toEqual([])
+      } else {
+        expect(base.calls.map(c => c[0])).not.toContain('spawn')
+        expect(asked).toBe(1)
+        expect(eng.started).toHaveLength(1)
+        expect(eng.started[0]).toMatchObject({ id: req.id, harness: 'gemini', initialPrompt: 'hi' })
+        expect(b.structuredSessions()).toEqual([{ id: req.id, route: 'structured', driver: 'acp' }])
+      }
+      await b.kill(req.id)
+    })
+  }
+
   test('a refused conversation link is reported again on a later list(), then never once it links', async () => {
     const base = fakeBase()
     const eng = fakeEngine()
