@@ -105,7 +105,7 @@ describe('HANDOFF.RELAY — forwarding after the snapshot', () => {
 })
 
 const row = (extra: Partial<ManagedSession>): ManagedSession =>
-  ({ id: 'lead-1', harness: 'codex', cwd: '/w', createdAt: '2026-10-16T10:00:00.000Z', conversationId: 'c1', ...extra })
+  ({ id: 'lead-1', harness: 'codex', cwd: '/w', createdAt: '2026-10-16T10:00:00.000Z', conversationId: 'c1', ...(extra.id && extra.id !== 'lead-1' ? { handoffFrom: 'lead-1', conversationId: `c-${extra.id}` } : {}), ...extra })
 
 describe('HANDOFF.RELAY — IO with injected reader', () => {
   it('works for any harness through its reader, and names a missing one', async () => {
@@ -417,5 +417,32 @@ describe('HANDOFF.RELAY — injected session messages are labelled, never the ow
     const txt = forwardText('lead-1', f)
     expect(txt).toContain('Sessão e2fa75878c (handback)')
     expect(txt).not.toContain('Responda ao dono')
+  })
+})
+
+describe('relay never treats a live starter as a predecessor or echoes the target', () => {
+  it('ignores lineage alone and rejects a stale one-sided handoff link', async () => {
+    const parent = row({ id: 'starter', handoffTo: 'child' })
+    const child = row({ id: 'child', parentSessionId: 'starter', handoffFrom: undefined })
+    let reads = 0, sends = 0
+    const io = { read: async () => { reads++; return { turns: CASE } }, patch: async () => true }
+    expect((await flushHandoffRelay(parent, [parent, child], async () => { sends++; return true }, io)).delivered).toBe(false)
+    expect(reads).toBe(0); expect(sends).toBe(0)
+    expect((await flushHandoffRelay({ ...parent, handoffTo: undefined }, [parent, child], async () => true, io)).delivered).toBe(false)
+  })
+  it('a reciprocal handoff still forwards owner messages while excluding the successor sender', async () => {
+    const parent = row({ handoffTo: 'next', handoffRelayedAt: CASE[6]!.at })
+    const target = row({ id: 'next', conversationId: 'c-next' })
+    const turns = [t('user', '[from session next · handback]\nmy own words', 56), t('user', '[from session c-next · question]\nmy question', 57), t('user', 'owner answer', 58)]
+    let text = ''
+    await flushHandoffRelay(parent, [parent, target], async (_id, body) => { text = body; return true }, { read: async () => ({ turns }), patch: async () => true })
+    expect(text).toContain('owner answer'); expect(text).not.toContain('my own words'); expect(text).not.toContain('my question')
+  })
+  it('never sends into the same conversation after a reopen', async () => {
+    const parent = row({ handoffTo: 'next' })
+    const target = row({ id: 'next', conversationId: parent.conversationId })
+    let sent = false
+    await flushHandoffRelay(parent, [parent, target], async () => { sent = true; return true }, { read: async () => ({ turns: CASE }), patch: async () => true })
+    expect(sent).toBe(false)
   })
 })

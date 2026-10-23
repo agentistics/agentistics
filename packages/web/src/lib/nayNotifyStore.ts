@@ -17,6 +17,7 @@
  */
 
 import { useSyncExternalStore } from 'react'
+import { reportOpenSession } from './ownerPresence'
 import { alertKey, alertStillTrue, staleDue, type NayAlert, type NayAlertKind } from './nayNotify'
 import { dismissNotification, readNotifications, type AppNotification } from './notifications'
 
@@ -64,6 +65,7 @@ let openSession: string | null = null
  */
 export function setOpenSession(id: string | null): void {
   openSession = id
+  reportOpenSession(id)
   if (!id) return
   markOpened(id)
   const next = state.queue.filter(a => a.sessionId !== id)

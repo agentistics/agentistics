@@ -135,6 +135,13 @@ export function successorAlive(m: ManagedSession): boolean {
   return status !== 'exited' && status !== 'lost' && status !== 'closed'
 }
 
+/** Only an explicit hand-off makes a predecessor; a live starter never does. */
+export function realHandoffTarget(parent: ManagedSession, target: ManagedSession): boolean {
+  return parent.id !== target.id && parent.handoffTo !== parent.id
+    && !(parent.conversationId && parent.conversationId === target.conversationId)
+    && target.handoffFrom === parent.id
+}
+
 /** Forward what the owner wrote into ONE predecessor after its snapshot. */
 export async function flushHandoffRelay(
   parent: ManagedSession,
@@ -150,9 +157,13 @@ export async function flushHandoffRelay(
     ...(Number.isFinite(cursorMs) ? { unchangedSince: cursorMs } : {}),
   }))
   if (!parent.handoffTo) return { ok: true, delivered: false }
+  const target = successorRow(registry, parent.handoffTo)
+  // Lineage (who started whom) is not a hand-off. Require the explicit reciprocal link;
+  // reject self/continuation targets before reading or forwarding any owner's words.
+  if (target && !realHandoffTarget(parent, target)) return { ok: true, delivered: false }
   const got = await read(parent)
   if ('unavailable' in got) return { ok: true, delivered: false, unverified: got.unavailable }
-  const fwd = planForward(got.turns, parent.handoffRelayedAt, parent.handoffRelayAwaiting === true)
+  const fwd = planForward(got.turns, parent.handoffRelayedAt, parent.handoffRelayAwaiting === true, target ? [target.id, target.conversationId ?? ""] : [])
   const truncated = 'truncated' in got && got.truncated === true
   if (!fwd) return { ok: true, delivered: false, ...(truncated ? { truncated } : {}) }
   const cursorPatch = {

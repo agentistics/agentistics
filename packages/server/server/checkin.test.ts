@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { planBudget, planPace, type PlanLimits } from '@agentistics/core'
 import {
-  checkinAccountLimits, checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
+  checkinMcpTargetDigest, changedInputs, checkinAccountLimits, checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   runNow, checkinTick, resetCheckinSweep, type CheckinAction, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
 
@@ -30,6 +30,7 @@ const testDeps: Partial<CheckinDeps> = {
   readFleet: (async () => { fleetReads++; return { rows } }) as unknown as CheckinDeps['readFleet'],
   runFleetAction: (async (_lang: string, request: unknown) => { prompts.push(request); if (delivery === 'throw') throw new Error('delivery failed'); return { ok: delivery === 'ok', message: 'sent' } }) as CheckinDeps['runFleetAction'],
   loadTaskWorld: (async () => ({ store: { logEvents: async (events: unknown[]) => { activity.push(...events) } } })) as CheckinDeps['loadTaskWorld'],
+  readCheckinHandoff: async () => null,
   readCheckinActivity: async (_since, id) => checkinActivity(activity, id),
   readCheckinLimits: async () => limits,
   readCheckinRelease: async () => release,
@@ -436,7 +437,7 @@ describe('idle check-ins', () => {
     await begin()
     expect(await fireDue(first + 15 * MINUTE)).toEqual([])
     expect(prompts).toHaveLength(1)
-    expect(stored().skipped).toEqual({ count: 1, lastAt: first + 15 * MINUTE })
+    expect(stored().skipped).toEqual({ count: 1, lastAt: first + 15 * MINUTE, reason: 'skipped: no change', tokens: 0 })
     const emitted = JSON.parse(frames.at(-1)!.split('data: ')[1]!.trim())
     expect(emitted.fingerprint).toBeUndefined()
     expect(emitted.lastFiredAt).toBeUndefined()
@@ -595,19 +596,19 @@ describe('idle check-ins', () => {
     await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + MINUTE)
     expect(await fireDue(first + 16 * MINUTE)).toEqual([leader.id])
   })
-  test('heartbeat fires at two hours and late reports cannot delay it', async () => {
+  test('unchanged workers never force a heartbeat, including after a late report', async () => {
     await begin(true)
     await putState(leader.conversationId, { intervalMin: 120 }, first)
     await recordReport(leader.conversationId, { state: 'ok', summary: 'Late' }, first + 119 * MINUTE)
-    expect(stored().nextRunAt).toBe(first + 120 * MINUTE)
+    expect(stored().nextRunAt).toBe(first + 239 * MINUTE)
     expect(await fireDue(first + 120 * MINUTE - 1)).toEqual([])
-    expect(await fireDue(first + 120 * MINUTE)).toEqual([leader.id])
+    expect(await fireDue(first + 120 * MINUTE)).toEqual([])
   })
-  test('skips are also bounded by the heartbeat deadline', async () => {
+  test('skips schedule the next interval without an idle heartbeat', async () => {
     await begin(true)
     await fireDue(first + 119 * MINUTE)
-    expect(stored().nextRunAt).toBe(first + 120 * MINUTE)
-    expect(await fireDue(first + 120 * MINUTE)).toEqual([leader.id])
+    expect(stored().nextRunAt).toBe(first + 134 * MINUTE)
+    expect(await fireDue(first + 120 * MINUTE)).toEqual([])
   })
   for (const failure of ['false', 'throw'] as const) {
     test(`${failure} delivery preserves the baseline and retries changed inputs`, async () => {
@@ -657,13 +658,13 @@ describe('idle check-ins', () => {
     await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + 15 * MINUTE)
     expect(await fireDue(first + 135 * MINUTE)).toEqual([])
   })
-  test('a failed heartbeat stays due for retry without advancing delivery history', async () => {
-    await begin(true); delivery = 'false'
+  test('a failed changed round preserves its baseline for the next interval', async () => {
+    await begin(true); limits = { band: 'tight' }; delivery = 'false'
     expect(await fireDue(first + 120 * MINUTE)).toEqual([])
     expect(stored().lastFiredAt).toBe(first)
-    expect(stored().nextRunAt).toBe(first + 120 * MINUTE)
+    expect(stored().nextRunAt).toBe(first + 135 * MINUTE)
     delivery = 'ok'
-    expect(await fireDue(first + 120 * MINUTE + 1)).toEqual([leader.id])
+    expect(await fireDue(first + 135 * MINUTE)).toEqual([leader.id])
   })
   test('manual runs preserve internal state and only commit successful delivery', async () => {
     await begin(); const baseline = stored().fingerprint
@@ -676,11 +677,11 @@ describe('idle check-ins', () => {
     expect(stored().lastFiredAt).toBe(first + MINUTE)
     expect(stored().skipped.count).toBe(2)
   })
-  test('restart uses persisted idle and heartbeat history', async () => {
+  test('restart uses persisted idle baseline without an idle heartbeat', async () => {
     await begin(true)
     preferences = JSON.parse(JSON.stringify(preferences)); setCheckinDeps(testDeps)
     expect(await fireDue(first + 15 * MINUTE)).toEqual([])
-    expect(await fireDue(first + 120 * MINUTE)).toEqual([leader.id])
+    expect(await fireDue(first + 120 * MINUTE)).toEqual([])
   })
   test('config updates and pause expiry preserve private state; checklist changes invalidate inputs', async () => {
     await begin(true)
@@ -689,7 +690,7 @@ describe('idle check-ins', () => {
     const updated = await putState(leader.conversationId, { intervalMin: 120 }, first + MINUTE)
     expect(stored()).toMatchObject({ ...baseline, pending: true })
     expect(updated).not.toHaveProperty('pending')
-    expect(updated.nextRunAt).toBe(first + 120 * MINUTE)
+    expect(updated.nextRunAt).toBe(first + 121 * MINUTE)
     await putState(leader.conversationId, { paused: { until: first + 2 * MINUTE } }, first + MINUTE)
     await stateFor(leader.conversationId, first + 2 * MINUTE)
     expect(stored()).toMatchObject({ ...baseline, pending: true })
@@ -710,4 +711,47 @@ describe('idle check-ins', () => {
     }
     expect(mcpCwds.every(cwd => cwd === leader.cwd)).toBe(true)
   })
+})
+
+
+describe('check-in delta gate', () => {
+  test('changed fleet state sends only the changed rows and no unchanged checklist sections', async () => {
+    await begin(true)
+    rows[1] = { ...rows[1], state: 'working' }
+    expect(await fireDue(first + 15 * MINUTE)).toEqual([leader.id])
+    const text = prompts.at(-1).text
+    expect(text).toContain('managed-worker')
+    expect(text).not.toContain('managed-leader')
+    expect(text).not.toContain('Configs MCP')
+    expect(text).not.toContain('mcp-configs')
+    expect(text).toContain('Somente estas mudanças')
+  })
+  test('handoff file commit wakes once and the baseline survives serialization', async () => {
+    await begin()
+    let commit = 'new-commit'
+    setCheckinDeps({ ...testDeps, readCheckinHandoff: async () => ({ path: 'leader/HANDOFF.md', commit }) })
+    expect(await fireDue(first + 15 * MINUTE)).toEqual([leader.id])
+    expect(prompts.at(-1).text).toContain('new-commit')
+    await recordReport(leader.conversationId, { state: 'ok', summary: 'Read' }, first + 15 * MINUTE)
+    preferences = JSON.parse(JSON.stringify(preferences))
+    expect(await fireDue(first + 30 * MINUTE)).toEqual([])
+    commit = 'newer-commit'
+    expect(await fireDue(first + 45 * MINUTE)).toEqual([leader.id])
+    expect(prompts.at(-1).text).toContain('newer-commit')
+    expect(prompts.at(-1).text).not.toContain('fleet')
+  })
+})
+
+
+test('MCP fingerprint follows targets only, without carrying config contents', () => {
+  const json = (model: string, command: string) => JSON.stringify({ model, mcpServers: { test: { command } } })
+  expect(checkinMcpTargetDigest('gemini', json('one', 'first'))).toBe(checkinMcpTargetDigest('gemini', json('two', 'first')))
+  expect(checkinMcpTargetDigest('gemini', json('one', 'first'))).not.toBe(checkinMcpTargetDigest('gemini', json('one', 'second')))
+  const toml = (model: string, command: string) => `model = "${model}"\n[mcp_servers.test]\ncommand = "${command}"\n`
+  expect(checkinMcpTargetDigest('codex', toml('one', 'first'))).toBe(checkinMcpTargetDigest('codex', toml('two', 'first')))
+  expect(checkinMcpTargetDigest('codex', toml('one', 'first'))).not.toBe(checkinMcpTargetDigest('codex', toml('one', 'second')))
+  expect(checkinMcpTargetDigest('codex', toml('one', 'first'))).toMatch(/^[a-f0-9]{64}$/)
+})
+test('delta excludes unchanged nested facts and treats reordering as unchanged', () => {
+  expect(changedInputs({ limits: { accounts: ['a', 'b'], band: 'ok' } }, { limits: { accounts: ['b', 'a'], band: 'tight' } })).toEqual({ limits: { band: 'tight' } })
 })

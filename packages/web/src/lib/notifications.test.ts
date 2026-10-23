@@ -475,3 +475,15 @@ describe('cleanup completion wording', () => {
     expect(s.resolveNotification(note('partial', { code: 'clean.partial', meta: { freed: '0 B', skipped: 1, errors: 0 } }), 'pt').message).toBe('0 B liberados. 1 item mantido por segurança.')
   })
 })
+
+test('owner wait notice uses the existing toast copy and session link, survives refresh, clears on open', async () => {
+  const s = await freshStore()
+  s.pushLocalNotification({ type: 'info', code: 'owner.waiting', meta: { label: 'Motor', sessionId: 'motor', episode: 'motor:1' } })
+  const n = s.readNotifications()[0]!
+  expect(s.resolveNotification(n, 'pt').title).toBe('Motor está esperando você')
+  expect(s.notificationLink(n)).toBe('/sessions/motor')
+  await s.refreshNotifications()
+  expect(s.readNotifications().some(v => v.id === n.id)).toBe(true)
+  s.dismissNotification(n.id)
+  expect(s.readNotifications().some(v => v.id === n.id)).toBe(false)
+})

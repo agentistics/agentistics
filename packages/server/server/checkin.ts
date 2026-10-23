@@ -33,6 +33,7 @@ export interface CheckinDeps {
   readCheckinLimits: (now: number) => Promise<unknown>
   readCheckinRelease: () => Promise<unknown>
   readCheckinMcpConfigs: (cwd: string) => Promise<unknown>
+  readCheckinHandoff: (cwd: string) => Promise<unknown>
 }
 
 // Board kinds are open-ended. Ignore check-in reports (our own feedback) and filter
@@ -40,7 +41,7 @@ export interface CheckinDeps {
 export function checkinActivity(events: readonly TaskEvent[], leader: string): unknown {
   return events.flatMap(e => {
     if (e.kind === 'checkin') return []
-    if (e.kind !== 'comment') return [{ ...e }]
+    if (e.kind !== 'comment') return [{ id: e.id, kind: e.kind, at: e.at, taskId: e.taskId, actor: e.actor, from: e.from, to: e.to }]
     if (!e.detail) return []
     try {
       const { message } = JSON.parse(e.detail)
@@ -56,7 +57,7 @@ export function checkinLimitInputs(limits: readonly PlanLimits[], now: number, b
     const budget = budgets?.[index] ?? { ...planBudget(l, now), ...planPace(l, now) }
     return {
       harness: l.harness, account: l.account, ...(budget.accountLabel ? { accountLabel: budget.accountLabel } : {}), plan: l.plan, sourcePlan: l.sourcePlan,
-      status: budget.status, paceStatus: budget.paceStatus, hold: budget.status === 'hold',
+      status: budget.status === 'hold' ? 'over' : budget.status, paceStatus: budget.paceStatus, hold: budget.status === 'hold',
       pause: budget.pauseUntil !== undefined && budget.pauseUntil > now,
       // Retain renewal identity, including a zero-usage renewal, without raw usage.
       windows: l.windows.map(w => ({ kind: w.kind, resetsAt: w.resetsAt, renewed: windowRenewed(w, now) })),
@@ -71,6 +72,13 @@ export function checkinAccountLimits(limits: readonly PlanLimits[], budgets: rea
     return budget ? [{ l, budget }] : []
   })
   return checkinLimitInputs(rows.map(r => r.l), now, rows.map(r => r.budget))
+}
+
+/** Hash only MCP targets, never unrelated model/settings edits or raw credentials. */
+export function checkinMcpTargetDigest(harness: HarnessId, text: string): string {
+  const parsed = harness === 'codex' ? Bun.TOML.parse(text) : JSON.parse(text)
+  const targets = harness === 'codex' ? parsed.mcp_servers : parsed.mcpServers
+  return createHash('sha256').update(stable(targets ?? null)).digest('hex')
 }
 
 const defaultCheckinActivity: CheckinDeps['readCheckinActivity'] = async (_since, leader) => checkinActivity((await deps.loadTaskWorld()).book.events, leader)
@@ -97,8 +105,18 @@ const defaultDeps: CheckinDeps = {
     try {
       const { getVersionInfo } = await import('./version')
       const v = await getVersionInfo()
-      return { current: v.current, latest: v.latest }
+      return { current: v.current }
     } catch { return null }
+  },
+  readCheckinHandoff: async cwd => {
+    const { findHandoffFile } = await import('./sessions/handoff-hint')
+    const file = await findHandoffFile(cwd)
+    if (!file) return null
+    const { relative } = await import('node:path')
+    const result = Bun.spawn(['git', 'log', '-1', '--pretty=tformat:%H', '--', relative(cwd, file.path)], { cwd, stdout: 'pipe', stderr: 'ignore' })
+    const commit = (await new Response(result.stdout).text()).trim()
+    const ok = await result.exited === 0
+    return { path: relative(cwd, file.path), commit: ok ? commit || null : null, ...(ok ? {} : { unavailable: true }) }
   },
   readCheckinMcpConfigs: async cwd => {
     const { listMcp } = await import('./mcp-admin')
@@ -112,10 +130,13 @@ const defaultDeps: CheckinDeps = {
       ['kimi', kimiMcpPath()],
     ]
     const configs = await Promise.all(files.filter(([h]) => harnessEnabled(h)).map(async ([harness, file]) => {
-      try { return { harness, file, digest: createHash('sha256').update(await readFile(file)).digest('hex') } }
+      try {
+        const text = await readFile(file, 'utf8')
+        return { harness, file, digest: checkinMcpTargetDigest(harness, text) }
+      }
       catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { harness, file, digest: null }; throw error }
     }))
-    return { claude: listed?.servers.map(s => ({ name: s.name, scope: s.scope, transport: s.transport, url: s.url ?? null, config: s.config })), configs }
+    return { claude: listed?.servers.map(s => ({ name: s.name, scope: s.scope, transport: s.transport, digest: createHash('sha256').update(stable({ url: s.url, config: s.config })).digest('hex') })), configs }
   },
 }
 let deps: CheckinDeps = defaultDeps
@@ -155,9 +176,9 @@ export interface CheckinState extends CheckinConfig {
   lastRunAt: number | null
   nextRunAt: number | null
   last: CheckinRound | null
-  skipped?: { count: number; lastAt: number }
+  skipped?: { count: number; lastAt: number; reason?: 'skipped: no change'; tokens?: 0 }
 }
-type Stored = CheckinState & { inherits?: boolean; pending?: boolean; fingerprint?: string; lastFiredAt?: number | null }
+type Stored = CheckinState & { inherits?: boolean; pending?: boolean; fingerprint?: string; inputs?: Record<string, unknown>; lastFiredAt?: number | null }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 /** Global defaults support enabled or indefinitely paused check-ins, never a timed snooze. */
@@ -214,8 +235,8 @@ export function promptFor(c: CheckinConfig): string {
   const items = c.checklist.filter(x => x.enabled).map(x => `- ${labels[x.id]}`).join('\n')
   return `[from agentistics · check-in]\nFaça o check-in da liderança agora.\n${items}\n\n${PLAIN_REPORT}\nQuando terminar, chame agentistics_checkin_report.`
 }
-async function promptForLeader(c: CheckinConfig): Promise<string> {
-  const prompt = promptFor(c)
+async function promptForLeader(c: CheckinConfig, changes?: Record<string, unknown>): Promise<string> {
+  const prompt = changes === undefined ? promptFor(c) : `[from agentistics · check-in]\nFaça o check-in da liderança agora.\nSomente estas mudanças desde o último check-in:\n${JSON.stringify(changes)}\n\n${PLAIN_REPORT}\nQuando terminar, chame agentistics_checkin_report.`
   const away = awayActive(parseAwayState((await deps.readPreferences()).away), Date.now())
   return away ? `${prompt}\nAWAY MODE — decide within the authorisations, record the decision, and never ask the owner; anything urgent goes as an away notice.` : prompt
 }
@@ -236,18 +257,8 @@ async function updateStored<T>(mutate: (all: Record<string, Stored>, prefs: Pref
   return result
 }
 function publicState(stored: Stored): CheckinState {
-  const { inherits: _inherits, pending: _pending, fingerprint: _fingerprint, lastFiredAt: _lastFiredAt, ...state } = stored
+  const { inherits: _inherits, pending: _pending, fingerprint: _fingerprint, inputs: _inputs, lastFiredAt: _lastFiredAt, ...state } = stored
   return state
-}
-
-const HEARTBEAT_MS = 2 * 60 * 60_000
-const liveWorkers = (rows: Awaited<ReturnType<CheckinDeps['readFleet']>>['rows'], roles: Awaited<ReturnType<CheckinDeps['readRolesDoc']>>['roles']): boolean =>
-  rows.some(row => deps.roleOfRow(roles, row) === 'worker' && !isClosedRow(row.id, row.state))
-function scheduledNext(now: number, state: Stored, workersAlive: boolean, next = nextRun(now, state)): number | null {
-  return next !== null && workersAlive && state.lastFiredAt != null ? Math.min(next, state.lastFiredAt + HEARTBEAT_MS) : next
-}
-async function workersAlive(): Promise<boolean> {
-  return liveWorkers((await deps.readFleet('pt')).rows, (await deps.readRolesDoc(deps.dataDir)).roles)
 }
 
 function stable(value: unknown): string {
@@ -257,15 +268,31 @@ function stable(value: unknown): string {
   return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${stable(v)}`).join(',')}}`
 }
 
-async function fingerprint(row: { id: string; cwd: string }, state: CheckinState, rows: readonly any[], now: number): Promise<string> {
+async function fingerprint(row: { id: string; cwd: string }, state: CheckinState, rows: readonly any[], now: number): Promise<{ hash: string; inputs: Record<string, unknown> }> {
   const enabled = new Set(state.checklist.filter(x => x.enabled).map(x => x.id))
   const inputs: Record<string, unknown> = {}
-  if (enabled.has('fleet')) inputs.fleet = rows.filter(r => !isClosedRow(r.id, r.state)).map(r => ({ id: r.id, status: r.status ?? r.state ?? r.activity ?? null })).sort((a, b) => a.id.localeCompare(b.id))
-  if (enabled.has('handbacks') || enabled.has('handoff')) inputs.activity = await deps.readCheckinActivity(0, row.id)
+  if (enabled.has('fleet')) inputs.fleet = rows.filter(r => !isClosedRow(r.id, r.state)).map(r => ({ id: r.id, status: r.state ?? r.activity ?? r.status ?? null })).sort((a, b) => a.id.localeCompare(b.id))
+  if (enabled.has('handoff')) inputs.handoff = await deps.readCheckinHandoff(row.cwd)
+  if (enabled.has('handbacks')) inputs.activity = await deps.readCheckinActivity(0, row.id)
   if (enabled.has('limits')) inputs.limits = await deps.readCheckinLimits(now)
   if (enabled.has('releases')) inputs.release = await deps.readCheckinRelease()
   if (enabled.has('mcp-configs')) inputs.mcp = await deps.readCheckinMcpConfigs(row.cwd)
-  return createHash('sha256').update(stable(inputs)).digest('hex')
+  return { hash: createHash('sha256').update(stable(inputs)).digest('hex'), inputs }
+}
+/** Deterministic delta; an array reports additions/removals, never repeats unchanged rows. */
+export function changedInputs(previous: Record<string, unknown> | undefined, current: Record<string, unknown>): Record<string, unknown> {
+  const changes: Record<string, unknown> = {}
+  for (const key of new Set([...Object.keys(previous ?? {}), ...Object.keys(current)])) {
+    const before = previous?.[key], after = current[key]
+    if (stable(before) === stable(after)) continue
+    if (Array.isArray(before) && Array.isArray(after)) {
+      const added = after.filter(a => !before.some(b => stable(a) === stable(b)))
+      const removed = before.filter(b => !after.some(a => stable(a) === stable(b)))
+      changes[key] = { added, removed }
+    } else if (isRecord(before) && isRecord(after)) changes[key] = changedInputs(before, after)
+    else changes[key] = after ?? null
+  }
+  return changes
 }
 /** Legacy agendas equal to the built-in config were automatic; preserve all other choices. */
 export function inheritsDefaults(old: (CheckinConfig & { inherits?: boolean }) | undefined): boolean {
@@ -304,7 +331,6 @@ export async function stateFor(session: string, now = Date.now()): Promise<Check
   return result
 }
 export async function putState(session: string, patch: Partial<CheckinConfig>, now = Date.now()): Promise<CheckinState> {
-  const alive = await workersAlive()
   const state = await updateStored((all, prefs) => {
     const old = all[session] ?? { ...leaderDefaults(prefs), inherits: true, session, lastRunAt: null, nextRunAt: null, last: null }
     const current = agendaState(session, old, prefs, now)
@@ -317,7 +343,6 @@ export async function putState(session: string, patch: Partial<CheckinConfig>, n
     }
     if (stable(config.checklist) !== stable(old.checklist)) delete state.fingerprint
     if (patch.intervalMin !== undefined || patch.paused !== undefined) state.nextRunAt = nextRun(now, config)
-    state.nextRunAt = scheduledNext(now, state, alive, state.nextRunAt)
     all[session] = state
     return state
   })
@@ -325,13 +350,11 @@ export async function putState(session: string, patch: Partial<CheckinConfig>, n
   emit(publicResult); return publicResult
 }
 export async function recordReport(session: string, round: CheckinRound, now = Date.now()): Promise<CheckinState> {
-  const alive = await workersAlive()
   const state = await updateStored((all, prefs) => {
     const old = all[session] ?? { ...leaderDefaults(prefs), inherits: true, session, lastRunAt: null, nextRunAt: null, last: null }
     const { pending: _pending, ...previous } = { ...old, ...agendaState(session, old, prefs, now), inherits: inheritsDefaults(old) }
     const resumed = previous.paused && previous.paused.until !== null && previous.paused.until <= now ? { ...previous, paused: null } : previous
     const state: CheckinState = { ...resumed, session, last: round, lastRunAt: now, nextRunAt: nextRun(now, resumed) }
-    state.nextRunAt = scheduledNext(now, state, alive)
     all[session] = state
     return state
   })
@@ -422,21 +445,19 @@ export async function fireDue(now = Date.now()): Promise<string[]> {
       const existing = (await allStored())[state.session]
       if (existing?.pending) await recordReport(state.session, { state: 'needs_you', summary: 'check-in sem resposta' }, now)
       const currentFingerprint = await fingerprint(row, state, rows, now)
-      const liveWorker = liveWorkers(rows, roles)
-      const heartbeat = liveWorker && (existing?.lastFiredAt == null || now - existing.lastFiredAt >= HEARTBEAT_MS)
-      if (existing?.fingerprint === currentFingerprint && !heartbeat) {
+      if (existing?.fingerprint === currentFingerprint.hash) {
         await updateStored(all => {
           const latest = all[state.session] ?? state
-          all[state.session] = { ...latest, skipped: { count: (latest.skipped?.count ?? 0) + 1, lastAt: now }, nextRunAt: scheduledNext(now, latest, liveWorker) }
+          all[state.session] = { ...latest, skipped: { count: (latest.skipped?.count ?? 0) + 1, lastAt: now, reason: 'skipped: no change', tokens: 0 }, nextRunAt: nextRun(now, latest) }
         })
         emit(publicState((await allStored())[state.session]!))
         continue
       }
-      const next = await promptForLeader(state).then(text => deps.runFleetAction('pt', { action: 'prompt', id: row.id, text })).catch(() => ({ ok: false }))
+      const next = await promptForLeader(state, changedInputs(existing?.inputs, currentFingerprint.inputs)).then(text => deps.runFleetAction('pt', { action: 'prompt', id: row.id, text })).catch(() => ({ ok: false }))
       await updateStored(all => {
         const latest = all[state.session] ?? state
-        const updated = { ...latest, ...(next.ok ? { fingerprint: currentFingerprint, lastFiredAt: now, pending: true } : {}) }
-        all[state.session] = { ...updated, nextRunAt: scheduledNext(now, updated, liveWorker) }
+        const updated = { ...latest, ...(next.ok ? { fingerprint: currentFingerprint.hash, inputs: currentFingerprint.inputs, lastFiredAt: now, pending: true } : {}) }
+        all[state.session] = { ...updated, nextRunAt: nextRun(now, updated) }
       })
       if (next.ok) fired.push(row.id)
       if (next.ok) emit(publicState((await allStored())[state.session]!))
@@ -459,7 +480,7 @@ export async function runNow(session: string, now = Date.now()): Promise<boolean
     const currentFingerprint = await fingerprint(row, state, rows, now)
     const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state) })
     if (!result.ok) return false
-    await updateStored(all => { all[state.session] = { ...all[state.session], ...state, fingerprint: currentFingerprint, lastFiredAt: now, nextRunAt: nextRun(now, state), pending: true } })
+    await updateStored(all => { all[state.session] = { ...all[state.session], ...state, fingerprint: currentFingerprint.hash, inputs: currentFingerprint.inputs, lastFiredAt: now, nextRunAt: nextRun(now, state), pending: true } })
     emit(publicState((await allStored())[state.session]!))
     return result.ok
   } finally {

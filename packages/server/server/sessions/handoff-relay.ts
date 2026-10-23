@@ -40,11 +40,11 @@ export function injectedLabel(turn: Pick<ChatTurn, 'role' | 'text' | 'system'>):
   const h = parseInjectedHeader(turn.text)
   return h && h.origin === 'session' ? `Sessão ${h.sender ?? '?'} (${h.kind})` : null
 }
-function injectedMessages(turns: readonly ChatTurn[]): RelayMessage[] {
+function injectedMessages(turns: readonly ChatTurn[], excludeSenders: readonly string[] = []): RelayMessage[] {
   const out: RelayMessage[] = []
   for (const t of turns) {
     const label = injectedLabel(t)
-    if (!label) continue
+    if (!label || excludeSenders.includes(parseInjectedHeader(t.text)?.sender ?? "")) continue
     out.push({ ...(t.at ? { at: t.at } : {}), text: head(parseInjectedHeader(t.text)!.body, RELAY_MAX_CHARS), label })
   }
   return out.slice(-RELAY_MAX_OWNER_MESSAGES)
@@ -155,7 +155,7 @@ export interface RelayForward {
  * predecessor's assistant text after them — or, when the snapshot ended on an UNANSWERED owner
  * message (`awaiting`), the answer the predecessor wrote after the hand-off began. `null` = nothing.
  */
-export function planForward(turns: readonly ChatTurn[], cursor: string | undefined, awaiting: boolean): RelayForward | null {
+export function planForward(turns: readonly ChatTurn[], cursor: string | undefined, awaiting: boolean, excludeSenders: readonly string[] = []): RelayForward | null {
   const fresh = turns.filter(t => after(t, cursor))
   if (fresh.length === 0) return null
   const ownerIdx: number[] = []
@@ -167,11 +167,11 @@ export function planForward(turns: readonly ChatTurn[], cursor: string | undefin
   const nextCursor = lastTurnAt(fresh) ?? cursor
   if (owner.length === 0 && !reply) {
     // Only the predecessor's own chatter moved: advance past it, nothing to deliver.
-    const injected = injectedMessages(fresh)
+    const injected = injectedMessages(fresh, excludeSenders)
     if (injected.length > 0) return { owner: [], injected, awaiting: nextAwaiting, ...(nextCursor ? { cursor: nextCursor } : {}) }
     return { owner: [], injected: [], awaiting: nextAwaiting, ...(nextCursor ? { cursor: nextCursor } : {}) }
   }
-  return { owner, injected: injectedMessages(fresh), ...(reply ? { reply } : {}), awaiting: nextAwaiting, ...(nextCursor ? { cursor: nextCursor } : {}) }
+  return { owner, injected: injectedMessages(fresh, excludeSenders), ...(reply ? { reply } : {}), awaiting: nextAwaiting, ...(nextCursor ? { cursor: nextCursor } : {}) }
 }
 
 /** A forward with something in it (as opposed to a cursor move only). */

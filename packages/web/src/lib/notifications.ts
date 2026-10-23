@@ -40,6 +40,7 @@ export const RETIRE_REASON_TEXT: Record<string, { pt: string; en: string }> = {
 /** Localized copy for server- and client-emitted notification codes. Resolved at
  *  render time by resolveNotification so switching the language re-translates. */
 export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }> = {
+  'owner.waiting': { pt: { title: '{label} está esperando você' }, en: { title: '{label} is waiting for you' } },
   // Spawn-filing refusals (spawn-filing-io.ts): shown when a session could not be started.
   'subtask_refused': {
     pt: { title: 'Sessão não iniciada', message: 'A subtarefa escolhida não pode receber uma sessão.' },
@@ -450,6 +451,7 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
     ? (lang === 'pt' ? `Evento: ${n.code}` : `Event: ${n.code}`)
     : ''
   let title = loc?.title ?? n.title ?? fallbackTitle
+  if (n.code === 'owner.waiting') title = title.replace('{label}', String(n.meta?.label ?? (lang === 'pt' ? 'Uma sessão' : 'A session')))
   // Titles carry placeholders too ("Agentistics atualizado para {version}") — fill them like messages.
   if (title && n.meta?.version) title = title.replace('{version}', `v${String(n.meta.version).replace(/^v/, '')}`)
   let message = loc?.message ?? n.message
@@ -546,7 +548,7 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
  */
 export function notificationLink(n: Pick<AppNotification, 'code' | 'meta'>): string | null {
   // A session notification leads to the session itself.
-  if (n.code?.startsWith('session.')) {
+  if (n.code === 'owner.waiting' || n.code?.startsWith('session.')) {
     const sid = String(n.meta?.sessionId ?? '').trim()
     return sid ? `/sessions/${encodeURIComponent(sid)}` : null
   }
@@ -603,7 +605,9 @@ function apply(next: unknown): void {
     && typeof (x as AppNotification).id === 'string'
     && typeof (x as AppNotification).ts === 'number'
     && typeof (x as AppNotification).type === 'string')
-  items = valid.map(x => ({ ...x, read: x.read === true }))
+  // A wait notice belongs to the focused browser, so a global inbox refresh cannot erase it.
+  const localWaits = items.filter(n => n.code === 'owner.waiting' && !valid.some(v => v.id === n.id))
+  items = [...valid.map(x => ({ ...x, read: x.read === true })), ...localWaits]
   emit()
 }
 

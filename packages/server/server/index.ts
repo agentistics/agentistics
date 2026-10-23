@@ -1988,6 +1988,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    if (url.pathname === '/api/fleet/owner-presence' && req.method === 'POST') {
+      const { handleOwnerPresence } = await import('./sessions/owner-presence-web')
+      const response = await handleOwnerPresence(req)
+      for (const [key, value] of Object.entries(CORS_HEADERS)) response.headers.set(key, value)
+      return response
+    }
+
     // THE REPOSITORY EXPLORER. Same shape as the utility shell's own gate a few lines up: two
     // gates, enforced HERE and not only in the UI, because these routes read and write arbitrary
     // files on the host — a hidden tab is not a closed door.

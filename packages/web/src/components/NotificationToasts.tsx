@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertCircle, AlertTriangle, Info, CheckCircle2, BellOff, X } from 'lucide-react'
 import { useNotifications, dismissNotification, resolveNotification, type AppNotification, type NotificationType } from '../lib/notifications'
@@ -38,6 +39,7 @@ interface Props {
  */
 export function NotificationToasts({ lang }: Props) {
   const notes = useNotifications()
+  const navigate = useNavigate()
   const [toasts, setToasts] = useState<AppNotification[]>([])
   const [leaving, setLeaving] = useState<Set<string>>(new Set())
   const seen = useRef<Map<string, NotificationType>>(new Map())
@@ -67,6 +69,7 @@ export function NotificationToasts({ lang }: Props) {
   }, [])
 
   useEffect(() => {
+    setToasts(current => current.filter(n => n.code !== 'owner.waiting' || notes.some(note => note.id === n.id)))
     // On first run, treat everything already in the store as seen so we don't
     // replay historical notifications as toasts on mount.
     if (!initialized.current) {
@@ -156,6 +159,7 @@ export function NotificationToasts({ lang }: Props) {
                 </div>
               )}
             </div>
+            {n.code === 'owner.waiting' && <button onClick={() => { navigate(`/sessions/${encodeURIComponent(String(n.meta?.sessionId ?? ''))}`); dismissNotification(n.id); startLeave(n.id) }} style={{ minHeight: 44, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer' }}>{lang === 'pt' ? 'Ir' : 'Go'}</button>}
             {isMuted && (
               <button
                 onClick={e => {
