@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.142.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões de uma segunda conta mostram o próprio chat e os próprios limites, inclusive depois de terminar.',
+        en: 'Sessions on a second account show their own chat and their own limits, even after they end.',
+      },
+      {
+        pt: 'Sessões abertas em segundo plano — pelo app, por um líder, numa passagem de líder ou ao reabrir — voltam a usar o chat completo em vez do terminal.',
+        en: 'Sessions opened in the background — from the app, by a leader, in a leader hand-off or on reopen — use the full chat again instead of the terminal.',
+      },
+      {
+        pt: 'Sessões abertas por um líder herdam o fluxo de trabalho dele também fora dos projetos já configurados.',
+        en: 'Sessions a leader opens inherit its workflow outside already set-up projects too.',
+      },
+      {
+        pt: 'Quando a pasta de dados não pode ser gravada, abrir ou reabrir uma sessão explica isso numa frase, sem travar.',
+        en: 'When the data folder cannot be written, opening or reopening a session says so in one sentence instead of failing silently.',
+      },
+    ],
+  },
   '2.142.0': {
     features: [
       {
