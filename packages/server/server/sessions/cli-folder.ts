@@ -69,6 +69,8 @@ export async function fileInFolder(
   const key = sessionIdentityKey(row)
   let ok = false
   await deps.update(cur => {
+    // Confirming the current folder on reopen must preserve its pin.
+    if (groupsOf(cur).groups.some(g => g.id === folderId && g.sessionKeys.includes(key))) { ok = true; return undefined }
     const plan = planGroupOp(groupsOf(cur), cur.pinnedSessions ?? [], { type: 'add', group: folderId, key })
     if (!plan.ok) return undefined
     ok = true

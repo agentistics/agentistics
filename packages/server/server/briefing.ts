@@ -95,7 +95,7 @@ const skills: readonly BriefingSkill[] = [
   {
     name: 'agentistics-sessions-hand-offs',
     description: 'Use when starting workers, coordinating parent and child sessions, or handing work over.',
-    body: '# Sessions and hand-offs\nOpen other sessions only after explicit approval. Give each worker a complete prompt, task, subtask, done criteria, and files it must not touch. A worker reports with agentistics_session_message(kind=handback|block|question); the product moves a filed subtask to review on handback. A leader hand-off started from the CLI uses `agentop session <harness> --handoff` (from inside the old leader): the successor inherits folder, pin, title, check-in, role and away.',
+    body: '# Sessions and hand-offs\nOpen other sessions only after explicit approval. Give each worker a complete prompt, task, subtask, done criteria, and files it must not touch. A worker reports with agentistics_session_message(kind=handback|block|question); the product moves a filed subtask to review on handback. A leader hand-off started from the CLI uses `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` (from inside the old leader): the successor inherits folder, pin, title, check-in, role, away and approval mode. Workers inherit the verified parent task, folder and approval mode; pass their own subtask.',
   },
   {
     name: 'agentistics-vault',

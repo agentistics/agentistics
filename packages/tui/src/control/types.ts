@@ -2018,6 +2018,8 @@ export interface ResumeSessionRequest {
 }
 
 export interface SpawnSessionResult {
+  /** Applied configuration and incomplete steps; id remains valid when configuration failed. */
+  configuration?: { ready: boolean; applied: string[]; pending: Array<{ item: string; reason: string }> }
   ok: boolean
   /** Already-localized outcome for the status line. */
   message: string
