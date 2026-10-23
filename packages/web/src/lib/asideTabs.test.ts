@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import {
-  autoUnfold, buildTeams, endedAge, endedSections, isAsideTab, liveAge, teamSummary, waitingIds, type TeamRow,
+  autoUnfold, buildTeams, endedAge, fellAge, endedSections, isAsideTab, liveAge, teamSummary, waitingIds, type TeamRow,
 } from './asideTabs'
 
 const r = (id: string, state: TeamRow['state'], extra: Partial<TeamRow> = {}): TeamRow => ({ id, state, title: id, ...extra })
@@ -73,4 +73,10 @@ test('live age reads the last message, then the start, and never invents one', (
   expect(liveAge(r('a', 'working'), now, true)).toBeNull()
   expect(isAsideTab('ended')).toBe(true)
   expect(isAsideTab('x')).toBe(false)
+})
+
+test('a fallen row says how long ago it went down', () => {
+  expect(fellAge(r('f', 'lost', { endedAt: 0 }), 3 * 3_600_000, true)).toBe('há 3 h')
+  expect(fellAge(r('f', 'lost', { endedAt: 0 }), 10 * 60_000, false)).toBe('10 min ago')
+  expect(fellAge(r('f', 'lost'), 0, true)).toBeNull()
 })
