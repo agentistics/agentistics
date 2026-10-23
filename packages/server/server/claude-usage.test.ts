@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { claudeAccessToken, CLAUDE_USAGE_URL, fetchClaudeUsage } from './claude-usage'
+import { claudeAccessToken, CLAUDE_USAGE_URL, fetchClaudeUsage, startClaudeUsagePoll } from './claude-usage'
 
 const NOW = Date.parse('2026-10-16T05:00:00Z')
 const FAKE = 'fake-token-for-tests-only'
@@ -53,5 +53,49 @@ describe('fetchClaudeUsage', () => {
     expect(await run(() => new Response('{}', { status: 200 })).p).toEqual({ skip: 'unparseable' })
     const failed = await run(() => { throw new Error(`boom ${FAKE}`) }).p
     expect(failed).toEqual({ skip: 'network' })
+  })
+})
+
+describe('startClaudeUsagePoll — every Claude login, each attributed by its own root', () => {
+  test('reads the default login AND each extra account root, ingesting each under its root', async () => {
+    const OTHER = 'fake-token-of-the-second-login'
+    const auths: string[] = []
+    const ingested: Array<string | null> = []
+    let done!: () => void
+    const finished = new Promise<void>(r => { done = r })
+    const stop = startClaudeUsagePoll({
+      now: () => NOW,
+      readCredential: async () => cred(),
+      accountRoots: async () => ['/accounts/claude/r_second'],
+      readCredentialAt: async root => (root === '/accounts/claude/r_second' ? cred({ accessToken: OTHER }) : null),
+      fetchImpl: async (_url, init) => {
+        auths.push((init.headers as Record<string, string>).Authorization!)
+        return new Response(usageBody, { status: 200 })
+      },
+      ingest: async (_l, root) => { ingested.push(root); if (ingested.length === 2) done() },
+    })
+    await finished
+    stop()
+    // Before: only the default login was ever asked, so a second account read "waiting for a reading".
+    expect(auths).toEqual([`Bearer ${FAKE}`, `Bearer ${OTHER}`])
+    expect(ingested).toEqual([null, '/accounts/claude/r_second'])
+  })
+  test('a root with no credential costs no request and ingests nothing', async () => {
+    const ingested: Array<string | null> = []
+    let calls = 0
+    let done!: () => void
+    const finished = new Promise<void>(r => { done = r })
+    const stop = startClaudeUsagePoll({
+      now: () => NOW,
+      readCredential: async () => cred(),
+      accountRoots: async () => ['/accounts/claude/r_signed_out'],
+      readCredentialAt: async () => { setTimeout(done, 0); return null },
+      fetchImpl: async () => { calls++; return new Response(usageBody, { status: 200 }) },
+      ingest: async (_l, root) => { ingested.push(root) },
+    })
+    await finished
+    stop()
+    expect(calls).toBe(1)
+    expect(ingested).toEqual([null])
   })
 })

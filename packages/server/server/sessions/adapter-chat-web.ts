@@ -26,6 +26,7 @@ import { fleetSessionHub } from './fleet-web'
 import { foreignConversations } from './row-conversation'
 import { readRegistry } from './registry'
 import { composingOf, onComposing } from './structured-composing'
+import { accountRootOf } from './account-transcript-roots'
 
 /** The engine's chat channel for a harness, or `undefined` (no engine, or a declared absence). */
 function chatOf(harness: string): HarnessChat | undefined {
@@ -40,6 +41,18 @@ function chatOf(harness: string): HarnessChat | undefined {
 async function structuredChatOf(id: string): Promise<{ chat: HarnessChat; conversationId: string } | undefined> {
   const { resolveBackend } = await import('./index')
   return (await resolveBackend().catch(() => null))?.chatOf?.(id)
+}
+
+/**
+ * Does this session run on a SECOND account's config root? The engine's file channel reads each
+ * harness's DEFAULT home only (engine-api 1.x `harnessRoots` names one root per harness and `ChatRef`
+ * carries none), so for such a row it finds nothing — a live row then streamed an empty conversation
+ * forever while its terminal answered. Those rows are served by the host readers, which look in every
+ * account root (`account-transcript-roots.ts`). A structured session is its own source and is unaffected.
+ */
+async function onAccountRoot(id: string): Promise<boolean> {
+  const row = (await readRegistry().catch(() => [])).find(r => r.id === id)
+  return (await accountRootOf(row?.accountId).catch(() => null)) !== null
 }
 
 /**
@@ -88,7 +101,7 @@ export async function openAdapterChatStream(
   if (!hub) return null
   const row = await findRow(hub, lang, id).catch(() => null)
   const structured = row ? await structuredChatOf(id) : undefined
-  const picked = structured ?? pickAdapterChat(row ?? undefined, true, chatOf)
+  const picked = structured ?? (await onAccountRoot(id) ? null : pickAdapterChat(row ?? undefined, true, chatOf))
   if (!row || !picked) return null
   if (!acquireChatSlot()) return null
   const { chat, conversationId } = picked
@@ -115,7 +128,7 @@ export async function openAdapterChatStream(
       const r = await findRow(hub, lang, id).catch(() => null)
       if (!r) return true // a row that left is the tick's own close, said in the legacy words
       const s = await structuredChatOf(id)
-      const p = s ? null : pickAdapterChat(r, true, chatOf)
+      const p = s || await onAccountRoot(id) ? null : pickAdapterChat(r, true, chatOf)
       return sameAdapterSource(opened, s ? { structured: true } : p ? { structured: false, conversationId: p.conversationId } : null)
     },
     // Only a structured session's raw stream can say it (the file channel learns a block when it is FINISHED).
@@ -131,7 +144,8 @@ export async function readAdapterChatPayload(host: StartHost, lang: CliLang, id:
   const hub = await fleetSessionHub().catch(() => null)
   if (!hub) return null
   const row = await findRow(hub, lang, id).catch(() => null)
-  const picked = (row ? await structuredChatOf(id) : undefined) ?? pickAdapterChat(row ?? undefined, true, chatOf)
+  const picked = (row ? await structuredChatOf(id) : undefined)
+    ?? (await onAccountRoot(id) ? null : pickAdapterChat(row ?? undefined, true, chatOf))
   if (!row || !picked) return null
   const { chat, conversationId } = picked
   const out = await readAdapterChat({
