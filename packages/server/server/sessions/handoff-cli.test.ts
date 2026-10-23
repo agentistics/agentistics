@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { passPinForKill } from './handoff-relay-io'
 import { __setHarnessAgentsReaderForTest } from './harness-agents-io'
 import { readPreferences, updatePreferences } from '../preferences'
-import type { ManagedSession, SessionBackend } from './types'
+import type { ManagedSession, SessionBackend, StructuredIntent } from './types'
 
 const saved = process.env.AGENTOP_MANAGED_ID
 // The CLI flow asks `claude agents --json`; the machine's real CLI is not part of this test.
@@ -17,9 +17,9 @@ beforeAll(() => __setHarnessAgentsReaderForTest(async () => []))
 afterAll(() => __setHarnessAgentsReaderForTest(null))
 afterEach(() => { if (saved === undefined) delete process.env.AGENTOP_MANAGED_ID; else process.env.AGENTOP_MANAGED_ID = saved })
 
-const mkBackend = (onSpawn: (id: string) => Promise<void> = async () => {}) => ({
+const mkBackend = (onSpawn: (id: string, structured?: StructuredIntent) => Promise<void> = async () => {}) => ({
   id: 'tmux', unavailable: async () => undefined, list: async () => [],
-  spawn: async (req: { id: string }) => { await onSpawn(req.id) },
+  spawn: async (req: { id: string; structured?: StructuredIntent }) => { await onSpawn(req.id, req.structured) },
   capture: async () => [], kill: async () => true,
 }) as unknown as SessionBackend
 
@@ -51,7 +51,7 @@ describe('agentop session --handoff — the CLI flow', () => {
   test('inherits everything the predecessor was set up with', async () => {
     await addSession({
       id: 'ho-all', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), label: 'Leader all',
-      conversationId: 'conv-ho-all', model: 'claude-opus-5-5', effort: 'high', note: 'keep going', away: true,
+      conversationId: 'conv-ho-all', mode: 'no-questions', model: 'claude-opus-5-5', effort: 'high', note: 'keep going', away: true,
     })
     await updatePreferences(() => ({
       pinnedSessions: ['a', 'conv-ho-all', 'b'],
@@ -65,6 +65,7 @@ describe('agentop session --handoff — the CLI flow', () => {
     expect(child.label).toContain("Leader all")
     expect(child.model).toBe('claude-opus-5-5')
     expect(child.effort).toBe('high')
+    expect(child.mode).toBe('no-questions')
     expect(child.note).toBe('keep going')
     expect(child.away).toBe(true)
     const p = await readPreferences()
@@ -76,6 +77,16 @@ describe('agentop session --handoff — the CLI flow', () => {
     expect(parentRow.handoffTo).toBe(child.id)
     expect(child.handoffSeq).toBe(2)
     expect(await (await import('./session-roles')).storedRoleFor([key, child.id])).toBe('leader')
+  }, 60_000)
+
+  test('ORQ.FORA --handoff sends background structured intent with relay instructions and inherited mode', async () => {
+    await addSession({ id: 'ho-protocol', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), label: 'Protocol leader', mode: 'no-questions' })
+    const intents: Array<StructuredIntent | undefined> = []
+    const backend = mkBackend(async (_id, structured) => { intents.push(structured) })
+    expect(await runHandoff('ho-protocol', 'claude', backend, async () => true)).toBe(0)
+    expect(intents[0]).toMatchObject({ harness: 'claude', origin: 'background', prompt: 'x', mode: 'no-questions' })
+    expect(intents[0]?.instructions?.text).toContain('agentistics')
+    expect(intents[0]?.mcp?.[0]?.name).toBe('agentistics')
   }, 60_000)
 
   test('a forged AGENTOP_MANAGED_ID without the pane is refused, nothing starts', async () => {

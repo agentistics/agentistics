@@ -9,7 +9,7 @@
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { conversationOfRow } from './row-conversation'
-import { resolveChatTranscriptPath } from './chat-tail'
+import { resolveClaudeTranscriptAnyAccount } from './chat-tail'
 
 export interface Resolved {
   row: { harness?: string; cwd?: string; state?: string; conversationBlind?: string }
@@ -38,7 +38,7 @@ export async function resolveSessionTranscript(
         : 'This session has no linked conversation, so there are no subagents to list.'),
     }
   }
-  const transcript = await resolveChatTranscriptPath(row.cwd, conversationId).catch(() => null)
+  const transcript = await resolveClaudeTranscriptAnyAccount(row.cwd, conversationId).catch(() => null)
   if (!transcript) {
     return {
       error: pt

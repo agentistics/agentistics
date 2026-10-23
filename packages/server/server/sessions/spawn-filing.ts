@@ -20,7 +20,7 @@
  *  4. A worker in a repository's MAIN checkout while another session is live there is refused —
  *     the shared-checkout corruption CLAUDE.md § "Concurrent work" records. `sharedCwd` overrides.
  *     Leaders are exempt from 3 and 4: their home (the workspace) is not a repository.
- *  5. Folder: explicit > the predecessor's (hand-off) > where the task's work already is (newest
+ *  5. Folder: explicit > the predecessor's (hand-off) > verified parent's > newest task work (newest
  *     session of the same subtask, else of the task, skipping finished folders) > the caller's own
  *     folder when the caller is on the same task > none, with a warning. Nothing is stored on the
  *     task: moving sessions moves the default.
@@ -61,6 +61,8 @@ export interface FilingInput {
   role?: 'worker' | 'leader' | undefined
   /** Task id or exact title. */
   taskRef?: string
+  harness?: string | undefined
+  callerRole?: 'worker' | 'leader' | undefined
   /** Subtask id or exact title. */
   subtaskRef?: string
   /** Explicit `--folder`: id, exact name or "Parent/Child". */
@@ -105,7 +107,7 @@ export type FilingRefusal =
   | 'no_such_subtask' | 'ambiguous_subtask' | 'subtask_needs_task'
   | 'no_such_folder' | 'ambiguous_folder'
   | 'cwd_missing' | 'cwd_wrong_repo' | 'cwd_needed' | 'cwd_shared_checkout'
-  | 'subtask_refused' | 'board_unreadable'
+  | 'subtask_refused' | 'board_unreadable' | 'handoff_required'
 
 export type FilingPlan = {
   ok: true
@@ -320,6 +322,11 @@ function resolveFolder(input: FilingInput, filing: Filing): { group?: SessionUse
     const g = folderOf(input.groups, input.handoffOf)
     if (g) return { group: g, source: 'predecessor' }
   }
+  // The verified parent's operational folder wins over unrelated recent task work.
+  if (input.caller) {
+    const g = folderOf(input.groups, input.caller)
+    if (g) return { group: g, source: 'parent' }
+  }
   const taskId = filing.task?.id
   if (taskId) {
     const subId = filing.subtask?.id
@@ -360,7 +367,7 @@ export function planFiling(input: FilingInput): FilingPlan {
   // A hand-off inherits the predecessor's filing unless one was named outright. A SUBTASK named
   // alone still inherits the predecessor's task, so it resolves inside it rather than board-wide
   // (where a title like "Planner" is on several tasks and refuses as ambiguous).
-  const inheritedTask = !explicitTask && pred ? clean(pred.taskId) : undefined
+  const inheritedTask = !explicitTask ? clean(pred?.taskId ?? input.caller?.taskId) : undefined
   const inheritedSub = !explicitSub && !explicitTask && pred ? clean(pred.subtaskId) : undefined
   const taskRef = explicitTask ?? inheritedTask
   const subtaskRef = explicitSub ?? inheritedSub
@@ -371,6 +378,10 @@ export function planFiling(input: FilingInput): FilingPlan {
     filing = resolveFiling(input, undefined, subtaskRef)
   }
   if ('ok' in filing) return fromPredecessor(filing, pred, inheritedTask !== undefined, inheritedSub !== undefined)
+
+  if (!pred && role === 'leader' && input.callerRole === 'leader' && input.caller && filing.task?.id && filing.task.id === input.caller.taskId) {
+    return refuse('handoff_required', `leader ${input.caller.label ?? input.caller.id} already leads this task; run agentop session ${input.harness ?? input.caller.harness} --handoff from inside that leader`)
+  }
 
   const cwd = resolveCwd(input, role, filing.task)
   if ('ok' in cwd) return cwd

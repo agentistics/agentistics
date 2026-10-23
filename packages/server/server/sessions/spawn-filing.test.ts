@@ -288,22 +288,24 @@ describe('folder', () => {
   test('parent: the caller\'s folder when the caller is filed on the same task', () => {
     const g = { groups: [{ id: 'p', name: 'Lead', sessionKeys: ['caller'] }] }
     const caller = R('caller', { taskId: 't-1' })
-    expect(ok(planFiling(base({ taskRef: 't-1', groups: g, rows: [caller], caller })))).toMatchObject({ folderId: 'p', folderSource: 'task' })
+    expect(ok(planFiling(base({ taskRef: 't-1', groups: g, rows: [caller], caller })))).toMatchObject({ folderId: 'p', folderSource: 'parent' })
     // no other filed session in a folder → parent
     const caller2 = R('lead', { taskId: 't-1' })
     const g2 = { groups: [{ id: 'p', name: 'Lead', sessionKeys: ['lead'] }] }
     expect(ok(planFiling(base({ taskRef: 't-1', groups: g2, rows: [], caller: caller2 })))).toMatchObject({ folderId: 'p', folderSource: 'parent' })
   })
-  test('parent: not taken when the caller is on another task, or in a finished folder', () => {
+  test('parent: inherited across tasks, but not from a finished folder', () => {
     const g = { groups: [{ id: 'p', name: 'Lead', sessionKeys: ['lead'] }, { id: 'f', name: 'Finished', sessionKeys: ['lead2'] }] }
     const p1 = ok(planFiling(base({ taskRef: 't-1', groups: g, caller: R('lead', { taskId: 't-2' }) })))
-    expect(p1).toMatchObject({ folderSource: 'none' })
-    expect(p1.folderId).toBeUndefined()
-    expect(p1.warnings).toContain('no_folder')
+    expect(p1).toMatchObject({ folderId: 'p', folderSource: 'parent' })
+    expect(p1.warnings).not.toContain('no_folder')
     expect(ok(planFiling(base({ taskRef: 't-1', groups: g, caller: R('lead2', { taskId: 't-1' }) }))).folderSource).toBe('none')
   })
-  test('no task and no explicit folder → none', () => {
-    expect(ok(planFiling(base({ groups, rows, caller: R('caller') })))).toMatchObject({ folderSource: 'none' })
+  test('no task and no explicit folder inherits the parent folder', () => {
+    expect(ok(planFiling(base({ groups, rows, caller: R('caller') })))).toMatchObject({ folderId: 'other', folderSource: 'parent' })
+  })
+  test('no task, explicit folder or parent folder → none', () => {
+    expect(ok(planFiling(base({ groups, rows, caller: R('folderless-parent') })))).toMatchObject({ folderSource: 'none' })
   })
 })
 
@@ -436,5 +438,34 @@ describe('a spawn with no parent and no role is a PERSON, not a worker (H1)', ()
   test('refusal texts carry no CLI-only wording without naming it as the CLI', () => {
     const p = planFiling({ ...base, role: 'worker' })
     if (!p.ok) expect(p.detail).toContain('(CLI: --shared-cwd)')
+  })
+})
+
+describe('ORQ.FORA — verified parent continuation', () => {
+  const caller = R('parent', { taskId: 't-1', subtaskId: 's-1', cwd: '/home/u/agentistics/.claude/worktrees/x' })
+  test('worker inherits task without inheriting the leader subtask', () => {
+    expect(ok(planFiling(base({ caller })))).toMatchObject({ taskId: 't-1' })
+    expect(ok(planFiling(base({ caller }))).subtaskId).toBeUndefined()
+  })
+  test('the parent folder wins over a newer unrelated front on the task', () => {
+    const plan = ok(planFiling(base({ caller, rows: [R('recent', { taskId: 't-1' })], groups: { groups: [
+      { id: 'parent-folder', name: 'Workers', sessionKeys: ['parent'] },
+      { id: 'recent-folder', name: 'Other front', sessionKeys: ['recent'] },
+    ] } })))
+    expect(plan).toMatchObject({ folderId: 'parent-folder', folderSource: 'parent' })
+  })
+  test('explicit task, subtask and folder override inheritance', () => {
+    expect(ok(planFiling(base({ caller, taskRef: 't-2', subtaskRef: 's-2', folderRef: 'f', groups: { groups: [{ id: 'f', name: 'Chosen', sessionKeys: [] }] } })))).toMatchObject({ taskId: 't-2', subtaskId: 's-2', folderId: 'f' })
+  })
+  test('same-task leader intent refuses with the exact successor command', () => {
+    const plan = planFiling(base({ caller, callerRole: 'leader', role: 'leader', harness: 'codex' }))
+    expect(plan).toMatchObject({ ok: false, code: 'handoff_required' })
+    if (!plan.ok) expect(plan.detail).toContain('agentop session codex --handoff')
+  })
+  test('a leader can start a leader for a different task/front', () => {
+    expect(ok(planFiling(base({ caller, callerRole: 'leader', role: 'leader', taskRef: 't-2' })))).toMatchObject({ taskId: 't-2', role: 'leader' })
+  })
+  test('explicit handoff preserves the same task and subtask', () => {
+    expect(ok(planFiling(base({ caller, callerRole: 'leader', handoffOf: caller })))).toMatchObject({ taskId: 't-1', subtaskId: 's-1', role: 'leader' })
   })
 })

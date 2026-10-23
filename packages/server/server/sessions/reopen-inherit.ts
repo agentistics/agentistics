@@ -1,4 +1,4 @@
-import type { HarnessId } from '@agentistics/core'
+import type { CanonicalMode, HarnessId } from '@agentistics/core'
 import { planSpawn } from './spawn-spec'
 import type { ManagedSession } from './types'
 
@@ -23,6 +23,7 @@ export function inheritedIdentity(prev: ManagedSession | undefined): Partial<Man
     out.label = prev.label
     if (prev.labelSince !== undefined) out.labelSince = prev.labelSince
   }
+  if (prev.mode) out.mode = prev.mode
   if (prev.note) out.note = prev.note
   if (prev.task) out.task = prev.task
   if (prev.taskId) out.taskId = prev.taskId
@@ -54,11 +55,13 @@ export function inheritedIdentity(prev: ManagedSession | undefined): Partial<Man
 export function inheritedLaunch(
   prev: ManagedSession | undefined,
   harness: HarnessId,
-): { model?: string; effort?: string } {
+): { model?: string; effort?: string; mode?: CanonicalMode } {
   if (!prev) return {}
   const accepts = (o: { model?: string; effort?: string }) =>
     planSpawn({ harness, cwd: prev.cwd, resumeId: 'x', ...o }).ok
-  const out: { model?: string; effort?: string } = {}
+  const out: { model?: string; effort?: string; mode?: CanonicalMode } = {}
+  // Never silently downgrade a recorded approval policy on reopen.
+  if (prev.mode) out.mode = prev.mode
   if (prev.model && accepts({ model: prev.model })) out.model = prev.model
   if (prev.effort && accepts({ effort: prev.effort })) out.effort = prev.effort
   return out

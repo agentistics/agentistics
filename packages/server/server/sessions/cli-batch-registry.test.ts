@@ -169,12 +169,33 @@ describe('batch — the registry row brackets the spawn', () => {
   })
 
   test('M2: start and batch write the same filing fields on the row for the same inputs', async () => {
-    const rows: Array<Record<string, unknown>> = []
-    const mk = () => ({ ...(fake([])), spawn: async (req: { id: string }) => { const r = (await readRegistry()).find(m => m.id === req.id); rows.push({ task: r?.task, taskId: r?.taskId, subtaskId: r?.subtaskId }); throw new Error('pane refused') } }) as unknown as SessionBackend
-    await quiet(() => start({ kind: 'start', harness: 'claude', background: true, prompt: 'x', cwd: process.cwd(), force: true, task: 'S4 row task', subtask: 'S4 row subtask' } as Parameters<typeof start>[0], mk()))
-    await quiet(() => batch({ kind: 'batch', task: 'S4 row task', subtask: 'S4 row subtask', json: true, force: true, specs: [{ harness: 'claude', prompt: 'x', cwd: process.cwd() }] } as Parameters<typeof batch>[0], mk()))
-    expect(rows.length).toBe(2)
-    expect(rows[0]).toEqual(rows[1])
-    expect(rows[0]).toMatchObject({ taskId: 't-s4row', subtaskId: 's-s4row' })
+    const d = realpathSync(mkdtempSync(join(tmpdir(), 'm2-filing-')))
+    const previousCaller = process.env.AGENTOP_MANAGED_ID
+    delete process.env.AGENTOP_MANAGED_ID
+    try {
+      expect(gitClean(['init', '-q', d]).exitCode).toBe(0)
+      expect(gitClean(['-C', d, 'remote', 'add', 'origin', 'https://github.com/fixture/m2-filing.git']).exitCode).toBe(0)
+      // Filing may bind a task to its repo before the recording backend refuses the process.
+      // Keep both the task and checkout private to this parity test.
+      const taskId = 't-m2-filing'
+      const subtaskId = 's-m2-filing'
+      const taskTitle = 'M2 filing parity task'
+      const subtaskTitle = 'M2 filing parity subtask'
+      const now = '2026-10-16T00:00:00Z'
+      const store = createTaskStore(TASKS_FILE)
+      await store.upsertTask({ id: taskId, title: taskTitle, status: 'in_progress', createdAt: now, updatedAt: now })
+      await store.upsertSubtask({ id: subtaskId, taskId, title: subtaskTitle, done: false, status: 'todo', createdAt: now, updatedAt: now })
+      const rows: Array<Record<string, unknown>> = []
+      const mk = () => ({ ...(fake([])), spawn: async (req: { id: string }) => { const r = (await readRegistry()).find(m => m.id === req.id); rows.push({ task: r?.task, taskId: r?.taskId, subtaskId: r?.subtaskId }); throw new Error('pane refused') } }) as unknown as SessionBackend
+      await quiet(() => start({ kind: 'start', harness: 'claude', background: true, prompt: 'x', cwd: d, force: true, task: taskTitle, subtask: subtaskTitle } as Parameters<typeof start>[0], mk()))
+      await quiet(() => batch({ kind: 'batch', task: taskTitle, subtask: subtaskTitle, json: true, force: true, specs: [{ harness: 'claude', prompt: 'x', cwd: d }] } as Parameters<typeof batch>[0], mk()))
+      expect(rows.length).toBe(2)
+      expect(rows[0]).toEqual(rows[1])
+      expect(rows[0]).toMatchObject({ taskId, subtaskId, task: taskTitle })
+    } finally {
+      if (previousCaller === undefined) delete process.env.AGENTOP_MANAGED_ID
+      else process.env.AGENTOP_MANAGED_ID = previousCaller
+      rmSync(d, { recursive: true, force: true })
+    }
   })
 })

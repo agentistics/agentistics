@@ -269,7 +269,7 @@ export function handoffHintText(hint: HandoffHint, awayNote = ''): string {
       : ''
     numbers = ` Sucessor começa em ${f}; passagem custa H ≈ ${k(why.overheadTokens ?? 0)} tokens de cache; ponto ótimo T* = F + √(2·H·g) ≈ ${k(why.targetTokens)} (g ≈ ${((why.growthPerCall ?? 0) / 1_000).toFixed(1)}k/chamada)${gain}.`
   }
-  return `Hora de passar a liderança: contexto ${k(hint.tokens)} tokens (${pct}% do limite).${numbers} Prepare a passagem e abra a sessão sucessora (handoff:true).${awayNote}`
+  return `Hora de passar a liderança: contexto ${k(hint.tokens)} tokens (${pct}% do limite).${numbers} Prepare a passagem e abra a sessão sucessora com \`agentop session <harness> --handoff --bg -p "Leia o arquivo de passagem e assuma"\`.${awayNote}`
 }
 
 export interface HandoffHintDeps {

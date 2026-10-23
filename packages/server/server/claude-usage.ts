@@ -25,6 +25,25 @@ const EXPIRY_MARGIN_MS = 60_000
 export const claudeCredentialsFile = (): string =>
   join(process.env.CLAUDE_CONFIG_DIR || join(HOME_DIR, '.claude'), '.credentials.json')
 
+/** An extra account root's credential file — the root IS that login's `CLAUDE_CONFIG_DIR`. */
+const readCredentialAt = (root: string): Promise<string | null> =>
+  readFile(join(root, '.credentials.json'), 'utf8').catch(() => null)
+
+/**
+ * Every extra Claude login's root. A second account signs in inside its own root, so the default
+ * credential file says nothing about it, and a session of it in the terminal UI emits no
+ * `rate_limit_event` — so without this its limits were never read ("waiting for a reading" forever).
+ */
+async function claudeAccountRoots(deps: UsageDeps): Promise<string[]> {
+  if (deps.accountRoots) return deps.accountRoots().catch(() => [])
+  try {
+    const [{ readAccounts }, { accountRootsFrom }] = await Promise.all([
+      import('./harness-accounts'), import('./sessions/account-transcript-roots'),
+    ])
+    return accountRootsFrom(await readAccounts(), 'claude')
+  } catch { return [] }
+}
+
 export type UsageSkip = 'no-credential' | 'expired' | 'no-scope' | 'http' | 'rate-limited' | 'unparseable' | 'network'
 export type UsageResult = { limits: PlanLimits } | { skip: UsageSkip }
 
@@ -42,6 +61,14 @@ export function claudeAccessToken(raw: string | null, nowMs: number): { token: s
 
 export interface UsageDeps {
   readCredential?: () => Promise<string | null>
+  /**
+   * The extra Claude account roots to read as well (each extra login's own `CLAUDE_CONFIG_DIR`,
+   * `account-roots.ts`), and how to read a root's credential file. Defaults: the account registry,
+   * and `<root>/.credentials.json` read in-process under the same rules as the default one.
+   */
+  accountRoots?: () => Promise<string[]>
+  readCredentialAt?: (root: string) => Promise<string | null>
+  ingest?: (limits: PlanLimits, root: string | null) => Promise<unknown>
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>
   now?: () => number
 }
@@ -77,11 +104,19 @@ export function startClaudeUsagePoll(deps: UsageDeps = {}): () => void {
   let delay = CLAUDE_USAGE_POLL_MS
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
+  const ingest = deps.ingest ?? ((l: PlanLimits, root: string | null) => ingestFromRoot(l, root))
   const tick = async (): Promise<void> => {
-    const r = await fetchClaudeUsage(deps).catch((): UsageResult => ({ skip: 'network' }))
-    // The poll reads the DEFAULT root's login, so its reading is that root's account.
-    if ('limits' in r) await ingestFromRoot(r.limits, null).catch(() => false)
-    delay = 'skip' in r && r.skip === 'rate-limited' ? Math.min(MAX_BACKOFF_MS, delay * 2) : CLAUDE_USAGE_POLL_MS
+    let limited = false
+    for (const root of [null, ...await claudeAccountRoots(deps)]) {
+      const r = await fetchClaudeUsage(root === null ? deps : {
+        ...deps,
+        readCredential: () => (deps.readCredentialAt ?? readCredentialAt)(root),
+      }).catch((): UsageResult => ({ skip: 'network' }))
+      // Attributed by the ROOT it was read from: the default home's binding, or that root's account.
+      if ('limits' in r) await ingest(r.limits, root).catch(() => false)
+      if ('skip' in r && r.skip === 'rate-limited') limited = true
+    }
+    delay = limited ? Math.min(MAX_BACKOFF_MS, delay * 2) : CLAUDE_USAGE_POLL_MS
     if (stopped) return
     timer = setTimeout(() => { void tick() }, delay)
     timer.unref?.()

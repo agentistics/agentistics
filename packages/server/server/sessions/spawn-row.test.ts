@@ -72,3 +72,16 @@ describe('spawnRole shared by start, batch and spawnSession', () => {
   ]
   for (const [name, input, role] of cases) test(name, () => expect(spawnRole(input)).toBe(role))
 })
+
+describe('ORQ.FORA API filing request', () => {
+  test('only a verified parent supplies ordinary worker inheritance', async () => {
+    const { spawnSessionFilingRequest } = await import('./spawn-row')
+    expect(spawnSessionFilingRequest({ cwd: '/w', parentSessionId: 'parent' }).callerSessionId).toBeUndefined()
+    expect(spawnSessionFilingRequest({ cwd: '/w', parentSessionId: 'parent', parentVerified: true }).callerSessionId).toBe('parent')
+  })
+  test('leader labels and handoff reach the common planner', async () => {
+    const { spawnSessionFilingRequest } = await import('./spawn-row')
+    expect(spawnSessionFilingRequest({ cwd: '/w', harness: 'codex', label: '[ LEADER ] - Next', parentSessionId: 'parent', parentVerified: true })).toMatchObject({ role: 'leader', callerSessionId: 'parent', harness: 'codex' })
+    expect(spawnSessionFilingRequest({ cwd: '/w', parentSessionId: 'parent', handoff: true })).toMatchObject({ role: 'leader', handoffOf: 'parent' })
+  })
+})

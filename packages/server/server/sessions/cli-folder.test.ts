@@ -98,3 +98,11 @@ describe('rekeyFolderMember', () => {
     expect(r.ok && r.byRef.get('Eng')!.siblings).toEqual(['Eng/Workers', 'Eng/Finalizadas'])
   })
 })
+
+test('ORQ.FORA reopen confirms the current folder without removing its pin', async () => {
+  const { deps, prefs } = mk()
+  prefs.sessionGroups!.groups[0]!.sessionKeys = ['conv']
+  prefs.pinnedSessions = ['before', 'conv', 'after']
+  expect(await fileInFolder('g1', { id: 'new-managed', conversationId: 'conv' }, deps)).toBe(true)
+  expect(prefs.pinnedSessions).toEqual(['before', 'conv', 'after'])
+})

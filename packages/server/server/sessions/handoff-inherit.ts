@@ -13,7 +13,7 @@
  * predecessor that is not pinned / has no agenda leaves the successor without one.
  */
 
-import { groupOfSession, planAddToGroup, sessionIdentityKey } from '@agentistics/core'
+import { type CanonicalMode, groupOfSession, planAddToGroup, sessionIdentityKey } from '@agentistics/core'
 import type { Preferences, PreferencesMutator } from '../preferences'
 
 type Ref = { id: string; conversationId?: string | undefined }
@@ -85,11 +85,14 @@ export function handoffMutePatch(prefs: Preferences, parent: Ref, child: Ref): P
  * was given always wins; an effort is inherited only alongside the model it was chosen for.
  */
 export function handoffSpawnDefaults(
-  parent: { harness?: string; model?: string | undefined; effort?: string | undefined } | undefined,
+  parent: { harness?: string; model?: string | undefined; effort?: string | undefined; mode?: CanonicalMode | undefined } | undefined,
   harness: string,
-  given: { model?: string | undefined; effort?: string | undefined },
-): { model?: string; effort?: string } {
-  const out: { model?: string; effort?: string } = {}
+  given: { model?: string | undefined; effort?: string | undefined; mode?: CanonicalMode | undefined },
+): { model?: string; effort?: string; mode?: CanonicalMode } {
+  const out: { model?: string; effort?: string; mode?: CanonicalMode } = {}
+  // Canonical approval modes can cross harnesses; unsupported modes are refused by the spawn planner.
+  const mode = given.mode ?? parent?.mode
+  if (mode) out.mode = mode
   if (given.model) out.model = given.model
   if (given.effort) out.effort = given.effort
   if (!parent || parent.harness !== harness) return out
@@ -102,10 +105,16 @@ export function handoffSpawnDefaults(
 }
 
 /** Every inherited preference in ONE patch (folder, pin, check-in, mute), or `undefined` when none applies. */
-export function handoffInheritPatch(prefs: Preferences, parent: Ref, child: Ref): Partial<Preferences> | undefined {
+export function handoffInheritPatch(prefs: Preferences, parent: Ref, child: Ref, folderId?: string): Partial<Preferences> | undefined {
   let working = prefs
   let out: Partial<Preferences> | undefined
-  for (const step of [handoffGroupPatch, handoffPinPatch, handoffCheckinPatch, handoffMutePatch]) {
+  const groupPatch = (current: Preferences, _parent: Ref, next: Ref): Partial<Preferences> | undefined => {
+    if (!folderId) return handoffGroupPatch(current, parent, next)
+    const value = current.sessionGroups ?? { groups: [] }
+    if (value.groups.some(g => g.id === folderId && g.sessionKeys.includes(sessionIdentityKey(next)))) return undefined
+    return { sessionGroups: planAddToGroup(value, folderId, sessionIdentityKey(next)) }
+  }
+  for (const step of [groupPatch, handoffPinPatch, handoffCheckinPatch, handoffMutePatch]) {
     const patch = step(working, parent, child)
     if (!patch) continue
     out = { ...out, ...patch }
@@ -114,20 +123,19 @@ export function handoffInheritPatch(prefs: Preferences, parent: Ref, child: Ref)
   return out
 }
 
-/** Apply it. Never throws: these are conveniences, not the spawn. Returns whether anything changed. */
+/** Apply it atomically. Write failures propagate to spawn configuration reporting/retry. */
 export async function inheritHandoffPrefs(
   parent: Ref,
   child: Ref,
   update: (mutate: PreferencesMutator) => Promise<unknown>,
+  folderId?: string,
 ): Promise<boolean> {
   let changed = false
-  try {
-    await update(cur => {
-      const patch = handoffInheritPatch(cur, parent, child)
-      changed = patch !== undefined
-      return patch
-    })
-  } catch { return false }
+  await update(cur => {
+    const patch = handoffInheritPatch(cur, parent, child, folderId)
+    changed = patch !== undefined
+    return patch
+  })
   return changed
 }
 

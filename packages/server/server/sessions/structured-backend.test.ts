@@ -12,7 +12,7 @@ import type {
 import { answerFits, structuredRegistry, stubDriver } from '@agentistics/engine-api'
 import { acpAsStructured, recordingSession, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
 import { isReplayCall } from './structured-replay'
-import { STRUCTURED_ROUTE_OFF, answerStructured, routableDriver, routeSpawn, structuredIntentOf, structuredReopenOrigin } from './structured-route'
+import { STRUCTURED_ROUTE_OFF, answerStructured, reopenOrigin, routableDriver, routeSpawn, spawnOriginOf, structuredIntentOf } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
 
 function fakeBase(): SessionBackend & { calls: Array<[string, unknown?]> } {
@@ -113,18 +113,32 @@ const web = (harness: HarnessId, extra: Partial<BackendSpawn> = {}): BackendSpaw
 
 describe('routeSpawn (pure)', () => {
   const base = { harness: 'gemini' as HarnessId, driver: 'acp' as const, acpDriven: false, acpOptIn: [] as string[] }
-  test('structured only for a web-born spawn, flag ON, with a ready driver', () => {
+  test('structured for a web-born or background spawn, flag ON, with a ready driver', () => {
     expect(routeSpawn({ ...base, flagOn: true, origin: 'web' })).toBe('structured')
+    expect(routeSpawn({ ...base, flagOn: true, origin: 'background' })).toBe('structured')
+    expect(routeSpawn({ ...base, flagOn: false, origin: 'background' })).toBe('tmux')
+    expect(routeSpawn({ ...base, flagOn: true, origin: 'background', driver: null })).toBe('tmux')
     expect(routeSpawn({ ...base, flagOn: false, origin: 'web' })).toBe('tmux')
     expect(routeSpawn({ ...base, flagOn: true, origin: 'terminal' })).toBe('tmux')
     expect(routeSpawn({ ...base, flagOn: true })).toBe('tmux')
     expect(routeSpawn({ ...base, flagOn: true, origin: 'web', driver: null })).toBe('tmux')
     expect(routeSpawn({ ...base, harness: null, flagOn: true, origin: 'web' })).toBe('tmux')
   })
-  test('a web reopen is structured only when the replaced row ran structured', () => {
-    expect(structuredReopenOrigin('web', 'acp')).toBe(true)
-    expect(structuredReopenOrigin('web', undefined)).toBe(false)
-    expect(structuredReopenOrigin(undefined, 'acp')).toBe(false)
+  test('a spawn nobody attaches to is background; an attached one stays a TUI (owner 2026-10-23)', () => {
+    // `agentop session --bg`, a leader's worker, a hand-off: no terminal anybody sits in.
+    expect(spawnOriginOf(undefined, false)).toBe('background')
+    expect(spawnOriginOf(undefined, true)).toBeUndefined()
+    expect(spawnOriginOf('web', true)).toBe('web')
+    expect(spawnOriginOf('terminal', false)).toBe('terminal')
+  })
+  test('a reopen routes structured unless a person attaches to it in a terminal', () => {
+    // Before: only a web reopen of a row that already ran structured — a tmux conversation stayed tmux.
+    expect(reopenOrigin('web', false)).toBe('web')
+    expect(reopenOrigin('web', true)).toBe('web')
+    expect(reopenOrigin(undefined, false)).toBe('background')
+    expect(reopenOrigin('terminal', false)).toBe('background')
+    expect(reopenOrigin(undefined, true)).toBeUndefined()
+    expect(reopenOrigin('terminal', true)).toBeUndefined()
   })
   test('A5.4 opt-in routes as before, flag or no flag', () => {
     expect(routeSpawn({ ...base, flagOn: false, acpDriven: true, acpOptIn: ['gemini'] })).toBe('acp-legacy')
@@ -162,6 +176,33 @@ describe('structuredRegistry / stubDriver / answerFits (engine-api, pure)', () =
 })
 
 describe('withStructured — routing', () => {
+  for (const origin of ['background', 'terminal', 'web'] as const) {
+    test(`flag ON + ${origin} origin: ${origin === 'terminal' ? 'tmux' : 'structured driver'}`, async () => {
+      const base = fakeBase()
+      const eng = fakeEngine()
+      let asked = 0
+      const b = withStructured(base, provider(eng.reg, {
+        structured: async () => { asked++; return eng.reg },
+      }))
+      const req = web('gemini')
+      req.structured = { ...req.structured!, origin }
+      await b.spawn(req)
+      if (origin === 'terminal') {
+        expect(base.calls).toEqual([['spawn', req]])
+        expect(asked).toBe(0)
+        expect(eng.started).toEqual([])
+        expect(b.structuredSessions()).toEqual([])
+      } else {
+        expect(base.calls.map(c => c[0])).not.toContain('spawn')
+        expect(asked).toBe(1)
+        expect(eng.started).toHaveLength(1)
+        expect(eng.started[0]).toMatchObject({ id: req.id, harness: 'gemini', initialPrompt: 'hi' })
+        expect(b.structuredSessions()).toEqual([{ id: req.id, route: 'structured', driver: 'acp' }])
+      }
+      await b.kill(req.id)
+    })
+  }
+
   test('a refused conversation link is reported again on a later list(), then never once it links', async () => {
     const base = fakeBase()
     const eng = fakeEngine()

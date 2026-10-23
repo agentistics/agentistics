@@ -22,6 +22,7 @@ import type { Task, TaskBook } from './task-model'
 export interface SpawnFilingRequest {
   /** Absent = a person / unknown caller (see `FilingInput.role`). */
   role?: 'worker' | 'leader' | undefined
+  harness?: string | undefined
   taskRef?: string | undefined
   subtaskRef?: string | undefined
   folderRef?: string | undefined
@@ -73,7 +74,8 @@ async function defaultLiveIds(): Promise<ReadonlySet<string>> {
 
 export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan> {
   const rows = o.rows ?? await readRegistry()
-  const wantsBoard = !!(o.taskRef?.trim() || o.subtaskRef?.trim() || o.handoffOf)
+  const caller = o.callerSessionId ? rows.find(r => r.id === o.callerSessionId) : undefined
+  const wantsBoard = !!(o.taskRef?.trim() || o.subtaskRef?.trim() || o.handoffOf || caller?.taskId)
   let book: Pick<TaskBook, 'tasks' | 'subtasks'> = o.book ?? (wantsBoard ? await import('./task-source').then(m => m.loadTaskBoard()).then(w => w.book) : { tasks: [], subtasks: [] })
   if (o.pendingTask) {
     const now = new Date().toISOString()
@@ -81,8 +83,9 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
     book = { tasks: [...book.tasks, synthetic], subtasks: book.subtasks }
   }
   const groups = o.groups ?? { groups: ((await readPreferences().catch(() => null))?.sessionGroups?.groups ?? []).map(g => ({ ...g, sessionKeys: [...g.sessionKeys] })) }
-  const caller = o.callerSessionId ? rows.find(r => r.id === o.callerSessionId) : undefined
   const handoffRow = o.handoffOf ? rows.find(r => r.id === o.handoffOf) : undefined
+  const callerRole = !o.handoffOf && o.role === 'leader' && caller
+    ? await import('./session-roles').then(m => m.storedRoleFor([caller.conversationId, caller.id])) : undefined
   const callerCwd = await canon(process.cwd())
   const cwd = o.cwd?.trim() ? await canon(resolve(o.cwd)) : undefined
   const liveIds = o.liveIds ?? await defaultLiveIds()
@@ -112,6 +115,7 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
     }
     const plan = planFiling({
       ...(o.role ? { role: o.role } : {}),
+      harness: o.harness, callerRole,
       ...(o.taskRef !== undefined ? { taskRef: o.taskRef } : {}),
       ...(o.subtaskRef !== undefined ? { subtaskRef: o.subtaskRef } : {}),
       ...(o.folderRef !== undefined ? { folderRef: o.folderRef } : {}),

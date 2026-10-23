@@ -79,7 +79,8 @@ const resolveLiveTranscriptPath = async (s: LiveSessionRef, bindings: Record<str
         break
       }
       case 'codex': path = await readers.resolveCodexTranscript(ref, join(root, 'sessions')); break
-      case 'gemini': path = await readers.resolveGeminiTranscript(ref, join(root, 'tmp')); break
+      // GEMINI_CLI_HOME is a HOME: the store is `<root>/.gemini/tmp` (`account-transcript-roots.ts`).
+      case 'gemini': path = await readers.resolveGeminiTranscript(ref, join(root, '.gemini', 'tmp')); break
       case 'copilot': path = await readers.resolveCopilotTranscript(ref, join(root, 'session-state')); break
       case 'kimi': path = await readers.resolveKimiTranscript(ref, join(root, 'sessions')); break
       case 'antigravity': path = await readers.resolveAntigravityTranscript(ref, join(root, 'brain')); break
