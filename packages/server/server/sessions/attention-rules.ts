@@ -91,6 +91,10 @@ export const ATTENTION_RULES: Record<HarnessId, AttentionRules | null> = {
     // 2026-09-05 (claude 2.1.261): `· Jitterbugging… (37s · ↓ 1.7k tokens · thought for 17s)`. The
     // verb is whimsical and changes every frame; the elapsed time and the token counter do not.
     mainWorking: [/\(\d+[hms][^)]*·\s*↓/],
+    // claude 2.1.309, 2026-10-23: the REVIEW step of a multi-question `AskUserQuestion` draws NO
+    // footer — `Ready to submit your answers?` directly above `❯ 1. Submit answers` / `2. Cancel`.
+    // See `AttentionRules.menuHeaders`.
+    menuHeaders: [{ re: /^\s*Ready to submit your answers\?\s*$/, within: 1 }],
   },
   codex: {
     probed: 'codex 0.113.0, 2026-08-13 + codex 0.160.1, 2026-10-07',
@@ -102,6 +106,10 @@ export const ATTENTION_RULES: Record<HarnessId, AttentionRules | null> = {
       /Press enter to confirm or esc to cancel/,
       // 0.160.1's directory-trust prompt.
       /enter continue · esc back/,
+      // 0.161.0's startup update picker (`1. Update now` / `2. Skip` / `3. Skip until next
+      // version`), captured live 2026-10-23: its footer says `esc skip`, not `esc back`, so the
+      // session read as idle and the chat offered nothing while the terminal waited.
+      /enter continue · esc skip/,
       // codex-cli 0.160.x startup daemon-settings question. Unlike the other prompts this is
       // drawn before the first conversation turn, so it must be recognised from its option footer.
       /Run without daemon this time[\s\S]*Restart with these settings[\s\S]*Cancel/,
@@ -122,6 +130,9 @@ export const ATTENTION_RULES: Record<HarnessId, AttentionRules | null> = {
       //  - AskUserQuestion (`→ [1] red` … `[4] Other`).
       /↑↓ select\s+[\d-]+ \/ ↵ choose/,
     ],
+    // 2.2.0's folder trust (2026-10-23): the `↑↓ navigate …` line sits under the TITLE and the
+    // description that used to end the dialog is gone — it ends on `Exit`, so no footer exists.
+    menuHeaders: [{ re: /↑↓ navigate · Enter select · Esc exit/, within: 8, marker: true }],
   },
   gemini: {
     probed: 'gemini 0.55.1, 2026-08-13',
@@ -145,6 +156,14 @@ export const ATTENTION_RULES: Record<HarnessId, AttentionRules | null> = {
       /ctrl\+g edit/i,
       /ctrl\+r Review/i,
       /Do you want to proceed/i,
+      // agy 1.4.6's `ask_question`, captured live 2026-10-23 — a footer per step kind, none of which
+      // the lines above match, so every question read as idle:
+      //   single choice  `↑/↓ Navigate · enter Select · esc Skip`
+      //   multi-select   `↑/↓ Navigate · → Next · space Toggle · enter Submit · esc Skip`
+      //   last step      `↑/↓ Navigate · ← Back · enter Submit All · esc Skip`
+      //   write-in field `enter Submit · esc Back`
+      /↑\/↓ Navigate · .*enter (?:Select|Submit)/i,
+      /enter Submit · esc Back/i,
     ],
   },
   // Never spawned by agentop (no spawn-spec, CLAUDE.md step 4 skipped by scope), so nobody has

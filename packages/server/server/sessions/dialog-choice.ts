@@ -63,6 +63,33 @@ export interface DialogOption {
    * (`isFreeTextOption`).
    */
   freeText?: boolean
+  /**
+   * The option is a CHECKBOX of a multi-select question, and whether it is ticked now. Absent on a
+   * single-choice option. Read off the `[ ]` / `[✔]` / `[x]` the harness prints (claude 2.1.309 and
+   * agy 1.4.6, both 2026-10-23), which is STRIPPED from `label` — drawn as text it read as a literal
+   * `[ ] Apple` in the card, with nothing saying a click only ticks a box.
+   */
+  checked?: boolean
+}
+
+/**
+ * WHERE in a multi-step form this dialog is — PURE data, read off the same frame as the options.
+ *
+ * claude's `AskUserQuestion` with several questions draws a TAB STRIP above the question
+ * (`←  ☒ Fruit  ☐ Color  ✔ Submit  →`, ☒ answered, ☐ not yet) and ends on a REVIEW step
+ * (`Ready to submit your answers?` / `1. Submit answers` / `2. Cancel`); agy's `ask_question` prints
+ * `Question 1/2: …` instead and has no review step. Without this the card showed one step of a form
+ * as if it were the whole question, and the person could not move on, nor see what was left.
+ */
+export interface DialogForm {
+  /** claude's tab strip, Submit excluded. Absent where the harness draws none. */
+  steps?: { label: string; done: boolean }[]
+  /** agy's `Question n/m`. Absent where the harness does not print one. */
+  position?: { at: number; of: number }
+  /** The REVIEW step: the answers are read back and the options are submit/cancel. */
+  review?: true
+  /** The options are checkboxes (`DialogOption.checked`): a pick toggles, it does not answer. */
+  multi?: true
 }
 
 /**
@@ -137,6 +164,11 @@ export type DialogUnreadable =
   | 'gap'
   /** Two highlighted rows. A frame this parser does not understand. */
   | 'two-cursors'
+  /**
+   * A numberless block with MORE rows at its column past a blank line — options grouped with their
+   * own description lines (kimi 0.41.0's trust prompt), which a contiguous-rows read would half-read.
+   */
+  | 'grouped'
 
 /**
  * WHAT THE SCREEN IS OFFERING — PURE, and the ONE reader of the block.
@@ -174,6 +206,70 @@ export interface DialogRead {
   reason?: DialogUnreadable
   /** Index of the TOPMOST option row reached, `-1` when none was. Feeds the preview's window. */
   top: number
+  /** Present only on `options`, and only when the dialog is one step of a form or a multi-select. */
+  form?: DialogForm
+}
+
+/**
+ * A line drawn INSIDE a box, without its borders — copilot draws its whole folder-trust dialog in
+ * one (`│ ❯ 1. Yes                │`, GitHub Copilot CLI 1.0.98, 2026-10-23), and the numbered rule
+ * anchors on the line's START, so every row of it was invisible: the dialog read as `none` and the
+ * card offered a bare confirm over three options. Only a line bordered on BOTH sides is unwrapped
+ * (nested boxes included), so text that merely contains a `│` is left exactly as it was. Indices
+ * stay 1:1 with the frame.
+ */
+const BOXED = /^\s*│(.*)│\s*$/
+function unbox(line: string): string {
+  let l = line
+  for (let i = 0; i < 3; i++) {
+    const m = BOXED.exec(l)
+    if (!m) break
+    l = m[1]!
+  }
+  return l
+}
+
+/** A checkbox label: `[ ] Apple`, `[✔] Apple`, `[x] Apple`. */
+const CHECKBOX = /^\[([ xX✔✓])\]\s+(\S.*)$/
+
+/** claude's tab strip: `←  ☒ Fruit  ☐ Color  ✔ Submit  →`. */
+const TAB_STRIP = /^\s*←\s+(.*?)\s+→\s*$/
+const TAB = /^([☐☒✔✓])\s+(\S.*)$/
+/** agy's `Question 1/2: Which fruits?`. */
+const POSITION = /^\s*Question (\d+)\/(\d+):/
+/** claude's review step, the line drawn directly above `1. Submit answers`. */
+const REVIEW = /^\s*Ready to submit your answers\?\s*$/
+
+/** How far above the first option the form's header may sit (a question can wrap). */
+const FORM_HEADER_LINES = 16
+
+/** Read the FORM around a numbered block — PURE. `undefined` when the dialog is a plain question. */
+export function readForm(frame: readonly string[], top: number, options: readonly DialogOption[]): DialogForm | undefined {
+  const form: DialogForm = {}
+  if (options.some(o => o.checked !== undefined)) form.multi = true
+  let nearest = true
+  for (let i = top - 1; i >= 0 && top - i <= FORM_HEADER_LINES; i--) {
+    const line = unbox(frame[i] ?? '')
+    if (line.trim() === '') continue
+    // The review sentence counts only DIRECTLY above the options: elsewhere it is a quotation.
+    if (nearest && REVIEW.test(line)) form.review = true
+    nearest = false
+    const p = POSITION.exec(line)
+    if (p && !form.position) form.position = { at: Number(p[1]), of: Number(p[2]) }
+    const strip = TAB_STRIP.exec(line)
+    if (strip) {
+      const tabs = strip[1]!.split(/\s{2,}/)
+        .map(t => TAB.exec(t.trim()))
+        .filter((m): m is RegExpExecArray => m !== null)
+      // `✔ Submit` is the review step's own tab, not a question.
+      const questions = tabs.filter(t => t[1] === '☐' || t[1] === '☒')
+      if (questions.length >= 1 && tabs.length >= 2) {
+        form.steps = questions.map(t => ({ label: t[2]!.trim(), done: t[1] === '☒' }))
+      }
+      break
+    }
+  }
+  return form.multi || form.review || form.steps || form.position ? form : undefined
 }
 
 /**
@@ -205,13 +301,16 @@ export function readDialog(
     // The LAST option is near the bottom, under nothing but chrome. Past this bound with nothing
     // found, there is no dialog here — and reading further would be reading the scrollback.
     if (found.length === 0 && frame.length - 1 - i > LAST_OPTION_LINES) break
-    const m = OPTION.exec(frame[i] ?? '')
+    const m = OPTION.exec(unbox(frame[i] ?? ''))
     if (!m) continue
     // Too far above the previous option to be part of the same menu: this is prose that happens to
     // be numbered, and joining it to the block would invent a menu.
     if (found.length > 0 && top - i > MAX_OPTION_GAP) break
     if (found.length === 0) bottom = i
-    found.push({ number: Number(m[2]), label: m[3]!, selected: m[1] !== undefined })
+    const box = CHECKBOX.exec(m[3]!)
+    found.push(box
+      ? { number: Number(m[2]), label: box[2]!, selected: m[1] !== undefined, checked: box[1] !== ' ' }
+      : { number: Number(m[2]), label: m[3]!, selected: m[1] !== undefined })
     top = i
     if (Number(m[2]) === 1) { anchored = true; break }
   }
@@ -230,7 +329,8 @@ export function readDialog(
   // (a fixed-height pane draws nothing into the rows it has not reached yet) and never counts; a
   // whole subsequent turn does. See `MAX_TRAILING_GAP`.
   let contentEnd = frame.length
-  while (contentEnd > bottom + 1 && (frame[contentEnd - 1] ?? '').trim() === '') contentEnd--
+  // A box's own closing edge and empty boxed rows are chrome, like the blank padding.
+  while (contentEnd > bottom + 1 && /^[\s│╰╯─]*$/.test(frame[contentEnd - 1] ?? '')) contentEnd--
   if (contentEnd - 1 - bottom > MAX_TRAILING_GAP) {
     return { kind: 'none', options: [], select: null, top: -1 }
   }
@@ -244,7 +344,8 @@ export function readDialog(
     return { kind: 'unreadable', reason: 'two-cursors', options: [], select: null, top }
   }
 
-  return { kind: 'options', options: found, select: 'numbered', top }
+  const form = readForm(frame, top, found)
+  return { kind: 'options', options: found, select: 'numbered', top, ...(form ? { form } : {}) }
 }
 
 /**
@@ -368,6 +469,18 @@ function readMarkerSelect(frame: readonly string[], opts: MarkerOpts = {}): Dial
   // One row is a statement, not a choice — and the caller may confirm it, which is exactly what
   // `none` grants and `unreadable` withholds.
   if (rows.length < 2) return { kind: 'none', options: [], select: null, top: at }
+
+  // A blank line and then MORE rows at this column: the options are grouped with descriptions, and
+  // the contiguous block above is an option plus its own description. Refused, never half-read.
+  // The select's own footer (agy's `↑/↓ Navigate · enter Confirm`) ends the search: it is chrome.
+  for (let i = rows[rows.length - 1]!.i + 1, blank = false; i < frame.length && (footerAt < 0 || i < footerAt); i++) {
+    const line = frame[i] ?? ''
+    if (line.trim() === '') { blank = true; continue }
+    if (blank && siblingAt(line, col) !== null) {
+      return { kind: 'unreadable', reason: 'grouped', options: [], select: null, top: rows[0]!.i }
+    }
+    break
+  }
 
   // Same staleness check the numbered path applies, and for the same reason: this marker menu is
   // the trust-prompt shape, which is exactly the kind of dialog that sits unscrolled on a short,

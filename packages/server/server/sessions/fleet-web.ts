@@ -604,6 +604,11 @@ async function runFleetActionOnce(
 
   switch (req.action) {
     case 'approve': {
+      // A multi-question form's step buttons: no option is picked, the form moves (`stepDialog`).
+      if (req.step === 'next' || req.step === 'back') {
+        if (!host.stepDialog) return { ok: false, message: s.sessionsNoHost }
+        return host.stepDialog(req.id, req.step)
+      }
       if (!host.answerSession) return { ok: false, message: s.sessionsNoHost }
       // `text` rides along for the FREE-TEXT option, where picking is only the first of three
       // steps — see `answerSession`. Every other option ignores it.

@@ -135,6 +135,14 @@ export interface ApprovalSpec {
    * from the frame and fall back to whatever positive evidence it has, never to a guess.
    */
   fieldOpen?: { pattern: RegExp; probed: string }
+  /**
+   * How to move between the STEPS of a multi-question form without answering the current one —
+   * the only way off a MULTI-SELECT step, where a digit toggles a box and submits nothing.
+   * MEASURED by driving live forms (claude 2.1.309 and agy 1.4.6, 2026-10-23): `Right` opens the
+   * next question (claude's tab strip, agy's `→ Next`), `Left` the previous one (agy's `← Back`).
+   * ABSENT means nobody has driven this harness's form, and the card offers no step buttons.
+   */
+  steps?: { next: string; back: string; probed: string }
   /** Provenance — the exact CLI version the dialog came from, and the date. */
   probed: string
 }
@@ -150,6 +158,7 @@ export const APPROVAL_SPECS: Record<HarnessId, ApprovalSpec | null> = {
       pattern: /ctrl\+g to edit in VS Code/i,
       probed: 'claude 2.1.263, 2026-09-08 (AskUserQuestion "Type something.")',
     },
+    steps: { next: 'Right', back: 'Left', probed: 'claude 2.1.309, 2026-10-23 (multi-question AskUserQuestion, multiSelect)' },
   },
   // No `choice` below this line except codex, and that is a statement rather than a gap: each of
   // these footers says `Enter` selects, and none of them says anything about typing a number.
@@ -164,9 +173,24 @@ export const APPROVAL_SPECS: Record<HarnessId, ApprovalSpec | null> = {
     // confirming the digit picks the option outright, exactly like claude's numbered dialogs.
     choice: { kind: 'digit', probed: 'codex 0.153.4, 2026-09-10 (directory-trust prompt)' },
   },
-  kimi: { key: 'Enter', probed: 'kimi 0.35.0, 2026-08-13' },
+  kimi: {
+    key: 'Enter',
+    probed: 'kimi 0.35.0, 2026-08-13',
+    // kimi 2.2.0's folder-trust prompt, driven live 2026-10-23: one line per option
+    // (`❯ Trust and continue` / `Exit`), `Down` moved the cursor onto `Exit`, `Up` back, `Enter`
+    // trusted the folder. The 0.41.0 shape (each option with a description line, groups split by a
+    // blank line) is refused by the reader as `grouped`, never half-read.
+    move: { down: 'Down', up: 'Up', probed: 'kimi 2.2.0, 2026-10-23 (folder-trust prompt)' },
+    markerSelect: { probed: 'kimi 2.2.0, 2026-10-23 (folder-trust prompt)' },
+  },
   gemini: { key: 'Enter', probed: 'gemini 0.55.1, 2026-08-13' },
-  copilot: { key: 'Enter', probed: 'GitHub Copilot CLI 1.0.79, 2026-08-13' },
+  copilot: {
+    key: 'Enter',
+    probed: 'GitHub Copilot CLI 1.0.79, 2026-08-13',
+    // VERIFIED on 1.0.98, 2026-10-23: its folder-trust dialog (`❯ 1. Yes` / `2. Yes, and remember
+    // this folder…` / `3. No (Esc)`, drawn inside a box) took a bare `1` and opened the session.
+    choice: { kind: 'digit', probed: 'GitHub Copilot CLI 1.0.98, 2026-10-23 (folder-trust prompt)' },
+  },
   antigravity: {
     key: 'Enter',
     probed: 'agy 1.1.12, 2026-08-13',
@@ -180,9 +204,11 @@ export const APPROVAL_SPECS: Record<HarnessId, ApprovalSpec | null> = {
       footer: /↑\/↓ Navigate · enter Confirm/i,
     },
     fieldOpen: {
-      pattern: /ctrl\+g to edit/i,
-      probed: 'agy 1.1.25, 2026-09-09',
+      // 1.4.6 (2026-10-23): picking `Write-in...` opens `Your answer:` over `enter Submit · esc Back`.
+      pattern: /ctrl\+g to edit|enter Submit · esc Back/i,
+      probed: 'agy 1.1.25, 2026-09-09 + agy 1.4.6, 2026-10-23',
     },
+    steps: { next: 'Right', back: 'Left', probed: 'agy 1.4.6, 2026-10-23 (two-question ask_question, multi-select)' },
   },
   // No spawn-spec/session-manager support (CLAUDE.md step 4, skipped by scope): agentop cannot start
   // or drive an opencode session, so there is no dialog to approve.
@@ -213,6 +239,8 @@ export const APPROVAL_SPECS: Record<HarnessId, ApprovalSpec | null> = {
  */
 const FREE_TEXT_LABEL: Partial<Record<HarnessId, RegExp>> = {
   claude: /^type something\.?$/i,
+  // agy 1.4.6, 2026-10-23: `3` on `Write-in...` opened `Your answer:`, `mango` + Enter answered it.
+  antigravity: /^write-in\.{0,3}$/i,
 }
 
 /** Is this option the free-text one — the one that must be typed into rather than confirmed? */

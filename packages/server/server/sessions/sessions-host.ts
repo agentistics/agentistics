@@ -24,7 +24,7 @@ import { EMPTY_CONFIRM_MEMORY, confirmActivities, type ConfirmMemory } from './a
 import type { ChatTurn } from '@agentistics/core'
 import { transcriptReaderFor } from './harness-transcript'
 import { markFleetPhase } from './fleet-profile'
-import { readDialog, type DialogOption, type DialogUnreadable } from './dialog-choice'
+import { readDialog, type DialogForm, type DialogOption, type DialogUnreadable } from './dialog-choice'
 import { markerReadOptions } from './approval-spec'
 // Taking a running session back when its registry record is gone. See `session-adopt.ts`.
 import { planAdoptions } from './session-adopt'
@@ -517,6 +517,7 @@ export function createSessionsPoller(o: {
       const modes = new Map<string, SessionMode>()
       const modeChoices = new Map<string, SessionMode[]>()
       const dialogOptions = new Map<string, DialogOption[]>()
+      const dialogForm = new Map<string, DialogForm>()
       const dialogSelect = new Map<string, 'numbered' | 'marker'>()
       const dialogStated = new Set<string>()
       /*
@@ -750,6 +751,7 @@ export function createSessionsPoller(o: {
           // confidence, which the UI reports rather than papering over.
           const dialog = readDialog(frame, markerReadOptions(harness))
           if (dialog.options.length > 0) dialogOptions.set(r.id, dialog.options)
+          if (dialog.options.length > 0 && dialog.form) dialogForm.set(r.id, dialog.form)
           // From the SAME read as the options: how they are picked is a fact about this frame, and
           // deriving it again downstream is how a numberless dialog gets offered a digit.
           if (dialog.select) dialogSelect.set(r.id, dialog.select)
@@ -1104,6 +1106,7 @@ export function createSessionsPoller(o: {
         modeChoices,
         ...(structured.size > 0 ? { structured } : {}),
         dialogOptions,
+        dialogForm,
         dialogSelect,
         dialogStated,
         dialogUnreadable,

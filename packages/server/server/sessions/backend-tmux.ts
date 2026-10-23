@@ -666,7 +666,7 @@ export const tmuxBackend: SessionBackend = {
    * somebody's folder. Nothing is sent after a failed look.
    */
   async sendMoveChoice(
-    id: string, keys: readonly string[], confirmKey: string, landed: (frame: string[]) => boolean,
+    id: string, keys: readonly string[], confirm: string | { literal: string }, landed: (frame: string[]) => boolean,
   ): Promise<'sent' | 'wrong-row' | 'failed'> {
     return writeToPane(id, async () => {
       for (const key of keys) {
@@ -679,7 +679,8 @@ export const tmuxBackend: SessionBackend = {
       }
       await sleep(SUBMIT_SETTLE_MS)
       if (!landed(await captureFrame(id))) return 'wrong-row'
-      return (await tmux(sendKeysNamedArgs(id, confirmKey))).code === 0 ? 'sent' : 'failed'
+      const args = typeof confirm === 'string' ? sendKeysNamedArgs(id, confirm) : sendKeysLiteralArgs(id, confirm.literal)
+      return (await tmux(args)).code === 0 ? 'sent' : 'failed'
     })
   },
 

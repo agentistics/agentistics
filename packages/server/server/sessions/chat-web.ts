@@ -124,7 +124,8 @@ export interface ChatPayload {
    * through the chat response too so the chat can render the same answerable approval card.
    */
   approvalLines?: string[]
-  dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean }[]
+  dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean; checked?: boolean }[]
+  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; canStep?: true }
   chooseBlind?: string
   /**
    * ENGINE.MAP F1.2: `'adapter'` when these turns came from the engine's chat channel (`HarnessChat`,
@@ -246,6 +247,7 @@ async function readSessionChatCore(
         live,
         ...(row.approvalLines?.length ? { approvalLines: row.approvalLines } : {}),
         ...(row.dialogOptions?.length ? { dialogOptions: row.dialogOptions } : {}),
+        ...(row.dialogForm ? { dialogForm: row.dialogForm } : {}),
         ...(row.chooseBlind ? { chooseBlind: row.chooseBlind } : {}),
       }
     }

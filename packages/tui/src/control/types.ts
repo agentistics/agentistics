@@ -774,7 +774,13 @@ export interface ControlSession {
    * prod?" with four different answers, in front of a key called `approve` that would have silently
    * taken whichever was highlighted.
    */
-  dialogOptions?: Array<{ number: number; label: string; selected: boolean; freeText?: boolean }>
+  dialogOptions?: Array<{ number: number; label: string; selected: boolean; freeText?: boolean; checked?: boolean }>
+  /**
+   * WHERE in a multi-question form this dialog is (`dialog-choice.ts`'s `DialogForm`), plus
+   * `canStep` when the harness's step keys were driven (`ApprovalSpec.steps`). Absent on a plain
+   * question.
+   */
+  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; canStep?: true }
   /**
    * Whether the user may pick one of `dialogOptions` from here.
    *
@@ -1672,6 +1678,8 @@ export interface ControlHost {
    * to five seconds old, and an answer to a question that has changed is worse than no answer.
    */
   answerSession?(id: string, choice?: number, text?: string): Promise<ActionResult>
+  /** Move a multi-question form to its next/previous question without answering this one. */
+  stepDialog?(id: string, dir: 'next' | 'back'): Promise<ActionResult>
 
   /**
    * Reopen the sessions of the last fall, in the background.

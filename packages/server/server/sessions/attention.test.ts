@@ -205,8 +205,11 @@ const DIALOG = [
 
 describe('approvalTail', () => {
   it('keeps the dialog exactly as drawn — borders, options and footer included', () => {
+    // The box's rows are READ since copilot's boxed trust prompt (2026-10-23), so the tail reaches
+    // the dialog's own top edge rather than stopping at a flat count.
     const out = approvalTail(DIALOG, 6)
-    expect(out).toHaveLength(6)
+    expect(out[0]).toBe('╭──────────────────────────────────────────╮')
+    expect(out).toHaveLength(11)
     // The three that decide anything: which options there are, which one is highlighted, and the
     // key that takes it. None of them survives being tidied.
     expect(out.join('\n')).toContain('❯ 1. Yes')
@@ -224,7 +227,8 @@ describe('approvalTail', () => {
   })
 
   it('takes the BOTTOM, because that is where the answer is', () => {
-    expect(approvalTail(DIALOG, 1)).toEqual(['╰──────────────────────────────────────────╯'])
+    // A frame with no readable dialog: the flat count governs, from the bottom.
+    expect(approvalTail(['earlier', 'text', 'Enter to confirm · Esc to cancel'], 1)).toEqual(['Enter to confirm · Esc to cancel'])
   })
 
   it('drops padding at either end without touching the blanks inside a dialog', () => {
@@ -234,7 +238,7 @@ describe('approvalTail', () => {
   it('survives an empty or all-blank frame rather than inventing a line', () => {
     expect(approvalTail([], 6)).toEqual([])
     expect(approvalTail(['', '  '], 6)).toEqual([])
-    expect(approvalTail(DIALOG, 0)).toEqual([])
+    expect(approvalTail(['no', 'dialog'], 0)).toEqual([])
   })
 })
 

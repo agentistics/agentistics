@@ -227,6 +227,14 @@ export interface CliStrings {
   sessAnswerStuck: (label: string) => string
   /** The write-your-own row was picked and no text field opened for it. */
   sessAnswerNoField: (label: string) => string
+  /** A multi-select box was ticked or unticked; the question is still open (more may be ticked). */
+  sessToggled: (label: string, checked: boolean) => string
+  /** The form moved to the next / previous question. */
+  sessStepped: (dir: 'next' | 'back') => string
+  /** Refused: nobody has driven this harness's multi-question form. */
+  sessStepUnknown: (harness: string) => string
+  /** Refused: the dialog on screen is not one step of a form, so there is nothing to step to. */
+  sessNotAForm: string
   /** Nothing fell, or everything that did has already been picked back up. */
   sessNoFell: string
   /** The session backend (tmux) could not be listed, so nothing can be judged fallen or alive. */
@@ -668,6 +676,11 @@ const EN: CliStrings = {
     `"${label}" did not open a field to type into, so nothing was typed — the words would have gone `
     + 'wherever the session was listening and the return would have submitted whatever was '
     + 'highlighted. Answer it in the session itself (attach).',
+  sessToggled: (label: string, checked: boolean) => `${checked ? 'ticked' : 'unticked'}: ${label} — tick the others you want, then go on to the next question.`,
+  sessStepped: (dir: 'next' | 'back') => dir === 'next' ? 'moved to the next question.' : 'moved back to the previous question.',
+  sessStepUnknown: (harness: string) =>
+    `agentop has not driven ${harness}'s multi-question form yet, so it will not press keys into it — attach to move between its questions there.`,
+  sessNotAForm: 'the session is not on a question with several steps any more, so nothing was pressed.',
   sessNoFell: 'nothing fell — no session was lost with the machine still on record.',
   sessBackendUnreadable: 'could not list the running sessions (tmux did not answer), so nothing was reopened — a session that is still running would have been started twice. Try again in a moment.',
   sessFellOpened: (opened: number, skipped: number, held: number) =>
@@ -1090,6 +1103,11 @@ const PT: CliStrings = {
     `"${label}" não abriu um campo para escrever, então nada foi digitado — as palavras iriam para `
     + 'onde a sessão estivesse ouvindo e o enter submeteria o que estivesse em foco. Responda na '
     + 'própria sessão (attach).',
+  sessToggled: (label: string, checked: boolean) => `${checked ? 'marcado' : 'desmarcado'}: ${label} — marque os outros que quiser e depois avance para a próxima pergunta.`,
+  sessStepped: (dir: 'next' | 'back') => dir === 'next' ? 'foi para a próxima pergunta.' : 'voltou para a pergunta anterior.',
+  sessStepUnknown: (harness: string) =>
+    `o agentop ainda não dirigiu o formulário de várias perguntas do ${harness}, então não vai apertar teclas nele — anexe para navegar entre as perguntas lá.`,
+  sessNotAForm: 'a sessão não está mais numa pergunta de várias etapas, então nada foi apertado.',
   sessNoFell: 'nada caiu — nenhuma sessão foi perdida com registro de que estava viva.',
   sessBackendUnreadable: 'não foi possível listar as sessões em execução (o tmux não respondeu), então nada foi reaberto — uma sessão ainda viva seria iniciada duas vezes. Tente de novo em instantes.',
   sessFellOpened: (opened: number, skipped: number, held: number) =>

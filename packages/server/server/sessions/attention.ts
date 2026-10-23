@@ -75,6 +75,42 @@ export function digestFrame(lines: readonly string[]): string {
   return (h >>> 0).toString(16)
 }
 
+/**
+ * Is a FOOTERLESS dialog open — PURE. See `AttentionRules.menuHeaders`: one of the `within` non-blank
+ * lines above the option block must match. `top` is `readDialog(frame).top` when the caller has it.
+ */
+export function headedMenuOpen(rules: AttentionRules, frame: readonly string[], top = readDialog(frame).top): boolean {
+  if (!rules.menuHeaders?.length) return false
+  let markerTop: number | undefined
+  const markerBlockTop = (): number => {
+    if (markerTop === undefined) {
+      const read = readDialog(frame, { marker: true })
+      markerTop = read.kind === 'options' && read.select === 'marker' ? read.top : -1
+    }
+    return markerTop
+  }
+  return rules.menuHeaders.some(h => {
+    const t = h.marker ? markerBlockTop() : top
+    if (t < 0) return false
+    let seen = 0
+    for (let i = t - 1; i >= 0 && seen < h.within; i--) {
+      const line = frame[i] ?? ''
+      if (line.trim() === '') continue
+      seen++
+      if (h.re.test(line)) return true
+    }
+    return false
+  })
+}
+
+/**
+ * Is the session sitting on a dialog, for an ACT about to answer it — PURE. The footer anywhere in
+ * the frame (the act re-reads a fresh capture of the dialog it was shown) or a headed menu.
+ */
+export function dialogOnScreen(rules: AttentionRules, frame: readonly string[]): boolean {
+  return rules.approval.some(re => re.test(frame.join('\n'))) || headedMenuOpen(rules, frame)
+}
+
 export function attentionOf(o: {
   alive: boolean
   lastActivityMs: number
@@ -133,6 +169,9 @@ export function attentionOf(o: {
   // the whole dialog block would suppress a real permission prompt on a busy session — the one
   // error this module calls worse than the one being fixed.
   if (o.rules && !working(footer) && o.rules.approval.some(re => re.test(approvalWindow))) {
+    return 'waiting-approval'
+  }
+  if (o.rules && !working(footer) && headedMenuOpen(o.rules, o.frame, optionTop)) {
     return 'waiting-approval'
   }
 
