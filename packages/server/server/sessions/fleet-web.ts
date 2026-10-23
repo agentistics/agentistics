@@ -976,8 +976,8 @@ export async function readConversationFacts(
         : 'This session has no linked conversation yet.'),
     }
   }
-  const { countCompactions, resolveChatTranscriptPath } = await import('./chat-tail')
-  const path = await resolveChatTranscriptPath(row.cwd, row.conversationId).catch(() => null)
+  const { countCompactions, resolveClaudeTranscriptAnyAccount } = await import('./chat-tail')
+  const path = await resolveClaudeTranscriptAnyAccount(row.cwd, row.conversationId).catch(() => null)
   if (!path) {
     return {
       unavailable: pt
