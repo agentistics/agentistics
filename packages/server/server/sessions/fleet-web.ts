@@ -59,7 +59,7 @@ import { readAccounts } from '../harness-accounts'
 import { handoffSessionLimit, artifactReplyCounts, readBilledReplies, refreshArtifactReplies, windowQuotaRate, retainedQuotaRate, readQuotaRates, saveQuotaRates, countBilledReplies, replyKey } from './handoff-usage'
 import type { SessionSnapshot } from './sessions-host'
 import type { ManagedSession } from './types'
-import { computeHandoffWhy, findHandoffFile, HANDOFF_RAMP_CALLS, isLeaderRow, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
+import { computeHandoffWhy, findHandoffFile, HANDOFF_RAMP_CALLS, hintCandidates, isLeaderRow, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
 
 // The REQUEST shape lives in the leaf `fleet-row.ts` so `index.ts` can name it without naming
 // this module — see the note there.
@@ -219,7 +219,7 @@ async function hostFor(lang: CliLang): Promise<StartHost> {
       if (inflight && now - at < SNAPSHOT_TTL_MS && current === mapped) return inflight
       at = now
       mapped = current
-      inflight = cachedSessions.call(host)
+      inflight = timeFleetPhase('host.sessions: map', () => cachedSessions.call(host))
       // A failed read must not be remembered as the answer for the next second.
       void inflight.catch(() => { inflight = null; at = 0 })
       return inflight
@@ -291,15 +291,16 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
     // Leaders get one low-noise handoff hint. It reads the RAW context numbers off the hub's
     // snapshot (the formatted `context` on a ControlSession is a label, not a count) and never holds
     // the fleet response open.
-    void (async () => {
+    // ONE pass at a time (OPEN-PERF): `readFleet` runs per frame key per hub tick, and overlapping
+    // passes each re-read the registry for the same rows.
+    if (!hintPass) hintPass = (async () => {
       const [registry, raw] = await Promise.all([readRegistry().catch(() => []), fleetSessionHub().then(h => h.read())])
       const titles = new Map(fleet.sessions.map(row => [row.id, fleetRow(row, s).title]))
       const byId = new Map(registry.map(row => [row.id, row]))
       const baseSamples = handoffBaseSamples(registry)
       const cutTokens = handoffCut(normalizeHandoffConfig((await readPreferences()).handoffConfig))
-      const rows: HandoffHintRow[] = await Promise.all(raw.sessions.map(async view => {
+      const rows: HandoffHintRow[] = await Promise.all(hintCandidates(raw.sessions).map(async view => {
         const managed = byId.get(view.id)
-        const handoff = await findHandoffFile(view.cwd)
         // HANDOFF.CALC: record this leader's context after its first ~15 calls — a sample of F.
         if (managed && managed.handoffBaseTokens === undefined && view.contextTokens !== undefined
           && isLeaderRow({ title: titles.get(view.id) ?? '', ...(managed.leader ? { leader: true } : {}) })
@@ -319,7 +320,8 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           ...(view.model !== undefined ? { model: view.model } : {}),
           ...(view.turns !== undefined ? { turns: view.turns } : {}),
           ...(view.costUSD !== undefined ? { costUSD: view.costUSD } : {}),
-          ...(handoff ? { handoffPath: handoff.path, handoffBytes: handoff.bytes } : {}),
+          // No handoff-file lookup here: `sendHandoffHints` finds it for the one row it hints, and a
+          // readdir + stat per fleet row per pass (1868 rows on the owner's machine) bought nothing.
           ...(view.cwd ? { cwd: view.cwd } : {}),
           ...(view.activity !== undefined ? { activity: view.activity, state: view.activity } : {}),
           ...((view.activity === 'working' || view.background) ? {
@@ -331,6 +333,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
         }
       }))
       await sendHandoffHints({
+        deferUntil: HINT_DEFER,
         rows: async () => rows,
         prompt: async (id, text) => {
           const out = await runFleetAction(lang, { action: 'prompt', id, text })
@@ -349,7 +352,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           return awayHandoffNote(sessionAwayState(parseAwayState((await readPreferences()).away), own, Date.now()), Date.now())
         },
       })
-    })().catch(() => {})
+    })().catch(() => {}).finally(() => { hintPass = null })
     // Nay conversations are filed into "Nay › Ativas" / "Nay › Inativas" by whether they run. It
     // rides the fleet read because that is the one moment every state change is seen, and it never
     // holds the reply: a filing is a convenience, the fleet is what this route is for.
@@ -399,6 +402,11 @@ export function handoffBaseSamples(registry: readonly ManagedSession[], max = 10
     .slice(0, max)
     .map(m => m.handoffBaseTokens!)
 }
+
+let hintPass: Promise<void> | null = null
+
+/** Rows whose hint was skipped or failed, and until when (`sendHandoffHints`' retry window). */
+const HINT_DEFER = new Map<string, number>()
 
 /** The owner's latest message in this session has no reply yet (HANDOFF.RELAY's own reading). */
 async function ownerWaitingOn(id: string): Promise<boolean> {
