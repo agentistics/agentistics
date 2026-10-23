@@ -1288,8 +1288,8 @@ function SideNav({
               <SessionsRail
                 rows={railRows} allRows={fleet.rows} lang={pt ? 'pt' : 'en'}
                 {...(sessionId ? { selectedId: sessionId } : {})}
-                filtersOpen={filtersOpen} filtersCount={filtersCount}
-                onToggleFilters={onToggleFilters} filtersButtonRef={filtersButtonRef}
+                rowsById={asideRowIndex}
+                act={req => fleetAct({ ...req, action: req.action as FleetActionId })}
               />
             ) : (
               <>
