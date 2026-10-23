@@ -379,7 +379,7 @@ export function planFiling(input: FilingInput): FilingPlan {
   }
   if ('ok' in filing) return fromPredecessor(filing, pred, inheritedTask !== undefined, inheritedSub !== undefined)
 
-  if (!pred && role === 'leader' && input.callerRole === 'leader' && filing.task?.id && filing.task.id === input.caller?.taskId) {
+  if (!pred && role === 'leader' && input.callerRole === 'leader' && input.caller && filing.task?.id && filing.task.id === input.caller.taskId) {
     return refuse('handoff_required', `leader ${input.caller.label ?? input.caller.id} already leads this task; run agentop session ${input.harness ?? input.caller.harness} --handoff from inside that leader`)
   }
 

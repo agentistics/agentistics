@@ -246,14 +246,6 @@ function reportFilingRefusal(r: Extract<FilingPlan, { ok: false }>, json: boolea
 }
 
 let warnedNoFolder = false
-/** File a just-spawned session into its folder; with none asked, a LEADER caller is told on stderr. */
-async function fileAtSpawn(ref: string | undefined, row: { id: string; conversationId?: string | undefined }): Promise<void> {
-  const f = ref ? folderByRef.get(ref) : undefined
-  if (f) { await fileInFolder(f.id, row).catch(() => false); return }
-  if (ref || warnedNoFolder) return
-  await warnLeaderNoFolder()
-}
-
 async function warnLeaderNoFolder(): Promise<void> {
   const { storedRoleFor } = await import('./session-roles')
   const leader = await callerIsLeader(callerSessionId(), storedRoleFor,
@@ -963,6 +955,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
   }
 
   const started: string[] = []
+  const configurations: Array<{ id: string; configuration: Awaited<ReturnType<typeof configureSpawn>> }> = []
   const skipped: string[] = [...plan.skipped]
   // A verified agent may not reopen a row whose account is off for agents (the owner still may).
   const agentCaller = plan.reopen.length > 0 && await callerHoldsIdentity(callerSessionId())
@@ -1021,13 +1014,16 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     // The old row is RETIRED, not deleted: it is still a thing that happened, and it stops standing
     // beside its own continuation with the same name on it.
     await patchSession(m.id, { endedAt: new Date().toISOString() })
-    await fileAtSpawn(folder, { id, conversationId: planned.plan.conversationId })
+    const configuration = await configureSpawn({ folderId: folder ? folderByRef.get(folder)?.id : undefined }, { id, conversationId: planned.plan.conversationId })
+    configurations.push({ id, configuration })
+    if (!configuration.ready) console.error(configurationPendingMessage(id, configuration))
+    if (!folder && !warnedNoFolder) await warnLeaderNoFolder()
     started.push(id)
   }
 
   if (json) {
     console.log(JSON.stringify({
-      task, started, skipped, already: plan.already,
+      task, started, skipped, configurations, already: plan.already,
       // Each one NAMES the session that already has the conversation, because a machine reader is
       // exactly who needs to be told where the work is rather than that something did not happen.
       heldElsewhere: plan.heldElsewhere.map(h => ({ id: h.id, heldBy: h.holder.id, label: h.holder.label })),
@@ -1043,7 +1039,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     const held = plan.heldElsewhere.length ? `, ${plan.heldElsewhere.length} already open elsewhere` : ''
     console.log(`\n${started.length} reopened${skipped.length ? `, ${skipped.length} could not be` : ''}${alreadyUp}${held}.`)
   }
-  return taskReopenSucceeded(plan, started.length) ? 0 : 1
+  return taskReopenSucceeded(plan, started.length) && configurations.every(c => c.configuration.ready) ? 0 : 1
 }
 
 /** The fleet as DATA, so an assistant orchestrating sessions reads it rather than parsing a table
