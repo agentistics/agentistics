@@ -396,6 +396,49 @@ const siblingAt = (line: string, col: number): string | null => {
 }
 
 /**
+ * The GROUPED shape around the cursor — PURE. `null` when the block is not grouped (no blank line
+ * followed by another row at the option column), `'refuse'` when it is grouped and cannot be read
+ * with confidence, else the option rows (each group's first row) in order.
+ */
+function readGroups(
+  frame: readonly string[], at: number, col: number, footerAt: number, MARK: RegExp,
+): { i: number; label: string }[] | null | 'refuse' {
+  const atCol = (i: number): string | null => {
+    const line = frame[i] ?? ''
+    if (i === at) return MARK.exec(line)?.[2] ?? null
+    if (MARK.test(line)) return null
+    return siblingAt(line, col)
+  }
+  const end = footerAt >= 0 ? footerAt : frame.length
+  // The region: rows at the column or blank, both ways from the cursor.
+  let lo = at
+  while (lo - 1 >= 0 && ((frame[lo - 1] ?? '').trim() === '' || atCol(lo - 1) !== null)) lo--
+  let hi = at
+  while (hi + 1 < end && ((frame[hi + 1] ?? '').trim() === '' || atCol(hi + 1) !== null)) hi++
+  const groups: { i: number; label: string }[][] = []
+  let cur: { i: number; label: string }[] = []
+  for (let i = lo; i <= hi; i++) {
+    const label = (frame[i] ?? '').trim() === '' ? null : atCol(i)
+    if (label === null) { if (cur.length) groups.push(cur); cur = []; continue }
+    cur.push({ i, label })
+  }
+  if (cur.length) groups.push(cur)
+  if (groups.length < 2) return null
+  // Grouped only when some group holds more than its option row; one-row groups are a plain list
+  // split by blank lines, which the contiguous read already refuses to join.
+  if (groups.every(g => g.length === 1)) return null
+  // Every option carries the same shape (kimi: one row + one description). Groups of different
+  // sizes are something else on the screen — a paragraph above a plain list — and the contiguous
+  // read stands.
+  if (groups.some(g => g.length !== groups[0]!.length)) return null
+  const firsts = groups.map(g => g[0]!)
+  if (!firsts.some(r => r.i === at)) return 'refuse'
+  // A group longer than an option and two lines of description is not a menu group.
+  if (groups.some(g => g.length > 3)) return 'refuse'
+  return firsts
+}
+
+/**
  * A menu with NO numbers, read off the frame — PURE.
  *
  * Claude's trust prompt is the case, and it is the one dialog where being wrong costs the most: the
@@ -470,16 +513,18 @@ function readMarkerSelect(frame: readonly string[], opts: MarkerOpts = {}): Dial
   // `none` grants and `unreadable` withholds.
   if (rows.length < 2) return { kind: 'none', options: [], select: null, top: at }
 
-  // A blank line and then MORE rows at this column: the options are grouped with descriptions, and
-  // the contiguous block above is an option plus its own description. Refused, never half-read.
-  // The select's own footer (agy's `↑/↓ Navigate · enter Confirm`) ends the search: it is chrome.
-  for (let i = rows[rows.length - 1]!.i + 1, blank = false; i < frame.length && (footerAt < 0 || i < footerAt); i++) {
-    const line = frame[i] ?? ''
-    if (line.trim() === '') { blank = true; continue }
-    if (blank && siblingAt(line, col) !== null) {
-      return { kind: 'unreadable', reason: 'grouped', options: [], select: null, top: rows[0]!.i }
+  // A blank line and then MORE rows at this column: the options are GROUPED with their own
+  // description lines (kimi 0.41.0 / 2.1.1's trust prompt — `❯ Trust this folder` + its sentence,
+  // blank, `Don't trust` + its sentence). The contiguous block is then an option plus its
+  // description, so the groups are read instead: each group's FIRST row is the option, the rest is
+  // its description, and the cursor must sit on a first row — otherwise it is refused.
+  const grouped = readGroups(frame, at, col, footerAt, MARK)
+  if (grouped === 'refuse') return { kind: 'unreadable', reason: 'grouped', options: [], select: null, top: rows[0]!.i }
+  if (grouped) {
+    return {
+      kind: 'options', select: 'marker', top: grouped[0]!.i,
+      options: grouped.map((r, n) => ({ number: n + 1, label: r.label, selected: r.i === at })),
     }
-    break
   }
 
   // Same staleness check the numbered path applies, and for the same reason: this marker menu is

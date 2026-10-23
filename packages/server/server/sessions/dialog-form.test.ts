@@ -252,6 +252,38 @@ describe('every harness that asks is SEEN asking', () => {
   }
 })
 
+/**
+ * kimi 0.41.0 / 2.1.1's GROUPED trust prompt (captured 2026-09-08, `dialog-marker.test.ts`), with its
+ * last description changed: the old rule keyed on that sentence, so any other wording — and a MOVING
+ * frame — read the session as working (board KIMI.TRUST). The header above the block decides now.
+ */
+const KIMI_GROUPED = [
+  '  Trust this folder?',
+  '  ↑↓ navigate · Enter select · Esc exit',
+  '',
+  '  /tmp/agkimi-wAb8iS',
+  '',
+  '  Project-level MCP servers are disabled until you explicitly choose Trust. Trust starts the',
+  '  listed project MCP targets and remembers this folder.',
+  '',
+  '   ❯ Trust this folder',
+  '     Enable project MCP servers. Remembered for this folder.',
+  '',
+  "     Don't trust",
+  '     Quit now.',
+]
+
+describe('kimi: the grouped trust prompt (2.1.1 shape)', () => {
+  it('is waiting-approval even while the frame moves', () => {
+    expect(attentionOf({ ...quiet, prevDigest: 'a', frameDigest: 'b', frame: KIMI_GROUPED, rules: rulesFor('kimi')! }))
+      .toBe('waiting-approval')
+  })
+  it('is read by its groups and answerable by moving', () => {
+    const d = readDialog(KIMI_GROUPED, markerReadOptions('kimi'))
+    expect(d.options.map(o => [o.label, o.selected])).toEqual([['Trust this folder', true], ["Don't trust", false]])
+  })
+})
+
 describe('trust prompts are READ, so the card can answer them', () => {
   it('copilot: the boxed options are read and picked by digit', () => {
     const d = readDialog(COPILOT_TRUST, markerReadOptions('copilot'))
