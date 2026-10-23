@@ -29,7 +29,7 @@ import type {
 import { answerFits } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
-import { modeNeedsProtocolSentence, routableDriver, routeSpawn, type SpawnRoute } from './structured-route'
+import { modeNeedsProtocolSentence, routableDriver, routeSpawn, structuredOrigin, type SpawnRoute } from './structured-route'
 import type { BackendSession, BackendSpawn, SessionActivity, SessionBackend, TerminalCapture } from './types'
 
 /** Which harness an argv starts — by its binary's base name against the spawn specs. */
@@ -448,7 +448,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       const flagOn = provider.flagOn?.() ?? false
       const origin = req.structured?.origin
       // Only ask what this route needs: flag off and not web → never touch `structured()`.
-      const wantsStructured = flagOn && origin === 'web' && harness !== null
+      const wantsStructured = flagOn && structuredOrigin(origin) && harness !== null
       const acp = await provider.acp().catch(() => null)
       const reg = wantsStructured
         ? (await provider.structured().catch(() => null)) ?? (acp ? acpAsStructured(acp) : null)

@@ -132,7 +132,7 @@ import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { spawnCapabilities } from './sessions/codex-capabilities'
 import { readHarnessVersion } from './sessions/harness-version'
-import { answerStructured, structuredIntentOf, structuredReopenOrigin } from './sessions/structured-route'
+import { answerStructured, reopenOrigin, spawnOriginOf, structuredIntentOf } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { applyAccountToPlan } from './sessions/account-plan'
 import { prependContext } from './sessions/agentistics-context'
@@ -1998,8 +1998,11 @@ export async function spawnManaged(req: {
   harness: HarnessId
   cwd: string
   attach: boolean
-  /** F2.0 — `web`: may run structured (`structured-route.ts`). Absent: a TUI, as always. */
-  origin?: 'web' | 'terminal'
+  /**
+   * F2.0 — `web` / `background` may run structured (`structured-route.ts`). Absent: `background` when
+   * nobody attaches (`spawnOriginOf`), a TUI when a person does.
+   */
+  origin?: 'web' | 'terminal' | 'background'
   resumeId?: string
   prompt?: string
   model?: string
@@ -2235,7 +2238,7 @@ export async function spawnManaged(req: {
         ? { initialPrompt: { ...planned.plan.initialPrompt, ...(rulesFor(req.harness) ? { rules: rulesFor(req.harness)! } : {}) } }
         : {}),
       // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
-      structured: structuredIntentOf(req, {
+      structured: structuredIntentOf({ ...req, origin: spawnOriginOf(req.origin, req.attach) }, {
         model, effort, ctx, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
         // The driver applies it only where its declaration says the protocol assigns ids; the row is
         // linked by what the protocol then STATES (`onConversation`), never by this offer.
@@ -2950,8 +2953,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // to bring back, which is worse than never having gated it. An ordinary resume (no holder to
       // end, `plan.kind !== 'takeover'`) has no such offset and is gated normally.
       ...(plan.kind === 'takeover' ? { skipAdmission: true } : {}),
-      // F2.0 — a web reopen of a row that ran STRUCTURED runs structured again; anything else is a TUI.
-      ...(structuredReopenOrigin(req.origin, previous?.structuredDriver) ? { origin: 'web' as const } : {}),
+      // A reopen runs structured unless a person attaches to it in a terminal (`reopenOrigin`).
+      ...(reopenOrigin(req.origin, req.attach) ? { origin: reopenOrigin(req.origin, req.attach)! } : {}),
       ...(req.callerVerified ? { callerVerified: true } : {}),
     }, s, lang)
     if (spawned.ok) {
