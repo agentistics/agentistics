@@ -335,6 +335,9 @@ export interface ManagedSession {
   cwd: string
   /** ISO string: this is a local JSON store, where ISO is the correct representation. */
   createdAt: string
+  /** Requested approval policy; separate from the briefing role. */
+  mode?: CanonicalMode
+  spawnConfiguration?: import('./spawn-configuration').SpawnConfiguration
   model?: string
   effort?: string
   /**

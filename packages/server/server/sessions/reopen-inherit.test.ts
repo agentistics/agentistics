@@ -86,3 +86,14 @@ describe('spawnManaged writes the registry row before the session exists', () =>
     expect(fn.match(/await abandon\(\)/g)?.length).toBe(2)
   })
 })
+
+describe('ORQ.FORA reopen approval mode', () => {
+  it('retains the recorded policy in both identity and launch argv', () => {
+    const row = { ...prev, mode: 'no-questions' as const }
+    expect(inheritedIdentity(row).mode).toBe('no-questions')
+    const launch = inheritedLaunch(row, 'claude')
+    expect(launch.mode).toBe('no-questions')
+    const result = planSpawn({ harness: 'claude', cwd: row.cwd, resumeId: 'c1', ...launch })
+    expect(result.ok && result.plan.argv).toContain('--dangerously-skip-permissions')
+  })
+})

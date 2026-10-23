@@ -100,6 +100,7 @@ export function conversationOwnedElsewhere(
 const warnedRefusals = new BoundedKeys(512)
 
 export interface SessionPatch {
+  spawnConfiguration?: import('./spawn-configuration').SpawnConfiguration
   leader?: boolean
   handoffHintLevel?: number
   handoffHintTokens?: number
@@ -201,6 +202,8 @@ function sanitize(raw: unknown): ManagedSession | null {
     harness: s.harness as ManagedSession['harness'],
     cwd: s.cwd,
     createdAt: typeof s.createdAt === 'string' ? s.createdAt : new Date().toISOString(),
+    ...(s.spawnConfiguration && typeof s.spawnConfiguration === 'object' && typeof (s.spawnConfiguration as Record<string, unknown>).ready === 'boolean' && Array.isArray((s.spawnConfiguration as Record<string, unknown>).applied) && Array.isArray((s.spawnConfiguration as Record<string, unknown>).pending) ? { spawnConfiguration: s.spawnConfiguration as ManagedSession['spawnConfiguration'] } : {}),
+    ...(typeof s.mode === 'string' && ['default', 'accept-edits', 'plan', 'no-questions'].includes(s.mode) ? { mode: s.mode as ManagedSession['mode'] } : {}),
     ...(typeof s.model === 'string' ? { model: s.model } : {}),
     ...(typeof s.effort === 'string' ? { effort: s.effort } : {}),
     ...(s.leader === true ? { leader: true } : {}),

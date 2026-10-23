@@ -410,3 +410,26 @@ describe('markCallerVerified (PLAN.ACCOUNTS D3 — the wire never states it eith
     expect(body.callerVerified).toBe(true)
   })
 })
+
+describe('ORQ.FORA live leader uniqueness warning', () => {
+  test('warns with the other leader name and id, without blocking the role change', async () => {
+    const rows = [
+      { id: 'leader', title: 'Motor', state: 'working' },
+      { id: 'child', title: 'Successor', state: 'waiting' },
+    ]
+    const { deps } = fake(rows, { taskOf: async () => 't-one' })
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { leader: 'leader' } })
+    expect(await roleOp(null, { ref: 'child', role: 'leader' }, deps)).toMatchObject({ ok: true, role: 'leader', warning: 'Another live leader on task t-one: Motor (leader).' })
+  })
+  test('leaders of other tasks and closed leaders do not warn', async () => {
+    const rows = [
+      { id: 'other', title: 'Other front', state: 'working' },
+      { id: 'old', title: 'Old', state: 'closed' },
+      { id: 'child', title: 'New', state: 'waiting' },
+    ]
+    const { deps } = fake(rows, { taskOf: async id => id === 'other' ? 't-other' : 't-one' })
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { other: 'leader', old: 'leader' } })
+    const result = await roleOp(null, { ref: 'child', role: 'leader' }, deps)
+    expect(result.ok && result.warning).toBeUndefined()
+  })
+})

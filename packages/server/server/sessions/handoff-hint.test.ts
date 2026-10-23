@@ -76,7 +76,7 @@ describe('LEADER.HANDOFF.HINT', () => {
     expect(s.texts[0]).toContain('F ≈ 100k')
     expect(s.texts[0]).toContain('T* = F + √(2·H·g)')
     expect(s.texts[0]).toContain('por resposta')
-    expect(handoffHintText({ id: 'x', level: 1, tokens: 150_000, fraction: 0.375 })).toContain('handoff:true')
+    expect(handoffHintText({ id: 'x', level: 1, tokens: 150_000, fraction: 0.375 })).toContain('agentop session <harness> --handoff')
   })
 
   it('concurrent runs deliver one level once, and a failed send is retried', async () => {
@@ -165,7 +165,7 @@ describe('LEADER.HANDOFF.HINT', () => {
 describe("hand-off hint while away", () => {
   it('appends the away sentence when given', () => {
     const t = handoffHintText({ id: 'x', level: 1, tokens: 150_000, fraction: 0.375 }, ' O dono está fora (modo ausente) até avisar que voltou: registre isso no handoff para o sucessor.')
-    expect(t).toContain('handoff:true). O dono está fora')
+    expect(t).toContain('`. O dono está fora')
   })
   it('sendHandoffHints passes the away note through', async () => {
     const sent: string[] = []

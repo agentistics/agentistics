@@ -1920,7 +1920,7 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
 async function spawnRow(a: {
   id: string
   spawnedAt: string
-  req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; parentSessionId?: string; parentConversationId?: string; inherit?: ManagedSession }
+  req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; parentSessionId?: string; parentConversationId?: string; mode?: CanonicalMode; inherit?: ManagedSession }
   pendingContext?: string
   /** Per-session away mode, already resolved (explicit request, else inherited / the replaced row's). */
   away?: boolean
@@ -1944,6 +1944,7 @@ async function spawnRow(a: {
     ...inheritedIdentity(req.inherit),
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
+    ...(req.mode ? { mode: req.mode } : {}),
     ...(req.label ? { label: req.label } : {}),
     ...(req.task ? { task: req.task } : {}),
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
@@ -1976,7 +1977,7 @@ function spawnQueue(): ReturnType<typeof createSpawnQueue<QueuedSpawnRequest>> {
     start: async q => {
       const r = await spawnManaged(q.req, cliStrings(q.lang), q.lang)
       // The same post-spawn step the direct path runs (folder, board filing, hand-off inheritance).
-      if (q.req.afterStart) { try { await q.req.afterStart(r) } catch { /* a convenience, not the spawn */ } }
+      if (q.req.afterStart) return q.req.afterStart(r)
       return r
     },
     notify: n => {
@@ -2123,6 +2124,7 @@ export async function spawnManaged(req: {
   const launch = req.resumeId ? inheritedLaunch(req.inherit, req.harness) : {}
   const model = req.model ?? launch.model
   const effort = req.effort ?? launch.effort
+  const mode = req.mode ?? launch.mode
   // Minted BEFORE the plan: the agentistics context tells the harness its own session id.
   const id = newSessionId()
   const offeredConversationId = randomUUID()
@@ -2171,7 +2173,7 @@ export async function spawnManaged(req: {
     ...(req.prompt ? { prompt: req.prompt } : {}),
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
-    ...(req.mode ? { mode: req.mode } : {}),
+    ...(mode ? { mode } : {}),
     // Offered for a FRESH session; `planSpawn` applies it only where the CLI accepts one and reports
     // back what it actually did. A resume ignores it — that conversation already has an id.
     conversationId: offeredConversationId,
@@ -2201,7 +2203,16 @@ export async function spawnManaged(req: {
   // <id>" for seconds — the placeholder `control-session.ts` keeps for sessions started OUTSIDE
   // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
-  await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }))
+  await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(mode ? { mode } : {}), ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }))
+  // A worker must be filed before its process can receive the first prompt.
+  if (req.contextTaskId) {
+    const { configureSpawn } = await import('./sessions/spawn-configuration')
+    const configuration = await configureSpawn({ taskId: req.contextTaskId, subtaskId: req.contextSubtaskId }, { id, conversationId: bornLink?.conversationId })
+    if (!configuration.ready) {
+      await removeSession(id)
+      return { ok: false, configuration, message: `Not started: board filing pending (${configuration.pending.map(p => p.reason).join('; ')}).` }
+    }
+  }
   if (req.inherit) {
     await rekeyStoredRole(
       [req.inherit.id, req.inherit.conversationId, req.resumeId],
@@ -2238,7 +2249,7 @@ export async function spawnManaged(req: {
         ? { initialPrompt: { ...planned.plan.initialPrompt, ...(rulesFor(req.harness) ? { rules: rulesFor(req.harness)! } : {}) } }
         : {}),
       // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
-      structured: structuredIntentOf({ ...req, origin: spawnOriginOf(req.origin, req.attach) }, {
+      structured: structuredIntentOf({ ...req, ...(mode ? { mode } : {}), origin: spawnOriginOf(req.origin, req.attach) }, {
         model, effort, ctx, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
         // The driver applies it only where its declaration says the protocol assigns ids; the row is
         // linked by what the protocol then STATES (`onConversation`), never by this offer.
@@ -4652,7 +4663,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // WHERE this session is filed is the one planner's answer (`spawn-filing.ts`), shared with
       // `session start` / `batch`: references resolved on the board, a group member filed on its
       // group, a hand-off inheriting its predecessor's filing, cwd and folder. A refusal spawns nothing.
-      const { planSpawnFilingSafe, attachAfterSpawn } = await import('./sessions/spawn-filing-io')
+      const { planSpawnFilingSafe } = await import('./sessions/spawn-filing-io')
       const { filingRow, refusalText, spawnSessionFilingRequest } = await import('./sessions/spawn-row')
       const filing = await planSpawnFilingSafe(spawnSessionFilingRequest(req))
       if (!filing.ok) return { ok: false, message: refusalText(filing) }
@@ -4662,7 +4673,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // Leader hand-off: the successor keeps the predecessor's title (generation counter in the ⓘ panel).
       let label = req.label
       let handoffParent: ManagedSession | undefined
-      let launch: { model?: string | undefined; effort?: string | undefined } = { model: req.model, effort: req.effort }
+      const parent = req.parentVerified && req.parentSessionId ? (await readRegistry()).find(r => r.id === req.parentSessionId) : undefined
+      let launch: { model?: string | undefined; effort?: string | undefined; mode?: CanonicalMode | undefined } = { model: req.model, effort: req.effort, mode: req.mode ?? parent?.mode }
       if (req.handoff && req.parentSessionId) {
         const { readRegistry } = await import('./sessions/registry')
         handoffParent = (await readRegistry()).find(m => m.id === req.parentSessionId)
@@ -4673,43 +4685,12 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // Runs on the direct result AND, through the spawn queue, when a queued launch completes
       // (a result that is not `ok` — refused or still queued — changes nothing).
       const afterStart = async (r: SpawnSessionResult): Promise<SpawnSessionResult> => {
-        let attachNote = ''
-        // NW-02: a session started for a BOARD task is filed there by id, not only named after it.
-        if (r.ok && r.id && taskId) {
-          const a = await attachAfterSpawn({ taskId, ...(subtaskId ? { subtaskId } : {}) }, r.id)
-          if (!a.ok) attachNote = S().spawnFilingFailed(a.reason)
-        }
-        // The folder the plan chose (the predecessor's, the task's, or where the caller works).
-        // Never fails the spawn: the session is already running, and an error here would invite a
-        // retry that starts a second leader.
-        if (r.ok && r.id && filing.folderId) {
-          try {
-            const { readRegistry } = await import('./sessions/registry')
-            const row = (await readRegistry()).find(m => m.id === r.id)
-            const { fileInFolder } = await import('./sessions/cli-folder')
-            await fileInFolder(filing.folderId, { id: r.id, ...(row?.conversationId ? { conversationId: row.conversationId } : {}) })
-          } catch { /* a folder is a convenience, not the spawn */ }
-        }
-        // A hand-off successor also inherits the predecessor's pin and check-in agenda (and its folder,
-        // idempotently, if the planner filed none). Never fails the spawn, for the same reason.
-        if (r.ok && r.id && req.handoff && req.parentSessionId) {
-          try {
-            const { readRegistry } = await import('./sessions/registry')
-            const reg = await readRegistry()
-            const parent = handoffParent ?? reg.find(m => m.id === req.parentSessionId)
-            const child = reg.find(m => m.id === r.id) ?? { id: r.id }
-            if (parent) {
-              const { inheritHandoffPrefs } = await import('./sessions/handoff-inherit')
-              const { updatePreferences } = await import('./preferences')
-              await inheritHandoffPrefs(parent, child, updatePreferences)
-              if (parent.note && !('note' in child && child.note)) {
-                const { patchSession } = await import('./sessions/registry')
-                await patchSession(r.id, { note: parent.note })
-              }
-            }
-          } catch { /* a folder is a convenience, not the spawn */ }
-        }
-        return attachNote ? { ...r, message: `${r.message ? r.message + ' ' : ''}${attachNote}` } : r
+        if (!r.ok || !r.id) return r
+        const { configureSpawn, configurationPendingMessage } = await import('./sessions/spawn-configuration')
+        const configuration = await configureSpawn(filing, { id: r.id }, handoffParent)
+        return { ...r, ok: configuration.ready, configuration,
+          message: configuration.ready ? r.message : configurationPendingMessage(r.id, configuration) }
+
       }
       return spawnManaged({
         harness: req.harness as HarnessId,
@@ -4719,7 +4700,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.prompt ? { prompt: req.prompt } : {}),
         ...(launch.model ? { model: launch.model } : {}),
         ...(launch.effort ? { effort: launch.effort } : {}),
-        ...(req.mode ? { mode: req.mode } : {}),
+        ...(launch.mode ? { mode: launch.mode } : {}),
         ...(label ? { label } : {}),
         ...(rowFiling.task ? { task: rowFiling.task } : {}),
         ...(taskId ? { contextTaskId: taskId } : {}),
@@ -4727,7 +4708,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.parentSessionId && req.parentVerified ? { parentVerified: true } : {}),
         ...(req.handoff ? { handoff: true } : {}),
-        ...(req.handoff ? { role: 'leader' as const } : req.role ? { role: req.role } : {}),
+        ...(filing.role ? { role: filing.role } : {}),
         ...(req.away !== undefined ? { away: req.away } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),

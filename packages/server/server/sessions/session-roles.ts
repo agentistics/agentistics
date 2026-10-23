@@ -126,6 +126,7 @@ export interface RoleDeps {
   /** Wait until the harness has an input surface; spawn delivery must not race startup. */
   waitForInput?: (rowId: string) => Promise<boolean>
   /** Who started this managed session (the registry's parentSessionId), if anyone. */
+  taskOf?: (rowId: string) => Promise<string | undefined>
   parentOf: (rowId: string) => Promise<string | undefined>
 }
 
@@ -138,7 +139,7 @@ export interface RoleRequest {
 }
 
 export type RoleReply =
-  | { ok: true; key: string; id?: string; title?: string; role: SessionRole | 'auto'; changed: boolean; renamed: boolean; notified: boolean; origin?: RoleOrigin; line: string; message: string }
+  | { ok: true; key: string; id?: string; title?: string; role: SessionRole | 'auto'; changed: boolean; renamed: boolean; notified: boolean; origin?: RoleOrigin; warning?: string; line: string; message: string }
   | { ok: false; code: string; message: string; matches?: string[] }
 
 const MESSAGES: Record<string, string> = {
@@ -226,6 +227,15 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     if (state.kind !== 'change') return state.reply
 
     const { base, next, changed } = state
+    let warning: string | undefined
+    if (next === 'leader' && deps.taskOf) {
+      const taskId = await deps.taskOf(resolved.id)
+      if (taskId) {
+        const other = (await Promise.all(rows.filter(r => r.id !== resolved.id && ['working', 'waiting', 'waiting-approval'].includes(r.state ?? '') && roleOfRow(state.roles, r) === 'leader').map(async r =>
+          await deps.taskOf!(r.id) === taskId ? r : undefined))).find(Boolean)
+        if (other) warning = `Another live leader on task ${taskId}: ${other.title} (${other.id}).`
+      }
+    }
     const lang: RoleLang = req.lang === 'pt' || req.lang === 'en' ? req.lang : await deps.uiLang().catch(() => 'en' as RoleLang)
     // External title/note I/O stays outside `serial`; either can wait for the fleet poll.
     const wanted = next === 'leader' && isPlaceholderTitle(resolved.title) ? resolved.title : titleForRole(resolved.title, next, lang)
@@ -241,10 +251,11 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
       })
     }
     return {
+      ...(warning ? { warning } : {}),
       ok: true, ...base, role: next ?? 'auto', changed, renamed, notified, ...(next ? { origin } : {}), line: roleLine(next),
-      message: changed
+      message: (changed
         ? `Role set to ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}${notified ? '; the session was told' : ''}.`
-        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`,
+        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (warning ? ` ${warning}` : ''),
     }
   })()
 }
@@ -364,6 +375,7 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
       }
       return false
     },
+    taskOf: async rowId => (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.taskId,
     parentOf: async rowId => (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.parentSessionId,
   }
 }

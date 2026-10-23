@@ -786,3 +786,34 @@ harness. The first registry read also repairs saved managed-id entries for alrea
 using one preferences update for the batch. Preference failures do not reject a recorded link;
 restarting the server retries orphan repair. Open session tabs remain browser-local; the server's
 `ui.sessionTabs` preference is only the feature flag.
+
+### Worker defaults and leader succession
+
+A spawn from a verified parent inherits its board task, sidebar folder and recorded canonical approval
+mode when those options are omitted. A worker does not inherit the parent's subtask: pass its own
+`--subtask` when it has one. An explicit task, folder or mode takes precedence. CLI start and batch
+accept `--mode default|accept-edits|plan|no-questions`; batch applies it to subsequent `--session`
+entries and can omit `--task` when a verified parent supplies one. Approval modes and briefing roles
+are separate: role `auto` does not select an approval mode, and Claude's native classifier `auto` is
+not converted to `no-questions`. A spawn that cannot apply an approval mode through either its terminal flags or structured driver refuses the launch.
+
+From inside the predecessor, use `agentop session <harness> --handoff --bg -p "Read the hand-off file
+and take over"` for leader succession. This retains task/subtask, folder, pin position, check-in,
+mute, title, role, away and recorded approval mode. Starting another leader on the verified leader
+parent's same task without `--handoff` is refused with that command. Starting a leader on a different
+task is allowed. Setting a role to leader warns when another live leader already leads that task;
+it does not block the change.
+
+Filing is checked again after registry creation and before the process starts. A filing failure
+prevents the worker's first prompt from running. Folder and handoff preferences are applied after
+startup. Failed configuration steps receive one idempotent retry; start/batch JSON and API results
+report `configuration.ready`, `applied` and `pending`. A running session with incomplete configuration
+is reported with its existing id and a repair message; do not retry by spawning another session.
+Reopening preserves the recorded approval mode and confirming an existing folder preserves its pin.
+Engine delegation is a separate adapter and is not covered by these spawn defaults.
+
+CLI background start/handoff, batch and `session open` pass the same structured intent as server
+spawns, including original prompt, instructions on fresh sessions, MCP, model/effort and approval
+mode. They use origin `background`, so `adapter-chat` and a ready driver can select the protocol.
+Attached starts and takeover use origin `terminal`. A reopen is registered before launch so protocol
+callbacks can record its conversation immediately.

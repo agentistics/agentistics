@@ -7,6 +7,7 @@
  * (`spawn-row.test.ts` is the table that holds it).
  */
 
+import { hasRolePrefix } from '@agentistics/core'
 import type { ManagedSession } from './types'
 import type { FilingPlan } from './spawn-filing'
 import type { SpawnFilingRequest } from './spawn-filing-io'
@@ -27,15 +28,19 @@ export function spawnRole(o: {
 export function spawnSessionFilingRequest(req: {
   role?: 'worker' | 'leader' | undefined
   parentSessionId?: string | undefined
+  parentVerified?: boolean | undefined
+  harness?: string | undefined
+  label?: string | undefined
   handoff?: boolean | undefined
   taskId?: string | undefined
   subtaskId?: string | undefined
   cwd: string
 }): SpawnFilingRequest {
   return {
-    role: spawnRole({ explicit: req.role, hasParent: !!req.parentSessionId, handoff: req.handoff }),
+    role: spawnRole({ explicit: req.role, leaderPrefix: !!req.label && hasRolePrefix(req.label), hasParent: !!req.parentSessionId, handoff: req.handoff }),
     taskRef: req.taskId, subtaskRef: req.subtaskId, cwd: req.cwd,
-    callerSessionId: req.parentSessionId,
+    harness: req.harness,
+    callerSessionId: req.parentVerified || req.handoff ? req.parentSessionId : undefined,
     ...(req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
   }
 }
