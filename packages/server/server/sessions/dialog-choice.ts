@@ -90,6 +90,11 @@ export interface DialogForm {
   review?: true
   /** The options are checkboxes (`DialogOption.checked`): a pick toggles, it does not answer. */
   multi?: true
+  /**
+   * A STRUCTURED multi-select (engine-api 1.13): no key is pressed per tick — the card keeps the
+   * ticks and sends them together as `choices`. Never set by a screen read.
+   */
+  together?: true
 }
 
 /**

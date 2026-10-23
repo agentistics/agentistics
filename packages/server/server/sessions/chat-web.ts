@@ -125,7 +125,7 @@ export interface ChatPayload {
    */
   approvalLines?: string[]
   dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean; checked?: boolean }[]
-  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; canStep?: true }
+  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; together?: true; canStep?: true }
   chooseBlind?: string
   /**
    * ENGINE.MAP F1.2: `'adapter'` when these turns came from the engine's chat channel (`HarnessChat`,

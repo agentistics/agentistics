@@ -118,7 +118,14 @@
  * without a `<task-notification>` (`stopped` | `never-started` | `session-ended`). Absent means a
  * notification settled it or it is still running. Engine → host only, so a 1.11 engine never sets it.
  */
-export const ENGINE_API_VERSION = '1.12.0'
+/**
+ * 1.13.0 — multi-select questions on STRUCTURED sessions: `StructuredAttention.multiSelect` and
+ * `StructuredAnswer.choices` (several options in one answer); `answerFits` validates them and answers a
+ * `choices` on a single-select request with `not-multi`. Additive both ways: a 1.12 host never sends
+ * `choices` (a lone `choice` still fits a multi-select request), and a 1.12 engine never states
+ * `multiSelect`.
+ */
+export const ENGINE_API_VERSION = '1.13.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

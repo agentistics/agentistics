@@ -619,7 +619,10 @@ async function runFleetActionOnce(
       // next actual marker turn, and forces that turn's count to disagree with its own markers:
       // a turn that would otherwise resolve draws a chip instead. It also cost a background fleet
       // read on every text answer for a record nothing could ever use.
-      const answered = await host.answerSession(req.id, req.choice, req.text ?? '')
+      // A declared type is not a parse: only a list of finite numbers is passed on.
+      const choices = Array.isArray(req.choices) && req.choices.every(c => typeof c === 'number' && Number.isFinite(c))
+        ? req.choices : undefined
+      const answered = await host.answerSession(req.id, req.choice, req.text ?? '', choices)
       // The engine's attention producer learns the wait ended HERE, with the option index (never its
       // label) — carried on the next confirmed transition out of `waiting-approval` (`fleet-hub.ts`).
       if (answered.ok && typeof req.choice === 'number') {

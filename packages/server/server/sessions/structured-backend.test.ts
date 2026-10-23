@@ -173,6 +173,20 @@ describe('structuredRegistry / stubDriver / answerFits (engine-api, pure)', () =
     expect(answerFits(open, { text: 'free' }).ok).toBe(true)
     expect(answerFits({ ...open, freeText: false }, { text: 'free' })).toEqual({ ok: false, why: 'text-not-accepted' })
   })
+  test('answerFits (1.13): several choices only on a multiSelect request', () => {
+    const multi: StructuredAttention = { requestId: 'm1', kind: 'question', multiSelect: true, freeText: true,
+      options: [{ id: '1', label: 'Apple' }, { id: '2', label: 'Banana' }, { id: 'other', label: 'Type something', freeText: true }] }
+    expect(answerFits(multi, { choices: [2, 1] })).toEqual({ ok: true, options: [multi.options[0]!, multi.options[1]!] })
+    expect(answerFits({ ...multi, multiSelect: undefined }, { choices: [1] })).toEqual({ ok: false, why: 'not-multi' })
+    expect(answerFits(multi, { choices: [] })).toEqual({ ok: false, why: 'empty' })
+    expect(answerFits(multi, { choices: [1, 1] })).toEqual({ ok: false, why: 'no-such-option' })
+    expect(answerFits(multi, { choices: [4] })).toEqual({ ok: false, why: 'no-such-option' })
+    expect(answerFits(multi, { choices: [1], text: 'x' })).toEqual({ ok: false, why: 'text-not-accepted' })
+    expect(answerFits(multi, { choices: [1, 3] })).toEqual({ ok: false, why: 'empty' })
+    expect(answerFits(multi, { choices: [1, 3], text: 'kiwi' }).ok).toBe(true)
+    // An older host sends a lone choice: still fits.
+    expect(answerFits(multi, { choice: 2 }).ok).toBe(true)
+  })
 })
 
 describe('withStructured — routing', () => {
@@ -390,6 +404,16 @@ describe('withStructured — answering through the driver', () => {
     expect(answerStructured(Q, 3, ' capivara ')).toEqual({ ok: true, answer: { requestId: 'q1', choice: 3, text: ' capivara ' }, said: ' capivara ' })
     expect(answerStructured(Q, 1, 'ignored')).toEqual({ ok: true, answer: { requestId: 'q1', choice: 1 }, said: 'Only my fix' })
     expect(answerStructured({ ...Q, options: [], freeText: true }, undefined, 'free')).toEqual({ ok: true, answer: { requestId: 'q1', text: 'free' }, said: 'free' })
+  })
+
+  test('answerStructured (pure): several ticks go as ONE answer, only on a multiSelect request', () => {
+    const M = { ...Q, multiSelect: true as const }
+    expect(answerStructured(M, undefined, undefined, [2, 1])).toEqual({ ok: true, answer: { requestId: 'q1', choices: [1, 2] }, said: 'Only my fix, ' + Q.options[1]!.label })
+    expect(answerStructured(M, undefined, undefined, [])).toEqual({ ok: false, why: 'needs-choice' })
+    expect(answerStructured(M, undefined, undefined, [9])).toEqual({ ok: false, why: 'gone' })
+    expect(answerStructured(M, undefined, '', [1, 3])).toEqual({ ok: false, why: 'needs-text' })
+    expect(answerStructured(M, undefined, 'kiwi', [1, 3])).toEqual({ ok: true, answer: { requestId: 'q1', choices: [1, 3], text: 'kiwi' }, said: 'Only my fix, kiwi' })
+    expect(answerStructured(Q, undefined, undefined, [1])).toEqual({ ok: false, why: 'gone' })
   })
 })
 

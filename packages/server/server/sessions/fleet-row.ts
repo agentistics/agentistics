@@ -150,6 +150,8 @@ export interface FleetActionRequest {
   text?: string
   /** The option NUMBER for `approve` on a numbered dialog. Never defaulted — see `answerSession`. */
   choice?: number
+  /** For `approve` on a STRUCTURED multi-select question: every option ticked, sent as one answer. */
+  choices?: number[]
   /** For `approve` on a multi-question form: move to the next/previous question instead of answering. */
   step?: 'next' | 'back'
   /** For `rewind`: which appearance of `text` among the person's prompts, 0 = the latest. */
@@ -238,7 +240,7 @@ export interface FleetRow {
   approvalLines?: string[]
   dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean; checked?: boolean }[]
   /** The multi-question form around the dialog — see `ControlSession.dialogForm`. */
-  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; canStep?: true }
+  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; together?: true; canStep?: true }
   /** The row's own sentences for what cannot be done to it. Already localized. */
   approvalBlind?: string
   approveBlind?: string

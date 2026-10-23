@@ -741,9 +741,13 @@ export function createSessionsPoller(o: {
           approvals.set(r.id, tail())
           // F3.3 — which option is a FIELD is the protocol's statement too, never re-derived from a label.
           const statedOptions = o.backend.attentionOf?.(r.id)?.options
-          dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label: anyGrant() ? scrubTerminalLine(r.id, label) : label, selected: i === 0, ...(statedOptions?.[i]?.freeText ? { freeText: true } : {}) })))
+          const statedMulti = o.backend.attentionOf?.(r.id)?.multiSelect === true
+          dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label: anyGrant() ? scrubTerminalLine(r.id, label) : label, selected: i === 0, ...(statedOptions?.[i]?.freeText ? { freeText: true } : {}), ...(statedMulti ? { checked: false } : {}) })))
           dialogSelect.set(r.id, 'numbered')
           dialogStated.add(r.id)
+          // engine-api 1.13: the protocol says the question takes several options — the card keeps
+          // the ticks itself and sends them as ONE answer (`choices`), nothing is pressed per tick.
+          if (o.backend.attentionOf?.(r.id)?.multiSelect) dialogForm.set(r.id, { multi: true, together: true })
         } else if (state === 'waiting-approval') {
           approvals.set(r.id, tail())
           // Read from the SAME frame that decided the state, so what is offered and what the state

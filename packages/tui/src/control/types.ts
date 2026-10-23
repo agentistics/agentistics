@@ -780,7 +780,7 @@ export interface ControlSession {
    * `canStep` when the harness's step keys were driven (`ApprovalSpec.steps`). Absent on a plain
    * question.
    */
-  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; canStep?: true }
+  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; together?: true; canStep?: true }
   /**
    * Whether the user may pick one of `dialogOptions` from here.
    *
@@ -1677,7 +1677,7 @@ export interface ControlHost {
    * asking, or when the options on screen no longer match what the user was shown. A snapshot is up
    * to five seconds old, and an answer to a question that has changed is worse than no answer.
    */
-  answerSession?(id: string, choice?: number, text?: string): Promise<ActionResult>
+  answerSession?(id: string, choice?: number, text?: string, choices?: readonly number[]): Promise<ActionResult>
   /** Move a multi-question form to its next/previous question without answering this one. */
   stepDialog?(id: string, dir: 'next' | 'back'): Promise<ActionResult>
 

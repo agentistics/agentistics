@@ -4403,7 +4403,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         : { ok: false, message: s.sessSendFailed(id) }
     },
 
-    async answerSession(id: string, choice?: number, text?: string): Promise<ActionResult> {
+    async answerSession(id: string, choice?: number, text?: string, choices?: readonly number[]): Promise<ActionResult> {
       const s = S()
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
@@ -4416,7 +4416,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // DRIVER: no screen is read and no keystroke is sent. The same refusals as the screen path.
       const stated = backend.attentionOf?.(id)
       if (stated !== undefined) {
-        const out = answerStructured(stated, choice, text)
+        const out = answerStructured(stated, choice, text, choices)
         if (!out.ok) {
           return { ok: false, message: out.why === 'not-asking' ? s.sessNotAsking
             : out.why === 'needs-choice' ? s.sessNeedsChoice(stated?.options.length ?? 0)
@@ -4425,6 +4425,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         if (!backend.answer || !await backend.answer(id, out.answer)) return { ok: false, message: s.sessChoiceGone }
         return { ok: true, message: s.sessAnswered(out.said) }
       }
+      // Several ticks in ONE answer exist only on a protocol: a screen form ticks one box per key.
+      if (choices !== undefined) return { ok: false, message: s.sessChoiceGone }
 
       const spec = approvalFor(managed.harness)
       if (!spec) return { ok: false, message: s.sessApproveUnknown(managed.harness) }
@@ -5201,9 +5203,9 @@ export async function runStart(codeStart?: CodeStart): Promise<StartResult> {
     // SS-06: a NATIVE session's question is the policy's, answered through the code host — after
     // re-reading that the SAME question is still pending (a stale list must not answer a new one).
     const answerTmux = host.answerSession?.bind(host)
-    host.answerSession = async (id, choice, text) => {
+    host.answerSession = async (id, choice, text, choices) => {
       if (!id.startsWith('ses_')) {
-        return answerTmux ? answerTmux(id, choice, text) : { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
+        return answerTmux ? answerTmux(id, choice, text, choices) :  { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
       }
       const recent = await code.recentSessions?.(20).catch(() => null)
       const ask = recent && recent.ok ? recent.sessions.find(r => r.sessionId === id)?.ask : undefined

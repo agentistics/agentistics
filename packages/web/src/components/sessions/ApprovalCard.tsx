@@ -29,7 +29,7 @@ import { optionLabel } from '../../lib/nativeSession'
 export interface ApprovalCardProps {
   row: FleetRow
   lang: 'pt' | 'en'
-  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; step?: 'next' | 'back' })
+  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; step?: 'next' | 'back'; choices?: number[] })
     => Promise<{ ok: boolean; message: string; id?: string }>
   /**
    * THE FREE-TEXT OPTION HANDS THE COMPOSER OVER, rather than growing a field of its own.
@@ -72,6 +72,13 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
    */
   const form = row.dialogForm
   const multi = form?.multi === true
+  /**
+   * A STRUCTURED multi-select (`together`): the protocol takes every tick in ONE answer, so the ticks
+   * live here until "Send" — nothing reaches the session per click. Reset when the question changes.
+   */
+  const together = multi && form?.together === true
+  const [ticks, setTicks] = useState<ReadonlySet<number>>(new Set())
+  const [ticksFor, setTicksFor] = useState<string | null>(null)
 
   /**
    * WHICH DIALOG THIS IS — the QUESTION plus its options, not the options alone.
@@ -104,6 +111,18 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
    * again helps in neither case.
    */
   const alreadyAnswered = answeredShape !== null && answeredShape === shape
+
+  if (together && ticksFor !== shape) { setTicksFor(shape); setTicks(new Set()) }
+  const tickedNow = (n: number, fromRow: boolean | undefined) => (together ? ticks.has(n) : fromRow === true)
+
+  async function sendTicks() {
+    setBusy('confirm')
+    const out = await act({ id: row.id, action: 'approve', choices: [...ticks].sort((a, b) => a - b) })
+    setBusy(null)
+    setNotice(out.message)
+    setFailed(!out.ok)
+    if (out.ok) setAnsweredShape(shape)
+  }
 
   async function step(dir: 'next' | 'back') {
     setBusy(dir)
@@ -189,7 +208,9 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
 
       {multi && (
         <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-          {pt ? 'Marque quantas quiser e depois avance.' : 'Tick as many as you want, then go on.'}
+          {together
+            ? (pt ? 'Marque quantas quiser e envie.' : 'Tick as many as you want, then send.')
+            : (pt ? 'Marque quantas quiser e depois avance.' : 'Tick as many as you want, then go on.')}
         </p>
       )}
 
@@ -243,8 +264,12 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
             {options.map(o => (
               <button
                 key={o.number}
-                {...(o.checked !== undefined ? { role: 'checkbox', 'aria-checked': o.checked } : {})}
+                {...(o.checked !== undefined ? { role: 'checkbox', 'aria-checked': tickedNow(o.number, o.checked) } : {})}
                 onClick={() => {
+                  if (together && !o.freeText) {
+                    setTicks(prev => { const n = new Set(prev); if (n.has(o.number)) n.delete(o.number); else n.add(o.number); return n })
+                    return
+                  }
                   // THE FREE-TEXT OPTION ANSWERS NOTHING BY ITSELF — it hands the COMPOSER over.
                   // In the session the digit does not submit either: it turns that row into a
                   // field, and every further press types the digit INTO it, which is how
@@ -271,7 +296,7 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
                   opacity: o.freeText ? 1 : (alreadyAnswered ? 0.5 : (busy !== null && busy !== o.number ? 0.5 : 1)),
                 }}
               >
-                {o.checked !== undefined ? <CheckboxBox checked={o.checked} /> : (
+                {o.checked !== undefined ? <CheckboxBox checked={tickedNow(o.number, o.checked)} /> : (
                   <span style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     width: 20, height: 20, borderRadius: 6, flexShrink: 0,
@@ -299,6 +324,20 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
                 )}
               </button>
             ))}
+
+            {together && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => void sendTicks()}
+                  disabled={busy !== null || alreadyAnswered || ticks.size === 0}
+                  style={dialogButtonStyle('primary', isMobile, busy !== null || alreadyAnswered || ticks.size === 0)}
+                >
+                  <Check size={14} />
+                  {pt ? `Enviar resposta (${ticks.size})` : `Send answer (${ticks.size})`}
+                </button>
+              </div>
+            )}
 
             {form?.canStep && (
               <div style={{

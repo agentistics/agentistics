@@ -91,4 +91,15 @@ describe('ApprovalCard', () => {
     expect(html).not.toContain('Previous question')
     expect(html).toContain('Next')
   })
+
+  test('a STRUCTURED multi-select keeps its ticks and sends them together', () => {
+    const html = form({ multi: true, together: true }, [
+      { number: 1, label: 'Apple', selected: true, checked: false },
+      { number: 2, label: 'Banana', selected: false, checked: false },
+    ])
+    expect(html).toContain('role="checkbox"')
+    expect(html).toContain('Send answer (0)')
+    expect(html).toContain('then send')
+    expect(html).not.toContain('Previous question')
+  })
 })
