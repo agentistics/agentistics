@@ -273,6 +273,18 @@ async function admitOrWait(requested: number, force: boolean, lang: CliLang, jso
 }
 
 export async function runSession(argv: string[]): Promise<number> {
+  try {
+    return await runSessionCommand(argv)
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException | null
+    if (!failure || !['EACCES', 'EPERM', 'EROFS'].includes(failure.code ?? '')) throw error
+    const reason = failure.code === 'EROFS' ? 'read-only filesystem' : 'permission denied'
+    console.error(`Could not complete the session command at ${JSON.stringify(failure.path ?? AGENTISTICS_DATA_DIR)} (${failure.code}: ${reason}); make the data directory writable by your user and retry.`)
+    return 1
+  }
+}
+
+async function runSessionCommand(argv: string[]): Promise<number> {
   waitForRoom = argv.includes('--wait')
   argv = argv.filter(a => a !== '--wait')
   const cmd = parseSessionArgs(argv)
