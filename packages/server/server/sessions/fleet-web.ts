@@ -721,7 +721,22 @@ async function runFleetActionOnce(
         const message = 'value' in late ? late.value.message : (lang === 'pt' ? 'A mensagem não foi entregue.' : 'The message was not delivered.')
         void import('../sse').then(m => m.broadcastNotification({ type: 'error', title: 'Message not delivered', message })).catch(() => {})
       })
-      if (!raced.settled) return { ok: true, message: (lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.') }
+      if (!raced.settled) {
+        // The write continues after this acknowledgement. Preserve navigation for a prompt sent
+        // through an ended row even when delivery is slower than the acknowledgement deadline.
+        let redirectedId: string | undefined
+        try {
+          const row = (await readRegistry()).find(r => r.id === req.id)
+          if (row?.conversationId) {
+            const [{ resolveBackend }, { liveConversationHolders }, { conversationHeldBy }] = await Promise.all([
+              import('./index'), import('./live-claims'), import('./conversation-claim'),
+            ])
+            const holder = conversationHeldBy(await liveConversationHolders(await resolveBackend()), row.conversationId, req.id)
+            if (holder?.kind === 'managed') redirectedId = holder.id
+          }
+        } catch { /* delivery still owns the outcome and reports a late failure above */ }
+        return { ok: true, message: (lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.'), ...(redirectedId ? { id: redirectedId } : {}) }
+      }
       const out = raced.value
       if (out.ok) await record()
       return out
