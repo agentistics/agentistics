@@ -12,10 +12,32 @@ export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 export const RELEASES: Record<string, ReleaseNotes> = {
   '2.143.1': {
     features: [],
-    fixes: [{
-      pt: 'Dormindo mostra só sessões fixadas que terminaram. O aviso de sessões que caíram pode ser dispensado, as linhas ficam juntas e os números dos botões ficam centralizados.',
-      en: 'Sleeping shows only pinned sessions that ended. The fallen-session notice can be dismissed, its rows stay together, and button counts are centered.',
-    }],
+    fixes: [
+      {
+        pt: 'Mensagens entre sessões chegam de verdade, uma vez só, também às sessões abertas em segundo plano e depois de reiniciar o servidor.',
+        en: 'Messages between sessions really arrive, exactly once, also to background sessions and after a server restart.',
+      },
+      {
+        pt: 'Dormindo mostra só sessões fixadas que terminaram. O aviso de sessões que caíram pode ser dispensado, as linhas ficam juntas e os números dos botões ficam centralizados.',
+        en: 'Sleeping shows only pinned sessions that ended. The fallen-session notice can be dismissed, its rows stay together, and button counts are centered.',
+      },
+      {
+        pt: 'Ao passar a liderança, fica um só líder com a equipe inteira (antiga e nova); o líder anterior é encerrado quando fica ocioso.',
+        en: 'A leader hand-off leaves one leader with the whole team (old and new); the previous leader is closed once it goes idle.',
+      },
+      {
+        pt: 'Um líder aberto por outro líder fica no topo com os demais líderes, nunca dentro da equipe de outro.',
+        en: 'A leader started by another leader stays at the top with the other leaders, never inside another team.',
+      },
+      {
+        pt: 'Novas ações no menu da sessão: "Tirar da equipe" e "Mover para a equipe de…".',
+        en: 'New session menu actions: "Take out of the team" and "Move to a leader\'s team…".',
+      },
+      {
+        pt: 'Sessões em "Sem líder" mostram o papel de cada uma e o projeto quando for diferente do resto.',
+        en: 'Sessions under "No leader" show each one\'s role, and the project when it differs from the rest.',
+      },
+    ],
   },
   '2.143.0': {
     features: [

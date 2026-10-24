@@ -128,6 +128,9 @@ export interface SessionPatch {
   /** See `ManagedSession.pendingContext`. `null` clears it once the first real prompt carried it. */
   pendingContext?: string | null
   attemptId?: string
+  /** The team link (`team-links.ts`). `null` clears it: the row moves to the root (no leader). */
+  parentSessionId?: string | null
+  parentConversationId?: string | null
   endedAt?: string | null
   conversationId?: string
   /** See `ManagedSession.conversationLink`. Written beside `conversationId`, never on its own. */

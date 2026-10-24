@@ -94,12 +94,18 @@ export async function resolveContextParent(parentId: string | undefined): Promis
  * the PREVIOUS record's `parentConversationId` forward untouched.
  */
 export async function parentLinkOf(
-  parentManagedId: string | undefined,
+  callerManagedId: string | undefined,
+  opts: { followHandoff?: boolean } = {},
 ): Promise<{ parentSessionId?: string; parentConversationId?: string; title?: string }> {
-  if (!parentManagedId) return {}
+  if (!callerManagedId) return {}
+  let parentManagedId = callerManagedId
   try {
     const { readRegistry } = await import('./registry')
-    const row = (await readRegistry()).find(m => m.id === parentManagedId)
+    const rows = await readRegistry()
+    // A predecessor that has handed off still finishing its turn files new workers under its
+    // SUCCESSOR, never into a second team of its own (`team-links.ts`).
+    if (opts.followHandoff) parentManagedId = (await import('./team-links')).currentLeaderId(rows, callerManagedId)
+    const row = rows.find(m => m.id === parentManagedId)
     return {
       parentSessionId: parentManagedId,
       ...(row?.conversationId ? { parentConversationId: row.conversationId } : {}),

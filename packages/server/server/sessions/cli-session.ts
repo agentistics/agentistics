@@ -44,7 +44,8 @@ import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { configureSpawn, configurationPendingMessage } from './spawn-configuration'
 import { handoffSpawnDefaults, handoffTitle } from './handoff-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, killAndRetireSession } from './registry'
-import { callerHoldsIdentity, callerProof, type CallerProof } from './session-identity'
+import { callerHoldsIdentity, callerProof, callerSessionFromTree, type CallerProof } from './session-identity'
+import { spawnParentLink } from './team-links'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
 import { newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
 import { liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
@@ -415,6 +416,24 @@ export function callerSessionId(env: Record<string, string | undefined> = proces
 }
 
 /**
+ * The calling session when `AGENTOP_MANAGED_ID` was LOST on the way here (an `env -u` workaround, a
+ * wrapper script): found from the process tree, and written back into THIS one-shot process's
+ * environment so every check downstream (`callerHoldsIdentity`, the hand-off proof) reads the same
+ * caller. The tree is the stronger proof — it is what `callerProof` checks — so nothing is weakened.
+ * A variable that IS set is never second-guessed. Without this, a leader's worker came up with no
+ * parent and landed in "No leader".
+ */
+export async function recoverCallerFromTree(backend: SessionBackend, env: Record<string, string | undefined> = process.env): Promise<string | undefined> {
+  if (callerSessionId(env)) return callerSessionId(env)
+  const found = await callerSessionFromTree(
+    async () => (backend as { listPanePids?: () => Promise<Map<string, number>> }).listPanePids?.(),
+    async () => (await readRegistry()).filter(r => !r.endedAt).map(r => r.id),
+  )
+  if (found) env.AGENTOP_MANAGED_ID = found
+  return found
+}
+
+/**
  * Said after a FAILED `--handoff` spawn. Measured 2026-10-17: a leader whose `--handoff` spawn failed
  * retried WITHOUT the flag, and that successor came up with none of the predecessor's setup (no pin,
  * no hand-off link, no relay) because a plain spawn inherits nothing.
@@ -435,6 +454,7 @@ export async function start(
   // is written verbatim into the registry, where `list` would print it back meaningless from
   // anywhere else.
   const lang = await resolveLang()
+  await recoverCallerFromTree(backend)
   // WHERE this session is filed is decided once, BEFORE the memory gate: a refusal spawns nothing.
   const parentSessionIdForPlan = callerSessionId()
   // `--handoff` is the API's `handoff: true`: only a VERIFIED calling session can have a successor, so
@@ -470,12 +490,15 @@ export async function start(
   const id = newSessionId()
   const offeredConversationId = randomUUID()
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
-  const parentLink = await parentLinkOf(callerSessionId())
+  // A hand-off names its predecessor exactly; any other spawn by a predecessor that has already
+  // handed off is filed under its successor (`team-links.ts`).
+  const parentLink = await parentLinkOf(callerSessionId(), { followHandoff: !cmd.handoff })
   const parentSessionId = parentLink.parentSessionId
   // A hand-off already PROVED its caller by the pane above (stronger than the token check), so the
-  // predecessor's away mode and role origin are inherited on that proof.
+  // predecessor's away mode and role origin are inherited on that proof. The CALLER is what is
+  // verified — the followed successor is never the process asking.
   const parentVerified = (cmd.handoff && !!parentSessionId && parentSessionId === parentSessionIdForPlan)
-    || await callerHoldsIdentity(parentSessionId)
+    || await callerHoldsIdentity(callerSessionId())
   const registry0 = parentVerified ? await readRegistry() : []
   // A name that already wears the leader prefix is a statement of intent: never let it silently become a worker.
   const wantedRole = cmd.handoff ? 'leader' as const : cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' as const : undefined)
@@ -546,8 +569,11 @@ export async function start(
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...filingRow(filing),
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
-    ...(parentSessionId ? { parentSessionId } : {}),
-    ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+    // TEAM LINK (`team-links.ts`): a leader — `--role leader`, a `--handoff` successor — is born at the root.
+    ...spawnParentLink(role, {
+      ...(parentSessionId ? { parentSessionId } : {}),
+      ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+    }),
     ...(away ? { away: true } : {}),
     ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
     // The link is EXACT here: the CLI was handed this id (`SpawnSpec.assignId`).
@@ -593,7 +619,8 @@ export async function start(
   const configuration = await configureSpawn(filing, { id, conversationId: planned.plan.conversationId }, handoffParentRow)
   if (!configuration.ready) console.error(configurationPendingMessage(id, configuration))
   if (handoffParentRow) {
-    await import('./handoff-relay-io').then(m => m.recordHandoffLink(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq))
+    // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
+    await import('./team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq))
   }
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
   // poller links the conversation). Delivery only — the session still reads as waiting.
@@ -730,6 +757,7 @@ export async function batch(
   // refusal (--subtask, --folder, a missing @cwd, a shared checkout) then shows up BEFORE the board
   // is written, and a refused batch creates no task and no attempt.
   const lang = await resolveLang()
+  await recoverCallerFromTree(backend)
   const callerId = callerSessionId()
   const verifiedCaller = await callerHoldsIdentity(callerId) ? callerId : undefined
   const parentRow = verifiedCaller ? (await readRegistry()).find(r => r.id === verifiedCaller) : undefined
@@ -780,9 +808,9 @@ export async function batch(
     // The plans were made against the stand-in: stamp the real id.
     plans = plans.map(p => ({ ...p, taskId: resolved.taskId }))
   }
-  const parentLink = await parentLinkOf(callerSessionId())
+  const parentLink = await parentLinkOf(callerSessionId(), { followHandoff: true })
   const parentSessionId = parentLink.parentSessionId
-  const parentVerified = await callerHoldsIdentity(parentSessionId)
+  const parentVerified = await callerHoldsIdentity(callerSessionId())
   const away = await resolveSpawnAwayFor(cmd.away, parentSessionId, parentVerified)
   // PLAN.ACCOUNTS D3 — read once for the whole batch; each session WITHOUT `account` takes the
   // router's pick for its harness, which is never an account that is off for agents.
@@ -836,8 +864,11 @@ export async function batch(
       createdAt: spawnedAt,
       // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
       ...filingRow(filing, cmd.task),
-      ...(parentSessionId ? { parentSessionId } : {}),
-      ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+      // TEAM LINK (`team-links.ts`): a session named as a leader is born at the root.
+      ...spawnParentLink(role, {
+        ...(parentSessionId ? { parentSessionId } : {}),
+        ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+      }),
       ...(away ? { away: true } : {}),
       ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
       ...(spec.attempt && resolved?.attempts.get(spec.attempt)
