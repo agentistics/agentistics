@@ -24,6 +24,7 @@ describe('live clean state', () => {
     expect(state.etaMs).toBe(2000)
     const progress = state.progress
     scanEstimate(state, 2, 20, 4000)
+    expect(state.etaMs).toBeNull() // 10% < 15%: no honest estimate yet
     expect(state.progress).toBe(progress)
     expect(state.progress).toBeLessThan(1)
     scanEstimate(state, 20, 20, 5000)

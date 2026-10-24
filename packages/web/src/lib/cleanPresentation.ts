@@ -18,7 +18,7 @@ export function cleanLogSize(line: { bytes?: number; kept?: boolean; freeBytes?:
   const size = cleanSize(line.bytes ?? 0, lang)
   if (line.kept) return `${size} · ${pt ? 'mantido' : 'kept'}`
   if (line.freeBytes !== undefined && line.freeBytes !== line.bytes) return `${size} · ${pt ? 'libera' : 'frees'} ${cleanSize(line.freeBytes, lang)}`
-  return size
+  return `${size} · ${pt ? 'libera' : 'frees'} ${size}`
 }
 export function cleanName(item: Pick<CleanWebItem, 'name' | 'path' | 'kind'>): string {
   const name = item.name || (item.path.replace(/\\/g, '/').replace(/\/$/, '').split('/').pop() || item.path)

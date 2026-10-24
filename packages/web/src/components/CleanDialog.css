@@ -24,7 +24,8 @@
 .clean-log-line { display: flex; gap: 9px; align-items: baseline; min-width: 0; }
 .clean-log-line > :not(.clean-log-name) { flex-shrink: 0; }
 .clean-log-line > .clean-log-name { flex: 1; }
-.clean-log-name { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.clean-log-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.clean-log-line > .clean-muted:last-child { white-space: nowrap; }
 .clean-summary > div { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-top: 4px; }
 .clean-type-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px; background: var(--border); }
 .clean-type-bar span { flex-basis: 0; min-width: 3px; }
