@@ -52,7 +52,7 @@ export function SegmentedTabs<Id extends string>({ tabs, value, onChange, collap
       style={{
         containerType: 'inline-size', containerName,
         display: 'flex', flexDirection: collapsed ? 'column' : 'row',
-        gap: 3, padding: 3, borderRadius: 10, minWidth: 0, width: '100%',
+        gap: 'var(--seg-track-gap, 3px)', padding: 'var(--seg-track-pad, 3px)', borderRadius: 10, minWidth: 0, width: '100%',
         boxSizing: 'border-box',
         background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
       }}
@@ -77,7 +77,7 @@ export function SegmentedTabs<Id extends string>({ tabs, value, onChange, collap
               position: 'relative',
               minHeight: 34, padding: collapsed ? '0' : '0 var(--mode-padding, 8px)',
               borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              fontSize: 12.5, fontWeight: on ? 700 : 500, whiteSpace: 'nowrap',
+              fontSize: 'var(--mode-font, 12.5px)', fontWeight: on ? 700 : 500, whiteSpace: 'nowrap',
               background: on ? 'var(--bg-surface)' : 'transparent',
               boxShadow: on ? 'var(--ag-shadow-seg)' : 'none',
               color: on ? 'var(--text-primary)' : 'var(--text-tertiary)',
@@ -95,9 +95,9 @@ export function SegmentedTabs<Id extends string>({ tabs, value, onChange, collap
                   position: collapsed ? 'absolute' : 'static',
                   top: collapsed ? (badgeOutside ? -5 : 2) : undefined, right: collapsed ? (badgeOutside ? -7 : 2) : undefined,
                   flexShrink: 0,
-                  minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8,
+                  minWidth: 16, height: 16, padding: '2px 4px 0', boxSizing: 'border-box', borderRadius: 8,
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10, fontWeight: 700, lineHeight: 1,
+                  fontSize: 10, fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
                   ...BADGE[tab.badgeTone ?? 'accent'],
                   // Outside the icon, a quiet count needs a ground of its own or it reads as part of the glyph.
                   ...(collapsed && badgeOutside && tab.badgeTone === 'quiet'

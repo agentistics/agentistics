@@ -7,3 +7,15 @@
     --mode-icon-display: none;
   }
 }
+
+/* The sessions aside's Ativas | Grupos | Encerradas: room around each word and its count
+   (owner 23/10: "muito grudado"). Segments take their content's width, so "Encerradas" plus
+   its count is never squeezed into a third of the track. Narrower asides step the room down. */
+.ag-aside-tabs { --seg-track-gap: 4px; --seg-track-pad: 4px; }
+.ag-aside-tabs .ag-mode-segment { --mode-padding: 12px; --mode-gap: 8px; }
+@container aside-tabs (max-width: 300px) {
+  .ag-aside-tabs .ag-mode-segment { --mode-padding: 7px; --mode-gap: 6px; }
+}
+@container aside-tabs (max-width: 240px) {
+  .ag-aside-tabs .ag-mode-segment { --mode-padding: 4px; --mode-gap: 4px; --mode-font: 11.5px; }
+}
