@@ -13,9 +13,10 @@
  * arrangement is worse than one that opens on the defaults.
  */
 
-import { useSyncExternalStore } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import { createPersonalDoc } from './sharedPref'
 import { DEFAULT_ORDER, SESSION_SORTS, type SessionOrder } from '@agentistics/tui/control/session-order'
+import { isAsideTab, type AsideTab } from './asideTabs'
 
 const doc = createPersonalDoc('agentistics-sessions-aside-v1', 'sessionsAside')
 
@@ -67,12 +68,16 @@ export interface AsideGroupPrefs {
   /** Show only the sessions whose role is "leader" (`leadersFilter.ts`). A FILTER, persisted like the
    *  rest of how this person reads the list — pins stay and folders keep their place. */
   leadersOnly: boolean
+  /** Which of the three tabs (Ativas | Grupos | Encerradas) the aside — and the rail — shows. */
+  tab: AsideTab
+  /** Leader teams folded in Ativas, keyed by the leader's identity key (`sessionIdentityKey`). */
+  foldedTeams: string[]
 }
 
 export const DEFAULT_ASIDE_GROUP_PREFS: AsideGroupPrefs = {
   groupBy: 'project', order: {}, collapsed: [], cardColor: 'wash', collapsedUserGroups: [],
   sort: DEFAULT_ORDER, hiddenUserGroups: [], foldedPinned: false, foldedGroupsSection: false,
-  expandedEndedGroups: [], sortExplicit: false, leadersOnly: false,
+  expandedEndedGroups: [], sortExplicit: false, leadersOnly: false, tab: 'active', foldedTeams: [],
 }
 
 /** Total: anything that is not a known key and direction reads as the default. */
@@ -146,6 +151,10 @@ export function parseAsideGroupPrefs(stored: unknown): AsideGroupPrefs {
       // A stored sort that is not the default, from before the flag existed, WAS a choice.
       sortExplicit: typeof p.sortExplicit === 'boolean' ? p.sortExplicit : sortDiffersFromDefault(readSessionSort(p.sort)),
       leadersOnly: p.leadersOnly === true,
+      tab: isAsideTab(p.tab) ? p.tab : DEFAULT_ASIDE_GROUP_PREFS.tab,
+      foldedTeams: Array.isArray(p.foldedTeams)
+        ? p.foldedTeams.filter((x): x is string => typeof x === 'string')
+        : [],
       expandedEndedGroups: Array.isArray(p.expandedEndedGroups)
         ? p.expandedEndedGroups.filter((x): x is string => typeof x === 'string')
         : [],
@@ -186,4 +195,21 @@ export function arrangeChangedCount(o: {
 /** Is the leaders-only filter on — followed live, so the Filtros badge in App and the aside agree. */
 export function useLeadersOnly(): boolean {
   return useSyncExternalStore(subscribeAsideGroupPrefs, () => readAsideGroupPrefs().leadersOnly, () => false)
+}
+
+/** The aside's current tab — followed live, so the open aside and the 64px rail always agree. */
+export function useAsideTab(): AsideTab {
+  return useSyncExternalStore(subscribeAsideGroupPrefs, () => readAsideGroupPrefs().tab, () => DEFAULT_ASIDE_GROUP_PREFS.tab)
+}
+
+/** The folded leader teams, joined so the snapshot is a stable primitive for `useSyncExternalStore`. */
+export function useFoldedTeams(): readonly string[] {
+  const joined = useSyncExternalStore(subscribeAsideGroupPrefs, () => readAsideGroupPrefs().foldedTeams.join('\u0000'), () => '')
+  return useMemo(() => (joined === '' ? [] : joined.split('\u0000')), [joined])
+}
+
+/** Fold or unfold one leader's team (shared by the open aside and the rail). */
+export function toggleFoldedTeam(key: string): void {
+  const cur = readAsideGroupPrefs().foldedTeams
+  writeAsideGroupPrefs({ foldedTeams: cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key] })
 }

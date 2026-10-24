@@ -319,16 +319,17 @@ const touch = (isMobile: boolean): React.CSSProperties => (isMobile ? { minHeigh
  * (the "joined the channel" divider), its action a text link at the END of the same line. One
  * definition so notes and event rows cannot drift.
  */
+/** The text starts at the chat's left edge (the composer's), and one hairline fills whatever the text
+ *  leaves on the right — its length follows the text (owner 23/10). */
 export function SystemLine({ children, below, isMobile = false }: { children: React.ReactNode; below?: React.ReactNode; isMobile?: boolean }) {
   const hair: React.CSSProperties = { flex: 1, height: 1, background: 'var(--border)', minWidth: 12 }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', margin: 0 }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, width: '100%',
         ...(isMobile ? { minHeight: 44, padding: 0 } : { padding: '4px 0' }),
         fontSize: 11, lineHeight: 1.4, color: SYS_TEXT,
       }}>
-        <span aria-hidden style={hair} />
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, maxWidth: '88%', minWidth: 0 }}>{children}</span>
         <span aria-hidden style={hair} />
       </div>

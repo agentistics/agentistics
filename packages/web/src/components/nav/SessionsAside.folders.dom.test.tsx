@@ -78,7 +78,7 @@ let host: HTMLDivElement
 let root: Root
 beforeEach(async () => {
   await loadSharedPrefs()
-  act(() => writePrefs({ leadersOnly: false, foldedPinned: false, foldedGroupsSection: false, collapsedUserGroups: [], expandedEndedGroups: [] }))
+  act(() => writePrefs({ leadersOnly: false, foldedPinned: false, foldedGroupsSection: false, collapsedUserGroups: [], expandedEndedGroups: [], tab: 'groups', foldedTeams: [] }))
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host)
 })
 afterEach(async () => {
@@ -110,9 +110,9 @@ for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
     expect(ended('parent').textContent).toContain(lang === 'pt' ? '3 pastas' : '3 folders')
     expect(ended('parent').textContent).toContain(lang === 'pt' ? '1 sessão' : '1 session')
     expect(ended('parent').getAttribute('aria-expanded')).toBe('false')
-    expect(ended('root').textContent).toContain(lang === 'pt' ? '1 grupo' : '1 group')
-    expect(host.querySelector('[data-ended-root-folders]')!.parentElement!.lastElementChild).toBe(host.querySelector('[data-ended-root-folders]'))
-    expect(host.textContent).toContain(lang === 'pt' ? 'Dormindo' : 'Sleeping')
+    expect(ended('root').textContent).toContain(lang === 'pt' ? '1 pasta' : '1 folder')
+    // The ended folders close the tree; only "New folder" follows them.
+    expect(host.querySelector('[data-ended-root-folders]')!.nextElementSibling).toBe(host.querySelector('[data-new-folder]'))
     await click(ended('parent'))
     expect(folder('idle-child')).not.toBeNull()
     expect(folder('unknown-child')?.textContent).toContain('Unknown child with a full title that must wrap')
@@ -194,32 +194,29 @@ test('ended trees remain readable while Active only is on, and their expansion s
 })
 
 
-for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) for (const count of [1, 4, 128]) {
-  test(`reopen-fell stays on one line beside its fixed dismiss control (${lang}, ${count}, ${width}px)`, async () => {
-    host.style.width = width === 390 ? '390px' : '288px'
-    await render(fleet, width, lang, filters, false, count)
+for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) for (const count of [1, 4]) {
+  test(`what fell is a discreet line in Ativas and a full section only in Encerradas (${lang}, ${count}, ${width}px)`, async () => {
+    act(() => writePrefs({ tab: 'active' }))
+    const fallenRows = Array.from({ length: count }, (_, i) => ({ ...row(`fell-${i}`, 'lost'), title: `Fallen ${i}` }))
+    await render([...fleet, ...fallenRows], width, lang, filters, false, count)
+    // Ativas: no banner, no fallen row — only the quiet foot line.
+    expect(host.querySelector('[data-fell-banner]')).toBeNull()
+    expect(host.querySelector('[data-tab-body="active"]')!.textContent).not.toContain('Fallen 0')
+    const line = host.querySelector<HTMLElement>('[data-fell-line]')!
+    expect(line.textContent).toContain(lang === 'pt' ? (count === 1 ? '1 caiu' : `${count} caíram`) : `${count} fell`)
+    expect(line.parentElement!.lastElementChild).toBe(line)
+    // The tab carries the count.
+    const endedTab = host.querySelector<HTMLButtonElement>('[data-segment="ended"]')!
+    expect(endedTab.textContent).toContain(String(count))
+    await click(Array.from(line.querySelectorAll('button')).find(b => b.textContent === (lang === 'pt' ? 'Ver' : 'See'))!)
+    expect(readPrefs().tab).toBe('ended')
     const banner = host.querySelector<HTMLElement>('[data-fell-banner]')!
-    const button = banner.querySelector<HTMLButtonElement>('[data-fell-reopen]')!
-    const dismiss = banner.querySelector<HTMLButtonElement>('[data-fell-dismiss]')!
-    const label = lang === 'pt' ? (count === 1 ? 'Reabrir 1 que caiu' : `Reabrir ${count} que caíram`) : `Reopen ${count} that fell`
     const sentence = lang === 'pt' ? (count === 1 ? 'Reabrir 1 sessão que caiu' : `Reabrir ${count} sessões que caíram`)
       : (count === 1 ? 'Reopen 1 session that fell' : `Reopen ${count} sessions that fell`)
-    expect(button.querySelector('[data-fell-full]')!.textContent).toBe(label)
-    expect(button.querySelector('[data-fell-short]')!.textContent).toBe(`${lang === 'pt' ? 'Reabrir' : 'Reopen'} ${count}`)
-    expect(banner.style.containerType).toBe('inline-size')
-    expect(button.title).toBe(sentence)
-    expect(button.getAttribute('aria-label')).toBe(sentence)
-    expect(getComputedStyle(button).whiteSpace).toBe('nowrap')
-    expect(getComputedStyle(button).textOverflow).not.toBe('ellipsis')
-    expect(button.querySelector('svg')!.style.flexShrink).toBe('0')
-    expect(dismiss.parentElement).toBe(banner)
-    expect(button.nextElementSibling).toBe(dismiss)
-    expect(getComputedStyle(dismiss).flexShrink).toBe('0')
-    expect(dismiss.style.width).toBe(width === 390 ? '44px' : '30px')
-    expect(dismiss.style.minWidth).toBe(width === 390 ? '44px' : '30px')
-    expect(dismiss.querySelector('svg')).not.toBeNull()
-    await click(dismiss)
-    expect(host.querySelector('[data-fell-banner]')).toBeNull()
+    expect(banner.querySelector<HTMLButtonElement>('[data-fell-reopen]')!.title).toBe(sentence)
+    const section = host.querySelector<HTMLElement>('[data-ended-section="fell"]')!
+    for (let i = 0; i < count; i++) expect(section.textContent).toContain(`Fallen ${i}`)
+    for (const el of Array.from(host.querySelectorAll<HTMLElement>('[data-tab-body] *'))) expect(el.style.textOverflow).not.toBe('ellipsis')
   })
 }
 
@@ -273,6 +270,7 @@ for (const width of [1280, 390]) test(`ended-only groups suppress the false empt
 })
 
 test('action feedback uses the session title, reserves space, and can be dismissed', async () => {
+  act(() => writePrefs({ tab: 'active' }))
   const session = { ...row('b4f46fa8d9-session', 'waiting'), title: '[ LÍDER ] - Maestro' }
   await act(async () => root.render(<MemoryRouter><SessionsAside rows={[session]} lang="pt" filters={filters} activeOnly={false}
     loading={false} unsupported={false} finishedTasks={[]} hideNew={false}
@@ -290,25 +288,19 @@ test('action feedback uses the session title, reserves space, and can be dismiss
   expect(notice.isConnected).toBe(false)
 }, 10000)
 
-for (const width of [1440, 390]) test(`pinned intent survives active/status filters and search narrows sleeping pins at ${width}px`, async () => {
+for (const width of [1440, 390]) test(`a pinned session that stopped sleeps in Encerradas, and search narrows it (${width}px)`, async () => {
+  act(() => writePrefs({ tab: 'ended' }))
   await render(fleet, width, 'pt', { ...filters, harnesses: ['claude'] }, true)
-  const sleeping = () => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Dormindo1')!
-  expect(sleeping()).toBeDefined()
-  expect(sleeping().getAttribute('aria-expanded')).toBe('false')
-  const status = Array.from(host.querySelectorAll<HTMLButtonElement>('[aria-label] button')).find(b => b.textContent?.includes('trabalhando'))
-  if (status) await click(status)
-  expect(sleeping()).toBeDefined()
-  await click(sleeping())
-  expect(host.textContent).toContain('Title pin-ended')
-  const input = host.querySelector<HTMLInputElement>('input[type="search"], input[placeholder]')!
+  const sleeping = () => host.querySelector<HTMLElement>('[data-ended-section="sleeping"]')
+  expect(sleeping()?.textContent).toContain('Dormindo')
+  expect(sleeping()?.textContent).toContain('Title pin-ended')
+  const input = host.querySelector<HTMLInputElement>('input[placeholder]')!
   const nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
   await act(async () => {
     nativeSet.call(input, 'no-such-title')
     input.dispatchEvent(new window.Event('input', { bubbles: true }))
-    input.dispatchEvent(new window.Event('change', { bubbles: true }))
   })
-  expect(host.textContent).not.toContain('Title pin-ended')
-  expect(sleeping()).toBeUndefined()
+  expect(sleeping()).toBeNull()
 })
 
 test('ended folders hide totals even for pinned or not-yet-loaded members', async () => {
@@ -324,20 +316,28 @@ test('ended folders hide totals even for pinned or not-yet-loaded members', asyn
   expect(folder('archived')!.querySelector('[title="Title pin-ended"]')).toBeNull()
 })
 
-for (const sidebar of [288, 220, 390]) test(`ended folders reserve icon space and summary units have no separators (${sidebar}px)`, async () => {
+for (const sidebar of [288, 220, 390]) test(`ended folders reserve icon space and the top carries no counters line (${sidebar}px)`, async () => {
   await act(async () => groups.renameSessionGroup('archived', 'Agentistics Side Tasks'))
   const rows = fleet.map(r => r.id === 'pin-ended' ? { ...r, title: '[ LÍDER ] - Maestro (superskill)' } : r)
   await render(rows, sidebar === 390 ? 390 : 1440, 'pt', filters, true, 0, true)
   await click(ended('root'))
   expect(folder('archived')!.querySelector('[data-folder-count]')).toBeNull()
   expect(folder('parent')!.querySelector('[data-folder-count]')).not.toBeNull()
-  const units = host.querySelectorAll('[aria-label="Resumo das sessões"] > span')
-  for (const unit of Array.from(units)) expect(unit.firstElementChild?.tagName).toBe('BUTTON')
-  expect(host.querySelector('[aria-label="Resumo das sessões"]')!.textContent).not.toContain('·')
+  expect(host.querySelector('[aria-label="Resumo das sessões"]')).toBeNull()
   const grip = folder('archived')!.querySelector<HTMLElement>('span[draggable]')!
   expect(grip.parentElement!.style.paddingLeft).toBe('8px')
   expect(grip.querySelector('svg')).not.toBeNull()
-  const sleeping = Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === 'Dormindo1')!
-  await click(sleeping)
+})
 
+test('the ⋮ button hands the caller ONE stable ref across re-renders (no update loop on /sessions)', async () => {
+  // App measures the filters anchor into state from this ref; an inline ref re-ran it every render
+  // and looped ("Maximum update depth exceeded"). Re-render with a fresh caller callback each time.
+  const seen: (HTMLButtonElement | null)[] = []
+  const draw = async () => {
+    await act(async () => root.render(<MemoryRouter><SessionsAside rows={fleet} lang="en" filters={filters} activeOnly={false}
+      loading={false} unsupported={false} finishedTasks={[]} hideNew filtersButtonRef={el => { seen.push(el) }} /></MemoryRouter>))
+  }
+  await draw(); await draw(); await draw()
+  expect(seen.filter(Boolean)).toHaveLength(1)
+  expect(seen.filter(el => el === null)).toHaveLength(0)
 })

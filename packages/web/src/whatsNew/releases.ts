@@ -10,6 +10,40 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.143.0': {
+    features: [
+      {
+        pt: 'Novo painel de sessões em três abas: Ativas, Grupos e Encerradas.',
+        en: 'New sessions panel in three tabs: Active, Groups and Ended.',
+      },
+      {
+        pt: 'Em Ativas, cada líder aparece com a equipe dele embaixo; dá para dobrar a equipe, e ela abre sozinha quando alguém dela espera por você.',
+        en: 'In Active, each leader shows its team underneath; a team can be folded, and it unfolds by itself when one of its sessions is waiting for you.',
+      },
+      {
+        pt: 'Sessões que caíram aparecem discretamente no rodapé, com Ver e Reabrir, e completas na aba Encerradas.',
+        en: 'Sessions that fell show discreetly at the bottom, with See and Reopen, and in full in the Ended tab.',
+      },
+      {
+        pt: 'O painel recolhido mostra as mesmas abas, líderes, equipes e pastas em ícones.',
+        en: 'The collapsed panel shows the same tabs, leaders, teams and folders as icons.',
+      },
+      {
+        pt: 'Filtros, ordem e as outras ações da lista ficam no menu ⋮ ao lado da busca.',
+        en: 'Filters, order and the list’s other actions live in the ⋮ menu next to search.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Líderes voltam a abrir sessões em outro projeto; a sessão fica na tarefa do líder, com um aviso.',
+        en: 'Leaders can start sessions in another project again; the session stays on the leader’s task, with a notice.',
+      },
+      {
+        pt: 'Avisos do sistema no chat começam alinhados à esquerda, com a linha só depois do texto.',
+        en: 'System notices in the chat start at the left edge, with the line only after the text.',
+      },
+    ],
+  },
   '2.142.1': {
     features: [],
     fixes: [

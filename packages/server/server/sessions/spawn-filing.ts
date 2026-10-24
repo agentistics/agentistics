@@ -15,8 +15,9 @@
  *     ambiguous; a subtask with no task is resolved board-wide; a group MEMBER is filed on its GROUP
  *     (a member can never hold a session — `planAttach`'s `subtask_in_group`).
  *  2. The plan carries the task's REAL title, for the row's `task` field.
- *  3. cwd: explicit, else the caller's — for a worker on a task with a `repo`, only when that cwd's
- *     repository is the task's; never guessed, the refusal lists known checkouts of the right one.
+ *  3. cwd: explicit, else the caller's — a worker on an explicitly named task with a `repo` must
+ *     use that repository; an inherited task mismatch warns instead. Never guessed, the refusal
+ *     lists known checkouts of the right one.
  *  4. A worker in a repository's MAIN checkout while another session is live there is refused —
  *     the shared-checkout corruption CLAUDE.md § "Concurrent work" records. `sharedCwd` overrides.
  *     Leaders are exempt from 3 and 4: their home (the workspace) is not a repository.
@@ -100,7 +101,7 @@ export type FolderSource = 'explicit' | 'predecessor' | 'task' | 'parent' | 'non
 export type CwdSource = 'explicit' | 'caller' | 'predecessor'
 
 /** Codes, not sentences: the surfaces (CLI, route) render them in the reader's language. */
-export type FilingWarning = 'no_folder' | 'subtask_member_filed_on_group' | 'shared_checkout_override'
+export type FilingWarning = 'no_folder' | 'subtask_member_filed_on_group' | 'shared_checkout_override' | 'inherited_task_repo_mismatch'
 
 export type FilingRefusal =
   | 'no_such_task' | 'ambiguous_task'
@@ -213,6 +214,16 @@ function resolveFiling(input: FilingInput, taskRef: string | undefined, subtaskR
 /** What identifies a repository: its short `org/repo` (lowercase) and, when a REMOTE said it, the host too. */
 interface RepoId { short: string; full?: string }
 
+/** Board repos are usually short `org/repo`; only a real remote carries a host. */
+function taskRepoId(repo: string | undefined): RepoId | undefined {
+  const value = clean(repo)
+  if (!value) return undefined
+  const isRemote = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value)
+    || /^[^/@]+@[^/:]+:/.test(value)
+    || value.split('/')[0]!.includes('.')
+  return isRemote ? repoId(value) : { short: value.toLowerCase() }
+}
+
 function repoId(remote: string | undefined): RepoId | undefined {
   if (!remote) return undefined
   const full = (normalizeGitRemote(remote) || remote).toLowerCase()
@@ -263,7 +274,7 @@ function checkoutsFor(input: FilingInput, want: RepoId): string[] {
   return [...out].slice(0, 10)
 }
 
-function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, task: Task | undefined): { cwd: string; source: CwdSource; shared?: true } | Refusal {
+function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, task: Task | undefined, inheritedTask: boolean): { cwd: string; source: CwdSource; shared?: true; inheritedRepoMismatch?: true } | Refusal {
   const explicit = clean(input.cwd)
   const fromPred = !explicit && input.handoffOf ? input.handoffOf.cwd : undefined
   const cwd = explicit ?? fromPred ?? input.callerCwd
@@ -272,22 +283,24 @@ function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, t
   if (!exists(facts)) return refuse('cwd_missing', `the directory ${cwd} does not exist`)
   if (role !== 'worker') return { cwd, source }
 
-  const want = repoId(task?.repo)
-  if (want && !sameRepo(facts, want)) {
+  const want = taskRepoId(task?.repo)
+  const mismatch = want !== undefined && !sameRepo(facts, want)
+  if (want && mismatch && !inheritedTask) {
     const candidates = checkoutsFor(input, want)
     return source === 'explicit'
       ? refuse('cwd_wrong_repo', `${cwd} is not a checkout of ${task!.repo} (task ${task!.id}) — use one of its worktrees (CLI: --cwd)`, candidates)
       : refuse('cwd_needed', `task ${task!.id} belongs to ${task!.repo} and ${cwd} is outside it — start the session in one of its worktrees (CLI: --cwd)`, candidates)
   }
+  const inheritedRepoMismatch = mismatch ? true : undefined
   const inRepo = keyOfFacts(facts) !== undefined
   if (inRepo && !facts.worktree && input.liveInCwd(cwd, input.caller?.id) >= 1) {
     if (!input.sharedCwd) {
       return refuse('cwd_shared_checkout',
         `${cwd} is a main checkout another live session already works in — use a worktree (git worktree add .claude/worktrees/<name> -b <branch>) or allow sharing (CLI: --shared-cwd)`)
     }
-    return { cwd, source, shared: true }
+    return { cwd, source, shared: true, inheritedRepoMismatch }
   }
-  return { cwd, source }
+  return { cwd, source, inheritedRepoMismatch }
 }
 
 // ── folder ──────────────────────────────────────────────────────────────────────────────────────
@@ -383,7 +396,7 @@ export function planFiling(input: FilingInput): FilingPlan {
     return refuse('handoff_required', `leader ${input.caller.label ?? input.caller.id} already leads this task; run agentop session ${input.harness ?? input.caller.harness} --handoff from inside that leader`)
   }
 
-  const cwd = resolveCwd(input, role, filing.task)
+  const cwd = resolveCwd(input, role, filing.task, inheritedTask !== undefined && filing.task?.id === inheritedTask)
   if ('ok' in cwd) return cwd
 
   const folder = resolveFolder(input, filing)
@@ -392,6 +405,7 @@ export function planFiling(input: FilingInput): FilingPlan {
   const warnings: FilingWarning[] = []
   if (filing.memberOf) warnings.push('subtask_member_filed_on_group')
   if (cwd.shared) warnings.push('shared_checkout_override')
+  if (cwd.inheritedRepoMismatch) warnings.push('inherited_task_repo_mismatch')
   if (folder.source === 'none') warnings.push('no_folder')
 
   return {
