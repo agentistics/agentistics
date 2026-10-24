@@ -28,6 +28,20 @@ if (command === 'run') {
   process.exit(await runRun(args))
 }
 
+// RES.1 — declare this process to the governor. Bun makes its processes non-dumpable, so the
+// environment the governor would read (HOME, CLAUDE_PID) is unreadable from outside; the card is how
+// it learns who owns this process. Synchronous and tiny; never throws.
+{
+  const { writeProcCard } = await import('../server/resources/proc-card.ts')
+  writeProcCard(command ?? 'start')
+}
+
+if (command === '__relay-worker') {
+  const { runRelayWorker } = await import('../server/sessions/relay-worker.ts')
+  runRelayWorker()
+  await new Promise<never>(() => {})
+}
+
 // F2.0b — the relay that holds a structured session's child so it outlives `agentop server`
 // (`server/sessions/structured-relay.ts`). Internal: started detached by the server, never typed.
 // First, before anything writes a file or prints: it is its own long-lived process.
@@ -36,14 +50,6 @@ if (command === '__structured-relay') {
   if (!args[0]) process.exit(2)
   runRelay(args[0])
   await new Promise<never>(() => {})
-}
-
-// RES.1 — declare this process to the governor. Bun makes its processes non-dumpable, so the
-// environment the governor would read (HOME, CLAUDE_PID) is unreadable from outside; the card is how
-// it learns who owns this process. Synchronous and tiny; never throws.
-{
-  const { writeProcCard } = await import('../server/resources/proc-card.ts')
-  writeProcCard(command ?? 'start')
 }
 
 // `preferences.experimental` → the feature variables, BEFORE any module that reads one loads
@@ -68,7 +74,12 @@ if (command === '__structured-relay') {
  * below, whose default for an unknown command prints the help to stdout.
  */
 if (command === 'mcp') {
-  await import('../../mcp/agentistics-mcp.ts')
+  if (process.env.AGENTOP_MCP_WORKER === '1') await import('../../mcp/agentistics-mcp.ts')
+  else {
+    await import('../../mcp/orphan-guard-boot.ts')
+    const { runMcpForwarder } = await import('../server/mcp-forwarder.ts')
+    runMcpForwarder()
+  }
   await new Promise<never>(() => {})
 }
 
