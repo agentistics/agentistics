@@ -7,24 +7,20 @@ export interface ModeMenuEntry {
 
 const MODES: Record<string, ModeMenuEntry[]> = {
   claude: [
-    { id: 'manual', label: 'manual mode' },
-    { id: 'accept-edits', label: 'accept edits' },
-    { id: 'plan', label: 'plan mode' },
-    { id: 'auto', label: 'auto mode' },
+    { id: 'manual', label: 'manual mode', canonical: 'default' },
+    { id: 'accept-edits', label: 'accept edits', canonical: 'accept-edits' },
+    { id: 'plan', label: 'plan mode', canonical: 'plan' },
+    // MODE.NOQ — reachable because managed claude sessions start with `--allow-dangerously-skip-permissions`;
+    // a session started before that is refused in words by the server (`cycleToMode`), never mis-cycled.
+    { id: 'bypass', label: 'bypass permissions', canonical: 'no-questions' },
+    // Claude's classifier-driven auto mode has no canonical twin; "Auto" reads the same in both languages.
+    { id: 'auto', label: 'Auto' },
   ],
 }
 
 /** Modes the server has measured for a harness. Unknown harnesses intentionally have no menu. */
 export function modeMenuFor(harness: string | undefined): readonly ModeMenuEntry[] {
   return harness ? (MODES[harness] ?? []) : []
-}
-
-/** Number of next-mode actions needed to reach a target in the cyclic mode order. */
-export function modeCycles(current: string, target: string, modes: readonly ModeMenuEntry[]): number {
-  const from = modes.findIndex(mode => mode.id === current)
-  const to = modes.findIndex(mode => mode.id === target)
-  if (from < 0 || to < 0 || modes.length === 0) return 0
-  return (to - from + modes.length) % modes.length
 }
 
 export interface MenuPlacement {

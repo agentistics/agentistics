@@ -92,7 +92,7 @@ describe('planSpawn', () => {
     const r = planSpawn({ harness: 'claude', cwd: '/tmp', prompt: 'fix the tests', model: 'opus', effort: 'high' })
     expect(r).toEqual({
       ok: true,
-      plan: { argv: ['claude', '--model', 'opus', '--effort', 'high', 'fix the tests'], initialPrompt: { mode: 'submit' } },
+      plan: { argv: ['claude', '--allow-dangerously-skip-permissions', '--model', 'opus', '--effort', 'high', 'fix the tests'], initialPrompt: { mode: 'submit' } },
     })
   })
 
@@ -128,7 +128,7 @@ describe('planSpawn', () => {
 
   it('omits the prompt entirely when there is none', () => {
     const r = planSpawn({ harness: 'claude', cwd: '/tmp' })
-    expect(r).toEqual({ ok: true, plan: { argv: ['claude'] } })
+    expect(r).toEqual({ ok: true, plan: { argv: ['claude', '--allow-dangerously-skip-permissions'] } })
   })
 
   it('refuses an effort value the harness does not accept, naming the ones it does', () => {
@@ -182,7 +182,7 @@ describe('planSpawn', () => {
 
   it('does NOT validate the model against a closed list', () => {
     const r = planSpawn({ harness: 'claude', cwd: '/tmp', model: 'claude-opus-5-some-future-name' })
-    expect(r).toEqual({ ok: true, plan: { argv: ['claude', '--model', 'claude-opus-5-some-future-name'] } })
+    expect(r).toEqual({ ok: true, plan: { argv: ['claude', '--allow-dangerously-skip-permissions', '--model', 'claude-opus-5-some-future-name'] } })
   })
 })
 
@@ -194,7 +194,7 @@ describe('assigning the conversation id at spawn', () => {
     const r = planSpawn({ harness: 'claude', cwd: '/r', conversationId: 'u-1' })
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.plan.argv).toEqual(['claude', '--session-id', 'u-1'])
+    expect(r.plan.argv).toEqual(['claude', '--allow-dangerously-skip-permissions', '--session-id', 'u-1'])
     expect(r.plan.conversationId).toBe('u-1')
   })
 
@@ -235,7 +235,7 @@ describe('assigning the conversation id at spawn', () => {
     const r = planSpawn({ harness: 'claude', cwd: '/r', resumeId: 'old', conversationId: 'new' })
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.plan.argv).toEqual(['claude', '--resume', 'old'])
+    expect(r.plan.argv).toEqual(['claude', '--allow-dangerously-skip-permissions', '--resume', 'old'])
     // The conversation this spawn drives is the one it was told to reopen.
     expect(r.plan.conversationId).toBe('old')
   })
@@ -244,7 +244,7 @@ describe('assigning the conversation id at spawn', () => {
     const r = planSpawn({ harness: 'claude', cwd: '/r' })
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.plan.argv).toEqual(['claude'])
+    expect(r.plan.argv).toEqual(['claude', '--allow-dangerously-skip-permissions'])
     expect(r.plan.conversationId).toBeUndefined()
   })
 })
@@ -397,6 +397,9 @@ describe('MODE.EVERYWHERE — the TUI starts in the asked mode, by its own flag'
   test('each harness, from its own --help (2026-10-10)', () => {
     expect(argvOf('claude', 'plan').argv).toContain('plan')
     expect(argvOf('claude', 'no-questions').argv).toContain('--dangerously-skip-permissions')
+    // MODE.NOQ — every claude start makes bypass REACHABLE from the chip, without turning it on.
+    expect(argvOf('claude', 'plan').argv).toContain('--allow-dangerously-skip-permissions')
+    expect(planSpawn({ harness: 'claude', cwd: '/r' })).toEqual({ ok: true, plan: { argv: ['claude', '--allow-dangerously-skip-permissions'] } })
     expect(argvOf('codex', 'accept-edits').argv.join(' ')).toContain('--sandbox workspace-write --ask-for-approval on-request')
     expect(argvOf('codex', 'no-questions').argv).toContain('--dangerously-bypass-approvals-and-sandbox')
     expect(argvOf('gemini', 'accept-edits').argv.join(' ')).toContain('--approval-mode auto_edit')
@@ -435,12 +438,14 @@ describe('MODE.EVERYWHERE — the TUI starts in the asked mode, by its own flag'
  * (a new flag, a new env value) fails here instead of comparing the new function to itself.
  */
 const MAIN_PLANS: Partial<Record<HarnessId, { fresh: unknown; resume: unknown }>> = {
+  // MODE.NOQ (2026-10-24): claude now starts with --allow-dangerously-skip-permissions — a deliberate change.
   "claude": {
     "fresh": {
       "ok": true,
       "plan": {
         "argv": [
           "claude",
+          "--allow-dangerously-skip-permissions",
           "--session-id",
           "11111111-2222-3333-4444-555555555555",
           "hi"
@@ -456,6 +461,7 @@ const MAIN_PLANS: Partial<Record<HarnessId, { fresh: unknown; resume: unknown }>
       "plan": {
         "argv": [
           "claude",
+          "--allow-dangerously-skip-permissions",
           "--resume",
           "11111111-2222-3333-4444-555555555555"
         ],

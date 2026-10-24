@@ -153,6 +153,14 @@ for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) test(
     expect(m.host.querySelector('[data-team-members]')).toBeNull()
     expect(m.host.querySelector('[data-team-loose]')).toBeNull()
     expect(m.host.querySelectorAll('[data-team]')).toHaveLength(3)
+    // Nothing promises a team it will not list: no fold chevron, and even a team folded earlier
+    // opens the leader's session from its name instead of unfolding.
+    expect(m.host.querySelector('[data-team-fold]')).toBeNull()
+    act(() => writePrefs({ leadersOnly: true, foldedTeams: ['live-folder'] }))
+    m.render()
+    expect(m.host.querySelector('[data-team-fold]')).toBeNull()
+    act(() => teamOf(m.host, 'live-folder')!.querySelector<HTMLButtonElement>('[data-session-open]')!.click())
+    expect(m.opened).toEqual(['live-folder'])
     m.render(rows.filter(r => r.id === 'worker' || r.id === 'ended'))
     expect(m.host.textContent).toContain(lang === 'pt' ? 'Nenhum líder ativo' : 'No active leaders')
     // The overflow menu carries the switch, checked.

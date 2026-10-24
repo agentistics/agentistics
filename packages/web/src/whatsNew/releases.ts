@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.146.0': {
+    features: [
+      {
+        pt: '"Sem perguntas" aparece em vermelho no seletor de modo das sessões, com um aviso do risco; os nomes dos modos agora estão em português.',
+        en: '"No questions" shows in red in the session mode selector, with a risk warning; mode names now follow your language.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Na visão "só líderes", o cartão de cada líder não mostra mais a seta de abrir a equipe, e tocar no nome abre a sessão do líder.',
+        en: 'In the "leaders only" view, each leader card no longer shows the arrow to open its team, and tapping the name opens the leader’s session.',
+      },
+    ],
+  },
   '2.145.2': {
     features: [],
     fixes: [

@@ -10,7 +10,13 @@
  *   accept edits  it writes files without asking       orange
  *   auto          it does everything without asking    green
  *
- * NONE OF THEM IS THE FAULT COLOUR. `var(--accent-red)` is what a broken connection, an
+ *   no questions  it runs everything, nothing stops  RED — the one exception, see below
+ *
+ * MODE.NOQ (owner, 2026-10-23): "sem perguntas" — claude's bypass permissions, codex's Full Access,
+ * gemini's YOLO — wears RED, on the chip and in the menu, because it is the one mode where nothing stops a
+ * destructive command before it runs. `auto` (claude's classifier mode) stays green: it still asks.
+ *
+ * NONE OF THE OTHERS IS THE FAULT COLOUR. `var(--accent-red)` is what a broken connection, an
  * unauthorized member and an offline machine wear, and `auto mode` is how this product is normally
  * used — painting the ordinary state red is the cry-wolf that `withheldStyle.ts` and the connection
  * pill's `stale` case both exist to avoid. A mode is a choice the user made, not a fault.
@@ -49,25 +55,27 @@ const tinted = (colour: string, dim: string): ModeStyle => ({
 const BLUE = tinted('var(--accent-blue)', 'var(--accent-blue-dim)')
 const ORANGE = tinted('var(--anthropic-orange)', 'var(--anthropic-orange-dim)')
 const GREEN = tinted('var(--accent-green)', 'var(--accent-green-dim)')
+const RED = tinted('var(--accent-red)', 'var(--accent-red-dim)')
 
 /** A terminal row's mode, by the id `mode-spec.ts` reads off claude's footer. */
 const BY_ID: Record<string, ModeStyle> = {
   manual: NEUTRAL,
   plan: BLUE,
   'accept-edits': ORANGE,
+  bypass: RED,
   auto: GREEN,
 }
 
 /**
  * MODE.EVERYWHERE — every harness's own mode by the CANONICAL one it means (`@agentistics/core`
  * `sessionMode.ts`), so gemini's "YOLO", codex's "Full Access" and claude's "bypass permissions" wear the
- * same green without this file learning each harness's words. Same gradient as above.
+ * same red without this file learning each harness's words. Same gradient as above.
  */
 const BY_CANONICAL: Record<CanonicalMode, ModeStyle> = {
   default: NEUTRAL,
   plan: BLUE,
   'accept-edits': ORANGE,
-  'no-questions': GREEN,
+  'no-questions': RED,
 }
 
 /**
