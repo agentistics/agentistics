@@ -2125,6 +2125,14 @@ dropped by the 60 s idle timeout at 120 s, 180 s, 240 s — "sometimes the app n
   502/503/504 included, they are a proxy that cannot reach the server — `timeout`, `server`,
   `incompatible`), retrying on its own except for 401/403. The boot screen watches itself
   (`useBootWatchdog`): "slow" while `/api/health` answers, "can't reach" when it doesn't.
+- **The boot right after an in-app UPDATE is its own case** (`lib/finaleGate.ts`). The page reloads
+  seconds after the new server first answers, i.e. inside its first build (~11 s, a probe can miss
+  its deadline), and a real payload (9 MB) is too big for the localStorage cache, so it boots with
+  nothing. For `POST_UPDATE_GRACE_MS` a missed probe or a 5xx/timeout/unreachable first load keeps
+  the loader (with a line saying why) instead of "Não foi possível falar com o agentistics" / the
+  "not answering" strip (`bootWatchdog`/`holdLoadError`); and while the finale is on screen the app
+  beneath it computes nothing, renders nothing and fetches only the slim payload (`afterFinale`) —
+  its first work there was the stutter at the end of every update.
 - **Measure with `scripts/perf/startup.ts`** (`--empty`, `--slow-git <ms>`, `--budget`); CI enforces
   `startupFirstScreenMs` (2 s after health, cold and warm) and `startupFullDataMs`.
 
