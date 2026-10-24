@@ -744,7 +744,10 @@ export function createSessionsPoller(o: {
           // The protocol STATES the question: show that, not the screen tail — a structured screen is
           // a log, and its tail still carried the previous question above the new options (live QA).
           const statedPrompt = o.backend.attentionOf?.(r.id)?.prompt
-          approvals.set(r.id, statedPrompt ? [anyGrant() ? scrubTerminalLine(r.id, statedPrompt) : statedPrompt] : tail())
+          // Drawn in the screen's own shape (the prompt, a blank, the numbered options), so the card
+          // reads the prompt as the QUESTION — a lone line was folded away as "the session screen".
+          const promptLines = statedPrompt ? [statedPrompt, '', ...statedDialog.map((l, i) => `${i + 1}. ${l}`)] : null
+          approvals.set(r.id, promptLines ? (anyGrant() ? promptLines.map(l => scrubTerminalLine(r.id, l)) : promptLines) : tail())
           // F3.3 — which option is a FIELD is the protocol's statement too, never re-derived from a label.
           const statedOptions = o.backend.attentionOf?.(r.id)?.options
           const statedMulti = o.backend.attentionOf?.(r.id)?.multiSelect === true

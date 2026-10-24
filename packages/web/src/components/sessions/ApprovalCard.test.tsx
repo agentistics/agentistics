@@ -102,4 +102,16 @@ describe('ApprovalCard', () => {
     expect(html).toContain('then send')
     expect(html).not.toContain('Previous question')
   })
+
+  test('"Send answer" counts the typed option while the composer holds it', () => {
+    const html = renderToStaticMarkup(<ApprovalCard
+      lang="en" answering={3} onSendAnswering={() => {}}
+      row={{ id: 's', title: 'S', state: 'waiting-approval', approvalLines: ['Colors: Which?', '', '1. Red', '2. Green', '3. Type something'],
+        dialogOptions: [{ number: 1, label: 'Red', selected: true, checked: false }, { number: 2, label: 'Green', selected: false, checked: false }, { number: 3, label: 'Type something', selected: false, checked: false, freeText: true }],
+        dialogForm: { multi: true, together: true }, verbs: [{ action: 'approve', label: 'Answer', enabled: true }] } as never}
+      act={async () => ({ ok: true, message: 'ok' })}
+    />)
+    expect(html).toContain('Send answer (1)')
+    expect(html).toContain('Colors: Which?')
+  })
 })

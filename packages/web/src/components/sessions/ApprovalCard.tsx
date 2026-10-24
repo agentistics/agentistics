@@ -40,11 +40,16 @@ export interface ApprovalCardProps {
    * attachments, no auto-grow — and its own separate idea of what Enter does.
    */
   onWrite?: (option: { number: number; label: string; choices?: number[] }) => void
+  /**
+   * The composer's own send — for the card's "Send answer" while the composer holds a typed answer
+   * on a structured multi-select, so the words and the ticks go together (`composerAnswerRequest`).
+   */
+  onSendAnswering?: () => void
   /** Which option the composer is currently answering, so the row can say so. */
   answering?: number | null
 }
 
-export function ApprovalCard({ row, lang, act, onWrite, answering = null }: ApprovalCardProps) {
+export function ApprovalCard({ row, lang, act, onWrite, onSendAnswering, answering = null }: ApprovalCardProps) {
   const pt = lang === 'pt'
   /** What is being asked, split from the terminal chrome the buttons already repeat. */
   const { question } = splitApprovalFrame(row.approvalLines ?? [])
@@ -121,6 +126,13 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
    */
   const answeringFree = together && answering !== null && options.some(o => o.number === answering && o.freeText)
   const ticksKey = [...ticks].sort((a, b) => a - b).join(',')
+  /**
+   * While the composer holds the typed answer, "Send" is the COMPOSER's send: the typed words live in
+   * its draft, and the card sending the ticks alone dropped them in silence (live QA r2: only "Green"
+   * arrived). The count includes the typed option, which is shown ticked.
+   */
+  const sendViaComposer = answeringFree && onSendAnswering !== undefined
+  const sendCount = ticks.size + (answeringFree && answering !== null && !ticks.has(answering) ? 1 : 0)
   useEffect(() => {
     if (!answeringFree || answering === null) return
     const o = options.find(x => x.number === answering)
@@ -342,12 +354,12 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
                 <button
                   type="button"
-                  onClick={() => void sendTicks()}
-                  disabled={busy !== null || alreadyAnswered || ticks.size === 0}
-                  style={dialogButtonStyle('primary', isMobile, busy !== null || alreadyAnswered || ticks.size === 0)}
+                  onClick={() => { if (sendViaComposer) onSendAnswering!(); else void sendTicks() }}
+                  disabled={busy !== null || alreadyAnswered || sendCount === 0}
+                  style={dialogButtonStyle('primary', isMobile, busy !== null || alreadyAnswered || sendCount === 0)}
                 >
                   <Check size={14} />
-                  {pt ? `Enviar resposta (${ticks.size})` : `Send answer (${ticks.size})`}
+                  {pt ? `Enviar resposta (${sendCount})` : `Send answer (${sendCount})`}
                 </button>
               </div>
             )}

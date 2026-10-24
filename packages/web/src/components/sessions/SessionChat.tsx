@@ -1474,6 +1474,15 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
   }, [])
 
+  // THE FLOATING COMPOSER GREW (the "waiting on a question" notice appeared, a draft wrapped): the
+  // padding reserved for it grew too, and a reader at the tail stays at the tail — otherwise the
+  // last thing in the conversation (a question card's Send button, live QA at 390 px) sits under
+  // the composer by exactly the growth.
+  useEffect(() => {
+    if (atTail) toTail(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerHeight])
+
 
   /**
    * A line the PANEL asked this composer to hold — the skills tab's "use this skill".
@@ -2651,6 +2660,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               lang={lang}
               act={act}
               answering={answering?.number ?? null}
+              // The card's own Send, while the composer holds a typed answer: the COMPOSER sends,
+              // so the words go with the ticks — the button used to send the ticks alone.
+              onSendAnswering={() => void send()}
               onWrite={o => {
                 setAnswering({ ...o, shape: dialogShape })
                 // The point of handing the composer over is that it is READY — the caret in it, on
