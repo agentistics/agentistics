@@ -26,6 +26,8 @@
  * `cardPlacement` put it.
  */
 
+import { createPortal } from 'react-dom'
+import { VaultExpiryActions } from '../vault/VaultExpiryActions'
 import { cleanSize } from '../../lib/cleanPresentation'
 import { limitNoticeText } from '../../lib/planLimits'
 import { PlanLimitMeter } from '../PlanLimitMeter'
@@ -56,6 +58,8 @@ import { sessionIdentityKey } from '../../lib/sessionIdentity'
 type Drawer = null | 'approve' | 'snooze' | 'snooze-custom' | 'end'
 
 export interface NayNotifyCardProps {
+  /** Vault notices occupy space in the open dock, preserving access to its conversation. */
+  noticeHost?: HTMLElement | null
   lang: 'pt' | 'en'
   isMobile: boolean
   rows: readonly ControlSession[]
@@ -127,6 +131,7 @@ function bottomInset(isMobile: boolean): number {
 }
 
 const SAY: Record<NayAlert['kind'], { pt: string; en: string }> = {
+  'vault-expiry': { pt: 'Seu cofre vai se trancar em 5 min. Manter aberto?', en: 'Your vault locks in 5 min. Keep it open?' },
   clean: { pt: 'Ei, a varredura está pronta.', en: 'Hey, the scan is ready.' },
   turn: { pt: 'Ei, a sessão respondeu.', en: 'Hey, the session replied.' },
   approval: { pt: 'Ei, olha essa sessão: ela pediu permissão.', en: 'Hey, look at this session: it is asking for permission.' },
@@ -136,6 +141,7 @@ const SAY: Record<NayAlert['kind'], { pt: string; en: string }> = {
 }
 
 const STATE_CHIP: Record<NayAlert['kind'], { pt: string; en: string; fg: string; bg: string }> = {
+  'vault-expiry': { pt: 'cofre', en: 'vault', fg: 'var(--anthropic-orange)', bg: 'var(--anthropic-orange-dim)' },
   clean: { pt: 'pronto · ver e limpar', en: 'ready · review and clean', fg: 'var(--anthropic-orange)', bg: 'var(--anthropic-orange-dim)' },
   turn: { pt: 'precisa de você', en: 'needs you', fg: 'var(--anthropic-orange-light)', bg: 'var(--anthropic-orange-dim)' },
   approval: { pt: 'pede aprovação', en: 'needs approval', fg: 'var(--accent-red)', bg: 'var(--accent-red-dim)' },
@@ -163,10 +169,12 @@ function lastSaid(row: ControlSession | undefined, kind: NayAlert['kind']): stri
   return turn ? turn.text.trim().slice(0, 240) : null
 }
 
-export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabStyle, onReply, zIndex, onOpenLimits }: NayNotifyCardProps) {
+export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabStyle, onReply, zIndex, onOpenLimits, noticeHost }: NayNotifyCardProps) {
   const pt = lang === 'pt'
   const alerts = useNayAlerts()
   const alert = alerts.length > 0 ? alerts[alerts.length - 1]! : null
+  const vault = alert?.kind === 'vault-expiry'
+  const embedded = vault && !!noticeHost
   const settings = useSettings()
   const shock = useNayShock()
   const { pathname } = useLocation()
@@ -235,7 +243,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   const remaining = useRef<{ key: string; ms: number }>({ key: '', ms: 0 })
   useEffect(() => {
     const sec = settings.autoDismissSec
-    if (!alert || !(sec > 0)) return
+    // Preserve the vault warning until answered, dismissed or invalidated by its countdown.
+    if (!alert || vault || !(sec > 0)) return
     const key = alert.key
     const total = sec * 1000
     if (remaining.current.key !== key) remaining.current = { key, ms: total }
@@ -253,7 +262,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       if (bar) bar.style.transform = `scaleX(${remaining.current.ms / total})`
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alert?.key, drawer, engaged, settings.autoDismissSec])
+  }, [alert?.key, vault, drawer, engaged, settings.autoDismissSec])
 
   // A new card resets its own controls.
   useEffect(() => { setDrawer(null); setSnoozeText(''); setSnoozeErr(null); setNotice(null); setLeaving(false); leavingRef.current = false; hideEchoes() }, [alert?.key])
@@ -317,9 +326,13 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   /** Place the card now: on the follow engine when the button is on screen, statically otherwise. */
   const placeNow = (): CardPlacement | null => {
     const card = cardRef.current
-    if (!card) return null
+    if (!card || embedded) return null
     const f = follow.current
-    const want: Size = { w: card.offsetWidth, h: card.scrollHeight }
+    // The NATURAL height, border included: a max-height written by a previous frame makes the shell
+    // shrink to it, so `scrollHeight` then just echoes the cap (and leaves out the 2px border), and the
+    // actions row ends flush with the card edge. Lift the cap to measure, `writeFrame` puts it back.
+    card.style.maxHeight = ''
+    const want: Size = { w: card.offsetWidth, h: card.offsetHeight }
     cardSize.current = { w: card.offsetWidth, h: card.offsetHeight }
     const b = buttonNow()
     const reduced = prefersReducedMotion()
@@ -350,7 +363,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
 
   // Placed and animated once per card, before paint.
   useLayoutEffect(() => {
-    if (!alert) return
+    if (!alert || embedded) return
     follow.current.st = null
     const p = placeNow()
     if (!p || !cardRef.current) return
@@ -358,18 +371,18 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     cancelRef.current = playEnter(settings.nayAnimation, cardRef.current, fabEl(), p, prefersReducedMotion())
     return () => { cancelRef.current?.(); cancelRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alert?.key])
+  }, [alert?.key, embedded])
 
   // A drawer opening changes the card's height: the follow target grows with it.
   useLayoutEffect(() => {
-    if (!alert) return
+    if (!alert || embedded) return
     const card = cardRef.current, f = follow.current
     if (card && f.st) { f.want = { w: card.offsetWidth, h: card.scrollHeight }; kickRef.current() } else placeNow()
-  }, [drawer, notice, busy]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [drawer, notice, busy, embedded]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // THE FOLLOW LOOP — the dock's own, run only while something moves.
   useEffect(() => {
-    if (!alert) return
+    if (!alert || embedded) return
     const f = follow.current
     const reduced = prefersReducedMotion()
     // Measured once, and again on a resize — the loop itself reads no layout.
@@ -400,7 +413,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     window.addEventListener('resize', onResize)
     return () => { off(); window.removeEventListener('resize', onResize); if (f.raf) cancelAnimationFrame(f.raf); f.raf = 0; hideEchoes() }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alert?.key, fabStyle])
+  }, [alert?.key, fabStyle, embedded])
 
   if (!alert) return null
 
@@ -411,7 +424,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     hideEchoes()
     // Leaving ends the entrance: its border / waves / spark must not outlive the card.
     cancelRef.current?.(); cancelRef.current = null
-    if (cardRef.current) await playExit(cardRef.current, fabEl(), reduced)
+    if (cardRef.current && !embedded) await playExit(cardRef.current, fabEl(), reduced)
     after()
   }
 
@@ -488,8 +501,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     transform: 'rotate(45deg)', border: '1px solid var(--border)',
   }
 
-  return (<>
-    {(fabStyle === 'trail' || fabStyle === 'comet') && !leaving && [0, 1].map(i => (
+  const content = (<>
+    {!embedded && (fabStyle === 'trail' || fabStyle === 'comet') && !leaving && [0, 1].map(i => (
       <div key={i} aria-hidden ref={el => { echoRefs.current[i] = el }} style={{
         position: 'fixed', left: 0, top: 0, zIndex: zIndex - 1, pointerEvents: 'none', opacity: 0,
         borderRadius: 14, border: '1.5px solid var(--anthropic-orange)', willChange: 'transform, opacity',
@@ -497,6 +510,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     ))}
     <div
       ref={cardRef}
+      key={`${alert.key}:${embedded}`}
+      data-nay-notice={alert.kind}
       role="dialog"
       aria-label={pt ? `Notificação: ${alert.name}` : `Notification: ${alert.name}`}
       aria-live="polite"
@@ -507,13 +522,13 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       style={{
         // left / top / transform-origin / max-height are written by the placement and the follow
         // loop, never by React: a re-render mid-drag must not snap the card back for a frame.
-        position: 'fixed', zIndex: NAY_NOTIFY_CARD_Z, width, maxWidth: 'calc(100vw / var(--ui-zoom, 1) - 24px)',
+        position: embedded ? 'relative' : 'fixed', flex: embedded ? '0 1 auto' : undefined, minHeight: 0, boxSizing: 'border-box', zIndex: NAY_NOTIFY_CARD_Z, width: embedded ? '100%' : width, maxWidth: embedded ? '100%' : 'calc(100vw / var(--ui-zoom, 1) - 24px)',
         background: 'var(--bg-card, var(--bg-surface))', border: '1px solid var(--border)', borderRadius: 14,
         boxShadow: '0 14px 36px rgba(0,0,0,0.34), 0 2px 6px rgba(0,0,0,0.18), inset 0 0 0 1px var(--anthropic-orange-dim)',
         fontSize: 13, color: 'var(--text-primary)', display: 'flex', flexDirection: 'column',
       }}
     >
-      {showTail && <span aria-hidden ref={tailRef} style={tailStyle} />}
+      {showTail && !embedded && <span aria-hidden ref={tailRef} style={tailStyle} />}
       {/* THE SHELL clips to the card's rounded edge and never scrolls itself. It used to be the card that
           scrolled (`overflowY: auto` + the follow loop's max-height), which made the whole header
           scroll away and left the countdown bar — absolute in a scroll container — scrolling with the
@@ -521,7 +536,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
           bar is pinned to the shell, which does not move. The tail stays outside the shell: it sits past
           the card's edge and `overflow: hidden` here would cut it off. */}
       <div data-nay-shell style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0, overflow: 'hidden', borderRadius: 'inherit' }}>
-      {settings.autoDismissSec > 0 && (
+      {!vault && settings.autoDismissSec > 0 && (
         // The time left before the card leaves by itself; inset so it follows the card's rounded foot.
         <div aria-hidden style={{ position: 'absolute', left: 12, right: 12, bottom: 0, height: 3, overflow: 'hidden', borderRadius: 2, pointerEvents: 'none' }}>
           <div ref={progressRef} style={{ height: '100%', background: 'var(--anthropic-orange)', opacity: 0.85, transformOrigin: 'left center', transform: 'scaleX(1)' }} />
@@ -574,7 +589,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
           </div>
         ))}
         {ck && <span data-rise style={hint}>{pt ? 'Não aviso de novo sobre isso, a não ser que piore.' : 'I will not bring this up again unless it gets worse.'}</span>}
-        {!ck && <div data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
+        {!vault && !ck && <div data-rise style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '9px 10px', display: 'grid', gap: 6, background: 'var(--bg-surface)' }}>
           <div title={alert.name} style={{ fontWeight: 650, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{alert.limit ? (harnessLabel ?? alert.name) : alert.name}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
             {harnessLabel && (
@@ -613,11 +628,13 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
           )}
         </div>}
 
+        {vault && <VaultExpiryActions key={alert.key} lang={lang} isMobile={isMobile}
+          onDone={() => finish('')} onLayout={() => { if (!embedded) { if (cardRef.current) cardRef.current.style.maxHeight = ''; placeNow(); kickRef.current() } }} />}
         {alert.demo && (
           <span data-rise style={hint}>{pt ? 'Exemplo das configurações: não há sessão por trás, então só adiar e dispensar funcionam.' : 'A settings example: there is no session behind it, so only snooze and dismiss work.'}</span>
         )}
         </div>
-        <div data-rise data-nay-actions style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0 }}>
+        {!vault && <div data-rise data-nay-actions style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0 }}>
           {alert.clean && <button type="button" style={primary} onClick={() => void close(() => {
             dismissAlert(alert.key)
             window.dispatchEvent(new CustomEvent('agentistics:open-clean'))
@@ -635,17 +652,17 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
               {pt ? `Continuar no ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}` : `Continue in ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}`}
             </button>
           )}
-          {!alert.demo && !alert.limit && !alert.clean && !ck && (
+          {!alert.demo && !alert.limit && !alert.clean && !ck && !vault && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(alert.sessionId) })}>
               {pt ? 'Responder' : 'Reply'}
             </button>
           )}
-          {!alert.demo && !alert.limit && !alert.clean && !ck && (
+          {!alert.demo && !alert.limit && !alert.clean && !ck && !vault && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(`/sessions/${encodeURIComponent(alert.sessionId)}`) })}>
               {pt ? 'Ir para a sessão' : 'Go to session'}
             </button>
           )}
-          {!alert.demo && !alert.limit && !alert.clean && !ck && (
+          {!alert.demo && !alert.limit && !alert.clean && !ck && !vault && (
             <button
               type="button"
               aria-label={pt ? 'Silenciar esta sessão' : 'Mute this session'}
@@ -670,7 +687,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
               {pt ? 'Encerrar' : 'End'}
             </button>
           )}
-        </div>
+        </div>}
 
         {/* Notice and drawer (snooze / approve / end) get their own bounded region: they can be tall. */}
         {notice && <span role="alert" style={{ ...hint, color: 'var(--accent-red)' }}>{notice}</span>}
@@ -721,6 +738,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
       </div>
     </div>
   </>)
+  return embedded && noticeHost ? createPortal(content, noticeHost) : content
 }
 
 const chipStyle: CSSProperties = {

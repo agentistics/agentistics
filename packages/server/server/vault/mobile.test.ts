@@ -10,7 +10,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { b64url, base32Decode, hotp, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
-import { __resetVaultForTests, __setVaultClockForTests, sealToFile } from './service'
+import { __resetVaultForTests, __setVaultClockForTests, sealToFile, autoLockRemainingMs } from './service'
 import { __resetGateForTests } from './gate'
 import { __resetPersonalForTests } from './personal'
 import { __resetMobileForTests } from './mobile'
@@ -45,7 +45,7 @@ const PHONE_HTTP = { host: `${RP}:47292`, origin: `http://${RP}:47292`, peer: '1
 type Where = { host: string; origin: string; peer: string }
 type J = Record<string, any>
 const grants: Record<string, string | undefined> = {}
-async function http(method: 'GET' | 'POST', path: string, body: unknown = {}, where: Where = LOCAL): Promise<{ status: number; json: J }> {
+async function http(method: 'GET' | 'POST', path: string, body: unknown = {}, where: Where = LOCAL): Promise<{ status: number; json: J; headers: Headers }> {
   const g = grants[where.host]
   const headers: Record<string, string> = { host: where.host, 'sec-fetch-site': 'same-origin', origin: where.origin, ...(g ? { 'x-vault-grant': g } : {}), ...(method === 'POST' ? { 'content-type': 'application/json' } : {}) }
   const req = new Request(`${where.origin}${path}`, { method, headers, ...(method === 'POST' ? { body: JSON.stringify(body) } : {}) })
@@ -53,7 +53,7 @@ async function http(method: 'GET' | 'POST', path: string, body: unknown = {}, wh
   const text = res ? await res.text() : '{}'
   const json = text.startsWith('{') ? JSON.parse(text) : {}
   if (typeof json.grant === 'string') grants[where.host] = json.grant
-  return { status: res?.status ?? 404, json }
+  return { status: res?.status ?? 404, json, headers: res?.headers ?? new Headers() }
 }
 
 /** A phone: one P-256 key, its credential id, a counter. */
@@ -129,6 +129,33 @@ describe('off loopback, a personal action never raises Windows Hello', () => {
     expect(r.json.value).toBeUndefined()
     expect(hello.gestures).toBe(g0)
   })
+})
+
+test('keep-open on the phone: passkey alone, single use, action bound, no host Hello or heartbeat', async () => {
+  const p = await registerPhone()
+  delete grants[PHONE.host]
+  const g0 = hello.gestures
+  T += 60_000
+  const before = autoLockRemainingMs()
+  expect((await http('POST', '/api/vault/extend', { code: codeAt() }, PHONE)).json.code).toBe('mobile-gesture-required')
+  expect(autoLockRemainingMs()).toBe(before)
+  const b = await http('POST', '/api/vault/personal/mobile/assert/begin', { action: 'extend-open', target: '' }, PHONE)
+  expect(b.json.ok).toBe(true)
+  expect(autoLockRemainingMs()).toBe(before) // cancelling the browser prompt here must not extend
+  const f = await http('POST', '/api/vault/personal/mobile/assert/finish', { challengeId: b.json.challengeId, ...p.get(b.json.challenge) }, PHONE)
+  expect(f.json.ok).toBe(true)
+  expect(autoLockRemainingMs()).toBe(before) // only consuming the proof on /extend counts
+  expect((await http('POST', '/api/vault/personal/edit', { id: itemId, expectedVersion: 1, item: { kind: 'login', name: 'X' }, gestureToken: f.json.gestureToken }, PHONE)).json.ok).toBe(false)
+  // Wrong bindings are refused without granting the action; issue a fresh proof for keep-open.
+  const b2 = await http('POST', '/api/vault/personal/mobile/assert/begin', { action: 'extend-open', target: '' }, PHONE)
+  const f2 = await http('POST', '/api/vault/personal/mobile/assert/finish', { challengeId: b2.json.challengeId, ...p.get(b2.json.challenge) }, PHONE)
+  const proof = { gestureToken: f2.json.gestureToken }
+  const extended = await http('POST', '/api/vault/extend', proof, PHONE)
+  expect(extended.json.ok).toBe(true)
+  expect(extended.headers.get('set-cookie')).toBeNull()
+  expect(autoLockRemainingMs()!).toBeGreaterThan(before!)
+  expect((await http('POST', '/api/vault/extend', proof, PHONE)).json.code).toBe('mobile-gesture-required')
+  expect(hello.gestures).toBe(g0)
 })
 
 describe('registering a phone passkey', () => {
