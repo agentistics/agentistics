@@ -276,8 +276,8 @@ export type StructuredBackend = SessionBackend & {
   structuredSessions(): Array<{ id: string; route: Exclude<SpawnRoute, 'tmux'>; driver: StructuredDriverId }>
   /**
    * F2.0b — take back every structured session whose child outlived the previous server: replay its
-   * record into a re-created driver, then continue live. Called ONCE, by the process that owns the
-   * sessions (`agentop server`); `list()` waits for it, so no poll reads such a row as `lost` meanwhile.
+   * record into a re-created driver, then continue live. Called at boot and before sending to a
+   * CLI-born session this server has not adopted yet; concurrent calls share the recovery.
    */
   reattach(): Promise<void>
   /**
@@ -366,7 +366,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     return true
   }
 
-  /** One re-attach per process; `list()` waits on it. */
+  /** One recovery at a time; a later CLI spawn can add a relay after boot. `list()` waits on it. */
   let reattaching: Promise<void> | null = null
 
   async function reattachOne(id: string, reg: EngineStructured | null): Promise<void> {
@@ -417,7 +417,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
         if (ids.length === 0) return
         const reg = await provider.structured().catch(() => null)
         await Promise.all(ids.map(id => reattachOne(id, reg).catch(() => {})))
-      })()
+      })().finally(() => { reattaching = null })
       return reattaching
     },
     async toTerminal(id) {

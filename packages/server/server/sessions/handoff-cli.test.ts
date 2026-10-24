@@ -37,7 +37,8 @@ const addLeader = async (id: string, conversationId: string) => {
   await addSession({ id, harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), label: 'Leader', conversationId })
   await updatePreferences(() => ({ pinnedSessions: ['other', conversationId] }))
 }
-const successorOf = async (parent: string) => (await readRegistry()).find(r => r.parentSessionId === parent)
+// A successor is a LEADER: it is linked by `handoffFrom`, never filed as the predecessor's child.
+const successorOf = async (parent: string) => (await readRegistry()).find(r => r.handoffFrom === parent)
 
 describe('agentop session --handoff — the CLI flow', () => {
   test('inherits the pin under the successor key', async () => {
@@ -45,7 +46,9 @@ describe('agentop session --handoff — the CLI flow', () => {
     expect(await runHandoff('ho-p1', 'claude', mkBackend(), async () => true)).toBe(0)
     const child = (await successorOf('ho-p1'))!
     expect(child.label).toContain('Leader')
-    expect((await readPreferences()).pinnedSessions).toEqual(['other', child.conversationId!])
+    // The predecessor stays pinned (only the owner unpins); the successor is pinned beside it.
+    expect((await readPreferences()).pinnedSessions).toEqual(['other', child.conversationId!, 'conv-ho-p1'])
+    expect(child.parentSessionId).toBeUndefined()
   }, 60_000)
 
   test('inherits everything the predecessor was set up with', async () => {
@@ -69,7 +72,7 @@ describe('agentop session --handoff — the CLI flow', () => {
     expect(child.note).toBe('keep going')
     expect(child.away).toBe(true)
     const p = await readPreferences()
-    expect(p.pinnedSessions).toEqual(['a', key, 'b'])
+    expect(p.pinnedSessions).toEqual(['a', key, 'conv-ho-all', 'b'])
     expect(p.mutedSessions).toContain(key)
     expect((p.checkin as Record<string, { intervalMin?: number }>)[key]?.intervalMin).toBe(120)
     expect(p.sessionGroups?.groups.find(g => g.id === 'g-lead')?.sessionKeys).toContain(key)
@@ -77,6 +80,19 @@ describe('agentop session --handoff — the CLI flow', () => {
     expect(parentRow.handoffTo).toBe(child.id)
     expect(child.handoffSeq).toBe(2)
     expect(await (await import('./session-roles')).storedRoleFor([key, child.id])).toBe('leader')
+  }, 60_000)
+
+  test('LIDER.ROTA: the whole team moves to the successor, which sits at the root; the predecessor is asked to retire', async () => {
+    await addSession({ id: 'ho-team', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), label: 'Motor', conversationId: 'conv-ho-team' })
+    await addSession({ id: 'ho-team-w1', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), parentSessionId: 'ho-team' })
+    await addSession({ id: 'ho-team-w2', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), parentSessionId: 'gone', parentConversationId: 'conv-ho-team' })
+    expect(await runHandoff('ho-team', 'claude', mkBackend(), async () => true)).toBe(0)
+    const rows = await readRegistry()
+    const child = rows.find(r => r.handoffFrom === 'ho-team')!
+    expect(child.parentSessionId).toBeUndefined()
+    expect(child.parentConversationId).toBeUndefined()
+    for (const w of ['ho-team-w1', 'ho-team-w2']) expect(rows.find(r => r.id === w)!.parentSessionId).toBe(child.id)
+    expect(rows.find(r => r.id === 'ho-team')!.retire?.successorId).toBe(child.id)
   }, 60_000)
 
   test('ORQ.FORA --handoff sends background structured intent with relay instructions and inherited mode', async () => {
@@ -103,7 +119,7 @@ describe('agentop session --handoff — the CLI flow', () => {
     await addLeader('ho-p3', 'conv-ho-p3')
     const backend = mkBackend(async id => { await patchSession(id, { conversationId: 'late-conv' }) })
     expect(await runHandoff('ho-p3', 'codex', backend, async () => true)).toBe(0)
-    expect((await readPreferences()).pinnedSessions).toEqual(['other', 'late-conv'])
+    expect((await readPreferences()).pinnedSessions).toEqual(['other', 'late-conv', 'conv-ho-p3'])
   }, 60_000)
 })
 
@@ -162,6 +178,6 @@ describe('kill into a folder — the pin goes to a LIVE successor only', () => {
     const dying = row({ id: 'a', conversationId: 'conv-a', handoffTo: 'b' })
     const live = row({ id: 'b', conversationId: 'conv-b' })
     expect(await passPinForKill(dying, [dying, live], updatePreferences)).toBe(true)
-    expect((await readPreferences()).pinnedSessions).toEqual(['conv-b'])
+    expect((await readPreferences()).pinnedSessions).toEqual(['conv-b', 'conv-a'])
   })
 })

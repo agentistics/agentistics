@@ -170,3 +170,39 @@ export async function callerRunsInSession(
   const parentOf = opts.parentOf ?? (opts.readStatus ? (pid: number) => { const m = /^PPid:\s*(\d+)/m.exec(opts.readStatus!(pid) ?? ''); return m ? Number(m[1]) : undefined } : undefined)
   return (await callerProof(id, panePids, { ...opts, ...(parentOf ? { parentOf } : {}) })) === 'proven'
 }
+
+/**
+ * Pure: which session's process (`anchors`: managed id → the pids agentop created for it — its tmux
+ * pane, a structured session's relay/child) is an ANCESTOR of the process whose chain is `chain`
+ * (self first). The NEAREST ancestor wins, so a session started inside another's pane is answered as
+ * itself. `undefined` when none is.
+ */
+export function sessionOwningChain(chain: readonly number[], anchors: ReadonlyMap<string, readonly number[]>): string | undefined {
+  for (const pid of chain) {
+    for (const [id, pids] of anchors) if (pids.includes(pid)) return id
+  }
+  return undefined
+}
+
+/**
+ * The session this process runs inside, found from the PROCESS TREE rather than the environment —
+ * for a spawn whose `AGENTOP_MANAGED_ID` was lost (`env -u`, a wrapper script, a harness that filters
+ * its children's environment). The tree is the same proof `callerProof` demands, so a session found
+ * here is as verified as one named by the variable. Never throws.
+ */
+export async function callerSessionFromTree(
+  panePids: () => Promise<ReadonlyMap<string, number> | undefined>,
+  registryIds: () => Promise<readonly string[]>,
+  opts: { pid?: number; parentOf?: (pid: number) => number | undefined; managedPids?: (id: string) => number[] } = {},
+): Promise<string | undefined> {
+  try {
+    const anchors = new Map<string, number[]>()
+    for (const [id, pid] of (await panePids().catch(() => undefined)) ?? []) anchors.set(id, [pid])
+    for (const id of await registryIds().catch(() => [] as string[])) {
+      const extra = (opts.managedPids ?? managedProcessPids)(id)
+      if (extra.length) anchors.set(id, [...(anchors.get(id) ?? []), ...extra])
+    }
+    if (anchors.size === 0) return undefined
+    return sessionOwningChain(ancestorChainBy(opts.pid ?? process.pid, opts.parentOf ?? parentOfDefault), anchors)
+  } catch { return undefined }
+}

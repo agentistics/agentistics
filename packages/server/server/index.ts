@@ -2169,6 +2169,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }, await defaultRoleDeps())
       return json(out, roleStatus(out))
     }
+    // TEAMS — the person takes a session out of its leader's team, or moves it into another leader's
+    // (`sessions/team-links.ts`). A leader is never moved into a team; a session proof is refused.
+    if (url.pathname === '/api/session-team' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { id?: unknown; leader?: unknown; lang?: unknown; session?: unknown }
+      const { teamOp, defaultIsLeader } = await import('./sessions/team-links-io')
+      const isLeader = await defaultIsLeader()
+      const out = await teamOp(body, { isLeader })
+      if (out.reply.ok) void import('./sessions/fleet-web').then(m => m.kickFleet(out.reply.ok ? out.reply.id : undefined)).catch(() => {})
+      return json(out.reply, out.status)
+    }
     // AWAY MODE — the owner is out; sessions started meanwhile are told so (`away.ts`). The browser and
     // the CLI write it as the person; a session (MCP) must prove itself and be a leader.
     if (url.pathname === '/api/away' && req.method === 'GET') {

@@ -134,11 +134,12 @@ export interface EndedSections<R> {
 
 /**
  * The Encerradas tab. Each row lands in exactly ONE section, in this precedence: fell (the machine
- * says so) → sleeping (pinned or a leader: somebody meant to come back) → finished today → older.
+ * says so) → sleeping (ended and explicitly pinned) → finished today → older.
  * Rows that are live are ignored. Each section is newest-ended first.
  */
 export function endedSections<R extends TeamRow>(rows: readonly R[], o: {
   fellIds: ReadonlySet<string>
+  /** Whether this session is explicitly pinned; leader roles do not imply a pin. */
   keep: (r: R) => boolean
   now: number
 }): EndedSections<R> {

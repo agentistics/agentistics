@@ -146,6 +146,22 @@ the relay outlives the server exactly as the tmux server does.
   conversation-id resume in tmux, as a failed driver always did.
 - **Any other process** (the cockpit, a one-shot `agentop session …`) lists a relayed row as running
   and never connects to it (one client per relay; a newer one replaces the older).
+- **CLI background sessions created after server boot** are adopted on the next prompt: the host checks
+  `isStructured(id)` as well as its local `chatOf(id)`, then recovers a missing driver before checking
+  attention and sending. Recovery is shared by concurrent callers, but a completed boot recovery does
+  not prevent a later one. Previously these rows were alive in `list()` while `chatOf()` was empty;
+  messages went to a nonexistent tmux pane and returned `502 not_confirmed`. The recovered driver's
+  accepted `prompt()` is the delivery acknowledgement, including while busy; no TUI submit check is used.
+  A stated approval still returns `target_blocked`, and a gone session remains `not_delivered`.
+  This applies to every structured harness, including Claude and Codex. Actual TUIs keep their existing
+  paths: Codex verifies its active composer (the busy queue above it is excluded); Claude and the other
+  TUIs use the focused input and bounded Return retry. No queue marker is inferred for an unprobed TUI.
+- **Input arriving during adoption** is checked at the relay too. A replay's input-file snapshot can
+  predate the CLI's last socket write. For writes past that snapshot, the recovering driver supplies
+  its input offset; the relay atomically suppresses bytes already recorded there and acknowledges
+  the result before recovery completes. Buffered writes from the replaced connection are ignored.
+  New prompts sent after recovery use the ordinary live path. An older relay without offset checking
+  falls back to conversation-id resume if recovery needs to write beyond its input snapshot.
 - **Driver rule (every driver, the F3 ones included):** start the child through `req.transport` when
   given, stamp turns with `pipe.now()`, and be deterministic over the pipe (ids in order, no timer or
   randomness in what it writes). `acp-structured.ts` is the worked example; `stubs.ts` states it.

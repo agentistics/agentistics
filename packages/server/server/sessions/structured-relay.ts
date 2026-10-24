@@ -16,8 +16,9 @@
  * - the child's exit is written to `exit.json` and sent (`{x: code}`), then the relay exits.
  *
  * Socket protocol, one JSON value per line. Client → relay: `{hello: {from: n}}` (send the stdout
- * records from index n, then follow), `{w: string}` (write to the child), `{k: 1}` (end the child).
- * Relay → client: `{o: line, t: ms}`, `{x: code|null}`, `{bye: 'replaced'}`.
+ * records from index n, then follow), `{w: string, replayAt?: number}` (write, or verify an input
+ * offset during recovery), `{k: 1}` (end the child).
+ * Relay → client: `{o: line, t: ms}`, `{x: code|null}`, `{bye: 'replaced'}`, `{replayError: reason}`, `{replayAck: true}`.
  *
  * Dependency-free on purpose (node built-ins only): it runs as its own process, from a checkout
  * (`bun run <this file> <dir>`) or from the binary (`agentop __structured-relay <dir>`).
@@ -26,6 +27,7 @@ import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type Socket } from 'node:net'
 import { join } from 'node:path'
+import { isInRecord, parseJsonl, type InRecord } from './structured-replay'
 
 export const RELAY_FILES = {
   launch: 'launch.json',
@@ -90,6 +92,7 @@ export function runRelay(dir: string): void {
   const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, detached: true, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
 
   let client: Socket | null = null
+  let writer: Socket | null = null
   const send = (s: Socket | null, msg: unknown): void => { if (s && !s.destroyed) s.write(`${JSON.stringify(msg)}\n`) }
 
   let partial = ''
@@ -161,6 +164,7 @@ export function runRelay(dir: string): void {
   const server = createServer(sock => {
     if (client && !client.destroyed) { send(client, { bye: 'replaced' }); client.end() }
     client = null
+    writer = sock
     let buf = ''
     let hello = false
     sock.setEncoding('utf8')
@@ -186,9 +190,22 @@ export function runRelay(dir: string): void {
           if (ended) { send(sock, { x: child.exitCode }); sock.end() }
           continue
         }
+        // A replaced client's buffered input must not race the new driver's replay.
+        if (writer !== sock) continue
         if (typeof msg.w === 'string') {
+          if (typeof msg.replayAt === 'number') {
+            const written = parseJsonl<InRecord>(readFileSync(inPath, 'utf8'), isInRecord).map(r => r.w).join('')
+            const at = msg.replayAt
+            if (!Number.isSafeInteger(at) || at < 0 || at > written.length
+              || (at < written.length && !written.startsWith(msg.w, at))) {
+              send(sock, { replayError: 'the re-created driver diverged from the relay input record' })
+              continue
+            }
+            if (at < written.length) { send(sock, { replayAck: true }); continue } // already delivered
+          }
           if (child.stdin && !child.stdin.destroyed) child.stdin.write(msg.w)
           appendFileSync(inPath, `${JSON.stringify({ t: Date.now(), w: msg.w })}\n`)
+          if (typeof msg.replayAt === 'number') send(sock, { replayAck: true })
           continue
         }
         if (msg.k) endChild()
@@ -223,7 +240,7 @@ export function runRelay(dir: string): void {
   // Published LAST, after the signal handlers exist: whoever reads this file may TERM the relay at once,
   // and a TERM before the handler is the default action — the relay dies and its child, in a process
   // group of its own, is orphaned.
-  writeFileSync(join(dir, RELAY_FILES.pid), JSON.stringify({ relay: process.pid, child: child.pid ?? null }), { mode: 0o600 })
+  writeFileSync(join(dir, RELAY_FILES.pid), JSON.stringify({ relay: process.pid, child: child.pid ?? null, replayOffsets: true }), { mode: 0o600 })
 }
 
 if (import.meta.main) {

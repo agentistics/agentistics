@@ -9,6 +9,7 @@
 
 import type React from 'react'
 import './ModeSwitch.css'
+import { COUNT_BADGE } from './countBadge'
 
 export interface SegmentedTab<Id extends string> {
   id: Id
@@ -95,9 +96,7 @@ export function SegmentedTabs<Id extends string>({ tabs, value, onChange, collap
                   position: collapsed ? 'absolute' : 'static',
                   top: collapsed ? (badgeOutside ? -5 : 2) : undefined, right: collapsed ? (badgeOutside ? -7 : 2) : undefined,
                   flexShrink: 0,
-                  minWidth: 16, height: 16, padding: '2px 4px 0', boxSizing: 'border-box', borderRadius: 8,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10, fontWeight: 700, lineHeight: 1, fontVariantNumeric: 'tabular-nums',
+                  ...COUNT_BADGE,
                   ...BADGE[tab.badgeTone ?? 'accent'],
                   // Outside the icon, a quiet count needs a ground of its own or it reads as part of the glyph.
                   ...(collapsed && badgeOutside && tab.badgeTone === 'quiet'
