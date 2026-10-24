@@ -99,7 +99,16 @@ function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
     setBusy(true); setError(null)
     const out = await postSwitch(sessionId, chosen.id, !!pending && resend, lang, handoff ? chosen.harness : undefined)
     setBusy(false)
-    if (!out.ok) { setError(out.message); return }
+    if (!out.ok) {
+      // The session was given back on its previous account under a NEW row: follow it, and say why.
+      if (out.id && out.id !== sessionId) {
+        pushNotification({ type: 'warning', title: pt ? 'Conta não trocada' : 'Account not switched', message: out.message })
+        onDone(out.id)
+        return
+      }
+      setError(out.message)
+      return
+    }
     pushNotification({ type: 'success', title: handoff ? (pt ? 'Continuado em outro assistente' : 'Continued on another assistant') : (pt ? 'Conta trocada' : 'Account switched'), message: out.message })
     onDone(out.id)
   }

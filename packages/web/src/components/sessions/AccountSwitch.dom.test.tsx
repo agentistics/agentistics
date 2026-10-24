@@ -13,6 +13,7 @@ let lib: typeof import('../../lib/accountSwitch')
 let originalFetch: typeof globalThis.fetch
 const posts: unknown[] = []
 let getBody: SwitchInfo
+let postReply: unknown = { ok: true, message: 'Session continued on the other account.', id: 'm2' }
 
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
 
@@ -26,7 +27,7 @@ beforeAll(async () => {
   ;(globalThis as { fetch?: unknown }).fetch = async (url: string, init?: RequestInit) => {
     if (String(url).startsWith('/api/fleet/switch-account') && init?.method === 'POST') {
       posts.push(JSON.parse(String(init.body)))
-      return json({ ok: true, message: 'Session continued on the other account.', id: 'm2' })
+      return json(postReply)
     }
     if (String(url).startsWith('/api/fleet/switch-account')) return json(getBody)
     return json({})
@@ -207,6 +208,17 @@ describe('AccountSwitchInline (the "Usage limits" card)', () => {
     await act(async () => { confirm.click(); await new Promise(r => setTimeout(r, 20)) })
     expect(posts).toEqual([{ id: 'm1', accountId: 'acc_k', harness: 'codex', resendPending: false }])
     expect(followed).toBe('m2')
+    await act(async () => { root.unmount() })
+  })
+  test('a refused target that came back on the old account under a new row: the page follows it', async () => {
+    getBody = info
+    postReply = { ok: false, message: 'The session did not start on the other account; it continues on its previous account.', id: 'm3' }
+    let followed = ''
+    const { host, root } = await mount(createElement(mod.AccountSwitchInline, { sessionId: 'm1', lang: 'en', onSwitched: (id: string) => { followed = id }, children: null }))
+    await act(async () => { (host.querySelector('[data-account-switch-open]') as HTMLButtonElement).click() })
+    await act(async () => { (host.querySelector('[data-account-switch-confirm]') as HTMLButtonElement).click(); await new Promise(r => setTimeout(r, 20)) })
+    expect(followed).toBe('m3')
+    postReply = { ok: true, message: 'Session continued on the other account.', id: 'm2' }
     await act(async () => { root.unmount() })
   })
   test('cancel puts the list back', async () => {
