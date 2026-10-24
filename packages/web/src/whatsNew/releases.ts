@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.143.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O painel de passagem preenche "Janela 5 h" e "Semana" com o consumo da conta da própria sessão, inclusive com várias contas Claude, com uma casa decimal e o motivo dito uma vez quando faltam dados.',
+        en: 'The hand-off panel fills "5 h window" and "Week" from the session’s own account, including multiple Claude accounts, with one decimal and the reason said once when data is missing.',
+      },
+      {
+        pt: 'Resumos de ferramentas no chat mostram um ícone do que foi feito (>_ para comandos, a logo do MCP) e ficam alinhados aos avisos do sistema.',
+        en: 'Chat tool summaries show an icon for what was done (>_ for commands, the MCP’s logo) and align with system notices.',
+      },
+    ],
+  },
   '2.143.1': {
     features: [],
     fixes: [
@@ -64,10 +77,6 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
-        pt: 'Resumos de ferramentas no chat mostram um ícone da atividade e ficam alinhados aos avisos do sistema.',
-        en: 'Chat tool summaries show a contextual activity icon and align with system notices.',
-      },
-      {
         pt: 'Líderes voltam a abrir sessões em outro projeto; a sessão fica na tarefa do líder, com um aviso.',
         en: 'Leaders can start sessions in another project again; the session stays on the leader’s task, with a notice.',
       },
@@ -113,10 +122,7 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Settings › Sessions lets you choose when to be told about a leader hand-off.',
       },
     ],
-    fixes: [{
-      pt: 'O painel de passagem calcula o consumo da janela de 5 h e da semana usando a conta da sessão, inclusive com várias contas Claude, e explica quando faltam dados.',
-      en: 'The handoff panel estimates 5-hour and weekly usage from the session’s own account, including multiple Claude accounts, and explains missing data.',
-    }],
+    fixes: [],
   },
   '2.141.0': {
     features: [
