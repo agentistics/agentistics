@@ -56,7 +56,7 @@ import { readRegistry, patchSession } from './registry'
 import { loadConversations } from './conversations'
 import { createHandoffQuotaSampler, handoffMetrics, type HandoffQuotaRate } from './handoff-panel'
 import { readAccounts } from '../harness-accounts'
-import { artifactReplyCounts, readBilledReplies, refreshArtifactReplies, windowQuotaRate, retainedQuotaRate, readQuotaRates, saveQuotaRates, countBilledReplies, replyKey } from './handoff-usage'
+import { handoffSessionLimit, artifactReplyCounts, readBilledReplies, refreshArtifactReplies, windowQuotaRate, retainedQuotaRate, readQuotaRates, saveQuotaRates, countBilledReplies, replyKey } from './handoff-usage'
 import type { SessionSnapshot } from './sessions-host'
 import type { ManagedSession } from './types'
 import { computeHandoffWhy, findHandoffFile, HANDOFF_RAMP_CALLS, isLeaderRow, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
@@ -452,7 +452,7 @@ let quotaRates = new Map<string, HandoffQuotaRate>()
 let billedReplyCounts = new Map<string, number>()
 let retainedRates: Record<string, HandoffQuotaRate> | undefined
 /** Passive sampling is bounded to 30 seconds; open panels refresh the same calibration. */
-async function sampleHandoffQuotas(raw: SessionSnapshot, force = false): Promise<Map<string, HandoffQuotaRate>> {
+async function sampleHandoffQuotas(raw: SessionSnapshot): Promise<Map<string, HandoffQuotaRate>> {
   if (quotaSampling) return quotaSampling
   if (Date.now() - quotaSampleAt < 30_000) return quotaRates
   quotaSampling = (async () => {
@@ -468,11 +468,10 @@ async function sampleHandoffQuotas(raw: SessionSnapshot, force = false): Promise
     const byId = new Map(registry.map(m => [m.id, m]))
     for (const limit of limits.limits) {
       const key = planAccountKey(limit.harness, limit.account)
-      const accounts = limits.limits.filter(l => l.harness === limit.harness)
       const peers = raw.sessions.filter(v => {
         const m = byId.get(v.id)
         return v.harness === limit.harness && v.status !== 'closed' && v.activity !== 'exited'
-          && (m?.accountId === limit.account || (!m?.accountId && accounts.length === 1))
+          && handoffSessionLimit(limit.harness, m ?? {}, accountRegistry, limits.limits) === limit
       }).map(v => handoffMetrics({ ...v, title: '', conversationId: v.conversationId ?? byId.get(v.id)?.conversationId }, conversations))
       const fromWindow = windowQuotaRate(limit, replies, Date.now())
       const canSample = peers.length > 0 && peers.every(v => Number.isFinite(v.costUSD)) && Date.now() - limit.updatedAt <= 30 * 60_000
@@ -499,8 +498,8 @@ async function sampleHandoffQuotas(raw: SessionSnapshot, force = false): Promise
 }
 export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?: number): Promise<import('@agentistics/core').HandoffPanel | null> {
   await hostFor(lang)
-  const [raw, registry, prefs] = await Promise.all([
-    fleetSessionHub().then(h => h.read()), readRegistry().catch(() => [] as ManagedSession[]), readPreferences(),
+  const [raw, registry, prefs, accountRegistry] = await Promise.all([
+    fleetSessionHub().then(h => h.read()), readRegistry().catch(() => [] as ManagedSession[]), readPreferences(), readAccounts(),
   ])
   const view = raw.sessions.find(r => r.id === id)
   const managed = registry.find(r => r.id === id)
@@ -509,12 +508,12 @@ export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?:
   const { planLimitsPayload } = await import('../plan-limits')
   const limits = await planLimitsPayload(prefs.billing)
   const accounts = limits.limits.filter(l => l.harness === view.harness)
-  const limit = managed.accountId ? accounts.find(l => l.account === managed.accountId) : accounts.length === 1 ? accounts[0] : undefined
-  const rates = await sampleHandoffQuotas(raw, true)
+  const limit = handoffSessionLimit(view.harness ?? managed.harness, managed, accountRegistry, limits.limits)
+  const rates = await sampleHandoffQuotas(raw)
   const quota = { ...(limit ? rates.get(`${limit.harness}:${limit.account}`) : undefined),
     fiveHourPctPerUSD: limit ? rates.get(`${limit.harness}:${limit.account}`)?.fiveHourPctPerUSD ?? null : null,
     weekPctPerUSD: limit ? rates.get(`${limit.harness}:${limit.account}`)?.weekPctPerUSD ?? null : null,
-    unavailableReason: !limit ? (accounts.length > 1 ? 'account-unknown' : 'no-meter') as 'account-unknown' | 'no-meter'
+    unavailableReason: !limit ? (accounts.length > 1 && !managed.accountId && !accountRegistry.bindings[`${view.harness}:`] ? 'account-unknown' : 'no-meter') as 'account-unknown' | 'no-meter'
       : !limit.windows.some(w => w.kind === '5h') || !limit.windows.some(w => w.kind === 'week') ? 'missing-window' as const
       : undefined,
   }

@@ -16,6 +16,22 @@ const tokens = (v: number | null, pt: boolean) => v === null ? '—' : `${Math.r
 const money = (v: number | null) => v === null ? '—' : fmtCost(v)
 const percent = (v: number | null, pt: boolean) => v === null ? '—' : `+${v.toLocaleString(pt ? 'pt-BR' : 'en-US', { maximumFractionDigits: 2 })}%`
 
+/** Explain every unavailable quota cell, including missing calibration or price inputs. */
+export function HandoffQuotaCell({ value, costUSD, reason, label, pt }: {
+  value: number | null; costUSD: number | null; reason: HandoffPanel['quotaUnavailableReason']; label: string; pt: boolean
+}) {
+  const explanation = reason === 'account-unknown'
+    ? (pt ? 'Não foi possível identificar a conta desta sessão.' : 'The account for this session could not be identified.')
+    : reason === 'no-meter'
+      ? (pt ? 'Não há limites de uso disponíveis para esta conta.' : 'No usage limits are available for this account.')
+      : reason === 'missing-window'
+        ? (pt ? 'A conta não informa esta janela de uso.' : 'The account does not report this usage window.')
+        : costUSD === null
+          ? (pt ? 'Faltam dados de contexto ou preço para estimar o consumo.' : 'Context or pricing data is missing to estimate consumption.')
+          : (pt ? 'Ainda não há consumo com preço e horário suficientes para estimar esta janela.' : 'There is not enough timestamped, priced usage yet to estimate this window.')
+  return <span role="cell" data-label={label} title={value === null ? explanation : undefined}>{percent(value, pt)}</span>
+}
+
 export function HandoffMeter({ id, pt, act }: { id: string; pt: boolean; act: SessionChatProps['act'] }) {
   const state = useHandoffPanel(id)
   const p = state.panel
@@ -107,13 +123,13 @@ export function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPa
         <div className="handoff-projection-heading" role="row"><span role="columnheader">{pt ? 'Caminho' : 'Path'}</span><span role="columnheader">{pt ? 'Custo' : 'Cost'}</span><span role="columnheader">{pt ? 'Janela 5 h' : '5 h window'}</span><span role="columnheader">{pt ? 'Semana' : 'Week'}</span></div>
         {p.projections.map(r => <div className={`handoff-projection ${r.kind}`} role="row" key={r.kind}>
           <span role="cell"><strong>{labels[r.kind]}</strong><small>{r.kind === 'handoff' ? (pt ? 'inclui o custo da passagem' : 'includes handoff overhead') : tokens(r.contextTokens, pt)}</small></span>
-          <span role="cell" data-label={pt ? 'Custo' : 'Cost'}>{money(r.costUSD)}</span><span role="cell" data-label={pt ? 'Janela 5 h' : '5 h window'}>{percent(r.fiveHourPct, pt)}</span><span role="cell" data-label={pt ? 'Semana' : 'Week'}>{percent(r.weekPct, pt)}</span>
+          <span role="cell" data-label={pt ? 'Custo' : 'Cost'}>{money(r.costUSD)}</span><HandoffQuotaCell value={r.fiveHourPct} costUSD={r.costUSD} reason={p.quotaUnavailableReason} label={pt ? 'Janela 5 h' : '5 h window'} pt={pt} /><HandoffQuotaCell value={r.weekPct} costUSD={r.costUSD} reason={p.quotaUnavailableReason} label={pt ? 'Semana' : 'Week'} pt={pt} />
         </div>)}
       </div>
       <label className="handoff-simulation"><span>{pt ? 'Simular continuar mais' : 'Simulate continuing another'}</span><input type="number" min={0} max={100} step={1} value={extraDraft} onChange={e => setExtraDraft(e.target.value)} onBlur={simulate} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); simulate() } }} /> %</label>
       <small>{pt ? 'Percentual da janela de contexto. Ajuste em Configurações › Sessões. Quota estimada pelo consumo medido da conta.' : 'Percentage of the context window. Adjust in Settings › Sessions. Quota estimated from measured account consumption.'}</small>
       {p.quotaUnavailableReason && <small>{p.quotaUnavailableReason === 'no-meter'
-        ? (pt ? 'Este assistente não informa limites de uso.' : 'This assistant does not report usage limits.')
+        ? (pt ? 'Não há limites de uso disponíveis para esta conta.' : 'No usage limits are available for this account.')
         : p.quotaUnavailableReason === 'account-unknown'
           ? (pt ? 'Não foi possível identificar a conta desta sessão.' : 'The account for this session could not be identified.')
           : (pt ? 'A conta não informa uma das janelas de uso.' : 'The account does not report one of the usage windows.')}</small>}

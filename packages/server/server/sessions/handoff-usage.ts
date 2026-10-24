@@ -13,6 +13,7 @@ import { canonicalAccountId, type AccountsFile } from '../harness-accounts'
 import type { ManagedSession } from './types'
 import type { IntegrationRegistry } from '@agentistics/engine-api'
 import type { HandoffQuotaRate } from './handoff-panel'
+import { claudeBilledReplies, geminiBilledReplies, nativeQuotaSources, nativeQuotaHarnesses, type NativeQuotaRoots } from './handoff-artifacts'
 
 export interface BilledReply { harness: HarnessId; conversationId: string; account?: string; at: number; costUSD: number | null; model?: string }
 export const replyKey = (harness: string, id: string) => `${harness}:${id}`
@@ -23,6 +24,14 @@ export function accountForReply(harness: HarnessId, conversationId: string, path
   const at = (path ? accountAtPath(harness, path.replace(/:\d+$/, ''), accounts.bindings, retired) : undefined) ?? explicit
     ?? fallbackSessionAccount(harness, accounts, limits.filter(l => l.harness === harness).map(l => l.account))
   return at ? canonicalAccountId(accounts, at) : undefined
+}
+
+/** A managed binding is authoritative, including an alias of an account merged later. */
+export function handoffSessionLimit(harness: HarnessId, session: Pick<ManagedSession, 'accountId'>,
+  accounts: AccountsFile, limits: readonly PlanLimits[]): PlanLimits | undefined {
+  const mine = limits.filter(l => l.harness === harness)
+  const id = session.accountId ?? fallbackSessionAccount(harness, accounts, mine.map(l => l.account))
+  return id ? mine.find(l => canonicalAccountId(accounts, l.account) === canonicalAccountId(accounts, id)) : undefined
 }
 
 /** Includes closed/unmanaged conversations; coarse lifetime imports cannot supply window spend. */
@@ -91,15 +100,36 @@ export function retainedQuotaRate(current: HandoffQuotaRate, previous?: HandoffQ
     weekPctPerUSD: good(current.weekPctPerUSD) ?? good(previous?.weekPctPerUSD) }
 }
 /** Refresh sources that can overlap a current window, replacing their journal copy wholesale.
- * The replay owns deduplication, cumulative deltas, model switches and timestamps.
+ * Native parsers or replay supply deduplicated usage, model identities and timestamps.
  */
 const artifactMemo = new Map<string, { stamp: string; replies: BilledReply[]; calls?: number }>()
 export const artifactReplyCounts = new Map<string, number>()
 export async function refreshArtifactReplies(existing: readonly BilledReply[], integrations: IntegrationRegistry<AgentisticsEvent>,
-  accounts: AccountsFile, managed: readonly ManagedSession[], limits: readonly PlanLimits[], now = Date.now()): Promise<BilledReply[]> {
+  accounts: AccountsFile, managed: readonly ManagedSession[], limits: readonly PlanLimits[], now = Date.now(), roots?: NativeQuotaRoots): Promise<BilledReply[]> {
   const replaced = new Set<string>()
   const fresh: BilledReply[] = []
+  const nativeSources = await nativeQuotaSources(accounts, limits, roots)
+  const activePaths = new Set(nativeSources.map(s => s.path))
+  for (const path of artifactMemo.keys()) if (path.startsWith('/') && !activePaths.has(path)) artifactMemo.delete(path)
+  for (const source of nativeSources) {
+    let cached = artifactMemo.get(source.path)
+    if (!cached || cached.stamp !== source.stamp) {
+      const content = await Promise.all(source.paths.map(path => readFile(path, 'utf8'))).then(parts => parts.join('\n')).catch(() => null)
+      if (content === null) continue
+      const codex = source.harness === 'codex' ? codexBilledReplies(content, source.conversationId) : undefined
+      cached = { stamp: source.stamp, calls: codex?.calls, replies: codex?.replies
+        ?? (source.harness === 'claude' ? claudeBilledReplies(content, source.conversationId) : geminiBilledReplies(content, source.conversationId)) }
+      artifactMemo.set(source.path, cached)
+    }
+    const key = replyKey(source.harness, source.conversationId)
+    const account = accountForReply(source.harness, source.conversationId, source.path, accounts, managed, limits)
+    if (cached.calls !== undefined) artifactReplyCounts.set(key, cached.calls)
+    replaced.add(key)
+    for (const reply of cached.replies) replaced.add(replyKey(reply.harness, reply.conversationId))
+    fresh.push(...cached.replies.map(r => ({ ...r, account })))
+  }
   for (const [harness, integration] of Object.entries(integrations)) {
+    if ((nativeQuotaHarnesses as readonly string[]).includes(harness)) continue
     const replay = integration?.replay
     const meters = limits.filter(l => l.harness === harness)
     if (!replay || !meters.length) continue
@@ -113,9 +143,8 @@ export async function refreshArtifactReplies(existing: readonly BilledReply[], i
       const stamp = `${info.size}:${info.mtimeMs}`
       let cached = artifactMemo.get(key)
       if (!cached || cached.stamp !== stamp) {
-        const result = harness === 'codex' ? { events: [] } : await replay.replay(source, null)
-        const codex = harness === 'codex' && path ? codexBilledReplies(await readFile(path, 'utf8'), source.sessionId) : undefined
-        const replies: BilledReply[] = codex?.replies ?? []
+        const result = await replay.replay(source, null)
+        const replies: BilledReply[] = []
         for (const e of result.events) {
           if (e.type !== 'model.completed') continue
           const completed = e as AgentisticsEvent<'model.completed'>
@@ -125,7 +154,7 @@ export async function refreshArtifactReplies(existing: readonly BilledReply[], i
           replies.push({ harness: harness as HarnessId, conversationId: source.sessionId,
             at: Date.parse(e.occurredAt), costUSD: priceCell(cell, pricingModelOf(completed)).costUSD })
         }
-        cached = { stamp, replies, calls: codex?.calls }
+        cached = { stamp, replies }
         artifactMemo.set(key, cached)
       }
       if (cached.calls !== undefined) artifactReplyCounts.set(key, cached.calls)

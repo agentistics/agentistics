@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { HandoffBand, handoffLevelLabel } from './HandoffWarning'
+import { HandoffBand, HandoffQuotaCell, handoffLevelLabel } from './HandoffWarning'
 import HandoffSettings from '../../pages/settings/HandoffSettings'
 
 describe('handoff screens', () => {
@@ -24,5 +24,20 @@ describe('handoff screens', () => {
       expect(html).toContain('value="10"')
       expect(html).toContain(pt ? 'Voltar ao padrão' : 'Reset to default')
     }
+  })
+})
+
+describe('quota cell explanations', () => {
+  it('renders a dash with a tooltip for each missing-data cause in both languages', () => {
+    for (const pt of [true, false]) for (const reason of ['no-meter', 'account-unknown', 'missing-window', undefined] as const) {
+      const html = renderToStaticMarkup(<HandoffQuotaCell value={null} costUSD={1} reason={reason} label="Week" pt={pt} />)
+      expect(html).toContain('>—</span>')
+      expect(html).toMatch(/title="[^"]+"/)
+    }
+  })
+  it('renders available percentages without an unavailable tooltip', () => {
+    const html = renderToStaticMarkup(<HandoffQuotaCell value={2.5} costUSD={1} reason="missing-window" label="Week" pt={false} />)
+    expect(html).toContain('+2.5%')
+    expect(html).not.toContain('title=')
   })
 })

@@ -57,19 +57,30 @@ current context + X% of the *reported context window*, not X% of the cut. The su
 includes the existing one-off handoff overhead plus 20 replies at the existing successor base.
 An unknown model price or context window leaves dependent cells null.
 
-Quota percentages estimate **additional percentage points** of the account's 5-hour/week windows,
-not the share of remaining allowance. The adapter observes the existing plan-limits meters and the same
-account's fleet spend on passive fleet polls (at most once per 30 seconds), so calibration starts
-before the panel is opened. An open panel refreshes that same calibration on its normal poll.
-The rate is positive utilization delta divided by positive spend delta, separately for
-each window, multiplied by each projected cost. It requires unchanged account/session population
-and reset boundaries, and recent samples (at most 30 minutes apart). Unknown account attribution,
-missing measurements, renewal, or no observed spend leave quota cells null. Each window keeps
-its baseline for up to 30 minutes rather than discarding it every five minutes; after a positive
-measurement, its last useful rate survives unchanged rounded meter readings. Missing, expired,
-or stale meters (over 30 minutes old), population changes, counter decreases and renewals discard
-the affected calibration. The 5-hour and week baselines remain independent.
-These estimates include other work in the account and are labeled estimates on screen.
+Quota percentages estimate **additional percentage points** of the session's own account's
+5-hour/week windows, not the share of remaining allowance. Explicit managed account bindings are
+resolved through account aliases; an unbound session uses the registered default account or a sole
+unambiguous account. A session never borrows another account's meter because its own is missing.
+
+Calibration reads timestamped, priced responses in each meter's interval, stopping at the meter's
+reading time. It includes closed conversations and all registered account roots. Claude, Codex and
+Gemini usage is read directly from native artifacts, including in builds without an engine; other
+harnesses use their journal/replay usage when available. Native artifacts replace their journal copy,
+rather than adding the same usage twice. Claude response IDs use final usage and the first timestamp;
+Codex uses cumulative token-count increments; Gemini snapshots are deduplicated by message ID.
+Costs use the central pricing functions, including Claude cache-write TTLs.
+
+Passive fleet polls and panel requests share a calibration cache (at most once per 30 seconds).
+A positive utilization delta divided by positive spend delta supplies a live calibration when the
+account/session population and reset boundaries stay unchanged. Otherwise, positive window usage
+divided by its timestamped spend supplies the initial rate. Each window retains its last useful
+account-specific rate through rounded readings, renewals and process restarts; rates are persisted
+in `handoff-quota-rates.json`. Missing windows remain null even when a previous rate exists.
+
+Unknown account attribution, missing meters, insufficient timestamped/priced usage, or unknown
+projection inputs leave dependent quota cells null. Every null quota cell shows a dash with a
+tooltip explaining why. These estimates include other work in the account and are labeled estimates
+on screen.
 
 ## Engine boundary
 
@@ -79,7 +90,8 @@ reminder formulas otherwise remain intact. The future measured-F/grace/complexit
 the adapter's internals while keeping the v1 UI contract. Complexity modes and new engine math are
 outside this screens batch.
 
-Unit tests are in `core/src/handoffConfig.test.ts`, `server/sessions/handoff-panel.test.ts`, and
+Unit tests are in `core/src/handoffConfig.test.ts`, `server/sessions/handoff-panel.test.ts`, `server/sessions/handoff-artifacts.test.ts`,
+`server/sessions/handoff-usage.test.ts`, and
 `web/src/components/sessions/HandoffWarning.test.tsx`, and `web/src/lib/handoffPanelState.test.ts`. The delivery owner runs tests/typechecking
 and desktop/mobile light/dark visual QA in an isolated `agentop run --rm` environment before
 accepting the change.
