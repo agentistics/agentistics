@@ -33,7 +33,16 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Filters, order and the list’s other actions live in the ⋮ menu next to search.',
       },
     ],
-    fixes: [],
+    fixes: [
+      {
+        pt: 'Líderes voltam a abrir sessões em outro projeto; a sessão fica na tarefa do líder, com um aviso.',
+        en: 'Leaders can start sessions in another project again; the session stays on the leader’s task, with a notice.',
+      },
+      {
+        pt: 'Avisos do sistema no chat começam alinhados à esquerda, com a linha só depois do texto.',
+        en: 'System notices in the chat start at the left edge, with the line only after the text.',
+      },
+    ],
   },
   '2.142.1': {
     features: [],
