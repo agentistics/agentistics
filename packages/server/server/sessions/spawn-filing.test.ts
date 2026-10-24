@@ -380,6 +380,78 @@ describe('repository comparison (L1, L2)', () => {
   })
 })
 
+describe('SPAWN.REPO — short board repository names', () => {
+  const shortBook = { tasks: [T('t-short', 'Workspace', 'agentistics/agentistics-workspace')], subtasks: [] }
+  test('short task repo matches a full checkout remote', () => {
+    const p = ok(planFiling(base({
+      book: shortBook, taskRef: 't-short', cwd: '/home/u/workspace',
+      repoOf: () => ({ remote: 'github.com/agentistics/agentistics-workspace', worktree: true }),
+    })))
+    expect(p).toMatchObject({ taskId: 't-short', cwd: '/home/u/workspace' })
+    expect(p.warnings).not.toContain('inherited_task_repo_mismatch')
+  })
+  test('short task repo refuses a different checkout remote', () => {
+    const p = refused(planFiling(base({
+      book: shortBook, taskRef: 't-short', cwd: '/home/u/agentistics-engine',
+    })))
+    expect(p.code).toBe('cwd_wrong_repo')
+  })
+  test('short task repo refuses another organization with the same repository name', () => {
+    expect(refused(planFiling(base({
+      book: shortBook, taskRef: 't-short',
+      repoOf: () => ({ remote: 'github.com/other/agentistics-workspace', worktree: true }),
+    }))).code).toBe('cwd_needed')
+  })
+  for (const repo of [REMOTE, 'https://github.com/agentistics/agentistics.git', 'git@github.com:agentistics/agentistics', 'ssh://git@github.com/agentistics/agentistics.git']) {
+    test(`task remote retains host comparison: ${repo}`, () => {
+      const remoteBook = { tasks: [T('t-remote', 'Remote', repo)], subtasks: [] }
+      expect(ok(planFiling(base({ book: remoteBook, taskRef: 't-remote', repoOf: () => ({ remote: REMOTE, worktree: true }) }))).taskId).toBe('t-remote')
+      expect(refused(planFiling(base({ book: remoteBook, taskRef: 't-remote', cwd: '/home/u/gitlab' }))).code).toBe('cwd_wrong_repo')
+    })
+  }
+})
+
+describe('SPAWN.REPO — inherited task repository policy', () => {
+  const caller = R('leader', { taskId: 't-1', cwd: '/home/u/workspace' })
+  test('inherited task and explicit cwd in another repo stay filed with a warning', () => {
+    const p = ok(planFiling(base({ caller, cwd: '/home/u/agentistics-engine' })))
+    expect(p).toMatchObject({ taskId: 't-1', taskTitle: 'Atomic spawn', cwd: '/home/u/agentistics-engine', cwdSource: 'explicit' })
+    expect(p.warnings).toContain('inherited_task_repo_mismatch')
+  })
+  test('inherited task and caller cwd outside a repo stay filed with a warning', () => {
+    const p = ok(planFiling(base({ caller, callerCwd: '/home/u/workspace' })))
+    expect(p).toMatchObject({ taskId: 't-1', cwdSource: 'caller' })
+    expect(p.warnings).toContain('inherited_task_repo_mismatch')
+  })
+  test('inherited task in the same repo adds no mismatch warning', () => {
+    expect(ok(planFiling(base({ caller }))).warnings).not.toContain('inherited_task_repo_mismatch')
+  })
+  test('explicit task still refuses another repo even when the caller has that task', () => {
+    expect(refused(planFiling(base({ caller, taskRef: 't-1', cwd: '/home/u/agentistics-engine' }))).code).toBe('cwd_wrong_repo')
+    expect(refused(planFiling(base({ caller, taskRef: 't-1', callerCwd: '/home/u/workspace' }))).code).toBe('cwd_needed')
+  })
+  test('inherited task mismatch does not bypass the missing directory guard', () => {
+    expect(refused(planFiling(base({ caller, cwd: '/gone' }))).code).toBe('cwd_missing')
+  })
+  test('inherited task mismatch preserves shared checkout refusal and override warning', () => {
+    const input = base({ caller, cwd: '/home/u/agentistics-engine', liveInCwd: () => 1 })
+    expect(refused(planFiling(input)).code).toBe('cwd_shared_checkout')
+    const p = ok(planFiling({ ...input, sharedCwd: true }))
+    expect(p.taskId).toBe('t-1')
+    expect(p.warnings).toContain('inherited_task_repo_mismatch')
+    expect(p.warnings).toContain('shared_checkout_override')
+  })
+  test('a handoff still inherits its predecessor task across repositories', () => {
+    const p = ok(planFiling(base({ handoffOf: caller })))
+    expect(p).toMatchObject({ taskId: 't-1', cwd: '/home/u/workspace', role: 'leader' })
+  })
+  test('a subtask resolved outside a missing inherited task keeps its repository check', () => {
+    expect(refused(planFiling(base({
+      caller: R('leader', { taskId: 't-gone' }), subtaskRef: 's-1', cwd: '/home/u/agentistics-engine',
+    }))).code).toBe('cwd_wrong_repo')
+  })
+})
+
 describe('checkout candidates (L3)', () => {
   test('trailing slashes collapse, vanished directories drop out, newest first', () => {
     const rows = [
