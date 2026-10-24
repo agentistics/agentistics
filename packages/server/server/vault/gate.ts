@@ -86,9 +86,8 @@ export const VAULT_ACTION_ROWS: Readonly<Record<VaultAction, ActionRow>> = {
   lock: { code: false, gesture: false, grant: null }, // locking only REDUCES exposure
   'set-auto-lock': { code: true, gesture: false, grant: 'read' },
   'set-confirm-each-use': { code: true, gesture: false, grant: 'read' },
-  // VAULT.UI2: "keep it open" — one more idle window. On this computer the vault is already open and the click
-  // is the consent (no proof); from a remote origin it costs the authenticator code, never silently.
-  'extend-open': { code: true, gesture: false, grant: null },
+  // Keep-open owes a fresh Hello (computer) or passkey (phone), never a code or read grant.
+  'extend-open': { code: false, gesture: true, grant: null },
   // Owner decision 2026-10-02: loosening what an unlock asks is an escalation — code AND gesture, fresh.
   'set-unlock-policy': { code: true, gesture: true, grant: null },
   'lock-local': { code: false, gesture: false, grant: null },
@@ -408,13 +407,10 @@ export async function requireVaultStepUp(action: VaultAction, ctx: GateContext):
     if (action === 'reset') return resetUnopenable(ctx)
     return refused('locked', sentence('locked'))
   }
-  // VAULT.V2 (QA r3 C1): "keep it open" needs the page's own read grant (bound to the HTTP session) or the code.
-  // A bare loopback request is no longer enough: any local process could otherwise hold the vault open forever.
   if (action === 'extend-open') {
-    if (grantValid(ctx.grant, ctx.session, 'read')) { noteVaultActivity(); return { ok: true } }
-    if (!ctx.code) return refused('stepup-required', sentence('stepup-required'))
-    const c = await checkCodeWith(o.dek, o.kid, ctx.code)
-    if (!c.ok) return c
+    if ((ctx.loopback || fromSocket(ctx)) && !hasPresence(o.vault)) return noPresenceRefusal()
+    const g = await gestureFor(action, ctx, o)
+    if (!g.ok) return g
     noteVaultActivity()
     return { ok: true }
   }
@@ -570,7 +566,7 @@ async function gestureFor(action: VaultAction, ctx: GateContext, o: { dek: Uint8
   // The Hello that just opened the vault covers the ONE send that follows it (single-use, 90 s) — only for
   // the page whose unlock reply carried the proof, in its session, for the session it declared (review H2).
   if (action === 'personal-grant' && ctx.loopback && consumeFreshPresence({ session: ctx.session, token: ctx.fresh, binding: `personal-grant:${ctx.binding ?? ''}` })) return { ok: true }
-  if (action.startsWith('personal-') && !ctx.loopback && !fromSocket(ctx)) {
+  if ((action.startsWith('personal-') || action === 'extend-open') && !ctx.loopback && !fromSocket(ctx)) {
     if (consumeGestureToken(ctx.session, ctx.gestureToken, `${action}:${ctx.binding ?? ''}`)) return { ok: true }
     return phoneGestureRefusal()
   }
@@ -587,6 +583,14 @@ export async function phoneUnlockGuard(): Promise<Refusal | null> {
   if (recoveryTodo()) return refused('recovery-mode', sentence('recovery-mode'))
   if ((await loadState()).frozen) return refused('stepup-frozen', sentence('stepup-frozen'))
   return null
+}
+
+/** A keep-open challenge proves nothing yet: no code, grant, Hello or idle-clock activity. */
+export async function prepareExtendOpenGesture(): Promise<GateResult> {
+  const denied = await phoneUnlockGuard()
+  if (denied) return denied
+  if (!(await ensureVaultOpen({ create: false, migrate: false }))) return refused('locked', sentence('locked'))
+  return { ok: true }
 }
 
 // ── §2.2 phase 2: the code that completes an unlock ─────────────────────────────────────────────

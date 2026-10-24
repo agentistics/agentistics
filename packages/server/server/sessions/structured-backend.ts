@@ -564,7 +564,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       return Promise.resolve(s.answer({ choice: Number(k), text: t }) ? 'sent' as const : 'failed' as const)
     }
   }
-  if (base.sendMoveChoice) backend.sendMoveChoice = (id, keys, confirmKey, landed) => (of(id) ? Promise.resolve('failed' as const) : base.sendMoveChoice!(id, keys, confirmKey, landed))
+  if (base.sendMoveChoice) backend.sendMoveChoice = (id, keys, confirm, landed) => (of(id) ? Promise.resolve('failed' as const) : base.sendMoveChoice!(id, keys, confirm, landed))
   if (base.rewindTo) backend.rewindTo = (id, text, occurrence) => (of(id) ? Promise.resolve('failed' as const) : base.rewindTo!(id, text, occurrence))
   if (base.sendQueuedNow) backend.sendQueuedNow = id => (of(id) ? Promise.resolve('nothing' as const) : base.sendQueuedNow!(id))
   return backend

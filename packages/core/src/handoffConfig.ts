@@ -56,6 +56,7 @@ export interface HandoffPanel {
   projectionReplies: number
   projections: HandoffProjection[]
   quotaEstimated: boolean
+  quotaUnavailableReason?: 'no-meter' | 'account-unknown' | 'missing-window'
   workInFlight: string[]
   handoffPath: string | null
 }

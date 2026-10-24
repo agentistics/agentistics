@@ -91,15 +91,19 @@ describe('the gate', () => {
     expect(readDialog(TRUST).select).toBeNull()
   })
 
-  test("kimi's numberless prompt would be HALF-READ, which is why kimi is not gated on", () => {
+  test("kimi 0.41.0 / 2.1.1's GROUPED prompt is read by its groups, never half-read", () => {
     // Asked for anyway, this is what comes out: the first option and its own DESCRIPTION, and
     // `Don't trust` never reached. Offering that is worse than offering nothing — the assertion
     // exists so nobody turns kimi on without modelling the description lines first.
+    // Since 2026-10-23 the GROUPS are read: each group's first row is the option, the rest its
+    // description. Read contiguously this came out as an option plus its own sentence.
     const forced = readDialog(KIMI_TRUST, { marker: true })
-    expect(forced.options.map(o => o.label)).toEqual([
-      'Trust this folder',
-      'Enable project MCP servers. Remembered for this folder.',
-    ])
+    expect(forced.kind).toBe('options')
+    expect(forced.options.map(o => [o.label, o.selected])).toEqual([['Trust this folder', true], ["Don't trust", false]])
+    // The cursor on a DESCRIPTION row is not a reading anybody can trust.
+    const odd = KIMI_TRUST.map(l => l === '   ❯ Trust this folder' ? '     Trust this folder'
+      : l === '     Enable project MCP servers. Remembered for this folder.' ? '   ❯ Enable project MCP servers. Remembered for this folder.' : l)
+    expect(readDialog(odd, { marker: true }).reason).toBe('grouped')
     // And with the gate as it ships, kimi reads exactly as it did before this reader existed.
     expect(readDialog(KIMI_TRUST).kind).toBe('none')
   })

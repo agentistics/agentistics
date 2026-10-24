@@ -54,7 +54,7 @@ const sessionHomes: Record<HarnessId, string> = {
 }
 
 /** Explicit managed ids and transcript roots win over the default/only-visible fallback. */
-function fallbackSessionAccount(harness: HarnessId, registry: AccountsFile, visible: readonly string[]): string | undefined {
+export function fallbackSessionAccount(harness: HarnessId, registry: AccountsFile, visible: readonly string[]): string | undefined {
   const bound = registry.bindings[`${harness}:`]
   // A default binding that points at a hidden or retired account must not swallow default-home
   // sessions while exactly one other account is the visible one.
@@ -64,7 +64,7 @@ function fallbackSessionAccount(harness: HarnessId, registry: AccountsFile, visi
 }
 
 type LiveSessionRef = { session_id: string; harness: string; native_session_id?: string; project_path?: string }
-const resolveLiveTranscriptPath = async (s: LiveSessionRef, bindings: Record<string, string>): Promise<string | null> => {
+export const resolveLiveTranscriptPath = async (s: LiveSessionRef, bindings: Record<string, string>): Promise<string | null> => {
   const readers = await import('./sessions/harness-transcript')
   const ref = { conversationId: s.native_session_id ?? s.session_id, cwd: s.project_path }
   const prefix = `${s.harness}:`
@@ -93,7 +93,7 @@ let liveTranscriptPath = resolveLiveTranscriptPath
 /** Tests only: avoid looking for transcripts in the owner's home. */
 export function __setLiveTranscriptPathForTest(f: typeof liveTranscriptPath | null): void { liveTranscriptPath = f ?? resolveLiveTranscriptPath }
 
-function accountAtPath(harness: HarnessId, path: string, bindings: Record<string, string>, retired: ReadonlySet<string> = new Set()): string | undefined {
+export function accountAtPath(harness: HarnessId, path: string, bindings: Record<string, string>, retired: ReadonlySet<string> = new Set()): string | undefined {
   return attributeAtPath(harness, path, bindings, retired)?.account
 }
 

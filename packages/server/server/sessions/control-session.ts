@@ -232,6 +232,10 @@ export function toControlSession(
             : o)),
         }
       : {}),
+    // The form around the dialog; `canStep` only where this harness's step keys were driven.
+    ...(v.dialogOptions?.length && v.dialogForm
+      ? { dialogForm: { ...v.dialogForm, ...(approvalFor(v.harness)?.steps && (v.dialogForm.steps || v.dialogForm.position) && !v.dialogStated ? { canStep: true as const } : {}) } }
+      : {}),
     // Picking one of them needs a VERIFIED way to select by number on this harness. Only claude has
     // one; everywhere else the options are shown and the answer is a refusal that names why, because
     // falling back to the confirm key would choose for the user among things that differ.

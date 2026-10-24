@@ -44,6 +44,7 @@ function* parseCodexSteps(content: string, fallbackId: string): Generator<void, 
   let userChars = 0, userCharMsgs = 0, assistantChars = 0, assistantCharMsgs = 0
   let userMessages = 0
   let assistantMessages = 0
+  let responseItemMessages = 0
   let usesWebSearch = false
   let firstPrompt = ''
   const messageHours: number[] = []
@@ -72,6 +73,8 @@ function* parseCodexSteps(content: string, fallbackId: string): Generator<void, 
       turnEvent = { ts: lineMs }
       turnEvents.push(turnEvent)
     }
+
+    if (outer === 'response_item' && type === 'message' && data.role === 'assistant') responseItemMessages++
 
     if (type === 'session_meta') {
       sessionId = data.id ?? sessionId
@@ -174,7 +177,8 @@ function* parseCodexSteps(content: string, fallbackId: string): Generator<void, 
     user_message_count: userMessages,
     user_chars: userChars,
     user_char_messages: userCharMsgs,
-    assistant_message_count: assistantMessages,
+    // Newer rollouts retain response_item messages without the agent_message mirror.
+    assistant_message_count: assistantMessages || responseItemMessages,
     assistant_chars: assistantChars,
     assistant_char_messages: assistantCharMsgs,
     tool_counts: toolCounts,
