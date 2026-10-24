@@ -341,3 +341,23 @@ test('the ⋮ button hands the caller ONE stable ref across re-renders (no updat
   expect(seen.filter(Boolean)).toHaveLength(1)
   expect(seen.filter(el => el === null)).toHaveLength(0)
 })
+
+for (const width of [1280, 390]) {
+  test(`ended falls dismiss without hiding rows, until a new session falls (${width}px)`, async () => {
+    act(() => writePrefs({ tab: 'ended' }))
+    const fallen = [row('fell-0', 'lost'), row('fell-1', 'lost')]
+    await render([...fleet, fallen[0]!], width, 'en', filters, false, 1)
+    const block = host.querySelector('[data-ended-section="fell"]')!
+    expect(block.querySelector('[data-fell-banner]')).not.toBeNull()
+    expect(block.querySelector('[data-session-line]')?.textContent).toContain('fell')
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="Dismiss fallen sessions notice"]')!)
+    expect(host.querySelector('[data-fell-banner]')).toBeNull()
+    expect(block.querySelectorAll('[data-session-line]').length).toBe(1)
+    expect((await import('../../lib/fellDismissal')).readDismissedFell()).toEqual(['fell-0'])
+    await render([...fleet, fallen[0]!], width, 'en', filters, false, 1)
+    expect(host.querySelector('[data-fell-banner]')).toBeNull()
+    await render([...fleet, ...fallen], width, 'en', filters, false, 2)
+    expect(host.querySelector('[data-fell-banner]')).not.toBeNull()
+    expect(host.querySelectorAll('[data-ended-section="fell"] [data-session-line]').length).toBe(2)
+  })
+}

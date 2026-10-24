@@ -10,6 +10,13 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.143.1': {
+    features: [],
+    fixes: [{
+      pt: 'Dormindo mostra só sessões fixadas que terminaram. O aviso de sessões que caíram pode ser dispensado, as linhas ficam juntas e os números dos botões ficam centralizados.',
+      en: 'Sleeping shows only pinned sessions that ended. The fallen-session notice can be dismissed, its rows stay together, and button counts are centered.',
+    }],
+  },
   '2.143.0': {
     features: [
       {

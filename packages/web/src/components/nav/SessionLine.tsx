@@ -160,6 +160,7 @@ export function SessionLine({
             {reopeningLabel(pt)}
           </span>
         )}
+        {fell && <span title={pt ? 'Esta sessão caiu' : 'This session fell'} style={{ flexShrink: 0, fontSize: 11, color: STATE_COLOR.lost }}>{pt ? 'caiu' : 'fell'}</span>}
         {time && (
           <span data-line-time style={{
             flexShrink: 0, fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',

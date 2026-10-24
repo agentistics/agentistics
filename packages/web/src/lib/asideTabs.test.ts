@@ -80,3 +80,20 @@ test('a fallen row says how long ago it went down', () => {
   expect(fellAge(r('f', 'lost', { endedAt: 0 }), 10 * 60_000, false)).toBe('10 min ago')
   expect(fellAge(r('f', 'lost'), 0, true)).toBeNull()
 })
+
+test('only pinned ended leaders and workers sleep; falls take precedence over pins', () => {
+  const now = Date.now()
+  const rows = [
+    r('pinned-leader', 'closed', { title: '[ LEADER ] - Kept', endedAt: now }),
+    r('unpinned-leader', 'closed', { title: '[ LEADER ] - Finished', endedAt: now }),
+    r('pinned-worker', 'exited', { endedAt: now }),
+    r('pinned-fell', 'lost', { endedAt: now }),
+    r('live-pin', 'working'),
+  ]
+  const pinned = new Set(['pinned-leader', 'pinned-worker', 'pinned-fell', 'live-pin'])
+  const sections = endedSections(rows, { fellIds: new Set(['pinned-fell']), keep: x => pinned.has(x.id), now })
+  expect(sections.sleeping.map(x => x.id)).toEqual(['pinned-leader', 'pinned-worker'])
+  expect(sections.today.map(x => x.id)).toEqual(['unpinned-leader'])
+  expect(sections.fell.map(x => x.id)).toEqual(['pinned-fell'])
+  expect(pinned.size).toBe(4)
+})

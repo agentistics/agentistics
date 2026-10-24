@@ -100,6 +100,7 @@ import { NAY_UNDOCK_SESSION, requestUndockSession, withUndockEntry } from '../..
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { getSessionRole, registerSessionRoleAlias, setSessionRole, useMuteWorkers, useSessionRole, useSessionRoles, type SessionRole } from '../../lib/sessionRoles'
 import { applyLeadersOnly, countLeaders, leadersText } from '../../lib/leadersFilter'
+import { COUNT_BADGE } from './countBadge'
 import { SegmentedTabs } from './SegmentedTabs'
 import { GoToSessionContext, SessionLine, type SessionLineProps } from './SessionLine'
 import {
@@ -389,7 +390,7 @@ export function SessionsAside({
    * writes synchronously, in the same tick the first click's handler runs.
    */
   const groupActingRef = useRef(false)
-  /** The exact set of fallen ids the "reopen what fell" banner was last dismissed for — see
+  /** The set of fallen ids the "reopen what fell" banner was last dismissed for — see
    *  `fellDismissal.ts`. Read once on mount; a dismiss updates it (and persists it) directly. */
   const [dismissedFell, setDismissedFell] = useState<string[] | null>(readDismissedFell)
   useEffect(() => subscribeDismissedFell(() => setDismissedFell(readDismissedFell())), [])
@@ -418,9 +419,8 @@ export function SessionsAside({
 
   const canAct = Boolean(act) && !hideNew
   const fellIds = useMemo(() => groupRows.fellRows.map(r => r.id), [groupRows.fellRows])
-  // Dismissing hides the banner for the EXACT group it named — the moment the machine reports a
-  // different set of fallen ids (one more session fell, or one of these was reopened on its own and
-  // the rest are still down), that is a new fact and the banner is shown again. See `fellDismissal.ts`.
+  // Dismissing hides the banner until a NEW fallen id appears. Reopening one of the
+  // dismissed sessions does not re-announce the remaining falls. See `fellDismissal.ts`.
   const fellDismissed = fellGroupDismissed(dismissedFell, fellIds)
   const showFell = canAct && groupRows.fellRows.length > 0 && !fellDismissed
   const fellCount = groupRows.fellRows.length
@@ -882,10 +882,10 @@ export function SessionsAside({
   }, [rows, active, isLeaderRow, isPinnedRow])
   /** The Encerradas sections, from the search-narrowed fleet. */
   const ended = useMemo(
-    () => endedSections(withPins(searched, filterSessions(rows, query)), { fellIds: fellIdSet, keep: r => isPinnedRow(r) || isLeaderRow(r), now }),
+    () => endedSections(withPins(searched, filterSessions(rows, query)), { fellIds: fellIdSet, keep: isPinnedRow, now }),
     // `now` moves every render; the sections only need to follow the rows.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searched, rows, query, withPins, fellIdSet, isPinnedRow, isLeaderRow],
+    [searched, rows, query, withPins, fellIdSet, isPinnedRow],
   )
   const [showAllEnded, setShowAllEnded] = useState(false)
   // The ended history is paged in on demand: the tab that draws it is what asks for it.
@@ -1516,8 +1516,7 @@ export function SessionsAside({
               {narrowed > 0 && (
                 <span aria-hidden style={{
                   position: 'absolute', top: -5, right: -5,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  minWidth: 15, height: 15, padding: '0 3px', borderRadius: 8,
+                  ...COUNT_BADGE, minWidth: 15, height: 15, padding: '0 3px',
                   background: 'var(--anthropic-orange)', color: '#fff',
                   fontSize: 9, fontWeight: 700, lineHeight: 1,
                 }}>{narrowed}</span>
@@ -1943,13 +1942,15 @@ export function SessionsAside({
         {tab === 'ended' && (
           <div data-tab-body="ended" style={{ display: 'flex', flexDirection: 'column', padding: '2px 0 4px' }}>
             {ended.fell.length > 0 && (
-              <div data-ended-section="fell">
+              <div data-ended-section="fell" style={{
+                margin: '0 2px 4px', padding: '0 2px 2px', borderRadius: 8,
+                border: '1px solid color-mix(in srgb, var(--accent-red) 30%, transparent)',
+                background: 'color-mix(in srgb, var(--accent-red) 7%, transparent)',
+              }}>
                 <div style={sectionHeading}>{pt ? 'Caíram' : 'Fell'}</div>
-                {canAct && (
+                {showFell && (
                   <div data-fell-banner style={{
-                    display: 'flex', alignItems: 'center', gap: 8, margin: '0 2px 4px', padding: '6px 6px 6px 10px', minHeight: tap,
-                    border: '1px solid color-mix(in srgb, var(--anthropic-orange) 30%, transparent)',
-                    background: 'color-mix(in srgb, var(--anthropic-orange) 7%, transparent)', borderRadius: 8,
+                    display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0 2px 6px', minHeight: tap,
                     fontSize: 12.5, color: 'var(--text-secondary)',
                   }}>
                     <RotateCcw size={14} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} aria-hidden />
@@ -1960,6 +1961,10 @@ export function SessionsAside({
                       onClick={() => setPicking('reopen')} style={{ ...linkButton, minHeight: tap }}>
                       {pt ? (fellCount === 1 ? 'Reabrir' : `Reabrir as ${fellCount}`) : (fellCount === 1 ? 'Reopen' : `Reopen all ${fellCount}`)}
                     </button>
+                    <IconButton label={pt ? 'Dispensar aviso de sessões que caíram' : 'Dismiss fallen sessions notice'}
+                      size={tap ?? 30} onClick={dismissFell}>
+                      <X size={14} />
+                    </IconButton>
                   </div>
                 )}
                 {ended.fell.map(r => renderEndedLine(r, true))}

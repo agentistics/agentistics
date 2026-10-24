@@ -32,7 +32,11 @@ The menu button stays at the left of the scrolling track, counts the visible tab
 moon when any pinned session sleeps. Its **Sleeping** entries reopen through the fleet's existing
 `resume` action and focus the resulting conversation in the current pane.
 
-In the aside, those same pinned ended sessions appear under **Sleeping** at the end of **Pinned**.
+In the aside's **Ended** tab, **Sleeping** contains only explicitly pinned ended sessions.
+An unpinned ended leader goes under today's or older finished sessions, just like a worker.
+Ending a session never removes its pin. The collapsed rail and the tabs menu use the same rule.
+
+In the folder view, those same pinned ended sessions appear under **Sleeping** at the end of **Pinned**.
 This row starts collapsed and remembers expansion with the existing ended-section preferences.
 The Pinned header counts both live and sleeping pins. Pins load their deferred ended sessions even
 with Active only enabled; status/value filters leave them visible, while search narrows them. Sleeping cards can still be opened for reading,
@@ -64,7 +68,10 @@ ended sessions directly as compact rows, without repeating Ended under every fol
 
 The crash-group reopen banner keeps its count in a single-line label (**Reabrir N que caíram** /
 **Reopen N that fell**). The title and accessible label keep the full sentence naming the sessions.
-The adjacent dismiss control keeps its own width: 30px on desktop and 44px on mobile.
+In **Ended**, the notice and fallen rows share one bordered block, with a visible **fell** label
+on each row. The adjacent dismiss control keeps its own width: 30px on desktop and 44px on mobile.
+Dismissing hides the notice across devices until a new fallen session id appears; the rows remain
+available to read or reopen, and reopening one does not show the notice again.
 
 The check-in details modal uses one column on desktop and mobile: headline, needs, delivered,
 in progress, next steps, health, then earlier rounds. Text wraps throughout. Health is a list of
