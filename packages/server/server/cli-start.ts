@@ -4327,9 +4327,18 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const live = (await backend.list().catch(() => [])).find(b => b.id === id)
       if (!live?.alive) return { ok: false, message: s.sessNotRunning }
 
+      // A --bg CLI spawn owns its driver in ANOTHER process. Its relay makes list()/isStructured()
+      // report it alive, but chatOf() is local to this server. Recover it before reading attention or
+      // choosing a transport; otherwise we type into a tmux pane that does not exist and report 502.
+      if (backend.isStructured?.(id) && !backend.chatOf?.(id)) {
+        try { await backend.reattach?.() } catch { return { ok: false, message: s.sessSendFailed(id) } }
+        // Never send terminal keys to a relay whose driver could not be recovered.
+        if (backend.isStructured?.(id) && !backend.chatOf?.(id)) return { ok: false, message: s.sessSendFailed(id) }
+      }
+
       // F3.3 — a STRUCTURED session states its open request; a prompt then would race the answer the
       // person is being asked for (the screen rules below read a TUI footer it never draws).
-      if (backend.attentionOf?.(id)) return { ok: false, message: s.sessPromptBlocked }
+      if (backend.attentionOf?.(id)) return { ok: false, message: s.sessPromptBlocked, failure: 'prompt' }
 
       // The structured protocol states whether input is blocked. Send through its driver;
       // Codex's TUI-only reliable paste method cannot address a structured process.
