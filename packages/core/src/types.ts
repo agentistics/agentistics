@@ -1038,6 +1038,9 @@ const BASE_MODEL_PRICING: Record<string, { input: number; output: number; cacheR
   'claude-sonnet-5-5':          { input: 2,    output: 10,   cacheRead: 0.10, cacheWrite: 2.50  },
   'claude-opus-4-6':            { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
   'claude-sonnet-4-6':          { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75  },
+  // Standard short-context (up to 100k prompt) estimate; higher prompt tier is not modeled here.
+  // platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-20.
+  'claude-haiku-5-5':          { input: 0.10, output: 0.50, cacheRead: 0.01, cacheWrite: 0.125 },
   'claude-haiku-4-5-20251001':  { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25  },
   // Legacy models
   'claude-opus-4-5-20251101':   { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },

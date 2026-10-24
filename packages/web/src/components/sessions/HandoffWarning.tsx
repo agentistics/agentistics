@@ -111,7 +111,12 @@ export function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPa
         </div>)}
       </div>
       <label className="handoff-simulation"><span>{pt ? 'Simular continuar mais' : 'Simulate continuing another'}</span><input type="number" min={0} max={100} step={1} value={extraDraft} onChange={e => setExtraDraft(e.target.value)} onBlur={simulate} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); simulate() } }} /> %</label>
-      <small>{pt ? 'Percentual da janela de contexto. Ajuste em Configurações › Sessões. Quota estimada pelo consumo medido da conta; “—” indica medição indisponível.' : 'Percentage of the context window. Adjust in Settings › Sessions. Quota estimated from measured account consumption; “—” means unavailable.'}</small>
+      <small>{pt ? 'Percentual da janela de contexto. Ajuste em Configurações › Sessões. Quota estimada pelo consumo medido da conta.' : 'Percentage of the context window. Adjust in Settings › Sessions. Quota estimated from measured account consumption.'}</small>
+      {p.quotaUnavailableReason && <small>{p.quotaUnavailableReason === 'no-meter'
+        ? (pt ? 'Este assistente não informa limites de uso.' : 'This assistant does not report usage limits.')
+        : p.quotaUnavailableReason === 'account-unknown'
+          ? (pt ? 'Não foi possível identificar a conta desta sessão.' : 'The account for this session could not be identified.')
+          : (pt ? 'A conta não informa uma das janelas de uso.' : 'The account does not report one of the usage windows.')}</small>}
       <div className="handoff-receives"><strong>{pt ? 'O que a sessão nova recebe' : 'What the new session receives'}</strong>
         <p>{pt ? 'Um arquivo durável com o estado do trabalho, suas decisões, sessões ativas e a fila. O líder prepara esse resumo antes de abrir o sucessor.' : 'A durable file with work state, your decisions, active sessions and the queue. The leader prepares this summary before starting the successor.'}</p>
         {p.handoffPath && <p>{p.handoffPath}</p>}

@@ -16,7 +16,7 @@ export function handoffMetrics(row: HandoffHintRow & { harness?: string; convers
   }
 }
 
-export interface HandoffQuotaRate { fiveHourPctPerUSD: number | null; weekPctPerUSD: number | null }
+export interface HandoffQuotaRate { fiveHourPctPerUSD: number | null; weekPctPerUSD: number | null; unavailableReason?: 'no-meter' | 'account-unknown' | 'missing-window' }
 export function computeHandoffPanel(row: HandoffHintRow, configIn: unknown, quota: HandoffQuotaRate = { fiveHourPctPerUSD: null, weekPctPerUSD: null }, now = Date.now()): HandoffPanel {
   const config = normalizeHandoffConfig(configIn)
   const cutTokens = handoffCut(config)
@@ -45,7 +45,7 @@ export function computeHandoffPanel(row: HandoffHintRow, configIn: unknown, quot
     handoffOverheadUSD: money(why.overheadTokens ?? null), breakEvenReplies: why.breakEvenTurns ?? null,
     projectionReplies: n,
     projections: [cost('continue', context === null ? null : n * context, context), cost('extra', extra === null ? null : n * extra, extra), cost('handoff', successor, why.successorBaseTokens)],
-    quotaEstimated: true, workInFlight: why.workInFlight, handoffPath: row.handoffPath ?? null,
+    quotaEstimated: true, quotaUnavailableReason: quota.unavailableReason, workInFlight: why.workInFlight, handoffPath: row.handoffPath ?? null,
   }
 }
 

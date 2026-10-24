@@ -80,6 +80,7 @@ describe('recorded metrics across harnesses', () => {
       expect(session.input_tokens).toBe(60_000)
       const conversation = toConversation(session)
       const p = computeHandoffPanel(handoffMetrics({ id: 'm', title: 'Leader', harness: 'gemini', conversationId: 'native-gemini', model: 'auto' }, [conversation]), null)
+      expect(p.replies).toBe(3)
       expect(p.contextWindow).toBe(1_048_576)
       expect(p.spentUSD).toBeCloseTo(.067125)
       expect(p.nextReplyUSD).toBeCloseTo(.009)

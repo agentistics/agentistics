@@ -38,6 +38,7 @@ export const PRICE_PROVENANCE: Record<string, PriceProvenance> = {
   'claude-sonnet-5-5': { source: ANTHROPIC, verifiedAt: '2026-10-20' },
   'claude-opus-4-6': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
   'claude-sonnet-4-6': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
+  'claude-haiku-5-5': { source: ANTHROPIC, verifiedAt: '2026-10-20' },
   'claude-haiku-4-5-20251001': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
   // Legacy rows: the same page, but no check date was ever written beside them.
   'claude-opus-4-5-20251101': { source: ANTHROPIC, verifiedAt: null },

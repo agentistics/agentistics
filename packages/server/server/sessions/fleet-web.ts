@@ -55,6 +55,8 @@ import type { ArtifactResponse } from './artifact-web'
 import { readRegistry, patchSession } from './registry'
 import { loadConversations } from './conversations'
 import { createHandoffQuotaSampler, handoffMetrics, type HandoffQuotaRate } from './handoff-panel'
+import { readAccounts } from '../harness-accounts'
+import { artifactReplyCounts, readBilledReplies, refreshArtifactReplies, windowQuotaRate, retainedQuotaRate, readQuotaRates, saveQuotaRates, countBilledReplies, replyKey } from './handoff-usage'
 import type { SessionSnapshot } from './sessions-host'
 import type { ManagedSession } from './types'
 import { computeHandoffWhy, findHandoffFile, HANDOFF_RAMP_CALLS, isLeaderRow, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
@@ -447,14 +449,21 @@ const handoffQuotaSampler = createHandoffQuotaSampler()
 let quotaSampling: Promise<Map<string, HandoffQuotaRate>> | undefined
 let quotaSampleAt = -Infinity
 let quotaRates = new Map<string, HandoffQuotaRate>()
+let billedReplyCounts = new Map<string, number>()
+let retainedRates: Record<string, HandoffQuotaRate> | undefined
 /** Passive sampling is bounded to 30 seconds; open panels refresh the same calibration. */
 async function sampleHandoffQuotas(raw: SessionSnapshot, force = false): Promise<Map<string, HandoffQuotaRate>> {
   if (quotaSampling) return quotaSampling
-  if (!force && Date.now() - quotaSampleAt < 30_000) return quotaRates
+  if (Date.now() - quotaSampleAt < 30_000) return quotaRates
   quotaSampling = (async () => {
-    const [registry, prefs, conversations] = await Promise.all([readRegistry(), readPreferences(), loadConversations()])
+    const [registry, prefs, conversations, accountRegistry] = await Promise.all([readRegistry(), readPreferences(), loadConversations(), readAccounts()])
     const { planLimitsPayload, planAccountKey } = await import('../plan-limits')
     const limits = await planLimitsPayload(prefs.billing)
+    const { engineIntegrations } = await import('../engine/load')
+    const replies = await refreshArtifactReplies(await readBilledReplies(accountRegistry, registry, limits.limits), engineIntegrations(), accountRegistry, registry, limits.limits)
+    billedReplyCounts = countBilledReplies(replies)
+    retainedRates ??= await readQuotaRates()
+    const before = JSON.stringify(retainedRates)
     const next = new Map<string, HandoffQuotaRate>()
     const byId = new Map(registry.map(m => [m.id, m]))
     for (const limit of limits.limits) {
@@ -465,17 +474,22 @@ async function sampleHandoffQuotas(raw: SessionSnapshot, force = false): Promise
         return v.harness === limit.harness && v.status !== 'closed' && v.activity !== 'exited'
           && (m?.accountId === limit.account || (!m?.accountId && accounts.length === 1))
       }).map(v => handoffMetrics({ ...v, title: '', conversationId: v.conversationId ?? byId.get(v.id)?.conversationId }, conversations))
-      if (!peers.length || peers.some(v => !Number.isFinite(v.costUSD)) || Date.now() - limit.updatedAt > 30 * 60_000) {
-        handoffQuotaSampler.forget(key)
-        continue
-      }
-      next.set(key, handoffQuotaSampler.observe(key, {
+      const fromWindow = windowQuotaRate(limit, replies, Date.now())
+      const canSample = peers.length > 0 && peers.every(v => Number.isFinite(v.costUSD)) && Date.now() - limit.updatedAt <= 30 * 60_000
+      const live = canSample ? handoffQuotaSampler.observe(key, {
         at: Date.now(), totalUSD: peers.reduce((sum, v) => sum + v.costUSD!, 0),
         population: peers.map(v => v.id).sort().join(','),
         fiveHour: limit.windows.find(w => w.kind === '5h'),
         week: limit.windows.find(w => w.kind === 'week'),
-      }))
+      }) : { fiveHourPctPerUSD: null, weekPctPerUSD: null }
+      const rate = retainedQuotaRate(retainedQuotaRate(live, fromWindow), retainedRates[key])
+      retainedRates[key] = rate
+      next.set(key, {
+        fiveHourPctPerUSD: limit.windows.some(w => w.kind === '5h') ? rate.fiveHourPctPerUSD : null,
+        weekPctPerUSD: limit.windows.some(w => w.kind === 'week') ? rate.weekPctPerUSD : null,
+      })
     }
+    if (JSON.stringify(retainedRates) !== before) await saveQuotaRates(retainedRates)
     for (const key of quotaRates.keys()) if (!next.has(key)) handoffQuotaSampler.forget(key)
     quotaRates = next
     quotaSampleAt = Date.now()
@@ -497,14 +511,20 @@ export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?:
   const accounts = limits.limits.filter(l => l.harness === view.harness)
   const limit = managed.accountId ? accounts.find(l => l.account === managed.accountId) : accounts.length === 1 ? accounts[0] : undefined
   const rates = await sampleHandoffQuotas(raw, true)
-  const quota = limit ? rates.get(`${limit.harness}:${limit.account}`) : undefined
+  const quota = { ...(limit ? rates.get(`${limit.harness}:${limit.account}`) : undefined),
+    fiveHourPctPerUSD: limit ? rates.get(`${limit.harness}:${limit.account}`)?.fiveHourPctPerUSD ?? null : null,
+    weekPctPerUSD: limit ? rates.get(`${limit.harness}:${limit.account}`)?.weekPctPerUSD ?? null : null,
+    unavailableReason: !limit ? (accounts.length > 1 ? 'account-unknown' : 'no-meter') as 'account-unknown' | 'no-meter'
+      : !limit.windows.some(w => w.kind === '5h') || !limit.windows.some(w => w.kind === 'week') ? 'missing-window' as const
+      : undefined,
+  }
   const conversations = await loadConversations()
   const file = await findHandoffFile(view.cwd)
   return computeHandoffPanel(handoffMetrics({
     harness: view.harness, conversationId: view.conversationId ?? managed.conversationId,
     id, title: managed.label ?? '', leader: true,
     contextTokens: view.contextTokens, contextWindow: view.contextWindow,
-    model: view.model ?? managed.model, turns: view.turns, costUSD: view.costUSD, calls: view.calls,
+    model: view.model ?? managed.model, turns: view.turns, costUSD: view.costUSD, calls: view.calls || conversations.find(c => c.harness === view.harness && (c.sessionId === managed.conversationId || c.nativeId === managed.conversationId))?.calls || artifactReplyCounts.get(replyKey(view.harness ?? managed.harness, view.conversationId ?? managed.conversationId ?? '')) || billedReplyCounts.get(replyKey(view.harness ?? managed.harness, view.conversationId ?? managed.conversationId ?? '')),
     baseSamples: handoffBaseSamples(registry),
     ...(file ? { handoffPath: file.path, handoffBytes: file.bytes } : {}),
     workInFlight: [...(view.activity === 'working' ? ['main-response'] : []), ...(view.background ? ['background-work'] : [])],
