@@ -14,6 +14,14 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     features: [],
     fixes: [
       {
+        pt: 'O aviso de que o cofre vai se trancar agora é falado pela Nay, num cartão opaco que não cobre o botão nem o chat dela.',
+        en: 'The vault auto-lock warning is now spoken by Nay, in an opaque card that covers neither her button nor her chat.',
+      },
+      {
+        pt: '"Manter aberto" no cofre pede o Windows Hello no computador e a biometria no celular, nunca o código do autenticador.',
+        en: '"Keep open" on the vault asks for Windows Hello on the computer and biometrics on the phone, never the authenticator code.',
+      },
+      {
         pt: 'O painel de passagem preenche "Janela 5 h" e "Semana" com o consumo da conta da própria sessão, inclusive com várias contas Claude, com uma casa decimal e o motivo dito uma vez quando faltam dados.',
         en: 'The hand-off panel fills "5 h window" and "Week" from the session’s own account, including multiple Claude accounts, with one decimal and the reason said once when data is missing.',
       },
@@ -88,10 +96,6 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       },
     ],
     fixes: [
-      {
-        pt: 'O aviso de que o cofre vai se trancar agora é falado pela Nay, num cartão opaco que preserva o botão e o chat aberto.',
-        en: 'The vault auto-lock warning is now spoken by Nay in an opaque notice that keeps the button and open chat accessible.',
-      },
       {
         pt: 'Líderes voltam a abrir sessões em outro projeto; a sessão fica na tarefa do líder, com um aviso.',
         en: 'Leaders can start sessions in another project again; the session stays on the leader’s task, with a notice.',
