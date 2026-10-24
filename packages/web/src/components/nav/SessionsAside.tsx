@@ -1953,10 +1953,7 @@ export function SessionsAside({
                     display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0 2px 6px', minHeight: tap,
                     fontSize: 12.5, color: 'var(--text-secondary)',
                   }}>
-                    <RotateCcw size={14} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} aria-hidden />
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      {pt ? (ended.fell.length === 1 ? '1 sessão caiu' : `${ended.fell.length} sessões caíram`) : (ended.fell.length === 1 ? '1 session fell' : `${ended.fell.length} sessions fell`)}
-                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }} />
                     <button type="button" data-fell-reopen title={reopenFellSentence} aria-label={reopenFellSentence}
                       onClick={() => setPicking('reopen')} style={{ ...linkButton, minHeight: tap }}>
                       {pt ? (fellCount === 1 ? 'Reabrir' : `Reabrir as ${fellCount}`) : (fellCount === 1 ? 'Reopen' : `Reopen all ${fellCount}`)}

@@ -125,7 +125,7 @@ export function SessionLine({
         data-session-open
         onClick={onOpen}
         {...(openLabel ? { 'aria-label': openLabel } : {})}
-        title={title}
+        title={fell ? `${title} · ${pt ? 'esta sessão caiu' : 'this session fell'}` : title}
         style={{
           flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
           minHeight: tap ?? (lead ? 32 : 28), padding: leading ? '3px 6px 3px 4px' : '3px 6px', borderRadius: 6,
@@ -160,7 +160,6 @@ export function SessionLine({
             {reopeningLabel(pt)}
           </span>
         )}
-        {fell && <span title={pt ? 'Esta sessão caiu' : 'This session fell'} style={{ flexShrink: 0, fontSize: 11, color: STATE_COLOR.lost }}>{pt ? 'caiu' : 'fell'}</span>}
         {time && (
           <span data-line-time style={{
             flexShrink: 0, fontSize: 12, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',

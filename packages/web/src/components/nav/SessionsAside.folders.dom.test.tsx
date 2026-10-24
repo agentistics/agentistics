@@ -349,7 +349,9 @@ for (const width of [1280, 390]) {
     await render([...fleet, fallen[0]!], width, 'en', filters, false, 1)
     const block = host.querySelector('[data-ended-section="fell"]')!
     expect(block.querySelector('[data-fell-banner]')).not.toBeNull()
-    expect(block.querySelector('[data-session-line]')?.textContent).toContain('fell')
+    expect(block.querySelector('[data-fell-banner]')?.textContent).toBe('Reopen')
+    expect(block.querySelector('[data-session-line]')?.textContent).toBe('Title fell-0'.concat(block.querySelector('[data-line-time]')?.textContent ?? ''))
+    expect(block.querySelector('[data-session-open]')?.getAttribute('title')).toContain('fell')
     await click(host.querySelector<HTMLButtonElement>('[aria-label="Dismiss fallen sessions notice"]')!)
     expect(host.querySelector('[data-fell-banner]')).toBeNull()
     expect(block.querySelectorAll('[data-session-line]').length).toBe(1)
