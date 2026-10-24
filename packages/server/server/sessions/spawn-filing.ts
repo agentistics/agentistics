@@ -245,14 +245,15 @@ const exists = (f: FilingRepo | null): f is FilingRepo => f !== null && !f.missi
 /**
  * Whether a directory's repository IS the task's. Hosts are compared when BOTH sides carry one
  * (github.com/o/r is not gitlab.com/o/r); a host-less side (`ResolvedRepoFacts.repo`) falls back to
- * `org/repo`. A repository with no remote is only its folder name — one segment — and is accepted
- * when that is the task repo's last segment.
+ * the repository name, allowing an owner transfer. A repository with no remote is only its folder
+ * name — one segment — and is accepted when that is the task repo's last segment.
  */
 function sameRepo(facts: FilingRepo, want: RepoId): boolean {
   const have = idOfFacts(facts)
   if (!have) return false
-  if (have.full && want.full) return have.full === want.full
+  if (have.full && want.full && have.full.split('/')[0] !== want.full.split('/')[0]) return false
   if (have.short === want.short) return true
+  if (have.short.includes('/') && want.short.includes('/')) return have.short.split('/').pop() === want.short.split('/').pop()
   return !facts.remote && !have.short.includes('/') && have.short === want.short.split('/').pop()
 }
 
