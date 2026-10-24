@@ -35,6 +35,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
+        pt: 'Resumos de ferramentas no chat mostram um ícone da atividade e ficam alinhados aos avisos do sistema.',
+        en: 'Chat tool summaries show a contextual activity icon and align with system notices.',
+      },
+      {
         pt: 'Líderes voltam a abrir sessões em outro projeto; a sessão fica na tarefa do líder, com um aviso.',
         en: 'Leaders can start sessions in another project again; the session stays on the leader’s task, with a notice.',
       },
