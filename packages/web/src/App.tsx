@@ -2190,11 +2190,10 @@ export default function AppLayout() {
     const el = filtrosButtonElRef.current
     if (!el) { setSessionsFiltersAnchor(null); return }
     const r = el.getBoundingClientRect()
-    setSessionsFiltersAnchor({
-      left: r.left,
-      top: r.bottom + 6,
-      maxHeight: Math.max(160, window.innerHeight - (r.bottom + 6) - 16),
-    })
+    const next = { left: r.left, top: r.bottom + 6, maxHeight: Math.max(160, window.innerHeight - (r.bottom + 6) - 16) }
+    // Same place → same state object, so a re-measure never re-renders the app by itself.
+    setSessionsFiltersAnchor(cur =>
+      cur && cur.left === next.left && cur.top === next.top && cur.maxHeight === next.maxHeight ? cur : next)
   }, [])
   const setFiltrosButtonEl = useCallback((el: HTMLButtonElement | null) => {
     filtrosButtonElRef.current = el

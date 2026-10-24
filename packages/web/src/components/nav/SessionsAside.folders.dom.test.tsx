@@ -328,3 +328,16 @@ for (const sidebar of [288, 220, 390]) test(`ended folders reserve icon space an
   expect(grip.parentElement!.style.paddingLeft).toBe('8px')
   expect(grip.querySelector('svg')).not.toBeNull()
 })
+
+test('the ⋮ button hands the caller ONE stable ref across re-renders (no update loop on /sessions)', async () => {
+  // App measures the filters anchor into state from this ref; an inline ref re-ran it every render
+  // and looped ("Maximum update depth exceeded"). Re-render with a fresh caller callback each time.
+  const seen: (HTMLButtonElement | null)[] = []
+  const draw = async () => {
+    await act(async () => root.render(<MemoryRouter><SessionsAside rows={fleet} lang="en" filters={filters} activeOnly={false}
+      loading={false} unsupported={false} finishedTasks={[]} hideNew filtersButtonRef={el => { seen.push(el) }} /></MemoryRouter>))
+  }
+  await draw(); await draw(); await draw()
+  expect(seen.filter(Boolean)).toHaveLength(1)
+  expect(seen.filter(el => el === null)).toHaveLength(0)
+})
