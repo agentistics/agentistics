@@ -2,7 +2,8 @@ import { IconButton } from '../sessions/RepoSearchView'
 import { ActionNotice } from '../sessions/ActionNotice'
 import { hasLeaderTitle, sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
 import { useEscapeOwner } from '../../lib/overlayStack'
-import { loadClosedFleet, needsClosedFleet } from '../../lib/fleet'
+import { loadClosedFleet, needsClosedFleet, nudgeFleet } from '../../lib/fleet'
+import { TEAM_MOVE, TEAM_UNLINK, leaderPickerEntries, looseFacts, moveSessionTeam, teamMenuExtras } from '../../lib/teamMenu'
 /**
  * SessionsAside — the fleet, in the sidebar's body.
  *
@@ -581,6 +582,8 @@ export function SessionsAside({
   /** The "Mover para grupo…" picker opened from a session row's own context menu — also
    *  `SessionRowMenu`, listing the existing groups plus "Novo grupo…". */
   const [groupPicker, setGroupPicker] = useState<{ id: string; x: number; y: number } | null>(null)
+  /** "Mover para a equipe de…" — the leader picker, anchored where the row menu was. */
+  const [teamPicker, setTeamPicker] = useState<{ id: string; x: number; y: number } | null>(null)
   /** Which group heading is a live drop target, and which grouped row (for reordering within a
    *  group) — read from the native drag payload (`dragReorder.ts`), not from a dragged row's own
    *  component state, because the source can be a pinned row, an automatic-section row or another
@@ -744,6 +747,16 @@ export function SessionsAside({
     if (action.startsWith('session-role:')) {
       const target = rows.find(r => r.id === id)
       setSessionRole(target ? sessionIdentityKey(target) : id, action.slice('session-role:'.length) as SessionRole | null)
+      setMenu(null)
+      return
+    }
+    if (action === TEAM_UNLINK) {
+      setMenu(null)
+      void moveSessionTeam(id, null, lang).then(out => { setNotice(out.message); if (out.ok) nudgeFleet() })
+      return
+    }
+    if (action === TEAM_MOVE) {
+      setTeamPicker({ id, x: menu.x, y: menu.y })
       setMenu(null)
       return
     }
@@ -1854,7 +1867,19 @@ export function SessionsAside({
               // trailing slots sit in the same columns as the rows inside the cards above.
               <div data-team-loose style={{ padding: '0 5px' }}>
                 <div style={sectionHeading}>{pt ? 'Sem líder' : 'No leader'}</div>
-                {shownLoose.map(r => renderLine(r))}
+                {/* An orphan says what it is — its role and its project / who started it — with the same
+                    role chip the rest of the list wears, so it can be told apart without opening it. */}
+                {shownLoose.map(r => {
+                  const facts = looseFacts(r, rows, pt)
+                  return renderLine(r, {
+                    facts: (
+                      <>
+                        <RoleChip role={roleOfRow(r)} pt={pt} />
+                        {facts && <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{facts}</span>}
+                      </>
+                    ),
+                  })
+                })}
               </div>
             )}
             {shownTeams.length === 0 && shownLoose.length === 0 && (
@@ -2048,6 +2073,10 @@ export function SessionsAside({
                 return [{ action: PIN_TOGGLE, label: on ? (pt ? 'Desafixar' : 'Unpin') : (pt ? 'Fixar no topo' : 'Pin to the top'), enabled: true }]
               })(),
               ...roleExtras(rows.find(r => r.id === menu.id), pt),
+              ...(() => {
+                const r = rows.find(x => x.id === menu.id)
+                return teamMenuExtras(r, r ? isLeaderRow(r) : false, teamsAll.teams.map(t => t.leader), pt)
+              })(),
               ...notifyExtras(rows.find(r => r.id === menu.id), mutedKeys, pt),
             ],
           ), pt, !isMobile)}
@@ -2084,6 +2113,23 @@ export function SessionsAside({
           onClose={() => setGroupPicker(null)}
         />
       )}
+
+      {/* "Mover para a equipe de…" — the live leaders (never the session itself nor the leader it is
+          already with), anchored where the menu was; the server applies the team rule. */}
+      {teamPicker && (() => {
+        const target = rows.find(r => r.id === teamPicker.id)
+        return (
+          <SessionRowMenu
+            x={teamPicker.x} y={teamPicker.y}
+            entries={target ? leaderPickerEntries(target, teamsAll.teams.map(t => t.leader), pt) : []}
+            onPick={leaderId => {
+              setTeamPicker(null)
+              void moveSessionTeam(teamPicker.id, leaderId, lang).then(out => { setNotice(out.message); if (out.ok) nudgeFleet() })
+            }}
+            onClose={() => setTeamPicker(null)}
+          />
+        )
+      })()}
 
       {/* A group's own "⋮" — rename / delete / reorder. Reuses `SessionRowMenu`, anchored under the
           button rather than at a pointer position (there is no right-click gesture on a heading).

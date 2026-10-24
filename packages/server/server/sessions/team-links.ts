@@ -123,6 +123,9 @@ export type TeamMoveRefusal = 'no_such_session' | 'no_such_leader' | 'not_a_lead
 
 export type TeamMovePlan = { ok: true; id: string; patch: ParentPatch } | { ok: false; code: TeamMoveRefusal }
 
+/** A refusal (a plan result, never a notification code). */
+const refuse = (code: TeamMoveRefusal): TeamMovePlan => ({ ok: false, code })
+
 /**
  * The person's manual move. `leaderId` absent = UNLINK (take it out of its team, to "No leader");
  * present = MOVE into that leader's team. `isLeader` is the role store's answer for a row.
@@ -135,17 +138,17 @@ export function planTeamMove(
   isLeader: (r: TeamRow) => boolean,
 ): TeamMovePlan {
   const row = rows.find(r => r.id === sessionId)
-  if (!row) return { ok: false, code: 'no_such_session' }
+  if (!row) return refuse('no_such_session')
   if (leaderId === undefined) {
-    if (!row.parentSessionId && !row.parentConversationId) return { ok: false, code: 'no_leader' }
+    if (!row.parentSessionId && !row.parentConversationId) return refuse('no_leader')
     return { ok: true, id: row.id, patch: ROOT_PATCH }
   }
   const leader = rows.find(r => r.id === leaderId)
-  if (!leader) return { ok: false, code: 'no_such_leader' }
-  if (leader.id === row.id) return { ok: false, code: 'same_session' }
-  if (!isLeader(leader)) return { ok: false, code: 'not_a_leader' }
-  if (isLeader(row)) return { ok: false, code: 'is_leader' }
-  if (namesParent(row, leader)) return { ok: false, code: 'already_there' }
+  if (!leader) return refuse('no_such_leader')
+  if (leader.id === row.id) return refuse('same_session')
+  if (!isLeader(leader)) return refuse('not_a_leader')
+  if (isLeader(row)) return refuse('is_leader')
+  if (namesParent(row, leader)) return refuse('already_there')
   return { ok: true, id: row.id, patch: parentPatchFor(leader) }
 }
 

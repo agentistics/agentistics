@@ -2176,6 +2176,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { teamOp, defaultIsLeader } = await import('./sessions/team-links-io')
       const isLeader = await defaultIsLeader()
       const out = await teamOp(body, { isLeader })
+      if (out.reply.ok) void import('./sessions/fleet-web').then(m => m.kickFleet(out.reply.ok ? out.reply.id : undefined)).catch(() => {})
       return json(out.reply, out.status)
     }
     // AWAY MODE — the owner is out; sessions started meanwhile are told so (`away.ts`). The browser and

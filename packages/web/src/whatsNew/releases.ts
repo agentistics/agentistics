@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.143.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Ao passar a liderança, fica um só líder com a equipe inteira (antiga e nova); o líder anterior é encerrado quando fica ocioso.',
+        en: 'A leader hand-off leaves one leader with the whole team (old and new); the previous leader is closed once it goes idle.',
+      },
+      {
+        pt: 'Um líder aberto por outro líder fica no topo com os demais líderes, nunca dentro da equipe de outro.',
+        en: 'A leader started by another leader stays at the top with the other leaders, never inside another team.',
+      },
+      {
+        pt: 'Novas ações no menu da sessão: "Tirar da equipe" e "Mover para a equipe de…".',
+        en: 'New session menu actions: "Take out of the team" and "Move to a leader\'s team…".',
+      },
+      {
+        pt: 'Sessões em "Sem líder" mostram o papel e o projeto de cada uma.',
+        en: 'Sessions under "No leader" show each one\'s role and project.',
+      },
+    ],
+  },
   '2.143.0': {
     features: [
       {

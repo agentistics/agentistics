@@ -94,7 +94,8 @@ export async function moveTeam(
 ): Promise<TeamMovePlan> {
   const plan = planTeamMove(await read(), sessionId, leaderId, isLeader)
   if (!plan.ok) return plan
-  return (await patch(plan.id, plan.patch)) ? plan : { ok: false, code: 'no_such_session' }
+  // The row vanished between the read and the write: the same answer as never having found it.
+  return (await patch(plan.id, plan.patch)) ? plan : planTeamMove([], sessionId, leaderId, isLeader)
 }
 
 const TEAM_MESSAGES: Record<string, { en: string; pt: string }> = {
