@@ -791,8 +791,16 @@ restarting the server retries orphan repair. Open session tabs remain browser-lo
 
 A spawn from a verified parent inherits its board task, sidebar folder and recorded canonical approval
 mode when those options are omitted. A worker does not inherit the parent's subtask: pass its own
-`--subtask` when it has one. An explicit task, folder or mode takes precedence. CLI start and batch
-accept `--mode default|accept-edits|plan|no-questions`; batch applies it to subsequent `--session`
+`--subtask` when it has one. An explicit task, folder or mode takes precedence.
+
+A worker stays filed on an inherited task when its working directory belongs to another repository
+or is outside a repository; the filing result includes a warning. An explicit `--task` still requires a matching
+repository for a worker; a mismatch refuses the launch and lists known checkouts. Short `org/repo`
+task names match full remotes by organization and repository; explicit remote hosts remain distinct.
+Missing directories and occupied main checkouts still refuse unless sharing is explicitly allowed
+for the latter with `--shared-cwd`.
+
+CLI start and batch accept `--mode default|accept-edits|plan|no-questions`; batch applies it to subsequent `--session`
 entries and can omit `--task` when a verified parent supplies one. Approval modes and briefing roles
 are separate: role `auto` does not select an approval mode, and Claude's native classifier `auto` is
 not converted to `no-questions`. A spawn that cannot apply an approval mode through either its terminal flags or structured driver refuses the launch.

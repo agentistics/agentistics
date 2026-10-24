@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { planFiling, type FilingInput, type FilingPlan } from './spawn-filing'
-import { filingJson, filingRow, spawnRole } from './spawn-row'
+import { filingJson, filingRow, spawnRole, WARNING_TEXT } from './spawn-row'
 import type { Subtask, Task } from './task-model'
 
 const T = (id: string, title: string): Task => ({ id, title, status: 'todo', createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' })
@@ -31,6 +31,17 @@ const TABLE: Array<[string, Partial<FilingInput>, { task?: string; taskId?: stri
 ]
 
 describe('one plan, one row', () => {
+  test('inherited repository mismatch is rendered and retained in JSON filing output', () => {
+    const plan = planFiling(input({
+      caller: { id: 'parent', harness: 'claude', cwd: '/parent', createdAt: '2026-10-01T00:00:00Z', taskId: 't-1' },
+      book: { tasks: [{ ...T('t-1', 'Atomic spawn'), repo: 'agentistics/agentistics' }], subtasks: [] },
+      repoOf: () => ({ remote: 'github.com/agentistics/agentistics-engine', worktree: true }),
+    }))
+    if (!plan.ok) throw new Error(`expected ok, got ${plan.code}`)
+    expect(filingRow(plan)).toEqual({ task: 'Atomic spawn', taskId: 't-1' })
+    expect(filingJson(plan).warnings).toContain('inherited_task_repo_mismatch')
+    expect(WARNING_TEXT.inherited_task_repo_mismatch).toContain('still filed on that task')
+  })
   for (const [name, over, want] of TABLE) {
     test(name, () => {
       const plan = planFiling(input(over)) as Extract<FilingPlan, { ok: true }>
