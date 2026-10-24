@@ -8,6 +8,7 @@
 .clean-dialog > :not(.clean-content) { flex-shrink: 0; }
 .clean-muted { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 .clean-number { display: block; font-size: 36px; line-height: 1.15; color: var(--anthropic-orange); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.clean-measured { display: block; font-size: 13px; margin-top: 2px; font-variant-numeric: tabular-nums; }
 .clean-found { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
 .clean-counters { display: flex; gap: 20px; text-align: right; }
 .clean-counters div { display: flex; flex-direction: column; gap: 3px; }

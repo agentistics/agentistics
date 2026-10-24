@@ -9,11 +9,11 @@ const scan: CleanScanState = { id: 'scan', state: 'scanning', step: 2, label: 'm
   log: [{ at: 1000, state: 'done', name: 'completed-name', bytes: 1024 }, { at: 1100, state: 'running', name: 'running-name' }, { at: 1200, state: 'queued', name: 'queued-project' }] }
 test('live scan shows localized bytes, counters, step, ETA, progress and all three log states', () => {
   const html = renderToStaticMarkup(<CleanScanView scan={scan} lang="pt" />)
-  for (const label of ['Encontrado até agora', '1,5 GB', 'Etapa', '46%', 'cerca de 40 s', 'O que está acontecendo', 'completed-name', 'medindo ', 'na fila: ', 'role="log"', 'value="0.46"']) expect(html).toContain(label)
+  for (const label of ['Dá para liberar até agora', '1,5 GB', 'Etapa', '46%', 'cerca de 40 s', 'O que está acontecendo', 'completed-name', 'medindo ', 'na fila: ', 'role="log"', 'value="0.46"']) expect(html).toContain(label)
 })
 test('the same state is readable in English, and first render has no stale progress', () => {
   const html = renderToStaticMarkup(<CleanScanView scan={scan} lang="en" />)
-  for (const label of ['Found so far', '1.5 GB', 'Step', 'about 40 s', 'queued: ']) expect(html).toContain(label)
+  for (const label of ['Can be freed so far', '1.5 GB', 'Step', 'about 40 s', 'queued: ']) expect(html).toContain(label)
   const initial = renderToStaticMarkup(<CleanScanView scan={null} lang="en" />)
   expect(initial).toContain('0 B')
   expect(initial).toContain('estimating time')
@@ -61,4 +61,10 @@ test('result summary distinguishes cleanup candidates from all rows including ke
     expect(html).not.toContain('39')
     expect(html).toContain(`<span style="white-space:nowrap">${new Date(plan.scannedAt).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>`)
   }
+})
+
+test('a kept folder shows its MEASURED size, never 0 B (LIMPEZA.ZERO regression)', () => {
+  const html = renderToStaticMarkup(<CleanScanView scan={{ ...scan, foundBytes: 0, measuredBytes: 3 * 1024 ** 3,
+    log: [{ at: 1000, state: 'done', name: 'aipe', bytes: 2 * 1024 ** 3, kept: true }, { at: 1100, state: 'done', name: 'old', bytes: 1024 ** 3, freeBytes: 512 * 1024 ** 2 }, { at: 1200, state: 'done', name: 'slow', bytes: 0, unknown: true }] }} lang="pt" />)
+  for (const label of ['2 GB · mantido', '1 GB · libera 512 MB', 'não medido', 'de 3 GB medidos']) expect(html).toContain(label)
 })

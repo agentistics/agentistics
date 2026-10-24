@@ -23,6 +23,8 @@ export interface WorktreeFacts {
   lastActivityMs?: number | null
   sizeBytes: number
   nodeModulesBytes: number
+  /** du could not answer (timed out, printed nothing): sizeBytes is NOT a measured 0. */
+  sizeUnknown?: boolean
 }
 
 export type CleanAction =
@@ -88,7 +90,7 @@ export function formatPlan(items: readonly CleanItem[], lang: 'en' | 'pt' = 'en'
     if (i.facts.repo !== repo) { repo = i.facts.repo; out.push(short(repo)) }
     const a = i.action
     const label = a.kind === 'keep' ? w[a.reason] : w[a.kind]
-    const size = a.kind === 'keep' ? fmtBytes(i.facts.sizeBytes) : fmtBytes(a.frees)
+    const size = i.facts.sizeUnknown ? '?' : a.kind === 'keep' ? fmtBytes(i.facts.sizeBytes) : fmtBytes(a.frees)
     out.push(`  ${a.kind === 'keep' ? ' ' : '•'} ${short(i.facts.path)}${i.facts.branch ? ` [${i.facts.branch}]` : ''}  ${size}  ${label}`)
   }
   const r = reclaimable(items)

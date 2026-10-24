@@ -5,7 +5,7 @@ import { type CleanItem } from './clean-plan'
 export const CLEAN_LOG_LIMIT = 20
 export function newCleanScan(id: string, now: number): CleanScanState {
   return { id, state: 'scanning', step: 1, label: 'discovering', progress: 0, etaMs: null,
-    startedAt: now, elapsedMs: 0, foundBytes: 0, itemCount: 0, projectCount: 0, projectTotal: 0, log: [], background: false }
+    startedAt: now, elapsedMs: 0, foundBytes: 0, measuredBytes: 0, itemCount: 0, projectCount: 0, projectTotal: 0, log: [], background: false }
 }
 export function scanLog(state: CleanScanState, entry: CleanScanState['log'][number]): void {
   state.log = [...state.log, entry].slice(-CLEAN_LOG_LIMIT)
@@ -26,7 +26,7 @@ export function wireCleanPlan(items: readonly CleanItem[], scan: Pick<CleanScanS
     return { id: `${f.repo}:${f.path}:${kind}`, repo: f.repo, project: basename(f.repo), path: f.path,
       name: basename(f.path) + (kind === 'node-modules' ? '/node_modules' : ''), kind,
       bytes: kind === 'keep' ? f.sizeBytes : i.action.kind === 'keep' ? 0 : i.action.frees,
-      reason, lastActivityMs: f.lastActivityMs ?? f.lastCommitMs }
+      reason, lastActivityMs: f.lastActivityMs ?? f.lastCommitMs, ...(f.sizeUnknown ? { bytesUnknown: true } : {}) }
   })
   return { items: rows, reclaimable: rows.reduce((sum, i) => i.kind === 'keep' ? sum : { bytes: sum.bytes + i.bytes, count: sum.count + 1 }, { bytes: 0, count: 0 }),
     scannedAt: now, elapsedMs: Math.max(0, now - scan.startedAt), scanId: scan.id }

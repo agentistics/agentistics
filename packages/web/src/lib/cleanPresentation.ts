@@ -7,6 +7,19 @@ export function cleanSize(bytes: number, lang: 'pt' | 'en'): string {
   const divisor = unit === 'GB' ? 1024 ** 3 : unit === 'MB' ? 1024 ** 2 : unit === 'KB' ? 1024 : 1
   return `${new Intl.NumberFormat(lang, { maximumFractionDigits: unit === 'GB' ? 1 : 0 }).format(n / divisor)} ${unit}`
 }
+/** A folder du could not measure says so; its stored 0 is not a size. */
+export function cleanItemSize(item: Pick<CleanWebItem, 'bytes' | 'bytesUnknown'>, lang: 'pt' | 'en'): string {
+  return item.bytesUnknown ? (lang === 'pt' ? 'não medido' : 'not measured') : cleanSize(item.bytes, lang)
+}
+/** One finished line of the live scan: the MEASURED size, then what happens to it. */
+export function cleanLogSize(line: { bytes?: number; kept?: boolean; freeBytes?: number; unknown?: boolean }, lang: 'pt' | 'en'): string {
+  const pt = lang === 'pt'
+  if (line.unknown) return pt ? 'não medido' : 'not measured'
+  const size = cleanSize(line.bytes ?? 0, lang)
+  if (line.kept) return `${size} · ${pt ? 'mantido' : 'kept'}`
+  if (line.freeBytes !== undefined && line.freeBytes !== line.bytes) return `${size} · ${pt ? 'libera' : 'frees'} ${cleanSize(line.freeBytes, lang)}`
+  return size
+}
 export function cleanName(item: Pick<CleanWebItem, 'name' | 'path' | 'kind'>): string {
   const name = item.name || (item.path.replace(/\\/g, '/').replace(/\/$/, '').split('/').pop() || item.path)
   return item.kind === 'node-modules' ? name.replace(/\/node_modules$/, '') : name
