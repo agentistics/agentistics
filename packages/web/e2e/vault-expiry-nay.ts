@@ -26,6 +26,23 @@ const testApi = (p: Page, code: string) => p.evaluate(async code => {
   const api = (window as any).vaultTest
   return await new Function('api', `return (async () => { ${code} })()`)(api)
 }, code)
+const buttonsFit = async (p: Page, label: string) => {
+  const r = await p.locator('[data-nay-notice="vault-expiry"]').evaluate(el => {
+    const cs = getComputedStyle(el), c = el.getBoundingClientRect()
+    const padBottom = parseFloat(cs.paddingBottom), border = parseFloat(cs.borderBottomWidth)
+    const shell = el.querySelector('[data-nay-shell]') as HTMLElement
+    const body = shell.firstElementChild as HTMLElement, bp = parseFloat(getComputedStyle(body).paddingBottom)
+    const boxes = ['[data-vault-extend]', '[data-vault-lock-now]'].map(q => (el.querySelector(q) as HTMLElement).getBoundingClientRect())
+    return { card: { top: c.top, bottom: c.bottom, left: c.left, right: c.right }, padBottom, border, bp,
+      boxes: boxes.map(b => ({ top: b.top, bottom: b.bottom, left: b.left, right: b.right })), clipped: shell.scrollHeight > shell.clientHeight + 1 }
+  })
+  const need = Math.max(r.padBottom, r.bp, 12) // the card's own padding (12) below the buttons
+  for (const b of r.boxes) {
+    assert(b.top >= r.card.top && b.left >= r.card.left && b.right <= r.card.right, `${label}: button inside card ${JSON.stringify(r)}`)
+    assert(r.card.bottom - r.border - b.bottom >= need - 0.5, `${label}: >= ${need}px below buttons ${JSON.stringify(r)}`)
+  }
+  assert(!r.clipped, `${label}: shell must not clip its content ${JSON.stringify(r)}`)
+}
 const fixtureRow = { id: 'nay-fixture', conversationId: 'nay-fixture', title: 'Conversa com a Nay', harness: 'claude',
   model: 'claude-sonnet-5-5', cwd: '/fixture/.agentistics/nay-chat', state: 'waiting', startedAt: Date.now(),
   actionable: true, verbs: [{ action: 'prompt', enabled: true, label: 'Enviar' }], chatTurns: [], source: 'structured', engine: 'structured', terminal: false }
@@ -96,6 +113,7 @@ try {
     for (const theme of ['light', 'dark']) {
       await page.evaluate(t => document.documentElement.setAttribute('data-theme', t), theme)
       await page.waitForTimeout(250)
+      await buttonsFit(page, `${width} ${theme} idle`)
       await page.screenshot({ path: `${output}/polish-${width}-${theme}-idle.png` })
     }
     // Existing queue/count: the single visible card includes another waiting occurrence.
@@ -183,6 +201,7 @@ try {
     for (const theme of ['light', 'dark']) {
       await page.evaluate(t => document.documentElement.setAttribute('data-theme', t), theme)
       await page.waitForTimeout(250)
+      await buttonsFit(page, `${width} ${theme} pending`)
       await page.screenshot({ path: `${output}/polish-${width}-${theme}-pending.png` })
     }
     hello = 'ok'; releaseHello!()

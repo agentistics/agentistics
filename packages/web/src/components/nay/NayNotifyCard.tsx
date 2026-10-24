@@ -328,7 +328,11 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
     const card = cardRef.current
     if (!card || embedded) return null
     const f = follow.current
-    const want: Size = { w: card.offsetWidth, h: card.scrollHeight }
+    // The NATURAL height, border included: a max-height written by a previous frame makes the shell
+    // shrink to it, so `scrollHeight` then just echoes the cap (and leaves out the 2px border), and the
+    // actions row ends flush with the card edge. Lift the cap to measure, `writeFrame` puts it back.
+    card.style.maxHeight = ''
+    const want: Size = { w: card.offsetWidth, h: card.offsetHeight }
     cardSize.current = { w: card.offsetWidth, h: card.offsetHeight }
     const b = buttonNow()
     const reduced = prefersReducedMotion()
