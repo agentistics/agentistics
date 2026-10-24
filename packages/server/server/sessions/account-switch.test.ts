@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   allSwitchOptions, claudeProjectDir, crossSwitchPrompt, decideCrossSwitch, decideSwitch, detectLimitInTail, planSwitchCopies,
-  switchMessage, switchOptions, switchSupported, SWITCH_LAYOUT,
+  switchMessage, switchOptions, switchSupported, SWITCH_LAYOUT, unavailableSwitchTargets,
 } from './account-switch'
 import type { SpawnAccountContext, SpawnAccountRow } from './spawn-account'
 import { HARNESS_ORDER } from '@agentistics/core'
@@ -177,6 +177,35 @@ describe('allSwitchOptions (v2: every harness)', () => {
   })
   test('nothing with the flag off', () => {
     expect(allSwitchOptions({ ...base, context: { enabled: false, accounts }, startable: ['claude', 'codex'] })).toEqual([])
+  })
+})
+
+describe('unavailableSwitchTargets (CONTA.LIMITES)', () => {
+  const accounts = [
+    ...two,
+    row({ id: 'acc_hidden', root: '/r/h', available: false, firstSeen: 3 }),
+    row({ id: 'acc_out', root: '/r/o', bound: false, firstSeen: 4 }),
+    row({ id: 'acc_old', root: '/r/old', retired: true }),
+    row({ id: 'acc_k', harness: 'codex', root: null, firstSeen: 5 }),
+    row({ id: 'acc_kimi', harness: 'kimi', root: null, firstSeen: 6 }),
+    row({ id: 'acc_cop', harness: 'copilot', root: null, firstSeen: 7 }),
+  ]
+  const base = { harness: 'claude' as const, currentAccountId: 'acc_a', meta: [{ id: 'acc_hidden', label: 'h@x', plan: 'Max' }] }
+  test('every live account the options leave out, with the reason; current and retired never listed', () => {
+    const startable = ['claude', 'codex'] as const
+    const offered = allSwitchOptions({ ...base, agentCaller: false, context: ctx(accounts), startable })
+    expect(offered.map(o => o.id)).toEqual(['acc_b', 'acc_k'])
+    const out = unavailableSwitchTargets({ ...base, context: ctx(accounts), startable, offered })
+    expect(out.map(o => `${o.id}:${o.reason}`)).toEqual(['acc_hidden:not_agentic', 'acc_out:signed_out', 'acc_kimi:harness_unavailable', 'acc_cop:harness_unavailable'])
+    expect(out[0]).toMatchObject({ label: 'h@x', plan: 'Max', harness: 'claude' })
+  })
+  test('a session whose harness cannot carry its conversation: its own other accounts say so', () => {
+    const own = [row({ id: 'acc_g1', harness: 'gemini' }), row({ id: 'acc_g2', harness: 'gemini', root: '/r/g2' })]
+    const out = unavailableSwitchTargets({ harness: 'gemini', currentAccountId: 'acc_g1', meta: [], context: ctx(own), startable: ['gemini'], offered: [] })
+    expect(out).toEqual([{ id: 'acc_g2', harness: 'gemini', label: 'acc_g2', reason: 'cant_carry' }])
+  })
+  test('nothing with the flag off', () => {
+    expect(unavailableSwitchTargets({ ...base, context: { enabled: false, accounts }, startable: ['claude'], offered: [] })).toEqual([])
   })
 })
 

@@ -166,6 +166,44 @@ export function allSwitchOptions(o: {
   return [...same, ...others]
 }
 
+/** Why an account of this machine is NOT among a session's switch targets (CONTA.LIMITES). */
+export type SwitchUnavailableReason = 'not_agentic' | 'signed_out' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
+
+export interface SwitchUnavailable extends Omit<SwitchOption, 'recommended'> { reason: SwitchUnavailableReason }
+
+/**
+ * Every live account that `allSwitchOptions` did NOT offer, each with the one reason a person can act
+ * on — so the picker can list the whole machine's accounts and say why a row cannot be chosen,
+ * instead of silently leaving it out. The session's own account and retired accounts are not listed.
+ * Order: the session's harness first, then `startable`'s order, then any other harness.
+ */
+export function unavailableSwitchTargets(o: {
+  harness: HarnessId
+  currentAccountId?: string
+  context: SpawnAccountContext
+  meta: readonly SwitchAccountMeta[]
+  startable: readonly HarnessId[]
+  offered: readonly { id: string }[]
+}): SwitchUnavailable[] {
+  if (!o.context.enabled) return []
+  const current = currentAccountOf(o.harness, o.currentAccountId, o.context.accounts)
+  const offered = new Set(o.offered.map(x => x.id))
+  const rank = (h: HarnessId) => h === o.harness ? -1 : (o.startable.indexOf(h) === -1 ? 999 : o.startable.indexOf(h))
+  const out: SwitchUnavailable[] = []
+  for (const a of o.context.accounts) {
+    if (a.retired || a.id === current || offered.has(a.id)) continue
+    const reason: SwitchUnavailableReason =
+      a.harness === o.harness && !switchSupported(a.harness) ? 'cant_carry'
+        : a.harness !== o.harness && !o.startable.includes(a.harness) ? 'harness_unavailable'
+          : !a.available ? 'not_agentic'
+            : !a.bound ? 'signed_out'
+              : 'unavailable'
+    const m = o.meta.find(x => x.id === a.id)
+    out.push({ id: a.id, harness: a.harness, label: m?.label ?? a.id, ...(m?.plan ? { plan: m.plan } : {}), reason })
+  }
+  return out.sort((x, y) => rank(x.harness) - rank(y.harness) || (firstSeen(o.context.accounts, x.id) - firstSeen(o.context.accounts, y.id)))
+}
+
 export type CrossDecision =
   | { ok: true; target: { id: string; root: string | null } }
   | { ok: false; reason: SwitchRefusal; detail: string }

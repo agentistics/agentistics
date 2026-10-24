@@ -4,15 +4,21 @@
  *
  * Two entries, ONE dialog: the notice above the composer when the conversation's last turn was
  * refused by the account's usage limit, and "Switch account" in the session's own menu, any time.
- * Built from the app's own pieces: `ConfirmModal`, `Select`, `Checkbox` (settings primitives) and the
- * handoff band's notice styling (`handoffWarning.css`), so it reads like every other notice there.
+ * Both show the SAME picker (CONTA.LIMITES): every account as a "Plan usage" row with its rings, also
+ * reachable inline from the session panel's "Usage limits" card. Built from the app's own pieces:
+ * `ConfirmModal`, `Checkbox`, `DialogActions`/`dialogButtonStyle` (settings primitives), the plan
+ * list's `PlanUsageRowCells`, and the handoff band's notice styling (`handoffWarning.css`).
  */
-import { useCallback, useEffect, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Users, X } from 'lucide-react'
-import { Checkbox, ConfirmModal, Select } from '../../pages/settings/primitives'
+import type { PlanLimits } from '@agentistics/core'
+import { Checkbox, ConfirmModal, DialogActions, dialogButtonStyle } from '../../pages/settings/primitives'
+import { PLAN_ROW_GRID, PlanUsageRowCells } from '../PlanLimitMeter'
+import { usePlanLimits, subscriptionName } from '../../lib/planLimits'
+import { defaultPick, pickerRows } from '../../lib/accountPicker'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import {
-  defaultTarget, fetchSwitchInfo, harnessName, isHandoff, noticeTitle, optionLabel, postSwitch, resetPhrase,
-  showLimitNotice, switchHarnesses, type SwitchInfo,
+  canSwitch, fetchSwitchInfo, harnessName, noticeTitle, postSwitch, resetPhrase, showLimitNotice, type SwitchInfo,
 } from '../../lib/accountSwitch'
 import { pushNotification } from '../../lib/notifications'
 import './handoffWarning.css'
@@ -46,6 +52,128 @@ export function useSwitchInfo(id: string | undefined, lang: string, enabled = tr
   return [info, reload]
 }
 
+/**
+ * The switch's whole state — the pick, the re-send flag, the call — shared by the dialog (menu +
+ * limit notice) and the inline picker in the session panel's "Usage limits" card, so the two can
+ * never disagree about what a confirm does.
+ */
+function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
+  open: boolean; sessionId: string; info: SwitchInfo; lang: string; fromLimit: boolean
+  onDone: (newId: string | undefined) => void
+}) {
+  const pt = lang === 'pt'
+  const plan = usePlanLimits()
+  const rows = pickerRows(info, plan.limits, plan.now, pt ? 'pt' : 'en')
+  const [pick, setPick] = useState('')
+  const pending = fromLimit ? info.limit?.pendingPreview : undefined
+  const [resend, setResend] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // Reset on OPEN and when the set of pickable rows really changes — never on a poll that returns the
+  // same list as a new array, or the person's pick snaps back to the default while they are choosing.
+  const pickable = rows.filter(r => r.kind === 'option').map(r => r.key)
+  const optionsKey = pickable.join(',')
+  useEffect(() => {
+    if (!open) return
+    setResend(true); setError(null); setBusy(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+  useEffect(() => {
+    if (!open) return
+    setPick(p => (p && pickable.includes(p) ? p : defaultPick(rows)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, optionsKey])
+  const chosen = rows.find(r => r.key === pick && r.kind === 'option')
+  const handoff = !!chosen?.handoff
+  const message = !chosen
+    ? (pt ? 'Escolha uma conta disponível na lista.' : 'Pick an available account from the list.')
+    : handoff
+      ? (pt
+        ? `Outro harness começa uma conversa NOVA em ${harnessName(chosen.harness)}, na mesma pasta, tarefa e papel, com um resumo desta (objetivo, estado, últimos turnos, arquivos tocados). Esta sessão só é encerrada depois que a nova estiver rodando.`
+        : `Another harness starts a NEW conversation on ${harnessName(chosen.harness)}, in the same folder, task and role, briefed with a summary of this one (goal, state, last turns, files touched). This session is ended only once the new one is running.`)
+      : (pt
+        ? `A sessão é encerrada e a mesma conversa continua na conta ${chosen.label}. A conversa é copiada, não movida: o histórico na conta atual continua lá.`
+        : `The session is ended and the same conversation continues on ${chosen.label}. The conversation is copied, not moved: the history on the current account stays there.`)
+  async function confirm() {
+    if (!chosen) return
+    setBusy(true); setError(null)
+    const out = await postSwitch(sessionId, chosen.id, !!pending && resend, lang, handoff ? chosen.harness : undefined)
+    setBusy(false)
+    if (!out.ok) { setError(out.message); return }
+    pushNotification({ type: 'success', title: handoff ? (pt ? 'Continuado em outro harness' : 'Continued on another harness') : (pt ? 'Conta trocada' : 'Account switched'), message: out.message })
+    onDone(out.id)
+  }
+  const confirmLabel = busy
+    ? (handoff ? (pt ? 'Iniciando…' : 'Starting…') : (pt ? 'Trocando…' : 'Switching…'))
+    : (handoff ? (pt ? `Continuar em ${harnessName(chosen?.harness)}` : `Continue on ${harnessName(chosen?.harness)}`) : (pt ? 'Confirmar troca' : 'Confirm switch'))
+  return { rows, plan, pick, setPick, chosen, message, pending, resend, setResend, busy, error, confirm, confirmLabel }
+}
+
+type SwitchFlow = ReturnType<typeof useSwitchFlow>
+
+/**
+ * The picker: every account as a "Plan usage" row (same cells, `PlanUsageRowCells`), the current one
+ * marked and not pickable, the ones that cannot be picked dimmed with the reason in words.
+ */
+export function AccountPicker({ flow, lang }: { flow: SwitchFlow; lang: string }) {
+  const pt = lang === 'pt'
+  const l = pt ? 'pt' : 'en'
+  const chip = (text: string, tone: string) => (
+    <span style={{ flexShrink: 0, fontSize: 10.5, fontWeight: 700, padding: '1px 6px', borderRadius: 999, color: tone, border: `1px solid ${tone}`, whiteSpace: 'nowrap' }}>{text}</span>
+  )
+  return (
+    <div role="radiogroup" aria-label={pt ? 'Contas' : 'Accounts'} data-account-picker style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {flow.rows.map(r => {
+        const name = subscriptionName(r.harness as PlanLimits['harness'], r.label || undefined)
+        const cells = (
+          <PlanUsageRowCells
+            harness={r.harness as PlanLimits['harness']} name={name} plan={r.plan} limits={r.limits} now={flow.plan.now} lang={l}
+            {...(r.reason ? { note: r.reason } : {})}
+            {...(r.kind === 'current' ? { tag: chip(pt ? 'Agora' : 'Current', 'var(--text-secondary)') }
+              : r.recommended && r.kind === 'option' ? { tag: chip(pt ? 'com folga' : 'has room', 'var(--accent-green)') } : {})}
+          />
+        )
+        const box: CSSProperties = { ...PLAN_ROW_GRID, padding: '8px 10px', borderRadius: 10, minHeight: 44, boxSizing: 'border-box', width: '100%', border: '1px solid var(--border)', textAlign: 'left', fontFamily: 'inherit', color: 'inherit' }
+        if (r.kind !== 'option') {
+          return (
+            <div key={r.key} data-account-row={r.key} data-account-row-kind={r.kind} aria-disabled
+              {...(r.kind === 'current' ? { 'data-account-switch-current': '' } : {})}
+              style={{ ...box, background: 'transparent', opacity: r.kind === 'current' ? 0.85 : 0.55 }}>
+              {cells}
+            </div>
+          )
+        }
+        const on = flow.pick === r.key
+        return (
+          <button key={r.key} type="button" role="radio" aria-checked={on} data-account-row={r.key} data-account-row-kind="option"
+            disabled={flow.busy} onClick={() => flow.setPick(r.key)}
+            style={{ ...box, cursor: flow.busy ? 'default' : 'pointer', background: on ? 'var(--anthropic-orange-dim)' : 'var(--ag-tint-2)', borderColor: on ? 'var(--anthropic-orange)' : 'var(--border)' }}>
+            {cells}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** What sits under the picker on both surfaces: the re-send choice and the server's refusal. */
+function SwitchExtras({ flow, lang }: { flow: SwitchFlow; lang: string }) {
+  const pt = lang === 'pt'
+  return <>
+    {flow.pending && (
+      <>
+        <Checkbox checked={flow.resend} onChange={flow.setResend} label={pt ? 'Reenviar a última mensagem na nova conta' : 'Re-send the last message on the new account'} />
+        {flow.resend && (
+          <blockquote style={{ margin: 0, padding: '6px 10px', borderLeft: '3px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, overflowWrap: 'anywhere' }}>
+            {flow.pending}
+          </blockquote>
+        )}
+      </>
+    )}
+    {flow.error && <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--accent-red)', overflowWrap: 'anywhere' }}>{flow.error}</p>}
+  </>
+}
+
 export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, onClose, onSwitched }: {
   open: boolean
   sessionId: string
@@ -58,106 +186,73 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
   onSwitched: (newId: string) => void
 }) {
   const pt = lang === 'pt'
-  const [target, setTarget] = useState('')
-  const [harness, setHarness] = useState('')
-  const pending = fromLimit ? info.limit?.pendingPreview : undefined
-  const [resend, setResend] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  // Reset on OPEN and when the set of options really changes — never on a poll that returns the same
-  // list as a new array, or the person's pick snaps back to the default while they are choosing.
-  const optionsKey = info.options.map(o => `${o.harness}:${o.id}`).join(',')
-  useEffect(() => {
-    if (!open) return
-    const first = defaultTarget(info.options)
-    setTarget(first); setHarness(info.options.find(o => o.id === first)?.harness ?? '')
-    setResend(true); setError(null); setBusy(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, optionsKey])
-  const harnesses = switchHarnesses(info)
-  const own = info.current?.harness
-  const accounts = info.options.filter(o => o.harness === harness)
-  /** Picking a harness lands on its recommended account, else its first. */
-  const pickHarness = (h: string) => {
-    setHarness(h)
-    const mine = info.options.filter(o => o.harness === h)
-    setTarget(defaultTarget(mine))
-  }
-  const chosen = info.options.find(o => o.id === target)
-  const handoff = isHandoff(info, chosen?.harness)
-  const from = [harnessName(own), info.current?.label].filter(Boolean).join(' · ')
-  const message = handoff
-    ? (pt
-      ? `Outro harness começa uma conversa NOVA em ${harnessName(chosen?.harness)}, na mesma pasta, tarefa e papel, com um resumo desta (objetivo, estado, últimos turnos, arquivos tocados). Esta sessão só é encerrada depois que a nova estiver rodando.`
-      : `Another harness starts a NEW conversation on ${harnessName(chosen?.harness)}, in the same folder, task and role, briefed with a summary of this one (goal, state, last turns, files touched). This session is ended only once the new one is running.`)
-    : (pt
-      ? `A sessão é encerrada e a mesma conversa continua${chosen ? ` na conta ${chosen.label}` : ' na outra conta'}. A conversa é copiada, não movida: o histórico na conta atual continua lá.`
-      : `The session is ended and the same conversation continues${chosen ? ` on ${chosen.label}` : ' on the other account'}. The conversation is copied, not moved: the history on the current account stays there.`)
-  async function confirm() {
-    if (!target) return
-    setBusy(true); setError(null)
-    const out = await postSwitch(sessionId, target, !!pending && resend, lang, chosen?.harness && chosen.harness !== own ? chosen.harness : undefined)
-    setBusy(false)
-    if (!out.ok) { setError(out.message); return }
-    pushNotification({ type: 'success', title: handoff ? (pt ? 'Continuado em outro harness' : 'Continued on another harness') : (pt ? 'Conta trocada' : 'Account switched'), message: out.message })
-    onClose()
-    if (out.id) onSwitched(out.id)
-  }
-  const label = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-secondary)' } as const
-  // The current account is SHOWN in its harness's list and can never be picked.
-  const accountOptions = [
-    ...(harness && harness === own && info.current?.id
-      ? [{ value: info.current.id, label: info.current.label ?? info.current.id, disabled: true, hint: pt ? 'atual' : 'current' }]
-      : []),
-    ...accounts.map(o => ({ value: o.id, label: optionLabel(o, pt) })),
-  ]
+  const flow = useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone: id => { onClose(); if (id) onSwitched(id) } })
   return (
     <ConfirmModal
       open={open}
       tone="default"
       icon={<Users size={18} />}
       title={pt ? 'Continuar em outra conta' : 'Continue on another account'}
-      message={message}
-      confirmLabel={busy
-        ? (handoff ? (pt ? 'Iniciando…' : 'Starting…') : (pt ? 'Trocando…' : 'Switching…'))
-        : (handoff ? (pt ? `Continuar em ${harnessName(chosen?.harness)}` : `Continue on ${harnessName(chosen?.harness)}`) : (pt ? 'Trocar conta' : 'Switch account'))}
+      message={flow.message}
+      confirmLabel={flow.confirmLabel}
       cancelLabel={pt ? 'Cancelar' : 'Cancel'}
-      onConfirm={() => { void confirm() }}
+      onConfirm={() => { void flow.confirm() }}
       onCancel={onClose}
-      busy={busy || !target}
+      busy={flow.busy || !flow.chosen}
       mobileSheet
+      maxWidth={460}
     >
       <div data-account-switch style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
-        {from && (
-          <p data-account-switch-current style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>
-            {pt ? 'Agora: ' : 'Now: '}<strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{from}</strong>
-          </p>
-        )}
-        <label style={label}>
-          {pt ? 'Harness' : 'Harness'}
-          <Select
-            value={harness}
-            onChange={pickHarness}
-            options={harnesses.map(h => ({ value: h, label: harnessName(h), ...(h === own ? { hint: pt ? 'mesma conversa' : 'same conversation' } : { hint: pt ? 'conversa nova' : 'new conversation' }) }))}
-          />
-        </label>
-        <label style={label}>
-          {pt ? 'Conta' : 'Account'}
-          <Select value={target} onChange={setTarget} options={accountOptions} />
-        </label>
-        {pending && (
-          <>
-            <Checkbox checked={resend} onChange={setResend} label={pt ? 'Reenviar a última mensagem na nova conta' : 'Re-send the last message on the new account'} />
-            {resend && (
-              <blockquote style={{ margin: 0, padding: '6px 10px', borderLeft: '3px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, overflowWrap: 'anywhere' }}>
-                {pending}
-              </blockquote>
-            )}
-          </>
-        )}
-        {error && <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--accent-red)', overflowWrap: 'anywhere' }}>{error}</p>}
+        <AccountPicker flow={flow} lang={lang} />
+        <SwitchExtras flow={flow} lang={lang} />
       </div>
     </ConfirmModal>
+  )
+}
+
+/**
+ * CONTA.LIMITES — the session panel's "Usage limits" card. Shows `children` (the plan-usage list)
+ * plus a "Switch account in this session" button; the button turns the list into the picker, with
+ * "Confirm switch" / "Cancel" under it. Absent button when there is nowhere to go.
+ */
+export function AccountSwitchInline({ sessionId, lang, onSwitched, children }: {
+  sessionId: string; lang: string; onSwitched: (newId: string) => void; children: ReactNode
+}) {
+  const pt = lang === 'pt'
+  const isMobile = useIsMobile()
+  const [picking, setPicking] = useState(false)
+  const [info] = useSwitchInfo(sessionId, lang)
+  useEffect(() => { setPicking(false) }, [sessionId])
+  if (!picking || !info) {
+    return <>
+      {children}
+      {canSwitch(info) && (
+        <button type="button" data-account-switch-open onClick={() => setPicking(true)}
+          style={{ ...dialogButtonStyle('secondary', isMobile), width: '100%', marginTop: 8, gap: 8 }}>
+          <Users size={15} />{pt ? 'Trocar de conta nesta sessão' : 'Switch account in this session'}
+        </button>
+      )}
+    </>
+  }
+  return <InlinePicker sessionId={sessionId} info={info} lang={lang} onCancel={() => setPicking(false)} onSwitched={id => { setPicking(false); if (id) onSwitched(id) }} />
+}
+
+function InlinePicker({ sessionId, info, lang, onCancel, onSwitched }: { sessionId: string; info: SwitchInfo; lang: string; onCancel: () => void; onSwitched: (id: string | undefined) => void }) {
+  const pt = lang === 'pt'
+  const isMobile = useIsMobile()
+  const flow = useSwitchFlow({ open: true, sessionId, info, lang, fromLimit: !!info.limit, onDone: onSwitched })
+  return (
+    <div data-account-switch data-account-switch-inline style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <p style={{ margin: 0, fontSize: 12.5, fontWeight: 600 }}>{pt ? 'Escolha a conta para esta sessão' : 'Choose the account for this session'}</p>
+      <AccountPicker flow={flow} lang={lang} />
+      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{flow.message}</p>
+      <SwitchExtras flow={flow} lang={lang} />
+      <DialogActions>
+        <button type="button" onClick={onCancel} disabled={flow.busy} style={dialogButtonStyle('secondary', isMobile, flow.busy)}>{pt ? 'Cancelar' : 'Cancel'}</button>
+        <button type="button" data-account-switch-confirm onClick={() => { void flow.confirm() }} disabled={flow.busy || !flow.chosen}
+          style={dialogButtonStyle('primary', isMobile, flow.busy || !flow.chosen)}>{flow.confirmLabel}</button>
+      </DialogActions>
+    </div>
   )
 }
 

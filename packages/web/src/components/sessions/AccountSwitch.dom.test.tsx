@@ -21,6 +21,8 @@ beforeAll(async () => {
   GlobalRegistrator.register({ width: 1200, height: 800 })
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never
+  // The plan-limits store follows the shared SSE stream; nothing streams here.
+  ;(globalThis as { EventSource?: unknown }).EventSource = class { addEventListener() {} removeEventListener() {} close() {} }
   ;(globalThis as { fetch?: unknown }).fetch = async (url: string, init?: RequestInit) => {
     if (String(url).startsWith('/api/fleet/switch-account') && init?.method === 'POST') {
       posts.push(JSON.parse(String(init.body)))
@@ -89,7 +91,7 @@ describe('AccountLimitBand', () => {
     await act(async () => { open.click() })
     const dialog = document.querySelector('[data-account-switch]')!
     expect(dialog.textContent).toContain('fix the bug')
-    const confirm = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Trocar conta')!
+    const confirm = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Confirmar troca')!
     await act(async () => { confirm.click(); await new Promise(r => setTimeout(r, 20)) })
     expect(posts).toEqual([{ id: 'm1', accountId: 'acc_b', resendPending: true }])
     expect(followed).toBe('m2')
@@ -110,10 +112,13 @@ describe('AccountLimitBand dismissal', () => {
     await act(async () => { first.root.unmount() })
     const again = await mount(createElement(mod.AccountLimitBand, { sessionId: 'mX', lang: 'pt', onSwitched: () => {} }))
     expect(band(again.host).classList.contains('visible')).toBe(false)
+    await act(async () => { again.root.unmount() })
     // A NEW limit (another reset time) shows again.
     getBody = { ...limited, limit: { ...limited.limit!, resetsAt: limited.limit!.resetsAt! + 60_000 } }
     const next = await mount(createElement(mod.AccountLimitBand, { sessionId: 'mX', lang: 'pt', onSwitched: () => {} }))
     expect(band(next.host).classList.contains('visible')).toBe(true)
+    // Unmount: a mounted picker keeps the shared plan-limits store subscribed for later files.
+    await act(async () => { next.root.unmount() })
   })
 })
 
@@ -130,16 +135,16 @@ describe('AccountSwitchDialog — every harness (v2)', () => {
     expect(lib.noticeTitle({ ...multi, options: [multi.options[2]!] }, true)).toBe('Esta conta bateu o limite — continuar na k@x.com (Codex CLI)?')
   })
 
-  test('the choice is always shown, the current account is shown and disabled; picking another harness posts it', async () => {
-    posts.length = 0
+  test('every account is a row: the current one marked and not pickable, the others pickable', async () => {
     const { root } = await mount(createElement(mod.AccountSwitchDialog, {
       open: true, sessionId: 'm1', info: { ...multi, options: [multi.options[0]!, multi.options[2]!] }, lang: 'pt', fromLimit: false, onClose: () => {}, onSwitched: () => {},
     }))
     const dialog = Array.from(document.querySelectorAll('[data-account-switch]')).at(-1)!
-    expect(dialog.querySelector('[data-account-switch-current]')!.textContent).toContain('Claude Code · a@x.com')
-    // Two Selects (harness, account), even with a single account per harness.
-    expect(dialog.querySelectorAll('button[aria-haspopup="listbox"]').length).toBe(2)
-    expect(dialog.textContent).toContain('Claude Code')
+    const current = dialog.querySelector('[data-account-switch-current]')!
+    expect(current.textContent).toContain('Claude Code · a@x.com')
+    expect(current.textContent).toContain('Agora')
+    expect(current.tagName).not.toBe('BUTTON')
+    expect(dialog.querySelectorAll('[role="radio"]').length).toBe(2)
     await act(async () => { root.unmount() })
   })
 
@@ -157,20 +162,66 @@ describe('AccountSwitchDialog — every harness (v2)', () => {
   })
 
   test('a poll that returns the same options as a NEW array keeps the person\'s pick', async () => {
+    posts.length = 0
     const host = document.createElement('div'); document.body.appendChild(host)
     const root = createRoot(host)
     const props = (info: SwitchInfo) => ({ open: true, sessionId: 'm1', info, lang: 'pt', fromLimit: false, onClose: () => {}, onSwitched: () => {} })
     await act(async () => { root.render(createElement(mod.AccountSwitchDialog, props(multi))) })
     const dialog = () => Array.from(document.querySelectorAll('[data-account-switch]')).at(-1)!
-    const trigger = dialog().querySelectorAll('button[aria-haspopup="listbox"]')[0] as HTMLButtonElement
-    await act(async () => { trigger.click() })
-    const codex = Array.from(document.querySelectorAll('[role="listbox"] [role="option"]')).find(o => o.textContent?.startsWith('Codex')) as HTMLElement
+    const codex = dialog().querySelector('[data-account-row="codex:acc_k"]') as HTMLButtonElement
     await act(async () => { codex.click() })
-    expect(dialog().textContent).toContain('k@x.com')
+    expect(codex.getAttribute('aria-checked')).toBe('true')
     // The 15 s poll: equal content, new identity.
     await act(async () => { root.render(createElement(mod.AccountSwitchDialog, props({ ...multi, options: multi.options.map(o => ({ ...o })) }))) })
-    expect(dialog().textContent).toContain('k@x.com')
-    expect(dialog().textContent).toContain('Codex CLI')
+    expect((dialog().querySelector('[data-account-row="codex:acc_k"]') as HTMLElement).getAttribute('aria-checked')).toBe('true')
+    expect(document.body.textContent).toContain('conversa NOVA em Codex')
+    await act(async () => { root.unmount() })
+  })
+})
+
+describe('AccountSwitchInline (the "Usage limits" card)', () => {
+  const info: SwitchInfo = {
+    ...limited, limit: null,
+    options: [limited.options[0]!, { id: 'acc_k', harness: 'codex', label: 'k@x.com' }],
+    unavailable: [{ id: 'acc_h', harness: 'claude', label: 'h@x.com', reason: 'not_agentic' }],
+  }
+  test('the button turns the list into the picker; disabled rows say why; confirm posts and follows', async () => {
+    getBody = info
+    posts.length = 0
+    let followed = ''
+    const { host, root } = await mount(createElement(mod.AccountSwitchInline, {
+      sessionId: 'm1', lang: 'en', onSwitched: (id: string) => { followed = id }, children: createElement('p', { 'data-summary': '' }, 'summary'),
+    }))
+    expect(host.querySelector('[data-summary]')).not.toBeNull()
+    const open = host.querySelector('[data-account-switch-open]') as HTMLButtonElement
+    expect(open.textContent).toContain('Switch account in this session')
+    await act(async () => { open.click() })
+    expect(host.querySelector('[data-summary]')).toBeNull()
+    const hidden = host.querySelector('[data-account-row="claude:acc_h"]')!
+    expect(hidden.getAttribute('data-account-row-kind')).toBe('disabled')
+    expect(hidden.textContent).toContain('Not available for agent use')
+    const codex = host.querySelector('[data-account-row="codex:acc_k"]') as HTMLButtonElement
+    await act(async () => { codex.click() })
+    const confirm = host.querySelector('[data-account-switch-confirm]') as HTMLButtonElement
+    expect(confirm.textContent).toBe('Continue on Codex CLI')
+    await act(async () => { confirm.click(); await new Promise(r => setTimeout(r, 20)) })
+    expect(posts).toEqual([{ id: 'm1', accountId: 'acc_k', harness: 'codex', resendPending: false }])
+    expect(followed).toBe('m2')
+    await act(async () => { root.unmount() })
+  })
+  test('cancel puts the list back', async () => {
+    getBody = info
+    const { host, root } = await mount(createElement(mod.AccountSwitchInline, { sessionId: 'm1', lang: 'pt', onSwitched: () => {}, children: createElement('p', { 'data-summary': '' }, 's') }))
+    await act(async () => { (host.querySelector('[data-account-switch-open]') as HTMLButtonElement).click() })
+    const cancel = Array.from(host.querySelectorAll('button')).find(b => b.textContent === 'Cancelar')!
+    await act(async () => { cancel.click() })
+    expect(host.querySelector('[data-summary]')).not.toBeNull()
+    await act(async () => { root.unmount() })
+  })
+  test('no button when there is nowhere to go', async () => {
+    getBody = { ...info, options: [] }
+    const { host, root } = await mount(createElement(mod.AccountSwitchInline, { sessionId: 'm1', lang: 'pt', onSwitched: () => {}, children: null }))
+    expect(host.querySelector('[data-account-switch-open]')).toBeNull()
     await act(async () => { root.unmount() })
   })
 })
