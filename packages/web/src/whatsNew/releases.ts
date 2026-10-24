@@ -109,7 +109,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Settings › Sessions lets you choose when to be told about a leader hand-off.',
       },
     ],
-    fixes: [],
+    fixes: [{
+      pt: 'O painel de passagem calcula o consumo da janela de 5 h e da semana usando a conta da sessão, inclusive com várias contas Claude, e explica quando faltam dados.',
+      en: 'The handoff panel estimates 5-hour and weekly usage from the session’s own account, including multiple Claude accounts, and explains missing data.',
+    }],
   },
   '2.141.0': {
     features: [

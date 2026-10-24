@@ -48,18 +48,44 @@ The response contains:
 
 Unknown measurements are **null**, never guessed zeros. Money is estimated API-equivalent USD,
 using the known model's cache-read price, matching the existing `computeHandoffWhy` calculations.
+The exact linked conversation supplies its recorded model and per-model session spend through
+`toConversation` / `sessionCostUSD`; a spawn alias such as `opus` or `auto` is not a price identity.
+This applies to every harness, including Gemini's native-id/store-key distinction. Unlinked
+conversations never borrow measurements from another session in the same directory.
 The continue row estimates 20 replies at current context. The extra row estimates 20 replies at
 current context + X% of the *reported context window*, not X% of the cut. The successor row
 includes the existing one-off handoff overhead plus 20 replies at the existing successor base.
 An unknown model price or context window leaves dependent cells null.
 
-Quota percentages estimate **additional percentage points** of the account's 5-hour/week windows,
-not the share of remaining allowance. The adapter observes the plan-limits meters and the same
-account's fleet spend: positive utilization delta divided by positive spend delta, separately for
-each window, multiplied by each projected cost. It requires unchanged account/session population
-and reset boundaries, and recent samples (at most 30 minutes apart). Unknown account attribution,
-missing measurements, renewal, unchanged utilization, or no observed spend leave quota cells null.
-These estimates include other work in the account and are labeled estimates on screen.
+Quota percentages estimate **additional percentage points** of the session's own account's
+5-hour/week windows, not the share of remaining allowance. Explicit managed account bindings are
+resolved through account aliases; an unbound session uses the registered default account or a sole
+unambiguous account. A session never borrows another account's meter because its own is missing.
+
+Calibration reads timestamped, priced responses in each meter's interval, stopping at the meter's
+reading time. It includes closed conversations and all registered account roots. Claude, Codex and
+Gemini usage is read directly from native artifacts, including in builds without an engine; other
+harnesses use their journal/replay usage when available. Native artifacts replace their journal copy,
+rather than adding the same usage twice. Claude response IDs use final usage and the first timestamp;
+Codex uses cumulative token-count increments; Gemini snapshots are deduplicated by message ID.
+Costs use the central pricing functions, including Claude cache-write TTLs.
+An explicit transcript-root binding preserves the source login of historical usage. Otherwise,
+the managed session's account takes precedence over the default home's current login, so switching
+the default account does not move a bound session's usage into another account's calibration.
+
+Passive fleet polls and panel requests share a calibration cache (at most once per 30 seconds).
+A positive utilization delta divided by positive spend delta supplies a live calibration when the
+account/session population and reset boundaries stay unchanged. Otherwise, positive window usage
+divided by its timestamped spend supplies the initial rate. Each window retains its last useful
+account-specific rate through rounded readings, renewals and process restarts; rates are persisted
+in `handoff-quota-rates.json`. Missing windows remain null even when a previous rate exists.
+
+Unknown account attribution, missing meters, insufficient timestamped/priced usage, or unknown
+projection inputs leave dependent quota cells null. Null quota cells show a dash; a single footnote
+explains the unavailable estimates for the whole table, replacing the normal calibration note.
+Percentages use one decimal place in both languages; positive values below 0.1 percentage points
+show “<0.1%” (“<0,1%” in Portuguese), while measured zero shows “+0.0%”. These estimates include
+other work in the account and are labeled estimates on screen.
 
 ## Engine boundary
 
@@ -69,7 +95,8 @@ reminder formulas otherwise remain intact. The future measured-F/grace/complexit
 the adapter's internals while keeping the v1 UI contract. Complexity modes and new engine math are
 outside this screens batch.
 
-Unit tests are in `core/src/handoffConfig.test.ts`, `server/sessions/handoff-panel.test.ts`, and
+Unit tests are in `core/src/handoffConfig.test.ts`, `server/sessions/handoff-panel.test.ts`, `server/sessions/handoff-artifacts.test.ts`,
+`server/sessions/handoff-usage.test.ts`, and
 `web/src/components/sessions/HandoffWarning.test.tsx`, and `web/src/lib/handoffPanelState.test.ts`. The delivery owner runs tests/typechecking
 and desktop/mobile light/dark visual QA in an isolated `agentop run --rm` environment before
 accepting the change.
@@ -77,3 +104,18 @@ accepting the change.
 The cost panel opens with focus on the dialog container and its summary visible at the top,
 including on mobile. The simulation percentage input receives focus through keyboard navigation
 or a click, rather than automatically when the panel opens.
+
+Current price rows added for this panel's coverage use the central `MODEL_PRICING` table and
+`PRICE_PROVENANCE`, checked on 2026-10-20 against
+[Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing),
+[OpenAI pricing](https://developers.openai.com/api/docs/pricing) and
+[Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing). GPT-6.1 Sol, GPT-6 Astra and
+GPT-6 Luna use Standard short-context rates, consistent with the existing API-equivalent estimates.
+Gemini 3.8 Flash uses the introductory Standard price through 2026-12-31; that row needs review
+when the introductory period ends. This change does not introduce tier or historical price accounting.
+
+Gemini rich JSON and JSONL chats supply current context from the latest measured per-response
+`tokens.input` (including cached input), rather than the session total. The existing context-window
+table now includes the [documented Gemini 3.8 Flash input limit](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash):
+1,048,576 tokens, checked 2026-10-20. A conversation with no prompt measurement still has no
+current-context projection, even if it has cumulative tokens or a known model price.

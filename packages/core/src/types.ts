@@ -94,7 +94,7 @@ export interface HarnessCapabilities {
    * total is not a context size. A long session with compaction sums to far more than was ever in
    * the window at once, so a harness that reports only running totals gets `false` here even
    * though `tokens` is `true`. What qualifies is a PER-TURN prompt size (or a gauge the harness
-   * measures itself), which is why codex and kimi qualify on their per-turn records while copilot,
+   * measures itself), which is why codex, gemini and kimi qualify on their per-turn records while copilot,
    * whose only token report is a cumulative one written at shutdown, does not.
    */
   contextWindow: boolean
@@ -140,7 +140,8 @@ export const HARNESS_CAPABILITIES: Record<SurfaceHarnessId, HarnessCapabilities>
   // Gemini's chat files carry `toolCalls: [{ name, args }]` per message, and a shell call puts its
   // command in `args.command` — so tools and commits are real. `gitLines` stays false: the calls
   // name the file they touched but carry no diff counters.
-  gemini:  { tokens: true,  cost: true,  model: true,  tools: true,  agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true,  contextWindow: false, compaction: false, skills: false, mcpServers: false },
+  // Per-response tokens.input records the full prompt (cache included), retained as current context.
+  gemini:  { tokens: true,  cost: true,  model: true,  tools: true,  agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true,  contextWindow: true, compaction: false, skills: false, mcpServers: false },
   // `tools` was false while `tool.execution_start` had been carrying the tool name and its
   // arguments all along — the flag was out of date, not the data missing. Verified against a real
   // events.jsonl before flipping it.
@@ -1021,6 +1022,8 @@ export type Theme = 'dark' | 'light'
 const BASE_MODEL_PRICING: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
   // Current models — verified against platform.claude.com/docs/en/about-claude/pricing 2026-07-27.
   'claude-fable-5':             { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
+  // Exact current ids: cache discounts differ from the older prefix rows (checked 2026-10-20).
+  'claude-fable-5-1':           { input: 10,   output: 50,   cacheRead: 0.25, cacheWrite: 12.50 },
   'claude-mythos-5':            { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
   'claude-opus-5':              { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
   // Opus 5.5 is cheaper than Opus 5: verified against platform.claude.com/docs/en/about-claude/pricing,
@@ -1032,8 +1035,12 @@ const BASE_MODEL_PRICING: Record<string, { input: number; output: number; cacheR
   // Sonnet 5: the introductory $2/$10 became the standard price. The increase to $3/$15 announced for
   // 2026-09-01 was cancelled (platform.claude.com/docs/en/about-claude/pricing, read 2026-09-25).
   'claude-sonnet-5':            { input: 2,    output: 10,   cacheRead: 0.20, cacheWrite: 2.50  },
+  'claude-sonnet-5-5':          { input: 2,    output: 10,   cacheRead: 0.10, cacheWrite: 2.50  },
   'claude-opus-4-6':            { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
   'claude-sonnet-4-6':          { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75  },
+  // Standard short-context (up to 100k prompt) estimate; higher prompt tier is not modeled here.
+  // platform.claude.com/docs/en/about-claude/pricing, verified 2026-10-20.
+  'claude-haiku-5-5':          { input: 0.10, output: 0.50, cacheRead: 0.01, cacheWrite: 0.125 },
   'claude-haiku-4-5-20251001':  { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25  },
   // Legacy models
   'claude-opus-4-5-20251101':   { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25  },
@@ -1044,6 +1051,8 @@ const BASE_MODEL_PRICING: Record<string, { input: number; output: number; cacheR
   'claude-haiku-3-5-20241022':  { input: 0.80, output: 4,    cacheRead: 0.08, cacheWrite: 1.00  },
   'claude-3-haiku-20240307':    { input: 0.25, output: 1.25, cacheRead: 0.03, cacheWrite: 0.30  },
   // Google (Gemini CLI, Antigravity CLI) — verified from ai.google.dev/gemini-api/docs/pricing
+  // Gemini 3.8 introductory Standard rates through 2026-12-31, checked 2026-10-20.
+  'gemini-3.8-flash':       { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   // (3.6/lite rows re-checked 2026-07-27; the rest 2026-06-22).
   // Gemini has no separate cache-write charge; cacheWrite is set to the input rate
   // and is unused in practice.
@@ -1067,6 +1076,10 @@ const BASE_MODEL_PRICING: Record<string, { input: number; output: number; cacheR
   // OpenAI has no separate cache-write charge; cacheWrite is set to the input rate
   // and is unused in practice (the Codex parser always sets cache_creation tokens to 0).
   'gpt-5.6-sol':    { input: 5,    output: 30, cacheRead: 0.50,  cacheWrite: 5    },
+  // Standard short-context rates, developers.openai.com/api/docs/pricing, checked 2026-10-20.
+  'gpt-6.1-sol':    { input: 2,    output: 10, cacheRead: 0.10, cacheWrite: 2.5 },
+  'gpt-6-astra':    { input: 10,   output: 50, cacheRead: 1,    cacheWrite: 12.5 },
+  'gpt-6-luna':     { input: 0.1,  output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
   'gpt-5.6-terra':  { input: 2.5,  output: 15, cacheRead: 0.25,  cacheWrite: 2.5  },
   'gpt-5.6-luna':   { input: 1,    output: 6,  cacheRead: 0.10,  cacheWrite: 1    },
   'gpt-5.5':        { input: 5,    output: 30, cacheRead: 0.50,  cacheWrite: 5    },
