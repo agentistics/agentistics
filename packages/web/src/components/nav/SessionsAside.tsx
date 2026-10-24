@@ -1947,23 +1947,21 @@ export function SessionsAside({
                 border: '1px solid color-mix(in srgb, var(--accent-red) 30%, transparent)',
                 background: 'color-mix(in srgb, var(--accent-red) 7%, transparent)',
               }}>
-                <div style={sectionHeading}>{pt ? 'Caíram' : 'Fell'}</div>
-                {showFell && (
-                  <div data-fell-banner style={{
-                    display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0 2px 6px', minHeight: tap,
-                    fontSize: 12.5, color: 'var(--text-secondary)',
-                  }}>
-                    <span style={{ flex: 1, minWidth: 0 }} />
-                    <button type="button" data-fell-reopen title={reopenFellSentence} aria-label={reopenFellSentence}
-                      onClick={() => setPicking('reopen')} style={{ ...linkButton, minHeight: tap }}>
-                      {pt ? (fellCount === 1 ? 'Reabrir' : `Reabrir as ${fellCount}`) : (fellCount === 1 ? 'Reopen' : `Reopen all ${fellCount}`)}
-                    </button>
-                    <IconButton label={pt ? 'Dispensar aviso de sessões que caíram' : 'Dismiss fallen sessions notice'}
-                      size={tap ?? 30} onClick={dismissFell}>
-                      <X size={14} />
-                    </IconButton>
-                  </div>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <div style={{ ...sectionHeading, flex: 1, minWidth: 0 }}>{pt ? 'Caíram' : 'Fell'}</div>
+                  {showFell && (
+                    <div data-fell-banner style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, paddingTop: 6, paddingRight: 2 }}>
+                      <button type="button" data-fell-reopen title={reopenFellSentence} aria-label={reopenFellSentence}
+                        onClick={() => setPicking('reopen')} style={{ ...linkButton, minHeight: tap }}>
+                        {pt ? (fellCount === 1 ? 'Reabrir' : `Reabrir as ${fellCount}`) : (fellCount === 1 ? 'Reopen' : `Reopen all ${fellCount}`)}
+                      </button>
+                      <IconButton label={pt ? 'Dispensar aviso de sessões que caíram' : 'Dismiss fallen sessions notice'}
+                        size={tap ?? 30} onClick={dismissFell}>
+                        <X size={14} />
+                      </IconButton>
+                    </div>
+                  )}
+                </div>
                 {ended.fell.map(r => renderEndedLine(r, true))}
               </div>
             )}
