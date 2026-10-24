@@ -96,3 +96,23 @@ describe('AccountLimitBand', () => {
     await act(async () => { root.unmount() })
   })
 })
+
+describe('AccountLimitBand dismissal', () => {
+  test('the X is remembered for this limit after the session is opened again', async () => {
+    getBody = limited
+    localStorage.clear()
+    const band = (h: HTMLElement) => h.querySelector('[data-account-limit-band]') as HTMLElement
+    const first = await mount(createElement(mod.AccountLimitBand, { sessionId: 'mX', lang: 'pt', onSwitched: () => {} }))
+    expect(band(first.host).classList.contains('visible')).toBe(true)
+    const x = band(first.host).querySelector('button[aria-label="Dispensar"]') as HTMLButtonElement
+    await act(async () => { x.click() })
+    expect(band(first.host).classList.contains('visible')).toBe(false)
+    await act(async () => { first.root.unmount() })
+    const again = await mount(createElement(mod.AccountLimitBand, { sessionId: 'mX', lang: 'pt', onSwitched: () => {} }))
+    expect(band(again.host).classList.contains('visible')).toBe(false)
+    // A NEW limit (another reset time) shows again.
+    getBody = { ...limited, limit: { ...limited.limit!, resetsAt: limited.limit!.resetsAt! + 60_000 } }
+    const next = await mount(createElement(mod.AccountLimitBand, { sessionId: 'mX', lang: 'pt', onSwitched: () => {} }))
+    expect(band(next.host).classList.contains('visible')).toBe(true)
+  })
+})

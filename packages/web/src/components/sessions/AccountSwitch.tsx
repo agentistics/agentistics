@@ -122,10 +122,18 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
 export function AccountLimitBand({ sessionId, lang, onSwitched }: { sessionId: string; lang: string; onSwitched: (newId: string) => void }) {
   const pt = lang === 'pt'
   const [info] = useSwitchInfo(sessionId, lang)
-  const [dismissed, setDismissed] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
-  // A dismissal holds for THIS limit only: the next one (a new reset time) shows again.
+  // A dismissal holds for THIS limit only: the next one (a new reset time) shows again. It is kept
+  // per session in localStorage so a reload or re-entering the session does not bring it back.
   const key = info?.limit ? `${info.limit.resetsAt ?? ''}:${info.limit.pendingPreview ?? ''}` : ''
+  const storeKey = `agentistics.accountLimitDismissed.${sessionId}`
+  const [dismissed, setDismissedState] = useState<string | null>(() => {
+    try { return localStorage.getItem(storeKey) } catch { return null }
+  })
+  const setDismissed = (k: string) => {
+    setDismissedState(k)
+    try { localStorage.setItem(storeKey, k) } catch { /* private mode: the dismissal lasts this view only */ }
+  }
   const visible = showLimitNotice(info) && dismissed !== key
   return (
     <>
