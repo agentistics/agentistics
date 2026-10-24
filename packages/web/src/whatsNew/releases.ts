@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.145.0': {
+    features: [
+      {
+        pt: 'Trocar a conta de uma sessão no meio dela: quando a conta bate o limite, um aviso acima da caixa de mensagem oferece continuar em outra conta, e "Trocar conta" fica no menu da sessão a qualquer momento. A conversa continua a mesma.',
+        en: 'Switch a session’s account mid-session: when the account hits its limit, a notice above the message box offers to continue on another account, and "Switch account" is in the session menu at any time. The conversation stays the same.',
+      },
+    ],
+    fixes: [],
+  },
   '2.144.1': {
     features: [],
     fixes: [

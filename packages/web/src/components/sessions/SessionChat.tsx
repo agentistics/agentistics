@@ -1,4 +1,5 @@
 import { HandoffBand } from './HandoffWarning'
+import { AccountLimitBand } from './AccountSwitch'
 /**
  * SessionChat — one live session, read as a conversation.
  *
@@ -3035,6 +3036,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             </div>
           )}
           {!source && <HandoffBand id={session.id} pt={pt} />}
+          {!source && <AccountLimitBand sessionId={session.id} lang={lang} onSwitched={id => onReopened?.(id)} />}
           {/* NO COMPOSER UNTIL THE CONVERSATION IS THERE. A field offered over a conversation still
               loading invites a message into a session whose state is not yet known — including one
               sitting in a dialog, where the text would go into the dialog's own filter. */}

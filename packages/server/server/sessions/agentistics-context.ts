@@ -73,7 +73,7 @@ const TOOL_GROUPS = {
     'agentistics_task_subtask', 'agentistics_task_link', 'agentistics_task_blocked_by', 'agentistics_task_next',
     'agentistics_task_claim', 'agentistics_task_activity', 'agentistics_task_edit', 'agentistics_task_session', 'agentistics_task_delete',
   ],
-  Sessions: ['agentistics_sessions', 'agentistics_session_groups', 'agentistics_session_group_create', 'agentistics_session_group_edit', 'agentistics_session_notify', 'agentistics_session_message', 'agentistics_session_role', 'agentistics_session_away', 'agentistics_checkin_report'],
+  Sessions: ['agentistics_sessions', 'agentistics_session_groups', 'agentistics_session_group_create', 'agentistics_session_group_edit', 'agentistics_session_notify', 'agentistics_session_message', 'agentistics_session_role', 'agentistics_session_away', 'agentistics_session_switch_account', 'agentistics_checkin_report'],
   Metrics: ['agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_plan_limits', 'agentistics_tags', 'agentistics_tag_detail'],
   Dashboards: ['agentistics_component_catalog', 'agentistics_get_layouts', 'agentistics_create_layout', 'agentistics_add_component', 'agentistics_remove_component', 'agentistics_set_active_layout', 'agentistics_delete_layout', 'agentistics_export_pdf', 'agentistics_build_layout'],
 } as const

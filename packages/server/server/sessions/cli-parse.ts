@@ -114,6 +114,8 @@ export type SessionCommand =
   | { kind: 'archive' | 'unarchive' | 'delete'; ref: string }
   | { kind: 'rename'; ref: string; label: string }
   | { kind: 'note'; ref: string; text: string }
+  /** CONTA.TROCA: move a session to another account of its harness. No account: list the options. */
+  | { kind: 'switch-account'; ref: string; accountId?: string; resend?: boolean; json?: boolean }
   | { kind: 'help' }
   | { kind: 'error'; message: string }
 
@@ -267,6 +269,16 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     const ref = argv[1]
     if (!ref) return { kind: 'error', message: `Usage: agentop session ${head} <ses_…>  (native Agentistics sessions)` }
     return { kind: head, ref }
+  }
+
+  if (head === 'switch-account') {
+    const rest = argv.slice(1).filter(a => a !== '--resend' && a !== '--json')
+    const ref = rest[0]
+    if (!ref) return { kind: 'error', message: 'Usage: agentop session switch-account <id|name> [<account-id>] [--resend]' }
+    return {
+      kind: 'switch-account', ref, ...(rest[1] ? { accountId: rest[1] } : {}),
+      ...(argv.includes('--resend') ? { resend: true } : {}), ...(jsonFlag ? { json: true } : {}),
+    }
   }
 
   if (head === 'rename') {
