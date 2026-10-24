@@ -15,8 +15,6 @@
  * hold, and so does a wall-clock ceiling — a finale that never got its frames (a canvas that failed,
  * a tab hidden through it) must not keep the app waiting behind it.
  */
-/** The latest the app beneath is held, whatever happened to the finale's own clock. */
-export const FINALE_CEILING_MS = FINALE_MS + 6000
 import { useEffect, useState } from 'react'
 import type { Lang } from '@agentistics/core'
 import { BUNDLE_VERSION } from '../lib/bundleVersion'
@@ -25,6 +23,9 @@ import { peekRestore } from '../lib/upgradeFlow'
 import { endFinale } from '../lib/finaleGate'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { FINALE_MS, UpdateFinale } from './UpdateFinale'
+
+/** The latest the app beneath is held, whatever happened to the finale's own clock. */
+export const FINALE_CEILING_MS = FINALE_MS + 6000
 
 function storedLang(): Lang {
   let stored: string | null = null
