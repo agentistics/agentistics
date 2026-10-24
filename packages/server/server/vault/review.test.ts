@@ -155,6 +155,7 @@ describe('7 — the unlock socket never steals a live service\'s socket', () => 
     expect(await startVaultSocket(path)).toEqual({ ok: false, reason: 'in-use' })
     expect(existsSync(path)).toBe(true)
     live.stop(true)
+    await rm(path, { force: true })
     await writeFile(path, '')
     expect((await startVaultSocket(path)).ok).toBe(true)
     stopVaultSocket()
