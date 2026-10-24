@@ -754,23 +754,34 @@ export function Checkbox({ checked, onChange, label, disabled, ariaLabel }: {
         minHeight: isMobile ? 44 : undefined,
       }}
     >
-      <div
-        aria-hidden
-        style={{
-          width: 16, height: 16, borderRadius: 4, flexShrink: 0,
-          border: `1px solid ${checked ? 'var(--anthropic-orange)' : 'var(--border)'}`,
-          background: checked ? 'var(--anthropic-orange)' : 'transparent',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'all 0.15s',
-        }}
-      >
-        {checked && (
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </div>
+      <CheckboxBox checked={checked} />
       {label && <span>{label}</span>}
+    </div>
+  )
+}
+
+/**
+ * The BOX of `Checkbox`, alone — for a row that is already a control of its own (the question
+ * card's multi-select option is a button), where nesting a second focusable checkbox would put two
+ * controls on one row. Same look, one definition.
+ */
+export function CheckboxBox({ checked }: { checked: boolean }) {
+  return (
+    <div
+      aria-hidden
+      style={{
+        width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+        border: `1px solid ${checked ? 'var(--anthropic-orange)' : 'var(--border)'}`,
+        background: checked ? 'var(--anthropic-orange)' : 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'all 0.15s',
+      }}
+    >
+      {checked && (
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
     </div>
   )
 }

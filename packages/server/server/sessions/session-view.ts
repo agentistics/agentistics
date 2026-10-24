@@ -14,7 +14,7 @@ import { capClosedConversations } from './closed-cap'
 import { matchesQuery, type SearchFields } from '@agentistics/tui/control/search-scope'
 import { type HarnessProcess, sessionAtCwd } from '../live-sessions'
 import { rulesFor } from './attention-rules'
-import type { DialogOption, DialogUnreadable } from './dialog-choice'
+import type { DialogForm, DialogOption, DialogUnreadable } from './dialog-choice'
 import { chosenName, tmuxSessionName, type HarnessSessionFile } from './harness-session-file'
 import type { HarnessSessionIndex } from './harness-sessions'
 import { idFromTmuxName } from './tmux-cli'
@@ -115,6 +115,8 @@ export interface SessionView {
    * a keystroke that confirms the highlighted row is choosing on the user's behalf.
    */
   dialogOptions?: DialogOption[]
+  /** The multi-question form around the dialog, read off the same frame — see `DialogForm`. */
+  dialogForm?: DialogForm
   /**
    * HOW one of `dialogOptions` is picked — `numbered` (type the digit) or `marker` (move onto it).
    *
@@ -502,6 +504,8 @@ export function buildSessionViews(o: {
   structured?: ReadonlySet<string>
   /** The options that dialog offers, keyed by session id. Absent where they could not be read. */
   dialogOptions?: ReadonlyMap<string, DialogOption[]>
+  /** The form around that dialog, keyed by session id. */
+  dialogForm?: ReadonlyMap<string, DialogForm>
   /** How those options are picked, keyed by session id — see `SessionView.dialogSelect`. */
   dialogSelect?: ReadonlyMap<string, 'numbered' | 'marker'>
   /** The ids whose dialog the protocol STATED — see `SessionView.dialogStated`. */
@@ -662,6 +666,9 @@ export function buildSessionViews(o: {
         : {}),
       ...(activity === 'waiting-approval' && (o.dialogOptions?.get(r.id)?.length ?? 0) > 0
         ? { dialogOptions: o.dialogOptions!.get(r.id)! }
+        : {}),
+      ...(activity === 'waiting-approval' && o.dialogForm?.get(r.id)
+        ? { dialogForm: o.dialogForm.get(r.id)! }
         : {}),
       ...(activity === 'waiting-approval' && o.dialogSelect?.get(r.id)
         ? { dialogSelect: o.dialogSelect.get(r.id)! }

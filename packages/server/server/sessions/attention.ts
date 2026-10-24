@@ -18,7 +18,7 @@
  * harness nobody probed — which the UI states in words.
  */
 
-import { readDialog } from './dialog-choice'
+import { readDialog, type MarkerOpts } from './dialog-choice'
 import type { AttentionRules, SessionActivity } from './types'
 
 /**
@@ -73,6 +73,42 @@ export function digestFrame(lines: readonly string[]): string {
     h = Math.imul(h, 0x01000193)
   }
   return (h >>> 0).toString(16)
+}
+
+/**
+ * Is a FOOTERLESS dialog open — PURE. See `AttentionRules.menuHeaders`: one of the `within` non-blank
+ * lines above the option block must match. `top` is `readDialog(frame).top` when the caller has it.
+ */
+export function headedMenuOpen(rules: AttentionRules, frame: readonly string[], top = readDialog(frame).top): boolean {
+  if (!rules.menuHeaders?.length) return false
+  let markerTop: number | undefined
+  const markerBlockTop = (): number => {
+    if (markerTop === undefined) {
+      const read = readDialog(frame, { marker: true })
+      markerTop = read.kind === 'options' && read.select === 'marker' ? read.top : -1
+    }
+    return markerTop
+  }
+  return rules.menuHeaders.some(h => {
+    const t = h.marker ? markerBlockTop() : top
+    if (t < 0) return false
+    let seen = 0
+    for (let i = t - 1; i >= 0 && seen < h.within; i--) {
+      const line = frame[i] ?? ''
+      if (line.trim() === '') continue
+      seen++
+      if (h.re.test(line)) return true
+    }
+    return false
+  })
+}
+
+/**
+ * Is the session sitting on a dialog, for an ACT about to answer it — PURE. The footer anywhere in
+ * the frame (the act re-reads a fresh capture of the dialog it was shown) or a headed menu.
+ */
+export function dialogOnScreen(rules: AttentionRules, frame: readonly string[]): boolean {
+  return rules.approval.some(re => re.test(frame.join('\n'))) || headedMenuOpen(rules, frame)
 }
 
 export function attentionOf(o: {
@@ -135,6 +171,9 @@ export function attentionOf(o: {
   if (o.rules && !working(footer) && o.rules.approval.some(re => re.test(approvalWindow))) {
     return 'waiting-approval'
   }
+  if (o.rules && !working(footer) && headedMenuOpen(o.rules, o.frame, optionTop)) {
+    return 'waiting-approval'
+  }
 
   // The marker is PROOF of work only while the screen has been moving at all recently. A footer
   // that lingers is not evidence, and silence eventually outweighs it — see `MARKER_STALE_MS`.
@@ -179,8 +218,8 @@ export function attentionOf(o: {
  * It is the only thing standing between `approvalFor()`'s keystroke and a confirmation the user
  * cannot check — see `approval-spec.ts`.
  */
-export function approvalTail(frame: readonly string[], max = 10): string[] {
-  const from = Math.max(0, frame.length - Math.max(0, dialogHeight(frame, max)))
+export function approvalTail(frame: readonly string[], max = 10, opts: MarkerOpts = {}): string[] {
+  const from = Math.max(0, frame.length - Math.max(0, dialogHeight(frame, max, opts)))
   const lines = frame.slice(from)
   let start = 0
   let end = lines.length
@@ -188,6 +227,11 @@ export function approvalTail(frame: readonly string[], max = 10): string[] {
   while (end > start && (lines[end - 1] ?? '').trim() === '') end--
   return lines.slice(start, end)
 }
+
+/** How far above a numberless select its question may reach (several paragraphs, up to a rule). */
+const MARKER_QUESTION_LINES = 24
+/** A horizontal rule: the edge of a harness's dialog screen. */
+const RULE_LINE = /^\s*[─━═╌]{8,}\s*$/
 
 /** How far above the first option the question itself may reach. */
 const QUESTION_LINES = 12
@@ -211,10 +255,23 @@ const QUESTION_LINES = 12
  * two, not a screen, and reaching one line too far prints somebody's earlier prose under "you are
  * about to confirm this".
  */
-export function dialogHeight(frame: readonly string[], max: number): number {
-  const { top } = readDialog(frame)
+export function dialogHeight(frame: readonly string[], max: number, opts: MarkerOpts = {}): number {
+  const read = readDialog(frame, opts)
+  const { top } = read
   if (top < 0) return Math.max(0, max)
   const blank = (i: number) => (frame[i] ?? '').trim() === ''
+  /*
+   * A NUMBERLESS select's question is SEVERAL paragraphs (claude's trust prompt: title, path, two
+   * paragraphs, "Security guide"), so the blank-line rule below stopped at "Security guide" and the
+   * flat window began mid-sentence (" folder first.", live QA 2026-10-24). Its screen is bounded by a
+   * rule above the title instead: walk up to it, within a bound.
+   */
+  if (read.select === 'marker') {
+    const floor = Math.max(0, top - MARKER_QUESTION_LINES)
+    let up = top
+    while (up > floor && !RULE_LINE.test(frame[up - 1] ?? '')) up--
+    return Math.max(Math.max(0, max), frame.length - up)
+  }
   /*
    * THE QUESTION IS THE BLOCK IMMEDIATELY ABOVE OPTION 1, and a blank line is what separates it
    * from the conversation. A flat "N lines above" cannot tell the two apart.

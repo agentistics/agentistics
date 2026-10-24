@@ -143,9 +143,21 @@ export function answerStructured(
   open: StructuredAttention | null,
   choice: number | undefined,
   text: string | undefined,
+  /** Every option ticked on a `multiSelect` request (engine-api 1.13); absent for a single pick. */
+  choices?: readonly number[],
 ): { ok: true; answer: StructuredAnswer; said: string } | { ok: false; why: 'not-asking' | 'needs-choice' | 'needs-text' | 'gone' } {
   if (!open) return { ok: false, why: 'not-asking' }
   const words = text ?? ''
+  if (choices !== undefined) {
+    if (!open.multiSelect || choice !== undefined) return { ok: false, why: 'gone' }
+    const picked = [...new Set(choices)].sort((a, b) => a - b)
+    if (picked.length === 0) return { ok: false, why: 'needs-choice' }
+    if (picked.some(c => !Number.isInteger(c) || !open.options[c - 1])) return { ok: false, why: 'gone' }
+    const field = picked.some(c => open.options[c - 1]!.freeText)
+    if (field && !words.trim()) return { ok: false, why: 'needs-text' }
+    const said = picked.map(c => (open.options[c - 1]!.freeText ? words.trim() : open.options[c - 1]!.label)).join(', ')
+    return { ok: true, answer: { requestId: open.requestId, choices: picked, ...(field ? { text: words } : {}) }, said }
+  }
   if (choice === undefined) {
     if (open.freeText && words.trim()) return { ok: true, answer: { requestId: open.requestId, text: words }, said: words }
     return { ok: false, why: open.options.length > 0 ? 'needs-choice' : 'needs-text' }

@@ -16,6 +16,7 @@
  * `ended` is never said of a live pane.
  */
 
+import { dialogOnScreen } from './attention'
 import type { HarnessId } from '@agentistics/core'
 import { rulesFor } from './attention-rules'
 import { classifyCodexSendFailure, codexIsBlockingFrame } from './codex-send'
@@ -34,7 +35,8 @@ export function promptIsBlocked(harness: HarnessId, frame: readonly string[]): b
   if (harness === 'codex') return codexIsBlockingFrame(frame)
   const text = frame.join('\n')
   if (harness === 'gemini' && GEMINI_QUOTA_DIALOG.test(text)) return true
-  return rulesFor(harness)?.approval.some(re => re.test(text)) === true
+  const rules = rulesFor(harness)
+  return rules ? dialogOnScreen(rules, frame) : false
 }
 
 /** Why a write that the backend reported as not delivered did not land, read from the screen AFTER it. */
