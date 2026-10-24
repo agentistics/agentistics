@@ -18,7 +18,7 @@ export interface SwitchInfo {
   ok: boolean
   /** False when multiple accounts are off (or the session is gone). */
   supported: boolean
-  current?: { id?: string; label?: string; harness?: string }
+  current?: { id?: string; label?: string; harness?: string; plan?: string }
   options: SwitchOption[]
   /** Every other account of this machine, with why it cannot be picked. Absent from an older server. */
   unavailable?: SwitchUnavailable[]

@@ -13,6 +13,7 @@
 import { featureOn, type HarnessId } from '@agentistics/core'
 import { readJsonLimited } from '../limits'
 import { readRegistry } from './registry'
+import { readAccounts } from '../harness-accounts'
 import { accountLabel, listSwitchTargets, readLimitState } from './account-switch-io'
 import type { SwitchUnavailableReason } from './account-switch'
 import { fleetLang, hostForFleet, kickFleet } from './fleet-web'
@@ -22,11 +23,17 @@ import { fleetLang, hostForFleet, kickFleet } from './fleet-web'
 export interface SwitchInfo {
   ok: true
   supported: boolean
-  current?: { id?: string; label?: string; harness?: string }
+  current?: { id?: string; label?: string; harness?: string; plan?: string }
   options: { id: string; harness: string; label: string; plan?: string; recommended?: boolean }[]
   /** Every other live account, NOT a target, with the reason in a code the browser words (CONTA.LIMITES). */
   unavailable: { id: string; harness: string; label: string; plan?: string; reason: SwitchUnavailableReason }[]
   limit: { resetsAt?: number; message?: string; pendingPreview?: string } | null
+}
+
+/** The plan the registry holds for the session's own account, for the picker's "current" row. */
+async function accountPlan(accountId: string | undefined): Promise<string | undefined> {
+  if (!accountId) return undefined
+  try { return (await readAccounts()).accounts.find(a => a.id === accountId)?.plan } catch { return undefined }
 }
 
 const PREVIEW = 160
@@ -44,17 +51,18 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
     const row = (await readRegistry()).find(m => m.id === id || (m.conversationId === id && !m.endedAt))
     if (!row || row.endedAt) return json(none)
     const harness = row.harness as HarnessId
-    const [{ options, unavailable }, label, limit] = await Promise.all([
+    const [{ options, unavailable }, label, limit, plan] = await Promise.all([
       listSwitchTargets({ harness, ...(row.accountId ? { accountId: row.accountId } : {}), agentCaller: false }),
       accountLabel(harness, row.accountId),
       row.conversationId
         ? readLimitState({ harness, conversationId: row.conversationId, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }).catch(() => null)
         : Promise.resolve(null),
+      accountPlan(row.accountId),
     ])
     const info: SwitchInfo = {
       ok: true,
       supported: true,
-      current: { harness, ...(row.accountId ? { id: row.accountId } : {}), ...(label ? { label } : {}) },
+      current: { harness, ...(row.accountId ? { id: row.accountId } : {}), ...(label ? { label } : {}), ...(plan ? { plan } : {}) },
       options,
       unavailable,
       limit: limit

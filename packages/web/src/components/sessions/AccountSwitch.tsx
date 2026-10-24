@@ -14,7 +14,7 @@ import { Users, X } from 'lucide-react'
 import type { PlanLimits } from '@agentistics/core'
 import { Checkbox, ConfirmModal, DialogActions, dialogButtonStyle } from '../../pages/settings/primitives'
 import { PLAN_ROW_GRID, PlanUsageRowCells } from '../PlanLimitMeter'
-import { usePlanLimits, subscriptionName } from '../../lib/planLimits'
+import { usePlanLimits } from '../../lib/planLimits'
 import { defaultPick, pickerRows } from '../../lib/accountPicker'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
@@ -124,10 +124,13 @@ export function AccountPicker({ flow, lang }: { flow: SwitchFlow; lang: string }
   return (
     <div role="radiogroup" aria-label={pt ? 'Contas' : 'Accounts'} data-account-picker style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {flow.rows.map(r => {
-        const name = subscriptionName(r.harness as PlanLimits['harness'], r.label || undefined)
+        // The ACCOUNT is the name (the mark already says which assistant); the line under it says
+        // the assistant and the plan, so a 335 px panel never cuts the one thing that tells rows apart.
+        const name = r.label || harnessName(r.harness)
+        const sub = [r.label ? harnessName(r.harness) : '', r.plan ?? (pt ? 'plano não registrado' : 'plan not registered')].filter(Boolean).join(' · ')
         const cells = (
           <PlanUsageRowCells
-            harness={r.harness as PlanLimits['harness']} name={name} plan={r.plan} limits={r.limits} now={flow.plan.now} lang={l}
+            harness={r.harness as PlanLimits['harness']} name={name} plan={sub} limits={r.limits} now={flow.plan.now} lang={l}
             {...(r.reason ? { note: r.reason } : {})}
             {...(r.kind === 'current' ? { tag: chip(pt ? 'Agora' : 'Current', 'var(--text-secondary)') }
               : r.recommended && r.kind === 'option' ? { tag: chip(pt ? 'com folga' : 'has room', 'var(--accent-green)') } : {})}

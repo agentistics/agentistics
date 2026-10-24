@@ -141,7 +141,7 @@ describe('AccountSwitchDialog — every harness (v2)', () => {
     }))
     const dialog = Array.from(document.querySelectorAll('[data-account-switch]')).at(-1)!
     const current = dialog.querySelector('[data-account-switch-current]')!
-    expect(current.textContent).toContain('Claude Code · a@x.com')
+    expect(current.textContent).toContain('a@x.com')
     expect(current.textContent).toContain('Agora')
     expect(current.tagName).not.toBe('BUTTON')
     expect(dialog.querySelectorAll('[role="radio"]').length).toBe(2)

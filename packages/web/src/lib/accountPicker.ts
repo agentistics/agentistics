@@ -65,7 +65,7 @@ export function pickerRows(info: SwitchInfo, limits: readonly PlanLimits[] | nul
   const cur = info.current
   if (cur?.harness) {
     const l = limitsFor(limits, cur.harness, cur.id)
-    const plan = l?.plan ?? l?.sourcePlan
+    const plan = cur.plan ?? l?.plan ?? l?.sourcePlan
     rows.push({
       key: `${cur.harness}:${cur.id ?? ''}`, id: cur.id ?? '', harness: cur.harness, label: cur.label ?? '',
       ...(plan ? { plan } : {}), limits: l, kind: 'current', handoff: false,
