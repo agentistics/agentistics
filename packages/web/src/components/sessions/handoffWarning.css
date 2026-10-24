@@ -6,6 +6,9 @@
 .handoff-meter:focus-visible { outline:2px solid var(--handoff-tone); outline-offset:2px; }
 .handoff-meter-crown { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; flex-shrink:0; border-radius:50%; background:var(--handoff-tone); color:var(--bg-card); transition:background .25s; }
 .handoff-meter-crown svg { display:block; }
+/* The figure leans toward the text colour: lighter than the circle on dark, darker on light, so it
+   stays readable in both themes while still saying the state. */
+.handoff-meter-value { color:color-mix(in srgb,var(--handoff-tone) 78%,var(--text-primary)); }
 .handoff-popover { position:fixed; z-index:1900; box-sizing:border-box; width:340px; max-width:calc(100vw / var(--ui-zoom, 1) - 24px); padding:16px; border:1px solid var(--border); border-radius:12px; background:var(--bg-card); color:var(--text-primary); box-shadow:0 12px 32px rgba(0,0,0,.25); font-size:13px; }
 .handoff-popover>strong { color:var(--handoff-tone); }
 .handoff-popover p,.handoff-live-panel p { font-size:12.5px; line-height:1.5; color:var(--text-secondary); margin:8px 0; }

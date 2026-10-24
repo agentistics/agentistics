@@ -19,7 +19,7 @@ export function leaderMeterState(level: HandoffLevel, contextTokens: number | nu
  *  the tertiary one is too faint to carry a filled circle in either theme. */
 export const LEADER_METER_TONE: Record<LeaderMeterState, string> = {
   normal: 'var(--accent-green)',
-  attention: 'var(--anthropic-orange-light)',
+  attention: 'var(--anthropic-orange)',
   critical: 'var(--accent-red)',
   none: 'var(--text-secondary)',
 }

@@ -42,7 +42,7 @@ describe('leader meter (option B)', () => {
   })
   it('reacts to the live reading with four states, colour from app tokens', () => {
     for (const [level, tokens, face, tone] of [
-      ['normal', 117_000, 'normal', '--accent-green'], ['near', 175_000, 'attention', '--anthropic-orange-light'],
+      ['normal', 117_000, 'normal', '--accent-green'], ['near', 175_000, 'attention', '--anthropic-orange'],
       ['due', 201_000, 'critical', '--accent-red'], ['overdue', 250_000, 'critical', '--accent-red'], ['normal', null, 'none', '--text-secondary'],
     ] as const) {
       const html = meter(level, tokens, true)
