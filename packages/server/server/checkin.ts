@@ -76,9 +76,15 @@ export function checkinAccountLimits(limits: readonly PlanLimits[], budgets: rea
 
 /** Hash only MCP targets, never unrelated model/settings edits or raw credentials. */
 export function checkinMcpTargetDigest(harness: HarnessId, text: string): string {
-  const parsed = harness === 'codex' ? Bun.TOML.parse(text) : JSON.parse(text)
-  const targets = harness === 'codex' ? parsed.mcp_servers : parsed.mcpServers
-  return createHash('sha256').update(stable(targets ?? null)).digest('hex')
+  // An empty or half-written file is a fact about the moment (a CLI creates a 0-byte config on first run),
+  // never a reason to throw: it digests to a stable marker and changes once the file becomes readable.
+  try {
+    const parsed = harness === 'codex' ? Bun.TOML.parse(text) : JSON.parse(text)
+    const targets = harness === 'codex' ? parsed.mcp_servers : parsed.mcpServers
+    return createHash('sha256').update(stable(targets ?? null)).digest('hex')
+  } catch {
+    return createHash('sha256').update('unreadable').digest('hex')
+  }
 }
 
 const defaultCheckinActivity: CheckinDeps['readCheckinActivity'] = async (_since, leader) => checkinActivity((await deps.loadTaskWorld()).book.events, leader)
@@ -134,7 +140,7 @@ const defaultDeps: CheckinDeps = {
         const text = await readFile(file, 'utf8')
         return { harness, file, digest: checkinMcpTargetDigest(harness, text) }
       }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { harness, file, digest: null }; throw error }
+      catch (error) { return { harness, file, digest: (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : createHash('sha256').update('unreadable').digest('hex') } }
     }))
     return { claude: listed?.servers.map(s => ({ name: s.name, scope: s.scope, transport: s.transport, digest: createHash('sha256').update(stable({ url: s.url, config: s.config })).digest('hex') })), configs }
   },
@@ -410,7 +416,8 @@ export async function checkinTick(now = Date.now()): Promise<void> {
 export function resetCheckinSweep(): void { lastSweep = 0 }
 export function startCheckinTimer(): void {
   if (timer) return
-  timer = setInterval(() => { void checkinTick() }, 15_000); timer.unref?.(); void checkinTick()
+  const safeTick = () => checkinTick().catch(error => { console.error('[checkin] tick failed:', error instanceof Error ? error.message : error) })
+  timer = setInterval(() => { void safeTick() }, 15_000); timer.unref?.(); void safeTick()
 }
 /** Cheap gate for the 15 s tick: one preferences read, no fleet or roles read unless a round may be due. */
 export async function anyDue(now: number): Promise<boolean> {

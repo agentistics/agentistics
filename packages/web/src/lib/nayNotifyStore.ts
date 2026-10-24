@@ -58,6 +58,8 @@ let snoozes: Snooze[] = typeof window === 'undefined' ? [] : readJson<unknown[]>
 // --- the session that is open on screen ---------------------------------------------------------
 
 let openSession: string | null = null
+// Presence heartbeats start on load, not on the first session selection or pointer event.
+reportOpenSession(null)
 
 /**
  * The session the person is looking at right now, or null. A card about it is never shown — they

@@ -755,3 +755,13 @@ test('MCP fingerprint follows targets only, without carrying config contents', (
 test('delta excludes unchanged nested facts and treats reordering as unchanged', () => {
   expect(changedInputs({ limits: { accounts: ['a', 'b'], band: 'ok' } }, { limits: { accounts: ['b', 'a'], band: 'tight' } })).toEqual({ limits: { band: 'tight' } })
 })
+
+describe('unreadable MCP config', () => {
+  test('empty or invalid config digests to a stable marker and never throws', () => {
+    for (const h of ['gemini', 'copilot', 'antigravity', 'kimi', 'codex'] as const) {
+      const a = checkinMcpTargetDigest(h, ''), b = checkinMcpTargetDigest(h, h === 'codex' ? '[x' : '{')
+      expect(a).toBe(b)
+      expect(a).not.toBe(checkinMcpTargetDigest(h, h === 'codex' ? '[mcp_servers.a]\ncommand="x"' : '{"mcpServers":{"a":{}}}'))
+    }
+  })
+})

@@ -1,7 +1,7 @@
 /** Owner presence and wait episodes. No prompt is ever sent by this module. */
 export const WAIT_NOTICE_MS = 5 * 60_000
 export const PRESENCE_TTL_MS = 45_000
-export interface PresenceReport { client: string; session: string | null; visible: boolean; focused: boolean; interacted: boolean }
+export interface PresenceReport { client: string; session: string | null; visible: boolean; focused: boolean; interacted: boolean; lang?: 'pt' | 'en'; shown?: string[] }
 export interface OwnerPresence { client: string; session: string | null; lastSeenAt: number; lastInteractionAt: number }
 export interface WaitingSession { id: string; conversationId?: string; title: string; waiting: boolean; since?: number }
 export interface WaitNotice { id: string; session: string; title: string }
@@ -33,8 +33,9 @@ export function createOwnerPresence() {
         if (presence?.session === row.id) e.opened = true
         // Every client must learn an acknowledgement, including one that was hidden at the time.
         if (e.opened) cleared.push(id)
+        if (report.shown?.includes(id)) e.announced = true
         if (presence?.client === report.client && presence.session !== row.id && !e.opened && !e.announced && now - e.since >= WAIT_NOTICE_MS) {
-          e.announced = true
+          // Marked announced only when the client acknowledges it in `shown`; until then it is re-offered.
           notices.push({ id, session: row.id, title: row.title })
         }
       }
@@ -48,5 +49,7 @@ export function validPresenceReport(value: unknown): value is PresenceReport {
   const p = value as Record<string, unknown>
   return typeof p.client === 'string' && p.client.length > 0 && p.client.length <= 100
     && (p.session === null || (typeof p.session === 'string' && p.session.length <= 200))
+    && (p.lang === undefined || p.lang === 'pt' || p.lang === 'en')
+    && (p.shown === undefined || (Array.isArray(p.shown) && p.shown.length <= 50 && p.shown.every(s => typeof s === 'string' && s.length <= 300)))
     && typeof p.visible === 'boolean' && typeof p.focused === 'boolean' && typeof p.interacted === 'boolean'
 }

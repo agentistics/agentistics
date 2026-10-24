@@ -17,6 +17,6 @@ export async function handleOwnerPresence(req: Request): Promise<Response> {
   const body = await req.json().catch(() => null)
   if (!validPresenceReport(body)) return Response.json({ error: 'invalid_presence' }, { status: 400 })
   const [{ readFleet }, { readPreferences }] = await Promise.all([import('./fleet-web'), import('../preferences')])
-  const rows = (await readFleet('pt')).rows
+  const rows = (await readFleet(body.lang ?? 'pt')).rows
   return Response.json(ownerPresence.report(body, waitingSessions(rows, (await readPreferences()).checkin ?? {})))
 }

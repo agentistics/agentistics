@@ -1,3 +1,4 @@
+import { initialLang } from './lang'
 import { dismissNotification, pushLocalNotification, readNotifications } from './notifications'
 
 let session: string | null = null
@@ -13,6 +14,7 @@ export function presenceActive(visible: string, focused: boolean): boolean { ret
 export function startOwnerPresence(): () => void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return () => {}
   const client = crypto.randomUUID()
+  const shownQueue = new Set<string>()
   let interacted = true, pending = false, disposed = false, rerun = false
   const send = async () => {
     if (disposed) return
@@ -21,14 +23,20 @@ export function startOwnerPresence(): () => void {
     const active = presenceActive(document.visibilityState, document.hasFocus())
     const interaction = interacted
     interacted = false
+    const shown = [...shownQueue]
     try {
       const response = await fetch('/api/fleet/owner-presence', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client, session, visible: active, focused: active, interacted: interaction }), keepalive: true })
+        body: JSON.stringify({ client, session, visible: active, focused: active, interacted: interaction, lang: initialLang(localStorage, navigator.language), shown }), keepalive: true })
       if (!response.ok || disposed) return
       const result = await response.json() as { notices: { id: string; session: string; title: string }[]; cleared: string[] }
       for (const n of readNotifications()) if (n.code === 'owner.waiting' && result.cleared.includes(String(n.meta?.episode))) dismissNotification(n.id)
       if (!active || !presenceActive(document.visibilityState, document.hasFocus())) return
-      for (const n of result.notices) pushLocalNotification({ type: 'info', code: 'owner.waiting', meta: { label: n.title, sessionId: n.session, episode: n.id } })
+      for (const id of shown) shownQueue.delete(id)
+      const have = new Set(readNotifications().filter(n => n.code === 'owner.waiting').map(n => String(n.meta?.episode)))
+      for (const n of result.notices) {
+        if (!have.has(n.id)) pushLocalNotification({ type: 'info', code: 'owner.waiting', meta: { label: n.title, sessionId: n.session, episode: n.id } })
+        shownQueue.add(n.id) // acknowledged on the next heartbeat
+      }
     } catch { interacted ||= interaction } finally { pending = false; if (rerun) { rerun = false; void send() } }
   }
   const interaction = () => { interacted = true }

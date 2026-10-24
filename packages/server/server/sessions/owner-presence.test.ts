@@ -17,7 +17,7 @@ describe('owner presence without model calls', () => {
     expect(p.report(report, rows, 0).notices).toEqual([])
     expect(p.report(report, rows, WAIT_NOTICE_MS - 1).notices).toEqual([])
     expect(p.report(report, rows, WAIT_NOTICE_MS).notices).toEqual([{ id: 'b:0', session: 'b', title: 'B' }])
-    expect(p.report(report, rows, WAIT_NOTICE_MS + 1).notices).toEqual([])
+    expect(p.report({ ...report, shown: ['b:0'] }, rows, WAIT_NOTICE_MS + 1).notices).toEqual([])
     expect(p.report({ ...report, session: 'b' }, rows, WAIT_NOTICE_MS + 2).cleared).toContain('b:0')
     expect(p.report(report, rows, WAIT_NOTICE_MS * 2).notices).toEqual([])
     p.report(report, rows.map(r => ({ ...r, waiting: false })), WAIT_NOTICE_MS * 2)
@@ -48,4 +48,18 @@ test('opening elsewhere clears a notice when its original browser becomes active
   expect(p.report(report, rows, WAIT_NOTICE_MS).notices).toHaveLength(1)
   p.report({ ...report, client: 'other', session: 'b' }, rows, WAIT_NOTICE_MS + 1)
   expect(p.report(report, rows, WAIT_NOTICE_MS + 2).cleared).toContain('b:0')
+})
+
+test('a notice is re-offered until the client acknowledges it as shown', () => {
+  const p = createOwnerPresence()
+  p.report(report, rows, 0)
+  expect(p.report(report, rows, WAIT_NOTICE_MS).notices).toHaveLength(1)
+  expect(p.report(report, rows, WAIT_NOTICE_MS + 1).notices).toHaveLength(1)
+  expect(p.report({ ...report, shown: ['b:0'] }, rows, WAIT_NOTICE_MS + 2).notices).toEqual([])
+  expect(p.report(report, rows, WAIT_NOTICE_MS + 3).notices).toEqual([])
+})
+test('lang and shown are validated', () => {
+  expect(validPresenceReport({ ...report, lang: 'en', shown: ['x'] })).toBe(true)
+  expect(validPresenceReport({ ...report, lang: 'fr' })).toBe(false)
+  expect(validPresenceReport({ ...report, shown: [1] })).toBe(false)
 })
