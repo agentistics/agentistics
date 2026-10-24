@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, symlinkSync, realpathSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
-import { attachAfterSpawn, planSpawnFiling, planSpawnFilingSafe } from './spawn-filing-io'
+import { attachAfterSpawn, planReopenCwd, planSpawnFiling, planSpawnFilingSafe } from './spawn-filing-io'
 import { addSession, readRegistry, removeSession } from './registry'
 import { spawnSessionFilingRequest } from './spawn-row'
 import { createTaskStore } from './task-store'
@@ -42,6 +42,33 @@ describe('planSpawnFiling (IO layer)', () => {
     expect((await planSpawnFiling(o)).ok).toBe(true)
     expect(await planSpawnFiling({ ...o, role: 'worker' })).toMatchObject({ ok: false, code: 'cwd_shared_checkout' })
     expect((await planSpawnFiling({ ...o, role: 'worker', sharedCwd: true })).ok).toBe(true)
+  })
+
+  test('single CLI, batch and web workers all refuse the live parent checkout', async () => {
+    const d = gitDir()
+    const parent = row('parent', d)
+    const base = { ...common, rows: [parent], liveIds: new Set([parent.id]) }
+    const requests = [
+      { role: 'worker' as const, cwd: d, callerSessionId: parent.id }, // CLI start
+      { role: 'worker' as const, cwd: d, callerSessionId: parent.id, extraLiveCwds: [] }, // batch, first spec
+      spawnSessionFilingRequest({ cwd: d, parentSessionId: parent.id, parentVerified: true }),
+    ]
+    for (const request of requests) {
+      expect(await planSpawnFiling({ ...base, ...request })).toMatchObject({ ok: false, code: 'cwd_shared_checkout' })
+      const shared = await planSpawnFiling({ ...base, ...request, sharedCwd: true })
+      expect(shared.ok).toBe(true)
+      if (shared.ok) expect(shared.warnings).toContain('shared_checkout_override')
+    }
+  })
+
+  test('reopening a worker uses the shared-checkout rule and excludes only the replaced row', async () => {
+    const d = gitDir()
+    const entry = { ...row('old', d), parentSessionId: 'parent' }
+    const options = { ...common, role: 'worker' as const, rows: [entry, row('other', d)], liveIds: new Set(['old', 'other']) }
+    expect(await planReopenCwd(entry, options)).toMatchObject({ ok: false, code: 'cwd_shared_checkout' })
+    expect(await planReopenCwd(entry, { ...options, liveIds: new Set(['old']) })).toMatchObject({ ok: true })
+    expect(await planReopenCwd(entry, { ...options, role: 'leader' })).toMatchObject({ ok: true })
+    expect(await planReopenCwd(entry, { ...options, repoFacts: async () => ({ repo: 'o/r', worktree: true }) })).toMatchObject({ ok: true })
   })
 
   test('a checkout reached through a symlinked row cwd is still seen as shared', async () => {

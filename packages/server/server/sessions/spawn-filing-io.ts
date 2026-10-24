@@ -139,6 +139,25 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
   throw new Error('unreachable')
 }
 
+/** Reopening keeps its filing, but a worker still cannot enter an occupied main checkout. */
+export async function planReopenCwd(
+  entry: ManagedSession,
+  options: Pick<SpawnFilingRequest, 'rows' | 'liveIds' | 'repoFacts' | 'role'> = {},
+): Promise<FilingPlan> {
+  const { storedRoleFor } = await import('./session-roles')
+  const { spawnRole } = await import('./spawn-row')
+  const { hasRolePrefix } = await import('@agentistics/core')
+  const role = options.role ?? await storedRoleFor([entry.conversationId, entry.id])
+    ?? spawnRole({ leaderPrefix: !!entry.label && hasRolePrefix(entry.label), hasParent: !!entry.parentSessionId })
+  const liveIds = new Set(options.liveIds ?? await defaultLiveIds())
+  // The replaced row is the same session; unlike a new child's parent, it is not a competitor.
+  liveIds.delete(entry.id)
+  return planSpawnFilingSafe({
+    ...options, role, liveIds, cwd: entry.cwd,
+    book: { tasks: [], subtasks: [] }, groups: { groups: [] },
+  })
+}
+
 /** Workers fail fast. Persons and hand-offs spawn first, then report the board's attach refusal. */
 function checkAttach(plan: FilingPlan, book: Pick<TaskBook, 'tasks' | 'subtasks'>): FilingPlan {
   if (!plan.ok || plan.role !== 'worker' || !plan.taskId || !plan.subtaskId) return plan
