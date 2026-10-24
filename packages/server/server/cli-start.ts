@@ -187,7 +187,7 @@ import { readSpawnBudget } from './sessions/memory-probe'
 // The lock on the door: one conversation, one live session. See `conversation-claim.ts` for the
 // measurement that made it necessary, and `live-claims.ts` for the evidence it is allowed to use.
 import { conversationHeldBy } from './sessions/conversation-claim'
-import { withResumeLock } from './sessions/resume-lock'
+import { withConversationResumeLock as withResumeLock } from './sessions/conversation-resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
 import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
 import {
@@ -2481,14 +2481,8 @@ async function reopenEntries(
      * time, once this row's turn under the lock comes, against a FRESH read — which is what lets the
      * second racer see the first racer's own new row and stand down instead of starting a twin.
      *
-     * `withResumeLock` is IN-PROCESS memory (a plain `Map` at module scope in `resume-lock.ts`), so
-     * this closes the race COMPLETELY only between two callers inside the SAME process — two
-     * `reopenFell` requests both landing on this one `agentop server`. A `reopenFell` fired from a
-     * separately-run cockpit process at the same instant has its OWN lock instance and is not
-     * serialised by it; the fresh-read recheck inside `attemptReopenRow` still narrows that case (it
-     * reads the registry file and the backend, which any process can see) without being a hard
-     * exclusion the way the same-process case is. Same class of stated limit `registry.ts` already
-     * carries for cross-process writes.
+     * The conversation lock is shared with CLI processes through an exclusive filesystem claim;
+     * it never proceeds without ownership. The fresh check then sees the previous winner's row.
      */
     const outcome = await withResumeLock(row.resumeId, () => attemptReopenRow(row.resumeId, m.id, {
       freshState: async () => {
@@ -2502,7 +2496,7 @@ async function reopenEntries(
         return { entries: freshEntries, aliveIds: freshAlive }
       },
       holderOf: async () =>
-        conversationHeldBy(await liveConversationHolders(await resolveBackend()), row.resumeId, m.id),
+        conversationHeldBy(await liveConversationHolders(await resolveBackend()), row.resumeId),
       spawn: () => spawnManaged(reopenRowRequest(m, row, caller), s, lang).then(r => {
         if (!r.ok && r.accountRefusal) accountRefusals.push({ id: m.id, reason: r.accountRefusal, message: r.message })
         return r
@@ -2871,7 +2865,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
    * without adding an undeclared property to the object literal below, which `StartHost` would
    * reject as an excess property.
    */
-  async function resumeSessionLocked(req: ResumeSessionRequest): Promise<SpawnSessionResult> {
+  async function resumeSessionLocked(req: ResumeSessionRequest, host: StartHost): Promise<SpawnSessionResult> {
     const s = S()
     // What the old row knew about this work — its task and its note — comes with it. A reopen
     // that dropped them would file the recovered session nowhere and lose what someone wrote
@@ -2879,39 +2873,25 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     const previous = req.replaces
       ? (await readRegistry()).find(m => m.id === req.replaces)
       : undefined
-    // THE LOCK ON THE DOOR — and, for one kind of holder, the door opening instead.
-    //
-    // Two assistants in one transcript and one working tree is the worst thing this feature has
-    // done, so nothing is spawned before asking who holds the conversation. But WHO holds it
-    // decides what the answer means:
-    //
-    //  - a MANAGED row is somewhere to go. It has a pane, `o` attaches to it, and "open it there"
-    //    is an instruction the user can follow. Still refused, unchanged.
-    //  - a PROCESS is not somewhere to go. An assistant started by hand has no pane to attach to,
-    //    and the refusal named its DIRECTORY — which is not a place. There was no verb that could
-    //    do anything with it either, so the row was a dead end: visible, and inert. Reported.
-    //
-    // For that second case the conversation is on DISK, so ending the process and reopening the
-    // same id under tmux costs the turn in flight and nothing else — and puts the work back under
-    // every verb this screen has. That is a takeover, and it is what `resume` now does rather
-    // than a verb of its own: the user already pressed the key that means "put this conversation
-    // in front of me".
-    // THE DECISION IS `planTakeover`, which already existed and which this code did not use.
-    //
-    // `cli-session.ts` had been taking a conversation over since the CLI gained the verb, through
-    // that pure planner. This method grew its own copy of the same gesture — the exact drift
-    // `task-reopen.ts` was extracted to end — and the copy was WORSE in a way that costs work: it
-    // killed the holder and then tried to resume, so a harness that cannot reopen by id would
-    // have had its assistant closed for nothing. The planner refuses `resume-unsupported` BEFORE
-    // anything is signalled, which is the whole reason it is a plan rather than an action.
+    // Ask under the conversation lock. Include the requested row itself: reopening a live row
+    // focuses it, including a CLI relay hosted in another process. Only a foreign process with no
+    // managed row needs the existing takeover planner below.
     const holder = conversationHeldBy(
       await liveConversationHolders(await resolveBackend()),
       req.sessionId,
-      req.replaces,
     )
     // A managed row is somewhere to go: it has a pane and `o` attaches to it, so "open it there"
     // is an instruction the user can follow. It never becomes a takeover.
-    if (holder?.kind === 'managed') return { ok: false, message: s.sessResumeInUse(holder.label) }
+    if (holder?.kind === 'managed') {
+      // Reopen is idempotent, including a click on the live row itself. A prompt supplied by
+      // continueExternal must reach the existing driver rather than disappear on this path.
+      if (req.prompt) {
+        const out = await host.promptSession!(holder.id, req.prompt)
+        return { ...out, ...(out.ok ? { id: holder.id } : {}) }
+      }
+      const ticket = req.attach ? await host.attachSession?.(holder.id) : null
+      return { ok: true, id: holder.id, message: s.sessResumeInUse(holder.label), ...(ticket ? { ticket } : {}) }
+    }
 
     const harness = req.harness as HarnessId
     const plan = planTakeover({
@@ -2954,11 +2934,14 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       harness: req.harness as HarnessId,
       cwd: req.cwd,
       resumeId: req.sessionId,
+      // A delayed raw spawn would run after this conversation claim is released. Refuse admission
+      // here so a queued replay cannot bypass the fresh live-holder check and create a twin.
+      queue: false,
       ...(req.prompt ? { prompt: req.prompt } : {}),
       ...(req.label ? { label: req.label } : {}),
-      ...(previous ? { inherit: previous } : recordedAccountId ? { accountId: recordedAccountId } : {}),
+      ...(recorded ? { inherit: recorded } : {}),
       attach: req.attach,
-      ...(previous?.task ? { task: previous.task } : {}),
+      ...(recorded?.task ? { task: recorded.task } : {}),
       // A TAKEOVER just ENDED the process this spawn replaces (`endProcess` above) — the net memory
       // cost of proceeding is ~zero, and refusing here would destroy the very session the user asked
       // to bring back, which is worse than never having gated it. An ordinary resume (no holder to
@@ -2973,10 +2956,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // is no guessing left for the next reopen. Without it the fallback matches on directory
       // alone, and every session in one repository resolves to the same conversation.
       if (spawned.id) await patchSession(spawned.id, { conversationId: req.sessionId })
-      if (previous?.note && spawned.id) await patchSession(spawned.id, { note: previous.note })
+      if (recorded?.note && spawned.id) await patchSession(spawned.id, { note: recorded.note })
       // The old row is RETIRED rather than deleted: it is still a thing that happened, and it
       // stops standing beside its own continuation with the same name on it.
-      if (previous) await patchSession(previous.id, { endedAt: new Date().toISOString() })
+      if (recorded) await patchSession(recorded.id, { endedAt: new Date().toISOString() })
 
       const liveBackend = await (await resolveBackend()).list().catch(() => null)
       const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
@@ -4125,7 +4108,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         const out = await runNativeVerb(req.sessionId, 'resume', lang)
         return { ...out, ...(out.ok ? { id: req.sessionId } : {}) }
       }
-      return withResumeLock(req.sessionId, () => resumeSessionLocked(req))
+      try { return await withResumeLock(req.sessionId, () => resumeSessionLocked(req, this)) }
+      catch (e) { return { ok: false, message: e instanceof Error ? e.message : String(e) } }
     },
 
     /*
@@ -4325,7 +4309,14 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
 
       const live = (await backend.list().catch(() => [])).find(b => b.id === id)
-      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      if (!live?.alive) {
+        const holder = conversationHeldBy(await liveConversationHolders(backend), managed.conversationId, id)
+        if (holder?.kind === 'managed') {
+          const out = await this.promptSession!(holder.id, body)
+          return { ...out, ...(out.ok ? { id: holder.id } : {}) }
+        }
+        return { ok: false, message: s.sessNotRunning }
+      }
 
       // F3.3 — a STRUCTURED session states its open request; a prompt then would race the answer the
       // person is being asked for (the screen rules below read a TUI footer it never draws).

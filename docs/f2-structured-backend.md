@@ -352,3 +352,18 @@ docs are silent (where `conversation_id` sits, the shape of `error`) and strict 
 - **P-23**: `--effort` accepts `xhigh|max` on 1.3.2 (`spawn-spec.ts` updated).
 - The driver adds `AGENTOP_MANAGED_ID` to the child's env (the MCP's session proof needs it; the `acp` driver does
   not yet — a shared fix in `structuredSpawnOf` would cover all drivers).
+
+### Reopening a conversation (REOPEN.DUP, #1105)
+
+Reopen checks the exact conversation claim while holding a per-conversation lock shared by the
+server, cockpit and CLI (`conversation-resume-lock.ts`). The filesystem claim has a live owner pid;
+it never expires a living owner's long spawn or proceeds after a contention timeout. A dead owner
+can be recovered. The existing in-process queue also releases its map entry after the last waiter.
+
+A live managed holder, including the requested row itself or a durable relay owned by another
+process, returns its existing row id. Terminal callers attach to that row; browser callers focus it.
+Backend liveness takes precedence over a stale `endedAt` stamp when gathering conversation claims.
+A dead row is retired using the existing `endedAt` replacement convention only after the new spawn
+succeeds. Sending through a dead managed row first looks for the exact conversation's live holder
+and delivers there; the successful response carries that row id so the composer follows it.
+The CLI relay adoption/delivery path remains the structured backend's responsibility.

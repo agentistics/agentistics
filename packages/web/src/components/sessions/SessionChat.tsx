@@ -2418,6 +2418,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       : await act({ id: session.id, action: 'prompt', text: full })
     setSending(false)
     if (out.ok) {
+      if (out.id && out.id !== session.id) onReopened?.(out.id)
       setVaultGrantCache(null)
       // Ask for the transcript at once. The harness writes the user turn as soon as it takes the
       // message, and the next scheduled read is up to `CHAT_POLL_MS` away — three seconds in which
