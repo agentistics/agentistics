@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowRightLeft, X } from 'lucide-react'
+import { ArrowRightLeft, Crown, X } from 'lucide-react'
 import { fmtCost, type HandoffLevel, type HandoffPanel } from '@agentistics/core'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { handoffPanelActions as actions, useHandoffPanel } from '../../lib/handoffPanel'
 import { ConfirmModal } from '../../pages/settings/primitives'
+import { LEADER_METER_TONE, leaderMeterState, leaderMeterStateLabel } from '../../lib/leaderMeter'
 import type { SessionChatProps } from './SessionChat'
 import './handoffWarning.css'
 
-const tones: Record<HandoffLevel, string> = { normal: 'var(--accent-green)', near: 'var(--accent-yellow, #ca8a04)', due: 'var(--anthropic-orange)', overdue: 'var(--accent-red)' }
+/** One palette for the meter, its popover and the composer band — the leader meter's states. */
+const tones: Record<HandoffLevel, string> = { normal: LEADER_METER_TONE.normal, near: LEADER_METER_TONE.attention, due: LEADER_METER_TONE.critical, overdue: LEADER_METER_TONE.critical }
 export function handoffLevelLabel(level: HandoffLevel, pt: boolean): string {
   return ({ normal: pt ? 'Longe do corte' : 'Below the cut', near: pt ? 'Chegando perto do ponto de passar' : 'Approaching the handoff point', due: pt ? 'Hora de passar' : 'Time to hand off', overdue: pt ? 'Passou do ponto' : 'Past the handoff point' })[level]
 }
@@ -41,6 +43,20 @@ export function HandoffQuotaNote({ panel: p, pt }: { panel: Pick<HandoffPanel, '
   return <small>{pt ? 'Percentual da janela de contexto. Ajuste em Configurações › Sessões.' : 'Percentage of the context window. Adjust in Settings › Sessions.'} {explanation}</small>
 }
 
+/** The header's leader indicator itself (option B): crown in a filled circle, then the context
+ *  figure, both in the state's colour. Presentational so every state can be rendered in a test. */
+export function LeaderMeterButton({ panel: p, pt, buttonRef, onClick }: { panel: Pick<HandoffPanel, 'level' | 'contextTokens' | 'cutTokens'>; pt: boolean; buttonRef?: RefObject<HTMLButtonElement | null>; onClick?: () => void }) {
+  const face = leaderMeterState(p.level, p.contextTokens)
+  const stateLabel = face === 'none' ? leaderMeterStateLabel(face, pt) : handoffLevelLabel(p.level, pt)
+  const role = pt ? 'Líder' : 'Leader'
+  return <button ref={buttonRef} type="button" className="handoff-meter" data-state={face} style={{ '--handoff-tone': LEADER_METER_TONE[face] } as CSSProperties}
+    aria-label={`${role} · ${p.contextTokens === null ? stateLabel : `${tokens(p.contextTokens, pt)} ${pt ? 'de' : 'of'} ${tokens(p.cutTokens, pt)} · ${stateLabel}`}`}
+    title={`${role} · ${stateLabel}`} onClick={onClick}>
+    <span className="handoff-meter-crown" aria-hidden="true"><Crown size={14} strokeWidth={2.25} /></span>
+    <span className="handoff-meter-value">{tokens(p.contextTokens, pt)}</span>
+  </button>
+}
+
 export function HandoffMeter({ id, pt, act }: { id: string; pt: boolean; act: SessionChatProps['act'] }) {
   const state = useHandoffPanel(id)
   const p = state.panel
@@ -54,16 +70,10 @@ export function HandoffMeter({ id, pt, act }: { id: string; pt: boolean; act: Se
     place(); window.addEventListener('resize', place); window.addEventListener('scroll', closePopover, true)
     return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', closePopover, true) }
   }, [id, state.popover])
-  if (!p || p.contextTokens === null) return null
+  if (!p) return null
   const collapsed = state.collapsed && (p.level === 'due' || p.level === 'overdue') && p.config.warnings[p.level]
   return <>
-    <button ref={anchor} type="button" className="handoff-meter" style={{ '--handoff-tone': tones[p.level] } as CSSProperties}
-      aria-label={`${tokens(p.contextTokens, pt)} ${pt ? 'de' : 'of'} ${tokens(p.cutTokens, pt)} · ${handoffLevelLabel(p.level, pt)}`}
-      onClick={() => collapsed ? actions.expand(id) : actions.open(id)}>
-      {!collapsed && <span>{pt ? 'Líder' : 'Leader'}</span>}
-      {collapsed ? <span>{pt ? 'Hora de passar' : 'Handoff due'}</span> : <span className="handoff-meter-track" aria-hidden="true"><span style={{ width: `${Math.min(100, Math.max(0, (p.contextTokens ?? 0) / p.cutTokens * 100))}%` }} /></span>}
-      <span>{tokens(p.contextTokens, pt)}</span>
-    </button>
+    <LeaderMeterButton panel={p} pt={pt} buttonRef={anchor} onClick={() => collapsed ? actions.expand(id) : actions.open(id)} />
     {state.popover && createPortal(<div className="handoff-popover" role="status" style={{ top: position.top, left: position.left, '--handoff-tone': tones[p.level] } as CSSProperties}>
       <strong>{handoffLevelLabel(p.level, pt)}</strong>
       <p>{tokens(p.contextTokens, pt)} {pt ? 'de' : 'of'} {tokens(p.cutTokens, pt)}. {pt ? 'Próxima resposta: ' : 'Next reply: '}{money(p.nextReplyUSD)}; {pt ? 'numa nova sessão: ' : 'in a new session: '}{money(p.successorReplyUSD)}.</p>

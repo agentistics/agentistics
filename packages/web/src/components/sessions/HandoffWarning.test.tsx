@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { HandoffPanel } from '@agentistics/core'
-import { HandoffBand, HandoffQuotaCell, HandoffQuotaNote, handoffLevelLabel } from './HandoffWarning'
+import { HandoffBand, HandoffQuotaCell, HandoffQuotaNote, LeaderMeterButton, handoffLevelLabel } from './HandoffWarning'
 import HandoffSettings from '../../pages/settings/HandoffSettings'
 
 describe('handoff screens', () => {
@@ -24,6 +24,37 @@ describe('handoff screens', () => {
       expect(html).toContain(pt ? 'Equilibrado' : 'Balanced')
       expect(html).toContain('value="10"')
       expect(html).toContain(pt ? 'Voltar ao padrão' : 'Reset to default')
+    }
+  })
+})
+
+describe('leader meter (option B)', () => {
+  const meter = (level: 'normal' | 'near' | 'due' | 'overdue', contextTokens: number | null, pt: boolean) =>
+    renderToStaticMarkup(<LeaderMeterButton panel={{ level, contextTokens, cutTokens: 200_000 }} pt={pt} />)
+  it('is a crown circle then the token figure, with no outer capsule or bar', () => {
+    const html = meter('normal', 117_000, true)
+    expect(html).toContain('class="handoff-meter-crown"')
+    expect(html).toContain('lucide-crown')
+    expect(html.indexOf('handoff-meter-crown')).toBeLessThan(html.indexOf('handoff-meter-value'))
+    expect(html).toContain('>117 mil</span>')
+    expect(html).not.toContain('handoff-meter-track')
+    expect(meter('normal', 117_000, false)).toContain('>117k</span>')
+  })
+  it('reacts to the live reading with four states, colour from app tokens', () => {
+    for (const [level, tokens, face, tone] of [
+      ['normal', 117_000, 'normal', '--accent-green'], ['near', 175_000, 'attention', '--anthropic-orange-light'],
+      ['due', 201_000, 'critical', '--accent-red'], ['overdue', 250_000, 'critical', '--accent-red'], ['normal', null, 'none', '--text-secondary'],
+    ] as const) {
+      const html = meter(level, tokens, true)
+      expect(html).toContain(`data-state="${face}"`)
+      expect(html).toContain(`--handoff-tone:var(${tone})`)
+    }
+  })
+  it('stays on screen without a reading and says so in words', () => {
+    for (const pt of [true, false]) {
+      const html = meter('normal', null, pt)
+      expect(html).toContain('>—</span>')
+      expect(html).toContain(pt ? 'aria-label="Líder · Sem leitura"' : 'aria-label="Leader · No reading"')
     }
   })
 })
