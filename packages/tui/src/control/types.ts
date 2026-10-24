@@ -2048,6 +2048,12 @@ export interface ResumeSessionRequest {
    * reopen keeps the recorded account.
    */
   switchToAccount?: string
+  /**
+   * CONTA.TROCA — skip the memory admission. Set only by the account switch, which has just ENDED
+   * the process this resume replaces, so the net memory cost is ~zero; refusing there would leave
+   * the person with no session at all.
+   */
+  force?: boolean
 }
 
 /** CONTA.TROCA — move a running session to another account of the same harness. */

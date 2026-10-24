@@ -26,6 +26,7 @@ import { sessionLinks } from '../lib/sessionParent'
 import { SessionCheckinCard, SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
 import { Drawer } from '../components/Drawer'
 import { PlanUsageSummary } from '../components/PlanLimitMeter'
+import { AccountSwitchInline } from '../components/sessions/AccountSwitch'
 import { ContextRing } from '../components/sessions/SessionStatsMenu'
 import { HarnessMark } from '../components/sessions/HarnessMark'
 import { HARNESS_LABELS } from '../lib/harness'
@@ -2918,16 +2919,19 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             </>
           )
         })(), (
-          <button
-            type="button"
-            onClick={() => { closeSessionDrawer(); requestPlanUsageModal() }}
-            aria-label={pt ? 'Ver todos os limites' : 'See every limit'}
-            style={{
-              all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: 'pointer',
-            }}
-          >
-            <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} accountLabels={planLimits.accountLabels} now={planLimits.now} lang={tPt} />
-          </button>
+          // CONTA.LIMITES: the list of plans, and the switch right where the limits are.
+          <AccountSwitchInline sessionId={selected.id} lang={tPt} onSwitched={id => { setSessionDrawer(false); goToReopened(id) }}>
+            <button
+              type="button"
+              onClick={() => { closeSessionDrawer(); requestPlanUsageModal() }}
+              aria-label={pt ? 'Ver todos os limites' : 'See every limit'}
+              style={{
+                all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: 'pointer',
+              }}
+            >
+              <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} accountLabels={planLimits.accountLabels} now={planLimits.now} lang={tPt} />
+            </button>
+          </AccountSwitchInline>
         ), { open: drawerLimitsOpen, toggle: () => setDrawerLimitsOpen(v => !v) })}
 
         {/* A leader's check-in is a card of its own (folded inside "Sessão" it was the hardest control
