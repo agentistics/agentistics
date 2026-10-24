@@ -4,15 +4,15 @@
  *
  *   GET  /api/fleet/switch-account?id=<row>   what the session could move to, and whether its last
  *                                             turn stopped on a usage limit
- *   POST /api/fleet/switch-account            { id, accountId, resendPending?, session? } — do it
+ *   POST /api/fleet/switch-account            { id, accountId, harness?, resendPending?, session? } — do it
  *
- * The GET never says anything when `multi-account` is off or the harness cannot be switched: the
- * notice and the menu item are ABSENT there, never present and failing.
+ * The GET never says anything when `multi-account` is off: the notice and the menu item are ABSENT
+ * there, never present and failing. Options span every harness that can start a session here
+ * (CONTA.TROCA v2); the same harness is offered only where its conversation can be carried.
  */
 import { featureOn, type HarnessId } from '@agentistics/core'
 import { readJsonLimited } from '../limits'
 import { readRegistry } from './registry'
-import { switchSupported } from './account-switch'
 import { accountLabel, listSwitchOptions, readLimitState } from './account-switch-io'
 import { fleetLang, hostForFleet, kickFleet } from './fleet-web'
 
@@ -21,8 +21,8 @@ import { fleetLang, hostForFleet, kickFleet } from './fleet-web'
 export interface SwitchInfo {
   ok: true
   supported: boolean
-  current?: { id?: string; label?: string }
-  options: { id: string; label: string; plan?: string; recommended?: boolean }[]
+  current?: { id?: string; label?: string; harness?: string }
+  options: { id: string; harness: string; label: string; plan?: string; recommended?: boolean }[]
   limit: { resetsAt?: number; message?: string; pendingPreview?: string } | null
 }
 
@@ -39,7 +39,7 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
     const none: SwitchInfo = { ok: true, supported: false, options: [], limit: null }
     if (!featureOn('multi-account') || !id) return json(none)
     const row = (await readRegistry()).find(m => m.id === id || (m.conversationId === id && !m.endedAt))
-    if (!row || !switchSupported(row.harness as HarnessId)) return json(none)
+    if (!row || row.endedAt) return json(none)
     const harness = row.harness as HarnessId
     const [options, label, limit] = await Promise.all([
       listSwitchOptions({ harness, ...(row.accountId ? { accountId: row.accountId } : {}), agentCaller: false }),
@@ -51,7 +51,7 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
     const info: SwitchInfo = {
       ok: true,
       supported: true,
-      current: { ...(row.accountId ? { id: row.accountId } : {}), ...(label ? { label } : {}) },
+      current: { harness, ...(row.accountId ? { id: row.accountId } : {}), ...(label ? { label } : {}) },
       options,
       limit: limit
         ? {
@@ -68,6 +68,7 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
     const body = read && read.ok && read.value && typeof read.value === 'object' ? read.value : null
     const id = typeof body?.id === 'string' ? body.id : ''
     const accountId = typeof body?.accountId === 'string' ? body.accountId : ''
+    const harness = typeof body?.harness === 'string' && body.harness ? body.harness : undefined
     if (!id || !accountId) return json({ ok: false, message: 'id and accountId are required' }, 400)
     const { markCallerVerified } = await import('./session-roles')
     const { verifySessionIdentity } = await import('./session-identity')
@@ -76,7 +77,7 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
     const target = (await readRegistry()).find(m => m.id === id) ?? (await readRegistry()).find(m => m.conversationId === id && !m.endedAt)
     const host = await hostForFleet(fleetLang(url.searchParams.get('lang')))
     if (!host.switchSessionAccount) return json({ ok: false, message: 'unavailable' }, 501)
-    const out = await host.switchSessionAccount({ id: target?.id ?? id, accountId, resendPending: body?.resendPending === true, ...(callerVerified ? { callerVerified: true } : {}) })
+    const out = await host.switchSessionAccount({ id: target?.id ?? id, accountId, ...(harness ? { harness } : {}), resendPending: body?.resendPending === true, ...(callerVerified ? { callerVerified: true } : {}) })
     if (out.ok) kickFleet(out.id)
     const { status, ...rest } = out as typeof out & { status?: number }
     return json(rest, out.ok ? 200 : status ?? 409)

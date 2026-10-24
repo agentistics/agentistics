@@ -614,12 +614,13 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_session_switch_account",
     description:
-      "Continue a session on ANOTHER account of the same harness (multiple accounts must be on). Use it when a session hit its account's usage limit and another account has room. With no `accountId` it lists the accounts the session can move to (the recommended one first, from the plan router) and whether its last turn stopped on a usage limit. With `accountId` it ends the session, copies its conversation to that account (never moves it) and resumes the SAME conversation there; the session keeps its name, task and note under a new id, which is returned. `resendPending: true` re-sends, once, the message the limit refused. Claude Code and Codex only; an account that is off for agents, removed or signed out is refused in words.",
+      "Continue a session on ANOTHER account — of its own harness or of another harness (multiple accounts must be on). Use it when a session hit its account's usage limit and another account has room. With no `accountId` it lists every account the session can move to, each with its `harness` (its own harness's other accounts first, then every other harness that can start a session here; the recommended one per harness from the plan router) and whether its last turn stopped on a usage limit. With `accountId` and no `harness` (or its own harness) it ends the session, copies its conversation to that account (never moves it) and resumes the SAME conversation there — Claude Code and Codex only. With `harness` set to ANOTHER harness it starts a NEW session there in the same folder, task, subtask and role, briefed with a summary of the conversation, and ends the old one only after the new one is running (a failure leaves the old one untouched). The new id is returned. `resendPending: true` re-sends, once, the message the limit refused. An account that is off for agents, removed or signed out is refused in words.",
     inputSchema: {
       type: "object",
       properties: {
         ref: { type: "string", description: "The session: managed id or conversation id." },
         accountId: { type: "string", description: "The target account id (acc_…). Omit to list the options." },
+        harness: { type: "string", description: "The target harness (claude, codex, gemini, copilot, antigravity, kimi, opencode). Omit = the session's own harness." },
         resendPending: { type: "boolean", description: "Re-send the message the usage limit refused, once." },
       },
       required: ["ref"],
@@ -1175,6 +1176,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         }
         const body = await apiSend("POST", "/api/fleet/switch-account", {
           id: a.ref, accountId: a.accountId, resendPending: a.resendPending === true,
+          ...(typeof a.harness === "string" && a.harness ? { harness: a.harness } : {}),
           session: sessionProof(process.env) ?? null,
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };

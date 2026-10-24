@@ -101,7 +101,7 @@ const USAGE = `Usage:
   agentop session retire <id|name> [--cancel] [--quiet-for 60s] [--deadline 30m] [--folder <folder>] [--json]
   agentop session folders [--json]
   agentop session rename <id|name> "label"
-  agentop session switch-account <id|name> [<account-id>] [--resend]
+  agentop session switch-account <id|name> [<account-id>] [--harness <h>] [--resend]
                                   Continue the session on another account of its harness (no
                                   account: list the ones it can move to). --resend re-sends the
                                   message a usage limit refused.
@@ -1517,7 +1517,7 @@ async function liveAgentFor(ref: string): Promise<
 
 /** CONTA.TROCA — the same host verb the browser's dialog calls (`account-switch-host.ts`). */
 async function switchAccount(
-  cmd: { ref: string; accountId?: string; resend?: boolean; json?: boolean },
+  cmd: { ref: string; accountId?: string; harness?: string; resend?: boolean; json?: boolean },
   backend: SessionBackend,
 ): Promise<number> {
   const registry = await readRegistry()
@@ -1529,17 +1529,19 @@ async function switchAccount(
   if (!cmd.accountId) {
     const row = registry.find(r => r.id === id)
     const { listSwitchOptions } = await import('./account-switch-io')
-    const options = row ? await listSwitchOptions({ harness: row.harness, ...(row.accountId ? { accountId: row.accountId } : {}), agentCaller: !!callerSessionId() }) : []
+    const all = row ? await listSwitchOptions({ harness: row.harness, ...(row.accountId ? { accountId: row.accountId } : {}), agentCaller: !!callerSessionId() }) : []
+    // --harness narrows the list to one harness; without it every harness that can take the session is listed.
+    const options = cmd.harness ? all.filter(o => o.harness === cmd.harness) : all
     if (cmd.json) { console.log(JSON.stringify({ options }, null, 2)); return 0 }
     if (!options.length) { console.log(lang === 'pt' ? 'Nenhuma outra conta disponível para esta sessão.' : 'No other account is available for this session.'); return 0 }
-    for (const o of options) console.log(`${o.id}\t${o.label}${o.plan ? ` (${o.plan})` : ''}${o.recommended ? '\t*' : ''}`)
+    for (const o of options) console.log(`${o.harness}\t${o.id}\t${o.label}${o.plan ? ` (${o.plan})` : ''}${o.recommended ? '\t*' : ''}`)
     return 0
   }
   const { hostForFleet } = await import('./fleet-web')
   const host = await hostForFleet(lang)
   if (!host.switchSessionAccount) { console.error('unavailable'); return 1 }
   const out = await host.switchSessionAccount({
-    id, accountId: cmd.accountId, ...(cmd.resend ? { resendPending: true } : {}), ...(callerSessionId() ? { callerVerified: true } : {}),
+    id, accountId: cmd.accountId, ...(cmd.harness ? { harness: cmd.harness } : {}), ...(cmd.resend ? { resendPending: true } : {}), ...(callerSessionId() ? { callerVerified: true } : {}),
   })
   if (cmd.json) console.log(JSON.stringify(out))
   else (out.ok ? console.log : console.error)(out.ok && out.id ? `${out.message} (${out.id})` : out.message)

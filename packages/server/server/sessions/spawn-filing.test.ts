@@ -321,6 +321,13 @@ describe('hand-off', () => {
       taskId: 't-1', subtaskId: 's-1', taskTitle: 'Atomic spawn', folderId: 'lead', folderSource: 'predecessor',
     })
   })
+  test('a harness SWITCH inherits the same filing but keeps the role it was given (none stays none)', () => {
+    for (const role of ['worker', undefined] as const) {
+      const p = ok(planFiling(base({ role, handoffOf: pred, handoffKeepsRole: true, groups })))
+      expect(p).toMatchObject({ cwd: '/home/u/workspace', taskId: 't-1', subtaskId: 's-1', folderId: 'lead' })
+      expect(p.role).toBe(role)
+    }
+  })
   test('explicit references and folder still win', () => {
     const p = ok(planFiling(base({ handoffOf: pred, groups, taskRef: 't-2', folderRef: 'Workers', cwd: '/home/u/agentistics' })))
     expect(p).toMatchObject({ taskId: 't-2', folderId: 'w', folderSource: 'explicit', cwd: '/home/u/agentistics', cwdSource: 'explicit' })
