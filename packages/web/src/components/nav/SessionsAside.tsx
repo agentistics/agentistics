@@ -2,7 +2,8 @@ import { IconButton } from '../sessions/RepoSearchView'
 import { ActionNotice } from '../sessions/ActionNotice'
 import { hasLeaderTitle, sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
 import { useEscapeOwner } from '../../lib/overlayStack'
-import { loadClosedFleet, needsClosedFleet } from '../../lib/fleet'
+import { loadClosedFleet, needsClosedFleet, nudgeFleet } from '../../lib/fleet'
+import { TEAM_MOVE, TEAM_UNLINK, commonProjectOf, leaderPickerEntries, looseFacts, moveSessionTeam, teamMenuExtras } from '../../lib/teamMenu'
 /**
  * SessionsAside — the fleet, in the sidebar's body.
  *
@@ -100,6 +101,7 @@ import { NAY_UNDOCK_SESSION, requestUndockSession, withUndockEntry } from '../..
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { getSessionRole, registerSessionRoleAlias, setSessionRole, useMuteWorkers, useSessionRole, useSessionRoles, type SessionRole } from '../../lib/sessionRoles'
 import { applyLeadersOnly, countLeaders, leadersText } from '../../lib/leadersFilter'
+import { COUNT_BADGE } from './countBadge'
 import { SegmentedTabs } from './SegmentedTabs'
 import { GoToSessionContext, SessionLine, type SessionLineProps } from './SessionLine'
 import {
@@ -389,7 +391,7 @@ export function SessionsAside({
    * writes synchronously, in the same tick the first click's handler runs.
    */
   const groupActingRef = useRef(false)
-  /** The exact set of fallen ids the "reopen what fell" banner was last dismissed for — see
+  /** The set of fallen ids the "reopen what fell" banner was last dismissed for — see
    *  `fellDismissal.ts`. Read once on mount; a dismiss updates it (and persists it) directly. */
   const [dismissedFell, setDismissedFell] = useState<string[] | null>(readDismissedFell)
   useEffect(() => subscribeDismissedFell(() => setDismissedFell(readDismissedFell())), [])
@@ -418,9 +420,8 @@ export function SessionsAside({
 
   const canAct = Boolean(act) && !hideNew
   const fellIds = useMemo(() => groupRows.fellRows.map(r => r.id), [groupRows.fellRows])
-  // Dismissing hides the banner for the EXACT group it named — the moment the machine reports a
-  // different set of fallen ids (one more session fell, or one of these was reopened on its own and
-  // the rest are still down), that is a new fact and the banner is shown again. See `fellDismissal.ts`.
+  // Dismissing hides the banner until a NEW fallen id appears. Reopening one of the
+  // dismissed sessions does not re-announce the remaining falls. See `fellDismissal.ts`.
   const fellDismissed = fellGroupDismissed(dismissedFell, fellIds)
   const showFell = canAct && groupRows.fellRows.length > 0 && !fellDismissed
   const fellCount = groupRows.fellRows.length
@@ -581,6 +582,8 @@ export function SessionsAside({
   /** The "Mover para grupo…" picker opened from a session row's own context menu — also
    *  `SessionRowMenu`, listing the existing groups plus "Novo grupo…". */
   const [groupPicker, setGroupPicker] = useState<{ id: string; x: number; y: number } | null>(null)
+  /** "Mover para a equipe de…" — the leader picker, anchored where the row menu was. */
+  const [teamPicker, setTeamPicker] = useState<{ id: string; x: number; y: number } | null>(null)
   /** Which group heading is a live drop target, and which grouped row (for reordering within a
    *  group) — read from the native drag payload (`dragReorder.ts`), not from a dragged row's own
    *  component state, because the source can be a pinned row, an automatic-section row or another
@@ -747,6 +750,16 @@ export function SessionsAside({
       setMenu(null)
       return
     }
+    if (action === TEAM_UNLINK) {
+      setMenu(null)
+      void moveSessionTeam(id, null, lang).then(out => { setNotice(out.message); if (out.ok) nudgeFleet() })
+      return
+    }
+    if (action === TEAM_MOVE) {
+      setTeamPicker({ id, x: menu.x, y: menu.y })
+      setMenu(null)
+      return
+    }
     if (action === 'remove-from-group') {
       const target = rows.find(r => r.id === id)
       if (target) removeSessionFromGroup(pinKeyOf(target))
@@ -882,10 +895,10 @@ export function SessionsAside({
   }, [rows, active, isLeaderRow, isPinnedRow])
   /** The Encerradas sections, from the search-narrowed fleet. */
   const ended = useMemo(
-    () => endedSections(withPins(searched, filterSessions(rows, query)), { fellIds: fellIdSet, keep: r => isPinnedRow(r) || isLeaderRow(r), now }),
+    () => endedSections(withPins(searched, filterSessions(rows, query)), { fellIds: fellIdSet, keep: isPinnedRow, now }),
     // `now` moves every render; the sections only need to follow the rows.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searched, rows, query, withPins, fellIdSet, isPinnedRow, isLeaderRow],
+    [searched, rows, query, withPins, fellIdSet, isPinnedRow],
   )
   const [showAllEnded, setShowAllEnded] = useState(false)
   // The ended history is paged in on demand: the tab that draws it is what asks for it.
@@ -1516,8 +1529,7 @@ export function SessionsAside({
               {narrowed > 0 && (
                 <span aria-hidden style={{
                   position: 'absolute', top: -5, right: -5,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  minWidth: 15, height: 15, padding: '0 3px', borderRadius: 8,
+                  ...COUNT_BADGE, minWidth: 15, height: 15, padding: '0 3px',
                   background: 'var(--anthropic-orange)', color: '#fff',
                   fontSize: 9, fontWeight: 700, lineHeight: 1,
                 }}>{narrowed}</span>
@@ -1854,7 +1866,22 @@ export function SessionsAside({
               // trailing slots sit in the same columns as the rows inside the cards above.
               <div data-team-loose style={{ padding: '0 5px' }}>
                 <div style={sectionHeading}>{pt ? 'Sem líder' : 'No leader'}</div>
-                {shownLoose.map(r => renderLine(r))}
+                {/* An orphan says what it is — its role and its project / who started it — with the same
+                    role chip the rest of the list wears, so it can be told apart without opening it. */}
+                {(() => {
+                  const common = commonProjectOf(shownLoose)
+                  return shownLoose.map(r => {
+                  const facts = looseFacts(r, rows, pt, common)
+                  return renderLine(r, {
+                    facts: (
+                      <>
+                        {roleOfRow(r) && <RoleChip role={roleOfRow(r)} pt={pt} />}
+                        {facts && <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{facts}</span>}
+                      </>
+                    ),
+                  })
+                  })
+                })()}
               </div>
             )}
             {shownTeams.length === 0 && shownLoose.length === 0 && (
@@ -1943,25 +1970,26 @@ export function SessionsAside({
         {tab === 'ended' && (
           <div data-tab-body="ended" style={{ display: 'flex', flexDirection: 'column', padding: '2px 0 4px' }}>
             {ended.fell.length > 0 && (
-              <div data-ended-section="fell">
-                <div style={sectionHeading}>{pt ? 'Caíram' : 'Fell'}</div>
-                {canAct && (
-                  <div data-fell-banner style={{
-                    display: 'flex', alignItems: 'center', gap: 8, margin: '0 2px 4px', padding: '6px 6px 6px 10px', minHeight: tap,
-                    border: '1px solid color-mix(in srgb, var(--anthropic-orange) 30%, transparent)',
-                    background: 'color-mix(in srgb, var(--anthropic-orange) 7%, transparent)', borderRadius: 8,
-                    fontSize: 12.5, color: 'var(--text-secondary)',
-                  }}>
-                    <RotateCcw size={14} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} aria-hidden />
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      {pt ? (ended.fell.length === 1 ? '1 sessão caiu' : `${ended.fell.length} sessões caíram`) : (ended.fell.length === 1 ? '1 session fell' : `${ended.fell.length} sessions fell`)}
-                    </span>
-                    <button type="button" data-fell-reopen title={reopenFellSentence} aria-label={reopenFellSentence}
-                      onClick={() => setPicking('reopen')} style={{ ...linkButton, minHeight: tap }}>
-                      {pt ? (fellCount === 1 ? 'Reabrir' : `Reabrir as ${fellCount}`) : (fellCount === 1 ? 'Reopen' : `Reopen all ${fellCount}`)}
-                    </button>
-                  </div>
-                )}
+              <div data-ended-section="fell" style={{
+                margin: '0 2px 4px', padding: '0 2px 2px', borderRadius: 8,
+                border: '1px solid color-mix(in srgb, var(--accent-red) 30%, transparent)',
+                background: 'color-mix(in srgb, var(--accent-red) 7%, transparent)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <div style={{ ...sectionHeading, flex: 1, minWidth: 0 }}>{pt ? 'Caíram' : 'Fell'}</div>
+                  {showFell && (
+                    <div data-fell-banner style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, paddingTop: 6, paddingRight: 2 }}>
+                      <button type="button" data-fell-reopen title={reopenFellSentence} aria-label={reopenFellSentence}
+                        onClick={() => setPicking('reopen')} style={{ ...linkButton, minHeight: tap }}>
+                        {pt ? (fellCount === 1 ? 'Reabrir' : `Reabrir as ${fellCount}`) : (fellCount === 1 ? 'Reopen' : `Reopen all ${fellCount}`)}
+                      </button>
+                      <IconButton label={pt ? 'Dispensar aviso de sessões que caíram' : 'Dismiss fallen sessions notice'}
+                        size={tap ?? 30} onClick={dismissFell}>
+                        <X size={14} />
+                      </IconButton>
+                    </div>
+                  )}
+                </div>
                 {ended.fell.map(r => renderEndedLine(r, true))}
               </div>
             )}
@@ -2048,6 +2076,10 @@ export function SessionsAside({
                 return [{ action: PIN_TOGGLE, label: on ? (pt ? 'Desafixar' : 'Unpin') : (pt ? 'Fixar no topo' : 'Pin to the top'), enabled: true }]
               })(),
               ...roleExtras(rows.find(r => r.id === menu.id), pt),
+              ...(() => {
+                const r = rows.find(x => x.id === menu.id)
+                return teamMenuExtras(r, r ? isLeaderRow(r) : false, teamsAll.teams.map(t => t.leader), pt)
+              })(),
               ...notifyExtras(rows.find(r => r.id === menu.id), mutedKeys, pt),
             ],
           ), pt, !isMobile)}
@@ -2084,6 +2116,23 @@ export function SessionsAside({
           onClose={() => setGroupPicker(null)}
         />
       )}
+
+      {/* "Mover para a equipe de…" — the live leaders (never the session itself nor the leader it is
+          already with), anchored where the menu was; the server applies the team rule. */}
+      {teamPicker && (() => {
+        const target = rows.find(r => r.id === teamPicker.id)
+        return (
+          <SessionRowMenu
+            x={teamPicker.x} y={teamPicker.y}
+            entries={target ? leaderPickerEntries(target, teamsAll.teams.map(t => t.leader), pt) : []}
+            onPick={leaderId => {
+              setTeamPicker(null)
+              void moveSessionTeam(teamPicker.id, leaderId, lang).then(out => { setNotice(out.message); if (out.ok) nudgeFleet() })
+            }}
+            onClose={() => setTeamPicker(null)}
+          />
+        )
+      })()}
 
       {/* A group's own "⋮" — rename / delete / reorder. Reuses `SessionRowMenu`, anchored under the
           button rather than at a pointer position (there is no right-click gesture on a heading).

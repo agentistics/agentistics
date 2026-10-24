@@ -51,6 +51,8 @@ export interface SessionLineProps {
   lead?: boolean
   /** Drawn between the title and the time — the folded leader's "3 na equipe · 1 esperando você". */
   summary?: string
+  /** Facts under the title (role chip, project) — the "No leader" rows' own identification. */
+  facts?: ReactNode
   /** Something before the open button (the team's fold chevron). */
   leading?: ReactNode
   pinned?: boolean
@@ -67,7 +69,7 @@ export interface SessionLineProps {
 }
 
 export function SessionLine({
-  session, selected, tap, time, fell = false, lead = false, summary, leading, pinned = false, onPin, onOpen, openLabel,
+  session, selected, tap, time, fell = false, lead = false, summary, facts, leading, pinned = false, onPin, onOpen, openLabel,
   verbs, onOpenMenu, onReopen, reopenVerb, lang,
 }: SessionLineProps) {
   const pt = lang !== 'en'
@@ -125,7 +127,7 @@ export function SessionLine({
         data-session-open
         onClick={onOpen}
         {...(openLabel ? { 'aria-label': openLabel } : {})}
-        title={title}
+        title={fell ? `${title} · ${pt ? 'esta sessão caiu' : 'this session fell'}` : title}
         style={{
           flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
           minHeight: tap ?? (lead ? 32 : 28), padding: leading ? '3px 6px 3px 4px' : '3px 6px', borderRadius: 6,
@@ -145,6 +147,9 @@ export function SessionLine({
           </span>
           {summary && (
             <span data-team-summary style={{ flexBasis: '100%', minWidth: 0, fontSize: 11, lineHeight: 1.35, color: 'var(--text-tertiary)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{summary}</span>
+          )}
+          {facts && (
+            <span data-session-facts style={{ flexBasis: '100%', minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 2, fontSize: 11, lineHeight: 1.35, color: 'var(--text-tertiary)' }}>{facts}</span>
           )}
         </span>
         {/* Muted sits with the title, not in the trailing columns, so time and dot keep their x. */}

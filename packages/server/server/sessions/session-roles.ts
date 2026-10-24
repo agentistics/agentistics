@@ -128,6 +128,8 @@ export interface RoleDeps {
   /** Who started this managed session (the registry's parentSessionId), if anyone. */
   taskOf?: (rowId: string) => Promise<string | undefined>
   parentOf: (rowId: string) => Promise<string | undefined>
+  /** A session declared LEADER leaves its parent's team (`team-links.ts`, rule 2). Absent = not wired. */
+  leaveTeam?: (rowId: string) => Promise<boolean>
 }
 
 export interface RoleRequest {
@@ -227,6 +229,8 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     if (state.kind !== 'change') return state.reply
 
     const { base, next, changed } = state
+    // A leader sits at the ROOT with the other leaders, never as another leader's worker.
+    if (next === 'leader' && deps.leaveTeam) await deps.leaveTeam(resolved.id).catch(() => false)
     let warning: string | undefined
     if (next === 'leader' && deps.taskOf) {
       const taskId = await deps.taskOf(resolved.id)
@@ -377,6 +381,7 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
     },
     taskOf: async rowId => (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.taskId,
     parentOf: async rowId => (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.parentSessionId,
+    leaveTeam: async rowId => (await import('./team-links-io')).leaveTeamAsLeader(rowId),
   }
 }
 

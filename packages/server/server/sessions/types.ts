@@ -776,7 +776,7 @@ export interface SessionBackend {
    * these rows; `undefined`/false for every other session, a TUI that came back from `toTerminal` included.
    */
   isStructured?(id: string): boolean
-  /** F2.0b — take back the structured sessions that outlived the previous server (the owner process only). */
+  /** F2.0b — recover surviving/CLI-born structured sessions (owner process only; concurrent calls share recovery). */
   reattach?(): Promise<void>
 }
 

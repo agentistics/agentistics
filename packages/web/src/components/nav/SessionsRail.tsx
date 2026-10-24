@@ -131,7 +131,7 @@ export function SessionsRail({
   const fellIds = useMemo(() => new Set(fellRows.map(r => r.id)), [fellRows])
   const live = sortSessions(fleet.filter(r => ACTIVE.has(r.state) && !fellIds.has(r.id)), readAsideGroupPrefs().sort)
   const { teams, loose } = buildTeams(live, { isLeader, pinned: isPinned, keyOf: sessionIdentityKey })
-  const ended = endedSections(fleet, { fellIds, keep: r => isPinned(r) || isLeader(r), now: Date.now() })
+  const ended = endedSections(fleet, { fellIds, keep: isPinned, now: Date.now() })
   const folders = railLayout({ rows: [], allRows: fleet, pinnedKeys: [], groups: groupsValue.groups.filter(g => !g.hidden), keyOf: sessionIdentityKey })
     .filter((i): i is FolderItem => i.kind === 'folder')
   useEffect(() => { if (tab === 'ended') loadClosedFleet() }, [tab])

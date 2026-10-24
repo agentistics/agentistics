@@ -1,0 +1,7 @@
+  He prepared his evening meal and sat in his leather chair to eat.
+❯ QUEUED-TWO: stop and reply only with the word mango
+  ctrl+x ctrl+s to send now
+────────────────────────────────────────
+❯ Press up to edit queued messages
+────────────────────────────────────────
+  ⏵⏵ bypass permissions on · 1 shell · esc to interrupt · ← 6 agents · ↓ to manage

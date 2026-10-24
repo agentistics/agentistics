@@ -227,6 +227,55 @@ describe('structured-replay (pure)', () => {
 })
 
 describe('a structured session survives a server restart', () => {
+  for (const harness of ['claude', 'codex'] as const) {
+    test(`${harness}: a CLI-born busy relay created AFTER boot can be adopted and prompted once`, async () => {
+      const r = rig()
+      const server = r.server({ harness })
+      await server.b.reattach() // boot completes BEFORE the CLI creates its relay
+      const cli = r.server({ harness })
+      await cli.b.spawn(webSpawn(r.root, 'slow-cli-turn', harness))
+      await until(() => cli.b.activityOf!('m-1') === 'working')
+      ;(r.started[0]!.transport as DurableTransport).detach() // the one-shot CLI exits
+
+      expect((await server.b.list()).some(s => s.id === 'm-1' && s.alive)).toBe(true)
+      expect(server.b.isStructured!('m-1')).toBe(true)
+      expect(server.b.chatOf!('m-1')).toBeUndefined() // H2, before the send recovers it
+      await Promise.all([server.b.reattach(), server.b.reattach()])
+      expect(r.started).toHaveLength(2) // one driver at spawn, one recovery, no duplicate recovery
+      expect(server.b.chatOf!('m-1')).toBeDefined()
+      expect(await server.b.sendText('m-1', 'follow-up')).toBe(true)
+      await until(() => prompts(r).includes('follow-up'))
+      expect(prompts(r)).toEqual(['slow-cli-turn', 'follow-up'])
+      expect(server.base.spawned).toHaveLength(0)
+    })
+
+    test(`${harness}: input recorded after the replay snapshot is never delivered twice`, async () => {
+      const r = rig()
+      const cli = r.server({ harness })
+      await cli.b.spawn(webSpawn(r.root, 'slow-cli-turn', harness))
+      await until(() => prompts(r).length === 1)
+      ;(r.started[0]!.transport as DurableTransport).detach()
+
+      // Force the observed race without a scheduling lottery: replay sees only init, but by
+      // the time its fresh driver writes the initial prompt the relay has recorded it too.
+      const input = path.join(r.store.dirOf('m-1'), 'in.jsonl')
+      const recorded = readFileSync(input, 'utf8')
+      expect(recorded.trim().split('\n')).toHaveLength(2)
+      const replay = r.store.replay.bind(r.store)
+      r.store.replay = id => {
+        writeFileSync(input, `${recorded.split('\n')[0]}\n`)
+        try { return replay(id) } finally { writeFileSync(input, recorded) }
+      }
+      const server = r.server({ harness })
+      await server.b.reattach()
+      expect(r.started).toHaveLength(2)
+      expect(server.base.spawned).toHaveLength(0)
+      expect(await server.b.sendText('m-1', 'follow-up')).toBe(true)
+      await until(() => prompts(r).includes('follow-up'))
+      expect(prompts(r)).toEqual(['slow-cli-turn', 'follow-up'])
+    })
+  }
+
   test('pending permission cards survive restart and remain answerable for every structured harness', async () => {
     for (const harness of ['claude', 'codex', 'gemini', 'kimi'] as HarnessId[]) {
       const r = rig()
