@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
 import { alertKey, type NayAlert } from './nayNotify'
 import {
-  bellEntriesToDrop, dismissAlert, dismissCleanAlert, observeFleet, pushAlert, readNayAlerts, releaseDue, resetNayNotifyStore, setOpenSession, setVisibleSessions, snoozeAlert,
+  bellEntriesToDrop, dismissVaultExpiryAlert, dismissAlert, dismissCleanAlert, observeFleet, pushAlert, readNayAlerts, releaseDue, resetNayNotifyStore, setOpenSession, setVisibleSessions, snoozeAlert,
   waitingSince,
 } from './nayNotifyStore'
 
@@ -168,5 +168,26 @@ describe('cleanup notices share Nay lifecycle without naming a fleet session', (
     dismissCleanAlert('scan')
     releaseDue(2001); await Promise.resolve()
     expect(readNayAlerts().map(a => a.sessionId)).toEqual(['session'])
+  })
+})
+
+
+describe('vault expiry notices', () => {
+  it('shares the queue, deduplicates an occurrence and survives unrelated fleet polls', () => {
+    const vault = alert('vault-expiry', 'vault-expiry')
+    pushAlert(alert('a'))
+    expect(pushAlert(vault)).toBe(true)
+    expect(pushAlert(vault)).toBe(false)
+    observeFleet([{ id: 'a', state: 'waiting' }], 0)
+    expect(readNayAlerts().map(a => a.kind)).toEqual(['turn', 'vault-expiry'])
+  })
+
+  it('clears only the vault warning when the countdown is extended or the vault locks', () => {
+    pushAlert(alert('a'))
+    pushAlert(alert('vault-expiry', 'vault-expiry'))
+    dismissVaultExpiryAlert()
+    expect(readNayAlerts().map(a => a.kind)).toEqual(['turn'])
+    pushAlert(alert('vault-expiry', 'vault-expiry', 2000))
+    expect(readNayAlerts()).toHaveLength(2)
   })
 })

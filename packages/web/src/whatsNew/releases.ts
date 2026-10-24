@@ -35,6 +35,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
+        pt: 'O aviso de que o cofre vai se trancar agora é falado pela Nay, num cartão opaco que preserva o botão e o chat aberto.',
+        en: 'The vault auto-lock warning is now spoken by Nay in an opaque notice that keeps the button and open chat accessible.',
+      },
+      {
         pt: 'Líderes voltam a abrir sessões em outro projeto; a sessão fica na tarefa do líder, com um aviso.',
         en: 'Leaders can start sessions in another project again; the session stays on the leader’s task, with a notice.',
       },

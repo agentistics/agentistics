@@ -171,6 +171,11 @@ export function dismissCleanAlert(scanId: string): void {
   emit()
 }
 
+/** The countdown was extended or the vault locked: queued expiry notices are no longer true. */
+export function dismissVaultExpiryAlert(): void {
+  for (const a of state.queue) if (a.kind === 'vault-expiry') dismissAlert(a.key)
+}
+
 export function dismissAlert(key: string): void {
   const next = state.queue.filter(a => a.key !== key)
   if (next.length === state.queue.length) return

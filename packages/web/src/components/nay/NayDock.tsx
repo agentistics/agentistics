@@ -30,7 +30,7 @@ import { sessionPlanFactor } from '../../lib/costBasis'
 import { versionedAsset } from '../../lib/brand'
 import { sessionCardStyle } from '../../lib/sessionCardStyle'
 import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/sessionsAsidePrefs'
-import { VaultExpiryCard } from '../vault/VaultExpiryCard'
+import { VaultExpiryNotice } from '../vault/VaultExpiryNotice'
 import { VaultUseRequestCard } from '../vault/VaultUseRequestCard'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { NayLimitsTab } from './NayLimitsTab'
@@ -482,6 +482,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
     ...(dock.open && panelSession ? [panelSession] : []),
   ].join('\n')
   useEffect(() => { setVisibleSessions(visibleKey ? visibleKey.split('\n') : []) }, [visibleKey])
+  const [noticeHost, setNoticeHost] = useState<HTMLDivElement | null>(null)
   const panel = dock.open && (
     <div
       ref={panelRef}
@@ -574,6 +575,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
         </IconButton>
       </header>
 
+      <div ref={setNoticeHost} data-nay-notice-host style={{ display: 'flex', flexDirection: 'column', flex: '0 1 auto', minHeight: 0, maxHeight: '50%' }} />
       {!settingsOpen && renderUpdatePrompt?.('dock')}
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -644,10 +646,10 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
       {/* The session notifications the button SPEAKS. Mounted whether or not the button itself is
           on screen: on a phone inside a session the button can be hidden, and the card then opens
           from the corner it would have occupied. */}
-      <VaultExpiryCard lang={lang} isMobile={isMobile} zIndex={dockZ + 1} />
+      <VaultExpiryNotice lang={lang} />
       <VaultUseRequestCard lang={lang} />
       <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1}
-        onOpenLimits={requestPlanUsageModal} />
+        onOpenLimits={requestPlanUsageModal} noticeHost={dock.open ? noticeHost : null} />
       {!dock.open && sessionAlerts.length === 0 && renderUpdatePrompt?.('float')}
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
       {echoStyle && [0, 1].map(i => (

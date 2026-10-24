@@ -647,8 +647,11 @@ of §7a/§7b: every record is sealed in the human scope, under the one purpose `
   inline unlock ONCE; nothing else prompts until it locks again. A phone keeps its own passkey path —
   never a Hello prompt off loopback.
 - **Auto-lock warning and "keep it open".** Five minutes before the idle lock the Nay floating chat shows
-  a card ("Seu cofre vai se trancar em 5 min. Manter aberto?" — [Manter aberto] [Trancar agora]) and a
+  its shared opaque notice card ("Seu cofre vai se trancar em 5 min. Manter aberto?" — [Manter aberto] [Trancar agora]) and a
   notification lands in Notificações, once per window (`nextWarn`; an extension or any use re-arms it).
+  This is the `vault-expiry` kind in Nay's existing one-card queue/count, following the button. When
+  the Nay panel is open it occupies space below its header, leaving the conversation accessible.
+  Dismissing it does not re-show it in the same window; locking or extending clears a queued warning.
   [Manter aberto] moves the idle clock by ONE window (`extendAutoLock`, audited
   `vault.auto-lock-extended`): the page's read grant or the authenticator code (`extend-open`).
   The HTTP `/api/vault/extend` route also requires the same `loopbackRequest`
