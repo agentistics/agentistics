@@ -7,13 +7,14 @@ export interface ModeMenuEntry {
 
 const MODES: Record<string, ModeMenuEntry[]> = {
   claude: [
-    { id: 'manual', label: 'manual mode' },
-    { id: 'accept-edits', label: 'accept edits' },
-    { id: 'plan', label: 'plan mode' },
+    { id: 'manual', label: 'manual mode', canonical: 'default' },
+    { id: 'accept-edits', label: 'accept edits', canonical: 'accept-edits' },
+    { id: 'plan', label: 'plan mode', canonical: 'plan' },
     // MODE.NOQ — reachable because managed claude sessions start with `--allow-dangerously-skip-permissions`;
     // a session started before that is refused in words by the server (`cycleToMode`), never mis-cycled.
     { id: 'bypass', label: 'bypass permissions', canonical: 'no-questions' },
-    { id: 'auto', label: 'auto mode' },
+    // Claude's classifier-driven auto mode has no canonical twin; "Auto" reads the same in both languages.
+    { id: 'auto', label: 'Auto' },
   ],
 }
 

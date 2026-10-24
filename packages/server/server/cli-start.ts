@@ -45,7 +45,7 @@ import { accountHome } from './account-home'
 import {
   followFleet, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type ConversationLinkReason, type HarnessId,
-  CANONICAL_MODES, type CanonicalMode,
+  CANONICAL_MODES, type CanonicalMode, CANONICAL_MODE_TEXT, canonicalOfTuiMode,
 } from '@agentistics/core'
 import type {
   ActionResult,
@@ -3837,10 +3837,13 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
           readMode: frame,
           sleep: ms => new Promise(r => setTimeout(r, ms)),
         })
-        if (out === 'reached') return { ok: true, message: spec.modes.find(m => m.id === target)?.label ?? target }
+        // Named in the reader's language when the mode has a canonical twin, else in the harness's own word.
+        const canonical = canonicalOfTuiMode(target)
+        const named = canonical ? CANONICAL_MODE_TEXT[canonical][lang === 'pt' ? 'pt' : 'en'].label : (spec.modes.find(m => m.id === target)?.label ?? target)
+        if (out === 'reached') return { ok: true, message: named }
         if (out === 'send-failed') return { ok: false, message: s.sessSendFailed(id) }
         if (out === 'unread') return { ok: false, message: s.sessModeUnread }
-        return { ok: false, message: s.sessModeUnreachable(spec.modes.find(m => m.id === target)?.label ?? target) }
+        return { ok: false, message: s.sessModeUnreachable(named) }
       }
       // The mode AFTER the key is whatever the harness moved to, and only the next poll can say —
       // so the answer names the act rather than claiming an outcome it has not read.
