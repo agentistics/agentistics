@@ -42,23 +42,25 @@ export function teamMenuExtras(row: Row | undefined, isLeader: boolean, leaders:
   ]
 }
 
-/** The picker's entries: one per leader, by its display title. */
-export function leaderPickerEntries(row: Row, leaders: readonly Row[], pt: boolean): MenuEntry[] {
-  return teamLeaderChoices(row, leaders).map(l => ({ action: l.id, label: sessionDisplayTitle(l.title), enabled: true, leader: true, leaderLabel: pt ? 'Líder' : 'Leader' }))
+/** The picker's entries: one per leader, by its display title. No "Líder" chip — every entry is one. */
+export function leaderPickerEntries(row: Row, leaders: readonly Row[], _pt?: boolean): MenuEntry[] {
+  return teamLeaderChoices(row, leaders).map(l => ({ action: l.id, label: sessionDisplayTitle(l.title), enabled: true }))
 }
 
 /**
  * What a "No leader" row says about itself, under its title: its project, and who started it when
- * that is known ("criada por Motor") — so an orphan can be told apart without opening it.
+ * that is known ("criada por Motor") — so an orphan can be told apart without opening it. The project
+ * is left out when it is the section's `commonProject`: said on every row it is noise.
  */
 export function looseFacts(
   row: Pick<ControlSession, 'project' | 'projectGroup' | 'parentSessionId' | 'parentConversationId'>,
   rows: readonly Pick<ControlSession, 'id' | 'conversationId' | 'title'>[],
   pt: boolean,
+  commonProject?: string,
 ): string {
   const out: string[] = []
   const project = row.projectGroup || row.project
-  if (project) out.push(project)
+  if (project && project !== commonProject) out.push(project)
   // Only a parent the fleet can still NAME: a bare id ("criada por 53015bf9") identifies nothing.
   const parent = sessionParent(row, rows)
   if (parent?.title) out.push(createdByLabel({ ...parent, ...(parent.title ? { title: sessionDisplayTitle(parent.title) } : {}) }, pt))
@@ -78,4 +80,13 @@ export async function moveSessionTeam(id: string, leader: string | null, lang: '
   } catch {
     return { ok: false, message: lang === 'pt' ? 'O servidor não respondeu.' : 'The server did not answer.' }
   }
+}
+
+/** The project most rows of a section share (ties: the first met); `''` when none names one. */
+export function commonProjectOf(rows: readonly Pick<ControlSession, 'project' | 'projectGroup'>[]): string {
+  const counts = new Map<string, number>()
+  for (const r of rows) { const p = r.projectGroup || r.project; if (p) counts.set(p, (counts.get(p) ?? 0) + 1) }
+  let best = '', n = 0
+  for (const [p, c] of counts) if (c > n) { best = p; n = c }
+  return best
 }

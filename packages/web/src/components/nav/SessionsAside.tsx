@@ -3,7 +3,7 @@ import { ActionNotice } from '../sessions/ActionNotice'
 import { hasLeaderTitle, sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { loadClosedFleet, needsClosedFleet, nudgeFleet } from '../../lib/fleet'
-import { TEAM_MOVE, TEAM_UNLINK, leaderPickerEntries, looseFacts, moveSessionTeam, teamMenuExtras } from '../../lib/teamMenu'
+import { TEAM_MOVE, TEAM_UNLINK, commonProjectOf, leaderPickerEntries, looseFacts, moveSessionTeam, teamMenuExtras } from '../../lib/teamMenu'
 /**
  * SessionsAside — the fleet, in the sidebar's body.
  *
@@ -1869,17 +1869,20 @@ export function SessionsAside({
                 <div style={sectionHeading}>{pt ? 'Sem líder' : 'No leader'}</div>
                 {/* An orphan says what it is — its role and its project / who started it — with the same
                     role chip the rest of the list wears, so it can be told apart without opening it. */}
-                {shownLoose.map(r => {
-                  const facts = looseFacts(r, rows, pt)
+                {(() => {
+                  const common = commonProjectOf(shownLoose)
+                  return shownLoose.map(r => {
+                  const facts = looseFacts(r, rows, pt, common)
                   return renderLine(r, {
                     facts: (
                       <>
-                        <RoleChip role={roleOfRow(r)} pt={pt} />
+                        {roleOfRow(r) && <RoleChip role={roleOfRow(r)} pt={pt} />}
                         {facts && <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{facts}</span>}
                       </>
                     ),
                   })
-                })}
+                  })
+                })()}
               </div>
             )}
             {shownTeams.length === 0 && shownLoose.length === 0 && (

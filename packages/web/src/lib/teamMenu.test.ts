@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { TEAM_MOVE, TEAM_UNLINK, leaderPickerEntries, looseFacts, teamLeaderChoices, teamMenuExtras } from './teamMenu'
+import { TEAM_MOVE, TEAM_UNLINK, commonProjectOf, leaderPickerEntries, looseFacts, teamLeaderChoices, teamMenuExtras } from './teamMenu'
 
 const r = (id: string, extra: Record<string, unknown> = {}) => ({ id, title: id, state: 'waiting' as const, ...extra })
 const motor = r('L1', { title: '[ LÍDER ] - Motor', conversationId: 'c1' })
@@ -24,7 +24,7 @@ describe('team menu entries', () => {
   test('the picker lists other leaders by display title, never the current one', () => {
     const member = r('w', { parentSessionId: 'L1' })
     expect(teamLeaderChoices(member, [motor, side]).map(l => l.id)).toEqual(['L2'])
-    expect(leaderPickerEntries(member, [motor, side], true)).toEqual([{ action: 'L2', label: 'Side Tasks', enabled: true, leader: true, leaderLabel: 'Líder' }])
+    expect(leaderPickerEntries(member, [motor, side], true)).toEqual([{ action: 'L2', label: 'Side Tasks', enabled: true }])
   })
 })
 
@@ -36,5 +36,11 @@ describe('"No leader" rows say what they are', () => {
     expect(looseFacts({ project: '' }, rows, false)).toBe('')
     // a parent that left the fleet has no name to show — never a bare id
     expect(looseFacts({ project: 'agentistics', parentSessionId: 'gone' }, rows, true)).toBe('agentistics')
+  })
+  test('the project is dropped when it is the section\'s common one', () => {
+    expect(looseFacts({ project: 'agentistics', parentSessionId: 'L1' }, [motor], true, 'agentistics')).toBe('criada por Motor')
+    expect(looseFacts({ project: 'other' }, [motor], true, 'agentistics')).toBe('other')
+    expect(commonProjectOf([{ project: 'a' }, { project: 'b' }, { project: 'b' }])).toBe('b')
+    expect(commonProjectOf([{ project: '' }])).toBe('')
   })
 })
