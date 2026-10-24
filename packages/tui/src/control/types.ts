@@ -1737,6 +1737,13 @@ export interface ControlHost {
   resumeSession?(req: ResumeSessionRequest): Promise<SpawnSessionResult>
 
   /**
+   * CONTA.TROCA — end a running session and resume the SAME conversation on another account of its
+   * harness. The transcript is copied (never moved) into the target account's root first; the new row
+   * inherits the old one's identity exactly as a reopen does. See `account-switch.ts`.
+   */
+  switchSessionAccount?(req: SwitchAccountRequest): Promise<SpawnSessionResult & { code?: string }>
+
+  /**
    * Reopen every session of one task, in the background.
    *
    * The point of naming a task is getting all of its work back at once. Sessions whose conversation
@@ -2024,6 +2031,23 @@ export interface ResumeSessionRequest {
    */
   origin?: 'web' | 'terminal'
   /** PLAN.ACCOUNTS D3: a VERIFIED agent is reopening — refused when the row's account is off for agents. */
+  callerVerified?: boolean
+  /**
+   * CONTA.TROCA — resume on THIS account instead of the row's recorded one. Set only by
+   * `switchSessionAccount`, after the conversation was copied into that account's root; every other
+   * reopen keeps the recorded account.
+   */
+  switchToAccount?: string
+}
+
+/** CONTA.TROCA — move a running session to another account of the same harness. */
+export interface SwitchAccountRequest {
+  /** The managed row id. */
+  id: string
+  /** The target account (`acc_…`). */
+  accountId: string
+  /** Re-send the prompt the usage limit refused, once, as the resumed session's first prompt. */
+  resendPending?: boolean
   callerVerified?: boolean
 }
 
