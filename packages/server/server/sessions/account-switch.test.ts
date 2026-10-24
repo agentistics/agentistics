@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   allSwitchOptions, claudeProjectDir, crossSwitchPrompt, decideCrossSwitch, decideSwitch, detectLimitInTail, planSwitchCopies,
-  switchMessage, switchOptions, switchSupported, SWITCH_LAYOUT, unavailableSwitchTargets,
+  startFailureSentence, switchFallbackMessage, switchMessage, switchOptions, switchSupported, SWITCH_LAYOUT, unavailableSwitchTargets,
 } from './account-switch'
 import type { SpawnAccountContext, SpawnAccountRow } from './spawn-account'
 import { HARNESS_ORDER } from '@agentistics/core'
@@ -250,5 +250,20 @@ describe('crossSwitchPrompt', () => {
     expect(big).toContain('Confirme o estado')
     const none = crossSwitchPrompt({ lang: 'pt', fromHarness: 'Gemini CLI', turns: { unavailable: 'sem leitor' } })
     expect(none).toContain('não pôde ser lida (sem leitor)')
+  })
+})
+
+describe('start failure sentences', () => {
+  test('raw stderr never reaches the person', () => {
+    expect(startFailureSentence('a sessão terminou assim que começou: copilot: error X', 'pt')).toBe('Ela terminou assim que começou (os detalhes estão no log do servidor).')
+    expect(startFailureSentence('the session exited as soon as it started: copilot: x', 'en')).not.toContain('copilot')
+  })
+  test('other reasons are capitalised and closed', () => {
+    expect(startFailureSentence('memória insuficiente', 'pt')).toBe('Memória insuficiente.')
+    expect(startFailureSentence('Already fine.', 'en')).toBe('Already fine.')
+    expect(startFailureSentence(undefined, 'en')).toBe('')
+  })
+  test('fallback leads with what happened to the session', () => {
+    expect(switchFallbackMessage('', 'pt')).toBe('A sessão não iniciou na outra conta; ela continua na conta de antes.')
   })
 })

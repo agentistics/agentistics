@@ -61,4 +61,12 @@ describe('pickerRows', () => {
     expect(defaultPick(pickerRows(info, [], now, 'pt'))).toBe('claude:acc_b')
     expect(defaultPick(pickerRows({ ...info, options: [] }, [], now, 'pt'))).toBe('')
   })
+  test('the default pick stays on the same assistant even when the router prefers another', () => {
+    const routerOnCodex: SwitchInfo = { ...info, options: info.options.map(o => ({ ...o, recommended: o.harness === 'codex' })) }
+    expect(defaultPick(pickerRows(routerOnCodex, [], now, 'en'))).toBe('claude:acc_b')
+  })
+  test('a missing CLI is said as a fact about this computer, not a capability', () => {
+    expect(unavailableReason('harness_unavailable', 'pt')).toBe('Não encontrado neste computador')
+    expect(unavailableReason('harness_unavailable', 'en')).toBe('Not found on this computer')
+  })
 })

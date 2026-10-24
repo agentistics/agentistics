@@ -33,7 +33,7 @@ const REASON: Record<SwitchUnavailableReason, { pt: string; en: string }> = {
   not_agentic: { pt: 'Não liberada para uso por agentes', en: 'Not available for agent use' },
   signed_out: { pt: 'Sem login nesta máquina', en: 'Not signed in on this machine' },
   cant_carry: { pt: 'Este assistente não leva a conversa para outra conta', en: "This assistant can't carry the conversation to another account" },
-  harness_unavailable: { pt: 'Este assistente não inicia sessões aqui', en: "This assistant can't start sessions here" },
+  harness_unavailable: { pt: 'Não encontrado neste computador', en: 'Not found on this computer' },
   unavailable: { pt: 'Indisponível agora', en: 'Unavailable right now' },
 }
 
@@ -94,8 +94,13 @@ export function pickerRows(info: SwitchInfo, limits: readonly PlanLimits[] | nul
   return rows
 }
 
-/** The row the picker starts on: the router's pick when it can be picked, else the first that can. */
+/**
+ * The row the picker starts on: an account of the SAME assistant first (the conversation continues;
+ * pressing the primary button without reading must never start a new one elsewhere) — the router's
+ * pick among those, else the first — and only then the router's pick anywhere, else the first.
+ */
 export function defaultPick(rows: readonly PickerRow[]): string {
   const open = rows.filter(r => r.kind === 'option')
-  return (open.find(r => r.recommended) ?? open[0])?.key ?? ''
+  const same = open.filter(r => !r.handoff)
+  return (same.find(r => r.recommended) ?? same[0] ?? open.find(r => r.recommended) ?? open[0])?.key ?? ''
 }

@@ -89,8 +89,8 @@ function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
     ? (pt ? 'Escolha uma conta disponível na lista.' : 'Pick an available account from the list.')
     : handoff
       ? (pt
-        ? `Outro harness começa uma conversa NOVA em ${harnessName(chosen.harness)}, na mesma pasta, tarefa e papel, com um resumo desta (objetivo, estado, últimos turnos, arquivos tocados). Esta sessão só é encerrada depois que a nova estiver rodando.`
-        : `Another harness starts a NEW conversation on ${harnessName(chosen.harness)}, in the same folder, task and role, briefed with a summary of this one (goal, state, last turns, files touched). This session is ended only once the new one is running.`)
+        ? `Outro assistente começa uma conversa NOVA em ${harnessName(chosen.harness)}, na mesma pasta, tarefa e papel, com um resumo desta (objetivo, estado, últimos turnos, arquivos tocados). Esta sessão só é encerrada depois que a nova estiver rodando.`
+        : `Another assistant starts a NEW conversation on ${harnessName(chosen.harness)}, in the same folder, task and role, briefed with a summary of this one (goal, state, last turns, files touched). This session is ended only once the new one is running.`)
       : (pt
         ? `A sessão é encerrada e a mesma conversa continua na conta ${chosen.label}. A conversa é copiada, não movida: o histórico na conta atual continua lá.`
         : `The session is ended and the same conversation continues on ${chosen.label}. The conversation is copied, not moved: the history on the current account stays there.`)
@@ -100,13 +100,13 @@ function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
     const out = await postSwitch(sessionId, chosen.id, !!pending && resend, lang, handoff ? chosen.harness : undefined)
     setBusy(false)
     if (!out.ok) { setError(out.message); return }
-    pushNotification({ type: 'success', title: handoff ? (pt ? 'Continuado em outro harness' : 'Continued on another harness') : (pt ? 'Conta trocada' : 'Account switched'), message: out.message })
+    pushNotification({ type: 'success', title: handoff ? (pt ? 'Continuado em outro assistente' : 'Continued on another assistant') : (pt ? 'Conta trocada' : 'Account switched'), message: out.message })
     onDone(out.id)
   }
   const confirmLabel = busy
     ? (handoff ? (pt ? 'Iniciando…' : 'Starting…') : (pt ? 'Trocando…' : 'Switching…'))
     : (handoff ? (pt ? `Continuar em ${harnessName(chosen?.harness)}` : `Continue on ${harnessName(chosen?.harness)}`) : (pt ? 'Confirmar troca' : 'Confirm switch'))
-  return { rows, plan, pick, setPick, chosen, message, pending, resend, setResend, busy, error, confirm, confirmLabel }
+  return { rows, plan, pick, setPick, chosen, handoff, message, pending, resend, setResend, busy, error, confirm, confirmLabel }
 }
 
 type SwitchFlow = ReturnType<typeof useSwitchFlow>
@@ -130,7 +130,7 @@ export function AccountPicker({ flow, lang }: { flow: SwitchFlow; lang: string }
         const sub = [r.label ? harnessName(r.harness) : '', r.plan ?? (pt ? 'plano não registrado' : 'plan not registered')].filter(Boolean).join(' · ')
         const cells = (
           <PlanUsageRowCells
-            harness={r.harness as PlanLimits['harness']} name={name} plan={sub} limits={r.limits} now={flow.plan.now} lang={l}
+            harness={r.harness as PlanLimits['harness']} name={name} plan={sub} limits={r.limits} now={flow.plan.now} lang={l} wrap
             {...(r.reason ? { note: r.reason } : {})}
             {...(r.kind === 'current' ? { tag: chip(pt ? 'Agora' : 'Current', 'var(--text-secondary)') }
               : r.recommended && r.kind === 'option' ? { tag: chip(pt ? 'com folga' : 'has room', 'var(--accent-green)') } : {})}
@@ -173,6 +173,13 @@ function SwitchExtras({ flow, lang }: { flow: SwitchFlow; lang: string }) {
         )}
       </>
     )}
+    {flow.busy && (
+      <p role="status" data-account-switch-progress style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>
+        {flow.handoff
+          ? (pt ? 'Iniciando a nova sessão… esta continua rodando até a nova estar de pé.' : 'Starting the new session… this one keeps running until the new one is up.')
+          : (pt ? 'Trocando de conta… a sessão é reaberta na outra conta; pode levar alguns segundos.' : 'Switching account… the session is reopening on the other account; this can take a few seconds.')}
+      </p>
+    )}
     {flow.error && <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--accent-red)', overflowWrap: 'anywhere' }}>{flow.error}</p>}
   </>
 }
@@ -206,7 +213,10 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
       maxWidth={460}
     >
       <div data-account-switch style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
-        <AccountPicker flow={flow} lang={lang} />
+        {/* The list scrolls, the dialog does not: with many accounts Cancel/Continue stay on screen (800 px desktop). */}
+        <div data-account-switch-list style={{ maxHeight: 'max(200px, calc(100dvh / var(--ui-zoom, 1) - 380px))', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+          <AccountPicker flow={flow} lang={lang} />
+        </div>
         <SwitchExtras flow={flow} lang={lang} />
       </div>
     </ConfirmModal>
@@ -283,7 +293,7 @@ export function AccountLimitBand({ sessionId, lang, onSwitched }: { sessionId: s
           <div className="handoff-band" role="status" style={{ '--handoff-tone': 'var(--anthropic-orange)' } as CSSProperties}>
             <div className="handoff-band-copy">
               <strong>{info ? noticeTitle(info, pt) : ''}</strong>
-              <span>{[info?.current?.label, resetPhrase(info?.limit?.resetsAt, pt)].filter(Boolean).join(' · ') || (pt ? 'Escolha a conta e o harness para continuar.' : 'Choose the account and harness to carry on.')}</span>
+              <span>{[info?.current?.label, resetPhrase(info?.limit?.resetsAt, pt)].filter(Boolean).join(' · ') || (pt ? 'Escolha a conta e o assistente para continuar.' : 'Choose the account and assistant to carry on.')}</span>
             </div>
             <div className="handoff-actions">
               <button type="button" className="primary" onClick={() => setOpen(true)}>{pt ? 'Continuar na outra conta' : 'Continue on the other account'}</button>

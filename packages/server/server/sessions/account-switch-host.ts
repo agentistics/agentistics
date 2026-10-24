@@ -11,12 +11,14 @@
  *     carries its last line whole. Never a move.
  *  4. RESUME the same conversation id on the target account, replacing the row: the reopen path
  *     retires the old row and carries its identity (name, note, task, role) onto the new one, so
- *     there are never two live rows. A copy that fails gives the session back on its OWN account.
+ *     there are never two live rows. A copy that fails, or a target account that refuses to start,
+ *     gives the session back on its OWN account (forced: the memory it held was just freed).
  */
 import { HARNESS_LABELS, type HarnessId } from '@agentistics/core'
 import type { ResumeSessionRequest, SpawnSessionRequest, SpawnSessionResult, SwitchAccountRequest } from '@agentistics/tui/control'
 import {
-  crossSwitchPrompt, decideCrossSwitch, decideSwitch, planSwitchCopies, switchMessage, switchStatus,
+  crossSwitchPrompt, decideCrossSwitch, decideSwitch, planSwitchCopies, startFailureSentence, switchFallbackMessage,
+  switchLostMessage, switchMessage, switchStatus,
   type SummaryTurn, type SwitchRefusal,
 } from './account-switch'
 import { accountLabel, executeCopies, findSourceFiles, readLimitState, resolveRoot, startableHere } from './account-switch-io'
@@ -121,6 +123,8 @@ export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: 
         return { ok: false, message: lang === 'pt' ? 'Não foi possível encerrar a sessão para trocar de conta. Nada mudou.' : 'The session could not be ended to switch accounts. Nothing changed.' }
       }
     }
+    // `force`: the process this resume replaces was just ended, so the memory gate has nothing to
+    // protect — refusing here is what left a person with NO session under RAM pressure.
     const base: ResumeSessionRequest = {
       sessionId: conv,
       harness,
@@ -129,23 +133,30 @@ export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: 
       replaces: row.id,
       attach: false,
       origin: 'web',
+      force: true,
       ...(req.callerVerified ? { callerVerified: true } : {}),
+    }
+    const backOnOld = async (why: string): Promise<SwitchResult> => {
+      const back = await deps.resume(base).catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }) as SpawnSessionResult)
+      if (back.ok) return { ...back, ok: false, message: why }
+      console.error(`[account-switch] ${row.id}: reopening on the previous account failed too: ${back.message}`)
+      return { ok: false, message: switchLostMessage(lang) }
     }
     try {
       await io.copy(copies)
     } catch {
-      // Give the session back where it was rather than leaving it ended.
-      const back = await deps.resume(base)
-      const why = lang === 'pt' ? 'Não foi possível copiar a conversa para a outra conta; a sessão continua na conta de antes.'
-        : 'The conversation could not be copied to the other account; the session continues on its previous account.'
-      return { ...back, ok: false, message: why }
+      return backOnOld(lang === 'pt' ? 'Não foi possível copiar a conversa para a outra conta; a sessão continua na conta de antes.'
+        : 'The conversation could not be copied to the other account; the session continues on its previous account.')
     }
     const out = await deps.resume({ ...base, switchToAccount: decided.target.id, ...(pending ? { prompt: pending } : {}) })
+      .catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }) as SpawnSessionResult)
     if (out.ok) {
       const done = lang === 'pt' ? 'Sessão continuada na outra conta.' : 'Session continued on the other account.'
       return { ...out, message: pending ? `${done} ${lang === 'pt' ? 'A última mensagem foi reenviada.' : 'The last message was re-sent.'}` : done }
     }
-    return out
+    // The new account refused to start: never leave the person without the session.
+    console.error(`[account-switch] ${row.id}: resume on ${decided.target.id} failed: ${out.message}`)
+    return backOnOld(switchFallbackMessage(out.message, lang))
   })
 }
 
@@ -207,12 +218,14 @@ async function crossHarnessSwitch(row: ManagedSession, req: SwitchAccountRequest
   const newId = started.id
   const running = newId ? (await deps.backend.list().catch(() => [])).some(b => b.id === newId && b.alive) : false
   if (!newId || !running) {
-    const why = started.message ? ` ${started.message}` : ''
+    if (started.message) console.error(`[account-switch] ${row.id}: hand-off to ${target} failed: ${started.message}`)
+    const reason = startFailureSentence(started.message, lang)
+    const why = reason ? ` ${reason}` : ''
     return { ok: false, message: pt ? `A nova sessão não iniciou; a sessão atual continua como estava.${why}` : `The new session did not start; the current session continues as it was.${why}` }
   }
   await io.link(row.id, newId).catch(() => undefined)
   const ended = await io.killAndRetire(row.id, () => deps.backend.kill(row.id)).catch(() => false)
-  const done = pt ? 'Trabalho continuado em outro harness, numa conversa nova com um resumo da anterior.' : 'Work continued on another harness, in a new conversation briefed with a summary of the previous one.'
+  const done = pt ? 'Trabalho continuado em outro assistente, numa conversa nova com um resumo da anterior.' : 'Work continued on another assistant, in a new conversation briefed with a summary of the previous one.'
   const tail = ended ? '' : (pt ? ' A sessão anterior não pôde ser encerrada: encerre-a você.' : ' The previous session could not be ended: end it yourself.')
   return { ...started, ok: true, id: newId, message: `${done}${pending ? (pt ? ' A última mensagem foi reenviada.' : ' The last message was re-sent.') : ''}${tail}` }
 }

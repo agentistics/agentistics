@@ -469,3 +469,38 @@ export const isCodexRolloutOf = (path: string, conversationId: string): boolean 
 
 /** Claude's sidecar directory sits beside the transcript, named after the conversation. */
 export const claudeSidecarOf = (transcript: string, conversationId: string): string => join(dirname(transcript), conversationId)
+
+const DIED_AT_SPAWN = /^(the session exited as soon as it started|a sessão terminou assim que começou)\b/i
+
+/**
+ * A start failure as a person reads it: one capitalised sentence, never the CLI's raw stderr (that
+ * goes to the server log). The host's "exited as soon as it started: <stderr>" becomes a sentence
+ * of its own; anything else keeps its words, capitalised and closed with a full stop.
+ */
+export function startFailureSentence(message: string | undefined, lang: 'en' | 'pt'): string {
+  const m = (message ?? '').trim()
+  if (!m) return ''
+  if (DIED_AT_SPAWN.test(m)) {
+    return lang === 'pt'
+      ? 'Ela terminou assim que começou (os detalhes estão no log do servidor).'
+      : 'It exited as soon as it started (details are in the server log).'
+  }
+  const s = m.charAt(0).toUpperCase() + m.slice(1)
+  return /[.!?…]$/.test(s) ? s : `${s}.`
+}
+
+/** The new account refused to start, and the session was given back on its own account. */
+export function switchFallbackMessage(reason: string | undefined, lang: 'en' | 'pt'): string {
+  const head = lang === 'pt'
+    ? 'A sessão não iniciou na outra conta; ela continua na conta de antes.'
+    : 'The session did not start on the other account; it continues on its previous account.'
+  const why = startFailureSentence(reason, lang)
+  return why ? `${head} ${why}` : head
+}
+
+/** Neither the new account nor the old one could start: the conversation is intact, the pane is not. */
+export function switchLostMessage(lang: 'en' | 'pt'): string {
+  return lang === 'pt'
+    ? 'A sessão não iniciou na outra conta nem pôde ser reaberta na conta de antes. A conversa está guardada: use Reabrir.'
+    : 'The session did not start on the other account and could not be reopened on its previous account. The conversation is kept: use Reopen.'
+}

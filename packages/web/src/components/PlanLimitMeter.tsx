@@ -58,19 +58,30 @@ export const PLAN_ROW_GRID = { display: 'grid', gridTemplateColumns: 'auto 1fr a
  * (CONTA.LIMITES), so an account reads the same in both. `note` replaces the plan line (a reason the
  * row cannot be picked); `tag` leads the plan line ("Current"), so it never cuts the name.
  */
-export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note, tag }: {
+export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note, tag, wrap = false }: {
   harness: PlanLimits['harness']; name: string; plan: string | undefined; limits: PlanLimits | null; now: number; lang: Lang
   note?: ReactNode; tag?: ReactNode
+  /** The picker: name and plan WRAP (never an ellipsis on the one fact that tells rows apart), the tag on its own line. */
+  wrap?: boolean
 }) {
-  const ellipsis = { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as const
+  const text = wrap
+    ? { display: 'block', overflowWrap: 'anywhere' } as const
+    : { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as const
+  const waiting = lang === 'pt' ? 'aguardando leitura' : 'waiting for the first reading'
   return <>
     <HarnessMark harness={harness} size={20} />
     <div style={{ minWidth: 0 }}>
-      <b style={{ ...ellipsis, fontSize: 13 }}>{name}</b>
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>{tag}<span style={{ ...ellipsis, minWidth: 0, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span></span>
+      <b style={{ ...text, fontSize: 13 }}>{name}</b>
+      {wrap
+        ? <>
+          <span style={{ ...text, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span>
+          {tag && <span style={{ display: 'flex', marginTop: 2 }}>{tag}</span>}
+          {!limits && <span style={{ ...text, fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
+        </>
+        : <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>{tag}<span style={{ ...text, minWidth: 0, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span></span>}
       {note && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{note}</span>}
     </div>
-    {limits ? limits.windows.map(w => <div key={w.kind} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang)}</span></div>) : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{lang === 'pt' ? 'aguardando leitura' : 'waiting for the first reading'}</span>}
+    {limits ? limits.windows.map(w => <div key={w.kind} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang)}</span></div>) : wrap ? null : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
   </>
 }
 
