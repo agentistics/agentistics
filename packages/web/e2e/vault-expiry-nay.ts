@@ -40,7 +40,8 @@ try {
     page.on('pageerror', e => { errors.push(e.message); console.error('Browser error:', e.stack) })
     let countdown: number | null = 240000
     let remote = false
-    let wrong = false
+    let hello: 'ok' | 'cancel' | 'error' | 'wait' = 'ok'
+    let releaseHello: (() => void) | undefined
     let failLock = false
     const posts: { path: string; body: any }[] = []
     const notifications: any[] = []
@@ -53,11 +54,16 @@ try {
         json = notifications
       } else if (path === '/api/vault' && req.method() === 'GET') json = { state: countdown === null ? 'locked' : 'open', autoLockInMs: countdown, entries: [] }
       else if (path === '/api/vault/extend') {
-        if (remote) { status = 401; json = { ok: false, code: 'stepup-required' } }
+        if (hello === 'wait' && !remote) await new Promise<void>(r => { releaseHello = r })
+        if (remote && req.postDataJSON()?.gestureToken !== 'phone-proof') { status = 401; json = { ok: false, code: 'mobile-gesture-required' } }
+        else if (hello === 'cancel') { status = 403; json = { ok: false, code: 'presence-cancelled' } }
+        else if (hello === 'error') { status = 503; json = { ok: false, code: 'presence-required', sentence: 'Confirme no Windows Hello para abrir o cofre.' } }
         else { countdown = 1800000; json = { ok: true, autoLockInMs: countdown } }
-      } else if (path === '/api/vault/stepup') {
-        if (wrong) { status = 401; json = { ok: false, code: 'stepup-wrong', sentence: 'Código incorreto. Tente novamente.' } }
-        else { remote = false; json = { ok: true } }
+      } else if (path === '/api/vault/personal/mobile/assert/begin') {
+        assert.deepEqual(req.postDataJSON(), { action: 'extend-open', target: '' })
+        json = { ok: true, challengeId: 'phone-challenge', challenge: 'YWJj', allowCredentials: ['YWJj'], rpId: 'localhost' }
+      } else if (path === '/api/vault/personal/mobile/assert/finish') {
+        json = { ok: true, gestureToken: 'phone-proof' }
       } else if (path === '/api/vault/lock') {
         if (failLock) { status = 503; json = { ok: false, code: 'unavailable', sentence: 'Não foi possível trancar agora.' } }
         else { countdown = null; json = { ok: true } }
@@ -104,27 +110,41 @@ try {
     await card.locator('[data-vault-extend]').click()
     await card.waitFor({ state: 'detached' })
     assert.equal(posts.filter(p => p.path === '/api/vault/extend').length, 1)
-    // A new window re-arms once; remote access uses CodeBoxes and preserves the error line.
-    remote = true; countdown = 230000
+    // Cancelled Hello leaves the warning and countdown intact, without a code fallback.
+    countdown = 230000; hello = 'cancel'
     await testApi(page, 'await api.refreshVaultWatch()')
     await card.waitFor()
     await card.locator('[data-vault-extend]').click()
-    await card.locator('input').first().waitFor()
-    wrong = true
-    await card.locator('input').first().pressSequentially('123456')
+    await poll(async () => !(await card.locator('[data-vault-extend]').isDisabled()), 'Hello cancellation')
+    assert.equal(countdown, 230000)
+    assert.equal(await card.locator('input').count(), 0)
+    hello = 'error'
     await card.locator('[data-vault-extend]').click()
-    await card.getByRole('status').waitFor()
-    assert((await card.getByRole('status').textContent())?.includes('Código incorreto'))
-    wrong = false
-    await card.locator('input').first().press('Enter')
+    await card.getByText('Windows Hello não respondeu. Tente novamente.', { exact: true }).waitFor()
+    assert.equal(countdown, 230000)
+    hello = 'ok'; remote = true
+    await page.evaluate(() => Object.defineProperty(navigator.credentials, 'get', { configurable: true, value: async () => null }))
+    await card.locator('[data-vault-extend]').click()
+    await poll(async () => !(await card.locator('[data-vault-extend]').isDisabled()), 'phone cancellation')
+    assert.equal(countdown, 230000)
+    assert.equal(posts.filter(p => p.path === '/api/vault/personal/mobile/assert/finish').length, 0)
+    // Exercise the real phoneGesture browser flow; only the authenticator itself is stubbed.
+    await page.evaluate(() => Object.defineProperty(navigator.credentials, 'get', { configurable: true, value: async () => ({
+      rawId: new Uint8Array([1, 2, 3]).buffer,
+      response: { clientDataJSON: new Uint8Array([1]).buffer, authenticatorData: new Uint8Array([2]).buffer, signature: new Uint8Array([3]).buffer },
+    }) }))
+    await card.locator('[data-vault-extend]').click()
     await card.waitFor({ state: 'detached' })
-    assert.equal(posts.filter(p => p.path === '/api/vault/stepup').length, 2)
+    assert.equal(posts.filter(p => p.path === '/api/vault/personal/mobile/assert/finish').length, 1)
+    assert.equal(posts.filter(p => p.path === '/api/vault/stepup').length, 0)
+    assert(posts.filter(p => p.path.startsWith('/api/vault/')).every(p => !p.body || !('code' in p.body)), 'never asks or sends an authenticator code')
+    remote = false
     // Failure is explained; locking succeeds explicitly on retry.
     countdown = 220000; failLock = true
     await testApi(page, 'await api.refreshVaultWatch()')
     await card.waitFor()
     await card.locator('[data-vault-lock-now]').click()
-    await card.getByRole('status').waitFor()
+    await card.getByText('Não foi possível trancar agora.', { exact: true }).waitFor()
     failLock = false
     await card.locator('[data-vault-lock-now]').click()
     await card.waitFor({ state: 'detached' })
@@ -136,31 +156,23 @@ try {
     await card.waitFor({ state: 'detached' })
     await testApi(page, 'await api.refreshVaultWatch()')
     assert.equal(await card.count(), 0)
-    // Step-up must also fit the floating card when the dock is closed.
+    // The existing notice shows the Hello step while the OS owns confirmation.
     await page.getByRole('dialog', { name: 'Nay', exact: true }).getByRole('button', { name: 'Fechar', exact: true }).click()
     countdown = 1800000; await testApi(page, 'await api.refreshVaultWatch()')
-    remote = true; countdown = 200000; await testApi(page, 'await api.refreshVaultWatch()')
+    countdown = 200000; hello = 'wait'; await testApi(page, 'await api.refreshVaultWatch()')
     await card.waitFor()
     await card.locator('[data-vault-extend]').click()
-    await card.locator('input').first().waitFor()
+    await card.getByText('Confirme no Windows Hello.', { exact: true }).waitFor()
+    await poll(async () => !!releaseHello, 'Hello request pending')
     await page.waitForTimeout(200)
-    assert(await card.locator('input').last().isVisible(), 'all six code boxes fit the floating notice')
-    const inputBounds = await card.locator('input').evaluateAll(inputs => inputs.map(el => {
-      const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, font: parseFloat(getComputedStyle(el).fontSize) }
-    }))
-    const bounds = await card.boundingBox()
-    assert(bounds && inputBounds.every(r => r.left >= bounds.x && r.right <= bounds.x + bounds.width), 'code boxes must not be clipped')
-    if (width === 390) {
-      assert(inputBounds.every(r => r.font >= 16), 'mobile inputs do not trigger Safari zoom')
-      assert((await card.locator('[data-vault-extend]').boundingBox())!.height >= 44, 'mobile action target')
-    }
-    await page.screenshot({ path: `${output}/${width}-stepup.png` })
-    wrong = false
-    await card.locator('input').first().pressSequentially('123456')
-    await card.locator('input').last().press('Enter')
+    assert.equal(await card.locator('input').count(), 0)
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    if (width === 390) assert((await card.locator('[data-vault-extend]').boundingBox())!.height >= 44)
+    await page.screenshot({ path: `${output}/hello-${width}.png` })
+    hello = 'ok'; releaseHello!()
     await card.waitFor({ state: 'detached' })
     assert.deepEqual(errors, [], 'no React/browser errors')
-    console.log(`PASS ${width}px: once/window, bell, queue/count, opaque, button/chat, extend, step-up, errors, lock, dismiss`)
+    console.log(`PASS ${width}px: once/window, bell, queue/count, opaque, button/chat, Hello ok/cancel/error, phone passkey, no code, lock, dismiss`)
     await context.close()
   }
 } finally {

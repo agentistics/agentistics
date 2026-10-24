@@ -17,14 +17,14 @@ import { __resetGateForTests, mintGrant, mintSetupCode } from './gate'
 import { handleVaultHttp } from './http'
 
 const STORE = new Map<string, Uint8Array>()
-function fake(id: ProtectorId): Protector & { gestures: number } {
+function fake(id: ProtectorId): Protector & { gestures: number; cancel: boolean } {
   const self = {
-    id, gestures: 0,
+    id, gestures: 0, cancel: false,
     label: () => (id === 'hello' ? 'Windows Hello (fake)' : 'DPAPI (fake)'),
     async probe() { return { ok: true as const } },
     async wrap(dek: Uint8Array, kid: string) { STORE.set(`${id}:${kid}`, new Uint8Array(dek)); return { ok: true as const, record: { type: id, createdAt: '2026-10-02T00:00:00.000Z' } } },
     async unwrap(_r: unknown, kid: string): Promise<UnwrapResult> {
-      if (id === 'hello') self.gestures++
+      if (id === 'hello') { self.gestures++; if (self.cancel) return { ok: false, kind: 'denied', reason: 'presence-cancelled: the user said no' } }
       const d = STORE.get(`${id}:${kid}`)
       return d ? { ok: true, dek: new Uint8Array(d) } : { ok: false, kind: 'missing', reason: 'gone' }
     },
@@ -456,7 +456,7 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
     expect((await beat(t2)).json.code).toBe('activity-token')
   })
 
-  test('extend: a non-loopback peer cannot extend the window or mint a heartbeat token', async () => {
+  test('extend: a non-loopback peer needs a passkey and cannot mint a heartbeat token', async () => {
     lockVault('user')
     await http('POST', '/api/vault/unlock', {})
     T += 10 * 60_000
@@ -469,37 +469,38 @@ describe('the routes that already existed keep their gate (stepup, lock, auto-lo
         body: '{}',
       })
       const res = await handleVaultHttp(req, new URL(req.url), { cors: {}, session: 'session-A', peer: '192.0.2.10' })
-      expect(res!.status).toBe(403)
-      expect(await res!.json()).toMatchObject({ ok: false, code: 'activity-not-here' })
+      expect(await res!.json()).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
       expect(res!.headers.get('set-cookie')).toBeNull()
       expect(autoLockRemainingMs()).toBe(before)
     }
   })
 
-  test('extend: a bare local curl is refused (window unchanged, no token); with the page\'s grant it works, throttled', async () => {
-    lockVault('user')
-    await http('POST', '/api/vault/unlock', {})
-    T += 40 * 60_000 / 4
+  test('extend: fresh Hello, never a code or grant; heartbeat cookies remain local and throttled', async () => {
+    // Without a presence protector, a grant cannot stand in for Hello.
+    expect((await http('POST', '/api/vault/extend', {}, mintGrant('http:session-A', 'read'))).json.code).toBe('no-presence')
+    await enrolOverHttp()
+    T += 10 * 60_000
     const before = autoLockRemainingMs()!
-    const bare = await http('POST', '/api/vault/extend', {})
-    expect(bare.json.code).toBe('stepup-required')
-    expect(tokenOf(bare)).toBeUndefined()
-    expect(autoLockRemainingMs()!).toBe(before)
-    const other = await http('POST', '/api/vault/extend', {}, mintGrant('http:session-B', 'read'))
-    expect(other.json.code).toBe('stepup-required')
-    expect(tokenOf(other)).toBeUndefined()
+    const g0 = hello.gestures
     const grant = mintGrant('http:session-A', 'read')
+    hello.cancel = true
+    const cancelled = await http('POST', '/api/vault/extend', { code: codeAt() }, grant)
+    expect(cancelled.json.code).toBe('presence-cancelled')
+    expect(tokenOf(cancelled)).toBeUndefined()
+    expect(autoLockRemainingMs()).toBe(before)
+    hello.cancel = false
     const first = await http('POST', '/api/vault/extend', {}, grant)
     expect(first.json.ok).toBe(true)
+    expect(hello.gestures).toBe(g0 + 2)
     const t1 = tokenOf(first)
     expect(t1).toBeDefined()
     expect(autoLockRemainingMs()!).toBeGreaterThan(before)
     T += 5_000
     const second = await http('POST', '/api/vault/extend', {}, grant)
     expect(second.json.ok).toBe(true)
-    expect(tokenOf(second)).toBeUndefined()                       // the arm throttle: no fresh token inside 30 s
-    expect(second.headers.get('set-cookie') ?? '').not.toContain('agentistics-vault-heartbeat') // and the page's cookie is not cleared
-    expect((await beat(t1)).json.ok).toBe(true)                   // the first token is still the live one
+    expect(hello.gestures).toBe(g0 + 3)
+    expect(tokenOf(second)).toBeUndefined()
+    expect((await beat(t1)).json.ok).toBe(true)
   })
 
   test('activity without a token is refused; an unknown path is not ours', async () => {

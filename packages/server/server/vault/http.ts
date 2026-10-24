@@ -168,20 +168,13 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     return reply(await gate.stepUpForRead(b.code, session))
   }
   if (path === '/api/vault/extend' && req.method === 'POST') {
-    // Extending can arm the same heartbeat token as /activity/arm: require its local-page trust.
-    if (!loopback) {
-      await req.body?.cancel().catch(() => {})
-      return reply({ ok: false, code: 'activity-not-here', sentence: vaultLang() === 'pt'
-        ? 'A atividade do cofre só pode vir do painel aberto no próprio computador.'
-        : 'Vault activity can only come from the dashboard on this computer.' })
-    }
     const b = await body()
-    const g = await gate.requireVaultStepUp('extend-open', { session, grant, loopback, code: codeOf(b) })
+    const g = await gate.requireVaultStepUp('extend-open', { session, grant, loopback, gestureToken: typeof b.gestureToken === 'string' ? b.gestureToken : undefined })
     if (!g.ok) return reply(g)
     const left = extendAutoLock()
     if (left === null) return reply({ ok: false, code: String('locked'), sentence: vaultLang() === 'pt' ? 'O cofre já está trancado.' : 'The vault is already locked.' })
     // A token only for the page's own grant, and under the arm's 30 s throttle (null = too soon: no new cookie).
-    const token = gate.grantValid(grant, session, 'read') ? armVaultHeartbeatToken() : null
+    const token = loopback && gate.grantValid(grant, session, 'read') ? armVaultHeartbeatToken() : null
     const res = reply({ ok: true, autoLockInMs: left })
     return token === null ? res : addHeartbeatCookie(res, token)
   }

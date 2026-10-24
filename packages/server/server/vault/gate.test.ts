@@ -164,10 +164,9 @@ describe('§2.4 — every row of the table', () => {
     test(`${action}: code ${row.code ? 'yes' : 'no'}, gesture ${row.gesture ? 'yes' : 'no'}, grant ${row.grant ?? 'none'}`, async () => {
       // A personal-secret row is the DESKTOP rule on a loopback page (off loopback the gesture is a phone
       // passkey token — tested in mobile.test.ts).
-      if (action === 'extend-open') return // VAULT.V2: grant-or-code by design — see the dedicated extend-open test below
       if (action === 'personal-grant') return // VAULT.UI2: loopback needs no proof, a phone needs its passkey — see the dedicated describe below
       // Review M3: a no-proof row is the rule for THIS computer (a remote caller owes the code — review-2-103-2.test.ts).
-      const C = action.startsWith('personal-') || (!row.code && !row.gesture) ? { ...S, loopback: true } : S
+      const C = action === 'extend-open' || action.startsWith('personal-') || (!row.code && !row.gesture) ? { ...S, loopback: true } : S
       if (!row.code && !row.gesture) {
         expect((await requireVaultStepUp(action, C)).ok).toBe(true)
         return
@@ -279,13 +278,20 @@ describe('VAULT.UI2 — the grant for a :vault chip, and the extension of an ope
     expect(autoLockRemainingMs()!).toBeLessThan(before - 9 * 60_000)
   })
 
-  test('extend-open: needs the page\'s read grant or the code — a bare loopback request is refused', async () => {
-    expect(await requireVaultStepUp('extend-open', { ...S, loopback: true })).toMatchObject({ ok: false, code: 'stepup-required' })
-    expect(await requireVaultStepUp('extend-open', S)).toMatchObject({ ok: false, code: 'stepup-required' })
-    expect((await requireVaultStepUp('extend-open', { ...S, grant: mintGrant(S.session, 'read') })).ok).toBe(true)
-    expect(await requireVaultStepUp('extend-open', { ...S, grant: mintGrant('other-session', 'read') })).toMatchObject({ ok: false, code: 'stepup-required' })
-    expect((await requireVaultStepUp('extend-open', { ...S, code: codeAt() })).ok).toBe(true)
-    next()
+  test('extend-open: fresh Hello even with a grant or code; cancellation never counts as activity', async () => {
+    expect(VAULT_ACTION_ROWS['extend-open']).toEqual({ code: false, gesture: true, grant: null })
+    const g0 = hello.gestures
+    expect((await requireVaultStepUp('extend-open', { ...S, loopback: true })).ok).toBe(true)
+    expect(hello.gestures).toBe(g0 + 1)
+    hello.cancel = true
+    T += 60_000
+    const before = autoLockRemainingMs()
+    for (const proof of [{}, { grant: mintGrant(S.session, 'read') }, { code: codeAt() }]) {
+      expect(await requireVaultStepUp('extend-open', { ...S, loopback: true, ...proof })).toMatchObject({ ok: false, code: 'presence-cancelled' })
+      expect(autoLockRemainingMs()).toBe(before)
+    }
+    expect(await requireVaultStepUp('extend-open', { ...S, code: codeAt() })).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
+    hello.cancel = false
   })
 
   test('extendAutoLock moves the clock by a whole window, audited; nothing open → null', async () => {
