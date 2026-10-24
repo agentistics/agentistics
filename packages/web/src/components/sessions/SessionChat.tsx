@@ -40,7 +40,7 @@ import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { modeStyle } from '../../lib/modeStyle'
 import { NoQuestionsWarning } from './ModePicker'
 import { modeLabel, modeTitle, onlyModeNote } from '../../lib/modeLabel'
-import { modeCycles, modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
+import { modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
 import { ApprovalCard } from './ApprovalCard'
 import { composerAnswerRequest } from '../../lib/dialogAnswer'
 import { TypedModel } from './ModelSelect'
@@ -1887,19 +1887,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       if (out.ok) nudgeFleet()
       return
     }
-    const cycles = modeCycles(row.mode.id, target, modeOptions)
     setModeMenuOpen(false)
-    for (let i = 0; i < cycles; i += 1) {
-      const out = await act({ id: session.id, action: 'cycleMode' })
-      if (!out.ok) {
-        setNotice(out.message)
-        return
-      }
-    }
-    if (cycles > 0) {
-      setNotice(modeOptions.find(mode => mode.id === target)?.label ?? target)
-      nudgeFleet()
-    }
+    if (row.mode.id === target) return
+    // MODE.NOQ — the SERVER presses and reads until the footer names the target: whether a mode is in the
+    // cycle depends on how the session was started, so a count computed here could land on the wrong one.
+    const out = await act({ id: session.id, action: 'cycleMode', text: target })
+    setNotice(out.ok ? (modeOptions.find(mode => mode.id === target)?.label ?? target) : out.message)
+    if (out.ok) nudgeFleet()
   }, [act, canPrompt, directModes, modeOptions, row?.mode, session.id])
   /** EXT.OPEN: the one question before a write continues an external session here. */
   const [continueAsk, setContinueAsk] = useState<{ message: string; text: string } | null>(null)
@@ -3654,9 +3648,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       height: 30, padding: '0 9px',
                       borderRadius: 9, flexShrink: 0, maxWidth: 150,
                       // The colour IS the mode — see `modeStyle.ts`. Ordered by how much the
-                      // session proceeds without asking, and never the fault colour: `auto` is how
-                      // this product is normally used, and a red ordinary state is the cry-wolf
-                      // this codebase avoids everywhere else.
+                      // session proceeds without asking. Only "no questions" is red (MODE.NOQ):
+                      // `auto` is how this product is normally used and stays green.
                       border: `1px solid ${modeStyle(row.mode).border}`,
                       background: modeStyle(row.mode).bg,
                       color: modeStyle(row.mode).fg,

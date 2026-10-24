@@ -58,12 +58,15 @@ export const NO_QUESTIONS_WARNING = {
 
 /**
  * The canonical mode of a TERMINAL (TUI) mode id, as `mode-spec.ts` reads it off the footer. Only claude's
- * footer has been driven; its `auto` (the classifier mode) means none of the four.
+ * footer has been driven; its `auto` (the classifier mode) means none of the four, its `bypass` is no-questions.
  */
 const TUI_CANONICAL: Readonly<Record<string, CanonicalMode>> = {
   manual: 'default',
   'accept-edits': 'accept-edits',
   plan: 'plan',
+  // claude's "bypass permissions" — in the cycle only when the session was started with
+  // `--allow-dangerously-skip-permissions` (MODE.NOQ, claude 2.1.310).
+  bypass: 'no-questions',
 }
 export function canonicalOfTuiMode(id: string): CanonicalMode | undefined {
   return TUI_CANONICAL[id]

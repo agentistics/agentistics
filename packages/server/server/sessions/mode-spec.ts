@@ -18,6 +18,21 @@
  *   ⏸ plan mode on (shift+tab to cycle)
  *   ⏵⏵ auto mode on (shift+tab to cycle)
  *
+ * RE-MEASURED 2026-10-24 against claude 2.1.310 (MODE.NOQ). `bypass permissions` ("sem perguntas") joins the
+ * cycle ONLY when the process was started with `--allow-dangerously-skip-permissions` (or already IN it via
+ * `--dangerously-skip-permissions`), and then sits between plan and auto:
+ *
+ *   ⏸ manual mode on · ? for shortcuts
+ *   ⏵⏵ accept edits on (shift+tab to cycle)
+ *   ⏸ plan mode on (shift+tab to cycle)
+ *   ⏵⏵ bypass permissions on (shift+tab to cycle)
+ *   ⏵⏵ auto mode on (shift+tab to cycle)
+ *
+ * Managed claude sessions now start with the ALLOW flag (`spawn-spec.ts`) — it enables nothing, it only
+ * makes bypass reachable. A session started before that still cycles through four, which is why choosing a
+ * target is `cycleToMode`: it presses and READS until the footer names the target, and stops after one
+ * full revolution rather than trusting a precomputed count.
+ *
  * Note that `manual` is the one whose footer does NOT say how to cycle — it advertises `? for
  * shortcuts` instead. Matching on "(shift+tab to cycle)" would therefore have found three of the
  * four and reported the fourth as unknown, which is why each mode is matched on its own NAME.
@@ -69,9 +84,10 @@ export const MODE_SPECS: Record<HarnessId, ModeSpec | null> = {
       { id: 'manual', label: 'manual mode', match: /manual mode on/ },
       { id: 'accept-edits', label: 'accept edits', match: /accept edits on/ },
       { id: 'plan', label: 'plan mode', match: /plan mode on/ },
+      { id: 'bypass', label: 'bypass permissions', match: /bypass permissions on/ },
       { id: 'auto', label: 'auto mode', match: /auto mode on/ },
     ],
-    probed: 'claude 2.1.263, 2026-09-06',
+    probed: 'claude 2.1.263, 2026-09-06; bypass: claude 2.1.310, 2026-10-24',
   },
   // Unprobed. See the header: a guessed key is a keystroke nobody asked for.
   codex: null,
@@ -103,4 +119,46 @@ export function modeOf(frame: readonly string[], spec: ModeSpec | undefined): Ha
   // First match wins, and the patterns are disjoint by construction — each names its own mode.
   for (const m of spec.modes) if (m.match.test(footer)) return m
   return null
+}
+
+export type CycleToModeResult = 'reached' | 'unreachable' | 'unread' | 'send-failed'
+
+/**
+ * Press the cycle key until the footer names `target` — IO through the given functions, so it is testable.
+ *
+ * Never a precomputed number of presses: whether a mode is IN the cycle depends on how the process was
+ * started (claude's bypass), so a count computed from a table lands on the wrong mode when the table and
+ * the session disagree. After each press it waits for the footer to name a DIFFERENT mode; once it is back
+ * at the mode it started from, the target is not in this session's cycle (`unreachable`) — the session is
+ * left exactly where it was. `unread` when no mode can be read at all (no footer, a dialog on screen).
+ */
+export async function cycleToMode(
+  spec: ModeSpec,
+  target: string,
+  io: {
+    sendKey: (key: string) => Promise<boolean>
+    readMode: () => Promise<string | null>
+    sleep: (ms: number) => Promise<void>
+  },
+  settle: { pollMs: number; maxWaitMs: number } = { pollMs: 120, maxWaitMs: 2500 },
+): Promise<CycleToModeResult> {
+  const start = await io.readMode()
+  if (start === null) return 'unread'
+  if (start === target) return 'reached'
+  if (!spec.modes.some(m => m.id === target)) return 'unreachable'
+  let at = start
+  // One revolution is at most every mode the table knows plus one: enough to come back to `start`.
+  for (let press = 0; press <= spec.modes.length; press += 1) {
+    if (!(await io.sendKey(spec.cycleKey))) return 'send-failed'
+    let now: string | null = at
+    for (let waited = 0; waited < settle.maxWaitMs && (now === at || now === null); waited += settle.pollMs) {
+      await io.sleep(settle.pollMs)
+      now = await io.readMode()
+    }
+    if (now === null || now === at) return 'unread'
+    if (now === target) return 'reached'
+    if (now === start) return 'unreachable'
+    at = now
+  }
+  return 'unreachable'
 }
