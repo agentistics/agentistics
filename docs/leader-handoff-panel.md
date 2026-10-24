@@ -81,9 +81,11 @@ account-specific rate through rounded readings, renewals and process restarts; r
 in `handoff-quota-rates.json`. Missing windows remain null even when a previous rate exists.
 
 Unknown account attribution, missing meters, insufficient timestamped/priced usage, or unknown
-projection inputs leave dependent quota cells null. Every null quota cell shows a dash with a
-tooltip explaining why. These estimates include other work in the account and are labeled estimates
-on screen.
+projection inputs leave dependent quota cells null. Null quota cells show a dash; a single footnote
+explains the unavailable estimates for the whole table, replacing the normal calibration note.
+Percentages use one decimal place in both languages; positive values below 0.1 percentage points
+show “<0.1%” (“<0,1%” in Portuguese), while measured zero shows “+0.0%”. These estimates include
+other work in the account and are labeled estimates on screen.
 
 ## Engine boundary
 
