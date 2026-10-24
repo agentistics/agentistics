@@ -5,6 +5,7 @@ import { computeHandoffPanel, handoffMetrics } from './handoff-panel'
 import { parseCodexRollout } from '../adapters/codex-parse'
 import { toConversation } from './conversations'
 import type { ManagedSession } from './types'
+import { CLAUDE_DIR, CODEX_DIR } from '../config'
 
 const now = Date.parse('2026-10-20T16:00:00Z')
 const five = 5 * 3600_000, week = 7 * 24 * 3600_000
@@ -39,6 +40,23 @@ describe('account history calibration', () => {
     const managed = [{ id: 'm', harness: 'codex', conversationId: 'c', accountId: 'new' }] as ManagedSession[]
     expect(accountForReply('codex', 'c', '/accounts/old/sessions/file.jsonl:33', accounts, managed, [])).toBe('old')
     expect(accountForReply('codex', 'c', '/accounts/new/sessions/file.jsonl:34', accounts, managed, [])).toBe('new')
+  })
+  for (const [harness, root] of [['claude', CLAUDE_DIR], ['codex', CODEX_DIR]] as const) it(`${harness}: does not attribute a bound session to the default home's current login`, () => {
+    const accounts = { version: 2 as const, accounts: [], segments: {}, aliases: { 'old-second': 'second' },
+      bindings: { [`${harness}:`]: 'first' } }
+    const managed = [{ id: 'm', harness, conversationId: 'c', accountId: 'old-second' }] as ManagedSession[]
+    const path = `${root}/sessions/c.jsonl:33`
+    const account = accountForReply(harness, 'c', path, accounts, managed, [])
+    expect(account).toBe('second')
+    const own = limit(harness, 'second')
+    const quota = windowQuotaRate(own, [{ ...reply(harness, 6), account }], now)
+    const panel = computeHandoffPanel({ id: 'm', title: 'Leader', model: harness === 'claude' ? 'claude-opus-5-5' : 'gpt-6.1-sol',
+      contextTokens: 200000, contextWindow: 1000000 }, null, quota, now)
+    for (const row of panel.projections) {
+      expect(row.fiveHourPct).toBeGreaterThan(0)
+      expect(row.weekPct).toBeGreaterThan(0)
+    }
+    expect(accountForReply(harness, 'unmanaged', path, accounts, managed, [])).toBe('first')
   })
   it('gives no-meter harnesses an explicit explanation without a made-up rate', () => {
     const p = computeHandoffPanel({ id: 'g', title: 'Gemini', model: 'gemini-3.8-flash', contextTokens: 100000, contextWindow: 1000000 }, null,

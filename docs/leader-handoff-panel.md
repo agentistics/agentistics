@@ -69,6 +69,9 @@ harnesses use their journal/replay usage when available. Native artifacts replac
 rather than adding the same usage twice. Claude response IDs use final usage and the first timestamp;
 Codex uses cumulative token-count increments; Gemini snapshots are deduplicated by message ID.
 Costs use the central pricing functions, including Claude cache-write TTLs.
+An explicit transcript-root binding preserves the source login of historical usage. Otherwise,
+the managed session's account takes precedence over the default home's current login, so switching
+the default account does not move a bound session's usage into another account's calibration.
 
 Passive fleet polls and panel requests share a calibration cache (at most once per 30 seconds).
 A positive utilization delta divided by positive spend delta supplies a live calibration when the

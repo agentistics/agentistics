@@ -21,7 +21,12 @@ export function accountForReply(harness: HarnessId, conversationId: string, path
   accounts: AccountsFile, managed: readonly ManagedSession[], limits: readonly PlanLimits[]): string | undefined {
   const explicit = managed.find(m => m.harness === harness && (m.conversationId === conversationId || m.id === conversationId))?.accountId
   const retired = new Set(accounts.accounts.filter(a => a.retired).map(a => a.id))
-  const at = (path ? accountAtPath(harness, path.replace(/:\d+$/, ''), accounts.bindings, retired) : undefined) ?? explicit
+  // A registered transcript root records its source login, even after a session switches.
+  // The default-home login is only a fallback and must not override a managed binding.
+  const { [`${harness}:`]: _default, ...roots } = accounts.bindings
+  const source = path?.replace(/:\d+$/, '')
+  const at = (source ? accountAtPath(harness, source, roots, retired) : undefined) ?? explicit
+    ?? (source ? accountAtPath(harness, source, accounts.bindings, retired) : undefined)
     ?? fallbackSessionAccount(harness, accounts, limits.filter(l => l.harness === harness).map(l => l.account))
   return at ? canonicalAccountId(accounts, at) : undefined
 }
