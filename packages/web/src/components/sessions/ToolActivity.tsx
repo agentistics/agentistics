@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, ArrowUpRight, Check, ChevronDown, Loader, Minus } from 'lucide-react'
 import { SystemLine, SYS_LINK, SYS_TEXT } from './ChatBubble'
+import { ActivityIcon } from './ActivityIcon'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { fmtSpan, groupSpanMs, stepVerb, summarize, type ActivityGroup, type ActivityStep } from '../../lib/toolActivity'
@@ -120,11 +121,12 @@ export function ToolActivity({ group, lang, variant, defaultOpen = false, now: n
 
   const label = (
     <>
+      <ActivityIcon steps={group.steps} />
+      <span title={summary} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
       {group.running
         ? <Loader size={12} className="ag-working-spin" style={{ flexShrink: 0 }} />
         : errors > 0 ? <AlertTriangle size={12} style={{ flexShrink: 0, color: 'var(--accent-red)' }} />
           : unfinished ? <Minus size={12} style={{ flexShrink: 0 }} /> : null}
-      <span title={summary} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
       <span style={{ flexShrink: 0, whiteSpace: 'nowrap', opacity: 0.8 }}>
         {' · '}{count} {pt ? (count === 1 ? 'passo' : 'passos') : (count === 1 ? 'step' : 'steps')}
         {errors > 0 && <span style={{ color: 'var(--accent-red)' }}>{' · '}{errors} {pt ? (errors === 1 ? 'falhou' : 'falharam') : 'failed'}</span>}
@@ -134,7 +136,7 @@ export function ToolActivity({ group, lang, variant, defaultOpen = false, now: n
     </>
   )
   const toggle: React.CSSProperties = {
-    display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: '100%',
+    display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0, maxWidth: '100%',
     border: 'none', background: 'none', padding: 0, font: 'inherit', color: 'inherit', cursor: 'pointer',
     ...(isMobile ? { minHeight: 44 } : {}),
   }
@@ -155,7 +157,7 @@ export function ToolActivity({ group, lang, variant, defaultOpen = false, now: n
   // inline + live
   const liveTail = variant === 'live' && group.running && !open
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: isMobile ? 0 : 36, minWidth: 0, fontSize: 11.5, color: SYS_TEXT }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, fontSize: 11, color: SYS_TEXT }}>
       <div style={{ display: 'flex', minWidth: 0 }}>{button}</div>
       {open && <StepsCard steps={group.steps} pt={pt} />}
       {liveTail && (

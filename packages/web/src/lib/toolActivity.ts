@@ -95,6 +95,35 @@ const RAW_KIND: Record<string, ActivityKind> = {
 
 const MCP = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$|^mcp_([a-z0-9-]+)_(.+)$/i
 
+/** Most frequent kind; ties keep first appearance, including unfinished steps. */
+export function activityIconKind(steps: readonly ActivityStep[]): ActivityKind {
+  const counts = new Map<ActivityKind, number>()
+  for (const step of steps) counts.set(step.kind, (counts.get(step.kind) ?? 0) + 1)
+  let kind: ActivityKind = 'other'
+  let most = 0
+  for (const [candidate, count] of counts) {
+    if (count > most) { kind = candidate; most = count }
+  }
+  return kind
+}
+
+/** Dominant MCP server, with the same count/first-appearance rule as the kind. */
+export function activityMcpServer(steps: readonly ActivityStep[]): string | undefined {
+  const counts = new Map<string, number>()
+  for (const step of steps) {
+    if (step.kind !== 'mcp') continue
+    const match = MCP.exec(step.name)
+    const server = (match?.[1] ?? match?.[3] ?? '').toLowerCase()
+    counts.set(server, (counts.get(server) ?? 0) + 1)
+  }
+  let server: string | undefined
+  let most = 0
+  for (const [candidate, count] of counts) {
+    if (count > most) { server = candidate || undefined; most = count }
+  }
+  return server
+}
+
 /** A path that is an assistant MEMORY rather than project code (Claude's auto-memory, agentistics leader notes). */
 const MEMORY_PATH = /(^|\/)(memory|memories)\/[^/]+\.md$|\/MEMORY\.md$|(^|\/)GEMINI\.md$/
 
