@@ -7,7 +7,7 @@
  * handoff band's notice styling (`handoffWarning.css`), so it reads like every other notice there.
  */
 import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { X } from 'lucide-react'
+import { Users, X } from 'lucide-react'
 import { Checkbox, ConfirmModal, Select } from '../../pages/settings/primitives'
 import {
   defaultTarget, fetchSwitchInfo, noticeTitle, optionLabel, postSwitch, resetPhrase, showLimitNotice,
@@ -69,7 +69,7 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
   const chosen = info.options.find(o => o.id === target)
   const from = info.current?.label
   const message = pt
-    ? `A sessão é encerrada e a mesma conversa continua${chosen ? ` na conta ${chosen.label}` : ' na outra conta'}${from ? ` (hoje em ${from})` : ''}. A conversa é copiada, não movida: o histórico na conta atual continua lá.`
+    ? `A sessão é encerrada e a mesma conversa continua${chosen ? ` na conta ${chosen.label}` : ' na outra conta'}${from ? ` (agora em ${from})` : ''}. A conversa é copiada, não movida: o histórico na conta atual continua lá.`
     : `The session is ended and the same conversation continues${chosen ? ` on ${chosen.label}` : ' on the other account'}${from ? ` (now on ${from})` : ''}. The conversation is copied, not moved: the history on the current account stays there.`
   async function confirm() {
     if (!target) return
@@ -85,6 +85,7 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
     <ConfirmModal
       open={open}
       tone="default"
+      icon={<Users size={18} />}
       title={pt ? 'Continuar em outra conta' : 'Continue on another account'}
       message={message}
       confirmLabel={busy ? (pt ? 'Trocando…' : 'Switching…') : (pt ? 'Trocar conta' : 'Switch account')}
