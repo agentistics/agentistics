@@ -9,6 +9,7 @@ import { listGeminiFamilies } from './gemini-family-io'
 import type { AccountsFile } from '../harness-accounts'
 import type { BilledReply } from './handoff-usage'
 
+// @harness-adapters-only: only these harnesses write native usage logs we can parse for quota calibration.
 export const nativeQuotaHarnesses = ['claude', 'codex', 'gemini'] as const
 export type NativeQuotaRoots = Partial<Record<typeof nativeQuotaHarnesses[number], string>>
 const defaultRoots: NativeQuotaRoots = { claude: CLAUDE_DIR, codex: CODEX_DIR, gemini: GEMINI_DIR }
