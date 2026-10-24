@@ -93,6 +93,11 @@ try {
     const a = await card.boundingBox(), b = await page.locator('[data-nay-fab]').boundingBox()
     assert(a && b && (a.x + a.width <= b.x || b.x + b.width <= a.x || a.y + a.height <= b.y || b.y + b.height <= a.y), 'notice must not cover Nay button')
     await page.screenshot({ path: `${output}/${width}-button.png` })
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(t => document.documentElement.setAttribute('data-theme', t), theme)
+      await page.waitForTimeout(250)
+      await page.screenshot({ path: `${output}/polish-${width}-${theme}-idle.png` })
+    }
     // Existing queue/count: the single visible card includes another waiting occurrence.
     await testApi(page, "api.pushAlert({key:'other',kind:'turn',sessionId:'other',name:'Outra sessão',sinceMs:1,sinceKnown:true}); api.pushAlert({...api.readNayAlerts().find(a=>a.kind==='vault-expiry'),key:'vault-new'})")
     assert.equal(await page.locator('[data-nay-notice]').count(), 1)
@@ -161,6 +166,7 @@ try {
     countdown = 1800000; await testApi(page, 'await api.refreshVaultWatch()')
     countdown = 200000; hello = 'wait'; await testApi(page, 'await api.refreshVaultWatch()')
     await card.waitFor()
+    const idleBox = (await card.locator('[data-vault-extend]').boundingBox())!
     await card.locator('[data-vault-extend]').click()
     await card.getByText('Confirme no Windows Hello.', { exact: true }).waitFor()
     await poll(async () => !!releaseHello, 'Hello request pending')
@@ -169,6 +175,16 @@ try {
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     if (width === 390) assert((await card.locator('[data-vault-extend]').boundingBox())!.height >= 44)
     await page.screenshot({ path: `${output}/hello-${width}.png` })
+    const busyBox = (await card.locator('[data-vault-extend]').boundingBox())!
+    assert(Math.abs(busyBox.width - idleBox.width) <= 1 && Math.abs(busyBox.height - idleBox.height) <= 1, `pending button keeps its size: ${JSON.stringify({ idleBox, busyBox })}`)
+    assert.equal((await card.locator('[data-vault-extend]').innerText()).trim(), 'Confirmando…')
+    assert(await card.locator('[data-vault-extend] svg').first().isVisible(), 'spinner visible')
+    assert(await card.locator('[data-vault-extend]').isDisabled())
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(t => document.documentElement.setAttribute('data-theme', t), theme)
+      await page.waitForTimeout(250)
+      await page.screenshot({ path: `${output}/polish-${width}-${theme}-pending.png` })
+    }
     hello = 'ok'; releaseHello!()
     await card.waitFor({ state: 'detached' })
     assert.deepEqual(errors, [], 'no React/browser errors')

@@ -19,3 +19,21 @@ export function nextWarn(s: WarnState, autoLockInMs: number | null, periodMs = I
   if (s.warned) return { state: s, fire: false }
   return { state: { warned: true }, fire: true }
 }
+
+/** PURE. Is this page served from the machine itself? Off-loopback the browser is a phone/other device,
+ *  so the card says "passkey" from the first frame instead of flashing the Windows Hello sentence. */
+export function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '')
+  return h === 'localhost' || h === '::1' || h === '' || /^127(\.\d{1,3}){3}$/.test(h) || h.endsWith('.localhost')
+}
+
+/** PURE. The sentence shown while the confirmation is pending. */
+export function confirmSentence(phone: boolean, pt: boolean): string {
+  return phone ? (pt ? 'Confirme com a passkey do aparelho.' : 'Confirm with this device’s passkey.')
+    : (pt ? 'Confirme no Windows Hello.' : 'Confirm with Windows Hello.')
+}
+
+/** PURE. The keep-open button's label: stable width, never a bare spinner. */
+export function extendLabel(busy: boolean, pt: boolean): string {
+  return busy ? (pt ? 'Confirmando…' : 'Confirming…') : (pt ? 'Manter aberto' : 'Keep open')
+}
