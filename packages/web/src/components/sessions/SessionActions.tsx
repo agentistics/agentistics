@@ -18,7 +18,9 @@
 
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState } from 'react'
-import { MoreHorizontal, X } from 'lucide-react'
+import { MoreHorizontal, Users, X } from 'lucide-react'
+import { AccountSwitchDialog, useSwitchInfo } from './AccountSwitch'
+import { canSwitch } from '../../lib/accountSwitch'
 import { SessionFiling } from '../tasks/SessionFiling'
 import { StopSessionConfirm } from '../tasks/StopSessionConfirm'
 import { boardCopy } from '../tasks/copy'
@@ -123,6 +125,9 @@ export function SessionActions({
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  // CONTA.TROCA: asked only while the menu is open, so a list of rows costs nothing.
+  const [switching, setSwitching] = useState(false)
+  const [switchInfo] = useSwitchInfo(open || inline || switching ? row.id : undefined, lang)
 
   // A different row is a different set of answers: an in-flight rename must not carry across.
   useEffect(() => {
@@ -202,6 +207,11 @@ export function SessionActions({
           onChanged={() => setNotice(boardCopy(lang).filed)}
           onClose={() => setLinking(false)}
         />
+      )}
+
+      {switchInfo && (
+        <AccountSwitchDialog open={switching} sessionId={row.id} info={switchInfo} lang={lang} fromLimit={!!switchInfo.limit}
+          onClose={() => setSwitching(false)} onSwitched={id => onOpened?.(id)} />
       )}
 
       {shown && (
@@ -375,6 +385,25 @@ export function SessionActions({
                     )}
                   </button>
                 ))}
+                {/* CONTA.TROCA: offered only when another account of this harness can take it. */}
+                {canSwitch(switchInfo) && (
+                  <button
+                    type="button"
+                    data-account-switch-item
+                    onClick={() => { setOpen(false); setSwitching(true) }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8,
+                      ...(inline ? { minHeight: 44 } : {}),
+                      border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer',
+                      fontFamily: 'inherit', fontSize: inline ? 14 : 12.5,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <Users size={14} style={{ flexShrink: 0 }} />
+                    {pt ? 'Trocar conta' : 'Switch account'}
+                  </button>
+                )}
                 {/* Attaching hands over a real terminal, which a browser tab does not have. The
                     command is offered instead of a button that cannot work. A native session has
                     no terminal at all (`attachCommand` is empty), so the block is left out. */}

@@ -72,9 +72,11 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
     const { markCallerVerified } = await import('./session-roles')
     const { verifySessionIdentity } = await import('./session-identity')
     const callerVerified = await markCallerVerified({ session: body?.session }, verifySessionIdentity)
+    // The MCP passes whatever reference it holds: a managed id, or the conversation id of a live row.
+    const target = (await readRegistry()).find(m => m.id === id) ?? (await readRegistry()).find(m => m.conversationId === id && !m.endedAt)
     const host = await hostForFleet(fleetLang(url.searchParams.get('lang')))
     if (!host.switchSessionAccount) return json({ ok: false, message: 'unavailable' }, 501)
-    const out = await host.switchSessionAccount({ id, accountId, resendPending: body?.resendPending === true, ...(callerVerified ? { callerVerified: true } : {}) })
+    const out = await host.switchSessionAccount({ id: target?.id ?? id, accountId, resendPending: body?.resendPending === true, ...(callerVerified ? { callerVerified: true } : {}) })
     if (out.ok) kickFleet(out.id)
     const { status, ...rest } = out as typeof out & { status?: number }
     return json(rest, out.ok ? 200 : status ?? 409)

@@ -138,3 +138,12 @@ describe('detectLimitInTail', () => {
     expect(detectLimitInTail('gemini', [claudeLimit])).toBeNull()
   })
 })
+
+describe('agentop session switch-account (parse)', () => {
+  test('ref, account and --resend', async () => {
+    const { parseSessionArgs } = await import('./cli-parse')
+    expect(parseSessionArgs(['switch-account', 'abc', 'acc_b', '--resend'])).toEqual({ kind: 'switch-account', ref: 'abc', accountId: 'acc_b', resend: true })
+    expect(parseSessionArgs(['switch-account', 'abc'])).toEqual({ kind: 'switch-account', ref: 'abc' })
+    expect(parseSessionArgs(['switch-account'])).toMatchObject({ kind: 'error' })
+  })
+})

@@ -99,6 +99,10 @@ const USAGE = `Usage:
   agentop session retire <id|name> [--cancel] [--quiet-for 60s] [--deadline 30m] [--folder <folder>] [--json]
   agentop session folders [--json]
   agentop session rename <id|name> "label"
+  agentop session switch-account <id|name> [<account-id>] [--resend]
+                                  Continue the session on another account of its harness (no
+                                  account: list the ones it can move to). --resend re-sends the
+                                  message a usage limit refused.
   agentop session note   <id|name> "text"
   agentop session archive|unarchive|delete <ses_…>
 
@@ -359,6 +363,7 @@ async function runSessionCommand(argv: string[]): Promise<number> {
       },
     )
     case 'note': return patch(cmd.ref, { note: cmd.text }, 'annotated', backend)
+    case 'switch-account': return switchAccount(cmd, backend)
   }
 }
 
@@ -1494,6 +1499,37 @@ async function liveAgentFor(ref: string): Promise<
   } catch {
     return null
   }
+}
+
+/** CONTA.TROCA — the same host verb the browser's dialog calls (`account-switch-host.ts`). */
+async function switchAccount(
+  cmd: { ref: string; accountId?: string; resend?: boolean; json?: boolean },
+  backend: SessionBackend,
+): Promise<number> {
+  const registry = await readRegistry()
+  const reconciled = reconcileSessions(registry, await backend.list())
+  const found = resolveSessionRef(reconciled.map(toRefCandidate), cmd.ref)
+  if (!found.ok) { console.error(refError(cmd.ref, found.reason, found.matches)); return 1 }
+  const { id } = found.session
+  const lang = await resolveLang()
+  if (!cmd.accountId) {
+    const row = registry.find(r => r.id === id)
+    const { listSwitchOptions } = await import('./account-switch-io')
+    const options = row ? await listSwitchOptions({ harness: row.harness, ...(row.accountId ? { accountId: row.accountId } : {}), agentCaller: !!callerSessionId() }) : []
+    if (cmd.json) { console.log(JSON.stringify({ options }, null, 2)); return 0 }
+    if (!options.length) { console.log(lang === 'pt' ? 'Nenhuma outra conta disponível para esta sessão.' : 'No other account is available for this session.'); return 0 }
+    for (const o of options) console.log(`${o.id}\t${o.label}${o.plan ? ` (${o.plan})` : ''}${o.recommended ? '\t*' : ''}`)
+    return 0
+  }
+  const { hostForFleet } = await import('./fleet-web')
+  const host = await hostForFleet(lang)
+  if (!host.switchSessionAccount) { console.error('unavailable'); return 1 }
+  const out = await host.switchSessionAccount({
+    id, accountId: cmd.accountId, ...(cmd.resend ? { resendPending: true } : {}), ...(callerSessionId() ? { callerVerified: true } : {}),
+  })
+  if (cmd.json) console.log(JSON.stringify(out))
+  else (out.ok ? console.log : console.error)(out.ok && out.id ? `${out.message} (${out.id})` : out.message)
+  return out.ok ? 0 : 1
 }
 
 async function kill(ref: string, backend: SessionBackend, folder?: string): Promise<number> {

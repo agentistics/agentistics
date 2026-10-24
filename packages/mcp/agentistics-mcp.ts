@@ -612,6 +612,20 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_session_switch_account",
+    description:
+      "Continue a session on ANOTHER account of the same harness (multiple accounts must be on). Use it when a session hit its account's usage limit and another account has room. With no `accountId` it lists the accounts the session can move to (the recommended one first, from the plan router) and whether its last turn stopped on a usage limit. With `accountId` it ends the session, copies its conversation to that account (never moves it) and resumes the SAME conversation there; the session keeps its name, task and note under a new id, which is returned. `resendPending: true` re-sends, once, the message the limit refused. Claude Code and Codex only; an account that is off for agents, removed or signed out is refused in words.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ref: { type: "string", description: "The session: managed id or conversation id." },
+        accountId: { type: "string", description: "The target account id (acc_…). Omit to list the options." },
+        resendPending: { type: "boolean", description: "Re-send the message the usage limit refused, once." },
+      },
+      required: ["ref"],
+    },
+  },
+  {
     name: "agentistics_session_away",
     description:
       "Read or switch AWAY MODE, or send the owner a notice while away — the owner is out (asleep, travelling) and the fleet carries on without asking them. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `on: false` switches it off. Every session started while it is active is told in its briefing. With `target` (a session's managed id or conversation id) `on` switches THAT session's own away mode instead — it alone is told the owner is out, even with the global switch off, and a running one is told the change; sessions it starts inherit it. Ceilings are per PROVIDER: `topCaps` maps a harness (claude, codex, gemini, copilot, antigravity, kimi, opencode) to how many workers may run on its top model tier at once. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
@@ -1149,6 +1163,18 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           ...(a?.role !== undefined ? { role: a.role } : {}),
           // Always present (null without proof): the server refuses an unproven MCP instead of
           // mistaking it for the person at the browser.
+          session: sessionProof(process.env) ?? null,
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_session_switch_account": {
+        const a = args as any;
+        if (typeof a?.accountId !== "string" || !a.accountId) {
+          const body = await apiGet(`/api/fleet/switch-account?id=${encodeURIComponent(String(a?.ref ?? ""))}`);
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        const body = await apiSend("POST", "/api/fleet/switch-account", {
+          id: a.ref, accountId: a.accountId, resendPending: a.resendPending === true,
           session: sessionProof(process.env) ?? null,
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
