@@ -396,11 +396,11 @@ describe('SPAWN.REPO — short board repository names', () => {
     })))
     expect(p.code).toBe('cwd_wrong_repo')
   })
-  test('short task repo refuses another organization with the same repository name', () => {
-    expect(refused(planFiling(base({
+  test('short task repo accepts another organization with the same repository name after transfer', () => {
+    expect(ok(planFiling(base({
       book: shortBook, taskRef: 't-short',
       repoOf: () => ({ remote: 'github.com/other/agentistics-workspace', worktree: true }),
-    }))).code).toBe('cwd_needed')
+    }))).taskId).toBe('t-short')
   })
   for (const repo of [REMOTE, 'https://github.com/agentistics/agentistics.git', 'git@github.com:agentistics/agentistics', 'ssh://git@github.com/agentistics/agentistics.git']) {
     test(`task remote retains host comparison: ${repo}`, () => {
@@ -409,6 +409,43 @@ describe('SPAWN.REPO — short board repository names', () => {
       expect(refused(planFiling(base({ book: remoteBook, taskRef: 't-remote', cwd: '/home/u/gitlab' }))).code).toBe('cwd_wrong_repo')
     })
   }
+})
+
+describe('SPAWN.TRANSFER — repository owner transfer', () => {
+  for (const repo of ['blpsoares/agentistics', 'github.com/blpsoares/agentistics', 'https://github.com/blpsoares/agentistics.git', 'git@github.com:blpsoares/agentistics.git']) {
+    const transferredBook = { tasks: [T('t-transfer', 'Transferred repo', repo)], subtasks: [] }
+    test(`old task owner accepts the current checkout: ${repo}`, () => {
+      const p = ok(planFiling(base({
+        book: transferredBook, taskRef: 't-transfer',
+        repoOf: () => ({ remote: REMOTE, worktree: true }),
+      })))
+      expect(p.taskId).toBe('t-transfer')
+      expect(p.warnings).not.toContain('inherited_task_repo_mismatch')
+    })
+    test(`old task owner accepts short checkout facts: ${repo}`, () => {
+      expect(ok(planFiling(base({ book: transferredBook, taskRef: 't-transfer' }))).taskId).toBe('t-transfer')
+    })
+    test(`old task owner refuses a different repository name: ${repo}`, () => {
+      expect(refused(planFiling(base({
+        book: transferredBook, taskRef: 't-transfer', cwd: '/home/u/agentistics-engine',
+      }))).code).toBe('cwd_wrong_repo')
+    })
+    test(`old task owner lists transferred checkouts as candidates: ${repo}`, () => {
+      const checkout = '/home/u/agentistics/.claude/worktrees/x'
+      const p = refused(planFiling(base({
+        book: transferredBook, taskRef: 't-transfer', cwd: '/home/u/workspace',
+        rows: [R('transferred', { cwd: checkout }), R('other', { cwd: '/home/u/agentistics-engine' })],
+        repoOf: dir => dir === checkout ? { remote: REMOTE, worktree: true } : repoOf(dir),
+      })))
+      expect(p).toMatchObject({ code: 'cwd_wrong_repo', candidates: [checkout] })
+    })
+  }
+  test('different hosts stay different even when the owner also changed', () => {
+    const transferredBook = { tasks: [T('t-transfer', 'Transferred repo', 'github.com/blpsoares/agentistics')], subtasks: [] }
+    expect(refused(planFiling(base({
+      book: transferredBook, taskRef: 't-transfer', cwd: '/home/u/gitlab',
+    }))).code).toBe('cwd_wrong_repo')
+  })
 })
 
 describe('SPAWN.REPO — inherited task repository policy', () => {

@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.145.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O app parado gasta menos processador: a lista de sessões não é mais regravada a cada poucos segundos.',
+        en: 'The idle app uses less CPU: the session list is no longer rewritten every few seconds.',
+      },
+      {
+        pt: 'Um repositório que mudou de dono continua valendo para as tarefas que já apontavam para ele: o mesmo nome sob outro dono conta como o mesmo repositório.',
+        en: 'A repository that changed owner still counts for the tasks that pointed to it: the same name under another owner is the same repository.',
+      },
+      {
+        pt: '"agentop session list" e "agentop session kill" não imprimem mais avisos internos no meio da resposta.',
+        en: '"agentop session list" and "agentop session kill" no longer print internal warnings in the middle of their output.',
+      },
+    ],
+  },
   '2.145.0': {
     features: [
       {

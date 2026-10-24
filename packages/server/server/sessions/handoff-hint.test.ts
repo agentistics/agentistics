@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   computeHandoffWhy, findHandoffFile, handoffHintText, handoffOverheadTokens, handoffTargetTokens, handoffThreshold,
-  planHandoffHints, sendHandoffHints, successorBase,
+  HANDOFF_HINT_RETRY_MS, hintCandidates, planHandoffHints, sendHandoffHints, successorBase,
 } from './handoff-hint'
 
 // The 16/10 numbers: F 100k (no samples → fallback), g ≈ 1.3k/call, a 1M window.
@@ -122,6 +122,49 @@ describe('LEADER.HANDOFF.HINT', () => {
     expect(await sendHandoffHints(deps(true))).toBe(0)
     expect(level).toBe(0)
     expect(await sendHandoffHints(deps(false))).toBe(1)
+  })
+
+  it('an owner-waiting skip writes nothing, and a skipped or failed row waits out the retry (OPEN-PERF)', async () => {
+    let writes = 0
+    let level = 0
+    let reads = 0
+    let clock = 1_000
+    const deferUntil = new Map<string, number>()
+    const deps = (waiting: boolean, ok = true) => ({
+      rows: async () => [row()],
+      prompt: async () => ({ ok }),
+      hinted: async () => { reads++; return { level } },
+      markHinted: async (_id: string, l: number) => { writes++; level = l; return true },
+      ownerWaiting: async () => waiting,
+      deferUntil,
+      now: () => clock,
+    })
+    // The owner is waiting: nothing is claimed, so nothing has to be put back.
+    expect(await sendHandoffHints(deps(true))).toBe(0)
+    expect(writes).toBe(0)
+    // …and the next fleet build inside the retry window does not even read it again.
+    const readsAfterSkip = reads
+    clock += HANDOFF_HINT_RETRY_MS - 1
+    expect(await sendHandoffHints(deps(false))).toBe(0)
+    expect(reads).toBe(readsAfterSkip)
+    // Past the window it is tried again; a failed send claims, puts back, and waits again.
+    clock += 1
+    expect(await sendHandoffHints(deps(false, false))).toBe(0)
+    expect(writes).toBe(2)
+    expect(level).toBe(0)
+    expect(await sendHandoffHints(deps(false))).toBe(0)
+    expect(writes).toBe(2)
+    clock += HANDOFF_HINT_RETRY_MS
+    expect(await sendHandoffHints(deps(false))).toBe(1)
+    expect(level).toBe(1)
+  })
+
+  it('only a RUNNING session is a hint candidate — a finished leader cannot be prompted (OPEN-PERF)', () => {
+    const views = [
+      { id: 'live', status: 'running' }, { id: 'gone', status: 'exited' }, { id: 'lost', status: 'lost' },
+      { id: 'ext', status: 'external' }, { id: 'closed', status: 'closed' }, { id: 'orphan', status: 'unregistered' },
+    ] as const
+    expect(hintCandidates(views).map(v => v.id)).toEqual(['live'])
   })
 
   it('break-even uses F and H, never the hand-off bytes alone', () => {
