@@ -19,3 +19,7 @@
 @container aside-tabs (max-width: 240px) {
   .ag-aside-tabs .ag-mode-segment { --mode-padding: 4px; --mode-gap: 4px; --mode-font: 11.5px; }
 }
+/* A phone's tabs are touch targets: 44px tall like every other tap target in the app. */
+@media (max-width: 767px) {
+  .ag-aside-tabs .ag-mode-segment { --mode-min-height: 44px; }
+}

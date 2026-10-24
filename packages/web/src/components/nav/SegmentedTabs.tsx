@@ -75,7 +75,7 @@ export function SegmentedTabs<Id extends string>({ tabs, value, onChange, collap
               flex: equal ? '1 1 0' : '1 1 auto', minWidth: 0, boxSizing: 'border-box',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--mode-gap, 6px)',
               position: 'relative',
-              minHeight: 34, padding: collapsed ? '0' : '0 var(--mode-padding, 8px)',
+              minHeight: collapsed ? 34 : 'var(--mode-min-height, 34px)', padding: collapsed ? '0' : '0 var(--mode-padding, 8px)',
               borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
               fontSize: 'var(--mode-font, 12.5px)', fontWeight: on ? 700 : 500, whiteSpace: 'nowrap',
               background: on ? 'var(--bg-surface)' : 'transparent',
