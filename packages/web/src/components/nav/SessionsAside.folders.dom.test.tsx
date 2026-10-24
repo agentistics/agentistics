@@ -54,7 +54,7 @@ beforeAll(async () => {
     if (init?.method && init.method !== 'GET') return Response.json({ ok: true })
     if (String(input) === '/api/user-prefs') return Response.json(prefs, { headers: { 'X-Prefs-Writable': 'false' } })
     if (String(input) === '/api/session-roles') return Response.json({ roles: {} })
-    return Response.json({ rows: [], sessions: [] })
+    return Response.json({ rows: [], sessions: [], options: [] })
   }) as typeof fetch
   createRoot = (await import('react-dom/client')).createRoot
   MemoryRouter = (await import('react-router-dom')).MemoryRouter
@@ -363,3 +363,52 @@ for (const width of [1280, 390]) {
     expect(host.querySelectorAll('[data-ended-section="fell"] [data-session-line]').length).toBe(2)
   })
 }
+
+for (const width of [1280, 390]) test(`external row with missing cwd and conversation offers cleanup at ${width}px`, async () => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+  act(() => writePrefs({ tab: 'active' }))
+  const session = { ...row('external:claude:missing-conversation', 'unknown'), cwd: '/missing/deleted', actionable: false }
+  const { fleetRow } = await import('../../../../server/server/sessions/fleet-row')
+  const { controlStrings } = await import('@agentistics/tui/control/i18n')
+  const verbs = fleetRow({ ...session, pid: 4242 }, controlStrings('pt')).verbs
+  const calls: string[] = []
+  await act(async () => root.render(<MemoryRouter><SessionsAside rows={[session]} lang="pt" filters={filters} activeOnly={false}
+    loading={false} unsupported={false} finishedTasks={[]} hideNew={false}
+    rowsById={new Map([[session.id, { verbs }]])}
+    act={async req => { calls.push(req.action); return { ok: true, message: 'ok' } }} /></MemoryRouter>))
+  const card = host.querySelector<HTMLElement>('[data-session-row]')!
+  const open = async () => act(async () => card.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 })))
+  await open()
+  const items = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+  expect(items().find(el => el.textContent?.includes('Encerrar'))?.disabled).toBe(false)
+  await click(items().find(el => el.textContent === 'Remover da lista')!)
+  expect(calls).toEqual([])
+  const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find(el => el.textContent === 'Remover da lista')!
+  expect(confirm).toBeDefined()
+  await click(confirm)
+  expect(calls).toEqual(['forget'])
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+}, 10000)
+
+test('mobile session actions offer end and confirm list removal for an external row', async () => {
+  const { SessionActions } = await import('../sessions/SessionActions')
+  const { fleetRow } = await import('../../../../server/server/sessions/fleet-row')
+  const { controlStrings } = await import('@agentistics/tui/control/i18n')
+  const session = { ...row('external:claude:missing', 'unknown'), pid: 4242, cwd: '/deleted', actionable: false }
+  const calls: string[] = []
+  await act(async () => root.render(<SessionActions inline row={fleetRow(session, controlStrings('pt')) as never} lang="pt"
+    act={async req => { calls.push(req.action); return { ok: true, message: 'ok' } }} />))
+  const buttons = () => Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+  expect(buttons().find(el => el.textContent === 'Encerrar sessão')?.disabled).toBe(false)
+  await click(buttons().find(el => el.textContent === 'Encerrar sessão')!)
+  expect(calls).toEqual([])
+  await click(buttons().find(el => el.textContent?.trim() === 'Encerrar')!)
+  expect(calls).toEqual(['kill'])
+  calls.length = 0
+  await click(buttons().find(el => el.textContent === 'Remover da lista')!)
+  expect(calls).toEqual([])
+  const confirm = document.querySelector<HTMLButtonElement>('[role="dialog"] button:last-child')!
+  expect(confirm.textContent).toBe('Remover da lista')
+  await click(confirm)
+  expect(calls).toEqual(['forget'])
+})
