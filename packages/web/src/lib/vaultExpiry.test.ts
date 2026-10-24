@@ -23,3 +23,20 @@ describe('nextWarn', () => {
     expect(nextWarn(WARN_INITIAL, 4 * 60_000, 5 * 60_000).fire).toBe(false)
   })
 })
+
+import { confirmSentence, extendLabel, isLoopbackHost } from './vaultExpiry'
+describe('device up front', () => {
+  test('loopback hosts are the machine; anything else is a phone', () => {
+    for (const h of ['localhost', '127.0.0.1', '[::1]', 'x.localhost']) expect(isLoopbackHost(h)).toBe(true)
+    for (const h of ['192.168.0.7', 'central.example.com', '100.64.0.2']) expect(isLoopbackHost(h)).toBe(false)
+  })
+  test('a phone never gets the Hello sentence', () => {
+    expect(confirmSentence(true, true)).not.toContain('Hello')
+    expect(confirmSentence(true, false)).not.toContain('Hello')
+    expect(confirmSentence(false, true)).toContain('Hello')
+  })
+  test('the busy label replaces the text but keeps a label', () => {
+    expect(extendLabel(true, true)).toBe('Confirmando…')
+    expect(extendLabel(false, false)).toBe('Keep open')
+  })
+})

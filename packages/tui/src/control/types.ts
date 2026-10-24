@@ -774,7 +774,13 @@ export interface ControlSession {
    * prod?" with four different answers, in front of a key called `approve` that would have silently
    * taken whichever was highlighted.
    */
-  dialogOptions?: Array<{ number: number; label: string; selected: boolean; freeText?: boolean }>
+  dialogOptions?: Array<{ number: number; label: string; selected: boolean; freeText?: boolean; checked?: boolean }>
+  /**
+   * WHERE in a multi-question form this dialog is (`dialog-choice.ts`'s `DialogForm`), plus
+   * `canStep` when the harness's step keys were driven (`ApprovalSpec.steps`). Absent on a plain
+   * question.
+   */
+  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; together?: true; canStep?: true }
   /**
    * Whether the user may pick one of `dialogOptions` from here.
    *
@@ -1262,6 +1268,8 @@ export interface ControlStatus {
 }
 
 export interface ActionResult {
+  /** The live row that received a prompt sent through a retired row. */
+  id?: string
   ok: boolean
   /** Already-localized one-line outcome, shown in the status line. */
   message: string
@@ -1671,7 +1679,9 @@ export interface ControlHost {
    * asking, or when the options on screen no longer match what the user was shown. A snapshot is up
    * to five seconds old, and an answer to a question that has changed is worse than no answer.
    */
-  answerSession?(id: string, choice?: number, text?: string): Promise<ActionResult>
+  answerSession?(id: string, choice?: number, text?: string, choices?: readonly number[]): Promise<ActionResult>
+  /** Move a multi-question form to its next/previous question without answering this one. */
+  stepDialog?(id: string, dir: 'next' | 'back'): Promise<ActionResult>
 
   /**
    * Reopen the sessions of the last fall, in the background.

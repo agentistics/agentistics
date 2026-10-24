@@ -165,10 +165,11 @@ import { approvalFor, choiceKey, fieldIsOpen, isFreeTextOption, markerReadOption
 // Carrying a rename through to the harness. Shared with `agentop session rename` — one gesture, one
 // implementation, for the reason `task-reopen.ts` exists.
 import { renameInHarness, renameMessage } from './sessions/rename'
-import { needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-choice'
+import { formMoved, needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-choice'
 import { answerFollowUp } from './sessions/answer-followup'
 import { liveTranscriptDeps, runTranscriptSearch } from './sessions/transcript-run'
 import { rulesFor } from './sessions/attention-rules'
+import { dialogOnScreen } from './sessions/attention'
 import { classifySendFailure, promptIsBlocked } from './sessions/prompt-guard'
 import { planCrashGroup, planFellOffer } from './sessions/crash-group'
 import { selectFell } from './sessions/fell-selection'
@@ -189,7 +190,7 @@ import { readSpawnBudget } from './sessions/memory-probe'
 // The lock on the door: one conversation, one live session. See `conversation-claim.ts` for the
 // measurement that made it necessary, and `live-claims.ts` for the evidence it is allowed to use.
 import { conversationHeldBy } from './sessions/conversation-claim'
-import { withResumeLock } from './sessions/resume-lock'
+import { withConversationResumeLock as withResumeLock } from './sessions/conversation-resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
 import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
 import {
@@ -227,6 +228,26 @@ const SEND_CAPTURE_LINES = 60
  * did move gets reported as stuck.
  */
 const ANSWER_SETTLE_MS = 240
+
+/**
+ * LEAVE an open free-text field before pressing anything into a form. On claude's multi-select the
+ * write-your-own box keeps its field open while the cursor sits on it, so the next digit was TYPED
+ * into it (`Purple22`) and `Right` moved the caret instead of the form — the card claimed the step
+ * and the dialog stayed (live QA 2026-10-24). One `Up` moves off it and keeps the typed text ticked
+ * (claude 2.1.309, driven 2026-10-24). Returns the frame after, or null when the field is still
+ * open (then nothing more is pressed).
+ */
+export async function leaveField(backend: Pick<SessionBackend, 'sendKey' | 'capture'>, id: string, harness: HarnessId, frame: string[]): Promise<string[] | null> {
+  if (fieldIsOpen(harness, frame) !== true) return frame
+  const up = approvalFor(harness)?.move?.up
+  if (!up || !await backend.sendKey(id, up)) return null
+  await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+  const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+  return fieldIsOpen(harness, after) === true ? null : after
+}
+
+/** How long a step key may take to redraw the form before the step is reported as stuck. */
+const STEP_SETTLE_MS = 1200
 
 
 // ANSI, for the output this module still writes to the REAL terminal: the suspended commands,
@@ -2074,6 +2095,13 @@ export async function spawnManaged(req: {
   const blocked = await backend.unavailable()
   if (blocked) return { ok: false, message: blocked }
 
+  if (req.inherit) {
+    const { planReopenCwd, liveIdsOf } = await import('./sessions/spawn-filing-io')
+    const { refusalText } = await import('./sessions/spawn-row')
+    const cwdPlan = await planReopenCwd({ ...req.inherit, cwd: req.cwd }, { liveIds: await liveIdsOf(backend) })
+    if (!cwdPlan.ok) return { ok: false, message: refusalText(cwdPlan) }
+  }
+
   // PLAN.ACCOUNTS D3 — the account is IMMUTABLE: a reopen runs in the replaced row's root (its
   // transcript exists only there), whatever the request or the flag says now. A fresh spawn's
   // account was chosen and checked by the caller (`spawn-account.ts`); it is re-read here so a
@@ -2491,14 +2519,8 @@ async function reopenEntries(
      * time, once this row's turn under the lock comes, against a FRESH read — which is what lets the
      * second racer see the first racer's own new row and stand down instead of starting a twin.
      *
-     * `withResumeLock` is IN-PROCESS memory (a plain `Map` at module scope in `resume-lock.ts`), so
-     * this closes the race COMPLETELY only between two callers inside the SAME process — two
-     * `reopenFell` requests both landing on this one `agentop server`. A `reopenFell` fired from a
-     * separately-run cockpit process at the same instant has its OWN lock instance and is not
-     * serialised by it; the fresh-read recheck inside `attemptReopenRow` still narrows that case (it
-     * reads the registry file and the backend, which any process can see) without being a hard
-     * exclusion the way the same-process case is. Same class of stated limit `registry.ts` already
-     * carries for cross-process writes.
+     * The conversation lock is shared with CLI processes through an exclusive filesystem claim;
+     * it never proceeds without ownership. The fresh check then sees the previous winner's row.
      */
     const outcome = await withResumeLock(row.resumeId, () => attemptReopenRow(row.resumeId, m.id, {
       freshState: async () => {
@@ -2512,7 +2534,7 @@ async function reopenEntries(
         return { entries: freshEntries, aliveIds: freshAlive }
       },
       holderOf: async () =>
-        conversationHeldBy(await liveConversationHolders(await resolveBackend()), row.resumeId, m.id),
+        conversationHeldBy(await liveConversationHolders(await resolveBackend()), row.resumeId),
       spawn: () => spawnManaged(reopenRowRequest(m, row, caller), s, lang).then(r => {
         if (!r.ok && r.accountRefusal) accountRefusals.push({ id: m.id, reason: r.accountRefusal, message: r.message })
         return r
@@ -2881,7 +2903,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
    * without adding an undeclared property to the object literal below, which `StartHost` would
    * reject as an excess property.
    */
-  async function resumeSessionLocked(req: ResumeSessionRequest): Promise<SpawnSessionResult> {
+  async function resumeSessionLocked(req: ResumeSessionRequest, host: StartHost): Promise<SpawnSessionResult> {
     const s = S()
     // What the old row knew about this work — its task and its note — comes with it. A reopen
     // that dropped them would file the recovered session nowhere and lose what someone wrote
@@ -2889,39 +2911,25 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     const previous = req.replaces
       ? (await readRegistry()).find(m => m.id === req.replaces)
       : undefined
-    // THE LOCK ON THE DOOR — and, for one kind of holder, the door opening instead.
-    //
-    // Two assistants in one transcript and one working tree is the worst thing this feature has
-    // done, so nothing is spawned before asking who holds the conversation. But WHO holds it
-    // decides what the answer means:
-    //
-    //  - a MANAGED row is somewhere to go. It has a pane, `o` attaches to it, and "open it there"
-    //    is an instruction the user can follow. Still refused, unchanged.
-    //  - a PROCESS is not somewhere to go. An assistant started by hand has no pane to attach to,
-    //    and the refusal named its DIRECTORY — which is not a place. There was no verb that could
-    //    do anything with it either, so the row was a dead end: visible, and inert. Reported.
-    //
-    // For that second case the conversation is on DISK, so ending the process and reopening the
-    // same id under tmux costs the turn in flight and nothing else — and puts the work back under
-    // every verb this screen has. That is a takeover, and it is what `resume` now does rather
-    // than a verb of its own: the user already pressed the key that means "put this conversation
-    // in front of me".
-    // THE DECISION IS `planTakeover`, which already existed and which this code did not use.
-    //
-    // `cli-session.ts` had been taking a conversation over since the CLI gained the verb, through
-    // that pure planner. This method grew its own copy of the same gesture — the exact drift
-    // `task-reopen.ts` was extracted to end — and the copy was WORSE in a way that costs work: it
-    // killed the holder and then tried to resume, so a harness that cannot reopen by id would
-    // have had its assistant closed for nothing. The planner refuses `resume-unsupported` BEFORE
-    // anything is signalled, which is the whole reason it is a plan rather than an action.
+    // Ask under the conversation lock. Include the requested row itself: reopening a live row
+    // focuses it, including a CLI relay hosted in another process. Only a foreign process with no
+    // managed row needs the existing takeover planner below.
     const holder = conversationHeldBy(
       await liveConversationHolders(await resolveBackend()),
       req.sessionId,
-      req.replaces,
     )
     // A managed row is somewhere to go: it has a pane and `o` attaches to it, so "open it there"
     // is an instruction the user can follow. It never becomes a takeover.
-    if (holder?.kind === 'managed') return { ok: false, message: s.sessResumeInUse(holder.label) }
+    if (holder?.kind === 'managed') {
+      // Reopen is idempotent, including a click on the live row itself. A prompt supplied by
+      // continueExternal must reach the existing driver rather than disappear on this path.
+      if (req.prompt) {
+        const out = await host.promptSession!(holder.id, req.prompt)
+        return { ...out, ...(out.ok ? { id: holder.id } : {}) }
+      }
+      const ticket = req.attach ? await host.attachSession?.(holder.id) : null
+      return { ok: true, id: holder.id, message: s.sessResumeInUse(holder.label), ...(ticket ? { ticket } : {}) }
+    }
 
     const harness = req.harness as HarnessId
     const plan = planTakeover({
@@ -2965,13 +2973,14 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       harness: req.harness as HarnessId,
       cwd: req.cwd,
       resumeId: req.sessionId,
+      // A delayed raw spawn would run after this conversation claim is released. Refuse admission
+      // here so a queued replay cannot bypass the fresh live-holder check and create a twin.
+      queue: false,
       ...(req.prompt ? { prompt: req.prompt } : {}),
       ...(req.label ? { label: req.label } : {}),
-      ...(previous
-        ? { inherit: req.switchToAccount ? { ...previous, accountId: req.switchToAccount } : previous }
-        : recordedAccountId ? { accountId: recordedAccountId } : {}),
+      ...(recorded ? { inherit: req.switchToAccount ? { ...recorded, accountId: req.switchToAccount } : recorded } : {}),
       attach: req.attach,
-      ...(previous?.task ? { task: previous.task } : {}),
+      ...(recorded?.task ? { task: recorded.task } : {}),
       // A TAKEOVER just ENDED the process this spawn replaces (`endProcess` above) — the net memory
       // cost of proceeding is ~zero, and refusing here would destroy the very session the user asked
       // to bring back, which is worse than never having gated it. An ordinary resume (no holder to
@@ -2986,10 +2995,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // is no guessing left for the next reopen. Without it the fallback matches on directory
       // alone, and every session in one repository resolves to the same conversation.
       if (spawned.id) await patchSession(spawned.id, { conversationId: req.sessionId })
-      if (previous?.note && spawned.id) await patchSession(spawned.id, { note: previous.note })
+      if (recorded?.note && spawned.id) await patchSession(spawned.id, { note: recorded.note })
       // The old row is RETIRED rather than deleted: it is still a thing that happened, and it
       // stops standing beside its own continuation with the same name on it.
-      if (previous) await patchSession(previous.id, { endedAt: new Date().toISOString() })
+      if (recorded) await patchSession(recorded.id, { endedAt: new Date().toISOString() })
 
       const liveBackend = await (await resolveBackend()).list().catch(() => null)
       const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
@@ -3862,7 +3871,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // Never on an open dialog: Esc Esc there answers the dialog, it does not open the menu.
       const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
       const rules = rulesFor(managed.harness)
-      if (rules && rules.approval.some(re => re.test(frame.join('\n')))) {
+      if (rules && dialogOnScreen(rules, frame)) {
         return { ok: false, message: s.sessPromptBlocked }
       }
       const out = await backend.rewindTo(id, prompt, occurrence)
@@ -4138,7 +4147,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         const out = await runNativeVerb(req.sessionId, 'resume', lang)
         return { ...out, ...(out.ok ? { id: req.sessionId } : {}) }
       }
-      return withResumeLock(req.sessionId, () => resumeSessionLocked(req))
+      try { return await withResumeLock(req.sessionId, () => resumeSessionLocked(req, this)) }
+      catch (e) { return { ok: false, message: e instanceof Error ? e.message : String(e) } }
     },
 
     async switchSessionAccount(req: SwitchAccountRequest) {
@@ -4147,7 +4157,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       return switchSessionAccountImpl(req, {
         lang: lang === 'pt' ? 'pt' : 'en',
         backend,
-        resume: r => resumeSessionLocked(r),
+        resume: r => resumeSessionLocked(r, this),
         withLock: (conv, fn) => withResumeLock(conv, fn),
       })
     },
@@ -4349,7 +4359,14 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
 
       const live = (await backend.list().catch(() => [])).find(b => b.id === id)
-      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      if (!live?.alive) {
+        const holder = conversationHeldBy(await liveConversationHolders(backend), managed.conversationId, id)
+        if (holder?.kind === 'managed') {
+          const out = await this.promptSession!(holder.id, body)
+          return { ...out, ...(out.ok ? { id: holder.id } : {}) }
+        }
+        return { ok: false, message: s.sessNotRunning }
+      }
 
       // A --bg CLI spawn owns its driver in ANOTHER process. Its relay makes list()/isStructured()
       // report it alive, but chatOf() is local to this server. Recover it before reading attention or
@@ -4407,7 +4424,46 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * a verified way to select the one they picked. A snapshot is up to five seconds old, and an
      * answer sent to a question that has changed underneath it is both wrong and silent.
      */
-    async answerSession(id: string, choice?: number, text?: string): Promise<ActionResult> {
+    /**
+     * Move a multi-question form to its next or previous question without answering the current
+     * one — the only way off a MULTI-SELECT step. Re-reads the screen first, like `answerSession`:
+     * the keys are pressed only into a form that is on screen NOW, on a harness whose form was
+     * driven (`ApprovalSpec.steps`).
+     */
+    async stepDialog(id: string, dir: 'next' | 'back'): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      const blocked = await backend.unavailable()
+      if (blocked) return { ok: false, message: blocked }
+      const managed = (await readRegistry()).find(m => m.id === id)
+      if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      if (backend.attentionOf?.(id) !== undefined) return { ok: false, message: s.sessStepUnknown(managed.harness) }
+      const spec = approvalFor(managed.harness)
+      if (!spec?.steps) return { ok: false, message: s.sessStepUnknown(managed.harness) }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      const rules = rulesFor(managed.harness)
+      const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+      if (!rules || !dialogOnScreen(rules, frame)) return { ok: false, message: s.sessNotAsking }
+      const form = readDialog(frame, markerReadOptions(managed.harness)).form
+      if (!form?.steps && !form?.position) return { ok: false, message: s.sessNotAForm }
+      const ready = await leaveField(backend, id, managed.harness, frame)
+      if (!ready) return { ok: false, message: s.sessFieldStuck }
+      if (!await backend.sendKey(id, dir === 'next' ? spec.steps.next : spec.steps.back)) return { ok: false, message: s.sessSendFailed(id) }
+      // "Moved" is said only when the form MOVED: the question or its options changed. A key that
+      // landed somewhere else (a field, a caret) is reported, never claimed. Waiting for the redraw
+      // here is also what lets the poll this act kicks see the next question at once.
+      const before = ready.join('\n')
+      for (let waited = 0; waited < STEP_SETTLE_MS; waited += ANSWER_SETTLE_MS) {
+        await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+        const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+        if (formMoved(ready, after)) return { ok: true, message: s.sessStepped(dir) }
+        if (after.join('\n') !== before && !dialogOnScreen(rules, after)) return { ok: true, message: s.sessStepped(dir) }
+      }
+      return { ok: false, message: s.sessStepStuck }
+    },
+
+    async answerSession(id: string, choice?: number, text?: string, choices?: readonly number[]): Promise<ActionResult> {
       const s = S()
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
@@ -4420,7 +4476,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // DRIVER: no screen is read and no keystroke is sent. The same refusals as the screen path.
       const stated = backend.attentionOf?.(id)
       if (stated !== undefined) {
-        const out = answerStructured(stated, choice, text)
+        const out = answerStructured(stated, choice, text, choices)
         if (!out.ok) {
           return { ok: false, message: out.why === 'not-asking' ? s.sessNotAsking
             : out.why === 'needs-choice' ? s.sessNeedsChoice(stated?.options.length ?? 0)
@@ -4429,6 +4485,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         if (!backend.answer || !await backend.answer(id, out.answer)) return { ok: false, message: s.sessChoiceGone }
         return { ok: true, message: s.sessAnswered(out.said) }
       }
+      // Several ticks in ONE answer exist only on a protocol: a screen form ticks one box per key.
+      if (choices !== undefined) return { ok: false, message: s.sessChoiceGone }
 
       const spec = approvalFor(managed.harness)
       if (!spec) return { ok: false, message: s.sessApproveUnknown(managed.harness) }
@@ -4438,7 +4496,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
       const rules = rulesFor(managed.harness)
       const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
-      if (!rules || !rules.approval.some(re => re.test(frame.join('\n')))) {
+      if (!rules || !dialogOnScreen(rules, frame)) {
         return { ok: false, message: s.sessNotAsking }
       }
 
@@ -4519,6 +4577,45 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
          * as declining the question outright — measured, the session logged "User declined to
          * answer questions" — which is a different answer from the one anybody meant to give.
          */
+        /*
+         * A MULTI-SELECT box is TICKED by its digit, never answered by it (claude 2.1.309 and agy
+         * 1.4.6, driven 2026-10-23): the question stays open for more ticks and is left with the
+         * step keys. So no follow-up is pressed — on claude, the `submit` follow-up below would send
+         * an `Enter` onto the very box that was just ticked and untick it. The read-back says only
+         * whether the box flipped.
+         */
+        if (picked.checked !== undefined) {
+          if (isFreeTextOption(managed.harness, picked.label)) {
+            // claude's write-your-own BOX opens its field when the CURSOR is on it (a digit only
+            // ticks it), so the cursor is moved there, the field confirmed, and the words typed —
+            // with no return, which would leave the form.
+            const answer = (text ?? '').trim()
+            if (!answer) return { ok: false, message: s.sessAnswerNeedsText }
+            const move = spec.move
+            const from = options.findIndex(o => o.selected)
+            if (!move || !backend.sendMoveChoice || from < 0) return { ok: false, message: s.sessChooseUnknown(managed.harness) }
+            const steps = (picked.number - 1) - from
+            const keys = Array.from({ length: Math.abs(steps) }, () => (steps > 0 ? move.down : move.up))
+            const out = await backend.sendMoveChoice(id, keys, { literal: answer }, after => {
+              const now = readDialog(after, markerReadOptions(managed.harness))
+              return now.options.find(o => o.selected)?.number === picked.number && fieldIsOpen(managed.harness, after) === true
+            })
+            if (out === 'wrong-row') return { ok: false, message: s.sessAnswerNoField(picked.label) }
+            return out === 'sent'
+              ? { ok: true, message: s.sessToggled(answer, true) }
+              : { ok: false, message: s.sessSendFailed(id) }
+          }
+          // A typed answer's field still open would take the digit as TEXT (`Purple22`): leave it first.
+          if (!await leaveField(backend, id, managed.harness, frame)) return { ok: false, message: s.sessFieldStuck }
+          if (!await backend.sendKey(id, key)) return { ok: false, message: s.sessSendFailed(id) }
+          await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+          const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+          const now = readDialog(after, markerReadOptions(managed.harness)).options.find(o => o.number === choice)
+          if (now?.checked !== undefined && now.checked !== picked.checked) {
+            return { ok: true, message: s.sessToggled(picked.label, now.checked) }
+          }
+          return { ok: false, message: s.sessAnswerStuck(picked.label) }
+        }
         if (isFreeTextOption(managed.harness, picked.label)) {
           const answer = (text ?? '').trim()
           if (!answer) return { ok: false, message: s.sessAnswerNeedsText }
@@ -4541,7 +4638,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
            */
           const out = await backend.sendChoiceText(id, key, answer, frame => {
             const step = answerFollowUp({
-              stillAsking: rules.approval.some(re => re.test(frame.join('\n'))),
+              stillAsking: dialogOnScreen(rules, frame),
               before: options, after: parseDialogOptions(frame), choice,
             })
             // TWO SIGNALS, and either one is positive evidence that a field is taking keys.
@@ -4584,7 +4681,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         if (!await backend.sendKey(id, key)) return { ok: false, message: s.sessSendFailed(id) }
         await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
         const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
-        const stillAsking = rules.approval.some(re => re.test(after.join('\n')))
+        const stillAsking = dialogOnScreen(rules, after)
         const next = answerFollowUp({
           stillAsking, before: options, after: parseDialogOptions(after), choice,
         })
@@ -5168,9 +5265,9 @@ export async function runStart(codeStart?: CodeStart): Promise<StartResult> {
     // SS-06: a NATIVE session's question is the policy's, answered through the code host — after
     // re-reading that the SAME question is still pending (a stale list must not answer a new one).
     const answerTmux = host.answerSession?.bind(host)
-    host.answerSession = async (id, choice, text) => {
+    host.answerSession = async (id, choice, text, choices) => {
       if (!id.startsWith('ses_')) {
-        return answerTmux ? answerTmux(id, choice, text) : { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
+        return answerTmux ? answerTmux(id, choice, text, choices) :  { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
       }
       const recent = await code.recentSessions?.(20).catch(() => null)
       const ask = recent && recent.ok ? recent.sessions.find(r => r.sessionId === id)?.ask : undefined

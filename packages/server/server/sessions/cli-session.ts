@@ -48,7 +48,7 @@ import { callerHoldsIdentity, callerProof, callerSessionFromTree, type CallerPro
 import { spawnParentLink } from './team-links'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
 import { newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
-import { liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
+import { liveIdsOf, planReopenCwd, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
 import { loadConversations } from './conversations'
@@ -67,6 +67,8 @@ import { AGENTISTICS_DATA_DIR, TASKS_FILE, PORT } from '../config'
 import { createTaskStore } from './task-store'
 import { newAttemptId, newTaskId, type Attempt, type Task } from './task-model'
 import { liveConversationHolders } from './live-claims'
+import { conversationHeldBy } from './conversation-claim'
+import { withConversationResumeLock } from './conversation-resume-lock'
 import { codexStartupFailure, execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
 import { reportFreshSpawn } from './spawn-report'
@@ -1009,32 +1011,37 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
   const agentCaller = plan.reopen.length > 0 && await callerHoldsIdentity(callerSessionId())
 
   for (const row of plan.reopen) {
-    const m = row.entry
-    const id = newSessionId()
-    const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
-    // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
-    const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
-    if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); continue }
-    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
-    if (!planned.ok) { skipped.push(m.id); continue }
-    await addSession({
-      id, harness: m.harness, cwd: m.cwd, createdAt: new Date().toISOString(), task,
-      // INHERITED from the row being replaced, never taken from the request: a reopened session is
-      // the same piece of work, and the attribution (taskId, subtaskId, attemptId) says so. See `inheritedIdentity`.
-      ...inheritedIdentity(m),
-      ...inheritedLaunch(m, m.harness),
-      label: row.label,
-      // The conversation is known EXACTLY here — we just handed its id to the CLI. The cockpit's
-      // reopen verb has recorded it since it was written; this path had not, so the same gesture
-      // left a row that knew which conversation it drove or one that did not, depending on where it
-      // was pressed. `planTaskReopen` exists to stop precisely that kind of drift.
-      ...(planned.plan.conversationId
-        ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'resumed-id' as const }
-        : {}),
-      // The REPLACEMENT re-measures rather than copying `m.repo`: a reopen is the moment to notice
-      // that the worktree came back, and copying a recorded value would carry one stale answer
-      // through every session ever reopened from it.
-      ...(await recordedRepo(m.cwd)),
+    await withConversationResumeLock(row.resumeId, async () => {
+      const holder = conversationHeldBy(await liveConversationHolders(backend), row.resumeId)
+      if (holder) { plan.heldElsewhere.push({ id: row.entry.id, holder }); return }
+      const m = row.entry
+      const cwdPlan = await planReopenCwd(m, { liveIds: await liveIdsOf(backend) })
+      if (!cwdPlan.ok) { console.error(`${m.id}: ${refusalText(cwdPlan)}`); skipped.push(m.id); return }
+      const id = newSessionId()
+      const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
+      // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
+      const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
+      if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); return }
+      const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
+      if (!planned.ok) { skipped.push(m.id); return }
+      await addSession({
+        id, harness: m.harness, cwd: m.cwd, createdAt: new Date().toISOString(), task,
+        // INHERITED from the row being replaced, never taken from the request: a reopened session is
+        // the same piece of work, and the attribution (taskId, subtaskId, attemptId) says so. See `inheritedIdentity`.
+        ...inheritedIdentity(m),
+        ...inheritedLaunch(m, m.harness),
+        label: row.label,
+        // The conversation is known EXACTLY here — we just handed its id to the CLI. The cockpit's
+        // reopen verb has recorded it since it was written; this path had not, so the same gesture
+        // left a row that knew which conversation it drove or one that did not, depending on where it
+        // was pressed. `planTaskReopen` exists to stop precisely that kind of drift.
+        ...(planned.plan.conversationId
+          ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'resumed-id' as const }
+          : {}),
+        // The REPLACEMENT re-measures rather than copying `m.repo`: a reopen is the moment to notice
+        // that the worktree came back, and copying a recorded value would carry one stale answer
+        // through every session ever reopened from it.
+        ...(await recordedRepo(m.cwd)),
     })
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
@@ -1042,7 +1049,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
         structured: structuredIntentOf({ harness: m.harness, origin: 'background', resumeId: row.resumeId, mode: m.mode }, { ...inheritedLaunch(m, m.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
         ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
       })
-    } catch { await removeSession(id); skipped.push(m.id); continue }
+    } catch { await removeSession(id); skipped.push(m.id); return }
     // The path the report came from. Claude refuses to resume a conversation that is already open
     // as a background agent, and the refusal is instant — so this reopen wrote a row for a process
     // that no longer existed, and pressing it again wrote another. The old row must NOT be retired
@@ -1052,7 +1059,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       skipped.push(m.id)
       await backend.kill(id).catch(() => {})
       await removeSession(id)
-      continue
+      return
     }
     await rekeyStoredRole(
       [m.id, m.conversationId],
@@ -1067,6 +1074,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     if (!configuration.ready) console.error(configurationPendingMessage(id, configuration))
     if (!folder && !warnedNoFolder) await warnLeaderNoFolder()
     started.push(id)
+    })
   }
 
   if (json) {
@@ -1362,86 +1370,92 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
   const live = await liveAgentFor(ref)
   if (!live) return null
 
-  const id = newSessionId()
-  const logFile = managedProcessLogPath(live.harness, id, AGENTISTICS_DATA_DIR)
-  // PLAN.ACCOUNTS D3 — a conversation agentop ran before keeps that row's account (and its root);
-  // one it never ran has no record and reopens in the default root, as before. Decided BEFORE the
-  // holder is closed: a removed account must refuse while the user still has their assistant.
-  const previous = newestRowOfConversation(await readRegistry(), live.sessionId)
-  const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
-  if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
-  const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...inheritedLaunch(previous, live.harness), ...(logFile ? { logFile } : {}), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
-  if (planned.ok && planned.plan.modeNeedsProtocol) { console.error(`Cannot reopen ${live.sessionId}: terminal cannot apply ${planned.plan.modeNeedsProtocol} approval mode`); return 1 }
-  const plan = planTakeover({
-    conversationId: live.sessionId,
-    harness: live.harness,
-    resumable: planned.ok,
-    holder: { pid: live.pid, cwd: live.cwd, label: live.name },
-    cwd: live.cwd,
-  })
-
-  if (plan.kind === 'refuse') {
-    console.error(explainTakeover(plan.reason))
-    return 1
-  }
-  if (plan.kind === 'free' || !planned.ok) return null
-
-  // Ending somebody's running assistant loses whatever it was mid-turn, so it is stated before it
-  // happens rather than reported after.
-  console.log(`Closing ${plan.holder.label ?? plan.conversationId.slice(0, 8)} (pid ${plan.holder.pid}) to reopen it here…`)
-  try {
-    process.kill(plan.holder.pid!, 'SIGTERM')
-  } catch (e) {
-    console.error(`Could not close it: ${e instanceof Error ? e.message : String(e)}`)
-    return 1
-  }
-  // Wait for it to actually go. Resuming while the old one is still shutting down is the very race
-  // the harness refuses on, and it would land as another dead row.
-  for (let i = 0; i < 40; i++) {
-    await new Promise(r => setTimeout(r, 100))
-    try { process.kill(plan.holder.pid!, 0) } catch { break }
-  }
-
-  try {
-    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-    await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}),
-      structured: structuredIntentOf({ harness: live.harness, origin: 'terminal', resumeId: live.sessionId, mode: previous?.mode }, { ...inheritedLaunch(previous, live.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
+  const result = await withConversationResumeLock(live.sessionId, async () => {
+    const holder = conversationHeldBy(await liveConversationHolders(backend), live.sessionId)
+    if (holder?.kind === 'managed') return { attach: holder.id }
+    const id = newSessionId()
+    const logFile = managedProcessLogPath(live.harness, id, AGENTISTICS_DATA_DIR)
+    // PLAN.ACCOUNTS D3 — a conversation agentop ran before keeps that row's account (and its root);
+    // one it never ran has no record and reopens in the default root, as before. Decided BEFORE the
+    // holder is closed: a removed account must refuse while the user still has their assistant.
+    const previous = newestRowOfConversation(await readRegistry(), live.sessionId)
+    const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
+    if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
+    const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...inheritedLaunch(previous, live.harness), ...(logFile ? { logFile } : {}), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
+    if (planned.ok && planned.plan.modeNeedsProtocol) { console.error(`Cannot reopen ${live.sessionId}: terminal cannot apply ${planned.plan.modeNeedsProtocol} approval mode`); return 1 }
+    const plan = planTakeover({
+      conversationId: live.sessionId,
+      harness: live.harness,
+      resumable: planned.ok,
+      holder: { pid: live.pid, cwd: live.cwd, label: live.name },
+      cwd: live.cwd,
     })
-  } catch (e) {
-    console.error(`Closed it, but could not reopen: ${e instanceof Error ? e.message : String(e)}`)
-    return 1
-  }
-  const died = await spawnFailure(backend, id, planned.plan.argv[0])
-  if (died) { console.error(died); await backend.kill(id).catch(() => {}); return 1 }
 
-  // The newest row of this conversation is the one being continued: its filing and name come
-  // along, and the live harness name (if any) still wins for the label.
-  const record: ManagedSession = {
-    id, harness: live.harness, cwd: plan.cwd, createdAt: new Date().toISOString(),
-    ...inheritedIdentity(previous),
-    ...inheritedLaunch(previous, live.harness),
-    ...(live.name ? { label: live.name, labelSince: Date.now() } : {}),
-    conversationId: plan.conversationId,
-    ...(await recordedRepo(plan.cwd)),
-  }
-  // The write is READ BACK, and that is not belt-and-braces — it is the failure this path actually
-  // had. `registry.ts` serialises writes within ONE process; agentop runs as several (the cockpit,
-  // the daemon, every one-shot command), all read-modify-writing the same file. A record added here
-  // was observed erased by a longer-lived process that had read the file just before, and the
-  // session it lost was the one the user was about to sit in: running, unregistered, and beyond
-  // every verb the cockpit offers. One retry closes the ordinary interleaving; a loss that survives
-  // it is SAID rather than left for the user to discover when a rename stops working.
-  // Retired like every other reopen: it stops standing beside its own continuation.
-  if (previous && !previous.endedAt) await patchSession(previous.id, { endedAt: new Date().toISOString() })
-  if (!await addVerified(record)) {
-    console.error(
-      `${id} is running but its registry record could not be kept — another agentop process is `
-      + 'writing the same registry. The cockpit will take it back on its next poll; if it does not, '
-      + `run \`agentop session attach ${id}\` again.`,
-    )
-  }
-  await deliverStoredRole(id, plan.conversationId).catch(() => false)
-  return execAttach(id, backend)
+    if (plan.kind === 'refuse') {
+      console.error(explainTakeover(plan.reason))
+      return 1
+    }
+    if (plan.kind === 'free' || !planned.ok) return null
+
+    // Ending somebody's running assistant loses whatever it was mid-turn, so it is stated before it
+    // happens rather than reported after.
+    console.log(`Closing ${plan.holder.label ?? plan.conversationId.slice(0, 8)} (pid ${plan.holder.pid}) to reopen it here…`)
+    try {
+      process.kill(plan.holder.pid!, 'SIGTERM')
+    } catch (e) {
+      console.error(`Could not close it: ${e instanceof Error ? e.message : String(e)}`)
+      return 1
+    }
+    // Wait for it to actually go. Resuming while the old one is still shutting down is the very race
+    // the harness refuses on, and it would land as another dead row.
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 100))
+      try { process.kill(plan.holder.pid!, 0) } catch { break }
+    }
+
+    try {
+      if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
+      await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}),
+        structured: structuredIntentOf({ harness: live.harness, origin: 'terminal', resumeId: live.sessionId, mode: previous?.mode }, { ...inheritedLaunch(previous, live.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
+      })
+    } catch (e) {
+      console.error(`Closed it, but could not reopen: ${e instanceof Error ? e.message : String(e)}`)
+      return 1
+    }
+    const died = await spawnFailure(backend, id, planned.plan.argv[0])
+    if (died) { console.error(died); await backend.kill(id).catch(() => {}); return 1 }
+
+    // The newest row of this conversation is the one being continued: its filing and name come
+    // along, and the live harness name (if any) still wins for the label.
+    const record: ManagedSession = {
+      id, harness: live.harness, cwd: plan.cwd, createdAt: new Date().toISOString(),
+      ...inheritedIdentity(previous),
+      ...inheritedLaunch(previous, live.harness),
+      ...(live.name ? { label: live.name, labelSince: Date.now() } : {}),
+      conversationId: plan.conversationId,
+      ...(await recordedRepo(plan.cwd)),
+    }
+    // The write is READ BACK, and that is not belt-and-braces — it is the failure this path actually
+    // had. `registry.ts` serialises writes within ONE process; agentop runs as several (the cockpit,
+    // the daemon, every one-shot command), all read-modify-writing the same file. A record added here
+    // was observed erased by a longer-lived process that had read the file just before, and the
+    // session it lost was the one the user was about to sit in: running, unregistered, and beyond
+    // every verb the cockpit offers. One retry closes the ordinary interleaving; a loss that survives
+    // it is SAID rather than left for the user to discover when a rename stops working.
+    // Retired like every other reopen: it stops standing beside its own continuation.
+    if (previous && !previous.endedAt) await patchSession(previous.id, { endedAt: new Date().toISOString() })
+    if (!await addVerified(record)) {
+      console.error(
+        `${id} is running but its registry record could not be kept — another agentop process is `
+        + 'writing the same registry. The cockpit will take it back on its next poll; if it does not, '
+        + `run \`agentop session attach ${id}\` again.`,
+      )
+    }
+    await deliverStoredRole(id, plan.conversationId).catch(() => false)
+    return { attach: id }
+  })
+  // Attaching can last for hours; the claim only covers the check, spawn and registry write.
+  return result !== null && typeof result === 'object' ? execAttach(result.attach, backend) : result
 }
 
 /**

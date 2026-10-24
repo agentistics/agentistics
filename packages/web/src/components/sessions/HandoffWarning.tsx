@@ -14,7 +14,32 @@ export function handoffLevelLabel(level: HandoffLevel, pt: boolean): string {
 }
 const tokens = (v: number | null, pt: boolean) => v === null ? '—' : `${Math.round(v / 1000).toLocaleString(pt ? 'pt-BR' : 'en-US')}${pt ? ' mil' : 'k'}`
 const money = (v: number | null) => v === null ? '—' : fmtCost(v)
-const percent = (v: number | null, pt: boolean) => v === null ? '—' : `+${v.toLocaleString(pt ? 'pt-BR' : 'en-US', { maximumFractionDigits: 2 })}%`
+const percent = (v: number | null, pt: boolean) => {
+  if (v === null) return '—'
+  if (v > 0 && v < 0.1) return pt ? '<0,1%' : '<0.1%'
+  return `+${v.toLocaleString(pt ? 'pt-BR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`
+}
+
+export function HandoffQuotaCell({ value, label, pt }: { value: number | null; label: string; pt: boolean }) {
+  return <span role="cell" data-label={label}>{percent(value, pt)}</span>
+}
+
+/** Explain unavailable estimates once for the entire comparison. */
+export function HandoffQuotaNote({ panel: p, pt }: { panel: Pick<HandoffPanel, 'quotaUnavailableReason' | 'projections'>; pt: boolean }) {
+  const missing = p.projections.some(r => r.fiveHourPct === null || r.weekPct === null)
+  const explanation = !missing
+    ? (pt ? 'Quota estimada pelo consumo medido da conta.' : 'Quota estimated from measured account consumption.')
+    : p.quotaUnavailableReason === 'account-unknown'
+      ? (pt ? 'Não foi possível identificar a conta desta sessão.' : 'The account for this session could not be identified.')
+      : p.quotaUnavailableReason === 'no-meter'
+        ? (pt ? 'Não há limites de uso disponíveis para esta conta.' : 'No usage limits are available for this account.')
+        : p.quotaUnavailableReason === 'missing-window'
+          ? (pt ? 'A conta não informa uma das janelas de uso.' : 'The account does not report one of the usage windows.')
+          : p.projections.some(r => r.costUSD === null)
+            ? (pt ? 'Faltam dados de contexto ou preço para estimar o consumo.' : 'Context or pricing data is missing to estimate consumption.')
+            : (pt ? 'Ainda não há consumo com preço e horário suficientes para estimar as janelas sem dados.' : 'There is not enough timestamped, priced usage yet to estimate the unavailable windows.')
+  return <small>{pt ? 'Percentual da janela de contexto. Ajuste em Configurações › Sessões.' : 'Percentage of the context window. Adjust in Settings › Sessions.'} {explanation}</small>
+}
 
 export function HandoffMeter({ id, pt, act }: { id: string; pt: boolean; act: SessionChatProps['act'] }) {
   const state = useHandoffPanel(id)
@@ -107,11 +132,11 @@ export function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPa
         <div className="handoff-projection-heading" role="row"><span role="columnheader">{pt ? 'Caminho' : 'Path'}</span><span role="columnheader">{pt ? 'Custo' : 'Cost'}</span><span role="columnheader">{pt ? 'Janela 5 h' : '5 h window'}</span><span role="columnheader">{pt ? 'Semana' : 'Week'}</span></div>
         {p.projections.map(r => <div className={`handoff-projection ${r.kind}`} role="row" key={r.kind}>
           <span role="cell"><strong>{labels[r.kind]}</strong><small>{r.kind === 'handoff' ? (pt ? 'inclui o custo da passagem' : 'includes handoff overhead') : tokens(r.contextTokens, pt)}</small></span>
-          <span role="cell" data-label={pt ? 'Custo' : 'Cost'}>{money(r.costUSD)}</span><span role="cell" data-label={pt ? 'Janela 5 h' : '5 h window'}>{percent(r.fiveHourPct, pt)}</span><span role="cell" data-label={pt ? 'Semana' : 'Week'}>{percent(r.weekPct, pt)}</span>
+          <span role="cell" data-label={pt ? 'Custo' : 'Cost'}>{money(r.costUSD)}</span><HandoffQuotaCell value={r.fiveHourPct} label={pt ? 'Janela 5 h' : '5 h window'} pt={pt} /><HandoffQuotaCell value={r.weekPct} label={pt ? 'Semana' : 'Week'} pt={pt} />
         </div>)}
       </div>
       <label className="handoff-simulation"><span>{pt ? 'Simular continuar mais' : 'Simulate continuing another'}</span><input type="number" min={0} max={100} step={1} value={extraDraft} onChange={e => setExtraDraft(e.target.value)} onBlur={simulate} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); simulate() } }} /> %</label>
-      <small>{pt ? 'Percentual da janela de contexto. Ajuste em Configurações › Sessões. Quota estimada pelo consumo medido da conta; “—” indica medição indisponível.' : 'Percentage of the context window. Adjust in Settings › Sessions. Quota estimated from measured account consumption; “—” means unavailable.'}</small>
+      <HandoffQuotaNote panel={p} pt={pt} />
       <div className="handoff-receives"><strong>{pt ? 'O que a sessão nova recebe' : 'What the new session receives'}</strong>
         <p>{pt ? 'Um arquivo durável com o estado do trabalho, suas decisões, sessões ativas e a fila. O líder prepara esse resumo antes de abrir o sucessor.' : 'A durable file with work state, your decisions, active sessions and the queue. The leader prepares this summary before starting the successor.'}</p>
         {p.handoffPath && <p>{p.handoffPath}</p>}

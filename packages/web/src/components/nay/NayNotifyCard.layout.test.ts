@@ -15,7 +15,7 @@ const src = readFileSync(join(import.meta.dir, 'NayNotifyCard.tsx'), 'utf8')
 const between = (a: string, b: string) => src.slice(src.indexOf(a), src.indexOf(b, src.indexOf(a)))
 
 test('the card is a flex column and is NOT the scroll container (the max-height the follow loop sets must not scroll it)', () => {
-  const card = between("position: 'fixed', zIndex: NAY_NOTIFY_CARD_Z", 'showTail &&')
+  const card = between("position: embedded ? 'relative' : 'fixed'", 'showTail &&')
   expect(card).toContain("display: 'flex', flexDirection: 'column'")
   expect(card).not.toMatch(/overflowY|overflow:/)
 })

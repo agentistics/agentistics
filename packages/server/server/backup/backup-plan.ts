@@ -301,6 +301,11 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     why: 'A lock held by a process on this machine.',
   },
   {
+    pattern: '.agentistics/conversation-resumes', match: 'prefix', reason: 'runtime',
+    restoreWith: 'nothing',
+    why: 'Per-conversation locks held while a reopen or write resumes it on this machine.',
+  },
+  {
     pattern: '.agentistics/team-sent.json', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing — the uploader re-pushes its full history on the next cycle',
     why: 'What this machine has already pushed to a central, plus team-sync.json beside it. The '
@@ -465,6 +470,10 @@ const RUNTIME: ExcludeRule[] = [
     why: 'One directory per running structured session: the relay holding its child (by pid, with a socket) '
       + 'and that session\'s protocol record, kept only so a restarted server can re-attach. The process '
       + 'does not exist on the new machine; the conversation itself is in the harness\'s own store.',
+  },
+  {
+    pattern: '.agentistics/handoff-quota-rates.json', match: 'prefix', reason: 'regenerable',
+    why: 'Account-specific handoff quota calibration, recomputed from local usage and plan meters.',
   },
   {
     pattern: '.agentistics/plan-limits.json', match: 'prefix', reason: 'regenerable',

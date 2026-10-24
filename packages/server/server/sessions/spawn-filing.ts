@@ -84,9 +84,8 @@ export interface FilingInput {
   groups: SessionUserGroupsValue
   repoOf: (dir: string) => FilingRepo | null
   /**
-   * Running sessions already in that directory, NOT counting `excludeId` — the planner passes the
-   * calling session's own id, so a worker spawning from the main checkout it lives in is not refused
-   * for sharing it with itself.
+   * Running sessions already in that directory. A new worker counts its parent too: the
+   * child is a second session even when it starts in the caller's own checkout.
    *
    * Path contract: every path the planner receives (`cwd`, `callerCwd`, the predecessor's and the
    * rows') is expected absolute and canonical (realpath'd) by the CALLER; the planner only trims
@@ -293,7 +292,7 @@ function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, t
   }
   const inheritedRepoMismatch = mismatch ? true : undefined
   const inRepo = keyOfFacts(facts) !== undefined
-  if (inRepo && !facts.worktree && input.liveInCwd(cwd, input.caller?.id) >= 1) {
+  if (inRepo && !facts.worktree && input.liveInCwd(cwd) >= 1) {
     if (!input.sharedCwd) {
       return refuse('cwd_shared_checkout',
         `${cwd} is a main checkout another live session already works in — use a worktree (git worktree add .claude/worktrees/<name> -b <branch>) or allow sharing (CLI: --shared-cwd)`)

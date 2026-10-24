@@ -42,6 +42,7 @@ import { NoQuestionsWarning } from './ModePicker'
 import { modeLabel, modeTitle, onlyModeNote } from '../../lib/modeLabel'
 import { modeCycles, modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
 import { ApprovalCard } from './ApprovalCard'
+import { composerAnswerRequest } from '../../lib/dialogAnswer'
 import { TypedModel } from './ModelSelect'
 import { approvalIdentity } from '../../lib/approvalQuestion'
 import { dialogAnswersToRetire } from '../../lib/dialogAnswerEcho'
@@ -229,7 +230,7 @@ export interface SessionChatProps {
   /** The shaped row, which carries the parsed dialog and what may be done about it. */
   row?: FleetRow
   lang: 'pt' | 'en'
-  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number; confirm?: boolean })
+  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; step?: 'next' | 'back'; choices?: number[]; occurrence?: number; confirm?: boolean })
     => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
   /** Switch to the live terminal when a failed write found a blocking prompt. */
   onOpenTerminal?: () => void
@@ -1474,6 +1475,15 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
   }, [])
 
+  // THE FLOATING COMPOSER GREW (the "waiting on a question" notice appeared, a draft wrapped): the
+  // padding reserved for it grew too, and a reader at the tail stays at the tail — otherwise the
+  // last thing in the conversation (a question card's Send button, live QA at 390 px) sits under
+  // the composer by exactly the growth.
+  useEffect(() => {
+    if (atTail) toTail(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerHeight])
+
 
   /**
    * A line the PANEL asked this composer to hold — the skills tab's "use this skill".
@@ -1793,7 +1803,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * cannot outlive the question: a dialog that changes under it would leave the composer sending an
    * answer to a question nobody asked.
    */
-  const [answering, setAnswering] = useState<{ number: number; label: string; shape: string } | null>(null)
+  // `choices`: a STRUCTURED multi-select's other ticks, kept by the card — the typed answer goes
+  // WITH them in one `choices` answer instead of replacing them.
+  const [answering, setAnswering] = useState<{ number: number; label: string; shape: string; choices?: number[] } | null>(null)
   /**
    * The dialog's identity — the same `approvalIdentity` `ApprovalCard` compares, for the same
    * reason (see that module's header): options ALONE are not an identity, because claude's
@@ -2415,10 +2427,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // what the echo has to be retired AGAINST — see `dialogAnswerEcho.ts`.
     const answeringShape = answeringNow && answering ? answering.shape : null
     const out = answeringNow && answering
-      ? await act({ id: session.id, action: 'approve', choice: answering.number, text: full })
+      ? await act(composerAnswerRequest(session.id, answering, full))
       : await act({ id: session.id, action: 'prompt', text: full })
     setSending(false)
     if (out.ok) {
+      if (out.id && out.id !== session.id) onReopened?.(out.id)
       setVaultGrantCache(null)
       // Ask for the transcript at once. The harness writes the user turn as soon as it takes the
       // message, and the next scheduled read is up to `CHAT_POLL_MS` away — three seconds in which
@@ -2649,6 +2662,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               lang={lang}
               act={act}
               answering={answering?.number ?? null}
+              // The card's own Send, while the composer holds a typed answer: the COMPOSER sends,
+              // so the words go with the ticks — the button used to send the ticks alone.
+              onSendAnswering={() => void send()}
               onWrite={o => {
                 setAnswering({ ...o, shape: dialogShape })
                 // The point of handing the composer over is that it is READY — the caret in it, on

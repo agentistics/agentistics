@@ -55,8 +55,10 @@ export async function attemptReopenRow(
   let fresh: Awaited<ReturnType<ReopenAttemptDeps['freshState']>>
   try { fresh = await deps.freshState() } catch { return { kind: 'failed' } }
   const { entries, aliveIds } = fresh
-  if (conversationAlreadyOpen(entries, aliveIds, resumeId, excludeId)) {
-    return { kind: 'held', holder: await deps.holderOf() }
+  // The live claim also covers the requested row itself and relays started in another process.
+  const holder = await deps.holderOf()
+  if (holder || aliveIds.has(excludeId) || conversationAlreadyOpen(entries, aliveIds, resumeId, excludeId)) {
+    return { kind: 'held', ...(holder ? { holder } : {}) }
   }
   const r = await deps.spawn()
   if (!r.ok) return { kind: 'failed' }

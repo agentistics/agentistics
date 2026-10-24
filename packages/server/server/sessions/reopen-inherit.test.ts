@@ -46,9 +46,7 @@ describe('every reopen path inherits identity', () => {
     expect(src).toContain('...inheritedIdentity(req.inherit)')
     expect(src).toContain('inherit: m,')
     expect(src).toContain('spawnManaged(reopenRowRequest(m, row, caller), s, lang)')
-    // CONTA.TROCA: a switch inherits the same row with only its account replaced.
-    expect(src).toContain('? { inherit: req.switchToAccount ? { ...previous, accountId: req.switchToAccount } : previous }')
-    expect(src).toContain(': recordedAccountId ? { accountId: recordedAccountId } : {}),')
+    expect(src).toContain('...(recorded ? { inherit: req.switchToAccount ? { ...recorded, accountId: req.switchToAccount } : recorded } : {})')
   })
   it('openTask and takeover use it too', async () => {
     const src = await read('./cli-session.ts')
