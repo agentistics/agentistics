@@ -95,10 +95,46 @@ export type BootVerdict = 'loading' | 'slow' | 'unreachable'
  */
 export const SLOW_AFTER_MS = 5000
 export const UNREACHABLE_AFTER_MS = 8000
-export function bootWatchdog(elapsedMs: number, health: 'ok' | 'down' | 'unknown'): BootVerdict {
-  if (health === 'down' && elapsedMs >= UNREACHABLE_AFTER_MS) return 'unreachable'
+/**
+ * Right after an in-app update the page reloads seconds after the NEW server first answered — a
+ * server known to be up, still building its first data (measured ~11 s, with a ~5 s stretch where a
+ * probe can miss its deadline). For this long after such a boot a missed probe or a failed first load
+ * is "still starting", never "can't reach agentistics": that screen, with its Try again, is what
+ * appeared under the end of every update. Past it, a server that still does not answer is reported
+ * exactly as before. `sinceUpdateMs` is `null` on an ordinary boot (`finaleGate.ts` `sinceUpdate`).
+ */
+export const POST_UPDATE_GRACE_MS = 90_000
+export function inUpdateGrace(sinceUpdateMs: number | null | undefined): boolean {
+  return sinceUpdateMs !== null && sinceUpdateMs !== undefined && sinceUpdateMs < POST_UPDATE_GRACE_MS
+}
+export function bootWatchdog(elapsedMs: number, health: 'ok' | 'down' | 'unknown', sinceUpdateMs: number | null = null): BootVerdict {
+  if (health === 'down' && elapsedMs >= UNREACHABLE_AFTER_MS && !inUpdateGrace(sinceUpdateMs)) return 'unreachable'
   if (elapsedMs >= SLOW_AFTER_MS) return 'slow'
   return 'loading'
+}
+
+/**
+ * Whether a failed load with nothing on screen should keep the boot loader instead of the error
+ * screen: only inside the post-update grace, and only for what a starting server looks like — no
+ * answer, no answer in time, or a 5xx. An auth status (401/403) and a foreign answer (`incompatible`)
+ * are never a server that is merely starting, so they are shown at once as before. The load keeps
+ * retrying on its own either way (`useData`).
+ */
+export function holdLoadError(e: LoadError, sinceUpdateMs: number | null): boolean {
+  if (!inUpdateGrace(sinceUpdateMs)) return false
+  if (e.kind === 'unreachable' || e.kind === 'timeout') return true
+  return e.kind === 'server' && e.status !== undefined && e.status >= 500
+}
+
+/** The one line under the boot loader while it is slow. After an update it says why. */
+export function bootSlowLine(lang: 'pt' | 'en', sinceUpdateMs: number | null): string {
+  const pt = lang === 'pt'
+  if (inUpdateGrace(sinceUpdateMs)) {
+    return pt
+      ? 'O agentistics acabou de reiniciar na versão nova e está lendo seu histórico — já vai abrir.'
+      : 'agentistics just restarted on the new version and is reading your history — almost there.'
+  }
+  return pt ? 'Ainda carregando — o servidor está respondendo.' : 'Still loading — the server is answering.'
 }
 
 export interface StartupStripState {

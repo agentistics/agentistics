@@ -6,7 +6,8 @@ import { startOfDay, endOfDay, subDays, isAfter, isBefore, parseISO, format, dif
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { eventStream, subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
-import { acceptPayload, classifyLoadError, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, dataUrl, SLIM_FOLLOWUP_MS, type LoadError, type StartupStripState } from '../lib/startupLoad'
+import { afterFinale, sinceUpdate } from '../lib/finaleGate'
+import { acceptPayload, classifyLoadError, holdLoadError, inUpdateGrace, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, dataUrl, SLIM_FOLLOWUP_MS, type LoadError, type StartupStripState } from '../lib/startupLoad'
 import { cacheFiguresOf } from '../lib/cacheFigures'
 import { useNativeVisible } from './useEngineCaps'
 
@@ -400,6 +401,8 @@ export function useData() {
   const dataRef = useRef<AppData | null>(data)
   const pollRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; partial: number; failures: number }>({ timer: null, partial: 0, failures: 0 })
   const refreshRef = useRef<() => Promise<void>>(async () => {})
+  /** Cancels a follow-up parked behind the update finale (`afterFinale`). */
+  const parkedRef = useRef<(() => void) | null>(null)
 
   /** The server's own progress for its first build, for the non-blocking strip. Never gates anything:
    *  a stream that errors is closed rather than left reconnecting. */
@@ -454,7 +457,12 @@ export function useData() {
       pollRef.current.failures = 0
       if (next.partial) {
         openProgress()
-        schedule(next.partialReason === 'slim' ? SLIM_FOLLOWUP_MS : partialPollMs(pollRef.current.partial++))
+        if (next.partialReason === 'slim') {
+          // The full payload (megabytes) is parsed on the main thread; while the update finale is on
+          // screen it waits for it to leave, so the animation is not the frame that pays for it.
+          parkedRef.current?.()
+          parkedRef.current = afterFinale(() => { parkedRef.current = null; schedule(SLIM_FOLLOWUP_MS) })
+        } else schedule(partialPollMs(pollRef.current.partial++))
       } else {
         pollRef.current.partial = 0
         writeDataCache(next)
@@ -465,7 +473,9 @@ export function useData() {
       const e = (raw && typeof raw === 'object' && 'kind' in raw) ? raw as LoadError : classifyLoadError(raw)
       const attempt = pollRef.current.failures++
       if (dataRef.current) {
-        setOffline(e)
+        // Right after an update the server is known to be up and still building its first data; a
+        // missed answer then is not "the server is not answering" (`holdLoadError`). It retries below.
+        if (!holdLoadError(e, sinceUpdate())) setOffline(e)
       } else {
         setLoadError(e)
         setError(e.detail)
@@ -484,9 +494,14 @@ export function useData() {
   const fetchData = useCallback(async () => { await refresh() }, [refresh])
 
   useEffect(() => {
-    void refresh()
+    // With a cached snapshot already seeded the first answer is the FULL payload; under the update
+    // finale it waits for the finale to leave (nothing on screen needs it before then). With nothing
+    // seeded the first ask is the slim one, which is small and goes at once.
+    const cancelFirst = dataRef.current ? afterFinale(() => { void refresh() }) : (void refresh(), () => {})
     const p = pollRef.current
     return () => {
+      cancelFirst()
+      parkedRef.current?.()
       if (p.timer) clearTimeout(p.timer)
       streamRef.current?.close()
     }
@@ -549,7 +564,10 @@ export function useData() {
       const step = livenessStep(down, answered)
       if (step === 'mark-offline') {
         down = true
-        if (dataRef.current) setOffline(prev => prev ?? { kind: 'unreachable', detail: 'no answer from /api/health' })
+        // Not inside the post-update grace: a probe missing its 2 s deadline then is the new server
+        // busy with its first build, and the strip it raised ("not answering … Try again") is what
+        // appeared as every update finished. `down` is still set, so its answer refreshes the data.
+        if (dataRef.current && !inUpdateGrace(sinceUpdate())) setOffline(prev => prev ?? { kind: 'unreachable', detail: 'no answer from /api/health' })
       } else if (step === 'recover') {
         down = false
         pollRef.current.failures = 0

@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.147.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O fim de uma atualização não engasga mais nem mostra "Não foi possível falar com o agentistics": enquanto a versão nova lê o seu histórico, a tela de carregamento fica e explica o motivo.',
+        en: 'The end of an update no longer stutters or shows "Can\'t reach agentistics": while the new version reads your history, the loading screen stays and says why.',
+      },
+    ],
+  },
   '2.147.0': {
     features: [
       {
