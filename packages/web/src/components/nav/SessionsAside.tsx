@@ -895,6 +895,16 @@ export function SessionsAside({
   const [overflow, setOverflow] = useState<{ x: number; y: number } | null>(null)
   const [arrangeAt, setArrangeAt] = useState<{ left: number; top: number } | null>(null)
   const overflowRef = useRef<HTMLButtonElement | null>(null)
+  // ONE stable callback ref for the ⋮ button: an inline arrow is a new ref every render, so React
+  // re-calls it, App re-measures the filters anchor into new state, re-renders us — an endless loop
+  // ("Maximum update depth exceeded" on opening /sessions). The latest caller ref is read through a ref.
+  const filtersButtonRefLatest = useRef(filtersButtonRef)
+  filtersButtonRefLatest.current = filtersButtonRef
+  const setOverflowButton = useCallback((el: HTMLButtonElement | null) => {
+    overflowRef.current = el
+    mutedButtonRef.current = el
+    filtersButtonRefLatest.current?.(el)
+  }, [])
 
   /** The pinned rows, in the order they were pinned. Their own band, above everything. */
   // Resolved from the RAW `rows`, never from `matched` — a filter, a search or "active only" must
@@ -1483,7 +1493,7 @@ export function SessionsAside({
           const label = pt ? 'Mais opções da lista' : 'More list options'
           return (
             <button
-              ref={el => { overflowRef.current = el; mutedButtonRef.current = el; filtersButtonRef?.(el) }}
+              ref={setOverflowButton}
               type="button"
               data-aside-overflow
               aria-haspopup="menu"
