@@ -13,8 +13,8 @@ import type { HarnessId } from '@agentistics/core'
 import { defaultHarnessRoot, readAccounts } from '../harness-accounts'
 import { readTailBytes, windowLines } from './transcript-window'
 import {
-  SWITCH_LAYOUT, allSwitchOptions, claudeProjectDir, claudeSidecarOf, detectLimitInTail, isCodexRolloutOf,
-  type LimitState, type SourceFiles, type SwitchAccountMeta, type SwitchCopy, type SwitchOption,
+  SWITCH_LAYOUT, allSwitchOptions, unavailableSwitchTargets, claudeProjectDir, claudeSidecarOf, detectLimitInTail, isCodexRolloutOf,
+  type LimitState, type SourceFiles, type SwitchAccountMeta, type SwitchCopy, type SwitchOption, type SwitchUnavailable,
 } from './account-switch'
 import { spawnAccountContext, spawnAccountRows } from './spawn-account-io'
 import { decideRecordedAccount } from './spawn-account'
@@ -101,13 +101,20 @@ export async function startableHere(): Promise<HarnessId[]> {
  * first, then every account of every other harness that can start a session here (CONTA.TROCA v2).
  */
 export async function listSwitchOptions(o: { harness: HarnessId; accountId?: string; agentCaller: boolean }): Promise<SwitchOption[]> {
+  return (await listSwitchTargets(o)).options
+}
+
+/** The options PLUS every account they leave out, with the reason (CONTA.LIMITES's picker). */
+export async function listSwitchTargets(o: { harness: HarnessId; accountId?: string; agentCaller: boolean }): Promise<{ options: SwitchOption[]; unavailable: SwitchUnavailable[] }> {
   const startable = await startableHere()
   const context = await spawnAccountContext([o.harness, ...startable.filter(h => h !== o.harness)])
   let meta: SwitchAccountMeta[] = []
   try {
     meta = (await readAccounts()).accounts.map(a => ({ id: a.id, label: a.nickname || a.label, ...(a.plan ? { plan: a.plan } : {}) }))
   } catch { /* no labels: ids are shown */ }
-  return allSwitchOptions({ harness: o.harness, ...(o.accountId ? { currentAccountId: o.accountId } : {}), agentCaller: o.agentCaller, context, meta, startable })
+  const current = o.accountId ? { currentAccountId: o.accountId } : {}
+  const options = allSwitchOptions({ harness: o.harness, ...current, agentCaller: o.agentCaller, context, meta, startable })
+  return { options, unavailable: unavailableSwitchTargets({ harness: o.harness, ...current, context, meta, startable, offered: options }) }
 }
 
 /** The label of the account a session runs on now, for the notice ("this account hit its limit"). */

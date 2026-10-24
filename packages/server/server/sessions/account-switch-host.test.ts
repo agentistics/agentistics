@@ -8,7 +8,7 @@ import type { ManagedSession } from './types'
 const acc = (o: Partial<SpawnAccountRow> & { id: string }): SpawnAccountRow =>
   ({ harness: 'claude', root: null, bound: true, available: true, firstSeen: 1, ...o })
 
-function world(opts: { copyFails?: boolean; transcript?: boolean; pending?: string; accounts?: SpawnAccountRow[] } = {}) {
+function world(opts: { copyFails?: boolean; transcript?: boolean; pending?: string; accounts?: SpawnAccountRow[]; refuseTarget?: boolean; refuseAll?: boolean } = {}) {
   let n = 0
   const rows: ManagedSession[] = [{
     id: 'm1', harness: 'claude', cwd: '/w', createdAt: '2026-10-24T00:00:00Z', conversationId: 'conv1', accountId: 'acc_a', label: 'Fix', note: 'n',
@@ -26,6 +26,9 @@ function world(opts: { copyFails?: boolean; transcript?: boolean; pending?: stri
     withLock: withResumeLock,
     resume: async r => {
       resumed.push(r)
+      if (opts.refuseAll || (opts.refuseTarget && r.switchToAccount)) {
+        return { ok: false, message: 'the session exited as soon as it started: claude: boom' }
+      }
       // The real reopen retires the replaced row and adds the continuation.
       const prev = rows.find(m => m.id === r.replaces)
       if (prev) prev.endedAt = prev.endedAt ?? 'now'
@@ -84,6 +87,31 @@ describe('switchSessionAccountImpl', () => {
     expect(w.resumed).toHaveLength(1)
     expect(w.resumed[0]!.switchToAccount).toBeUndefined()
     expect(w.live().map(r => r.accountId)).toEqual(['acc_a'])
+  })
+
+  test('every resume is forced: the process it replaces was just ended', async () => {
+    const w = world()
+    await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, w.deps)
+    expect(w.resumed.every(r => r.force === true)).toBe(true)
+  })
+
+  test('a target that refuses to start gives the session back on its own account, in words', async () => {
+    const w = world({ refuseTarget: true })
+    const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, w.deps)
+    expect(out.ok).toBe(false)
+    expect(w.resumed.map(r => r.switchToAccount)).toEqual(['acc_b', undefined])
+    expect(w.resumed[1]).toMatchObject({ sessionId: 'conv1', replaces: 'm1', force: true })
+    expect(w.live().map(r => r.accountId)).toEqual(['acc_a'])
+    expect(out.message).toBe('The session did not start on the other account; it continues on its previous account. It exited as soon as it started (details are in the server log).')
+    expect(out.message).not.toContain('boom')
+  })
+
+  test('when even the old account cannot start, the message says the conversation is kept', async () => {
+    const w = world({ refuseAll: true })
+    const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, w.deps)
+    expect(out).toMatchObject({ ok: false })
+    expect(w.resumed).toHaveLength(2)
+    expect(out.message).toContain('Reopen')
   })
 
   test('refusals end nothing', async () => {
