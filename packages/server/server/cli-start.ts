@@ -4176,6 +4176,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         backend,
         resume: r => resumeSessionLocked(r, this),
         withLock: (conv, fn) => withResumeLock(conv, fn),
+        spawn: r => this.spawnSession!(r),
       })
     },
 
@@ -4825,6 +4826,13 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (req.handoff && req.parentSessionId) {
         const { readRegistry } = await import('./sessions/registry')
         handoffParent = (await readRegistry()).find(m => m.id === req.parentSessionId)
+        const { handoffSpawnDefaults, handoffTitle } = await import('./sessions/handoff-inherit')
+        label = handoffTitle(handoffParent?.label, req.label)
+        launch = handoffSpawnDefaults(handoffParent, req.harness, req)
+      } else if (req.switchFrom) {
+        // CONTA.TROCA v2: the predecessor is the row being replaced, not the parent — its folder, pin,
+        // mute and note carry over through the same `configureSpawn` step a hand-off uses.
+        handoffParent = (await readRegistry()).find(m => m.id === req.switchFrom)
         const { handoffSpawnDefaults, handoffTitle } = await import('./sessions/handoff-inherit')
         label = handoffTitle(handoffParent?.label, req.label)
         launch = handoffSpawnDefaults(handoffParent, req.harness, req)

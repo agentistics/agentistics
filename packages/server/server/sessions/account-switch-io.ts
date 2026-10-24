@@ -13,7 +13,7 @@ import type { HarnessId } from '@agentistics/core'
 import { defaultHarnessRoot, readAccounts } from '../harness-accounts'
 import { readTailBytes, windowLines } from './transcript-window'
 import {
-  SWITCH_LAYOUT, claudeProjectDir, claudeSidecarOf, detectLimitInTail, isCodexRolloutOf, switchOptions,
+  SWITCH_LAYOUT, allSwitchOptions, claudeProjectDir, claudeSidecarOf, detectLimitInTail, isCodexRolloutOf,
   type LimitState, type SourceFiles, type SwitchAccountMeta, type SwitchCopy, type SwitchOption,
 } from './account-switch'
 import { spawnAccountContext, spawnAccountRows } from './spawn-account-io'
@@ -89,15 +89,25 @@ export async function readLimitState(o: { harness: HarnessId; conversationId: st
   return detectLimitInTail(o.harness, windowLines(tail))
 }
 
-/** The accounts a session could move to, labelled for a person. */
+/** The harnesses a hand-off could start here: spec'd and on PATH. A blind PATH offers none. */
+export async function startableHere(): Promise<HarnessId[]> {
+  const { availableHarnesses } = await import('./harness-available')
+  const a = availableHarnesses()
+  return a.blind ? [] : a.ids
+}
+
+/**
+ * The accounts a session could move to, labelled for a person — its own harness's other accounts
+ * first, then every account of every other harness that can start a session here (CONTA.TROCA v2).
+ */
 export async function listSwitchOptions(o: { harness: HarnessId; accountId?: string; agentCaller: boolean }): Promise<SwitchOption[]> {
-  if (!SWITCH_LAYOUT[o.harness]) return []
-  const context = await spawnAccountContext([o.harness])
+  const startable = await startableHere()
+  const context = await spawnAccountContext([o.harness, ...startable.filter(h => h !== o.harness)])
   let meta: SwitchAccountMeta[] = []
   try {
     meta = (await readAccounts()).accounts.map(a => ({ id: a.id, label: a.nickname || a.label, ...(a.plan ? { plan: a.plan } : {}) }))
   } catch { /* no labels: ids are shown */ }
-  return switchOptions({ harness: o.harness, ...(o.accountId ? { currentAccountId: o.accountId } : {}), agentCaller: o.agentCaller, context, meta })
+  return allSwitchOptions({ harness: o.harness, ...(o.accountId ? { currentAccountId: o.accountId } : {}), agentCaller: o.agentCaller, context, meta, startable })
 }
 
 /** The label of the account a session runs on now, for the notice ("this account hit its limit"). */

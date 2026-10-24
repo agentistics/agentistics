@@ -47,6 +47,7 @@ export const claudeProjectDir = (cwd: string): string => cwd.replace(/[^a-zA-Z0-
 export type SwitchRefusal =
   | SpawnAccountRefusal
   | 'switch_unsupported' | 'no_conversation' | 'same_account' | 'not_running_here' | 'no_transcript' | 'no_target'
+  | 'harness_unavailable'
 
 /** One copy: a file, or a directory copied recursively. Never a move. */
 export interface SwitchCopy { from: string; to: string; kind: 'file' | 'dir' }
@@ -92,8 +93,12 @@ export function planSwitchCopies(o: {
 /** A copy whose destination is its own source is nothing to do — and refusing it guards a self-overwrite. */
 export const copiesAreNoop = (copies: readonly SwitchCopy[]): boolean => copies.every(c => c.from === c.to)
 
-/** One account a switch could land on, as a client is told about it. */
-export interface SwitchOption { id: string; label: string; plan?: string; recommended?: boolean }
+/**
+ * One account a switch could land on, as a client is told about it. `harness` names the harness the
+ * account belongs to: the same one continues the conversation, another one starts a new conversation
+ * there with a summary (CONTA.TROCA v2).
+ */
+export interface SwitchOption { id: string; harness: HarnessId; label: string; plan?: string; recommended?: boolean }
 
 export interface SwitchAccountMeta { id: string; label: string; plan?: string }
 
@@ -118,12 +123,140 @@ export function switchOptions(o: {
     const ok = decideSpawnAccount({ harness: o.harness, requested: a.id, agentCaller: o.agentCaller, context: o.context })
     if (!ok.ok || !a.available) continue
     const m = o.meta.find(x => x.id === a.id)
-    out.push({ id: a.id, label: m?.label ?? a.id, ...(m?.plan ? { plan: m.plan } : {}), ...(picked === a.id ? { recommended: true } : {}) })
+    out.push({ id: a.id, harness: o.harness, label: m?.label ?? a.id, ...(m?.plan ? { plan: m.plan } : {}), ...(picked === a.id ? { recommended: true } : {}) })
   }
   return out.sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended) || (firstSeen(o.context.accounts, a.id) - firstSeen(o.context.accounts, b.id)))
 }
 
 const firstSeen = (rows: readonly SpawnAccountRow[], id: string) => rows.find(r => r.id === id)?.firstSeen ?? 0
+
+/**
+ * CONTA.TROCA v2 — every account a session could move to, across EVERY harness that can start a
+ * session here (`startable`: spec'd and on PATH), grouped by harness in `startable`'s order with the
+ * session's own harness first. The same harness contributes `switchOptions` (only where its
+ * conversation can be carried); another harness contributes each of its live, signed-in, available
+ * accounts that a fresh spawn would accept — a harness with no registered account offers nothing,
+ * because "is anybody signed in at its default root" is not something the registry can vouch for,
+ * and a hand-off onto a login prompt would end the old session for a pane that cannot work.
+ */
+export function allSwitchOptions(o: {
+  harness: HarnessId
+  currentAccountId?: string
+  agentCaller: boolean
+  context: SpawnAccountContext
+  meta: readonly SwitchAccountMeta[]
+  startable: readonly HarnessId[]
+}): SwitchOption[] {
+  if (!o.context.enabled) return []
+  const same = switchOptions(o)
+  const others: SwitchOption[] = []
+  for (const h of o.startable) {
+    if (h === o.harness) continue
+    const picked = o.context.picks?.[h]
+    const mine: SwitchOption[] = []
+    for (const a of o.context.accounts) {
+      if (a.harness !== h || a.retired || !a.bound || !a.available) continue
+      const ok = decideSpawnAccount({ harness: h, requested: a.id, agentCaller: o.agentCaller, context: o.context })
+      if (!ok.ok) continue
+      const m = o.meta.find(x => x.id === a.id)
+      mine.push({ id: a.id, harness: h, label: m?.label ?? a.id, ...(m?.plan ? { plan: m.plan } : {}), ...(picked === a.id ? { recommended: true } : {}) })
+    }
+    others.push(...mine.sort((a, b) => Number(!!b.recommended) - Number(!!a.recommended) || (firstSeen(o.context.accounts, a.id) - firstSeen(o.context.accounts, b.id))))
+  }
+  return [...same, ...others]
+}
+
+export type CrossDecision =
+  | { ok: true; target: { id: string; root: string | null } }
+  | { ok: false; reason: SwitchRefusal; detail: string }
+
+/**
+ * Decide a hand-off to ANOTHER harness before anything starts or ends. Nothing is carried on disk —
+ * the new harness cannot read this conversation — so no layout or link is required; the session
+ * must only still be running here and the target must be an account a fresh spawn would accept.
+ */
+export function decideCrossSwitch(o: {
+  harness: HarnessId
+  targetHarness: HarnessId
+  running: boolean
+  requested: string
+  agentCaller: boolean
+  context: SpawnAccountContext
+  startable: readonly HarnessId[]
+}): CrossDecision {
+  if (!o.context.enabled) return { ok: false, reason: 'accounts_disabled', detail: o.requested }
+  if (!o.running) return { ok: false, reason: 'not_running_here', detail: '' }
+  if (!o.startable.includes(o.targetHarness)) return { ok: false, reason: 'harness_unavailable', detail: o.targetHarness }
+  const target = decideSpawnAccount({ harness: o.targetHarness, requested: o.requested, agentCaller: o.agentCaller, context: o.context })
+  if (!target.ok) return { ok: false, reason: target.reason, detail: target.detail }
+  if (!target.account) return { ok: false, reason: 'unknown_account', detail: o.requested }
+  if (o.context.accounts.find(a => a.id === o.requested)?.available === false) return { ok: false, reason: 'account_unavailable', detail: o.requested }
+  return { ok: true, target: target.account }
+}
+
+/** A turn as the summary reads it: `ChatTurn`'s fields that matter here, nothing harness-specific. */
+export interface SummaryTurn {
+  role: 'user' | 'assistant'
+  text: string
+  composer?: boolean
+  tools?: { writes?: string[] }[]
+}
+
+const SUMMARY_GOAL = 1200
+const SUMMARY_STATE = 1500
+const SUMMARY_TURN = 400
+const SUMMARY_LAST_TURNS = 6
+const SUMMARY_FILES = 30
+
+const clip = (s: string, n: number): string => {
+  const t = s.trim()
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t
+}
+
+/**
+ * The first prompt of the session that continues the work on ANOTHER harness: a distilled summary
+ * (goal, state, last turns, files touched) — never the whole conversation — plus the message the
+ * limit refused, when the person asked to re-send it. Same harness-neutral reading for every
+ * harness: the turns come from that harness's own transcript reader. An unreadable conversation is
+ * SAID, and the new session is told to establish the state itself.
+ */
+export function crossSwitchPrompt(o: {
+  lang: 'en' | 'pt'
+  fromHarness: string
+  fromAccount?: string
+  turns: readonly SummaryTurn[] | { unavailable: string }
+  pending?: string
+}): string {
+  const pt = o.lang === 'pt'
+  const from = `${o.fromHarness}${o.fromAccount ? ` (${pt ? 'conta' : 'account'} ${o.fromAccount})` : ''}`
+  const out: string[] = [pt
+    ? `Você continua o trabalho de uma sessão ${from} que foi encerrada para trocar de harness/conta. Esta é uma conversa NOVA: abaixo está um resumo da anterior, não o histórico inteiro.`
+    : `You are continuing the work of a ${from} session that was ended to switch harness/account. This is a NEW conversation: below is a summary of the previous one, not its whole history.`]
+  if ('unavailable' in o.turns) {
+    out.push(pt ? `A conversa anterior não pôde ser lida (${o.turns.unavailable}). Estabeleça o estado pelo repositório (git status, git log) antes de agir.`
+      : `The previous conversation could not be read (${o.turns.unavailable}). Establish the state from the repository (git status, git log) before acting.`)
+  } else {
+    const turns = o.turns.filter(t => !t.composer && t.text.trim())
+    const goal = turns.find(t => t.role === 'user')
+    const state = [...turns].reverse().find(t => t.role === 'assistant')
+    if (goal) out.push(`${pt ? '## Objetivo (primeira mensagem)' : '## Goal (first message)'}\n${clip(goal.text, SUMMARY_GOAL)}`)
+    if (state) out.push(`${pt ? '## Estado (última resposta do assistente)' : '## State (last assistant reply)'}\n${clip(state.text, SUMMARY_STATE)}`)
+    const last = turns.slice(-SUMMARY_LAST_TURNS)
+    if (last.length) {
+      out.push(`${pt ? '## Últimos turnos' : '## Last turns'}\n${last.map(t => `- ${t.role === 'user' ? (pt ? 'Pessoa' : 'Person') : (pt ? 'Assistente' : 'Assistant')}: ${clip(t.text, SUMMARY_TURN).replace(/\n+/g, ' ')}`).join('\n')}`)
+    }
+    const files = [...new Set(o.turns.flatMap(t => (t.tools ?? []).flatMap(x => x.writes ?? [])))]
+    if (files.length) {
+      const shown = files.slice(-SUMMARY_FILES)
+      out.push(`${pt ? '## Arquivos tocados' : '## Files touched'}\n${shown.map(f => `- ${f}`).join('\n')}${files.length > shown.length ? `\n- … (+${files.length - shown.length})` : ''}`)
+    }
+    if (!turns.length) out.push(pt ? 'A conversa anterior não tinha mensagens legíveis. Estabeleça o estado pelo repositório antes de agir.' : 'The previous conversation had no readable messages. Establish the state from the repository before acting.')
+  }
+  out.push(o.pending
+    ? `${pt ? '## Mensagem pendente — a anterior foi recusada; responda a ela agora' : '## Pending message — it was refused before; answer it now'}\n${o.pending}`
+    : (pt ? 'Confirme o estado (git status) e continue de onde parou.' : 'Confirm the state (git status) and carry on where it stopped.'))
+  return out.join('\n\n')
+}
 
 /**
  * The account a row runs on NOW: its recorded one, or — recorded before accounts — whichever account
@@ -203,6 +336,9 @@ export function switchMessage(reason: SwitchRefusal, detail: string, lang: 'en' 
     case 'no_transcript':
       return pt ? 'A conversa desta sessão não foi encontrada no disco, então não pode ser levada para outra conta. Nada foi encerrado.'
         : "This session's conversation was not found on disk, so it cannot be carried to another account. Nothing was ended."
+    case 'harness_unavailable':
+      return pt ? `${detail} não pode iniciar uma sessão nesta máquina (não está instalado ou não está no PATH do servidor). Nada foi encerrado.`
+        : `${detail} cannot start a session on this machine (it is not installed or not on the server's PATH). Nothing was ended.`
     case 'no_target':
       return pt ? 'Essa sessão não existe mais. Atualize a lista.' : 'That session no longer exists. Refresh the list.'
     default:
