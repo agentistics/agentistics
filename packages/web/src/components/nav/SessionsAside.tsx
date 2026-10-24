@@ -1825,6 +1825,9 @@ export function SessionsAside({
               const showMembers = !storedFold && !leadersOnly && t.members.length > 0
               const leaderTitle = sessionDisplayTitle(t.leader.title)
               const hasTeam = teamsAll.teams.find(x => x.key === t.key)!.members.length > 0
+              // Leaders-only never lists members, so nothing here may promise to: no fold chevron, and
+              // the name always opens the leader's session (a stored fold would otherwise just toggle).
+              const foldable = hasTeam && !leadersOnly
               return (
                 <div key={t.key} data-team={t.key} style={{
                   background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 4,
@@ -1832,7 +1835,7 @@ export function SessionsAside({
                   {renderLine(t.leader, {
                     lead: true,
                     ...(!showMembers && hasTeam ? { summary: teamSummary(teamsAll.teams.find(x => x.key === t.key)!.members, pt) } : {}),
-                    leading: (
+                    ...(leadersOnly ? {} : { leading: (
                       <button
                         type="button"
                         data-team-fold
@@ -1851,9 +1854,9 @@ export function SessionsAside({
                       >
                         <ChevronDown size={14} style={{ transform: storedFold ? 'rotate(-90deg)' : 'none', transition: 'transform 0.15s' }} />
                       </button>
-                    ),
+                    ) }),
                     // Folded, the leader's name only unfolds; open, it opens the leader's session.
-                    ...(storedFold && hasTeam ? {
+                    ...(storedFold && foldable ? {
                       onOpen: () => toggleFoldedTeam(t.key),
                       openLabel: pt ? `Mostrar a equipe de ${leaderTitle}` : `Show ${leaderTitle}'s team`,
                     } : {}),
