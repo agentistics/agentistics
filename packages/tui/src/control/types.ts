@@ -2000,6 +2000,13 @@ export interface SpawnSessionRequest {
   accountDecided?: boolean
   /** PLAN.ACCOUNTS D3: the request carries a VERIFIED session identity — an agent is asking. */
   callerVerified?: boolean
+  /**
+   * CONTA.TROCA v2 — the managed id this session REPLACES on another harness. It inherits that row's
+   * filing, folder, pin, mute and note exactly as a hand-off successor does (`handoffOf` +
+   * `configureSpawn`'s predecessor), while `parentSessionId` and `role` stay what the caller states —
+   * a switched worker still reports to its own leader, not to the session it replaced. Server-set only.
+   */
+  switchFrom?: string
 }
 
 export interface ResumeSessionRequest {
@@ -2046,6 +2053,12 @@ export interface SwitchAccountRequest {
   id: string
   /** The target account (`acc_…`). */
   accountId: string
+  /**
+   * CONTA.TROCA v2 — the target harness. Absent or the session's own: the same conversation continues
+   * on the other account. Another harness: a NEW session there in the same cwd/filing/folder/role,
+   * briefed with a summary, and the old one ended only once the new one runs.
+   */
+  harness?: string
   /** Re-send the prompt the usage limit refused, once, as the resumed session's first prompt. */
   resendPending?: boolean
   callerVerified?: boolean

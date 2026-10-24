@@ -13,14 +13,17 @@
  *     retires the old row and carries its identity (name, note, task, role) onto the new one, so
  *     there are never two live rows. A copy that fails gives the session back on its OWN account.
  */
-import type { HarnessId } from '@agentistics/core'
-import type { ResumeSessionRequest, SpawnSessionResult, SwitchAccountRequest } from '@agentistics/tui/control'
-import { decideSwitch, planSwitchCopies, switchMessage, switchStatus, type SwitchRefusal } from './account-switch'
-import { executeCopies, findSourceFiles, readLimitState, resolveRoot } from './account-switch-io'
+import { HARNESS_LABELS, type HarnessId } from '@agentistics/core'
+import type { ResumeSessionRequest, SpawnSessionRequest, SpawnSessionResult, SwitchAccountRequest } from '@agentistics/tui/control'
+import {
+  crossSwitchPrompt, decideCrossSwitch, decideSwitch, planSwitchCopies, switchMessage, switchStatus,
+  type SummaryTurn, type SwitchRefusal,
+} from './account-switch'
+import { accountLabel, executeCopies, findSourceFiles, readLimitState, resolveRoot, startableHere } from './account-switch-io'
 import { spawnAccountContext } from './spawn-account-io'
 import { spawnAccountMessage } from './spawn-account'
 import { killAndRetireSession, readRegistry } from './registry'
-import type { SessionBackend } from './types'
+import type { ManagedSession, SessionBackend } from './types'
 
 export interface SwitchHostDeps {
   lang: 'en' | 'pt'
@@ -28,6 +31,8 @@ export interface SwitchHostDeps {
   /** `resumeSessionLocked` — the reopen body, WITHOUT taking the lock again. */
   resume: (r: ResumeSessionRequest) => Promise<SpawnSessionResult>
   withLock: <T>(conversationId: string, fn: () => Promise<T>) => Promise<T>
+  /** The host's own `spawnSession` — the cross-harness hand-off starts its new session through it. */
+  spawn?: (r: SpawnSessionRequest) => Promise<SpawnSessionResult>
   /** The disk and registry, replaceable by a test. */
   io?: Partial<SwitchIo>
 }
@@ -39,6 +44,13 @@ export interface SwitchIo {
   copy: typeof executeCopies
   limit: typeof readLimitState
   killAndRetire: (id: string, kill: () => Promise<boolean>) => Promise<boolean>
+  startable: typeof startableHere
+  /** The session's conversation, through its harness's own transcript reader. */
+  turns: (m: ManagedSession) => Promise<{ turns: SummaryTurn[] } | { unavailable: string }>
+  role: (keys: (string | undefined)[]) => Promise<'leader' | 'worker' | undefined>
+  label: typeof accountLabel
+  /** Link old → new so a message to the replaced row (or its children's parent link) follows on. */
+  link: (oldId: string, newId: string) => Promise<void>
 }
 
 const REAL_IO: SwitchIo = {
@@ -48,6 +60,11 @@ const REAL_IO: SwitchIo = {
   copy: executeCopies,
   limit: readLimitState,
   killAndRetire: (id, kill) => killAndRetireSession(id, kill),
+  startable: startableHere,
+  turns: async m => (await import('./handoff-relay-io')).readSessionTurns(m),
+  role: async keys => (await import('./session-roles')).storedRoleFor(keys) as Promise<'leader' | 'worker' | undefined>,
+  label: accountLabel,
+  link: async (oldId, newId) => (await import('./handoff-relay-io')).recordHandoffLink(oldId, newId, undefined),
 }
 
 export type SwitchResult = SpawnSessionResult & { code?: SwitchRefusal; status?: number }
@@ -67,6 +84,7 @@ export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: 
   const row = (await io.readRows()).find(m => m.id === req.id)
   if (!row) return refuse('not_running_here', '', lang)
   const harness = row.harness as HarnessId
+  if (req.harness && req.harness !== harness) return crossHarnessSwitch(row, req, deps, io)
   const conversationId = row.conversationId
   const context = await io.context([harness])
   const decided = decideSwitch({
@@ -129,4 +147,72 @@ export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: 
     }
     return out
   })
+}
+
+/**
+ * CONTA.TROCA v2 — continue on ANOTHER harness. The new harness cannot read this conversation, so
+ * nothing is copied: a NEW session starts in the same cwd, inheriting the row's filing, folder, pin,
+ * mute, note, role and parent, briefed with a distilled summary (`crossSwitchPrompt`) plus the
+ * refused message when asked. The order is the safety, and it is the opposite of the same-harness
+ * path: the old session is ended only AFTER the new one is confirmed running; any failure before
+ * that leaves the old one exactly as it was.
+ */
+async function crossHarnessSwitch(row: ManagedSession, req: SwitchAccountRequest, deps: SwitchHostDeps, io: SwitchIo): Promise<SwitchResult> {
+  const { lang } = deps
+  const pt = lang === 'pt'
+  const harness = row.harness as HarnessId
+  const target = req.harness as HarnessId
+  if (!deps.spawn) return { ok: false, message: 'unavailable' }
+  const startable = await io.startable()
+  const context = await io.context([target])
+  const live = (await deps.backend.list().catch(() => [])).find(b => b.id === row.id)
+  const decided = decideCrossSwitch({
+    harness, targetHarness: target, running: !row.endedAt && live?.alive === true,
+    requested: req.accountId, agentCaller: req.callerVerified === true, context, startable,
+  })
+  if (!decided.ok) return refuse(decided.reason, decided.detail, lang)
+  const conv = row.conversationId
+  const pending = req.resendPending && conv
+    ? (await io.limit({ harness, conversationId: conv, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }).catch(() => null))?.pendingPrompt
+    : undefined
+  const turns = await io.turns(row).catch(e => ({ unavailable: e instanceof Error ? e.message : String(e) }))
+  const fromAccount = await io.label(harness, row.accountId).catch(() => undefined)
+  const prompt = crossSwitchPrompt({
+    lang, fromHarness: HARNESS_LABELS[harness] ?? harness, ...(fromAccount ? { fromAccount } : {}),
+    turns: 'unavailable' in turns ? turns : turns.turns, ...(pending ? { pending } : {}),
+  })
+  const role = await io.role([conv, row.id]).catch(() => undefined)
+  const started = await deps.spawn({
+    harness: target,
+    cwd: row.cwd,
+    attach: false,
+    origin: 'web',
+    prompt,
+    switchFrom: row.id,
+    accountId: decided.target.id,
+    accountDecided: true,
+    // The replacement frees a session's worth of memory the moment it is confirmed; queueing it
+    // could start it later beside a session the person already moved on from.
+    force: true,
+    ...(row.label ? { label: row.label } : {}),
+    ...(row.task ? { task: row.task } : {}),
+    ...(row.mode ? { mode: row.mode } : {}),
+    ...(role ? { role } : {}),
+    ...(row.parentSessionId ? { parentSessionId: row.parentSessionId, parentVerified: true } : {}),
+    away: row.away === true,
+    ...(req.callerVerified ? { callerVerified: true } : {}),
+  }).catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }) as SpawnSessionResult)
+  // A spawn that is running but whose configuration (filing/folder) is pending still RUNS: the old
+  // session is ended only when the new one exists as a live pane.
+  const newId = started.id
+  const running = newId ? (await deps.backend.list().catch(() => [])).some(b => b.id === newId && b.alive) : false
+  if (!newId || !running) {
+    const why = started.message ? ` ${started.message}` : ''
+    return { ok: false, message: pt ? `A nova sessão não iniciou; a sessão atual continua como estava.${why}` : `The new session did not start; the current session continues as it was.${why}` }
+  }
+  await io.link(row.id, newId).catch(() => undefined)
+  const ended = await io.killAndRetire(row.id, () => deps.backend.kill(row.id)).catch(() => false)
+  const done = pt ? 'Trabalho continuado em outro harness, numa conversa nova com um resumo da anterior.' : 'Work continued on another harness, in a new conversation briefed with a summary of the previous one.'
+  const tail = ended ? '' : (pt ? ' A sessão anterior não pôde ser encerrada: encerre-a você.' : ' The previous session could not be ended: end it yourself.')
+  return { ...started, ok: true, id: newId, message: `${done}${pending ? (pt ? ' A última mensagem foi reenviada.' : ' The last message was re-sent.') : ''}${tail}` }
 }

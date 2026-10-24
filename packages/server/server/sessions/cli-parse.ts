@@ -115,7 +115,7 @@ export type SessionCommand =
   | { kind: 'rename'; ref: string; label: string }
   | { kind: 'note'; ref: string; text: string }
   /** CONTA.TROCA: move a session to another account of its harness. No account: list the options. */
-  | { kind: 'switch-account'; ref: string; accountId?: string; resend?: boolean; json?: boolean }
+  | { kind: 'switch-account'; ref: string; accountId?: string; harness?: string; resend?: boolean; json?: boolean }
   | { kind: 'help' }
   | { kind: 'error'; message: string }
 
@@ -272,11 +272,14 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
   }
 
   if (head === 'switch-account') {
-    const rest = argv.slice(1).filter(a => a !== '--resend' && a !== '--json')
+    const hi = argv.indexOf('--harness')
+    const harness = hi > 0 ? argv[hi + 1] : undefined
+    if (hi > 0 && (!harness || harness.startsWith('--'))) return { kind: 'error', message: 'Usage: agentop session switch-account <id|name> [<account-id>] [--harness <harness>] [--resend]' }
+    const rest = argv.slice(1).filter((a, i) => a !== '--resend' && a !== '--json' && a !== '--harness' && !(hi > 0 && i === hi))
     const ref = rest[0]
-    if (!ref) return { kind: 'error', message: 'Usage: agentop session switch-account <id|name> [<account-id>] [--resend]' }
+    if (!ref) return { kind: 'error', message: 'Usage: agentop session switch-account <id|name> [<account-id>] [--harness <harness>] [--resend]' }
     return {
-      kind: 'switch-account', ref, ...(rest[1] ? { accountId: rest[1] } : {}),
+      kind: 'switch-account', ref, ...(rest[1] ? { accountId: rest[1] } : {}), ...(harness ? { harness } : {}),
       ...(argv.includes('--resend') ? { resend: true } : {}), ...(jsonFlag ? { json: true } : {}),
     }
   }

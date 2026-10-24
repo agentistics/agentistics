@@ -39,8 +39,8 @@ afterAll(async () => {
 })
 
 const limited: SwitchInfo = {
-  ok: true, supported: true, current: { id: 'acc_a', label: 'a@x.com' },
-  options: [{ id: 'acc_b', label: 'b@x.com', recommended: true }, { id: 'acc_c', label: 'c@x.com' }],
+  ok: true, supported: true, current: { id: 'acc_a', label: 'a@x.com', harness: 'claude' },
+  options: [{ id: 'acc_b', harness: 'claude', label: 'b@x.com', recommended: true }, { id: 'acc_c', harness: 'claude', label: 'c@x.com' }],
   limit: { resetsAt: Date.now() + 3_600_000, pendingPreview: 'fix the bug' },
 }
 
@@ -114,5 +114,45 @@ describe('AccountLimitBand dismissal', () => {
     getBody = { ...limited, limit: { ...limited.limit!, resetsAt: limited.limit!.resetsAt! + 60_000 } }
     const next = await mount(createElement(mod.AccountLimitBand, { sessionId: 'mX', lang: 'pt', onSwitched: () => {} }))
     expect(band(next.host).classList.contains('visible')).toBe(true)
+  })
+})
+
+describe('AccountSwitchDialog — every harness (v2)', () => {
+  const multi: SwitchInfo = {
+    ...limited,
+    options: [...limited.options, { id: 'acc_k', harness: 'codex', label: 'k@x.com', plan: 'Plus', recommended: true }, { id: 'acc_g', harness: 'gemini', label: 'g@x.com' }],
+  }
+  test('lists harnesses grouped (own first) and says what each means', () => {
+    expect(lib.switchHarnesses(multi)).toEqual(['claude', 'codex', 'gemini'])
+    expect(lib.switchHarnesses({ ...multi, options: multi.options.filter(o => o.harness !== 'claude') })).toEqual(['codex', 'gemini'])
+    expect(lib.isHandoff(multi, 'codex')).toBe(true)
+    expect(lib.isHandoff(multi, 'claude')).toBe(false)
+    expect(lib.noticeTitle({ ...multi, options: [multi.options[2]!] }, true)).toBe('Esta conta bateu o limite — continuar na k@x.com (Codex CLI)?')
+  })
+
+  test('the choice is always shown, the current account is shown and disabled; picking another harness posts it', async () => {
+    posts.length = 0
+    const { root } = await mount(createElement(mod.AccountSwitchDialog, {
+      open: true, sessionId: 'm1', info: { ...multi, options: [multi.options[0]!, multi.options[2]!] }, lang: 'pt', fromLimit: false, onClose: () => {}, onSwitched: () => {},
+    }))
+    const dialog = Array.from(document.querySelectorAll('[data-account-switch]')).at(-1)!
+    expect(dialog.querySelector('[data-account-switch-current]')!.textContent).toContain('Claude Code · a@x.com')
+    // Two Selects (harness, account), even with a single account per harness.
+    expect(dialog.querySelectorAll('button[aria-haspopup="listbox"]').length).toBe(2)
+    expect(dialog.textContent).toContain('Claude Code')
+    await act(async () => { root.unmount() })
+  })
+
+  test('a handoff target changes the words and posts the harness', async () => {
+    posts.length = 0
+    const only = { ...multi, options: [multi.options[2]!] }
+    const { root } = await mount(createElement(mod.AccountSwitchDialog, {
+      open: true, sessionId: 'm1', info: only, lang: 'pt', fromLimit: false, onClose: () => {}, onSwitched: () => {},
+    }))
+    expect(document.body.textContent).toContain('conversa NOVA em Codex')
+    const confirm = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Continuar em Codex CLI')!
+    await act(async () => { confirm.click(); await new Promise(r => setTimeout(r, 20)) })
+    expect(posts).toEqual([{ id: 'm1', accountId: 'acc_k', harness: 'codex', resendPending: false }])
+    await act(async () => { root.unmount() })
   })
 })

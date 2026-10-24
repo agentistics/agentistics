@@ -178,7 +178,7 @@ export function SessionActions({
   }
 
   const shown = inline || open
-  // CONTA.TROCA: offered only when another account of this harness can take it — just above `kill`,
+  // CONTA.TROCA: offered whenever another account (of this or any other harness) can take it — just above `kill`,
   // with the other verbs that act on the session itself.
   const switchItem = canSwitch(switchInfo) ? (
                   <button

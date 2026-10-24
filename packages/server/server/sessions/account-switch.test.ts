@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  claudeProjectDir, decideSwitch, detectLimitInTail, planSwitchCopies, switchOptions, switchSupported, SWITCH_LAYOUT,
+  allSwitchOptions, claudeProjectDir, crossSwitchPrompt, decideCrossSwitch, decideSwitch, detectLimitInTail, planSwitchCopies,
+  switchMessage, switchOptions, switchSupported, SWITCH_LAYOUT,
 } from './account-switch'
 import type { SpawnAccountContext, SpawnAccountRow } from './spawn-account'
 import { HARNESS_ORDER } from '@agentistics/core'
@@ -145,5 +146,80 @@ describe('agentop session switch-account (parse)', () => {
     expect(parseSessionArgs(['switch-account', 'abc', 'acc_b', '--resend'])).toEqual({ kind: 'switch-account', ref: 'abc', accountId: 'acc_b', resend: true })
     expect(parseSessionArgs(['switch-account', 'abc'])).toEqual({ kind: 'switch-account', ref: 'abc' })
     expect(parseSessionArgs(['switch-account'])).toMatchObject({ kind: 'error' })
+  })
+  test('--harness picks another harness, in any position; a bare --harness is a usage error', async () => {
+    const { parseSessionArgs } = await import('./cli-parse')
+    expect(parseSessionArgs(['switch-account', 'abc', 'acc_k', '--harness', 'codex'])).toEqual({ kind: 'switch-account', ref: 'abc', accountId: 'acc_k', harness: 'codex' })
+    expect(parseSessionArgs(['switch-account', '--harness', 'gemini', 'abc'])).toEqual({ kind: 'switch-account', ref: 'abc', harness: 'gemini' })
+    expect(parseSessionArgs(['switch-account', 'abc', '--harness'])).toMatchObject({ kind: 'error' })
+  })
+})
+
+describe('allSwitchOptions (v2: every harness)', () => {
+  const accounts = [
+    ...two, row({ id: 'acc_c', root: '/r/c', firstSeen: 3 }),
+    row({ id: 'acc_k1', harness: 'codex', root: null, firstSeen: 4 }), row({ id: 'acc_k2', harness: 'codex', root: '/r/k2', firstSeen: 5 }),
+    row({ id: 'acc_g', harness: 'gemini', root: null, firstSeen: 6 }),
+    row({ id: 'acc_gout', harness: 'gemini', root: '/r/g', bound: false }),
+    row({ id: 'acc_kimi', harness: 'kimi', root: null }),
+  ]
+  const base = { harness: 'claude' as const, currentAccountId: 'acc_a', agentCaller: false, meta: [{ id: 'acc_g', label: 'g@x', plan: 'Pro' }] }
+  test('own harness first (router pick first), then every startable harness grouped in order; signed-out and uninstalled absent', () => {
+    const out = allSwitchOptions({ ...base, context: ctx(accounts, { claude: 'acc_c', codex: 'acc_k2' }), startable: ['claude', 'codex', 'gemini'] })
+    expect(out.map(o => `${o.harness}:${o.id}`)).toEqual(['claude:acc_c', 'claude:acc_b', 'codex:acc_k2', 'codex:acc_k1', 'gemini:acc_g'])
+    expect(out.filter(o => o.recommended).map(o => o.id)).toEqual(['acc_c', 'acc_k2'])
+    expect(out.find(o => o.id === 'acc_g')).toMatchObject({ label: 'g@x', plan: 'Pro' })
+    expect(out.some(o => o.id === 'acc_a')).toBe(false)
+  })
+  test('a harness that cannot carry its conversation still offers the OTHER harnesses', () => {
+    const out = allSwitchOptions({ ...base, harness: 'gemini', currentAccountId: 'acc_g', context: ctx(accounts), startable: ['claude', 'codex', 'gemini'] })
+    expect(out.map(o => o.harness)).toEqual(['claude', 'claude', 'claude', 'codex', 'codex'])
+  })
+  test('nothing with the flag off', () => {
+    expect(allSwitchOptions({ ...base, context: { enabled: false, accounts }, startable: ['claude', 'codex'] })).toEqual([])
+  })
+})
+
+describe('decideCrossSwitch', () => {
+  const accounts = [...two, row({ id: 'acc_k', harness: 'codex', root: '/r/k' }), row({ id: 'acc_kout', harness: 'codex', root: '/r/x', bound: false })]
+  const o = { harness: 'claude' as const, targetHarness: 'codex' as const, running: true, agentCaller: false, context: ctx(accounts), startable: ['claude', 'codex'] as const }
+  test('an account of the target harness that a spawn would accept', () => {
+    expect(decideCrossSwitch({ ...o, requested: 'acc_k', startable: [...o.startable] })).toEqual({ ok: true, target: { id: 'acc_k', root: '/r/k' } })
+  })
+  test('refusals: not installed, not running, signed out, another harness\'s account, flag off', () => {
+    const st = [...o.startable]
+    expect(decideCrossSwitch({ ...o, requested: 'acc_k', startable: ['claude'] })).toMatchObject({ ok: false, reason: 'harness_unavailable' })
+    expect(decideCrossSwitch({ ...o, requested: 'acc_k', running: false, startable: st })).toMatchObject({ ok: false, reason: 'not_running_here' })
+    expect(decideCrossSwitch({ ...o, requested: 'acc_kout', startable: st })).toMatchObject({ ok: false, reason: 'account_signed_out' })
+    expect(decideCrossSwitch({ ...o, requested: 'acc_b', startable: st })).toMatchObject({ ok: false, reason: 'unknown_account' })
+    expect(decideCrossSwitch({ ...o, requested: 'acc_k', context: { enabled: false, accounts }, startable: st })).toMatchObject({ ok: false, reason: 'accounts_disabled' })
+    expect(switchMessage('harness_unavailable', 'codex', 'pt', () => '')).toContain('Nada foi encerrado')
+  })
+})
+
+describe('crossSwitchPrompt', () => {
+  const turns = [
+    { role: 'user' as const, text: 'Add the export button to the report page' },
+    { role: 'assistant' as const, text: 'Added it.', tools: [{ writes: ['src/Report.tsx'] }, { writes: ['src/Report.tsx', 'src/export.ts'] }] },
+    { role: 'user' as const, text: 'now the tests', composer: true },
+    { role: 'user' as const, text: 'Now write the tests' },
+    { role: 'assistant' as const, text: 'Tests written; one fails on the CSV header.' },
+  ]
+  test('goal, state, last turns, files touched, and the pending message', () => {
+    const p = crossSwitchPrompt({ lang: 'en', fromHarness: 'Claude Code', fromAccount: 'a@x', turns, pending: 'fix the CSV header' })
+    expect(p).toContain('Claude Code (account a@x)')
+    expect(p).toContain('## Goal (first message)\nAdd the export button')
+    expect(p).toContain('## State (last assistant reply)\nTests written; one fails')
+    expect(p).toContain('- Person: Now write the tests')
+    expect(p).not.toContain('now the tests')
+    expect(p).toContain('- src/Report.tsx\n- src/export.ts')
+    expect(p.endsWith('fix the CSV header')).toBe(true)
+  })
+  test('long texts are clipped; an unreadable conversation is said', () => {
+    const big = crossSwitchPrompt({ lang: 'pt', fromHarness: 'Codex', turns: [{ role: 'user', text: 'x'.repeat(5000) }] })
+    expect(big.length).toBeLessThan(2000)
+    expect(big).toContain('Confirme o estado')
+    const none = crossSwitchPrompt({ lang: 'pt', fromHarness: 'Gemini CLI', turns: { unavailable: 'sem leitor' } })
+    expect(none).toContain('não pôde ser lida (sem leitor)')
   })
 })

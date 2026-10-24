@@ -32,6 +32,8 @@ export function spawnSessionFilingRequest(req: {
   harness?: string | undefined
   label?: string | undefined
   handoff?: boolean | undefined
+  /** CONTA.TROCA v2: inherit this row's filing as a hand-off successor would. */
+  switchFrom?: string | undefined
   taskId?: string | undefined
   subtaskId?: string | undefined
   cwd: string
@@ -41,7 +43,7 @@ export function spawnSessionFilingRequest(req: {
     taskRef: req.taskId, subtaskRef: req.subtaskId, cwd: req.cwd,
     harness: req.harness,
     callerSessionId: req.parentVerified || req.handoff ? req.parentSessionId : undefined,
-    ...(req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
+    ...(req.switchFrom ? { handoffOf: req.switchFrom } : req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
   }
 }
 
