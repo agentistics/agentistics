@@ -111,6 +111,8 @@ export interface AdmissionRefusal {
   max: number
   /** RES.1 — room held back for a heavy job, bytes (already out of `fits`). */
   heavyReserveBytes?: number
+  /** Safety floor used by the budget; absent on older measurements. */
+  reservedBytes?: number
   /** RES.1 — the load that refused (`cpu`), or that was measured. */
   load1?: number
   cores?: number
@@ -168,6 +170,7 @@ export function admitSpawn(
     ...(input.heavyReserveBytes ? { heavyReserveBytes: input.heavyReserveBytes } : {}),
     ...(input.load ? { load1: input.load.load1, cores: input.load.cores } : {}),
     ...(input.hog ? { hog: input.hog } : {}),
+    ...(budget.reservedBytes !== undefined ? { reservedBytes: budget.reservedBytes } : {}),
     reason,
     requested,
     fits,
@@ -263,6 +266,9 @@ function admissionFactsCore(r: AdmissionRefusal, lang: AdmissionLang): string {
   const ram = gb(r.availableBytes, lang)
   const load = r.load1 !== undefined && r.cores ? `${r.load1.toFixed(1)} / ${r.cores}` : '?'
   const heavy = r.heavyReserveBytes ? gb(r.heavyReserveBytes, lang) : null
+  const floor = r.reservedBytes !== undefined
+    ? lang === 'pt' ? `piso de segurança de ${gb(r.reservedBytes, lang)}; ` : `${gb(r.reservedBytes, lang)} safety floor; `
+    : ''
   if (r.reason === 'cpu') {
     return lang === 'pt'
       ? `A CPU está saturada (carga ${load} núcleos), então nenhuma sessão nova cabe agora.`
@@ -273,7 +279,7 @@ function admissionFactsCore(r: AdmissionRefusal, lang: AdmissionLang): string {
       const asked = r.requested === 1 ? 'mais uma sessão' : `${r.requested} sessões`
       const fits = r.fits === 0 ? 'não cabe nenhuma' : r.fits === 1 ? 'só cabe 1' : `só cabem ${r.fits}`
       return `Memória insuficiente para iniciar ${asked}: ${fits}. ${ram} de RAM disponível, com ${heavy} reservados para uma tarefa pesada; `
-        + `${costPhrase(r, lang)}, ${r.used} de ${r.max} em uso.`
+        + floor + `${costPhrase(r, lang)}, ${r.used} de ${r.max} em uso.`
     }
     if (r.reason === 'swap') {
       return `O swap está ${swapPercent(r)}% cheio (${swap} usados), então a máquina já está sob pressão — `
@@ -282,13 +288,13 @@ function admissionFactsCore(r: AdmissionRefusal, lang: AdmissionLang): string {
     const asked = r.requested === 1 ? 'mais uma sessão' : `${r.requested} sessões`
     const fits = r.fits === 0 ? 'não cabe nenhuma' : r.fits === 1 ? 'só cabe 1' : `só cabem ${r.fits}`
     return `Memória insuficiente para iniciar ${asked}: ${fits}. ${ram} de RAM disponível, swap ${swap} usado; `
-      + `${costPhrase(r, lang)}, ${r.used} de ${r.max} em uso.`
+      + floor + `${costPhrase(r, lang)}, ${r.used} de ${r.max} em uso.`
   }
   if (r.reason === 'no-room' && heavy) {
     const asked = r.requested === 1 ? 'another session' : `${r.requested} sessions`
     const fits = r.fits === 0 ? 'none fit' : `only ${r.fits} fit${r.fits === 1 ? 's' : ''}`
     return `Not enough memory to start ${asked}: ${fits}. ${ram} of RAM available, with ${heavy} held back for one heavy job; `
-      + `${costPhrase(r, lang)}, ${r.used} of ${r.max} in use.`
+      + floor + `${costPhrase(r, lang)}, ${r.used} of ${r.max} in use.`
   }
   if (r.reason === 'swap') {
     return `Swap is ${swapPercent(r)}% full (${swap} used), so the machine is already under pressure — `
@@ -297,7 +303,7 @@ function admissionFactsCore(r: AdmissionRefusal, lang: AdmissionLang): string {
   const asked = r.requested === 1 ? 'another session' : `${r.requested} sessions`
   const fits = r.fits === 0 ? 'none fit' : `only ${r.fits} fit${r.fits === 1 ? 's' : ''}`
   return `Not enough memory to start ${asked}: ${fits}. ${ram} of RAM available, swap ${swap} used; `
-    + `${costPhrase(r, lang)}, ${r.used} of ${r.max} in use.`
+    + floor + `${costPhrase(r, lang)}, ${r.used} of ${r.max} in use.`
 }
 
 /** What to do about it — different per reason, because the fixes differ. */
