@@ -776,7 +776,8 @@ async function runFleetActionOnce(
         if (!row || row.pid === undefined) return { ok: false, message: s.sessionsRowGone }
         const { endExternalProcess } = await import('./external-end')
         const ok = await endExternalProcess(row.pid)
-        return { ok, message: ok ? cliStrings(lang).sessKilled(req.id) : cliStrings(lang).sessKillUnconfirmed(req.id) }
+        const name = row.title || row.project || req.id
+        return { ok, message: ok ? cliStrings(lang).sessKilled(name) : cliStrings(lang).sessKillUnconfirmed(name) }
       }
       if (!host.killSession) return { ok: false, message: s.sessionsNoHost }
       return await host.killSession(req.id)
