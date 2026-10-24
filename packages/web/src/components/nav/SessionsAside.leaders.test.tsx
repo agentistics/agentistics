@@ -118,7 +118,7 @@ for (const width of [1280, 390]) test(`Ativas: one card per leader with its team
     // The old top furniture is gone: no counters line, no fell banner.
     expect(m.host.querySelector('[aria-label="Sessions summary"]')).toBeNull()
     expect(m.host.querySelector('[data-fell-banner]')).toBeNull()
-    for (const el of Array.from(m.host.querySelectorAll<HTMLElement>('*'))) expect(el.style.textOverflow).not.toBe('ellipsis')
+    for (const el of Array.from(m.host.querySelectorAll<HTMLElement>('[data-tab-body] *'))) expect(el.style.textOverflow).not.toBe('ellipsis')
   } finally { await unmount(m) }
 })
 

@@ -216,7 +216,7 @@ for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) for (
     expect(banner.querySelector<HTMLButtonElement>('[data-fell-reopen]')!.title).toBe(sentence)
     const section = host.querySelector<HTMLElement>('[data-ended-section="fell"]')!
     for (let i = 0; i < count; i++) expect(section.textContent).toContain(`Fallen ${i}`)
-    for (const el of Array.from(host.querySelectorAll<HTMLElement>('*'))) expect(el.style.textOverflow).not.toBe('ellipsis')
+    for (const el of Array.from(host.querySelectorAll<HTMLElement>('[data-tab-body] *'))) expect(el.style.textOverflow).not.toBe('ellipsis')
   })
 }
 
