@@ -79,6 +79,8 @@ const DEFAULT_ROOTS: Record<HarnessId, () => string> = {
   antigravity: () => join(homedir(), '.gemini', 'antigravity-cli'),
   opencode: () => process.env.OPENCODE_DIR ?? join(homedir(), '.local', 'share', 'opencode'),
 }
+/** The login root a harness uses when no account root is set (its own env override, else its home dir). */
+export const defaultHarnessRoot = (harness: HarnessId): string => DEFAULT_ROOTS[harness]()
 export const IDENTITY_PROBES: Record<HarnessId, ((root: string | null) => Promise<AccountIdentity>) | null> = {
   claude: async root => {
     const stdout = await new Promise<string>((resolve, reject) => {

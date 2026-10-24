@@ -77,6 +77,7 @@ import type {
   ProjectOption,
   ProjectSearchResult,
   ResumeSessionRequest,
+  SwitchAccountRequest,
   StartOption,
   BootOption,
   TabId,
@@ -2941,7 +2942,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     // agentop never ran has no record and keeps the default root, as before.
     const { newestRowOfConversation } = await import('./sessions/spawn-account-io')
     const recorded = previous ?? newestRowOfConversation(await readRegistry(), req.sessionId, harness)
-    const recordedAccountId = recorded?.accountId
+    // CONTA.TROCA — a switch names the account it copied the conversation into; nothing else may.
+    const recordedAccountId = req.switchToAccount ?? recorded?.accountId
     if (recordedAccountId || req.callerVerified) {
       const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
       const { spawnAccountMessage } = await import('./sessions/spawn-account')
@@ -2965,7 +2967,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       resumeId: req.sessionId,
       ...(req.prompt ? { prompt: req.prompt } : {}),
       ...(req.label ? { label: req.label } : {}),
-      ...(previous ? { inherit: previous } : recordedAccountId ? { accountId: recordedAccountId } : {}),
+      ...(previous
+        ? { inherit: req.switchToAccount ? { ...previous, accountId: req.switchToAccount } : previous }
+        : recordedAccountId ? { accountId: recordedAccountId } : {}),
       attach: req.attach,
       ...(previous?.task ? { task: previous.task } : {}),
       // A TAKEOVER just ENDED the process this spawn replaces (`endProcess` above) — the net memory
@@ -4135,6 +4139,17 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         return { ...out, ...(out.ok ? { id: req.sessionId } : {}) }
       }
       return withResumeLock(req.sessionId, () => resumeSessionLocked(req))
+    },
+
+    async switchSessionAccount(req: SwitchAccountRequest) {
+      const { switchSessionAccountImpl } = await import('./sessions/account-switch-host')
+      const backend = await resolveBackend()
+      return switchSessionAccountImpl(req, {
+        lang: lang === 'pt' ? 'pt' : 'en',
+        backend,
+        resume: r => resumeSessionLocked(r),
+        withLock: (conv, fn) => withResumeLock(conv, fn),
+      })
     },
 
     /*
