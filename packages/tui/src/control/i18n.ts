@@ -475,6 +475,9 @@ export interface ControlStrings {
   sessionsNativeNote: string
   /** The two native-only verbs, and why they wait for the session to end. */
   sessionsArchive: string
+  sessionsForget: string
+  /** Why a live managed row cannot leave the list. */
+  sessionsForgetLive: string
   sessionsDelete: string
   sessionsEndFirst: string
   /** Why Reopen is dimmed when no harness-specific explanation exists. Deliberately cause-neutral: a missing link, a
@@ -1248,6 +1251,8 @@ const EN: ControlStrings = {
   sessionsExternalNote: 'started outside agentop — listed, but it cannot be attached or stopped here.',
   sessionsNativeNote: 'a native Agentistics session — talk to it in its own chat; from here it can be renamed, ended or reopened.',
   sessionsArchive: 'Archive',
+  sessionsForget: 'Remove from list',
+  sessionsForgetLive: 'A live session stays on the list — end it first.',
   sessionsDelete: 'Delete',
   sessionsEndFirst: 'End the session first.',
   sessionsNoReopenTarget: 'This session cannot be reopened from here: no resumable conversation was found for it.',
@@ -1863,6 +1868,8 @@ const PT: ControlStrings = {
   sessionsExternalNote: 'iniciada fora do agentop — listada, mas não dá para anexar nem parar por aqui.',
   sessionsNativeNote: 'uma sessão nativa do Agentistics — converse com ela no próprio chat; daqui dá para renomear, encerrar ou reabrir.',
   sessionsArchive: 'Arquivar',
+  sessionsForget: 'Remover da lista',
+  sessionsForgetLive: 'Uma sessão viva fica na lista — encerre-a primeiro.',
   sessionsDelete: 'Apagar',
   sessionsEndFirst: 'Encerre a sessão antes.',
   sessionsNoReopenTarget: 'Não dá para reabrir esta sessão daqui: nenhuma conversa retomável foi encontrada para ela.',

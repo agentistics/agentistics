@@ -697,6 +697,8 @@ export function SessionsAside({
     }
   }
 
+  const [cleanupAsk, setCleanupAsk] = useState<{ id: string; action: string } | null>(null)
+
   const pickMenuAction = (action: string) => {
     if (!menu) return
     const { id } = menu
@@ -767,6 +769,9 @@ export function SessionsAside({
       return
     }
     if (!act) return
+    if (action === 'forget' || (action === 'kill' && id.startsWith('external:'))) {
+      setCleanupAsk({ id, action }); setMenu(null); return
+    }
     if (action === 'resume') { void reopenRow(id); return }
     void act({ id, action }).then(out => setNotice(out.message))
   }
@@ -2508,6 +2513,21 @@ export function SessionsAside({
             .finally(() => setGroupBusy(false))
         }}
         onCancel={() => setBroadcastReopenAsk(null)}
+      />
+      <ConfirmModal
+        open={cleanupAsk !== null}
+        title={cleanupAsk?.action === 'forget' ? (pt ? 'Remover da lista?' : 'Remove from list?') : (pt ? 'Encerrar sessão?' : 'End session?')}
+        message={cleanupAsk?.action === 'forget'
+          ? (pt ? 'A conversa será preservada. Se o processo estiver rodando, ele continuará.' : 'The conversation is preserved. A running process will keep running.')
+          : (pt ? 'O processo desta sessão e seus filhos serão encerrados.' : 'This session’s process and its children will be stopped.')}
+        confirmLabel={cleanupAsk?.action === 'forget' ? (pt ? 'Remover da lista' : 'Remove from list') : (pt ? 'Encerrar' : 'End')}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        onConfirm={() => {
+          const ask = cleanupAsk
+          setCleanupAsk(null)
+          if (ask && act) void act(ask).then(out => { setNotice(out.message); if (out.ok) nudgeFleet() })
+        }}
+        onCancel={() => setCleanupAsk(null)}
       />
       <ConfirmModal
         open={deletingGroup !== null}
