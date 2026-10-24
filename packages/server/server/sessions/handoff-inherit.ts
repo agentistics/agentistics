@@ -44,7 +44,10 @@ export function nextHandoffSeq(parentSeq: number | undefined): number {
   return (typeof parentSeq === 'number' && Number.isInteger(parentSeq) && parentSeq >= 1 ? parentSeq : 1) + 1
 }
 
-/** The successor takes the predecessor's place in the pinned set (same position). */
+/**
+ * The successor joins the pinned set right BEFORE the predecessor (its position). The predecessor is
+ * NEVER unpinned here: a pinned session stays pinned even after it ends — only the owner unpins.
+ */
 export function handoffPinPatch(prefs: Preferences, parent: Ref, child: Ref): Partial<Preferences> | undefined {
   const pinned = prefs.pinnedSessions
   if (!Array.isArray(pinned)) return undefined
@@ -54,7 +57,7 @@ export function handoffPinPatch(prefs: Preferences, parent: Ref, child: Ref): Pa
   const childKey = sessionIdentityKey(child)
   if (pinned.includes(childKey)) return undefined
   const next = [...pinned]
-  next[at] = childKey
+  next.splice(at, 0, childKey)
   return { pinnedSessions: next }
 }
 

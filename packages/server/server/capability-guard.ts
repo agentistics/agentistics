@@ -108,6 +108,7 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/session-notify', 'localShell'],
   ['/api/session-message', 'localShell'],
   ['/api/session-roles', 'localShell'],
+  ['/api/session-team', 'localShell'],
   ['/api/away', 'localShell'],
   // The leaders' check-in agenda: resolves sessions against THIS machine's fleet and types the
   // check-in prompt into them, so it rides the same capability as the session routes above.

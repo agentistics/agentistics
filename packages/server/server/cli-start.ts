@@ -136,6 +136,7 @@ import { answerStructured, reopenOrigin, spawnOriginOf, structuredIntentOf } fro
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { applyAccountToPlan } from './sessions/account-plan'
 import { prependContext } from './sessions/agentistics-context'
+import { rootIfLeader } from './sessions/team-links'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
@@ -2136,7 +2137,8 @@ export async function spawnManaged(req: {
       ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker', undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true))
       : undefined
   // The parent's conversation id, read from the registry at spawn: stable across the parent's reopens.
-  const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId) : {}
+  // A hand-off names its predecessor exactly; every other spawn follows a predecessor's hand-off to its successor.
+  const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId, { followHandoff: !req.handoff }) : {}
   const storedContextRole = role
     ? { role }
     : await resolveContextRole(id, req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId)
@@ -2203,7 +2205,13 @@ export async function spawnManaged(req: {
   // <id>" for seconds — the placeholder `control-session.ts` keeps for sessions started OUTSIDE
   // agentop. Born linked — see `born-link.ts` for the window a patch-afterwards left open.
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
-  await addSession(await spawnRow({ id, spawnedAt, req: { ...req, ...(mode ? { mode } : {}), ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}) }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }))
+  // TEAM LINK (`team-links.ts`): a leader — explicit, a hand-off successor, a reopened leader — is born
+  // at the root; everyone else is the (current) caller's child.
+  await addSession(rootIfLeader(await spawnRow({ id, spawnedAt, req: {
+    ...req, ...(mode ? { mode } : {}),
+    ...(parentLink.parentSessionId ? { parentSessionId: parentLink.parentSessionId } : {}),
+    ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+  }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }), req.handoff ? 'leader' : storedContextRole.role))
   // A worker must be filed before its process can receive the first prompt.
   if (req.contextTaskId) {
     const { configureSpawn } = await import('./sessions/spawn-configuration')
@@ -2278,7 +2286,8 @@ export async function spawnManaged(req: {
   }
   if (storedContextRole.role) await markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)
   if (handoffParentRow) {
-    await import('./sessions/handoff-relay-io').then(m => m.recordHandoffLink(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
+    // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
+    await import('./sessions/team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
   }
 
   // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a

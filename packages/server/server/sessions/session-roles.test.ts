@@ -433,3 +433,14 @@ describe('ORQ.FORA live leader uniqueness warning', () => {
     expect(result.ok && result.warning).toBeUndefined()
   })
 })
+
+describe('LIDER.ROTA: a session that becomes a leader leaves its parent\'s team', () => {
+  test('setting leader (own or by the person) calls leaveTeam; worker does not', async () => {
+    const left: string[] = []
+    const { deps } = fake([{ id: 'w', title: 'Side' }, { id: 'x', title: 'X' }], { leaveTeam: async id => { left.push(id); return true } })
+    expect((await roleOp('w', { role: 'leader' }, deps)).ok).toBe(true)
+    expect((await roleOp(null, { ref: 'x', role: 'worker' }, deps)).ok).toBe(true)
+    expect((await roleOp(null, { ref: 'x', role: 'leader' }, deps)).ok).toBe(true)
+    expect(left).toEqual(['w', 'x'])
+  })
+})
