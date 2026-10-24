@@ -82,21 +82,40 @@ function armAwayNotices(): void {
   noticeTimer = setTimeout(() => { noticeTimer = undefined; void flushAwayNotices(Date.now()) }, Math.max(0, at - Date.now()))
   noticeTimer.unref?.()
 }
-export async function flushAwayNotices(now: number): Promise<number> {
-  if (flushing) { await flushing; return flushAwayNotices(now) }
+/**
+ * Bounds ONE session's delivery inside a flush. Above `PROMPT_ACK_MS` (4 s) so a slow-but-alive pane
+ * is never cut off; a send that outlives it (a dead relay, a hung fleet read) is retried after quiet.
+ */
+export const AWAY_SEND_TIMEOUT_MS = 8_000
+type AwaySent = { ok: boolean; gone?: boolean }
+function sendBounded(job: PendingAway, text: string, timeoutMs: number): Promise<AwaySent> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<AwaySent>(resolve => { timer = setTimeout(() => resolve({ ok: false }), timeoutMs) })
+  return Promise.race([job.send(text).catch((): AwaySent => ({ ok: false })), timeout]).finally(() => clearTimeout(timer))
+}
+/**
+ * Delivers every due notice IN PARALLEL, each under its own deadline: one dead session must not
+ * delay — or, with an unbounded send, block forever — the notices of every session queued after it.
+ */
+export async function flushAwayNotices(now: number, timeoutMs = AWAY_SEND_TIMEOUT_MS): Promise<number> {
+  if (flushing) { await flushing; return flushAwayNotices(now, timeoutMs) }
   flushing = (async () => {
-    let sentCount = 0
+    const due: [string, PendingAway, string][] = []
     for (const [id, job] of pendingAway) {
       const told = lastTold.get(id)
       if (now < job.quietAt || (told && now - told.at < AWAY_COOLDOWN_MS)) continue
       pendingAway.delete(id)
       const notice = awayLiveNotice(told ? told.state : job.before, job.after, false, job.role, now, { planLimitsInBriefing: job.planLimits })
       if (!notice) continue
-      const text = job.perSession ? forThisSession(notice) : notice
-      const sent: { ok: boolean; gone?: boolean } = await job.send(text).catch(() => ({ ok: false }))
+      due.push([id, job, job.perSession ? forThisSession(notice) : notice])
+    }
+    const results = await Promise.all(due.map(([, job, text]) => sendBounded(job, text, timeoutMs)))
+    let sentCount = 0
+    results.forEach((sent, i) => {
+      const [id, job] = due[i]!
       if (sent.ok) { lastTold.set(id, { state: job.after, at: now }); sentCount++ }
       else if (!sent.gone && !pendingAway.has(id)) pendingAway.set(id, { ...job, quietAt: now + AWAY_QUIET_MS })
-    }
+    })
     return sentCount
   })()
   try { return await flushing } finally { flushing = undefined; armAwayNotices() }
