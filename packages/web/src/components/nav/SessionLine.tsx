@@ -144,9 +144,16 @@ export function SessionLine({
             {title}
           </span>
           {summary && (
-            <span data-team-summary style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{summary}</span>
+            <span data-team-summary style={{ flexBasis: '100%', minWidth: 0, fontSize: 11, lineHeight: 1.35, color: 'var(--text-tertiary)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{summary}</span>
           )}
         </span>
+        {/* Muted sits with the title, not in the trailing columns, so time and dot keep their x. */}
+        {muted && (
+          <span role="img" aria-label={mutedTooltip(pt)} title={mutedTooltip(pt)}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 14, color: 'var(--text-tertiary)' }}>
+            <BellOff size={12} />
+          </span>
+        )}
         {reopening && (
           <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
             <AgentisticsLoader size={12} label={reopeningLabel(pt)} />
@@ -170,12 +177,6 @@ export function SessionLine({
         >
           <RotateCcw size={13} />
         </IconButton>
-      )}
-      {muted && (
-        <span role="img" aria-label={mutedTooltip(pt)} title={mutedTooltip(pt)}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 16, color: 'var(--text-tertiary)' }}>
-          <BellOff size={12} />
-        </span>
       )}
       {goTo && (
         <button type="button"

@@ -1873,7 +1873,8 @@ export function SessionsAside({
                 padding: '0 6px', fontSize: 12, color: 'var(--text-tertiary)',
               }}>
                 <RotateCcw size={13} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} aria-hidden />
-                <span style={{ flex: 1, minWidth: 0 }}>{pt ? `${fellCount} ${fellCount === 1 ? 'caiu' : 'caíram'}` : `${fellCount} fell`}</span>
+                {/* On a phone the actions stay beside the words: the right edge belongs to the floating Nay button. */}
+                <span style={{ flex: tap ? '0 1 auto' : 1, minWidth: 0 }}>{pt ? `${fellCount} ${fellCount === 1 ? 'caiu' : 'caíram'}` : `${fellCount} fell`}</span>
                 <button type="button" onClick={() => setTab('ended')} style={{ ...linkButton, minHeight: tap, fontWeight: 500 }}>
                   {pt ? 'Ver' : 'See'}
                 </button>
@@ -2645,6 +2646,8 @@ function EmptyReason({
           ? (pt ? 'Nenhum líder ativo' : 'No active leaders')
         : filterNarrowed
           ? (pt ? 'Nenhuma sessão corresponde aos filtros no topo.' : 'No session matches the filters above.')
+          : searching
+            ? (pt ? 'Nenhuma sessão corresponde à busca.' : 'No session matches that search.')
           : withheld > 0 && withheldInTab
             ? (pt
                 ? `Nada rodando agora. ${withheld} ${withheld === 1 ? 'conversa está' : 'conversas estão'} em Encerradas.`
