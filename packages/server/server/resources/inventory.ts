@@ -67,6 +67,11 @@ export type ProcessKind =
   | 'helper'   // registered through the helper API
   | 'heavy'    // a job under `agentop heavy`
 
+/** These IO forwarders replace their logic workers automatically, including while requests drain. */
+export function autoSwaps(p: Pick<AgentopProcess, 'kind' | 'label'>): boolean {
+  return p.kind === 'mcp' || (p.kind === 'cli' && p.label === 'agentop __structured-relay')
+}
+
 export interface ProcessOwner {
   /** `session` — an assistant session's process (CLAUDE_PID); `pid` — a helper's declared owner pid. */
   kind: 'session' | 'pid'
@@ -135,6 +140,7 @@ export function classifyProcess(e: ProcEntry, helperPids: ReadonlyMap<number, st
   if (!isAgentop && !exeBase.startsWith('agentop')) return null
   const label = `agentop${sub ? ` ${sub}` : ''}`
   if (sub === 'mcp') return { kind: 'mcp', label }
+  if (sub === '__relay-worker') return { kind: 'cli', label: 'agentop __structured-relay' }
   if (sub === 'server') return { kind: 'server', label }
   if (sub === 'watch') return { kind: 'watch', label }
   if (sub === undefined || COCKPIT_COMMANDS.has(sub)) return { kind: 'cockpit', label: sub ? label : 'agentop' }
@@ -231,7 +237,7 @@ export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): Age
       usedBytes: e.rssBytes === null ? null : e.rssBytes + (e.swapBytes ?? 0),
       cpuPercent: e.cpuPercent,
       ageSec: e.ageSec,
-      stale: e.exe !== null && e.exe.endsWith(' (deleted)'),
+      stale: !autoSwaps(c) && e.exe !== null && e.exe.endsWith(' (deleted)'),
       orphan: e.ppid === 1,
       owner,
       self: e.pid === ctx.selfPid,

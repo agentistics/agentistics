@@ -28,6 +28,12 @@ if (command === 'run') {
   process.exit(await runRun(args))
 }
 
+if (command === '__relay-worker') {
+  const { runRelayWorker } = await import('../server/sessions/relay-worker.ts')
+  runRelayWorker()
+  await new Promise<never>(() => {})
+}
+
 // F2.0b — the relay that holds a structured session's child so it outlives `agentop server`
 // (`server/sessions/structured-relay.ts`). Internal: started detached by the server, never typed.
 // First, before anything writes a file or prints: it is its own long-lived process.
@@ -68,7 +74,12 @@ if (command === '__structured-relay') {
  * below, whose default for an unknown command prints the help to stdout.
  */
 if (command === 'mcp') {
-  await import('../../mcp/agentistics-mcp.ts')
+  if (process.env.AGENTOP_MCP_WORKER === '1') await import('../../mcp/agentistics-mcp.ts')
+  else {
+    await import('../../mcp/orphan-guard-boot.ts')
+    const { runMcpForwarder } = await import('../server/mcp-forwarder.ts')
+    runMcpForwarder()
+  }
   await new Promise<never>(() => {})
 }
 

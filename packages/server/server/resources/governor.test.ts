@@ -49,7 +49,13 @@ describe('planGovernor — kills', () => {
     const i = inv([entry({ pid: 9, ppid: 500, argv: ['agentop', 'mcp'], exe: '/u/agentop.bak (deleted)' })])
     const plan = planGovernor({ inventory: i, helpers: [], nowMs: 0 })
     expect(plan.kills).toEqual([])
-    expect(plan.alerts[0]).toMatchObject({ reason: 'stale-binary', fix: { action: 'reconnect-session' } })
+    expect(plan.alerts).toEqual([])
+  })
+  test('old binary notices exclude only MCP and relay keepers/workers', () => {
+    const commands = ['mcp', '__structured-relay', '__relay-worker', 'server', 'watch', 'start', 'session']
+    const inventory = inv(commands.map((sub, n) => entry({ pid: n + 10, argv: ['agentop', sub], exe: '/u/agentop (deleted)' })))
+    expect(inventory.map(p => p.stale)).toEqual([false, false, false, true, true, true, true])
+    expect(planGovernor({ inventory, helpers: [], nowMs: 0 }).alerts.map(a => a.pid)).toEqual([13, 14, 15, 16])
   })
   test('a test leftover is killed ONLY when its recorded owner is gone; the main HOME never is', () => {
     const iso = { HOME: '/tmp/tuicheck.x', CLAUDE_PID: '700' }

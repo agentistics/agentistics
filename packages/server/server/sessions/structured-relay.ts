@@ -27,7 +27,8 @@ import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type Socket } from 'node:net'
 import { join } from 'node:path'
-import { isInRecord, parseJsonl, type InRecord } from './structured-replay'
+import { IdleSwap, JsonWorker, executableVersion, runningExecutableVersion, helperCommand, swapLog } from '../helper-hotswap'
+import type { RelayDecision } from './relay-worker'
 
 export const RELAY_FILES = {
   launch: 'launch.json',
@@ -74,7 +75,7 @@ export function drainTerminatedRelay(end: number, d: {
   tick()
 }
 
-export function runRelay(dir: string): void {
+export function runRelay(dir: string, pollMs = 5000): void {
   const spec = JSON.parse(readFileSync(join(dir, RELAY_FILES.launch), 'utf8')) as RelayLaunchSpec
   const outPath = join(dir, RELAY_FILES.out)
   const inPath = join(dir, RELAY_FILES.in)
@@ -91,6 +92,33 @@ export function runRelay(dir: string): void {
   // relay terminate the whole tree, rather than leaving a helper behind when the CLI ignores TERM.
   const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, detached: true, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
 
+  const makeWorker = (): JsonWorker => new JsonWorker(helperCommand('__relay-worker'))
+  const firstWorker = makeWorker()
+  const ready = firstWorker.request('ready').then(response => {
+    if (response.error || response.result !== true) throw new Error('relay worker not ready')
+    return true
+  }).catch(error => { swapLog(error); endChild(); return false })
+  const swap = new IdleSwap(firstWorker, runningExecutableVersion(), {
+    version: executableVersion,
+    prepare: async () => {
+      const worker = makeWorker()
+      try {
+        const response = await worker.request('ready')
+        if (response.error || response.result !== true) throw new Error('relay worker not ready')
+        return worker
+      } catch (error) { worker.close(); throw error }
+    },
+    close: worker => worker.close(), usable: worker => worker.healthy, log: swapLog,
+  })
+  const swapTimer = setInterval(() => { void swap.check() }, pollMs)
+  process.on('exit', () => { clearInterval(swapTimer); swap.close() })
+  // Serialize protocol decisions through their effects. The worker cannot change while an input
+  // write/replay is in flight; journal writes remain with the keeper and happen exactly once.
+  let queue = Promise.resolve()
+  const enqueue = (work: () => Promise<void>): void => {
+    queue = queue.then(work).catch(() => { console.error('[agentop relay] protocol worker failed'); endChild() })
+  }
+  let replayOutput: unknown[] | null = null
   let client: Socket | null = null
   let writer: Socket | null = null
   const send = (s: Socket | null, msg: unknown): void => { if (s && !s.destroyed) s.write(`${JSON.stringify(msg)}\n`) }
@@ -99,7 +127,9 @@ export function runRelay(dir: string): void {
   const record = (line: string): void => {
     const t = Date.now()
     appendFileSync(outPath, `${JSON.stringify({ t, l: line })}\n`)
-    send(client, { o: line, t })
+    const message = { o: line, t }
+    send(client, message)
+    replayOutput?.push(message)
   }
   child.stdout!.setEncoding('utf8')
   child.stdout!.on('data', (chunk: string) => {
@@ -126,7 +156,9 @@ export function runRelay(dir: string): void {
     client?.end()
     server.close()
     try { unlinkSync(sockPath) } catch { /* already gone */ }
-    if (!termAt) setTimeout(() => process.exit(0), 200).unref?.()
+    // A child may exit while hello is awaiting its worker. Let that replay send its buffered tail
+    // and exit record before leaving; the former synchronous replay could not hit this race.
+    if (!termAt) void queue.finally(() => { setTimeout(() => process.exit(0), 200).unref?.() })
   }
   child.stdout!.on('close', () => { stdoutClosed = true; finishOutput() })
 
@@ -162,6 +194,8 @@ export function runRelay(dir: string): void {
   }
 
   const server = createServer(sock => {
+    // A previous hello may still be waiting for its worker; it owns a socket even before `client`.
+    if (writer && writer !== client && !writer.destroyed) { send(writer, { bye: 'replaced' }); writer.end() }
     if (client && !client.destroyed) { send(client, { bye: 'replaced' }); client.end() }
     client = null
     writer = sock
@@ -177,38 +211,39 @@ export function runRelay(dir: string): void {
         buf = buf.slice(nl + 1)
         let msg: Record<string, unknown>
         try { msg = JSON.parse(line) as Record<string, unknown> } catch { continue }
-        if (!hello && msg.hello && typeof msg.hello === 'object') {
-          hello = true
-          const from = Math.max(0, Number((msg.hello as { from?: unknown }).from) || 0)
-          // Synchronous read and registration in ONE tick: a line recorded after this read is sent
-          // live, one recorded before it is in the file — never both, never neither.
-          const recs = readFileSync(outPath, 'utf8').split('\n').filter(Boolean)
-          for (const r of recs.slice(from)) {
-            try { const { t, l } = JSON.parse(r) as { t: number; l: string }; send(sock, { o: l, t }) } catch { /* a torn record cannot exist: appends are whole */ }
-          }
-          client = sock
-          if (ended) { send(sock, { x: child.exitCode }); sock.end() }
-          continue
-        }
-        // A replaced client's buffered input must not race the new driver's replay.
-        if (writer !== sock) continue
-        if (typeof msg.w === 'string') {
-          if (typeof msg.replayAt === 'number') {
-            const written = parseJsonl<InRecord>(readFileSync(inPath, 'utf8'), isInRecord).map(r => r.w).join('')
-            const at = msg.replayAt
-            if (!Number.isSafeInteger(at) || at < 0 || at > written.length
-              || (at < written.length && !written.startsWith(msg.w, at))) {
-              send(sock, { replayError: 'the re-created driver diverged from the relay input record' })
-              continue
+        enqueue(async () => {
+          if (!await ready) return
+          // A replaced client's buffered input must not race the new driver's replay.
+          if (writer !== sock) return
+          if (msg.k) { endChild(); return }
+          const isHello = !hello && msg.hello && typeof msg.hello === 'object'
+          if (!isHello && typeof msg.w !== 'string') return
+          const leave = swap.enter()
+          try {
+            // Snapshot and collect live output in the same tick, then replay it before attaching.
+            // A worker round trip must not create a gap or duplicate at the durable/live boundary.
+            const out = isHello ? readFileSync(outPath, 'utf8') : undefined
+            if (isHello) replayOutput = []
+            const response = await swap.current.request('decide', { dir, message: msg, out })
+            if (response.error) throw new Error('relay worker rejected protocol decision')
+            if (writer !== sock || sock.destroyed) return
+            const decision = response.result as RelayDecision
+            if (decision.write !== undefined) {
+              if (child.stdin && !child.stdin.destroyed) child.stdin.write(decision.write)
+              if (decision.record) appendFileSync(inPath, `${JSON.stringify({ t: Date.now(), w: decision.write })}\n`)
             }
-            if (at < written.length) { send(sock, { replayAck: true }); continue } // already delivered
+            for (const message of decision.messages) send(sock, message)
+            if (isHello) {
+              hello = true
+              for (const message of replayOutput ?? []) send(sock, message)
+              client = sock
+              if (ended) { send(sock, { x: child.exitCode }); sock.end() }
+            }
+          } finally {
+            if (isHello) replayOutput = null
+            leave()
           }
-          if (child.stdin && !child.stdin.destroyed) child.stdin.write(msg.w)
-          appendFileSync(inPath, `${JSON.stringify({ t: Date.now(), w: msg.w })}\n`)
-          if (typeof msg.replayAt === 'number') send(sock, { replayAck: true })
-          continue
-        }
-        if (msg.k) endChild()
+        })
       }
     })
     sock.on('close', () => { if (client === sock) client = null })
