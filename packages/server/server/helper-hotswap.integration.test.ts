@@ -163,8 +163,15 @@ test('compiled MCP cancelled unanswered request does not prevent a swap', async 
     await until(() => existsSync(join(dir, 'request-started')))
     install(dir, 'v2'); await until(() => existsSync(join(dir, 'initialized-v2')))
     c.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 2 } })
-    c.send({ jsonrpc: '2.0', id: 3, method: 'tools/list' })
-    expect((await c.wait(m => m.id === 3)).result.version).toBe('v2')
+    // The swap activates at the next idle point, so a call sent right after the cancel may still be
+    // answered by v1. Ask until v2 answers: the cancelled request must not hold the swap back.
+    let version = ''
+    for (let id = 3; version !== 'v2' && id < 200; id++) {
+      c.send({ jsonrpc: '2.0', id, method: 'tools/list' })
+      version = (await c.wait(m => m.id === id)).result.version
+      if (version !== 'v2') await sleep(25)
+    }
+    expect(version).toBe('v2')
   } finally { child.kill(); await new Promise<void>(resolve => child.once('close', () => resolve())) }
 }, 10_000)
 
