@@ -23,15 +23,22 @@ const OPENAI = 'developers.openai.com/api/docs/pricing'
 
 /** One entry per `MODEL_PRICING` key, transcribed from the comments beside each row. */
 export const PRICE_PROVENANCE: Record<string, PriceProvenance> = {
+  'gemini-3.8-flash': { source: GOOGLE, verifiedAt: '2026-10-20' },
+  'gpt-6.1-sol': { source: OPENAI, verifiedAt: '2026-10-20' },
+  'gpt-6-astra': { source: OPENAI, verifiedAt: '2026-10-20' },
+  'gpt-6-luna': { source: OPENAI, verifiedAt: '2026-10-20' },
   'claude-fable-5': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
+  'claude-fable-5-1': { source: ANTHROPIC, verifiedAt: '2026-10-20' },
   'claude-mythos-5': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
   'claude-opus-5': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
   'claude-opus-5-5': { source: ANTHROPIC, verifiedAt: '2026-09-25' },
   'claude-opus-4-8': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
   'claude-opus-4-7': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
   'claude-sonnet-5': { source: ANTHROPIC, verifiedAt: '2026-09-25' },
+  'claude-sonnet-5-5': { source: ANTHROPIC, verifiedAt: '2026-10-20' },
   'claude-opus-4-6': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
   'claude-sonnet-4-6': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
+  'claude-haiku-5-5': { source: ANTHROPIC, verifiedAt: '2026-10-20' },
   'claude-haiku-4-5-20251001': { source: ANTHROPIC, verifiedAt: '2026-07-27' },
   // Legacy rows: the same page, but no check date was ever written beside them.
   'claude-opus-4-5-20251101': { source: ANTHROPIC, verifiedAt: null },

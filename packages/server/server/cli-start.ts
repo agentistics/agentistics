@@ -164,10 +164,11 @@ import { approvalFor, choiceKey, fieldIsOpen, isFreeTextOption, markerReadOption
 // Carrying a rename through to the harness. Shared with `agentop session rename` — one gesture, one
 // implementation, for the reason `task-reopen.ts` exists.
 import { renameInHarness, renameMessage } from './sessions/rename'
-import { needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-choice'
+import { formMoved, needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-choice'
 import { answerFollowUp } from './sessions/answer-followup'
 import { liveTranscriptDeps, runTranscriptSearch } from './sessions/transcript-run'
 import { rulesFor } from './sessions/attention-rules'
+import { dialogOnScreen } from './sessions/attention'
 import { classifySendFailure, promptIsBlocked } from './sessions/prompt-guard'
 import { planCrashGroup, planFellOffer } from './sessions/crash-group'
 import { selectFell } from './sessions/fell-selection'
@@ -226,6 +227,26 @@ const SEND_CAPTURE_LINES = 60
  * did move gets reported as stuck.
  */
 const ANSWER_SETTLE_MS = 240
+
+/**
+ * LEAVE an open free-text field before pressing anything into a form. On claude's multi-select the
+ * write-your-own box keeps its field open while the cursor sits on it, so the next digit was TYPED
+ * into it (`Purple22`) and `Right` moved the caret instead of the form — the card claimed the step
+ * and the dialog stayed (live QA 2026-10-24). One `Up` moves off it and keeps the typed text ticked
+ * (claude 2.1.309, driven 2026-10-24). Returns the frame after, or null when the field is still
+ * open (then nothing more is pressed).
+ */
+export async function leaveField(backend: Pick<SessionBackend, 'sendKey' | 'capture'>, id: string, harness: HarnessId, frame: string[]): Promise<string[] | null> {
+  if (fieldIsOpen(harness, frame) !== true) return frame
+  const up = approvalFor(harness)?.move?.up
+  if (!up || !await backend.sendKey(id, up)) return null
+  await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+  const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+  return fieldIsOpen(harness, after) === true ? null : after
+}
+
+/** How long a step key may take to redraw the form before the step is reported as stuck. */
+const STEP_SETTLE_MS = 1200
 
 
 // ANSI, for the output this module still writes to the REAL terminal: the suspended commands,
@@ -3858,7 +3879,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // Never on an open dialog: Esc Esc there answers the dialog, it does not open the menu.
       const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
       const rules = rulesFor(managed.harness)
-      if (rules && rules.approval.some(re => re.test(frame.join('\n')))) {
+      if (rules && dialogOnScreen(rules, frame)) {
         return { ok: false, message: s.sessPromptBlocked }
       }
       const out = await backend.rewindTo(id, prompt, occurrence)
@@ -4392,7 +4413,46 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * a verified way to select the one they picked. A snapshot is up to five seconds old, and an
      * answer sent to a question that has changed underneath it is both wrong and silent.
      */
-    async answerSession(id: string, choice?: number, text?: string): Promise<ActionResult> {
+    /**
+     * Move a multi-question form to its next or previous question without answering the current
+     * one — the only way off a MULTI-SELECT step. Re-reads the screen first, like `answerSession`:
+     * the keys are pressed only into a form that is on screen NOW, on a harness whose form was
+     * driven (`ApprovalSpec.steps`).
+     */
+    async stepDialog(id: string, dir: 'next' | 'back'): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      const blocked = await backend.unavailable()
+      if (blocked) return { ok: false, message: blocked }
+      const managed = (await readRegistry()).find(m => m.id === id)
+      if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      if (backend.attentionOf?.(id) !== undefined) return { ok: false, message: s.sessStepUnknown(managed.harness) }
+      const spec = approvalFor(managed.harness)
+      if (!spec?.steps) return { ok: false, message: s.sessStepUnknown(managed.harness) }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      const rules = rulesFor(managed.harness)
+      const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+      if (!rules || !dialogOnScreen(rules, frame)) return { ok: false, message: s.sessNotAsking }
+      const form = readDialog(frame, markerReadOptions(managed.harness)).form
+      if (!form?.steps && !form?.position) return { ok: false, message: s.sessNotAForm }
+      const ready = await leaveField(backend, id, managed.harness, frame)
+      if (!ready) return { ok: false, message: s.sessFieldStuck }
+      if (!await backend.sendKey(id, dir === 'next' ? spec.steps.next : spec.steps.back)) return { ok: false, message: s.sessSendFailed(id) }
+      // "Moved" is said only when the form MOVED: the question or its options changed. A key that
+      // landed somewhere else (a field, a caret) is reported, never claimed. Waiting for the redraw
+      // here is also what lets the poll this act kicks see the next question at once.
+      const before = ready.join('\n')
+      for (let waited = 0; waited < STEP_SETTLE_MS; waited += ANSWER_SETTLE_MS) {
+        await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+        const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+        if (formMoved(ready, after)) return { ok: true, message: s.sessStepped(dir) }
+        if (after.join('\n') !== before && !dialogOnScreen(rules, after)) return { ok: true, message: s.sessStepped(dir) }
+      }
+      return { ok: false, message: s.sessStepStuck }
+    },
+
+    async answerSession(id: string, choice?: number, text?: string, choices?: readonly number[]): Promise<ActionResult> {
       const s = S()
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
@@ -4405,7 +4465,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // DRIVER: no screen is read and no keystroke is sent. The same refusals as the screen path.
       const stated = backend.attentionOf?.(id)
       if (stated !== undefined) {
-        const out = answerStructured(stated, choice, text)
+        const out = answerStructured(stated, choice, text, choices)
         if (!out.ok) {
           return { ok: false, message: out.why === 'not-asking' ? s.sessNotAsking
             : out.why === 'needs-choice' ? s.sessNeedsChoice(stated?.options.length ?? 0)
@@ -4414,6 +4474,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         if (!backend.answer || !await backend.answer(id, out.answer)) return { ok: false, message: s.sessChoiceGone }
         return { ok: true, message: s.sessAnswered(out.said) }
       }
+      // Several ticks in ONE answer exist only on a protocol: a screen form ticks one box per key.
+      if (choices !== undefined) return { ok: false, message: s.sessChoiceGone }
 
       const spec = approvalFor(managed.harness)
       if (!spec) return { ok: false, message: s.sessApproveUnknown(managed.harness) }
@@ -4423,7 +4485,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
       const rules = rulesFor(managed.harness)
       const frame = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
-      if (!rules || !rules.approval.some(re => re.test(frame.join('\n')))) {
+      if (!rules || !dialogOnScreen(rules, frame)) {
         return { ok: false, message: s.sessNotAsking }
       }
 
@@ -4504,6 +4566,45 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
          * as declining the question outright — measured, the session logged "User declined to
          * answer questions" — which is a different answer from the one anybody meant to give.
          */
+        /*
+         * A MULTI-SELECT box is TICKED by its digit, never answered by it (claude 2.1.309 and agy
+         * 1.4.6, driven 2026-10-23): the question stays open for more ticks and is left with the
+         * step keys. So no follow-up is pressed — on claude, the `submit` follow-up below would send
+         * an `Enter` onto the very box that was just ticked and untick it. The read-back says only
+         * whether the box flipped.
+         */
+        if (picked.checked !== undefined) {
+          if (isFreeTextOption(managed.harness, picked.label)) {
+            // claude's write-your-own BOX opens its field when the CURSOR is on it (a digit only
+            // ticks it), so the cursor is moved there, the field confirmed, and the words typed —
+            // with no return, which would leave the form.
+            const answer = (text ?? '').trim()
+            if (!answer) return { ok: false, message: s.sessAnswerNeedsText }
+            const move = spec.move
+            const from = options.findIndex(o => o.selected)
+            if (!move || !backend.sendMoveChoice || from < 0) return { ok: false, message: s.sessChooseUnknown(managed.harness) }
+            const steps = (picked.number - 1) - from
+            const keys = Array.from({ length: Math.abs(steps) }, () => (steps > 0 ? move.down : move.up))
+            const out = await backend.sendMoveChoice(id, keys, { literal: answer }, after => {
+              const now = readDialog(after, markerReadOptions(managed.harness))
+              return now.options.find(o => o.selected)?.number === picked.number && fieldIsOpen(managed.harness, after) === true
+            })
+            if (out === 'wrong-row') return { ok: false, message: s.sessAnswerNoField(picked.label) }
+            return out === 'sent'
+              ? { ok: true, message: s.sessToggled(answer, true) }
+              : { ok: false, message: s.sessSendFailed(id) }
+          }
+          // A typed answer's field still open would take the digit as TEXT (`Purple22`): leave it first.
+          if (!await leaveField(backend, id, managed.harness, frame)) return { ok: false, message: s.sessFieldStuck }
+          if (!await backend.sendKey(id, key)) return { ok: false, message: s.sessSendFailed(id) }
+          await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+          const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+          const now = readDialog(after, markerReadOptions(managed.harness)).options.find(o => o.number === choice)
+          if (now?.checked !== undefined && now.checked !== picked.checked) {
+            return { ok: true, message: s.sessToggled(picked.label, now.checked) }
+          }
+          return { ok: false, message: s.sessAnswerStuck(picked.label) }
+        }
         if (isFreeTextOption(managed.harness, picked.label)) {
           const answer = (text ?? '').trim()
           if (!answer) return { ok: false, message: s.sessAnswerNeedsText }
@@ -4526,7 +4627,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
            */
           const out = await backend.sendChoiceText(id, key, answer, frame => {
             const step = answerFollowUp({
-              stillAsking: rules.approval.some(re => re.test(frame.join('\n'))),
+              stillAsking: dialogOnScreen(rules, frame),
               before: options, after: parseDialogOptions(frame), choice,
             })
             // TWO SIGNALS, and either one is positive evidence that a field is taking keys.
@@ -4569,7 +4670,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         if (!await backend.sendKey(id, key)) return { ok: false, message: s.sessSendFailed(id) }
         await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
         const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
-        const stillAsking = rules.approval.some(re => re.test(after.join('\n')))
+        const stillAsking = dialogOnScreen(rules, after)
         const next = answerFollowUp({
           stillAsking, before: options, after: parseDialogOptions(after), choice,
         })
@@ -5153,9 +5254,9 @@ export async function runStart(codeStart?: CodeStart): Promise<StartResult> {
     // SS-06: a NATIVE session's question is the policy's, answered through the code host — after
     // re-reading that the SAME question is still pending (a stale list must not answer a new one).
     const answerTmux = host.answerSession?.bind(host)
-    host.answerSession = async (id, choice, text) => {
+    host.answerSession = async (id, choice, text, choices) => {
       if (!id.startsWith('ses_')) {
-        return answerTmux ? answerTmux(id, choice, text) : { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
+        return answerTmux ? answerTmux(id, choice, text, choices) :  { ok: false, message: cliStrings(host.lang === "pt" ? "pt" : "en").sessChoiceGone }
       }
       const recent = await code.recentSessions?.(20).catch(() => null)
       const ask = recent && recent.ok ? recent.sessions.find(r => r.sessionId === id)?.ask : undefined

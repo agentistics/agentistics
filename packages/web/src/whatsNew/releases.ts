@@ -10,6 +10,39 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.143.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O aviso de que o cofre vai se trancar agora é falado pela Nay, num cartão opaco que não cobre o botão nem o chat dela.',
+        en: 'The vault auto-lock warning is now spoken by Nay, in an opaque card that covers neither her button nor her chat.',
+      },
+      {
+        pt: '"Manter aberto" no cofre pede o Windows Hello no computador e a biometria no celular, nunca o código do autenticador.',
+        en: '"Keep open" on the vault asks for Windows Hello on the computer and biometrics on the phone, never the authenticator code.',
+      },
+      {
+        pt: 'O painel de passagem preenche "Janela 5 h" e "Semana" com o consumo da conta da própria sessão, inclusive com várias contas Claude, com uma casa decimal e o motivo dito uma vez quando faltam dados.',
+        en: 'The hand-off panel fills "5 h window" and "Week" from the session’s own account, including multiple Claude accounts, with one decimal and the reason said once when data is missing.',
+      },
+      {
+        pt: 'Resumos de ferramentas no chat mostram um ícone do que foi feito (>_ para comandos, a logo do MCP) e ficam alinhados aos avisos do sistema.',
+        en: 'Chat tool summaries show an icon for what was done (>_ for commands, the MCP’s logo) and align with system notices.',
+      },
+      {
+        pt: 'Perguntas de múltipla escolha de uma sessão aparecem no cartão do chat como a pergunta, e "Enviar resposta" manda todas as opções marcadas e o texto digitado.',
+        en: 'A session’s multiple-choice questions show in the chat card as the question, and "Send answer" sends every ticked option plus the typed text.',
+      },
+      {
+        pt: 'O pedido de "confiar nesta pasta" pode ser respondido pelo app.',
+        en: 'The "trust this folder" prompt can be answered from the app.',
+      },
+      {
+        pt: 'Um comando local, como /rename, não deixa mais a sessão presa em "trabalhando".',
+        en: 'A local command such as /rename no longer leaves the session stuck on "working".',
+      },
+    ],
+  },
   '2.143.1': {
     features: [],
     fixes: [

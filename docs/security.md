@@ -453,7 +453,8 @@ it on. A vault set up under §7a keeps working unchanged until you do.
 | unlock | per the unlock policy (below) | yes (the gesture opens it; when the code is owed it must follow within 120 s, and a wrong code drops the key) | — |
 | change the unlock policy | yes | yes | none, asked every time |
 | list the vault, lock it from the dashboard | no | no | **VAULT.UI2 auth policy (owner, 2026-10-04):** an OPEN vault is itself the proof for metadata — opening it already cost presence + the code. Viewing the list asks nothing more, and the "Digite o código do seu autenticador para ver a lista" step is gone. Locking only reduces exposure. Neither counts as *use*: a polled list does not postpone the auto-lock. |
-| change auto-lock, "keep it open" from a remote origin | yes | no | the code (a 5-minute grant covers repeats). "Keep it open" on THIS computer needs no proof: the vault is already open and the click is the consent. |
+| change auto-lock | yes | no | the code (a 5-minute grant covers repeats). |
+| "keep it open" | no | yes | fresh Windows Hello on this computer, or the phone’s passkey. Never the code or a read grant. |
 | rekey, reset, add a passphrase, enrol or turn off presence, a new recovery key, replace the authenticator | yes | yes | none, asked every time |
 | lock from a terminal on this machine, auto-lock, shutdown | no | no | — |
 
@@ -647,13 +648,17 @@ of §7a/§7b: every record is sealed in the human scope, under the one purpose `
   inline unlock ONCE; nothing else prompts until it locks again. A phone keeps its own passkey path —
   never a Hello prompt off loopback.
 - **Auto-lock warning and "keep it open".** Five minutes before the idle lock the Nay floating chat shows
-  a card ("Seu cofre vai se trancar em 5 min. Manter aberto?" — [Manter aberto] [Trancar agora]) and a
+  its shared opaque notice card ("Seu cofre vai se trancar em 5 min. Manter aberto?" — [Manter aberto] [Trancar agora]) and a
   notification lands in Notificações, once per window (`nextWarn`; an extension or any use re-arms it).
+  This is the `vault-expiry` kind in Nay's existing one-card queue/count, following the button. When
+  the Nay panel is open it occupies space below its header, leaving the conversation accessible.
+  Dismissing it does not re-show it in the same window; locking or extending clears a queued warning.
   [Manter aberto] moves the idle clock by ONE window (`extendAutoLock`, audited
-  `vault.auto-lock-extended`): the page's read grant or the authenticator code (`extend-open`).
-  The HTTP `/api/vault/extend` route also requires the same `loopbackRequest`
-  check as `/activity` and `/activity/arm` before reading the body: loopback TCP peer and Host,
-  no proxy headers, and a loopback Origin. It never extends silently, and nobody answering means it locks exactly as before.
+  `vault.auto-lock-extended`): fresh Windows Hello on this computer, or a single-use, session/action-bound
+  passkey proof on the phone (`extend-open`). It never asks the authenticator code or accepts a read
+  grant instead of presence. Cancelling leaves the countdown unchanged. A missing/broken Hello is
+  explained for retry; no code fallback is offered. The phone assertion needs no read grant or code.
+  Heartbeat cookies are armed only for a verified loopback page with its own read grant, as before. It never extends silently, and nobody answering means it locks exactly as before.
 - **The vault locks with the screen.** On Linux from logind (`PrepareForSleep`, `Lock`); on a Windows
   host from WSL through a `powershell.exe` child subscribed to `SessionSwitch` (Win+L, user switch,
   logoff, remote disconnect) and `PowerModeChanged` (suspend). **What cannot be detected, said plainly:**

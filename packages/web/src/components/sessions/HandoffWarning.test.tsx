@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { HandoffBand, handoffLevelLabel } from './HandoffWarning'
+import type { HandoffPanel } from '@agentistics/core'
+import { HandoffBand, HandoffQuotaCell, HandoffQuotaNote, handoffLevelLabel } from './HandoffWarning'
 import HandoffSettings from '../../pages/settings/HandoffSettings'
 
 describe('handoff screens', () => {
@@ -23,6 +24,62 @@ describe('handoff screens', () => {
       expect(html).toContain(pt ? 'Equilibrado' : 'Balanced')
       expect(html).toContain('value="10"')
       expect(html).toContain(pt ? 'Voltar ao padrão' : 'Reset to default')
+    }
+  })
+})
+
+describe('quota comparison', () => {
+  const panel = (reason?: HandoffPanel['quotaUnavailableReason'], costUSD: number | null = 1,
+    fiveHourPct: number | null = null, weekPct: number | null = null): Pick<HandoffPanel, 'quotaUnavailableReason' | 'projections'> => ({
+    quotaUnavailableReason: reason,
+    projections: (['continue', 'extra', 'handoff'] as const).map(kind => ({ kind, contextTokens: 250000, costUSD, fiveHourPct, weekPct })),
+  })
+  it('uses exactly one decimal in each locale and preserves small positive estimates', () => {
+    for (const pt of [true, false]) for (const [value, expected] of [
+      [4.5, '+4.5%'], [6, '+6.0%'], [1.27, '+1.3%'], [0, '+0.0%'], [0.1, '+0.1%'],
+      [0.099, '&lt;0.1%'], [0.001, '&lt;0.1%'],
+    ] as const) {
+      const html = renderToStaticMarkup(<HandoffQuotaCell value={value} label="Week" pt={pt} />)
+      expect(html).toContain(`>${pt ? expected.replace('.', ',') : expected}</span>`)
+      expect(html).not.toContain('title=')
+    }
+  })
+  it('explains every missing-data cause once for all six dash cells, in both languages', () => {
+    for (const pt of [true, false]) for (const [reason, cost, explanation] of [
+      ['no-meter', 1, pt ? 'Não há limites de uso disponíveis para esta conta.' : 'No usage limits are available for this account.'],
+      ['account-unknown', 1, pt ? 'Não foi possível identificar a conta desta sessão.' : 'The account for this session could not be identified.'],
+      ['missing-window', 1, pt ? 'A conta não informa uma das janelas de uso.' : 'The account does not report one of the usage windows.'],
+      [undefined, null, pt ? 'Faltam dados de contexto ou preço para estimar o consumo.' : 'Context or pricing data is missing to estimate consumption.'],
+      [undefined, 1, pt ? 'Ainda não há consumo com preço e horário suficientes para estimar as janelas sem dados.' : 'There is not enough timestamped, priced usage yet to estimate the unavailable windows.'],
+    ] as const) {
+      const p = panel(reason, cost)
+      const html = renderToStaticMarkup(<>{p.projections.map(r => <div key={r.kind}>
+        <HandoffQuotaCell value={r.fiveHourPct} label="5 h" pt={pt} /><HandoffQuotaCell value={r.weekPct} label="Week" pt={pt} />
+      </div>)}<HandoffQuotaNote panel={p} pt={pt} /></>)
+      expect(html.match(/>—<\/span>/g)).toHaveLength(6)
+      expect(html).not.toContain('title=')
+      expect(html.match(/<small>/g)).toHaveLength(1)
+      expect(html.split(explanation)).toHaveLength(2)
+      expect(html).toContain(`Sessions. ${explanation}`.replace('Sessions', pt ? 'Sessões' : 'Sessions'))
+      expect(html).not.toContain(pt ? 'Quota estimada' : 'Quota estimated')
+    }
+  })
+  it('uses the same table note when either window is missing and retains available estimates', () => {
+    for (const pt of [true, false]) for (const [fiveHourPct, weekPct] of [[null, 2.5], [2.5, null]]) {
+      const p = panel('missing-window', 1, fiveHourPct!, weekPct!)
+      const html = renderToStaticMarkup(<><HandoffQuotaNote panel={p} pt={pt} />
+        <HandoffQuotaCell value={fiveHourPct!} label="5 h" pt={pt} /><HandoffQuotaCell value={weekPct!} label="Week" pt={pt} /></>)
+      expect(html).toContain(pt ? 'A conta não informa uma das janelas de uso.' : 'The account does not report one of the usage windows.')
+      expect(html).toContain(pt ? '+2,5%' : '+2.5%')
+      expect(html).toContain('>—</span>')
+      expect(html).not.toContain('title=')
+    }
+  })
+  it('keeps the calibration note when every estimate is available', () => {
+    for (const pt of [true, false]) {
+      const html = renderToStaticMarkup(<HandoffQuotaNote panel={panel(undefined, 1, 2.5, 0)} pt={pt} />)
+      expect(html).toContain(pt ? 'Quota estimada pelo consumo medido da conta.' : 'Quota estimated from measured account consumption.')
+      expect(html.match(/<small>/g)).toHaveLength(1)
     }
   })
 })

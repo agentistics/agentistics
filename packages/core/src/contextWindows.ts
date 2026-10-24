@@ -14,13 +14,11 @@
  *
  * Two things deliberately NOT here:
  *
- *  - **OpenAI and Google models.** Neither vendor publishes the input token limit on a page this
- *    could cite (checked 2026-08-14: Gemini's model list names every model and states no limit).
- *    Codex does not need them — it REPORTS its own window per session (`model_context_window`), and
- *    a harness stating the window for the session it is running outranks any table. Copilot and
- *    Gemini produce no context measurement at all, so there is nothing to divide. That leaves
- *    Antigravity's Gemini conversations and Kimi's routed models with a measurement and no window;
- *    they draw no bar until the figures can be cited.
+ *  - **Models without a citable input limit.** Codex REPORTS its own window per session
+ *    (`model_context_window`), which outranks any table. Gemini 3.8 Flash now has a citable input
+ *    limit (checked 2026-10-20); its parser retains the per-response prompt level. Copilot has no
+ *    current-context measurement. Antigravity and Kimi may state their own windows; otherwise
+ *    their models draw no bar until a verified figure is available here.
  *  - **A guess for the harness's own cap.** Claude Code can run `claude-opus-5` under a 200k
  *    session cap (its `opus[1m]` model picker), and the transcript records only `claude-opus-5` —
  *    no suffix, no window field, checked across a whole transcript. This table therefore reports
@@ -49,6 +47,7 @@ const ANTHROPIC_DOCS = 'platform.claude.com/docs/en/about-claude/models/overview
  * both resolve that way without needing their own rows.
  */
 export const CONTEXT_WINDOWS: Record<string, ContextWindow> = {
+  'gemini-3.8-flash': { tokens: 1_048_576, verifiedAt: '2026-10-20', source: 'ai.google.dev/gemini-api/docs/models/gemini-3.8-flash' },
   'claude-fable-5':    { tokens: 1_000_000, verifiedAt: '2026-08-14', source: ANTHROPIC_DOCS },
   'claude-mythos-5':   { tokens: 1_000_000, verifiedAt: '2026-08-14', source: ANTHROPIC_DOCS },
   'claude-opus-5':     { tokens: 1_000_000, verifiedAt: '2026-08-14', source: ANTHROPIC_DOCS },

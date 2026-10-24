@@ -230,6 +230,16 @@ export interface StructuredAttention {
   options: StructuredOption[]
   /** The request accepts a typed answer with no option (a question with free text). */
   freeText?: boolean
+  /**
+   * 1.13 — the question takes SEVERAL options at once (claude's `AskUserQuestion` `multiSelect`). Its
+   * answer is `StructuredAnswer.choices`. Absent: one option, as before.
+   */
+  multiSelect?: true
+  /**
+   * 1.13 — this question's place in a FORM of several (claude's `AskUserQuestion` with N questions,
+   * asked one at a time): `{ at: 2, of: 3 }`. Absent on a lone question.
+   */
+  step?: { at: number; of: number }
 }
 
 /**
@@ -240,6 +250,12 @@ export interface StructuredAttention {
 export interface StructuredAnswer {
   requestId?: string
   choice?: number
+  /**
+   * 1.13 — every option picked on a `multiSelect` request, 1-based, in any order, no repeats. `text`
+   * rides with a picked `freeText` option. A single-select request refuses it; a host older than 1.13
+   * never sends it, and a `multiSelect` request still accepts a lone `choice`.
+   */
+  choices?: number[]
   text?: string
 }
 
@@ -355,9 +371,24 @@ export function stubDriver(id: StructuredDriverId, harnesses: readonly HarnessId
 }
 
 /** PURE. Whether an answer fits the open request (the one rule every driver applies before acting). */
-export function answerFits(open: StructuredAttention | null, a: StructuredAnswer): { ok: true; option?: StructuredOption } | { ok: false; why: 'none-open' | 'stale' | 'no-such-option' | 'text-not-accepted' | 'empty' } {
+export function answerFits(open: StructuredAttention | null, a: StructuredAnswer): { ok: true; option?: StructuredOption; options?: StructuredOption[] } | { ok: false; why: 'none-open' | 'stale' | 'no-such-option' | 'text-not-accepted' | 'empty' | 'not-multi' } {
   if (!open) return { ok: false, why: 'none-open' }
   if (a.requestId !== undefined && a.requestId !== open.requestId) return { ok: false, why: 'stale' }
+  if (a.choices !== undefined) {
+    if (!open.multiSelect) return { ok: false, why: 'not-multi' }
+    if (a.choice !== undefined) return { ok: false, why: 'no-such-option' }
+    if (!Array.isArray(a.choices) || a.choices.length === 0) return { ok: false, why: 'empty' }
+    const seen = new Set<number>()
+    for (const c of a.choices) {
+      if (!Number.isInteger(c) || c < 1 || c > open.options.length || seen.has(c)) return { ok: false, why: 'no-such-option' }
+      seen.add(c)
+    }
+    const options = [...seen].sort((x, y) => x - y).map(c => open.options[c - 1]!)
+    const field = options.some(o => o.freeText)
+    if (a.text !== undefined && !field) return { ok: false, why: 'text-not-accepted' }
+    if (field && (a.text === undefined || a.text.trim() === '')) return { ok: false, why: 'empty' }
+    return { ok: true, options }
+  }
   if (a.choice === undefined) {
     if (a.text === undefined || a.text.trim() === '') return { ok: false, why: 'empty' }
     return open.freeText ? { ok: true } : { ok: false, why: 'text-not-accepted' }

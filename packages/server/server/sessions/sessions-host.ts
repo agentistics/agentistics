@@ -24,7 +24,7 @@ import { EMPTY_CONFIRM_MEMORY, confirmActivities, type ConfirmMemory } from './a
 import type { ChatTurn } from '@agentistics/core'
 import { transcriptReaderFor } from './harness-transcript'
 import { markFleetPhase } from './fleet-profile'
-import { readDialog, type DialogOption, type DialogUnreadable } from './dialog-choice'
+import { readDialog, type DialogForm, type DialogOption, type DialogUnreadable } from './dialog-choice'
 import { markerReadOptions } from './approval-spec'
 // Taking a running session back when its registry record is gone. See `session-adopt.ts`.
 import { planAdoptions } from './session-adopt'
@@ -517,6 +517,7 @@ export function createSessionsPoller(o: {
       const modes = new Map<string, SessionMode>()
       const modeChoices = new Map<string, SessionMode[]>()
       const dialogOptions = new Map<string, DialogOption[]>()
+      const dialogForm = new Map<string, DialogForm>()
       const dialogSelect = new Map<string, 'numbered' | 'marker'>()
       const dialogStated = new Set<string>()
       /*
@@ -735,14 +736,34 @@ export function createSessionsPoller(o: {
         // The dialog is kept from the frame that DECIDED the state, so the two can never describe
         // different moments — and it costs nothing extra, the frame is already here.
         const statedDialog = state === 'waiting-approval' ? o.backend.dialogOf?.(r.id) : undefined
-        const tail = (): string[] => anyGrant() ? approvalTail(frame, APPROVAL_LINES).map(l => scrubTerminalLine(r.id, l)) : approvalTail(frame, APPROVAL_LINES)
+        const tail = (): string[] => {
+          const lines = approvalTail(frame, APPROVAL_LINES, markerReadOptions(harness))
+          return anyGrant() ? lines.map(l => scrubTerminalLine(r.id, l)) : lines
+        }
         if (statedDialog) {
-          approvals.set(r.id, tail())
+          // The protocol STATES the question: show that, not the screen tail — a structured screen is
+          // a log, and its tail still carried the previous question above the new options (live QA).
+          const statedPrompt = o.backend.attentionOf?.(r.id)?.prompt
+          // Drawn in the screen's own shape (the prompt, a blank, the numbered options), so the card
+          // reads the prompt as the QUESTION — a lone line was folded away as "the session screen".
+          const promptLines = statedPrompt ? [statedPrompt, '', ...statedDialog.map((l, i) => `${i + 1}. ${l}`)] : null
+          approvals.set(r.id, promptLines ? (anyGrant() ? promptLines.map(l => scrubTerminalLine(r.id, l)) : promptLines) : tail())
           // F3.3 — which option is a FIELD is the protocol's statement too, never re-derived from a label.
           const statedOptions = o.backend.attentionOf?.(r.id)?.options
-          dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label: anyGrant() ? scrubTerminalLine(r.id, label) : label, selected: i === 0, ...(statedOptions?.[i]?.freeText ? { freeText: true } : {}) })))
+          const statedMulti = o.backend.attentionOf?.(r.id)?.multiSelect === true
+          dialogOptions.set(r.id, statedDialog.map((label, i) => ({ number: i + 1, label: anyGrant() ? scrubTerminalLine(r.id, label) : label, selected: i === 0, ...(statedOptions?.[i]?.freeText ? { freeText: true } : {}), ...(statedMulti ? { checked: false } : {}) })))
           dialogSelect.set(r.id, 'numbered')
           dialogStated.add(r.id)
+          // engine-api 1.13: the protocol says the question takes several options — the card keeps
+          // the ticks itself and sends them as ONE answer (`choices`), nothing is pressed per tick.
+          const statedAttention = o.backend.attentionOf?.(r.id)
+          const statedStep = statedAttention?.step
+          if (statedAttention?.multiSelect || statedStep) {
+            dialogForm.set(r.id, {
+              ...(statedAttention?.multiSelect ? { multi: true as const, together: true as const } : {}),
+              ...(statedStep ? { position: { at: statedStep.at, of: statedStep.of } } : {}),
+            })
+          }
         } else if (state === 'waiting-approval') {
           approvals.set(r.id, tail())
           // Read from the SAME frame that decided the state, so what is offered and what the state
@@ -750,6 +771,7 @@ export function createSessionsPoller(o: {
           // confidence, which the UI reports rather than papering over.
           const dialog = readDialog(frame, markerReadOptions(harness))
           if (dialog.options.length > 0) dialogOptions.set(r.id, dialog.options)
+          if (dialog.options.length > 0 && dialog.form) dialogForm.set(r.id, dialog.form)
           // From the SAME read as the options: how they are picked is a fact about this frame, and
           // deriving it again downstream is how a numberless dialog gets offered a digit.
           if (dialog.select) dialogSelect.set(r.id, dialog.select)
@@ -1104,6 +1126,7 @@ export function createSessionsPoller(o: {
         modeChoices,
         ...(structured.size > 0 ? { structured } : {}),
         dialogOptions,
+        dialogForm,
         dialogSelect,
         dialogStated,
         dialogUnreadable,

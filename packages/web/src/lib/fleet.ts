@@ -104,7 +104,9 @@ export interface FleetRow {
   conversationId?: string
   approvalLines?: string[]
   /** `freeText` marks the option that is a FIELD — picking it opens one. See `approval-spec.ts`. */
-  dialogOptions?: { number: number; label: string; selected?: boolean; freeText?: boolean }[]
+  dialogOptions?: { number: number; label: string; selected?: boolean; freeText?: boolean; checked?: boolean }[]
+  /** A multi-question form around the dialog (server-read): its steps, review, multi-select. */
+  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; together?: true; canStep?: true }
   approvalBlind?: string
   approveBlind?: string
   chooseBlind?: string
@@ -225,6 +227,10 @@ export interface FleetState {
     action: FleetActionId
     text?: string
     choice?: number
+    /** `approve` on a STRUCTURED multi-select question: every ticked option, as one answer. */
+    choices?: number[]
+    /** `approve` on a multi-question form: move to the next/previous question instead of answering. */
+    step?: 'next' | 'back'
     /** `rewind` only: which appearance of `text` — counting from the latest, 0 first. */
     occurrence?: number
     /**
