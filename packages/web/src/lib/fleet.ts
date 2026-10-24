@@ -33,7 +33,7 @@ const parseRelayActResult = parseActResult
 
 /** Mirrors `SessionAction` in `@agentistics/tui/control/sessions`, minus the verbs a page cannot do. */
 export type FleetActionId =
-  | 'resume' | 'approve' | 'prompt' | 'rename' | 'note' | 'task' | 'kill'
+  | 'resume' | 'approve' | 'prompt' | 'rename' | 'note' | 'task' | 'kill' | 'forget'
   /** Stop the current turn without ending the session. See the server's own union. */
   | 'interrupt'
   /** F2.0b — "open in terminal" on a structured session (protocol-driven): the same conversation as a TUI. */
@@ -64,7 +64,7 @@ export type FleetActionId =
 
 /** The verbs this page can PERFORM. The rest are shown, dimmed, with their reason. */
 export const PERFORMABLE: ReadonlySet<FleetActionId> = new Set<FleetActionId>([
-  'resume', 'approve', 'prompt', 'rename', 'note', 'task', 'kill', 'archive', 'delete',
+  'resume', 'approve', 'prompt', 'rename', 'note', 'task', 'kill', 'forget', 'archive', 'delete',
 ])
 
 /** The verbs that take a line of text before they can run. */

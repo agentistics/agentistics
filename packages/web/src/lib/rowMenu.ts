@@ -66,9 +66,10 @@ export function rowMenuEntries(
   const find = (a: string) => verbs.find(v => v.action === a)
   const stop = ENDED.has(state) ? undefined : MID_TURN.has(state) ? find('interrupt') : find('kill')
   // `archive` exists only on a NATIVE row (the server offers it nowhere else). `delete` is deliberately
-  // NOT here: it is permanent and this menu acts on a click with no confirmation — it lives in the
+  // NOT here: it permanently deletes a conversation — it lives in the
   // session's own menu (`SessionActions`), which asks first.
-  const fleet = [find('rename'), stop, find('resume'), find('archive')].filter((v): v is RowVerb => v !== undefined)
+  // `forget` only hides a row; its caller asks through ConfirmModal before acting.
+  const fleet = [find('rename'), stop, find('resume'), find('archive'), find('forget')].filter((v): v is RowVerb => v !== undefined)
   return [...fleet, ...extra]
 }
 

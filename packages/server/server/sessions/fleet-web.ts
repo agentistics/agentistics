@@ -1,4 +1,4 @@
-import { readPreferences } from '../preferences'
+import { readPreferences, updatePreferences } from '../preferences'
 import { normalizeHandoffConfig, handoffCut } from '@agentistics/core'
 /**
  * fleet-web.ts — the WEB dashboard's window onto the session fleet.
@@ -287,7 +287,10 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
   try {
     const host = await hostFor(lang)
     if (!host.sessions) return { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
-    const fleet = await timeFleetPhase('readFleet: host.sessions()', () => host.sessions!())
+    const source = await timeFleetPhase('readFleet: host.sessions()', () => host.sessions!())
+    const fleet = { ...source, sessions: [...source.sessions] }
+    const forgotten = (await readPreferences()).ui?.forgottenSessionRows
+    if (Array.isArray(forgotten)) fleet.sessions = fleet.sessions.filter(r => !forgotten.includes(r.id))
     // Leaders get one low-noise handoff hint. It reads the RAW context numbers off the hub's
     // snapshot (the formatted `context` on a ControlSession is a label, not a count) and never holds
     // the fleet response open.
@@ -764,7 +767,26 @@ async function runFleetActionOnce(
     case 'task':
       if (!host.taskSession) return { ok: false, message: s.sessionsNoHost }
       return await host.taskSession(req.id, text)
+    case 'forget': {
+      // Forget the row only: neither transcript deletion nor process termination needs to succeed.
+      const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id)
+      if (!row || row.harness === 'agentistics') return { ok: false, message: s.sessionsRowGone }
+      if (!fleetRow(row, s).verbs.some(v => v.action === 'forget' && v.enabled)) return { ok: false, message: s.sessionsForgetLive }
+      await updatePreferences(cur => ({ ui: { ...cur.ui, forgottenSessionRows: [...new Set([
+        ...(Array.isArray(cur.ui?.forgottenSessionRows) ? cur.ui.forgottenSessionRows.filter((v): v is string => typeof v === 'string') : []), req.id,
+      ])] } }))
+      BODIES.clear(); FRAMES.clear()
+      return { ok: true, message: lang === 'pt' ? 'Sessão removida da lista.' : 'Session removed from list.' }
+    }
     case 'kill':
+      if (isExternalRowId(req.id)) {
+        const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id)
+        if (!row || row.pid === undefined) return { ok: false, message: s.sessionsRowGone }
+        const { endExternalProcess } = await import('./external-end')
+        const ok = await endExternalProcess(row.pid)
+        const name = row.title || row.project || req.id
+        return { ok, message: ok ? cliStrings(lang).sessKilled(name) : cliStrings(lang).sessKillUnconfirmed(name) }
+      }
       if (!host.killSession) return { ok: false, message: s.sessionsNoHost }
       return await host.killSession(req.id)
     // Only a NATIVE session has a store to archive or delete from (`native-fleet.ts`); any other id is

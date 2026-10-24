@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.145.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Ligar o modo ausente avisa todas as sessões quase na hora; uma sessão que não responde não atrasa mais as outras.',
+        en: 'Turning on away mode tells every session almost at once; a session that does not answer no longer delays the others.',
+      },
+      {
+        pt: 'Uma sessão externa cuja conversa ou pasta foi apagada pode ser encerrada ou tirada da lista pelo menu dela ("Encerrar" e "Remover da lista").',
+        en: 'An external session whose conversation or folder was deleted can be ended or taken off the list from its menu ("End" and "Remove from list").',
+      },
+    ],
+  },
   '2.145.1': {
     features: [],
     fixes: [

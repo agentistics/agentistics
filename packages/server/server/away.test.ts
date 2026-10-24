@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { AWAY_COOLDOWN_MS, AWAY_QUIET_MS, flushAwayNotices, awayStatus, readAwayView, resetAwayLiveDedupe, sendAwayNotice, sessionAwayStatus, setAway, setSessionAway, awaySessionRows, type AwaySessionRow, type AwayDeps, type SessionAwayDeps } from './away'
+import { AWAY_COOLDOWN_MS, AWAY_QUIET_MS, AWAY_SEND_TIMEOUT_MS, flushAwayNotices, awayStatus, readAwayView, resetAwayLiveDedupe, sendAwayNotice, sessionAwayStatus, setAway, setSessionAway, awaySessionRows, type AwaySessionRow, type AwayDeps, type SessionAwayDeps } from './away'
 import { routeCapability } from './capability-guard'
 
 const NOW = Date.now()
@@ -319,5 +319,52 @@ describe('away live fan-out and anti-flood', () => {
     await flushAwayNotices(NOW + AWAY_QUIET_MS)
     expect(f.typed[0]!.text).toContain('api_key=[REDACTED]')
     expect(f.typed[0]!.text).not.toContain('sk-ant-api03-AAAAAAAA')
+  })
+})
+
+describe('away delivery fan-out — a dead session never holds the others', () => {
+  function fleet(prompt: (id: string) => Promise<{ ok: boolean }>) {
+    const ids = ['a', 'dead', 'b', 'slow', 'c']
+    const rows = ids.map(id => ({ id, conversationId: `c${id}`, state: 'waiting', running: true, away: false }))
+    const { d } = deps({ live: { rows: async () => rows.map(r => ({ ...r })), roleOf: async () => 'worker', prompt } })
+    return d
+  }
+  it('bounds each send above the 4 s prompt ack, so a slow-but-alive pane is not cut off', () => {
+    expect(AWAY_SEND_TIMEOUT_MS).toBeGreaterThan(4_000)
+  })
+  it('delivers to every live session while one send never settles', async () => {
+    const typed: string[] = []
+    const d = fleet(async id => {
+      if (id === 'dead') await new Promise(() => {})
+      typed.push(id); return { ok: true }
+    })
+    await setAway({ on: true }, d)
+    expect(await flushAwayNotices(NOW + AWAY_QUIET_MS, 50)).toBe(4)
+    expect(typed.sort()).toEqual(['a', 'b', 'c', 'slow'])
+  })
+  it('sends in parallel: a slow session does not delay the ones queued after it', async () => {
+    const at: Record<string, number> = {}
+    const start = Date.now()
+    const d = fleet(async id => {
+      await Bun.sleep(id === 'slow' ? 200 : 10)
+      at[id] = Date.now() - start; return { ok: true }
+    })
+    await setAway({ on: true }, d)
+    await flushAwayNotices(NOW + AWAY_QUIET_MS, 1_000)
+    expect(at.c!).toBeLessThan(at.slow!)
+  })
+  it('retries a timed-out session after quiet, and only that one', async () => {
+    let deadAlive = false
+    const typed: string[] = []
+    const d = fleet(async id => {
+      if (id === 'dead' && !deadAlive) await new Promise(() => {})
+      typed.push(id); return { ok: true }
+    })
+    await setAway({ on: true }, d)
+    await flushAwayNotices(NOW + AWAY_QUIET_MS, 20)
+    deadAlive = true
+    expect(await flushAwayNotices(NOW + 2 * AWAY_QUIET_MS - 1, 20)).toBe(0)
+    expect(await flushAwayNotices(NOW + 2 * AWAY_QUIET_MS, 20)).toBe(1)
+    expect(typed.filter(id => id === 'dead')).toEqual(['dead'])
   })
 })

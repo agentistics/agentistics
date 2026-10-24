@@ -438,3 +438,11 @@ The aside's crash-reopen banner uses its own available width to choose between a
 `Reopen N` (`Reabrir N`). The full sentence remains its title and accessible label. Closed-folder
 headers reserve space for the complete leading icon and omit totals. Summary filters wrap as
 indivisible units separated by spacing, so no punctuation is stranded at a line boundary.
+
+The session row menu on desktop and mobile offers **Remove from list** (**Remover da lista**)
+for terminal sessions, including external processes with a deleted working directory or a missing
+conversation. Confirmation hides that row persistently in this machine's web list; it preserves
+the transcript and leaves a running process running. **End session** (**Encerrar sessão**) is
+also available for external rows with an observed PID. It ends only that PID and its descendants,
+checks process identities before signalling, and escalates surviving processes through the existing
+kill confirmation logic. Neither operation needs the working directory or conversation to exist.

@@ -16,6 +16,7 @@
  * rather than a modal so the row it acts on stays on screen while the question is being answered.
  */
 
+import { ConfirmModal } from '../../pages/settings/primitives'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { MoreHorizontal, X } from 'lucide-react'
@@ -102,7 +103,7 @@ const TEXT_VERBS = new Set<string>(['rename', 'note'])
 // `archive` / `delete` arrive only on a NATIVE row (the server offers them nowhere else), after `kill`
 // because both need the session ended first.
 // `terminal` (F2.0b) is offered by the server only on a row running over its harness's protocol.
-const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'terminal', 'kill', 'archive', 'delete']
+const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'terminal', 'kill', 'forget', 'archive', 'delete']
 
 /** The verbs that belong to the delivery board rather than to the session itself. */
 const TASK_VERBS = new Set<string>(['task'])
@@ -118,6 +119,7 @@ export function SessionActions({
   const [asking, setAsking] = useState<FleetVerb | null>(null)
   const [draft, setDraft] = useState('')
   const [confirming, setConfirming] = useState(false)
+  const [confirmingForget, setConfirmingForget] = useState(false)
   /** `delete` is PERMANENT, so it asks once more, in words, before it runs. */
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   /** `terminal` on a row that is mid-turn ends that turn, so it asks first (a idle one just switches). */
@@ -131,7 +133,7 @@ export function SessionActions({
 
   // A different row is a different set of answers: an in-flight rename must not carry across.
   useEffect(() => {
-    setOpen(false); setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingTerminal(false); setNotice(null)
+    setOpen(false); setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingForget(false); setConfirmingTerminal(false); setNotice(null)
   }, [row.id])
 
   useEffect(() => { if (asking) inputRef.current?.focus() }, [asking])
@@ -151,9 +153,9 @@ export function SessionActions({
     // menu closes and an inline notice would go with it.
     if (action === 'terminal') pushNotification(terminalToast(out, lang))
     if (!out.ok) { setConfirmingTerminal(false); return }
-    setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingTerminal(false); setOpen(false)
+    setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingForget(false); setConfirmingTerminal(false); setOpen(false)
     // An archived or deleted session leaves the list exactly as an ended one does.
-    if (action === 'kill' || action === 'archive' || action === 'delete') onGone?.()
+    if (action === 'kill' || action === 'forget' || action === 'archive' || action === 'delete') onGone?.()
     // A REOPEN LANDS SOMEWHERE. It mints a NEW row and retires the one it was asked about, so
     // staying put leaves the reader on a dead session with a success message over it — reported as
     // "the reopen did nothing". The server hands back the new id precisely so this can follow it.
@@ -172,6 +174,7 @@ export function SessionActions({
       return
     }
     if (v.action === 'kill') { setConfirming(true); return }
+    if (v.action === 'forget') { setConfirmingForget(true); return }
     if (v.action === 'delete') { setConfirmingDelete(true); return }
     if (v.action === 'terminal' && terminalNeedsConfirm(row.state)) { setConfirmingTerminal(true); return }
     void run(v.action as FleetActionId)
@@ -444,6 +447,16 @@ export function SessionActions({
           </div>
         </>
       )}
+      {confirmingForget && <ConfirmModal
+        open
+        title={pt ? 'Remover da lista?' : 'Remove from list?'}
+        message={pt ? 'A conversa será preservada. Se o processo estiver rodando, ele continuará.' : 'The conversation is preserved. A running process will keep running.'}
+        confirmLabel={pt ? 'Remover da lista' : 'Remove from list'}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        busy={busy}
+        onConfirm={() => { void run('forget') }}
+        onCancel={() => setConfirmingForget(false)}
+      />}
     </div>
   )
 }
