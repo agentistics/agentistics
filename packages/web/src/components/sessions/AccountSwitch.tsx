@@ -64,12 +64,16 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
   const [resend, setResend] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Reset on OPEN and when the set of options really changes — never on a poll that returns the same
+  // list as a new array, or the person's pick snaps back to the default while they are choosing.
+  const optionsKey = info.options.map(o => `${o.harness}:${o.id}`).join(',')
   useEffect(() => {
     if (!open) return
     const first = defaultTarget(info.options)
     setTarget(first); setHarness(info.options.find(o => o.id === first)?.harness ?? '')
     setResend(true); setError(null); setBusy(false)
-  }, [open, info.options])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, optionsKey])
   const harnesses = switchHarnesses(info)
   const own = info.current?.harness
   const accounts = info.options.filter(o => o.harness === harness)

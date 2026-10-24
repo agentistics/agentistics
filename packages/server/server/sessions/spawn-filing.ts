@@ -78,6 +78,8 @@ export interface FilingInput {
   caller?: ManagedSession
   /** The predecessor, for a leader hand-off. */
   handoffOf?: ManagedSession
+  /** CONTA.TROCA v2: `handoffOf` is a row being REPLACED on another harness, not a leader hand-off — the role stays `role`. */
+  handoffKeepsRole?: boolean
   book: Pick<TaskBook, 'tasks' | 'subtasks'>
   /** The registry — where the task's work already sits, and known checkouts. */
   rows: readonly ManagedSession[]
@@ -374,7 +376,7 @@ function fromPredecessor(r: Refusal, pred: ManagedSession | undefined, task: boo
 
 export function planFiling(input: FilingInput): FilingPlan {
   const pred = input.handoffOf
-  const role: 'worker' | 'leader' | undefined = pred ? 'leader' : input.role
+  const role: 'worker' | 'leader' | undefined = pred && !input.handoffKeepsRole ? 'leader' : input.role
   const explicitTask = clean(input.taskRef)
   const explicitSub = clean(input.subtaskRef)
   // A hand-off inherits the predecessor's filing unless one was named outright. A SUBTASK named

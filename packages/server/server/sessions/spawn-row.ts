@@ -43,7 +43,7 @@ export function spawnSessionFilingRequest(req: {
     taskRef: req.taskId, subtaskRef: req.subtaskId, cwd: req.cwd,
     harness: req.harness,
     callerSessionId: req.parentVerified || req.handoff ? req.parentSessionId : undefined,
-    ...(req.switchFrom ? { handoffOf: req.switchFrom } : req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
+    ...(req.switchFrom ? { handoffOf: req.switchFrom, handoffKeepsRole: true } : req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
   }
 }
 

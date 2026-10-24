@@ -155,4 +155,22 @@ describe('AccountSwitchDialog — every harness (v2)', () => {
     expect(posts).toEqual([{ id: 'm1', accountId: 'acc_k', harness: 'codex', resendPending: false }])
     await act(async () => { root.unmount() })
   })
+
+  test('a poll that returns the same options as a NEW array keeps the person\'s pick', async () => {
+    const host = document.createElement('div'); document.body.appendChild(host)
+    const root = createRoot(host)
+    const props = (info: SwitchInfo) => ({ open: true, sessionId: 'm1', info, lang: 'pt', fromLimit: false, onClose: () => {}, onSwitched: () => {} })
+    await act(async () => { root.render(createElement(mod.AccountSwitchDialog, props(multi))) })
+    const dialog = () => Array.from(document.querySelectorAll('[data-account-switch]')).at(-1)!
+    const trigger = dialog().querySelectorAll('button[aria-haspopup="listbox"]')[0] as HTMLButtonElement
+    await act(async () => { trigger.click() })
+    const codex = Array.from(document.querySelectorAll('[role="listbox"] [role="option"]')).find(o => o.textContent?.startsWith('Codex')) as HTMLElement
+    await act(async () => { codex.click() })
+    expect(dialog().textContent).toContain('k@x.com')
+    // The 15 s poll: equal content, new identity.
+    await act(async () => { root.render(createElement(mod.AccountSwitchDialog, props({ ...multi, options: multi.options.map(o => ({ ...o })) }))) })
+    expect(dialog().textContent).toContain('k@x.com')
+    expect(dialog().textContent).toContain('Codex CLI')
+    await act(async () => { root.unmount() })
+  })
 })
