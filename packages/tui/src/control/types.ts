@@ -1643,8 +1643,11 @@ export interface ControlHost {
    * One keystroke, and the harness decides which mode comes next — there is no key that picks one
    * by name, so this is a cycle rather than a chooser. Refused, in words, for a harness whose modes
    * nobody has driven: a guessed key is a keypress nobody asked for. See `mode-spec.ts`.
+   *
+   * MODE.NOQ — with a `target` mode id, presses and reads until the footer names it, and refuses in words
+   * when one full revolution never did (the mode is not in this session's cycle).
    */
-  cycleSessionMode?(id: string): Promise<ActionResult>
+  cycleSessionMode?(id: string, target?: string): Promise<ActionResult>
 
   /**
    * F4.D — set a STRUCTURED session's permission mode DIRECTLY, through its protocol (`modeId` is one of

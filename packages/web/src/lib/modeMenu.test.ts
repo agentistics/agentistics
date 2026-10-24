@@ -1,21 +1,23 @@
 import { describe, expect, it } from 'bun:test'
-import { modeCycles, modeMenuFor, modeMenuPlacement } from './modeMenu'
+import { modeMenuFor, modeMenuPlacement } from './modeMenu'
 
 describe('modeMenu', () => {
   it('lists only modes measured for each harness', () => {
     expect(modeMenuFor('claude').map(mode => mode.id)).toEqual([
-      'manual', 'accept-edits', 'plan', 'auto',
+      'manual', 'accept-edits', 'plan', 'bypass', 'auto',
     ])
     expect(modeMenuFor('codex')).toEqual([])
     expect(modeMenuFor(undefined)).toEqual([])
   })
 
-  it('calculates forward cycles, including wraparound', () => {
-    const modes = modeMenuFor('claude')
-    expect(modeCycles('manual', 'plan', modes)).toBe(2)
-    expect(modeCycles('auto', 'manual', modes)).toBe(1)
-    expect(modeCycles('plan', 'plan', modes)).toBe(0)
-    expect(modeCycles('unknown', 'plan', modes)).toBe(0)
+  it('MODE.NOQ — claude offers "no questions" (bypass permissions), in its measured cycle place', () => {
+    const bypass = modeMenuFor('claude').find(mode => mode.id === 'bypass')
+    expect(bypass?.canonical).toBe('no-questions')
+    // claude 2.1.310 with --allow-dangerously-skip-permissions: plan -> bypass -> auto
+    const ids = modeMenuFor('claude').map(mode => mode.id)
+    expect(ids.indexOf('bypass')).toBe(ids.indexOf('plan') + 1)
+    // only one entry carries the warning-bearing canonical
+    expect(modeMenuFor('claude').filter(mode => mode.canonical === 'no-questions')).toHaveLength(1)
   })
 
   it('clamps a menu to both viewport margins and flips it up when needed', () => {

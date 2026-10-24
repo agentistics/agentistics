@@ -93,8 +93,13 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     // MODE.EVERYWHERE — `claude --help` 2.1.296: `--permission-mode <mode>  (choices: "acceptEdits", "auto",
     // "bypassPermissions", "manual", "dontAsk", "plan")` and `--dangerously-skip-permissions  Bypass all
-    // permission checks`. The ALLOW flag is deliberately not added to a TUI: it inserts bypass into the
-    // shift+tab cycle that `mode-spec.ts` measured, and the chip would then cycle to a mode it cannot name.
+    // permission checks`.
+    // MODE.NOQ (claude 2.1.310, 2026-10-24) — `--allow-dangerously-skip-permissions  Enable bypassing all
+    // permission checks as an option, without it being enabled by default`. It turns NOTHING on: it only puts
+    // "bypass permissions" into the shift+tab cycle, which is the one way the chip's menu can reach "no
+    // questions" after the start. `mode-spec.ts` now names that mode, so the chip never cycles into one it
+    // cannot read.
+    startupArgs: ['--allow-dangerously-skip-permissions'],
     modeArgs: {
       'accept-edits': ['--permission-mode', 'acceptEdits'],
       plan: ['--permission-mode', 'plan'],
