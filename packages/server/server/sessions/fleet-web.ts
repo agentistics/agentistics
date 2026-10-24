@@ -751,7 +751,7 @@ async function runFleetActionOnce(
     }
     case 'cycleMode':
       if (!host.cycleSessionMode) return { ok: false, message: s.sessionsNoHost }
-      return await host.cycleSessionMode(req.id)
+      return await host.cycleSessionMode(req.id, text || undefined)
     case 'setMode':
       if (!host.setSessionMode) return { ok: false, message: s.sessionsNoHost }
       return await host.setSessionMode(req.id, text)

@@ -294,6 +294,10 @@ export interface CliStrings {
   sessModeUnknown: (harness: string) => string
   /** Said after the cycle key lands. It names the ACT — only the next poll knows the new mode. */
   sessModeCycled: string
+  /** MODE.NOQ — a named mode is not in this session's cycle (claude started without the allow flag). */
+  sessModeUnreachable: (label: string) => string
+  /** MODE.NOQ — the footer named no mode while cycling (a dialog, or no footer yet). */
+  sessModeUnread: string
   /** The free-text option was picked with nothing written. Enter on an empty field DECLINES. */
   sessAnswerNeedsText: string
   sessKilled: (id: string) => string
@@ -745,6 +749,9 @@ const EN: CliStrings = {
   sessModeUnknown: (harness: string) =>
     `nobody has driven ${harness}'s modes, so agentop does not know which key changes them — switch it inside the session.`,
   sessModeCycled: 'moved to the next mode.',
+  sessModeUnreachable: (label: string) =>
+    `"${label}" is not in this session's mode cycle — it was started before agentop made it reachable. Reopen the session to get it; the mode was left as it was.`,
+  sessModeUnread: 'could not read the mode on the session\'s screen — nothing was changed after that. Try again in a moment.',
   sessAnswerNeedsText: 'this option is a field to write in — send it with your answer, because an empty one reads as declining the question.',
   sessKilled: (id: string) => `stopped ${id}.`,
   sessInterrupted: (id: string) => `asked ${id} to stop what it was doing — the session is still up.`,
@@ -1169,6 +1176,9 @@ const PT: CliStrings = {
   sessModeUnknown: (harness: string) =>
     `ninguém dirigiu os modos do ${harness}, então o agentop não sabe qual tecla os altera — troque dentro da própria sessão.`,
   sessModeCycled: 'passou para o próximo modo.',
+  sessModeUnreachable: (label: string) =>
+    `"${label}" não está no ciclo de modos desta sessão — ela foi aberta antes de o agentop torná-lo alcançável. Reabra a sessão para tê-lo; o modo ficou como estava.`,
+  sessModeUnread: 'não deu para ler o modo na tela da sessão — nada mais foi alterado. Tente de novo em instantes.',
   sessAnswerNeedsText: 'esta opção é um campo para escrever — envie junto com a sua resposta, porque vazia ela é lida como recusar a pergunta.',
   sessKilled: (id: string) => `${id} encerrada.`,
   sessInterrupted: (id: string) => `pedi para ${id} parar o que estava fazendo — a sessão continua de pé.`,

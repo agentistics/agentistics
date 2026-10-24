@@ -203,7 +203,7 @@ import {
 import { createSessionHub, setProcessSessionHub, type SessionHub } from './sessions/session-hub'
 import { hostAdapterState, hostTailState, onAdapterStateChange } from './sessions/adapter-state-host'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
-import { modeSpecFor } from './sessions/mode-spec'
+import { cycleToMode, modeOf, modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
 import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
 import { exactLinksOnDisk } from './sessions/reopen-link'
@@ -3805,7 +3805,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * means something else in most terminals, and sending it blind into an assistant is a keypress
      * nobody asked for — the same refusal `choiceKey` makes for a numbered dialog.
      */
-    async cycleSessionMode(id: string): Promise<ActionResult> {
+    async cycleSessionMode(id: string, target?: string): Promise<ActionResult> {
       const s = S()
       const backend = await resolveBackend()
       const blocked = await backend.unavailable()
@@ -3828,6 +3828,20 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const live = (await backend.list().catch(() => [])).find(b => b.id === id)
       if (!live?.alive) return { ok: false, message: s.sessNotRunning }
 
+      // MODE.NOQ — a NAMED target is reached by pressing and READING, never by a count computed from the
+      // table: whether a mode is in the cycle depends on how the process was started (claude's bypass).
+      if (target) {
+        const frame = async () => modeOf(await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[]), spec)?.id ?? null
+        const out = await cycleToMode(spec, target, {
+          sendKey: key => backend.sendKey(id, key),
+          readMode: frame,
+          sleep: ms => new Promise(r => setTimeout(r, ms)),
+        })
+        if (out === 'reached') return { ok: true, message: spec.modes.find(m => m.id === target)?.label ?? target }
+        if (out === 'send-failed') return { ok: false, message: s.sessSendFailed(id) }
+        if (out === 'unread') return { ok: false, message: s.sessModeUnread }
+        return { ok: false, message: s.sessModeUnreachable(spec.modes.find(m => m.id === target)?.label ?? target) }
+      }
       // The mode AFTER the key is whatever the harness moved to, and only the next poll can say —
       // so the answer names the act rather than claiming an outcome it has not read.
       return (await backend.sendKey(id, spec.cycleKey))
