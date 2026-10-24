@@ -92,12 +92,16 @@ export function runRelay(dir: string, pollMs = 5000): void {
   // relay terminate the whole tree, rather than leaving a helper behind when the CLI ignores TERM.
   const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, detached: true, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
 
-  const makeWorker = (): JsonWorker => new JsonWorker(helperCommand('__relay-worker'))
+  const makeWorker = (): JsonWorker => {
+    const worker = new JsonWorker(helperCommand('__relay-worker'))
+    worker.onerror = error => {
+      if (worker !== swap.current) return
+      swapLog(error)
+      void swap.recover()
+    }
+    return worker
+  }
   const firstWorker = makeWorker()
-  const ready = firstWorker.request('ready').then(response => {
-    if (response.error || response.result !== true) throw new Error('relay worker not ready')
-    return true
-  }).catch(error => { swapLog(error); endChild(); return false })
   const swap = new IdleSwap(firstWorker, runningExecutableVersion(), {
     version: executableVersion,
     prepare: async () => {
@@ -116,7 +120,7 @@ export function runRelay(dir: string, pollMs = 5000): void {
   // write/replay is in flight; journal writes remain with the keeper and happen exactly once.
   let queue = Promise.resolve()
   const enqueue = (work: () => Promise<void>): void => {
-    queue = queue.then(work).catch(() => { console.error('[agentop relay] protocol worker failed'); endChild() })
+    queue = queue.then(work).catch(error => { swapLog(error); send(writer, { replayError: 'relay decision failed; retry the request' }) })
   }
   let replayOutput: unknown[] | null = null
   let client: Socket | null = null
@@ -212,7 +216,6 @@ export function runRelay(dir: string, pollMs = 5000): void {
         let msg: Record<string, unknown>
         try { msg = JSON.parse(line) as Record<string, unknown> } catch { continue }
         enqueue(async () => {
-          if (!await ready) return
           // A replaced client's buffered input must not race the new driver's replay.
           if (writer !== sock) return
           if (msg.k) { endChild(); return }
@@ -224,7 +227,17 @@ export function runRelay(dir: string, pollMs = 5000): void {
             // A worker round trip must not create a gap or duplicate at the durable/live boundary.
             const out = isHello ? readFileSync(outPath, 'utf8') : undefined
             if (isHello) replayOutput = []
-            const response = await swap.current.request('decide', { dir, message: msg, out })
+            // Decisions have no effects in the worker: retrying after a crash is safe. Only the
+            // keeper applies the eventual decision and appends its journal record once.
+            let response
+            for (;;) {
+              await swap.recover()
+              const worker = swap.current
+              try { response = await worker.request('decide', { dir, message: msg, out }); break }
+              catch (error) {
+                if (worker.healthy) throw error
+              }
+            }
             if (response.error) throw new Error('relay worker rejected protocol decision')
             if (writer !== sock || sock.destroyed) return
             const decision = response.result as RelayDecision

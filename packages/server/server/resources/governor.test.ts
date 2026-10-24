@@ -49,13 +49,16 @@ describe('planGovernor — kills', () => {
     const i = inv([entry({ pid: 9, ppid: 500, argv: ['agentop', 'mcp'], exe: '/u/agentop.bak (deleted)' })])
     const plan = planGovernor({ inventory: i, helpers: [], nowMs: 0 })
     expect(plan.kills).toEqual([])
-    expect(plan.alerts).toEqual([])
+    expect(plan.alerts.map(a => a.reason)).toEqual(['stale-binary'])
   })
-  test('old binary notices exclude only MCP and relay keepers/workers', () => {
+  test('old binary notices exclude only helpers with a hot-swap capability card', () => {
     const commands = ['mcp', '__structured-relay', '__relay-worker', 'server', 'watch', 'start', 'session']
-    const inventory = inv(commands.map((sub, n) => entry({ pid: n + 10, argv: ['agentop', sub], exe: '/u/agentop (deleted)' })))
+    const inventory = inv(commands.map((sub, n) => entry({ pid: n + 10, argv: ['agentop', sub], exe: '/u/agentop (deleted)', helperHotSwap: true })))
     expect(inventory.map(p => p.stale)).toEqual([false, false, false, true, true, true, true])
     expect(planGovernor({ inventory, helpers: [], nowMs: 0 }).alerts.map(a => a.pid)).toEqual([13, 14, 15, 16])
+    const legacy = inv(commands.slice(0, 3).map((sub, n) => entry({ pid: n + 20, argv: ['agentop', sub], exe: '/u/agentop (deleted)' })))
+    expect(legacy.map(p => p.stale)).toEqual([true, true, true])
+    expect(planGovernor({ inventory: legacy, helpers: [], nowMs: 0 }).alerts.map(a => a.pid)).toEqual([20, 21, 22])
   })
   test('a test leftover is killed ONLY when its recorded owner is gone; the main HOME never is', () => {
     const iso = { HOME: '/tmp/tuicheck.x', CLAUDE_PID: '700' }

@@ -37,11 +37,13 @@ export function runRelayWorker(): void {
     let nl: number
     while ((nl = buf.indexOf('\n')) >= 0) {
       const line = buf.slice(0, nl); buf = buf.slice(nl + 1)
-      const msg = JSON.parse(line)
+      let msg: Record<string, any> | undefined
       try {
+        msg = JSON.parse(line)
+        if (!msg || typeof msg !== 'object') throw new Error('invalid message')
         const result = msg.method === 'ready' ? true : relayDecision(msg.params.dir, msg.params.message, msg.params.out)
         process.stdout.write(`${JSON.stringify({ id: msg.id, result })}\n`)
-      } catch { process.stdout.write(`${JSON.stringify({ id: msg.id, error: 'relay decision failed' })}\n`) }
+      } catch { process.stdout.write(`${JSON.stringify({ id: msg?.id ?? null, error: 'relay decision failed' })}\n`) }
     }
   })
   process.stdin.on('end', () => process.exit(0))

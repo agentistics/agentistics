@@ -35,6 +35,7 @@ export interface ProcCard {
    */
   owner?: { pid: number; starttime: number; harness: string }
   command: string
+  helperHotSwap?: true
   version?: string
 }
 
@@ -63,6 +64,7 @@ export function writeProcCard(command: string, version?: string, dir = procCardD
     pid: process.pid,
     starttime,
     command,
+    ...(['mcp', '__structured-relay', '__relay-worker'].includes(command) ? { helperHotSwap: true as const } : {}),
     ...(process.env.HOME ? { home: process.env.HOME } : {}),
     ...(Number.isInteger(claudePid) && claudePid > 0 ? { claudePid } : {}),
     ...(process.env.CLAUDE_CODE_SESSION_ID ? { sessionId: process.env.CLAUDE_CODE_SESSION_ID } : {}),

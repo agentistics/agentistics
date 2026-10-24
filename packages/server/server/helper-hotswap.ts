@@ -5,11 +5,22 @@ import { existsSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 export class IdleSwap<T> {
+  private retryVersion?: string
+  private retryAt = 0
+  private failures = 0
+  private recovery?: Promise<void>
+  private now(): number { return this.d.now?.() ?? Date.now() }
+  private failed(version: string, error: unknown): void {
+    this.retryVersion = version
+    this.retryAt = this.now() + Math.min(600_000, 5000 * 2 ** Math.min(this.failures++, 7))
+    this.d.log(error)
+  }
   private busy = 0
   private preparing = false
   private stopped = false
   private candidate?: { worker: T; version: string }
   constructor(public current: T, private version: string, private readonly d: {
+    now?(): number
     version(): string
     prepare(): Promise<T>
     close(worker: T): void
@@ -24,29 +35,45 @@ export class IdleSwap<T> {
   async check(): Promise<void> {
     if (this.stopped || this.preparing || this.candidate) return
     this.preparing = true
+    let version = this.version
     try {
-      const version = this.d.version()
-      if (version === this.version) return
+      version = this.d.version()
+      if (version !== this.retryVersion) { this.failures = 0; this.retryAt = 0; this.retryVersion = version }
+      if (this.now() < this.retryAt) return
+      if (version === this.version && this.d.usable?.(this.current) !== false) return
       const worker = await this.d.prepare()
       if (this.stopped) { this.d.close(worker); return }
       this.candidate = { worker, version }
       this.commit()
-    } catch (error) { this.d.log(error) }
+    } catch (error) { this.failed(version, error) }
     finally { this.preparing = false }
   }
   private commit(): void {
-    if (this.busy || !this.candidate) return
+    if (!this.candidate || (this.busy && this.d.usable?.(this.current) !== false)) return
     if (this.d.usable && !this.d.usable(this.candidate.worker)) {
       this.d.close(this.candidate.worker)
+      this.failed(this.candidate.version, new Error('replacement exited before idle'))
       this.candidate = undefined
-      this.d.log(new Error('replacement exited before idle'))
       return
     }
     const old = this.current
     this.current = this.candidate.worker
+    this.failures = 0; this.retryAt = 0
     this.version = this.candidate.version
     this.candidate = undefined
     this.d.close(old)
+  }
+  /** Recovery ignores the idle barrier only when the active worker has died. */
+  recover(): Promise<void> {
+    if (this.recovery) return this.recovery
+    this.recovery = (async () => {
+      while (!this.stopped && this.d.usable?.(this.current) === false) {
+        this.commit()
+        await this.check()
+        if (this.d.usable?.(this.current) === false) await new Promise(resolve => setTimeout(resolve, 100))
+      }
+    })().finally(() => { this.recovery = undefined })
+    return this.recovery
   }
   close(): void {
     this.stopped = true
@@ -133,3 +160,13 @@ export class JsonWorker {
 }
 
 export const swapLog = (error: unknown): void => { console.error('[agentop helper] hot-swap failed; keeping current worker:', error instanceof Error ? error.message : 'worker unavailable') }
+
+/** Only request lifetimes hold idle; cancellation and a bounded lease release them too. */
+export class RequestLeases {
+  private requests = new Map<string, { leave(): void; at: number }>()
+  constructor(private enter: () => () => void, private now = Date.now, private ceilingMs = 300_000) {}
+  start(key: string): void { this.finish(key); this.requests.set(key, { leave: this.enter(), at: this.now() }) }
+  finish(key: string): void { const r = this.requests.get(key); this.requests.delete(key); r?.leave() }
+  expire(): void { for (const [key, r] of this.requests) if (this.now() - r.at >= this.ceilingMs) this.finish(key) }
+  clear(): string[] { const keys = [...this.requests.keys()]; for (const key of keys) this.finish(key); return keys }
+}

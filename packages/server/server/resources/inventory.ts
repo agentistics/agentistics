@@ -54,6 +54,8 @@ export interface ProcEntry {
   cwdGone?: boolean
   /** AGENTOP_MANAGED_ID found on the nearest ancestor that carries one (an MCP's owning session). */
   ancestorManagedId?: string
+  /** A validated process card explicitly declares support for worker replacement. */
+  helperHotSwap?: boolean
   /** The assistant this process declared it was started under (proc-card.ts), with its start time. */
   cardOwner?: { pid: number; starttime: number; harness: string }
 }
@@ -68,8 +70,8 @@ export type ProcessKind =
   | 'heavy'    // a job under `agentop heavy`
 
 /** These IO forwarders replace their logic workers automatically, including while requests drain. */
-export function autoSwaps(p: Pick<AgentopProcess, 'kind' | 'label'>): boolean {
-  return p.kind === 'mcp' || (p.kind === 'cli' && p.label === 'agentop __structured-relay')
+export function autoSwaps(p: Pick<AgentopProcess, 'kind' | 'label'>, capable = false): boolean {
+  return capable && (p.kind === 'mcp' || (p.kind === 'cli' && p.label === 'agentop __structured-relay'))
 }
 
 export interface ProcessOwner {
@@ -237,7 +239,7 @@ export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): Age
       usedBytes: e.rssBytes === null ? null : e.rssBytes + (e.swapBytes ?? 0),
       cpuPercent: e.cpuPercent,
       ageSec: e.ageSec,
-      stale: !autoSwaps(c) && e.exe !== null && e.exe.endsWith(' (deleted)'),
+      stale: !autoSwaps(c, e.helperHotSwap === true) && e.exe !== null && e.exe.endsWith(' (deleted)'),
       orphan: e.ppid === 1,
       owner,
       self: e.pid === ctx.selfPid,
