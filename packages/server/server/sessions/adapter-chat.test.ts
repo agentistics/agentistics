@@ -3,7 +3,7 @@ import type { ChatSourceRef, HarnessChat, HarnessChatDelta } from '@agentistics/
 import type { ChatTurn } from '@agentistics/core'
 import {
   adapterChatResponse, firstWindow, adapterRefused, clearAdapterRefusals, pickAdapterChat, readAdapterChat, refuseAdapter,
-  rowLive, sameAdapterSource, sourceForeign, type AdapterChatDeps, type AdapterChatRow,
+  logForeign, rowLive, sameAdapterSource, sourceForeign, type AdapterChatDeps, type AdapterChatRow,
 } from './adapter-chat'
 import type { ChatPayload } from './chat-web'
 import { onChatStreamsReset, resetChatStreams } from './chat-stream'
@@ -520,4 +520,25 @@ describe('a source owned by ANOTHER row is refused (CROSSBIND)', () => {
     expect(out).toBeNull()
     expect(follows).toBe(0)
   })
+})
+
+test('foreign-source diagnostics stay silent in CLI and never repeat after 512 pairs', () => {
+  const saved = process.env.SERVE_STATIC
+  const originalWarn = console.warn
+  const warns: string[] = []
+  console.warn = (m: string) => { warns.push(String(m)) }
+  const own = 'diagnostic-churn-test'
+  const src = (i: number): ChatSourceRef => ({ harness: 'codex', conversationId: `foreign-${i}`, sourceRef: `/diagnostic/${i}` })
+  try {
+    delete process.env.SERVE_STATIC
+    logForeign(own, src(0))
+    expect(warns).toHaveLength(0)
+    process.env.SERVE_STATIC = '1'
+    for (let pass = 0; pass < 2; pass++) for (let i = 0; i < 600; i++) logForeign(own, src(i))
+    expect(warns).toHaveLength(600)
+  } finally {
+    console.warn = originalWarn
+    if (saved === undefined) delete process.env.SERVE_STATIC
+    else process.env.SERVE_STATIC = saved
+  }
 })

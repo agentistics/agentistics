@@ -837,3 +837,13 @@ and its backup path is logged once. Readers continue with defaults (or the exist
 when available), so a background preferences read does not terminate the server. The corrupt bytes
 remain available for recovery, and a later preferences write creates a valid file. If the backup
 cannot be made, the read fails rather than allowing a write to destroy the original bytes.
+
+### Conversation ownership diagnostics
+
+When another session already owns a conversation, the registry, transcript fork resolver and
+adapter chat reader refuse to bind to it. These warnings belong to the server log; one-shot CLI
+commands, including `agentop session list`, keep them out of the terminal even when launched from
+a shell that inherited the server's `SERVE_STATIC` variable. Each diagnostic key is retained for
+the process lifetime, including after a row is removed, so encountering more than 512 distinct
+collisions cannot make earlier warnings repeat. Only the pair's identifiers and source paths are
+retained, without transcript content; restarting the process resets the diagnostic history.

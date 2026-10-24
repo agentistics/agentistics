@@ -24,7 +24,7 @@ import { chatDelta, type ChatTurn, type SessionConversationLink } from '@agentis
 import type { ChatPayload } from './chat-web'
 import { conversationOfRow } from './row-conversation'
 import { isExternalRowId } from './external-continue'
-import { BoundedKeys } from './bounded-keys'
+import { RefusalLog } from './refusal-log'
 
 /** How long a conversation whose channel failed is served by the legacy readers instead. */
 export const ADAPTER_REFUSAL_MS = 5 * 60_000
@@ -147,10 +147,9 @@ export function sourceForeign(src: ChatSourceRef, own: string, foreign: Readonly
 }
 
 /** The warning, said once per pair, when a source is refused for belonging to another row. */
-const refusedForeign = new BoundedKeys(512)
+const refusedForeign = new RefusalLog()
 export function logForeign(own: string, src: ChatSourceRef): void {
-  if (!refusedForeign.add(`${own}\0${src.conversationId}\0${src.sourceRef}`)) return
-  console.warn(`[sessions] refused the chat source ${src.sourceRef} for ${own}: another session is linked to that conversation`)
+  refusedForeign.warn(`${own}\0${src.conversationId}\0${src.sourceRef}`, `[sessions] refused the chat source ${src.sourceRef} for ${own}: another session is linked to that conversation`)
 }
 
 /** Which channel a stream follows: a structured session's own, or the engine's file channel for a conversation. */

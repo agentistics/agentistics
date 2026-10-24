@@ -21,6 +21,10 @@
 const command = process.argv[2] === 'tui' ? 'start' : process.argv[2]
 const args = process.argv.slice(3)
 
+// A shell started by the server can inherit this marker. Only this process's server
+// dispatch below may enable it; one-shot CLI readers must never act as the server.
+delete process.env.SERVE_STATIC
+
 // `run` must be dispatched before the normal bootstrap: its child receives a fresh HOME and must
 // never let this parent read or write the owner's preferences, harness configs, or proc card.
 if (command === 'run') {
