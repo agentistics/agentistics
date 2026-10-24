@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
-import { isRealAgentopPort, releaseThrowawayPorts, reserveThrowawayPorts, runRun } from './cli-run'
+import { buildThrowawayEnv, isRealAgentopPort, releaseThrowawayPorts, reserveThrowawayPorts, runRun } from './cli-run'
 
 const testHome = mkdtempSync(join(tmpdir(), 'agentop-run-ports-'))
 const originalHome = process.env.HOME
@@ -50,6 +50,42 @@ function runCli(home: string, args: string[]) {
 }
 
 describe('agentop run --rm', () => {
+  test('pins the original Volta installation while isolating HOME and run state', () => {
+    const sourceHome = join(testHome, 'volta-owner')
+    mkdirSync(join(sourceHome, '.volta'), { recursive: true })
+    const source = { HOME: sourceHome, PATH: '/tools/bin:/usr/bin', AGENTISTICS_DIR: '/original/state' }
+    const env = buildThrowawayEnv('/throwaway', 'test-env', 48100, 48101, source)
+    expect(env.VOLTA_HOME).toBe(join(sourceHome, '.volta'))
+    expect(env.HOME).toBe('/throwaway')
+    expect(env.USERPROFILE).toBe('/throwaway')
+    expect(env.AGENTISTICS_DIR).toBe('/throwaway/.agentistics')
+    expect(env.TMPDIR).toBe('/throwaway/tmp')
+    expect(env.TMUX_TMPDIR).toBe(env.TMPDIR)
+    expect(env.PORT).toBe('48100')
+    expect(env.WEB_PORT).toBe('48101')
+    expect(env.AGENTISTICS_THROWAWAY).toBe('test-env')
+    expect(env.PATH).toBe(source.PATH)
+    expect(source.HOME).toBe(sourceHome)
+    expect(source).not.toHaveProperty('VOLTA_HOME')
+  })
+
+  test('preserves an explicit custom VOLTA_HOME', () => {
+    const env = buildThrowawayEnv('/throwaway', 'custom-volta', 48100, 48101, { HOME: testHome, VOLTA_HOME: '/custom/volta' })
+    expect(env.VOLTA_HOME).toBe('/custom/volta')
+  })
+
+  test('finds Volta through USERPROFILE when HOME is absent', () => {
+    const sourceHome = join(testHome, 'volta-profile')
+    mkdirSync(join(sourceHome, '.volta'), { recursive: true })
+    const env = buildThrowawayEnv('/throwaway', 'profile', 48100, 48101, { USERPROFILE: sourceHome })
+    expect(env.VOLTA_HOME).toBe(join(sourceHome, '.volta'))
+  })
+
+  test('does not invent a Volta installation when the original home has none', () => {
+    const env = buildThrowawayEnv('/throwaway', 'no-volta', 48100, 48101, { HOME: join(testHome, 'no-volta') })
+    expect(env).not.toHaveProperty('VOLTA_HOME')
+  })
+
   test('never selects the real API or web ports', () => {
     expect(isRealAgentopPort(47291)).toBe(true)
     expect(isRealAgentopPort(47292)).toBe(true)
