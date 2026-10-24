@@ -166,7 +166,8 @@ import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateS
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
 import { HOST_SESSION_PATH, resolveHostSessionRefresh } from './lib/hostSession'
-import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
+import { bootSlowLine, bootWatchdog, fetchWithTimeout, holdLoadError, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
+import { sinceUpdate, useFinaleActive } from './lib/finaleGate'
 import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
 
 /**
@@ -252,7 +253,7 @@ function useBootWatchdog(): BootVerdict {
     const t0 = Date.now()
     let health: 'ok' | 'down' | 'unknown' = 'unknown'
     let cancelled = false
-    const tick = () => { if (!cancelled) setVerdict(bootWatchdog(Date.now() - t0, health)) }
+    const tick = () => { if (!cancelled) setVerdict(bootWatchdog(Date.now() - t0, health, sinceUpdate())) }
     const probe = () => {
       fetchWithTimeout('/api/health', 4000, { cache: 'no-store' })
         .then(r => { health = r.ok ? 'ok' : 'down' })
@@ -304,14 +305,15 @@ export function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: str
  */
 function LoadingScreen({ lang }: { lang: string }) {
   const verdict = useBootWatchdog()
-  const [underSplash] = useState(() => !bootReleased())
+  // After an update the FINALE takes the splash's place (`FinaleHost` releases it on its first frame),
+  // so this screen draws its own loader beneath it: when the finale leaves before the data has, the
+  // person sees the loader and its line — never the empty dark page that used to sit there.
+  const [underSplash] = useState(() => !bootReleased() && sinceUpdate() === null)
   // The server stopped answering: say so instead of spinning (the ServerProblem screen holds nothing,
   // so the splash leaves for it). The requests keep retrying and the probe keeps running.
   const unreachable = verdict === 'unreachable'
   useBootHold(underSplash && !unreachable)
-  const slowLine = verdict === 'slow'
-    ? (lang === 'pt' ? 'Ainda carregando — o servidor está respondendo.' : 'Still loading — the server is answering.')
-    : null
+  const slowLine = verdict === 'slow' ? bootSlowLine(lang === 'pt' ? 'pt' : 'en', sinceUpdate()) : null
   useEffect(() => { if (underSplash) setBootStatus(slowLine) }, [underSplash, slowLine])
   if (unreachable) {
     return <ServerProblem lang={lang} problem={{ kind: 'unreachable', detail: '' }} onRetry={() => location.reload()} autoRetry />
@@ -2856,7 +2858,11 @@ export default function AppLayout() {
   // totals — the exact defect `resolveMachineCacheScope` exists to prevent for team/machine scope.
   const derivedActiveOnly = activeOnly && fleetReadable
   const runningIds = useMemo(() => runningConversationIds(headerFleet.rows), [headerFleet.rows])
-  const legacyDerived = useDerivedStats(data, filters, tagsList, derivedActiveOnly, runningIds)
+  // While the update finale is on screen the dashboard beneath it is hidden: computing its stats and
+  // rendering it there are long tasks on the finale's own thread — the stutter at the end of an
+  // update. Both wait for the finale to leave (`finaleGate.ts`); the loader holds until then.
+  const finaleUp = useFinaleActive()
+  const legacyDerived = useDerivedStats(finaleUp ? null : data, filters, tagsList, derivedActiveOnly, runningIds)
   // A4.7: the session, cost and tool figures from the projections, laid over the legacy answer when
   // the server says this surface opted in and the filters are ones the API can express.
   const projectedOverlay = useProjectedDerived({
@@ -3455,6 +3461,9 @@ export default function AppLayout() {
     // problem" send a person to different places — and it retries on its own (useData) except for an
     // auth status, which the gates above resolve.
     const problem: LoadError = loadError ?? { kind: 'server', detail: String(error) }
+    // Right after an update the server is known to be up and still starting: the loader stays (it
+    // says why) while the load retries, instead of "can't reach agentistics" under the finale.
+    if (holdLoadError(problem, sinceUpdate())) return <LoadingScreen lang={lang} />
     const autoRetry = !(problem.kind === 'server' && (problem.status === 401 || problem.status === 403))
     return <ServerProblem lang={lang} problem={problem} onRetry={refetch} autoRetry={autoRetry} />
   }

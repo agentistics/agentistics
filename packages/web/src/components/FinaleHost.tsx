@@ -10,14 +10,21 @@
  * is pending), and survives `App`'s boot states because it is not part of them.
  *
  * `App` still consumes the snapshot later, to put the route and the scroll back.
+ *
+ * While it is up the app beneath it holds its heavy first work (`finaleGate.ts`); leaving ENDS that
+ * hold, and so does a wall-clock ceiling — a finale that never got its frames (a canvas that failed,
+ * a tab hidden through it) must not keep the app waiting behind it.
  */
+/** The latest the app beneath is held, whatever happened to the finale's own clock. */
+export const FINALE_CEILING_MS = FINALE_MS + 6000
 import { useEffect, useState } from 'react'
 import type { Lang } from '@agentistics/core'
 import { BUNDLE_VERSION } from '../lib/bundleVersion'
 import { releaseBoot } from '../lib/bootSplash'
 import { peekRestore } from '../lib/upgradeFlow'
+import { endFinale } from '../lib/finaleGate'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { UpdateFinale } from './UpdateFinale'
+import { FINALE_MS, UpdateFinale } from './UpdateFinale'
 
 function storedLang(): Lang {
   let stored: string | null = null
@@ -33,6 +40,11 @@ export function FinaleHost() {
   })
   const isMobile = useIsMobile()
   useEffect(() => { if (pending) releaseBoot() }, [pending])
+  useEffect(() => {
+    if (!pending || !BUNDLE_VERSION) { endFinale(); return }
+    const ceiling = window.setTimeout(endFinale, FINALE_CEILING_MS)
+    return () => window.clearTimeout(ceiling)
+  }, [pending])
   if (!pending || !BUNDLE_VERSION) return null
-  return <UpdateFinale lang={storedLang()} isMobile={isMobile} version={BUNDLE_VERSION} from={pending.from} onDone={() => setPending(null)} />
+  return <UpdateFinale lang={storedLang()} isMobile={isMobile} version={BUNDLE_VERSION} from={pending.from} onDone={() => { endFinale(); setPending(null) }} />
 }
