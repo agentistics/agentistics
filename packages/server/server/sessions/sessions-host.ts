@@ -736,9 +736,15 @@ export function createSessionsPoller(o: {
         // The dialog is kept from the frame that DECIDED the state, so the two can never describe
         // different moments — and it costs nothing extra, the frame is already here.
         const statedDialog = state === 'waiting-approval' ? o.backend.dialogOf?.(r.id) : undefined
-        const tail = (): string[] => anyGrant() ? approvalTail(frame, APPROVAL_LINES).map(l => scrubTerminalLine(r.id, l)) : approvalTail(frame, APPROVAL_LINES)
+        const tail = (): string[] => {
+          const lines = approvalTail(frame, APPROVAL_LINES, markerReadOptions(harness))
+          return anyGrant() ? lines.map(l => scrubTerminalLine(r.id, l)) : lines
+        }
         if (statedDialog) {
-          approvals.set(r.id, tail())
+          // The protocol STATES the question: show that, not the screen tail — a structured screen is
+          // a log, and its tail still carried the previous question above the new options (live QA).
+          const statedPrompt = o.backend.attentionOf?.(r.id)?.prompt
+          approvals.set(r.id, statedPrompt ? [anyGrant() ? scrubTerminalLine(r.id, statedPrompt) : statedPrompt] : tail())
           // F3.3 — which option is a FIELD is the protocol's statement too, never re-derived from a label.
           const statedOptions = o.backend.attentionOf?.(r.id)?.options
           const statedMulti = o.backend.attentionOf?.(r.id)?.multiSelect === true
@@ -747,7 +753,14 @@ export function createSessionsPoller(o: {
           dialogStated.add(r.id)
           // engine-api 1.13: the protocol says the question takes several options — the card keeps
           // the ticks itself and sends them as ONE answer (`choices`), nothing is pressed per tick.
-          if (o.backend.attentionOf?.(r.id)?.multiSelect) dialogForm.set(r.id, { multi: true, together: true })
+          const statedAttention = o.backend.attentionOf?.(r.id)
+          const statedStep = statedAttention?.step
+          if (statedAttention?.multiSelect || statedStep) {
+            dialogForm.set(r.id, {
+              ...(statedAttention?.multiSelect ? { multi: true as const, together: true as const } : {}),
+              ...(statedStep ? { position: { at: statedStep.at, of: statedStep.of } } : {}),
+            })
+          }
         } else if (state === 'waiting-approval') {
           approvals.set(r.id, tail())
           // Read from the SAME frame that decided the state, so what is offered and what the state

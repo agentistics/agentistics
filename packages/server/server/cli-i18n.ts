@@ -235,6 +235,10 @@ export interface CliStrings {
   sessStepUnknown: (harness: string) => string
   /** Refused: the dialog on screen is not one step of a form, so there is nothing to step to. */
   sessNotAForm: string
+  /** A typed answer's field is open and could not be left, so no key was pressed into it. */
+  sessFieldStuck: string
+  /** The step key was delivered and the form did not move. */
+  sessStepStuck: string
   /** Nothing fell, or everything that did has already been picked back up. */
   sessNoFell: string
   /** The session backend (tmux) could not be listed, so nothing can be judged fallen or alive. */
@@ -681,6 +685,8 @@ const EN: CliStrings = {
   sessStepUnknown: (harness: string) =>
     `agentop has not driven ${harness}'s multi-question form yet, so it will not press keys into it — attach to move between its questions there.`,
   sessNotAForm: 'the session is not on a question with several steps any more, so nothing was pressed.',
+  sessFieldStuck: 'the typed answer\'s field is still open and could not be left, so nothing was pressed into it — finish it in the session itself (attach).',
+  sessStepStuck: 'the key was delivered and the form did not move to another question. Nothing else was pressed — move it in the session itself (attach).',
   sessNoFell: 'nothing fell — no session was lost with the machine still on record.',
   sessBackendUnreadable: 'could not list the running sessions (tmux did not answer), so nothing was reopened — a session that is still running would have been started twice. Try again in a moment.',
   sessFellOpened: (opened: number, skipped: number, held: number) =>
@@ -1108,6 +1114,8 @@ const PT: CliStrings = {
   sessStepUnknown: (harness: string) =>
     `o agentop ainda não dirigiu o formulário de várias perguntas do ${harness}, então não vai apertar teclas nele — anexe para navegar entre as perguntas lá.`,
   sessNotAForm: 'a sessão não está mais numa pergunta de várias etapas, então nada foi apertado.',
+  sessFieldStuck: 'o campo da resposta digitada continua aberto e não foi possível sair dele, então nada foi apertado nele — termine na própria sessão (attach).',
+  sessStepStuck: 'a tecla foi entregue e o formulário não foi para outra pergunta. Nada mais foi apertado — mude na própria sessão (attach).',
   sessNoFell: 'nada caiu — nenhuma sessão foi perdida com registro de que estava viva.',
   sessBackendUnreadable: 'não foi possível listar as sessões em execução (o tmux não respondeu), então nada foi reaberto — uma sessão ainda viva seria iniciada duas vezes. Tente de novo em instantes.',
   sessFellOpened: (opened: number, skipped: number, held: number) =>

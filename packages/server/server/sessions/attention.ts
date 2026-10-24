@@ -18,7 +18,7 @@
  * harness nobody probed — which the UI states in words.
  */
 
-import { readDialog } from './dialog-choice'
+import { readDialog, type MarkerOpts } from './dialog-choice'
 import type { AttentionRules, SessionActivity } from './types'
 
 /**
@@ -218,8 +218,8 @@ export function attentionOf(o: {
  * It is the only thing standing between `approvalFor()`'s keystroke and a confirmation the user
  * cannot check — see `approval-spec.ts`.
  */
-export function approvalTail(frame: readonly string[], max = 10): string[] {
-  const from = Math.max(0, frame.length - Math.max(0, dialogHeight(frame, max)))
+export function approvalTail(frame: readonly string[], max = 10, opts: MarkerOpts = {}): string[] {
+  const from = Math.max(0, frame.length - Math.max(0, dialogHeight(frame, max, opts)))
   const lines = frame.slice(from)
   let start = 0
   let end = lines.length
@@ -227,6 +227,11 @@ export function approvalTail(frame: readonly string[], max = 10): string[] {
   while (end > start && (lines[end - 1] ?? '').trim() === '') end--
   return lines.slice(start, end)
 }
+
+/** How far above a numberless select its question may reach (several paragraphs, up to a rule). */
+const MARKER_QUESTION_LINES = 24
+/** A horizontal rule: the edge of a harness's dialog screen. */
+const RULE_LINE = /^\s*[─━═╌]{8,}\s*$/
 
 /** How far above the first option the question itself may reach. */
 const QUESTION_LINES = 12
@@ -250,10 +255,23 @@ const QUESTION_LINES = 12
  * two, not a screen, and reaching one line too far prints somebody's earlier prose under "you are
  * about to confirm this".
  */
-export function dialogHeight(frame: readonly string[], max: number): number {
-  const { top } = readDialog(frame)
+export function dialogHeight(frame: readonly string[], max: number, opts: MarkerOpts = {}): number {
+  const read = readDialog(frame, opts)
+  const { top } = read
   if (top < 0) return Math.max(0, max)
   const blank = (i: number) => (frame[i] ?? '').trim() === ''
+  /*
+   * A NUMBERLESS select's question is SEVERAL paragraphs (claude's trust prompt: title, path, two
+   * paragraphs, "Security guide"), so the blank-line rule below stopped at "Security guide" and the
+   * flat window began mid-sentence (" folder first.", live QA 2026-10-24). Its screen is bounded by a
+   * rule above the title instead: walk up to it, within a bound.
+   */
+  if (read.select === 'marker') {
+    const floor = Math.max(0, top - MARKER_QUESTION_LINES)
+    let up = top
+    while (up > floor && !RULE_LINE.test(frame[up - 1] ?? '')) up--
+    return Math.max(Math.max(0, max), frame.length - up)
+  }
   /*
    * THE QUESTION IS THE BLOCK IMMEDIATELY ABOVE OPTION 1, and a blank line is what separates it
    * from the conversation. A flat "N lines above" cannot tell the two apart.

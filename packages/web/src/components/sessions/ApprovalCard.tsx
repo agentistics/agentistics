@@ -18,7 +18,7 @@
  * agreeing to.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertCircle, Check, ChevronLeft, ChevronRight } from 'lucide-react'
 import { CheckboxBox, dialogButtonStyle } from '../../pages/settings/primitives'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -39,7 +39,7 @@ export interface ApprovalCardProps {
    * second composer with none of the composer's features — no dictation, no paste-an-image, no
    * attachments, no auto-grow — and its own separate idea of what Enter does.
    */
-  onWrite?: (option: { number: number; label: string }) => void
+  onWrite?: (option: { number: number; label: string; choices?: number[] }) => void
   /** Which option the composer is currently answering, so the row can say so. */
   answering?: number | null
 }
@@ -113,7 +113,20 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
   const alreadyAnswered = answeredShape !== null && answeredShape === shape
 
   if (together && ticksFor !== shape) { setTicksFor(shape); setTicks(new Set()) }
-  const tickedNow = (n: number, fromRow: boolean | undefined) => (together ? ticks.has(n) : fromRow === true)
+  const tickedNow = (n: number, fromRow: boolean | undefined) =>
+    (together ? ticks.has(n) || answering === n : fromRow === true)
+  /**
+   * A STRUCTURED multi-select's typed answer travels WITH the other ticks (`choices`), and a tick
+   * changed while the composer holds the answer reaches it too — the typed text replaced them before.
+   */
+  const answeringFree = together && answering !== null && options.some(o => o.number === answering && o.freeText)
+  const ticksKey = [...ticks].sort((a, b) => a - b).join(',')
+  useEffect(() => {
+    if (!answeringFree || answering === null) return
+    const o = options.find(x => x.number === answering)
+    if (o) onWrite?.({ number: o.number, label: o.label, choices: [...ticks].sort((a, b) => a - b) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticksKey, answeringFree])
 
   async function sendTicks() {
     setBusy('confirm')
@@ -275,7 +288,7 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
                   // field, and every further press types the digit INTO it, which is how
                   // `33333333333333333` happened. So the digit and the words travel together,
                   // once, when the composer sends — see `answerSession`.
-                  if (o.freeText) { onWrite?.({ number: o.number, label: o.label }); return }
+                  if (o.freeText) { onWrite?.({ number: o.number, label: o.label, ...(together ? { choices: [...ticks].sort((a, b) => a - b) } : {}) }); return }
                   void answer(o.number)
                 }}
                 // Picking the free-text option SENDS NOTHING — it hands the composer over — so it

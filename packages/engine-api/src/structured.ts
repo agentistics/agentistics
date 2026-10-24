@@ -235,6 +235,11 @@ export interface StructuredAttention {
    * answer is `StructuredAnswer.choices`. Absent: one option, as before.
    */
   multiSelect?: true
+  /**
+   * 1.13 — this question's place in a FORM of several (claude's `AskUserQuestion` with N questions,
+   * asked one at a time): `{ at: 2, of: 3 }`. Absent on a lone question.
+   */
+  step?: { at: number; of: number }
 }
 
 /**

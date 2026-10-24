@@ -163,7 +163,7 @@ import { approvalFor, choiceKey, fieldIsOpen, isFreeTextOption, markerReadOption
 // Carrying a rename through to the harness. Shared with `agentop session rename` — one gesture, one
 // implementation, for the reason `task-reopen.ts` exists.
 import { renameInHarness, renameMessage } from './sessions/rename'
-import { needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-choice'
+import { formMoved, needsChoice, parseDialogOptions, readDialog } from './sessions/dialog-choice'
 import { answerFollowUp } from './sessions/answer-followup'
 import { liveTranscriptDeps, runTranscriptSearch } from './sessions/transcript-run'
 import { rulesFor } from './sessions/attention-rules'
@@ -226,6 +226,26 @@ const SEND_CAPTURE_LINES = 60
  * did move gets reported as stuck.
  */
 const ANSWER_SETTLE_MS = 240
+
+/**
+ * LEAVE an open free-text field before pressing anything into a form. On claude's multi-select the
+ * write-your-own box keeps its field open while the cursor sits on it, so the next digit was TYPED
+ * into it (`Purple22`) and `Right` moved the caret instead of the form — the card claimed the step
+ * and the dialog stayed (live QA 2026-10-24). One `Up` moves off it and keeps the typed text ticked
+ * (claude 2.1.309, driven 2026-10-24). Returns the frame after, or null when the field is still
+ * open (then nothing more is pressed).
+ */
+export async function leaveField(backend: Pick<SessionBackend, 'sendKey' | 'capture'>, id: string, harness: HarnessId, frame: string[]): Promise<string[] | null> {
+  if (fieldIsOpen(harness, frame) !== true) return frame
+  const up = approvalFor(harness)?.move?.up
+  if (!up || !await backend.sendKey(id, up)) return null
+  await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+  const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+  return fieldIsOpen(harness, after) === true ? null : after
+}
+
+/** How long a step key may take to redraw the form before the step is reported as stuck. */
+const STEP_SETTLE_MS = 1200
 
 
 // ANSI, for the output this module still writes to the REAL terminal: the suspended commands,
@@ -4398,9 +4418,20 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (!rules || !dialogOnScreen(rules, frame)) return { ok: false, message: s.sessNotAsking }
       const form = readDialog(frame, markerReadOptions(managed.harness)).form
       if (!form?.steps && !form?.position) return { ok: false, message: s.sessNotAForm }
-      return (await backend.sendKey(id, dir === 'next' ? spec.steps.next : spec.steps.back))
-        ? { ok: true, message: s.sessStepped(dir) }
-        : { ok: false, message: s.sessSendFailed(id) }
+      const ready = await leaveField(backend, id, managed.harness, frame)
+      if (!ready) return { ok: false, message: s.sessFieldStuck }
+      if (!await backend.sendKey(id, dir === 'next' ? spec.steps.next : spec.steps.back)) return { ok: false, message: s.sessSendFailed(id) }
+      // "Moved" is said only when the form MOVED: the question or its options changed. A key that
+      // landed somewhere else (a field, a caret) is reported, never claimed. Waiting for the redraw
+      // here is also what lets the poll this act kicks see the next question at once.
+      const before = ready.join('\n')
+      for (let waited = 0; waited < STEP_SETTLE_MS; waited += ANSWER_SETTLE_MS) {
+        await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+        const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])
+        if (formMoved(ready, after)) return { ok: true, message: s.sessStepped(dir) }
+        if (after.join('\n') !== before && !dialogOnScreen(rules, after)) return { ok: true, message: s.sessStepped(dir) }
+      }
+      return { ok: false, message: s.sessStepStuck }
     },
 
     async answerSession(id: string, choice?: number, text?: string, choices?: readonly number[]): Promise<ActionResult> {
@@ -4545,6 +4576,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
               ? { ok: true, message: s.sessToggled(answer, true) }
               : { ok: false, message: s.sessSendFailed(id) }
           }
+          // A typed answer's field still open would take the digit as TEXT (`Purple22`): leave it first.
+          if (!await leaveField(backend, id, managed.harness, frame)) return { ok: false, message: s.sessFieldStuck }
           if (!await backend.sendKey(id, key)) return { ok: false, message: s.sessSendFailed(id) }
           await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
           const after = await backend.capture(id, SEND_CAPTURE_LINES).catch(() => [] as string[])

@@ -41,6 +41,7 @@ import { NoQuestionsWarning } from './ModePicker'
 import { modeLabel, modeTitle, onlyModeNote } from '../../lib/modeLabel'
 import { modeCycles, modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
 import { ApprovalCard } from './ApprovalCard'
+import { composerAnswerRequest } from '../../lib/dialogAnswer'
 import { TypedModel } from './ModelSelect'
 import { approvalIdentity } from '../../lib/approvalQuestion'
 import { dialogAnswersToRetire } from '../../lib/dialogAnswerEcho'
@@ -1792,7 +1793,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * cannot outlive the question: a dialog that changes under it would leave the composer sending an
    * answer to a question nobody asked.
    */
-  const [answering, setAnswering] = useState<{ number: number; label: string; shape: string } | null>(null)
+  // `choices`: a STRUCTURED multi-select's other ticks, kept by the card — the typed answer goes
+  // WITH them in one `choices` answer instead of replacing them.
+  const [answering, setAnswering] = useState<{ number: number; label: string; shape: string; choices?: number[] } | null>(null)
   /**
    * The dialog's identity — the same `approvalIdentity` `ApprovalCard` compares, for the same
    * reason (see that module's header): options ALONE are not an identity, because claude's
@@ -2414,7 +2417,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // what the echo has to be retired AGAINST — see `dialogAnswerEcho.ts`.
     const answeringShape = answeringNow && answering ? answering.shape : null
     const out = answeringNow && answering
-      ? await act({ id: session.id, action: 'approve', choice: answering.number, text: full })
+      ? await act(composerAnswerRequest(session.id, answering, full))
       : await act({ id: session.id, action: 'prompt', text: full })
     setSending(false)
     if (out.ok) {

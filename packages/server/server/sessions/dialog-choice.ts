@@ -577,3 +577,29 @@ export function parseDialogOptions(
 export function needsChoice(options: readonly DialogOption[]): boolean {
   return options.length > 1
 }
+
+/**
+ * Did a form MOVE between two frames — PURE. The question line above the options or the options'
+ * labels changed (another question, or the review step). A tick (only a box's state) and a caret
+ * moving inside a typed field (the label growing, the field still open) are not a move — that is
+ * how `Right` inside a field read as "moved to the next question" while the form stayed put.
+ */
+export function formMoved(before: readonly string[], after: readonly string[]): boolean {
+  const a = readDialog(before)
+  const b = readDialog(after)
+  if (b.kind !== 'options') return a.kind === 'options'
+  if (a.kind !== 'options') return true
+  if (Boolean(a.form?.review) !== Boolean(b.form?.review)) return true
+  if (a.form?.position?.at !== b.form?.position?.at) return true
+  const head = (f: readonly string[], top: number): string => {
+    for (let i = top - 1; i >= 0; i--) if ((f[i] ?? '').trim() !== '') return (f[i] ?? '').trim()
+    return ''
+  }
+  if (head(before, a.top) !== head(after, b.top)) return true
+  if (a.options.length !== b.options.length) return true
+  // A label that only GREW or shrank at its end is the typed field taking keys, not another question.
+  return a.options.some((o, i) => {
+    const l = o.label, m = b.options[i]!.label
+    return l !== m && !m.startsWith(l) && !l.startsWith(m)
+  })
+}
