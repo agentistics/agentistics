@@ -36,6 +36,7 @@ agentop --version    # print version (and a notice if an update exists)
 | [`central`](#central) | Manage the Team Mode central (wraps `central.sh`) |
 | [`member`](#member) | Join / leave / inspect a Team Mode central from this machine |
 | [`session`](#session) | Start / list / attach / kill background assistant sessions (tmux-backed); `ls` prints the cockpit's table |
+| [`run`](#run) | Execute a command with a disposable home and separate API/web ports |
 | [`hooks`](#hooks) | Teach Claude Code to fan work out across several assistants through agentop |
 | [`backup`](#backup) | Back up this machine's history — metrics, and a manifest that rebuilds every repository |
 | [`restore`](#restore) | Restore a backup, or pull one from the private GitHub repository holding them |
@@ -52,6 +53,22 @@ Running **bare `agentop`** on an interactive terminal opens the
 [control center](#start). Without a terminal it prints this help; `--help` always prints it.
 
 ---
+
+## `run`
+
+```bash
+agentop run --rm -- bun --version
+agentop run --rm -- bun test packages/server/server/cli-run.test.ts
+agentop run ls
+agentop run stop <name>
+```
+
+Each run gets a disposable `HOME`, `USERPROFILE`, Agentistics data directory, temporary
+directory, and reserved API/web ports. Its home and port reservations are removed when it exits.
+The command inherits `PATH`. An explicit `VOLTA_HOME` is preserved; otherwise, when the original
+home contains `.volta`, that installation is pinned in `VOLTA_HOME` before changing `HOME`.
+This lets Volta's bun/node/npm shims find their installed toolchains without repeatedly invoking
+themselves through `PATH`.
 
 ## `start`
 

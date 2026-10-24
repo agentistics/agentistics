@@ -22,6 +22,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Os ajudantes em segundo plano passam sozinhos para a versão nova depois de uma atualização — o aviso de "programa antigo" não aparece mais.',
         en: 'Background helpers move to the new version by themselves after an update — no more "old binary" notice.',
       },
+      {
+        pt: 'Testes num ambiente descartável não entram mais em laço infinito quando o bun vem do Volta.',
+        en: 'Test runs in a throwaway no longer loop forever when bun comes from Volta.',
+      },
     ],
   },
   '2.147.1': {

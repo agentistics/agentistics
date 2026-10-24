@@ -28,6 +28,20 @@ export type ThrowawayState = {
 
 type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[] }
 
+export function buildThrowawayEnv(home: string, name: string, apiPort: number, webPort: number, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  // Volta shims locate their toolchains relative to HOME unless VOLTA_HOME is set.
+  // Capture the original installation before isolating HOME, or a shim may resolve itself.
+  const voltaHome = source.VOLTA_HOME || join(source.HOME || source.USERPROFILE || homedir(), '.volta')
+  return {
+    ...source,
+    ...(source.VOLTA_HOME || existsSync(voltaHome) ? { VOLTA_HOME: voltaHome } : {}),
+    HOME: home, USERPROFILE: home, AGENTISTICS_DIR: join(home, '.agentistics'),
+    PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1',
+    AGENTISTICS_SERVER_FOREGROUND: '1', AGENTISTICS_EXPERIMENTAL: '0',
+    TMUX_TMPDIR: join(home, 'tmp'), TMPDIR: join(home, 'tmp'), AGENTISTICS_THROWAWAY: name,
+  }
+}
+
 function usage(): string {
   return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] -- <command...>
        agentop run --rm [--ttl 2h] [--port-offset N] [--name x]
@@ -220,8 +234,8 @@ async function startRun(options: RunOptions): Promise<number> {
   const state: ThrowawayState = { name: options.name, home, apiPort, webPort, reservationPaths, startedAt: new Date().toISOString(), command: options.command }
   const script = process.argv[1]
   const argv = options.command.length ? options.command : (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'server'] : [process.execPath, 'server'])
-  const env = { ...process.env, HOME: home, USERPROFILE: home, AGENTISTICS_DIR: agentistics, PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1', AGENTISTICS_SERVER_FOREGROUND: '1', AGENTISTICS_EXPERIMENTAL: '0', TMUX_TMPDIR: join(home, 'tmp'), TMPDIR: join(home, 'tmp'), AGENTISTICS_THROWAWAY: options.name }
-  mkdirSync(env.TMPDIR, { recursive: true, mode: 0o700 })
+  const env = buildThrowawayEnv(home, options.name, apiPort, webPort)
+  mkdirSync(env.TMPDIR!, { recursive: true, mode: 0o700 })
   const unit = `agentistics-throwaway-${options.name}.scope`
   const systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
   const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv
