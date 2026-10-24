@@ -410,26 +410,37 @@ export function resolveSessionSearchScopes(p: Preferences): SearchScope[] {
   return SEARCH_SCOPES.filter(s => set.has(s))
 }
 
-/** Read + parse a preferences JSON file.
- *  - absent or blank  → null  (a legitimate "nothing here")
- *  - present but corrupt → THROWS. Falling through to defaults here presents the machine as
- *    solo and silently discards every connection, denylist, archiveMode and layout. */
-/** The file's JSON exactly as it is on disk — tokens NOT re-injected. `null` when absent/empty. */
-async function readRawPrefs(path: string): Promise<Record<string, unknown> | null> {
-  const file = Bun.file(path)
-  if (!(await file.exists())) return null
-  const text = await file.text()
+/** Read the on-disk JSON without re-injecting tokens. Preserve corrupt bytes before defaulting.
+ * Recovery takes the writer's lock and re-reads: another process may already have repaired the
+ * file. Writers pass `lockHeld` to avoid re-entering their own cross-process lock. */
+async function readRawPrefs(path: string, lockHeld = false): Promise<Record<string, unknown> | null> {
+  let text: string
+  try { text = await readFile(path, 'utf8') } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
+  }
   if (!text.trim()) return null
   try {
-    return JSON.parse(text) as Record<string, unknown>
-  } catch (err) {
-    throw new Error(`preferences file at ${path} is present but unparseable: ${err instanceof Error ? err.message : String(err)}`)
+    const parsed: unknown = JSON.parse(text)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('expected an object')
+    return parsed as Record<string, unknown>
+  } catch {
+    if (!lockHeld) {
+      const release = await acquireFileLock(path)
+      try { return await readRawPrefs(path, true) } finally { await release() }
+    }
+    const backup = `${path}.corrupt-${Date.now()}`
+    // Abort if preservation fails: a subsequent write must never erase the only copy.
+    await rename(path, backup)
+    rawPrefsMemo.delete(path)
+    console.error('[preferences] unreadable preferences moved aside; previous contents kept at', backup)
+    return null
   }
 }
 
 /** Parse a preferences file and put its SEALED tokens back (see vault/prefs-tokens.ts): every
  *  reader keeps seeing `connections[].token`, while the file itself holds none. */
-async function readJsonPrefs(path: string): Promise<Preferences | null> {
+async function readJsonPrefs(path: string, lockHeld = false): Promise<Preferences | null> {
   // PERF.SLOW: a server reads preferences many times a second (timers, every route, every poll) and
   // the file changes a few times a day. Re-reading and re-parsing it each time was ~15 % of an idle
   // server's CPU. The PARSED file is kept against its stat (inode + size + mtime in ns — a write is
@@ -440,7 +451,7 @@ async function readJsonPrefs(path: string): Promise<Preferences | null> {
   const hit = key !== null ? rawPrefsMemo.get(path) : undefined
   if (hit && hit.key === key) raw = structuredClone(hit.raw)
   else {
-    raw = await readRawPrefs(path)
+    raw = await readRawPrefs(path, lockHeld)
     if (raw && key !== null) rawPrefsMemo.set(path, { key, raw: structuredClone(raw) })
     else rawPrefsMemo.delete(path)
   }
@@ -464,12 +475,12 @@ function defaultPrefs(): Preferences {
   return { customLayout: [], team: migrateTeamConfig(undefined) }
 }
 
-/** Read the effective preferences (primary, else migrated legacy, else defaults) with NO
- *  side-effecting write. `writePreferencesTo`'s read-merge step uses this (never the
+/** Read the effective preferences (primary, else migrated legacy, else defaults) without a
+ *  migration write (corrupt input may still be quarantined). `writePreferencesTo`'s read-merge step uses this (never the
  *  write-triggering `readPreferencesFrom`) so it can never re-enter `enqueueWrite` from inside
  *  an already-running chained callback — see the deadlock note on `enqueueWrite`. */
-async function readEffective(primary: string, legacy: string | null): Promise<{ prefs: Preferences; migratedFromLegacy: boolean }> {
-  const p = await readJsonPrefs(primary)
+async function readEffective(primary: string, legacy: string | null, lockHeld = false): Promise<{ prefs: Preferences; migratedFromLegacy: boolean }> {
+  const p = await readJsonPrefs(primary, lockHeld)
   if (p) return { prefs: withMigratedTeam(p), migratedFromLegacy: false }
   // `legacy === null` means this data dir has no legacy predecessor and MUST NOT be seeded from
   // outside itself — see `legacyPreferencesSource`. It is not "the file is missing": nothing is
@@ -516,7 +527,7 @@ export async function readPreferencesFrom(primary: string, legacy: string | null
       // Re-check under the chain (and now the cross-process lock): primary may have been
       // created — by our own read above racing another queued write, by that write itself, or
       // by a SEPARATE PROCESS that migrated first — since we decided to migrate.
-      const p2 = await readJsonPrefs(primary)
+      const p2 = await readJsonPrefs(primary, true)
       if (p2) return withMigratedTeam(p2)
       // The legacy dir may be read-only (Docker), so a failed migration write is expected and
       // ignored — the caller still gets the migrated-in-memory result.
@@ -551,10 +562,8 @@ export async function readPreferences(): Promise<Preferences> {
 /**
  * CLI entry points: read the preferences or die with ONE clear line naming the file.
  *
- * `readPreferences` now THROWS on a corrupt (present, non-empty, unparseable) file instead of
- * silently presenting the machine as solo. Every command that reads it must therefore say what
- * is wrong and exit non-zero — an unhandled rejection stack, or a bare `mode: solo`, are both
- * worse than the truth. Never prints the file's contents (it holds central tokens).
+ * Corrupt JSON is quarantined by the reader. Other IO failures still need a clear sentence
+ * instead of an unhandled rejection. Never prints the file's contents (it may hold tokens).
  */
 export async function readPreferencesOrExit(): Promise<Preferences> {
   try {
@@ -595,7 +604,7 @@ async function writeFileAtomic(path: string, text: string): Promise<void> {
  * Throws the vault's sentence when a token must be sealed and cannot be — never plain text.
  */
 async function writePrefsFile(primary: string, prefs: Preferences): Promise<void> {
-  const previous = await readRawPrefs(primary).catch(() => null)
+  const previous = await readRawPrefs(primary, true)
   const toWrite = await stripAndSealTokens(primary, prefs as unknown as Record<string, unknown>, previous)
   await writeFileAtomic(primary, JSON.stringify(toWrite, null, 2))
   rawPrefsMemo.delete(primary)
@@ -970,7 +979,7 @@ export async function writePreferencesTo(primary: string, legacy: string | null,
     }
     const release = await acquireFileLock(primary)
     try {
-      const { prefs: current } = await readEffective(primary, legacy)
+      const { prefs: current } = await readEffective(primary, legacy, true)
       const merged = { ...current, ...prefs }
       if (prefs.team) merged.team = mergeTeamPayload(current.team, prefs.team)
       await writePrefsFile(primary, merged)
@@ -1011,7 +1020,7 @@ export async function updateTeamConfigAt(primary: string, legacy: string | null,
   return enqueueWrite(async () => {
     const release = await acquireFileLock(primary)
     try {
-      const { prefs: current } = await readEffective(primary, legacy)
+      const { prefs: current } = await readEffective(primary, legacy, true)
       const currentTeam = current.team ?? migrateTeamConfig(undefined)
       const nextTeam = mutate(currentTeam)
       if (nextTeam === undefined) return currentTeam
@@ -1044,7 +1053,7 @@ export async function updatePreferencesAt(primary: string, legacy: string | null
   return enqueueWrite(async () => {
     const release = await acquireFileLock(primary)
     try {
-      const { prefs: current } = await readEffective(primary, legacy)
+      const { prefs: current } = await readEffective(primary, legacy, true)
       const patch = mutate(current)
       if (patch === undefined) return current
       const merged = { ...current, ...patch }
@@ -1080,7 +1089,7 @@ export async function migratePreferencesTokensAt(primary: string, legacy: string
       await enqueueWrite(async () => {
         const release = await acquireFileLock(primary)
         try {
-          const { prefs } = await readEffective(primary, legacy)
+          const { prefs } = await readEffective(primary, legacy, true)
           await writePrefsFile(primary, prefs)
         } finally {
           await release()

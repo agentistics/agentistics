@@ -34,7 +34,9 @@ export function withResumeLock<T>(conversationId: string, fn: () => Promise<T>):
   const prior = chains.get(conversationId) ?? Promise.resolve()
   const run = prior.then(fn, fn)
   // The stored link never rejects, so a failure cannot wedge the chain. The CALLER still sees it.
-  chains.set(conversationId, run.then(() => undefined, () => undefined))
+  const tail = run.then(() => undefined, () => undefined)
+  chains.set(conversationId, tail)
+  void tail.then(() => { if (chains.get(conversationId) === tail) chains.delete(conversationId) })
   return run
 }
 

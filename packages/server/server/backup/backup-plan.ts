@@ -301,6 +301,11 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     why: 'A lock held by a process on this machine.',
   },
   {
+    pattern: '.agentistics/conversation-resumes', match: 'prefix', reason: 'runtime',
+    restoreWith: 'nothing',
+    why: 'Per-conversation locks held while a reopen or write resumes it on this machine.',
+  },
+  {
     pattern: '.agentistics/team-sent.json', match: 'prefix', reason: 'regenerable',
     restoreWith: 'nothing — the uploader re-pushes its full history on the next cycle',
     why: 'What this machine has already pushed to a central, plus team-sync.json beside it. The '

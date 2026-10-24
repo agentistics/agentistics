@@ -1268,6 +1268,8 @@ export interface ControlStatus {
 }
 
 export interface ActionResult {
+  /** The live row that received a prompt sent through a retired row. */
+  id?: string
   ok: boolean
   /** Already-localized one-line outcome, shown in the status line. */
   message: string

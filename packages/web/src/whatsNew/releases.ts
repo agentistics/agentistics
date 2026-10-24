@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.144.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Reabrir uma sessão encerrada, ou escrever nela, não cria mais uma segunda linha da mesma conversa na lista.',
+        en: 'Reopening an ended session, or writing to it, no longer creates a second row for the same conversation in the list.',
+      },
+      {
+        pt: 'Abrir uma sessão na mesma pasta que outra já usa explica o motivo e sugere uma worktree, e um arquivo de preferências corrompido não impede mais o app de abrir.',
+        en: 'Starting a session in a folder another live session already uses explains why and suggests a worktree, and a corrupt preferences file no longer stops the app from starting.',
+      },
+    ],
+  },
   '2.144.0': {
     features: [],
     fixes: [

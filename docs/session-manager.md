@@ -798,7 +798,9 @@ or is outside a repository; the filing result includes a warning. An explicit `-
 repository for a worker; a mismatch refuses the launch and lists known checkouts. Short `org/repo`
 task names match full remotes by organization and repository; explicit remote hosts remain distinct.
 Missing directories and occupied main checkouts still refuse unless sharing is explicitly allowed
-for the latter with `--shared-cwd`.
+for the latter with `--shared-cwd`. The live parent counts as another session: single CLI start,
+batch and web creation use the same rule. Reopening a worker also checks the checkout, excluding
+only the row being replaced; leaders and launches by a person retain their role exemptions.
 
 CLI start and batch accept `--mode default|accept-edits|plan|no-questions`; batch applies it to subsequent `--session`
 entries and can omit `--task` when a verified parent supplies one. Approval modes and briefing roles
@@ -827,3 +829,11 @@ spawns, including original prompt, instructions on fresh sessions, MCP, model/ef
 mode. They use origin `background`, so `adapter-chat` and a ready driver can select the protocol.
 Attached starts and takeover use origin `terminal`. A reopen is registered before launch so protocol
 callbacks can record its conversation immediately.
+
+### Corrupt preferences recovery
+
+Invalid JSON in `~/.agentistics/preferences.json` is moved to `preferences.json.corrupt-<timestamp>`
+and its backup path is logged once. Readers continue with defaults (or the existing legacy migration
+when available), so a background preferences read does not terminate the server. The corrupt bytes
+remain available for recovery, and a later preferences write creates a valid file. If the backup
+cannot be made, the read fails rather than allowing a write to destroy the original bytes.
