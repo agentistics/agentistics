@@ -3000,6 +3000,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // A NAY conversation: a managed `claude` session in Nay's own directory, filed under the "Nay"
     // group (`sessions/nay-web.ts`). It rides `/api/fleet`'s `localShell` guard like every start, and
     // it is also the chat — so the user's chat switch (`chat-gate.ts`) must be on too.
+    // CONTA.TROCA — move a session to another account of its harness (`sessions/account-switch-web.ts`).
+    if (url.pathname === '/api/fleet/switch-account') {
+      const { handleAccountSwitchRoute } = await import('./sessions/account-switch-web')
+      const res = await handleAccountSwitchRoute(req, url, CORS_HEADERS)
+      if (res) return res
+    }
     if (url.pathname === '/api/fleet/nay' && req.method === 'POST') {
       if (!chatAllowed(CAPS.localChat, (await readPreferences()).chatEnabled)) {
         return new Response(JSON.stringify({ ok: false, message: 'chat_disabled' }), {
