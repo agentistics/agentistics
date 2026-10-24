@@ -47,7 +47,7 @@ import { addSession, newSessionId, patchSession, readRegistry, removeSession, re
 import { callerHoldsIdentity, callerProof, type CallerProof } from './session-identity'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
 import { newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
-import { liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
+import { liveIdsOf, planReopenCwd, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
 import { loadConversations } from './conversations'
@@ -979,6 +979,8 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       const holder = conversationHeldBy(await liveConversationHolders(backend), row.resumeId)
       if (holder) { plan.heldElsewhere.push({ id: row.entry.id, holder }); return }
       const m = row.entry
+      const cwdPlan = await planReopenCwd(m, { liveIds: await liveIdsOf(backend) })
+      if (!cwdPlan.ok) { console.error(`${m.id}: ${refusalText(cwdPlan)}`); skipped.push(m.id); return }
       const id = newSessionId()
       const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
       // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.

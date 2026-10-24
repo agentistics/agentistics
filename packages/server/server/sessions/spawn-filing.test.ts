@@ -465,14 +465,14 @@ describe('checkout candidates (L3)', () => {
 })
 
 describe('shared checkout probe (L4)', () => {
-  test('the caller itself is excluded from the live count', () => {
+  test('a new worker counts its caller as another live session', () => {
     const seen: Array<string | undefined> = []
     const p = planFiling(base({
       callerCwd: '/home/u/agentistics', caller: R('me'),
       liveInCwd: (_d, ex) => { seen.push(ex); return ex === 'me' ? 0 : 1 },
     }))
-    expect(ok(p).cwd).toBe('/home/u/agentistics')
-    expect(seen).toEqual(['me'])
+    expect(refused(p).code).toBe('cwd_shared_checkout')
+    expect(seen).toEqual([undefined])
   })
 })
 

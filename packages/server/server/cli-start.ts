@@ -2072,6 +2072,13 @@ export async function spawnManaged(req: {
   const blocked = await backend.unavailable()
   if (blocked) return { ok: false, message: blocked }
 
+  if (req.inherit) {
+    const { planReopenCwd, liveIdsOf } = await import('./sessions/spawn-filing-io')
+    const { refusalText } = await import('./sessions/spawn-row')
+    const cwdPlan = await planReopenCwd({ ...req.inherit, cwd: req.cwd }, { liveIds: await liveIdsOf(backend) })
+    if (!cwdPlan.ok) return { ok: false, message: refusalText(cwdPlan) }
+  }
+
   // PLAN.ACCOUNTS D3 — the account is IMMUTABLE: a reopen runs in the replaced row's root (its
   // transcript exists only there), whatever the request or the flag says now. A fresh spawn's
   // account was chosen and checked by the caller (`spawn-account.ts`); it is re-read here so a

@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test'
+import { test, expect, spyOn } from 'bun:test'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { fileURLToPath } from 'node:url'
@@ -150,11 +150,9 @@ test('writePreferencesTo merges with legacy values on first write', async () => 
   expect(p.installDismissed).toBe(true)
 })
 
-// Task 2: serialized/atomic writes + migrateTeamConfig at the single choke point + refuse to
-// silently default over a corrupt primary file (which would present the machine as solo and
-// discard every connection, denylist, archiveMode and layout).
+// Serialized/atomic writes, shape migration, and preservation of corrupt preferences.
 
-import { mkdtemp, writeFile, readFile, readdir, open, utimes } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, readdir, open, utimes, mkdir } from 'node:fs/promises'
 import { tmpdir as osTmpdir } from 'node:os'
 import { dirname } from 'node:path'
 
@@ -181,10 +179,51 @@ test('readPreferencesFrom returns defaults for an absent or empty file', async (
   expect((await readPreferencesFrom(primary, legacy)).team?.connections).toEqual([])
 })
 
-test('readPreferencesFrom THROWS on a corrupt non-empty file instead of silently defaulting', async () => {
-  const { primary, legacy } = await tmpPaths2()
-  await writeFile(primary, '{"team": {"connections": [')
-  await expect(readPreferencesFrom(primary, legacy)).rejects.toThrow()
+test('corrupt preferences are quarantined once and concurrent readers continue with defaults', async () => {
+  const { primary } = await tmpPaths2()
+  const broken = '{"team": {"connections": ['
+  await writeFile(primary, broken)
+  const log = spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    const reads = await Promise.all(Array.from({ length: 8 }, () => readPreferencesFrom(primary, null)))
+    for (const prefs of reads) {
+      expect(prefs.customLayout).toEqual([])
+      expect(prefs.team?.connections).toEqual([])
+    }
+    const backups = (await readdir(dirname(primary))).filter(n => n.startsWith('preferences.json.corrupt-'))
+    expect(backups).toHaveLength(1)
+    expect(await readFile(join(dirname(primary), backups[0]!), 'utf8')).toBe(broken)
+    expect(log).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(log.mock.calls)).not.toContain(broken)
+    await writePreferencesTo(primary, null, { theme: 'light' })
+    expect((await readPreferencesFrom(primary, null)).theme).toBe('light')
+    expect(await readFile(join(dirname(primary), backups[0]!), 'utf8')).toBe(broken)
+  } finally { log.mockRestore() }
+})
+
+test('failed preferences quarantine preserves the original and refuses a subsequent write', async () => {
+  const { primary } = await tmpPaths2()
+  const broken = '{invalid'
+  await writeFile(primary, broken)
+  const stamp = Date.now()
+  await mkdir(`${primary}.corrupt-${stamp}`)
+  const clock = spyOn(Date, 'now').mockReturnValue(stamp)
+  try {
+    await expect(readPreferencesFrom(primary, null)).rejects.toThrow()
+    await expect(writePreferencesTo(primary, null, { theme: 'light' })).rejects.toThrow()
+    expect(await readFile(primary, 'utf8')).toBe(broken)
+  } finally { clock.mockRestore() }
+})
+
+test('non-object preferences JSON is quarantined instead of crashing shape migration', async () => {
+  for (const invalid of ['null', '[]', '42', '"text"']) {
+    const { primary } = await tmpPaths2()
+    await writeFile(primary, invalid)
+    expect((await readPreferencesFrom(primary, null)).team?.connections).toEqual([])
+    const backups = (await readdir(dirname(primary))).filter(n => n.startsWith('preferences.json.corrupt-'))
+    expect(backups).toHaveLength(1)
+    expect(await readFile(join(dirname(primary), backups[0]!), 'utf8')).toBe(invalid)
+  }
 })
 
 test('the default team object is never shared between reads', async () => {
@@ -470,11 +509,10 @@ async function waitForFile(path: string, timeoutMs: number): Promise<void> {
   }
 }
 
-/** Outcome of `raceTwoProcesses`. With the lock disabled, EITHER side reading a torn write mid-race
- *  can throw (not just the final read) — `readJsonPrefs` deliberately throws on unparseable JSON
- *  rather than silently defaulting (see its own doc comment), so a torn write surfaces as an
- *  exception from `updateTeamConfigAt` itself, not only as a bad final file. All of that is
- *  evidence of the SAME underlying corruption, not a test bug, so it's captured here rather than
+/** Outcome of `raceTwoProcesses`. With the lock disabled, either side can encounter IO errors
+ *  while another process replaces/quarantines a torn file, or continue from defaults and lose
+ *  connections. Both the exception and the final connection count are evidence of missing
+ *  synchronization, so failures from `updateTeamConfigAt` are captured here rather than
  *  left to crash the test. */
 interface RaceResult {
   ids: string[] | null
