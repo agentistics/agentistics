@@ -21,6 +21,18 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Resumos de ferramentas no chat mostram um ícone do que foi feito (>_ para comandos, a logo do MCP) e ficam alinhados aos avisos do sistema.',
         en: 'Chat tool summaries show an icon for what was done (>_ for commands, the MCP’s logo) and align with system notices.',
       },
+      {
+        pt: 'Perguntas de múltipla escolha de uma sessão aparecem no cartão do chat como a pergunta, e "Enviar resposta" manda todas as opções marcadas e o texto digitado.',
+        en: 'A session’s multiple-choice questions show in the chat card as the question, and "Send answer" sends every ticked option plus the typed text.',
+      },
+      {
+        pt: 'O pedido de "confiar nesta pasta" pode ser respondido pelo app.',
+        en: 'The "trust this folder" prompt can be answered from the app.',
+      },
+      {
+        pt: 'Um comando local, como /rename, não deixa mais a sessão presa em "trabalhando".',
+        en: 'A local command such as /rename no longer leaves the session stuck on "working".',
+      },
     ],
   },
   '2.143.1': {
