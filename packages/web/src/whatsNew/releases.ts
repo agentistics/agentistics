@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.147.0': {
+    features: [
+      {
+        pt: '"Trocar conta" agora deixa escolher a conta e o assistente. Na mesma ferramenta a conversa continua igual; em outro assistente a sessão continua na mesma pasta e tarefa, com um resumo do que foi feito.',
+        en: '"Switch account" now lets you pick the account and the assistant. With the same tool the conversation carries on as is; with another assistant the session continues in the same folder and task, with a summary of what was done.',
+      },
+    ],
+    fixes: [],
+  },
   '2.146.0': {
     features: [
       {

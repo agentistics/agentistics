@@ -1,5 +1,6 @@
 /**
- * CONTA.TROCA — continue a session on another account of its harness.
+ * CONTA.TROCA — continue a session on another account: of its own harness (the same conversation
+ * continues) or of another harness (a new conversation there, briefed with a summary — v2).
  *
  * Two entries, ONE dialog: the notice above the composer when the conversation's last turn was
  * refused by the account's usage limit, and "Switch account" in the session's own menu, any time.
@@ -10,8 +11,8 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { Users, X } from 'lucide-react'
 import { Checkbox, ConfirmModal, Select } from '../../pages/settings/primitives'
 import {
-  defaultTarget, fetchSwitchInfo, noticeTitle, optionLabel, postSwitch, resetPhrase, showLimitNotice,
-  type SwitchInfo,
+  defaultTarget, fetchSwitchInfo, harnessName, isHandoff, noticeTitle, optionLabel, postSwitch, resetPhrase,
+  showLimitNotice, switchHarnesses, type SwitchInfo,
 } from '../../lib/accountSwitch'
 import { pushNotification } from '../../lib/notifications'
 import './handoffWarning.css'
@@ -58,29 +59,58 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
 }) {
   const pt = lang === 'pt'
   const [target, setTarget] = useState('')
+  const [harness, setHarness] = useState('')
   const pending = fromLimit ? info.limit?.pendingPreview : undefined
   const [resend, setResend] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Reset on OPEN and when the set of options really changes — never on a poll that returns the same
+  // list as a new array, or the person's pick snaps back to the default while they are choosing.
+  const optionsKey = info.options.map(o => `${o.harness}:${o.id}`).join(',')
   useEffect(() => {
     if (!open) return
-    setTarget(defaultTarget(info.options)); setResend(true); setError(null); setBusy(false)
-  }, [open, info.options])
+    const first = defaultTarget(info.options)
+    setTarget(first); setHarness(info.options.find(o => o.id === first)?.harness ?? '')
+    setResend(true); setError(null); setBusy(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, optionsKey])
+  const harnesses = switchHarnesses(info)
+  const own = info.current?.harness
+  const accounts = info.options.filter(o => o.harness === harness)
+  /** Picking a harness lands on its recommended account, else its first. */
+  const pickHarness = (h: string) => {
+    setHarness(h)
+    const mine = info.options.filter(o => o.harness === h)
+    setTarget(defaultTarget(mine))
+  }
   const chosen = info.options.find(o => o.id === target)
-  const from = info.current?.label
-  const message = pt
-    ? `A sessão é encerrada e a mesma conversa continua${chosen ? ` na conta ${chosen.label}` : ' na outra conta'}${from ? ` (agora em ${from})` : ''}. A conversa é copiada, não movida: o histórico na conta atual continua lá.`
-    : `The session is ended and the same conversation continues${chosen ? ` on ${chosen.label}` : ' on the other account'}${from ? ` (now on ${from})` : ''}. The conversation is copied, not moved: the history on the current account stays there.`
+  const handoff = isHandoff(info, chosen?.harness)
+  const from = [harnessName(own), info.current?.label].filter(Boolean).join(' · ')
+  const message = handoff
+    ? (pt
+      ? `Outro harness começa uma conversa NOVA em ${harnessName(chosen?.harness)}, na mesma pasta, tarefa e papel, com um resumo desta (objetivo, estado, últimos turnos, arquivos tocados). Esta sessão só é encerrada depois que a nova estiver rodando.`
+      : `Another harness starts a NEW conversation on ${harnessName(chosen?.harness)}, in the same folder, task and role, briefed with a summary of this one (goal, state, last turns, files touched). This session is ended only once the new one is running.`)
+    : (pt
+      ? `A sessão é encerrada e a mesma conversa continua${chosen ? ` na conta ${chosen.label}` : ' na outra conta'}. A conversa é copiada, não movida: o histórico na conta atual continua lá.`
+      : `The session is ended and the same conversation continues${chosen ? ` on ${chosen.label}` : ' on the other account'}. The conversation is copied, not moved: the history on the current account stays there.`)
   async function confirm() {
     if (!target) return
     setBusy(true); setError(null)
-    const out = await postSwitch(sessionId, target, !!pending && resend, lang)
+    const out = await postSwitch(sessionId, target, !!pending && resend, lang, chosen?.harness && chosen.harness !== own ? chosen.harness : undefined)
     setBusy(false)
     if (!out.ok) { setError(out.message); return }
-    pushNotification({ type: 'success', title: pt ? 'Conta trocada' : 'Account switched', message: out.message })
+    pushNotification({ type: 'success', title: handoff ? (pt ? 'Continuado em outro harness' : 'Continued on another harness') : (pt ? 'Conta trocada' : 'Account switched'), message: out.message })
     onClose()
     if (out.id) onSwitched(out.id)
   }
+  const label = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-secondary)' } as const
+  // The current account is SHOWN in its harness's list and can never be picked.
+  const accountOptions = [
+    ...(harness && harness === own && info.current?.id
+      ? [{ value: info.current.id, label: info.current.label ?? info.current.id, disabled: true, hint: pt ? 'atual' : 'current' }]
+      : []),
+    ...accounts.map(o => ({ value: o.id, label: optionLabel(o, pt) })),
+  ]
   return (
     <ConfirmModal
       open={open}
@@ -88,7 +118,9 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
       icon={<Users size={18} />}
       title={pt ? 'Continuar em outra conta' : 'Continue on another account'}
       message={message}
-      confirmLabel={busy ? (pt ? 'Trocando…' : 'Switching…') : (pt ? 'Trocar conta' : 'Switch account')}
+      confirmLabel={busy
+        ? (handoff ? (pt ? 'Iniciando…' : 'Starting…') : (pt ? 'Trocando…' : 'Switching…'))
+        : (handoff ? (pt ? `Continuar em ${harnessName(chosen?.harness)}` : `Continue on ${harnessName(chosen?.harness)}`) : (pt ? 'Trocar conta' : 'Switch account'))}
       cancelLabel={pt ? 'Cancelar' : 'Cancel'}
       onConfirm={() => { void confirm() }}
       onCancel={onClose}
@@ -96,12 +128,23 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
       mobileSheet
     >
       <div data-account-switch style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
-        {info.options.length > 1 && (
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
-            {pt ? 'Conta' : 'Account'}
-            <Select value={target} onChange={setTarget} options={info.options.map(o => ({ value: o.id, label: optionLabel(o, pt) }))} />
-          </label>
+        {from && (
+          <p data-account-switch-current style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>
+            {pt ? 'Agora: ' : 'Now: '}<strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{from}</strong>
+          </p>
         )}
+        <label style={label}>
+          {pt ? 'Harness' : 'Harness'}
+          <Select
+            value={harness}
+            onChange={pickHarness}
+            options={harnesses.map(h => ({ value: h, label: harnessName(h), ...(h === own ? { hint: pt ? 'mesma conversa' : 'same conversation' } : { hint: pt ? 'conversa nova' : 'new conversation' }) }))}
+          />
+        </label>
+        <label style={label}>
+          {pt ? 'Conta' : 'Account'}
+          <Select value={target} onChange={setTarget} options={accountOptions} />
+        </label>
         {pending && (
           <>
             <Checkbox checked={resend} onChange={setResend} label={pt ? 'Reenviar a última mensagem na nova conta' : 'Re-send the last message on the new account'} />
@@ -142,7 +185,7 @@ export function AccountLimitBand({ sessionId, lang, onSwitched }: { sessionId: s
           <div className="handoff-band" role="status" style={{ '--handoff-tone': 'var(--anthropic-orange)' } as CSSProperties}>
             <div className="handoff-band-copy">
               <strong>{info ? noticeTitle(info, pt) : ''}</strong>
-              <span>{[info?.current?.label, resetPhrase(info?.limit?.resetsAt, pt)].filter(Boolean).join(' · ') || (pt ? 'A conversa continua igual, na outra conta.' : 'The conversation carries on unchanged, on the other account.')}</span>
+              <span>{[info?.current?.label, resetPhrase(info?.limit?.resetsAt, pt)].filter(Boolean).join(' · ') || (pt ? 'Escolha a conta e o harness para continuar.' : 'Choose the account and harness to carry on.')}</span>
             </div>
             <div className="handoff-actions">
               <button type="button" className="primary" onClick={() => setOpen(true)}>{pt ? 'Continuar na outra conta' : 'Continue on the other account'}</button>

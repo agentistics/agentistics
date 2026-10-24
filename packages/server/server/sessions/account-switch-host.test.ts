@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { ResumeSessionRequest } from '@agentistics/tui/control'
+import type { ResumeSessionRequest, SpawnSessionRequest } from '@agentistics/tui/control'
 import { switchSessionAccountImpl, type SwitchHostDeps } from './account-switch-host'
 import { withResumeLock } from './resume-lock'
 import type { SpawnAccountRow } from './spawn-account'
@@ -106,5 +106,92 @@ describe('switchSessionAccountImpl', () => {
   test('an unknown row is refused in words', async () => {
     const w = world()
     expect(await switchSessionAccountImpl({ id: 'nope', accountId: 'acc_b' }, w.deps)).toMatchObject({ ok: false, code: 'not_running_here' })
+  })
+})
+
+describe('switchSessionAccountImpl — another harness (v2 hand-off)', () => {
+  function cross(opts: { spawnFails?: boolean; diesAtLaunch?: boolean; installed?: string[] } = {}) {
+    const order: string[] = []
+    const alive = new Set(['m1'])
+    const rows: ManagedSession[] = [{
+      id: 'm1', harness: 'claude', cwd: '/w', createdAt: '2026-10-24T00:00:00Z', conversationId: 'conv1', accountId: 'acc_a',
+      label: 'Fix', task: 'T', taskId: 't1', subtaskId: 's1', parentSessionId: 'lead', mode: 'accept-edits', away: true,
+    }]
+    const spawned: SpawnSessionRequest[] = []
+    const links: string[] = []
+    const deps: SwitchHostDeps = {
+      lang: 'en',
+      backend: {
+        list: async () => [...alive].map(id => ({ id, alive: true })) as never,
+        kill: async id => { order.push(`kill:${id}`); alive.delete(id); return true },
+      },
+      withLock: withResumeLock,
+      resume: async () => { throw new Error('a hand-off never resumes') },
+      spawn: async r => {
+        order.push(`spawn:${r.harness}`)
+        spawned.push(r)
+        if (opts.spawnFails) return { ok: false, message: 'codex: command not found' }
+        if (!opts.diesAtLaunch) alive.add('m9')
+        return { ok: true, message: 'started', id: 'm9' }
+      },
+      io: {
+        readRows: async () => rows.map(r => ({ ...r })),
+        context: async () => ({ enabled: true, accounts: [acc({ id: 'acc_a' }), acc({ id: 'acc_k', harness: 'codex', root: '/r/k' })] }),
+        limit: async () => ({ pendingPrompt: 'fix the CSV header' }),
+        killAndRetire: async (id, kill) => { order.push(`retire:${id}`); return kill() },
+        startable: async () => (opts.installed ?? ['claude', 'codex']) as never,
+        turns: async () => ({ turns: [{ role: 'user', text: 'Add export' }, { role: 'assistant', text: 'Done; tests next.' }] }),
+        role: async () => 'worker',
+        label: async () => 'a@x',
+        link: async (a, b) => { links.push(`${a}->${b}`) },
+      },
+    }
+    return { deps, order, spawned, links, alive }
+  }
+
+  test('starts the new session FIRST, briefed with a summary, inheriting cwd/filing/role/parent; ends the old one after', async () => {
+    const w = cross()
+    const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_k', harness: 'codex', resendPending: true }, w.deps)
+    expect(out).toMatchObject({ ok: true, id: 'm9' })
+    expect(w.order).toEqual(['spawn:codex', 'retire:m1', 'kill:m1'])
+    expect(w.spawned[0]).toMatchObject({
+      harness: 'codex', cwd: '/w', switchFrom: 'm1', accountId: 'acc_k', accountDecided: true, label: 'Fix', task: 'T',
+      role: 'worker', parentSessionId: 'lead', parentVerified: true, mode: 'accept-edits', away: true, attach: false,
+    })
+    expect(w.spawned[0]!.prompt).toContain('Claude Code (account a@x)')
+    expect(w.spawned[0]!.prompt).toContain('Add export')
+    expect(w.spawned[0]!.prompt!.endsWith('fix the CSV header')).toBe(true)
+    expect(w.links).toEqual(['m1->m9'])
+    expect([...w.alive]).toEqual(['m9'])
+  })
+
+  test('a spawn that fails, or a pane that died at launch, leaves the old session untouched', async () => {
+    for (const o of [{ spawnFails: true }, { diesAtLaunch: true }]) {
+      const w = cross(o)
+      const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_k', harness: 'codex' }, w.deps)
+      expect(out.ok).toBe(false)
+      expect(out.message).toContain('continues as it was')
+      expect(w.order.filter(s => s.startsWith('kill') || s.startsWith('retire'))).toEqual([])
+      expect(w.links).toEqual([])
+      expect(w.alive.has('m1')).toBe(true)
+    }
+  })
+
+  test('refusals start and end nothing', async () => {
+    for (const [o, req, code] of [
+      [{ installed: ['claude'] }, 'acc_k', 'harness_unavailable'],
+      [{}, 'acc_a', 'unknown_account'],
+    ] as const) {
+      const w = cross(o as never)
+      const out = await switchSessionAccountImpl({ id: 'm1', accountId: req, harness: 'codex' }, w.deps)
+      expect(out).toMatchObject({ ok: false, code })
+      expect(w.order).toEqual([])
+    }
+  })
+
+  test('without --resend no pending message rides the summary', async () => {
+    const w = cross()
+    await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_k', harness: 'codex' }, w.deps)
+    expect(w.spawned[0]!.prompt).not.toContain('fix the CSV header')
   })
 })

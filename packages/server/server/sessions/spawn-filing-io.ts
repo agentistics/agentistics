@@ -33,6 +33,8 @@ export interface SpawnFilingRequest {
   callerSessionId?: string | undefined
   /** The predecessor's id, for a leader hand-off. */
   handoffOf?: string | undefined
+  /** CONTA.TROCA v2: the predecessor is replaced on another harness; its role is NOT promoted to leader. */
+  handoffKeepsRole?: boolean | undefined
   /** Registry ids of sessions that are running now; `undefined` = ask the backend. */
   liveIds?: ReadonlySet<string> | undefined
   /**
@@ -124,6 +126,7 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
       callerCwd,
       ...(caller ? { caller } : {}),
       ...(handoffRow ? { handoffOf: handoffRow } : {}),
+      ...(o.handoffKeepsRole ? { handoffKeepsRole: true } : {}),
       book, rows: canonRows, groups, repoOf, liveInCwd,
     })
     if (misses.size === 0 || pass === 3) return checkAttach(plan, book)
