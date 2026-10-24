@@ -1537,7 +1537,6 @@ export function SessionsAside({
       {/* THE TABS — the segmented control `ModeSwitch` draws (`SegmentedTabs`), not a second one. */}
       <div style={{ padding: '0 2px' }}>
         <SegmentedTabs<AsideTab>
-          equal
           ariaLabel={pt ? 'Sessões' : 'Sessions'}
           containerName="aside-tabs"
           className="ag-aside-tabs"
