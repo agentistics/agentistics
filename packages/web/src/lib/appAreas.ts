@@ -42,7 +42,7 @@ export interface Area {
 
 export const APP_AREAS: readonly Area[] = [
   { id: 'sessions', icon: 'terminal', labelPt: 'Sessões', labelEn: 'Sessions', pages: [
-    { id: 'workspace', path: '/sessions', labelPt: 'Sessões', labelEn: 'Sessions' },
+    { id: 'workspace', path: '/sessions', labelPt: 'Lista', labelEn: 'List' },
     { id: 'leaders', path: '/leadership', labelPt: 'Líderes', labelEn: 'Leaders' },
     { id: 'checkins', path: '/leadership/checkins', labelPt: 'Check-ins', labelEn: 'Check-ins' },
     { id: 'handoffs', path: '/leadership/handoffs', labelPt: 'Passagens', labelEn: 'Hand-offs' },

@@ -14,7 +14,7 @@ const render = (props: Partial<React.ComponentProps<typeof AreaTree>> & { at: st
 }
 
 describe('AreaTree', () => {
-  for (const lang of ['pt', 'en'] as const) for (const variant of ['aside', 'sheet'] as const) {
+  for (const lang of ['pt', 'en'] as const) for (const variant of ['aside'] as const) {
     it(`leadership deep links expand Sessions without a leadership area (${lang}/${variant})`, () => {
       const html = render({ at: '/leadership/checkins', lang, variant })
       expect(html).toContain(lang === 'pt' ? 'aria-label="Recolher Sessões"' : 'aria-label="Collapse Sessions"')
@@ -24,6 +24,18 @@ describe('AreaTree', () => {
       expect(html).not.toContain(lang === 'pt' ? '>Liderança<' : '>Leadership<')
     })
   }
+  it('the sheet starts folded even when the desktop explicitly expanded the current area', () => {
+    areaOpenStore.set({ sessions: true })
+    const html = render({ at: '/sessions', variant: 'sheet' })
+    expect(html).not.toContain('aria-expanded="true"')
+    expect(html).not.toContain('Check-ins')
+    expect(html).toContain('aria-label="Expandir Sessões"')
+    expect(areaOpenStore.get()).toEqual({ sessions: true })
+  })
+  it('the workspace child has a distinct List label', () => {
+    const html = render({ at: '/sessions' })
+    expect(html).toMatch(/aria-current="page"[^>]*>Lista/)
+  })
   it('expands only the current area and marks the current page', () => {
     const html = render({ at: '/usage/history' })
     expect(html).toContain('Histórico')

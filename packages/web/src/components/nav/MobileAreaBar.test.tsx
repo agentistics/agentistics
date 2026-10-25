@@ -72,7 +72,7 @@ describe('MobileAreaBar', () => {
     expect(html).toContain('Atualizar app')
     expect(html).toContain('Nova versão disponível')
     expect(html).toContain('>NOVO</span>')
-    expect(html).toContain('border-color:var(--anthropic-orange)')
+    expect(html).toContain('box-shadow:inset 0 0 0 1px var(--anthropic-orange)')
     const hardware = renderToStaticMarkup(<MobileActionRow action={{ key: 'hardware', label: 'Hardware', icon: RefreshCw, onClick: () => {} }} />)
     expect(hardware).toContain('lucide-chevron-right')
   })

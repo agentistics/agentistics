@@ -6,7 +6,7 @@ import { activateMobileSessions, mobileAreaSlot, scrollMobileSessionsToTop } fro
 import { BottomSheet } from '../BottomSheet'
 import { ChangePasswordSelf } from '../ChangePasswordSelf'
 import { MfaSetup } from '../MfaSetup'
-import { AreaTree, areaRowStyle } from './AreaTree'
+import { AreaTree, areaRowStyle, SHEET_TRAILING_STYLE } from './AreaTree'
 import { MobilePillBar } from './MobilePillBar'
 
 export interface MobileAreaAction {
@@ -27,10 +27,10 @@ export function MobileActionRow({ action }: { action: MobileAreaAction }) {
   const Icon = action.icon
   return (
     <button type="button" onClick={action.onClick} style={{
-      ...areaRowStyle(true), width: '100%', flex: 'none', border: '1px solid transparent',
+      ...areaRowStyle(true), width: '100%', flex: 'none', border: 'none',
       cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
       ...(action.accent ? {
-        borderColor: 'var(--anthropic-orange)', color: 'var(--anthropic-orange)',
+        boxShadow: 'inset 0 0 0 1px var(--anthropic-orange)', color: 'var(--anthropic-orange)',
         background: 'var(--anthropic-orange-dim)',
       } : {}),
     }}>
@@ -39,9 +39,11 @@ export function MobileActionRow({ action }: { action: MobileAreaAction }) {
         <span style={{ display: 'block', fontWeight: action.accent ? 700 : 500 }}>{action.label}</span>
         {action.description && <span style={{ display: 'block', whiteSpace: 'normal', fontSize: 12, color: 'var(--text-tertiary)' }}>{action.description}</span>}
       </span>
+      <span style={{ ...SHEET_TRAILING_STYLE, marginRight: -12 }}>
       {action.badge ? <span style={{ borderRadius: 9, padding: '2px 9px', background: 'var(--anthropic-orange)', color: '#111', fontSize: 10, fontWeight: 700 }}>{action.badge}</span>
         : action.value ? <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{action.value}</span>
         : <ChevronRight size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />}
+      </span>
     </button>
   )
 }

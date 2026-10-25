@@ -13,7 +13,10 @@ top without navigating or resetting filters. The action supports open-session ro
 shell hides the bar while a conversation is open. Other subpages select their parent area's slot;
 Repositories, Vault and Settings select More. Direct tabs go to each area's first page.
 
-More opens the same `AreaTree` used by the desktop sidebar, in its sheet variant. Area rows
+More opens the same `AreaTree` used by the desktop sidebar, in its sheet variant. It starts folded
+on every opening, independently of desktop expansion preferences, keeping global actions visible.
+Explicit chevrons expand a local accordion. The Sessions child is named List to distinguish it from
+the area. Icons share the same left inset; chevrons and current values share a 44px trailing column. Area rows
 are at least 46px and subpages 44px. Selecting a destination closes the sheet, including selecting the
 current page. The tree keeps the registry's Settings entries and filters them by the viewer's visible
 settings sections. Below a divider, global actions reuse the area-row geometry: Hardware opens its
