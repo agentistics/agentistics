@@ -26,10 +26,10 @@ afterAll(async () => {
   await GlobalRegistrator.unregister()
 })
 const visibility = (hidden: boolean) => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: hidden ? 'hidden' : 'visible' }); document.dispatchEvent(new Event('visibilitychange')) }
-async function mount(withHeaderBell = true) {
+async function mount(withHeaderBell = true, lang: 'pt' | 'en' = 'en') {
   visibility(false); store.clearNotifications()
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host)
-  await act(async () => root.render(<MemoryRouter>{withHeaderBell && <NotificationBell lang="en" />}<NotificationToasts lang="en" /></MemoryRouter>))
+  await act(async () => root.render(<MemoryRouter>{withHeaderBell && <NotificationBell lang={lang} />}<NotificationToasts lang={lang} /></MemoryRouter>))
   return { host, close: async () => { await act(async () => root.unmount()); host.remove() } }
 }
 test('single new toast dismisses without losing its unread bell entry', async () => {
@@ -47,17 +47,18 @@ test('single new toast dismisses without losing its unread bell entry', async ()
 test('burst summary opens the real bell by keyboard and preserves all 20 entries', async () => {
   const { host, close } = await mount()
   try {
-    await act(async () => host.querySelector<HTMLButtonElement>('button[title="Notifications"]')!.click())
     await act(async () => { for (let i = 0; i < 20; i++) store.pushLocalNotification({ type: 'info', title: `News ${i}` }) })
     expect(host.querySelectorAll('[data-testid="notification-toast"]')).toHaveLength(0)
     const summary = host.querySelector<HTMLElement>('[data-testid="notification-summary"]')!
-    expect(summary.textContent).toContain('+20 more — open the bell')
+    expect(summary.textContent).toContain('20 updates — open the bell')
     expect(store.readNotifications().filter(n => !n.read)).toHaveLength(20)
     await act(async () => summary.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
     expect(host.textContent).toContain('Clear all')
     expect(host.querySelectorAll('[data-bell-sticky-header]')).toHaveLength(1)
     expect(store.readNotifications()).toHaveLength(20)
     expect(store.readNotifications().every(n => n.read)).toBe(true)
+    await act(async () => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+    expect(host.querySelector('[data-testid="notification-summary"]')).toBeNull()
   } finally { await close() }
 })
 test('hidden backlog waits for return and receives its full dismissal time', async () => {
@@ -124,3 +125,27 @@ test('summary opens one persistent bell panel even on a route without a header b
     expect(store.readNotifications()).toHaveLength(20)
   } finally { await close() }
 })
+
+for (const lang of ['pt', 'en'] as const) {
+  test(`open bell suppresses burst summary and closing restores it (${lang})`, async () => {
+    const { host, close } = await mount(true, lang)
+    try {
+      const bell = host.querySelector<HTMLButtonElement>('button[title]')!
+      await act(async () => bell.click())
+      await act(async () => { for (let i = 0; i < 20; i++) store.pushLocalNotification({ type: 'info', title: `News ${i}` }) })
+      expect(host.querySelector('[data-testid="notification-summary"]')).toBeNull()
+      expect(host.querySelectorAll('[data-bell-sticky-header]')).toHaveLength(1)
+      expect(store.readNotifications()).toHaveLength(20)
+      await act(async () => bell.click())
+      expect(host.querySelector('[data-testid="notification-summary"]')!.textContent).toContain(lang === 'pt' ? '20 novidades — abrir no sino' : '20 updates — open the bell')
+    } finally { await close() }
+  })
+  test(`summary keeps + beside an error card (${lang})`, async () => {
+    const { host, close } = await mount(true, lang)
+    try {
+      await act(async () => { for (let i = 0; i < 20; i++) store.pushLocalNotification({ type: i === 0 ? 'error' : 'info', title: `News ${i}` }) })
+      expect(host.querySelectorAll('[data-testid="notification-toast"]')).toHaveLength(1)
+      expect(host.querySelector('[data-testid="notification-summary"]')!.textContent).toContain(lang === 'pt' ? '+19 novidades' : '+19 more')
+    } finally { await close() }
+  })
+}

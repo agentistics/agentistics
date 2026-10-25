@@ -146,3 +146,6 @@ while you were away” summary. It appears on return and gets its full reading t
 open the existing bell panel by click, Enter or Space, including routes without a header bell. Grouping and dismissing toasts leave history and
 unread counts untouched; opening the bell marks entries read as usual. Existing category, Nay card,
 update and do-not-disturb exclusions still apply. Copy follows the PT/EN language toggle.
+
+While a bell panel is open, its summary toast stays hidden so the panel header remains readable.
+A summary shown alone uses “N novidades” / “N updates”; beside individual cards it keeps “+N”.

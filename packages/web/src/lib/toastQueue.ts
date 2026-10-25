@@ -39,12 +39,12 @@ export function removeToast(state: ToastQueue, id: string): ToastQueue {
   return id === SUMMARY_ID ? { ...state, summary: null } : { ...state, items: state.items.filter(n => n.id !== id) }
 }
 
-export function summaryToast(summary: NonNullable<ToastQueue['summary']>, lang: 'pt' | 'en'): AppNotification {
+export function summaryToast(summary: NonNullable<ToastQueue['summary']>, lang: 'pt' | 'en', hasOtherCards = false): AppNotification {
   const count = summary.ids.length
   return { id: SUMMARY_ID, type: 'info', ts: 0, read: false,
     title: summary.away
       ? (lang === 'pt' ? `${count} ${count === 1 ? 'novidade' : 'novidades'} enquanto você estava fora` : `${count} ${count === 1 ? 'update' : 'updates'} while you were away`)
-      : (lang === 'pt' ? `+${count} ${count === 1 ? 'novidade' : 'novidades'} — abrir no sino` : `+${count} more — open the bell`),
+      : (lang === 'pt' ? `${hasOtherCards ? '+' : ''}${count} ${count === 1 ? 'novidade' : 'novidades'} — abrir no sino` : hasOtherCards ? `+${count} more — open the bell` : `${count} ${count === 1 ? 'update' : 'updates'} — open the bell`),
     message: summary.away ? (lang === 'pt' ? 'Abrir no sino' : 'Open the bell') : undefined,
   }
 }

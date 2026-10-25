@@ -12,6 +12,7 @@ import { useCleanScan } from '../lib/cleanScan'
 import { cleanSize } from '../lib/cleanPresentation'
 import { usePendingUpdate } from '../lib/pendingUpdate'
 import { ToggleSwitch } from './ToggleSwitch'
+import { setNotificationPanelOpen } from '../lib/notificationPanel'
 import { answerAwayDigest } from '../lib/awayDigest'
 
 const ICON: Record<NotificationType, { color: string; Icon: typeof AlertCircle }> = {
@@ -104,6 +105,12 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label, to
   const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const panelId = useRef(Symbol('notification-panel'))
+  useEffect(() => {
+    const id = panelId.current
+    setNotificationPanelOpen(id, open)
+    return () => setNotificationPanelOpen(id, false)
+  }, [open])
   const [digestBusyId, setDigestBusyId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const unread = notes.filter(n => !n.read).length

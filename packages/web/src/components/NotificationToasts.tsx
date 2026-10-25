@@ -6,6 +6,7 @@ import { pushLimitAlert } from '../lib/planLimitNotice'
 import { UPDATE_NOTICE_CODE } from '../lib/updateToast'
 import { openWhatsNew } from '../whatsNew/open'
 import { setSessionMuted } from '../lib/mutedSessions'
+import { useNotificationPanelOpen } from '../lib/notificationPanel'
 import { NotificationBell } from './NotificationBell'
 import { SESSION_MUTED_CODE } from '../lib/notifyMenu'
 import { useAway } from '../lib/awayMode'
@@ -42,13 +43,14 @@ interface Props {
 export function NotificationToasts({ lang }: Props) {
   const notes = useNotifications()
   const away = useAway().active
+  const panelOpen = useNotificationPanelOpen()
   const [hidden, setHidden] = useState(() => document.visibilityState === 'hidden')
   const [queue, setQueue] = useState(emptyToastQueue)
   const quiet = hidden || away
   const wasQuiet = useRef(quiet)
   const quietSince = useRef(quiet ? Date.now() : Infinity)
   const returnedAt = useRef(0)
-  const toasts = quiet ? [] : [...queue.items, ...(queue.summary ? [summaryToast(queue.summary, lang)] : [])]
+  const toasts = quiet ? [] : [...queue.items, ...(queue.summary && !panelOpen ? [summaryToast(queue.summary, lang, queue.items.length > 0)] : [])]
 
   useEffect(() => {
     const changed = () => {
@@ -133,7 +135,7 @@ export function NotificationToasts({ lang }: Props) {
   // Reconcile timers against the bounded presentation. Hidden/away summaries get their full
   // reading time on return; grouped cards cannot retain timers that later dismiss new content.
   useEffect(() => {
-    const cards = quiet ? [] : [...queue.items, ...(queue.summary ? [summaryToast(queue.summary, lang)] : [])]
+    const cards = quiet ? [] : [...queue.items, ...(queue.summary && !panelOpen ? [summaryToast(queue.summary, lang, queue.items.length > 0)] : [])]
     const active = new Set(cards.map(n => n.id))
     for (const id of Object.keys(autoTimers.current)) {
       if (!active.has(id) || id === SUMMARY_ID) { clearTimeout(autoTimers.current[id]); delete autoTimers.current[id] }
@@ -151,7 +153,7 @@ export function NotificationToasts({ lang }: Props) {
         startLeave(n.id)
       }, AUTO_MS[n.type])
     }
-  }, [queue, quiet, lang, startLeave])
+  }, [queue, quiet, lang, startLeave, panelOpen])
 
   // Clear any pending timers on unmount.
   useEffect(() => () => {
@@ -186,8 +188,8 @@ export function NotificationToasts({ lang }: Props) {
             role={isSummary || isUpdate || isWhatsNew ? 'button' : 'status'}
             aria-live="polite"
             tabIndex={isSummary || isUpdate || isWhatsNew ? 0 : undefined}
-            onKeyDown={isSummary ? e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); window.dispatchEvent(new CustomEvent('agentistics:open-notifications')); startLeave(n.id) } } : undefined}
-            onClick={isSummary ? () => { window.dispatchEvent(new CustomEvent('agentistics:open-notifications')); startLeave(n.id) } : isUpdate ? () => { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); startLeave(n.id) }
+            onKeyDown={isSummary ? e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setQueue(q => removeToast(q, SUMMARY_ID)); window.dispatchEvent(new CustomEvent('agentistics:open-notifications')) } } : undefined}
+            onClick={isSummary ? () => { setQueue(q => removeToast(q, SUMMARY_ID)); window.dispatchEvent(new CustomEvent('agentistics:open-notifications')) } : isUpdate ? () => { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); startLeave(n.id) }
               : isWhatsNew ? () => { openWhatsNew(n.meta); startLeave(n.id) } : undefined}
             style={{
               pointerEvents: 'auto',
