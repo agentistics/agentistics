@@ -4,7 +4,7 @@
  * The table, the subtask grid and the kanban each used to carry their own row of separate buttons
  * (a filter here, a group picker there, a sort chip that only appeared once it was not the default),
  * each opening its own differently-shaped panel. They are segments of one bar now, with the look of
- * `nav/ModeSwitch` (an elevated trough, the active segment on the surface colour), and every segment
+ * `nav/SegmentedTabs` (an elevated trough, the active segment on the surface colour), and every segment
  * opens the EXISTING menu content in the SAME portal panel (`PickerMenu.tsx`'s `PanelMenu`).
  *
  * This file owns only the SHAPE: the trough, the segment style a menu trigger wears, and the sort
@@ -37,7 +37,7 @@ export function ViewBar({ children, label }: { children: ReactNode; label?: stri
 /**
  * What a menu trigger wears to be a segment. `active` = this segment has been moved off its
  * default (a narrowed filter, a non-default order) and reads as the selected one, exactly like the
- * current mode in ModeSwitch.
+ * current segment in SegmentedTabs.
  */
 export const viewSegment = (mobile: boolean, active = false): CSSProperties => ({
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -50,7 +50,7 @@ export const viewSegment = (mobile: boolean, active = false): CSSProperties => (
   transition: 'background 0.15s, color 0.15s',
 })
 
-/** The narrow-count bubble ModeSwitch draws on a segment (a filter's active dimensions). */
+/** The narrow-count bubble SegmentedTabs draws on a segment (a filter's active dimensions). */
 export const segmentBadge: CSSProperties = {
   minWidth: 16, height: 16, padding: '0 4px', borderRadius: 8, fontSize: 10, fontWeight: 700,
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

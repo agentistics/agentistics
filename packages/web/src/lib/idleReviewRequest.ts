@@ -20,7 +20,8 @@ let pending = false
 /** The bell's own call: arm the flag, then raise the event for whichever page is already mounted. */
 export function requestIdleReview(): void {
   pending = true
-  if (typeof window === 'undefined') return
+  // Some tests leave a bare stub `window` behind; without dispatchEvent there is no page to tell.
+  if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return
   window.dispatchEvent(new CustomEvent('agentistics:open-idle-sessions'))
 }
 

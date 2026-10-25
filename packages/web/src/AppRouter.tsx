@@ -6,6 +6,14 @@ import { CenteredLoader } from './components/CenteredLoader'
 import { bootReleased, useBootHold } from './lib/bootSplash'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
+const UsageNowPage = lazy(() => import('./pages/usage/UsageNowPage'))
+const UsagePlanPage = lazy(() => import('./pages/usage/UsagePlanPage'))
+const UsageLimitsPage = lazy(() => import('./pages/usage/UsageLimitsPage'))
+const UsageHistoryPage = lazy(() => import('./pages/usage/UsageHistoryPage'))
+const LeadersPage = lazy(() => import('./pages/leadership/LeadersPage'))
+const CheckinsPage = lazy(() => import('./pages/leadership/CheckinsPage'))
+const HandoffsPage = lazy(() => import('./pages/leadership/HandoffsPage'))
+const AwayPage = lazy(() => import('./pages/leadership/AwayPage'))
 const CostsPage = lazy(() => import('./pages/CostsPage'))
 const TopUsagePage = lazy(() => import('./pages/TopUsagePage'))
 const RepositoriesPage = lazy(() => import('./pages/RepositoriesPage'))
@@ -13,6 +21,8 @@ const RepoDetailPage = lazy(() => import('./pages/RepoDetailPage'))
 const TagsPage = lazy(() => import('./pages/TagsPage'))
 const VaultPage = lazy(() => import('./pages/VaultPage'))
 const TasksPage = lazy(() => import('./pages/TasksPage'))
+const TaskActivityPage = lazy(() => import('./pages/TaskActivityPage'))
+const ActionsPage = lazy(() => import('./pages/ActionsPage'))
 const TagDetailPage = lazy(() => import('./pages/TagDetailPage'))
 const ToolsPage = lazy(() => import('./pages/ToolsPage'))
 const CustomPage = lazy(() => import('./pages/CustomPage'))
@@ -60,6 +70,14 @@ export default function AppRouter() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route index element={<Suspense fallback={<PageFallback />}><HomePage /></Suspense>} />
+          <Route path="usage" element={<Suspense fallback={<PageFallback />}><UsageNowPage /></Suspense>} />
+          <Route path="usage/plan" element={<Suspense fallback={<PageFallback />}><UsagePlanPage /></Suspense>} />
+          <Route path="usage/limits" element={<Suspense fallback={<PageFallback />}><UsageLimitsPage /></Suspense>} />
+          <Route path="usage/history" element={<Suspense fallback={<PageFallback />}><UsageHistoryPage /></Suspense>} />
+          <Route path="leadership" element={<Suspense fallback={<PageFallback />}><LeadersPage /></Suspense>} />
+          <Route path="leadership/checkins" element={<Suspense fallback={<PageFallback />}><CheckinsPage /></Suspense>} />
+          <Route path="leadership/handoffs" element={<Suspense fallback={<PageFallback />}><HandoffsPage /></Suspense>} />
+          <Route path="leadership/away" element={<Suspense fallback={<PageFallback />}><AwayPage /></Suspense>} />
           <Route path="costs" element={<Suspense fallback={<PageFallback />}><CostsPage /></Suspense>} />
           <Route path="top" element={<Suspense fallback={<PageFallback />}><TopUsagePage /></Suspense>} />
           {/* The sessions WORKSPACE. `:sessionId` is optional because the workspace has a landing
@@ -81,8 +99,10 @@ export default function AppRouter() {
               A bookmark, a pinned tab or an old link still lands somewhere that answers. */}
           <Route path="projects" element={<Navigate to="/repositories" replace />} />
           <Route path="repositories" element={<Suspense fallback={<PageFallback />}><RepositoriesPage /></Suspense>} />
+          <Route path="repositories/actions" element={<Suspense fallback={<PageFallback />}><ActionsPage /></Suspense>} />
           <Route path="repo/:id" element={<Suspense fallback={<PageFallback />}><RepoDetailPage /></Suspense>} />
           <Route path="tasks" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
+          <Route path="tasks/activity" element={<Suspense fallback={<PageFallback />}><TaskActivityPage /></Suspense>} />
           <Route path="tasks/:id" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
           <Route path="tags" element={<Suspense fallback={<PageFallback />}><TagsPage /></Suspense>} />
           <Route path="vault" element={<Suspense fallback={<PageFallback />}><VaultPage /></Suspense>} />

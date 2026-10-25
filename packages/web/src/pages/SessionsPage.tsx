@@ -25,8 +25,7 @@ import { useAway } from '../lib/awayMode'
 import { sessionLinks } from '../lib/sessionParent'
 import { SessionCheckinCard, SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
 import { Drawer } from '../components/Drawer'
-import { PlanUsageSummary } from '../components/PlanLimitMeter'
-import { AccountSwitchInline } from '../components/sessions/AccountSwitch'
+import { SessionLimitsCard } from '../components/sessions/SessionLimitsCard'
 import { ContextRing } from '../components/sessions/SessionStatsMenu'
 import { HarnessMark } from '../components/sessions/HarnessMark'
 import { HARNESS_LABELS } from '../lib/harness'
@@ -80,6 +79,8 @@ import { loadClosedFleet, useFleet, useFleetIndex, type FleetActionId } from '..
 import { useIsMobile } from '../hooks/useIsMobile'
 import { FleetOverview } from '../components/sessions/FleetOverview'
 import { SessionCreating } from '../components/sessions/SessionCreating'
+import { SessionEndingGate } from '../components/sessions/SessionEnding'
+import { useEndingSelection } from '../lib/endingSessions'
 import { NewSessionModal } from '../components/sessions/NewSessionModal'
 
 // How long a navigation may keep claiming its session is still coming is `ARRIVAL_WAIT_MS` in
@@ -496,9 +497,13 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   // Matched on BOTH ids for the same reason `fleetIndex` is keyed on both: a managed row is named
   // by its tmux session, while a closed conversation is named by its own conversation id, and a
   // link may carry either.
-  const selected = sessionId === undefined
+  const matchedSelected = sessionId === undefined
     ? undefined
     : fleet.rows.find(r => r.id === sessionId || r.conversationId === sessionId)
+  // The fleet may remove the row before the minimum ending interval has elapsed. Keep this view
+  // mounted until the kill completes, so its title and hidden draft survive that fast transition.
+  const { row: selected, ending: selectedEnding } = useEndingSelection(sessionId, matchedSelected)
+
   /** A STRUCTURED row's `cli` pane is the door to the same conversation as a TUI — every mount. */
   const selectedOpenInTerminal = openInTerminalFor(selected ? rowIndex.get(selected.id) : undefined, act)
 
@@ -1363,6 +1368,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       onOpenTask={taskId => navigate(`/tasks/${encodeURIComponent(taskId)}`)}
       // The badge on the row is the fleet's; re-poll so it agrees with what the tab just did.
       onTaskChanged={refresh}
+      // The "Usage limits" card (with the account switch) lives in the Metrics tab on desktop; the phone
+      // has it in the drawer, so it is not handed down there.
+      {...(!isMobile ? { limitsCard: { onSwitched: (id: string) => goToReopened(id), onOpenAll: requestPlanUsageModal } } : {})}
       // See `sessionMetrics`: present exactly when the store has a record, which is the same fact
       // that decides whether the metrics card offers its link.
       {...(sessionMetrics ? { metrics: sessionMetrics } : {})}
@@ -2011,6 +2019,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   ) : null
 
   const panel = selected === undefined ? null : (
+    <SessionEndingGate ending={selectedEnding} id={selected.id} lang={pt ? 'pt' : 'en'} title={selected.title}>
     <SessionPanel
       session={selected}
       {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
@@ -2056,6 +2065,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // The Studio entry's first-open dot — one flag, read wherever the bar renders it.
       studioSeen={ctx.studioSeen}
     />
+    </SessionEndingGate>
   )
 
   /**
@@ -2135,6 +2145,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     return () => window.removeEventListener('popstate', onPop)
   }, [])
   useEffect(() => { setSessionDrawer(false) }, [selected?.id])
+  // Ending a session shows its own state on the session view; the drawer must not sit over it.
+  useEffect(() => { if (selectedEnding) setSessionDrawer(false) }, [selectedEnding])
   const unreadInbox = useNotifications().filter(n => !n.read).length
   const planLimits = usePlanLimits()
 
@@ -2214,6 +2226,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     >
       <FiltersBar
         compact
+        hideClearAll
         only={FLEET_FILTER_DIMS}
         activeOnly={activeOnly}
         onActiveOnlyChange={setActiveOnly}
@@ -2855,7 +2868,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         </div>
 
         {drawerSection('view', pt ? 'Vista' : 'View', null, (
-          <div role="tablist" style={{
+          <div className="ag-mobile-shell-tabs" role="tablist" style={{
             display: 'grid', gridTemplateColumns: `repeat(${viewTabs.length}, 1fr)`, gap: 3, padding: 3,
             borderRadius: 10, background: 'var(--bg-elevated)',
           }}>
@@ -2920,18 +2933,12 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           )
         })(), (
           // CONTA.LIMITES: the list of plans, and the switch right where the limits are.
-          <AccountSwitchInline sessionId={selected.id} lang={tPt} onSwitched={id => { setSessionDrawer(false); goToReopened(id) }}>
-            <button
-              type="button"
-              onClick={() => { closeSessionDrawer(); requestPlanUsageModal() }}
-              aria-label={pt ? 'Ver todos os limites' : 'See every limit'}
-              style={{
-                all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: 'pointer',
-              }}
-            >
-              <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} accountLabels={planLimits.accountLabels} now={planLimits.now} lang={tPt} />
-            </button>
-          </AccountSwitchInline>
+          <SessionLimitsCard
+            sessionId={selected.id}
+            lang={tPt}
+            onSwitched={id => { setSessionDrawer(false); goToReopened(id) }}
+            onOpenAll={() => { closeSessionDrawer(); requestPlanUsageModal() }}
+          />
         ), { open: drawerLimitsOpen, toggle: () => setDrawerLimitsOpen(v => !v) })}
 
         {/* A leader's check-in is a card of its own (folded inside "Sessão" it was the hardest control
@@ -3032,8 +3039,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           here — two or three rows of controls that are consulted occasionally and read never,
           out of a 664px viewport — so they moved into a sheet that costs nothing until it is
           asked for and has the whole screen once it is. */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
+      <div className="ag-mobile-shell-header" style={{
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8,
         minHeight: 44, padding: '0 10px', flexShrink: 0,
         // Same reason as the open-session bar: the shared header is hidden on this layout, so
         // this row IS the top of the screen and owns the status-bar band.
@@ -3064,7 +3071,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           rows would make the list unreachable on the screen whose whole problem is height. Both
           read the SAME `overviewRows` the desktop uses, so the two layouts can never count
           different sets — the defect this page has already hit twice. */}
-      <div role="tablist" style={{
+      <div className="ag-mobile-shell-tabs" role="tablist" style={{
         display: 'flex', gap: 2, padding: '6px 12px 0', flexShrink: 0,
       }}>
         {([
@@ -3077,7 +3084,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             aria-selected={mobileTab === id}
             onClick={() => setMobileTab(id)}
             style={{
-              flex: 1, minHeight: 40, borderRadius: 9, border: 'none', cursor: 'pointer',
+              flex: 1, minHeight: 44, borderRadius: 9, border: 'none', cursor: 'pointer',
               background: mobileTab === id ? 'var(--bg-elevated)' : 'transparent',
               color: mobileTab === id ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
               fontFamily: 'inherit', fontSize: 13,

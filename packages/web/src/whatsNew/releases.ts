@@ -10,6 +10,80 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.151.0': {
+    features: [
+      {
+        pt: 'Nova barra lateral por áreas: Sessões, Agentask, Liderança, Uso, Métricas, Repositórios, Cofre e Ajustes, com busca de páginas (Ctrl K).',
+        en: 'A new sidebar by areas: Sessions, Agentask, Leadership, Usage, Metrics, Repositories, Vault and Settings, with page search (Ctrl K).',
+      },
+      {
+        pt: 'Em Sessões, uma coluna de ícones das áreas fica ao lado da lista; o seletor Painel/Sessões saiu.',
+        en: 'In Sessions, a column of area icons sits beside the list; the Dashboard/Sessions switch is gone.',
+      },
+      {
+        pt: 'Página Uso: o ritmo de cada plano agora, o plano de sessões até a renovação, os limites e o histórico.',
+        en: 'Usage page: each plan\'s pace right now, a session plan until renewal, the limits and the history.',
+      },
+      {
+        pt: 'Página Liderança: líderes, check-ins, passagens e modo ausente num só lugar.',
+        en: 'Leadership page: leaders, check-ins, hand-offs and away mode in one place.',
+      },
+      {
+        pt: 'No celular, um botão "onde estou" embaixo abre o menu de áreas.',
+        en: 'On a phone, a "where am I" button at the bottom opens the areas menu.',
+      },
+      {
+        pt: 'O cartão "Limites de uso", com a troca de conta da sessão, agora também aparece no painel lateral (aba Métricas) no computador.',
+        en: 'The "Usage limits" card, with the session’s account switch, now also appears in the side panel (Metrics tab) on desktop.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Sessões do Antigravity no modo novo continuam depois que o app reinicia.',
+        en: 'Antigravity sessions in the new mode carry on after the app restarts.',
+      },
+      {
+        pt: 'Quando chegam muitas notificações de uma vez, elas viram um único resumo, e quem estava fora vê só "N novidades enquanto você estava fora".',
+        en: 'When many notifications arrive at once they become a single summary, and coming back shows just "N updates while you were away".',
+      },
+      {
+        pt: 'O título e os botões do topo da sessão não passam mais por cima da linha que separa as abas.',
+        en: 'The session title and top buttons no longer cross the line under the tabs.',
+      },
+      {
+        pt: 'Ao encerrar uma sessão, a tela mostra "Encerrando…" até ela sair da lista, também na linha da lista lateral.',
+        en: 'Ending a session shows "Ending…" until it leaves the list, on the aside row too.',
+      },
+      {
+        pt: 'O grupo de comandos que ainda está rodando agora pode ser recolhido e continua recolhido.',
+        en: 'A running group of commands can now be collapsed and stays collapsed.',
+      },
+      {
+        pt: 'O comando /rename concluído aparece como aviso de sessão renomeada, em vez de uma mensagem com seu avatar.',
+        en: 'A completed /rename command appears as a session renamed notice instead of a message with your avatar.',
+      },
+      {
+        pt: 'Ao trocar de conta, os nomes das contas e dos planos ("Claude Pro", "Claude Max 5x") são os mesmos do Uso dos planos.',
+        en: 'When switching accounts, account and plan names ("Claude Pro", "Claude Max 5x") now match the Plan usage list.',
+      },
+      {
+        pt: 'No celular, os botões Confirmar e Cancelar da troca de conta ficam sempre visíveis, mesmo com muitas contas.',
+        en: 'On a phone, the Confirm and Cancel buttons of the account switch always stay visible, even with many accounts.',
+      },
+      {
+        pt: 'Quando a troca de conta falha, a mensagem mostra só o motivo, sem o texto técnico do final.',
+        en: 'When an account switch fails, the message shows only the reason, without the technical text at the end.',
+      },
+      {
+        pt: 'Se a troca de conta falhar e a sessão não voltar na conta de antes, o aviso diz que ela foi encerrada e traz o botão Reabrir.',
+        en: 'If an account switch fails and the session does not come back on its previous account, the notice says it was ended and offers a Reopen button.',
+      },
+      {
+        pt: 'Ao levar uma conversa para outro assistente, o resumo não confunde mais o aviso de limite com o estado da conversa.',
+        en: 'Moving a conversation to another assistant no longer mistakes a usage-limit notice for the conversation’s state in the summary.',
+      },
+    ],
+  },
   '2.150.0': {
     features: [
       {

@@ -1,5 +1,12 @@
 import { expect, test } from 'bun:test'
-import { normalizeEcho, pendingEchoes, SAFE_CONTAINS_LEN } from './echoMatch'
+import { normalizeEcho, pendingEchoes, SAFE_CONTAINS_LEN, slashInvocation } from './echoMatch'
+
+test('slash invocation identification preserves arguments and rejects paths and prose', () => {
+  expect(slashInvocation('  /rename New title  ')).toEqual({ command: '/rename', args: 'New title' })
+  expect(slashInvocation('/plugin:review\nchanges')).toEqual({ command: '/plugin:review', args: 'changes' })
+  expect(slashInvocation('/rename')).toEqual({ command: '/rename', args: '' })
+  for (const text of ['explain /rename X', '/home/user/file', '> /rename X', '']) expect(slashInvocation(text)).toBeNull()
+})
 
 test('normalizes bash echoes without changing ordinary message matching', () => {
   expect(normalizeEcho('! mkdir -p a\t b  ')).toBe('!mkdir -p a b')

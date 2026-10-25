@@ -11,21 +11,30 @@ import {
 } from '@agentistics/core'
 import { subscribeEvent } from './eventStream'
 import { HARNESS_LABELS } from './harness'
+import type { UsageBudgetRow } from './usagePlan'
 
 export type RegisteredPlan = { harness: PlanLimits['harness']; plan: string; account?: string }
+export interface PlanReadings {
+  account: string
+  harness: PlanLimits['harness']
+  points: { at: number; weekPct: number | null; fiveHourPct: number | null }[]
+}
 
 export interface PlanLimitsSnapshot {
   /** `null` until the first answer — never an empty list standing in for "not asked yet". */
   limits: PlanLimits[] | null
   /** Plans registered in Settings → Billing whose harness has reported no window yet. */
   registered: RegisteredPlan[]
+  /** Every owner's account, including rows hidden from agents. */
+  budgets: UsageBudgetRow[]
+  readings: PlanReadings[]
   /** `account id → "<Harness> #n"` (or nickname), from the agent-visible and hidden budget rows. */
   accountLabels: Record<string, string>
   /** A clock that ticks once a minute while anything is subscribed, for "in X min" / "X min ago". */
   now: number
 }
 
-let snap: PlanLimitsSnapshot = { limits: null, registered: [], accountLabels: {}, now: Date.now() }
+let snap: PlanLimitsSnapshot = { limits: null, registered: [], budgets: [], readings: [], accountLabels: {}, now: Date.now() }
 const listeners = new Set<() => void>()
 let stop: (() => void) | null = null
 
@@ -38,11 +47,14 @@ async function refresh(): Promise<void> {
   try {
     const r = await fetch('/api/plan-limits', { cache: 'no-store' })
     if (!r.ok) return
-    const body = await r.json() as { limits?: PlanLimits[]; registered?: PlanLimitsSnapshot['registered']; budgets?: { account?: string; accountLabel?: string }[]; hiddenFromAgents?: { account?: string; accountLabel?: string }[] }
+    const body = await r.json() as { limits?: PlanLimits[]; registered?: RegisteredPlan[]; budgets?: UsageBudgetRow[]; hiddenFromAgents?: UsageBudgetRow[]; readings?: PlanReadings[] }
+    const budgets = [...(body.budgets ?? []), ...(body.hiddenFromAgents ?? [])]
     const accountLabels: Record<string, string> = {}
-    for (const b of [...(body.budgets ?? []), ...(body.hiddenFromAgents ?? [])]) if (b.account && b.accountLabel) accountLabels[b.account] = b.accountLabel
+    for (const b of budgets) if (b.account && b.accountLabel) accountLabels[b.account] = b.accountLabel
     emit({
       accountLabels,
+      budgets,
+      readings: body.readings ?? [],
       limits: Array.isArray(body.limits) ? body.limits : [],
       registered: Array.isArray(body.registered) ? body.registered : [],
       now: Date.now(),
@@ -76,8 +88,8 @@ export function usePlanLimits(): PlanLimitsSnapshot {
 }
 
 /** Tests / fixtures: put a snapshot in place without the network. */
-export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.now(), registered: PlanLimitsSnapshot['registered'] = []): void {
-  emit({ limits, registered, now })
+export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.now(), registered: PlanLimitsSnapshot['registered'] = [], budgets: UsageBudgetRow[] = [], readings: PlanReadings[] = []): void {
+  emit({ limits, registered, budgets, readings, now })
 }
 
 // ─── Words ────────────────────────────────────────────────────────────────────────────────────

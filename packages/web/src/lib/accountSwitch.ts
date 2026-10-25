@@ -26,7 +26,8 @@ export interface SwitchInfo {
   limit: { resetsAt?: number; message?: string; pendingPreview?: string } | null
 }
 
-export interface SwitchOutcome { ok: boolean; message: string; id?: string; code?: string }
+/** `ended` + `endedId`: the session WAS ended and could not be given back — the row to Reopen. */
+export interface SwitchOutcome { ok: boolean; message: string; id?: string; code?: string; ended?: boolean; endedId?: string }
 
 export async function fetchSwitchInfo(id: string, lang: string): Promise<SwitchInfo | null> {
   try {

@@ -1262,6 +1262,12 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId,
   const title = systemEventTitle(event.sender ? titleOf?.(event.sender) : undefined)
   const stamp = messageTime(typeof at === 'number' ? new Date(at).toString() : at, pt ? 'pt' : 'en')
   const label = systemEventLine(event, pt)
+  if (event.kind === 'rename') return (
+    <SystemLine isMobile={isMobile}>
+      <Info size={14} style={{ flexShrink: 0 }} />
+      <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{label}</span>
+    </SystemLine>
+  )
   return (
     <SystemLine
       isMobile={isMobile}
@@ -1307,7 +1313,9 @@ export function FleetSystemEventRow({ event, lang, at }: { event: SystemEvent; l
 }
 
 export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
-  const event = props.turn.role === 'user' ? parseSystemEvent(props.turn.text) : null
+  const parsed = props.turn.role === 'user' ? parseSystemEvent(props.turn.text) : null
+  // Only the confirmed turn says the rename happened. Queued commands keep their delivery status.
+  const event = parsed?.kind === 'rename' && (props.awaiting || props.turn.pending) ? null : parsed
   if (event) return event.sender
     ? <FleetSystemEventRow event={event} lang={props.lang} at={props.turn.at} />
     : <SystemEventRow event={event} pt={props.lang === 'pt'} sessionId={props.sessionId} />

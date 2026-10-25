@@ -9,14 +9,13 @@ import { version } from '../../../package.json'
 import {
   Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart2, Bot,
   Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
-  Clock, Code2, Cpu, DollarSign, Download,
-  FileCode, FileDown, Flame, FolderOpen, FolderTree, GitBranch,
-  GitCommit, GitCompare, Globe, Home, KeyRound, Layers,
-  LogOut, Maximize2, MessageSquare, MessagesSquare, Moon, MoreHorizontal,
+  Clock, Code2, Cpu, Download,
+  FileCode, Flame, FolderOpen, FolderTree, GitBranch,
+  GitCommit, Globe, Home, KeyRound,
+  LogOut, Maximize2, MessageSquare, MessagesSquare, Moon,
   PanelLeft, RefreshCw, Server, Settings, ShieldCheck,
-  SlidersHorizontal, Sparkles, Sun, Tag as TagIcon, Target, TerminalSquare,
-  TrendingUp, Trophy, Users, Wrench, X, Zap,
-  ZoomIn, ClipboardList, BellOff,
+  SlidersHorizontal, Sparkles, Sun, Target, TerminalSquare,
+  TrendingUp, Users, X, Zap, BellOff,
 } from 'lucide-react'
 import { mutedTooltip, useSessionMuted } from './lib/notifyMenu'
 import { useData, useDerivedStats, LIVE_INTERVAL_OPTIONS, LIVE_INTERVAL_OPTIONS_RISKY } from './hooks/useData'
@@ -98,8 +97,13 @@ import { InstallModal } from './components/InstallModal'
 import { isNoticeSnoozed, snoozeNotice } from './lib/noticeSnooze'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
 import { resolveArchiveChoice } from './lib/archive'
-import { ModeSwitch } from './components/nav/ModeSwitch'
-import { MobilePillBar } from './components/nav/MobilePillBar'
+import { useEngineCaps } from './hooks/useEngineCaps'
+import { visibleSettingsSections } from './lib/settingsSections'
+import { AreaTree } from './components/nav/AreaTree'
+import { areaOfPath } from './lib/appAreas'
+import { AREA_RAIL_W, AreaRail } from './components/nav/AreaRail'
+import { areaBadges } from './lib/areaBadges'
+import { MobileAreaBar } from './components/nav/MobileAreaBar'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
 import { openArtifacts } from './lib/artifactsStore'
@@ -117,7 +121,7 @@ import { applyTextScale, clampTextScale, readLocalTextScale, writeLocalTextScale
 import { journalBackfillPollMs } from './lib/journalBackfill'
 import { initialLang } from './lib/lang'
 import { fleetOpenStore, sessionsFiltersOpenStore, sessionTabsStore, studioSeenStore } from './lib/appFlags'
-import { SessionTabStrip } from './components/sessions/SessionTabStrip'
+import { SessionTabStrip, TAB_STRIP_H } from './components/sessions/SessionTabStrip'
 import { reopenSession } from './lib/reopeningStore'
 import { replaceTab } from './lib/sessionTabs'
 import { getOpenTabs, setOpenTabs } from './lib/sessionTabsStore'
@@ -126,7 +130,6 @@ import {
   DEFAULT_ORDER, sortSessions, type ControlSession,
 } from '@agentistics/tui/control/session-fleet'
 import { AsideResizer } from './components/nav/AsideResizer'
-import { modeOfPath } from './lib/workspaceMode'
 import { ASIDE_DEFAULT, ASIDE_MAX, ASIDE_MIN, clampAsideWidth } from './lib/asideWidth'
 import { PanelGap } from './components/sessions/PanelGap'
 import { OUTER_GAP, PANEL_BORDER, PANEL_GAP, PANEL_RADIUS } from './lib/panelLayout'
@@ -654,298 +657,13 @@ function fmtCostFull(usd: number, currency: 'USD' | 'BRL' = 'USD', rate = 1): st
   return `USD ${usd.toFixed(6)}`
 }
 
-function MobileBottomNav({
-  lang, harnesses, onRefresh, onOpenHardware, liveUpdates, onToggleLive, updateInterval, healthIssues, isCentral, hasWorkflows,
-  principal, theme, onToggleTheme, onToggleLang, a11yEnabled,
-}: {
-  lang: Lang
-  harnesses?: SurfaceHarnessId[]
-  onRefresh: () => void
-  /** Hardware is a modal, not a destination — on mobile its entry point is a tile in this sheet. */
-  onOpenHardware: () => void
-  liveUpdates: boolean
-  onToggleLive: () => void
-  updateInterval: number
-  healthIssues?: HealthIssue[]
-  /** A central updates in real time via SSE — no Live toggle. */
-  isCentral?: boolean
-  hasWorkflows?: boolean
-  /** Signed-in account. Absent on a solo machine with no IAM — the account block then hides. */
-  principal?: IamAccount
-  theme: Theme
-  onToggleTheme: () => void
-  onToggleLang: () => void
-  /** Whether the magnifier feature is on. Once it is, the header button is the way in — a tile
-   *  here too would be a second entry point to the same screen. */
-  a11yEnabled: boolean
-}) {
-  const location = useLocation()
-  const navigate = useNavigate()
-  const pt = lang === 'pt'
-  const [moreOpen, setMoreOpen] = useState(false)
-  const orange = 'var(--anthropic-orange)'
-  // The sheet has two faces: the tile grid, and (after tapping the account row) the account
-  // actions. A nested popover behaves badly on a phone, so we swap the body in place instead
-  // of stacking another floating layer over the sheet.
-  const [accountOpen, setAccountOpen] = useState(false)
-  const [pwOpen, setPwOpen] = useState(false)
-  const [mfaOpen, setMfaOpen] = useState(false)
-  const roleLabel = principal
-    ? (principal.role === 'owner' ? 'Owner' : (principal.memberships.some(m => m.role === 'manager') ? 'Manager' : 'User'))
-    : ''
-  const logout = () => { void fetch('/api/iam/logout', { method: 'POST' }).then(() => window.location.reload()) }
-  const closeSheet = () => { setMoreOpen(false); setAccountOpen(false) }
-
-  // Primary destinations live in the bar; the rest go behind a "More" sheet so
-  // the bar never crams more than 5 slots on a narrow phone.
-  const primary = [
-    { to: '/',         labelPt: 'Home',       labelEn: 'Home',      icon: Home },
-    { to: '/costs',    labelPt: 'Custos',     labelEn: 'Costs',     icon: DollarSign },
-    // Repositories took the slot Projects held. It is the page that now answers "which projects" —
-    // the repository is the key that survives a different path on every machine — so somebody
-    // reaching for the old tile lands where the information actually is. It leaves the "More"
-    // sheet by the same move: one destination, one place to press it.
-    { to: '/repositories', labelPt: 'Repositórios', labelEn: 'Repositories', icon: GitBranch },
-    { to: '/tools',    labelPt: 'Tools',      labelEn: 'Tools',     icon: Wrench },
-  ] as const
-
-  // Square tiles in the "More" sheet: nav destinations + the actions that used
-  // to crowd the top header (settings, live toggle, refresh, warnings).
-  type Tile = {
-    key: string
-    label: string
-    icon: typeof Home
-    onClick: () => void
-    active?: boolean
-    accent?: boolean
-    badge?: string
-    /** See the desktop rail: the two navs mark the same features, or one of them lies. */
-    beta?: boolean
-  }
-  // The switch's badge, from the SHARED fleet poll (see lib/fleet.ts) — no extra request.
-  const { fleet: mobileFleet } = useFleet(lang === 'pt' ? 'pt' : 'en')
-  const attention = mobileFleet.attention
-
-  const navTiles: Tile[] = [
-    // Repositories is NOT here: it is a fixed slot in the bar now (see `primary`). A destination
-    // in both places is the same feature marked twice, and the sheet is where the ones that did
-    // not fit live.
-    // Members/machines only exist on a central — a solo machine has exactly one of each.
-    ...(isCentral
-      ? [{ key: 'members', label: pt ? 'Membros' : 'Members', icon: Users, onClick: () => { closeSheet(); navigate('/members') }, active: location.pathname.startsWith('/members') } as Tile]
-      : []),
-    { key: 'top', label: pt ? 'Top' : 'Top', icon: Trophy, onClick: () => { closeSheet(); navigate('/top') }, active: location.pathname.startsWith('/top') },
-    { key: 'tasks', label: 'Agentask', icon: ClipboardList, onClick: () => { closeSheet(); navigate('/tasks') }, active: location.pathname.startsWith('/tasks'), beta: true },
-    { key: 'tags', label: 'Tags', icon: TagIcon, onClick: () => { closeSheet(); navigate('/tags') }, active: location.pathname.startsWith('/tags') },
-    { key: 'custom', label: pt ? 'Personalizado' : 'Custom', icon: Layers, onClick: () => { closeSheet(); navigate('/custom') }, active: location.pathname.startsWith('/custom') },
-    { key: 'export', label: pt ? 'Exportar' : 'Export', icon: FileDown, onClick: () => { closeSheet(); navigate('/export') }, active: location.pathname.startsWith('/export') },
-    // Unconditional: the page's filter mode compares two SCOPES and needs no second harness.
-    // Only the by-harness mode inside it stays gated.
-    { key: 'compare', label: pt ? 'Comparar' : 'Compare', icon: GitCompare, onClick: () => { closeSheet(); navigate('/compare') }, active: location.pathname.startsWith('/compare') },
-    // Only while the feature is OFF: once it's on, the header magnifier button (beside the bell)
-    // is the way in, and two entry points to the same screen on a phone is one too many. Same
-    // ZoomIn icon as the header button — one feature, one icon.
-    ...(a11yEnabled
-      ? []
-      : [{ key: 'accessibility', label: pt ? 'Acessibilidade' : 'Accessibility', icon: ZoomIn, onClick: () => { closeSheet(); navigate('/settings/accessibility') }, active: location.pathname.startsWith('/settings/accessibility') } as Tile]),
-  ]
-  const activeIssueCount = healthIssues?.length ?? 0
-  const actionTiles: Tile[] = [
-    // Live toggle — hidden on a central (real-time via SSE, nothing to toggle).
-    ...(isCentral ? [] : [{
-      key: 'live', label: pt ? 'Ao vivo' : 'Live', icon: Activity,
-      onClick: () => onToggleLive(), accent: liveUpdates,
-      badge: liveUpdates ? (updateInterval >= 60 ? `${updateInterval / 60}m` : `${updateInterval}s`) : undefined,
-    } as Tile]),
-    { key: 'refresh', label: pt ? 'Atualizar' : 'Refresh', icon: RefreshCw, onClick: () => { onRefresh(); closeSheet() } },
-    // An overlay, so it belongs with the actions: nothing in the bottom bar can be "on /hardware".
-    { key: 'hardware', label: 'Hardware', icon: Cpu, onClick: () => { closeSheet(); onOpenHardware() } },
-    { key: 'settings', label: pt ? 'Ajustes' : 'Settings', icon: SlidersHorizontal, onClick: () => { closeSheet(); navigate('/settings') }, active: location.pathname.startsWith('/settings') },
-    // Theme and language live here because the sidebar that hosts them on desktop is not
-    // rendered on mobile. Neither closes the sheet — you toggle and immediately re-judge.
-    { key: 'theme', label: pt ? 'Tema' : 'Theme', icon: theme === 'dark' ? Sun : Moon, onClick: () => onToggleTheme() },
-    { key: 'lang', label: pt ? 'Idioma' : 'Language', icon: Globe, onClick: () => onToggleLang(), badge: pt ? 'PT' : 'EN' },
-    // Health warnings moved next to the notification bell in the mobile top bar (its own popover).
-  ]
-  const allTiles = [...navTiles, ...actionTiles]
-
-  const navAction = navTiles.some(t => t.active)
-  // A repo's own page is `/repo/:id`, not a child of `/repositories` — the slot has to know it,
-  // or the section stops marking itself the moment you open a repository.
-  const primaryActive = primary.findIndex(tab => tab.to === '/'
-    ? location.pathname === '/'
-    : tab.to === '/repositories'
-      ? location.pathname.startsWith('/repositories') || location.pathname.startsWith('/repo')
-      : location.pathname.startsWith(tab.to))
-
-  const accountActionStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 44,
-    padding: '0 14px', borderRadius: 12, border: '1px solid var(--border)',
-    background: 'var(--bg-elevated)', color: 'var(--text-primary)',
-    fontSize: '0.8438rem', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
-  }
-
-  return (
-    <>
-      {/* "More" bottom sheet — square tiles for bigger, friendlier tap targets */}
-      <div
-        onClick={() => closeSheet()}
-        style={{
-          position: 'fixed', inset: 0, zIndex: 310, background: 'rgba(0,0,0,0.45)',
-          opacity: moreOpen ? 1 : 0,
-          pointerEvents: moreOpen ? 'auto' : 'none',
-          transition: 'opacity 0.25s ease',
-        }}
-      />
-      <div style={{
-        // Down to the FLOOR, with the pill floating over its foot: stopped at the pill's top it left a
-        // strip of page showing around the see-through bar.
-        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 320,
-        background: 'var(--bg-surface)', borderTop: '1px solid var(--border)',
-        borderRadius: '16px 16px 0 0', boxShadow: '0 -8px 30px rgba(0,0,0,0.35)',
-        padding: '8px 12px calc(16px + var(--mobile-nav-h))',
-        // The bar under it is a see-through floating pill now, so the closed sheet must travel past the
-        // floor entirely — a fraction short of its own height left an edge showing through the pill.
-        transform: moreOpen ? 'translateY(0)' : 'translateY(calc(100% + 24px))',
-        transition: 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
-      }}>
-        <div style={{
-          width: 36, height: 4, borderRadius: 2, background: 'var(--border)',
-          margin: '4px auto 12px',
-        }} />
-        {/* Account block — the mobile home for the profile menu that lives in the desktop
-            sidebar. Without it a phone user has no way to change their password or log out. */}
-        {principal && (
-          <button
-            onClick={() => setAccountOpen(o => !o)}
-            aria-expanded={accountOpen}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 44,
-              padding: '8px 10px', marginBottom: 10, borderRadius: 12,
-              border: `1px solid ${accountOpen ? orange : 'var(--border)'}`,
-              background: accountOpen ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-              cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
-            }}
-          >
-            <span style={{
-              width: 32, height: 32, borderRadius: '50%', background: 'var(--bg-surface)',
-              border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0,
-            }}>{principal.name.slice(0, 2)}</span>
-            <span style={{ minWidth: 0, flex: 1 }}>
-              <span style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
-              <span style={{ display: 'block', fontSize: '0.625rem', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
-            </span>
-            <ChevronDown size={16} style={{ flexShrink: 0, color: 'var(--text-tertiary)', transform: accountOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-          </button>
-        )}
-        {accountOpen && principal ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button
-              onClick={() => { setAccountOpen(false); setMoreOpen(false); setPwOpen(true) }}
-              style={accountActionStyle}
-            >
-              <KeyRound size={16} /> {pt ? 'Trocar senha' : 'Change password'}
-            </button>
-            <button
-              onClick={() => { setAccountOpen(false); setMoreOpen(false); setMfaOpen(true) }}
-              style={accountActionStyle}
-            >
-              <ShieldCheck size={16} /> {pt ? 'Duas etapas' : 'Two-factor'}
-            </button>
-            <button
-              onClick={logout}
-              style={{ ...accountActionStyle, color: '#ef4444', borderColor: 'color-mix(in srgb, #ef4444 40%, transparent)' }}
-            >
-              <LogOut size={16} /> {pt ? 'Sair' : 'Log out'}
-            </button>
-          </div>
-        ) : (
-        <>
-        {/* The workspace switch. The aside that hosts it on desktop is not rendered on mobile, and
-            a mode a phone cannot reach is a mode a phone cannot leave. */}
-        <div style={{ marginBottom: 12 }}>
-          <ModeSwitch lang={lang === 'pt' ? 'pt' : 'en'} attention={attention} onNavigate={closeSheet} />
-        </div>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 8,
-        }}>
-          {allTiles.map(tile => {
-            const Icon = tile.icon
-            const lit = tile.active || tile.accent
-            return (
-              <button
-                key={tile.key}
-                onClick={tile.onClick}
-                style={{
-                  position: 'relative',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  gap: 6, padding: '11px 4px',
-                  borderRadius: 12,
-                  border: `1px solid ${lit ? orange : 'var(--border)'}`,
-                  background: lit ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-                  color: lit ? orange : 'var(--text-primary)',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  fontSize: '0.6875rem', fontWeight: 600,
-                  transition: 'all 0.15s',
-                }}
-              >
-                <Icon size={19} strokeWidth={1.8} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{tile.label}</span>
-                {/* Top-LEFT, so it cannot collide with the count badge on the right. */}
-                {tile.beta && <BetaTag what={tile.label} style={{ position: 'absolute', top: 4, left: 5 }} />}
-                {tile.badge && (
-                  <span style={{
-                    position: 'absolute', top: 4, right: 5,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
-                    background: orange, color: '#fff', fontSize: '0.5625rem', fontWeight: 700,
-                  }}>
-                    {tile.badge}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-        </>
-        )}
-      </div>
-
-      <MobilePillBar
-        ariaLabel={pt ? 'Navegação principal' : 'Main navigation'}
-        items={[
-          ...primary.map(tab => ({
-            key: tab.to,
-            label: pt ? tab.labelPt : tab.labelEn,
-            icon: tab.icon,
-            onActivate: () => { closeSheet(); navigate(tab.to) },
-          })),
-          {
-            key: 'more',
-            label: pt ? 'Mais' : 'More',
-            icon: MoreHorizontal,
-            onActivate: () => { if (moreOpen) closeSheet(); else setMoreOpen(true) },
-          },
-        ]}
-        activeIndex={moreOpen || navAction ? primary.length : primaryActive}
-      />
-
-      {pwOpen && <ChangePasswordSelf lang={lang} onClose={() => setPwOpen(false)} />}
-      {mfaOpen && <MfaSetup lang={lang} onClose={() => setMfaOpen(false)} canDisable={principal?.role !== 'owner'} />}
-    </>
-  )
-}
-
 /**
  * The fixed strip along the top of the page, to the right of the aside. The aside runs the full
  * height and its header row (`AsideHeader`) has this same height, so the two bands stay level.
  */
 const TOPBAR_H = 44
-/** The session tab strip's row above the title line (`SessionTabStrip` is 34px + its hairline). */
-const TABS_ROW_H = 35
+/** The session tab strip's row above the title line — the strip's own measured height, never a typed number. */
+const TABS_ROW_H = TAB_STRIP_H
 const SIDEBAR_W = 248
 const SIDEBAR_W_COLLAPSED = 64
 /** Room kept between the Filtros / stats tabs and the right-hand aside they hang beside. */
@@ -1061,7 +779,7 @@ function SideNav({
   // The row's context menu (Task 6) needs the verb-carrying shape, not the arrangement-only one —
   // `useFleetIndex` is the SAME map the header and the panel already build from `fleet.sessions`.
   const asideRowIndex = useFleetIndex(fleet.sessions)
-  const mode = modeOfPath(location.pathname)
+  const mode = areaOfPath(location.pathname)?.area.id === 'sessions' ? 'sessions' as const : 'dashboard' as const
   // The collapsed rail's order — the SAME order the open list draws, so collapsing the aside never
   // reshuffles the sessions. Pinned first (that is what pinning is for), then `sortSessions(…,
   // DEFAULT_ORDER)` — the ranking the terminal cockpit breaks ties on, so "sorted by status" means
@@ -1078,28 +796,15 @@ function SideNav({
   // A resize in progress. Only used to suspend the collapse animation — see the aside's `transition`.
   const [dragging, setDragging] = useState(false)
 
-  const items: {
-    to: string; labelPt: string; labelEn: string; icon: React.ReactNode
-    /** Still being tried out — see `BetaTag`. Marked HERE so the rail and the sheet agree. */
-    beta?: boolean
-  }[] = [
-    { to: '/',          labelPt: 'Home',         labelEn: 'Home',         icon: <Home size={17} /> },
-    { to: '/costs',     labelPt: 'Custos',       labelEn: 'Costs',        icon: <DollarSign size={17} /> },
-    { to: '/top',       labelPt: 'Top de uso',   labelEn: 'Top usage',    icon: <Trophy size={17} /> },
-    // No Projects entry. Its two panels — top projects and languages — are on Home, and the
-    // repository is the dimension that survives a different path on every machine, so what the
-    // page answered is answered by Repositories. `/projects` redirects there (see `AppRouter`).
-    { to: '/repositories', labelPt: 'Repositórios', labelEn: 'Repositories', icon: <GitBranch size={17} /> },
-    // Members/machines only exist on a central — a solo machine has exactly one of each.
-    ...(isCentral ? [{ to: '/members', labelPt: 'Membros', labelEn: 'Members', icon: <Users size={17} /> }] : []),
-    { to: '/tasks',     labelPt: 'Agentask',  labelEn: 'Agentask',    icon: <ClipboardList size={17} />, beta: true },
-    { to: '/tags',      labelPt: 'Tags',         labelEn: 'Tags',         icon: <TagIcon size={17} /> },
-    // Cofre is NOT here: it lives in the fixed header's action group (VaultHeaderButton), owner 2026-10-04. The route stays.
-    { to: '/tools',     labelPt: 'Ferramentas',  labelEn: 'Tools',        icon: <Wrench size={17} /> },
-    { to: '/custom',    labelPt: 'Personalizado',labelEn: 'Custom',       icon: <Layers size={17} /> },
-    // Unconditional — see the mobile tile: comparing two filter scopes needs no second harness.
-    { to: '/compare', labelPt: 'Comparar', labelEn: 'Compare', icon: <GitCompare size={17} /> },
-  ]
+  const { nativeRuntime } = useEngineCaps()
+  const visibleSettings = useMemo(() => new Set(visibleSettingsSections({
+    central: !!isCentral,
+    ...(principal ? { role: principal.role === 'owner' ? 'owner' as const : 'member' as const, isManager: principal.memberships.some(m => m.role === 'manager') } : {}),
+    ...(nativeRuntime !== null ? { nativeRuntime } : {}),
+  }).map(x => x.id)), [isCentral, principal, nativeRuntime])
+  // The rail/tree badges read the plan store the Uso page reads, so its badge matches the page.
+  const planLimits = usePlanLimits()
+  const areaBadgeCounts = useMemo(() => areaBadges({ attention, usageRows: isCentral ? undefined : planLimits.budgets }), [attention, isCentral, planLimits.budgets])
   const footBtn: React.CSSProperties = {
     width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
     borderRadius: 8, border: '1px solid var(--border)', background: 'transparent',
@@ -1203,13 +908,14 @@ function SideNav({
             <Download size={15} />
           </button>
         </CollapsedTip>
-        <CollapsedTip label={pt ? 'Configurações' : 'Settings'} show={collapsed}>
+        {/* The tree carries Ajustes (A1); this shortcut remains only where there is no tree yet. */}
+        {mode === 'sessions' && <CollapsedTip label={pt ? 'Configurações' : 'Settings'} show={collapsed}>
           <NavLink to="/settings" aria-label={pt ? 'Configurações' : 'Settings'} title={collapsed ? undefined : (pt ? 'Configurações' : 'Settings')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, textDecoration: 'none' }}
             onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-primary)' }}
             onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-secondary)' }}>
             <SlidersHorizontal size={15} />
           </NavLink>
-        </CollapsedTip>
+        </CollapsedTip>}
         {!isCentral && <PlanUsageFootButton lang={pt ? 'pt' : 'en'} collapsed={collapsed} footBtn={footBtn} openSession={openSession} />}
       </div>
     </div>
@@ -1217,7 +923,8 @@ function SideNav({
   return (
     <aside style={{
       position: 'fixed', top: 0, left: 0, bottom: 0,
-      width: collapsed ? SIDEBAR_W_COLLAPSED : width, zIndex: 200,
+      // The Sessões area adds the area rail (and its gap) in front of the list; the list keeps its width.
+      width: (collapsed ? SIDEBAR_W_COLLAPSED : width) + (mode === 'sessions' ? AREA_RAIL_W + PANEL_GAP : 0), zIndex: 200,
       // FLOATING-PANELS DESIGN (`sdd/brief.md`): in the sessions workspace this element is the
       // FRAME, not a panel — its own background reads as the frame's ground colour, and the actual
       // sessions-list PANEL (below the mark/mode-switch, its own border+radius+overflow:hidden) is
@@ -1252,11 +959,6 @@ function SideNav({
       {/* The aside is the full height of the window, so it carries its own mark and fold control —
           this row is FRAME chrome (the mockup's own titlebar), never inside the panel below it. */}
       <AsideHeader lang={lang === 'pt' ? 'pt' : 'en'} height={TOPBAR_H} collapsed={collapsed} onToggle={onToggle} />
-      {/* The workspace switch, PINNED above the scrolling body — frame chrome too, same reason. */}
-      <div style={{ padding: '0 2px 10px' }}>
-        <ModeSwitch lang={lang} collapsed={collapsed} attention={attention} />
-        {/* Member machine: live connection status + latency to the central. Null unless connected. */}
-      </div>
 
       {/* ONE aside, two bodies — never two asides. The shell above is shared; only what sits below
           it changes. Collapsed, the sessions workspace draws the RAIL — sessions, not the
@@ -1282,7 +984,10 @@ function SideNav({
          * RESIZE GAP is withheld while collapsed (`!collapsed` below): a fixed 64px rail has nothing
          * to resize.
          */
-        <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: PANEL_GAP }}>
+        {/* APP.AREAS Task 4: the areas as a rail of icons beside the list, which is unchanged. */}
+        <AreaRail lang={pt ? 'pt' : 'en'} pathname={location.pathname} badges={areaBadgeCounts} visibleSettings={visibleSettings} />
+        <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{
             flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
             border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
@@ -1339,46 +1044,12 @@ function SideNav({
             />
           )}
         </div>
+        </div>
       ) : (
       <>
-      <nav className="ag-noscroll" style={{ display: 'flex', flexDirection: 'column', gap: 5, overflowY: 'auto', overflowX: 'hidden', flex: 1, paddingTop: 4 }}>
-        {items.map(item => {
-          const active = item.to === '/'
-            ? location.pathname === '/'
-            : item.to === '/repositories'
-              ? inReposSection
-              : location.pathname.startsWith(item.to)
-          const label = pt ? item.labelPt : item.labelEn
-          return (
-            <CollapsedTip key={item.to} label={label} show={collapsed}>
-              <NavLink
-                to={item.to}
-                end={item.to === '/'}
-                aria-label={collapsed ? label : undefined}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12, minWidth: 0,
-                  // 40px of row. The list was laid out at 10px vertical padding and read as cramped
-                  // — a nav item is a target as well as a label, and 36px is the floor for one.
-                  padding: collapsed ? '11px 0' : '11px 12px', justifyContent: collapsed ? 'center' : 'flex-start',
-                  borderRadius: 10, textDecoration: 'none',
-                  fontSize: '0.8438rem', fontWeight: active ? 700 : 500, fontFamily: 'inherit', whiteSpace: 'nowrap',
-                  color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
-                  background: active ? 'var(--anthropic-orange-dim)' : 'transparent',
-                  transition: 'background 0.15s, color 0.15s',
-                }}
-                onMouseEnter={e => { if (!active) { const t = e.currentTarget as HTMLAnchorElement; t.style.color = 'var(--text-primary)'; t.style.background = 'var(--bg-elevated)' } }}
-                onMouseLeave={e => { if (!active) { const t = e.currentTarget as HTMLAnchorElement; t.style.color = 'var(--text-secondary)'; t.style.background = 'transparent' } }}
-              >
-                <span style={{ flexShrink: 0, display: 'flex' }}>{item.icon}</span>
-                {!collapsed && label}
-                {/* Collapsed, the rail has no room for the word — a dot in the same colour carries
-                    it, and the tooltip says what it means. Never colour alone anywhere it fits. */}
-                {item.beta && <BetaTag what={label} compact={collapsed} style={collapsed ? { marginLeft: 2 } : { marginLeft: 'auto' }} />}
-              </NavLink>
-            </CollapsedTip>
-          )
-        })}
-      </nav>
+      <div className="ag-noscroll" style={{ overflowY: 'auto', overflowX: 'hidden', flex: 1, paddingTop: 4 }}>
+        <AreaTree lang={pt ? 'pt' : 'en'} pathname={location.pathname} collapsed={collapsed} badges={areaBadgeCounts} visibleSettings={visibleSettings} />
+      </div>
 
       {/* The resize handle. Unchanged — dashboard-mode keeps its plain edge-line resizer; the gap-
           as-handle model is the sessions workspace's alone. Only while the sidebar is open: there is
@@ -1729,18 +1400,21 @@ export default function AppLayout() {
   // was pressed — the sidebar visibly resizing on a control whose job is to change what is IN it.
   // Only the sessions workspace offers the handle, but whatever it is dragged to applies to both.
   const liveAsideWidth = asideWidth
-  const inSessionsWorkspace = modeOfPath(location.pathname) === 'sessions'
+  const inSessionsWorkspace = areaOfPath(location.pathname)?.area.id === 'sessions'
+  // The fixed aside's real width: the list (or the collapsed rail), plus the Sessões area's own
+  // area rail and its gap. Every inset that clears the aside reads this one figure.
+  const leftAsideW = (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth) + (inSessionsWorkspace ? AREA_RAIL_W + PANEL_GAP : 0)
   // PUBLISHED for `SessionPanel.tsx`/`ShellBand.tsx`'s full-screen surfaces, deep inside
   // `SessionsPage.tsx` — see `leftAsideEdge.ts`'s own header for the bug this fixes (full screen
   // reaching through the left sessions list). `0` on mobile: that layout has no fixed left sidebar
   // for a full-screen surface to avoid, and mobile panels cover the viewport by design anyway.
   useEffect(() => {
-    setLeftAsideEdge(isMobile ? 0 : (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth))
+    setLeftAsideEdge(isMobile ? 0 : leftAsideW)
     // Alongside it — see `leftAsideOpen.ts`'s own header for why this needs to be a SEPARATE
     // boolean rather than a comparison against the edge above (a genuinely narrow expanded list can
     // coincide with `SIDEBAR_W_COLLAPSED`'s own width).
     setLeftAsideOpen(!isMobile && !sidebarCollapsed)
-  }, [isMobile, sidebarCollapsed, liveAsideWidth])
+  }, [isMobile, sidebarCollapsed, leftAsideW])
 
   /**
    * THE PHONE'S SESSIONS WORKSPACE, AND THE TWO WAYS ITS DOCUMENT MOVED WHEN IT SHOULD NOT HAVE.
@@ -2212,7 +1886,7 @@ export default function AppLayout() {
     measureFiltrosAnchor()
     window.addEventListener('resize', measureFiltrosAnchor)
     return () => window.removeEventListener('resize', measureFiltrosAnchor)
-  }, [sessionsFiltersOpen, measureFiltrosAnchor, sidebarCollapsed, liveAsideWidth])
+  }, [sessionsFiltersOpen, measureFiltrosAnchor, sidebarCollapsed, leftAsideW])
   const filtrosBounds = filtrosPanelBounds(
     { left: 0, right: sessionsFiltersAnchor?.left ?? 0 },
     rightAsideEdge === null ? null : { left: rightAsideEdge - FILTROS_ASIDE_GAP, right: viewportW },
@@ -2231,6 +1905,13 @@ export default function AppLayout() {
   // because the poller is module-scoped and every surface reads the same snapshot.
   useEffect(() => { setFleetSourceCentral(isCentral) }, [isCentral])
   const { fleet: headerFleet, act: headerFleetAct, unsupported: headerFleetUnsupported } = useFleet(lang === 'pt' ? 'pt' : 'en')
+  const mobilePlanLimits = usePlanLimits()
+  const { nativeRuntime: mobileNativeRuntime } = useEngineCaps()
+  const mobileVisibleSettings = new Set(visibleSettingsSections({
+    central: !!isCentral,
+    ...(iam?.account ? { role: iam.account.role, isManager: iam.account.memberships.some(m => m.role === 'manager') } : {}),
+    ...(mobileNativeRuntime !== null ? { nativeRuntime: mobileNativeRuntime } : {}),
+  }).map(section => section.id))
   /**
    * "Active only" needs a fleet to intersect against, on EITHER page. An exposed profile with no
    * host power, or a central with no machine chosen, both report `unsupported` here — offering the
@@ -2326,6 +2007,25 @@ export default function AppLayout() {
     return () => document.removeEventListener('keydown', onKey)
   }, [inSessionsWorkspace, selectedFleetSession])
 
+  // Ctrl/Cmd+K — focus the area tree's search on any desktop page; opens the aside first if folded.
+  useEffect(() => {
+    if (isMobile) return
+    const onKey = (e: KeyboardEvent) => {
+      const focusInTerminal = document.activeElement instanceof Element
+        && document.activeElement.closest('.xterm') !== null
+      const shortcut = shouldHandlePanelShortcut({
+        key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey,
+        isComposing: e.isComposing, focusInTerminal,
+      }, e.target as { tagName?: string; isContentEditable?: boolean } | null)
+      if (shortcut !== 'focus-search') return
+      e.preventDefault()
+      setSidebarCollapsed(false)
+      window.setTimeout(() => document.querySelector<HTMLInputElement>('#ag-area-search input')?.focus(), 0)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [isMobile])
+
   /**
    * THE THREE WORKSPACE PANEL SHORTCUTS (owner addition, VS-Code style) — `Ctrl/Cmd+B` toggles the
    * LEFT sessions list (the same `sidebarCollapsed` state `AsideHeader`'s own collapse button already
@@ -2355,7 +2055,7 @@ export default function AppLayout() {
         key: e.key, code: e.code, ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey,
         isComposing: e.isComposing, focusInTerminal,
       }, e.target as { tagName?: string; isContentEditable?: boolean } | null)
-      if (shortcut === null) return
+      if (shortcut === null || shortcut === 'focus-search') return
       // `Ctrl+Shift+B` is Chrome's own bookmarks-bar toggle — the page must win it.
       e.preventDefault()
       if (shortcut === 'toggle-left') { setSidebarCollapsed(c => !c); return }
@@ -3673,7 +3373,7 @@ export default function AppLayout() {
           Cancel" — laid over it, see `ChatSelectionOverlay`. */}
       <ChatSelectionOverlay lang={lang === 'pt' ? 'pt' : 'en'} padX={PAGE_INSET} />
       {headerSession && (
-        <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'baseline', gap: 7 }}>
+        <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'center', gap: 7 }}>
           <SessionLinkInfo session={headerSession} links={sessionLinks(headerSession, headerFleet.rows)} lang={lang === 'pt' ? 'pt' : 'en'} onGo={p => navigate(p)} />
           <span style={{
             fontSize: '0.8438rem', fontWeight: 650, color: 'var(--text-primary)',
@@ -4487,7 +4187,7 @@ export default function AppLayout() {
         ? { paddingBottom: 'var(--mobile-nav-h)' }
         : {}),
       background: 'var(--bg-base)', display: 'flex', flexDirection: 'column',
-      paddingLeft: isMobile ? 0 : (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth),
+      paddingLeft: isMobile ? 0 : leftAsideW,
       paddingTop: isMobile ? 0 : 'var(--ag-topbar-h)',
       boxSizing: 'border-box',
       transition: 'padding-left 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
@@ -4517,7 +4217,7 @@ export default function AppLayout() {
           below={tabsRowOn && tabNotice ? <ActionNotice message={tabNotice} lang={lang} onDismiss={() => setTabNotice(null)} /> : null}
           onBelowHeight={setTabNoticeHeight}
           height={TOPBAR_H}
-          asideWidth={sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth}
+          asideWidth={leftAsideW}
           // Owner-approved central-pane inset (2026-09-26): the sessions workspace's pane now
           // carries its own top border 5px below this strip — see `SessionsPage.tsx`'s
           // `CENTRAL_PANE` and `TopBar`'s own doc comment on `noBottomBorder`.
@@ -4589,7 +4289,7 @@ export default function AppLayout() {
           and the collapsible filter band, both sized for a viewport the strip's row would not fit
           in. Nothing about mobile changed. */}
       {!inSessionsWorkspace && isMobile && (
-      <header style={{
+      <header className="ag-mobile-shell-header" style={{
         background: 'var(--bg-surface)',
         position: 'sticky',
         // Beneath the fixed strip, never at the viewport top: one is window chrome and the other is
@@ -4613,12 +4313,12 @@ export default function AppLayout() {
             live/alerts, so there are no longer two stacked header rows. */}
         {isMobile && (
           <div style={{
-            maxWidth: 1400, margin: '0 auto', padding: '0 16px', height: 48,
+            maxWidth: 1400, margin: '0 auto', padding: '0 12px', minHeight: 48, flexWrap: 'wrap',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
             {/* 60% of the 48px band, the same proportion the desktop strip uses. */}
             <img src={brandAsset('/minimalistLogo.png')} alt="agentistics" style={{ height: 28, width: 'auto' }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
               <MagnifierButton ctx={appCtx} />
               <HideLensesButton ctx={appCtx} />
               {data?.healthIssues && data.healthIssues.length > 0 && (
@@ -4730,7 +4430,7 @@ export default function AppLayout() {
               <button
                 onClick={toggleFleet}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 40,
+                  display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 44,
                   padding: '0 14px', background: 'transparent', border: 'none',
                   fontFamily: 'inherit', fontSize: '0.75rem', cursor: 'pointer',
                   color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
@@ -5003,22 +4703,27 @@ export default function AppLayout() {
           while they are in it. The root's height drops the matching subtraction — see its note.
  */}
       {isMobile && !sessionOpen && (
-        <MobileBottomNav
+        <MobileAreaBar
           lang={lang}
-          harnesses={data.harnesses}
-            onRefresh={refetch}
-          onOpenHardware={() => setHardwareOpen(true)}
-          liveUpdates={liveUpdates}
-          onToggleLive={() => setLiveUpdates(v => !v)}
-          updateInterval={updateInterval}
-          healthIssues={data.healthIssues}
-          isCentral={isCentral}
-          hasWorkflows={(data.workflows?.length ?? 0) > 0}
+          pathname={location.pathname}
+          onNavigate={navigate}
+          attention={headerFleetUnsupported ? undefined : headerFleet.attention}
+          badges={areaBadges({ attention: headerFleetUnsupported ? undefined : headerFleet.attention, usageRows: mobilePlanLimits.budgets })}
+          visibleSettings={mobileVisibleSettings}
           principal={iam?.account}
-          theme={theme}
-          onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          onToggleLang={() => { const next = lang === 'pt' ? 'en' : 'pt'; setLang(next); if (next === 'pt') setCurrency('BRL'); else if (currency === 'BRL') setCurrency('USD') }}
-          a11yEnabled={a11y.prefs.enabled}
+          actions={[
+            ...(isCentral ? [] : [{
+              key: 'live', label: lang === 'pt' ? 'Ao vivo' : 'Live', icon: Activity,
+              onClick: () => setLiveUpdates(v => !v), accent: liveUpdates, keepOpen: true,
+              badge: liveUpdates ? (updateInterval >= 60 ? `${updateInterval / 60}m` : `${updateInterval}s`) : undefined,
+            }]),
+            { key: 'refresh', label: lang === 'pt' ? 'Atualizar' : 'Refresh', icon: RefreshCw, onClick: refetch },
+            { key: 'hardware', label: 'Hardware', icon: Cpu, onClick: () => setHardwareOpen(true) },
+            { key: 'theme', label: lang === 'pt' ? 'Tema' : 'Theme', icon: theme === 'dark' ? Sun : Moon,
+              onClick: () => setTheme(theme === 'dark' ? 'light' : 'dark'), keepOpen: true },
+            { key: 'lang', label: lang === 'pt' ? 'Idioma' : 'Language', icon: Globe, badge: lang === 'pt' ? 'PT' : 'EN', keepOpen: true,
+              onClick: () => { const next = lang === 'pt' ? 'en' : 'pt'; setLang(next); if (next === 'pt') setCurrency('BRL'); else if (currency === 'BRL') setCurrency('USD') } },
+          ]}
         />
       )}
 

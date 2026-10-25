@@ -5,6 +5,9 @@ import { addSession, readRegistry } from './registry'
 import { __setSessionBackendForTest } from './index'
 import { exactLinksOnDisk } from './reopen-link'
 import { routeSpawn } from './structured-route'
+import { featureOn } from '@agentistics/core'
+import { structuredRegistry } from '@agentistics/engine-api'
+import { acpLegacyDeclaration, withStructured } from './structured-backend'
 import type { ManagedSession, SessionBackend, StructuredIntent } from './types'
 
 const savedCaller = process.env.AGENTOP_MANAGED_ID
@@ -33,6 +36,30 @@ async function quietly(f: () => Promise<unknown>) {
 }
 
 describe('ORQ.FORA CLI modes reach the process boundary', () => {
+  for (const raw of ['0', undefined]) {
+    test(`CLI background spawn with ADAPTER_CHAT=${raw ?? 'unset'} follows the web feature decision`, async () => {
+      delete process.env.AGENTOP_MANAGED_ID
+      const { seen, backend: terminal } = recorder()
+      let driverStarts = 0
+      const reg = structuredRegistry([{
+        id: 'claude-stream-json', status: 'ready', harnesses: ['claude'], note: 'fixture',
+        // Refuse before any process can start.
+        declares: () => acpLegacyDeclaration('claude'),
+        async start() { driverStarts++; return { ok: false as const, reason: 'fixture: no process is launched' } },
+      }])
+      const backend = withStructured(terminal, {
+        structured: async () => reg, acp: async () => null, allowed: async () => [],
+        flagOn: () => featureOn('adapter-chat', { AGENTISTICS_ADAPTER_CHAT: raw }),
+      })
+      __setSessionBackendForTest(backend)
+      await quietly(() => runSession(['claude', '--bg', '--force', '--shared-cwd']))
+      expect(driverStarts).toBe(raw === '0' ? 0 : 1)
+      // OFF routes straight to the terminal; ON reaches it only after the fixture driver's refusal.
+      expect(seen).toHaveLength(1)
+      expect(seen[0]!.structured?.origin).toBe('background')
+    })
+  }
+
   test('start forwards --mode to argv and records it before launch', async () => {
     delete process.env.AGENTOP_MANAGED_ID
     const cmd = parseSessionArgs(['claude', '--bg', '--force', '--shared-cwd', '--mode', 'no-questions'])

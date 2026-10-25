@@ -12,6 +12,7 @@ import { useCleanScan } from '../lib/cleanScan'
 import { cleanSize } from '../lib/cleanPresentation'
 import { usePendingUpdate } from '../lib/pendingUpdate'
 import { ToggleSwitch } from './ToggleSwitch'
+import { setNotificationPanelOpen } from '../lib/notificationPanel'
 import { answerAwayDigest } from '../lib/awayDigest'
 
 const ICON: Record<NotificationType, { color: string; Icon: typeof AlertCircle }> = {
@@ -32,6 +33,8 @@ function relTime(ts: number, pt: boolean): string {
 }
 
 interface Props {
+  /** The toast overlay reuses this panel on routes with no header bell. */
+  toastHost?: boolean
   lang: 'pt' | 'en'
   /** Optional style overrides for the trigger button (to match the header's action row). */
   buttonStyle?: React.CSSProperties
@@ -90,7 +93,7 @@ export function NotificationRowBody({ pt, title, message, isJournalFailed, isCle
   )
 }
 
-export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: Props) {
+export function NotificationBell({ lang, buttonStyle, buttonClassName, label, toastHost = false }: Props) {
   const pt = lang === 'pt'
   const allNotes = useNotifications()
   const pinnedUpd = usePendingUpdate()
@@ -102,6 +105,12 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
   const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
+  const panelId = useRef(Symbol('notification-panel'))
+  useEffect(() => {
+    const id = panelId.current
+    setNotificationPanelOpen(id, open)
+    return () => setNotificationPanelOpen(id, false)
+  }, [open])
   const [digestBusyId, setDigestBusyId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const unread = notes.filter(n => !n.read).length
@@ -114,6 +123,12 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
     return () => window.removeEventListener('mousedown', h)
   }, [])
 
+  useEffect(() => {
+    const show = () => { setOpen(toastHost); if (toastHost) markAllRead() }
+    window.addEventListener('agentistics:open-notifications', show)
+    return () => window.removeEventListener('agentistics:open-notifications', show)
+  }, [toastHost])
+
   function toggle() {
     const next = !open
     setOpen(next)
@@ -121,8 +136,8 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
   }
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
+    <div ref={ref} style={toastHost ? { position: 'fixed', top: 16, right: 16, zIndex: 3000 } : { position: 'relative' }}>
+      {!toastHost && <button
         className={buttonClassName}
         onClick={toggle}
         title={pt ? 'Notificações' : 'Notifications'}
@@ -153,7 +168,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label }: 
             boxSizing: 'border-box',
           }}>{unread > 9 ? '9+' : unread}</span>
         )}
-      </button>
+      </button>}
 
       {open && (
         <div style={{
