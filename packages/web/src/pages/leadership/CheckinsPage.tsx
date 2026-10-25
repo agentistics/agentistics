@@ -27,7 +27,7 @@ export function CheckinsContent({ lang, reports, rows, error = false, capable = 
   const isMobile = useIsMobile()
   const rounds = (reports ?? []).filter(report => report.last && rows.some(row => row.id === report.session || row.conversationId === report.session)).slice().sort((a, b) => (b.last?.at ?? b.lastRunAt ?? 0) - (a.last?.at ?? a.lastRunAt ?? 0))
   return <div style={{ minWidth: 0 }}>
-    <PageHeader lang={lang} areaId="leadership" pageId="checkins" />
+    <PageHeader lang={lang} areaId="sessions" pageId="checkins" />
     {!capable ? <p role="status">{pt ? 'Check-ins indisponíveis nesta instância.' : 'Check-ins are unavailable on this instance.'}</p> : <>
       {error && <p role="status">{pt ? 'Não foi possível atualizar as rodadas.' : 'Could not refresh check-in rounds.'}</p>}
       {!reports && !error && <p role="status">{pt ? 'Carregando rodadas…' : 'Loading rounds…'}</p>}

@@ -13,6 +13,13 @@ function render(pathname: string, attention?: number, lang: 'pt' | 'en' = 'pt') 
 }
 
 describe('MobileAreaBar', () => {
+  test('leadership belongs to Sessions with a shortcut back to the session list', () => {
+    for (const lang of ['pt', 'en'] as const) {
+      const html = render('/leadership/checkins', 2, lang)
+      expect(html).toContain(lang === 'pt' ? 'Ir para · Sessões › Check-ins' : 'Go to · Sessions › Check-ins')
+      expect(html.match(/<button\b/g) ?? []).toHaveLength(2)
+    }
+  })
   test('the place pill names the current registry area and page', () => {
     const html = render('/usage')
     // Quiet area, bold page, a lucide chevron — never a text "▾".

@@ -100,7 +100,7 @@ import { resolveArchiveChoice } from './lib/archive'
 import { useEngineCaps } from './hooks/useEngineCaps'
 import { visibleSettingsSections } from './lib/settingsSections'
 import { AreaTree } from './components/nav/AreaTree'
-import { areaOfPath } from './lib/appAreas'
+import { isSessionsWorkspace } from './lib/appAreas'
 import { AREA_RAIL_W, AreaRail } from './components/nav/AreaRail'
 import { areaBadges } from './lib/areaBadges'
 import { MobileAreaBar } from './components/nav/MobileAreaBar'
@@ -779,7 +779,7 @@ function SideNav({
   // The row's context menu (Task 6) needs the verb-carrying shape, not the arrangement-only one —
   // `useFleetIndex` is the SAME map the header and the panel already build from `fleet.sessions`.
   const asideRowIndex = useFleetIndex(fleet.sessions)
-  const mode = areaOfPath(location.pathname)?.area.id === 'sessions' ? 'sessions' as const : 'dashboard' as const
+  const mode = isSessionsWorkspace(location.pathname) ? 'sessions' as const : 'dashboard' as const
   // The collapsed rail's order — the SAME order the open list draws, so collapsing the aside never
   // reshuffles the sessions. Pinned first (that is what pinning is for), then `sortSessions(…,
   // DEFAULT_ORDER)` — the ranking the terminal cockpit breaks ties on, so "sorted by status" means
@@ -1400,7 +1400,7 @@ export default function AppLayout() {
   // was pressed — the sidebar visibly resizing on a control whose job is to change what is IN it.
   // Only the sessions workspace offers the handle, but whatever it is dragged to applies to both.
   const liveAsideWidth = asideWidth
-  const inSessionsWorkspace = areaOfPath(location.pathname)?.area.id === 'sessions'
+  const inSessionsWorkspace = isSessionsWorkspace(location.pathname)
   // The fixed aside's real width: the list (or the collapsed rail), plus the Sessões area's own
   // area rail and its gap. Every inset that clears the aside reads this one figure.
   const leftAsideW = (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth) + (inSessionsWorkspace ? AREA_RAIL_W + PANEL_GAP : 0)

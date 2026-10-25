@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp, KeyRound, LogOut, ShieldCheck, MessagesSquare, type LucideIcon } from 'lucide-react'
 import type { IamAccount } from '../../App'
-import { areaOfPath, pageLabel, type AreaId } from '../../lib/appAreas'
+import { areaOfPath, isSessionsWorkspace, pageLabel, type AreaId } from '../../lib/appAreas'
 import { BottomSheet } from '../BottomSheet'
 import { BetaTag } from '../BetaTag'
 import { ChangePasswordSelf } from '../ChangePasswordSelf'
@@ -81,14 +81,15 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
   const go = (to: string) => { closeSheet(); onNavigate(to) }
   const current = areaOfPath(pathname)
   // The prototype (CelBarraLugar): the area quiet, the page bold, a chevron from the icon set.
+  const page = current?.page && pageLabel(current.page, lang) !== pageLabel(current.area, lang) ? current.page : null
   const placeText = current
-    ? pageLabel(current.area, lang) + (current.page ? ` › ${pageLabel(current.page, lang)}` : '')
+    ? pageLabel(current.area, lang) + (page ? ` › ${pageLabel(page, lang)}` : '')
     : (pt ? 'Navegar' : 'Navigate')
-  const place: React.ReactNode = current?.page
-    ? <><span style={{ color: 'rgba(255,255,255,0.5)' }}>{pageLabel(current.area, lang)} ›</span> <b>{pageLabel(current.page, lang)}</b></>
+  const place: React.ReactNode = current && page
+    ? <><span style={{ color: 'rgba(255,255,255,0.5)' }}>{pageLabel(current.area, lang)} ›</span> <b>{pageLabel(page, lang)}</b></>
     : <b>{placeText}</b>
   // On Sessions the pill already names the place: a round shortcut to the same page is a duplicate.
-  const onSessions = current?.area.id === 'sessions'
+  const onSessions = isSessionsWorkspace(pathname)
   const sessions = pt ? 'Sessões' : 'Sessions'
   const orange = 'var(--anthropic-orange)'
   const roleLabel = principal

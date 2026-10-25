@@ -10,10 +10,10 @@
  */
 import { SETTINGS_SECTIONS } from './settingsSections'
 
-export type AreaId = 'sessions' | 'tasks' | 'leadership' | 'usage' | 'metrics' | 'repositories' | 'vault' | 'settings'
+export type AreaId = 'sessions' | 'tasks' | 'usage' | 'metrics' | 'repositories' | 'vault' | 'settings'
 
 /** lucide-react icon names; the components map them, so this module stays React-free. */
-export type AreaIcon = 'terminal' | 'clipboard' | 'crown' | 'gauge' | 'chart' | 'git' | 'lock' | 'settings'
+export type AreaIcon = 'terminal' | 'clipboard' | 'gauge' | 'chart' | 'git' | 'lock' | 'settings'
 
 export interface AreaPage {
   id: string
@@ -33,7 +33,7 @@ export interface Area {
   icon: AreaIcon
   labelPt: string
   labelEn: string
-  /** Empty for an area that is ONE page (Sessões, Cofre). */
+  /** Empty for an area that is ONE page (Cofre). */
   pages: readonly AreaPage[]
   /** The area's own root when it has no pages. */
   root?: string
@@ -41,16 +41,16 @@ export interface Area {
 }
 
 export const APP_AREAS: readonly Area[] = [
-  { id: 'sessions', icon: 'terminal', labelPt: 'Sessões', labelEn: 'Sessions', pages: [], root: '/sessions' },
-  { id: 'tasks', icon: 'clipboard', labelPt: 'Agentask', labelEn: 'Agentask', beta: true, pages: [
-    { id: 'board', path: '/tasks', labelPt: 'Quadro', labelEn: 'Board' },
-    { id: 'activity', path: '/tasks/activity', labelPt: 'Atividade', labelEn: 'Activity' },
-  ] },
-  { id: 'leadership', icon: 'crown', labelPt: 'Liderança', labelEn: 'Leadership', pages: [
+  { id: 'sessions', icon: 'terminal', labelPt: 'Sessões', labelEn: 'Sessions', pages: [
+    { id: 'workspace', path: '/sessions', labelPt: 'Sessões', labelEn: 'Sessions' },
     { id: 'leaders', path: '/leadership', labelPt: 'Líderes', labelEn: 'Leaders' },
     { id: 'checkins', path: '/leadership/checkins', labelPt: 'Check-ins', labelEn: 'Check-ins' },
     { id: 'handoffs', path: '/leadership/handoffs', labelPt: 'Passagens', labelEn: 'Hand-offs' },
     { id: 'away', path: '/leadership/away', labelPt: 'Modo ausente', labelEn: 'Away mode' },
+  ] },
+  { id: 'tasks', icon: 'clipboard', labelPt: 'Agentask', labelEn: 'Agentask', beta: true, pages: [
+    { id: 'board', path: '/tasks', labelPt: 'Quadro', labelEn: 'Board' },
+    { id: 'activity', path: '/tasks/activity', labelPt: 'Atividade', labelEn: 'Activity' },
   ] },
   { id: 'usage', icon: 'gauge', beta: true, labelPt: 'Uso', labelEn: 'Usage', pages: [
     { id: 'now', path: '/usage', labelPt: 'Agora', labelEn: 'Now' },
@@ -85,6 +85,11 @@ export const UNLISTED_ROUTES: readonly string[] = ['projects', 'hardware', 'expo
 function under(pathname: string, prefix: string): boolean {
   if (prefix === '/') return pathname === '/'
   return pathname === prefix || pathname.startsWith(prefix + '/')
+}
+
+/** The terminal/chat canvas has its own layout; other pages in Sessions remain scrollable documents. */
+export function isSessionsWorkspace(pathname: string): boolean {
+  return under(pathname, '/sessions')
 }
 
 /**

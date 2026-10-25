@@ -9,6 +9,12 @@ const render = (lang: 'pt' | 'en', extra: Partial<Parameters<typeof AreaRail>[0]
 )
 
 describe('AreaRail', () => {
+  test('a leadership deep link activates Sessions without a separate leadership icon', () => {
+    const html = render('pt', { pathname: '/leadership/checkins' })
+    expect(html).toContain('aria-label="Sessões" aria-current="page"')
+    expect(html).not.toContain('lucide-crown')
+    expect(html).not.toContain('aria-label="Liderança"')
+  })
   for (const lang of ['pt', 'en'] as const) {
     test(`a 60px column, one link per area except Ajustes, the current area marked (${lang})`, () => {
       expect(AREA_RAIL_W).toBe(60)

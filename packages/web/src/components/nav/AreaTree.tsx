@@ -8,7 +8,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { BarChart3, ChevronRight, ClipboardList, Crown, Gauge, GitBranch, Lock, SlidersHorizontal, Terminal } from 'lucide-react'
+import { BarChart3, ChevronRight, ClipboardList, Gauge, GitBranch, Lock, SlidersHorizontal, Terminal } from 'lucide-react'
 import {
   APP_AREAS, areaOfPath, firstPath, pageLabel, searchAreas, type Area, type AreaIcon, type AreaId,
 } from '../../lib/appAreas'
@@ -20,7 +20,6 @@ import { areaOpenStore, isAreaOpen, openedArea, toggledAreaOpen } from '../../li
 export const AREA_ICON: Record<AreaIcon, (size: number) => React.ReactNode> = {
   terminal: s => <Terminal size={s} />,
   clipboard: s => <ClipboardList size={s} />,
-  crown: s => <Crown size={s} />,
   gauge: s => <Gauge size={s} />,
   chart: s => <BarChart3 size={s} />,
   git: s => <GitBranch size={s} />,

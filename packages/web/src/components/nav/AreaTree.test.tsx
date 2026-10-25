@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'bun:test'
+import { beforeEach, describe, expect, it } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { AreaTree } from './AreaTree'
+import { areaOpenStore } from '../../lib/areaOpen'
+
+beforeEach(() => areaOpenStore.set({}))
 
 const render = (props: Partial<React.ComponentProps<typeof AreaTree>> & { at: string }) => {
   const { at, ...rest } = props
@@ -11,6 +14,16 @@ const render = (props: Partial<React.ComponentProps<typeof AreaTree>> & { at: st
 }
 
 describe('AreaTree', () => {
+  for (const lang of ['pt', 'en'] as const) for (const variant of ['aside', 'sheet'] as const) {
+    it(`leadership deep links expand Sessions without a leadership area (${lang}/${variant})`, () => {
+      const html = render({ at: '/leadership/checkins', lang, variant })
+      expect(html).toContain(lang === 'pt' ? 'aria-label="Recolher Sessões"' : 'aria-label="Collapse Sessions"')
+      expect(html).toContain('href="/leadership/checkins"')
+      expect(html).toMatch(/aria-current="page"[^>]*>Check-ins/)
+      expect(html).not.toContain('lucide-crown')
+      expect(html).not.toContain(lang === 'pt' ? '>Liderança<' : '>Leadership<')
+    })
+  }
   it('expands only the current area and marks the current page', () => {
     const html = render({ at: '/usage/history' })
     expect(html).toContain('Histórico')

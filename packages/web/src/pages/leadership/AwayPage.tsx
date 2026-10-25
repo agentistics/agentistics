@@ -18,7 +18,7 @@ export function AwayContent({ lang, capable }: { lang: 'pt' | 'en'; capable: boo
     : away.active ? `${pt ? 'Ausente' : 'Away'} ${awayUntilLabel(away.state, lang, Date.now())}`
     : (pt ? 'Você está presente.' : 'You are present.')
   return <div style={{ minWidth: 0 }}>
-    <PageHeader lang={lang} areaId="leadership" pageId="away" status={status} />
+    <PageHeader lang={lang} areaId="sessions" pageId="away" status={status} />
     {capable && <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
       <AwaySection embedded lang={lang} capable={capable} />
       <AwayImpact pt={pt} />

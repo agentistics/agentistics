@@ -12,6 +12,11 @@ are at least 46px and subpages 44px. Selecting a destination closes the sheet, i
 current page. The tree keeps the registry's Settings entries and filters them by the viewer's visible
 settings sections. Global action tiles and the existing account actions follow the tree.
 
+Leaders, Check-ins, Hand-offs and Away mode are subpages of Sessions, retaining their `/leadership`
+URLs. The place pill names Sessions and the current subpage. These document pages keep the round
+shortcut back to the session list; only the actual `/sessions` workspace suppresses that shortcut.
+The shared tree has one Sessions area, with combined session-attention and check-in warning counts.
+
 `BottomSheet` owns the scrim, Escape handling, focus containment and return, scroll region, and bottom
 safe inset. The navigation sheet and `FiltersSheet` share that frame. Filters still update immediately;
 the footer offers Done and conditionally Clear, which is the sheet's only clear action
