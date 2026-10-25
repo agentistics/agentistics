@@ -12,7 +12,8 @@
  */
 
 import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
-import { BellOff, Crown, MoreVertical, Pin, RotateCcw, SquareArrowOutUpRight } from 'lucide-react'
+import { RoleIcon, type RoleIconKind } from './RoleIcon'
+import { BellOff, MoreVertical, Pin, RotateCcw, SquareArrowOutUpRight } from 'lucide-react'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
 import { sessionDisplayTitle, hasLeaderTitle } from '../../lib/sessionDisplayTitle'
@@ -76,7 +77,7 @@ export function SessionLine({
   const pt = lang !== 'en'
   const roleKey = sessionIdentityKey(session)
   const storedRole = useSessionRole(roleKey)
-  const leader = (storedRole ?? (hasLeaderTitle(session.title) ? 'leader' : undefined)) === 'leader'
+  const role: RoleIconKind = storedRole ?? (hasLeaderTitle(session.title) ? 'leader' : 'auto')
   useEffect(() => { registerSessionRoleAlias(session.id, roleKey) }, [session.id, roleKey])
   const muted = useMutedKeys().includes(roleKey)
   const reopening = useReopening().has(session.id)
@@ -136,7 +137,7 @@ export function SessionLine({
           border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer',
         }}
       >
-        {leader && <Crown size={13} aria-label={pt ? 'líder' : 'leader'} style={{ flexShrink: 0, color: 'var(--accent-purple)' }} />}
+        <RoleIcon kind={role} size={13} pt={pt} style={{ alignSelf: 'flex-start', marginTop: 2 }} />
         {/* Title and the folded team's summary share one wrapping box: the summary drops under the
             name when the line is short, instead of crushing the name to a letter per line. */}
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 1 }}>

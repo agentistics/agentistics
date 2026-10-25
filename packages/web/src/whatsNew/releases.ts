@@ -10,9 +10,42 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.152.1': {
-    features: [],
+  '2.153.0': {
+    features: [
+      {
+        pt: 'Na lista de sessões, o worker ganhou um ícone azul de chave e chave de fenda cruzadas, e o papel automático um ícone discreto.',
+        en: 'In the sessions list, a worker now has a blue crossed wrench-and-screwdriver icon, and the automatic role a quiet one.',
+      },
+    ],
     fixes: [
+      {
+        pt: 'Uma sessão do chat cujo processo cai agora volta sozinha no modo novo (a mesma conversa), em vez de ir parar no terminal.',
+        en: 'A chat session whose process dies now comes back on its own in the new mode (same conversation) instead of ending up in the terminal.',
+      },
+      {
+        pt: 'Sessões que já tinham caído no terminal podem voltar ao modo novo sem perder a conversa.',
+        en: 'Sessions that already fell to the terminal can return to the new mode without losing the conversation.',
+      },
+      {
+        pt: 'O chat de uma sessão que trocou de conta continua atualizando (antes ele parava na hora da troca).',
+        en: 'The chat of a session that switched accounts keeps updating (it used to stop at the switch).',
+      },
+      {
+        pt: 'Uma cópia de teste do app não encerra mais as sessões reais.',
+        en: 'A test copy of the app no longer ends the real sessions.',
+      },
+      {
+        pt: 'Antigravity: a resposta volta a aparecer depois de interromper uma sessão com várias filhas.',
+        en: 'Antigravity: the reply shows again after interrupting a session with several children.',
+      },
+      {
+        pt: 'Antigravity: a pergunta "confia nesta pasta?" e outros pedidos de permissão fora do turno agora aparecem como cartão no chat.',
+        en: 'Antigravity: the "trust this folder?" prompt and other permission prompts outside a turn now show up as a card in the chat.',
+      },
+      {
+        pt: 'Em "Finalizadas hoje", a mesma sessão não aparece mais duas vezes.',
+        en: 'In "Finished today", the same session no longer appears twice.',
+      },
       {
         pt: 'A barra de baixo no celular agora tem três peças: dois grupos de botões e o Início num círculo maior no meio, com as pontas curvas em volta dele.',
         en: 'The bottom bar on the phone now has three pieces: two button groups and a bigger round Home button in the middle, with curved ends around it.',
