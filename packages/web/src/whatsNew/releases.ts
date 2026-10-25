@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.149.0': {
+    features: [
+      {
+        pt: 'O indicador de líder no cabeçalho virou uma coroa num círculo com os tokens ao lado, mudando de cor conforme a conversa enche.',
+        en: 'The leader indicator in the header is now a crown in a circle with the token count beside it, changing colour as the conversation fills up.',
+      },
+    ],
+    fixes: [],
+  },
   '2.148.2': {
     features: [],
     fixes: [
