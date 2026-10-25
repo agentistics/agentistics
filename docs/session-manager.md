@@ -42,6 +42,12 @@ every verb, label and refusal through the same `sessionActions` the cockpit reso
 against — a client that re-derived them would be another answer to "what may be done to this row",
 and the one that went wrong would offer a blind "approve" on a dialog with four different outcomes.
 
+Switching to another harness starts a new conversation with a summary of the previous one.
+The summary excludes assistant usage-limit notices recognized by the source harness's
+`LIMIT_RULES` from both the state and the recent turns. The state uses the last remaining
+assistant reply; when none remains, the new session must establish the state from the repository.
+Harnesses without a registered limit rule retain their replies unchanged.
+
 ## Requirements
 
 tmux (Linux, macOS). **On Windows, run agentop inside WSL** — the CLI says so in those words rather

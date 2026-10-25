@@ -168,7 +168,7 @@ describe('switchSessionAccountImpl — another harness (v2 hand-off)', () => {
         limit: async () => ({ pendingPrompt: 'fix the CSV header' }),
         killAndRetire: async (id, kill) => { order.push(`retire:${id}`); return kill() },
         startable: async () => (opts.installed ?? ['claude', 'codex']) as never,
-        turns: async () => ({ turns: [{ role: 'user', text: 'Add export' }, { role: 'assistant', text: 'Done; tests next.' }] }),
+        turns: async () => ({ turns: [{ role: 'user', text: 'Add export' }, { role: 'assistant', text: 'Done; tests next.' }, { role: 'assistant', text: "You've hit your session limit · resets 6:30pm" }] }),
         role: async () => 'worker',
         label: async () => 'a@x',
         link: async (a, b) => { links.push(`${a}->${b}`) },
@@ -188,6 +188,8 @@ describe('switchSessionAccountImpl — another harness (v2 hand-off)', () => {
     })
     expect(w.spawned[0]!.prompt).toContain('Claude Code (account a@x)')
     expect(w.spawned[0]!.prompt).toContain('Add export')
+    expect(w.spawned[0]!.prompt).toContain('## State (last assistant reply)\nDone; tests next.')
+    expect(w.spawned[0]!.prompt).not.toContain("You've hit your session limit")
     expect(w.spawned[0]!.prompt!.endsWith('fix the CSV header')).toBe(true)
     expect(w.links).toEqual(['m1->m9'])
     expect([...w.alive]).toEqual(['m9'])
