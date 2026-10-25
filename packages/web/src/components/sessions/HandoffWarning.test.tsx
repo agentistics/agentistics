@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { HandoffPanel } from '@agentistics/core'
-import { HandoffBand, HandoffQuotaCell, HandoffQuotaNote, LeaderMeterButton, handoffLevelLabel } from './HandoffWarning'
+import { HandoffBand, HandoffQuotaCell, HandoffQuotaNote, LeaderMeterButton, HandoffNoReading, HandoffPopoverCopy, handoffPanelLabel, handoffLevelLabel } from './HandoffWarning'
 import HandoffSettings from '../../pages/settings/HandoffSettings'
 
 describe('handoff screens', () => {
@@ -42,12 +42,23 @@ describe('leader meter (option B)', () => {
   })
   it('reacts to the live reading with four states, colour from app tokens', () => {
     for (const [level, tokens, face, tone] of [
-      ['normal', 117_000, 'normal', '--accent-green'], ['near', 175_000, 'attention', '--anthropic-orange'],
+      ['normal', 117_000, 'normal', '--accent-green'], ['near', 175_000, 'attention', '--leader-meter-attention'],
       ['due', 201_000, 'critical', '--accent-red'], ['overdue', 250_000, 'critical', '--accent-red'], ['normal', null, 'none', '--text-secondary'],
     ] as const) {
       const html = meter(level, tokens, true)
       expect(html).toContain(`data-state="${face}"`)
       expect(html).toContain(`--handoff-tone:var(${tone})`)
+    }
+  })
+  it('uses the no-reading label and explanation for every server level in PT and EN', () => {
+    for (const pt of [true, false]) {
+      for (const level of ['normal', 'near', 'due', 'overdue'] as const) {
+        expect(handoffPanelLabel({ level, contextTokens: null }, pt)).toBe(pt ? 'Sem leitura' : 'No reading')
+        expect(handoffPanelLabel({ level, contextTokens: 0 }, pt)).toBe(handoffLevelLabel(level, pt))
+      }
+      const html = renderToStaticMarkup(<HandoffNoReading pt={pt} />)
+      expect(html).toContain(pt ? 'Ainda não há uma leitura de contexto' : 'There is no context reading')
+      expect(html).not.toContain('—')
     }
   })
   it('stays on screen without a reading and says so in words', () => {
@@ -111,6 +122,25 @@ describe('quota comparison', () => {
       const html = renderToStaticMarkup(<HandoffQuotaNote panel={panel(undefined, 1, 2.5, 0)} pt={pt} />)
       expect(html).toContain(pt ? 'Quota estimada pelo consumo medido da conta.' : 'Quota estimated from measured account consumption.')
       expect(html.match(/<small>/g)).toHaveLength(1)
+    }
+  })
+})
+
+describe('handoff popover copy', () => {
+  it('focuses on reply cost and leaves the full token count to the composer band', () => {
+    for (const pt of [true, false]) {
+      const html = renderToStaticMarkup(<HandoffPopoverCopy panel={{ contextTokens: 212000, nextReplyUSD: 0.42, successorReplyUSD: 0.08 }} pt={pt} />)
+      expect(html).toContain(pt ? 'Próxima resposta' : 'Next reply')
+      expect(html).not.toContain('212')
+      expect(html).not.toContain('200')
+    }
+  })
+  it('explains pending estimates instead of showing empty costs without a reading', () => {
+    for (const pt of [true, false]) {
+      const html = renderToStaticMarkup(<HandoffPopoverCopy panel={{ contextTokens: null, nextReplyUSD: null, successorReplyUSD: null }} pt={pt} />)
+      expect(html).toContain(pt ? 'Ainda não há uma leitura' : 'There is no context reading')
+      expect(html).not.toContain('—')
+      expect(html).not.toContain(pt ? 'Próxima resposta' : 'Next reply')
     }
   })
 })

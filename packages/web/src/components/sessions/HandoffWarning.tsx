@@ -14,6 +14,14 @@ const tones: Record<HandoffLevel, string> = { normal: LEADER_METER_TONE.normal, 
 export function handoffLevelLabel(level: HandoffLevel, pt: boolean): string {
   return ({ normal: pt ? 'Longe do corte' : 'Below the cut', near: pt ? 'Chegando perto do ponto de passar' : 'Approaching the handoff point', due: pt ? 'Hora de passar' : 'Time to hand off', overdue: pt ? 'Passou do ponto' : 'Past the handoff point' })[level]
 }
+export function handoffPanelLabel(panel: Pick<HandoffPanel, 'level' | 'contextTokens'>, pt: boolean): string {
+  return panel.contextTokens === null ? leaderMeterStateLabel('none', pt) : handoffLevelLabel(panel.level, pt)
+}
+
+export function HandoffNoReading({ pt }: { pt: boolean }) {
+  return <p>{pt ? 'Ainda não há uma leitura de contexto para esta sessão. As estimativas aparecerão quando a leitura estiver disponível.' : 'There is no context reading for this session yet. Estimates will appear when a reading is available.'}</p>
+}
+
 const tokens = (v: number | null, pt: boolean) => v === null ? '—' : `${Math.round(v / 1000).toLocaleString(pt ? 'pt-BR' : 'en-US')}${pt ? ' mil' : 'k'}`
 const money = (v: number | null) => v === null ? '—' : fmtCost(v)
 const percent = (v: number | null, pt: boolean) => {
@@ -47,7 +55,7 @@ export function HandoffQuotaNote({ panel: p, pt }: { panel: Pick<HandoffPanel, '
  *  figure, both in the state's colour. Presentational so every state can be rendered in a test. */
 export function LeaderMeterButton({ panel: p, pt, buttonRef, onClick }: { panel: Pick<HandoffPanel, 'level' | 'contextTokens' | 'cutTokens'>; pt: boolean; buttonRef?: RefObject<HTMLButtonElement | null>; onClick?: () => void }) {
   const face = leaderMeterState(p.level, p.contextTokens)
-  const stateLabel = face === 'none' ? leaderMeterStateLabel(face, pt) : handoffLevelLabel(p.level, pt)
+  const stateLabel = handoffPanelLabel(p, pt)
   const role = pt ? 'Líder' : 'Leader'
   return <button ref={buttonRef} type="button" className="handoff-meter" data-state={face} style={{ '--handoff-tone': LEADER_METER_TONE[face] } as CSSProperties}
     aria-label={`${role} · ${p.contextTokens === null ? stateLabel : `${tokens(p.contextTokens, pt)} ${pt ? 'de' : 'of'} ${tokens(p.cutTokens, pt)} · ${stateLabel}`}`}
@@ -55,6 +63,10 @@ export function LeaderMeterButton({ panel: p, pt, buttonRef, onClick }: { panel:
     <span className="handoff-meter-crown" aria-hidden="true"><Crown size={14} strokeWidth={2.25} /></span>
     <span className="handoff-meter-value">{tokens(p.contextTokens, pt)}</span>
   </button>
+}
+
+export function HandoffPopoverCopy({ panel: p, pt }: { panel: Pick<HandoffPanel, 'contextTokens' | 'nextReplyUSD' | 'successorReplyUSD'>; pt: boolean }) {
+  return p.contextTokens === null ? <HandoffNoReading pt={pt} /> : <p>{pt ? 'Próxima resposta: ' : 'Next reply: '}{money(p.nextReplyUSD)}; {pt ? 'numa nova sessão: ' : 'in a new session: '}{money(p.successorReplyUSD)}.</p>
 }
 
 export function HandoffMeter({ id, pt, act }: { id: string; pt: boolean; act: SessionChatProps['act'] }) {
@@ -74,9 +86,9 @@ export function HandoffMeter({ id, pt, act }: { id: string; pt: boolean; act: Se
   const collapsed = state.collapsed && (p.level === 'due' || p.level === 'overdue') && p.config.warnings[p.level]
   return <>
     <LeaderMeterButton panel={p} pt={pt} buttonRef={anchor} onClick={() => collapsed ? actions.expand(id) : actions.open(id)} />
-    {state.popover && createPortal(<div className="handoff-popover" role="status" style={{ top: position.top, left: position.left, '--handoff-tone': tones[p.level] } as CSSProperties}>
-      <strong>{handoffLevelLabel(p.level, pt)}</strong>
-      <p>{tokens(p.contextTokens, pt)} {pt ? 'de' : 'of'} {tokens(p.cutTokens, pt)}. {pt ? 'Próxima resposta: ' : 'Next reply: '}{money(p.nextReplyUSD)}; {pt ? 'numa nova sessão: ' : 'in a new session: '}{money(p.successorReplyUSD)}.</p>
+    {state.popover && createPortal(<div className="handoff-popover" role="status" style={{ top: position.top, left: position.left, '--handoff-tone': LEADER_METER_TONE[leaderMeterState(p.level, p.contextTokens)] } as CSSProperties}>
+      <strong>{handoffPanelLabel(p, pt)}</strong>
+      <HandoffPopoverCopy panel={p} pt={pt} />
       <div className="handoff-actions"><button type="button" className="primary" onClick={() => actions.open(id)}>{pt ? 'Ver as contas' : 'See the numbers'}</button><button type="button" onClick={closePopover}>Ok</button></div>
     </div>, document.body)}
     <HandoffLivePanel panel={p} open={state.open} pt={pt} act={act} />
@@ -86,7 +98,7 @@ export function HandoffMeter({ id, pt, act }: { id: string; pt: boolean; act: Se
 export function HandoffBand({ id, pt }: { id: string; pt: boolean }) {
   const state = useHandoffPanel(id)
   const p = state.panel
-  const enabled = !!p && (p.level === 'due' || p.level === 'overdue') && p.config.warnings[p.level]
+  const enabled = !!p && p.contextTokens !== null && (p.level === 'due' || p.level === 'overdue') && p.config.warnings[p.level]
   const visible = enabled && !state.collapsed
   const ratio = p && p.nextReplyUSD !== null && p.successorReplyUSD !== null && p.successorReplyUSD > 0 ? p.nextReplyUSD / p.successorReplyUSD : null
   return <div className={`handoff-band-wrap ${visible ? 'visible' : ''}`} inert={!visible} aria-hidden={!visible}>
@@ -129,9 +141,10 @@ export function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPa
   const labels = { continue: pt ? 'Continuar aqui' : 'Continue here', extra: pt ? `Continuar +${p.config.extraPercent}%` : `Continue +${p.config.extraPercent}%`, handoff: pt ? 'Passar para uma sessão nova' : 'Hand off to a new session' }
   return createPortal(<ConfirmModal focusPanel className="handoff-dialog" open={open} maxWidth={640} mobileSheet tone="default" icon={<ArrowRightLeft size={18} />}
     title={pt ? 'Continuar ou passar o líder?' : 'Continue or hand off the leader?'}
-    message={handoffLevelLabel(p.level, pt)} confirmLabel="" cancelLabel="" onConfirm={() => {}} onCancel={() => actions.close(p.sessionId)}
-    footer={<div className="handoff-panel-footer">{confirm && <p role="status">{pt ? 'O líder vai preparar a passagem e abrir o sucessor pelo fluxo existente. O trabalho em andamento será registrado no arquivo de passagem.' : 'The leader will prepare the handoff and open the successor through the existing flow. Work in flight will be recorded in the handoff file.'}</p>}<div className="handoff-actions"><button type="button" onClick={() => actions.close(p.sessionId)} disabled={sending}>{pt ? 'Fechar' : 'Close'}</button><button type="button" onClick={() => actions.dismiss(p.sessionId, true)} disabled={sending}>{pt ? 'Lembrar em +50 mil' : 'Remind me in +50k'}</button><button type="button" className="primary" disabled={sending} onClick={() => confirm ? void handoff() : setConfirm(true)}>{sending ? (pt ? 'Solicitando…' : 'Requesting…') : confirm ? (pt ? 'Confirmar passagem' : 'Confirm handoff') : (pt ? 'Passar agora' : 'Hand off now')}</button></div></div>}>
+    message={handoffPanelLabel(p, pt)} confirmLabel="" cancelLabel="" onConfirm={() => {}} onCancel={() => actions.close(p.sessionId)}
+    footer={<div className="handoff-panel-footer">{confirm && <p role="status">{pt ? 'O líder vai preparar a passagem e abrir o sucessor pelo fluxo existente. O trabalho em andamento será registrado no arquivo de passagem.' : 'The leader will prepare the handoff and open the successor through the existing flow. Work in flight will be recorded in the handoff file.'}</p>}<div className="handoff-actions"><button type="button" onClick={() => actions.close(p.sessionId)} disabled={sending}>{pt ? 'Fechar' : 'Close'}</button><button type="button" onClick={() => actions.dismiss(p.sessionId, true)} disabled={sending || p.contextTokens === null}>{pt ? 'Lembrar em +50 mil' : 'Remind me in +50k'}</button><button type="button" className="primary" disabled={sending || p.contextTokens === null} onClick={() => confirm ? void handoff() : setConfirm(true)}>{sending ? (pt ? 'Solicitando…' : 'Requesting…') : confirm ? (pt ? 'Confirmar passagem' : 'Confirm handoff') : (pt ? 'Passar agora' : 'Hand off now')}</button></div></div>}>
     <div className="handoff-live-panel">
+      {p.contextTokens === null ? <HandoffNoReading pt={pt} /> : <>
       <div className="handoff-summary">
         <div><small>{pt ? 'Conversa agora' : 'Context now'}</small><strong>{tokens(p.contextTokens, pt)}</strong><small>{pt ? 'corte: ' : 'cut: '}{tokens(p.cutTokens, pt)}</small></div>
         <div><small>{pt ? 'Já gasto nesta sessão' : 'Spent this session'}</small><strong>{money(p.spentUSD)}</strong><small>{p.replies ?? '—'} {pt ? 'respostas' : 'replies'}</small></div>
@@ -153,6 +166,7 @@ export function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPa
         <p>{pt ? 'Contexto base estimado: ' : 'Estimated base context: '}{tokens(p.successorBaseTokens, pt)} · {pt ? 'Custo da passagem: ' : 'Handoff overhead: '}{money(p.handoffOverheadUSD)} · {pt ? 'Equilíbrio em respostas: ' : 'Break-even replies: '}{p.breakEvenReplies ?? '—'}</p>
         <p>{pt ? 'Trabalho em andamento: ' : 'Work in flight: '}{p.workInFlight.length ? p.workInFlight.map(w => w === 'main-response' ? (pt ? 'resposta principal' : 'main response') : w === 'background-work' ? (pt ? 'trabalho em segundo plano' : 'background work') : w).join(', ') : (pt ? 'nenhum detectado' : 'none detected')}.</p>
       </div>
+      </>}
       {error && <p role="alert">{error}</p>}
     </div>
   </ConfirmModal>, document.body)
