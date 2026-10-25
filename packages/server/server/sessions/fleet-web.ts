@@ -1263,7 +1263,7 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
     const notice = harnesses.length === 0 ? host.harnessNotice?.() : undefined
     // Harnesses with an official one-click installer stay listed (greyed, with Install) when missing.
     const labels: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', copilot: 'Copilot' }
-    type NewHarness = { id: string; label: string; modelSuggestions: string[]; supportsModel: boolean; efforts: string[]; installed?: boolean; defaultModel?: string; defaultEffort?: string; modes?: CanonicalMode[] }
+    type NewHarness = { id: string; label: string; modelSuggestions: string[]; supportsModel: boolean; efforts: string[]; installed?: boolean; defaultModel?: string; defaultModelStale?: true; defaultEffort?: string; modes?: CanonicalMode[] }
     const missing: NewHarness[] = Object.keys(labels).filter(id => !harnesses.some(h => h.id === id)).map(id => ({
       id, label: labels[id]!, modelSuggestions: [], supportsModel: false, efforts: [], installed: false,
     }))
@@ -1281,6 +1281,7 @@ export async function readNewOptions(lang: CliLang, query: string, disk?: string
           label: h.label,
           ...catalogFields(h.modelSuggestions, catalogs.get(h.id)),
           ...(defaultModel ? { defaultModel } : {}),
+          ...(here.modelStale && !h.defaultModel ? { defaultModelStale: true as const } : {}),
           supportsModel: h.supportsModel,
           efforts: [...h.efforts],
           ...(h.installed === false ? { installed: false } : { installed: true }),
