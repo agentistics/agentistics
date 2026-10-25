@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.148.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A limpeza de disco mostra o tamanho real de cada pasta e quanto dá para liberar — antes aparecia 0 B em tudo.',
+        en: 'Disk cleanup shows each folder\'s real size and how much can be freed — it used to show 0 B everywhere.',
+      },
+      {
+        pt: 'Os comandos de terminal não mostram mais avisos "refused to follow".',
+        en: 'Terminal commands no longer print "refused to follow" warnings.',
+      },
+    ],
+  },
   '2.148.0': {
     features: [
       {

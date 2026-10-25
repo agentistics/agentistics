@@ -41,7 +41,11 @@ export function getCleanPlan(): { state: 'scanning' | 'ready'; progress: number;
         completed++
         const row = wireCleanPlan(planClean([fact], Date.now()), state, Date.now(), protectionFor([fact], protectedBySession)).items[0]!
         if (row.kind !== 'keep') { state.foundBytes += row.bytes; state.itemCount++ }
-        scanLog(state, { at: Date.now(), state: 'done', name: row.name, bytes: row.kind === 'keep' ? 0 : row.bytes })
+        state.measuredBytes = (state.measuredBytes ?? 0) + fact.sizeBytes
+        // The line reports what was MEASURED. It used to print 0 for every kept folder, so a scan of
+        // folders holding gigabytes read as a column of "0 B".
+        scanLog(state, { at: Date.now(), state: 'done', name: basename(fact.path), bytes: fact.sizeBytes,
+          ...(row.kind === 'keep' ? { kept: true } : { freeBytes: row.bytes }), ...(fact.sizeUnknown ? { unknown: true } : {}) })
         scanEstimate(state, completed, Math.max(total, Math.ceil(total / Math.max(1, discoveredRepos) * repos.length)), Date.now())
       },
       onProgress: done => { state.projectCount = done },

@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, ut
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitTestEnv } from '@agentistics/core/gitTestEnv'
-import { applyClean, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
+import { applyClean, parseDu, repoOf, worktreeFacts, WORKTREE_POOL_SIZE } from './clean-io'
 import { planClean } from './clean-plan'
 
 const dirs: string[] = []
@@ -104,5 +104,35 @@ describe('live scan callbacks and cancellation', () => {
     const wip = facts.find(f => f.path === join(root, 'wip'))!
     expect(wip.lastActivityMs!).toBeGreaterThanOrEqual(Math.floor(future.getTime() / 1000) * 1000)
     expect(wip.lastActivityMs!).toBeGreaterThan(wip.lastCommitMs!)
+  })
+})
+
+describe('sizes are measured, never a silent 0 (LIMPEZA.ZERO)', () => {
+  test('parseDu reads the total and the node_modules line of one walk', () => {
+    expect(parseDu('40\t1700000001\t/w/node_modules\n4\t1700000000\t/w/src\n100\t1700000002\t/w\n', '/w', true))
+      .toEqual({ bytes: 102400, mtimeMs: 1700000002000, nodeModulesBytes: 40960 })
+    expect(parseDu('100\t/w\n', '/w', false)).toEqual({ bytes: 102400, mtimeMs: null, nodeModulesBytes: 0 })
+    expect(parseDu('', '/w', true)).toBeNull()
+    expect(parseDu('du: cannot read', '/w', true)).toBeNull()
+  })
+  test('real sizes are non-zero, and the main checkout does not count worktrees nested inside it', async () => {
+    const { root, r } = repo()
+    const nested = join(r, '.claude', 'worktrees', 'big')
+    g(r, 'worktree', 'add', '-q', nested, '-b', 'big')
+    writeFileSync(join(nested, 'blob'), 'x'.repeat(2_000_000))
+    const facts = await worktreeFacts(r, { env })
+    const main = facts.find(f => f.isMain)!, big = facts.find(f => f.path === nested)!
+    expect(big.sizeBytes).toBeGreaterThan(1_900_000)
+    expect(main.sizeBytes).toBeGreaterThan(0)
+    expect(main.sizeBytes).toBeLessThan(1_000_000)
+    for (const f of facts.filter(f => !f.missing)) { expect(f.sizeBytes).toBeGreaterThan(0); expect(f.sizeUnknown).toBeUndefined() }
+    expect(facts.find(f => f.path === join(root, 'wip'))!.nodeModulesBytes).toBeGreaterThan(0)
+  })
+  test('a du that cannot answer marks the size unknown instead of measuring 0', async () => {
+    const { r } = repo()
+    const bin = realpathSync(mkdtempSync(join(tmpdir(), 'clean-du-'))); dirs.push(bin)
+    writeFileSync(join(bin, 'du'), '#!/bin/sh\nexit 1\n'); chmodSync(join(bin, 'du'), 0o755)
+    const facts = await worktreeFacts(r, { env: { ...env, PATH: `${bin}:${env.PATH ?? '/usr/bin:/bin'}` } })
+    for (const f of facts) expect(f.sizeUnknown).toBe(true)
   })
 })

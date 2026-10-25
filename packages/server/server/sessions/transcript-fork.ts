@@ -34,8 +34,7 @@
 
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
-import { BoundedKeys } from './bounded-keys'
-import { isServerProcess } from './shared-snapshot'
+import { RefusalLog } from './refusal-log'
 
 /** How many of the linked file's last uuids a successor must carry (or all of them, if fewer). */
 export const FORK_MIN_SHARED = 3
@@ -92,7 +91,7 @@ const successors = new Map<string, string>()
 const negatives = new Map<string, number>()
 
 /** `from -> to` pairs already logged as refused, so a refusal is said once, not once per poll. */
-const refusedLogged = new BoundedKeys(512)
+const refusedLogged = new RefusalLog()
 
 /** Forget everything. Tests only. */
 export function forgetForks(): void { successors.clear(); negatives.clear(); refusedLogged.clear() }
@@ -108,11 +107,7 @@ export function followAllowed(candidate: string, foreign: ReadonlySet<string> | 
 }
 
 function logRefused(from: string, to: string): void {
-  // One-shot CLI readers share this resolver; the refusal is a server diagnostic.
-  if (!isServerProcess()) return
-  const key = `${from}\0${to}`
-  if (!refusedLogged.add(key)) return
-  console.warn(`[sessions] refused to follow ${conversationOfPath(from)} into ${conversationOfPath(to)}: another session is linked to that conversation`)
+  refusedLogged.warn(`${from}\0${to}`, `[sessions] refused to follow ${conversationOfPath(from)} into ${conversationOfPath(to)}: another session is linked to that conversation`)
 }
 
 /**
