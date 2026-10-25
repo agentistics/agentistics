@@ -1208,3 +1208,10 @@ tr:focus-within .ag-row-actions,
 /* The sessions aside's one-line rows (`SessionLine.tsx`): the hover lift sits on the open button, so a
    selected row's own background is never overridden by a style attribute. */
 [data-session-line]:hover > [data-session-open] { background: var(--bg-elevated); }
+
+/* The switch-account dialog: focus shows only from the keyboard, and stays INSIDE its control (a ring
+   drawn outside the scrolling list is cut by it and doubles the selected row's own border). */
+[role="checkbox"]:focus:not(:focus-visible),
+[data-account-row]:focus:not(:focus-visible) { outline: none; }
+[role="checkbox"]:focus-visible { outline: 2px solid var(--anthropic-orange); outline-offset: 2px; border-radius: 4px; }
+[data-account-row]:focus-visible { outline: 2px solid var(--anthropic-orange); outline-offset: -2px; }

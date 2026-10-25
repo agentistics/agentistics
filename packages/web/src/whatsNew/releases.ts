@@ -19,6 +19,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
+        pt: 'A janela de trocar de conta ficou mais larga: explicação à esquerda, contas à direita, e o topo não é mais cortado.',
+        en: 'The switch-account dialog is wider: explanation on the left, accounts on the right, and its top is no longer cut off.',
+      },
+      {
         pt: 'Uma sessão do chat cujo processo cai agora volta sozinha no modo novo (a mesma conversa), em vez de ir parar no terminal.',
         en: 'A chat session whose process dies now comes back on its own in the new mode (same conversation) instead of ending up in the terminal.',
       },
