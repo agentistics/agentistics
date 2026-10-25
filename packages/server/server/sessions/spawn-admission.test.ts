@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'bun:test'
+import { heavyReserveBytes, HEAVY_JOB_BYTES } from '../resources/heavy'
 import { memoryBudget, ASSUMED_SESSION_BYTES, type MemorySample } from './memory-budget'
 import {
   admitSpawn, admissionMessage, admissionOverrideNote, admissionRefusal, admissionRefusalBody,
@@ -14,7 +15,7 @@ const MB = 1024 * 1024
  * to the budget arithmetic that moves an admission decision fails here too.
  */
 function measure(sample: MemorySample, sessions: number, perSession: number): SpawnBudget {
-  return { sample, budget: memoryBudget({ sample, sessionBytes: sessions * perSession, sessions }) }
+  return { sample, budget: memoryBudget({ sample, sessionBytes: sessions * perSession, sessions, reservedBytes: 2 * GB }) }
 }
 const noSwap = { total: 16 * GB, swapTotal: 4 * GB, swapUsed: 0 }
 
@@ -94,7 +95,7 @@ describe('admitSpawn — the table', () => {
     const r = admissionRefusal(a)!
     expect(r).toEqual({
       heavyReserveBytes: 1.8 * GB, load1: 1, cores: 8, hog,
-      reason: 'no-room', requested: 1, fits: 0,
+      reservedBytes: 2 * GB, reason: 'no-room', requested: 1, fits: 0,
       availableBytes: 100 * MB, swapUsedBytes: 0, swapTotalBytes: 4 * GB,
       costBytes: 500 * MB, costBasis: 'measured', used: 4, max: 4,
     })
@@ -124,6 +125,56 @@ describe('admitSpawn — the table', () => {
   })
 })
 
+describe('MEM.GATE — heavy jobs only reserve their remaining headroom', () => {
+  function incident(available: number, runningRss: number, reservedBytes?: number): SpawnBudget {
+    const sample = { ...noSwap, available }
+    const reserve = heavyReserveBytes(runningRss)
+    return {
+      sample, heavyReserveBytes: reserve,
+      budget: memoryBudget({ sample, sessions: 10, sessionBytes: 10 * 215 * MB, heavyReserveBytes: reserve, reservedBytes }),
+    }
+  }
+
+  it('admits with 3.5 GiB available when the heavy job already holds 1.7 GiB', () => {
+    const input = incident(3.5 * GB, 1.7 * GB)
+    expect(input.heavyReserveBytes).toBeCloseTo(0.1 * GB)
+    expect(admitSpawn(input, 1)).toMatchObject({ admit: true, fits: 6 })
+    expect(input.budget.max).toBe(16)
+  })
+
+  it('refuses with 1.4 GiB available and 1.0 GiB remaining heavy headroom', () => {
+    const r = admissionRefusal(admitSpawn(incident(1.4 * GB, HEAVY_JOB_BYTES - GB), 1))!
+    expect(r).toMatchObject({ reason: 'no-room', fits: 0, reservedBytes: 2 * GB, heavyReserveBytes: GB, used: 10, max: 10 })
+    expect(admissionMessage(r, 'en')).toContain('1.4 GB of RAM available, with 1.0 GB held back for one heavy job; 2.0 GB safety floor;')
+    expect(admissionMessage(r, 'pt')).toContain('piso de segurança de 2,0 GB')
+  })
+
+  it('credits the 2.7 GiB tsc RSS already deducted from 3.5 GiB available RAM', () => {
+    const input = incident(3.5 * GB, 2.7 * GB)
+    expect(input.heavyReserveBytes).toBe(0)
+    expect(admitSpawn(input, 7)).toMatchObject({ admit: true, fits: 7 })
+    const r = admissionRefusal(admitSpawn(input, 8))!
+    expect(r.reservedBytes).toBe(2 * GB)
+    expect(admissionMessage(r, 'en')).toContain('2.0 GB safety floor')
+  })
+
+  it('reserves the full heavy allowance while a lock holder has not grown yet', () => {
+    expect(admissionRefusal(admitSpawn(incident(3.5 * GB, 0), 1))!.fits).toBe(0)
+  })
+
+  it('honours a configured floor and names it in the refusal', () => {
+    const r = admissionRefusal(admitSpawn(incident(3.5 * GB, 2.7 * GB, 4 * GB), 1))!
+    expect(r.fits).toBe(0)
+    expect(admissionMessage(r, 'en')).toContain('4.0 GB safety floor')
+  })
+
+  it('admits exactly one session at the byte boundary, but refuses one byte below it', () => {
+    const required = 2 * GB + 215 * MB
+    expect(admitSpawn(incident(required, 2.7 * GB), 1)).toMatchObject({ admit: true, fits: 1 })
+    expect(admissionRefusal(admitSpawn(incident(required - 1, 2.7 * GB), 1))!.fits).toBe(0)
+  })
+})
+
 describe('rendering', () => {
   it('no-room names RAM, swap, the cost and how many fit — en', () => {
     const msg = admissionMessage(admissionRefusal(admitSpawn(THREE_LEFT, 5))!, 'en')
@@ -132,6 +183,7 @@ describe('rendering', () => {
     expect(msg).toContain('2.7 GB of RAM available')
     expect(msg).toContain('0.0 GB / 4.0 GB')
     expect(msg).toContain('250 MB (measured over the 2 running)')
+    expect(msg).toContain('2.0 GB safety floor')
     expect(msg).toContain('at most 3')
     expect(msg).toContain('--force')
   })
@@ -144,6 +196,13 @@ describe('rendering', () => {
     expect(msg).toContain('0,0 GB / 4,0 GB')
     expect(msg).toContain('250 MB (medido sobre 2 em execução)')
     expect(msg).toContain('--force')
+  })
+
+  it('still renders an older refusal without the safety-floor field', () => {
+    const { reservedBytes, ...legacy } = admissionRefusal(admitSpawn(THREE_LEFT, 5))!
+    expect(admissionMessage(legacy, 'en')).toContain('only 3 fit')
+    expect(admissionMessage(legacy, 'en')).not.toContain('safety floor')
+    expect(admissionMessage(legacy, 'pt')).not.toContain('piso de segurança')
   })
 
   it('cpu names the load and says to wait — en and pt', () => {

@@ -12,12 +12,12 @@
  * next slot is tried. Slot 0 is `/tmp/agentistics-heavy.lock`, the lock sessions already take by hand.
  */
 
-import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, readlink, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { FLOCK_BUSY_CODE, flockHolders, heavyLockPath, heavySlots, parseFlockArgv, queuePosition, type HeavyWaiter } from './heavy'
+import { FLOCK_BUSY_CODE, flockHolders, heavyLockPath, heavySlots, heavyTreePids, parseFlockArgv, queuePosition, type HeavyWaiter } from './heavy'
 import { stat } from 'node:fs/promises'
-import { pidAlive, readProcTable } from './proc-read'
+import { pidAlive, readProcTable, type ProcStatRow } from './proc-read'
 import { parseMeminfo } from '../sessions/memory-budget'
 
 export const HEAVY_DIR = join(AGENTISTICS_DATA_DIR, 'heavy')
@@ -49,21 +49,20 @@ async function memAvailable(): Promise<number | null> {
   try { return parseMeminfo(await readFile('/proc/meminfo', 'utf8'))?.available ?? null } catch { return null }
 }
 
-/**
- * RSS + swap of a process AND its descendants — a heavy job runs as `flock`'s child (and `tsc` as
- * `bun`'s), so the pid on record holds almost nothing itself.
- */
-async function rssOf(pid: number, depth = 0): Promise<number | null> {
-  try {
-    const s = await readFile(`/proc/${pid}/status`, 'utf8')
-    const kb = (k: string) => Number(new RegExp(`^${k}:\\s+(\\d+) kB$`, 'm').exec(s)?.[1] ?? 0) * 1024
-    let total = kb('VmRSS') + kb('VmSwap')
-    if (depth < 6) {
-      const kids = (await readFile(`/proc/${pid}/task/${pid}/children`, 'utf8').catch(() => '')).trim()
-      for (const k of kids ? kids.split(/\s+/).map(Number) : []) total += (await rssOf(k, depth + 1)) ?? 0
-    }
-    return total
-  } catch { return null }
+/** Resident memory already deducted from MemAvailable. Swap must not reduce future RAM headroom. */
+async function rssOf(pid: number, table: readonly ProcStatRow[], seen: Set<number>): Promise<number | null> {
+  let total = 0
+  let measured = false
+  for (const member of heavyTreePids([pid], table)) {
+    if (seen.has(member)) continue
+    seen.add(member)
+    try {
+      const status = await readFile(`/proc/${member}/status`, 'utf8')
+      const rss = /^VmRSS:\s+(\d+) kB$/m.exec(status)
+      if (rss) { total += Number(rss[1]) * 1024; measured = true }
+    } catch { /* gone or unreadable: no resident bytes to credit */ }
+  }
+  return measured ? total : null
 }
 
 /**
@@ -72,45 +71,87 @@ async function rssOf(pid: number, depth = 0): Promise<number | null> {
  * file's inode); the waiters are the other `flock` processes naming the same file. Without this the
  * queue would say "0 running" while a full `tsc -b` held the slot.
  */
-async function manualJobs(): Promise<{ running: HeavyRunning[]; waiting: HeavyWaiter[] }> {
+async function manualJobs(table: readonly ProcStatRow[], lockDir: string): Promise<{ running: HeavyRunning[]; waiting: HeavyWaiter[] }> {
   const running: HeavyRunning[] = []
   const waiting: HeavyWaiter[] = []
   if (process.platform !== 'linux') return { running, waiting }
   const locks = await readFile('/proc/locks', 'utf8').catch(() => '')
   const inodes = new Map<number, number>()
   for (let slot = 0; slot < 8; slot++) {
-    const st = await stat(heavyLockPath(slot)).catch(() => null)
+    const st = await stat(heavyLockPath(slot, lockDir)).catch(() => null)
     if (st) inodes.set(st.ino, slot)
   }
   if (inodes.size === 0) return { running, waiting }
   const holders = new Map<number, number>()
-  for (const [ino, slot] of inodes) for (const pid of flockHolders(locks, ino)) holders.set(pid, slot)
-  // The `flock` processes, out of the process table the governor's tick already read (`comm` is in
-  // `stat`): this used to read `/proc/<pid>/comm` of every process on the machine, every tick.
-  for (const row of readProcTable() ?? []) {
-    if (row.comm !== 'flock') continue
-    const pid = row.pid
+  const unknownSlots = new Map<string, { inode: number; slot: number }>()
+  const livePids = new Set(table.map(row => row.pid))
+  for (const [ino, slot] of inodes) for (const pid of flockHolders(locks, ino)) {
+    if (livePids.has(pid)) holders.set(pid, slot)
+    else unknownSlots.set(heavyLockPath(slot, lockDir), { inode: ino, slot })
+  }
+  for (const [inode, slot] of inodes) {
+    const path = heavyLockPath(slot, lockDir)
+    if ([...holders.values()].includes(slot) || unknownSlots.has(path)) continue
+    // On this kernel /proc/locks can omit inherited FD locks after the acquiring process exits.
+    // Probe without waiting, holding a free lock only for `true`. Only a successful probe proves
+    // it is free; a busy lock or any probe error still needs the fdinfo fallback.
+    let free = false
+    try {
+      const probe = Bun.spawn(['flock', '-n', '-E', String(FLOCK_BUSY_CODE), path, 'true'], {
+        stdout: 'ignore', stderr: 'ignore',
+      })
+      free = await probe.exited === 0
+    } catch { /* unavailable probe: preserve holder detection through fdinfo */ }
+    if (!free) unknownSlots.set(path, { inode, slot })
+  }
+  // `flock 9` can exit while the shell/job keeps its open file description. Linux then reports
+  // no global holder (or an exited pid). Find the processes retaining that locked descriptor, not every
+  // process that merely opened the lock file. Free slots never need an FD scan.
+  if (unknownSlots.size > 0) {
+    for (const row of table) {
+      const fds = await readdir(`/proc/${row.pid}/fd`).catch(() => [] as string[])
+      for (const fd of fds) {
+        const path = await readlink(`/proc/${row.pid}/fd/${fd}`).catch(() => '')
+        const unknown = unknownSlots.get(path)
+        if (!unknown) continue
+        const info = await readFile(`/proc/${row.pid}/fdinfo/${fd}`, 'utf8').catch(() => '')
+        if (flockHolders(info, unknown.inode).length > 0) holders.set(row.pid, unknown.slot)
+      }
+    }
+    // Inherited descriptors appear in every child too; retain the outermost holder tree only.
+    const nested = new Set([...holders.keys()].flatMap(pid => heavyTreePids([pid], table).slice(1)))
+    for (const pid of nested) holders.delete(pid)
+  }
+  // A holder may have exec'd the command (`flock -F`) or be a shell using `flock <fd>`.
+  // Trust the kernel's holder pid even when its process name/argv no longer mentions flock.
+  for (const [pid, slot] of holders) {
     const argv = (await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '')).split('\0').filter(Boolean)
     const parsed = parseFlockArgv(argv)
-    if (!parsed) continue
-    const slot = [...inodes.entries()].find(([, sl]) => heavyLockPath(sl) === parsed.lock)?.[1]
-    if (slot === undefined) continue
     const st = await stat(`/proc/${pid}`).catch(() => null)
-    const sinceMs = st ? st.mtimeMs : Date.now()
-    if (holders.has(pid)) running.push({ pid, sinceMs, command: parsed.command, slot, usedBytes: await rssOf(pid), manual: true })
-    else waiting.push({ pid, sinceMs, command: parsed.command })
+    running.push({ pid, sinceMs: st?.mtimeMs ?? Date.now(), command: table.find(r => r.pid === pid)?.comm === 'flock'
+      ? parsed?.command ?? '' : argv.join(' ').slice(0, 200), slot, usedBytes: null, manual: true })
+  }
+  for (const row of table) {
+    if (row.comm !== 'flock' || holders.has(row.pid)) continue
+    const argv = (await readFile(`/proc/${row.pid}/cmdline`, 'utf8').catch(() => '')).split('\0').filter(Boolean)
+    const parsed = parseFlockArgv(argv)
+    if (!parsed || ![...inodes.values()].some(slot => heavyLockPath(slot, lockDir) === parsed.lock)) continue
+    const st = await stat(`/proc/${row.pid}`).catch(() => null)
+    waiting.push({ pid: row.pid, sinceMs: st?.mtimeMs ?? Date.now(), command: parsed.command })
   }
   return { running, waiting }
 }
 
 /** What is running and waiting right now — dead entries dropped, manual `flock` jobs included. */
-export async function readHeavyState(dir = HEAVY_DIR): Promise<HeavyState> {
+export async function readHeavyState(dir = HEAVY_DIR, lockDir = '/tmp'): Promise<HeavyState> {
   const ours = (await readDirJson<HeavyRunning>(join(dir, 'running'))).filter(r => pidAlive(r.pid))
-  const manual = await manualJobs()
+  const table = readProcTable(Date.now(), true) ?? []
+  const manual = await manualJobs(table, lockDir)
   // A job run through `agentop heavy` is ALSO a flock holder; keep our richer record, not both.
   const ourPids = new Set(ours.map(r => r.pid))
   const running = [...ours, ...manual.running.filter(r => !ourPids.has(r.pid))]
-  for (const r of running) if (r.usedBytes === null || r.usedBytes === undefined) r.usedBytes = await rssOf(r.pid)
+  const seen = new Set<number>()
+  for (const r of running) r.usedBytes = await rssOf(r.pid, table, seen)
   const waiting = [
     ...(await readDirJson<HeavyWaiter>(join(dir, 'waiting'))).filter(w => pidAlive(w.pid)),
     ...manual.waiting,
