@@ -17,6 +17,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'O texto técnico de imagem lida não aparece mais como mensagem sua no chat.',
         en: 'The technical note of a viewed image no longer shows as your message in the chat.',
       },
+      {
+        pt: 'No chat, as ferramentas que falharam aparecem marcadas também nas sessões do modo novo.',
+        en: 'In the chat, tools that failed are now marked in new-mode sessions too.',
+      },
     ],
   },
   '2.151.1': {
