@@ -46,7 +46,7 @@ export function areaEntryPath(area: Area): string {
 }
 
 /** Themed hover tooltip for the icons-only state. */
-export function Tip({ label, show, children }: { label: string; show: boolean; children: React.ReactNode }) {
+export function Tip({ label, show, children }: { label: React.ReactNode; show: boolean; children: React.ReactNode }) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   if (!show) return <>{children}</>
   return (
@@ -124,7 +124,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
     const hasPages = pagesOf(area).length > 0
     const expanded = hasPages && isAreaOpen(openMap, area.id, active)
     return (
-      <Tip key={area.id} label={label} show={collapsed}>
+      <Tip key={area.id} label={<>{label}{area.beta && <> <BetaTag what={label} lang={lang} /></>}</>} show={collapsed}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
         <a
           href={to}
@@ -145,7 +145,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
             {collapsed && n ? <span aria-hidden style={{ position: 'absolute', top: -3, right: -4, width: 8, height: 8, borderRadius: 4, background: 'var(--anthropic-orange)' }} /> : null}
           </span>
           {!collapsed && label}
-          {!collapsed && area.beta && <BetaTag what={label} style={{ marginLeft: 4 }} />}
+          {!collapsed && area.beta && <BetaTag what={label} lang={lang} style={{ marginLeft: 4 }} />}
           {!collapsed && n ? <Badge n={n} /> : null}
         </a>
         {!collapsed && hasPages && (

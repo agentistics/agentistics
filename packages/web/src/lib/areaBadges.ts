@@ -20,7 +20,7 @@ export function areaBadges(input: {
   set('sessions', input.attention)
   if (input.usageRows) {
     // The SAME rule as the Uso › Agora sentence ("N de M planos acima do ritmo"): one reading of over pace.
-    set('usage', input.usageRows.filter(r => usagePaceState(r) !== 'on').length)
+    set('usage', input.usageRows.filter(r => ['hold', 'over'].includes(usagePaceState(r))).length)
   }
   set('leadership', input.checkinsOverdue)
   return out

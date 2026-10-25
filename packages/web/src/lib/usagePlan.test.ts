@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { usageHeadline, planSessions, type UsageBudgetRow } from './usagePlan'
+import { usageHeadline, usagePaceState, planSessions, type UsageBudgetRow } from './usagePlan'
+import { areaBadges } from './areaBadges'
+import { planLimitsTool } from '../../../mcp/plan-limits-tool'
 
 const at = (time: string) => new Date(`2026-10-17T${time}:00`).getTime()
 const row = (p: Partial<UsageBudgetRow> = {}): UsageBudgetRow => ({
@@ -17,7 +19,7 @@ describe('usageHeadline', () => {
     const rows = [row({ paceStatus: 'over', pauseUntil: at('14:20') }), row({ account: 'b' }),
       row({ account: 'c', paceStatus: 'over', pauseUntil: at('13:11') })]
     expect(usageHeadline(rows, at('12:00'), 'pt')).toBe('2 de 3 planos acima do ritmo. Não abra sessões novas até 14:20.')
-    expect(usageHeadline(rows, at('12:00'), 'en')).toBe('2 of 3 plans over pace. Do not open new sessions until 14:20.')
+    expect(usageHeadline(rows, at('12:00'), 'en')).toBe('2 of 3 plans over pace. Do not open new sessions until 02:20 PM.')
   })
   test('all on pace', () => {
     expect(usageHeadline([row()], 0, 'en')).toBe('All 1 plans on pace.')
@@ -34,9 +36,10 @@ describe('usageHeadline', () => {
 })
 
 describe('planSessions', () => {
-  test('parallel is floor(sustainable / per-session burn), including decimal boundaries', () => {
-    expect(planSessions([row({ sustainablePctPerHour: 1.2, burnPctPerHour: 0.4, liveSessions: [live] })], 4, 0)[0]?.parallel).toBe(3)
-    expect(planSessions([row({ sustainablePctPerHour: 1.1, burnPctPerHour: 0.8, liveSessions: [live, { ...live, id: 'worker2' }] })], 4, 0)[0]?.parallel).toBe(2)
+  test('parallel follows the server recommendation even when live/session rates imply another capacity', () => {
+    for (const suggestedParallel of [0, 1, 2, 8]) for (const hours of [0.25, 4, 168]) {
+      expect(planSessions([row({ suggestedParallel, sustainablePctPerHour: 1.2, burnPctPerHour: 0.4, liveSessions: [live] })], hours, 0)[0]?.parallel).toBe(suggestedParallel)
+    }
   })
   test('a plan on hold gets zero and its numeric pause, even beyond the requested hours', () => {
     expect(planSessions([row({ status: 'hold', pauseUntil: at('14:20') })], 1, at('12:00'))[0])
@@ -51,7 +54,7 @@ describe('planSessions', () => {
     expect(planSessions([row({ liveSessions: [], suggestedParallel: 2 })], 4, 0)[0]).toMatchObject({ parallel: 2, reason: 'pace' })
   })
   test('each account keeps its label and capacity without mutation', () => {
-    const rows = [row({ liveSessions: [live], sustainablePctPerHour: 0.1 }), row({ harness: 'codex', account: undefined, accountLabel: undefined, freeSlotsMeasured: false })]
+    const rows = [row({ liveSessions: [live], sustainablePctPerHour: 0.1, suggestedParallel: 0 }), row({ harness: 'codex', account: undefined, accountLabel: undefined, freeSlotsMeasured: false })]
     const before = structuredClone(rows)
     expect(planSessions(rows, 4, 0)).toEqual([
       { account: 'a', harness: 'claude', label: 'Claude · pessoal', parallel: 0, pauseUntil: null, reason: 'pace' },
@@ -60,4 +63,29 @@ describe('planSessions', () => {
     expect(rows).toEqual(before)
     expect(planSessions([], 4, 0)).toEqual([])
   })
+})
+
+for (const [status, paceStatus, expected] of [
+  ['ok', 'under', 'under'], ['ok', 'on', 'on'], ['ok', 'over', 'over'],
+  ['tight', 'under', 'over'], ['tight', 'on', 'over'], ['hold', 'under', 'hold'],
+] as const) test(`usage status ${status}/${paceStatus} → ${expected}`, () => {
+  expect(usagePaceState({ status, paceStatus })).toBe(expected)
+})
+
+test('a pause on another day includes its day in both languages', () => {
+  const pauseUntil = at('14:20') + 3 * 86_400_000
+  for (const lang of ['pt', 'en'] as const) {
+    const text = usageHeadline([row({ status: 'hold', pauseUntil })], at('12:00'), lang)!
+    expect(text).toContain(lang === 'pt' ? 'ter' : 'Tue')
+  }
+})
+
+test('MCP forwards the same per-account recommendation and status that drive Plan and the area count', () => {
+  const rows = [row({ status: 'tight', paceStatus: 'on', suggestedParallel: 1 }),
+    row({ account: 'b', paceStatus: 'under', suggestedParallel: 2 }),
+    row({ account: 'c', status: 'hold', paceStatus: 'over', suggestedParallel: 0 })]
+  const mcp = planLimitsTool(undefined, { budgets: rows })
+  expect(planSessions(rows, 4, 0).map(r => r.parallel)).toEqual(mcp.budgets.map(r => r.suggestedParallel))
+  expect(areaBadges({ usageRows: mcp.budgets })).toEqual({ usage: 2 })
+  expect(usageHeadline(mcp.budgets, 0, 'en')).toBe('2 of 3 plans over pace.')
 })

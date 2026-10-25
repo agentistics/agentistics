@@ -17,13 +17,16 @@ import type { CSSProperties } from 'react'
 export interface BetaTagProps {
   /** Where it sits, for the tooltip's sentence. */
   what?: string
+  lang?: 'pt' | 'en'
   /** A dot instead of the word, for a place with no room for four characters (a nav rail). */
   compact?: boolean
   style?: CSSProperties
 }
 
-export function BetaTag({ what, compact, style }: BetaTagProps) {
-  const title = what
+export function BetaTag({ what, compact, style, lang = 'en' }: BetaTagProps) {
+  const title = lang === 'pt'
+    ? `${what ?? 'Este recurso'} está em beta — funciona, ainda está mudando e algumas partes vão mudar de lugar.`
+    : what
     ? `${what} is in beta — it works, it is still being changed, and some of it will move.`
     : 'This is in beta — it works, it is still being changed, and some of it will move.'
   if (compact) {

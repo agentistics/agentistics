@@ -1210,6 +1210,14 @@ describe('a `default` meter beside identified accounts (BILLING.SIMPLE §7)', ()
     return now
   }
 
+  test('pending registered accounts carry a friendly account label without exposing owner login', async () => {
+    const pending = { ...codexAccount('acc_pending', '/r1'), nickname: 'Principal', label: 'owner@example.test' }
+    writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ version: 2, bindings: {}, segments: {}, accounts: [pending] }))
+    const body = await planLimitsPayload({ profiles: {}, accountProfiles: { acc_pending: sub('ChatGPT Plus') } }, now0())
+    expect(body.registered).toContainEqual({ harness: 'codex', account: 'acc_pending', plan: 'ChatGPT Plus', accountLabel: 'Principal' })
+    expect(JSON.stringify(body.registered)).not.toContain('owner@example.test')
+  })
+
   test('one live identified account: the meter is that account\'s, and its plan is not listed as waiting', async () => {
     const now = await seed([codexAccount('acc_codex000001', '/r1')])
     const body = await planLimitsPayload({ profiles: {}, accountProfiles: { acc_codex000001: sub('ChatGPT Plus') } }, now)

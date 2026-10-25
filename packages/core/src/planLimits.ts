@@ -153,8 +153,9 @@ export function planSlots(input: PlanSlotInput): { freeSlots: number; freeSlotsM
     ? sessions.reduce((sum, s) => sum + s.burnPctPerHour, 0) / sessions.length
     : (input.typicalBurnPctPerHour ?? input.sustainablePctPerHour) / Math.max(1, input.measuredLiveCount ?? 1)
   const freeSlotsMeasured = perSession > 0
+  const capacity = (input.sustainablePctPerHour - totalBurn) / perSession
   const freeSlots = freeSlotsMeasured
-    ? Math.max(0, Math.floor((input.sustainablePctPerHour - totalBurn) / perSession))
+    ? Math.max(0, Math.floor(capacity + Number.EPSILON * Math.max(1, Math.abs(capacity))))
     : Math.max(0, (input.fallbackParallel ?? 1) - sessions.length)
   return {
     freeSlots,
@@ -329,16 +330,18 @@ export type PlanForecast =
  * At the AVERAGE pace of the window so far (used ÷ elapsed since the window opened), does the
  * window last until it renews, or when does it run out? The window opened at
  * `resetsAt - length`; a pace measured over less than a minute is clamped to one minute.
+ * Anchor the projection to the observation timestamp; ticking the clock alone is not a new sample.
  */
-export function forecastWindow(w: PlanLimitWindow, nowMs: number): PlanForecast {
+export function forecastWindow(w: PlanLimitWindow, nowMs: number, observedAt = nowMs): PlanForecast {
   w = effectiveWindow(w, nowMs)
   if (w.projected) return { kind: 'renewed' }
   if (w.usedPct >= 100) return { kind: 'exhausted', until: w.resetsAt }
   if (w.usedPct <= 0) return { kind: 'lasts' }
   const opened = w.resetsAt - PLAN_WINDOW_MS[w.kind]
-  const elapsed = Math.max(60_000, nowMs - opened)
+  const sampledAt = Math.min(nowMs, observedAt)
+  const elapsed = Math.max(60_000, sampledAt - opened)
   const perMs = w.usedPct / elapsed
-  const at = nowMs + (100 - w.usedPct) / perMs
+  const at = sampledAt + (100 - w.usedPct) / perMs
   return at >= w.resetsAt ? { kind: 'lasts' } : { kind: 'runs-out', at: Math.round(at) }
 }
 
@@ -358,8 +361,8 @@ export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
   const weekPct = week ? currentUsedPct(week, nowMs) : 0
   const weekResetsAt = week?.resetsAt ?? nowMs
   const daysToWeekReset = Math.max(0, (weekResetsAt - nowMs) / DAY_MS)
-  const dailyBudgetPct = (100 - weekPct) / Math.max(daysToWeekReset, 0.5)
-  const forecast = week ? forecastWindow(week, nowMs) : { kind: 'lasts' as const }
+  const dailyBudgetPct = Math.max(0, 100 - weekPct) / Math.max(daysToWeekReset, 0.5)
+  const forecast = week ? forecastWindow(week, nowMs, l.updatedAt) : { kind: 'lasts' as const }
   const status: PlanBudgetStatus = fiveHourPct >= PLAN_BUDGET_HOLD_5H_PCT || weekPct >= PLAN_BUDGET_HOLD_WEEK_PCT
     ? 'hold'
     : weekPct >= PLAN_BUDGET_TIGHT_WEEK_PCT || forecast.kind === 'runs-out'
@@ -398,7 +401,9 @@ export function planPace(
   const readings = [...history.filter(x => x.updatedAt !== l.updatedAt), l]
     .filter(x => x.harness === l.harness && x.account === l.account)
     .filter(x => segmentStart === undefined || x.updatedAt >= segmentStart)
-    .filter(x => !week || x.updatedAt >= week.resetsAt - PLAN_WINDOW_MS.week)
+    .filter(x => x.updatedAt <= nowMs)
+    .filter(x => !week || (x.updatedAt >= week.resetsAt - PLAN_WINDOW_MS.week
+      && windowOf(x, 'week')?.resetsAt === week.resetsAt))
     .sort((a, b) => a.updatedAt - b.updatedAt)
   const first = readings.find(x => nowMs - x.updatedAt <= 6 * 3_600_000)
   const last = readings.at(-1)
@@ -413,8 +418,9 @@ export function planPace(
   const burnPctPerHour = elapsedHours > 0
     ? Math.max(0, (currentUsedPct(lastWeek!, nowMs) - currentUsedPct(firstWeek!, nowMs)) / elapsedHours)
     : sustainablePctPerHour
-  const ratio = sustainablePctPerHour > 0 ? burnPctPerHour / sustainablePctPerHour : 0
-  const paceStatus: PlanPaceStatus = ratio > 1.2 ? 'over' : ratio < 0.8 ? 'under' : 'on'
+  const ratio = sustainablePctPerHour > 0 ? burnPctPerHour / sustainablePctPerHour : burnPctPerHour > 0 ? Infinity : 1
+  // Subtracting decimal percentages can move an exact 0.8/1.2 boundary by a few ulps.
+  const paceStatus: PlanPaceStatus = ratio > 1.2 + 1e-12 ? 'over' : ratio < 0.8 - 1e-12 ? 'under' : 'on'
   const fiveWindow = windowOf(l, '5h')
   const five = fiveWindow && effectiveWindow(fiveWindow, nowMs)
   const fivePct = five ? currentUsedPct(five, nowMs) : 0
@@ -456,6 +462,8 @@ export function planPace(
   return {
     paceStatus, burnPctPerHour, sustainablePctPerHour, suggestedParallel, note,
     ...slots,
+    // The fallback sustainable rate is policy, not an observed per-session measurement.
+    freeSlotsMeasured: slots.freeSlotsMeasured && (elapsedHours > 0 || liveSessions.some(s => s.burnPctPerHour > 0)),
     ...(budgetHold ? { freeSlots: 0, pauseUntil } : {}),
   }
 }
@@ -555,14 +563,14 @@ export function routeRecommendation(
   kind: RouteKind,
   authorHarness?: string,
 ): RouteRecommendation {
-  const allowTight = kind === 'lead'
   // Routing aggregates fold only registered accounts, so an unregistered meter can never make a
   // harness look available when every account that could take work is held.
   const aggregates = new Map(harnessAggregate(budgets.filter(b => b.plan !== 'unregistered')).map(a => [a.harness, a]))
   const eligibleHarness = (agg: HarnessAggregate) =>
-    eligibleAccounts(agg.harness).length > 0 && agg.status !== 'hold' && (allowTight || agg.status !== 'tight') && agg.harness !== (kind === 'qa' ? authorHarness : undefined)
+    eligibleAccounts(agg.harness).length > 0 && agg.status !== 'hold' && agg.harness !== (kind === 'qa' ? authorHarness : undefined)
   const eligibleAccounts = (h: HarnessId) =>
-    budgets.filter(b => b.harness === h && b.spawnable !== false && b.plan !== 'unregistered' && !b.yieldsTo && b.status !== 'hold' && (allowTight || b.status !== 'tight'))
+    // Tight is a budget warning, not a pause: only hold crosses the 5h/week stop thresholds.
+    budgets.filter(b => b.harness === h && b.spawnable !== false && b.plan !== 'unregistered' && !b.yieldsTo && b.status !== 'hold')
   const harnesses = [...aggregates.values()].filter(eligibleHarness)
   const ordered = [...harnesses].sort((a, b) => {
     const ap = a.paceStatus === 'under' ? 0 : 1
@@ -579,9 +587,11 @@ export function routeRecommendation(
     if (budgets.length && budgets.every(b => b.spawnable === false)) {
       return { harness: null, reason: 'No harness can start a new session.', alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Install or repair a harness before opening workers.' } }
     }
-    const earliest = budgets.filter(b => b.status === 'hold').sort((a, b) => a.weekResetsAt - b.weekResetsAt)[0]
-    const reset = earliest ? new Date(earliest.weekResetsAt).toISOString() : 'the next reset'
-    return { harness: null, reason: `all plans on hold until ${reset}`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
+    if (budgets.length && budgets.every(b => b.status === 'hold')) {
+      const earliest = Math.min(...budgets.map(b => b.pauseUntil ?? b.weekResetsAt))
+      return { harness: null, reason: `all plans on hold until ${new Date(earliest).toISOString()}`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
+    }
+    return { harness: null, reason: `No eligible plan for ${kind}.`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Check plan registration, account availability, and author-harness exclusions.' } }
   }
   if (!pickAgg) return noRoute()
   const candidates = eligibleAccounts(pickAgg.harness)
@@ -594,6 +604,7 @@ export function routeRecommendation(
       .filter(b => !(b.harness === pick.harness && b.account === pick.account))
       .map(b => ({ harness: b.harness, account: b.account ?? 'default' })))
   const paceText = pick.note ? ` ${pick.note}` : ''
+  const budgetText = pick.status === 'tight' ? ' Tight budget warning.' : ''
   const measured = candidates.some(b => b.freeSlotsMeasured)
   const parallel = measured
     ? pickAgg.freeSlots
@@ -603,7 +614,7 @@ export function routeRecommendation(
     ...(pick.account ? { account: pick.account } : {}),
     ...(pick.accountLabel ? { accountLabel: pick.accountLabel } : {}),
     ...(selected?.[1] ? { model: selected[1] } : {}),
-    reason: `${pick.harness} is the preferred eligible plan for ${kind}.${paceText}`,
+    reason: `${pick.harness} is the preferred eligible plan for ${kind}.${budgetText}${paceText}`,
     alternatives,
     accountAlternatives,
     cadence: { parallel, note: pick.note ?? 'Keep one worker running.' },

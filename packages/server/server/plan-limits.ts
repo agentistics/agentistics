@@ -708,7 +708,7 @@ export interface PlanLimitsPayload {
   /** Owner surfaces: every account observed, with the owner-only login `label`. */
   limits: PlanLimits[]
   /** Plans registered in Billing for an account that has reported no window yet. */
-  registered: { harness: HarnessId; account: string; plan: string }[]
+  registered: { harness: HarnessId; account: string; plan: string; accountLabel?: string }[]
   budgets: AccountBudgetRow[]
   hiddenFromAgents: AccountBudgetRow[]
   /** Owner-only in-memory history, including accounts hidden from agents. Times are epoch ms. */
@@ -861,7 +861,7 @@ export async function planLimitsPayload(
       // A login that already reports a meter (under its own id, an alias, or a same-login twin) is
       // not "waiting for a reading" — that row would be the same plan twice.
       if (!a.available || limits.some(l => l.harness === h && (l.account === account || (a.id && sameAccount(l.account, a.id)) || (!a.id && !byAccount.has(l.account))))) continue
-      registered.push({ harness: h, account, plan })
+      registered.push({ harness: h, account, plan, accountLabel: labelOf(h, account) })
     }
   }
   const aggregates = harnessAggregate(budgets)

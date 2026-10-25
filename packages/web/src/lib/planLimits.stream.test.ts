@@ -61,16 +61,17 @@ test('a plan-limits signal on the open stream refreshes the open tab without a r
   const budgets = [budget]
   const hiddenFromAgents: UsageBudgetRow[] = [{ ...budget, harness: 'codex', account: 'hidden', accountLabel: 'Work' }]
   const readings: PlanReadings[] = [{ harness: 'claude', account: 'default', points: [{ at: now, weekPct: 37, fiveHourPct: 43 }] }]
-  answer = { ...answer as object, budgets, hiddenFromAgents, readings }
+  answer = { ...answer as object, budgets, hiddenFromAgents, readings,
+    registered: [{ harness: 'copilot', account: 'pending', plan: 'Pro', accountLabel: 'Copilot CLI #1' }] }
   const before = calls
   FakeEventSource.last!.emit('plan-limits')
   await tick()
   expect(calls).toBe(before + 1)
   expect(planLimitsSnapshot().limits!.map(l => l.harness)).toEqual(['claude'])
-  expect(planLimitsSnapshot().registered).toEqual([])
+  expect(planLimitsSnapshot().registered).toEqual([{ harness: 'copilot', account: 'pending', plan: 'Pro', accountLabel: 'Copilot CLI #1' }])
   expect(planLimitsSnapshot().budgets).toEqual([...budgets, ...hiddenFromAgents])
   expect(planLimitsSnapshot().readings).toEqual(readings)
-  expect(planLimitsSnapshot().accountLabels).toEqual({ default: 'Personal', hidden: 'Work' })
+  expect(planLimitsSnapshot().accountLabels).toEqual({ default: 'Personal', hidden: 'Work', pending: 'Copilot CLI #1' })
   expect(renders).toBeGreaterThan(1)
   off()
 })
