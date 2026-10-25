@@ -31,6 +31,11 @@ describe('rowMenuEntries', () => {
     }
   })
 
+  it('offers Reopen and Remove, never End, for a backend-confirmed lost row', () => {
+    const actions = rowMenuEntries([...verbs, { action: 'forget', label: 'Remove from list', enabled: true }], 'lost', [], 123).map(e => e.action)
+    expect(actions).toEqual(['rename', 'resume', 'forget'])
+  })
+
   it('keeps Stop on a lost row — its backend may still be running', () => {
     expect(rowMenuEntries(verbs, 'lost').map(e => e.action)).toContain('kill')
   })
