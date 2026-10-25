@@ -19,13 +19,19 @@ describe('MobileAreaBar', () => {
       expect(html.match(/<button\b/g) ?? []).toHaveLength(5)
       const labels = lang === 'pt' ? ['Agentask', 'Uso', 'Sessões', 'Métricas', 'Mais'] : ['Agentask', 'Usage', 'Sessions', 'Metrics', 'More']
       let at = -1
-      for (const label of labels) { at = html.indexOf(`>${label}</span>`, at + 1); expect(at).toBeGreaterThan(-1) }
-      for (const button of html.match(/<button\b[^>]*>/g) ?? []) {
+      for (const label of labels) {
+        const found = label === labels[2] ? html.indexOf(`aria-label="${label}`, at + 1) : html.indexOf(`>${label}</span>`, at + 1)
+        at = found; expect(at).toBeGreaterThan(-1)
+      }
+      // Four slot buttons share the two pills; the fifth is the standalone round centre.
+      const slotButtons = (html.match(/<button\b[^>]*>/g) ?? []).filter(b => !b.includes('width:58px'))
+      expect(slotButtons).toHaveLength(4)
+      for (const button of slotButtons) {
         expect(button).toContain('flex:1')
         expect(button).toContain('min-width:0')
         expect(button).toContain('min-height:44px')
       }
-      expect(html).toContain('background:rgba(17, 17, 24, 0.84)')
+      expect(html).toContain('background:var(--bg-card)')
       expect(html).toContain('aria-haspopup="dialog"')
       expect(html).toContain('aria-expanded="false"')
       expect(html).not.toContain('role="dialog"')
@@ -36,10 +42,10 @@ describe('MobileAreaBar', () => {
     for (const pathname of ['/sessions', '/sessions/abc', '/leadership/checkins']) {
       for (const lang of ['pt', 'en'] as const) {
         const html = render(pathname, 2, lang)
-        expect(html).toContain(lang === 'pt' ? '>Início</span>' : '>Home</span>')
+        expect(html).toContain(lang === 'pt' ? 'aria-label="Início' : 'aria-label="Home')
         expect(html).toContain('lucide-house')
         expect(html).toContain('border-radius:50%')
-        expect(html).toContain('width:40px;height:40px')
+        expect(html).toContain('width:58px;height:58px')
         expect(html.match(/<button\b/g) ?? []).toHaveLength(5)
       }
     }

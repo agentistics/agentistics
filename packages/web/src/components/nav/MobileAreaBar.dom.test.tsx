@@ -3,7 +3,10 @@ import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { act } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import type { Root } from 'react-dom/client'
-import { followOffset, restOffset } from '../../lib/bottomNavDrag'
+import { barFollow, barSlots } from '../../lib/bottomNavDrag'
+
+const SLOTS = barSlots(356, 48, 2, 2, 4, 10)
+const INDICATOR_AT = (i: number) => SLOTS[i]!.left + 4
 
 let createRoot: typeof import('react-dom/client').createRoot
 let MobileAreaBar: typeof import('./MobileAreaBar').MobileAreaBar
@@ -49,7 +52,7 @@ async function render(pathname = '/sessions') {
   const nav = host.querySelector<HTMLElement>('nav[aria-label="Navegação principal"]')!
   const track = nav.firstElementChild as HTMLElement
   const buttons = Array.from(track.querySelectorAll('button'))
-  return { track, buttons, indicator: () => track.querySelector<HTMLElement>('[aria-hidden="true"]')! }
+  return { nav, track, buttons, indicator: () => track.querySelector<HTMLElement>('[data-bar-indicator]')! }
 }
 const click = (el: HTMLElement) => act(async () => { el.click() })
 const pointer = (el: HTMLElement, type: string, x: number, y = 728) => act(async () => {
@@ -61,7 +64,7 @@ test('vertical drag-off cancels both horizontal and purely vertical gestures', a
   for (const x of [20, 250]) {
     await pointer(view.track, 'pointerdown', 20)
     await pointer(view.track, 'pointermove', x, 500)
-    expect(view.indicator().style.transform).toContain(`translateX(${restOffset(1, 356, 5, 4)}px)`)
+    expect(view.indicator().style.transform).toContain(`translateX(${INDICATOR_AT(1)}px)`)
     await pointer(view.track, 'pointerup', x, 500)
     await click(view.buttons[3]!)
     expect(went).toEqual([])
@@ -83,7 +86,7 @@ test('Home scrolls the session panes to top and an open conversation returns to 
   for (const pane of panes) { pane.scrollTop = 300; document.body.appendChild(pane) }
   try {
     let view = await render()
-    expect(view.buttons[2]!.textContent).toContain('Início')
+    expect(view.buttons[2]!.getAttribute('aria-label')).toContain('Início')
     await click(view.buttons[2]!)
     expect(panes[0]!.scrollTop).toBe(0)
     expect(panes[1]!.scrollTop).toBe(300)
@@ -95,11 +98,43 @@ test('Home scrolls the session panes to top and an open conversation returns to 
   } finally { panes.forEach(el => el.remove()) }
 })
 
-test('drag follows the finger through five equal slots and activates only on release', async () => {
+test('the bar is three pieces: left pill, standalone round Início, right pill', async () => {
+  const view = await render('/usage')
+  const pills = view.nav.querySelectorAll('[data-bar-pill]')
+  expect(Array.from(pills).map(p => p.getAttribute('data-bar-pill'))).toEqual(['left', 'right'])
+  const centre = view.nav.querySelector('[data-bar-centre]')!
+  expect(centre.querySelector('button')).toBe(view.buttons[2]!)
+  expect(view.buttons[2]!.style.width).toBe('58px')
+  // Left pill holds Agentask + Uso, right pill Métricas + Mais.
+  expect(pills[0]!.parentElement!.querySelectorAll('button').length).toBe(2)
+  expect(pills[1]!.parentElement!.querySelectorAll('button').length).toBe(2)
+  expect(pills[0]!.getAttribute('style')).toContain('mask-image')
+})
+
+test('the active slot gets a large indicator; Início active puts the fill on the circle instead', async () => {
+  let view = await render('/usage')
+  expect(view.buttons[1]!.getAttribute('aria-current')).toBe('page')
+  expect(view.indicator()).not.toBeNull()
+  expect(view.indicator().style.width).toBe(`${SLOTS[1]!.width - 8}px`)
+  expect(Number.parseFloat(view.indicator().style.width)).toBeGreaterThan(60)
+  view = await render('/sessions')
+  expect(view.indicator()).toBeNull()
+  expect(view.buttons[2]!.getAttribute('aria-current')).toBe('page')
+  expect(view.buttons[2]!.style.borderColor || view.buttons[2]!.getAttribute('style')).toContain('anthropic-orange')
+})
+
+test('badges sit on the icons and the circle badge stays outside the circle', async () => {
+  const view = await render('/usage')
+  const badges = view.nav.querySelectorAll('[data-area-badge]')
+  expect(Array.from(badges).map(b => b.textContent)).toEqual(['3', '1', '2'])
+  expect(view.buttons[2]!.contains(badges[2]!)).toBe(false)
+})
+
+test('drag follows the finger through the pills and activates only on release and activates only on release', async () => {
   const view = await render('/usage')
   await pointer(view.track, 'pointerdown', 20)
   await pointer(view.track, 'pointermove', 250)
-  expect(view.indicator().style.transform).toContain(`translateX(${followOffset(250, 356, 5, 4)}px)`)
+  expect(view.indicator().style.transform).toContain(`translateX(${barFollow(250, SLOTS, 4)}px)`)
   expect(went).toEqual([])
   await pointer(view.track, 'pointerup', 250)
   expect(went).toEqual(['/'])
@@ -114,7 +149,8 @@ test('releasing over More opens the existing area sheet; cancelling a drag resto
   await pointer(view.track, 'pointermove', 345)
   await pointer(view.track, 'pointercancel', 345)
   expect(went).toEqual([])
-  expect(view.indicator().style.transform).toContain(`translateX(${restOffset(2, 356, 5, 4)}px)`)
+  expect(view.indicator()).toBeNull()
+  expect(view.buttons[2]!.getAttribute('aria-current')).toBe('page')
   await pointer(view.track, 'pointerdown', 20)
   await pointer(view.track, 'pointermove', 345)
   await pointer(view.track, 'pointerup', 345)

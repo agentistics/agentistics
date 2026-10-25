@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { activateMobileSessions, MOBILE_AREA_SLOTS, mobileAreaSlot } from './mobileAreaTabs'
+import { activateMobileSessions, MOBILE_AREA_SLOTS, MOBILE_SESSIONS_HOME_EVENT, mobileAreaSlot, scrollMobileSessionsToTop } from './mobileAreaTabs'
 import { slotAt } from './bottomNavDrag'
 
 describe('option A destinations', () => {
@@ -39,5 +39,21 @@ describe('Sessions / Home activation', () => {
       expect(navigated).toEqual(['/sessions'])
       expect(scrolled).toBe(0)
     }
+  })
+})
+
+describe('Início on /sessions', () => {
+  test('asks the page to leave the fleet-summary tab, so the tap always lands on the list', () => {
+    let heard = 0
+    const target = new EventTarget()
+    const w = globalThis as unknown as { window?: unknown; document?: unknown }
+    const oldWindow = w.window, oldDoc = w.document
+    w.window = Object.assign(target, { scrollTo: () => {} })
+    w.document = { querySelectorAll: () => [] }
+    try {
+      target.addEventListener(MOBILE_SESSIONS_HOME_EVENT, () => { heard++ })
+      activateMobileSessions('/sessions', () => {}, scrollMobileSessionsToTop)
+      expect(heard).toBe(1)
+    } finally { w.window = oldWindow; w.document = oldDoc }
   })
 })

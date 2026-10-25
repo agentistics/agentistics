@@ -77,6 +77,7 @@ import type { AppContext } from '../lib/app-context'
 import { reopenSession } from '../lib/reopeningStore'
 import { loadClosedFleet, useFleet, useFleetIndex, type FleetActionId } from '../lib/fleet'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { MOBILE_SESSIONS_HOME_EVENT } from '../lib/mobileAreaTabs'
 import { FleetOverview } from '../components/sessions/FleetOverview'
 import { SessionCreating } from '../components/sessions/SessionCreating'
 import { SessionEndingGate } from '../components/sessions/SessionEnding'
@@ -406,6 +407,11 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * you go and look at. Not in the URL — it is a view preference on one screen, not a place.
    */
   const [mobileTab, setMobileTab] = useState<'list' | 'overview'>('list')
+  useEffect(() => {
+    const home = () => setMobileTab('list')
+    window.addEventListener(MOBILE_SESSIONS_HOME_EVENT, home)
+    return () => window.removeEventListener(MOBILE_SESSIONS_HOME_EVENT, home)
+  }, [])
   /**
    * The mobile filters live in a SHEET, and this is whether it is open.
    *

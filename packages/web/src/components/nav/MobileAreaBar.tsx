@@ -90,14 +90,14 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
   return (
     <>
       <MobilePillBar
-        variant="tabs"
+        centerIndex={2}
         ariaLabel={pt ? 'Navegação principal' : 'Main navigation'}
         activeIndex={open ? 4 : mobileAreaSlot(pathname)}
         items={[
           { key: 'tasks', label: 'Agentask', icon: ClipboardList, onActivate: () => go('/tasks'), badge: badges?.tasks },
           { key: 'usage', label: pt ? 'Uso' : 'Usage', icon: Gauge, onActivate: () => go('/usage'), badge: badges?.usage },
           { key: 'sessions', label: sessions, ariaLabel: sessionBadge && sessionBadge > 0 ? `${sessions}, ${sessionBadge} ${pt ? 'precisam de você' : 'need you'}` : sessions,
-            icon: onSessions ? House : Terminal, onActivate: () => { closeSheet(); activateMobileSessions(pathname, onNavigate, scrollMobileSessionsToTop) }, badge: sessionBadge, emphasis: true },
+            icon: onSessions ? House : Terminal, onActivate: () => { closeSheet(); activateMobileSessions(pathname, onNavigate, scrollMobileSessionsToTop) }, badge: sessionBadge },
           { key: 'metrics', label: pt ? 'Métricas' : 'Metrics', icon: BarChart3, onActivate: () => go('/'), badge: badges?.metrics },
           { key: 'more', label: pt ? 'Mais' : 'More', icon: Ellipsis, onActivate: () => setOpen(v => !v), expanded: open, hasPopup: 'dialog' },
         ]}
