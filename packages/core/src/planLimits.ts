@@ -561,14 +561,14 @@ export function routeRecommendation(
   kind: RouteKind,
   authorHarness?: string,
 ): RouteRecommendation {
-  const allowTight = kind === 'lead'
   // Routing aggregates fold only registered accounts, so an unregistered meter can never make a
   // harness look available when every account that could take work is held.
   const aggregates = new Map(harnessAggregate(budgets.filter(b => b.plan !== 'unregistered')).map(a => [a.harness, a]))
   const eligibleHarness = (agg: HarnessAggregate) =>
-    eligibleAccounts(agg.harness).length > 0 && agg.status !== 'hold' && (allowTight || agg.status !== 'tight') && agg.harness !== (kind === 'qa' ? authorHarness : undefined)
+    eligibleAccounts(agg.harness).length > 0 && agg.status !== 'hold' && agg.harness !== (kind === 'qa' ? authorHarness : undefined)
   const eligibleAccounts = (h: HarnessId) =>
-    budgets.filter(b => b.harness === h && b.spawnable !== false && b.plan !== 'unregistered' && !b.yieldsTo && b.status !== 'hold' && (allowTight || b.status !== 'tight'))
+    // Tight is a budget warning, not a pause: only hold crosses the 5h/week stop thresholds.
+    budgets.filter(b => b.harness === h && b.spawnable !== false && b.plan !== 'unregistered' && !b.yieldsTo && b.status !== 'hold')
   const harnesses = [...aggregates.values()].filter(eligibleHarness)
   const ordered = [...harnesses].sort((a, b) => {
     const ap = a.paceStatus === 'under' ? 0 : 1
@@ -585,9 +585,11 @@ export function routeRecommendation(
     if (budgets.length && budgets.every(b => b.spawnable === false)) {
       return { harness: null, reason: 'No harness can start a new session.', alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Install or repair a harness before opening workers.' } }
     }
-    const earliest = budgets.filter(b => b.status === 'hold').sort((a, b) => a.weekResetsAt - b.weekResetsAt)[0]
-    const reset = earliest ? new Date(earliest.weekResetsAt).toISOString() : 'the next reset'
-    return { harness: null, reason: `all plans on hold until ${reset}`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
+    if (budgets.length && budgets.every(b => b.status === 'hold')) {
+      const earliest = Math.min(...budgets.map(b => b.pauseUntil ?? b.weekResetsAt))
+      return { harness: null, reason: `all plans on hold until ${new Date(earliest).toISOString()}`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Wait for a plan to renew.' } }
+    }
+    return { harness: null, reason: `No eligible plan for ${kind}.`, alternatives: [], accountAlternatives: [], cadence: { parallel: 0, note: 'Check plan registration, account availability, and author-harness exclusions.' } }
   }
   if (!pickAgg) return noRoute()
   const candidates = eligibleAccounts(pickAgg.harness)

@@ -165,6 +165,13 @@ Budget hold starts at 85% of 5h or 95% of week. A week at 80%, or one forecast t
 is tight. The page combines these fields: hold first, tight/recent over next, otherwise on/under.
 The area warning count uses that same decision. MCP exposes budget and pace as separate fields.
 
+`tight` is a warning, not a routing hold. Registered, available accounts with that status remain
+eligible for every work kind; only `hold` crosses a quota stop threshold. Thus a tight account
+whose recent burn is under pace can still receive workers at its measured cadence. QA continues
+to exclude the author's harness. If no route exists because plans are unregistered, unavailable,
+yielded or excluded for QA, the router says no eligible plan, rather than claiming they are held.
+“All plans on hold” is reserved for actual hold rows and names the earliest account pause time.
+
 Plan shows the server's suggested parallel cadence, including availability overrides, rather than
 recalculating it in the browser. The requested hours record the intended interval; recommendation
 remains sustainable through renewal, independent of that duration. Suggested cadence is 0 for

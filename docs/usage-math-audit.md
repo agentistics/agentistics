@@ -65,6 +65,7 @@ numeric tiles on the Usage pages.
 | Free slots | live mean burn P; `max(0,floor((S-sum(live burn))/P))`; absent live sessions use typical plan burn / measured count | Additional shared pool per account | Fixed decimal whole-slot loss (1.2/0.4). Measurement flag now requires observed interval or positive live measurement, not single-point fallback. |
 | Pause until | hold →weekly reset at week≥95, else 5h reset at ≥85; over →`t+max(0,remaining hours-(100-weekPct)/B)*H`, capped at next 5h reset | Renewal hold or earlier over-pace recheck | Agrees. Recheck cap does not guarantee sustainable burn at that time. |
 | Aggregate slots / pause | harness slots sum usable accounts; global free slots=max usable harness pools; pause=min account rechecks | Pick an available harness/account, not total interchangeable capacity | Agrees; headline's conservative latest pause has different scope. |
+| Route eligibility / no-route reason | Registered, spawnable, non-yielded accounts whose status is not hold; QA excludes author harness | Tight is a warning, not a stop below quota hold thresholds | Fixed: tight previously excluded all off-lead work, even under pace with two free slots; fallback falsely called this “all plans on hold”. Only actual all-held rows now use that reason and earliest account pause, otherwise no eligible plan. |
 
 ## Edge cases and policy questions
 

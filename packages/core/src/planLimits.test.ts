@@ -366,10 +366,10 @@ describe('per-account primitives (B1)', () => {
     expect(r.account).toBe('acc_c')
   })
 
-  test('route: registered tight account + unregistered ok account is not eligible off-lead', () => {
+  test('route: registered tight account remains eligible off-lead; unregistered account does not', () => {
     const tight = { ...row(mk('claude', 'acc_a', 10, 85)), status: 'tight' as const }
     const unreg = { ...row(mk('claude', 'acc_b', 10, 10)), plan: 'unregistered' }
-    expect(routeRecommendation([tight, unreg], 'mechanical').harness).toBeNull()
+    expect(routeRecommendation([tight, unreg], 'mechanical').account).toBe('acc_a')
     expect(routeRecommendation([tight, unreg], 'lead').account).toBe('acc_a')
   })
 

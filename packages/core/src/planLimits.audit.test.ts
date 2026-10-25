@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  effectiveWindow, forecastWindow, planBudget, planPace, planSlots, PLAN_WINDOW_MS,
+  effectiveWindow, forecastWindow, planBudget, planPace, planSlots, routeRecommendation, PLAN_WINDOW_MS,
   type PlanLimits, type PlanWindowKind,
 } from './planLimits'
 
@@ -73,6 +73,48 @@ describe('Usage audit: budgets, measurements and thresholds', () => {
   test('decimal slot boundaries do not lose a whole slot', () => {
     expect(planSlots({ sustainablePctPerHour: 1.2, typicalBurnPctPerHour: 0.4, liveSessions: [] }).freeSlots).toBe(3)
     expect(planSlots({ sustainablePctPerHour: 1.19, typicalBurnPctPerHour: 0.4, liveSessions: [] }).freeSlots).toBe(2)
+  })
+})
+
+describe('Usage audit: tight is a warning, not a routing hold', () => {
+  const rows = () => (['claude', 'codex'] as const).map((harness, i) => {
+    const l = limits(40, NOW + 160 * H, NOW, `${harness}-account`)
+    l.harness = harness
+    l.plan = 'Registered plan'
+    l.windows.push({ kind: '5h', usedPct: i === 0 ? 72 : 27, resetsAt: NOW + 2 * H })
+    const history = [{ ...l, updatedAt: NOW - H, windows: l.windows.map(w => w.kind === 'week' ? { ...w, usedPct: 39.85 } : w) }]
+    return { ...planBudget(l, NOW), ...planPace(l, NOW, history), account: l.account, spawnable: true }
+  })
+
+  for (const kind of ['lead', 'hard-bug', 'design', 'spec-impl', 'mechanical', 'qa', 'probe'] as const) {
+    test(`tight/under plans at 72% and 27% 5h still route ${kind}`, () => {
+      const budgets = rows()
+      for (const b of budgets) expect(b).toMatchObject({ status: 'tight', paceStatus: 'under', suggestedParallel: 2, freeSlots: 2 })
+      const r = routeRecommendation(budgets, kind, kind === 'qa' ? 'claude' : undefined)
+      expect(r.harness).not.toBeNull()
+      expect(r.cadence.parallel).toBe(2)
+      expect(r.reason).not.toContain('all plans on hold')
+      if (kind === 'qa') expect(r.harness).toBe('codex')
+    })
+  }
+  test('a weekly warning below the 95% hold threshold does not block workers', () => {
+    const b = { ...rows()[0]!, weekPct: 90 }
+    expect(routeRecommendation([b], 'mechanical').harness).toBe('claude')
+  })
+  test('a real hold still blocks and names the earliest actual 5h/week pause', () => {
+    const budgets = rows().map((b, i) => ({ ...b, status: 'hold' as const, pauseUntil: NOW + (i + 1) * H }))
+    const r = routeRecommendation(budgets, 'mechanical')
+    expect(r.harness).toBeNull()
+    expect(r.cadence.parallel).toBe(0)
+    expect(r.reason).toBe(`all plans on hold until ${new Date(NOW + H).toISOString()}`)
+  })
+  test('registration, author exclusion and yielded rows do not falsely claim all plans are held', () => {
+    for (const budgets of [[], rows().map(b => ({ ...b, plan: 'unregistered' })),
+      [rows()[0]!], rows().map(b => ({ ...b, yieldsTo: 'fresh-account' }))]) {
+      const r = routeRecommendation(budgets, 'qa', 'claude')
+      expect(r.harness).toBeNull()
+      expect(r.reason).toBe('No eligible plan for qa.')
+    }
   })
 })
 
