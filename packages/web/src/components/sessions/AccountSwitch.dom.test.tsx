@@ -337,6 +337,41 @@ describe('AccountSwitchDialog — layout', () => {
     expect(aside.querySelectorAll('[data-account-row]').length).toBe(10)
     expect(aside.style.overflowY).toBe('auto')
     expect(dialog.style.overflowY).toBe('hidden')
+    // The aside is the scroll container and its height is bounded by the viewport, not by its content.
+    expect(aside.style.maxHeight).toContain('dvh')
+    expect(parseInt(aside.style.minHeight || '0')).toBe(0)
+    expect(main.style.maxHeight).toBe(aside.style.maxHeight)
+    // Reading order is the stacked one: rows, then the checkbox, then the buttons.
+    const order = Array.from(dialog.querySelectorAll('[data-account-row], [role="checkbox"], [data-dialog-footer] button'))
+    const firstRow = order.findIndex(e => e.hasAttribute('data-account-row'))
+    const box = order.findIndex(e => e.getAttribute('role') === 'checkbox')
+    const btn = order.findIndex(e => e.closest('[data-dialog-footer]'))
+    expect(firstRow).toBe(0)
+    expect(box).toBeGreaterThan(firstRow)
+    expect(btn).toBeGreaterThan(box)
+    await act(async () => { root.unmount() })
+  })
+
+  test('while the switch runs Cancel is disabled and Escape does not close', async () => {
+    window.innerWidth = 1440
+    let closed = 0
+    let release: (v: unknown) => void = () => {}
+    const prev = globalThis.fetch
+    ;(globalThis as { fetch?: unknown }).fetch = async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith('/api/fleet/switch-account') && init?.method === 'POST') return new Promise(res => { release = () => res(json(postReply)) })
+      return (prev as typeof fetch)(url, init)
+    }
+    const { root } = await mount(createElement(mod.AccountSwitchDialog, { ...props(many), onClose: () => { closed++ } }))
+    const row = document.querySelector('[data-account-row]:not([disabled])') as HTMLElement
+    await act(async () => { row.click() })
+    await act(async () => { (document.querySelector('[data-account-switch-confirm], [data-dialog-footer] button:last-child') as HTMLElement).click() })
+    const cancel = document.querySelector('[data-dialog-footer] button') as HTMLButtonElement
+    expect(closed).toBe(0)
+    expect(cancel.disabled).toBe(true)
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(closed).toBe(0)
+    globalThis.fetch = prev
+    await act(async () => { release(null); await new Promise(r => setTimeout(r, 20)) })
     await act(async () => { root.unmount() })
   })
 

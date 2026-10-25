@@ -242,6 +242,7 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
       onConfirm={() => { void flow.confirm() }}
       onCancel={onClose}
       busy={flow.busy || !flow.chosen}
+      lockCancel={flow.busy}
       mobileSheet
       maxWidth={920}
       aside={<AccountPicker flow={flow} lang={lang} />}
