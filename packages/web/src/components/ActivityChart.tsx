@@ -267,6 +267,19 @@ export function ActivityChart({
   )
 }
 
+/** Evenly spaced, round-ish ticks across [min, max]: few enough to read at 390 px. */
+export function timeTicks(min: number, max: number, count: number): number[] {
+  if (!(max > min) || count < 2) return [min]
+  const span = max - min
+  const steps = [3_600_000, 3 * 3_600_000, 6 * 3_600_000, 12 * 3_600_000, 24 * 3_600_000, 2 * 24 * 3_600_000, 3 * 24 * 3_600_000, 7 * 24 * 3_600_000]
+  const step = steps.find(s => span / s <= count - 1) ?? steps[steps.length - 1]!
+  // Day-or-longer steps align to the local midnight, the rest to the local hour.
+  const align = (t: number) => { const d = new Date(t); if (step >= 24 * 3_600_000) d.setHours(0, 0, 0, 0); else d.setMinutes(0, 0, 0); return d.getTime() }
+  const ticks: number[] = []
+  for (let t = align(min); t <= max; t += step) if (t >= min) ticks.push(t)
+  return ticks.length ? ticks : [min, max]
+}
+
 /** Percent comparisons share the activity chart's frame, with a fixed scale and no normalization. */
 export function ActivityPercentChart({ data, series, lang, height = 220 }: {
   data: { at: number; [key: string]: number | null }[]
@@ -276,15 +289,30 @@ export function ActivityPercentChart({ data, series, lang, height = 220 }: {
 }) {
   const locale = lang === 'pt' ? 'pt-BR' : 'en-US'
   const dateLabel = (at: number) => new Date(at).toLocaleString(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-  return <div style={{ minWidth: 0 }} role="img" aria-label={series.map(s => s.label).join(' · ')}>
+  const min = data.length ? Math.min(...data.map(p => p.at)) : 0
+  const max = data.length ? Math.max(...data.map(p => p.at)) : 0
+  const short = max - min < 36 * 3_600_000
+  const tickLabel = (at: number) => new Date(at).toLocaleString(locale, short ? { hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' })
+  const narrow = typeof window !== 'undefined' && window.innerWidth < 520
+  const ticks = timeTicks(min, max, narrow ? 4 : 7)
+  // The tooltip follows the pointer and leaves with it; on touch, a tap outside the chart closes it.
+  const [open, setOpen] = useState(false)
+  const box = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    if (!open) return
+    const away = (e: Event) => { if (!box.current?.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('pointerdown', away)
+    return () => document.removeEventListener('pointerdown', away)
+  }, [open])
+  return <div ref={box} style={{ minWidth: 0 }} role="img" aria-label={series.map(s => s.label).join(' · ')} onMouseLeave={() => setOpen(false)}>
     <ResponsiveContainer width="100%" height={height}>
-      <LineChart data={data} margin={{ left: 0, right: 8, top: 8 }}>
+      <LineChart data={data} margin={{ left: 0, right: 12, top: 8 }} onMouseMove={() => setOpen(true)} onClick={() => setOpen(true)}>
         <CartesianGrid stroke="var(--border)" vertical={false} />
-        <XAxis dataKey="at" type="number" domain={['dataMin', 'dataMax']} tickFormatter={dateLabel} tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={50} />
-        <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} width={38} tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }} axisLine={false} tickLine={false} />
-        <Tooltip labelFormatter={v => dateLabel(Number(v))} formatter={v => v == null ? '—' : `${Number(v).toFixed(1)}%`} contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10 }} />
+        <XAxis dataKey="at" type="number" domain={['dataMin', 'dataMax']} ticks={ticks} tickFormatter={tickLabel} tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }} axisLine={false} tickLine={false} interval={0} />
+        <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tickFormatter={v => `${v}%`} width={38} tick={{ fill: 'var(--text-tertiary)', fontSize: 10 }} axisLine={false} tickLine={false} />
+        <Tooltip active={open ? undefined : false} labelFormatter={v => dateLabel(Number(v))} formatter={v => v == null ? '—' : `${Number(v).toFixed(1)}%`} contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 10 }} />
         <Legend wrapperStyle={{ fontSize: 11, overflowWrap: 'anywhere' }} />
-        {series.map(s => <Line key={s.key} dataKey={s.key} name={s.label} stroke={s.color} strokeDasharray={s.expected ? '5 4' : undefined} strokeWidth={1.5} type="linear" dot={!s.expected} connectNulls={s.connectNulls ?? false} isAnimationActive={false} />)}
+        {series.map(s => <Line key={s.key} dataKey={s.key} name={s.label} stroke={s.color} strokeDasharray={s.expected ? '5 4' : undefined} strokeWidth={s.expected ? 1.5 : 2} type="linear" dot={!s.expected && data.length < 3} activeDot={s.expected ? false : { r: 3 }} connectNulls={s.connectNulls ?? false} isAnimationActive={false} />)}
       </LineChart>
     </ResponsiveContainer>
   </div>

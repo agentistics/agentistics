@@ -13,6 +13,7 @@ import { NayLimitsTab } from '../../components/nay/NayLimitsTab'
 import { updatedPhrase, shortWhen } from '../../lib/planLimits'
 import { PlanLimitBars, PlanUsageCard } from '../../components/PlanLimitMeter'
 import { usageHeadline } from '../../lib/usagePlan'
+import { timeTicks } from '../../components/ActivityChart'
 import { UsageCharts, usageChartData } from './UsageCharts'
 
 const NOW = Date.parse('2026-10-18T12:00:00Z')
@@ -125,7 +126,7 @@ describe('usage account cards', () => {
     for (const lang of ['pt', 'en'] as const) {
       const html = render(<UsageNowPage />, 390, lang)
       expect(html).toContain('30%')
-      expect(html).toContain(lang === 'pt' ? 'desde que o servidor iniciou' : 'since the server started')
+      expect(html).toContain(lang === 'pt' ? 'Ainda não há histórico de uso registrado' : 'No usage history recorded yet')
       expect(html).not.toContain(lang === 'pt' ? 'Ainda não há leituras de uso neste período.' : 'No usage readings in this period yet.')
     }
   })
@@ -248,11 +249,11 @@ describe('usage account cards', () => {
     expect(html).toContain('value="4"')
     expect(html).toContain('2 sessões em paralelo')
   })
-  test('history explains its in-memory lifetime and empty readings', () => {
+  test('history states its empty state and empty readings', () => {
     __setPlanLimitsForTest([], NOW)
     for (const lang of ['pt', 'en'] as const) {
       const html = render(<UsageHistoryPage />, 390, lang)
-      const scope = lang === 'pt' ? /desde que o servidor iniciou/g : /since the server started/g
+      const scope = lang === 'pt' ? /Ainda não há histórico de uso registrado/g : /No usage history recorded yet/g
       expect(html.match(scope)).toHaveLength(1)
       expect(html).toContain(lang === 'pt' ? 'As leituras atuais aparecem em Agora.' : 'Current readings appear in Now.')
     }
@@ -276,6 +277,28 @@ describe('usage percent series', () => {
       { at: NOW, actual: null, expected: 100 },
     ])
     expect(usageChartData(reading, '5h', NOW)).toEqual([])
+  })
+  test('a renewed window breaks the Real line instead of falling', () => {
+    const r1 = NOW - WEEK / 2, r2 = NOW + WEEK / 2
+    const reading = { harness: 'claude' as const, account: 'p', points: [
+      { at: NOW - WEEK + 1000, weekPct: 80, fiveHourPct: null, weekReset: r1 },
+      { at: NOW - WEEK + 2000, weekPct: 95, fiveHourPct: null, weekReset: r1 },
+      { at: NOW - 1000, weekPct: 3, fiveHourPct: null, weekReset: r2 },
+      { at: NOW, weekPct: 4, fiveHourPct: null, weekReset: r2 },
+    ] }
+    const data = usageChartData(reading, 'week', r2)
+    const gap = data.findIndex(p => p.actual === null && p.expected === null)
+    expect(data.slice(0, gap).filter(p => p.actual !== null).at(-1)!.actual).toBe(95)
+    expect(data.slice(gap).find(p => p.actual !== null)!.actual).toBe(3)
+    // within one window there is no gap
+    expect(data.filter(p => p.actual === null && p.expected === null)).toHaveLength(1)
+  })
+  test('ticks are few, ordered and inside the range', () => {
+    const t = timeTicks(NOW - WEEK, NOW, 4)
+    expect(t.length).toBeGreaterThan(1)
+    expect(t.length).toBeLessThanOrEqual(5)
+    expect(t.every((x, i) => x >= NOW - WEEK && x <= NOW && (i === 0 || x > t[i - 1]!))).toBe(true)
+    expect(timeTicks(NOW, NOW, 4)).toEqual([NOW])
   })
   test('missing renewal does not invent an expected line or a zero for unknown readings', () => {
     const reading = { harness: 'codex' as const, account: 'work', points: [{ at: NOW, weekPct: null, fiveHourPct: 12 }] }

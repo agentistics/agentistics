@@ -25,6 +25,7 @@ import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SES
 import {
   bind, byId, canonicalAccountId, forceProbe, sameLogin, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
 } from './harness-accounts'
+import { allHistory, dropHistory, moveHistory, recordHistory, __resetPlanHistoryForTest } from './plan-history'
 import { withFileLock } from './sessions/file-lock'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
@@ -245,6 +246,7 @@ async function migrateDefaultRecords(registry?: AccountsFile): Promise<boolean> 
     }
     const h = history.get(oldKey)
     if (h) { history.set(newKey, [...(history.get(newKey) ?? []), ...h.map(x => ({ ...x, account: id }))]); history.delete(oldKey) }
+    void moveHistory(oldKey, newKey).catch(() => {})
     moved = true
   }
   return moved
@@ -415,6 +417,7 @@ async function ingestPlanLimitsNow(reading: PlanLimits): Promise<boolean> {
       newSegment = true
       segmentStarts.set(l.account, l.updatedAt)
       history.delete(key)
+      await dropHistory(key).catch(() => {})
       state.notices = resetNoticesFor(state.notices, l.harness, l.account)
     }
   }
@@ -423,6 +426,7 @@ async function ingestPlanLimitsNow(reading: PlanLimits): Promise<boolean> {
   readings.push(l)
   const cutoff = l.updatedAt - 7 * 24 * 3_600_000
   history.set(key, readings.filter(x => x.updatedAt >= cutoff).slice(-32))
+  await recordHistory(key, l).catch(() => {})
   // Only the owner judges thresholds: a notice decided by a process that cannot raise it would be
   // recorded as told and never reach anyone.
   const notices: PlanThresholdNotice[] = []
@@ -712,7 +716,7 @@ export interface PlanLimitsPayload {
   budgets: AccountBudgetRow[]
   hiddenFromAgents: AccountBudgetRow[]
   /** Owner-only in-memory history, including accounts hidden from agents. Times are epoch ms. */
-  readings: { account: string; harness: HarnessId; points: { at: number; weekPct: number | null; fiveHourPct: number | null }[] }[]
+  readings: { account: string; harness: HarnessId; points: { at: number; weekPct: number | null; fiveHourPct: number | null; weekReset?: number; fiveReset?: number }[] }[]
   freeSlots: number
   freeSlotsByHarness: Partial<Record<HarnessId, number>>
   freeSlotsByAccount: Record<string, number>
@@ -836,18 +840,29 @@ export async function planLimitsPayload(
     return !!rx && !!ry && sameLogin(rx, ry)
   }
   const budgets = yieldStaleRows(visibleBudgets, sameAccount)
-  const readings: PlanLimitsPayload['readings'] = [...history.values()].flatMap(list => {
+  // The persisted, downsampled series; the in-memory raw readings only for a key it has not met.
+  const persisted = await allHistory().catch(() => [] as Awaited<ReturnType<typeof allHistory>>)
+  const readings: PlanLimitsPayload['readings'] = []
+  const seen = new Set<string>()
+  for (const [key, pts] of persisted) {
+    const mine = history.get(key)?.at(-1) ?? state.limits[key]
+    const [harness, ...rest] = key.split(':')
+    if (!pts.length || !harness || !isHarnessId(harness)) continue
+    seen.add(key)
+    readings.push({ account: mine?.account ?? rest.join(':'), harness: mine?.harness ?? harness, points: pts })
+  }
+  for (const [key, list] of history) {
     const last = list.at(-1)
-    if (!last) return []
-    return [{
+    if (!last || seen.has(key)) continue
+    readings.push({
       account: last.account, harness: last.harness,
       points: [...list].sort((a, b) => a.updatedAt - b.updatedAt).map(l => ({
         at: l.updatedAt,
         weekPct: l.windows.find(w => w.kind === 'week')?.usedPct ?? null,
         fiveHourPct: l.windows.find(w => w.kind === '5h')?.usedPct ?? null,
       })),
-    }]
-  })
+    })
+  }
   // Plans registered in Settings → Billing whose account has reported no window yet: listed by
   // name with NO meters (nothing observed is not nothing used). Hidden accounts are absent.
   const registered: PlanLimitsPayload['registered'] = []
@@ -893,6 +908,7 @@ export function __resetPlanLimitsForTest(file: string | null = null): void {
   codexPending.clear()
   state = { limits: {}, notices: {} }
   history.clear()
+  __resetPlanHistoryForTest(file === null ? join(AGENTISTICS_DATA_DIR, `.plan-history-test-none-${process.pid}`) : `${file}.history`)
   segmentStarts.clear()
   migratedAway.clear()
   lastMigrateCheck = 0
