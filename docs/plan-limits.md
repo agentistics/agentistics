@@ -72,6 +72,10 @@ positional default for the `--session`s that follow) and every reopen.
   login). Naming a signed-out account, or reopening a row recorded on one, is refused in words
   (**409 `account_signed_out`**) for the owner as well — it never runs under whatever login holds a
   root now.
+- Antigravity's legacy `default` and `root:<hash>` records for the default root merge before
+  identification. Its first confirmed identity keeps the surviving record's id and nickname.
+  Only Antigravity treats `root:` records as unidentified placeholders: it minted those keys
+  before it had an identity probe. Other harnesses keep `root:` records separate from a new login.
 - No `account` → the router's pick for that harness (C2's agent-visible budgets, `pickAccount`), else
   the default root when its account is visible, else the oldest visible signed-in account (a
   secondary-only account included), else the owner keeps the default root and an agent is refused.

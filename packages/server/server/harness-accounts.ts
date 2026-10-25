@@ -168,7 +168,8 @@ export function sameLogin(
   if (a.key === 'default' || b.key === 'default') {
     // The unknown identity: only the same directory can say it is the same login.
     if (a.key === b.key) return normRoot(a.root) === normRoot(b.root)
-    if (a.harness === 'claude' || IDENTITY_PROBES[a.harness] !== null) return false
+    // Antigravity's legacy default/root pair still names one unknown login after gaining a probe.
+    if (a.harness === 'claude' || (a.harness !== 'antigravity' && IDENTITY_PROBES[a.harness] !== null)) return false
     const [legacy, rooted] = a.key === 'default' ? [a, b] : [b, a]
     return legacy.root === null && rooted.root === null && rooted.key.startsWith('root:')
   }
@@ -267,8 +268,10 @@ function foldAccount(data: AccountsFile, keep: HarnessAccount, drop: HarnessAcco
 }
 
 /**
- * A `default` record (or a `root:<hash>` one, minted while the harness had no probe at all) of a
- * harness WITH an identity probe is the login on a root that could not be identified yet (a v1 list, or a probe that read nothing). The first CONFIRMED identity bound to
+ * A `default` record of a harness WITH an identity probe is the login on a root that could not be
+ * identified yet (a v1 list, or a probe that read nothing). Antigravity also treats `root:<hash>` as
+ * a placeholder because it minted those keys while it had no probe. Other harnesses keep those
+ * records separate. The first CONFIRMED identity bound to
  * that same root is that login, so the placeholder folds into it — exactly one placeholder, never
  * one another root is bound to. Without this the placeholder outlives the fix that identifies the
  * login and shows as a second, never-read plan beside the real one.
@@ -278,7 +281,8 @@ function foldPlaceholder(data: AccountsFile, account: HarnessAccount, displaced?
   const bound = new Set(Object.values(data.bindings))
   // `displaced` was bound to this root a moment ago; `adopt` has already cleared its root.
   const placeholders = data.accounts.filter(a => a !== account && a.harness === account.harness
-    && (a.key === 'default' || a.key.startsWith('root:')) && !bound.has(a.id) && (a === displaced || sameRoot(account.harness, a.root, account.root)))
+    && (a.key === 'default' || (a.harness === 'antigravity' && a.key.startsWith('root:')))
+    && !bound.has(a.id) && (a === displaced || sameRoot(account.harness, a.root, account.root)))
   if (placeholders.length !== 1) return false
   // The identified login takes the placeholder's id: Billing profiles, session rows and nicknames the
   // owner already keyed by it keep resolving with no alias lookup; the fresh id becomes the alias.
