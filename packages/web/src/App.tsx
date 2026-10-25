@@ -99,6 +99,7 @@ import { ModeSwitch } from './components/nav/ModeSwitch'
 import { useEngineCaps } from './hooks/useEngineCaps'
 import { visibleSettingsSections } from './lib/settingsSections'
 import { AreaTree } from './components/nav/AreaTree'
+import { AREA_RAIL_W, AreaRail } from './components/nav/AreaRail'
 import { areaBadges } from './lib/areaBadges'
 import { MobileAreaBar, MobileActionTile } from './components/nav/MobileAreaBar'
 import { usePlanLimits } from './lib/planLimits'
@@ -1168,7 +1169,8 @@ function SideNav({
   return (
     <aside style={{
       position: 'fixed', top: 0, left: 0, bottom: 0,
-      width: collapsed ? SIDEBAR_W_COLLAPSED : width, zIndex: 200,
+      // The Sessões area adds the area rail (and its gap) in front of the list; the list keeps its width.
+      width: (collapsed ? SIDEBAR_W_COLLAPSED : width) + (mode === 'sessions' ? AREA_RAIL_W + PANEL_GAP : 0), zIndex: 200,
       // FLOATING-PANELS DESIGN (`sdd/brief.md`): in the sessions workspace this element is the
       // FRAME, not a panel — its own background reads as the frame's ground colour, and the actual
       // sessions-list PANEL (below the mark/mode-switch, its own border+radius+overflow:hidden) is
@@ -1203,12 +1205,6 @@ function SideNav({
       {/* The aside is the full height of the window, so it carries its own mark and fold control —
           this row is FRAME chrome (the mockup's own titlebar), never inside the panel below it. */}
       <AsideHeader lang={lang === 'pt' ? 'pt' : 'en'} height={TOPBAR_H} collapsed={collapsed} onToggle={onToggle} />
-      {/* The workspace switch, PINNED above the scrolling body — frame chrome too, same reason. */}
-      {mode === 'sessions' && (
-        <div style={{ padding: '0 2px 10px' }}>
-          <ModeSwitch lang={lang} collapsed={collapsed} attention={attention} />
-        </div>
-      )}
 
       {/* ONE aside, two bodies — never two asides. The shell above is shared; only what sits below
           it changes. Collapsed, the sessions workspace draws the RAIL — sessions, not the
@@ -1234,7 +1230,10 @@ function SideNav({
          * RESIZE GAP is withheld while collapsed (`!collapsed` below): a fixed 64px rail has nothing
          * to resize.
          */
-        <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: PANEL_GAP }}>
+        {/* APP.AREAS Task 4: the areas as a rail of icons beside the list, which is unchanged. */}
+        <AreaRail lang={pt ? 'pt' : 'en'} pathname={location.pathname} badges={areaBadgeCounts} visibleSettings={visibleSettings} />
+        <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{
             flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
             border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden',
@@ -1290,6 +1289,7 @@ function SideNav({
               style={{ position: 'absolute', top: 0, bottom: 0, right: -PANEL_GAP }}
             />
           )}
+        </div>
         </div>
       ) : (
       <>
@@ -1647,17 +1647,20 @@ export default function AppLayout() {
   // Only the sessions workspace offers the handle, but whatever it is dragged to applies to both.
   const liveAsideWidth = asideWidth
   const inSessionsWorkspace = modeOfPath(location.pathname) === 'sessions'
+  // The fixed aside's real width: the list (or the collapsed rail), plus the Sessões area's own
+  // area rail and its gap. Every inset that clears the aside reads this one figure.
+  const leftAsideW = (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth) + (inSessionsWorkspace ? AREA_RAIL_W + PANEL_GAP : 0)
   // PUBLISHED for `SessionPanel.tsx`/`ShellBand.tsx`'s full-screen surfaces, deep inside
   // `SessionsPage.tsx` — see `leftAsideEdge.ts`'s own header for the bug this fixes (full screen
   // reaching through the left sessions list). `0` on mobile: that layout has no fixed left sidebar
   // for a full-screen surface to avoid, and mobile panels cover the viewport by design anyway.
   useEffect(() => {
-    setLeftAsideEdge(isMobile ? 0 : (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth))
+    setLeftAsideEdge(isMobile ? 0 : leftAsideW)
     // Alongside it — see `leftAsideOpen.ts`'s own header for why this needs to be a SEPARATE
     // boolean rather than a comparison against the edge above (a genuinely narrow expanded list can
     // coincide with `SIDEBAR_W_COLLAPSED`'s own width).
     setLeftAsideOpen(!isMobile && !sidebarCollapsed)
-  }, [isMobile, sidebarCollapsed, liveAsideWidth])
+  }, [isMobile, sidebarCollapsed, leftAsideW])
 
   /**
    * THE PHONE'S SESSIONS WORKSPACE, AND THE TWO WAYS ITS DOCUMENT MOVED WHEN IT SHOULD NOT HAVE.
@@ -2129,7 +2132,7 @@ export default function AppLayout() {
     measureFiltrosAnchor()
     window.addEventListener('resize', measureFiltrosAnchor)
     return () => window.removeEventListener('resize', measureFiltrosAnchor)
-  }, [sessionsFiltersOpen, measureFiltrosAnchor, sidebarCollapsed, liveAsideWidth])
+  }, [sessionsFiltersOpen, measureFiltrosAnchor, sidebarCollapsed, leftAsideW])
   const filtrosBounds = filtrosPanelBounds(
     { left: 0, right: sessionsFiltersAnchor?.left ?? 0 },
     rightAsideEdge === null ? null : { left: rightAsideEdge - FILTROS_ASIDE_GAP, right: viewportW },
@@ -4407,7 +4410,7 @@ export default function AppLayout() {
         ? { paddingBottom: 'var(--mobile-nav-h)' }
         : {}),
       background: 'var(--bg-base)', display: 'flex', flexDirection: 'column',
-      paddingLeft: isMobile ? 0 : (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth),
+      paddingLeft: isMobile ? 0 : leftAsideW,
       paddingTop: isMobile ? 0 : 'var(--ag-topbar-h)',
       boxSizing: 'border-box',
       transition: 'padding-left 0.22s cubic-bezier(0.22, 1, 0.36, 1)',
@@ -4437,7 +4440,7 @@ export default function AppLayout() {
           below={tabsRowOn && tabNotice ? <ActionNotice message={tabNotice} lang={lang} onDismiss={() => setTabNotice(null)} /> : null}
           onBelowHeight={setTabNoticeHeight}
           height={TOPBAR_H}
-          asideWidth={sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth}
+          asideWidth={leftAsideW}
           // Owner-approved central-pane inset (2026-09-26): the sessions workspace's pane now
           // carries its own top border 5px below this strip — see `SessionsPage.tsx`'s
           // `CENTRAL_PANE` and `TopBar`'s own doc comment on `noBottomBorder`.

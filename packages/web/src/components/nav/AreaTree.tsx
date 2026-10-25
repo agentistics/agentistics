@@ -40,8 +40,13 @@ function recalled(id: AreaId): string | null {
   try { return sessionStorage.getItem(LAST_KEY + id) } catch { return null }
 }
 
+/** Where a click on an area lands: the page last visited inside it, else its first page. */
+export function areaEntryPath(area: Area): string {
+  return firstPath(area, recalled(area.id))
+}
+
 /** Themed hover tooltip for the icons-only state. */
-function Tip({ label, show, children }: { label: string; show: boolean; children: React.ReactNode }) {
+export function Tip({ label, show, children }: { label: string; show: boolean; children: React.ReactNode }) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   if (!show) return <>{children}</>
   return (
