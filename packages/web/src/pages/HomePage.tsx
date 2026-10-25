@@ -91,7 +91,7 @@ export default function HomePage() {
     if (id === 'messages') {
       card = <StatCard lang={lang} label={lang === 'pt' ? 'Mensagens' : 'Messages'} value={full ? fmtFull(d.totalMessages) : fmt(d.totalMessages)} sub={lang === 'pt' ? 'no período selecionado' : 'in selected period'} icon={<MessageSquare size={15} />} accent="var(--anthropic-orange)" info={infoItems[0]} onInfoClick={() => setInfoModalIndex(0)} fullPrecision={full} onTogglePrecision={tog(d.totalMessages)} />
     } else if (id === 'sessions') {
-      card = <StatCard lang={lang} label={lang === 'pt' ? 'Sessões' : 'Sessions'} value={full ? fmtFull(d.totalSessions) : fmt(d.totalSessions)} sub={`avg ${d.totalSessions > 0 ? Math.round(d.totalMessages / d.totalSessions) : 0} msgs/sessão`} icon={<Zap size={15} />} accent="var(--accent-blue)" info={infoItems[1]} onInfoClick={() => setInfoModalIndex(1)} fullPrecision={full} onTogglePrecision={tog(d.totalSessions)} />
+      card = <StatCard lang={lang} label={lang === 'pt' ? 'Sessões' : 'Sessions'} value={full ? fmtFull(d.totalSessions) : fmt(d.totalSessions)} sub={`${lang === 'pt' ? 'média de' : 'avg'} ${d.totalSessions > 0 ? Math.round(d.totalMessages / d.totalSessions) : 0} ${lang === 'pt' ? 'msgs/sessão' : 'msgs/session'}`} icon={<Zap size={15} />} accent="var(--accent-blue)" info={infoItems[1]} onInfoClick={() => setInfoModalIndex(1)} fullPrecision={full} onTogglePrecision={tog(d.totalSessions)} />
     } else if (id === 'tool-calls') {
       card = <StatCard lang={lang} label={lang === 'pt' ? 'Tool calls' : 'Tool calls'} value={full ? fmtFull(d.totalToolCalls) : fmt(d.totalToolCalls)} sub={lang === 'pt' ? 'execuções totais' : 'total executions'} icon={<Wrench size={15} />} accent="var(--accent-green)" info={infoItems[2]} onInfoClick={() => setInfoModalIndex(2)} fullPrecision={full} onTogglePrecision={tog(d.totalToolCalls)} />
     } else if (id === 'tokens') {
@@ -143,9 +143,6 @@ export default function HomePage() {
           // headline — BRL is ~5× the amount and can carry an extra digit.
           sizeBasis={widerValue(fmtCost(shownUSD, 'USD', brlRate), fmtCost(shownUSD, 'BRL', brlRate))}
           sub={showPlan ? planCostSub(lang) : [costCardSub(lang, filters.harness), estimateNote, d.unpricedTokens > 0 ? UNPRICED_TOTAL_MARKER[lang === 'pt' ? 'pt' : 'en'] : ''].filter(Boolean).join('\n')}
-          // Belt and braces beside the shorter text: every card in a grid row shares its height,
-          // so this one may never be the one that stretches it.
-          subNoWrap={showPlan}
           icon={<TrendingUp size={15} />} accent="var(--anthropic-orange)" info={infoItems[5]} onInfoClick={() => setInfoModalIndex(5)}
           // Only the currency lives here. The API/Plan switch moved to the filter bar, where it
           // was asked for and where people look to change what they are seeing — keeping a second
@@ -181,16 +178,13 @@ export default function HomePage() {
             const t = sessionTime(d.longestSession, lang)
             const msgs = (d.longestSession!.user_message_count ?? 0) + (d.longestSession!.assistant_message_count ?? 0)
             // Both figures are NAMED here ("active" / "elapsed") but NOT explained: the full
-            // definition lives in the ⓘ modal and the value tooltip. Spelled out on the card it
-            // wrapped to three lines and stretched the whole grid row. The project is its folder
-            // name, not the absolute path, for the same reason — and `subNoWrap` guarantees it,
-            // since a long enough folder name would otherwise wrap and bring the row back up.
+            // definition lives in the ⓘ modal and the value tooltip. The complete sub-line wraps
+            // within the card; the project is shown as its folder name.
             return `${t.activeLabel} · ${t.elapsed} ${t.elapsedLabel} · ${msgs} ${lang === 'pt' ? 'msgs' : 'msgs'}`
               + (filters.projects.length === 0 && d.longestSession!.project_path
                 ? ` · ${projectFolder(d.longestSession!.project_path)}`
                 : '')
           })() : ''}
-          subNoWrap
           icon={<Clock size={15} />} accent="var(--accent-purple)" info={infoItems[4]} onInfoClick={() => setInfoModalIndex(4)} />
       )
     } else if (id === 'commits') {
@@ -252,10 +246,12 @@ export default function HomePage() {
           <span style={{ fontSize: 11, opacity: 0.7 }}>{lang === 'pt' ? '1ª sessão' : 'first session'}</span>
           <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{format(derived.firstSessionDate, 'MMM d, yyyy')}</span>
           <span style={{ opacity: 0.4 }}>→</span>
-          <span style={{ fontSize: 11, opacity: 0.7 }}>{lang === 'pt' ? 'última sessão' : 'last session'}</span>
-          <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{format(derived.lastSessionDate, 'MMM d, yyyy')}</span>
-          <span style={{ opacity: 0.3, margin: '0 2px' }}>·</span>
-          <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{derived.sessionSpanDays.toLocaleString()}</strong> {lang === 'pt' ? 'dias' : 'days'}</span>
+          <span style={{ display: 'inline-flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 6 }}>
+            <span style={{ fontSize: 11, opacity: 0.7 }}>{lang === 'pt' ? 'última sessão' : 'last session'}</span>
+            <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{format(derived.lastSessionDate, 'MMM d, yyyy')}</span>
+            <span style={{ opacity: 0.3, margin: '0 2px' }}>·</span>
+            <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{derived.sessionSpanDays.toLocaleString()}</strong> {lang === 'pt' ? 'dias' : 'days'}</span>
+          </span>
         </div>
       )}
 

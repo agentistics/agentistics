@@ -160,7 +160,9 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
 // 390px, so on mobile each row renders as a stacked card: title + badge, a subtitle, label/value
 // field rows, and a footer of full-width 44px actions. The desktop <table> is kept as-is beside
 // it — this is an additional branch, never a replacement.
-export function RecordCard({ title, subtitle, badge, fields, actions, onClick, leading, wrapTitle = false }: {
+export function RecordCard({ title, subtitle, badge, fields, actions, onClick, leading, fieldLayout = 'inline', children, wrapTitle = false }: {
+  children?: React.ReactNode
+  fieldLayout?: 'inline' | 'stacked'
   title: React.ReactNode
   wrapTitle?: boolean
   subtitle?: React.ReactNode
@@ -179,26 +181,28 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
       onClick={onClick}
       style={{
         border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)',
-        cursor: onClick ? 'pointer' : 'default', overflow: 'hidden',
+        cursor: onClick ? 'pointer' : 'default', overflow: 'hidden', height: fieldLayout === 'stacked' ? '100%' : undefined,
+        display: 'flex', flexDirection: 'column', boxSizing: 'border-box',
       }}
     >
       <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           {leading && <span onClick={e => e.stopPropagation()} style={{ display: 'flex', flexShrink: 0 }}>{leading}</span>}
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: wrapTitle ? undefined : 'ellipsis', whiteSpace: wrapTitle ? 'normal' : 'nowrap', overflowWrap: wrapTitle ? 'anywhere' : undefined }}>{title}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: wrapTitle || fieldLayout === 'stacked' ? undefined : 'ellipsis', whiteSpace: wrapTitle || fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: wrapTitle || fieldLayout === 'stacked' ? 'anywhere' : undefined }}>{title}</div>
             {subtitle && (
-              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>{subtitle}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: fieldLayout === 'stacked' ? undefined : 'ellipsis', whiteSpace: fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: fieldLayout === 'stacked' ? 'anywhere' : undefined, marginTop: 1 }}>{subtitle}</div>
             )}
           </div>
           {badge && <span style={{ flexShrink: 0 }}>{badge}</span>}
         </div>
+        {children}
         {fields.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
             {fields.map(f => (
-              <div key={f.label} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 12 }}>
+              <div key={f.label} style={{ display: 'flex', flexDirection: fieldLayout === 'stacked' ? 'column' : 'row', alignItems: 'flex-start', gap: fieldLayout === 'stacked' ? 3 : 10, fontSize: 12 }}>
                 <span style={{ color: 'var(--text-tertiary)', flexShrink: 0, minWidth: 82 }}>{f.label}</span>
-                <span style={{ color: 'var(--text-secondary)', minWidth: 0, flex: 1, textAlign: 'right' }}>{f.value}</span>
+                <span style={{ color: 'var(--text-secondary)', minWidth: 0, maxWidth: '100%', flex: fieldLayout === 'stacked' ? undefined : 1, textAlign: fieldLayout === 'stacked' ? 'left' : 'right', overflowWrap: fieldLayout === 'stacked' ? 'anywhere' : undefined }}>{f.value}</span>
               </div>
             ))}
           </div>
@@ -208,7 +212,7 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
         <div
           onClick={e => e.stopPropagation()}
           style={{
-            display: 'flex', gap: 1, borderTop: '1px solid var(--border)',
+            display: 'flex', gap: 1, borderTop: '1px solid var(--border)', marginTop: 'auto',
             background: 'var(--border)',
           }}
         >
@@ -222,7 +226,8 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
 // RecordCardAction
 // A footer button for RecordCard: equal share of the row, 44px tall, flat against its neighbours
 // (the 1px gaps in the parent's background show through as hairline dividers).
-export function RecordCardAction({ onClick, children, danger, label, disabled }: {
+export function RecordCardAction({ onClick, children, danger, label, disabled, inline = false }: {
+  inline?: boolean
   onClick: () => void
   children: React.ReactNode
   danger?: boolean
@@ -239,9 +244,10 @@ export function RecordCardAction({ onClick, children, danger, label, disabled }:
       aria-label={label}
       aria-busy={disabled || undefined}
       style={{
-        flex: 1, minHeight: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-        border: 'none', background: 'var(--bg-card)',
-        color: danger ? '#ef4444' : 'var(--text-secondary)',
+        flex: inline ? '0 0 auto' : 1, minHeight: 44, minWidth: 44, padding: inline ? '0 8px' : undefined, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+        border: inline ? '1px solid var(--border)' : 'none', borderRadius: inline ? 8 : undefined,
+        background: inline ? 'var(--bg-elevated)' : 'var(--bg-card)',
+        color: danger ? '#ef4444' : inline ? 'var(--text-primary)' : 'var(--text-secondary)',
         fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
         cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
       }}
@@ -478,13 +484,14 @@ export function Toggle({ on, onToggle, disabled, label }: {
  * control"), same reason a `<label>` wrapper doesn't work here either (a label only forwards
  * clicks to a real form control, never to an element carrying an ARIA role).
  */
-export function RowSwitch({ on, onToggle, label, sub, icon, disabled, dimmed }: {
+export function RowSwitch({ on, onToggle, label, sub, icon, disabled, dimmed, wrap = false }: {
   on: boolean
   onToggle: () => void
   label: string
   sub?: string
   icon?: React.ReactNode
   disabled?: boolean
+  wrap?: boolean
   /** Renders the row de-emphasized with a struck-through label — the picker's "blocked
    *  repository" state. Deliberately not colour-only: a reader who cannot distinguish the
    *  on/off pill colour still sees the strikethrough and the lower opacity. */
@@ -514,13 +521,13 @@ export function RowSwitch({ on, onToggle, label, sub, icon, disabled, dimmed }: 
           fontSize: 13, fontWeight: 500, color: 'var(--text-primary)',
           textDecoration: dimmed ? 'line-through' : 'none',
           opacity: dimmed ? 0.55 : 1,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          overflow: wrap ? undefined : 'hidden', textOverflow: wrap ? undefined : 'ellipsis', whiteSpace: wrap ? 'normal' : 'nowrap', overflowWrap: wrap ? 'anywhere' : undefined,
         }}>{label}</div>
         {sub && (
           <div style={{
-            fontSize: 11, color: 'var(--text-tertiary)', marginTop: 1,
+            fontSize: wrap ? 13 : 11, color: wrap ? 'var(--text-secondary)' : 'var(--text-tertiary)', marginTop: 1,
             opacity: dimmed ? 0.55 : 1,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            overflow: wrap ? undefined : 'hidden', textOverflow: wrap ? undefined : 'ellipsis', whiteSpace: wrap ? 'normal' : 'nowrap', overflowWrap: wrap ? 'anywhere' : undefined,
           }}>{sub}</div>
         )}
       </span>
@@ -583,7 +590,7 @@ export function StatusDot({ state, size = 8 }: {
  * included — adding an inline 16px here would be dead code that reads like a live requirement.
  */
 export function FieldInput({
-  label, sub, value, onChange, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, minHeight, hideReveal,
+  label, sub, value, onChange, min, step, invalid, describedBy, unit, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false, minHeight, hideReveal,
 }: {
   label: string
   minHeight?: number
@@ -591,7 +598,13 @@ export function FieldInput({
   sub?: string
   value: string
   onChange: (v: string) => void
-  type?: 'text' | 'password'
+  min?: number
+  step?: number | 'any'
+  invalid?: boolean
+  describedBy?: string
+  unit?: string
+  type?: 'text' | 'password' | 'number'
+  isMobile?: boolean
   placeholder?: string
   disabled?: boolean
   autoComplete?: string
@@ -601,18 +614,24 @@ export function FieldInput({
   mono?: boolean
   inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']
   spellCheck?: boolean
+  /** Keep the label for screen readers only (the field already carries it as `aria-label`). */
+  hideLabel?: boolean
 }) {
   // A hidden field the user cannot proof-read is where a mistyped token or password becomes a
   // failure somewhere else entirely; the reveal is the same control every other form here uses.
   const [shown, setShown] = useState(false)
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 2 }}>{label}</div>
+    <div style={{ marginBottom: hideLabel ? 0 : 14 }}>
+      {!hideLabel && <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 2 }}>{label}</div>}
       {sub && <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 5 }}>{sub}</div>}
       <div style={{ position: 'relative', display: 'flex', flexDirection: 'column' }}>
       <input
         type={type === 'password' && shown ? 'text' : type}
         value={value}
+        min={min}
+        step={step}
+        aria-invalid={invalid}
+        aria-describedby={describedBy}
         placeholder={placeholder}
         onChange={e => onChange(e.target.value)}
         disabled={disabled}
@@ -622,11 +641,11 @@ export function FieldInput({
         autoFocus={autoFocus}
         inputMode={inputMode}
         spellCheck={spellCheck}
-        aria-label={label}
+        aria-label={unit ? `${label} (${unit})` : label}
         style={{
-          width: '100%', boxSizing: 'border-box',
-          padding: '7px 10px', minHeight,
-          ...(type === 'password' && !hideReveal ? { paddingRight: REVEAL_PAD } : null),
+          width: '100%', boxSizing: 'border-box', minHeight: minHeight ?? (isMobile ? 44 : undefined),
+          padding: '7px 10px',
+          ...(type === 'password' && !hideReveal ? { paddingRight: REVEAL_PAD } : unit ? { paddingRight: 76 } : null),
           background: 'var(--bg-elevated)',
           border: '1px solid var(--border)',
           borderRadius: 7,
@@ -640,6 +659,7 @@ export function FieldInput({
         onFocus={e => { if (!disabled) e.currentTarget.style.borderColor = 'var(--anthropic-orange)' }}
         onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
       />
+      {unit && <span aria-hidden="true" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', fontSize: 13, pointerEvents: 'none' }}>{unit}</span>}
       {type === 'password' && !hideReveal && <RevealButton shown={shown} onToggle={() => setShown(v => !v)} />}
       </div>
     </div>

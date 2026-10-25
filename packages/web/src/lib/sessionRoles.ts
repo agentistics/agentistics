@@ -34,6 +34,7 @@ const parseRoles = (raw: unknown): SessionRoles => {
 }
 
 let cache: SessionRoles = {}
+let rolesReady = false
 let originCache: RoleOrigins = {}
 const parseOrigins = (raw: unknown): RoleOrigins => {
   const out: RoleOrigins = {}
@@ -57,7 +58,9 @@ export async function refreshRoles(): Promise<void> {
     const next = parseRoles(body.roles)
     const nextOrigins = parseOrigins(body.origins)
     if (pendingWrites > 0) return
-    if (JSON.stringify(next) !== JSON.stringify(cache) || JSON.stringify(nextOrigins) !== JSON.stringify(originCache)) { cache = next; originCache = nextOrigins; emit() }
+    const firstAnswer = !rolesReady
+    rolesReady = true
+    if (firstAnswer || JSON.stringify(next) !== JSON.stringify(cache) || JSON.stringify(nextOrigins) !== JSON.stringify(originCache)) { cache = next; originCache = nextOrigins; emit() }
   } catch { /* offline or no host power: keep what we have */ }
 }
 
@@ -86,7 +89,9 @@ async function fetchRolesFresh(): Promise<boolean> {
     const nextOrigins = parseOrigins(body.origins)
     const merged = pendingWrites > 0 ? { ...next, ...cache } : next
     const mergedOrigins = pendingWrites > 0 ? { ...nextOrigins, ...originCache } : nextOrigins
-    if (JSON.stringify(merged) !== JSON.stringify(cache) || JSON.stringify(mergedOrigins) !== JSON.stringify(originCache)) { cache = merged; originCache = mergedOrigins; emit() }
+    const firstAnswer = !rolesReady
+    rolesReady = true
+    if (firstAnswer || JSON.stringify(merged) !== JSON.stringify(cache) || JSON.stringify(mergedOrigins) !== JSON.stringify(originCache)) { cache = merged; originCache = mergedOrigins; emit() }
     return true
   } catch { return false }
 }
@@ -183,3 +188,6 @@ export function useSessionRoleOrigin(id: string): RoleOrigin | undefined {
 }
 export function useSessionRoles(): SessionRoles { return useSyncExternalStore(roles.subscribe, roles.get, roles.serverSnapshot) }
 export function useMuteWorkers(): boolean { return useSyncExternalStore(muted.subscribe, muted.get, muted.serverSnapshot) }
+
+/** Whether the role store has answered at least once; an unanswered map is not zero leaders. */
+export function useSessionRolesReady(): boolean { return useSyncExternalStore(roles.subscribe, () => rolesReady, () => false) }

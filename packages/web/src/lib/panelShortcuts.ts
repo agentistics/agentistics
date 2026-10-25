@@ -25,7 +25,7 @@
  * so they fire regardless of where focus is.
  */
 
-export type PanelShortcutId = 'toggle-left' | 'toggle-right' | 'toggle-band'
+export type PanelShortcutId = 'toggle-left' | 'toggle-right' | 'toggle-band' | 'focus-search'
 
 /** The subset of a keyboard event this module reads — narrowed so a test can hand in a plain
  *  object rather than constructing a real DOM `KeyboardEvent`. `code` is the LAYOUT-INDEPENDENT
@@ -61,6 +61,8 @@ export function matchPanelShortcut(e: PanelShortcutInput): PanelShortcutId | nul
   const mod = e.ctrl || e.meta
   if (!mod || e.alt) return null
   const key = e.key.toLowerCase()
+  // Ctrl/Cmd+K focuses the area tree's search (every desktop page, not only the Sessions workspace).
+  if (key === 'k' && !e.shift) return 'focus-search'
   if (key === 'b') return e.shift ? 'toggle-right' : 'toggle-left'
   if (!e.shift && (QUOTE_CODES.has(e.code) || QUOTE_KEYS.has(key))) return 'toggle-band'
   return null

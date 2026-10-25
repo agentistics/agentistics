@@ -39,6 +39,7 @@
   --accent-purple: #8b5cf6;
   --accent-green: #10b981;
   --accent-green-dim: rgba(16, 185, 129, 0.12);
+  --accent-amber: #f59e0b;
   --accent-red: #ef4444;
   --accent-red-dim: rgba(239, 68, 68, 0.12);
   --accent-cyan: #06b6d4;
@@ -86,6 +87,7 @@
   --accent-purple: #7c3aed;
   --accent-green: #047857;
   --accent-green-dim: rgba(4, 120, 87, 0.1);
+  --accent-amber: #92400e;
   --accent-red: #b91c1c;
   --accent-red-dim: rgba(185, 28, 28, 0.1);
   --accent-cyan: #0e7490;
@@ -1134,6 +1136,49 @@ tr:focus-within .ag-row-actions,
 }
 @media (max-width: 380px) { .ag-code-boxes { gap: 6px; } .ag-code-box { height: 48px; } }
 @media (prefers-reduced-motion: reduce) { .ag-code-boxes.is-shaking { animation: none; } }
+
+/* Shared physical touch targets for chat and every nested dock tab. */
+@media (max-width: 767px) {
+  .ag-nay-dock :is(button, a[href], [role="button"]) {
+    min-width: 44px;
+    min-height: 44px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+  }
+  .ag-nay-dock :is(.ag-tap, .ag-tap-icon)::after { inset: 0; }
+}
+
+/* KPI actions share physical touch targets, including consumer-supplied chips.
+   Physical boxes prevent overlapping targets in a wrapping control row. */
+@media (max-width: 767px) {
+  .ag-stat-card button {
+    min-width: 44px;
+    min-height: 44px;
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Task chips have inline minimums; keep the target rule authoritative here. */
+  .ag-task-detail :is(button, [role="button"]) {
+    min-width: 44px !important;
+    min-height: 44px !important;
+    --ag-tap-grow: 0;
+    flex-shrink: 0;
+  }
+}
+
+/* Phone shell chrome: full 44px targets in layout, including shared header icons and tabs.
+   Wrapping the header preserves those targets when all optional status controls are present. */
+@media (max-width: 767px) {
+  .ag-mobile-shell-header button,
+  .ag-mobile-shell-header a,
+  .ag-mobile-shell-tabs button {
+    min-height: 44px;
+    min-width: 44px;
+    box-sizing: border-box;
+  }
+}
 
 /* A minimum-width aside stacks the two sleeping-row actions in their trailing slot, leaving
    enough room for the full last word and its role badge. Wider rows keep both actions inline. */

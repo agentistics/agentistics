@@ -1,14 +1,14 @@
 /**
  * SegmentedTabs — the segmented control, as a shape.
  *
- * Extracted from `ModeSwitch` (the Painel | Sessões switch) so the sessions aside's own
- * Ativas | Grupos | Encerradas tabs are the SAME control rather than a second one that drifts:
- * one track, one raised segment, one badge. `ModeSwitch` keeps owning what its segments MEAN
- * (navigation between workspaces); this file only draws.
+ * Extracted from the former `ModeSwitch` (the Painel | Sessões switch, removed by APP.AREAS) so
+ * the sessions aside's own Ativas | Grupos | Encerradas tabs are the SAME control rather than a
+ * second one that drifts: one track, one raised segment, one badge. Each caller owns what its
+ * segments MEAN; this file only draws.
  */
 
 import type React from 'react'
-import './ModeSwitch.css'
+import './SegmentedTabs.css'
 import { COUNT_BADGE } from './countBadge'
 
 export interface SegmentedTab<Id extends string> {
@@ -37,7 +37,7 @@ export function SegmentedTabs<Id extends string>({ tabs, value, onChange, collap
   /** Icons only, stacked — the 64px rail. */
   collapsed?: boolean
   ariaLabel: string
-  /** The CSS container this control answers to (`ModeSwitch.css` narrows the segments under it). */
+  /** The CSS container this control answers to (`SegmentedTabs.css` narrows the segments under it). */
   containerName?: string
   className?: string
   /** Equal-width segments (the aside's three tabs); otherwise each takes its content's width. */

@@ -230,11 +230,6 @@ function totalTools(s: SessionMeta): number {
   return Object.values(s.tool_counts ?? {}).reduce((a, b) => a + b, 0)
 }
 
-function truncate(str: string, max: number): string {
-  if (!str) return ''
-  return str.length <= max ? str : str.slice(0, max) + '…'
-}
-
 /** The state is the live poll's, never the session record's — a stored session has none, and a
  *  pinned row is only known to be OPEN, which is why it falls back to "working". */
 function getStatusInfo(state?: SessionActivity, isPinned?: boolean): { color: string; labelPt: string; labelEn: string } {
@@ -1490,12 +1485,12 @@ function CardMeta({ s, fleetRow, lang, grouping, bandLabel }: {
   const said = (fact: CardFact, value?: string) => bandRepeats(g, fact, value, bandLabel)
   const repo = s.git_remote ? repoShortName(s.git_remote) : ''
   const project = fleetRow?.project || (s.project_path ? formatProjectName(s.project_path) : '')
-  if (project && !said('project', project)) bits.push(<span key="p" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0 }}><Folder size={11} style={{ opacity: 0.7, flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{project}</span></span>)
-  if (repo && !said('repo', repo)) bits.push(<span key="r" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0 }}><GitCommit size={11} style={{ opacity: 0.7, flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{repo}</span></span>)
+  if (project && !said('project', project)) bits.push(<span key="p" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0 }}><Folder size={11} style={{ opacity: 0.7, flexShrink: 0 }} /><span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{project}</span></span>)
+  if (repo && !said('repo', repo)) bits.push(<span key="r" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0 }}><GitCommit size={11} style={{ opacity: 0.7, flexShrink: 0 }} /><span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{repo}</span></span>)
   const model = fleetRow?.model || s.model
-  if (model && !said('model', model)) bits.push(<span key="m" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0 }}><Tag size={11} style={{ opacity: 0.7, flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{model}</span></span>)
-  if (fleetRow?.task) bits.push(<span key="t" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--anthropic-orange)', minWidth: 0 }}><Bookmark size={11} style={{ flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fleetRow.task}</span></span>)
-  if (fleetRow?.note) bits.push(<span key="n" style={{ fontStyle: 'italic', opacity: 0.85, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fleetRow.note}>“{truncate(fleetRow.note, 60)}”</span>)
+  if (model && !said('model', model)) bits.push(<span key="m" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0 }}><Tag size={11} style={{ opacity: 0.7, flexShrink: 0 }} /><span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{model}</span></span>)
+  if (fleetRow?.task) bits.push(<span key="t" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--anthropic-orange)', minWidth: 0 }}><Bookmark size={11} style={{ flexShrink: 0 }} /><span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{fleetRow.task}</span></span>)
+  if (fleetRow?.note) bits.push(<span key="n" style={{ fontStyle: 'italic', opacity: 0.85, minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere' }} title={fleetRow.note}>“{fleetRow.note}”</span>)
   if (bits.length === 0) return null
   return (
     <div style={{ display: 'flex', alignItems: 'center', columnGap: 14, rowGap: 4, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-tertiary)', minWidth: 0 }}>
@@ -1580,14 +1575,10 @@ function CardShell({
   children?: React.ReactNode
 }) {
   const isGrid = layout === 'grid'
-  const titleStyle: React.CSSProperties = isGrid
-    ? {
-        fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', minWidth: 0,
-        // Two lines, then an ellipsis — a grid title is worth a second line and never a third.
-        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-        wordBreak: 'break-word', lineHeight: 1.3,
-      }
-    : { fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }
+  const titleStyle: React.CSSProperties = {
+    fontSize: isGrid ? 14 : 15, fontWeight: 600, color: 'var(--text-primary)',
+    minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.3,
+  }
 
   return (
     <div
@@ -2241,7 +2232,7 @@ function TerminalComposer({ row, act, authorName, lang, isMobile, state: compose
       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, fontSize: 11, fontWeight: 600, color: 'var(--anthropic-orange)' }}>
         <Send size={11} style={{ flexShrink: 0 }} />
         <span style={{ color: 'var(--text-tertiary)', fontWeight: 500, flexShrink: 0 }}>{t.writingTo}</span>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${row.title} · ${row.id}`}>{row.title}</span>
+        <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }} title={`${row.title} · ${row.id}`}>{row.title}</span>
         <code style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, opacity: 0.75, flexShrink: 0 }}>{row.id}</code>
       </div>
       {/* On a dialog the blind LINE prompt is refused by the server; the sighted keystroke path (the
@@ -2542,7 +2533,7 @@ function CardModal({ statusPill, harness, title, meta, lang, onClose, children }
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
             {statusPill}
             <HarnessBadge harness={harness} />
-            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }} title={title}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 0, flex: 1 }} title={title}>
               {title}
             </span>
             <button className="ag-tap-icon"
