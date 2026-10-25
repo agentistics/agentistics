@@ -4,7 +4,7 @@
  * what the row carries. Driven through the real host with a recording backend and an isolated registry.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createControlHost } from '../cli-start'
@@ -17,6 +17,7 @@ import { runFleetAction, __setFleetHostForTest } from './fleet-web'
 import type { BackendSpawn, ManagedSession, SessionBackend } from './types'
 
 let dir = ''
+let pathBefore: string | undefined
 const NO_TERMINAL = { async suspend<T>(_fn: () => Promise<T>): Promise<T> { throw new Error('no terminal') } }
 
 /** A backend where `alive` rows are tmux's, `structured` rows are driven, and a spawn can be told to land either way. */
@@ -46,11 +47,21 @@ const tmuxRow = (extra: Partial<ManagedSession> = {}): ManagedSession =>
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'back-structured-'))
+  // The resume checks the harness can be executed; CI has no `claude`, so a stub binary stands in.
+  const bin = join(dir, 'bin')
+  mkdirSync(bin)
+  writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 0\n')
+  chmodSync(join(bin, 'claude'), 0o755)
+  pathBefore = process.env.PATH
+  process.env.PATH = `${bin}:${pathBefore ?? ''}`
   __setHarnessAgentsReaderForTest(async () => [])
   __setSpawnBudgetForTest({ value: null })
   resetHarnessAvailability()
 })
 afterAll(() => {
+  if (pathBefore === undefined) delete process.env.PATH
+  else process.env.PATH = pathBefore
+  resetHarnessAvailability()
   __setSessionBackendForTest(null)
   __setHarnessAgentsReaderForTest(null)
   __setSpawnBudgetForTest(null)
