@@ -1,6 +1,16 @@
-.handoff-meter { display:flex; align-items:center; gap:8px; min-height:32px; padding:0 10px; flex-shrink:0; border:1px solid color-mix(in srgb,var(--handoff-tone) 55%,transparent); border-radius:8px; background:color-mix(in srgb,var(--handoff-tone) 8%,var(--bg-card)); color:var(--handoff-tone); font:inherit; font-size:12px; font-weight:600; cursor:pointer; font-variant-numeric:tabular-nums; }
-.handoff-meter-track { width:50px; height:6px; border-radius:3px; background:var(--border); overflow:hidden; }
-.handoff-meter-track>span { display:block; height:100%; background:var(--handoff-tone); transition:width .25s,background .25s; }
+/* THE LEADER METER — option B (owner, 2026-10-23): no outer capsule. A filled circle holding the
+   crown, then the context figure; both wear the state's colour (`--handoff-tone`) and nothing else
+   says the state. It sits at the header's 32px icon height so it lines up with the "⋯" button. */
+:root { --leader-meter-attention:var(--anthropic-orange); }
+[data-theme="light"] { --leader-meter-attention:color-mix(in srgb,var(--anthropic-orange) 65%,var(--text-primary)); }
+.handoff-meter { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 4px 0 2px; flex-shrink:0; border:0; border-radius:16px; background:transparent; color:var(--handoff-tone); font:inherit; font-size:13px; font-weight:700; line-height:1; white-space:nowrap; cursor:pointer; font-variant-numeric:tabular-nums; transition:color .25s,background .15s; }
+.handoff-meter:hover { background:color-mix(in srgb,var(--handoff-tone) 10%,transparent); }
+.handoff-meter:focus-visible { outline:2px solid var(--handoff-tone); outline-offset:2px; }
+.handoff-meter-crown { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; flex-shrink:0; border-radius:50%; background:var(--handoff-tone); color:var(--bg-card); transition:background .25s; }
+.handoff-meter-crown svg { display:block; }
+/* The figure leans toward the text colour: lighter than the circle on dark, darker on light, so it
+   stays readable in both themes while still saying the state. */
+.handoff-meter-value { min-width:7ch; text-align:left; color:color-mix(in srgb,var(--handoff-tone) 78%,var(--text-primary)); }
 .handoff-popover { position:fixed; z-index:1900; box-sizing:border-box; width:340px; max-width:calc(100vw / var(--ui-zoom, 1) - 24px); padding:16px; border:1px solid var(--border); border-radius:12px; background:var(--bg-card); color:var(--text-primary); box-shadow:0 12px 32px rgba(0,0,0,.25); font-size:13px; }
 .handoff-popover>strong { color:var(--handoff-tone); }
 .handoff-popover p,.handoff-live-panel p { font-size:12.5px; line-height:1.5; color:var(--text-secondary); margin:8px 0; }
@@ -32,8 +42,8 @@
 .handoff-receives { margin-top:14px; padding:12px; border-radius:10px; background:var(--bg-elevated); overflow-wrap:anywhere; }
 .handoff-panel-footer { justify-content:flex-end; }
 @media(max-width:768px) {
-  .handoff-meter { min-height:44px; padding:0 8px; gap:5px; font-size:11.5px; }
-  .handoff-meter-track { width:26px; }
+  .handoff-meter { height:44px; padding:0 2px; gap:5px; font-size:12px; }
+  .handoff-meter-crown { width:24px; height:24px; }
   .handoff-actions button { min-height:44px; }
   .handoff-band { flex-wrap:wrap; }
   .handoff-band-copy { flex-basis:100%; }
@@ -48,7 +58,7 @@
   .handoff-projection>span[data-label]::before { content:attr(data-label); font-size:11px; color:var(--text-secondary); }
   .handoff-panel-footer { flex-direction:column-reverse; align-items:stretch; }
 }
-@media(prefers-reduced-motion:reduce) { .handoff-band-wrap,.handoff-meter-track>span { transition:none; } }
+@media(prefers-reduced-motion:reduce) { .handoff-band-wrap,.handoff-meter,.handoff-meter-crown { transition:none; } }
 
 .handoff-simulation { display:flex; align-items:center; gap:8px; margin:12px 0; font-size:13px; }
 .handoff-simulation>span { flex:1; }

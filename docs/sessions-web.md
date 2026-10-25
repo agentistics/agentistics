@@ -446,3 +446,5 @@ the transcript and leaves a running process running. **End session** (**Encerrar
 also available for external rows with an observed PID. It ends only that PID and its descendants,
 checks process identities before signalling, and escalates surviving processes through the existing
 kill confirmation logic. Neither operation needs the working directory or conversation to exist.
+
+The header leader meter reserves space for its reading so polling between numbers and no reading does not move adjacent actions. Attention uses a darker mix of existing theme tokens in light mode. Without a context reading, its details explain that estimates are pending and hide the comparison; handoff and reminder actions stay disabled until a reading arrives. The composer warning keeps the full current/cut count, while the meter shows the current count and its popover focuses on reply costs.
