@@ -3,6 +3,7 @@
  * (owner's page rules, 2026-10-17). The crumb is read from the registry so it can never disagree with
  * the tree.
  */
+import { BetaTag } from '../BetaTag'
 import { APP_AREAS, pageLabel, type AreaId } from '../../lib/appAreas'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
 
@@ -24,7 +25,7 @@ export function PageHeader({ lang, areaId, pageId, title, status, actions = [], 
         <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 2 }}>
           {pageLabel(area, lang)}{page ? <> <span aria-hidden>›</span> {pageLabel(page, lang)}</> : null}
         </div>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: 'var(--text-primary)' }}>{heading}</h1>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: 'var(--text-primary)' }}>{heading}{(area.beta || page?.beta) && <> <BetaTag what={pageLabel(area, lang)} lang={lang} /></>}</h1>
         {status ? <p style={{ margin: '6px 0 0', fontSize: 14, color: 'var(--text-secondary)' }}>{status}</p> : null}
       </div>
       {actions.slice(0, 2).map(a => (
