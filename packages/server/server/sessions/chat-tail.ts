@@ -25,7 +25,7 @@ import { abandonedBranchLines } from './active-branch'
 import { join } from 'node:path'
 import { splitImageMarkers } from '@agentistics/core'
 import { PROJECTS_DIR } from '../config'
-import { accountStoreDirs } from './account-transcript-roots'
+import { newestTranscript } from './account-transcript-roots'
 import { UUID_RE } from '../git'
 import { isUserRoleMessage } from '../jsonl'
 import { commandSummary, hasUnreadableWrite, shellWrites } from './shell-writes'
@@ -134,12 +134,8 @@ export async function resolveChatTranscriptPath(
  */
 export async function resolveClaudeTranscriptAnyAccount(cwd: string, sessionId: string): Promise<string | null> {
   const found = await resolveChatTranscriptPath(cwd, sessionId)
-  if (found || !UUID_RE.test(sessionId)) return found
-  for (const dir of await accountStoreDirs('claude')) {
-    const path = await resolveChatTranscriptPath(cwd, sessionId, dir).catch(() => null)
-    if (path) return path
-  }
-  return null
+  if (!UUID_RE.test(sessionId)) return found
+  return newestTranscript('claude', found, dir => resolveChatTranscriptPath(cwd, sessionId, dir))
 }
 
 interface Cached {

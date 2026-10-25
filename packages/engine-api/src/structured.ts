@@ -204,6 +204,14 @@ export interface StructuredPipe {
 
 /** F2.0b — the host's way of starting a driver's child (see `StructuredSpawn.transport`). */
 export interface StructuredTransport {
+  /**
+   * Start the driver's child. 1.14 — may be called AGAIN once the driver has `kill()`ed the previous
+   * pipe (a cancel that has to end the child): each call is a generation, sequential, never concurrent.
+   * The host starts the new child only after the old one exited (writes made meanwhile are held and
+   * delivered in order), keeps the session alive between children, and on re-attach hands the
+   * re-created driver the same sequence of generations. A launch while the previous child runs and was
+   * not killed by the driver THROWS.
+   */
   launch(bin: string, args: readonly string[], cwd: string, env?: Readonly<Record<string, string>>): StructuredPipe
 }
 

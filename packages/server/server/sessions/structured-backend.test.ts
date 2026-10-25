@@ -50,7 +50,7 @@ function fakeSession(req: StructuredSpawn) {
   const s = {
     prompts: [] as string[], answers: [] as StructuredAnswer[], cancelled: 0, disposed: false,
     id: req.id, driver: 'acp' as const, harness: req.harness,
-    conversationId: () => req.conversationId ?? 'conv-from-protocol',
+    conversationId: () => req.resumeId ?? req.conversationId ?? 'conv-from-protocol',
     activity: () => state,
     attention: () => open,
     screen: (n: number) => ['> hi', 'agent: hello'].slice(-n),
@@ -79,7 +79,7 @@ function fakeSession(req: StructuredSpawn) {
 }
 type FakeSession = ReturnType<typeof fakeSession>
 
-function fakeEngine(o: { harnesses?: HarnessId[]; refuse?: string } = {}) {
+function fakeEngine(o: { harnesses?: HarnessId[]; refuse?: string; refuseAfter?: number } = {}) {
   const started: StructuredSpawn[] = []
   const sessions: FakeSession[] = []
   const reg = structuredRegistry([
@@ -87,7 +87,7 @@ function fakeEngine(o: { harnesses?: HarnessId[]; refuse?: string } = {}) {
       id: 'acp', status: 'ready', harnesses: o.harnesses ?? ['gemini', 'kimi', 'copilot'], note: 'fake', declares: () => DECL,
       async start(req) {
         started.push(req)
-        if (o.refuse) return { ok: false, reason: o.refuse }
+        if (o.refuse || (o.refuseAfter !== undefined && started.length > o.refuseAfter)) return { ok: false, reason: o.refuse ?? 'refused' }
         const s = fakeSession(req)
         sessions.push(s)
         return { ok: true, session: s as unknown as StructuredSession }
@@ -364,9 +364,80 @@ describe('withStructured — fallback', () => {
     expect(b.activityOf?.('m-1')).toBeUndefined()
   })
 
-  test('a driver failing mid-life is resumed in tmux by its conversation id, under the same managed id', async () => {
+  test('a driver failing mid-life comes back STRUCTURED by its conversation id, same managed id, no first prompt again', async () => {
     const base = fakeBase()
     const eng = fakeEngine()
+    const fell: unknown[] = []
+    const b = withStructured(base, provider(eng.reg, {
+      resumeSpawn: async (req, conv) => ({ id: 'ignored', cwd: req.cwd, argv: ['gemini', '--resume', conv] }),
+      onFallback: (id, o) => fell.push([id, o]),
+    }))
+    await b.spawn(web('gemini'))
+    eng.sessions[0]!.fail('claude exited (code 143)')
+    await new Promise(r => setTimeout(r, 5))
+    expect(base.calls).toEqual([])
+    expect(eng.started.length).toBe(2)
+    expect(eng.started[1]).toMatchObject({ id: 'm-1', harness: 'gemini', cwd: '/w', resumeId: 'offered' })
+    expect(eng.started[1]!.initialPrompt).toBeUndefined()
+    expect(eng.started[1]!.instructions).toBeUndefined()
+    expect(fell).toEqual([['m-1', { reason: 'claude exited (code 143)', resumed: true, structured: true }]])
+    expect(b.structuredSessions().map(s => s.id)).toEqual(['m-1'])
+    expect(b.isStructured!('m-1')).toBe(true)
+    // the new child is driven like the first: a prompt reaches it, not tmux
+    expect(await b.sendText('m-1', 'again')).toBe(true)
+    expect(eng.sessions[1]!.prompts).toEqual(['again'])
+  })
+
+  test('a structured relaunch that is refused falls to tmux (resume by id) and the row is tmux\'s', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine({ refuseAfter: 1 })
+    const fell: unknown[] = []
+    const b = withStructured(base, provider(eng.reg, {
+      resumeSpawn: async (req, conv) => ({ id: 'ignored', cwd: req.cwd, argv: ['gemini', '--resume', conv] }),
+      onFallback: (id, o) => fell.push([id, o]),
+    }))
+    await b.spawn(web('gemini'))
+    eng.sessions[0]!.fail('pipe closed')
+    await new Promise(r => setTimeout(r, 5))
+    expect(base.calls).toEqual([['spawn', { id: 'm-1', cwd: '/w', argv: ['gemini', '--resume', 'offered'] }]])
+    expect(fell).toEqual([['m-1', { reason: 'pipe closed', resumed: true }]])
+    expect(b.structuredSessions()).toEqual([])
+  })
+
+  test('a child that dies at once every time stops being relaunched structured (no loop): tmux', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine()
+    const b = withStructured(base, provider(eng.reg, {
+      resumeSpawn: async (req, conv) => ({ id: 'ignored', cwd: req.cwd, argv: ['gemini', '--resume', conv] }),
+    }))
+    await b.spawn(web('gemini'))
+    for (let n = 0; n < 3; n++) { eng.sessions[n]!.fail('boom'); await new Promise(r => setTimeout(r, 5)) }
+    expect(eng.started.length).toBe(4) // the first + three relaunches
+    eng.sessions[3]!.fail('boom')
+    await new Promise(r => setTimeout(r, 5))
+    expect(eng.started.length).toBe(4)
+    expect(base.calls.map(c => c[0])).toEqual(['spawn'])
+  })
+
+  test('with the adapter flag off a failed driver is resumed in tmux (no structured relaunch)', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine()
+    let on = true
+    const b = withStructured(base, provider(eng.reg, {
+      flagOn: () => on,
+      resumeSpawn: async (req, conv) => ({ id: 'ignored', cwd: req.cwd, argv: ['gemini', '--resume', conv] }),
+    }))
+    await b.spawn(web('gemini'))
+    on = false
+    eng.sessions[0]!.fail('x')
+    await new Promise(r => setTimeout(r, 5))
+    expect(eng.started.length).toBe(1)
+    expect(base.calls.map(c => c[0])).toEqual(['spawn'])
+  })
+
+  test('a driver failing mid-life, structured relaunch unavailable, is resumed in tmux by its conversation id, under the same managed id', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine({ refuseAfter: 1 })
     const fell: unknown[] = []
     const b = withStructured(base, provider(eng.reg, {
       resumeSpawn: async (req, conv) => ({ id: 'ignored', cwd: req.cwd, argv: ['gemini', '--resume', conv] }),

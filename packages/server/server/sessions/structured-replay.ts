@@ -29,8 +29,11 @@ export type SessionCall =
   /** MODE.EVERYWHERE — a mode set through the protocol (it writes to the child, so a replay makes it again). */
   | { op: 'setMode'; id: string }
 
-/** A call the host made on the session, and when (`at`: lines read; `t`: ms). */
-export type ReplayCall = SessionCall & { at: number; t: number }
+/**
+ * A call the host made on the session, and when (`g`: the driver's child — its generation — the call
+ * was made on, absent = 0; `at`: lines read from that child; `t`: ms).
+ */
+export type ReplayCall = SessionCall & { g?: number; at: number; t: number }
 
 /** PURE. A JSONL file's records; a line that does not parse (a torn last write) is dropped. */
 export function parseJsonl<T>(text: string, valid: (v: unknown) => v is T): T[] {
@@ -50,6 +53,7 @@ export const isReplayCall = (v: unknown): v is ReplayCall => {
   if (!v || typeof v !== 'object') return false
   const c = v as ReplayCall
   if (typeof c.at !== 'number' || typeof c.t !== 'number') return false
+  if (c.g !== undefined && !(Number.isInteger(c.g) && c.g >= 0)) return false
   if (c.op === 'prompt') return typeof c.text === 'string'
   if (c.op === 'setMode') return typeof c.id === 'string'
   return c.op === 'answer' || c.op === 'cancel'

@@ -3935,6 +3935,40 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       }
     },
 
+    /**
+     * FALLBACK.STRUCTURED — "back to the new mode": a row that fell to tmux (or was born there) is ended
+     * and its SAME conversation resumed over the harness's protocol, with everything the row carries
+     * (account, task, folder, role, note — `inherit`). The reopen machinery, nothing new: the row is
+     * replaced the way an account switch replaces it. A relaunch the driver refuses falls to tmux by the
+     * spawn's own rule; the answer then says so, in a sentence, and the conversation is not lost.
+     */
+    async backToStructured(id: string): Promise<ActionResult> {
+      const pt = lang === 'pt'
+      const backend = await resolveBackend()
+      const row = (await readRegistry()).find(m => m.id === id)
+      if (!row) return { ok: false, message: S().sessNoRegistryEntry }
+      if (backend.isStructured?.(id)) {
+        return { ok: true, message: pt ? 'Esta sessão já roda no modo novo.' : 'This session already runs in the new mode.' }
+      }
+      const conversationId = row.conversationId
+      if (!conversationId) {
+        return { ok: false, message: pt ? 'Esta sessão não tem uma conversa vinculada para retomar.' : 'This session has no linked conversation to resume.' }
+      }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (live?.alive && !(await killAndRetireSession(id, () => backend.kill(id)).catch(() => false))) {
+        return { ok: false, message: pt ? 'Não foi possível encerrar a sessão no terminal. Nada mudou.' : 'The session could not be ended in the terminal. Nothing changed.' }
+      }
+      const out = await this.resumeSession!({
+        sessionId: conversationId, harness: row.harness, cwd: row.cwd, label: row.label ?? '',
+        replaces: id, attach: false, origin: 'web', force: true,
+      }).catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }) as SpawnSessionResult)
+      if (!out.ok) return { ok: false, message: out.message }
+      const nowStructured = out.id ? backend.isStructured?.(out.id) === true : false
+      return nowStructured
+        ? { ok: true, message: pt ? 'Sessão de volta ao modo novo (a mesma conversa, retomada).' : 'Session back in the new mode (the same conversation, resumed).' }
+        : { ok: true, message: pt ? 'A conversa foi retomada, mas o modo novo não subiu; ela segue no terminal.' : 'The conversation was resumed, but the new mode did not start; it continues in the terminal.' }
+    },
+
     async interruptSession(id: string): Promise<ActionResult> {
       const s = S()
       const backend = await resolveBackend()

@@ -126,7 +126,16 @@
  * `choices` (a lone `choice` still fits a multi-select request), and a 1.12 engine never states
  * `multiSelect`.
  */
-export const ENGINE_API_VERSION = '1.13.0'
+/**
+ * 1.14.0 — AGY.MULTICHILD: `StructuredTransport.launch` may be called AGAIN once the driver has
+ * `kill()`ed the previous pipe (a harness with no interrupt ends its child on cancel and resumes the
+ * conversation in a new one). Each call is a GENERATION: the host starts the new child only after the
+ * old one exited, keeps the session alive between the two, and a re-attach hands the re-created driver
+ * the same sequence. A launch while the previous child runs and was not killed throws. Behaviour only,
+ * no type changes: a 1.13 engine never relaunches, and a 1.13 host broke a relaunching driver (its
+ * second child was never read), so an engine that relaunches needs a 1.14 host.
+ */
+export const ENGINE_API_VERSION = '1.14.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

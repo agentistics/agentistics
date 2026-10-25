@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { followOffset, isDrag, restOffset, slotAt } from './bottomNavDrag'
+import { barFollow, barSlotAt, barSlots, followOffset, isDrag, restOffset, slotAt } from './bottomNavDrag'
 
 describe('slotAt', () => {
   test('maps a position to its equal-width slot', () => {
@@ -40,5 +40,31 @@ describe('isDrag', () => {
   test('past the threshold, either direction, is a drag', () => {
     expect(isDrag(6)).toBe(true)
     expect(isDrag(-20)).toBe(true)
+  })
+})
+
+describe('three-piece bar geometry', () => {
+  const slots = barSlots(356, 34, 2, 2)
+  test('two pills of two slots around a centre gap', () => {
+    expect(slots.map(s => s.kind)).toEqual(['left', 'left', 'centre', 'right', 'right'])
+    expect(slots[0]!.width).toBe(80.5)
+    expect(slots[2]!.left).toBe(161)
+    expect(slots[3]!.left).toBe(195)
+    const padded = barSlots(356, 48, 2, 2, 4, 10)
+    expect(padded[0]!.left).toBe(4)
+    expect(padded[1]!.left + padded[1]!.width).toBe(154 - 10)
+    expect(padded[3]!.left).toBe(154 + 48 + 10)
+    expect(barSlots(0, 34, 2, 2)).toEqual([])
+  })
+  test('x resolves to its slot; the circle answers a little beyond its gap', () => {
+    expect([10, 100, 175, 230, 340].map(x => barSlotAt(x, slots))).toEqual([0, 1, 2, 3, 4])
+    expect(barSlotAt(150, slots)).toBe(2)
+    expect(barSlotAt(-20, slots)).toBe(0)
+    expect(barSlotAt(900, slots)).toBe(4)
+  })
+  test('the indicator follows the finger inside its own pill and never leaves it', () => {
+    expect(barFollow(0, slots, 4)).toBe(4)
+    expect(barFollow(120, slots, 4)).toBeCloseTo(120 - 72.5 / 2)
+    expect(barFollow(352, slots, 4)).toBe(195 + 161 - 4 - 72.5)
   })
 })

@@ -32,7 +32,7 @@ for (const lang of ['pt', 'en'] as const) test(`mobile deep link navigates leade
   const trigger = document.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')!
   expect(trigger.textContent).toBe(lang === 'pt' ? 'Mais' : 'More')
   const home = document.querySelector<HTMLButtonElement>('button[aria-current="page"]')!
-  expect(home.textContent).toContain(lang === 'pt' ? 'Início' : 'Home')
+  expect(home.getAttribute('aria-label')).toContain(lang === 'pt' ? 'Início' : 'Home')
   expect(home.querySelector('.lucide-house')).not.toBeNull()
   await act(async () => trigger.click())
   const sheet = document.querySelector('[role="dialog"]')!

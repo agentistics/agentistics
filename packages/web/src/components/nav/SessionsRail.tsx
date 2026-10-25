@@ -24,7 +24,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { Archive, Crown, Folder, List, Plus, RotateCcw } from 'lucide-react'
+import { RoleIcon, roleLabel, type RoleIconKind } from './RoleIcon'
+import { Archive, Folder, List, Plus, RotateCcw } from 'lucide-react'
 import { ACTIVE_STATES, sortSessions, type ControlSession } from '@agentistics/tui/control/session-fleet'
 import { HarnessMark } from '../sessions/HarnessMark'
 import { SessionFacts } from '../sessions/SessionFacts'
@@ -150,6 +151,7 @@ export function SessionsRail({
   /** One session as a round mark: the crown for a leader, the harness mark otherwise. */
   const mark = (s: ControlSession, o: { lines?: string[]; onClick?: () => void; fell?: boolean } = {}) => {
     const leader = isLeader(s)
+    const role: RoleIconKind = leader ? 'leader' : (getSessionRole(sessionIdentityKey(s)) ?? 'auto')
     const dot = o.fell ? null : stateDot(s.state)
     const dim = !o.fell && !ACTIVE.has(s.state)
     const size = leader ? 34 : 30
@@ -160,7 +162,7 @@ export function SessionsRail({
         type="button"
         data-rail-mark={s.id}
         onClick={o.onClick ?? (() => navigate(sessionPath(s.id)))}
-        aria-label={`${sessionDisplayTitle(s.title)}${leader ? (pt ? ' · líder' : ' · leader') : ''}, ${s.stateLabel}`}
+        aria-label={`${sessionDisplayTitle(s.title)} · ${roleLabel(role, pt)}, ${s.stateLabel}`}
         {...tipHandlers({ kind: 'session', session: s, lines: o.lines ?? [] })}
         style={{
           position: 'relative', width: size, height: size, flexShrink: 0, borderRadius: '50%', padding: 0,
@@ -173,7 +175,15 @@ export function SessionsRail({
           color: o.fell ? 'var(--accent-red)' : 'var(--text-secondary)',
         }}
       >
-        {leader ? <Crown size={14} style={{ color: 'var(--accent-purple)' }} /> : <HarnessMark harness={s.harness} size={16} />}
+        {leader ? <RoleIcon kind="leader" size={14} pt={pt} /> : <HarnessMark harness={s.harness} size={16} />}
+        {!leader && (
+          <span aria-hidden style={{
+            position: 'absolute', left: -5, top: -5, width: 18, height: 18, borderRadius: '50%', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', background: 'var(--bg-surface)', border: '1px solid var(--border)', boxSizing: 'border-box',
+          }}>
+            <RoleIcon kind={role} size={12} pt={pt} />
+          </span>
+        )}
         {dot && (
           <span aria-hidden style={{
             position: 'absolute', right: -2, bottom: -2, width: 10, height: 10, borderRadius: '50%',
