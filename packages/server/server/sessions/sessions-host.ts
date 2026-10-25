@@ -628,6 +628,7 @@ export function createSessionsPoller(o: {
           lastScreenMs: adapter.lastScreen(r.id),
           nowMs,
           forced: adapter.takeForced(r.id),
+          screenApproval: adapter.screenApproval(r.id),
         })
         // The tail is read FIRST for a row only it can state, so the screen can be skipped when idle.
         let tailReading: TailReading | undefined
@@ -717,6 +718,8 @@ export function createSessionsPoller(o: {
         // The harness's own statement, where there is one (flag on); a dialog only the screen can see
         // still wins over it, and is confirmed like any screen reading.
         let state = reading && !stated ? adapterActivity(reading, screenState) : screenState
+        // A dialog only the screen shows keeps the screen being read until it is gone (see `planScreen`).
+        if (reading && !stated) adapter?.setScreenApproval(r.id, screenState === 'waiting-approval' && !reading.attention)
         if (reading && !stated && !(screenState === 'waiting-approval' && !reading.attention)) {
           exact.add(r.id)
           corroborated.add(r.id)
