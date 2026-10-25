@@ -1,6 +1,8 @@
 /** UI adapter for the existing math; keep HandoffPanel v1 stable when the engine is replaced. */
 import { getModelPrice, hasModelPrice, handoffCut, handoffLevel, normalizeHandoffConfig, type HandoffPanel } from '@agentistics/core'
 import { computeHandoffWhy, type HandoffHintRow } from './handoff-hint'
+import type { ManagedSession } from './types'
+import { DEFAULT_DEADLINE_MS } from './retire-plan'
 import { findConversation, type Conversation } from './conversations'
 
 /** Only the exact recorded conversation may supply metrics; never guess by directory. */
@@ -16,8 +18,35 @@ export function handoffMetrics(row: HandoffHintRow & { harness?: string; convers
   }
 }
 
+export interface HandoffLifecycle {
+  session: Pick<ManagedSession, 'handoffRequestedAt' | 'handoffTo' | 'handoffRelayClosing' | 'retire' | 'endedAt'>
+  successor?: Pick<ManagedSession, 'id' | 'endedAt'>
+  successorGone?: boolean
+}
+/** Use recorded lifecycle events; elapsed time alone never claims the session is being killed. */
+export function handoffProgress({ session: row, successor, successorGone }: HandoffLifecycle, now: number): HandoffPanel['handoff'] {
+  const req = row.retire
+  const successorId = req?.successorId ?? row.handoffTo
+  if (req?.expiredAt || successorGone || successor?.endedAt || (successorId && !successor)) return undefined
+  if (req && now >= Date.parse(req.deadlineAt)) return undefined
+  const requestedAt = row.handoffRequestedAt ?? req?.requestedAt
+  if (successorId && successor) {
+    // The panel endpoint has already excluded stopped views. endedAt is recorded BEFORE the
+    // kill, so a still-live predecessor with that decision is closing, not back at the warning.
+    if (row.handoffRelayClosing || row.endedAt) return { stage: 'closing', successorId, requestedAt, deadlineAt: req?.deadlineAt, progress: .95 }
+    if (req?.successorId === successorId) {
+      const elapsed = Math.max(0, now - Date.parse(req.requestedAt))
+      const duration = Math.max(req.quietForMs, Date.parse(req.deadlineAt) - Date.parse(req.requestedAt), 1)
+      return { stage: 'taken-over', successorId, requestedAt: req.requestedAt, deadlineAt: req.deadlineAt, progress: .5 + .4 * Math.min(1, elapsed / duration) }
+    }
+    return { stage: 'successor-open', successorId, requestedAt, progress: .35 }
+  }
+  if (!requestedAt || !Number.isFinite(Date.parse(requestedAt)) || now >= Date.parse(requestedAt) + DEFAULT_DEADLINE_MS) return undefined
+  return { stage: 'preparing', requestedAt, deadlineAt: new Date(Date.parse(requestedAt) + DEFAULT_DEADLINE_MS).toISOString(), progress: .1 }
+}
+
 export interface HandoffQuotaRate { fiveHourPctPerUSD: number | null; weekPctPerUSD: number | null; unavailableReason?: 'no-meter' | 'account-unknown' | 'missing-window' }
-export function computeHandoffPanel(row: HandoffHintRow, configIn: unknown, quota: HandoffQuotaRate = { fiveHourPctPerUSD: null, weekPctPerUSD: null }, now = Date.now()): HandoffPanel {
+export function computeHandoffPanel(row: HandoffHintRow, configIn: unknown, quota: HandoffQuotaRate = { fiveHourPctPerUSD: null, weekPctPerUSD: null }, now = Date.now(), lifecycle?: HandoffLifecycle): HandoffPanel {
   const config = normalizeHandoffConfig(configIn)
   const cutTokens = handoffCut(config)
   const why = computeHandoffWhy({ ...row, cutTokens })
@@ -35,6 +64,7 @@ export function computeHandoffPanel(row: HandoffHintRow, configIn: unknown, quot
       weekPct: costUSD !== null && quota.weekPctPerUSD !== null ? costUSD * quota.weekPctPerUSD : null }
   }
   return {
+    ...(lifecycle ? { handoff: handoffProgress(lifecycle, now) } : {}),
     version: 1, sessionId: row.id, updatedAt: now, config, cutTokens,
     contextTokens: context, contextWindow: window,
     level: context === null ? 'normal' : handoffLevel(context, cutTokens),

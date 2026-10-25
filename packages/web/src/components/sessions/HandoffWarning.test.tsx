@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test'
+import { MemoryRouter } from 'react-router-dom'
+import { DEFAULT_HANDOFF_CONFIG } from '@agentistics/core'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { HandoffPanel } from '@agentistics/core'
-import { HandoffBand, HandoffQuotaCell, HandoffQuotaNote, LeaderMeterButton, HandoffNoReading, HandoffPopoverCopy, handoffPanelLabel, handoffLevelLabel } from './HandoffWarning'
+import { HandoffBandView, HandoffBand, HandoffQuotaCell, HandoffQuotaNote, LeaderMeterButton, HandoffNoReading, HandoffPopoverCopy, handoffPanelLabel, handoffLevelLabel } from './HandoffWarning'
 import HandoffSettings from '../../pages/settings/HandoffSettings'
 
 describe('handoff screens', () => {
@@ -141,6 +143,38 @@ describe('handoff popover copy', () => {
       expect(html).toContain(pt ? 'Ainda não há uma leitura' : 'There is no context reading')
       expect(html).not.toContain('—')
       expect(html).not.toContain(pt ? 'Próxima resposta' : 'Next reply')
+    }
+  })
+})
+
+
+describe('handoff progress band', () => {
+  const panel = { sessionId: 'leader', level: 'due', contextTokens: 251_000, cutTokens: 250_000,
+    config: DEFAULT_HANDOFF_CONFIG, nextReplyUSD: null, successorReplyUSD: null } as HandoffPanel
+  it('shows every stage in PT/EN without warning actions, including while collapsed or unmeasured', () => {
+    for (const pt of [true, false]) {
+      for (const stage of ['preparing', 'successor-open', 'taken-over', 'closing'] as const) {
+        const html = renderToStaticMarkup(<MemoryRouter><HandoffBandView id="leader" pt={pt} collapsed panel={{ ...panel,
+          contextTokens: null, handoff: { stage, successorId: 'next/id', progress: .7 } }} /></MemoryRouter>)
+        expect(html).toContain('handoff-band-wrap visible')
+        expect(html).toContain(pt ? 'Passagem em andamento' : 'Handoff in progress')
+        expect(html).toContain(({ preparing: pt ? 'Preparando a passagem' : 'Preparing the handoff', 'successor-open': pt ? 'Sucessor aberto' : 'Successor opened', 'taken-over': pt ? 'Sucessor assumiu' : 'Successor took over', closing: pt ? 'Encerrando este líder' : 'Closing this leader' })[stage])
+        expect(html).toContain('role="progressbar"')
+        expect(html).toContain('aria-valuenow="70"')
+        expect(html).toContain('/sessions/next%2Fid')
+        expect(html).toContain(pt ? 'Ver sucessor' : 'View successor')
+        expect(html).not.toContain('<button')
+        expect(html).not.toContain(pt ? 'Hora de passar' : 'Time to hand off')
+      }
+    }
+  })
+  it('restores the existing warning and controls when the server has no active handoff', () => {
+    for (const pt of [true, false]) {
+      const html = renderToStaticMarkup(<HandoffBandView id="leader" pt={pt} panel={panel} />)
+      expect(html).toContain('handoff-band-wrap visible')
+      expect(html).toContain(pt ? 'Passar agora' : 'Hand off now')
+      expect(html).toContain(pt ? 'Lembrar depois' : 'Remind me later')
+      expect(html).not.toContain('role="progressbar"')
     }
   })
 })

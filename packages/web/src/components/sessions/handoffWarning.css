@@ -72,3 +72,7 @@
 .handoff-panel-footer > .handoff-actions { justify-content: flex-end; }
 .handoff-panel-footer p { margin: 0 0 10px; color: var(--text-secondary); font-size: 12.5px; line-height: 1.5; }
 @media(max-width:768px) { .handoff-panel-footer > .handoff-actions { flex-direction: column-reverse; align-items: stretch; } }
+
+.handoff-successor { color:var(--handoff-tone); font-size:12px; flex-shrink:0; text-decoration:underline; }
+.handoff-progress-track { display:flex; margin-top:4px; }
+@media(max-width:768px) { .handoff-successor { display:inline-flex; align-items:center; min-height:44px; } }
