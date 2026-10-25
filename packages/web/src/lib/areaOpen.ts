@@ -20,8 +20,15 @@ export function isAreaOpen(map: AreaOpenMap, id: string, active: boolean): boole
   return map[id] ?? active
 }
 
-export function toggledAreaOpen(map: AreaOpenMap, id: string, active: boolean): AreaOpenMap {
-  return { ...map, [id]: !isAreaOpen(map, id, active) }
+/**
+ * The chevron. Closing just closes. OPENING by hand is the accordion too (QA r3): every other area
+ * held open closes, including the current one, which is open by default and so needs an explicit
+ * `false` (`activeId`). Hand-closed areas stay closed.
+ */
+export function toggledAreaOpen(map: AreaOpenMap, id: string, active: boolean, activeId?: string): AreaOpenMap {
+  if (isAreaOpen(map, id, active)) return { ...map, [id]: false }
+  const out = openedArea(map, id)
+  return activeId && activeId !== id ? { ...out, [activeId]: false } : out
 }
 
 /**

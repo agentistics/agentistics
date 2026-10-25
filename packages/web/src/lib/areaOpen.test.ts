@@ -32,3 +32,13 @@ it('opening an area closes the others held open, so the tree never stacks every 
   // A hand-closed area stays closed.
   expect(openedArea({ tasks: false, usage: true }, 'metrics')).toEqual({ tasks: false, metrics: true })
 })
+
+it('opening an area by its chevron closes the others, the current one included (QA r3)', () => {
+  // On Uso (open by default, no entry), expanding Métricas by hand closes Uso.
+  expect(toggledAreaOpen({}, 'metrics', false, 'usage')).toEqual({ metrics: true, usage: false })
+  // Another area left open from before closes too; a hand-closed one stays closed.
+  expect(toggledAreaOpen({ leadership: true, tasks: false }, 'metrics', false, 'usage')).toEqual({ tasks: false, metrics: true, usage: false })
+  // Closing just closes.
+  expect(toggledAreaOpen({ metrics: true }, 'metrics', false, 'usage')).toEqual({ metrics: false })
+  for (const id of ['usage', 'leadership']) expect(isAreaOpen(toggledAreaOpen({ leadership: true }, 'metrics', false, 'usage'), id, id === 'usage')).toBe(false)
+})

@@ -12,7 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { ListTree } from 'lucide-react'
 import { APP_AREAS, areaOfPath, pageLabel, type AreaId } from '../../lib/appAreas'
 import { useEscapeOwner } from '../../lib/overlayStack'
-import { ATTN_COUNT_CLASS } from './AttentionDot'
+import { SOLID_COUNT } from './countBadge'
 import { AREA_ICON, AreaTree, Tip, areaEntryPath, rememberAreaPath } from './AreaTree'
 
 export const AREA_RAIL_W = 60
@@ -81,9 +81,9 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
               >
                 {AREA_ICON[area.icon](18)}
                 {n ? (
-                  <span className={ATTN_COUNT_CLASS} style={{
+                  <span data-area-badge style={{
                     position: 'absolute', top: 2, right: 1, minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
-                    boxSizing: 'border-box', background: 'var(--anthropic-orange)', color: '#fff', fontSize: 9.5, fontWeight: 700,
+                    boxSizing: 'border-box', ...SOLID_COUNT, fontSize: 9.5, fontWeight: 700,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   }}>{n}</span>
                 ) : null}

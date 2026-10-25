@@ -14,7 +14,7 @@ import {
 } from '../../lib/appAreas'
 import { BetaTag } from '../BetaTag'
 import { FieldInput } from '../../pages/settings/primitives'
-import { ATTN_COUNT_CLASS } from './AttentionDot'
+import { SOLID_COUNT } from './countBadge'
 import { areaOpenStore, isAreaOpen, openedArea, toggledAreaOpen } from '../../lib/areaOpen'
 
 export const AREA_ICON: Record<AreaIcon, (size: number) => React.ReactNode> = {
@@ -72,10 +72,10 @@ export function Tip({ label, show, children }: { label: string; show: boolean; c
 function Badge({ n }: { n: number }) {
   return (
     <span
-      className={ATTN_COUNT_CLASS}
+      data-area-badge
       style={{
         marginLeft: 'auto', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, boxSizing: 'border-box',
-        background: 'var(--anthropic-orange)', color: '#fff', fontSize: 11, fontWeight: 700,
+        ...SOLID_COUNT, fontSize: 11, fontWeight: 700,
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       }}
     >{n}</span>
@@ -112,7 +112,8 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
   useEffect(() => {
     if (!currentId) return
     const map = areaOpenStore.get()
-    if (Object.entries(map).some(([k, v]) => k !== currentId && v === true)) areaOpenStore.set(openedArea(map, currentId))
+    // Arriving is also asking to see it: a `false` left by opening another area by hand is cleared.
+    if (map[currentId] === false || Object.entries(map).some(([k, v]) => k !== currentId && v === true)) areaOpenStore.set(openedArea(map, currentId))
   }, [currentId])
 
   const areaRow = (area: Area) => {
@@ -151,7 +152,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
           <button
             type="button" aria-expanded={expanded}
             aria-label={(expanded ? (pt ? 'Recolher ' : 'Collapse ') : (pt ? 'Expandir ' : 'Expand ')) + label}
-            onClick={() => areaOpenStore.set(toggledAreaOpen(openMap, area.id, active))}
+            onClick={() => areaOpenStore.set(toggledAreaOpen(openMap, area.id, active, current?.area.id))}
             style={{
               flexShrink: 0, width: sheet ? 44 : 28, height: sheet ? 44 : 28, display: 'flex', alignItems: 'center',
               justifyContent: 'center', border: 'none', background: 'transparent', cursor: 'pointer',

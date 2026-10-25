@@ -40,4 +40,14 @@ describe('AreaRail', () => {
       expect(open).toContain(lang === 'pt' ? 'Agentask' : 'Agentask')
     })
   }
+  test('area badges are dark ink on the solid accent and never the breathing attention class (QA r3)', () => {
+    const html = render('pt', { badges: { usage: 2, sessions: 3 } })
+    const badges = html.match(/<span data-area-badge[^>]*>/g) ?? []
+    expect(badges).toHaveLength(2)
+    for (const b of badges) {
+      expect(b).toContain('background:var(--anthropic-orange)')
+      expect(b).toContain('color:#0a0a0f')
+      expect(b).not.toContain('ag-attn-count')
+    }
+  })
 })

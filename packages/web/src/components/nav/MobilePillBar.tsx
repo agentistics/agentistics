@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { followOffset, isDrag, restOffset, slotAt } from '../../lib/bottomNavDrag'
-import { ATTN_COUNT_CLASS } from './AttentionDot'
+import { SOLID_COUNT } from './countBadge'
 import { MOBILE_PILL_BAR_Z } from '../../lib/zLayers'
 
 /**
@@ -209,9 +209,9 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
                 {place ? (item.content ?? item.label) : item.label}
               </span>}
               {place && i === 0 && <Icon size={16} strokeWidth={1.8} aria-hidden style={{ flexShrink: 0, opacity: 0.8 }} />}
-              {item.badge !== undefined && item.badge > 0 && <span className={ATTN_COUNT_CLASS} style={{
+              {item.badge !== undefined && item.badge > 0 && <span data-area-badge style={{
                 position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, padding: '0 4px',
-                borderRadius: 9, background: ORANGE, color: '#fff', fontSize: 11, fontWeight: 700,
+                borderRadius: 9, ...SOLID_COUNT, fontSize: 11, fontWeight: 700,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               }}>{item.badge}</span>}
             </button>
