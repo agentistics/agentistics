@@ -845,3 +845,11 @@ it('reopens a protocol-stated Codex thread before the file/metrics cache catches
   const views = buildSessionViews({ activity: new Map(), reconciled: [row('codex-web', { status: 'lost', backend: undefined, managed: managed('codex-web', { harness: 'codex', conversationId: 'thread-from-protocol', conversationLinkVia: 'protocol-stated', label: 'Codex task' }) })], processes: [], conversations: [] })
   expect(views.find(v => v.id === 'codex-web')?.resume).toEqual({ sessionId: 'thread-from-protocol', title: 'Codex task' })
 })
+
+it('carries the registry handoff successor on an ended session view', () => {
+  const [v] = buildSessionViews({
+    reconciled: [row('source', { status: 'exited', managed: managed('source', { handoffTo: 'target' }) })],
+    activity: new Map(), processes: [],
+  })
+  expect(v!.handoffTo).toBe('target')
+})

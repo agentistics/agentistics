@@ -229,6 +229,8 @@ export interface FleetRow {
   /** F4.D — the modes this STRUCTURED row can be set to directly (`setMode`); absent: cycle with `cycleMode`. */
   modes?: SessionMode[]
   conversationId?: string
+  /** Exact managed successor recorded by the existing handoff registry. */
+  handoffTo?: string
   /** WHERE the conversation link came from (LIVE.1). Not relayed to a central. */
   link?: SessionConversationLink | null
   /**
@@ -347,6 +349,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.effort ? { effort: row.effort } : {}),
     ...(row.mode ? { mode: row.mode } : {}),
     ...(row.modeChoices ? { modes: row.modeChoices } : {}),
+    ...(row.handoffTo ? { handoffTo: row.handoffTo } : {}),
     ...(row.conversationId ? { conversationId: row.conversationId } : {}),
     ...(row.link !== undefined ? { link: row.link } : {}),
     ...(row.conversationId && row.link ? { conversationLinkVia: row.link.reason } : {}),

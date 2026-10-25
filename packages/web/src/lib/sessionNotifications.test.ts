@@ -572,6 +572,49 @@ describe('account switches announce continuation instead of a generic exit', () 
     expect(bells).toEqual(['session.exited'])
   })
 
+
+  for (const state of ['working', 'waiting', 'waiting-approval', 'exited', 'lost', 'unknown', 'closed', 'missing']) {
+    it(`cross-harness handoff to a ${state} successor only suppresses a live continuation`, () => {
+      const linked = { ...source, handoffTo: 'cross-harness-target' }
+      let prev = notifyFleetTransitions(null, [linked], 'en')
+      const target = { id: linked.handoffTo, conversationId: 'new-conversation', harness: 'codex', state }
+      const rows = [{ ...linked, state: 'exited' }, ...(state === 'missing' ? [] : [target])]
+      prev = notifyFleetTransitions(prev, rows, 'en')
+      const live = ['working', 'waiting', 'waiting-approval'].includes(state)
+      expect(bells.filter(code => code === 'session.exited')).toEqual(live ? [] : ['session.exited'])
+      prev = notifyFleetTransitions(prev, rows, 'en')
+      notifyFleetTransitions(prev, rows, 'en')
+      expect(bells.filter(code => code === 'session.exited')).toEqual(live ? [] : ['session.exited'])
+    })
+  }
+
+  for (const success of [true, false]) {
+    it(`retains an exit through source removal during a switch, then ${success ? 'suppresses continuation' : 'announces failure'}`, async () => {
+      let respond!: (response: Response) => void
+      const notificationFetch = globalThis.fetch
+      globalThis.fetch = ((url: unknown, init?: RequestInit) =>
+        String(url).startsWith('/api/fleet/switch-account')
+          ? new Promise<Response>(resolve => { respond = resolve })
+          : notificationFetch(url as string, init)) as typeof fetch
+      let prev = notifyFleetTransitions(null, [source], 'en')
+      const request = postSwitch(source.id, 'other-account', false, 'en')
+      prev = notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      prev = notifyFleetTransitions(prev, [], 'en')
+      // A removed source may reappear before the request finishes; it is still the same pending end.
+      prev = notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      prev = notifyFleetTransitions(prev, [], 'en')
+      expect(bells).toEqual([])
+      respond(Response.json(success
+        ? { ok: true, id: 'successor', message: 'Continued' }
+        : { ok: false, ended: true, endedId: source.id, message: 'Failed' }))
+      await request
+      const rows = success ? [{ ...source, id: 'successor', state: 'waiting' }] : []
+      prev = notifyFleetTransitions(prev, rows, 'en')
+      notifyFleetTransitions(prev, rows, 'en')
+      expect(bells).toEqual(success ? [] : ['session.exited'])
+    })
+  }
+
   it('keeps a plain kill even with an unrelated live session in the same folder', () => {
     let prev = notifyFleetTransitions(null, [source], 'en')
     const rows = [
@@ -589,5 +632,37 @@ describe('account switches announce continuation instead of a generic exit', () 
     prev = notifyFleetTransitions(prev, rows, 'en')
     notifyFleetTransitions(prev, rows, 'en')
     expect(bells).toEqual(['session.exited'])
+  })
+})
+
+describe('authoritative session ends do not need a second SSE change', () => {
+  for (const state of ['working', 'waiting']) {
+    it(`announces a kill while ${state} on the first exit, exactly once after vanishing`, () => {
+      const source = { id: 'killed', state, title: 'Killed worker', cwd: '/repo/task', harness: 'codex' }
+      let prev = notifyFleetTransitions(null, [source], 'en')
+      prev = notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      expect(captured).toHaveLength(1)
+      expect(captured[0]!.title).toContain('Session Closed')
+      expect(captured[0]!.body).toContain('Killed worker')
+      prev = notifyFleetTransitions(prev, [], 'en')
+      prev = notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      expect(captured).toHaveLength(1)
+    })
+  }
+
+  it('keeps old exited rows silent on page load and subsequent snapshots', () => {
+    const rows = [{ id: 'old', state: 'exited' }]
+    let prev = notifyFleetTransitions(null, rows, 'en')
+    prev = notifyFleetTransitions(prev, rows, 'en')
+    notifyFleetTransitions(prev, rows, 'en')
+    expect(captured).toHaveLength(0)
+  })
+
+  it('recognizes an end of a newly observed live row before activity confirmation', () => {
+    let prev = notifyFleetTransitions(null, [], 'en')
+    prev = notifyFleetTransitions(prev, [{ id: 'new', state: 'working' }], 'en')
+    notifyFleetTransitions(prev, [{ id: 'new', state: 'exited' }], 'en')
+    expect(captured).toHaveLength(1)
   })
 })

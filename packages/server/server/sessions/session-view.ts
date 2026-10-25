@@ -175,6 +175,8 @@ export interface SessionView {
    * event channel deduplicates on. Absent is absent.
    */
   conversationId?: string
+  /** Exact managed successor recorded by the existing handoff registry. */
+  handoffTo?: string
   /**
    * The conversation STORE's key for `conversationId`, only when the two differ (gemini: the id
    * agentop assigned is the header uuid, the store key is `<project>/<file>`). Lets a search hit,
@@ -696,6 +698,7 @@ export function buildSessionViews(o: {
       ...(r.managed?.parentSessionId ? { parentSessionId: r.managed.parentSessionId } : {}),
       ...(r.managed?.parentConversationId ? { parentConversationId: r.managed.parentConversationId } : {}),
       ...(r.managed?.away ? { away: true } : {}),
+      ...(r.managed?.handoffTo ? { handoffTo: r.managed.handoffTo } : {}),
       ...(r.managed?.handoffSeq ? { handoffSeq: r.managed.handoffSeq } : {}),
       ...(r.managed?.conversationId ? { conversationId: r.managed.conversationId } : {}),
       ...(conv && r.managed?.conversationId && conv.sessionId !== r.managed.conversationId

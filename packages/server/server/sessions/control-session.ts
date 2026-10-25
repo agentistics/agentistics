@@ -210,6 +210,7 @@ export function toControlSession(
     // of `project`, which is then the last segment of a path that names nothing.
     ...(facts.missing ? { dirGone: s.sessDirGone } : {}),
     ...(facts.worktree ? { worktree: true } : {}),
+    ...(v.handoffTo ? { handoffTo: v.handoffTo } : {}),
     // The conversation this row is KNOWN to be writing — what `--resume` takes, and the only exact
     // answer to "where does it continue from". Never filled from the harness+directory guess.
     ...(v.conversationId ? { conversationId: v.conversationId } : {}),
