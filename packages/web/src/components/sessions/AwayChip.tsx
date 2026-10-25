@@ -3,6 +3,7 @@ import { Moon } from 'lucide-react'
 import { SESSION_CHIP_STYLE } from './RoleChip'
 import { ConfirmModal, Select } from '../../pages/settings/primitives'
 import { setSessionAway, useAway } from '../../lib/awayMode'
+import { sessionAwayView } from '@agentistics/core'
 import { AwayImpact } from '../AwayImpact'
 import { useIsMobile } from '../../hooks/useIsMobile'
 
@@ -75,8 +76,12 @@ export function AwayDialogHost() {
   useEffect(() => { setScope('session'); setError(null) }, [req?.id])
   if (!req) return null
   const { id, pt } = req
-  const on = store.pending[id] ?? req.away
+  // With the global switch active the session is away whatever its own flag says: the dialog states
+  // that (and where to turn it off) instead of offering a per-session OFF that would change nothing.
+  const view = sessionAwayView(global.active, store.pending[id] ?? req.away)
+  const on = view.on
   const confirm = async () => {
+    if (view.locked) { closeSessionAwayDialog(); return }
     if (busy) return
     setBusy(true); setError(null)
     const result = await setSessionAway(id, !on, pt ? 'pt' : 'en', scope === 'active' ? 'active' : undefined)
@@ -85,14 +90,24 @@ export function AwayDialogHost() {
     else setError(pt ? `Não foi possível alterar (${result.error}).` : `Could not change it (${result.error}).`)
   }
   return <AwayScopeDialog pt={pt} open on={on} scope={scope} setScope={setScope} busy={busy} error={error}
-    globalActive={global.active} onConfirm={() => { void confirm() }} onCancel={() => { if (!busy) closeSessionAwayDialog() }} />
+    globalActive={global.active} locked={view.locked} onConfirm={() => { void confirm() }} onCancel={() => { if (!busy) closeSessionAwayDialog() }} />
 }
 
 /** The scope question uses the same modal and picker as Settings, for both ON and OFF. */
-export function AwayScopeDialog({ pt, open, on, scope, setScope, busy, error, globalActive, onConfirm, onCancel }: {
+export function AwayScopeDialog({ pt, open, on, scope, setScope, busy, error, globalActive, locked = false, onConfirm, onCancel }: {
   pt: boolean; open: boolean; on: boolean; scope: string; setScope: (scope: string) => void
+  /** The global switch decides this session's state: say so, offer nothing to change here. */
+  locked?: boolean
   busy: boolean; error: string | null; globalActive: boolean; onConfirm: () => void; onCancel: () => void
 }) {
+  if (locked) return (
+    <ConfirmModal open={open} tone="default" icon={<Moon size={17} />}
+      title={pt ? 'Ligado pelo modo ausente geral' : 'On through global away mode'}
+      message={pt
+        ? 'Enquanto o modo ausente geral estiver ligado, esta sessão segue ausente. Para voltar, desligue o modo ausente geral.'
+        : 'While global away mode is on, this session stays away. To come back, turn global away mode off.'}
+      confirmLabel={pt ? 'Entendi' : 'Got it'} cancelLabel={pt ? 'Fechar' : 'Close'} onConfirm={onConfirm} onCancel={onCancel} />
+  )
   return (
     <ConfirmModal open={open} tone="default" icon={<Moon size={17} />}
       title={on ? (pt ? 'Desligar modo ausente' : 'Turn away mode off') : (pt ? 'Ligar modo ausente' : 'Turn away mode on')}

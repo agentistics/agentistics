@@ -31,6 +31,7 @@ import { clockLabel, formatNextRun, formatSkipped, useCheckin, type CheckinConfi
 import { RailSection } from '../tasks/RailSection'
 import { CheckinConfigControls } from './CheckinConfigControls'
 import { setSessionAway, useAway } from '../../lib/awayMode'
+import { sessionAwayView } from '@agentistics/core'
 import { openCheckinModal, useCheckinModalRequest } from '../../lib/checkinModal'
 
 export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
@@ -158,9 +159,13 @@ export function SessionAwayRow({ managedId, away, pt, isMobile = false }: { mana
   const [pending, setPending] = useState<boolean | null>(null)
   const [note, setNote] = useState<string | null>(null)
   useEffect(() => { setPending(null) }, [away, managedId])
-  const on = pending ?? away
+  // The EFFECTIVE state (`sessionAwayView`): with the global switch active the session is away
+  // whatever its own flag says, so the switch reads ON, names the global as its source and is locked.
+  const view = sessionAwayView(global.active, pending ?? away)
+  const on = view.on
   const label = pt ? 'Modo ausente nesta sessão' : 'Away mode on this session'
   const toggle = async () => {
+    if (view.locked) return
     const next = !on
     setPending(next)
     setNote(null)
@@ -168,19 +173,25 @@ export function SessionAwayRow({ managedId, away, pt, isMobile = false }: { mana
     if (!r.ok) { setPending(null); setNote(pt ? `Não foi possível mudar (${r.error}).` : `Could not change it (${r.error}).`); return }
     setNote(r.queued ? (pt ? 'A sessão será avisada em instantes.' : 'The session will be told shortly.') : null)
   }
-  const sub = global.active
-    ? (pt ? 'O modo ausente global está ligado: esta sessão já sabe que você está fora.' : 'Global away mode is on: this session already knows you are out.')
+  const source = view.source === 'global'
+    ? (pt ? 'ligado pelo modo ausente geral' : 'on through global away mode')
+    : view.source === 'session' ? (pt ? 'ligado só nesta sessão' : 'on for this session only') : null
+  const sub = view.locked
+    ? (pt ? 'Enquanto o modo ausente geral estiver ligado, esta sessão segue ausente. Para voltar, desligue o modo ausente geral.' : 'While global away mode is on, this session stays away. To come back, turn global away mode off.')
     : on
       ? (pt ? 'Ela não pergunta nada a você; as sessões que ela abrir herdam.' : 'It asks you nothing; sessions it starts inherit it.')
       : (pt ? 'Ligue para esta sessão decidir sozinha enquanto você está fora.' : 'Turn on to let this session decide on its own while you are out.')
   return (
-    <div data-testid="session-away-row">
+    <div data-testid="session-away-row" data-away-source={view.source ?? 'off'}>
       <div style={SECTION}>{pt ? 'Modo ausente' : 'Away mode'}</div>
       <div style={{ ...CHECKIN_ROW, padding: '0 6px', minHeight: isMobile ? 44 : 28 }}>
-        <Moon size={15} style={{ color: on || global.active ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }} />
-        <span>{pt ? 'Estou fora para esta sessão' : "I'm away for this session"}</span>
+        <Moon size={15} style={{ color: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }} />
+        <span style={{ display: 'grid', minWidth: 0 }}>
+          <span>{pt ? 'Estou fora para esta sessão' : "I'm away for this session"}</span>
+          {source && <span data-testid="session-away-source" style={{ fontSize: 10.5, color: 'var(--anthropic-orange)' }}>{source}</span>}
+        </span>
         <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
-          <ToggleSwitch on={on} onToggle={() => { void toggle() }} label={label} tap={isMobile ? 44 : undefined} />
+          <ToggleSwitch on={on} disabled={view.locked} onToggle={() => { void toggle() }} label={label} tap={isMobile ? 44 : undefined} />
         </span>
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '0 6px 4px', lineHeight: 1.4 }}>{sub}</div>

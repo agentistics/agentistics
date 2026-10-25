@@ -83,6 +83,30 @@ export function currentLeaderId(rows: readonly TeamRow[], id: string): string {
   return cur
 }
 
+/**
+ * Where a message addressed to `id` must go now. Every reopen, takeover and ACCOUNT SWITCH mints a
+ * new managed id for the same conversation and retires the old row, so a worker that recorded its
+ * leader's id at spawn kept addressing a row that no longer runs (measured 25/10: a worker sat waiting
+ * on a parent that had switched accounts). An ENDED row is followed through its hand-off chain
+ * (`currentLeaderId`) and then to the LIVE row carrying the same conversation; a row that is still
+ * running, or one with no live continuation, is its own answer — never a guess by directory or name.
+ */
+export function liveSuccessorOf(rows: readonly TeamRow[], id: string): string {
+  const row = rows.find(r => r.id === id || (!!r.conversationId && r.conversationId === id))
+  if (!row || !row.endedAt) return id
+  const led = currentLeaderId(rows, row.id)
+  const cur = rows.find(r => r.id === led) ?? row
+  if (!cur.endedAt) return cur.id
+  const live = cur.conversationId ? rows.find(r => r.id !== cur.id && !r.endedAt && r.conversationId === cur.conversationId) : undefined
+  return live ? live.id : id
+}
+
+/** The rows whose team link names the replaced row `oldId` by managed id: they follow its replacement. */
+export function childrenOfReplaced(rows: readonly TeamRow[], oldId: string, newId: string): string[] {
+  if (!oldId || oldId === newId) return []
+  return rows.filter(r => r.id !== newId && r.parentSessionId === oldId).map(r => r.id)
+}
+
 export interface HandoffReparent {
   /** Rows to file under the successor (the predecessor's whole team, ended rows included so a reopen follows). */
   children: string[]

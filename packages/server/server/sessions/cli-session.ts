@@ -42,7 +42,7 @@ import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { configureSpawn, configurationPendingMessage } from './spawn-configuration'
-import { handoffSpawnDefaults, handoffTitle } from './handoff-inherit'
+import { handoffAccountOf, handoffSpawnDefaults, handoffTitle } from './handoff-inherit'
 import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, killAndRetireSession } from './registry'
 import { callerHoldsIdentity, callerProof, callerSessionFromTree, type CallerProof } from './session-identity'
 import { spawnParentLink } from './team-links'
@@ -74,7 +74,7 @@ import { spawnDeath } from './spawn-check'
 import { reportFreshSpawn } from './spawn-report'
 import { readHarnessAgents } from './harness-agents-io'
 import { planTakeover, type TakeoverRefusal } from './takeover'
-import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './session-roles'
+import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, promoteSpawningParentNow, PROMOTED_PARENT_LINE, rekeyStoredRole, spawnRoleOriginFor } from './session-roles'
 import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 
 /**
@@ -524,11 +524,19 @@ export async function start(
   const ctx = buildSpawnContext({ ...(relay ? { handoffRelay: relay.section } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   // PLAN.ACCOUNTS D3 — one decision for every door (`spawn-account.ts`). An agent is asking when
   // this command runs inside a pane that can prove its identity.
-  const account = decideSpawnAccount({
-    harness: cmd.harness, ...(cmd.account ? { requested: cmd.account } : {}),
-    agentCaller: await callerHoldsIdentity(callerSessionId()),
-    context: await spawnAccountContext(cmd.account ? [] : [cmd.harness]),
+  // A HAND-OFF successor runs under the predecessor's account (same harness) unless one was named;
+  // an inherited account that is no longer usable falls back to the automatic choice, said in words.
+  const inheritedAccount = handoffAccountOf(handoffParentRow, cmd.harness, cmd.account)
+  const agentCaller = await callerHoldsIdentity(callerSessionId())
+  const accountCtx = await spawnAccountContext(cmd.account ? [] : [cmd.harness])
+  let account = decideSpawnAccount({
+    harness: cmd.harness, ...((cmd.account ?? inheritedAccount) ? { requested: (cmd.account ?? inheritedAccount)! } : {}),
+    agentCaller, context: accountCtx,
   })
+  if (!account.ok && inheritedAccount) {
+    console.error(`The predecessor's account ${inheritedAccount} cannot be used (${account.reason}); the successor uses the automatic choice.`)
+    account = decideSpawnAccount({ harness: cmd.harness, agentCaller, context: accountCtx })
+  }
   if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en')); return 1 }
   const planned = planSpawn({
     harness: cmd.harness, cwd, prompt: cmd.prompt, model: launch.model, effort: launch.effort, mode: launch.mode,
@@ -623,6 +631,11 @@ export async function start(
   if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
 
   if (role) await applyRoleTitle(id, label ?? id, role, lang).catch(() => false)
+  // AUTO → LEADER: a session with no role that starts a worker has declared itself a leader by doing it.
+  const promotedParent = role === 'worker' && !wantedRole && !cmd.handoff
+    ? (await promoteSpawningParentNow(parentSessionId, parentVerified, lang === 'pt' ? 'pt' : 'en').catch(() => ({ promoted: false }))).promoted
+    : false
+  if (promotedParent) console.error(PROMOTED_PARENT_LINE)
   const configuration = await configureSpawn(filing, { id, conversationId: planned.plan.conversationId }, handoffParentRow)
   if (!configuration.ready) console.error(configurationPendingMessage(id, configuration))
   if (handoffParentRow) {

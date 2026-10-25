@@ -12,7 +12,7 @@
  */
 
 import { anyGrant, scrubDeep, scrubTerminalLine } from '../vault/grants'
-import { canonicalOfTuiMode, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
+import { canonicalOfTuiMode, type CanonicalMode, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
 import { createLimiter } from '../utils'
 import { retainKeys } from '../prune-keys'
 import { statSync } from 'node:fs'
@@ -374,6 +374,14 @@ export function createSessionsPoller(o: {
    * What may be adopted at all is the pure `planAdoptions`.
    */
   adoptSessions?: (records: readonly ManagedSession[]) => Promise<unknown>
+  /**
+   * Persist the approval mode a running row is OBSERVED in (the harness's own statement, or the footer
+   * read), canonical only. `ManagedSession.mode` was written once at spawn, so a mode changed later —
+   * the chip, `BTab` in the terminal, a structured `setMode` — was invisible to everything that reads
+   * the record, and a hand-off successor inherited the mode its predecessor STARTED in. Called only
+   * when the observed canonical mode differs from the record: one write per change, never per poll.
+   */
+  recordMode?: (id: string, mode: CanonicalMode) => Promise<unknown>
   /**
    * ENGINE.MAP F1.2: what each row's HARNESS says about its own state, through the engine's chat
    * channel (`adapter-state.ts`) — only with the `adapter-chat` flag on, so `null` (the default) keeps
@@ -1030,6 +1038,13 @@ export function createSessionsPoller(o: {
         }
       }
       markFleetPhase(`poll: recordHarnessName x${recordNameWrites}`, recordNameStart)
+
+      if (o.recordMode) {
+        for (const m of registry) {
+          const canonical = modes.get(m.id)?.canonical
+          if (canonical && canonical !== m.mode) await o.recordMode(m.id, canonical).catch(() => undefined)
+        }
+      }
 
       // Decided against the BACKEND's own list rather than the reconciled statuses, because that is
       // the question: a row the backend has never heard of is one the machine took.

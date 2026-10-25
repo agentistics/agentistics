@@ -1384,7 +1384,19 @@ export async function runFleetSpawn(
   // harness has several accounts and none was named).
   const { spawnAccountContext } = await import('./spawn-account-io')
   const asked = HARNESS_ORDER.filter(h => h === body.harness && body.account === undefined)
-  const decision = planFleetSpawn(body, await host.startableHarnesses(), await spawnAccountContext(asked))
+  const startable = await host.startableHarnesses()
+  const accountCtx = await spawnAccountContext(asked)
+  // A HAND-OFF successor runs under its predecessor's account (same harness) unless one was named; an
+  // inherited account the plan refuses (retired, signed out, off for agents) falls back to automatic.
+  const inheritedAccount = body.handoff === true && typeof body.parent === 'string' && body.account === undefined
+    ? await import('./registry').then(async r => {
+      const { handoffAccountOf } = await import('./handoff-inherit')
+      const parent = (await r.readRegistry()).find(m => m.id === body.parent)
+      return handoffAccountOf(parent, String(body.harness), undefined)
+    }).catch(() => undefined)
+    : undefined
+  const inherited = inheritedAccount ? planFleetSpawn({ ...body, account: inheritedAccount }, startable, await spawnAccountContext([])) : undefined
+  const decision = inherited?.ok ? inherited : planFleetSpawn(body, startable, accountCtx)
   // A harness refused as unknown because the host's PATH reaches NO assistant at all is the PATH's
   // fault, and "no spawn spec for it here" would send someone looking for a bug in agentop.
   const blindNotice = !decision.ok && decision.reason === 'unknown_harness' ? host.harnessNotice?.() : undefined

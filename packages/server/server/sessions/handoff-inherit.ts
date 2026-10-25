@@ -107,6 +107,19 @@ export function handoffSpawnDefaults(
   return out
 }
 
+/**
+ * The account a hand-off successor is spawned under: the predecessor's own, for the SAME harness only
+ * (an account belongs to one CLI), and never over an account the hand-off named explicitly.
+ */
+export function handoffAccountOf(
+  parent: { harness?: string; accountId?: string | undefined } | undefined,
+  harness: string,
+  requested: string | undefined,
+): string | undefined {
+  if (requested) return undefined
+  return parent && parent.harness === harness && parent.accountId ? parent.accountId : undefined
+}
+
 /** Every inherited preference in ONE patch (folder, pin, check-in, mute), or `undefined` when none applies. */
 export function handoffInheritPatch(prefs: Preferences, parent: Ref, child: Ref, folderId?: string): Partial<Preferences> | undefined {
   let working = prefs

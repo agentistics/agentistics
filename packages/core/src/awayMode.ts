@@ -287,6 +287,18 @@ export function resolveSpawnAway(req: AwaySpawnRequest | undefined, parent: { aw
 }
 
 /**
+ * What ONE session's away control must SHOW: the EFFECTIVE state and where it comes from. While the
+ * global switch is active the session is away whatever its own flag says (`sessionAwayState`), so the
+ * control reads ON with `source: 'global'` and is `locked` — a per-session OFF would change nothing
+ * (and the global OFF clears every own flag anyway), so offering it would be a switch that lies.
+ */
+export interface SessionAwayView { on: boolean; source: 'global' | 'session' | null; locked: boolean }
+export function sessionAwayView(globalActive: boolean, ownAway: boolean | undefined): SessionAwayView {
+  if (globalActive) return { on: true, source: 'global', locked: true }
+  return ownAway === true ? { on: true, source: 'session', locked: false } : { on: false, source: null, locked: false }
+}
+
+/**
  * What a session-only away state authorises when the global switch is off: opening workers within
  * the plan limits, nothing else. A session the owner put in away mode on purpose must be able to
  * keep going; releases and merges still wait for the owner (or the global switch).

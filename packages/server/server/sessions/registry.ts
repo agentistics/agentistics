@@ -146,6 +146,8 @@ export interface SessionPatch {
   harnessNameSince?: number
   /** See `ManagedSession.structuredDriver`. */
   structuredDriver?: string
+  /** The approval mode the row was last OBSERVED in (the poller's `recordMode`). */
+  mode?: import('@agentistics/core').CanonicalMode
   /** See `ManagedSession.away`. `null` clears it (a session switched back off). */
   away?: true | null
   /** See `ManagedSession.retire`. `null` clears it (carried out or cancelled). */

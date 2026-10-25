@@ -423,6 +423,60 @@ export async function ensureSpawnRole(
   })
 }
 
+/**
+ * AUTO → LEADER. A session with NO stored role (automatic) that starts a WORKER of its own has
+ * declared itself a leader by doing it: record `leader` with origin `inferred`, apply the leader title
+ * and leave the parent's team, exactly as a declared leader would. Never touches a session that
+ * already has a role (a declared worker that spawns stays a worker — the person or it said so), and
+ * only for a VERIFIED parent that is a row of this fleet. No note is typed: the parent is the one
+ * running the spawn right now, and the caller prints the line in its own answer instead.
+ */
+export async function promoteSpawningParent(
+  parentId: string | undefined,
+  verified: boolean,
+  lang: RoleLang,
+  providedDeps?: RoleDeps,
+): Promise<{ promoted: boolean; renamed: boolean }> {
+  if (!parentId || !verified) return { promoted: false, renamed: false }
+  const deps = providedDeps ?? await defaultRoleDeps()
+  const rows = await deps.rows().catch(() => [] as FleetRowForGroups[])
+  const parent = rows.find(r => r.id === parentId || r.conversationId === parentId)
+  if (!parent) return { promoted: false, renamed: false }
+  const promoted = await serial(async () => {
+    const doc = await loadRoles(deps)
+    if (roleOfRow(doc.roles, parent)) return false
+    const key = sessionIdentityKey(parent)
+    const roles = { ...doc.roles, [key]: 'leader' as SessionRole }
+    const origins = { ...(doc.origins ?? {}), [key]: 'inferred' as RoleOrigin }
+    const at = { ...(doc.at ?? {}), [key]: Date.now() }
+    // The parent is told in the spawn's own answer, so the reopen path must not type it again.
+    const lastDeliveredRole = { ...(doc.lastDeliveredRole ?? {}), [key]: 'leader' as SessionRole }
+    await writeRolesDoc(deps.dataDir, { ...doc, roles, origins, at, lastDeliveredRole })
+    return true
+  })
+  if (!promoted) return { promoted: false, renamed: false }
+  if (deps.leaveTeam) await deps.leaveTeam(parent.id).catch(() => false)
+  const renamed = await applyRoleTitle(parent.id, parent.title, 'leader', lang, deps).catch(() => false)
+  return { promoted: true, renamed }
+}
+
+/**
+ * `promoteSpawningParent` against the REGISTRY rather than a fleet poll: the spawn doors run in the
+ * CLI process too, where a poll of the whole fleet would cost seconds for one row the registry holds.
+ */
+export async function promoteSpawningParentNow(parentId: string | undefined, verified: boolean, lang: RoleLang): Promise<{ promoted: boolean; renamed: boolean }> {
+  if (!parentId || !verified) return { promoted: false, renamed: false }
+  const deps = await defaultRoleDeps()
+  const { readRegistry } = await import('./registry')
+  return promoteSpawningParent(parentId, verified, lang, {
+    ...deps,
+    rows: async () => (await readRegistry()).map(m => ({ id: m.id, ...(m.conversationId ? { conversationId: m.conversationId } : {}), title: m.label ?? m.harnessName ?? m.id, harness: m.harness })),
+  })
+}
+
+/** The line a spawn answer carries when it just made its caller a leader. */
+export const PROMOTED_PARENT_LINE = '[agentistics] you started a worker, so your role is now LEADER (it was automatic). ' + roleLine('leader')
+
 /** The spawn context already carried this role, so a later reopen must not type it again. */
 export async function markRoleDelivered(
   keys: readonly (string | undefined)[],

@@ -15,10 +15,15 @@ export type RoleLang = 'en' | 'pt'
  * Who set a stored role: the person (`manual`, also what an entry with no origin means), the session
  * itself (`auto`), or a leader session that set it for a child (`{ leader: <managed session id> }`).
  */
-export type RoleOrigin = 'manual' | 'auto' | { leader: string }
+export type RoleOrigin = 'manual' | 'auto' | 'inferred' | { leader: string }
 
+/**
+ * `inferred`: an AUTOMATIC session (no stored role) was resolved by the system because it started
+ * workers of its own (`promoteSpawningParent`, server) — the one inference made on the session's
+ * behalf. A child of a verified leader is resolved too, as a worker, with origin `{ leader }`.
+ */
 export function parseRoleOrigin(v: unknown): RoleOrigin | undefined {
-  if (v === 'manual' || v === 'auto') return v
+  if (v === 'manual' || v === 'auto' || v === 'inferred') return v
   if (v && typeof v === 'object' && typeof (v as { leader?: unknown }).leader === 'string' && (v as { leader: string }).leader !== '') {
     return { leader: (v as { leader: string }).leader }
   }

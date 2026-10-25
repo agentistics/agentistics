@@ -4,7 +4,7 @@ import { createSharedPref } from './sharedPref'
 export type SessionRole = 'leader' | 'worker'
 export type SessionRoles = Record<string, SessionRole>
 /** Who set a role — mirrors the core `RoleOrigin`; an entry with none was the person's. */
-export type RoleOrigin = 'manual' | 'auto' | { leader: string }
+export type RoleOrigin = 'manual' | 'auto' | 'inferred' | { leader: string }
 export type RoleOrigins = Record<string, RoleOrigin>
 
 /** The title to print for a leader origin: only the current parent can be named, and only when it IS that leader. */
@@ -15,6 +15,7 @@ export function leaderTitleFor(origin: RoleOrigin | undefined, parent: { id: str
 /** The ⓘ's wording for who set the role. */
 export function roleOriginLabel(origin: RoleOrigin | undefined, pt: boolean, leaderTitle?: string): string {
   if (origin === 'auto') return pt ? 'definido pela própria sessão' : 'set by the session itself'
+  if (origin === 'inferred') return pt ? 'deduzido: ela abriu workers' : 'inferred: it started workers'
   if (origin && typeof origin === 'object') {
     if (leaderTitle) return pt ? `definido pelo líder ${leaderTitle}` : `set by leader ${leaderTitle}`
     return pt ? 'definido por um líder' : 'set by a leader'
@@ -40,7 +41,7 @@ const parseOrigins = (raw: unknown): RoleOrigins => {
   const out: RoleOrigins = {}
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
   for (const [id, o] of Object.entries(raw as Record<string, unknown>)) {
-    if (o === 'manual' || o === 'auto') out[id] = o
+    if (o === 'manual' || o === 'auto' || o === 'inferred') out[id] = o
     else if (o && typeof o === 'object' && typeof (o as { leader?: unknown }).leader === 'string') out[id] = { leader: (o as { leader: string }).leader }
   }
   return out

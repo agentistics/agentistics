@@ -45,6 +45,8 @@ export interface MessageDeps {
   comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind } }) => Promise<{ ok: boolean }>
   /** `handback` from a session filed on a subtask: move that subtask in_progress → in_review. */
   handbackSubtask?: (subtaskId: string) => Promise<void>
+  /** A reference naming a row that was replaced (reopen, account switch, hand-off) → its live successor's id. */
+  redirect?: (to: string) => Promise<string>
   now: () => number
 }
 
@@ -91,7 +93,8 @@ export async function sendSessionMessage(
   const kind = req.kind
 
   const rows = await deps.rows().catch(() => [] as FleetRowForGroups[])
-  const r = resolveSessionForGroup(rows, to)
+  const routed = deps.redirect ? await deps.redirect(to).catch(() => to) : to
+  const r = resolveSessionForGroup(rows, routed)
   if (!r.ok) return fail(r.code, undefined, r.matches)
   const target = r.session
   if (target.id === senderId || (target.conversationId && target.conversationId === senderId)) return fail('self')
@@ -168,6 +171,10 @@ export async function defaultMessageDeps(): Promise<MessageDeps> {
       const sub = w.book.subtasks.find(s => s.id === subtaskId)
       const next = sub ? statusAfterHandback(sub.status) : null
       if (next) await tw.patchSubtask(subtaskId, { status: next })
+    },
+    redirect: async to => {
+      const [{ readRegistry }, { liveSuccessorOf }] = await Promise.all([import('./registry'), import('./team-links')])
+      return liveSuccessorOf(await readRegistry(), to)
     },
     now: () => Date.now(),
   }

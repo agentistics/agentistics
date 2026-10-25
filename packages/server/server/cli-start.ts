@@ -139,7 +139,7 @@ import { applyAccountToPlan } from './sessions/account-plan'
 import { prependContext } from './sessions/agentistics-context'
 import { rootIfLeader } from './sessions/team-links'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, writeContextFile } from './sessions/spawn-context'
-import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
+import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, promoteSpawningParentNow, PROMOTED_PARENT_LINE, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -1625,6 +1625,8 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     // Take back a running session whose registry record was lost. Called only with a non-empty
     // list, so a healthy fleet never writes. See `session-adopt.ts` for what may be adopted.
     adoptSessions: async records => { await adoptSessionRecords(records) },
+    // The approval mode the row is observed in, so a hand-off successor inherits the CURRENT one.
+    recordMode: (id, mode) => patchSession(id, { mode }),
     // ENGINE.MAP F1.2: the harness's own statement of its state, with the `adapter-chat` flag on only.
     adapterState: hostAdapterState,
     tailState: hostTailState,
@@ -2314,10 +2316,17 @@ export async function spawnManaged(req: {
     return { ok: false, message }
   }
   if (storedContextRole.role) await markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)
+  // AUTO → LEADER: a session with no role that starts a worker has declared itself a leader by doing it.
+  const promotedParent = role === 'worker' && !req.role && !req.handoff && !req.resumeId && !req.inherit
+    ? (await promoteSpawningParentNow(req.parentSessionId, req.parentVerified === true, lang === 'pt' ? 'pt' : 'en').catch(() => ({ promoted: false }))).promoted
+    : false
   if (handoffParentRow) {
     // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
     await import('./sessions/team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
   }
+  // A REOPEN (takeover, account switch) retires the row its workers name: they follow it here, so a
+  // handback reaches the session that is running and not the one this spawn replaced.
+  if (req.inherit?.id) await reparentReplacedChildren(req.inherit.id, id, planned.plan.conversationId ?? req.resumeId).catch(() => 0)
 
   // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a
   // first-message context left pending for the TUI must not be prepended to its first prompt again.
@@ -2345,13 +2354,15 @@ export async function spawnManaged(req: {
   // one-line status the shell prints, and a caller (the web UI, the wizard) that wants to say "this
   // is why the check was overridden" needs that sentence separate from "session X started".
   const overrideExtra = admittedWith ? { overridden: true as const, note: admittedWith } : {}
-  if (!req.attach) return { ok: true, id, message: s.sessStartedBg(name), ...overrideExtra }
+  const note = [admittedWith, promotedParent ? PROMOTED_PARENT_LINE : null].filter(Boolean).join(' ')
+  const extra = { ...overrideExtra, ...(note ? { note } : {}) }
+  if (!req.attach) return { ok: true, id, message: s.sessStartedBg(name), ...extra }
   return {
     ok: true,
     id,
     message: s.sessStarted(name),
     ticket: { argv: backend.attachCommand(id), detachHint: await backend.detachHint(), label: name },
-    ...overrideExtra,
+    ...extra,
   }
 }
 
@@ -4844,6 +4855,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         if (!r.ok || !r.id) return r
         const { configureSpawn, configurationPendingMessage } = await import('./sessions/spawn-configuration')
         const configuration = await configureSpawn(filing, { id: r.id }, handoffParent)
+        // CONTA.TROCA v2 (another harness): the replaced row's workers follow its replacement.
+        if (req.switchFrom) await reparentReplacedChildren(req.switchFrom, r.id).catch(() => 0)
         return { ...r, ok: configuration.ready, configuration,
           message: configuration.ready ? r.message : configurationPendingMessage(r.id, configuration) }
 
@@ -5414,4 +5427,15 @@ async function runControlLoop(
 export function reopenRekeyTarget(inherit: { id: string; conversationId?: string } | undefined, bornConversationId: string | undefined, newId: string): string | null {
   if (!inherit || inherit.conversationId) return null
   return bornConversationId ?? newId
+}
+
+/**
+ * The workers whose team link names `oldId` (a row just replaced by a reopen or an account switch)
+ * are re-filed under `newId`. Without it they keep reporting to an id that no longer runs.
+ */
+async function reparentReplacedChildren(oldId: string, newId: string, newConversationId?: string): Promise<number> {
+  const { childrenOfReplaced } = await import('./sessions/team-links')
+  const ids = childrenOfReplaced(await readRegistry(), oldId, newId)
+  if (!ids.length) return 0
+  return patchSessions(ids, { parentSessionId: newId, ...(newConversationId ? { parentConversationId: newConversationId } : {}) })
 }

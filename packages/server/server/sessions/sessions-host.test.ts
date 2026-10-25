@@ -1192,3 +1192,21 @@ describe('LINK.CROSSTALK — two claude sessions in one folder never trade conve
     expect(calls).toEqual([['m1', 'c-new']])
   })
 })
+
+describe('persisting the observed approval mode (HERANÇA)', () => {
+  it('writes the canonical mode once when it differs from the record, never when it matches', async () => {
+    const calls: { id: string; mode: string }[] = []
+    const make = (rec: ReturnType<typeof managed>) => createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('m1')], frames: { m1: ['  ⏵⏵ accept edits on (shift+tab to cycle)'] } }),
+      readRegistry: async () => [rec],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      recordMode: async (id, mode) => { calls.push({ id, mode }) },
+    })
+    await make(managed('m1')).poll()
+    expect(calls).toEqual([{ id: 'm1', mode: 'accept-edits' }])
+    calls.length = 0
+    await make(managed('m1', { mode: 'accept-edits' })).poll()
+    expect(calls).toEqual([])
+  })
+})

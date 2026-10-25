@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.152.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Com o modo ausente geral ligado, cada sessão mostra "ligado pelo modo ausente geral" em vez de parecer desligada.',
+        en: 'With global away mode on, each session shows "on through global away mode" instead of looking off.',
+      },
+      {
+        pt: 'Uma sessão em papel automático que abre workers passa a ser líder sozinha, e o painel diz por quê.',
+        en: 'A session on the automatic role that starts workers becomes a leader on its own, and the panel says why.',
+      },
+      {
+        pt: 'Na passagem de bastão, a nova sessão herda o modo de aprovação atual, a conta, o modo ausente, a tarefa e a pasta da anterior.',
+        en: 'On a hand-off, the new session inherits the current approval mode, the account, away mode, the task and the folder of the previous one.',
+      },
+      {
+        pt: 'Depois de trocar de conta, as sessões filhas continuam falando com o líder certo.',
+        en: 'After switching accounts, child sessions keep reporting to the right leader.',
+      },
+    ],
+  },
   '2.152.0': {
     features: [
       {
