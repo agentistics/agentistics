@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.149.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Comandos locais, como /rename, deixam de aparecer como não lidos quando a sessão termina de executá-los.',
+        en: 'Local commands such as /rename stop appearing as unread once the session finishes handling them.',
+      },
+    ],
+  },
   '2.149.0': {
     features: [
       {
