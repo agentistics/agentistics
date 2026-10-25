@@ -90,11 +90,23 @@ async function manualJobs(table: readonly ProcStatRow[], lockDir: string): Promi
     else unknownSlots.set(heavyLockPath(slot, lockDir), { inode: ino, slot })
   }
   for (const [inode, slot] of inodes) {
-    if (![...holders.values()].includes(slot)) unknownSlots.set(heavyLockPath(slot, lockDir), { inode, slot })
+    const path = heavyLockPath(slot, lockDir)
+    if ([...holders.values()].includes(slot) || unknownSlots.has(path)) continue
+    // On this kernel /proc/locks can omit inherited FD locks after the acquiring process exits.
+    // Probe without waiting, holding a free lock only for `true`. Only a successful probe proves
+    // it is free; a busy lock or any probe error still needs the fdinfo fallback.
+    let free = false
+    try {
+      const probe = Bun.spawn(['flock', '-n', '-E', String(FLOCK_BUSY_CODE), path, 'true'], {
+        stdout: 'ignore', stderr: 'ignore',
+      })
+      free = await probe.exited === 0
+    } catch { /* unavailable probe: preserve holder detection through fdinfo */ }
+    if (!free) unknownSlots.set(path, { inode, slot })
   }
   // `flock 9` can exit while the shell/job keeps its open file description. Linux then reports
   // no global holder (or an exited pid). Find the processes retaining that locked descriptor, not every
-  // process that merely opened the lock file. Slots without a live global holder need an FD scan.
+  // process that merely opened the lock file. Free slots never need an FD scan.
   if (unknownSlots.size > 0) {
     for (const row of table) {
       const fds = await readdir(`/proc/${row.pid}/fd`).catch(() => [] as string[])

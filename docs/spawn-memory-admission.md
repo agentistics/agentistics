@@ -17,6 +17,9 @@ Heavy RSS is measured afresh over each holder's process tree, including descenda
 by other threads. Each PID is counted once. Holders are discovered from the kernel lock table,
 even after `flock -F` execs the command. Inherited FD locks (`flock 9`) whose acquiring process
 has exited are found through locked file descriptions in `/proc/<pid>/fdinfo`.
+Some kernels omit these inherited locks from `/proc/locks`. For a slot without a known holder,
+a non-blocking `flock -n -E 254 <path> true` probe distinguishes a free lock from a busy one.
+Free locks skip descriptor scanning; busy locks and probe errors retain the `fdinfo` fallback.
 Persisted `usedBytes` readings are never reused for admission.
 
 For example, with 3.5 GiB available and a heavy tsc already at 2.7 GiB RSS, the remaining heavy

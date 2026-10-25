@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
+import * as fs from 'node:fs/promises'
 import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,17 +8,45 @@ import { readHeavyState } from './heavy-io'
 const MB = 1024 * 1024
 
 describe('heavy job resident memory', () => {
-  test.skipIf(process.platform !== 'linux')('does not treat an open but unlocked file as a running job', async () => {
+  test.skipIf(process.platform !== 'linux' || !Bun.which('flock'))('does not scan descriptors for an open but unlocked file', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'heavy-unlocked-'))
     const handle = await open(join(dir, 'agentistics-heavy.lock'), 'w')
+    const readDirs = spyOn(fs, 'readdir')
     try {
       const state = await readHeavyState(join(dir, 'state'), dir)
       expect(state.running).toHaveLength(0)
+      expect(readDirs.mock.calls.length).toBeGreaterThan(0)
+      expect(readDirs.mock.calls.filter(([path]) => /^\/proc\/\d+\/fd$/.test(String(path)))).toHaveLength(0)
     } finally {
+      readDirs.mockRestore()
       await handle.close()
       await rm(dir, { recursive: true, force: true })
     }
   })
+
+  for (const failure of ['throws', 'exits nonzero'] as const) {
+    test.skipIf(process.platform !== 'linux')(`falls back to descriptor scanning when the lock probe ${failure}`, async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'heavy-probe-error-'))
+      const handle = await open(join(dir, 'agentistics-heavy.lock'), 'w')
+      const readDirs = spyOn(fs, 'readdir')
+      const realSpawn = Bun.spawn
+      const spawn = spyOn(Bun, 'spawn').mockImplementation(() => {
+        if (failure === 'throws') throw new Error('probe unavailable')
+        return realSpawn(['/bin/false'], { stdout: 'ignore', stderr: 'ignore' })
+      })
+      try {
+        const state = await readHeavyState(join(dir, 'state'), dir)
+        expect(spawn).toHaveBeenCalledTimes(1)
+        expect(readDirs.mock.calls.some(([path]) => /^\/proc\/\d+\/fd$/.test(String(path)))).toBe(true)
+        expect(state.running).toHaveLength(0)
+      } finally {
+        spawn.mockRestore()
+        readDirs.mockRestore()
+        await handle.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+  }
 
   for (const mode of ['fork', 'exec', 'fd'] as const) {
     test.skipIf(process.platform !== 'linux' || !Bun.which('flock'))(
