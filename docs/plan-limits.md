@@ -142,6 +142,47 @@ normalization. Without a renewal time, no expected line is invented. Agora compa
 weekly window; history retains older observed readings, with the expected line limited to the
 current known window.
 
+### Usage math and policy
+
+Usage is BETA; the shared beta chip appears in the area tree, rail tooltip, mobile sheet and page
+titles. The detailed formula/verdict audit is [usage-math-audit.md](usage-math-audit.md).
+
+The shared exhaustion forecast uses average consumption since the window opened: percent divided
+by elapsed time (at least one minute). It does not use the recent measured burn. No usage means no
+exhaustion warning; 100% or more is exhausted. Remaining quota is clamped at zero, while the reported
+used percentage remains visible even above 100%.
+
+Recent weekly pace uses same-account, same-renewal observations from the last six hours, after the
+current account segment starts. Burn is the nonnegative percentage delta divided by elapsed hours
+(at least one minute). Without two observations it falls back to the sustainable rate as policy,
+not a measurement. Sustainable rate is remaining weekly quota divided by remaining hours (at least
+half an hour); projected periods cap it at 198%/h. A positive live per-session measurement can
+still establish measured capacity. A flat zero burn cannot establish per-session capacity.
+
+Recent burn/sustainable ratios below 0.8 are under pace, above 1.2 over pace; both boundaries belong
+to on pace, allowing only floating-point noise. Positive burn against zero quota is over pace.
+Budget hold starts at 85% of 5h or 95% of week. A week at 80%, or one forecast to run out early,
+is tight. The page combines these fields: hold first, tight/recent over next, otherwise on/under.
+The area warning count uses that same decision. MCP exposes budget and pace as separate fields.
+
+Plan shows the server's suggested parallel cadence, including availability overrides, rather than
+recalculating it in the browser. The requested hours record the intended interval; recommendation
+remains sustainable through renewal, independent of that duration. Suggested cadence is 0 for
+hold/recent over, otherwise a 1–8 heuristic from recent/sustainable rates. It differs from free
+slots, which subtract measured live burn and divide remaining rate by average per-session burn.
+The running count includes attributed positive-burn sessions, not all open fleet sessions.
+
+Daily budget is nonnegative remaining weekly quota divided by days remaining (at least half a day).
+Hold pause time is the weekly reset when weekly quota binds, otherwise the 5h reset. An over-pace
+pause solves for when remaining quota can sustain the measured burn through renewal, capped at
+the next 5h reset as a recheck time. The page headline uses the latest future account pause; MCP's
+aggregate uses the earliest recheck. Account cards retain their own pause times and future days.
+
+History retains at most 32 observations per account within seven days of the latest sample, in
+memory only. Durations use absolute milliseconds (week=168h); dates use the browser's time zone.
+Meters tick on the client clock, whereas budget snapshots refresh through the existing SSE store.
+The audit records the stale-snapshot, planning-horizon and projection limitations explicitly.
+
 ### Usage area presentation
 
 Usage › Now and Plan use the same measured-capacity test (`freeSlotsMeasured` and a finite,

@@ -153,8 +153,9 @@ export function planSlots(input: PlanSlotInput): { freeSlots: number; freeSlotsM
     ? sessions.reduce((sum, s) => sum + s.burnPctPerHour, 0) / sessions.length
     : (input.typicalBurnPctPerHour ?? input.sustainablePctPerHour) / Math.max(1, input.measuredLiveCount ?? 1)
   const freeSlotsMeasured = perSession > 0
+  const capacity = (input.sustainablePctPerHour - totalBurn) / perSession
   const freeSlots = freeSlotsMeasured
-    ? Math.max(0, Math.floor((input.sustainablePctPerHour - totalBurn) / perSession))
+    ? Math.max(0, Math.floor(capacity + Number.EPSILON * Math.max(1, Math.abs(capacity))))
     : Math.max(0, (input.fallbackParallel ?? 1) - sessions.length)
   return {
     freeSlots,
@@ -358,7 +359,7 @@ export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
   const weekPct = week ? currentUsedPct(week, nowMs) : 0
   const weekResetsAt = week?.resetsAt ?? nowMs
   const daysToWeekReset = Math.max(0, (weekResetsAt - nowMs) / DAY_MS)
-  const dailyBudgetPct = (100 - weekPct) / Math.max(daysToWeekReset, 0.5)
+  const dailyBudgetPct = Math.max(0, 100 - weekPct) / Math.max(daysToWeekReset, 0.5)
   const forecast = week ? forecastWindow(week, nowMs) : { kind: 'lasts' as const }
   const status: PlanBudgetStatus = fiveHourPct >= PLAN_BUDGET_HOLD_5H_PCT || weekPct >= PLAN_BUDGET_HOLD_WEEK_PCT
     ? 'hold'
@@ -398,7 +399,9 @@ export function planPace(
   const readings = [...history.filter(x => x.updatedAt !== l.updatedAt), l]
     .filter(x => x.harness === l.harness && x.account === l.account)
     .filter(x => segmentStart === undefined || x.updatedAt >= segmentStart)
-    .filter(x => !week || x.updatedAt >= week.resetsAt - PLAN_WINDOW_MS.week)
+    .filter(x => x.updatedAt <= nowMs)
+    .filter(x => !week || (x.updatedAt >= week.resetsAt - PLAN_WINDOW_MS.week
+      && windowOf(x, 'week')?.resetsAt === week.resetsAt))
     .sort((a, b) => a.updatedAt - b.updatedAt)
   const first = readings.find(x => nowMs - x.updatedAt <= 6 * 3_600_000)
   const last = readings.at(-1)
@@ -413,8 +416,9 @@ export function planPace(
   const burnPctPerHour = elapsedHours > 0
     ? Math.max(0, (currentUsedPct(lastWeek!, nowMs) - currentUsedPct(firstWeek!, nowMs)) / elapsedHours)
     : sustainablePctPerHour
-  const ratio = sustainablePctPerHour > 0 ? burnPctPerHour / sustainablePctPerHour : 0
-  const paceStatus: PlanPaceStatus = ratio > 1.2 ? 'over' : ratio < 0.8 ? 'under' : 'on'
+  const ratio = sustainablePctPerHour > 0 ? burnPctPerHour / sustainablePctPerHour : burnPctPerHour > 0 ? Infinity : 1
+  // Subtracting decimal percentages can move an exact 0.8/1.2 boundary by a few ulps.
+  const paceStatus: PlanPaceStatus = ratio > 1.2 + 1e-12 ? 'over' : ratio < 0.8 - 1e-12 ? 'under' : 'on'
   const fiveWindow = windowOf(l, '5h')
   const five = fiveWindow && effectiveWindow(fiveWindow, nowMs)
   const fivePct = five ? currentUsedPct(five, nowMs) : 0
@@ -456,6 +460,8 @@ export function planPace(
   return {
     paceStatus, burnPctPerHour, sustainablePctPerHour, suggestedParallel, note,
     ...slots,
+    // The fallback sustainable rate is policy, not an observed per-session measurement.
+    freeSlotsMeasured: slots.freeSlotsMeasured && (elapsedHours > 0 || liveSessions.some(s => s.burnPctPerHour > 0)),
     ...(budgetHold ? { freeSlots: 0, pauseUntil } : {}),
   }
 }

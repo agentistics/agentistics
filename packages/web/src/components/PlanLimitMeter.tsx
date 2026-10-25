@@ -107,7 +107,7 @@ function WindowRow({ w, now, lang, ring, forecast = true }: { w: PlanLimitWindow
     <div style={{ minWidth: 0, flex: 1, fontSize: 12, lineHeight: 1.5 }}>
       <b style={{ display: 'block', whiteSpace: 'nowrap' }}>{renewed ? `${windowLabel(w.kind, lang)} · –` : `${windowLabel(w.kind, lang)} · ${Math.round(pct)}% ${pt ? 'usado' : 'used'}`}</b>
       <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 5, color: 'var(--text-secondary)' }}>
-        {!renewed && <span style={{ whiteSpace: 'nowrap' }}>{pt ? `restam ${100 - Math.round(pct)}%` : `${100 - Math.round(pct)}% left`} ·</span>}
+        {!renewed && <span style={{ whiteSpace: 'nowrap' }}>{pt ? `restam ${Math.max(0, 100 - Math.round(pct))}%` : `${Math.max(0, 100 - Math.round(pct))}% left`} ·</span>}
         {windowResetPhrase(w, now, lang).split(/ (\((?:em|in) .+\))$/).filter(Boolean).map((part, i) => <span key={i} style={{ whiteSpace: renewed ? 'normal' : 'nowrap' }}>{part}</span>)}
       </div>
       {forecast && <span data-plan-forecast-slot style={{ display: 'block', minHeight: '1.5em', color: LIMIT_WARN, fontWeight: 600 }}>{f ? forecastPhrase(f, now, lang) : null}</span>}

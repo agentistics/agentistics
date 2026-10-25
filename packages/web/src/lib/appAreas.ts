@@ -52,7 +52,7 @@ export const APP_AREAS: readonly Area[] = [
     { id: 'handoffs', path: '/leadership/handoffs', labelPt: 'Passagens', labelEn: 'Hand-offs' },
     { id: 'away', path: '/leadership/away', labelPt: 'Modo ausente', labelEn: 'Away mode' },
   ] },
-  { id: 'usage', icon: 'gauge', labelPt: 'Uso', labelEn: 'Usage', pages: [
+  { id: 'usage', icon: 'gauge', beta: true, labelPt: 'Uso', labelEn: 'Usage', pages: [
     { id: 'now', path: '/usage', labelPt: 'Agora', labelEn: 'Now' },
     { id: 'plan', path: '/usage/plan', labelPt: 'Planejar', labelEn: 'Plan' },
     { id: 'limits', path: '/usage/limits', labelPt: 'Limites', labelEn: 'Limits' },

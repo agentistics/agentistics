@@ -9,6 +9,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { BetaTag } from '../BetaTag'
 import { ListTree } from 'lucide-react'
 import { APP_AREAS, areaOfPath, pageLabel, type AreaId } from '../../lib/appAreas'
 import { useEscapeOwner } from '../../lib/overlayStack'
@@ -67,7 +68,7 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
             : (pt ? 'avisos' : 'alerts')
           const name = n ? `${label}, ${n} ${what}` : label
           return (
-            <Tip key={area.id} label={label} show>
+            <Tip key={area.id} label={<>{label}{area.beta && <> <BetaTag what={label} lang={lang} /></>}</>} show>
               <a
                 href={to}
                 aria-label={name}

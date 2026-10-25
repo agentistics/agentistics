@@ -48,9 +48,10 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
         const pace = usagePaceState(row)
         const hold = pace === 'hold'
         const over = pace === 'over'
+        const under = pace === 'under'
         const measured = hasMeasuredPace(row)
         return <div key={accountKey(row)} data-usage-account={accountKey(row)} style={{ ...cardRows, overflowWrap: 'anywhere' }}>
-          <Section title={row.plan} style={cardRows} contentStyle={contentRows} action={<Pill tone={hold ? 'error' : over ? 'warn' : 'ok'}>{hold ? (pt ? 'Em pausa' : 'On hold') : over ? (pt ? 'Acima do ritmo' : 'Over pace') : (pt ? 'No ritmo' : 'On pace')}</Pill>}>
+          <Section title={row.plan} style={cardRows} contentStyle={contentRows} action={<Pill tone={hold ? 'error' : over ? 'warn' : 'ok'}>{hold ? (pt ? 'Em pausa' : 'On hold') : over ? (pt ? 'Acima do ritmo' : 'Over pace') : under ? (pt ? 'Abaixo do ritmo' : 'Under pace') : (pt ? 'No ritmo' : 'On pace')}</Pill>}>
             <PlanUsageCard embedded showPlan={false} limits={limitsForAccount} pending={{ harness: row.harness, plan: row.plan }} accountLabel={accountLabel(row)} now={now} lang={lang} />
             <div data-usage-metrics style={{ alignSelf: 'start', minWidth: 0 }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 12 }}>

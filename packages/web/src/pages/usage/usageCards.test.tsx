@@ -47,6 +47,23 @@ function seed(rows: UsageBudgetRow[]) {
 afterEach(() => __setPlanLimitsForTest(null, NOW))
 
 describe('usage account cards', () => {
+  test('under pace stays under without lighting the over-pace headline', () => {
+    seed([row({ paceStatus: 'under' })])
+    for (const lang of ['pt', 'en'] as const) {
+      const html = render(<UsageNowPage />, 390, lang)
+      expect(html).toContain(lang === 'pt' ? '>Abaixo do ritmo<' : '>Under pace<')
+      expect(html).toContain(lang === 'pt' ? 'Todos os 1 planos no ritmo.' : 'All 1 plans on pace.')
+    }
+  })
+  test('overage retains the reported percentage with no negative remainder', () => {
+    seed([row({ weekPct: 125, status: 'hold' })])
+    for (const lang of ['pt', 'en'] as const) for (const page of [<UsageNowPage />, <UsageLimitsPage />]) {
+      const html = render(page, 390, lang)
+      expect(html).toContain('125%')
+      expect(html).toContain(lang === 'pt' ? 'restam 0%' : '0% left')
+      expect(html).not.toContain('-25%')
+    }
+  })
   test('headline and account pills agree when the budget is tight but recent pace is on', () => {
     const rows = [row({ status: 'tight', paceStatus: 'on' }), row({ harness: 'codex', status: 'tight', paceStatus: 'on', weekPct: 27, weekResetsAt: NOW + WEEK * 0.93 })]
     seed(rows)
@@ -212,6 +229,14 @@ describe('usage account cards', () => {
 })
 
 describe('usage percent series', () => {
+  for (const kind of ['week', '5h'] as const) for (const fraction of [0, 0.25, 0.5, 1]) {
+    test(`${kind} expected fraction ${fraction} is a straight percentage line`, () => {
+      const length = kind === 'week' ? WEEK : 5 * 3_600_000
+      const at = NOW - length + fraction * length
+      const reading = { harness: 'codex' as const, account: 'a', points: [{ at, weekPct: 125, fiveHourPct: 125 }] }
+      expect(usageChartData(reading, kind, NOW).find(p => p.at === at)).toEqual({ at, expected: fraction * 100, actual: 125 })
+    })
+  }
   test('expected runs from 0 to 100 while measured percentages stay unchanged', () => {
     const reading = { harness: 'claude' as const, account: 'personal', points: [{ at: NOW - WEEK / 2, weekPct: 25, fiveHourPct: null }] }
     expect(usageChartData(reading, 'week', NOW)).toEqual([

@@ -293,7 +293,7 @@ describe('renewed windows project their next period', () => {
       paceStatus: 'on', burnPctPerHour: 0.4505851966576492,
       sustainablePctPerHour: 0.4505851966576492, suggestedParallel: 1,
       note: 'On pace: keep the current cadence through the weekly reset.',
-      freeSlots: 1, freeSlotsMeasured: true, liveSessions: [],
+      freeSlots: 1, freeSlotsMeasured: false, liveSessions: [],
     })
   })
 
