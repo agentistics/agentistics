@@ -111,7 +111,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
   }
   const style: CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
-    minHeight: mobile ? 44 : 30, padding: '5px 6px 5px 12px', borderRadius: 8, boxSizing: 'border-box',
+    minHeight: mobile ? 44 : TAB_H, padding: '5px 6px 5px 12px', borderRadius: 8, boxSizing: 'border-box',
     fontSize: 12, scrollSnapAlign: 'center', scrollSnapStop: 'always',
     minWidth: mobile ? 132 : 110, width: mobile ? '100%' : 'max-content', maxWidth: mobile ? '100%' : 360,
     fontWeight: active || needs ? 650 : 500,
@@ -178,6 +178,21 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
     </div>
   )
 }
+
+/**
+ * THE DESKTOP STRIP'S HEIGHT IS ARITHMETIC, AND `App.tsx` RESERVES EXACTLY THIS MUCH FOR IT. The row
+ * the top bar sets aside for the strip used to be a hand-typed 35 ("34px + its hairline") while the
+ * strip really measured 47 (tab 30 + the tablist's padding, border and margin + the hairline), so
+ * its bottom edge ran 12px into the title row and the title and the right-hand buttons crossed the
+ * divider. Every term lives here, the style reads them, and `TAB_STRIP_H` is their sum — change one
+ * and the reserved row follows.
+ */
+export const TAB_H = 30
+export const TABLIST_PAD = 3
+export const TABLIST_BORDER = 1
+export const TABLIST_MARGIN_Y = 4
+export const STRIP_HAIRLINE = 1
+export const TAB_STRIP_H = TAB_H + 2 * (TABLIST_PAD + TABLIST_BORDER + TABLIST_MARGIN_Y) + STRIP_HAIRLINE
 
 export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen, onNone, onNoticeChange }: SessionTabStripProps) {
   const pt = lang === 'pt'
@@ -367,13 +382,13 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
   }
 
   return (
-    <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0, borderBottom: '1px solid var(--border-subtle)' }}>
+    <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0, boxSizing: 'border-box', borderBottom: `${STRIP_HAIRLINE}px solid var(--border-subtle)`, ...(mobile ? null : { height: TAB_STRIP_H }) }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0 }}>
       <button
         type="button" aria-haspopup="menu" aria-label={pt ? 'Abas abertas e dormindo' : 'Open and sleeping tabs'}
         onClick={e => listMenu(e.currentTarget)}
         style={{
-          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 30, minWidth: mobile ? 44 : 0, justifyContent: 'center',
+          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : TAB_H, minWidth: mobile ? 44 : 0, justifyContent: 'center',
           padding: '0 8px', marginLeft: 6, boxSizing: 'border-box', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
           cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
         }}
@@ -382,7 +397,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
         ref={attach} className="tabscroll" role="tablist" aria-label={pt ? 'Sessões abertas' : 'Open sessions'} onScroll={measure}
         style={{
           display: 'flex', alignItems: 'stretch', gap: 3, overflowX: 'auto', flex: 1, minWidth: 0,
-          background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 3, margin: '4px 6px',
+          background: 'var(--bg-base)', border: `${TABLIST_BORDER}px solid var(--border-subtle)`, borderRadius: 10, padding: TABLIST_PAD, margin: `${TABLIST_MARGIN_Y}px 6px`,
           WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory',
           ...(!mobile && fade !== null ? { maskImage: fade, WebkitMaskImage: fade } : null),
         }}

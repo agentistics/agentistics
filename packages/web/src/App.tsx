@@ -114,7 +114,7 @@ import { applyTextScale, clampTextScale, readLocalTextScale, writeLocalTextScale
 import { journalBackfillPollMs } from './lib/journalBackfill'
 import { initialLang } from './lib/lang'
 import { fleetOpenStore, sessionsFiltersOpenStore, sessionTabsStore, studioSeenStore } from './lib/appFlags'
-import { SessionTabStrip } from './components/sessions/SessionTabStrip'
+import { SessionTabStrip, TAB_STRIP_H } from './components/sessions/SessionTabStrip'
 import { reopenSession } from './lib/reopeningStore'
 import { replaceTab } from './lib/sessionTabs'
 import { getOpenTabs, setOpenTabs } from './lib/sessionTabsStore'
@@ -941,8 +941,8 @@ function MobileBottomNav({
  * height and its header row (`AsideHeader`) has this same height, so the two bands stay level.
  */
 const TOPBAR_H = 44
-/** The session tab strip's row above the title line (`SessionTabStrip` is 34px + its hairline). */
-const TABS_ROW_H = 35
+/** The session tab strip's row above the title line — the strip's own measured height, never a typed number. */
+const TABS_ROW_H = TAB_STRIP_H
 const SIDEBAR_W = 248
 const SIDEBAR_W_COLLAPSED = 64
 /** Room kept between the Filtros / stats tabs and the right-hand aside they hang beside. */
@@ -3645,7 +3645,7 @@ export default function AppLayout() {
           Cancel" — laid over it, see `ChatSelectionOverlay`. */}
       <ChatSelectionOverlay lang={lang === 'pt' ? 'pt' : 'en'} padX={PAGE_INSET} />
       {headerSession && (
-        <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'baseline', gap: 7 }}>
+        <div style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'center', gap: 7 }}>
           <SessionLinkInfo session={headerSession} links={sessionLinks(headerSession, headerFleet.rows)} lang={lang === 'pt' ? 'pt' : 'en'} onGo={p => navigate(p)} />
           <span style={{
             fontSize: '0.8438rem', fontWeight: 650, color: 'var(--text-primary)',
