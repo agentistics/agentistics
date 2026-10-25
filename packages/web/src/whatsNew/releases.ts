@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.150.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O comando /rename concluído aparece como aviso de sessão renomeada, em vez de uma mensagem com seu avatar.',
+        en: 'A completed /rename command appears as a session renamed notice instead of a message with your avatar.',
+      },
+    ],
+  },
   '2.150.0': {
     features: [
       {

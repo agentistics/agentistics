@@ -118,6 +118,13 @@ function withoutLeadingMarkers(turn: string): string {
  */
 type EchoMatch = 'no' | 'weak' | 'anchor'
 
+/** The slash invocation used by echo reconciliation and local-command system lines, never paths. */
+export function slashInvocation(text: string): { command: string; args: string } | null {
+  const trimmed = text.trim()
+  const match = /^(\/[A-Za-z0-9][A-Za-z0-9_:-]*)(?=$|\s)/.exec(trimmed)
+  return match ? { command: match[1]!, args: trimmed.slice(match[0].length).trim() } : null
+}
+
 export function pendingEchoes(
   echoes: readonly string[],
   userTurns: readonly string[],
@@ -148,7 +155,7 @@ export function pendingEchoes(
   // publishes its confirmed user turn on completion, but that is not FIFO model-input evidence.
   // Treat ALL slash invocations conservatively here: only the driver knows which are local;
   // keeping a skill pending costs a glance, using a local command to hide a prompt loses it.
-  const command = echoes.map(text => /^\/[A-Za-z0-9][A-Za-z0-9_:-]*(?=$|\s)/.test(text.trimStart()))
+  const command = echoes.map(text => slashInvocation(text) !== null)
   const lastAnchor = match.findLastIndex((m, i) => m === 'anchor' && !command[i])
   return echoes.filter((_text, i) => match[i] === 'no' && (command[i] || i > lastAnchor))
 }
