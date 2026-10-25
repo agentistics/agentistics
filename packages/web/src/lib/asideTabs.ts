@@ -143,14 +143,16 @@ const TWIN_WINDOW_MS = 5 * 60_000
  * and only when one of the two is unlinked. Live rows are never touched.
  */
 export function dedupeEnded<R extends TeamRow>(rows: readonly R[]): R[] {
+  // A synthetic `closed:<cid>` row carries its conversation in the id, not in the field.
+  const cidOf = (r: R) => r.conversationId || (r.id.startsWith('closed:') ? r.id.slice('closed:'.length) : undefined)
   const end = (r: R) => r.endedAt ?? r.startedAt ?? -Infinity
   const ended = rows.filter(r => !isLive(r.state)).sort((a, b) => end(b) - end(a))
   const drop = new Set<R>()
   const kept: R[] = []
   for (const r of ended) {
     const twin = kept.find(k =>
-      (r.conversationId && k.conversationId
-        ? r.conversationId === k.conversationId
+      (cidOf(r) && cidOf(k)
+        ? cidOf(r) === cidOf(k)
         : k.title === r.title && Math.abs(end(k) - end(r)) <= TWIN_WINDOW_MS))
     if (twin) drop.add(r)
     else kept.push(r)

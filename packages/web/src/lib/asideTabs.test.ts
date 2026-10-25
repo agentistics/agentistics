@@ -121,3 +121,21 @@ test('unlinked twins with one title ended minutes apart merge; far apart or diff
   const s = endedSections(rows, { fellIds: new Set(), keep: () => false, now: t })
   expect(s.today.length + s.older.length).toBe(3)
 })
+
+test('a synthetic closed:<cid> row is dropped by a linked row of that conversation however far apart', () => {
+  const t = 10_000_000
+  const rows = [
+    r('m1', 'exited', { conversationId: 'c9', title: 'USO', endedAt: t }),
+    r('closed:c9', 'closed', { title: 'USO', endedAt: t - 90 * 60_000 }),
+  ]
+  expect(dedupeEnded(rows).map(x => x.id)).toEqual(['m1'])
+})
+
+test('two conversations with one title stay two rows even when one is synthetic', () => {
+  const t = 10_000_000
+  const rows = [
+    r('m1', 'exited', { conversationId: 'c1', title: 'USO', endedAt: t }),
+    r('closed:c2', 'closed', { title: 'USO', endedAt: t - 60_000 }),
+  ]
+  expect(dedupeEnded(rows).map(x => x.id)).toEqual(['m1', 'closed:c2'])
+})

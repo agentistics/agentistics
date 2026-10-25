@@ -178,10 +178,10 @@ export function SessionsRail({
         {leader ? <RoleIcon kind="leader" size={14} pt={pt} /> : <HarnessMark harness={s.harness} size={16} />}
         {!leader && (
           <span aria-hidden style={{
-            position: 'absolute', left: -3, top: -3, width: 14, height: 14, borderRadius: '50%', display: 'flex',
+            position: 'absolute', left: -5, top: -5, width: 18, height: 18, borderRadius: '50%', display: 'flex',
             alignItems: 'center', justifyContent: 'center', background: 'var(--bg-surface)', border: '1px solid var(--border)', boxSizing: 'border-box',
           }}>
-            <RoleIcon kind={role} size={9} pt={pt} />
+            <RoleIcon kind={role} size={12} pt={pt} />
           </span>
         )}
         {dot && (

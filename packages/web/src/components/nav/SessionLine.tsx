@@ -137,7 +137,7 @@ export function SessionLine({
           border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer',
         }}
       >
-        <RoleIcon kind={role} size={13} pt={pt} />
+        <RoleIcon kind={role} size={13} pt={pt} style={{ alignSelf: 'flex-start', marginTop: 2 }} />
         {/* Title and the folded team's summary share one wrapping box: the summary drops under the
             name when the line is short, instead of crushing the name to a letter per line. */}
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 1 }}>

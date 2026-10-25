@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.152.0': {
+  '2.153.0': {
     features: [
       {
         pt: 'Na lista de sessões, o worker ganhou um ícone azul de chave e chave de fenda cruzadas, e o papel automático um ícone discreto.',
