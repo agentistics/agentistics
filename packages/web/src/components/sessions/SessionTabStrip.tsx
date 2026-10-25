@@ -8,7 +8,8 @@ import { ActionNotice } from './ActionNotice'
  * Every status mark carries its word (`aria-label` + `title`) — colour is never the only signal.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
-import { ChevronDown, Crown, List, Moon, Pin, X } from 'lucide-react'
+import { RoleIcon } from '../nav/RoleIcon'
+import { ChevronDown, List, Moon, Pin, X } from 'lucide-react'
 import { sessionIdentityKey } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
@@ -147,7 +148,7 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
     >
       <TabStatus state={state} label={label} />
       {row && <span style={{ display: 'inline-flex', flexShrink: 0, opacity: active ? 1 : 0.6 }}><HarnessMark harness={row.harness} size={14} /></span>}
-      {(role === 'leader' || hasLeaderTitle(row?.title ?? '')) && <Crown size={11} aria-label={pt ? 'Líder' : 'Leader'} style={{ color: 'var(--accent-purple)', flexShrink: 0, opacity: active ? 1 : 0.6 }} />}
+      <RoleIcon kind={role ?? (hasLeaderTitle(row?.title ?? '') ? 'leader' : 'auto')} size={11} pt={pt} style={{ opacity: active ? 1 : 0.6 }} />
       <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', flex: 1, minWidth: 0, lineHeight: 1.35, opacity: ended && !active ? 0.7 : 1 }}>{title}</span>
       {pinned
         ? (
