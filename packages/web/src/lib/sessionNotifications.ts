@@ -3,6 +3,7 @@
  */
 
 import { versionedAsset } from './brand'
+import { getReopening } from './reopeningStore'
 import type { SessionMeta } from '@agentistics/core'
 import { isNayCwd, sessionLabel } from '@agentistics/core'
 import { HARNESS_LABELS } from './harness'
@@ -710,8 +711,16 @@ export function notifyFleetTransitions(
   for (const [id, state] of Object.entries(seen)) {
     if (prev[id] === state) continue          // already announced, nothing new
     if (unconfirmed[id] !== state) continue   // first sighting — wait for the next poll
+    // A switch ends its source before attempting the continuation. Keep the old baseline until
+    // the request settles, so a failed fallback still reports a real exit.
+    if (state === 'exited' && getReopening().has(id)) continue
     const firstSight = prev[id] === undefined
     next[id] = state
+    const source = rows.find(r => r.id === id)
+    const continued = state === 'exited' && source?.conversationId && rows.some(r =>
+      r.id !== id && r.conversationId === source.conversationId &&
+      (r.state === 'working' || r.state === 'waiting' || r.state === 'waiting-approval'))
+    if (continued) continue
     if (!firstSight || state === 'waiting-approval') announce[id] = state
   }
   // A row that vanished from the fleet stops being tracked, or its last state would be re-announced
