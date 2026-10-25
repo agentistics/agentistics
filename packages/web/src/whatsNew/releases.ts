@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.151.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O texto técnico de imagem lida não aparece mais como mensagem sua no chat.',
+        en: 'The technical note of a viewed image no longer shows as your message in the chat.',
+      },
+    ],
+  },
   '2.151.1': {
     features: [
       {
