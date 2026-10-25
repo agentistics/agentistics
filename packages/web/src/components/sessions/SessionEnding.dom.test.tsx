@@ -163,11 +163,12 @@ test('useFleet kill waits for the real shared fleet snapshot to leave Active bef
   } finally { globalThis.fetch = previousFetch }
 })
 
-for (const replacement of [false, true]) test(`a fast fleet ${replacement ? 'replacement' : 'removal'} retains the selected view and title until ending completes`, async () => {
+for (const replacement of [false, true]) test(`a fast fleet ${replacement ? 'replacement' : 'removal'} holds through a deferred navigation without flashing the chat`, async () => {
   let present = true
+  let route = 'selected'
   function SelectedView() {
-    const { row } = ending.useEndingSelection('selected', present ? { id: 'selected', title: 'Selected session' } : replacement ? { id: 'closed-conversation', title: 'Closed session' } : undefined)
-    return row ? createElement(SessionEndingGate, { id: row.id, title: row.title, lang: 'en', children: createElement('textarea', { 'data-composer': '', defaultValue: 'draft' }) }) : createElement('div', {}, 'Overview')
+    const { row, ending: holding } = ending.useEndingSelection(route, present ? { id: 'selected', title: 'Selected session' } : replacement ? { id: 'closed-conversation', title: 'Closed session' } : undefined)
+    return row ? createElement(SessionEndingGate, { id: row.id, ending: holding, title: row.title, lang: 'en', children: createElement('textarea', { 'data-composer': '', defaultValue: 'draft' }) }) : createElement('div', {}, 'Overview')
   }
   act(() => root.render(createElement(SelectedView)))
   let completion!: Promise<{ ok: boolean }>
@@ -178,7 +179,85 @@ for (const replacement of [false, true]) test(`a fast fleet ${replacement ? 'rep
   expect(host.textContent).not.toContain('Overview')
   expect(composer().parentElement!.style.display).toBe('none')
   await act(async () => { await completion })
+  expect(ending.isEnding('selected')).toBe(false)
+  // The request settled, but React Router has not committed the next route yet.
+  await act(async () => { await Bun.sleep(100) })
+  expect(overlay()!.textContent).toContain('Selected session')
+  expect(composer().parentElement!.style.display).toBe('none')
+  present = false
+  route = 'overview'
+  act(() => root.render(createElement(SelectedView)))
   expect(overlay()).toBeNull()
-  if (!replacement) expect(host.textContent).toBe('Overview')
-  else expect(composer()).not.toBeNull()
+})
+
+test('a refused attempt releases the selected view and retains the draft on the same route', async () => {
+  function SelectedView() {
+    const { row, ending: holding } = ending.useEndingSelection('refused', { id: 'refused', title: 'Refused session' })
+    return createElement(SessionEndingGate, { id: row!.id, ending: holding, lang: 'en', children: createElement('textarea', { 'data-composer': '', defaultValue: 'draft' }) })
+  }
+  act(() => root.render(createElement(SelectedView)))
+  let settle!: (out: { ok: boolean }) => void
+  let completion!: Promise<{ ok: boolean }>
+  await act(async () => { completion = ending.withEnding('refused', () => new Promise(resolve => { settle = resolve }), async () => {}) })
+  expect(overlay()).not.toBeNull()
+  await act(async () => { settle({ ok: false }); await completion })
+  expect(overlay()).toBeNull()
+  expect(composer().value).toBe('draft')
+  expect(composer().parentElement!.style.display).toBe('contents')
+})
+
+test('each identical refused kill shows a toast even when the bell already has that refusal', async () => {
+  if (!process.env.ENDING_REFUSAL_ISOLATED) {
+    const child = Bun.spawn([process.execPath, 'test', fileURLToPath(import.meta.url), '--test-name-pattern', 'each identical refused kill'], {
+      env: { ...process.env, ENDING_REFUSAL_ISOLATED: '1' }, stdout: 'ignore', stderr: 'pipe',
+    })
+    const errors = await new Response(child.stderr).text()
+    expect(await child.exited, errors).toBe(0)
+    return
+  }
+  // The action menu subscribes to task changes; this test has no event server.
+  const previousEventSource = globalThis.EventSource
+  globalThis.EventSource = class { addEventListener() {} removeEventListener() {} close() {} } as unknown as typeof EventSource
+  const { SessionActions } = await import('./SessionActions')
+  const { NotificationToasts } = await import('../NotificationToasts')
+  const { refreshNotifications } = await import('../../lib/notifications')
+  const previousFetch = globalThis.fetch
+  const message = 'Kill refused'
+  const notes = [{ id: 'historical', type: 'error', title: 'End session', message, ts: 1, read: false }] as Array<Record<string, unknown>>
+  const keys = new Set<string>(['End session:Kill refused'])
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/notifications')) {
+      if (init?.method === 'POST') {
+        const n = JSON.parse(init.body as string)
+        const key = n.meta?.notificationKey ?? `${n.title}:${n.message}`
+        if (!keys.has(key)) { keys.add(key); notes.unshift({ ...n, id: `attempt-${keys.size}`, ts: Date.now(), read: false }) }
+      }
+      return Response.json(notes)
+    }
+    return new Response(null, { status: 404 })
+  }) as typeof fetch
+  try {
+    await refreshNotifications()
+    const row = { id: 'refused', title: 'Refused session', harness: 'claude', cwd: '/x', project: 'x', state: 'waiting', stateLabel: 'needs you', actionable: true, attachCommand: '', verbs: [{ action: 'kill', label: 'Stop session', enabled: true }] } as never
+    const refuse = () => ending.withEnding('refused', async () => ({ ok: false, message }), async () => {})
+    act(() => root.render(createElement('div', {},
+      createElement(SessionActions, { row, lang: 'en', act: refuse }),
+      createElement(NotificationToasts, { lang: 'en' }))))
+    const click = (label: string) => {
+      const button = Array.from(host.querySelectorAll('button')).find(b => b.textContent?.trim() === label || b.getAttribute('aria-label') === label)
+      expect(button, label).toBeDefined()
+      act(() => button!.click())
+    }
+    expect(host.querySelector('[role="status"]')).toBeNull()
+    for (let i = 0; i < 2; i++) {
+      click('Session actions'); click('Stop session')
+      await act(async () => { click('End'); await Bun.sleep(30) })
+      expect(host.querySelector('[role="status"]')?.textContent).toContain(message)
+      click('dismiss')
+      await act(async () => { await Bun.sleep(280) })
+      expect(host.querySelector('[role="status"]')).toBeNull()
+    }
+    expect(notes).toHaveLength(3)
+    expect(keys.size).toBe(3)
+  } finally { globalThis.fetch = previousFetch; globalThis.EventSource = previousEventSource }
 })

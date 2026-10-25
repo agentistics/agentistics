@@ -12,7 +12,10 @@
  */
 import { useRef, useSyncExternalStore } from 'react'
 
-const ending = new Set<string>()
+// A selection can keep this attempt after it leaves the map. That lets a successful loader
+// survive the router's deferred navigation without retaining completed sessions globally.
+interface EndingAttempt { succeeded: boolean }
+const ending = new Map<string, EndingAttempt>()
 const listeners = new Set<() => void>()
 let version = 0
 
@@ -20,7 +23,7 @@ function emit(): void { version++; for (const l of listeners) l() }
 
 export function markEnding(id: string): void {
   if (ending.has(id)) return
-  ending.add(id)
+  ending.set(id, { succeeded: false })
   emit()
 }
 
@@ -57,20 +60,31 @@ export async function withEnding<T extends { ok: boolean }>(id: string, action: 
   markEnding(id)
   try {
     const result = await action()
-    if (result.ok) await Promise.all([
-      waitUntilInactive(),
-      new Promise<void>(resolve => setTimeout(resolve, Math.max(0, ENDING_MIN_MS - (Date.now() - started)))),
-    ])
+    if (result.ok) {
+      await Promise.all([
+        waitUntilInactive(),
+        new Promise<void>(resolve => setTimeout(resolve, Math.max(0, ENDING_MIN_MS - (Date.now() - started)))),
+      ])
+      const attempt = ending.get(id)
+      if (attempt) attempt.succeeded = true
+    }
     return result
   } finally { unmarkEnding(id) }
 }
 
 /** Retain the selected view when a fast fleet update removes its row during the reading interval. */
 export function useEndingSelection<T extends { id: string }>(route: string | undefined, row: T | undefined) {
-  const held = useRef({ route, row })
+  const held = useRef<{ route: string | undefined; row: T | undefined; attempt?: EndingAttempt }>({ route, row })
   const rowEnding = useEnding(row?.id)
   const heldEnding = useEnding(held.current.route === route ? held.current.row?.id : undefined)
-  const ending = rowEnding || heldEnding
-  if (!ending) held.current = { route, row }
-  return { row: ending && held.current.route === route ? held.current.row : row, ending }
+  if (held.current.route !== route) held.current = { route, row }
+  // Clearing request state is synchronous; navigation commits in a React transition. Keep the
+  // successful attempt on THIS selection until that commit, so the chat never flashes between.
+  const holding = rowEnding || heldEnding || held.current.attempt?.succeeded === true
+  if (!holding) held.current = { route, row }
+  else if (!held.current.attempt) {
+    const id = rowEnding ? row?.id : held.current.row?.id
+    if (id) held.current.attempt = ending.get(id)
+  }
+  return { row: holding ? held.current.row : row, ending: holding }
 }

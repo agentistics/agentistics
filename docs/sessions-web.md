@@ -451,5 +451,6 @@ The header leader meter reserves space for its reading so polling between number
 
 Ending a session keeps “Encerrando…” / “Ending…”, its title and the aside status visible for at
 least 800 ms and until the fleet confirms it has left Active, whichever takes longer. Navigation
-waits for both. The conversation stays mounted with its composer hidden; a refused kill restores
-the draft immediately and the action reports the refusal as a toast.
+waits for both, and the ending view remains visible until the route change commits. The conversation
+stays mounted with its composer hidden; a refused kill restores the draft immediately and each
+refused attempt reports a toast, including repeated identical refusals.

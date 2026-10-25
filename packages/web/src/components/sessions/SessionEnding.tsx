@@ -39,8 +39,9 @@ export function SessionEnding({ lang, label, title }: { lang: 'pt' | 'en'; label
  * refused kill restores the conversation, its draft and its scroll exactly as they were; outside
  * the ending window the wrapper is `display: contents` and changes no layout.
  */
-export function SessionEndingGate({ id, lang, label, title, children }: { id: string; lang: 'pt' | 'en'; label?: string; title?: string; children: ReactNode }) {
-  const ending = useEnding(id)
+export function SessionEndingGate({ id, lang, label, title, ending: heldEnding, children }: { ending?: boolean; id: string; lang: 'pt' | 'en'; label?: string; title?: string; children: ReactNode }) {
+  const pending = useEnding(id)
+  const ending = heldEnding ?? pending
   return (
     <>
       {ending && <SessionEnding lang={lang} {...(label ? { label } : {})} {...(title ? { title } : {})} />}
