@@ -34,7 +34,7 @@
 import { noteStructuredLine, sessionAccountOf } from '../plan-limits'
 import { clearComposing, noteComposingLine } from './structured-composing'
 import { spawn as spawnChild } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createConnection, type Socket } from 'node:net'
 import path, { join } from 'node:path'
 import type { HarnessId, StructuredPipe, StructuredSession, StructuredSpawn, StructuredTransport } from '@agentistics/engine-api'
@@ -66,7 +66,7 @@ export function relayCommand(): RelayCommand {
     : { command: process.execPath, args: ['__structured-relay'] }
 }
 
-const FILES = { ...RELAY_FILES, saved: 'spawn.json', calls: 'calls.jsonl', ending: 'ending', killed: 'killed' } as const
+const FILES = { ...RELAY_FILES, saved: 'spawn.json', owner: 'owner.json', calls: 'calls.jsonl', ending: 'ending', killed: 'killed' } as const
 const CONNECT_TRIES = 200
 const CONNECT_STEP_MS = 25
 
@@ -75,6 +75,19 @@ const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 
 function pidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
+}
+
+/**
+ * Does `/proc/<pid>/cmdline` name one of `dirs`? The relay is started as `<runtime> … <generation dir>`,
+ * so a live relay carries the directory it records into. `null` = cannot tell (no /proc: not Linux, or
+ * the process is gone). A COPY of a store has the same PIDs in the same PID namespace but a different
+ * directory, so a PID that does not name this store's directory belongs to another server.
+ */
+export function cmdlineNames(pid: number, dirs: readonly string[]): boolean | null {
+  let raw: string
+  try { raw = readFileSync(`/proc/${pid}/cmdline`, 'utf8') } catch { return null }
+  const argv = raw.split('\0')
+  return dirs.some(d => argv.includes(d))
 }
 
 /** A connection to one relay: line-framed JSON both ways, reconnect-free (one attempt sequence). */
@@ -225,16 +238,36 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
   /** How many generations were launched: 0 … n-1 each have a `launch.json` (written before their relay starts). */
   const generations = (id: string): number => { let n = 0; while (existsSync(path.join(genDir(id, n), FILES.launch))) n++; return n }
   const lastGen = (id: string) => Math.max(0, generations(id) - 1)
+  const realRoot = (): string => { try { return realpathSync(root) } catch { return path.resolve(root) } }
+  /**
+   * STRUCTURED.OWNER: whose record is this? A session directory is stamped at creation with the real
+   * path of the store that made it. A record copied to another data dir (`cp -a ~/.agentistics`) keeps the
+   * stamp, so it reads FOREIGN there: nothing in it may be signalled, re-attached or reported alive. A
+   * record with no stamp predates this guard; it is judged by its relay PID instead (see `relayPid`).
+   */
+  const foreign = (id: string): boolean => {
+    const raw = read(id, FILES.owner)
+    if (!raw) return false
+    try { const o = (JSON.parse(raw) as { root?: unknown }).root; return typeof o === 'string' && o !== realRoot() } catch { return true }
+  }
   const relayPid = (id: string, k: number): number | null => {
+    if (foreign(id)) return null
     const raw = readGen(id, k, FILES.pid)
     if (!raw) return null
-    try { const p = (JSON.parse(raw) as { relay?: unknown }).relay; return typeof p === 'number' ? p : null } catch { return null }
+    let pid: number
+    try { const p = (JSON.parse(raw) as { relay?: unknown }).relay; if (typeof p !== 'number') return null; pid = p } catch { return null }
+    // A live process must name THIS record's directory (also protects against a recycled PID). Where
+    // /proc cannot say, the stamp above is the only guard, and an unstamped legacy record is trusted.
+    const dir = genDir(id, k)
+    const named = cmdlineNames(pid, [dir, (() => { try { return realpathSync(dir) } catch { return dir } })()])
+    return named === false ? null : pid
   }
   const relayLive = (id: string, k: number): boolean => {
     const pid = relayPid(id, k)
     return pid !== null && pidAlive(pid) && readGen(id, k, FILES.exit) === null
   }
   const isAlive = (id: string): boolean => {
+    if (foreign(id)) return false
     const k = lastGen(id)
     if (relayLive(id, k)) return true
     // Between children: the driver ended its last child ON PURPOSE (agy's cancel) and starts the next
@@ -342,6 +375,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
       rmSync(dir, { recursive: true, force: true })
       mkdirSync(dir, { recursive: true, mode: 0o700 })
       writeFileSync(path.join(dir, FILES.saved), JSON.stringify(saved), { mode: 0o600 })
+      writeFileSync(path.join(dir, FILES.owner), JSON.stringify({ root: realRoot() }), { mode: 0o600 })
       const gens: Generation[] = []
       const cur = () => gens[gens.length - 1]
       const delivered = () => cur()?.lines.delivered() ?? 0
