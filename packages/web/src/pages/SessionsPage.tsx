@@ -3096,7 +3096,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '10px 12px' }}>
         {mobileTab === 'overview' ? (
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+          <div data-mobile-sessions-scroll style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
             <FleetOverview
               lang={pt ? 'pt' : 'en'}
               rows={overviewRows}

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, ChevronUp, KeyRound, LogOut, ShieldCheck, MessagesSquare, type LucideIcon } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Ellipsis, Gauge, House, KeyRound, LogOut, ShieldCheck, Terminal, type LucideIcon } from 'lucide-react'
 import type { IamAccount } from '../../App'
-import { areaOfPath, isSessionsWorkspace, pageLabel, type AreaId } from '../../lib/appAreas'
+import { areaOfPath, type AreaId } from '../../lib/appAreas'
+import { activateMobileSessions, mobileAreaSlot, scrollMobileSessionsToTop } from '../../lib/mobileAreaTabs'
 import { BottomSheet } from '../BottomSheet'
 import { ChangePasswordSelf } from '../ChangePasswordSelf'
 import { MfaSetup } from '../MfaSetup'
@@ -64,17 +65,9 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
   useEffect(() => { closeSheet() }, [pathname, closeSheet])
   const go = (to: string) => { closeSheet(); onNavigate(to) }
   const current = areaOfPath(pathname)
-  // The prototype (CelBarraLugar): the area quiet, the page bold, a chevron from the icon set.
-  const page = current?.page && pageLabel(current.page, lang) !== pageLabel(current.area, lang) ? current.page : null
-  const placeText = current
-    ? pageLabel(current.area, lang) + (page ? ` › ${pageLabel(page, lang)}` : '')
-    : (pt ? 'Navegar' : 'Navigate')
-  const place: React.ReactNode = current && page
-    ? <><span style={{ color: 'rgba(255,255,255,0.5)' }}>{pageLabel(current.area, lang)} ›</span> <b>{pageLabel(page, lang)}</b></>
-    : <b>{placeText}</b>
-  // On Sessions the pill already names the place: a round shortcut to the same page is a duplicate.
-  const onSessions = isSessionsWorkspace(pathname)
-  const sessions = pt ? 'Sessões' : 'Sessions'
+  const onSessions = current?.area.id === 'sessions'
+  const sessions = onSessions ? (pt ? 'Início' : 'Home') : (pt ? 'Sessões' : 'Sessions')
+  const sessionBadge = badges?.sessions ?? attention
   const orange = 'var(--anthropic-orange)'
   const roleLabel = principal
     ? (principal.role === 'owner' ? 'Owner' : (principal.memberships.some(m => m.role === 'manager') ? 'Manager' : 'User'))
@@ -90,14 +83,16 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
   return (
     <>
       <MobilePillBar
-        variant="place"
+        variant="tabs"
         ariaLabel={pt ? 'Navegação principal' : 'Main navigation'}
-        activeIndex={0}
+        activeIndex={open ? 4 : mobileAreaSlot(pathname)}
         items={[
-          { key: 'areas', label: placeText, content: place, ariaLabel: (pt ? 'Ir para · ' : 'Go to · ') + placeText,
-            icon: open ? ChevronUp : ChevronDown, onActivate: () => setOpen(v => !v), expanded: open, hasPopup: 'dialog' },
-          ...(onSessions ? [] : [{ key: 'sessions', label: sessions, ariaLabel: attention && attention > 0 ? `${sessions}, ${attention} ${pt ? 'precisam de você' : 'need you'}` : sessions,
-            icon: MessagesSquare, onActivate: () => go('/sessions'), badge: attention && attention > 0 ? attention : undefined }]),
+          { key: 'tasks', label: 'Agentask', icon: ClipboardList, onActivate: () => go('/tasks'), badge: badges?.tasks },
+          { key: 'usage', label: pt ? 'Uso' : 'Usage', icon: Gauge, onActivate: () => go('/usage'), badge: badges?.usage },
+          { key: 'sessions', label: sessions, ariaLabel: sessionBadge && sessionBadge > 0 ? `${sessions}, ${sessionBadge} ${pt ? 'precisam de você' : 'need you'}` : sessions,
+            icon: onSessions ? House : Terminal, onActivate: () => { closeSheet(); activateMobileSessions(pathname, onNavigate, scrollMobileSessionsToTop) }, badge: sessionBadge, emphasis: true },
+          { key: 'metrics', label: pt ? 'Métricas' : 'Metrics', icon: BarChart3, onActivate: () => go('/'), badge: badges?.metrics },
+          { key: 'more', label: pt ? 'Mais' : 'More', icon: Ellipsis, onActivate: () => setOpen(v => !v), expanded: open, hasPopup: 'dialog' },
         ]}
       />
       <BottomSheet open={open} onClose={closeSheet} title={pt ? 'Ir para' : 'Go to'} lang={lang}>

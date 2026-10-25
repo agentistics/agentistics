@@ -30,7 +30,10 @@ for (const lang of ['pt', 'en'] as const) test(`mobile deep link navigates leade
   await act(async () => root!.render(createElement(Router, { initialEntries: ['/leadership/away'] },
     createElement(Bar, { lang, pathname: '/leadership/away', badges: { sessions: 3 }, actions: [], onNavigate: to => { destination = to } }))))
   const trigger = document.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')!
-  expect(trigger.getAttribute('aria-label')).toContain(lang === 'pt' ? 'Sessões › Modo ausente' : 'Sessions › Away mode')
+  expect(trigger.textContent).toBe(lang === 'pt' ? 'Mais' : 'More')
+  const home = document.querySelector<HTMLButtonElement>('button[aria-current="page"]')!
+  expect(home.textContent).toContain(lang === 'pt' ? 'Início' : 'Home')
+  expect(home.querySelector('.lucide-house')).not.toBeNull()
   await act(async () => trigger.click())
   const sheet = document.querySelector('[role="dialog"]')!
   const area = sheet.querySelector('button[aria-expanded="true"]')!
