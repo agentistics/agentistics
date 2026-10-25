@@ -9,6 +9,8 @@ let createRoot: typeof import('react-dom/client').createRoot
 let MobileAreaBar: typeof import('./MobileAreaBar').MobileAreaBar
 let host: HTMLDivElement, root: Root
 let went: string[], scrolls: number
+let sheetStates: boolean[]
+const onSheetOpenChange = (open: boolean) => { sheetStates.push(open) }
 let reduced: MediaQueryList
 let oldRect: typeof HTMLElement.prototype.getBoundingClientRect
 let oldScroll: typeof window.scrollTo
@@ -25,7 +27,7 @@ beforeAll(async () => {
   MobileAreaBar = (await import('./MobileAreaBar')).MobileAreaBar
 })
 beforeEach(() => {
-  went = []; scrolls = 0
+  went = []; scrolls = 0; sheetStates = []
   reduced = Object.assign(new EventTarget(), { matches: false, media: '(prefers-reduced-motion: reduce)' }) as unknown as MediaQueryList
   window.matchMedia = (() => reduced) as typeof window.matchMedia
   window.scrollTo = (() => { scrolls++ }) as typeof window.scrollTo
@@ -42,7 +44,7 @@ afterAll(async () => {
 
 async function render(pathname = '/sessions') {
   await act(async () => {
-    root.render(<MemoryRouter><MobileAreaBar lang="pt" pathname={pathname} onNavigate={to => went.push(to)} actions={[]} badges={{ tasks: 3, usage: 1, sessions: 2 }} /></MemoryRouter>)
+    root.render(<MemoryRouter><MobileAreaBar lang="pt" pathname={pathname} onNavigate={to => went.push(to)} onSheetOpenChange={onSheetOpenChange} actions={[]} badges={{ tasks: 3, usage: 1, sessions: 2 }} /></MemoryRouter>)
   })
   const nav = host.querySelector<HTMLElement>('nav[aria-label="Navegação principal"]')!
   const track = nav.firstElementChild as HTMLElement
@@ -118,7 +120,10 @@ test('releasing over More opens the existing area sheet; cancelling a drag resto
   await pointer(view.track, 'pointerup', 345)
   expect(host.querySelector('[role="dialog"][aria-label="Ir para"]')).not.toBeNull()
   expect(view.buttons[4]!.getAttribute('aria-expanded')).toBe('true')
+  expect(sheetStates.at(-1)).toBe(true)
   expect(went).toEqual([])
+  await click(host.querySelector<HTMLButtonElement>('button[aria-label="Fechar"]')!)
+  expect(sheetStates.at(-1)).toBe(false)
 })
 
 test('reduced motion follows the preference, disabling springs, lift and scale during drag', async () => {

@@ -103,8 +103,8 @@ export function areaRowStyle(sheet: boolean): React.CSSProperties {
 }
 
 /** Shared trailing column: values and chevrons occupy the same centre line. */
-export const SHEET_TRAILING_STYLE: React.CSSProperties = {
-  width: 44, height: 44, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+export function areaTrailingStyle(sheet: boolean): React.CSSProperties {
+  return { width: sheet ? 44 : 28, height: sheet ? 44 : 28, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }
 }
 
 const GROUP_HEADING = { personal: { pt: 'Pessoal', en: 'Personal' }, governance: { pt: 'Governança', en: 'Governance' } } as const
@@ -170,7 +170,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
             aria-label={(expanded ? (pt ? 'Recolher ' : 'Collapse ') : (pt ? 'Expandir ' : 'Expand ')) + label}
             onClick={() => sheet ? setSheetArea(expanded ? null : area.id) : areaOpenStore.set(toggledAreaOpen(openMap, area.id, active, current?.area.id))}
             style={{
-              ...SHEET_TRAILING_STYLE, width: sheet ? 44 : 28, height: sheet ? 44 : 28,
+              ...areaTrailingStyle(sheet),
               border: 'none', background: 'transparent', cursor: 'pointer',
               color: 'var(--text-tertiary)', borderRadius: 8,
             }}

@@ -10,7 +10,7 @@ import {
   AlertTriangle, ArrowLeft, ArrowRight, BarChart2, Bot,
   Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
   Clock, Code2, Cpu, Download,
-  FileCode, Flame, FolderOpen, FolderTree, GitBranch,
+  FileCode, FileDown, Flame, FolderOpen, FolderTree, GitBranch,
   GitCommit, Globe, Home, KeyRound,
   LogOut, Maximize2, MessageSquare, MessagesSquare, Moon,
   PanelLeft, Server, Settings, ShieldCheck,
@@ -739,7 +739,7 @@ function SideNav({
         <CollapsedTip label={pt ? 'Exportar' : 'Export'} show={collapsed}>
           <button onClick={onExport} aria-label={pt ? 'Exportar relatório PDF' : 'Export PDF report'} title={collapsed ? undefined : (pt ? 'Exportar relatório PDF' : 'Export PDF report')}
             style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, borderColor: 'var(--anthropic-orange)50', color: 'var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)' }}>
-            <Download size={15} />
+            <FileDown size={15} />{!collapsed && <span style={{ fontSize: 11, marginLeft: 4 }}>PDF</span>}
           </button>
         </CollapsedTip>
         {/* The tree carries Ajustes (A1); this shortcut remains only where there is no tree yet. */}
@@ -979,6 +979,7 @@ export default function AppLayout() {
       Array<'members' | 'teams' | 'machines' | 'presence' | 'repos' | 'tags' | 'projects' | 'models'>
     : undefined
   const isMobile = useIsMobile()
+  const [areaSheetOpen, setAreaSheetOpen] = useState(false)
   /**
    * The viewport's own width, tracked reactively — `useIsMobile` only answers a boolean at its own
    * 768px breakpoint, and `filtrosPanelBounds` needs the actual figure at every size above it (the
@@ -1001,6 +1002,7 @@ export default function AppLayout() {
   // placeholder, not a choice, so only a CHANGE is written.
   const langSeen = useRef(false)
   useEffect(() => {
+    document.documentElement.lang = lang
     if (!langSeen.current) { langSeen.current = true; return }
     try { localStorage.setItem('agentistics-lang', lang) } catch { /* private mode */ }
   }, [lang])
@@ -2276,7 +2278,7 @@ export default function AppLayout() {
   }, [versionAnswer, lang])
   const nayOffered = !teamSession?.aggregatorOnly && teamSession?.capabilities?.localChat !== false
     && teamSession?.capabilities?.localShell !== false && chatOffered
-  const renderUpdatePrompt = promptVisible && versionAnswer
+  const renderUpdatePrompt = !areaSheetOpen && promptVisible && versionAnswer
     ? (placement: UpdateCardPlacement) => (
         <NayUpdateCard lang={lang} isMobile={isMobile} info={versionAnswer} placement={placement} onExit={onPromptExit} />
       )
@@ -4519,6 +4521,7 @@ export default function AppLayout() {
       {isMobile && !sessionOpen && (
         <MobileAreaBar
           lang={lang}
+          onSheetOpenChange={setAreaSheetOpen}
           pathname={location.pathname}
           onNavigate={navigate}
           attention={headerFleetUnsupported ? undefined : headerFleet.attention}

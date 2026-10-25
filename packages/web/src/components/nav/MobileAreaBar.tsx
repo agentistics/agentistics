@@ -6,7 +6,7 @@ import { activateMobileSessions, mobileAreaSlot, scrollMobileSessionsToTop } fro
 import { BottomSheet } from '../BottomSheet'
 import { ChangePasswordSelf } from '../ChangePasswordSelf'
 import { MfaSetup } from '../MfaSetup'
-import { AreaTree, areaRowStyle, SHEET_TRAILING_STYLE } from './AreaTree'
+import { AreaTree, areaRowStyle, areaTrailingStyle } from './AreaTree'
 import { MobilePillBar } from './MobilePillBar'
 
 export interface MobileAreaAction {
@@ -39,7 +39,7 @@ export function MobileActionRow({ action }: { action: MobileAreaAction }) {
         <span style={{ display: 'block', fontWeight: action.accent ? 700 : 500 }}>{action.label}</span>
         {action.description && <span style={{ display: 'block', whiteSpace: 'normal', fontSize: 12, color: 'var(--text-tertiary)' }}>{action.description}</span>}
       </span>
-      <span style={{ ...SHEET_TRAILING_STYLE, marginRight: -12 }}>
+      <span style={{ ...areaTrailingStyle(true), marginRight: -12 }}>
       {action.badge ? <span style={{ borderRadius: 9, padding: '2px 9px', background: 'var(--anthropic-orange)', color: '#111', fontSize: 10, fontWeight: 700 }}>{action.badge}</span>
         : action.value ? <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{action.value}</span>
         : <ChevronRight size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />}
@@ -48,7 +48,7 @@ export function MobileActionRow({ action }: { action: MobileAreaAction }) {
   )
 }
 
-export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, actions, principal, visibleSettings }: {
+export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, actions, principal, visibleSettings, onSheetOpenChange }: {
   lang: 'pt' | 'en'
   pathname: string
   badges?: Partial<Record<AreaId, number>>
@@ -57,12 +57,17 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
   actions: MobileAreaAction[]
   principal?: IamAccount
   visibleSettings?: ReadonlySet<string>
+  onSheetOpenChange?: (open: boolean) => void
 }) {
   const pt = lang === 'pt'
   const [open, setOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const [pwOpen, setPwOpen] = useState(false)
   const [mfaOpen, setMfaOpen] = useState(false)
+  useEffect(() => {
+    onSheetOpenChange?.(open)
+    return () => onSheetOpenChange?.(false)
+  }, [open, onSheetOpenChange])
   const closeSheet = useCallback(() => { setOpen(false); setAccountOpen(false) }, [])
   useEffect(() => { closeSheet() }, [pathname, closeSheet])
   const go = (to: string) => { closeSheet(); onNavigate(to) }

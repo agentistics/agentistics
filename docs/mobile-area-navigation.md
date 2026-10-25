@@ -28,7 +28,13 @@ changed. The existing account actions follow them. There are no Live or manual d
 An installable update from `/api/version` adds Update app first in that lower group, and in the desktop
 header. This entry persists through dismissing or snoozing the popup and reopens the existing
 `renderUpdatePrompt` flow. It disappears when the version answer becomes current; it never creates
-a separate install path.
+a separate install path. The update prompt is suppressed while the area sheet is open and may
+reappear after it closes.
+
+The sidebar's file-download control exports PDF and is labelled PDF; it is a separate action.
+Theme lives in the desktop footer and mobile sheet. The header moon indicates Away mode, so it
+remains available and does not change the theme. The document's `lang` attribute follows the UI
+language, including the initial loading screen.
 
 `useData` keeps server push/patch subscriptions. Its fallback asks every 10 seconds while a fleet row
 is working and every 60 seconds while idle, avoiding full reads when the revision stream is healthy.
@@ -42,6 +48,8 @@ on an adapter object gives them a foreign receiver and can crash the browser wit
 Leaders, Check-ins, Hand-offs and Away mode are subpages of Sessions, retaining their `/leadership`
 URLs. The central Home tab returns these document pages to the session list.
 The shared tree has one Sessions area, with combined session-attention and check-in warning counts.
+On mobile, the list's duplicate page title is omitted. Its local view toggle reads List / Fleet summary:
+the latter shows live fleet cards and differs from the bottom bar's Metrics (the stored dashboard at `/`).
 
 `BottomSheet` owns the scrim, Escape handling, focus containment and return, scroll region, and bottom
 safe inset. The navigation sheet and `FiltersSheet` share that frame. Filters still update immediately;

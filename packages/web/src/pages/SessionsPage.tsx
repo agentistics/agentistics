@@ -3047,9 +3047,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         paddingTop: 'var(--safe-top)',
         borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)',
       }}>
-        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 650, color: 'var(--text-primary)' }}>
-          {pt ? 'Sessões' : 'Sessions'}
-        </span>
+        <span style={{ flex: 1 }} />
         {filterButton}
         {magnifierButton}
       </div>
@@ -3075,8 +3073,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         display: 'flex', gap: 2, padding: '6px 12px 0', flexShrink: 0,
       }}>
         {([
-          ['list', pt ? 'Sessões' : 'Sessions'],
-          ['overview', pt ? 'Métricas' : 'Metrics'],
+          ['list', pt ? 'Lista' : 'List'],
+          ['overview', pt ? 'Resumo da frota' : 'Fleet summary'],
         ] as const).map(([id, label]) => (
           <button
             key={id}
