@@ -3997,7 +3997,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * The user has answered the offer for the fall at `atMs` — stop raising it.
      *
      * Monotonic (`Math.max`), so a poll that re-anchors onto an OLDER cluster — which
-     * `planCrashGroup` deliberately permits, with no maximum age — cannot lower the watermark and
+     * `planCrashGroup` permits within its 24-hour age limit — cannot lower the watermark and
      * bring the modal back naming a fall from three days ago.
      */
     dismissFall(atMs: number): void {

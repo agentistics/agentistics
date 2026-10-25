@@ -137,3 +137,18 @@ describe('CHAT.FIRST — an echo recorded before the conversation is linked', ()
     expect(pendingFor(CONV, ['hello'], 2000)).toEqual([])
   })
 })
+
+
+describe('local command acknowledgements', () => {
+  it('retires the command on every device without retiring an earlier mid-turn prompt', () => {
+    const prompt = 'Please inspect these queued changes'
+    const command = '/rename A sufficiently long name'
+    recordPrompt(CONV, prompt)
+    recordPrompt(CONV, command)
+    expect(pendingFor(CONV, []).map(p => p.text)).toEqual([prompt, command])
+    expect(pendingFor(CONV, [command]).map(p => p.text)).toEqual([prompt])
+    reloadPrompts()
+    expect(pendingFor(CONV, [command]).map(p => p.text)).toEqual([prompt])
+    expect(pendingFor(CONV, [command, prompt])).toEqual([])
+  })
+})

@@ -339,7 +339,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
         deferUntil: HINT_DEFER,
         rows: async () => rows,
         prompt: async (id, text) => {
-          const out = await runFleetAction(lang, { action: 'prompt', id, text })
+          const out = await runFleetAction(lang, { action: 'prompt', id, text, handoff: true })
           return { ok: out.ok }
         },
         hinted: async id => {
@@ -530,6 +530,13 @@ export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?:
   }
   const conversations = await loadConversations()
   const file = await findHandoffFile(view.cwd)
+  const successorId = managed.retire?.successorId ?? managed.handoffTo
+  const successor = registry.find(r => r.id === successorId)
+  const successorView = raw.sessions.find(r => r.id === successorId)
+  // A successor may be born between the hub poll and the registry read. Allow its birth grace.
+  const successorGone = !!successorId && !raw.unavailable && (successorView
+    ? ['closed', 'lost', 'exited'].includes(successorView.status) || successorView.activity === 'exited'
+    : !!successor && Date.now() > Date.parse(successor.createdAt) + 30_000)
   return computeHandoffPanel(handoffMetrics({
     harness: view.harness, conversationId: view.conversationId ?? managed.conversationId,
     id, title: managed.label ?? '', leader: true,
@@ -539,7 +546,10 @@ export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?:
     ...(file ? { handoffPath: file.path, handoffBytes: file.bytes } : {}),
     workInFlight: [...(view.activity === 'working' ? ['main-response'] : []), ...(view.background ? ['background-work'] : [])],
   }, conversations), extraPercent !== undefined && Number.isInteger(extraPercent) && extraPercent >= 0 && extraPercent <= 100
-    ? { ...normalizeHandoffConfig(prefs.handoffConfig), extraPercent } : prefs.handoffConfig, quota)
+    ? { ...normalizeHandoffConfig(prefs.handoffConfig), extraPercent } : prefs.handoffConfig, quota, Date.now(), {
+    session: managed,
+    successor, successorGone,
+  })
 }
 
 /**
@@ -706,6 +716,7 @@ async function runFleetActionOnce(
       // queue it records the composer fingerprint, so the chat shows this turn as the person's own
       // message even when the harness stored it as a paste (`recordComposerMessage`).
       const record = async () => {
+        if (req.handoff === true) await patchSession(req.id, { handoffRequestedAt: new Date(sentAtMs).toISOString() })
         await recordComposerMessage(req.id, text)
         void (async () => {
           try {

@@ -10,6 +10,13 @@ before dropping their records, and boot consumes relay-recorded exits before dis
 A confirmed session kill records the decision before removing its pane (a refused kill restores
 the previous value). None of these rules depends on the harness or on leader/worker role.
 
+Only the latest crash group with heartbeat evidence from the last 24 hours is announced as
+“sessions that fell”. Older losses remain in Ended and can still be reopened individually.
+Ended row menus omit End session, including lost rows whose end time comes from their last
+heartbeat; a running pane with unread activity keeps its stop action. Dismissing the recovery
+notice persists across reloads and stays dismissed while only those same fallen IDs remain.
+A new fallen ID makes the notice visible again.
+
 The poller must observe a tmux command's exit while its dead pane still exists. If the command ends
 while the application server is stopped and the tmux backend then disappears before the next poll,
 there is no durable termination evidence to distinguish it from a session lost in a reboot.
@@ -847,3 +854,17 @@ a shell that inherited the server's `SERVE_STATIC` variable. Each diagnostic key
 the process lifetime, including after a row is removed, so encountering more than 512 distinct
 collisions cannot make earlier warnings repeat. Only the pair's identifiers and source paths are
 retained, without transcript content; restarting the process resets the diagnostic history.
+
+
+Once an automatic handoff hint or a confirmed **Hand off now** prompt is delivered, the composer
+shows **Handoff in progress** instead of the context warning. Its progress track follows preparation,
+the successor opening, the successor taking over (a retire request), and the predecessor closing.
+During takeover, the track advances with time toward the retirement deadline; it stays below complete
+until the predecessor ends. **View successor** opens the linked session. Handoff and reminder buttons
+are hidden during this flow. An expired retire request or a stopped/missing successor restores the
+warning; a preparation request without a successor expires after 30 minutes.
+
+The optional `HandoffPanel.handoff` block carries the stage, successor, request/deadline timestamps,
+and progress fraction. `ManagedSession.handoffRequestedAt` records confirmed prompt delivery for both
+manual requests (`prompt` with `handoff: true`) and automatic hints. Failed deliveries do not start
+progress. Existing successor links and retire requests also supply progress for older sessions.

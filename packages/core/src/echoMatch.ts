@@ -144,8 +144,13 @@ export function pendingEchoes(
   // "ok" from an hour ago — and letting one of those anchor the rule turns a mistake that cost ONE
   // spurious retirement into one that silently clears the whole queue behind it. A message the
   // person can no longer see is the failure this file exists to prevent.
-  const lastAnchor = match.lastIndexOf('anchor')
-  return echoes.filter((_text, i) => i > lastAnchor && match[i] === 'no')
+  // A local slash command may finish while an earlier model prompt still waits. The driver
+  // publishes its confirmed user turn on completion, but that is not FIFO model-input evidence.
+  // Treat ALL slash invocations conservatively here: only the driver knows which are local;
+  // keeping a skill pending costs a glance, using a local command to hide a prompt loses it.
+  const command = echoes.map(text => /^\/[A-Za-z0-9][A-Za-z0-9_:-]*(?=$|\s)/.test(text.trimStart()))
+  const lastAnchor = match.findLastIndex((m, i) => m === 'anchor' && !command[i])
+  return echoes.filter((_text, i) => match[i] === 'no' && (command[i] || i > lastAnchor))
 }
 
 /**

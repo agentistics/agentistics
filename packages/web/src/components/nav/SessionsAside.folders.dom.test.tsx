@@ -356,6 +356,9 @@ for (const width of [1280, 390]) {
     expect(host.querySelector('[data-fell-banner]')).toBeNull()
     expect(block.querySelectorAll('[data-session-line]').length).toBe(1)
     expect((await import('../../lib/fellDismissal')).readDismissedFell()).toEqual(['fell-0'])
+    expect(JSON.parse(localStorage.getItem('agentistics-fell-dismissed-v1')!)).toEqual(['fell-0'])
+    await act(async () => root.unmount())
+    root = createRoot(host)
     await render([...fleet, fallen[0]!], width, 'en', filters, false, 1)
     expect(host.querySelector('[data-fell-banner]')).toBeNull()
     await render([...fleet, ...fallen], width, 'en', filters, false, 2)
@@ -411,4 +414,26 @@ test('mobile session actions offer end and confirm list removal for an external 
   expect(confirm.textContent).toBe('Remover da lista')
   await click(confirm)
   expect(calls).toEqual(['forget'])
+})
+
+for (const state of ['closed', 'exited', 'lost'] as const) test(`ended ${state} row menu has Reopen and Remove, never End session`, async () => {
+  act(() => writePrefs({ tab: 'ended' }))
+  const session = { ...row(`ended-${state}`, state), endedAt: Date.now() - 33 * 86_400_000 }
+  const verbs = [
+    { action: 'kill', label: 'Encerrar sessão', enabled: true },
+    { action: 'resume', label: 'Reabrir', enabled: true },
+    { action: 'forget', label: 'Remover da lista', enabled: true },
+  ]
+  await act(async () => root.render(<MemoryRouter><SessionsAside rows={[session]} lang="pt" filters={filters} activeOnly={false}
+    loading={false} unsupported={false} finishedTasks={[]} hideNew
+    rowsById={new Map([[session.id, { verbs }]])} /></MemoryRouter>))
+  // The old row is in Ended, outside the recent recovery group.
+  expect(host.querySelector('[data-fell-banner]')).toBeNull()
+  await click(host.querySelector<HTMLElement>('[data-ended-all]')!)
+  const line = host.querySelector<HTMLElement>('[data-session-line]')!
+  await act(async () => line.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })))
+  const labels = Array.from(document.querySelectorAll('[role="menuitem"]')).map(el => el.textContent)
+  expect(labels).toContain('Reabrir')
+  expect(labels).toContain('Remover da lista')
+  expect(labels).not.toContain('Encerrar sessão')
 })

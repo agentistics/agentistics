@@ -6,6 +6,7 @@ import { HARNESS_LABELS } from '../lib/harness'
 import { currentUsedPct, limitLevel, limitLevelWord, usePlanLimits, windowLabel } from '../lib/planLimits'
 import { requestPlanUsageModal } from '../lib/planUsageModalRequests'
 import { scrollIsOutside } from '../lib/popoverScroll'
+import { PlanUsageSessionSwitch, type PlanUsageSession } from './PlanUsageSessionSwitch'
 import { LimitLevelIcon, PlanUsageSummary } from './PlanLimitMeter'
 
 const POP_W = 344
@@ -17,9 +18,10 @@ const GRACE_MS = 100
  * portaled popover with a caret on the button; click opens the plan-usage modal. Icon only (so the five
  * footer buttons share one width); the level badge appears when a window is at 75% or more.
  */
-export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' | 'en'; collapsed: boolean; footBtn: CSSProperties }) {
+export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: { lang: 'pt' | 'en'; collapsed: boolean; footBtn: CSSProperties; openSession?: PlanUsageSession }) {
   const pt = lang === 'pt'
   const snap = usePlanLimits()
+  const skipReturnFocus = useRef(false)
   const btnRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -50,6 +52,7 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
   const openModal = useCallback(() => { btnRef.current?.focus(); requestPlanUsageModal(); close() }, [close])
   // Keyboard focus opens the summary; focus handed back by a modal closed with the pointer does not.
   const onBtnFocus = (e: React.FocusEvent<HTMLButtonElement>) => {
+    if (skipReturnFocus.current) { skipReturnFocus.current = false; return }
     let visible = true
     try { visible = e.currentTarget.matches(':focus-visible') } catch { /* older engines: keep opening */ }
     if (visible) open()
@@ -61,6 +64,10 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
   }
   const onPopKey = (e: React.KeyboardEvent) => {
     if (e.key !== 'Tab' || !btnRef.current) return
+    const inside = Array.from(popRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])') ?? [])
+    const index = inside.indexOf(document.activeElement as HTMLElement)
+    const adjacent = inside[index + (e.shiftKey ? -1 : 1)]
+    if (index >= 0 && adjacent) { e.preventDefault(); adjacent.focus(); return }
     e.preventDefault()
     if (e.shiftKey) { btnRef.current.focus(); return }
     const all = Array.from(document.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'))
@@ -83,6 +90,9 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' |
     pop = createPortal(
       <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={{ ...style, maxWidth: POP_W + 20 }} onMouseEnter={open} onMouseLeave={closeSoon} onFocus={open} onBlur={closeSoon} onKeyDown={onPopKey}>
         <PlanUsageSummary onOpen={openModal} limits={snap.limits} registered={snap.registered} accountLabels={snap.accountLabels} now={snap.now} lang={lang} />
+        <PlanUsageSessionSwitch lang={lang} session={openSession && { ...openSession, onSwitch: () => {
+          btnRef.current?.focus(); skipReturnFocus.current = true; close(); openSession.onSwitch()
+        } }} />
         {collapsed
           ? <span aria-hidden style={{ ...caret, left: -CARET / 2 - 1, bottom: Math.max(4, rect.height / 2 + 8 - CARET / 2 - 8), borderLeft: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />
           : <span aria-hidden style={{ ...caret, bottom: -CARET / 2 - 1, left: Math.min(POP_W - 20, Math.max(8, caretLeft)), borderRight: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />}
