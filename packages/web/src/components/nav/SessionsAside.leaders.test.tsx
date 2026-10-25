@@ -98,6 +98,29 @@ async function unmount(m: Mount) {
   act(() => writePrefs({ leadersOnly: false, tab: 'active', foldedTeams: [] }))
   m.host.remove()
 }
+
+for (const width of [1280, 390]) test(`handoff keeps both leaders visible during overlap, then one team; a failed spawn preserves the original (${width}px)`, async () => {
+  const m = await mount(width)
+  const predecessor = { ...row('live-pin', 'working'), title: '[ LEADER ] - Motor', conversationId: 'live-pin' }
+  const successor = { ...row('live-folder', 'working'), title: predecessor.title, conversationId: 'live-folder' }
+  const worker = { ...row('worker', 'working'), parentSessionId: successor.id }
+  try {
+    m.render([predecessor, successor, worker])
+    expect(m.host.querySelectorAll('[data-team]')).toHaveLength(2)
+    expect(teamOf(m.host, predecessor.id)).not.toBeNull()
+    expect(teamOf(m.host, successor.id)?.textContent).toContain(worker.title)
+    expect(m.host.querySelectorAll('[data-team-members]')).toHaveLength(1)
+    expect(m.host.querySelectorAll('[data-team-members] [data-session-open]')).toHaveLength(1)
+
+    m.render([{ ...predecessor, state: 'exited' }, successor, worker])
+    expect(m.host.querySelectorAll('[data-team]')).toHaveLength(1)
+    expect(teamOf(m.host, successor.id)?.textContent).toContain(worker.title)
+
+    m.render([predecessor, { ...worker, parentSessionId: predecessor.id }])
+    expect(m.host.querySelectorAll('[data-team]')).toHaveLength(1)
+    expect(teamOf(m.host, predecessor.id)?.textContent).toContain(worker.title)
+  } finally { await unmount(m) }
+})
 const teamOf = (host: HTMLElement, id: string) => host.querySelector<HTMLElement>(`[data-team="${id}"]`)
 
 for (const width of [1280, 390]) test(`Ativas: one card per leader with its team, pinned leader first, nothing drawn twice (${width}px)`, async () => {
