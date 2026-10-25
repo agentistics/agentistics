@@ -232,7 +232,10 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
         >
           <FieldInput
             label={pt ? 'Buscar página' : 'Find page'} value={query} onChange={setQuery}
-            hideLabel placeholder={pt ? 'Buscar  Ctrl K' : 'Search  Ctrl K'} autoComplete="off" spellCheck={false}
+            hideLabel autoComplete="off" spellCheck={false}
+            // A phone has no Ctrl K: the sheet's field says what it finds and is a 44px target.
+            placeholder={sheet ? (pt ? 'Buscar página' : 'Find page') : (pt ? 'Buscar · Ctrl K' : 'Search · Ctrl K')}
+            isMobile={sheet}
           />
         </div>
       )}

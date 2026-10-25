@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, KeyRound, LogOut, ShieldCheck, MessagesSquare, type LucideIcon } from 'lucide-react'
+import { ChevronDown, ChevronUp, KeyRound, LogOut, ShieldCheck, MessagesSquare, type LucideIcon } from 'lucide-react'
 import type { IamAccount } from '../../App'
 import { areaOfPath, pageLabel, type AreaId } from '../../lib/appAreas'
 import { BottomSheet } from '../BottomSheet'
@@ -80,9 +80,15 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
   useEffect(() => { closeSheet() }, [pathname, closeSheet])
   const go = (to: string) => { closeSheet(); onNavigate(to) }
   const current = areaOfPath(pathname)
-  const place = current
+  // The prototype (CelBarraLugar): the area quiet, the page bold, a chevron from the icon set.
+  const placeText = current
     ? pageLabel(current.area, lang) + (current.page ? ` › ${pageLabel(current.page, lang)}` : '')
     : (pt ? 'Navegar' : 'Navigate')
+  const place: React.ReactNode = current?.page
+    ? <><span style={{ color: 'rgba(255,255,255,0.5)' }}>{pageLabel(current.area, lang)} ›</span> <b>{pageLabel(current.page, lang)}</b></>
+    : <b>{placeText}</b>
+  // On Sessions the pill already names the place: a round shortcut to the same page is a duplicate.
+  const onSessions = current?.area.id === 'sessions'
   const sessions = pt ? 'Sessões' : 'Sessions'
   const orange = 'var(--anthropic-orange)'
   const roleLabel = principal
@@ -101,11 +107,12 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
       <MobilePillBar
         variant="place"
         ariaLabel={pt ? 'Navegação principal' : 'Main navigation'}
-        activeIndex={current?.area.id === 'sessions' ? 1 : 0}
+        activeIndex={0}
         items={[
-          { key: 'areas', label: `${place} ▾`, icon: ChevronDown, onActivate: () => setOpen(v => !v), expanded: open, hasPopup: 'dialog' },
-          { key: 'sessions', label: sessions, ariaLabel: attention && attention > 0 ? `${sessions}, ${attention} ${pt ? 'precisam de você' : 'need you'}` : sessions,
-            icon: MessagesSquare, onActivate: () => go('/sessions'), badge: attention && attention > 0 ? attention : undefined },
+          { key: 'areas', label: placeText, content: place, ariaLabel: (pt ? 'Ir para · ' : 'Go to · ') + placeText,
+            icon: open ? ChevronUp : ChevronDown, onActivate: () => setOpen(v => !v), expanded: open, hasPopup: 'dialog' },
+          ...(onSessions ? [] : [{ key: 'sessions', label: sessions, ariaLabel: attention && attention > 0 ? `${sessions}, ${attention} ${pt ? 'precisam de você' : 'need you'}` : sessions,
+            icon: MessagesSquare, onActivate: () => go('/sessions'), badge: attention && attention > 0 ? attention : undefined }]),
         ]}
       />
       <BottomSheet open={open} onClose={closeSheet} title={pt ? 'Ir para' : 'Go to'} lang={lang}>

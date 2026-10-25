@@ -21,6 +21,8 @@ import { MOBILE_PILL_BAR_Z } from '../../lib/zLayers'
 export interface PillItem {
   key: string
   label: string
+  /** Richer label for the place pill (quiet area, bold page); `label` stays the plain text. */
+  content?: React.ReactNode
   icon: LucideIcon
   onActivate: () => void
   ariaLabel?: string
@@ -73,7 +75,7 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
   const localX = (clientX: number) => {
     const x = clientX - (trackRef.current?.getBoundingClientRect().left ?? 0)
     // Convert the unequal place/round widths to the equal slots bottomNavDrag operates on.
-    if (!place || width <= 62) return x
+    if (!place || count < 2 || width <= 62) return x
     const boundary = width - 57
     return x < boundary ? x / boundary * (width / 2) : width / 2 + (x - boundary) / 57 * (width / 2)
   }
@@ -203,9 +205,10 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
               }}>
                 <Icon size={20} strokeWidth={lit ? 2.1 : 1.8} />
               </span>}
-              {(!place || i === 0) && <span style={{ width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {item.label}
+              {(!place || i === 0) && <span style={{ width: place ? undefined : '100%', minWidth: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {place ? (item.content ?? item.label) : item.label}
               </span>}
+              {place && i === 0 && <Icon size={16} strokeWidth={1.8} aria-hidden style={{ flexShrink: 0, opacity: 0.8 }} />}
               {item.badge !== undefined && item.badge > 0 && <span className={ATTN_COUNT_CLASS} style={{
                 position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, padding: '0 4px',
                 borderRadius: 9, background: ORANGE, color: '#fff', fontSize: 11, fontWeight: 700,

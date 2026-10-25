@@ -2214,6 +2214,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     >
       <FiltersBar
         compact
+        hideClearAll
         only={FLEET_FILTER_DIMS}
         activeOnly={activeOnly}
         onActiveOnlyChange={setActiveOnly}

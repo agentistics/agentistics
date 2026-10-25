@@ -43,6 +43,9 @@ interface Props {
   presence?: Record<string, MemberPresence>
   lang: Lang
   compact?: boolean
+  /** The host already offers a "Clear" for everything (the filters sheet's footer): drop this bar's
+   *  own "Clear filters", so one action is never offered twice on one screen. */
+  hideClearAll?: boolean
   /** Live readout of the currently-filtered data, rendered right-aligned in the top bar
    *  (desktop only). Pre-formatted so FiltersBar needs no currency/rate. */
   summary?: {
@@ -196,7 +199,7 @@ const SEARCH_INPUT: React.CSSProperties = {
   borderRadius: 6, padding: '6px 8px 6px 26px', outline: 'none',
 }
 
-export function FiltersBar({ only, filters, onChange, projects, sessionCountByProject, models, modelGroups, modelsInProject, users, harnesses, presence, lang, compact, summary, teams, machines, tags, canFilterMembers = true, onCreateTagFromFilters, activeOnly, onActiveOnlyChange, costBasis = "api", onCostBasisChange, costBasisReady = false, onCostBasisSetup, hideDateRange = false, inline = false, dateCompact = false, activeFiltersIcon = false, addFilterIcon = false, harnessesOutOfView }: Props) {
+export function FiltersBar({ only, filters, onChange, projects, sessionCountByProject, models, modelGroups, modelsInProject, users, harnesses, presence, lang, compact, hideClearAll = false, summary, teams, machines, tags, canFilterMembers = true, onCreateTagFromFilters, activeOnly, onActiveOnlyChange, costBasis = "api", onCostBasisChange, costBasisReady = false, onCostBasisSetup, hideDateRange = false, inline = false, dateCompact = false, activeFiltersIcon = false, addFilterIcon = false, harnessesOutOfView }: Props) {
   // Fall back to a single unlabeled group when modelGroups isn't provided.
   const groups: { harness: SurfaceHarnessId | null; models: string[] }[] =
     modelGroups && modelGroups.length > 0
@@ -459,7 +462,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
                     <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
                     {HARNESS_LABELS[h]}
                     <button onClick={() => onChange({ ...filters, harnesses: filters.harnesses!.filter(x => x !== h) })}
-                      title={lang === 'pt' ? 'Remover harness' : 'Remove harness'}
+                      title={lang === 'pt' ? 'Remover harness' : 'Remove harness'} aria-label={lang === 'pt' ? 'Remover harness' : 'Remove harness'} className="ag-tap-icon"
                       style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', color, opacity: 0.7, flexShrink: 0 }}>
                       <X size={10} strokeWidth={2.5} />
                     </button>
@@ -492,7 +495,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
                     <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0 }} />
                     {online ? 'Online' : 'Offline'}
                     <button onClick={() => onChange({ ...filters, presence: undefined })}
-                      title={lang === 'pt' ? 'Remover filtro de presença' : 'Remove presence filter'}
+                      title={lang === 'pt' ? 'Remover filtro de presença' : 'Remove presence filter'} aria-label={lang === 'pt' ? 'Remover filtro de presença' : 'Remove presence filter'} className="ag-tap-icon"
                       style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', color, opacity: 0.7, flexShrink: 0 }}>
                       <X size={10} strokeWidth={2.5} />
                     </button>
@@ -530,7 +533,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
                   : (lang === 'pt' ? 'Filtros ativos' : 'Active filters')}
               </button>
             )}
-            <button
+            {!hideClearAll && <button
               onClick={clearAllFilters}
               style={{
                 marginLeft: compact ? 'auto' : 0,
@@ -543,7 +546,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
               title={lang === 'pt' ? 'Limpar todos os filtros' : 'Clear all filters'}
             >
               <X size={12} /> {lang === 'pt' ? 'Limpar filtros' : 'Clear filters'}
-            </button>
+            </button>}
           </div>
         )}
 
@@ -600,7 +603,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
           background: hasCustomDates ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
           border: hasCustomDates ? '1px solid rgba(217,119,6,0.55)' : '1px solid var(--border)',
           borderRadius: 7,
-          height: 30,
+          height: isMobile ? 44 : 30,
           paddingLeft: 8,
           gap: 1,
         }}>
@@ -815,7 +818,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
               }}>
                 {lang === 'pt' ? 'Filtros ativos' : 'Active filters'}
               </span>
-              <button
+              {!hideClearAll && <button
                 onClick={clearAllFilters}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -828,7 +831,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
                 title={lang === 'pt' ? 'Limpar todos os filtros' : 'Clear all filters'}
               >
                 <X size={12} /> {lang === 'pt' ? 'Limpar filtros' : 'Clear filters'}
-              </button>
+              </button>}
             </div>
             {activeFilterRows}
           </div>
@@ -1539,10 +1542,12 @@ function FilterChip({ title, onRemove, removeTitle, children }: { title?: string
       display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600,
       color: 'var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)',
       border: '1px solid rgba(217,119,6,0.3)', borderRadius: 5,
-      padding: '2px 6px 2px 8px', maxWidth: 260, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      padding: '2px 6px 2px 8px', maxWidth: 260, whiteSpace: 'nowrap',
     }}>
-      {children}
-      <button onClick={onRemove} title={removeTitle}
+      {/* The label clips, not the chip: a clipping chip would also clip the ✕'s projected target. */}
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{children}</span>
+      {/* On a phone the 10px ✕ projects a 44px target (`.ag-tap-icon`); the chip keeps its paint. */}
+      <button onClick={onRemove} title={removeTitle} aria-label={removeTitle} className="ag-tap-icon"
         style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', color: 'var(--anthropic-orange)', opacity: 0.7, flexShrink: 0 }}>
         <X size={10} strokeWidth={2.5} />
       </button>

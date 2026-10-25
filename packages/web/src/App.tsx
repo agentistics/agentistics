@@ -4649,7 +4649,7 @@ export default function AppLayout() {
               <button
                 onClick={toggleFleet}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 40,
+                  display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 44,
                   padding: '0 14px', background: 'transparent', border: 'none',
                   fontFamily: 'inherit', fontSize: '0.75rem', cursor: 'pointer',
                   color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums',
