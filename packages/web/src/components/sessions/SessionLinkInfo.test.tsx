@@ -179,6 +179,21 @@ describe('per-session away switch', () => {
   })
 })
 
+describe('per-session away switch under the GLOBAL away mode (HERANÇA)', () => {
+  const none: SessionLinks = { parent: null, children: [], task: null }
+  it('reads ON, names the global as the source and is locked, whatever the session flag says', async () => {
+    const { __setAwayForTest } = await import('../../lib/awayMode')
+    __setAwayForTest({ on: true, since: '2026-10-25T00:00:00Z', until: null, authorised: [], maxWorkers: 6, topCaps: {} } as never)
+    try {
+      const html = renderToStaticMarkup(<SessionLinkPanel links={none} sessionId="s1" pt onGo={() => {}} awayId="s1" />)
+      expect(html).toContain('aria-checked="true"')
+      expect(html).toContain('ligado pelo modo ausente geral')
+      expect(html).toContain('data-away-source="global"')
+      expect(html).toContain('disabled')
+    } finally { __setAwayForTest(null) }
+  })
+})
+
 describe('hand-off generation in the ⓘ panel', () => {
   const links = { parent: null, children: [], task: null }
   it('shows the counter (EN and PT) and nothing when never handed off', () => {

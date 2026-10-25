@@ -54,6 +54,10 @@ describe('a replaced row (reopen / account switch) hands its workers to its repl
     const r: TeamRow[] = [{ id: 'old', conversationId: 'c1', endedAt: 'z', handoffTo: 'n' }, { id: 'n', conversationId: 'c2' }]
     expect(liveSuccessorOf(r, 'old')).toBe('n')
   })
+  test('a leader that handed off but is still finishing its turn already forwards to its successor', () => {
+    const r: TeamRow[] = [{ id: 'old', conversationId: 'c1', handoffTo: 'n' }, { id: 'n', conversationId: 'c2' }]
+    expect(liveSuccessorOf(r, 'old')).toBe('n')
+  })
   test('the workers naming the old id are re-filed', () => {
     expect(childrenOfReplaced(rows, 'old', 'new')).toEqual(['w1'])
     expect(childrenOfReplaced(rows, 'new', 'new')).toEqual([])

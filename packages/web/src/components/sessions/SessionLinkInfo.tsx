@@ -242,7 +242,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
         <div style={SECTION}>{pt ? 'Tipo' : 'Type'}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 6px', fontSize: 12 }}>
           <RoleChip role={role} pt={pt} />
-          <span style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{role ? roleOriginLabel(roleOrigin, pt, leaderTitleFor(roleOrigin, links.parent)) : (pt ? 'deduzido pelo sistema' : 'inferred by system')}</span>
+          <span style={{ color: 'var(--text-tertiary)', fontSize: 10.5 }}>{role ? (handoffSeq && role === 'leader' && roleOrigin && typeof roleOrigin === 'object' ? (pt ? 'herdado na passagem de líder' : 'inherited in the leader hand-off') : roleOriginLabel(roleOrigin, pt, leaderTitleFor(roleOrigin, links.parent))) : (pt ? 'deduzido pelo sistema' : 'inferred by system')}</span>
           <button type="button" aria-label={pt ? 'Trocar tipo' : 'Change type'} aria-expanded={rolePickerOpen} onClick={() => setRolePickerOpen(open => !open)} style={{ all: 'unset', marginLeft: 'auto', color: 'var(--anthropic-orange)', cursor: 'pointer', fontSize: 11, padding: '3px 5px', borderRadius: 5, ...(isMobile ? { boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', minHeight: 44, minWidth: 44, justifyContent: 'center' } : {}) }}>{pt ? 'Trocar' : 'Change'}</button>
         </div>
         {rolePickerOpen && (
