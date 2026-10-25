@@ -66,8 +66,8 @@ export async function readServerSnapshot<T>(lang: string): Promise<T | null> {
  *
  * The server must never ask itself — it would be an HTTP round trip to its own poller, and on a
  * cold start a request that cannot complete until the thing making it has finished starting.
- * `SERVE_STATIC` is set by `cli.ts` for the `server` subcommand and by nothing else, so it is the
- * one marker that is true exactly when this process is serving.
+ * `cli.ts` clears inherited `SERVE_STATIC` before dispatch and sets it again only when it starts
+ * serving. A command launched from a server-owned shell must not inherit the server role.
  */
 export function isServerProcess(): boolean {
   return process.env.SERVE_STATIC === '1'

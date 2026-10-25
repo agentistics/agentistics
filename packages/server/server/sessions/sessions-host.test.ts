@@ -54,6 +54,7 @@ const poller = (o: {
   processes?: HarnessProcess[]
   now?: () => number
   touchSessions?: (ids: readonly string[], atMs: number) => Promise<unknown>
+  endSessions?: (ids: readonly string[], endedAt: string) => Promise<unknown>
   heartbeatMs?: number
 }) => createSessionsPoller({
   backend: o.backend,
@@ -61,6 +62,7 @@ const poller = (o: {
   scanProcesses: async () => ({ procs: o.processes ?? [] }),
   now: o.now ?? (() => NOW),
   ...(o.touchSessions ? { touchSessions: o.touchSessions } : {}),
+  ...(o.endSessions ? { endSessions: o.endSessions } : {}),
   ...(o.heartbeatMs !== undefined ? { heartbeatMs: o.heartbeatMs } : {}),
 })
 
@@ -391,6 +393,26 @@ describe('the heartbeat', () => {
 })
 
 describe('the sessions that fell together', () => {
+  for (const harness of ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi', 'opencode'] as const) {
+    it(`${harness}: persists clean exits, so only sessions alive at backend loss fall after reboot`, async () => {
+      const registry = ['done', 'alive'].map(id => managed(id, { harness, lastSeenMs: NOW }))
+      const sessions = [backendSession('done', { alive: false }), backendSession('alive')]
+      const writes: string[][] = []
+      const p = poller({
+        registry, backend: fakeBackend({ sessions }),
+        endSessions: async (ids, endedAt) => {
+          writes.push([...ids])
+          for (const m of registry) if (ids.includes(m.id)) m.endedAt = endedAt
+        },
+      })
+      await p.poll()
+      expect(writes).toEqual([['done']])
+      // A fresh poller after reboot has no memory and no panes, only the durable registry.
+      const rebooted = poller({ registry: structuredClone(registry), backend: fakeBackend({ sessions: [] }) })
+      expect((await rebooted.poll()).fell?.entries.map(e => e.id)).toEqual(['alive'])
+    })
+  }
+
   it('marks the rows and reports the group when the backend has lost them', async () => {
     const p = poller({
       backend: fakeBackend({ sessions: [] }),

@@ -14,8 +14,8 @@ import type { ReactNode } from 'react'
 import { HARNESS_LABELS } from '../lib/harness'
 import { HarnessMark } from './sessions/HarnessMark'
 import {
-  currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, SOURCE_LABEL, stalePhrase,
-  updatedPhrase, warnForecast, windowLabel, windowShort, fmtWhen, limitLevel, limitLevelWord, subscriptionRows, type RegisteredPlan,
+  currentUsedPct, forecastPhrase, LIMIT_WARN, limitTone, resetPhrase, shortWhen, SOURCE_LABEL, stalePhrase,
+  updatedPhrase, warnForecast, windowLabel, windowShort, fmtWhen, limitLevel, limitLevelWord, subscriptionName, subscriptionRows, type RegisteredPlan,
 } from '../lib/planLimits'
 
 type Lang = 'pt' | 'en'
@@ -49,14 +49,47 @@ export function LimitLevelIcon({ pct, size = 16, lang = 'pt', level = limitLevel
   </svg>
 }
 
+/** The grid one "Plan usage" row is laid out on: mark, name + plan, one ring per window. */
+export const PLAN_ROW_GRID = { display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 8 } as const
+
+/**
+ * The CELLS of one "Plan usage" row — shared by the summary list and the account-switch picker
+ * (CONTA.LIMITES), so an account reads the same in both. `note` replaces the plan line (a reason the
+ * row cannot be picked); `tag` leads the plan line ("Current"), so it never cuts the name.
+ */
+export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note, tag, wrap = false }: {
+  harness: PlanLimits['harness']; name: string; plan: string | undefined; limits: PlanLimits | null; now: number; lang: Lang
+  note?: ReactNode; tag?: ReactNode
+  /** The picker: name and plan WRAP (never an ellipsis on the one fact that tells rows apart), the tag on its own line. */
+  wrap?: boolean
+}) {
+  const text = wrap
+    ? { display: 'block', overflowWrap: 'anywhere' } as const
+    : { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as const
+  const waiting = lang === 'pt' ? 'aguardando leitura' : 'waiting for the first reading'
+  return <>
+    <HarnessMark harness={harness} size={20} />
+    <div style={{ minWidth: 0 }}>
+      <b style={{ ...text, fontSize: 13 }}>{name}</b>
+      {wrap
+        ? <>
+          <span style={{ ...text, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span>
+          {tag && <span style={{ display: 'flex', marginTop: 2 }}>{tag}</span>}
+          {!limits && <span style={{ ...text, fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
+        </>
+        : <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>{tag}<span style={{ ...text, minWidth: 0, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span></span>}
+      {note && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{note}</span>}
+    </div>
+    {limits ? limits.windows.map(w => <div key={w.kind} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang)}</span></div>) : wrap ? null : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
+  </>
+}
+
 export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen }: { onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang }) {
   const rows = subscriptionRows(limits, registered, accountLabels)
   return <div data-plan-usage-summary style={{ width: 344, padding: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span><span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
-    {rows.map((row, i) => <div key={`${row.harness}:${i}`} data-plan-row={row.harness} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 8, padding: '8px 4px', borderTop: '1px solid var(--border)' }}>
-      <HarnessMark harness={row.harness} size={20} />
-      <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{HARNESS_LABELS[row.harness]}{row.accountLabel ? ` · ${row.accountLabel}` : ''}</b><span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span></div>
-      {row.limits ? row.limits.windows.map(w => <div key={w.kind} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang)}</span></div>) : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{lang === 'pt' ? 'aguardando leitura' : 'waiting for the first reading'}</span>}
+    {rows.map((row, i) => <div key={`${row.harness}:${i}`} data-plan-row={row.harness} style={{ ...PLAN_ROW_GRID, padding: '8px 4px', borderTop: '1px solid var(--border)' }}>
+      <PlanUsageRowCells harness={row.harness} name={subscriptionName(row.harness, row.accountLabel)} plan={row.plan} limits={row.limits} now={now} lang={lang} />
     </div>)}
     {rows.some(r => r.limits?.windows.some(w => currentUsedPct(w, now) >= 75)) && <div style={{ padding: '7px 4px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{rows.flatMap(r => (r.limits?.windows ?? []).filter(w => currentUsedPct(w, now) >= 75).slice(0, 1).map(w => <span key={`${r.harness}:${w.kind}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><LimitLevelIcon pct={currentUsedPct(w, now)} lang={lang} />{HARNESS_LABELS[r.harness]}: {windowLabel(w.kind, lang)} {lang === 'pt' ? 'em' : 'at'} {Math.round(currentUsedPct(w, now))}% · {lang === 'pt' ? 'renova' : 'resets'} {fmtWhen(w.resetsAt, now, lang)}</span>))}</div>}
     <div style={{ borderTop: '1px solid var(--border)', padding: '8px 4px 4px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>{lang === 'pt' ? 'Clique para ver tudo' : 'Click to see everything'} <button type="button" data-plan-usage-open onClick={onOpen} style={{ float: 'right', border: 0, background: 'transparent', padding: 0, font: 'inherit', fontWeight: 700, color: 'var(--anthropic-orange)', cursor: 'pointer' }}>{lang === 'pt' ? 'Abrir ›' : 'Open ›'}</button></div>
@@ -108,7 +141,7 @@ export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedd
   return <div data-plan-usage-card={harness} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, padding: embedded ? 0 : 12, borderRadius: 12, background: 'var(--bg-card)', border: embedded ? undefined : '1px solid var(--border)' }}>
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <HarnessMark harness={harness} size={24} />
-      <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 14 }}>{HARNESS_LABELS[harness]}{accountLabel ? ` · ${accountLabel}` : ''}</b>{showPlan && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{plan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span>}</div>
+      <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 14 }}>{subscriptionName(harness, accountLabel)}</b>{showPlan && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{plan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span>}</div>
       <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', color: !limits ? 'var(--text-tertiary)' : level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} level={level} size={14} lang={lang} />{state}</span>
     </div>
     {limits && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{limits.windows.map(w => <div key={w.kind} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} lang={lang} ring={48} /></div>)}</div>}
@@ -237,7 +270,7 @@ export function PlanLimitArcs({ limits, now, size }: { limits: PlanLimits; now: 
 export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
   const warn = limits.windows.map(w => warnForecast(w, now)).find(Boolean) ?? null
   return (
-    <div data-plan-limits={limits.harness} data-plan-compact style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', columnGap: 6, rowGap: 3, fontSize: 10.5, minWidth: 0 }}>
+    <div data-plan-limits={limits.harness} data-plan-compact style={{ display: 'grid', gridTemplateColumns: 'auto minmax(16px, 1fr) auto', alignItems: 'center', columnGap: 6, rowGap: 3, fontSize: 10.5, minWidth: 0 }}>
       {limits.windows.map(w => {
         const pct = currentUsedPct(w, now)
         const renewed = windowRenewed(w, now)
@@ -249,13 +282,16 @@ export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: 
             style={{ height: 3, minWidth: 16, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
             <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: '100%', background: limitTone(pct), borderRadius: 2 }} />
           </div>,
-          <span key={`${w.kind}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'normal', overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>
-            {renewed ? '–' : `${Math.round(pct)}%`} · {renewed ? windowResetPhrase(w, now, lang) : fmtWhen(w.resetsAt, now, lang)}
+          <span key={`${w.kind}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+            {renewed ? '–' : `${Math.round(pct)}% · ${shortWhen(w.resetsAt, now, lang, w.kind)}`}
           </span>,
+          ...(renewed ? [<span key={`${w.kind}reset`} data-plan-renewal style={{ gridColumn: '1 / -1', color: 'var(--text-secondary)', whiteSpace: 'normal', overflowWrap: 'normal', lineHeight: 1.4 }}>
+            {windowResetPhrase(w, now, lang)}
+          </span>] : []),
         ]
       })}
       {warn && (
-        <span data-plan-forecast style={{ gridColumn: '1 / -1', color: LIMIT_WARN, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <span data-plan-forecast style={{ gridColumn: '1 / -1', color: LIMIT_WARN, fontWeight: 600, whiteSpace: 'normal', overflowWrap: 'normal' }}>
           {forecastPhrase(warn, now, lang)}
         </span>
       )}

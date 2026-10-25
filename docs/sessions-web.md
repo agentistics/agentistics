@@ -18,12 +18,65 @@ about the web one specifically.
 
 The aside's **N leaders** toggle counts only sessions in the fleet's active states that match the
 current search and harness/project/repository/model filters. When enabled, it displays those
-leaders in one flat list, including leaders that are pinned or filed in hidden folders. Pinned,
-folder, ended and summary-filter sections are suspended until the toggle is turned off; their
+leaders in one flat list, including leaders filed in hidden folders. Pinned and Sleeping stay
+above that list regardless of quick filters, and pinned leaders are not repeated in the flat list.
+Folder, ended and summary-filter sections are suspended until the toggle is turned off; their
 settings are preserved. The toggle stays visible at zero while enabled so it can be turned off.
 The summary filter does not narrow this flat list; its selection is restored in the normal view.
 When no active leaders match, the list says **No active leaders** (**Nenhum líder ativo**), even
 when workers or ended leaders are pinned.
+
+With the `sessionTabs` flag enabled, pinned sessions in `exited`, `closed`, `lost` or `unknown`
+state sleep in the strip's menu instead of occupying a tab. Unpinned ended tabs stay visible.
+The menu button stays at the left of the scrolling track, counts the visible tabs, and shows a
+moon when any pinned session sleeps. Its **Sleeping** entries reopen through the fleet's existing
+`resume` action and focus the resulting conversation in the current pane.
+
+In the aside's **Ended** tab, **Sleeping** contains only explicitly pinned ended sessions.
+An unpinned ended leader goes under today's or older finished sessions, just like a worker.
+Ending a session never removes its pin. The collapsed rail and the tabs menu use the same rule.
+
+In the folder view, those same pinned ended sessions appear under **Sleeping** at the end of **Pinned**.
+This row starts collapsed and remembers expansion with the existing ended-section preferences.
+The Pinned header counts both live and sleeping pins. Pins load their deferred ended sessions even
+with Active only enabled; status/value filters leave them visible, while search narrows them. Sleeping cards can still be opened for reading,
+reopened, or unpinned; sleeping never removes the pin. Leader names omit the role prefix and keep
+an explicit Líder/Leader badge in cards and the tabs menu. Titles wrap without ellipses; the menu
+can grow to the viewport gutter. On phones each tab fits the scrolling track, with mandatory scroll
+snapping and the active tab scrolled into view. Arrow keys, Home and End move the tab's focus;
+Enter or Space opens the focused tab. Row pin/open/reopen controls are separate buttons. Reopen
+uses an icon with an explicit label and foreground contrast. Disabled reopen icons expose the same
+localized refusal reason as the row menu in their tooltip and accessible label. At the minimum aside width its two
+action icons stack in the trailing slot so the last word and role badge still fit together.
+
+The notification panel keeps its title, Clear all action and Mute active workers switch together
+in one sticky header while notifications scroll below. Aside action feedback reserves space and uses
+session names in place of managed-id fragments. Long diagnostics live in a Details disclosure;
+the compact notice can be dismissed. Expanded diagnostics have a visibly bordered, keyboard-scrollable
+region capped to the viewport height. Card and rail metadata wrap as spaced facts without dot
+separators at line boundaries. Tab action feedback occupies its own row below the session
+header, including on mobile and in split panes.
+
+Folders with no `working`, `waiting` or `waiting-approval` session in their visible subtree move
+under **Ended** (**Encerradas**) at the end of their parent. The same section also holds that
+parent's ended sessions, with separate folder and session counts. Entire idle root groups move to
+one Ended section at the bottom of the list. These sections start collapsed and remember their
+expansion in `expandedEndedGroups`; folder structure, membership and drag order stay intact.
+When activity returns, the folder and its parents return to their normal positions. Search and
+filters narrow what a folder shows without reclassifying its activity. Archived trees show their
+ended sessions directly as compact rows, without repeating Ended under every folder.
+
+The crash-group reopen banner keeps its count in a single-line label (**Reabrir N que caíram** /
+**Reopen N that fell**). The title and accessible label keep the full sentence naming the sessions.
+In **Ended**, the notice and fallen rows share one bordered block, with a visible **fell** label
+on each row. The adjacent dismiss control keeps its own width: 30px on desktop and 44px on mobile.
+Dismissing hides the notice across devices until a new fallen session id appears; the rows remain
+available to read or reopen, and reopening one does not show the notice again.
+
+The check-in details modal uses one column on desktop and mobile: headline, needs, delivered,
+in progress, next steps, health, then earlier rounds. Text wraps throughout. Health is a list of
+status dots, labels and full explanations; below 480px explanations move under their labels.
+Earlier rounds expand downward in place to show their complete items.
 
 ---
 
@@ -366,3 +419,32 @@ The pending vault-use card follows the shared vault watcher: it polls use reques
 vault is open. A 401/403 clears the card and parks polling until a lock-state transition restarts it;
 the shared watcher continues checking vault state, so unlocking resumes requests. Unmounting or
 locking cancels the timer and ignores any older in-flight result.
+
+Active folder header totals count saved membership, including pinned members drawn in Pinned and
+ended sessions whose history page has not loaded yet. Under filters, `shown/total` counts matching
+resolved members over saved members (including nested folders). Folders inside Ended omit this
+counter: the section already states how many it holds, and the folder name gets that space.
+
+If the server is unreachable at first start, the retry screen explains that the first opening
+after an update reads the whole history and can take a few minutes. The existing loader stays
+visible while automatic retries continue.
+
+Billing keeps each window’s percentage and renewal time on one line. A renewed window’s longer
+explanation spans the full usage cell below its meter. On mobile, Settings sections snap one
+complete tab at a time and the selected section scrolls into view. The statistics pull-tab stays
+out of Settings so it cannot overlap the card.
+
+The aside's crash-reopen banner uses its own available width to choose between a full label and
+`Reopen N` (`Reabrir N`). The full sentence remains its title and accessible label. Closed-folder
+headers reserve space for the complete leading icon and omit totals. Summary filters wrap as
+indivisible units separated by spacing, so no punctuation is stranded at a line boundary.
+
+The session row menu on desktop and mobile offers **Remove from list** (**Remover da lista**)
+for terminal sessions, including external processes with a deleted working directory or a missing
+conversation. Confirmation hides that row persistently in this machine's web list; it preserves
+the transcript and leaves a running process running. **End session** (**Encerrar sessão**) is
+also available for external rows with an observed PID. It ends only that PID and its descendants,
+checks process identities before signalling, and escalates surviving processes through the existing
+kill confirmation logic. Neither operation needs the working directory or conversation to exist.
+
+The header leader meter reserves space for its reading so polling between numbers and no reading does not move adjacent actions. Attention uses a darker mix of existing theme tokens in light mode. Without a context reading, its details explain that estimates are pending and hide the comparison; handoff and reminder actions stay disabled until a reading arrives. The composer warning keeps the full current/cut count, while the meter shows the current count and its popover focuses on reply costs.

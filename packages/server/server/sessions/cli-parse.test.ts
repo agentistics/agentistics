@@ -159,8 +159,8 @@ describe('batch — the form an assistant drives', () => {
     })
   })
 
-  it('refuses a batch with no task, because the sessions must belong together', () => {
-    expect(parseSessionArgs(['batch', '--session', 'claude: a'])).toMatchObject({ kind: 'error' })
+  it('defers an omitted batch task to verified parent inheritance', () => {
+    expect(parseSessionArgs(['batch', '--session', 'claude: a'])).toMatchObject({ kind: 'batch', task: '' })
   })
 
   it('refuses a batch with no sessions', () => {
@@ -379,5 +379,22 @@ describe('--account (PLAN.ACCOUNTS D3)', () => {
   it('batch: a positional default for the --session entries that follow it', () => {
     const c = parseSessionArgs(['batch', '--task', 't', '--session', 'claude: a', '--account', 'acc_2', '--session', 'claude: b'])
     expect(c.kind === 'batch' && c.specs.map(s => s.account)).toEqual([undefined, 'acc_2'])
+  })
+})
+
+describe('ORQ.FORA approval mode flags', () => {
+  it('CLI start and handoff keep mode separate from the role', () => {
+    expect(parseSessionArgs(['claude', '--mode', 'no-questions', '--role', 'worker'])).toMatchObject({ kind: 'start', mode: 'no-questions', role: 'worker' })
+    expect(parseSessionArgs(['claude', '--handoff', '--mode', 'default'])).toMatchObject({ kind: 'start', handoff: true, mode: 'default' })
+    expect(parseSessionArgs(['claude', '--mode', 'auto'])).toMatchObject({ kind: 'error' })
+    expect(parseSessionArgs(['claude', '--mode'])).toMatchObject({ kind: 'error' })
+  })
+  it('batch applies positional mode defaults and permits parent-task inheritance', () => {
+    const command = parseSessionArgs(['batch', '--mode', 'accept-edits', '--session', 'claude: first', '--mode', 'default', '--session', 'codex: second'])
+    expect(command.kind).toBe('batch')
+    if (command.kind !== 'batch') return
+    expect(command.task).toBe('')
+    expect(command.specs.map(s => s.mode)).toEqual(['accept-edits', 'default'])
+    expect(parseSessionArgs(['batch', '--mode', 'auto', '--session', 'claude: x']).kind).toBe('error')
   })
 })

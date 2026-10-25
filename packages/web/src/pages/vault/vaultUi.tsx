@@ -127,22 +127,27 @@ export function TextButton({ onClick, children, pressed }: { onClick: () => void
  * The page's dialog shell (the prototype's modal): the app's card with a title row and × over a
  * hairline, the body, and the `DialogActions` footer over another hairline. Full screen on a phone.
  */
-export function Sheet({ closeLabel, isMobile, title, onClose, children, wide, footer }: {
+export function Sheet({ closeLabel, isMobile, title, onClose, children, wide, footer, maxWidth, closeSize }: {
   closeLabel: string; isMobile: boolean; title: string; onClose: () => void; children: React.ReactNode; wide?: boolean; footer?: React.ReactNode
+  /** Overrides the desktop width (default 500, 640 with `wide`). */
+  maxWidth?: number
+  closeSize?: number
 }) {
   useEscapeOwner(true, onClose)
   const o: React.CSSProperties = isMobile ? { ...overlay, padding: 0, zIndex: 3000 } : { ...overlay, zIndex: 3000 }
   const frame: React.CSSProperties = { ...card, padding: 0, display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }
   const c: React.CSSProperties = isMobile
     ? { ...frame, maxWidth: 'none', width: '100%', height: 'calc(100dvh / var(--ui-zoom, 1))', maxHeight: 'calc(100dvh / var(--ui-zoom, 1))', borderRadius: 0, border: 'none' }
-    : { ...frame, maxWidth: wide ? 640 : 500, maxHeight: 'calc(90vh / var(--ui-zoom, 1))', boxShadow: '0 20px 60px rgba(0,0,0,0.55)' }
+    : { ...frame, maxWidth: maxWidth ?? (wide ? 640 : 500), maxHeight: 'calc(90vh / var(--ui-zoom, 1))', boxShadow: '0 20px 60px rgba(0,0,0,0.55)' }
   return (
     <div style={o} role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
       <div style={c} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 18px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <span style={{ fontSize: 15, fontWeight: 650, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>{title}</span>
           <button type="button" className="ag-tap-icon" aria-label={closeLabel} onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', padding: 4, display: 'inline-flex' }}><X size={16} /></button>
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', padding: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              // 44x44 hit area on a phone; the icon stays 16px and the negative margin keeps the header's height.
+              ...(isMobile ? { boxSizing: 'border-box', width: 44, height: 44, margin: '-12px -12px -12px 0' } : closeSize ? { boxSizing: 'border-box', width: closeSize, height: closeSize } : {}) }}><X size={16} /></button>
         </div>
         <div style={{ padding: 18, overflowY: 'auto', minHeight: 0, flex: isMobile ? 1 : undefined }}>{children}</div>
         {footer && <div data-sheet-footer style={{ padding: '0 18px 12px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>{footer}</div>}

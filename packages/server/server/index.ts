@@ -88,7 +88,7 @@ import { validateSecret, ensureSessionSecret } from './secret-store'
 import { requiresStepUp, verifyStepUp, STEPUP_HEADER } from './stepup'
 import { writeAudit, ensureAuditIndexes, listAudit } from './audit'
 import { safeError } from './errors'
-import { cleanPlanResponse, applyCleanSelection, cleanJob } from './clean/clean-web'
+import { cleanPlanResponse, applyCleanSelection, cleanJob, cleanScanState, backgroundCleanScan, cancelCleanScan, finalizeCleanScan } from './clean/clean-web'
 import { LIMITS, readJsonLimited } from './limits'
 // Type only, and from the LEAF: `sessions/fleet-web.ts` reaches `cli-start.ts` and through it Ink
 // and React, so this server names only `fleet-row.ts` — the two handlers load the implementation by
@@ -1059,6 +1059,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         return json(result)
       } catch (err) { return json({ error: String(err) }, 500) }
     }
+    if (url.pathname === '/api/clean/scan' && req.method === 'GET') return json(cleanScanState())
+    if (url.pathname === '/api/clean/background' && req.method === 'POST') return json(backgroundCleanScan())
+    if (url.pathname === '/api/clean/cancel' && req.method === 'POST') return json(cancelCleanScan())
+    if (url.pathname === '/api/clean/finalize' && req.method === 'POST') { finalizeCleanScan(); return json({ ok: true }) }
     if (url.pathname === '/api/clean/apply' && req.method === 'POST') {
       try {
         const body = await req.json() as { ids?: unknown }
@@ -1204,6 +1208,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/preferences' && req.method === 'PUT') {
       try {
         let body = await req.json() as Preferences
+        if (body.handoffConfig !== undefined) {
+          const { normalizeHandoffConfig } = await import('@agentistics/core')
+          body.handoffConfig = normalizeHandoffConfig(body.handoffConfig)
+        }
         // C1: never let a PUT wipe `connections[]`. An old cached tab still PUTs a full flat solo
         // `team` object to disconnect (the current UI uses DELETE /api/team/connections/:id), and
         // that payload carries `connections: []` — which mergeTeamPayload honours as an explicit
@@ -2161,6 +2169,16 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }, await defaultRoleDeps())
       return json(out, roleStatus(out))
     }
+    // TEAMS — the person takes a session out of its leader's team, or moves it into another leader's
+    // (`sessions/team-links.ts`). A leader is never moved into a team; a session proof is refused.
+    if (url.pathname === '/api/session-team' && req.method === 'POST') {
+      const body = await req.json().catch(() => ({})) as { id?: unknown; leader?: unknown; lang?: unknown; session?: unknown }
+      const { teamOp, defaultIsLeader } = await import('./sessions/team-links-io')
+      const isLeader = await defaultIsLeader()
+      const out = await teamOp(body, { isLeader })
+      if (out.reply.ok) void import('./sessions/fleet-web').then(m => m.kickFleet(out.reply.ok ? out.reply.id : undefined)).catch(() => {})
+      return json(out.reply, out.status)
+    }
     // AWAY MODE — the owner is out; sessions started meanwhile are told so (`away.ts`). The browser and
     // the CLI write it as the person; a session (MCP) must prove itself and be a leader.
     if (url.pathname === '/api/away' && req.method === 'GET') {
@@ -2775,6 +2793,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       })
     }
 
+    const handoffPanel = url.pathname.match(/^\/api\/sessions\/([^/]+)\/handoff-panel$/)
+    if (handoffPanel && req.method === 'GET') {
+      const { readHandoffPanel, fleetLang } = await import('./sessions/fleet-web')
+      const extra = url.searchParams.get('extraPercent')
+      const out = await readHandoffPanel(fleetLang(url.searchParams.get('lang')), decodeURIComponent(handoffPanel[1]!), extra !== null && extra.trim() !== '' ? Number(extra) : undefined)
+      return new Response(JSON.stringify(out ?? { error: 'not_found' }), {
+        status: out ? 200 : 404,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      })
+    }
+
     // Explain the handoff recommendation for one leader. This is intentionally a read-only,
     // session-specific route; the eventual modal can use it without rebuilding the whole fleet.
     const handoffWhy = url.pathname.match(/^\/api\/sessions\/([^/]+)\/handoff-why$/)
@@ -2971,6 +3000,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // A NAY conversation: a managed `claude` session in Nay's own directory, filed under the "Nay"
     // group (`sessions/nay-web.ts`). It rides `/api/fleet`'s `localShell` guard like every start, and
     // it is also the chat — so the user's chat switch (`chat-gate.ts`) must be on too.
+    // CONTA.TROCA — move a session to another account of its harness (`sessions/account-switch-web.ts`).
+    if (url.pathname === '/api/fleet/switch-account') {
+      const { handleAccountSwitchRoute } = await import('./sessions/account-switch-web')
+      const res = await handleAccountSwitchRoute(req, url, CORS_HEADERS)
+      if (res) return res
+    }
     if (url.pathname === '/api/fleet/nay' && req.method === 'POST') {
       if (!chatAllowed(CAPS.localChat, (await readPreferences()).chatEnabled)) {
         return new Response(JSON.stringify({ ok: false, message: 'chat_disabled' }), {

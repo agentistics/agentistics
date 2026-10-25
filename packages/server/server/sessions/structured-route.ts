@@ -1,22 +1,45 @@
 /**
  * structured-route.ts — PURE: where a spawn runs (ENGINE.MAP F2.0, owner decision 11 Q1 + 09/10).
  *
- * - `structured`: a WEB-born session, flag `adapter-chat` ON, and a READY driver for its harness —
- *   the official protocol is the session's primary source.
+ * - `structured`: a session NOBODY HOLDS IN A TERMINAL — web-born, or started in the background
+ *   (`agentop session --bg`, a leader's worker, a hand-off, a background reopen) — with flag
+ *   `adapter-chat` ON and a READY driver for its harness: the official protocol is its primary source.
  * - `acp-legacy`: A5.4 exactly as before — the person opted the harness into ACP
  *   (`preferences.acpHarnesses`) and the engine drives it over `Engine.acp`. Untouched by the flag, so
  *   flag OFF is byte-for-byte today's behaviour.
- * - `tmux`: everything else. A terminal-born session is ALWAYS a TUI (unless A5.4's opt-in says
- *   otherwise, as it did before), and "open in terminal" on a structured one is a TUI resume of the same
- *   conversation id.
+ * - `tmux`: everything else. A session a person starts ATTACHED in a terminal is ALWAYS a TUI (unless
+ *   A5.4's opt-in says otherwise, as it did before), and "open in terminal" on a structured one is a TUI
+ *   resume of the same conversation id.
+ *
+ * Owner decision 2026-10-23 (superseding 11 Q1's "terminal-born is always a TUI" for the background
+ * case): with the adapter live, a leader-spawned session, a reopen and a session on another account
+ * must not fall back to the old tmux mode. They used to, because only `origin: 'web'` was routable and
+ * `agentop session --bg`, the hand-off and the reopen never carried it.
  *
  * A refusal from either structured route falls back to tmux with the same request (the composite's job).
  */
 import type { CanonicalMode, HarnessId, StructuredAnswer, StructuredAttention, StructuredDriverId } from '@agentistics/engine-api'
 import type { StructuredIntent } from './types'
 
-/** Where a spawn came from. Absent = not the web (the cockpit, `agentop session`, a reopen from a TUI). */
-export type SpawnOrigin = 'web' | 'terminal'
+/**
+ * Where a spawn came from. `background`: no person holds it in a terminal (`--bg`, a hand-off, a
+ * background reopen). Absent or `terminal`: a person attached to it (the cockpit, `agentop session`).
+ */
+export type SpawnOrigin = 'web' | 'terminal' | 'background'
+
+/** PURE. Whether an origin may run structured: nobody is sitting in front of its terminal. */
+export function structuredOrigin(origin: SpawnOrigin | undefined): boolean {
+  return origin === 'web' || origin === 'background'
+}
+
+/**
+ * PURE. The origin a spawn routes as. An explicit one is kept; a spawn with none that nobody ATTACHES to
+ * (`attach: false` — `--bg`, a leader's worker, a hand-off) is `background`; an attached one stays a TUI.
+ */
+export function spawnOriginOf(origin: SpawnOrigin | undefined, attach: boolean): SpawnOrigin | undefined {
+  if (origin) return origin
+  return attach ? undefined : 'background'
+}
 
 export type SpawnRoute = 'structured' | 'acp-legacy' | 'tmux'
 
@@ -64,18 +87,20 @@ export function modeRoutable(mode: CanonicalMode | undefined, startModes: readon
 
 export function routeSpawn(i: RouteInput): SpawnRoute {
   if (!i.harness) return 'tmux'
-  if (i.flagOn && i.origin === 'web' && i.driver && modeRoutable(i.mode, i.startModes)) return 'structured'
+  if (i.flagOn && structuredOrigin(i.origin) && i.driver && modeRoutable(i.mode, i.startModes)) return 'structured'
   if (i.acpDriven && i.acpOptIn.includes(i.harness)) return 'acp-legacy'
   return 'tmux'
 }
 
 /**
- * PURE. Whether a REOPEN is a web-born spawn: only when the browser asked AND the row it replaces ran
- * structured. A terminal-born row reopened from the web stays a TUI (owner, 11 Q1): the web never
- * turns a TUI session into a structured one behind the person's back.
+ * PURE. The origin a REOPEN routes as. A reopen starts a NEW process for a conversation whose old one is
+ * gone, so there is no TUI to turn into anything: the browser's reopen is `web`, and one nobody attaches
+ * to is `background` (`spawnOriginOf`). Only a reopen a person ATTACHES to in a terminal is a TUI.
+ * (Before 2026-10-23 a web reopen ran structured only when the row it replaced had — owner 11 Q1 — so a
+ * conversation once started in tmux was reopened in tmux forever.)
  */
-export function structuredReopenOrigin(origin: SpawnOrigin | undefined, previousDriver: string | undefined): boolean {
-  return origin === 'web' && !!previousDriver
+export function reopenOrigin(origin: SpawnOrigin | undefined, attach: boolean): SpawnOrigin | undefined {
+  return spawnOriginOf(origin === 'terminal' ? undefined : origin, attach)
 }
 
 /**
@@ -118,9 +143,21 @@ export function answerStructured(
   open: StructuredAttention | null,
   choice: number | undefined,
   text: string | undefined,
+  /** Every option ticked on a `multiSelect` request (engine-api 1.13); absent for a single pick. */
+  choices?: readonly number[],
 ): { ok: true; answer: StructuredAnswer; said: string } | { ok: false; why: 'not-asking' | 'needs-choice' | 'needs-text' | 'gone' } {
   if (!open) return { ok: false, why: 'not-asking' }
   const words = text ?? ''
+  if (choices !== undefined) {
+    if (!open.multiSelect || choice !== undefined) return { ok: false, why: 'gone' }
+    const picked = [...new Set(choices)].sort((a, b) => a - b)
+    if (picked.length === 0) return { ok: false, why: 'needs-choice' }
+    if (picked.some(c => !Number.isInteger(c) || !open.options[c - 1])) return { ok: false, why: 'gone' }
+    const field = picked.some(c => open.options[c - 1]!.freeText)
+    if (field && !words.trim()) return { ok: false, why: 'needs-text' }
+    const said = picked.map(c => (open.options[c - 1]!.freeText ? words.trim() : open.options[c - 1]!.label)).join(', ')
+    return { ok: true, answer: { requestId: open.requestId, choices: picked, ...(field ? { text: words } : {}) }, said }
+  }
   if (choice === undefined) {
     if (open.freeText && words.trim()) return { ok: true, answer: { requestId: open.requestId, text: words }, said: words }
     return { ok: false, why: open.options.length > 0 ? 'needs-choice' : 'needs-text' }

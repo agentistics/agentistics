@@ -1,58 +1,106 @@
-import { readdirSync, readlinkSync } from 'node:fs'
-import { resolve, sep } from 'node:path'
+import { readdirSync, readlinkSync, statfsSync } from 'node:fs'
+import { basename, join, resolve, sep } from 'node:path'
 import { platform } from 'node:os'
 import { cleanRepos, collectCleanFacts } from '../cli-clean'
 import { applyClean } from './clean-io'
-import { fmtBytes, planClean, reclaimable, type CleanItem, type WorktreeFacts } from './clean-plan'
+import { fmtBytes, planClean, type CleanItem, type WorktreeFacts } from './clean-plan'
 import { broadcastNotification } from '../sse'
+import type { CleanWebPlan, CleanJob, CleanScanState } from '@agentistics/core'
+import { newCleanScan, scanEstimate, scanLog, wireCleanPlan } from './clean-state'
 
-export interface CleanWebItem {
-  id: string
-  repo: string
-  path: string
-  kind: CleanItem['action']['kind']
-  bytes: number
-  reason: string
-}
-export interface CleanWebPlan { items: CleanWebItem[]; reclaimable: { bytes: number; count: number } }
-export interface CleanJob { id: string; state: 'verifying' | 'removing worktrees' | 'removing node_modules' | 'pruning' | 'done'; progress: number; result?: { freedBytes: number; worktrees: number; nodeModules: number; skipped: Array<{ path: string; reason: string }>; errors: string[] } }
+export type { CleanWebItem, CleanWebPlan, CleanJob } from '@agentistics/core'
 
-let scan: { promise: Promise<CleanWebPlan>; at: number } | null = null
+let scan: { promise: Promise<CleanWebPlan>; controller: AbortController; state: CleanScanState } | null = null
 let cached: { plan: CleanWebPlan; at: number } | null = null
 let job: CleanJob | null = null
-let scanProgress = 0
 const CACHE_MS = 5 * 60_000
 
 function itemId(f: WorktreeFacts, kind: CleanItem['action']['kind']): string { return `${f.repo}:${f.path}:${kind}` }
-function reason(item: CleanItem): string {
-  if (item.action.kind === 'remove') return 'merged and clean'
-  if (item.action.kind === 'prune') return 'directory is gone'
-  if (item.action.kind === 'node-modules') return 'no commit in 30+ days'
-  return item.action.reason
+
+/** Server-owned task: leaving the dialog does not interrupt it. */
+export function getCleanPlan(): { state: 'scanning' | 'ready'; progress: number; plan: Promise<CleanWebPlan> } {
+  if (scan?.state.state === 'scanning') return { state: 'scanning', progress: scan.state.progress, plan: scan.promise }
+  if (cached && (scan?.state.background || Date.now() - cached.at < CACHE_MS)) return { state: 'ready', progress: 1, plan: Promise.resolve(cached.plan) }
+  cached = null
+  const controller = new AbortController()
+  const state = newCleanScan(crypto.randomUUID(), Date.now())
+  const signal = controller.signal
+  const promise = (async () => {
+    const repos = await cleanRepos([], { signal, lowPriority: true })
+    signal.throwIfAborted()
+    state.projectTotal = repos.length
+    for (const repo of repos) scanLog(state, { at: Date.now(), state: 'queued', name: basename(repo) })
+    state.step = 2; state.label = 'measuring'
+    const protectedBySession = await protectedPaths()
+    signal.throwIfAborted()
+    let completed = 0, total = 0, discoveredRepos = 0
+    const facts = await collectCleanFacts(repos, { lowPriority: true, signal,
+      onDiscover: count => { total += count; discoveredRepos++ },
+      onItemStart: path => scanLog(state, { at: Date.now(), state: 'running', name: basename(path) }),
+      onItem: fact => {
+        completed++
+        const row = wireCleanPlan(planClean([fact], Date.now()), state, Date.now(), protectionFor([fact], protectedBySession)).items[0]!
+        if (row.kind !== 'keep') { state.foundBytes += row.bytes; state.itemCount++ }
+        state.measuredBytes = (state.measuredBytes ?? 0) + fact.sizeBytes
+        // The line reports what was MEASURED. It used to print 0 for every kept folder, so a scan of
+        // folders holding gigabytes read as a column of "0 B".
+        scanLog(state, { at: Date.now(), state: 'done', name: basename(fact.path), bytes: fact.sizeBytes,
+          ...(row.kind === 'keep' ? { kept: true } : { freeBytes: row.bytes }), ...(fact.sizeUnknown ? { unknown: true } : {}) })
+        scanEstimate(state, completed, Math.max(total, Math.ceil(total / Math.max(1, discoveredRepos) * repos.length)), Date.now())
+      },
+      onProgress: done => { state.projectCount = done },
+    })
+    signal.throwIfAborted()
+    state.step = 3; state.label = 'preparing'; state.progress = 0.98
+    const plan = wireCleanPlan(planClean(facts, Date.now()), state, Date.now(), protectionFor(facts, protectedBySession))
+    state.state = 'ready'; state.progress = 1; state.etaMs = 0; state.elapsedMs = plan.elapsedMs
+    state.foundBytes = plan.reclaimable.bytes; state.itemCount = plan.reclaimable.count
+    cached = { plan, at: Date.now() }
+    return plan
+  })().catch(error => {
+    const cancelled = signal.aborted
+    controller.abort()
+    state.state = cancelled ? 'cancelled' : 'error'
+    state.elapsedMs = Date.now() - state.startedAt
+    if (!cancelled) state.error = String(error)
+    throw error
+  })
+  // Polling uses the snapshot; consume rejections even when nobody awaits the promise.
+  void promise.catch(() => {})
+  scan = { promise, controller, state }
+  return { state: 'scanning', progress: state.progress, plan: promise }
 }
-function wire(items: readonly CleanItem[]): CleanWebPlan {
-  const selected = items.filter(i => i.action.kind !== 'keep')
-  return { items: selected.map(i => {
-    if (i.action.kind === 'keep') throw new Error('keep item selected')
-    return { id: itemId(i.facts, i.action.kind), repo: i.facts.repo, path: i.facts.path, kind: i.action.kind, bytes: i.action.frees, reason: reason(i) }
-  }), reclaimable: reclaimable(items) }
+function protectionFor(facts: readonly WorktreeFacts[], protectedBySession: Map<string, string>): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const f of facts) {
+    const match = [...protectedBySession].find(([p]) => inside(f.path, p) || inside(p, f.path))
+    if (match) out.set(f.path, match[1])
+  }
+  return out
 }
-async function scanNow(): Promise<CleanWebPlan> {
-  const repos = await cleanRepos([])
-  scanProgress = repos.length ? 0 : 1
-  const facts = await collectCleanFacts(repos, { lowPriority: true, onProgress: (done, total) => { scanProgress = total ? done / total : 1 } })
-  return wire(planClean(facts, Date.now()))
+export function cleanScanState(): CleanScanState | null {
+  if (!scan) return null
+  const state = scan.state
+  return { ...state, elapsedMs: state.state === 'scanning' ? Date.now() - state.startedAt : state.elapsedMs, log: [...state.log] }
 }
-export function getCleanPlan(): { state: 'scanning' | 'ready'; progress: number; plan?: Promise<CleanWebPlan> } {
-  if (scan && Date.now() - scan.at < CACHE_MS) return { state: 'scanning', progress: scanProgress, plan: scan.promise }
-  const promise = scanNow().then(plan => { cached = { plan, at: Date.now() }; return plan }).finally(() => { if (scan?.promise === promise) scan = null })
-  scan = { promise, at: Date.now() }
-  return { state: 'scanning', progress: scanProgress, plan: promise }
+export function backgroundCleanScan(): CleanScanState | null {
+  if (scan && (scan.state.state === 'scanning' || scan.state.state === 'ready')) scan.state.background = true
+  return cleanScanState()
 }
-export async function cleanPlanResponse(): Promise<CleanWebPlan | { state: 'scanning'; progress: number }> {
-  if (cached && Date.now() - cached.at < CACHE_MS) return cached.plan
-  if (!scan || Date.now() - scan.at >= CACHE_MS) getCleanPlan()
-  return { state: 'scanning', progress: scanProgress }
+export function cancelCleanScan(): CleanScanState | null {
+  if (scan?.state.state === 'scanning') {
+    scan.state.state = 'cancelled'; scan.state.background = false; scan.controller.abort()
+  }
+  return cleanScanState()
+}
+export function finalizeCleanScan(): void {
+  if (scan?.state.state === 'scanning') return
+  scan = null; cached = null
+}
+export async function cleanPlanResponse(): Promise<CleanWebPlan | CleanScanState> {
+  if (cached && (scan?.state.background || Date.now() - cached.at < CACHE_MS)) return cached.plan
+  if (!scan || scan.state.state === 'cancelled' || scan.state.state === 'ready') getCleanPlan()
+  return cleanScanState()!
 }
 
 function inside(path: string, root: string): boolean { const p = resolve(path), r = resolve(root); return p === r || p.startsWith(r + sep) }
@@ -103,6 +151,8 @@ export async function applyCleanSelection(ids: readonly string[]): Promise<Clean
   const created: CleanJob = { id: crypto.randomUUID(), state: 'verifying', progress: 0 }
   job = created
   void (async () => {
+    const startedAt = Date.now()
+    const diskFreeBefore = diskFree()
     const protectedBySession = await protectedPaths()
     const requested = new Set(ids)
     const repos = await cleanRepos([])
@@ -124,13 +174,25 @@ export async function applyCleanSelection(ids: readonly string[]): Promise<Clean
       safe.push(item)
     }
     const errors: string[] = []
+    const removed: NonNullable<CleanJob['result']>['removed'] = []
+    const apply = async (items: CleanItem[]) => {
+      const problems = await applyClean(items)
+      errors.push(...problems)
+      for (const item of items) {
+        if (item.action.kind !== 'keep' && !problems.some(problem => problem.startsWith((item.action.kind === 'node-modules' ? join(item.facts.path, 'node_modules') : item.facts.path) + ':'))) {
+          removed.push({ path: item.facts.path, kind: item.action.kind, bytes: item.action.frees })
+        }
+      }
+    }
     created.state = 'removing worktrees'; created.progress = 25
-    errors.push(...(await applyClean(safe.filter(i => i.action.kind === 'remove'))))
+    await apply(safe.filter(i => i.action.kind === 'remove'))
     created.state = 'removing node_modules'; created.progress = 60
-    errors.push(...(await applyClean(safe.filter(i => i.action.kind === 'node-modules'))))
+    await apply(safe.filter(i => i.action.kind === 'node-modules'))
     created.state = 'pruning'; created.progress = 85
-    errors.push(...(await applyClean(safe.filter(i => i.action.kind === 'prune'))))
-    created.result = { freedBytes: safe.reduce((n, i) => n + (i.action.kind === 'keep' ? 0 : i.action.frees), 0), worktrees: safe.filter(i => i.action.kind === 'remove' || i.action.kind === 'prune').length, nodeModules: safe.filter(i => i.action.kind === 'node-modules').length, skipped, errors }
+    await apply(safe.filter(i => i.action.kind === 'prune'))
+    created.result = { freedBytes: removed.reduce((n, i) => n + i.bytes, 0), worktrees: removed.filter(i => i.kind === 'remove' || i.kind === 'prune').length, removedWorktrees: removed.filter(i => i.kind === 'remove').length,
+      nodeModules: removed.filter(i => i.kind === 'node-modules').length, pruned: removed.filter(i => i.kind === 'prune').length,
+      skipped, errors, removed, elapsedMs: Date.now() - startedAt, diskFreeBefore, diskFreeAfter: diskFree() }
     created.state = 'done'; created.progress = 100
     cached = null
     scan = null
@@ -146,7 +208,11 @@ export async function applyCleanSelection(ids: readonly string[]): Promise<Clean
         errors: created.result.errors.length,
       },
     })
-  })().catch(error => { created.state = 'done'; created.progress = 100; created.result = { freedBytes: 0, worktrees: 0, nodeModules: 0, skipped: [], errors: [String(error)] } })
+  })().catch(error => { created.state = 'done'; created.progress = 100; created.result = { freedBytes: 0, worktrees: 0, removedWorktrees: 0, nodeModules: 0, skipped: [], errors: [String(error)], pruned: 0, removed: [], elapsedMs: 0, diskFreeBefore: null, diskFreeAfter: null } })
   return created
 }
 export function cleanJob(): CleanJob | null { return job }
+
+function diskFree(): number | null {
+  try { const fs = statfsSync(process.cwd()); return fs.bavail * fs.bsize } catch { return null }
+}

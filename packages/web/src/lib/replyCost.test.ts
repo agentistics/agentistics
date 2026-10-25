@@ -9,11 +9,12 @@ describe('replyCost', () => {
     const r = replyCost('claude', meta({ context_tokens: 400_000, input_tokens: 1000, cache_read_input_tokens: 8_000_000, cache_creation_input_tokens: 1_000_000, assistant_message_count: 30 }))
     expect(r.lastTurn).toBe(400_000)
     expect(r.average).toBe(Math.round(9_001_000 / 30))
+    expect(replyCost('gemini', meta({ context_tokens: 5, input_tokens: 9, assistant_message_count: 1 })).lastTurn).toBe(5)
   })
   test('unknown is null, never 0', () => {
     expect(replyCost('claude', undefined)).toEqual({ lastTurn: null, average: null })
     expect(replyCost('claude', meta({}))).toEqual({ lastTurn: null, average: null })
-    expect(replyCost('gemini', meta({ context_tokens: 5, input_tokens: 9, assistant_message_count: 1 })).lastTurn).toBeNull()
+    expect(replyCost('copilot', meta({ context_tokens: 5, input_tokens: 9, assistant_message_count: 1 })).lastTurn).toBeNull()
   })
   test('threshold warns only above it, 0 disables', () => {
     expect(replyCostExceeds(300_001, 300_000)).toBe(true)

@@ -46,7 +46,7 @@ describe('every reopen path inherits identity', () => {
     expect(src).toContain('...inheritedIdentity(req.inherit)')
     expect(src).toContain('inherit: m,')
     expect(src).toContain('spawnManaged(reopenRowRequest(m, row, caller), s, lang)')
-    expect(src).toContain('...(previous ? { inherit: previous } : recordedAccountId ? { accountId: recordedAccountId } : {})')
+    expect(src).toContain('...(recorded ? { inherit: req.switchToAccount ? { ...recorded, accountId: req.switchToAccount } : recorded } : {})')
   })
   it('openTask and takeover use it too', async () => {
     const src = await read('./cli-session.ts')
@@ -79,10 +79,21 @@ describe('spawnManaged writes the registry row before the session exists', () =>
   it('addSession precedes backend.spawn, and a failed launch removes the row', async () => {
     const src = await Bun.file(new URL('../cli-start.ts', import.meta.url)).text()
     const fn = src.slice(src.indexOf('async function spawnManaged('))
-    const add = fn.indexOf('await addSession(await spawnRow(')
+    const add = fn.indexOf('await addSession(rootIfLeader(await spawnRow(')
     const spawn = fn.indexOf('await backend.spawn(')
     expect(add).toBeGreaterThan(0)
     expect(add).toBeLessThan(spawn)
     expect(fn.match(/await abandon\(\)/g)?.length).toBe(2)
+  })
+})
+
+describe('ORQ.FORA reopen approval mode', () => {
+  it('retains the recorded policy in both identity and launch argv', () => {
+    const row = { ...prev, mode: 'no-questions' as const }
+    expect(inheritedIdentity(row).mode).toBe('no-questions')
+    const launch = inheritedLaunch(row, 'claude')
+    expect(launch.mode).toBe('no-questions')
+    const result = planSpawn({ harness: 'claude', cwd: row.cwd, resumeId: 'c1', ...launch })
+    expect(result.ok && result.plan.argv).toContain('--dangerously-skip-permissions')
   })
 })

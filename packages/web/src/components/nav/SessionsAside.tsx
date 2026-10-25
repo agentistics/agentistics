@@ -1,5 +1,9 @@
+import { IconButton } from '../sessions/RepoSearchView'
+import { ActionNotice } from '../sessions/ActionNotice'
+import { hasLeaderTitle, sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
 import { useEscapeOwner } from '../../lib/overlayStack'
-import { loadClosedFleet } from '../../lib/fleet'
+import { loadClosedFleet, needsClosedFleet, nudgeFleet } from '../../lib/fleet'
+import { TEAM_MOVE, TEAM_UNLINK, commonProjectOf, leaderPickerEntries, looseFacts, moveSessionTeam, teamMenuExtras } from '../../lib/teamMenu'
 /**
  * SessionsAside — the fleet, in the sidebar's body.
  *
@@ -24,7 +28,7 @@ import { getActivePane } from '../../lib/paneScope'
 import { openBeside, openInPane, readSplitRoute, splitHref } from '../../lib/splitRoute'
 
 import {
-  BellOff, ChevronDown, ChevronRight, Clock, Crown, Filter, Folder, FolderPlus, GripVertical, MoreVertical, Pin,
+  BellOff, ChevronDown, ChevronRight, Clock, Crown, Filter, Folder, FolderOpen, FolderPlus, GripVertical, MoreVertical, Moon, Pin,
   PinOff, Plus, RotateCcw, Search, Send, SquareArrowOutUpRight, X,
 } from 'lucide-react'
 import type { Filters } from '@agentistics/core'
@@ -42,7 +46,8 @@ import { SessionsGroupMenu } from './SessionsGroupMenu'
 import type { SessionOrder } from '@agentistics/tui/control/session-order'
 import { displayName, toggleHidden } from '../../lib/groupNameMask'
 import { folderFold } from '../../lib/folderFold'
-import { splitFolderRows, endedAutoOpen } from '../../lib/folderRows'
+import { splitSleepingTabs } from '../../lib/sessionTabs'
+import { activeFolderIds, isFolderSessionActive, splitFolderRows, endedAutoOpen } from '../../lib/folderRows'
 import { ATTN_BAR_CLASS, ATTN_COUNT_CLASS, attentionCount, attentionIds, pruneDismissed } from './AttentionDot'
 import { rowSelected } from '../../lib/fleetSelection'
 import { filterFleet, ignoredDimensions } from '../../lib/fleetFilter'
@@ -52,7 +57,7 @@ import { SessionPickModal } from '../sessions/SessionPickModal'
 import { IdleReviewCard } from '../sessions/IdleReviewCard'
 import { PendingSessionCard } from '../sessions/PendingSessionCard'
 import { markSessionPending, reconcilePendingSessionsNow } from '../../lib/pendingSessionStore'
-import { reopeningLabel, useReopening, withReopening } from '../../lib/reopeningStore'
+import { reopenSession, reopeningLabel, useReopening, withReopening } from '../../lib/reopeningStore'
 import { buildPickRows } from '../../lib/sessionPick'
 import { NOTIFY_TOGGLE, mutedTooltip, notifyMenuExtras, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
@@ -96,9 +101,20 @@ import { NAY_UNDOCK_SESSION, requestUndockSession, withUndockEntry } from '../..
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { getSessionRole, registerSessionRoleAlias, setSessionRole, useMuteWorkers, useSessionRole, useSessionRoles, type SessionRole } from '../../lib/sessionRoles'
 import { applyLeadersOnly, countLeaders, leadersText } from '../../lib/leadersFilter'
+import { COUNT_BADGE } from './countBadge'
+import { SegmentedTabs } from './SegmentedTabs'
+import { GoToSessionContext, SessionLine, type SessionLineProps } from './SessionLine'
+import {
+  autoUnfold, buildTeams, endedAge, endedSections, fellAge, liveAge, teamSummary, waitingIds, type AsideTab, type Team,
+} from '../../lib/asideTabs'
+import { toggleFoldedTeam, useAsideTab, useFoldedTeams } from '../../lib/sessionsAsidePrefs'
 
 /** The row menu's client-side "open beside" entry — see `openSessionBeside`. */
 const OPEN_BESIDE = '__open_beside__'
+const SLEEPING_PINS = 'pinned:sleeping'
+/** The row menu's client-side pin toggle. */
+const PIN_TOGGLE = '__pin_toggle__'
+const ROOT_ENDED_FOLDERS = 'folders:root-ended'
 
 export interface SessionsAsideProps {
   lang: 'pt' | 'en'
@@ -208,11 +224,6 @@ export interface SessionsAsideProps {
   onGoToSession?: (id: string) => void
 }
 
-/**
- * How a row reaches `onGoToSession` without threading it through every band, group and pinned
- * list between the aside and `SessionRow`. `null` = no button.
- */
-const GoToSessionContext = createContext<((id: string) => void) | null>(null)
 
 /**
  * What a pin — and a user group (`sessionUserGroups.ts`) — are stored under.
@@ -268,7 +279,6 @@ export function SessionsAside({
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
   onCreated, selectedId, onGoToSession,
 }: SessionsAsideProps) {
-  useEffect(() => { if (!activeOnly) loadClosedFleet() }, [activeOnly, rows])
   const pt = lang === 'pt'
   const mutedKeys = useMutedKeys()
   const mutedRows = useMemo(() => mutedSessionRows(rows, mutedKeys), [rows, mutedKeys])
@@ -295,7 +305,7 @@ export function SessionsAside({
   }
   const [query, setQuery] = useState('')
   const [mutedPopover, setMutedPopover] = useState<{ x: number; y: number } | null>(null)
-  const mutedButtonRef = useRef<HTMLButtonElement>(null)
+  const mutedButtonRef = useRef<HTMLButtonElement | null>(null)
   useEffect(() => {
     if (!mutedPopover) return
     const close = (e: MouseEvent) => {
@@ -381,7 +391,7 @@ export function SessionsAside({
    * writes synchronously, in the same tick the first click's handler runs.
    */
   const groupActingRef = useRef(false)
-  /** The exact set of fallen ids the "reopen what fell" banner was last dismissed for — see
+  /** The set of fallen ids the "reopen what fell" banner was last dismissed for — see
    *  `fellDismissal.ts`. Read once on mount; a dismiss updates it (and persists it) directly. */
   const [dismissedFell, setDismissedFell] = useState<string[] | null>(readDismissedFell)
   useEffect(() => subscribeDismissedFell(() => setDismissedFell(readDismissedFell())), [])
@@ -410,11 +420,17 @@ export function SessionsAside({
 
   const canAct = Boolean(act) && !hideNew
   const fellIds = useMemo(() => groupRows.fellRows.map(r => r.id), [groupRows.fellRows])
-  // Dismissing hides the banner for the EXACT group it named — the moment the machine reports a
-  // different set of fallen ids (one more session fell, or one of these was reopened on its own and
-  // the rest are still down), that is a new fact and the banner is shown again. See `fellDismissal.ts`.
+  // Dismissing hides the banner until a NEW fallen id appears. Reopening one of the
+  // dismissed sessions does not re-announce the remaining falls. See `fellDismissal.ts`.
   const fellDismissed = fellGroupDismissed(dismissedFell, fellIds)
   const showFell = canAct && groupRows.fellRows.length > 0 && !fellDismissed
+  const fellCount = groupRows.fellRows.length
+  const reopenFellLabel = pt
+    ? (fellCount === 1 ? 'Reabrir 1 que caiu' : `Reabrir ${fellCount} que caíram`)
+    : `Reopen ${fellCount} that fell`
+  const reopenFellSentence = pt
+    ? (fellCount === 1 ? 'Reabrir 1 sessão que caiu' : `Reabrir ${fellCount} sessões que caíram`)
+    : (fellCount === 1 ? 'Reopen 1 session that fell' : `Reopen ${fellCount} sessions that fell`)
   const dismissFell = () => { setDismissedFell(fellIds); writeDismissedFell(fellIds) }
   // One session is not a broadcast — the row's own composer is right there and says so better.
   const showSend = canAct && groupRows.sendable > 1
@@ -427,6 +443,8 @@ export function SessionsAside({
    * swapped) live there and are not re-decided here.
    */
   const pins = useSyncExternalStore(subscribePinnedSessions, getPinnedIds, pinnedServerSnapshot)
+  // Sleeping pins live in the deferred closed fleet, even when the list only shows active rows.
+  useEffect(() => { if (needsClosedFleet(activeOnly, pins.length)) loadClosedFleet() }, [activeOnly, rows, pins])
   const pinned = useMemo(() => new Set(pins), [pins])
   const flip = (row: ControlSession) => {
     const out = togglePinnedSession(pinKeyOf(row))
@@ -440,6 +458,18 @@ export function SessionsAside({
   }
   /** No longer only about pins — the row menu's action results land here too. */
   const [notice, setNotice] = useState<string | null>(null)
+  // Action replies may name a managed-id prefix; show the same session name as its row.
+  const noticeText = useMemo(() => {
+    let text = notice ?? ''
+    for (const row of rows) {
+      for (const id of [row.id, row.conversationId].filter((id): id is string => Boolean(id))) {
+        for (const length of [...new Set([id.length, 10, 8])].filter(n => n <= id.length)) {
+          text = text.replaceAll(id.slice(0, length), sessionDisplayTitle(row.title))
+        }
+      }
+    }
+    return text
+  }, [notice, rows])
 
   /**
    * USER GROUPS ("Saved to later", …) — same server-side store as pins, for the same reason.
@@ -460,14 +490,15 @@ export function SessionsAside({
    * A session that is BOTH pinned and grouped shows ONCE, in the Pinned band — pinning is the
    * stronger "always in sight, always first" promise, and showing it twice would leave two bands
    * each claiming to be where it lives. It stays stored in the group; unpinning it brings it back
-   * here on its own, with no action needed on the group.
+   * here on its own, with no action needed on the group. Resolution retains those memberships
+   * for activity/counts; renderGroupBand omits their cards.
    */
   const groupRowsResolved = useMemo(
     () => groupsValue.groups.map(g => ({
       group: g,
-      rows: resolveGroupRows(g, rows, pinKeyOf).filter(r => !pinned.has(pinKeyOf(r))),
+      rows: resolveGroupRows(g, rows, pinKeyOf),
     })),
-    [groupsValue, rows, pinned],
+    [groupsValue, rows],
   )
   /** Which user-group bands are folded on THIS screen — per viewer, alongside the aside's other
    *  arrangement prefs (see `sessionsAsidePrefs.ts`). Membership itself is shared/server-side. */
@@ -551,6 +582,8 @@ export function SessionsAside({
   /** The "Mover para grupo…" picker opened from a session row's own context menu — also
    *  `SessionRowMenu`, listing the existing groups plus "Novo grupo…". */
   const [groupPicker, setGroupPicker] = useState<{ id: string; x: number; y: number } | null>(null)
+  /** "Mover para a equipe de…" — the leader picker, anchored where the row menu was. */
+  const [teamPicker, setTeamPicker] = useState<{ id: string; x: number; y: number } | null>(null)
   /** Which group heading is a live drop target, and which grouped row (for reordering within a
    *  group) — read from the native drag payload (`dragReorder.ts`), not from a dragged row's own
    *  component state, because the source can be a pinned row, an automatic-section row or another
@@ -653,6 +686,19 @@ export function SessionsAside({
     setMenu({ x, y, id: session.id, state: session.state, verbs })
   }
 
+  const reopenRow = async (id: string) => {
+    if (!act) return
+    const out = await reopenSession(id, act)
+    setNotice(out.message)
+    if (out.ok && out.id) {
+      const from = rows.find(r => r.id === id)
+      const r = reopenedSessionRoute(out.id, from ? { id, harness: from.harness, title: from.title } : { id })
+      navigate(r.path, r.options)
+    }
+  }
+
+  const [cleanupAsk, setCleanupAsk] = useState<{ id: string; action: string } | null>(null)
+
   const pickMenuAction = (action: string) => {
     if (!menu) return
     const { id } = menu
@@ -688,6 +734,12 @@ export function SessionsAside({
       setMenu(null)
       return
     }
+    if (action === PIN_TOGGLE) {
+      const target = rows.find(r => r.id === id)
+      if (target) flip(target)
+      setMenu(null)
+      return
+    }
     if (action === NOTIFY_TOGGLE) {
       const target = rows.find(r => r.id === id)
       if (target) toggleSessionMuted(pinKeyOf(target))
@@ -700,6 +752,16 @@ export function SessionsAside({
       setMenu(null)
       return
     }
+    if (action === TEAM_UNLINK) {
+      setMenu(null)
+      void moveSessionTeam(id, null, lang).then(out => { setNotice(out.message); if (out.ok) nudgeFleet() })
+      return
+    }
+    if (action === TEAM_MOVE) {
+      setTeamPicker({ id, x: menu.x, y: menu.y })
+      setMenu(null)
+      return
+    }
     if (action === 'remove-from-group') {
       const target = rows.find(r => r.id === id)
       if (target) removeSessionFromGroup(pinKeyOf(target))
@@ -707,18 +769,11 @@ export function SessionsAside({
       return
     }
     if (!act) return
-    const call = () => act({ id, action })
-    void (action === 'resume' ? withReopening([id], call) : call()).then(out => {
-      setNotice(out.message)
-      // A REOPEN LANDS SOMEWHERE, here too. It retires the row it was asked about, so a reader
-      // sitting on that row is left on an id the next poll drops — and this handler kept only the
-      // message. The row it came FROM names the wait; see `reopenedSessionRoute`.
-      if (out.ok && action === 'resume' && out.id) {
-        const from = rows.find(r => r.id === id)
-        const r = reopenedSessionRoute(out.id, from ? { id, harness: from.harness, title: from.title } : { id })
-        navigate(r.path, r.options)
-      }
-    })
+    if (action === 'forget' || (action === 'kill' && id.startsWith('external:'))) {
+      setCleanupAsk({ id, action }); setMenu(null); return
+    }
+    if (action === 'resume') { void reopenRow(id); return }
+    void act({ id, action }).then(out => setNotice(out.message))
   }
 
   // The top bar's magnifier focuses this field. An event rather than a prop because the button and
@@ -775,18 +830,113 @@ export function SessionsAside({
     const ids = new Set(matched.map(r => r.id))
     return groupRowsResolved.map(e => ({ ...e, rows: e.rows.filter(r => ids.has(r.id)) }))
   }, [narrowing, matched, groupRowsResolved])
+  // Activity comes from the whole fleet, so a search or value filter cannot archive a live folder.
+  const foldersWithActivity = useMemo(() => activeFolderIds(groupRowsResolved), [groupRowsResolved])
+  const rootFolders = groupRowsShown.filter(g => !g.group.parentId && !groupConcealed(groupsValue, g.group.id))
+  const liveRootFolders = rootFolders.filter(g => foldersWithActivity.has(g.group.id))
+  const endedRootFolders = rootFolders.filter(g => !foldersWithActivity.has(g.group.id))
   const searching = query.trim() !== ''
+  const rootEndedOpen = expandedEnded.has(ROOT_ENDED_FOLDERS)
+    || (searching && endedRootFolders.some(g => folderSessionCount(g.group.id, groupRowsShown) > 0))
   /** Which SET filter dimensions this fleet cannot answer at all, said in one line — never silent. */
   const ignoredNote = useMemo(() => ignoredDimensions(filters, lang), [filters, lang])
 
+  /*
+   * THE THREE TABS — Ativas | Grupos | Encerradas (owner, 2026-10-23: "A + C + D", approved on the
+   * clickable prototype). The tab and the folded teams are part of the arrangement document, so the
+   * 64px rail (`SessionsRail`) shows the same tab and the same folds. `asideTabs.ts` decides which
+   * session belongs to which team and which section; this component only draws.
+   */
+  const tab = useAsideTab()
+  const setTab = (t: AsideTab) => writeAsideGroupPrefs({ tab: t })
+  const foldedTeams = useFoldedTeams()
+  const now = Date.now()
+  const isLeaderRow = useCallback(
+    (r: ControlSession) => (roleOfRow(r) ?? (hasLeaderTitle(r.title) ? 'leader' : undefined)) === 'leader',
+    [roleOfRow],
+  )
+  const isPinnedRow = useCallback((r: ControlSession) => pinned.has(pinKeyOf(r)), [pinned])
+  const fellIdSet = useMemo(() => new Set(fellIds), [fellIds])
+  /** Live rows of the WHOLE (value-filtered) fleet, in the chosen order — teams are built on these so
+   *  a search narrowing a leader away still shows its matching members under it. */
+  /** A PIN survives the value filters (the rule the pinned band always kept): pinned rows of the raw
+   *  fleet join whatever the filters let through. */
+  const withPins = useCallback((filtered: readonly ControlSession[], raw: readonly ControlSession[]) => {
+    const ids = new Set(filtered.map(r => r.id))
+    return [...filtered, ...raw.filter(r => !ids.has(r.id) && pinned.has(pinKeyOf(r)))]
+  }, [pinned])
+  const liveSorted = useMemo(
+    () => sortSessions(withPins(valueFiltered, rows).filter(r => active.has(r.state) && !fellIdSet.has(r.id)), sortOrder),
+    [valueFiltered, rows, withPins, active, fellIdSet, sortOrder],
+  )
+  /** What the search and the "show only" choice let through. */
+  const liveMatch = useMemo(
+    () => new Set(applySummaryFilter(withPins(searched, filterSessions(rows, query)).filter(r => active.has(r.state)), summaryFilter).map(r => r.id)),
+    [searched, rows, query, withPins, active, summaryFilter],
+  )
+  const narrowedLive = query.trim() !== '' || summaryFilter !== null
+  const teamsAll = useMemo(
+    () => buildTeams(liveSorted, { isLeader: isLeaderRow, pinned: isPinnedRow, keyOf: pinKeyOf }),
+    [liveSorted, isLeaderRow, isPinnedRow],
+  )
+  const shownTeams = useMemo(() => teamsAll.teams.flatMap((t): Team<ControlSession>[] => {
+    const members = t.members.filter(m => liveMatch.has(m.id))
+    return liveMatch.has(t.leader.id) || members.length > 0 ? [{ ...t, members }] : []
+  }), [teamsAll, liveMatch])
+  const shownLoose = useMemo(() => (leadersOnly ? [] : teamsAll.loose.filter(r => liveMatch.has(r.id))), [teamsAll, liveMatch, leadersOnly])
+  /*
+   * A folded team UNFOLDS on its own when one of its members starts waiting on the person — the
+   * transition, judged against the previous poll (never the level, or a fold could not be kept).
+   */
+  const prevWaiting = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    const live = rows.filter(r => active.has(r.state))
+    if (prevWaiting.current) {
+      const cur = readAsideGroupPrefs().foldedTeams
+      const next = autoUnfold(cur, buildTeams(live, { isLeader: isLeaderRow, pinned: isPinnedRow, keyOf: pinKeyOf }).teams, prevWaiting.current)
+      if (next !== cur) writeAsideGroupPrefs({ foldedTeams: [...next] })
+    }
+    prevWaiting.current = waitingIds(live)
+  }, [rows, active, isLeaderRow, isPinnedRow])
+  /** The Encerradas sections, from the search-narrowed fleet. */
+  const ended = useMemo(
+    () => endedSections(withPins(searched, filterSessions(rows, query)), { fellIds: fellIdSet, keep: isPinnedRow, now }),
+    // `now` moves every render; the sections only need to follow the rows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searched, rows, query, withPins, fellIdSet, isPinnedRow],
+  )
+  const [showAllEnded, setShowAllEnded] = useState(false)
+  // The ended history is paged in on demand: the tab that draws it is what asks for it.
+  useEffect(() => { if (tab === 'ended') loadClosedFleet() }, [tab])
+  const liveCount = useMemo(() => valueFiltered.filter(r => active.has(r.state) && !fellIdSet.has(r.id)).length, [valueFiltered, active, fellIdSet])
+  /** The overflow menu (filters, arrange, broadcast, muted, "show only", fold all) and where it opened. */
+  const [overflow, setOverflow] = useState<{ x: number; y: number } | null>(null)
+  const [arrangeAt, setArrangeAt] = useState<{ left: number; top: number } | null>(null)
+  const overflowRef = useRef<HTMLButtonElement | null>(null)
+  // ONE stable callback ref for the ⋮ button: an inline arrow is a new ref every render, so React
+  // re-calls it, App re-measures the filters anchor into new state, re-renders us — an endless loop
+  // ("Maximum update depth exceeded" on opening /sessions). The latest caller ref is read through a ref.
+  const filtersButtonRefLatest = useRef(filtersButtonRef)
+  filtersButtonRefLatest.current = filtersButtonRef
+  const setOverflowButton = useCallback((el: HTMLButtonElement | null) => {
+    overflowRef.current = el
+    mutedButtonRef.current = el
+    filtersButtonRefLatest.current?.(el)
+  }, [])
+
   /** The pinned rows, in the order they were pinned. Their own band, above everything. */
   // Resolved from the RAW `rows`, never from `matched` — a filter, a search or "active only" must
-  // never remove a row from the pinned band (see the header comment, and `resolvePinnedRows`'s
+  // never remove a row from the pinned band; only text search narrows it (`resolvePinnedRows`'s
   // own). Reading from `matched` was the bug: it is already cut by `activeOnly` (on by default
   // here), so a pinned session that finished while the person was away vanished from the band the
   // moment its state left `ACTIVE_STATES` — no reload needed, just the ordinary case of a pinned
   // session finishing.
-  const pinnedRows = useMemo(() => resolvePinnedRows(pins, rows, pinKeyOf), [pins, rows])
+  const allPinnedRows = useMemo(() => filterSessions(resolvePinnedRows(pins, rows, pinKeyOf), query), [pins, rows, query])
+  const { pinnedRows, sleepingRows } = useMemo(() => {
+    const byKey = new Map(allPinnedRows.map(row => [pinKeyOf(row), row]))
+    const split = splitSleepingTabs([...byKey.keys()], pins, k => byKey.get(k)?.state)
+    return { pinnedRows: split.drawn.map(k => byKey.get(k)!), sleepingRows: split.sleeping.map(k => byKey.get(k)!) }
+  }, [allPinnedRows, pins])
 
   /**
    * TWO bands — Active and Inactive.
@@ -834,6 +984,9 @@ export function SessionsAside({
    * fifth piece of persisted state to keep in sync with the other four.
    */
   const collapseAll = () => {
+    writeAsideGroupPrefs({ foldedTeams: teamsAll.teams.filter(t => t.members.length > 0).map(t => t.key) })
+    setExpandedEndedState(new Set())
+    writeAsideGroupPrefs({ expandedEndedGroups: [] })
     setFoldedPinnedState(true)
     writeAsideGroupPrefs({ foldedPinned: true })
     setFoldedGroupsSectionState(true)
@@ -846,6 +999,10 @@ export function SessionsAside({
     writeAsideGroupPrefs({ collapsed: [...allAutoKeys] })
   }
   const expandAll = () => {
+    writeAsideGroupPrefs({ foldedTeams: [] })
+    const nextEnded = new Set([...expandedEnded, SLEEPING_PINS, ROOT_ENDED_FOLDERS, ...groupsValue.groups.map(g => g.id)])
+    setExpandedEndedState(nextEnded)
+    writeAsideGroupPrefs({ expandedEndedGroups: [...nextEnded] })
     setFoldedPinnedState(false)
     writeAsideGroupPrefs({ foldedPinned: false })
     setFoldedGroupsSectionState(false)
@@ -867,7 +1024,7 @@ export function SessionsAside({
   const total = leadersOnly ? activeLeaders.length : bands.reduce(
     (n, b) => n + b.groups.reduce((m, g) => m + g.sessions.length, 0),
     0,
-  ) + pinnedRows.length + groupRowsShown.reduce((n, g) => n + g.rows.length, 0)
+  ) + allPinnedRows.length + groupRowsShown.reduce((n, g) => n + g.rows.length, 0)
   const filterCount = (filters.harnesses?.length ?? 0) + filters.projects.length
     + (filters.repos?.length ?? 0) + filters.models.length
 
@@ -903,7 +1060,7 @@ export function SessionsAside({
    * folders' (`folderSessionCount`). It used to count direct sessions only, and a parent holding
    * nothing but subfolders read `0`.
    */
-  const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1, parentDimmed = false): React.ReactNode => {
+  const renderGroupBand = (entry: { group: SessionUserGroup; rows: ControlSession[] }, depth: 0 | 1, parentDimmed = false, insideEnded = false): React.ReactNode => {
     const { group } = entry
     // What matches in this folder (its nested folders included) — see `groupRowsShown`.
     const shownInFolder = folderSessionCount(group.id, groupRowsShown)
@@ -920,19 +1077,23 @@ export function SessionsAside({
     const noMatches = fold.dimmed
     const folded = fold.folded
     const source = fold.showAll || parentDimmed ? groupRowsResolved : groupRowsShown
-    const gRows = fold.showAll || parentDimmed
+    const folderRows = fold.showAll || parentDimmed
       ? (groupRowsResolved.find(g => g.group.id === group.id)?.rows ?? entry.rows)
       : entry.rows
+    const gRows = folderRows
     const isDropTarget = dragOverGroupId === group.id
     const isReorderTarget = groupReorderOver === group.id
     const nestHover = nestOverGroupId?.id === group.id ? nestOverGroupId : null
     const children = depth === 0 ? source.filter(g => g.group.parentId === group.id && !g.group.hidden) : []
+    // An archived subtree keeps its tree together; it needs no second "Ended" inside each folder.
+    const liveChildren = insideEnded ? children : children.filter(g => foldersWithActivity.has(g.group.id))
+    const endedChildren = insideEnded ? [] : children.filter(g => !foldersWithActivity.has(g.group.id))
     // A folded group hides its rows (and, for a parent, its children too): its own left edge says
     // when one of them is waiting.
     const attn = folded ? attentionCount(gRows, dismissedAttn) : 0
     return (
       <div
-        key={group.id}
+        key={group.id} data-session-folder={group.id}
         style={{ marginLeft: depth * 14, ...(noMatches && !parentDimmed ? { opacity: 0.5 } : {}) }}
       >
         <div
@@ -1050,7 +1211,7 @@ export function SessionsAside({
         >
           <div style={{
             display: 'flex', alignItems: 'center', gap: 2, borderRadius: 7,
-            padding: '4px 4px 4px 5px', minHeight: tap,
+            padding: insideEnded ? '4px 8px' : '4px 0', minHeight: tap,
           }}>
             {/* The grip — the ONLY drag source that reorders, and only TOP-LEVEL folders have one. A
                 nested folder is pinned first under its parent and has no order of its own to change;
@@ -1065,11 +1226,11 @@ export function SessionsAside({
                 title={pt ? 'Arrastar para reordenar' : 'Drag to reorder'}
                 style={{
                   display: 'flex', alignItems: 'center', flexShrink: 0, cursor: 'grab',
-                  color: 'var(--text-tertiary)', padding: '0 2px', minHeight: tap,
+                  color: 'var(--text-tertiary)', padding: 0, minHeight: tap,
                   ...(tap ? { touchAction: 'none' as const } : {}),
                 }}
               >
-                <GripVertical size={13} />
+                {insideEnded ? (folded ? <Folder size={11} /> : <FolderOpen size={11} />) : <GripVertical size={13} />}
               </span>
             )}
             {/* The body — everything else on the row. Dragging THIS nests the folder into
@@ -1078,7 +1239,7 @@ export function SessionsAside({
               draggable
               onDragStart={e => { setGroupNestDragPayload(e, group.id); setDraggingGroupId(group.id) }}
               onDragEnd={() => { setNestOverGroupId(null); setDraggingGroupId(null) }}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, cursor: 'grab' }}
+              style={{ display: 'flex', alignItems: 'center', gap: insideEnded ? 2 : 6, flex: 1, minWidth: 0, cursor: 'grab' }}
             >
               <button
                 onClick={() => (fold.toggles === 'dimmed' ? toggleOpenedDimmed(group.id) : toggleUserGroupFold(group.id))}
@@ -1097,8 +1258,8 @@ export function SessionsAside({
                   color: 'var(--text-tertiary)',
                 }}
               >
-                {folded ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-                <Folder size={11} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />
+                {!insideEnded && (folded ? <ChevronRight size={11} /> : <ChevronDown size={11} />)}
+                {!(insideEnded && depth === 0) && <Folder size={11} style={{ color: 'var(--anthropic-orange)', flexShrink: 0 }} />}
                 {/* Hidden: the name stays in the layout (so the block is exactly as long as it) and
                     a grey block is painted over it. `role="img"` makes a reader announce the
                     label instead of reading the text out. */}
@@ -1108,12 +1269,12 @@ export function SessionsAside({
                     : {})}
                   style={{
                     fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
-                    minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    minWidth: 0, overflowWrap: 'normal', textAlign: 'left',
                   }}
                 >
                   {group.name}
                 </span>
-                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupRowsResolved), narrowing)}</span>
+                {!insideEnded && <span data-folder-count style={{ flexShrink: 0, whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 600, opacity: 0.65 }}>{folderCountLabel(shownInFolder, folderSessionCount(group.id, groupsValue.groups.map(group => ({ group, rows: group.sessionKeys }))), narrowing)}</span>}
               </button>
               <button
                 onClick={e => {
@@ -1124,7 +1285,7 @@ export function SessionsAside({
                 title={pt ? 'Opções do grupo' : 'Group options'}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: tap ?? 24, height: tap ?? 24, flexShrink: 0, borderRadius: 6,
+                  width: tap ?? (insideEnded ? 20 : 24), height: tap ?? 24, padding: insideEnded ? 0 : undefined, flexShrink: 0, borderRadius: 6,
                   border: 'none', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer',
                 }}
               >
@@ -1138,7 +1299,7 @@ export function SessionsAside({
                   order a file explorer uses, and the reason a freshly nested folder becoming the
                   FIRST child (`moveToFrontAmongSiblings`, core) actually reads as "first" on screen
                   instead of sitting after every session the parent already held. */}
-              {children.map(c => renderGroupBand(c, 1, noMatches || parentDimmed))}
+              {liveChildren.map(c => renderGroupBand(c, 1, noMatches || parentDimmed, insideEnded))}
               {gRows.length === 0 && children.length === 0 ? (
                 <p style={{ margin: '2px 9px 4px 21px', fontSize: 10.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
                   {/* Empty because of the FILTERS is not an empty folder — telling someone to drag
@@ -1149,12 +1310,12 @@ export function SessionsAside({
                     ? 'Arraste uma sessão até aqui, ou use "Mover para grupo" no menu dela.'
                     : 'Drag a session here, or use "Move to group" on its menu.'}
                 </p>
-              ) : gRows.length > 0 && (
+              ) : (gRows.length > 0 || endedChildren.length > 0) && (
                 // Indented under the header — a MEMBER, not another top-level row — the same
                 // modest offset the empty-group hint above already lines up with.
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 12, paddingRight: 4, minWidth: 0 }}>
                   {(() => {
-                  const { live, ended } = splitFolderRows(gRows, r => active.has(r.state), sortOrder, sortExplicit)
+                  const { live, ended } = splitFolderRows(gRows, isFolderSessionActive, sortOrder, sortExplicit)
                   const renderRow = (s: ControlSession, compact = false) => {
                     const key = pinKeyOf(s)
                     return (
@@ -1192,30 +1353,31 @@ export function SessionsAside({
                           // the list would not scroll from a session. Native drag starts on long-press.
                         }}
                       >
-                        <SessionRow
+                        <SessionLine
                           session={s}
-                          compact={compact}
                           selected={rowSelected(s, sessionId)}
                           {...(tap ? { tap } : {})}
+                          time={compact ? endedAge(s, now, pt) : liveAge(s, now, pt)}
+                          pinned={pinned.has(pinKeyOf(s))}
                           onPin={() => flip(s)}
                           onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
                           {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
                           onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
-                          onFile={(x, y) => setLinking({ id: s.id, x, y })}
                           lang={lang}
-                          cardColor={cardColor}
                         />
                       </div>
                     )
                   }
-                  const endedOpen = expandedEnded.has(group.id) || endedAutoOpen(searching, ended, entry.rows)
+                  const endedOpen = insideEnded || expandedEnded.has(group.id) || endedAutoOpen(searching, ended, entry.rows)
+                    || (searching && endedChildren.some(c => folderSessionCount(c.group.id, groupRowsShown) > 0))
                   return (
                     <>
                       {live.map(s => renderRow(s))}
-                      {ended.length > 0 && (
+                      {!insideEnded && (ended.length > 0 || endedChildren.length > 0) && (
                         <button
                           onClick={() => toggleEnded(group.id)}
                           aria-expanded={endedOpen}
+                          data-ended-folders={group.id}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 6, minHeight: tap, padding: '3px 4px',
                             background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
@@ -1223,10 +1385,16 @@ export function SessionsAside({
                           }}
                         >
                           {endedOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                          {pt ? `Encerradas (${ended.length})` : `Ended (${ended.length})`}
+                          {endedChildren.length === 0
+                            ? (pt ? `Encerradas (${ended.length})` : `Ended (${ended.length})`)
+                            : <><span>{pt ? 'Encerradas' : 'Ended'}</span><span style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', columnGap: 10 }}>
+                                <span>{endedChildren.length} {pt ? (endedChildren.length === 1 ? 'pasta' : 'pastas') : (endedChildren.length === 1 ? 'folder' : 'folders')}</span>
+                                {ended.length > 0 && <span>{ended.length} {pt ? (ended.length === 1 ? 'sessão' : 'sessões') : (ended.length === 1 ? 'session' : 'sessions')}</span>}
+                              </span></>}
                         </button>
                       )}
                       {endedOpen && ended.map(s => renderRow(s, true))}
+                      {endedOpen && endedChildren.map(c => renderGroupBand(c, 1, noMatches || parentDimmed, true))}
                     </>
                   )
                   })()}
@@ -1239,11 +1407,53 @@ export function SessionsAside({
     )
   }
 
+  /** Opening a row: the route on this machine, or the mount's own handler (a central's relay, the Nay dock). */
+  const openRow = (s: ControlSession) => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))
+  /** One session on one line (`SessionLine`), draggable into a folder like every row of this list. */
+  const renderLine = (s: ControlSession, extra: Partial<SessionLineProps> = {}) => {
+    const key = pinKeyOf(s)
+    const verbs = rowsById?.get(s.id)?.verbs
+    return (
+      <div key={s.id} draggable onDragStart={e => setDragPayload(e, key)}>
+        <SessionLine
+          session={s}
+          selected={rowSelected(s, sessionId)}
+          lang={lang}
+          {...(tap ? { tap } : {})}
+          time={liveAge(s, now, pt)}
+          pinned={pinned.has(key)}
+          onPin={() => flip(s)}
+          onOpen={() => openRow(s)}
+          {...(verbs ? { verbs } : {})}
+          onOpenMenu={(x, y, v) => openMenu(s, x, y, v)}
+          {...extra}
+        />
+      </div>
+    )
+  }
+  /** An ended row: the time it ended, and the row's own Reopen verb as a button. */
+  const renderEndedLine = (s: ControlSession, fell = false) => {
+    const resume = rowsById?.get(s.id)?.verbs.find(v => v.action === 'resume')
+    return renderLine(s, {
+      time: fell ? fellAge(s, now, pt) : endedAge(s, now, pt), fell,
+      ...(act && resume ? { onReopen: () => { void reopenRow(s.id) }, reopenVerb: resume } : {}),
+    })
+  }
+  const sectionHeading: React.CSSProperties = {
+    padding: '10px 8px 4px', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+    color: 'var(--text-tertiary)',
+  }
+  const linkButton: React.CSSProperties = {
+    border: 'none', background: 'transparent', color: 'var(--anthropic-orange)', cursor: 'pointer',
+    fontFamily: 'inherit', fontSize: 12, fontWeight: 600, padding: '0 4px', flexShrink: 0,
+    display: 'inline-flex', alignItems: 'center',
+  }
+
   useEscapeOwner(creatingGroup !== null, () => setCreatingGroup(null))
   useEscapeOwner(renamingGroup !== null, () => setRenamingGroup(null))
   return (
     <GoToSessionContext.Provider value={onGoToSession ?? null}>
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
+    <div style={{ containerType: 'inline-size', containerName: 'sessions-aside', position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10, paddingTop: 4 }}>
       {/* THE IDLE-REVIEW CARD — the FIRST thing in the column, right under the Dashboard/Sessions
           tabs (desktop) and the Sessions/Metrics tabs (mobile). Owner decision 2026-09-27: it sat
           above Groups, halfway down a list that scrolls, and read as one more row. At the top it
@@ -1254,20 +1464,13 @@ export function SessionsAside({
           the idle card, for the same reason: a notice about the list, not an item in it. */}
       <PendingSessionCard lang={lang} tap={tap} />
       {/*
-        * THE SEARCH, on its own row.
-        *
-        * Search is what the column is used for on every visit; starting a session and writing to
-        * several are things somebody does occasionally. Two full-width dashed buttons stacked above
-        * the field spent three rows of a 268px column on that ranking inverted — and those rows come
-        * straight out of the list, which is the thing being searched.
-        *
-        * An icon may not carry the meaning alone, so both keep `title` AND `aria-label` with the
-        * words they used to print. `+` is the one solid accent control in the aside because it is
-        * the only one that CREATES something; "send to several" stays quiet beside it. "Reopen what
-        * fell" is deliberately NOT here and keeps its full-width button below: it names a COUNT, and
-        * a count is not something an icon can say.
+        * THE TOP, always: search, the overflow menu, and the one solid accent control — "New session",
+        * the only control here that CREATES something (owner, 2026-10-23). Everything that used to
+        * sit in two rows above the list — the summary counters, the broadcast / filters / arrange /
+        * muted buttons, the "reopen what fell" banner — moved into the overflow menu or into the
+        * Encerradas tab; nothing they did was dropped.
         */}
-      <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, padding: '0 2px', minHeight: tap }}>
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, padding: '0 2px', minHeight: tap ?? 36 }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex' }}>
           <Search
             size={13}
@@ -1277,10 +1480,11 @@ export function SessionsAside({
             ref={searchRef}
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder={pt ? 'Buscar sessão…' : 'Search sessions…'}
+            placeholder={pt ? 'Buscar sessão' : 'Search sessions'}
+            aria-label={pt ? 'Buscar sessão' : 'Search sessions'}
             style={{
               flex: 1, minWidth: 0, boxSizing: 'border-box',
-              padding: '9px 26px 9px 30px', borderRadius: 9,
+              padding: '0 26px 0 30px', borderRadius: 8,
               border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
               color: 'var(--text-primary)', fontFamily: 'inherit',
               // 16px on mobile or iOS Safari zooms the viewport; the global guard in index.css
@@ -1302,199 +1506,131 @@ export function SessionsAside({
             </button>
           )}
         </div>
-      </div>
-
-      {/* THE SUMMARY LINE: what the fleet is doing right now. Each part is a filter (press again to
-          clear it); the capacity slot stays empty until a source provides "N/M vagas". */}
-      <div
-        role="group"
-        aria-label={pt ? 'Resumo das sessões' : 'Sessions summary'}
-        style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '2px 0', padding: '0 2px', fontSize: 11, color: 'var(--text-tertiary)' }}
-      >
-        {!leadersOnly && summaryParts(summaryNumbers, pt).map((v, i) => (
-          <span key={v.part} style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
-            {i > 0 && <span aria-hidden>·</span>}
+        {(() => {
+          const narrowed = (filtersCount ?? 0) + (summaryFilter ? 1 : 0) + (leadersOnly ? 1 : 0)
+          const label = pt ? 'Mais opções da lista' : 'More list options'
+          return (
             <button
+              ref={setOverflowButton}
               type="button"
-              onClick={() => setSummaryFilter(toggleSummaryPart(summaryFilter, v.part))}
-              aria-pressed={summaryFilter === v.part}
+              data-aside-overflow
+              aria-haspopup="menu"
+              aria-expanded={overflow !== null || !!filtersOpen || arrangeAt !== null}
+              aria-label={narrowed > 0 ? `${label} — ${narrowed} ${pt ? 'ativo(s)' : 'active'}` : label}
+              title={label}
+              onClick={e => {
+                const r = e.currentTarget.getBoundingClientRect()
+                setOverflow(cur => (cur ? null : { x: r.left, y: r.bottom + 4 }))
+              }}
               style={{
-                border: 'none', background: summaryFilter === v.part ? 'var(--bg-elevated)' : 'transparent',
-                color: summaryFilter === v.part ? 'var(--text-primary)' : v.part === 'needs' && v.count > 0 ? 'var(--anthropic-orange)' : 'inherit',
-                font: 'inherit', cursor: 'pointer', borderRadius: 6,
-                padding: isMobile ? '12px 5px' : '2px 4px', minHeight: tap,
-                fontWeight: summaryFilter === v.part || (v.part === 'needs' && v.count > 0) ? 600 : 400,
+                position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                width: tap ?? 36, minHeight: tap ?? 36, padding: 0, borderRadius: 8, cursor: 'pointer',
+                border: `1px solid ${narrowed > 0 || filtersOpen ? 'var(--anthropic-orange)' : 'var(--border-subtle)'}`,
+                background: 'var(--bg-elevated)',
+                color: narrowed > 0 || filtersOpen ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', fontFamily: 'inherit',
               }}
             >
-              {v.text}
+              <MoreVertical size={15} />
+              {narrowed > 0 && (
+                <span aria-hidden style={{
+                  position: 'absolute', top: -5, right: -5,
+                  ...COUNT_BADGE, minWidth: 15, height: 15, padding: '0 3px',
+                  background: 'var(--anthropic-orange)', color: '#fff',
+                  fontSize: 9, fontWeight: 700, lineHeight: 1,
+                }}>{narrowed}</span>
+              )}
             </button>
-          </span>
-        ))}
-        {(leaderCount > 0 || leadersOnly) && (
-          <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center' }}>
-            {!leadersOnly && <span aria-hidden>·</span>}
-            <button
-              type="button"
-              data-leaders-only
-              onClick={() => writeAsideGroupPrefs({ leadersOnly: !leadersOnly })}
-              aria-pressed={leadersOnly}
-              title={leadersOnly ? (pt ? 'Mostrar todas as sessões' : 'Show all sessions') : (pt ? 'Mostrar só os líderes' : 'Show leaders only')}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                border: 'none', background: leadersOnly ? 'var(--bg-elevated)' : 'transparent',
-                color: leadersOnly ? 'var(--accent-purple)' : 'inherit',
-                font: 'inherit', cursor: 'pointer', borderRadius: 6,
-                padding: isMobile ? '12px 5px' : '2px 4px', minHeight: tap,
-                fontWeight: leadersOnly ? 600 : 400,
-              }}
-            >
-              <Crown size={11} aria-hidden />
-              {leadersText(leaderCount, pt)}
-              {leadersOnly && <X size={11} aria-hidden />}
-            </button>
-          </span>
-        )}
-        {capacityLabel && (<><span aria-hidden>·</span><span data-testid="aside-capacity">{capacityLabel}</span></>)}
-      </div>
-
-      {/*
-        * THE THREE STANDING VERBS, one row under the search: start a session, write to several, and
-        * arrange the list. They share the column's width equally with a small gap, so three icons
-        * are big targets and read as one control rather than three stray squares. "New session"
-        * is the solid accent because it is the only one that CREATES something. A verb this
-        * surface cannot perform is ABSENT (a central has no New session, a machine with nothing to
-        * broadcast to has no send) and the ones left simply share the width.
-        */}
-      <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, padding: '0 2px' }}>
+          )
+        })()}
         {!hideNew && (
           <button
             onClick={() => setCreating(true)}
             aria-label={pt ? 'Nova sessão' : 'New session'}
             title={pt ? 'Nova sessão' : 'New session'}
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flex: 1, minWidth: 0, minHeight: tap ?? 36, padding: 0, borderRadius: 9, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              width: tap ?? 36, minHeight: tap ?? 36, padding: 0, borderRadius: 8, cursor: 'pointer',
               border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange)',
               color: '#141414', fontFamily: 'inherit',
             }}
             onMouseEnter={e => { e.currentTarget.style.filter = 'brightness(1.1)' }}
             onMouseLeave={e => { e.currentTarget.style.filter = 'none' }}
           >
-            <Plus size={18} />
-          </button>
-        )}
-        {showSend && (
-          <button
-            onClick={() => setPicking('send')}
-            aria-label={pt ? 'Enviar prompt em massa' : 'Send a prompt to several'}
-            title={pt ? 'Enviar prompt em massa' : 'Send a prompt to several'}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, minWidth: 0, minHeight: tap ?? 36,
-              padding: 0, borderRadius: 9, cursor: 'pointer',
-              border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
-              color: 'var(--text-tertiary)', fontFamily: 'inherit',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.borderColor = 'var(--anthropic-orange)'
-              e.currentTarget.style.color = 'var(--anthropic-orange)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.borderColor = 'var(--border-subtle)'
-              e.currentTarget.style.color = 'var(--text-tertiary)'
-            }}
-          >
-            <Send size={14} />
-          </button>
-        )}
-        {/* FILTROS (design item 4) — "Filtros na linha de botões da lista, visível também com ela
-            minimizada". `App.tsx` owns the open/close state and the panel that actually opens; this
-            button only toggles it and reports its own position through `filtersButtonRef`, so the
-            caller can anchor the panel beside it (a popover, not a control this component draws
-            itself — see `App.tsx`'s own `sessionsFiltersAnchor`). Absent on mobile — see the prop's
-            own header. */}
-        {onToggleFilters && (
-        <button
-          ref={filtersButtonRef}
-          onClick={onToggleFilters}
-          aria-expanded={filtersOpen}
-          aria-label={pt ? 'Filtros — restringe a lista de sessões' : 'Filters — narrows the fleet list'}
-          title={pt ? 'Filtros — restringe a lista de sessões' : 'Filters — narrows the fleet list'}
-          style={{
-            position: 'relative',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flex: 1, minWidth: 0, minHeight: tap ?? 36, padding: 0, borderRadius: 9, cursor: 'pointer',
-            border: `1px solid ${filtersOpen ? 'var(--anthropic-orange)' : 'var(--border-subtle)'}`,
-            background: filtersOpen ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-            color: filtersOpen ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', fontFamily: 'inherit',
-          }}
-          onMouseEnter={e => { if (!filtersOpen) { e.currentTarget.style.borderColor = 'var(--anthropic-orange)'; e.currentTarget.style.color = 'var(--anthropic-orange)' } }}
-          onMouseLeave={e => { if (!filtersOpen) { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.color = 'var(--text-tertiary)' } }}
-        >
-          <Filter size={14} />
-          {!!filtersCount && filtersCount > 0 && (
-            <span style={{
-              position: 'absolute', top: 3, right: 3,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              minWidth: 13, height: 13, padding: '0 3px', borderRadius: 7,
-              background: 'var(--anthropic-orange)', color: '#fff',
-              fontSize: 8.5, fontWeight: 700, lineHeight: 1,
-            }}>
-              {filtersCount}
-            </span>
-          )}
-        </button>
-        )}
-        {!leadersOnly && <SessionsGroupMenu
-          fill
-          lang={lang}
-          groupBy={groupBy}
-          onGroupBy={setGroupBy}
-          sort={sortOrder}
-          onSort={setSortOrder}
-          groups={groupOrderCandidates}
-          onReorder={keys => setGroupOrder(groupBy, keys)}
-          cardColor={cardColor}
-          onCardColor={setCardColor}
-          onCollapseAll={collapseAll}
-          onExpandAll={expandAll}
-          hiddenFolders={hiddenFoldersOf(groupsValue).map(g => {
-            const parent = g.parentId ? groupsValue.groups.find(x => x.id === g.parentId) : undefined
-            const name = displayName(g.name, hiddenGroups.has(g.id))
-            return { id: g.id, name: parent ? `${displayName(parent.name, hiddenGroups.has(parent.id))} › ${name}` : name }
-          })}
-          onShowFolder={id => setSessionGroupHidden(id, false)}
-          changed={arrangeChangedCount({
-            groupBy, sort: sortOrder, cardColor,
-            order: groupOrder[groupBy] ?? [], hiddenFolders: hiddenFoldersOf(groupsValue).length,
-          })}
-        />}
-        {mutedRows.length > 0 && (
-          <button
-            ref={mutedButtonRef}
-            type="button"
-            onClick={e => {
-              const r = e.currentTarget.getBoundingClientRect()
-              setMutedPopover(cur => cur ? null : { x: r.right, y: r.bottom + 6 })
-            }}
-            aria-label={pt ? 'Sessões silenciadas' : 'Muted sessions'}
-            title={pt ? 'Sessões silenciadas' : 'Muted sessions'}
-            style={{
-              position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flex: 1, minWidth: 0, minHeight: tap ?? 36, padding: 0, borderRadius: 9,
-              border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)',
-              color: 'var(--text-tertiary)', cursor: 'pointer', fontFamily: 'inherit',
-            }}
-          >
-            <BellOff size={14} />
-            <span style={{
-              position: 'absolute', top: 3, right: 3, minWidth: 13, height: 13, padding: '0 3px',
-              borderRadius: 7, background: 'var(--anthropic-orange)', color: '#fff',
-              fontSize: 8.5, fontWeight: 700, lineHeight: 1, display: 'inline-flex',
-              alignItems: 'center', justifyContent: 'center',
-            }}>{mutedRows.length}</span>
+            <Plus size={17} />
           </button>
         )}
       </div>
+
+      {/* THE TABS — the segmented control `ModeSwitch` draws (`SegmentedTabs`), not a second one. */}
+      <div style={{ padding: '0 2px' }}>
+        <SegmentedTabs<AsideTab>
+          ariaLabel={pt ? 'Sessões' : 'Sessions'}
+          containerName="aside-tabs"
+          className="ag-aside-tabs"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { id: 'active', label: pt ? 'Ativas' : 'Active', badge: liveCount, badgeTone: 'quiet',
+              badgeLabel: pt ? `${liveCount} ativas` : `${liveCount} active` },
+            { id: 'groups', label: pt ? 'Grupos' : 'Groups' },
+            { id: 'ended', label: pt ? 'Encerradas' : 'Ended', badge: fellCount, badgeTone: 'alert',
+              badgeLabel: pt ? (fellCount === 1 ? '1 caiu' : `${fellCount} caíram`) : `${fellCount} fell` },
+          ]}
+        />
+      </div>
+
+      {overflow && (
+        <SessionRowMenu
+          x={overflow.x} y={overflow.y} below
+          onClose={() => setOverflow(null)}
+          entries={[
+            ...(onToggleFilters ? [{ action: 'ov:filters', label: (pt ? 'Filtros' : 'Filters') + (filtersCount ? ` (${filtersCount})` : ''), enabled: true, checked: !!filtersOpen }] : []),
+            { action: 'ov:arrange', label: pt ? 'Ordenar e organizar…' : 'Sort and arrange…', enabled: true },
+            ...(showSend ? [{ action: 'ov:send', label: pt ? 'Enviar prompt para várias…' : 'Send a prompt to several…', enabled: true }] : []),
+            ...(mutedRows.length > 0 ? [{ action: 'ov:muted', label: pt ? `Silenciadas (${mutedRows.length})` : `Muted (${mutedRows.length})`, enabled: true }] : []),
+            { action: 'ov:label-only', label: pt ? 'Mostrar só' : 'Show only', enabled: false, separatorBefore: true },
+            ...summaryParts(summaryNumbers, pt).map(v => ({ action: `ov:part:${v.part}`, label: v.text, enabled: true, checked: summaryFilter === v.part })),
+            ...(leaderCount > 0 || leadersOnly ? [{ action: 'ov:leaders', label: leadersText(leaderCount, pt), enabled: true, checked: leadersOnly }] : []),
+            { action: 'ov:collapse', label: pt ? 'Recolher tudo' : 'Collapse all', enabled: true, separatorBefore: true },
+            { action: 'ov:expand', label: pt ? 'Expandir tudo' : 'Expand all', enabled: true },
+            ...(capacityLabel ? [{ action: 'ov:capacity', label: capacityLabel, enabled: false, separatorBefore: true }] : []),
+          ]}
+          onPick={action => {
+            const r = overflowRef.current?.getBoundingClientRect()
+            if (action === 'ov:filters') onToggleFilters?.()
+            else if (action === 'ov:arrange' && r) setArrangeAt({ left: Math.max(12, Math.min(r.left, window.innerWidth - 512)), top: r.bottom + 6 })
+            else if (action === 'ov:send') setPicking('send')
+            else if (action === 'ov:muted' && r) setMutedPopover({ x: r.right, y: r.bottom + 6 })
+            else if (action.startsWith('ov:part:')) setSummaryFilter(toggleSummaryPart(summaryFilter, action.slice('ov:part:'.length) as SummaryPart))
+            else if (action === 'ov:leaders') writeAsideGroupPrefs({ leadersOnly: !leadersOnly })
+            else if (action === 'ov:collapse') collapseAll()
+            else if (action === 'ov:expand') expandAll()
+          }}
+        />
+      )}
+      <SessionsGroupMenu
+        teamLayout
+        openAt={arrangeAt}
+        onClose={() => setArrangeAt(null)}
+        lang={lang}
+        groupBy={groupBy}
+        onGroupBy={setGroupBy}
+        sort={sortOrder}
+        onSort={setSortOrder}
+        groups={groupOrderCandidates}
+        onReorder={keys => setGroupOrder(groupBy, keys)}
+        cardColor={cardColor}
+        onCardColor={setCardColor}
+        onCollapseAll={collapseAll}
+        onExpandAll={expandAll}
+        hiddenFolders={hiddenFoldersOf(groupsValue).map(g => {
+          const parent = g.parentId ? groupsValue.groups.find(x => x.id === g.parentId) : undefined
+          const name = displayName(g.name, hiddenGroups.has(g.id))
+          return { id: g.id, name: parent ? `${displayName(parent.name, hiddenGroups.has(parent.id))} › ${name}` : name }
+        })}
+        onShowFolder={id => setSessionGroupHidden(id, false)}
+        changed={0}
+      />
       {mutedPopover && createPortal(
         <div
           role="dialog"
@@ -1558,49 +1694,6 @@ export function SessionsAside({
         document.body,
       )}
 
-      {/*
-        * THE GROUP VERBS, under "New session" because that is where starting work lives.
-        *
-        * "Reopen what fell" appears only when something DID fall, and it names the count: a button
-        * that is always there teaches nothing, and a bare "reopen" is a different promise from
-        * "reopen 6 sessions". Neither is offered on a surface that cannot act — a button whose only
-        * outcome is a refusal is a button that teaches the wrong thing.
-        */}
-      {showFell && (
-        <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, margin: '0 2px' }}>
-          <button
-            onClick={() => setPicking('reopen')}
-            style={{
-              flex: 1, minWidth: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-              padding: '9px 12px', borderRadius: 9, cursor: 'pointer', minHeight: tap,
-              border: '1px solid var(--anthropic-orange)', background: 'rgba(232,146,90,0.08)',
-              color: 'var(--anthropic-orange)', fontFamily: 'inherit', fontSize: 12.5, fontWeight: 600,
-            }}
-          >
-            <RotateCcw size={14} />
-            {pt
-              ? (groupRows.fellRows.length === 1 ? 'Reabrir 1 sessão que caiu' : `Reabrir ${groupRows.fellRows.length} sessões que caíram`)
-              : (groupRows.fellRows.length === 1 ? 'Reopen 1 session that fell' : `Reopen ${groupRows.fellRows.length} sessions that fell`)}
-          </button>
-          {/* Hides the banner until a DIFFERENT crash group shows up — never on the server, never
-              discarding anything. Every row stays reopenable one at a time from its own menu. */}
-          <button
-            onClick={dismissFell}
-            aria-label={pt ? 'Dispensar' : 'Dismiss'}
-            title={pt ? 'Dispensar' : 'Dismiss'}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-              width: tap ?? 30, minHeight: tap, padding: 0, borderRadius: 9, cursor: 'pointer',
-              border: '1px solid var(--border-subtle)', background: 'transparent',
-              color: 'var(--text-tertiary)', fontFamily: 'inherit',
-            }}
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
-
       {picking && act && (
         <SessionPickModal
           kind={picking}
@@ -1659,13 +1752,7 @@ export function SessionsAside({
         />
       )}
 
-      {notice && (
-        <p role="status" style={{
-          margin: '0 4px', fontSize: 11, lineHeight: 1.45, color: 'var(--anthropic-orange)',
-        }}>
-          {notice}
-        </p>
-      )}
+      {notice && <ActionNotice message={noticeText} lang={lang} onDismiss={() => setNotice(null)} />}
 
       {/* The list is real but not current — either the machine stopped answering, or these rows
           came out of the stored snapshot and no poll has confirmed them yet. `fleetStale.ts` owns
@@ -1731,218 +1818,224 @@ export function SessionsAside({
           setDraggingGroupId(null)
         }}
       >
-        {leadersOnly ? (
-          <>
-          <div data-leaders-list style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {activeLeaders.map(s => (
-              <SessionRow
-                key={s.id}
-                session={s}
-                selected={rowSelected(s, sessionId)}
-                pinned={pinned.has(pinKeyOf(s))}
-                tap={tap}
-                onPin={() => flip(s)}
-                onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
-                {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
-                onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
-                onFile={(x, y) => setLinking({ id: s.id, x, y })}
-                lang={lang}
-                cardColor={cardColor}
-              />
-            ))}
-          </div>
-          {total === 0 && (
-            <EmptyReason
-              pt={pt} loading={loading} unsupported={unsupported} unavailable={unavailable}
-              leadersOnly searching={false} withheld={0} filterNarrowed={false}
-            />
-          )}
-          </>
-        ) : (
-          <>
-        {/* The pinned band, above everything — that is what pinning is for: the two or three
-            sessions that must not move when the arrangement changes. */}
-        {pinnedRows.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <button
-              onClick={toggleFoldedPinned}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-                padding: '6px 9px 7px', fontSize: 10.5, fontWeight: 700,
-                textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--anthropic-orange)',
-                background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
-                minHeight: tap,
-              }}
-            >
-              {foldedPinned ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-              <Pin size={11} />
-              <span>{pt ? 'Fixadas' : 'Pinned'}</span>
-              <span style={{ marginLeft: 'auto', fontWeight: 600, opacity: 0.75 }}>{pinnedRows.length}</span>
-            </button>
-            {!foldedPinned && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {pinnedRows.map((s, i) => {
-                const key = pinKeyOf(s)
-                return (
-                <div
-                  key={`pin-${s.id}`}
-                  draggable
-                  onDragStart={e => {
-                    setDragFrom(key)
-                    // ALSO published on the cross-component channel (`dragReorder.ts`'s shared
-                    // payload), so a pinned row can be dropped onto a user group's heading exactly
-                    // like a row from anywhere else in this aside — see the group bands below.
-                    setDragPayload(e, key)
-                  }}
-                  onDragOver={e => {
-                    // A FOLDER dragged across the pinned band is not a pinned-row reorder: leave it to
-                    // bubble to the list's own drop handling (a nested folder dropped here leaves its parent).
-                    if (hasGroupNestDragPayload(e) || hasGroupDragPayload(e)) return
-                    e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(key)
-                  }}
-                  onDragEnd={() => { setDragFrom(null); setDragOver(null) }}
-                  onDrop={e => {
-                    if (hasGroupNestDragPayload(e) || hasGroupDragPayload(e)) return
-                    e.preventDefault()
-                    // Never lets a group's own drop handler ALSO see this drop bubble past it — not
-                    // load-bearing here (the pinned band is a sibling of the groups block, not a
-                    // descendant), kept for the same reason every internal reorder drop stops here.
-                    e.stopPropagation()
-                    if (dragFrom !== null) movePinnedSession(dragFrom, key)
-                    setDragFrom(null); setDragOver(null)
-                  }}
-                  style={{
-                    // The drop target is shown as an EDGE, not by moving the rows: a list that
-                    // reflows under the cursor moves the target you were aiming at.
-                    boxShadow: dragOver === key && dragFrom !== null && dragFrom !== key
-                      ? 'inset 0 2px 0 var(--anthropic-orange)'
-                      : undefined,
-                    opacity: dragFrom === key ? 0.45 : 1,
-                  }}
-                >
-                  <SessionRow
-                    session={s}
-                    selected={rowSelected(s, sessionId)}
-                    pinned
-                    {...(tap ? { tap } : {})}
-                    onPin={() => flip(s)}
-                    onOpen={() => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
-                    onMoveBy={d => {
-                      // The step buttons move relative to the VISIBLE neighbor — same key-based
-                      // rule as the drag above; there is no raw-array index to step by here either.
-                      const neighbor = pinnedRows[i + d]
-                      if (neighbor) movePinnedSession(key, pinKeyOf(neighbor))
-                    }}
-                    {...(rowsById?.get(s.id) ? { verbs: rowsById.get(s.id)!.verbs } : {})}
-                    onOpenMenu={(x, y, verbs) => openMenu(s, x, y, verbs)}
-                    onFile={(x, y) => setLinking({ id: s.id, x, y })}
-                    lang={lang}
-                    cardColor={cardColor}
-                  />
+        {tab === 'active' && (
+          <div data-tab-body="active" style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: '100%', padding: '2px 0 4px' }}>
+            {shownTeams.map(t => {
+              const storedFold = foldedTeams.includes(t.key) && !narrowedLive
+              const showMembers = !storedFold && !leadersOnly && t.members.length > 0
+              const leaderTitle = sessionDisplayTitle(t.leader.title)
+              const hasTeam = teamsAll.teams.find(x => x.key === t.key)!.members.length > 0
+              // Leaders-only never lists members, so nothing here may promise to: no fold chevron, and
+              // the name always opens the leader's session (a stored fold would otherwise just toggle).
+              const foldable = hasTeam && !leadersOnly
+              return (
+                <div key={t.key} data-team={t.key} style={{
+                  background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 4,
+                }}>
+                  {renderLine(t.leader, {
+                    lead: true,
+                    ...(!showMembers && hasTeam ? { summary: teamSummary(teamsAll.teams.find(x => x.key === t.key)!.members, pt) } : {}),
+                    ...(leadersOnly ? {} : { leading: (
+                      <button
+                        type="button"
+                        data-team-fold
+                        aria-expanded={!storedFold}
+                        aria-label={storedFold
+                          ? (pt ? `Mostrar a equipe de ${leaderTitle}` : `Show ${leaderTitle}'s team`)
+                          : (pt ? `Esconder a equipe de ${leaderTitle}` : `Hide ${leaderTitle}'s team`)}
+                        disabled={!hasTeam}
+                        onClick={() => toggleFoldedTeam(t.key)}
+                        style={{
+                          visibility: hasTeam ? 'visible' : 'hidden',
+                          width: tap ?? 24, height: tap ?? 28, flexShrink: 0, border: 'none', background: 'transparent',
+                          color: 'var(--text-tertiary)', borderRadius: 6, cursor: 'pointer', padding: 0,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <ChevronDown size={14} style={{ transform: storedFold ? 'rotate(-90deg)' : 'none', transition: 'transform 0.15s' }} />
+                      </button>
+                    ) }),
+                    // Folded, the leader's name only unfolds; open, it opens the leader's session.
+                    ...(storedFold && foldable ? {
+                      onOpen: () => toggleFoldedTeam(t.key),
+                      openLabel: pt ? `Mostrar a equipe de ${leaderTitle}` : `Show ${leaderTitle}'s team`,
+                    } : {}),
+                  })}
+                  {showMembers && (
+                    <div data-team-members style={{ display: 'flex', flexDirection: 'column', marginLeft: 13, paddingLeft: 10, borderLeft: '1px solid var(--border)' }}>
+                      {t.members.map(m => renderLine(m))}
+                    </div>
+                  )}
                 </div>
-                )
-              })}
-            </div>
+              )
+            })}
+            {shownLoose.length > 0 && (
+              // Padded by exactly a team card's border + padding (1 + 4), so these rows' time, dot and
+              // trailing slots sit in the same columns as the rows inside the cards above.
+              <div data-team-loose style={{ padding: '0 5px' }}>
+                <div style={sectionHeading}>{pt ? 'Sem líder' : 'No leader'}</div>
+                {/* An orphan says what it is — its role and its project / who started it — with the same
+                    role chip the rest of the list wears, so it can be told apart without opening it. */}
+                {(() => {
+                  const common = commonProjectOf(shownLoose)
+                  return shownLoose.map(r => {
+                  const facts = looseFacts(r, rows, pt, common)
+                  return renderLine(r, {
+                    facts: (
+                      <>
+                        {roleOfRow(r) && <RoleChip role={roleOfRow(r)} pt={pt} />}
+                        {facts && <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{facts}</span>}
+                      </>
+                    ),
+                  })
+                  })
+                })()}
+              </div>
+            )}
+            {shownTeams.length === 0 && shownLoose.length === 0 && (
+              <EmptyReason
+                pt={pt} loading={loading} unsupported={unsupported} unavailable={unavailable}
+                leadersOnly={leadersOnly} searching={narrowedLive}
+                withheld={valueFiltered.filter(r => !active.has(r.state)).length}
+                withheldInTab
+                filterNarrowed={filterCount > 0 && valueFiltered.length < rows.length}
+              />
+            )}
+            {/* What FELL, said discreetly at the foot — the full list lives in Encerradas. */}
+            {fellCount > 0 && !narrowedLive && (
+              <div data-fell-line style={{
+                marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 6, minHeight: tap ?? 30,
+                padding: '0 6px', fontSize: 12, color: 'var(--text-tertiary)',
+              }}>
+                <RotateCcw size={13} style={{ flexShrink: 0, color: 'var(--anthropic-orange)' }} aria-hidden />
+                {/* On a phone the actions stay beside the words: the right edge belongs to the floating Nay button. */}
+                <span style={{ flex: tap ? '0 1 auto' : 1, minWidth: 0 }}>{pt ? `${fellCount} ${fellCount === 1 ? 'caiu' : 'caíram'}` : `${fellCount} fell`}</span>
+                <button type="button" onClick={() => setTab('ended')} style={{ ...linkButton, minHeight: tap, fontWeight: 500 }}>
+                  {pt ? 'Ver' : 'See'}
+                </button>
+                {canAct && (
+                  <button type="button" data-fell-reopen onClick={() => setPicking('reopen')} title={reopenFellSentence} style={{ ...linkButton, minHeight: tap }}>
+                    {pt ? 'Reabrir' : 'Reopen'}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}
 
-        {/*
-          * USER GROUPS — named, manually curated sets ("Saved to later", …), below Pinned and above
-          * the automatic Active/Inactive sections. The header (with "+ Novo grupo") always renders,
-          * even with zero groups, so the control is discoverable rather than appearing only once
-          * something has already been filed.
-          */}
-        <div style={{ marginBottom: 14 }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '6px 2px 6px 9px', minHeight: tap,
-            borderRadius: 8,
-          }}>
-            <button
-              onClick={toggleFoldedGroupsSection}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
-                cursor: 'pointer', fontFamily: 'inherit', padding: 0, minHeight: tap,
-                color: 'var(--text-tertiary)',
-              }}
-            >
-              {foldedGroupsSection ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
-              <span style={{
-                fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
-              }}>
-                {pt ? 'Grupos' : 'Groups'}
-              </span>
-            </button>
-            <button
-              onClick={() => { setNewGroupName(''); setCreatingGroup({}) }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto',
-                padding: tap ? '0 8px' : '3px 7px', minHeight: tap, borderRadius: 7, cursor: 'pointer',
-                border: '1px dashed var(--border-subtle)', background: 'transparent',
-                color: 'var(--text-tertiary)', fontFamily: 'inherit', fontSize: 10.5, fontWeight: 600,
-                whiteSpace: 'nowrap',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.borderColor = 'var(--anthropic-orange)'
-                e.currentTarget.style.color = 'var(--anthropic-orange)'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.borderColor = 'var(--border-subtle)'
-                e.currentTarget.style.color = 'var(--text-tertiary)'
-              }}
-            >
-              <FolderPlus size={12} />
-              {pt ? 'Novo grupo' : 'New group'}
-            </button>
-          </div>
-
-          {/* A HIDDEN folder (and everything inside it) is not drawn; it is listed, with a way back,
-              in the arrange panel's "Pastas ocultas". */}
-          {!foldedGroupsSection && groupRowsShown.filter(g => !g.group.parentId && !groupConcealed(groupsValue, g.group.id)).map(entry => renderGroupBand(entry, 0))}
-        </div>
-
-        {total === 0 ? (
-          <EmptyReason
-            pt={pt} loading={loading} unsupported={unsupported}
-            unavailable={unavailable} searching={query !== ''}
-            withheld={activeOnly ? hidden : 0}
-            filterNarrowed={filterCount > 0 && valueFiltered.length < rows.length}
-          />
-        ) : (
+        {tab === 'groups' && (
           <div
-            // Dropping a GROUPED row anywhere in the automatic sections takes it out of its group —
-            // the drag-out half of moving a session, alongside the row menu's own "Remover do
-            // grupo". A row that was never grouped is unaffected: removing a key from no group is a
-            // no-op (`planRemoveFromGroup`).
+            data-tab-body="groups"
+            style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', padding: '2px 0 4px' }}
+            // A session dropped on the tab's blank space (not on a folder — those stop the drop)
+            // leaves its folder: the drag-out half of moving a session.
             onDragOver={e => { if (hasDragPayload(e)) e.preventDefault() }}
             onDrop={e => {
               const key = readDragPayload(e)
               if (key) removeSessionFromGroup(key)
             }}
           >
-            {bands.map((b, i) => (
-              <SessionBand
-                // The label is not unique — two dimensions can legitimately produce one word, and
-                // an empty band still holds its place in the order.
-                key={`${i}-${b.label}`}
-                bandId={b.id}
-                label={b.label} groups={b.groups} groupBy={groupBy} pinned={pinned}
-                sessionId={sessionId} tap={tap} onPin={flip}
-                onOpen={s => (onOpenRow ? onOpenRow(s) : openSessionRoute(s.id))}
-                {...(rowsById ? { rowsById } : {})}
-                onOpenMenu={openMenu}
-                onFile={(s, x, y) => setLinking({ id: s.id, x, y })}
-                lang={lang}
-                foldedGroups={foldedGroups}
-                onToggleGroupFold={toggleGroupFold}
-                dismissedAttn={dismissedAttn}
-                onDismissAttn={dismissAttn}
-                cardColor={cardColor}
-              />
-            ))}
+            {/* A HIDDEN folder (and everything inside it) is not drawn; it is listed, with a way back,
+                in the arrange panel's "Pastas ocultas". */}
+            {liveRootFolders.map(entry => renderGroupBand(entry, 0))}
+            {endedRootFolders.length > 0 && (
+              <div data-ended-root-folders style={{ marginTop: 4, padding: '4px 0', borderRadius: 8, background: 'var(--bg-elevated)' }}>
+                <button type="button" onClick={() => toggleEnded(ROOT_ENDED_FOLDERS)} aria-expanded={rootEndedOpen}
+                  data-ended-folders="root"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', minHeight: tap, padding: '3px 4px',
+                    background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                    fontSize: 11, fontWeight: 600, color: 'var(--text-tertiary)', textAlign: 'left' }}>
+                  {rootEndedOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                  <span>{pt ? 'Encerradas' : 'Ended'}</span>
+                  <span style={{ marginLeft: 'auto' }}>{endedRootFolders.length} {pt ? (endedRootFolders.length === 1 ? 'pasta' : 'pastas') : (endedRootFolders.length === 1 ? 'folder' : 'folders')}</span>
+                </button>
+                {rootEndedOpen && endedRootFolders.map(entry => renderGroupBand(entry, 0, false, true))}
+              </div>
+            )}
+            {rootFolders.length === 0 && groupsValue.groups.length > 0 && (
+              <p style={{ margin: '8px 8px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+                {pt ? 'Nenhuma pasta corresponde à busca.' : 'No folder matches the search.'}
+              </p>
+            )}
+            <button
+              type="button"
+              data-new-folder
+              onClick={() => { setNewGroupName(''); setCreatingGroup({}) }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, width: '100%', minHeight: tap ?? 30, marginTop: 4,
+                padding: '0 8px', borderRadius: 7, border: 'none', background: 'transparent', cursor: 'pointer',
+                fontFamily: 'inherit', fontSize: 12.5, color: 'var(--text-tertiary)', textAlign: 'left',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--anthropic-orange)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-tertiary)' }}
+            >
+              <FolderPlus size={13} />
+              {pt ? 'Nova pasta' : 'New folder'}
+            </button>
           </div>
         )}
-          </>
+
+        {tab === 'ended' && (
+          <div data-tab-body="ended" style={{ display: 'flex', flexDirection: 'column', padding: '2px 0 4px' }}>
+            {ended.fell.length > 0 && (
+              <div data-ended-section="fell" style={{
+                margin: '0 2px 4px', padding: '0 2px 2px', borderRadius: 8,
+                border: '1px solid color-mix(in srgb, var(--accent-red) 30%, transparent)',
+                background: 'color-mix(in srgb, var(--accent-red) 7%, transparent)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <div style={{ ...sectionHeading, flex: 1, minWidth: 0 }}>{pt ? 'Caíram' : 'Fell'}</div>
+                  {showFell && (
+                    <div data-fell-banner style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, paddingTop: 6, paddingRight: 2 }}>
+                      <button type="button" data-fell-reopen title={reopenFellSentence} aria-label={reopenFellSentence}
+                        onClick={() => setPicking('reopen')} style={{ ...linkButton, minHeight: tap }}>
+                        {pt ? (fellCount === 1 ? 'Reabrir' : `Reabrir as ${fellCount}`) : (fellCount === 1 ? 'Reopen' : `Reopen all ${fellCount}`)}
+                      </button>
+                      <IconButton label={pt ? 'Dispensar aviso de sessões que caíram' : 'Dismiss fallen sessions notice'}
+                        size={tap ?? 30} onClick={dismissFell}>
+                        <X size={14} />
+                      </IconButton>
+                    </div>
+                  )}
+                </div>
+                {ended.fell.map(r => renderEndedLine(r, true))}
+              </div>
+            )}
+            {ended.sleeping.length > 0 && (
+              <div data-ended-section="sleeping">
+                <div style={sectionHeading}>{pt ? 'Dormindo' : 'Sleeping'}</div>
+                {ended.sleeping.map(r => renderEndedLine(r))}
+              </div>
+            )}
+            {(ended.today.length > 0 || ended.older.length > 0) && (
+              <div data-ended-section="finished">
+                {ended.today.length > 0 && <div style={sectionHeading}>{pt ? 'Finalizadas hoje' : 'Finished today'}</div>}
+                {ended.today.map(r => renderEndedLine(r))}
+                {showAllEnded && ended.older.length > 0 && (
+                  <>
+                    <div style={sectionHeading}>{pt ? 'Antes de hoje' : 'Before today'}</div>
+                    {ended.older.map(r => renderEndedLine(r))}
+                  </>
+                )}
+                {ended.older.length > 0 && (
+                  <button type="button" data-ended-all onClick={() => setShowAllEnded(v => !v)}
+                    aria-expanded={showAllEnded}
+                    style={{ ...linkButton, display: 'flex', width: '100%', padding: '0 8px', minHeight: tap ?? 30, textAlign: 'left' }}>
+                    {showAllEnded
+                      ? (pt ? 'Mostrar só as de hoje' : 'Show only today')
+                      : (pt ? `Ver todas as finalizadas (${ended.older.length + ended.today.length})` : `See all finished (${ended.older.length + ended.today.length})`)}
+                  </button>
+                )}
+              </div>
+            )}
+            {ended.fell.length + ended.sleeping.length + ended.today.length + ended.older.length === 0 && (
+              <p style={{ margin: 0, padding: '14px 10px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+                {loading ? (pt ? 'Lendo as sessões desta máquina…' : 'Reading this machine’s sessions…')
+                  : narrowedLive ? (pt ? 'Nenhuma sessão encerrada corresponde à busca.' : 'No ended session matches the search.')
+                  : (pt ? 'Nada encerrado.' : 'Nothing ended.')}
+              </p>
+            )}
+          </div>
         )}
       </div>
 
@@ -1983,7 +2076,18 @@ export function SessionsAside({
               }] : []),
               ...taskMenuEntries(rows.find(r => r.id === menu.id)?.task, pt),
               ...groupMenuExtras(rows.find(r => r.id === menu.id), groupOfKey, pt),
+              // Pinning from the menu — the only door on a phone, where only a leader line carries a pin.
+              ...(() => {
+                const r = rows.find(x => x.id === menu.id)
+                if (!r) return []
+                const on = pinned.has(pinKeyOf(r))
+                return [{ action: PIN_TOGGLE, label: on ? (pt ? 'Desafixar' : 'Unpin') : (pt ? 'Fixar no topo' : 'Pin to the top'), enabled: true }]
+              })(),
               ...roleExtras(rows.find(r => r.id === menu.id), pt),
+              ...(() => {
+                const r = rows.find(x => x.id === menu.id)
+                return teamMenuExtras(r, r ? isLeaderRow(r) : false, teamsAll.teams.map(t => t.leader), pt)
+              })(),
               ...notifyExtras(rows.find(r => r.id === menu.id), mutedKeys, pt),
             ],
           ), pt, !isMobile)}
@@ -2020,6 +2124,23 @@ export function SessionsAside({
           onClose={() => setGroupPicker(null)}
         />
       )}
+
+      {/* "Mover para a equipe de…" — the live leaders (never the session itself nor the leader it is
+          already with), anchored where the menu was; the server applies the team rule. */}
+      {teamPicker && (() => {
+        const target = rows.find(r => r.id === teamPicker.id)
+        return (
+          <SessionRowMenu
+            x={teamPicker.x} y={teamPicker.y}
+            entries={target ? leaderPickerEntries(target, teamsAll.teams.map(t => t.leader), pt) : []}
+            onPick={leaderId => {
+              setTeamPicker(null)
+              void moveSessionTeam(teamPicker.id, leaderId, lang).then(out => { setNotice(out.message); if (out.ok) nudgeFleet() })
+            }}
+            onClose={() => setTeamPicker(null)}
+          />
+        )
+      })()}
 
       {/* A group's own "⋮" — rename / delete / reorder. Reuses `SessionRowMenu`, anchored under the
           button rather than at a pointer position (there is no right-click gesture on a heading).
@@ -2397,6 +2518,21 @@ export function SessionsAside({
         onCancel={() => setBroadcastReopenAsk(null)}
       />
       <ConfirmModal
+        open={cleanupAsk !== null}
+        title={cleanupAsk?.action === 'forget' ? (pt ? 'Remover da lista?' : 'Remove from list?') : (pt ? 'Encerrar sessão?' : 'End session?')}
+        message={cleanupAsk?.action === 'forget'
+          ? (pt ? 'A conversa será preservada. Se o processo estiver rodando, ele continuará.' : 'The conversation is preserved. A running process will keep running.')
+          : (pt ? 'O processo desta sessão e seus filhos serão encerrados.' : 'This session’s process and its children will be stopped.')}
+        confirmLabel={cleanupAsk?.action === 'forget' ? (pt ? 'Remover da lista' : 'Remove from list') : (pt ? 'Encerrar' : 'End')}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        onConfirm={() => {
+          const ask = cleanupAsk
+          setCleanupAsk(null)
+          if (ask && act) void act(ask).then(out => { setNotice(out.message); if (out.ok) nudgeFleet() })
+        }}
+        onCancel={() => setCleanupAsk(null)}
+      />
+      <ConfirmModal
         open={deletingGroup !== null}
         title={pt ? 'Excluir grupo' : 'Delete group'}
         message={deletingGroup ? deleteGroupMessage(pt, displayName(deletingGroup.name, hiddenGroups.has(deletingGroup.id)), childCount) : ''}
@@ -2556,8 +2692,10 @@ function SessionBand({
  * since the real one already sits in the header this list scrolls under.
  */
 function EmptyReason({
-  pt, loading, unsupported, unavailable, searching, withheld, filterNarrowed, leadersOnly = false,
+  pt, loading, unsupported, unavailable, searching, withheld, filterNarrowed, leadersOnly = false, withheldInTab = false,
 }: {
+  /** The withheld rows are in the Encerradas tab, not behind a switch — say so instead. */
+  withheldInTab?: boolean
   pt: boolean; loading: boolean; unsupported: boolean; unavailable?: string; searching: boolean
   leadersOnly?: boolean
   /** How many rows the "active only" switch (now in the shared header) is holding back. */
@@ -2580,6 +2718,12 @@ function EmptyReason({
           ? (pt ? 'Nenhum líder ativo' : 'No active leaders')
         : filterNarrowed
           ? (pt ? 'Nenhuma sessão corresponde aos filtros no topo.' : 'No session matches the filters above.')
+          : searching
+            ? (pt ? 'Nenhuma sessão corresponde à busca.' : 'No session matches that search.')
+          : withheld > 0 && withheldInTab
+            ? (pt
+                ? `Nada rodando agora. ${withheld} ${withheld === 1 ? 'conversa está' : 'conversas estão'} em Encerradas.`
+                : `Nothing is running right now. ${withheld} ${withheld === 1 ? 'conversation is' : 'conversations are'} in Ended.`)
           : withheld > 0
             ? (pt
                 ? `Nada rodando agora. ${withheld} ${withheld === 1 ? 'conversa está' : 'conversas estão'} escondida${withheld === 1 ? '' : 's'} por "Só ativas".`
@@ -2599,7 +2743,7 @@ function EmptyReason({
 }
 
 
-export function SessionRow({ session, selected, compact = false, pinned, tap, onPin, onOpen, onMoveBy, verbs, onOpenMenu, onFile, lang, cardColor }: {
+export function SessionRow({ session, selected, compact = false, pinned, tap, onPin, onOpen, onMoveBy, verbs, onOpenMenu, onFile, onReopen, reopenVerb, lang, cardColor }: {
   session: ControlSession; selected: boolean
   compact?: boolean
   /** Minimum row height on mobile — 44px, and undefined on desktop. */
@@ -2609,6 +2753,8 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
   onOpen: () => void
   /** Reorder this pinned row by `delta` places. Only ever passed for a row in the Pinned band. */
   onMoveBy?: (delta: number) => void
+  onReopen?: () => void
+  reopenVerb?: RowVerb
   /** This row's own verbs, for the context menu (Task 6). Absent where the caller has none to offer. */
   verbs?: RowVerb[]
   /** Opens the context menu at a point, carrying the verbs it was opened with. */
@@ -2621,7 +2767,8 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
 }) {
   const mutedKeys = useMutedKeys()
   const roleKey = sessionIdentityKey(session)
-  const role = useSessionRole(roleKey)
+  const storedRole = useSessionRole(roleKey)
+  const role = storedRole ?? (hasLeaderTitle(session.title) ? 'leader' : undefined)
   const muteWorkers = useMuteWorkers()
   useEffect(() => { registerSessionRoleAlias(session.id, roleKey) }, [session.id, roleKey])
   const wants = sessionNotify(session)
@@ -2635,14 +2782,40 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
   const clearLongPress = () => {
     if (longPress.current !== null) { clearTimeout(longPress.current); longPress.current = null }
   }
-  return (
-    <button
-      onClick={onOpen}
+  const pinControl = onPin && (
+    <button type="button"
+      tabIndex={0}
+      aria-label={pinned ? (lang === 'en' ? 'Unpin' : 'Desafixar') : (lang === 'en' ? 'Pin' : 'Fixar')}
+      title={pinned ? (lang === 'en' ? 'Unpin' : 'Desafixar') : (lang === 'en' ? 'Pin' : 'Fixar')}
+      onClick={e => { e.stopPropagation(); onPin() }}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onPin() }
+      }}
       style={{
-        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+        border: 'none', background: 'transparent', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        width: tap ?? 20, height: tap ?? 20, borderRadius: 6, cursor: 'pointer',
+        color: pinned ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
+        // A pin nobody set is faint until the row is hovered: a column of pin glyphs down an
+        // unpinned list is noise beside the titles they sit next to.
+        // There is no hover on a touch screen, so the pin is always visible there. On desktop
+        // it appears with the row — see `.ag-row-pin` in index.css.
+        opacity: pinned || tap ? 1 : 0,
+        transition: 'opacity 0.15s',
+      }}
+      className="ag-row-pin"
+    >
+      {pinned ? <PinOff size={12} /> : <Pin size={12} />}
+    </button>
+  )
+  return (
+    <div
+      data-session-row
+      data-sleeping-pin={compact && pinned && onReopen ? true : undefined}
+      style={{
+        display: 'flex', flexWrap: compact ? 'nowrap' : 'wrap', alignItems: 'center', gap: compact ? (tap ? 2 : 0) : 8, fontSize: compact ? 13 : undefined, width: '100%', boxSizing: 'border-box',
         // Left padding is deliberately wider than the right: a live row carries a state edge on its left
         // and the text needs air beside it (the row's own dot used to provide it).
-        padding: compact ? '6px 8px' : '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: tap,
+        padding: compact ? (pinned && !tap ? '6px' : '6px 8px') : '9px 9px 9px 18px', borderRadius: 9, border: 'none', textAlign: 'left', minHeight: compact ? 56 : tap,
         // SELECTED is NOT orange. Orange is already the state colour for a row that needs a person
         // (`STATE_COLOR.waiting`), so the selected row wore the same tint as the alarm and the two
         // became one signal: selecting a working session made it look like it was asking for you.
@@ -2692,20 +2865,35 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       aria-current={selected ? 'true' : undefined}
       title={session.model ? `${session.title}\n${session.model}` : session.title}
     >
+      {compact && pinned && pinControl}
+      <button type="button" onClick={onOpen} data-session-open
+        style={{ flex: compact ? '1 1 0' : '1 1 130px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, padding: 0,
+          border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
       {reopening && (
         <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
           <AgentisticsLoader size={12} label={reopeningLabel(lang !== 'en')} />
           {reopeningLabel(lang !== 'en')}
         </span>
       )}
-      {compact ? <CompactSessionFacts session={session} /> : <SessionFacts
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', minWidth: 0 }}>
+      {compact ? <CompactSessionFacts showHarness={!pinned} session={session} titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined} /> : <SessionFacts
+        titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined}
         session={session}
         selected={selected}
         {...(lang ? { lang } : {})}
         {...(cardStyle.stateTextColor ? { metaColor: cardStyle.stateTextColor } : {})}
       />}
+      </span>
+      </button>
+      {onReopen && reopenVerb && (
+        <IconButton label={!reopenVerb.enabled && reopenVerb.reason ? reopenVerb.reason : (lang === 'en' ? 'Reopen' : 'Reabrir')} size={tap ?? 22}
+          disabled={!reopenVerb.enabled || reopening} color="var(--text-primary)"
+          onClick={e => { e.stopPropagation(); if (reopenVerb.enabled && !reopening) onReopen() }}>
+          <RotateCcw size={14} />
+        </IconButton>
+      )}
       {compact && verbs && verbs.length > 0 && onOpenMenu && (
-        <span role="button" tabIndex={0}
+        <button type="button" tabIndex={0}
           aria-label={lang === 'en' ? `Options for ${session.title}` : `Opções de ${session.title}`}
           aria-haspopup="menu"
           onClick={e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); onOpenMenu(r.left, r.bottom, verbs) }}
@@ -2715,15 +2903,12 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
               const r = e.currentTarget.getBoundingClientRect(); onOpenMenu(r.left, r.bottom, verbs)
             }
           }}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: tap ?? 22, height: tap ?? 22 }}
-        ><MoreVertical size={13} /></span>
+          style={{ border: 'none', background: 'transparent', color: 'inherit', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: tap ?? 22, height: tap ?? 22 }}
+        ><MoreVertical size={13} /></button>
       )}
-      {role && <RoleChip role={role} pt={lang === 'pt'} />}
       {/* The assistant, NAMED. It was a 5px dot, which carries the fact in colour alone — and a
           colour is not a name. The model sits with it on the meta line below. */}
-      {/* The pin lives on the row rather than in a menu: it is a one-click decision about the row
-          you are looking at. `role="button"` on a span, because a <button> inside a <button> is
-          invalid HTML and browsers resolve it by dropping one of them. */}
+      {/* Row actions are separate buttons beside the session-opening button. */}
       {goTo && (() => {
         // A SEPARATE control: the row click keeps doing what this mount does with it. Always
         // visible (unlike the pin): it is the one way out of the dock to the workspace, and a
@@ -2732,15 +2917,14 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         const hint = lang === 'en' ? 'Open this session in the Sessions workspace' : 'Abrir esta sessão na tela de Sessões'
         const go = (e: { stopPropagation(): void; preventDefault(): void }) => { e.preventDefault(); e.stopPropagation(); goTo(session.id) }
         return (
-          <span
-            role="button"
+          <button type="button"
             tabIndex={0}
             aria-label={label}
             title={hint}
             onClick={go}
             onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') go(e) }}
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              border: 'none', background: 'transparent', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
               // 44px PAINTED on touch (`tap` is only given there): the row has the height, and a
               // projected `.ag-tap-icon` box would reach into the pin beside it.
               width: tap ? 44 : 22, height: tap ? 44 : 22, borderRadius: 6, cursor: 'pointer', color: 'var(--text-tertiary)',
@@ -2749,7 +2933,7 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-tertiary)' }}
           >
             <SquareArrowOutUpRight size={13} />
-          </span>
+          </button>
         )
       })()}
       {mutedKeys.includes(pinKeyOf(session)) && (
@@ -2767,36 +2951,8 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
       {muteWorkers && role === 'worker' && sessionRunning(session) && !mutedKeys.includes(pinKeyOf(session)) && (
         <span role="img" aria-label={lang === 'en' ? 'Workers muted' : 'Workers silenciados'} title={lang === 'en' ? 'Workers muted' : 'Workers silenciados'} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: 18, height: 20, color: 'var(--text-tertiary)' }}><BellOff size={12} /></span>
       )}
-      {goTo && !mutedKeys.includes(pinKeyOf(session)) && !(muteWorkers && role === 'worker' && sessionRunning(session)) && (
-        <span aria-hidden="true" data-session-mute-slot style={{ width: 18, height: 20, flexShrink: 0 }} />
-      )}
-      {onPin && (
-        <span
-          role="button"
-          tabIndex={0}
-          aria-label={pinned ? 'Unpin' : 'Pin'}
-          title={pinned ? 'Unpin' : 'Pin'}
-          onClick={e => { e.stopPropagation(); onPin() }}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onPin() }
-          }}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            width: 20, height: 20, borderRadius: 6, cursor: 'pointer',
-            color: pinned ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
-            // A pin nobody set is faint until the row is hovered: a column of pin glyphs down an
-            // unpinned list is noise beside the titles they sit next to.
-            // There is no hover on a touch screen, so the pin is always visible there. On desktop
-            // it appears with the row — see `.ag-row-pin` in index.css.
-            opacity: pinned || tap ? 1 : 0,
-            transition: 'opacity 0.15s',
-          }}
-          className="ag-row-pin"
-        >
-          {pinned ? <Pin size={12} /> : <PinOff size={12} />}
-        </span>
-      )}
-    </button>
+      {!(compact && pinned) && pinControl}
+    </div>
   )
 }
 

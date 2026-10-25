@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -116,6 +116,77 @@ describe('followFork — two transcript files', () => {
     expect(await followFork(oldP)).toBe(newP)
     rmSync(newP)
     expect(await followFork(oldP)).toBe(oldP)
+  })
+})
+
+describe('fork refusal diagnostics', () => {
+  test.each([undefined, '0'])('CLI readers stay silent with SERVE_STATIC=%s', async serveStatic => {
+    const saved = process.env.SERVE_STATIC
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      if (serveStatic === undefined) delete process.env.SERVE_STATIC
+      else process.env.SERVE_STATIC = serveStatic
+      const oldP = write(`${OLD_ID}.jsonl`, oldLines, 1000)
+      const newP = write(`${NEW_ID}.jsonl`, newLines, 2000)
+      const foreign = new Set([NEW_ID])
+      expect(await followFork(oldP, { foreign })).toBe(oldP)
+      expect(warn).not.toHaveBeenCalled()
+
+      // Silencing a CLI read must not consume the server's once-per-pair diagnostic.
+      process.env.SERVE_STATIC = '1'
+      expect(await followFork(oldP, { foreign })).toBe(oldP)
+      expect(await followFork(oldP, { foreign })).toBe(oldP)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(`[sessions] refused to follow ${OLD_ID} into ${NEW_ID}: another session is linked to that conversation`)
+      expect(await followFork(oldP)).toBe(newP)
+    } finally {
+      warn.mockRestore()
+      if (saved === undefined) delete process.env.SERVE_STATIC
+      else process.env.SERVE_STATIC = saved
+    }
+  })
+
+  test('the server remembers refused pairs after more than 512 distinct collisions', async () => {
+    const saved = process.env.SERVE_STATIC
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    const fs = {
+      readdir: async () => ['old.jsonl', 'foreign.jsonl'],
+      stat: async (p: string) => ({ mtimeMs: p.endsWith('/old.jsonl') ? 1 : 2, size: 100 }),
+      readFile: async () => oldLines.join('\n'),
+    }
+    try {
+      process.env.SERVE_STATIC = '1'
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < 600; i++) {
+          const from = `/project-${i}/old.jsonl`
+          expect(await followFork(from, { fs, foreign: new Set(['foreign']) })).toBe(from)
+        }
+      }
+      expect(warn).toHaveBeenCalledTimes(600)
+    } finally {
+      warn.mockRestore()
+      if (saved === undefined) delete process.env.SERVE_STATIC
+      else process.env.SERVE_STATIC = saved
+    }
+  })
+
+  test('the server logs a remembered successor refusal only once per pair', async () => {
+    const saved = process.env.SERVE_STATIC
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      process.env.SERVE_STATIC = '1'
+      const oldP = write(`${OLD_ID}.jsonl`, oldLines, 1000)
+      const newP = write(`${NEW_ID}.jsonl`, newLines, 2000)
+      expect(await followFork(oldP)).toBe(newP)
+      const foreign = new Set([NEW_ID])
+      expect(await followFork(oldP, { foreign })).toBe(oldP)
+      expect(await followFork(oldP, { foreign })).toBe(oldP)
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+      if (saved === undefined) delete process.env.SERVE_STATIC
+      else process.env.SERVE_STATIC = saved
+    }
   })
 })
 

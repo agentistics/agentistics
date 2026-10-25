@@ -2111,10 +2111,11 @@ dropped by the 60 s idle timeout at 120 s, 180 s, 240 s — "sometimes the app n
   build stops WAITING, not WORKING — the walk lands in git.ts's memo/disk cache, `deferredRepos` names
   the paths, and a rebuild is requested when the late ones settle. A hard timeout would discard the
   half-done walk and pay it again every build.
-- **A transcript is folded in 1 MB slices with a yield between them** (`foldYielding`,
-  transcript-state.ts). One synchronous fold of a 40 MB file held the event loop ~1 s, which delayed
-  even the quick payload and `/api/health`. Slicing is the append path's own resumability, so the
-  numbers cannot change.
+- **Transcript CPU work yields between records** (`cooperative-work.ts`, `foldClaudeParseYielding`):
+  Claude's main fold, subagent summaries and Codex rollout reads use an 8 ms scheduling budget,
+  with a `setImmediate` turn even for small files. The synchronous and yielding entry points drain
+  the same generator, preserving counters and last-wins usage. One oversized record and the final
+  reduction still run synchronously; validate health latency with real-size data after changes.
 - **The boot build BROADCASTS its progress** (`startFirstBuild`). It used to run with a no-op progress
   function, so a `/api/data-stream` that subscribed to it saw empty bars for the whole build.
 - **Client** (`useData` + `lib/startupLoad.ts`): every request the boot waits on has a deadline; a
@@ -2124,6 +2125,14 @@ dropped by the 60 s idle timeout at 120 s, 180 s, 240 s — "sometimes the app n
   502/503/504 included, they are a proxy that cannot reach the server — `timeout`, `server`,
   `incompatible`), retrying on its own except for 401/403. The boot screen watches itself
   (`useBootWatchdog`): "slow" while `/api/health` answers, "can't reach" when it doesn't.
+- **The boot right after an in-app UPDATE is its own case** (`lib/finaleGate.ts`). The page reloads
+  seconds after the new server first answers, i.e. inside its first build (~11 s, a probe can miss
+  its deadline), and a real payload (9 MB) is too big for the localStorage cache, so it boots with
+  nothing. For `POST_UPDATE_GRACE_MS` a missed probe or a 5xx/timeout/unreachable first load keeps
+  the loader (with a line saying why) instead of "Não foi possível falar com o agentistics" / the
+  "not answering" strip (`bootWatchdog`/`holdLoadError`); and while the finale is on screen the app
+  beneath it computes nothing, renders nothing and fetches only the slim payload (`afterFinale`) —
+  its first work there was the stutter at the end of every update.
 - **Measure with `scripts/perf/startup.ts`** (`--empty`, `--slow-git <ms>`, `--budget`); CI enforces
   `startupFirstScreenMs` (2 s after health, cold and warm) and `startupFullDataMs`.
 

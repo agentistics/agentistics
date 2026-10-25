@@ -15,12 +15,13 @@
  *     ambiguous; a subtask with no task is resolved board-wide; a group MEMBER is filed on its GROUP
  *     (a member can never hold a session — `planAttach`'s `subtask_in_group`).
  *  2. The plan carries the task's REAL title, for the row's `task` field.
- *  3. cwd: explicit, else the caller's — for a worker on a task with a `repo`, only when that cwd's
- *     repository is the task's; never guessed, the refusal lists known checkouts of the right one.
+ *  3. cwd: explicit, else the caller's — a worker on an explicitly named task with a `repo` must
+ *     use that repository; an inherited task mismatch warns instead. Never guessed, the refusal
+ *     lists known checkouts of the right one.
  *  4. A worker in a repository's MAIN checkout while another session is live there is refused —
  *     the shared-checkout corruption CLAUDE.md § "Concurrent work" records. `sharedCwd` overrides.
  *     Leaders are exempt from 3 and 4: their home (the workspace) is not a repository.
- *  5. Folder: explicit > the predecessor's (hand-off) > where the task's work already is (newest
+ *  5. Folder: explicit > the predecessor's (hand-off) > verified parent's > newest task work (newest
  *     session of the same subtask, else of the task, skipping finished folders) > the caller's own
  *     folder when the caller is on the same task > none, with a warning. Nothing is stored on the
  *     task: moving sessions moves the default.
@@ -61,6 +62,8 @@ export interface FilingInput {
   role?: 'worker' | 'leader' | undefined
   /** Task id or exact title. */
   taskRef?: string
+  harness?: string | undefined
+  callerRole?: 'worker' | 'leader' | undefined
   /** Subtask id or exact title. */
   subtaskRef?: string
   /** Explicit `--folder`: id, exact name or "Parent/Child". */
@@ -75,15 +78,16 @@ export interface FilingInput {
   caller?: ManagedSession
   /** The predecessor, for a leader hand-off. */
   handoffOf?: ManagedSession
+  /** CONTA.TROCA v2: `handoffOf` is a row being REPLACED on another harness, not a leader hand-off — the role stays `role`. */
+  handoffKeepsRole?: boolean
   book: Pick<TaskBook, 'tasks' | 'subtasks'>
   /** The registry — where the task's work already sits, and known checkouts. */
   rows: readonly ManagedSession[]
   groups: SessionUserGroupsValue
   repoOf: (dir: string) => FilingRepo | null
   /**
-   * Running sessions already in that directory, NOT counting `excludeId` — the planner passes the
-   * calling session's own id, so a worker spawning from the main checkout it lives in is not refused
-   * for sharing it with itself.
+   * Running sessions already in that directory. A new worker counts its parent too: the
+   * child is a second session even when it starts in the caller's own checkout.
    *
    * Path contract: every path the planner receives (`cwd`, `callerCwd`, the predecessor's and the
    * rows') is expected absolute and canonical (realpath'd) by the CALLER; the planner only trims
@@ -98,14 +102,14 @@ export type FolderSource = 'explicit' | 'predecessor' | 'task' | 'parent' | 'non
 export type CwdSource = 'explicit' | 'caller' | 'predecessor'
 
 /** Codes, not sentences: the surfaces (CLI, route) render them in the reader's language. */
-export type FilingWarning = 'no_folder' | 'subtask_member_filed_on_group' | 'shared_checkout_override'
+export type FilingWarning = 'no_folder' | 'subtask_member_filed_on_group' | 'shared_checkout_override' | 'inherited_task_repo_mismatch'
 
 export type FilingRefusal =
   | 'no_such_task' | 'ambiguous_task'
   | 'no_such_subtask' | 'ambiguous_subtask' | 'subtask_needs_task'
   | 'no_such_folder' | 'ambiguous_folder'
   | 'cwd_missing' | 'cwd_wrong_repo' | 'cwd_needed' | 'cwd_shared_checkout'
-  | 'subtask_refused' | 'board_unreadable'
+  | 'subtask_refused' | 'board_unreadable' | 'handoff_required'
 
 export type FilingPlan = {
   ok: true
@@ -211,6 +215,16 @@ function resolveFiling(input: FilingInput, taskRef: string | undefined, subtaskR
 /** What identifies a repository: its short `org/repo` (lowercase) and, when a REMOTE said it, the host too. */
 interface RepoId { short: string; full?: string }
 
+/** Board repos are usually short `org/repo`; only a real remote carries a host. */
+function taskRepoId(repo: string | undefined): RepoId | undefined {
+  const value = clean(repo)
+  if (!value) return undefined
+  const isRemote = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value)
+    || /^[^/@]+@[^/:]+:/.test(value)
+    || value.split('/')[0]!.includes('.')
+  return isRemote ? repoId(value) : { short: value.toLowerCase() }
+}
+
 function repoId(remote: string | undefined): RepoId | undefined {
   if (!remote) return undefined
   const full = (normalizeGitRemote(remote) || remote).toLowerCase()
@@ -233,14 +247,15 @@ const exists = (f: FilingRepo | null): f is FilingRepo => f !== null && !f.missi
 /**
  * Whether a directory's repository IS the task's. Hosts are compared when BOTH sides carry one
  * (github.com/o/r is not gitlab.com/o/r); a host-less side (`ResolvedRepoFacts.repo`) falls back to
- * `org/repo`. A repository with no remote is only its folder name — one segment — and is accepted
- * when that is the task repo's last segment.
+ * the repository name, allowing an owner transfer. A repository with no remote is only its folder
+ * name — one segment — and is accepted when that is the task repo's last segment.
  */
 function sameRepo(facts: FilingRepo, want: RepoId): boolean {
   const have = idOfFacts(facts)
   if (!have) return false
-  if (have.full && want.full) return have.full === want.full
+  if (have.full && want.full && have.full.split('/')[0] !== want.full.split('/')[0]) return false
   if (have.short === want.short) return true
+  if (have.short.includes('/') && want.short.includes('/')) return have.short.split('/').pop() === want.short.split('/').pop()
   return !facts.remote && !have.short.includes('/') && have.short === want.short.split('/').pop()
 }
 
@@ -261,7 +276,7 @@ function checkoutsFor(input: FilingInput, want: RepoId): string[] {
   return [...out].slice(0, 10)
 }
 
-function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, task: Task | undefined): { cwd: string; source: CwdSource; shared?: true } | Refusal {
+function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, task: Task | undefined, inheritedTask: boolean): { cwd: string; source: CwdSource; shared?: true; inheritedRepoMismatch?: true } | Refusal {
   const explicit = clean(input.cwd)
   const fromPred = !explicit && input.handoffOf ? input.handoffOf.cwd : undefined
   const cwd = explicit ?? fromPred ?? input.callerCwd
@@ -270,22 +285,24 @@ function resolveCwd(input: FilingInput, role: 'worker' | 'leader' | undefined, t
   if (!exists(facts)) return refuse('cwd_missing', `the directory ${cwd} does not exist`)
   if (role !== 'worker') return { cwd, source }
 
-  const want = repoId(task?.repo)
-  if (want && !sameRepo(facts, want)) {
+  const want = taskRepoId(task?.repo)
+  const mismatch = want !== undefined && !sameRepo(facts, want)
+  if (want && mismatch && !inheritedTask) {
     const candidates = checkoutsFor(input, want)
     return source === 'explicit'
       ? refuse('cwd_wrong_repo', `${cwd} is not a checkout of ${task!.repo} (task ${task!.id}) — use one of its worktrees (CLI: --cwd)`, candidates)
       : refuse('cwd_needed', `task ${task!.id} belongs to ${task!.repo} and ${cwd} is outside it — start the session in one of its worktrees (CLI: --cwd)`, candidates)
   }
+  const inheritedRepoMismatch = mismatch ? true : undefined
   const inRepo = keyOfFacts(facts) !== undefined
-  if (inRepo && !facts.worktree && input.liveInCwd(cwd, input.caller?.id) >= 1) {
+  if (inRepo && !facts.worktree && input.liveInCwd(cwd) >= 1) {
     if (!input.sharedCwd) {
       return refuse('cwd_shared_checkout',
         `${cwd} is a main checkout another live session already works in — use a worktree (git worktree add .claude/worktrees/<name> -b <branch>) or allow sharing (CLI: --shared-cwd)`)
     }
-    return { cwd, source, shared: true }
+    return { cwd, source, shared: true, inheritedRepoMismatch }
   }
-  return { cwd, source }
+  return { cwd, source, inheritedRepoMismatch }
 }
 
 // ── folder ──────────────────────────────────────────────────────────────────────────────────────
@@ -319,6 +336,11 @@ function resolveFolder(input: FilingInput, filing: Filing): { group?: SessionUse
   if (input.handoffOf) {
     const g = folderOf(input.groups, input.handoffOf)
     if (g) return { group: g, source: 'predecessor' }
+  }
+  // The verified parent's operational folder wins over unrelated recent task work.
+  if (input.caller) {
+    const g = folderOf(input.groups, input.caller)
+    if (g) return { group: g, source: 'parent' }
   }
   const taskId = filing.task?.id
   if (taskId) {
@@ -354,13 +376,13 @@ function fromPredecessor(r: Refusal, pred: ManagedSession | undefined, task: boo
 
 export function planFiling(input: FilingInput): FilingPlan {
   const pred = input.handoffOf
-  const role: 'worker' | 'leader' | undefined = pred ? 'leader' : input.role
+  const role: 'worker' | 'leader' | undefined = pred && !input.handoffKeepsRole ? 'leader' : input.role
   const explicitTask = clean(input.taskRef)
   const explicitSub = clean(input.subtaskRef)
   // A hand-off inherits the predecessor's filing unless one was named outright. A SUBTASK named
   // alone still inherits the predecessor's task, so it resolves inside it rather than board-wide
   // (where a title like "Planner" is on several tasks and refuses as ambiguous).
-  const inheritedTask = !explicitTask && pred ? clean(pred.taskId) : undefined
+  const inheritedTask = !explicitTask ? clean(pred?.taskId ?? input.caller?.taskId) : undefined
   const inheritedSub = !explicitSub && !explicitTask && pred ? clean(pred.subtaskId) : undefined
   const taskRef = explicitTask ?? inheritedTask
   const subtaskRef = explicitSub ?? inheritedSub
@@ -372,7 +394,11 @@ export function planFiling(input: FilingInput): FilingPlan {
   }
   if ('ok' in filing) return fromPredecessor(filing, pred, inheritedTask !== undefined, inheritedSub !== undefined)
 
-  const cwd = resolveCwd(input, role, filing.task)
+  if (!pred && role === 'leader' && input.callerRole === 'leader' && input.caller && filing.task?.id && filing.task.id === input.caller.taskId) {
+    return refuse('handoff_required', `leader ${input.caller.label ?? input.caller.id} already leads this task; run agentop session ${input.harness ?? input.caller.harness} --handoff from inside that leader`)
+  }
+
+  const cwd = resolveCwd(input, role, filing.task, inheritedTask !== undefined && filing.task?.id === inheritedTask)
   if ('ok' in cwd) return cwd
 
   const folder = resolveFolder(input, filing)
@@ -381,6 +407,7 @@ export function planFiling(input: FilingInput): FilingPlan {
   const warnings: FilingWarning[] = []
   if (filing.memberOf) warnings.push('subtask_member_filed_on_group')
   if (cwd.shared) warnings.push('shared_checkout_override')
+  if (cwd.inheritedRepoMismatch) warnings.push('inherited_task_repo_mismatch')
   if (folder.source === 'none') warnings.push('no_folder')
 
   return {

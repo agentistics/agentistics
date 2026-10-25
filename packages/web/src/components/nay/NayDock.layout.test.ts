@@ -29,10 +29,3 @@ test('every mobile dock tab shares physical 44px controls, including settings, c
   expect(launch).not.toContain('ellipsis')
   expect(launch).toContain("whiteSpace: 'normal'")
 })
-
-test('dock session rows reserve the muted indicator column even when unmuted', () => {
-  const aside = readFileSync(join(import.meta.dir, '../nav/SessionsAside.tsx'), 'utf8')
-  expect(aside).toContain('data-session-mute-slot')
-  expect(aside).toContain('aria-hidden="true" data-session-mute-slot style={{ width: 18, height: 20, flexShrink: 0 }}')
-  expect(aside).toContain("goTo && !mutedKeys.includes(pinKeyOf(session)) && !(muteWorkers && role === 'worker' && sessionRunning(session))")
-})

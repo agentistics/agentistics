@@ -22,6 +22,7 @@ import type { Task, TaskBook } from './task-model'
 export interface SpawnFilingRequest {
   /** Absent = a person / unknown caller (see `FilingInput.role`). */
   role?: 'worker' | 'leader' | undefined
+  harness?: string | undefined
   taskRef?: string | undefined
   subtaskRef?: string | undefined
   folderRef?: string | undefined
@@ -32,6 +33,8 @@ export interface SpawnFilingRequest {
   callerSessionId?: string | undefined
   /** The predecessor's id, for a leader hand-off. */
   handoffOf?: string | undefined
+  /** CONTA.TROCA v2: the predecessor is replaced on another harness; its role is NOT promoted to leader. */
+  handoffKeepsRole?: boolean | undefined
   /** Registry ids of sessions that are running now; `undefined` = ask the backend. */
   liveIds?: ReadonlySet<string> | undefined
   /**
@@ -73,7 +76,8 @@ async function defaultLiveIds(): Promise<ReadonlySet<string>> {
 
 export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan> {
   const rows = o.rows ?? await readRegistry()
-  const wantsBoard = !!(o.taskRef?.trim() || o.subtaskRef?.trim() || o.handoffOf)
+  const caller = o.callerSessionId ? rows.find(r => r.id === o.callerSessionId) : undefined
+  const wantsBoard = !!(o.taskRef?.trim() || o.subtaskRef?.trim() || o.handoffOf || caller?.taskId)
   let book: Pick<TaskBook, 'tasks' | 'subtasks'> = o.book ?? (wantsBoard ? await import('./task-source').then(m => m.loadTaskBoard()).then(w => w.book) : { tasks: [], subtasks: [] })
   if (o.pendingTask) {
     const now = new Date().toISOString()
@@ -81,8 +85,9 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
     book = { tasks: [...book.tasks, synthetic], subtasks: book.subtasks }
   }
   const groups = o.groups ?? { groups: ((await readPreferences().catch(() => null))?.sessionGroups?.groups ?? []).map(g => ({ ...g, sessionKeys: [...g.sessionKeys] })) }
-  const caller = o.callerSessionId ? rows.find(r => r.id === o.callerSessionId) : undefined
   const handoffRow = o.handoffOf ? rows.find(r => r.id === o.handoffOf) : undefined
+  const callerRole = !o.handoffOf && o.role === 'leader' && caller
+    ? await import('./session-roles').then(m => m.storedRoleFor([caller.conversationId, caller.id])) : undefined
   const callerCwd = await canon(process.cwd())
   const cwd = o.cwd?.trim() ? await canon(resolve(o.cwd)) : undefined
   const liveIds = o.liveIds ?? await defaultLiveIds()
@@ -112,6 +117,7 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
     }
     const plan = planFiling({
       ...(o.role ? { role: o.role } : {}),
+      harness: o.harness, callerRole,
       ...(o.taskRef !== undefined ? { taskRef: o.taskRef } : {}),
       ...(o.subtaskRef !== undefined ? { subtaskRef: o.subtaskRef } : {}),
       ...(o.folderRef !== undefined ? { folderRef: o.folderRef } : {}),
@@ -120,6 +126,7 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
       callerCwd,
       ...(caller ? { caller } : {}),
       ...(handoffRow ? { handoffOf: handoffRow } : {}),
+      ...(o.handoffKeepsRole ? { handoffKeepsRole: true } : {}),
       book, rows: canonRows, groups, repoOf, liveInCwd,
     })
     if (misses.size === 0 || pass === 3) return checkAttach(plan, book)
@@ -133,6 +140,25 @@ export async function planSpawnFiling(o: SpawnFilingRequest): Promise<FilingPlan
     }
   }
   throw new Error('unreachable')
+}
+
+/** Reopening keeps its filing, but a worker still cannot enter an occupied main checkout. */
+export async function planReopenCwd(
+  entry: ManagedSession,
+  options: Pick<SpawnFilingRequest, 'rows' | 'liveIds' | 'repoFacts' | 'role'> = {},
+): Promise<FilingPlan> {
+  const { storedRoleFor } = await import('./session-roles')
+  const { spawnRole } = await import('./spawn-row')
+  const { hasRolePrefix } = await import('@agentistics/core')
+  const role = options.role ?? await storedRoleFor([entry.conversationId, entry.id])
+    ?? spawnRole({ leaderPrefix: !!entry.label && hasRolePrefix(entry.label), hasParent: !!entry.parentSessionId })
+  const liveIds = new Set(options.liveIds ?? await defaultLiveIds())
+  // The replaced row is the same session; unlike a new child's parent, it is not a competitor.
+  liveIds.delete(entry.id)
+  return planSpawnFilingSafe({
+    ...options, role, liveIds, cwd: entry.cwd,
+    book: { tasks: [], subtasks: [] }, groups: { groups: [] },
+  })
 }
 
 /** Workers fail fast. Persons and hand-offs spawn first, then report the board's attach refusal. */

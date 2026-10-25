@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { LimitLevelIcon } from '../components/PlanLimitMeter'
-import { limitLevel, limitLevelWord, subscriptionRows, fmtSpan, forecastPhrase, limitNoticeMeta, limitNoticeText, limitTone, resetPhrase, windowLabel, windowShortLabel } from './planLimits'
+import { limitLevel, limitLevelWord, subscriptionName, subscriptionRows, fmtSpan, forecastPhrase, limitNoticeMeta, limitNoticeText, limitTone, resetPhrase, windowLabel, windowShortLabel } from './planLimits'
 
 const M = 60_000
 test('spans', () => {
@@ -59,6 +59,13 @@ test('a registered plan with no reading is a row with no limits (no ring, no zer
   const rows = subscriptionRows([reading], [{ harness: 'claude', plan: 'Max 5x' }, { harness: 'gemini', plan: 'Pro' }])
   expect(rows.map(r => [r.harness, r.limits === null])).toEqual([['claude', false], ['gemini', true]])
   expect(subscriptionRows(null, [{ harness: 'codex', plan: 'Plus' }])[0]!.limits).toBeNull()
+})
+test('an account label that is only the assistant name is not appended to it', () => {
+  const rd = (account: string) => ({ harness: 'codex', account, plan: 'Plus', source: 'codex-rollout', updatedAt: 1, windows: [{ kind: '5h', usedPct: 10, resetsAt: 9e12 }] }) as never
+  const rows = subscriptionRows([rd('default')], [{ harness: 'codex', account: 'acc_1', plan: 'Plus' }], { default: 'Codex CLI', acc_1: 'Codex CLI #1' })
+  expect(rows.map(r => r.accountLabel)).toEqual([undefined, 'Codex CLI #1'])
+  expect(rows.map(r => subscriptionName(r.harness, r.accountLabel))).toEqual(['Codex CLI', 'Codex CLI #1'])
+  expect(subscriptionName('claude', 'Work')).toBe('Claude Code · Work')
 })
 test('two accounts of one harness are two rows, each named; a single account stays unlabelled', () => {
   const rd = (account: string) => ({ harness: 'claude', account, plan: 'Max', source: 'stream', updatedAt: 1, windows: [{ kind: '5h', usedPct: 10, resetsAt: 9e12 }] }) as never

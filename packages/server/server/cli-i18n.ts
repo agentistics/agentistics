@@ -227,6 +227,18 @@ export interface CliStrings {
   sessAnswerStuck: (label: string) => string
   /** The write-your-own row was picked and no text field opened for it. */
   sessAnswerNoField: (label: string) => string
+  /** A multi-select box was ticked or unticked; the question is still open (more may be ticked). */
+  sessToggled: (label: string, checked: boolean) => string
+  /** The form moved to the next / previous question. */
+  sessStepped: (dir: 'next' | 'back') => string
+  /** Refused: nobody has driven this harness's multi-question form. */
+  sessStepUnknown: (harness: string) => string
+  /** Refused: the dialog on screen is not one step of a form, so there is nothing to step to. */
+  sessNotAForm: string
+  /** A typed answer's field is open and could not be left, so no key was pressed into it. */
+  sessFieldStuck: string
+  /** The step key was delivered and the form did not move. */
+  sessStepStuck: string
   /** Nothing fell, or everything that did has already been picked back up. */
   sessNoFell: string
   /** The session backend (tmux) could not be listed, so nothing can be judged fallen or alive. */
@@ -282,6 +294,10 @@ export interface CliStrings {
   sessModeUnknown: (harness: string) => string
   /** Said after the cycle key lands. It names the ACT — only the next poll knows the new mode. */
   sessModeCycled: string
+  /** MODE.NOQ — a named mode is not in this session's cycle (claude started without the allow flag). */
+  sessModeUnreachable: (label: string) => string
+  /** MODE.NOQ — the footer named no mode while cycling (a dialog, or no footer yet). */
+  sessModeUnread: string
   /** The free-text option was picked with nothing written. Enter on an empty field DECLINES. */
   sessAnswerNeedsText: string
   sessKilled: (id: string) => string
@@ -668,6 +684,13 @@ const EN: CliStrings = {
     `"${label}" did not open a field to type into, so nothing was typed — the words would have gone `
     + 'wherever the session was listening and the return would have submitted whatever was '
     + 'highlighted. Answer it in the session itself (attach).',
+  sessToggled: (label: string, checked: boolean) => `${checked ? 'ticked' : 'unticked'}: ${label} — tick the others you want, then go on to the next question.`,
+  sessStepped: (dir: 'next' | 'back') => dir === 'next' ? 'moved to the next question.' : 'moved back to the previous question.',
+  sessStepUnknown: (harness: string) =>
+    `agentop has not driven ${harness}'s multi-question form yet, so it will not press keys into it — attach to move between its questions there.`,
+  sessNotAForm: 'the session is not on a question with several steps any more, so nothing was pressed.',
+  sessFieldStuck: 'the typed answer\'s field is still open and could not be left, so nothing was pressed into it — finish it in the session itself (attach).',
+  sessStepStuck: 'the key was delivered and the form did not move to another question. Nothing else was pressed — move it in the session itself (attach).',
   sessNoFell: 'nothing fell — no session was lost with the machine still on record.',
   sessBackendUnreadable: 'could not list the running sessions (tmux did not answer), so nothing was reopened — a session that is still running would have been started twice. Try again in a moment.',
   sessFellOpened: (opened: number, skipped: number, held: number) =>
@@ -726,6 +749,9 @@ const EN: CliStrings = {
   sessModeUnknown: (harness: string) =>
     `nobody has driven ${harness}'s modes, so agentop does not know which key changes them — switch it inside the session.`,
   sessModeCycled: 'moved to the next mode.',
+  sessModeUnreachable: (label: string) =>
+    `"${label}" is not in this session's mode cycle — it was started before agentop made it reachable. Reopen the session to get it; the mode was left as it was.`,
+  sessModeUnread: 'could not read the mode on the session\'s screen — nothing was changed after that. Try again in a moment.',
   sessAnswerNeedsText: 'this option is a field to write in — send it with your answer, because an empty one reads as declining the question.',
   sessKilled: (id: string) => `stopped ${id}.`,
   sessInterrupted: (id: string) => `asked ${id} to stop what it was doing — the session is still up.`,
@@ -1090,6 +1116,13 @@ const PT: CliStrings = {
     `"${label}" não abriu um campo para escrever, então nada foi digitado — as palavras iriam para `
     + 'onde a sessão estivesse ouvindo e o enter submeteria o que estivesse em foco. Responda na '
     + 'própria sessão (attach).',
+  sessToggled: (label: string, checked: boolean) => `${checked ? 'marcado' : 'desmarcado'}: ${label} — marque os outros que quiser e depois avance para a próxima pergunta.`,
+  sessStepped: (dir: 'next' | 'back') => dir === 'next' ? 'foi para a próxima pergunta.' : 'voltou para a pergunta anterior.',
+  sessStepUnknown: (harness: string) =>
+    `o agentop ainda não dirigiu o formulário de várias perguntas do ${harness}, então não vai apertar teclas nele — anexe para navegar entre as perguntas lá.`,
+  sessNotAForm: 'a sessão não está mais numa pergunta de várias etapas, então nada foi apertado.',
+  sessFieldStuck: 'o campo da resposta digitada continua aberto e não foi possível sair dele, então nada foi apertado nele — termine na própria sessão (attach).',
+  sessStepStuck: 'a tecla foi entregue e o formulário não foi para outra pergunta. Nada mais foi apertado — mude na própria sessão (attach).',
   sessNoFell: 'nada caiu — nenhuma sessão foi perdida com registro de que estava viva.',
   sessBackendUnreadable: 'não foi possível listar as sessões em execução (o tmux não respondeu), então nada foi reaberto — uma sessão ainda viva seria iniciada duas vezes. Tente de novo em instantes.',
   sessFellOpened: (opened: number, skipped: number, held: number) =>
@@ -1143,6 +1176,9 @@ const PT: CliStrings = {
   sessModeUnknown: (harness: string) =>
     `ninguém dirigiu os modos do ${harness}, então o agentop não sabe qual tecla os altera — troque dentro da própria sessão.`,
   sessModeCycled: 'passou para o próximo modo.',
+  sessModeUnreachable: (label: string) =>
+    `"${label}" não está no ciclo de modos desta sessão — ela foi aberta antes de o agentop torná-lo alcançável. Reabra a sessão para tê-lo; o modo ficou como estava.`,
+  sessModeUnread: 'não deu para ler o modo na tela da sessão — nada mais foi alterado. Tente de novo em instantes.',
   sessAnswerNeedsText: 'esta opção é um campo para escrever — envie junto com a sua resposta, porque vazia ela é lida como recusar a pergunta.',
   sessKilled: (id: string) => `${id} encerrada.`,
   sessInterrupted: (id: string) => `pedi para ${id} parar o que estava fazendo — a sessão continua de pé.`,

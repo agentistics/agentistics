@@ -25,6 +25,7 @@ import { abandonedBranchLines } from './active-branch'
 import { join } from 'node:path'
 import { splitImageMarkers } from '@agentistics/core'
 import { PROJECTS_DIR } from '../config'
+import { accountStoreDirs } from './account-transcript-roots'
 import { UUID_RE } from '../git'
 import { isUserRoleMessage } from '../jsonl'
 import { commandSummary, hasUnreadableWrite, shellWrites } from './shell-writes'
@@ -124,6 +125,21 @@ export async function resolveChatTranscriptPath(
     scan: () => scanForTranscript(sessionId, projectsDir),
     now,
   })
+}
+
+/**
+ * `resolveChatTranscriptPath` over the default store, then over every Claude account root: a second
+ * login writes its transcripts under its own `CLAUDE_CONFIG_DIR` (`account-transcript-roots.ts`). The
+ * id is exact, so a hit in a root is that conversation. For callers holding only a row's cwd and id.
+ */
+export async function resolveClaudeTranscriptAnyAccount(cwd: string, sessionId: string): Promise<string | null> {
+  const found = await resolveChatTranscriptPath(cwd, sessionId)
+  if (found || !UUID_RE.test(sessionId)) return found
+  for (const dir of await accountStoreDirs('claude')) {
+    const path = await resolveChatTranscriptPath(cwd, sessionId, dir).catch(() => null)
+    if (path) return path
+  }
+  return null
 }
 
 interface Cached {

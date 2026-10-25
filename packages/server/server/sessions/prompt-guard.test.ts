@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { classifySendFailure, promptIsBlocked } from './prompt-guard'
+import { hasQueuedMessages } from '@agentistics/core'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { inputFocusOf } from './input-focus'
+import { planCodexSend } from './codex-send'
 
 /**
  * Per harness: a screen with a dialog open (its real footer, from `attention-rules.ts`'s probes) and a
@@ -68,5 +73,20 @@ describe('gemini usage-limit dialog (live capture)', () => {
   test('is a blocking dialog although it has no select footer', () => {
     expect(promptIsBlocked('gemini', frame)).toBe(true)
     expect(classifySendFailure('gemini', frame, true)).toBe('prompt')
+  })
+})
+
+describe('MSG.CONFIRM busy TUI captures (H1)', () => {
+  const captured = (path: string) => readFileSync(join(import.meta.dir, 'fixtures', path), 'utf8').split('\n')
+  test('busy Claude has a queued message and input focus, not a dialog or overlay', () => {
+    const frame = captured('msg-confirm/claude-busy-queued.txt')
+    expect(hasQueuedMessages(frame)).toBe(true)
+    expect(inputFocusOf(frame)).toBe('input')
+    expect(promptIsBlocked('claude', frame)).toBe(false)
+  })
+  test('busy Codex confirms the queued message through its cleared active composer', () => {
+    const frame = captured('codex-0.161.0/busy-queued.txt')
+    expect(promptIsBlocked('codex', frame)).toBe(false)
+    expect(planCodexSend('after-enter', frame, 'queued message A')).toBe('delivered')
   })
 })

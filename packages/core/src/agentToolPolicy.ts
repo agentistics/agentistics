@@ -79,6 +79,7 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_checkin_report',
   'agentistics_session_role',
   'agentistics_session_away',
+  'agentistics_session_switch_account',
   // Metrics (6)
   'agentistics_summary',
   'agentistics_harnesses',
@@ -177,6 +178,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_session_away: {
     ...GROUPS, risk: 'W', routes: ['GET /api/away', 'PUT /api/away', 'PUT /api/away/session', 'POST /api/away/notice'],
     reason: 'reads or switches away mode (what newly started sessions are told about the owner being out) and lets a leader raise a notice in the owner\'s bell; reversible by switching it off; the server accepts writes only from a verified LEADER session',
+  },
+  agentistics_session_switch_account: {
+    ...GROUPS, risk: 'W', routes: ['GET /api/fleet/switch-account', 'POST /api/fleet/switch-account'],
+    reason: 'continues a session on another account of the same harness: the conversation is copied (never moved) and resumed under the same id; an agent may only target accounts that are on for agents',
   },
   // ------------------------------------------------------------------ Metrics
   agentistics_summary: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics' },

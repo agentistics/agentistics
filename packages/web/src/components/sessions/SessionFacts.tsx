@@ -11,6 +11,7 @@
 
 import type React from 'react'
 import { sessionNotify, type ControlSession } from '@agentistics/tui/control/session-fleet'
+import { sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 
 /**
@@ -26,6 +27,7 @@ export function shortModel(model: string): string {
 }
 
 export interface SessionFactsProps {
+  titleBadge?: React.ReactNode
   session: ControlSession
   /** Bolder title — the same rule the open row uses (selected or wants a person). */
   selected?: boolean
@@ -47,7 +49,7 @@ export interface SessionFactsProps {
   withEffort?: boolean
 }
 
-export function SessionFacts({ session, selected = false, metaColor, withEffort = false }: SessionFactsProps) {
+export function SessionFacts({ session, selected = false, metaColor, withEffort = false, titleBadge }: SessionFactsProps) {
   const wants = sessionNotify(session)
   return (
     <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -67,15 +69,14 @@ export function SessionFacts({ session, selected = false, metaColor, withEffort 
         fontWeight: (selected || wants ? 650 : 500) + (session.task ? 50 : 0),
         whiteSpace: 'normal', overflowWrap: 'anywhere',
       }}>
-        {session.title}
+        {sessionDisplayTitle(session.title)}{titleBadge && <span style={{ display: 'inline-block', marginLeft: 6, verticalAlign: 'middle' }}>{titleBadge}</span>}
       </span>
       <span style={{
-        // Stacked rows keep every fact readable; narrow cards wrap the metadata onto more lines.
-        display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flexWrap: 'wrap',
+        // Separate facts with space: a wrapping line must never strand a separator.
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 10, rowGap: 3, minWidth: 0,
         fontSize: 10.5, color: wants ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
       }}>
-        <span style={{ flexShrink: 0, color: metaColor }}>{session.stateLabel}</span>
-        <span style={{ opacity: 0.4, flexShrink: 0 }}>·</span>
+        <span style={{ minWidth: 0, overflowWrap: 'anywhere', color: metaColor }}>{session.stateLabel}</span>
         <span style={{
           color: (HARNESS_COLORS as Record<string, string>)[session.harness] ?? 'var(--text-tertiary)',
           fontWeight: 650, minWidth: 0, flexShrink: 1,
@@ -86,19 +87,12 @@ export function SessionFacts({ session, selected = false, metaColor, withEffort 
         {/* The model, when the row knows one. A row that does not is not "some default model" —
             it is unknown, and inventing a name there is the confident-zero defect in words. */}
         {session.model && (
-          <>
-            <span style={{ opacity: 0.4, flexShrink: 0 }}>·</span>
-            {/* Long model ids wrap within the same metadata vocabulary as the session title. */}
-            <span style={{ minWidth: 0, flexShrink: 3, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
-              {shortModel(session.model)}
-            </span>
-          </>
+          <span style={{ minWidth: 0, flexShrink: 3, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+            {shortModel(session.model)}
+          </span>
         )}
         {withEffort && session.effort && (
-          <>
-            <span style={{ opacity: 0.4, flexShrink: 0 }}>·</span>
-            <span style={{ flexShrink: 0 }}>{session.effort}</span>
-          </>
+          <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{session.effort}</span>
         )}
       </span>
     </span>

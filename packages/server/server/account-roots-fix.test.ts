@@ -3,6 +3,7 @@ import { lstat, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
+import { LOGIN_ADAPTERS, type LoginInfo } from './account-login'
 import { PORT } from './config'
 import { createHarnessAccounts } from './harness-accounts'
 import { createAccountRoots, registerRootMcp } from './account-roots'
@@ -18,7 +19,10 @@ function make(over: Partial<Parameters<typeof createAccountRoots>[0]> = {}) {
   const store = createHarnessAccounts({ file: join(tmp, 'accounts.json'), probe: async () => ({ key: 'default', label: 'x' }) })
   const roots = createAccountRoots({
     base: join(tmp, 'accounts'), flagOn: () => true, defaultDir: h => join(tmp, 'default', h),
-    spawn: async () => ({ ok: true, message: 'ok', id: 'sess1' }), registerMcp: async () => {}, audit: async () => {},
+    login: async req => {
+      const info: LoginInfo = { kind: LOGIN_ADAPTERS[req.harness]!.kind, url: 'https://auth.example/login', code: 'ABCD-EFGH', expiresAt: Date.now() + 900000 }
+      return { ready: Promise.resolve(info), info: () => info, submit: async () => {}, stop: async () => {} }
+    }, registerMcp: async () => {}, audit: async () => {},
     probe: async () => ({ key: 'default', label: 'x' }),
     bind: (root, id) => store.bind(root, id), retire: id => store.retire(id),
     getAccount: id => store.byId(id), listAccounts: () => store.readAccounts(),
@@ -31,13 +35,14 @@ describe('H1 — the roots routes ride the shell gate', () => {
   test('capability: roots are localShell, the rest of /api/accounts is unchanged', () => {
     expect(routeCapability('/api/accounts/roots')).toBe('localShell')
     expect(routeCapability('/api/accounts/roots/r_1')).toBe('localShell')
+    expect(routeCapability('/api/accounts/roots/r_1/code')).toBe('localShell')
     expect(routeCapability('/api/accounts')).toBe('localTranscripts')
     expect(routeCapability('/api/accounts/abc')).toBe('localTranscripts')
   })
   test('a foreign Host gets 421 on every roots route', () => {
     const caps = capabilitiesFor('local', { central: false, exposure: undefined, allowLocalShell: false, tls: false })
     const list = buildHostAllowlist({ hostname: 'box', interfaceAddresses: ['127.0.0.1'], ports: [PORT, PORT + 1], allowedOrigins: [], secureOrigin: undefined } as never)
-    for (const path of ['/api/accounts/roots', '/api/accounts/roots/r_1']) {
+    for (const path of ['/api/accounts/roots', '/api/accounts/roots/r_1', '/api/accounts/roots/r_1/code']) {
       const res = hostGate(path, `evil.example:${PORT}`, list, caps)
       expect(res?.status).toBe(421)
     }
@@ -155,7 +160,7 @@ describe('M4 — boot re-registration walks every root', () => {
 
 describe('LOWs', () => {
   test('L1: a throwing spawn removes the root', async () => {
-    const { roots } = make({ spawn: async () => { throw new Error('boom') } })
+    const { roots } = make({ login: async () => { throw new Error('boom') } })
     const out = await roots.addRoot('claude')
     expect(out.ok).toBe(false)
     expect(await roots.list()).toEqual([])

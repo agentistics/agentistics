@@ -18,6 +18,7 @@
  * than the bubble, and letting it set the width is how a message ends up outside its own card.
  */
 
+import { OpenCheckinButton } from './CheckinModal'
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { stripDictatedMark } from '../../lib/dictationMark'
@@ -318,16 +319,17 @@ const touch = (isMobile: boolean): React.CSSProperties => (isMobile ? { minHeigh
  * (the "joined the channel" divider), its action a text link at the END of the same line. One
  * definition so notes and event rows cannot drift.
  */
+/** The text starts at the chat's left edge (the composer's), and one hairline fills whatever the text
+ *  leaves on the right — its length follows the text (owner 23/10). */
 export function SystemLine({ children, below, isMobile = false }: { children: React.ReactNode; below?: React.ReactNode; isMobile?: boolean }) {
   const hair: React.CSSProperties = { flex: 1, height: 1, background: 'var(--border)', minWidth: 12 }
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', margin: 0 }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8, width: '100%',
         ...(isMobile ? { minHeight: 44, padding: 0 } : { padding: '4px 0' }),
         fontSize: 11, lineHeight: 1.4, color: SYS_TEXT,
       }}>
-        <span aria-hidden style={hair} />
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, maxWidth: '88%', minWidth: 0 }}>{children}</span>
         <span aria-hidden style={hair} />
       </div>
@@ -336,7 +338,7 @@ export function SystemLine({ children, below, isMobile = false }: { children: Re
   )
 }
 
-function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt: boolean }) {
+function SystemNote({ note, noteRef, pt, sessionId }: { note: string; noteRef?: string; pt: boolean; sessionId?: string }) {
   const { label, help, tab } = chatNote(note, pt)
   const [shown, setShown] = useState(false)
   const isMobile = useIsMobile()
@@ -344,12 +346,9 @@ function SystemNote({ note, noteRef, pt }: { note: string; noteRef?: string; pt:
 
   // CHECKIN.PROMPT-SYSTEM is a notice, but its action belongs to the shared session header so
   // the same larger report view is used from both places.
-  if (note.includes('agentistics_checkin_report')) {
+  if (note.includes('agentistics_checkin_report') && sessionId) {
     return <SystemLine isMobile={isMobile}>
-      <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin'))}
-        style={{ ...sysLink, ...touch(isMobile) }}>
-        {pt ? 'Abrir check-in' : 'Open check-in'}
-      </button>
+      <OpenCheckinButton sessionId={sessionId} lang={pt ? 'pt' : 'en'} style={{ ...sysLink, ...touch(isMobile) }} fallback={<span>{label}</span>} />
     </SystemLine>
   }
 
@@ -604,7 +603,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
   }
 
   if (turn.system) {
-    return <SystemNote note={turn.system} noteRef={turn.systemRef} pt={pt} />
+    return <SystemNote note={turn.system} noteRef={turn.systemRef} pt={pt} {...(sessionId ? { sessionId } : {})} />
   }
 
   const color = (HARNESS_COLORS as Record<string, string>)[harness] ?? 'var(--text-secondary)'
@@ -1291,11 +1290,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId,
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}{title && <span style={{ color: 'var(--text-tertiary)' }}> · {title}</span>}</span>
         <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
       </button>
-      {event.kind === 'checkin' && <button
-        type="button"
-        onClick={() => window.dispatchEvent(new CustomEvent('agentistics:open-checkin', { detail: { sessionId } }))}
-        style={{ ...sysLink, ...touch(isMobile) }}
-      >{pt ? 'Abrir check-in' : 'Open check-in'}</button>}
+      {event.kind === 'checkin' && sessionId && <OpenCheckinButton sessionId={sessionId} lang={pt ? 'pt' : 'en'} style={{ ...sysLink, ...touch(isMobile) }} />}
     </SystemLine>
   )
 }

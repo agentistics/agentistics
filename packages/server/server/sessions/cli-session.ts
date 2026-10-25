@@ -9,6 +9,8 @@
 import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { mkdir } from 'node:fs/promises'
+import { structuredIntentOf } from './structured-route'
+import { agentisticsMcpLaunch } from '../mcp-launch'
 import { managedProcessLogPath } from './process-conversation'
 import { HARNESS_ORDER, hasRolePrefix, type HarnessId } from '@agentistics/core'
 // `GROUPINGS` and never a list typed into the usage text: the help is the only place a person can
@@ -39,12 +41,14 @@ import { rulesFor } from './attention-rules'
 import { renameInHarness, renameMessage } from './rename'
 import { reconcileSessions, resolveSessionRef, type ReconciledSession, type RefCandidate } from './session-ref'
 import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
+import { configureSpawn, configurationPendingMessage } from './spawn-configuration'
 import { handoffSpawnDefaults, handoffTitle } from './handoff-inherit'
-import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, retireSession } from './registry'
-import { callerHoldsIdentity, callerProof, type CallerProof } from './session-identity'
+import { addSession, newSessionId, patchSession, readRegistry, removeSession, retireFallenSessions, killAndRetireSession } from './registry'
+import { callerHoldsIdentity, callerProof, callerSessionFromTree, type CallerProof } from './session-identity'
+import { spawnParentLink } from './team-links'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
 import { newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
-import { attachAfterSpawn, liveIdsOf, planSpawnFilingSafe } from './spawn-filing-io'
+import { liveIdsOf, planReopenCwd, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
 import { loadConversations } from './conversations'
@@ -59,14 +63,16 @@ import { loadNativeFleet, resolveNativeRef, runNativeVerb } from './native-fleet
 import { isServerProcess, readServerSnapshot } from './shared-snapshot'
 import { needsAttention, type SessionView } from './session-view'
 import { planTaskReopen, taskReopenSucceeded } from './task-reopen'
-import { AGENTISTICS_DATA_DIR, TASKS_FILE } from '../config'
+import { AGENTISTICS_DATA_DIR, TASKS_FILE, PORT } from '../config'
 import { createTaskStore } from './task-store'
 import { newAttemptId, newTaskId, type Attempt, type Task } from './task-model'
 import { liveConversationHolders } from './live-claims'
+import { conversationHeldBy } from './conversation-claim'
+import { withConversationResumeLock } from './conversation-resume-lock'
 import { codexStartupFailure, execFailed } from './spawn-outcome'
 import { spawnDeath } from './spawn-check'
 import { reportFreshSpawn } from './spawn-report'
-import { parseHarnessAgents } from './harness-agents'
+import { readHarnessAgents } from './harness-agents-io'
 import { planTakeover, type TakeoverRefusal } from './takeover'
 import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './session-roles'
 import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
@@ -87,7 +93,7 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
 const STARTABLE: HarnessId[] = HARNESS_ORDER.filter(h => SPAWN_SPECS[h] !== null)
 
 const USAGE = `Usage:
-  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--task <id|title>] [--subtask <id|title>] [--shared-cwd] [--away|--no-away] [--handoff] [--account <acc_…>] [--force]
+  agentop session <harness> [-p "prompt"] [--bg] [--model <id>] [--effort <level>] [--mode <default|accept-edits|plan|no-questions>] [--cwd <path>] [--name "label"] [--notify on|off] [--folder <folder>] [--task <id|title>] [--subtask <id|title>] [--shared-cwd] [--away|--no-away] [--handoff] [--account <acc_…>] [--force]
   agentop session ls     [--all] [--group ${GROUPINGS.join('|')}] [--json]
   agentop session list
   agentop session attach <id|name>
@@ -95,6 +101,10 @@ const USAGE = `Usage:
   agentop session retire <id|name> [--cancel] [--quiet-for 60s] [--deadline 30m] [--folder <folder>] [--json]
   agentop session folders [--json]
   agentop session rename <id|name> "label"
+  agentop session switch-account <id|name> [<account-id>] [--harness <h>] [--resend]
+                                  Continue the session on another account of its harness (no
+                                  account: list the ones it can move to). --resend re-sends the
+                                  message a usage limit refused.
   agentop session note   <id|name> "text"
   agentop session archive|unarchive|delete <ses_…>
 
@@ -145,7 +155,7 @@ const USAGE = `Usage:
 
 Orchestrating several at once — the form an assistant should use:
 
-  agentop session batch --task "<name>" [--cwd <path>] [--model <id>] [--effort <level>] [--folder <folder>] \\
+  agentop session batch --task "<name>" [--cwd <path>] [--model <id>] [--effort <level>] [--mode <default|accept-edits|plan|no-questions>] [--folder <folder>] \\
                        --session "<harness>[@<cwd>]: <prompt>" [--session "..."] [--subtask <id|title>] [--shared-cwd] [--away|--no-away] [--json] [--force]
   agentop session open  "<task>" [--folder <folder>] [--json] [--force]
   agentop session list  [--json]
@@ -242,30 +252,7 @@ function reportFilingRefusal(r: Extract<FilingPlan, { ok: false }>, json: boolea
   else console.error(refusalText(r))
 }
 
-/** Record the filing on the board like the web door does; a refusal is SAID (stderr) and never fails a running spawn. */
-async function attachFiling(plan: Extract<FilingPlan, { ok: true }>, sessionId: string): Promise<string | null> {
-  const r = await attachAfterSpawn(plan, sessionId)
-  if (r.ok) return null
-  console.error(`Warning: the session ${sessionId} started but the board did not file it (${r.reason}).`)
-  return r.reason
-}
-
 let warnedNoFolder = false
-/** File a just-spawned session into its folder; with none asked, a LEADER caller is told on stderr. */
-async function fileAtSpawn(ref: string | undefined, row: { id: string; conversationId?: string | undefined }): Promise<void> {
-  const f = ref ? folderByRef.get(ref) : undefined
-  if (f) { await fileInFolder(f.id, row).catch(() => false); return }
-  if (ref || warnedNoFolder) return
-  await warnLeaderNoFolder()
-}
-
-/** `start`/`batch`: the folder is the PLAN's (an id); with none, a LEADER caller is told on stderr. */
-async function fileAtSpawnPlanned(folderId: string | undefined, row: { id: string; conversationId?: string | undefined }): Promise<void> {
-  if (folderId) { await fileInFolder(folderId, row).catch(() => false); return }
-  if (warnedNoFolder) return
-  await warnLeaderNoFolder()
-}
-
 async function warnLeaderNoFolder(): Promise<void> {
   const { storedRoleFor } = await import('./session-roles')
   const leader = await callerIsLeader(callerSessionId(), storedRoleFor,
@@ -293,6 +280,18 @@ async function admitOrWait(requested: number, force: boolean, lang: CliLang, jso
 }
 
 export async function runSession(argv: string[]): Promise<number> {
+  try {
+    return await runSessionCommand(argv)
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException | null
+    if (!failure || !['EACCES', 'EPERM', 'EROFS'].includes(failure.code ?? '')) throw error
+    const reason = failure.code === 'EROFS' ? 'read-only filesystem' : 'permission denied'
+    console.error(`Could not complete the session command at ${JSON.stringify(failure.path ?? AGENTISTICS_DATA_DIR)} (${failure.code}: ${reason}); make the data directory writable by your user and retry.`)
+    return 1
+  }
+}
+
+async function runSessionCommand(argv: string[]): Promise<number> {
   waitForRoom = argv.includes('--wait')
   argv = argv.filter(a => a !== '--wait')
   const cmd = parseSessionArgs(argv)
@@ -366,6 +365,7 @@ export async function runSession(argv: string[]): Promise<number> {
       },
     )
     case 'note': return patch(cmd.ref, { note: cmd.text }, 'annotated', backend)
+    case 'switch-account': return switchAccount(cmd, backend)
   }
 }
 
@@ -398,8 +398,8 @@ async function nativeCliVerb(kind: 'kill' | 'rename' | 'archive' | 'unarchive' |
   return 0
 }
 
-async function spawnFailure(backend: SessionBackend, id: string, bin?: string, freshHarness?: HarnessId): Promise<string | undefined> {
-  const outcome = await spawnDeath(backend, id, undefined, freshHarness, reportFreshSpawn)
+async function spawnFailure(backend: SessionBackend, id: string, bin?: string, freshHarness?: HarnessId, settleMs?: number): Promise<string | undefined> {
+  const outcome = await spawnDeath(backend, id, settleMs, freshHarness, reportFreshSpawn)
   if (!outcome) return undefined
   // A binary that could not be EXECUTED says nothing on the way out (see `execFailed`), and the
   // only thing that fixes it is the PATH — so name it rather than print a bare status.
@@ -423,6 +423,24 @@ export function callerSessionId(env: Record<string, string | undefined> = proces
 }
 
 /**
+ * The calling session when `AGENTOP_MANAGED_ID` was LOST on the way here (an `env -u` workaround, a
+ * wrapper script): found from the process tree, and written back into THIS one-shot process's
+ * environment so every check downstream (`callerHoldsIdentity`, the hand-off proof) reads the same
+ * caller. The tree is the stronger proof — it is what `callerProof` checks — so nothing is weakened.
+ * A variable that IS set is never second-guessed. Without this, a leader's worker came up with no
+ * parent and landed in "No leader".
+ */
+export async function recoverCallerFromTree(backend: SessionBackend, env: Record<string, string | undefined> = process.env): Promise<string | undefined> {
+  if (callerSessionId(env)) return callerSessionId(env)
+  const found = await callerSessionFromTree(
+    async () => (backend as { listPanePids?: () => Promise<Map<string, number>> }).listPanePids?.(),
+    async () => (await readRegistry()).filter(r => !r.endedAt).map(r => r.id),
+  )
+  if (found) env.AGENTOP_MANAGED_ID = found
+  return found
+}
+
+/**
  * Said after a FAILED `--handoff` spawn. Measured 2026-10-17: a leader whose `--handoff` spawn failed
  * retried WITHOUT the flag, and that successor came up with none of the predecessor's setup (no pin,
  * no hand-off link, no relay) because a plain spawn inherits nothing.
@@ -432,13 +450,18 @@ const HANDOFF_NOT_MADE = 'The hand-off was NOT made and nothing was inherited. R
 export async function start(
   cmd: Extract<SessionCommand, { kind: 'start' }>,
   backend: SessionBackend,
-  deps: { provesCaller?: (id: string) => Promise<boolean> } = {},
+  deps: {
+    provesCaller?: (id: string) => Promise<boolean>
+    /** How long a healthy spawn is watched before it counts as up (`SETTLE_MS`). Tests shorten it. */
+    settleMs?: number
+  } = {},
 ): Promise<number> {
   // A relative --cwd must resolve against the CALLER's directory: passed through unresolved it
   // reaches `tmux new-session -c` and is interpreted by the tmux SERVER's own cwd instead, and it
   // is written verbatim into the registry, where `list` would print it back meaningless from
   // anywhere else.
   const lang = await resolveLang()
+  await recoverCallerFromTree(backend)
   // WHERE this session is filed is decided once, BEFORE the memory gate: a refusal spawns nothing.
   const parentSessionIdForPlan = callerSessionId()
   // `--handoff` is the API's `handoff: true`: only a VERIFIED calling session can have a successor, so
@@ -457,13 +480,15 @@ export async function start(
       return 1
     }
   }
+  const verifiedCaller = parentSessionIdForPlan && (cmd.handoff || await callerHoldsIdentity(parentSessionIdForPlan)) ? parentSessionIdForPlan : undefined
   const filing = await planSpawnFilingSafe({
+    harness: cmd.harness,
     liveIds: await liveIdsOf(backend),
     // A person with no parent session is neither: only a parent (or an explicit role) makes a worker.
     role: cmd.handoff ? 'leader' : spawnRole({ explicit: cmd.role, leaderPrefix: !!cmd.label && hasRolePrefix(cmd.label), hasParent: !!parentSessionIdForPlan }),
     ...(cmd.handoff ? { handoffOf: parentSessionIdForPlan } : {}),
     taskRef: cmd.taskId ?? cmd.task, subtaskRef: cmd.subtask, folderRef: cmd.folder,
-    cwd: cmd.cwd, sharedCwd: cmd.sharedCwd, callerSessionId: parentSessionIdForPlan,
+    cwd: cmd.cwd, sharedCwd: cmd.sharedCwd, callerSessionId: verifiedCaller,
   })
   if (!filing.ok) { reportFilingRefusal(filing, cmd.json ?? false); return 1 }
   for (const w of filing.warnings) if (w !== 'no_folder') console.error(WARNING_TEXT[w])
@@ -472,13 +497,16 @@ export async function start(
   const id = newSessionId()
   const offeredConversationId = randomUUID()
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
-  const parentLink = await parentLinkOf(callerSessionId())
+  // A hand-off names its predecessor exactly; any other spawn by a predecessor that has already
+  // handed off is filed under its successor (`team-links.ts`).
+  const parentLink = await parentLinkOf(callerSessionId(), { followHandoff: !cmd.handoff })
   const parentSessionId = parentLink.parentSessionId
   // A hand-off already PROVED its caller by the pane above (stronger than the token check), so the
-  // predecessor's away mode and role origin are inherited on that proof.
+  // predecessor's away mode and role origin are inherited on that proof. The CALLER is what is
+  // verified — the followed successor is never the process asking.
   const parentVerified = (cmd.handoff && !!parentSessionId && parentSessionId === parentSessionIdForPlan)
-    || await callerHoldsIdentity(parentSessionId)
-  const registry0 = cmd.handoff ? await readRegistry().catch(() => [] as ManagedSession[]) : []
+    || await callerHoldsIdentity(callerSessionId())
+  const registry0 = parentVerified ? await readRegistry() : []
   // A name that already wears the leader prefix is a statement of intent: never let it silently become a worker.
   const wantedRole = cmd.handoff ? 'leader' as const : cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' as const : undefined)
   const role = wantedRole
@@ -489,7 +517,7 @@ export async function start(
   const handoffParentRow = cmd.handoff && parentSessionId ? registry0.find(m => m.id === parentSessionId) : undefined
   const label = cmd.handoff ? handoffTitle(handoffParentRow?.label, cmd.label) : cmd.label
   // …and its launch flags when this hand-off did not name them (same harness only).
-  const launch = handoffParentRow ? handoffSpawnDefaults(handoffParentRow, cmd.harness, cmd) : { model: cmd.model, effort: cmd.effort }
+  const launch = handoffSpawnDefaults(handoffParentRow, cmd.harness, { ...cmd, mode: cmd.mode ?? registry0.find(r => r.id === verifiedCaller)?.mode })
   const relay = handoffParentRow
     ? await import('./handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
@@ -503,13 +531,14 @@ export async function start(
   })
   if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en')); return 1 }
   const planned = planSpawn({
-    harness: cmd.harness, cwd, prompt: cmd.prompt, model: launch.model, effort: launch.effort,
+    harness: cmd.harness, cwd, prompt: cmd.prompt, model: launch.model, effort: launch.effort, mode: launch.mode,
     ...(logFile ? { logFile } : {}),
     conversationId: offeredConversationId,
     context: ctx,
     ...(account.account?.root ? { account: { root: account.account.root } } : {}),
   }, await spawnCapabilities(cmd.harness))
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
+  if (!cmd.background && planned.plan.modeNeedsProtocol) { console.error(`${cmd.harness} cannot start a terminal in ${planned.plan.modeNeedsProtocol} mode; use a supported mode or a structured session.`); return 1 }
 
   // The memory GATE, before anything is registered or launched — `requested: 1` is this one
   // process. A refusal here means nothing below this point runs: no id is minted, no row is
@@ -540,14 +569,18 @@ export async function start(
     createdAt: spawnedAt,
     ...(launch.model ? { model: launch.model } : {}),
     ...(launch.effort ? { effort: launch.effort } : {}),
+    ...(launch.mode ? { mode: launch.mode } : {}),
     ...(label ? { label } : {}),
     ...(handoffParentRow?.note ? { note: handoffParentRow.note } : {}),
     ...(account.account ? { accountId: account.account.id } : {}),
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...filingRow(filing),
     ...(cmd.attemptId ? { attemptId: cmd.attemptId } : {}),
-    ...(parentSessionId ? { parentSessionId } : {}),
-    ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+    // TEAM LINK (`team-links.ts`): a leader — `--role leader`, a `--handoff` successor — is born at the root.
+    ...spawnParentLink(role, {
+      ...(parentSessionId ? { parentSessionId } : {}),
+      ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+    }),
     ...(away ? { away: true } : {}),
     ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
     // The link is EXACT here: the CLI was handed this id (`SpawnSpec.assignId`).
@@ -556,10 +589,19 @@ export async function start(
       : {}),
     ...(await recordedRepo(cwd)),
   })
+  const filingConfiguration = await configureSpawn({ taskId: filing.taskId, subtaskId: filing.subtaskId }, { id, conversationId: planned.plan.conversationId })
+  if (!filingConfiguration.ready) {
+    await removeSession(id)
+    reportFilingRefusal({ ok: false, code: 'subtask_refused', detail: `board filing is pending: ${filingConfiguration.pending.map(p => p.reason).join('; ')}; no process was started` }, cmd.json ?? false)
+    return 1
+  }
   await writeContextFile(planned.plan)
   try {
     if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...spawnPromptArg(planned.plan, cmd.harness) })
+    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...spawnPromptArg(planned.plan, cmd.harness),
+      structured: structuredIntentOf({ harness: cmd.harness, origin: cmd.background ? 'background' : 'terminal', prompt: cmd.prompt, mode: launch.mode }, { ...launch, ctx, conversationId: offeredConversationId, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
+      ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
+    })
   } catch (e) {
     await removeSession(id).catch(() => {})
     console.error(`Could not start the session: ${e instanceof Error ? e.message : String(e)}`)
@@ -570,7 +612,7 @@ export async function start(
   // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
   // session". A harness that refuses its arguments has already exited by now, and registering a row
   // for it is what produced three dead rows called MAIN. See `spawn-outcome.ts`.
-  const failed = await spawnFailure(backend, id, planned.plan.argv[0], cmd.harness)
+  const failed = await spawnFailure(backend, id, planned.plan.argv[0], cmd.harness, deps.settleMs)
   if (failed) {
     console.error(failed)
     if (cmd.handoff) console.error(HANDOFF_NOT_MADE)
@@ -581,19 +623,11 @@ export async function start(
   if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
 
   if (role) await applyRoleTitle(id, label ?? id, role, lang).catch(() => false)
-  await fileAtSpawnPlanned(folderId, { id, conversationId: planned.plan.conversationId })
-  const attachFailed = await attachFiling(filing, id)
+  const configuration = await configureSpawn(filing, { id, conversationId: planned.plan.conversationId }, handoffParentRow)
+  if (!configuration.ready) console.error(configurationPendingMessage(id, configuration))
   if (handoffParentRow) {
-    await import('./handoff-relay-io').then(m => m.recordHandoffLink(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
-    // Pin (same position), check-in agenda and, idempotently, the folder — never fails the spawn.
-    await import('./handoff-inherit').then(async m => {
-      const { updatePreferences } = await import('../preferences')
-      // Re-read: the server may have linked a conversation (codex/kimi/antigravity) during the startup wait,
-      // and the pin/agenda must land under the CURRENT identity key, as the API path does.
-      const fresh = (await readRegistry().catch(() => [] as ManagedSession[])).find(r => r.id === id)
-      const parentNow = (await readRegistry().catch(() => [] as ManagedSession[])).find(r => r.id === handoffParentRow.id) ?? handoffParentRow
-      await m.inheritHandoffPrefs(parentNow, { id, conversationId: fresh?.conversationId ?? planned.plan.conversationId }, updatePreferences)
-    }).catch(() => {})
+    // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
+    await import('./team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq))
   }
   // Muted at birth: keyed by the conversation we assigned, else by the managed id (re-keyed when the
   // poller links the conversation). Delivery only — the session still reads as waiting.
@@ -610,13 +644,14 @@ export async function start(
   })
 
   if (cmd.background) {
-    if (cmd.json) console.log(JSON.stringify({ id, harness: cmd.harness, label: label ?? null, ...filingJson(filing), ...(attachFailed ? { attachFailed } : {}) }, null, 2))
+    if (cmd.json) console.log(JSON.stringify({ id, harness: cmd.harness, label: label ?? null, ...filingJson(filing), configuration }, null, 2))
     else {
-      console.log(`Started ${cmd.harness} session ${id}${label ? ` (${label})` : ''} in ${cwd}`)
+      if (configuration.ready) console.log(`Started ${cmd.harness} session ${id}${label ? ` (${label})` : ''} in ${cwd}`)
       console.log(`Attach with: agentop session attach ${id}`)
     }
-    return 0
+    return configuration.ready ? 0 : 1
   }
+  if (!configuration.ready) return 1
   return execAttach(id, backend)
 }
 
@@ -729,7 +764,11 @@ export async function batch(
   // refusal (--subtask, --folder, a missing @cwd, a shared checkout) then shows up BEFORE the board
   // is written, and a refused batch creates no task and no attempt.
   const lang = await resolveLang()
+  await recoverCallerFromTree(backend)
   const callerId = callerSessionId()
+  const verifiedCaller = await callerHoldsIdentity(callerId) ? callerId : undefined
+  const parentRow = verifiedCaller ? (await readRegistry()).find(r => r.id === verifiedCaller) : undefined
+  if (!cmd.task && !parentRow?.taskId) { console.error('batch needs --task or a verified parent filed on a task.'); return 1 }
   const PENDING_ID = 't-pending-batch'
   const liveIds = await liveIdsOf(backend)
   const planAll = async (taskRef: string, pending: boolean): Promise<Array<Extract<FilingPlan, { ok: true }>> | Extract<FilingPlan, { ok: false }>> => {
@@ -739,7 +778,7 @@ export async function batch(
         liveIds,
         role: spawnRole({ leaderPrefix: !!spec.name && hasRolePrefix(spec.name), hasParent: !!callerId }),
         taskRef, subtaskRef: cmd.subtask, folderRef: spec.folder, cwd: spec.cwd, sharedCwd: cmd.sharedCwd,
-        callerSessionId: callerId,
+        callerSessionId: verifiedCaller, harness: spec.harness,
         // Earlier specs of this batch already occupy their directories.
         extraLiveCwds: plans.map(x => x.cwd),
         ...(pending ? { pendingTask: { id: PENDING_ID, title: cmd.task } } : {}),
@@ -776,9 +815,9 @@ export async function batch(
     // The plans were made against the stand-in: stamp the real id.
     plans = plans.map(p => ({ ...p, taskId: resolved.taskId }))
   }
-  const parentLink = await parentLinkOf(callerSessionId())
+  const parentLink = await parentLinkOf(callerSessionId(), { followHandoff: true })
   const parentSessionId = parentLink.parentSessionId
-  const parentVerified = await callerHoldsIdentity(parentSessionId)
+  const parentVerified = await callerHoldsIdentity(callerSessionId())
   const away = await resolveSpawnAwayFor(cmd.away, parentSessionId, parentVerified)
   // PLAN.ACCOUNTS D3 — read once for the whole batch; each session WITHOUT `account` takes the
   // router's pick for its harness, which is never an account that is off for agents.
@@ -805,6 +844,7 @@ export async function batch(
       cwd,
       ...(logFile ? { logFile } : {}),
       context: ctx,
+      ...((spec.mode ?? parentRow?.mode) ? { mode: spec.mode ?? parentRow?.mode } : {}),
       ...(spec.prompt ? { prompt: spec.prompt } : {}),
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
@@ -831,13 +871,17 @@ export async function batch(
       createdAt: spawnedAt,
       // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
       ...filingRow(filing, cmd.task),
-      ...(parentSessionId ? { parentSessionId } : {}),
-      ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+      // TEAM LINK (`team-links.ts`): a session named as a leader is born at the root.
+      ...spawnParentLink(role, {
+        ...(parentSessionId ? { parentSessionId } : {}),
+        ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
+      }),
       ...(away ? { away: true } : {}),
       ...(pendingContextFor(planned.plan, ctx) ? { pendingContext: pendingContextFor(planned.plan, ctx)! } : {}),
       ...(spec.attempt && resolved?.attempts.get(spec.attempt)
         ? { attemptId: resolved.attempts.get(spec.attempt)! }
         : {}),
+      ...((spec.mode ?? parentRow?.mode) ? { mode: spec.mode ?? parentRow?.mode } : {}),
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
       ...(spec.name ? { label: spec.name } : {}),
@@ -847,6 +891,12 @@ export async function batch(
         : {}),
       ...(await recordedRepo(cwd)),
     })
+    const filingConfiguration = await configureSpawn({ taskId: filing.taskId, subtaskId: filing.subtaskId }, { id, conversationId: planned.plan.conversationId })
+    if (!filingConfiguration.ready) {
+      await removeSession(id)
+      failed.push({ harness: spec.harness, reason: `Not started: board filing pending (${filingConfiguration.pending.map(p => p.reason).join('; ')})` })
+      continue
+    }
     await writeContextFile(planned.plan)
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
@@ -854,6 +904,8 @@ export async function batch(
         id, cwd, argv: planned.plan.argv,
         ...(planned.plan.env ? { env: planned.plan.env } : {}),
         ...spawnPromptArg(planned.plan, spec.harness),
+        structured: structuredIntentOf({ harness: spec.harness, origin: 'background', prompt: spec.prompt, mode: spec.mode ?? parentRow?.mode }, { model: spec.model, effort: spec.effort, ctx, conversationId: offeredConversationId, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
+        ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
       })
     } catch (e) {
       await removeSession(id).catch(() => {})
@@ -872,9 +924,12 @@ export async function batch(
     }
     if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
     if (spec.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
-    await fileAtSpawnPlanned(filing.folderId, { id, conversationId: planned.plan.conversationId })
-    const attachFailed = await attachFiling(filing, id)
-    filingJsons.push({ ...filingJson(filing), ...(attachFailed ? { attachFailed } : {}) } as ReturnType<typeof filingJson>)
+    const configuration = await configureSpawn(filing, { id, conversationId: planned.plan.conversationId })
+    if (!configuration.ready) {
+      failed.push({ harness: spec.harness, reason: configurationPendingMessage(id, configuration) })
+      console.error(configurationPendingMessage(id, configuration))
+    }
+    filingJsons.push({ ...filingJson(filing), configuration } as ReturnType<typeof filingJson>)
     const liveBackend = await backend.list().catch(() => null)
     const backendIds = liveBackend ? new Set(liveBackend.map(b => b.id)) : null
     await retireFallenSessions({
@@ -895,7 +950,7 @@ export async function batch(
     console.log(`\n${started.length} started under task "${cmd.task}"${failed.length ? `, ${failed.length} failed` : ''}.`)
     if (started.length > 0) console.log(`Attach to any with: agentop session attach <id>`)
   }
-  return failed.length > 0 && started.length === 0 ? 1 : 0
+  return failed.length > 0 ? 1 : 0
 }
 
 /** `agentop session open "<task>"` — reopen every session of a task, detached. */
@@ -950,23 +1005,51 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
   }
 
   const started: string[] = []
+  const configurations: Array<{ id: string; configuration: Awaited<ReturnType<typeof configureSpawn>> }> = []
   const skipped: string[] = [...plan.skipped]
   // A verified agent may not reopen a row whose account is off for agents (the owner still may).
   const agentCaller = plan.reopen.length > 0 && await callerHoldsIdentity(callerSessionId())
 
   for (const row of plan.reopen) {
-    const m = row.entry
-    const id = newSessionId()
-    const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
-    // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
-    const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
-    if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); continue }
-    const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
-    if (!planned.ok) { skipped.push(m.id); continue }
+    await withConversationResumeLock(row.resumeId, async () => {
+      const holder = conversationHeldBy(await liveConversationHolders(backend), row.resumeId)
+      if (holder) { plan.heldElsewhere.push({ id: row.entry.id, holder }); return }
+      const m = row.entry
+      const cwdPlan = await planReopenCwd(m, { liveIds: await liveIdsOf(backend) })
+      if (!cwdPlan.ok) { console.error(`${m.id}: ${refusalText(cwdPlan)}`); skipped.push(m.id); return }
+      const id = newSessionId()
+      const logFile = managedProcessLogPath(m.harness, id, AGENTISTICS_DATA_DIR)
+      // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
+      const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
+      if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); return }
+      const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
+      if (!planned.ok) { skipped.push(m.id); return }
+      await addSession({
+        id, harness: m.harness, cwd: m.cwd, createdAt: new Date().toISOString(), task,
+        // INHERITED from the row being replaced, never taken from the request: a reopened session is
+        // the same piece of work, and the attribution (taskId, subtaskId, attemptId) says so. See `inheritedIdentity`.
+        ...inheritedIdentity(m),
+        ...inheritedLaunch(m, m.harness),
+        label: row.label,
+        // The conversation is known EXACTLY here — we just handed its id to the CLI. The cockpit's
+        // reopen verb has recorded it since it was written; this path had not, so the same gesture
+        // left a row that knew which conversation it drove or one that did not, depending on where it
+        // was pressed. `planTaskReopen` exists to stop precisely that kind of drift.
+        ...(planned.plan.conversationId
+          ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'resumed-id' as const }
+          : {}),
+        // The REPLACEMENT re-measures rather than copying `m.repo`: a reopen is the moment to notice
+        // that the worktree came back, and copying a recorded value would carry one stale answer
+        // through every session ever reopened from it.
+        ...(await recordedRepo(m.cwd)),
+    })
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({ id, cwd: m.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}) })
-    } catch { skipped.push(m.id); continue }
+      await backend.spawn({ id, cwd: m.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}),
+        structured: structuredIntentOf({ harness: m.harness, origin: 'background', resumeId: row.resumeId, mode: m.mode }, { ...inheritedLaunch(m, m.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
+        ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
+      })
+    } catch { await removeSession(id); skipped.push(m.id); return }
     // The path the report came from. Claude refuses to resume a conversation that is already open
     // as a background agent, and the refusal is instant — so this reopen wrote a row for a process
     // that no longer existed, and pressing it again wrote another. The old row must NOT be retired
@@ -975,27 +1058,9 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     if (died) {
       skipped.push(m.id)
       await backend.kill(id).catch(() => {})
-      continue
+      await removeSession(id)
+      return
     }
-    await addSession({
-      id, harness: m.harness, cwd: m.cwd, createdAt: new Date().toISOString(), task,
-      // INHERITED from the row being replaced, never taken from the request: a reopened session is
-      // the same piece of work, and the attribution (taskId, subtaskId, attemptId) says so. See `inheritedIdentity`.
-      ...inheritedIdentity(m),
-      ...inheritedLaunch(m, m.harness),
-      label: row.label,
-      // The conversation is known EXACTLY here — we just handed its id to the CLI. The cockpit's
-      // reopen verb has recorded it since it was written; this path had not, so the same gesture
-      // left a row that knew which conversation it drove or one that did not, depending on where it
-      // was pressed. `planTaskReopen` exists to stop precisely that kind of drift.
-      ...(planned.plan.conversationId
-        ? { conversationId: planned.plan.conversationId, conversationLink: 'assigned' as const, conversationLinkVia: 'resumed-id' as const }
-        : {}),
-      // The REPLACEMENT re-measures rather than copying `m.repo`: a reopen is the moment to notice
-      // that the worktree came back, and copying a recorded value would carry one stale answer
-      // through every session ever reopened from it.
-      ...(await recordedRepo(m.cwd)),
-    })
     await rekeyStoredRole(
       [m.id, m.conversationId],
       [id, planned.plan.conversationId],
@@ -1004,13 +1069,17 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     // The old row is RETIRED, not deleted: it is still a thing that happened, and it stops standing
     // beside its own continuation with the same name on it.
     await patchSession(m.id, { endedAt: new Date().toISOString() })
-    await fileAtSpawn(folder, { id, conversationId: planned.plan.conversationId })
+    const configuration = await configureSpawn({ folderId: folder ? folderByRef.get(folder)?.id : undefined }, { id, conversationId: planned.plan.conversationId })
+    configurations.push({ id, configuration })
+    if (!configuration.ready) console.error(configurationPendingMessage(id, configuration))
+    if (!folder && !warnedNoFolder) await warnLeaderNoFolder()
     started.push(id)
+    })
   }
 
   if (json) {
     console.log(JSON.stringify({
-      task, started, skipped, already: plan.already,
+      task, started, skipped, configurations, already: plan.already,
       // Each one NAMES the session that already has the conversation, because a machine reader is
       // exactly who needs to be told where the work is rather than that something did not happen.
       heldElsewhere: plan.heldElsewhere.map(h => ({ id: h.id, heldBy: h.holder.id, label: h.holder.label })),
@@ -1026,7 +1095,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     const held = plan.heldElsewhere.length ? `, ${plan.heldElsewhere.length} already open elsewhere` : ''
     console.log(`\n${started.length} reopened${skipped.length ? `, ${skipped.length} could not be` : ''}${alreadyUp}${held}.`)
   }
-  return taskReopenSucceeded(plan, started.length) ? 0 : 1
+  return taskReopenSucceeded(plan, started.length) && configurations.every(c => c.configuration.ready) ? 0 : 1
 }
 
 /** The fleet as DATA, so an assistant orchestrating sessions reads it rather than parsing a table
@@ -1301,82 +1370,92 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
   const live = await liveAgentFor(ref)
   if (!live) return null
 
-  const id = newSessionId()
-  const logFile = managedProcessLogPath(live.harness, id, AGENTISTICS_DATA_DIR)
-  // PLAN.ACCOUNTS D3 — a conversation agentop ran before keeps that row's account (and its root);
-  // one it never ran has no record and reopens in the default root, as before. Decided BEFORE the
-  // holder is closed: a removed account must refuse while the user still has their assistant.
-  const previous = newestRowOfConversation(await readRegistry(), live.sessionId)
-  const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
-  if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
-  const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...(logFile ? { logFile } : {}), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
-  const plan = planTakeover({
-    conversationId: live.sessionId,
-    harness: live.harness,
-    resumable: planned.ok,
-    holder: { pid: live.pid, cwd: live.cwd, label: live.name },
-    cwd: live.cwd,
+  const result = await withConversationResumeLock(live.sessionId, async () => {
+    const holder = conversationHeldBy(await liveConversationHolders(backend), live.sessionId)
+    if (holder?.kind === 'managed') return { attach: holder.id }
+    const id = newSessionId()
+    const logFile = managedProcessLogPath(live.harness, id, AGENTISTICS_DATA_DIR)
+    // PLAN.ACCOUNTS D3 — a conversation agentop ran before keeps that row's account (and its root);
+    // one it never ran has no record and reopens in the default root, as before. Decided BEFORE the
+    // holder is closed: a removed account must refuse while the user still has their assistant.
+    const previous = newestRowOfConversation(await readRegistry(), live.sessionId)
+    const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
+    if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
+    const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...inheritedLaunch(previous, live.harness), ...(logFile ? { logFile } : {}), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
+    if (planned.ok && planned.plan.modeNeedsProtocol) { console.error(`Cannot reopen ${live.sessionId}: terminal cannot apply ${planned.plan.modeNeedsProtocol} approval mode`); return 1 }
+    const plan = planTakeover({
+      conversationId: live.sessionId,
+      harness: live.harness,
+      resumable: planned.ok,
+      holder: { pid: live.pid, cwd: live.cwd, label: live.name },
+      cwd: live.cwd,
+    })
+
+    if (plan.kind === 'refuse') {
+      console.error(explainTakeover(plan.reason))
+      return 1
+    }
+    if (plan.kind === 'free' || !planned.ok) return null
+
+    // Ending somebody's running assistant loses whatever it was mid-turn, so it is stated before it
+    // happens rather than reported after.
+    console.log(`Closing ${plan.holder.label ?? plan.conversationId.slice(0, 8)} (pid ${plan.holder.pid}) to reopen it here…`)
+    try {
+      process.kill(plan.holder.pid!, 'SIGTERM')
+    } catch (e) {
+      console.error(`Could not close it: ${e instanceof Error ? e.message : String(e)}`)
+      return 1
+    }
+    // Wait for it to actually go. Resuming while the old one is still shutting down is the very race
+    // the harness refuses on, and it would land as another dead row.
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 100))
+      try { process.kill(plan.holder.pid!, 0) } catch { break }
+    }
+
+    try {
+      if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
+      await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}),
+        structured: structuredIntentOf({ harness: live.harness, origin: 'terminal', resumeId: live.sessionId, mode: previous?.mode }, { ...inheritedLaunch(previous, live.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
+      })
+    } catch (e) {
+      console.error(`Closed it, but could not reopen: ${e instanceof Error ? e.message : String(e)}`)
+      return 1
+    }
+    const died = await spawnFailure(backend, id, planned.plan.argv[0])
+    if (died) { console.error(died); await backend.kill(id).catch(() => {}); return 1 }
+
+    // The newest row of this conversation is the one being continued: its filing and name come
+    // along, and the live harness name (if any) still wins for the label.
+    const record: ManagedSession = {
+      id, harness: live.harness, cwd: plan.cwd, createdAt: new Date().toISOString(),
+      ...inheritedIdentity(previous),
+      ...inheritedLaunch(previous, live.harness),
+      ...(live.name ? { label: live.name, labelSince: Date.now() } : {}),
+      conversationId: plan.conversationId,
+      ...(await recordedRepo(plan.cwd)),
+    }
+    // The write is READ BACK, and that is not belt-and-braces — it is the failure this path actually
+    // had. `registry.ts` serialises writes within ONE process; agentop runs as several (the cockpit,
+    // the daemon, every one-shot command), all read-modify-writing the same file. A record added here
+    // was observed erased by a longer-lived process that had read the file just before, and the
+    // session it lost was the one the user was about to sit in: running, unregistered, and beyond
+    // every verb the cockpit offers. One retry closes the ordinary interleaving; a loss that survives
+    // it is SAID rather than left for the user to discover when a rename stops working.
+    // Retired like every other reopen: it stops standing beside its own continuation.
+    if (previous && !previous.endedAt) await patchSession(previous.id, { endedAt: new Date().toISOString() })
+    if (!await addVerified(record)) {
+      console.error(
+        `${id} is running but its registry record could not be kept — another agentop process is `
+        + 'writing the same registry. The cockpit will take it back on its next poll; if it does not, '
+        + `run \`agentop session attach ${id}\` again.`,
+      )
+    }
+    await deliverStoredRole(id, plan.conversationId).catch(() => false)
+    return { attach: id }
   })
-
-  if (plan.kind === 'refuse') {
-    console.error(explainTakeover(plan.reason))
-    return 1
-  }
-  if (plan.kind === 'free' || !planned.ok) return null
-
-  // Ending somebody's running assistant loses whatever it was mid-turn, so it is stated before it
-  // happens rather than reported after.
-  console.log(`Closing ${plan.holder.label ?? plan.conversationId.slice(0, 8)} (pid ${plan.holder.pid}) to reopen it here…`)
-  try {
-    process.kill(plan.holder.pid!, 'SIGTERM')
-  } catch (e) {
-    console.error(`Could not close it: ${e instanceof Error ? e.message : String(e)}`)
-    return 1
-  }
-  // Wait for it to actually go. Resuming while the old one is still shutting down is the very race
-  // the harness refuses on, and it would land as another dead row.
-  for (let i = 0; i < 40; i++) {
-    await new Promise(r => setTimeout(r, 100))
-    try { process.kill(plan.holder.pid!, 0) } catch { break }
-  }
-
-  try {
-    if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-    await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}) })
-  } catch (e) {
-    console.error(`Closed it, but could not reopen: ${e instanceof Error ? e.message : String(e)}`)
-    return 1
-  }
-  const died = await spawnFailure(backend, id, planned.plan.argv[0])
-  if (died) { console.error(died); await backend.kill(id).catch(() => {}); return 1 }
-
-  // The newest row of this conversation is the one being continued: its filing and name come
-  // along, and the live harness name (if any) still wins for the label.
-  const record: ManagedSession = {
-    id, harness: live.harness, cwd: plan.cwd, createdAt: new Date().toISOString(),
-    ...inheritedIdentity(previous),
-    ...(live.name ? { label: live.name, labelSince: Date.now() } : {}),
-    conversationId: plan.conversationId,
-    ...(await recordedRepo(plan.cwd)),
-  }
-  // The write is READ BACK, and that is not belt-and-braces — it is the failure this path actually
-  // had. `registry.ts` serialises writes within ONE process; agentop runs as several (the cockpit,
-  // the daemon, every one-shot command), all read-modify-writing the same file. A record added here
-  // was observed erased by a longer-lived process that had read the file just before, and the
-  // session it lost was the one the user was about to sit in: running, unregistered, and beyond
-  // every verb the cockpit offers. One retry closes the ordinary interleaving; a loss that survives
-  // it is SAID rather than left for the user to discover when a rename stops working.
-  // Retired like every other reopen: it stops standing beside its own continuation.
-  if (previous && !previous.endedAt) await patchSession(previous.id, { endedAt: new Date().toISOString() })
-  if (!await addVerified(record)) {
-    console.error(
-      `${id} is running but its registry record could not be kept — another agentop process is `
-      + 'writing the same registry. The cockpit will take it back on its next poll; if it does not, '
-      + `run \`agentop session attach ${id}\` again.`,
-    )
-  }
-  await deliverStoredRole(id, plan.conversationId).catch(() => false)
-  return execAttach(id, backend)
+  // Attaching can last for hours; the claim only covers the check, spawn and registry write.
+  return result !== null && typeof result === 'object' ? execAttach(result.attach, backend) : result
 }
 
 /**
@@ -1418,10 +1497,8 @@ async function liveAgentFor(ref: string): Promise<
   { sessionId: string; harness: HarnessId; cwd: string; pid?: number; name?: string } | null
 > {
   try {
-    const out = Bun.spawnSync(['claude', 'agents', '--json'])
-    if (!out.success) return null
     const needle = ref.trim().toLowerCase()
-    const hits = parseHarnessAgents(out.stdout.toString()).filter(a =>
+    const hits = (await readHarnessAgents()).filter(a =>
       a.sessionId.toLowerCase().startsWith(needle)
       || (a.name ?? '').toLowerCase() === needle)
     const only = hits.length === 1 ? hits[0]! : undefined
@@ -1436,6 +1513,39 @@ async function liveAgentFor(ref: string): Promise<
   } catch {
     return null
   }
+}
+
+/** CONTA.TROCA — the same host verb the browser's dialog calls (`account-switch-host.ts`). */
+async function switchAccount(
+  cmd: { ref: string; accountId?: string; harness?: string; resend?: boolean; json?: boolean },
+  backend: SessionBackend,
+): Promise<number> {
+  const registry = await readRegistry()
+  const reconciled = reconcileSessions(registry, await backend.list())
+  const found = resolveSessionRef(reconciled.map(toRefCandidate), cmd.ref)
+  if (!found.ok) { console.error(refError(cmd.ref, found.reason, found.matches)); return 1 }
+  const { id } = found.session
+  const lang = await resolveLang()
+  if (!cmd.accountId) {
+    const row = registry.find(r => r.id === id)
+    const { listSwitchOptions } = await import('./account-switch-io')
+    const all = row ? await listSwitchOptions({ harness: row.harness, ...(row.accountId ? { accountId: row.accountId } : {}), agentCaller: !!callerSessionId() }) : []
+    // --harness narrows the list to one harness; without it every harness that can take the session is listed.
+    const options = cmd.harness ? all.filter(o => o.harness === cmd.harness) : all
+    if (cmd.json) { console.log(JSON.stringify({ options }, null, 2)); return 0 }
+    if (!options.length) { console.log(lang === 'pt' ? 'Nenhuma outra conta disponível para esta sessão.' : 'No other account is available for this session.'); return 0 }
+    for (const o of options) console.log(`${o.harness}\t${o.id}\t${o.label}${o.plan ? ` (${o.plan})` : ''}${o.recommended ? '\t*' : ''}`)
+    return 0
+  }
+  const { hostForFleet } = await import('./fleet-web')
+  const host = await hostForFleet(lang)
+  if (!host.switchSessionAccount) { console.error('unavailable'); return 1 }
+  const out = await host.switchSessionAccount({
+    id, accountId: cmd.accountId, ...(cmd.harness ? { harness: cmd.harness } : {}), ...(cmd.resend ? { resendPending: true } : {}), ...(callerSessionId() ? { callerVerified: true } : {}),
+  })
+  if (cmd.json) console.log(JSON.stringify(out))
+  else (out.ok ? console.log : console.error)(out.ok && out.id ? `${out.message} (${out.id})` : out.message)
+  return out.ok ? 0 : 1
 }
 
 async function kill(ref: string, backend: SessionBackend, folder?: string): Promise<number> {
@@ -1461,7 +1571,10 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
   }, await resolveLang())
   if (flushed.warning) console.error(flushed.warning)
 
-  const confirmed = await backend.kill(id)
+  const confirmed = await killAndRetireSession(id, async () => {
+    const killed = await backend.kill(id)
+    return killed || statusBefore === 'lost' || statusBefore === 'exited'
+  })
   // A session that was already `lost` (the backend has nothing by this id — there was never
   // anything for `kill` to do) or `exited` (the hosted command already finished) is safe to clear
   // even on a backend report we cannot trust, because the reconciled view established BEFORE this
@@ -1474,7 +1587,6 @@ async function kill(ref: string, backend: SessionBackend, folder?: string): Prom
   // MARKED finished, never deleted — see `retireSession`'s own docstring. A session filed under a
   // task must go on resolving in `loadTaskWorld`'s rows after `agentop session kill`, exactly as it
   // already does behind the web/cockpit kill verb.
-  await retireSession(id)
   console.log(`Killed ${id}.`)
   const f = folder ? folderByRef.get(folder) : undefined
   if (f) {

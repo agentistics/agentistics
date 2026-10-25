@@ -17,7 +17,7 @@ import { conversationsInUse, type ClaimingSession, type ConversationHolder } fro
 import { emptyHarnessSessionIndex, loadHarnessSessions } from './harness-sessions'
 import { readRegistry } from './registry'
 import { externalId } from './session-view'
-import { parseHarnessAgents, type HarnessAgent } from './harness-agents'
+import { readHarnessAgents } from './harness-agents-io'
 import type { ManagedSession, SessionBackend } from './types'
 
 /**
@@ -35,15 +35,15 @@ import type { ManagedSession, SessionBackend } from './types'
  *    sitting in the very conversation someone is about to reopen.
  *  - the REGISTRY's `conversationId` covers a live row whose harness record cannot be read.
  *
- * Every read is best-effort and every failure degrades to "we do not know", never to a refusal: this
- * guard exists to prevent lost work, not to become a new way of losing the verb.
+ * Auxiliary reads are best-effort. A failed backend list must propagate: unreadable liveness is
+ * never evidence that nobody holds a conversation, and must not admit a second process.
  */
 export async function liveConversationHolders(
   backend: SessionBackend,
 ): Promise<Map<string, ConversationHolder>> {
   const [registry, backendSessions, harnessSessions, procs] = await Promise.all([
     readRegistry().catch(() => [] as ManagedSession[]),
-    backend.list().catch(() => []),
+    backend.list(),
     loadHarnessSessions().catch(() => emptyHarnessSessionIndex()),
     scanProcesses().then(r => r.procs).catch(() => []),
   ])
@@ -51,8 +51,7 @@ export async function liveConversationHolders(
 
   const claims: ClaimingSession[] = []
   for (const m of registry) {
-    // A retired row drives nothing, whatever pane the backend still holds for it.
-    if (m.endedAt) continue
+    // Backend liveness wins over a stale endedAt stamp, including a CLI-owned relay.
     const exact = harnessSessions.byManagedId.get(m.id)?.sessionId
     const conversationId = exact ?? m.conversationId
     if (!conversationId) continue
@@ -102,16 +101,6 @@ export async function liveConversationHolders(
     })
   }
   return conversationsInUse(claims)
-}
-
-/** `claude agents --json`, or nothing. Best-effort: a machine without the CLI behaves as before. */
-async function readHarnessAgents(): Promise<HarnessAgent[]> {
-  try {
-    const out = Bun.spawnSync(['claude', 'agents', '--json'])
-    return out.success ? parseHarnessAgents(out.stdout.toString()) : []
-  } catch {
-    return []
-  }
 }
 
 /** Signal 0 asks the kernel whether the pid exists without touching the process. */

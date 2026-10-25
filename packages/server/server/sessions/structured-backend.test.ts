@@ -12,7 +12,7 @@ import type {
 import { answerFits, structuredRegistry, stubDriver } from '@agentistics/engine-api'
 import { acpAsStructured, recordingSession, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
 import { isReplayCall } from './structured-replay'
-import { STRUCTURED_ROUTE_OFF, answerStructured, routableDriver, routeSpawn, structuredIntentOf, structuredReopenOrigin } from './structured-route'
+import { STRUCTURED_ROUTE_OFF, answerStructured, reopenOrigin, routableDriver, routeSpawn, spawnOriginOf, structuredIntentOf } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
 
 function fakeBase(): SessionBackend & { calls: Array<[string, unknown?]> } {
@@ -72,6 +72,7 @@ function fakeSession(req: StructuredSpawn) {
     // test controls
     ask(a: StructuredAttention) { open = a; state = 'waiting-approval' },
     fail(reason: string) { state = 'exited'; for (const cb of exits) cb({ kind: 'failed', reason }) },
+    end() { state = 'exited'; for (const cb of exits) cb({ kind: 'ended' }) },
   }
   return s
 }
@@ -112,18 +113,32 @@ const web = (harness: HarnessId, extra: Partial<BackendSpawn> = {}): BackendSpaw
 
 describe('routeSpawn (pure)', () => {
   const base = { harness: 'gemini' as HarnessId, driver: 'acp' as const, acpDriven: false, acpOptIn: [] as string[] }
-  test('structured only for a web-born spawn, flag ON, with a ready driver', () => {
+  test('structured for a web-born or background spawn, flag ON, with a ready driver', () => {
     expect(routeSpawn({ ...base, flagOn: true, origin: 'web' })).toBe('structured')
+    expect(routeSpawn({ ...base, flagOn: true, origin: 'background' })).toBe('structured')
+    expect(routeSpawn({ ...base, flagOn: false, origin: 'background' })).toBe('tmux')
+    expect(routeSpawn({ ...base, flagOn: true, origin: 'background', driver: null })).toBe('tmux')
     expect(routeSpawn({ ...base, flagOn: false, origin: 'web' })).toBe('tmux')
     expect(routeSpawn({ ...base, flagOn: true, origin: 'terminal' })).toBe('tmux')
     expect(routeSpawn({ ...base, flagOn: true })).toBe('tmux')
     expect(routeSpawn({ ...base, flagOn: true, origin: 'web', driver: null })).toBe('tmux')
     expect(routeSpawn({ ...base, harness: null, flagOn: true, origin: 'web' })).toBe('tmux')
   })
-  test('a web reopen is structured only when the replaced row ran structured', () => {
-    expect(structuredReopenOrigin('web', 'acp')).toBe(true)
-    expect(structuredReopenOrigin('web', undefined)).toBe(false)
-    expect(structuredReopenOrigin(undefined, 'acp')).toBe(false)
+  test('a spawn nobody attaches to is background; an attached one stays a TUI (owner 2026-10-23)', () => {
+    // `agentop session --bg`, a leader's worker, a hand-off: no terminal anybody sits in.
+    expect(spawnOriginOf(undefined, false)).toBe('background')
+    expect(spawnOriginOf(undefined, true)).toBeUndefined()
+    expect(spawnOriginOf('web', true)).toBe('web')
+    expect(spawnOriginOf('terminal', false)).toBe('terminal')
+  })
+  test('a reopen routes structured unless a person attaches to it in a terminal', () => {
+    // Before: only a web reopen of a row that already ran structured — a tmux conversation stayed tmux.
+    expect(reopenOrigin('web', false)).toBe('web')
+    expect(reopenOrigin('web', true)).toBe('web')
+    expect(reopenOrigin(undefined, false)).toBe('background')
+    expect(reopenOrigin('terminal', false)).toBe('background')
+    expect(reopenOrigin(undefined, true)).toBeUndefined()
+    expect(reopenOrigin('terminal', true)).toBeUndefined()
   })
   test('A5.4 opt-in routes as before, flag or no flag', () => {
     expect(routeSpawn({ ...base, flagOn: false, acpDriven: true, acpOptIn: ['gemini'] })).toBe('acp-legacy')
@@ -158,9 +173,50 @@ describe('structuredRegistry / stubDriver / answerFits (engine-api, pure)', () =
     expect(answerFits(open, { text: 'free' }).ok).toBe(true)
     expect(answerFits({ ...open, freeText: false }, { text: 'free' })).toEqual({ ok: false, why: 'text-not-accepted' })
   })
+  test('answerFits (1.13): several choices only on a multiSelect request', () => {
+    const multi: StructuredAttention = { requestId: 'm1', kind: 'question', multiSelect: true, freeText: true,
+      options: [{ id: '1', label: 'Apple' }, { id: '2', label: 'Banana' }, { id: 'other', label: 'Type something', freeText: true }] }
+    expect(answerFits(multi, { choices: [2, 1] })).toEqual({ ok: true, options: [multi.options[0]!, multi.options[1]!] })
+    expect(answerFits({ ...multi, multiSelect: undefined }, { choices: [1] })).toEqual({ ok: false, why: 'not-multi' })
+    expect(answerFits(multi, { choices: [] })).toEqual({ ok: false, why: 'empty' })
+    expect(answerFits(multi, { choices: [1, 1] })).toEqual({ ok: false, why: 'no-such-option' })
+    expect(answerFits(multi, { choices: [4] })).toEqual({ ok: false, why: 'no-such-option' })
+    expect(answerFits(multi, { choices: [1], text: 'x' })).toEqual({ ok: false, why: 'text-not-accepted' })
+    expect(answerFits(multi, { choices: [1, 3] })).toEqual({ ok: false, why: 'empty' })
+    expect(answerFits(multi, { choices: [1, 3], text: 'kiwi' }).ok).toBe(true)
+    // An older host sends a lone choice: still fits.
+    expect(answerFits(multi, { choice: 2 }).ok).toBe(true)
+  })
 })
 
 describe('withStructured — routing', () => {
+  for (const origin of ['background', 'terminal', 'web'] as const) {
+    test(`flag ON + ${origin} origin: ${origin === 'terminal' ? 'tmux' : 'structured driver'}`, async () => {
+      const base = fakeBase()
+      const eng = fakeEngine()
+      let asked = 0
+      const b = withStructured(base, provider(eng.reg, {
+        structured: async () => { asked++; return eng.reg },
+      }))
+      const req = web('gemini')
+      req.structured = { ...req.structured!, origin }
+      await b.spawn(req)
+      if (origin === 'terminal') {
+        expect(base.calls).toEqual([['spawn', req]])
+        expect(asked).toBe(0)
+        expect(eng.started).toEqual([])
+        expect(b.structuredSessions()).toEqual([])
+      } else {
+        expect(base.calls.map(c => c[0])).not.toContain('spawn')
+        expect(asked).toBe(1)
+        expect(eng.started).toHaveLength(1)
+        expect(eng.started[0]).toMatchObject({ id: req.id, harness: 'gemini', initialPrompt: 'hi' })
+        expect(b.structuredSessions()).toEqual([{ id: req.id, route: 'structured', driver: 'acp' }])
+      }
+      await b.kill(req.id)
+    })
+  }
+
   test('a refused conversation link is reported again on a later list(), then never once it links', async () => {
     const base = fakeBase()
     const eng = fakeEngine()
@@ -257,6 +313,20 @@ describe('withStructured — routing', () => {
 })
 
 describe('withStructured — fallback', () => {
+  test('a normal end records termination without triggering fallback', async () => {
+    const eng = fakeEngine()
+    const calls: string[] = []
+    const b = withStructured(fakeBase(), provider(eng.reg, {
+      onEnded: async id => { calls.push(`ended:${id}`) },
+      onFallback: () => { calls.push('fallback') },
+    }))
+    await b.spawn(web('gemini'))
+    eng.sessions[0]!.end()
+    await new Promise(r => setTimeout(r, 0))
+    expect(calls).toEqual(['ended:m-1'])
+    expect((await b.list()).find(s => s.id === 'm-1')?.alive).toBe(false)
+  })
+
   test('a refused structured start goes to tmux with the same request', async () => {
     const base = fakeBase()
     const eng = fakeEngine({ refuse: 'login needed' })
@@ -334,6 +404,16 @@ describe('withStructured — answering through the driver', () => {
     expect(answerStructured(Q, 3, ' capivara ')).toEqual({ ok: true, answer: { requestId: 'q1', choice: 3, text: ' capivara ' }, said: ' capivara ' })
     expect(answerStructured(Q, 1, 'ignored')).toEqual({ ok: true, answer: { requestId: 'q1', choice: 1 }, said: 'Only my fix' })
     expect(answerStructured({ ...Q, options: [], freeText: true }, undefined, 'free')).toEqual({ ok: true, answer: { requestId: 'q1', text: 'free' }, said: 'free' })
+  })
+
+  test('answerStructured (pure): several ticks go as ONE answer, only on a multiSelect request', () => {
+    const M = { ...Q, multiSelect: true as const }
+    expect(answerStructured(M, undefined, undefined, [2, 1])).toEqual({ ok: true, answer: { requestId: 'q1', choices: [1, 2] }, said: 'Only my fix, ' + Q.options[1]!.label })
+    expect(answerStructured(M, undefined, undefined, [])).toEqual({ ok: false, why: 'needs-choice' })
+    expect(answerStructured(M, undefined, undefined, [9])).toEqual({ ok: false, why: 'gone' })
+    expect(answerStructured(M, undefined, '', [1, 3])).toEqual({ ok: false, why: 'needs-text' })
+    expect(answerStructured(M, undefined, 'kiwi', [1, 3])).toEqual({ ok: true, answer: { requestId: 'q1', choices: [1, 3], text: 'kiwi' }, said: 'Only my fix, kiwi' })
+    expect(answerStructured(Q, undefined, undefined, [1])).toEqual({ ok: false, why: 'gone' })
   })
 })
 

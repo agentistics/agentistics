@@ -91,7 +91,7 @@ function terminalVerb(s: ControlStrings): FleetVerb {
  * never pays for it, and naming it in an `import type` puts it back in the resolver's path.
  */
 export type FleetActionId =
-  | 'approve' | 'prompt' | 'rename' | 'note' | 'task' | 'kill' | 'resume'
+  | 'approve' | 'prompt' | 'rename' | 'note' | 'task' | 'kill' | 'resume' | 'forget'
   /**
    * Stop what the session is doing WITHOUT ending it.
    *
@@ -150,6 +150,10 @@ export interface FleetActionRequest {
   text?: string
   /** The option NUMBER for `approve` on a numbered dialog. Never defaulted — see `answerSession`. */
   choice?: number
+  /** For `approve` on a STRUCTURED multi-select question: every option ticked, sent as one answer. */
+  choices?: number[]
+  /** For `approve` on a multi-question form: move to the next/previous question instead of answering. */
+  step?: 'next' | 'back'
   /** For `rewind`: which appearance of `text` among the person's prompts, 0 = the latest. */
   occurrence?: number
   /**
@@ -178,7 +182,7 @@ export interface FleetActionRequest {
 
 /** How a verb is offered to the page: performable, present-but-refused, or absent. */
 export interface FleetVerb {
-  action: SessionAction
+  action: SessionAction | 'forget'
   label: string
   /**
    * False when this row cannot take it. Drawn DISABLED, never removed — the cockpit made the same
@@ -234,7 +238,9 @@ export interface FleetRow {
   conversationLinkVia?: SessionConversationLink['reason']
   /** The dialog this session is blocked on, verbatim, and the options read off it. */
   approvalLines?: string[]
-  dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean }[]
+  dialogOptions?: { number: number; label: string; selected: boolean; freeText?: boolean; checked?: boolean }[]
+  /** The multi-question form around the dialog — see `ControlSession.dialogForm`. */
+  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; together?: true; canStep?: true }
   /** The row's own sentences for what cannot be done to it. Already localized. */
   approvalBlind?: string
   approveBlind?: string
@@ -282,6 +288,8 @@ export function verbReason(
 }
 
 /** One control-center row, shaped for the browser — verbs, wording and refusals included. */
+const FORGETTABLE_STATES: ReadonlySet<string> = new Set(['exited', 'closed', 'lost'])
+
 export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
   const words = actionWords(s)
   const verbs: FleetVerb[] = sessionActions(row)
@@ -295,6 +303,20 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
         ...(reason ? { reason } : {}),
       }
     })
+  // Cleanup does not need a readable directory or a resumable conversation.
+  if (isExternalRowId(row.id) && row.pid !== undefined) {
+    const kill = verbs.find(v => v.action === 'kill')
+    if (kill) { kill.enabled = true; delete kill.reason }
+  }
+  // Hiding a LIVE managed row would bury a session that keeps running; only external rows and rows
+  // that already ended (or were lost) can leave the list.
+  if (!isNativeRow(row)) {
+    const forgettable = isExternalRowId(row.id) || FORGETTABLE_STATES.has(row.state)
+    verbs.push({
+      action: 'forget', label: s.sessionsForget, enabled: forgettable,
+      ...(forgettable ? {} : { reason: s.sessionsForgetLive }),
+    })
+  }
   // EXT.OPEN: an EXTERNAL row that named its conversation, on a harness that resumes by id, TAKES a
   // prompt — the first write continues it here (`external-continue.ts`, `continueExternal`). Every
   // other external row keeps its refusal: read-only live.
@@ -328,6 +350,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.conversationId && row.link ? { conversationLinkVia: row.link.reason } : {}),
     ...(row.approvalLines?.length ? { approvalLines: row.approvalLines } : {}),
     ...(row.dialogOptions?.length ? { dialogOptions: [...row.dialogOptions] } : {}),
+    ...(row.dialogOptions?.length && row.dialogForm ? { dialogForm: row.dialogForm } : {}),
     ...(row.approvalBlind ? { approvalBlind: row.approvalBlind } : {}),
     ...(row.approveBlind ? { approveBlind: row.approveBlind } : {}),
     ...(row.chooseBlind ? { chooseBlind: row.chooseBlind } : {}),

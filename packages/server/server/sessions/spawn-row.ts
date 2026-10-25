@@ -7,6 +7,7 @@
  * (`spawn-row.test.ts` is the table that holds it).
  */
 
+import { hasRolePrefix } from '@agentistics/core'
 import type { ManagedSession } from './types'
 import type { FilingPlan } from './spawn-filing'
 import type { SpawnFilingRequest } from './spawn-filing-io'
@@ -27,16 +28,22 @@ export function spawnRole(o: {
 export function spawnSessionFilingRequest(req: {
   role?: 'worker' | 'leader' | undefined
   parentSessionId?: string | undefined
+  parentVerified?: boolean | undefined
+  harness?: string | undefined
+  label?: string | undefined
   handoff?: boolean | undefined
+  /** CONTA.TROCA v2: inherit this row's filing as a hand-off successor would. */
+  switchFrom?: string | undefined
   taskId?: string | undefined
   subtaskId?: string | undefined
   cwd: string
 }): SpawnFilingRequest {
   return {
-    role: spawnRole({ explicit: req.role, hasParent: !!req.parentSessionId, handoff: req.handoff }),
+    role: spawnRole({ explicit: req.role, leaderPrefix: !!req.label && hasRolePrefix(req.label), hasParent: !!req.parentSessionId, handoff: req.handoff }),
     taskRef: req.taskId, subtaskRef: req.subtaskId, cwd: req.cwd,
-    callerSessionId: req.parentSessionId,
-    ...(req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
+    harness: req.harness,
+    callerSessionId: req.parentVerified || req.handoff ? req.parentSessionId : undefined,
+    ...(req.switchFrom ? { handoffOf: req.switchFrom, handoffKeepsRole: true } : req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
   }
 }
 
@@ -83,4 +90,5 @@ export const WARNING_TEXT: Record<OkPlan['warnings'][number], string> = {
   no_folder: 'No sidebar folder was found for this session — pass --folder to file it.',
   subtask_member_filed_on_group: 'The subtask is a member of a group; the session is filed on the group.',
   shared_checkout_override: 'Sharing a main checkout another live session works in (--shared-cwd).',
+  inherited_task_repo_mismatch: 'The working directory is outside the inherited task repository; the session is still filed on that task. Pass --task explicitly to require a matching repository.',
 }

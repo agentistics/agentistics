@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
 import { start } from './cli-session'
 import { parseSessionArgs } from './cli-parse'
 import { addSession, patchSession, readRegistry } from './registry'
@@ -7,15 +7,19 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { passPinForKill } from './handoff-relay-io'
+import { __setHarnessAgentsReaderForTest } from './harness-agents-io'
 import { readPreferences, updatePreferences } from '../preferences'
-import type { ManagedSession, SessionBackend } from './types'
+import type { ManagedSession, SessionBackend, StructuredIntent } from './types'
 
 const saved = process.env.AGENTOP_MANAGED_ID
+// The CLI flow asks `claude agents --json`; the machine's real CLI is not part of this test.
+beforeAll(() => __setHarnessAgentsReaderForTest(async () => []))
+afterAll(() => __setHarnessAgentsReaderForTest(null))
 afterEach(() => { if (saved === undefined) delete process.env.AGENTOP_MANAGED_ID; else process.env.AGENTOP_MANAGED_ID = saved })
 
-const mkBackend = (onSpawn: (id: string) => Promise<void> = async () => {}) => ({
+const mkBackend = (onSpawn: (id: string, structured?: StructuredIntent) => Promise<void> = async () => {}) => ({
   id: 'tmux', unavailable: async () => undefined, list: async () => [],
-  spawn: async (req: { id: string }) => { await onSpawn(req.id) },
+  spawn: async (req: { id: string; structured?: StructuredIntent }) => { await onSpawn(req.id, req.structured) },
   capture: async () => [], kill: async () => true,
 }) as unknown as SessionBackend
 
@@ -25,14 +29,16 @@ async function runHandoff(parent: string, harness: string, backend: SessionBacke
   if (cmd.kind !== 'start') throw new Error('not a start')
   const log = console.log; const err = console.error
   console.log = () => {}; console.error = () => {}
-  try { return await start(cmd, backend, provesCaller ? { provesCaller } : {}) } finally { console.log = log; console.error = err }
+  // A mock pane never dies, so the real settle wait (5 s) would prove nothing and only cost time.
+  try { return await start(cmd, backend, { settleMs: 50, ...(provesCaller ? { provesCaller } : {}) }) } finally { console.log = log; console.error = err }
 }
 
 const addLeader = async (id: string, conversationId: string) => {
   await addSession({ id, harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), label: 'Leader', conversationId })
   await updatePreferences(() => ({ pinnedSessions: ['other', conversationId] }))
 }
-const successorOf = async (parent: string) => (await readRegistry()).find(r => r.parentSessionId === parent)
+// A successor is a LEADER: it is linked by `handoffFrom`, never filed as the predecessor's child.
+const successorOf = async (parent: string) => (await readRegistry()).find(r => r.handoffFrom === parent)
 
 describe('agentop session --handoff — the CLI flow', () => {
   test('inherits the pin under the successor key', async () => {
@@ -40,13 +46,15 @@ describe('agentop session --handoff — the CLI flow', () => {
     expect(await runHandoff('ho-p1', 'claude', mkBackend(), async () => true)).toBe(0)
     const child = (await successorOf('ho-p1'))!
     expect(child.label).toContain('Leader')
-    expect((await readPreferences()).pinnedSessions).toEqual(['other', child.conversationId!])
+    // The predecessor stays pinned (only the owner unpins); the successor is pinned beside it.
+    expect((await readPreferences()).pinnedSessions).toEqual(['other', child.conversationId!, 'conv-ho-p1'])
+    expect(child.parentSessionId).toBeUndefined()
   }, 60_000)
 
   test('inherits everything the predecessor was set up with', async () => {
     await addSession({
       id: 'ho-all', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), label: 'Leader all',
-      conversationId: 'conv-ho-all', model: 'claude-opus-5-5', effort: 'high', note: 'keep going', away: true,
+      conversationId: 'conv-ho-all', mode: 'no-questions', model: 'claude-opus-5-5', effort: 'high', note: 'keep going', away: true,
     })
     await updatePreferences(() => ({
       pinnedSessions: ['a', 'conv-ho-all', 'b'],
@@ -60,10 +68,11 @@ describe('agentop session --handoff — the CLI flow', () => {
     expect(child.label).toContain("Leader all")
     expect(child.model).toBe('claude-opus-5-5')
     expect(child.effort).toBe('high')
+    expect(child.mode).toBe('no-questions')
     expect(child.note).toBe('keep going')
     expect(child.away).toBe(true)
     const p = await readPreferences()
-    expect(p.pinnedSessions).toEqual(['a', key, 'b'])
+    expect(p.pinnedSessions).toEqual(['a', key, 'conv-ho-all', 'b'])
     expect(p.mutedSessions).toContain(key)
     expect((p.checkin as Record<string, { intervalMin?: number }>)[key]?.intervalMin).toBe(120)
     expect(p.sessionGroups?.groups.find(g => g.id === 'g-lead')?.sessionKeys).toContain(key)
@@ -71,6 +80,29 @@ describe('agentop session --handoff — the CLI flow', () => {
     expect(parentRow.handoffTo).toBe(child.id)
     expect(child.handoffSeq).toBe(2)
     expect(await (await import('./session-roles')).storedRoleFor([key, child.id])).toBe('leader')
+  }, 60_000)
+
+  test('LIDER.ROTA: the whole team moves to the successor, which sits at the root; the predecessor is asked to retire', async () => {
+    await addSession({ id: 'ho-team', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), label: 'Motor', conversationId: 'conv-ho-team' })
+    await addSession({ id: 'ho-team-w1', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), parentSessionId: 'ho-team' })
+    await addSession({ id: 'ho-team-w2', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), parentSessionId: 'gone', parentConversationId: 'conv-ho-team' })
+    expect(await runHandoff('ho-team', 'claude', mkBackend(), async () => true)).toBe(0)
+    const rows = await readRegistry()
+    const child = rows.find(r => r.handoffFrom === 'ho-team')!
+    expect(child.parentSessionId).toBeUndefined()
+    expect(child.parentConversationId).toBeUndefined()
+    for (const w of ['ho-team-w1', 'ho-team-w2']) expect(rows.find(r => r.id === w)!.parentSessionId).toBe(child.id)
+    expect(rows.find(r => r.id === 'ho-team')!.retire?.successorId).toBe(child.id)
+  }, 60_000)
+
+  test('ORQ.FORA --handoff sends background structured intent with relay instructions and inherited mode', async () => {
+    await addSession({ id: 'ho-protocol', harness: 'claude', cwd: process.cwd(), createdAt: new Date().toISOString(), label: 'Protocol leader', mode: 'no-questions' })
+    const intents: Array<StructuredIntent | undefined> = []
+    const backend = mkBackend(async (_id, structured) => { intents.push(structured) })
+    expect(await runHandoff('ho-protocol', 'claude', backend, async () => true)).toBe(0)
+    expect(intents[0]).toMatchObject({ harness: 'claude', origin: 'background', prompt: 'x', mode: 'no-questions' })
+    expect(intents[0]?.instructions?.text).toContain('agentistics')
+    expect(intents[0]?.mcp?.[0]?.name).toBe('agentistics')
   }, 60_000)
 
   test('a forged AGENTOP_MANAGED_ID without the pane is refused, nothing starts', async () => {
@@ -87,7 +119,7 @@ describe('agentop session --handoff — the CLI flow', () => {
     await addLeader('ho-p3', 'conv-ho-p3')
     const backend = mkBackend(async id => { await patchSession(id, { conversationId: 'late-conv' }) })
     expect(await runHandoff('ho-p3', 'codex', backend, async () => true)).toBe(0)
-    expect((await readPreferences()).pinnedSessions).toEqual(['other', 'late-conv'])
+    expect((await readPreferences()).pinnedSessions).toEqual(['other', 'late-conv', 'conv-ho-p3'])
   }, 60_000)
 })
 
@@ -146,6 +178,6 @@ describe('kill into a folder — the pin goes to a LIVE successor only', () => {
     const dying = row({ id: 'a', conversationId: 'conv-a', handoffTo: 'b' })
     const live = row({ id: 'b', conversationId: 'conv-b' })
     expect(await passPinForKill(dying, [dying, live], updatePreferences)).toBe(true)
-    expect((await readPreferences()).pinnedSessions).toEqual(['conv-b'])
+    expect((await readPreferences()).pinnedSessions).toEqual(['conv-b', 'conv-a'])
   })
 })

@@ -14,8 +14,8 @@ describe('fellGroupDismissed', () => {
     expect(fellGroupDismissed(['a', 'b'], ['a', 'b', 'c'])).toBe(false)
   })
 
-  it('is false once the fall SHRANK — one row was reopened on its own', () => {
-    expect(fellGroupDismissed(['a', 'b'], ['a'])).toBe(false)
+  it('stays dismissed when a row is reopened and only known falls remain', () => {
+    expect(fellGroupDismissed(['a', 'b'], ['a'])).toBe(true)
   })
 
   it('is false for a same-size set that does not actually match', () => {

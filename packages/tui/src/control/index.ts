@@ -212,6 +212,7 @@ export type {
   ProjectSearchResult,
   RestoreCandidate,
   ResumeSessionRequest,
+  SwitchAccountRequest,
   StartHow,
   StartOption,
   StartRequest,

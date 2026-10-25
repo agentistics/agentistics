@@ -121,6 +121,10 @@ function usage(overrides: Partial<ModelUsage> = {}): ModelUsage {
 // getModelPrice
 
 describe('getModelPrice', () => {
+  test('current Claude cache discounts do not inherit older prefix prices', () => {
+    expect(getModelPrice('claude-sonnet-5-5').cacheRead).toBe(.10)
+    expect(getModelPrice('claude-fable-5-1').cacheRead).toBe(.25)
+  })
   test('claude-opus-5-5 has its own row, not the claude-opus-5 prefix fallback', () => {
     // platform.claude.com/docs/en/about-claude/pricing, read 2026-09-25. Without the row the
     // prefix match priced Opus 5.5 at Opus 5's $5/$25 — double.
@@ -711,7 +715,7 @@ test('current Anthropic models are priced as themselves, not as the fallback', (
 test('sessionDay tolerates a start_time an adapter got wrong', () => {
   expect(sessionDay('2026-08-05T10:00:00.000Z')).toBe('2026-08-05')
   // Kimi wrote an epoch number; one such session used to 500 the whole /api/data response.
-  expect(sessionDay(1785939883717)).toBe(new Date(1785939883717).toISOString().slice(0, 10))
+  expect(sessionDay(1785939883717)).toBe(sessionDay(new Date(1785939883717).toISOString()))
   expect(sessionDay(undefined)).toBe('')
   expect(sessionDay(null)).toBe('')
   expect(sessionDay({})).toBe('')

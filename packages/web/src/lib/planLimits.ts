@@ -202,8 +202,18 @@ export function subscriptionRows(limits: PlanLimits[] | null, registered: Regist
   for (const r of rows) perHarness.set(r.harness, (perHarness.get(r.harness) ?? 0) + 1)
   return rows.map(({ account, ...r }) => {
     const label = account ? labels[account] : undefined
-    return (perHarness.get(r.harness) ?? 0) > 1 && label ? { ...r, accountLabel: label } : r
+    // A label that is only the assistant's own name says nothing the row does not ("Codex CLI · Codex CLI").
+    const telling = label && label !== HARNESS_LABELS[r.harness] ? label : undefined
+    return (perHarness.get(r.harness) ?? 0) > 1 && telling ? { ...r, accountLabel: telling } : r
   })
+}
+
+/** A subscription's name: the assistant, plus the account only when it adds something. A label that
+ *  already starts with the assistant's name ("Codex CLI #2") stands alone instead of repeating it. */
+export function subscriptionName(harness: PlanLimits['harness'], accountLabel?: string): string {
+  const h = HARNESS_LABELS[harness] ?? harness
+  if (!accountLabel || accountLabel === h) return h
+  return accountLabel.startsWith(`${h} `) ? accountLabel : `${h} · ${accountLabel}`
 }
 
 export { currentUsedPct, forecastWindow }

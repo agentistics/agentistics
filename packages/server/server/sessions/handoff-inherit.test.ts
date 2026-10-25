@@ -26,10 +26,10 @@ describe('generation counter', () => {
 
 describe('pin', () => {
   it('the successor takes the predecessor slot', () => {
-    expect(handoffPinPatch(prefs({ pinnedSessions: ['a', 'conv-p', 'b'] }), parent, child)?.pinnedSessions).toEqual(['a', 'conv-c', 'b'])
+    expect(handoffPinPatch(prefs({ pinnedSessions: ['a', 'conv-p', 'b'] }), parent, child)?.pinnedSessions).toEqual(['a', 'conv-c', 'conv-p', 'b'])
   })
   it('finds a pin recorded under the managed id', () => {
-    expect(handoffPinPatch(prefs({ pinnedSessions: ['p1'] }), parent, child)?.pinnedSessions).toEqual(['conv-c'])
+    expect(handoffPinPatch(prefs({ pinnedSessions: ['p1'] }), parent, child)?.pinnedSessions).toEqual(['conv-c', 'p1'])
   })
   it('does nothing for an unpinned predecessor or when already pinned', () => {
     expect(handoffPinPatch(prefs({ pinnedSessions: ['a'] }), parent, child)).toBeUndefined()
@@ -86,16 +86,16 @@ describe('combined', () => {
       pinnedSessions: ['conv-p'], checkin: { 'conv-p': { session: 'conv-p', intervalMin: 30 } },
     }), parent, child)
     expect(full?.sessionGroups?.groups[0]?.sessionKeys).toEqual(['conv-p', 'conv-c'])
-    expect(full?.pinnedSessions).toEqual(['conv-c'])
+    expect(full?.pinnedSessions).toEqual(['conv-c', 'conv-p'])
     expect((full?.checkin as Record<string, unknown>)['conv-c']).toBeDefined()
     expect(handoffInheritPatch(prefs({}), parent, child)).toBeUndefined()
   })
-  it('writes through the mutator and never throws', async () => {
+  it('writes through the mutator and surfaces write failures for retry', async () => {
     let seen: Partial<Preferences> | undefined
     const ok = await inheritHandoffPrefs(parent, child, async m => { seen = m(prefs({ pinnedSessions: ['conv-p'] })) as Partial<Preferences> })
     expect(ok).toBe(true)
-    expect(seen?.pinnedSessions).toEqual(['conv-c'])
-    expect(await inheritHandoffPrefs(parent, child, async () => { throw new Error('x') })).toBe(false)
+    expect(seen?.pinnedSessions).toEqual(['conv-c', 'conv-p'])
+    await expect(inheritHandoffPrefs(parent, child, async () => { throw new Error('x') })).rejects.toThrow('x')
   })
 })
 
@@ -114,7 +114,7 @@ describe('CLI hand-off end to end (preferences)', () => {
   it('successor gets folder, pin at the same index and the check-in agenda', async () => {
     const p = mkPrefs()
     expect(await inheritHandoffPrefs(parent, child, upd(p))).toBe(true)
-    expect(p.pinnedSessions).toEqual(['a', 'conv-c', 'b'])
+    expect(p.pinnedSessions).toEqual(['a', 'conv-c', 'conv-p', 'b'])
     expect(p.sessionGroups?.groups[0]?.sessionKeys).toContain('conv-c')
     expect((p.checkin as Record<string, unknown>)['conv-c']).toMatchObject({ intervalMin: 30, session: 'conv-c' })
   })
@@ -158,7 +158,7 @@ describe('mute', () => {
   })
   it('is part of the one inherit patch, beside the pin', () => {
     const patch = handoffInheritPatch(prefs({ pinnedSessions: ['conv-p'], mutedSessions: ['conv-p'] }), parent, child)
-    expect(patch?.pinnedSessions).toEqual(['conv-c'])
+    expect(patch?.pinnedSessions).toEqual(['conv-c', 'conv-p'])
     expect(patch?.mutedSessions).toEqual(['conv-p', 'conv-c'])
   })
 })
@@ -183,5 +183,26 @@ describe('launch flags', () => {
   })
   it('no predecessor: exactly what was given', () => {
     expect(handoffSpawnDefaults(undefined, 'claude', { model: 'm' })).toEqual({ model: 'm' })
+  })
+})
+
+describe('ORQ.FORA handoff approval defaults', () => {
+  it('inherits canonical approval across harnesses without copying model or effort', () => {
+    expect(handoffSpawnDefaults({ harness: 'claude', model: 'sonnet', effort: 'high', mode: 'no-questions' }, 'codex', {})).toEqual({ mode: 'no-questions' })
+  })
+  it('explicit default overrides a parent approval mode', () => {
+    expect(handoffSpawnDefaults({ harness: 'claude', mode: 'no-questions' }, 'claude', { mode: 'default' })).toEqual({ mode: 'default' })
+  })
+  it('a planned explicit folder wins over the predecessor backstop', async () => {
+    let current = prefs({ sessionGroups: { groups: [
+      { id: 'old', name: 'Old', sessionKeys: ['conv-p'] },
+      { id: 'chosen', name: 'Chosen', sessionKeys: ['conv-c'] },
+    ] }, pinnedSessions: ['conv-p'] })
+    const update = async (mutate: import('../preferences').PreferencesMutator) => { current = { ...current, ...mutate(current) }; return current }
+    await inheritHandoffPrefs(parent, child, update, 'chosen')
+    expect(current.sessionGroups?.groups.find(g => g.id === 'chosen')?.sessionKeys).toContain('conv-c')
+    expect(current.sessionGroups?.groups.find(g => g.id === 'old')?.sessionKeys).not.toContain('conv-c')
+    expect(current.pinnedSessions).toEqual(['conv-c', 'conv-p'])
+    expect(await inheritHandoffPrefs(parent, child, update, 'chosen')).toBe(false)
   })
 })

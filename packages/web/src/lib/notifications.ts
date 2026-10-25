@@ -414,6 +414,21 @@ export function idleFreedSentence(freed: string | null | undefined, lang: 'pt' |
 const PEER_CODES = new Set(['member.rules_proposed', 'member.peer_pinned', 'member.peer_key_changed'])
 
 export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Localized {
+  if (n.code === 'clean.done' || n.code === 'clean.partial') {
+    const pt = lang === 'pt'
+    const count = (key: string) => Math.max(0, Number(n.meta?.[key]) || 0)
+    const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+    const removed: string[] = []
+    const worktrees = count('worktrees'), folders = count('nodeModules')
+    if (worktrees) removed.push(plural(worktrees, 'worktree', 'worktrees'))
+    if (folders) removed.push(plural(folders, pt ? 'pasta de dependências' : 'dependency folder', pt ? 'pastas de dependências' : 'dependency folders'))
+    const parts = [`${String(n.meta?.freed ?? '0 B')} ${pt ? 'liberados' : 'freed'}.`]
+    if (removed.length) parts.push(pt ? `Removidos: ${removed.join(' e ')}.` : `Removed: ${removed.join(' and ')}.`)
+    const skipped = count('skipped'), errors = count('errors')
+    if (skipped) parts.push(pt ? `${plural(skipped, 'item mantido', 'itens mantidos')} por segurança.` : `${plural(skipped, 'item kept', 'items kept')} for safety.`)
+    if (errors) parts.push(`${plural(errors, pt ? 'erro' : 'error', pt ? 'erros' : 'errors')}.`)
+    return { title: NOTIFICATION_TEXT[n.code]![lang].title, message: parts.join(' ') }
+  }
   if (n.code === 'limits.threshold' || n.code === 'limits.exhausted') {
     const m = limitNoticeMeta(n.meta)
     if (m) return limitNoticeText(m, lang)

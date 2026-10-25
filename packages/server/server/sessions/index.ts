@@ -91,6 +91,10 @@ export async function resolveBackend(): Promise<SessionBackend> {
       onStarted(id, driver) {
         void import('./registry').then(r => r.patchSession(id, { structuredDriver: driver })).catch(() => {})
       },
+      async onEnded(id, endedAt) {
+        const { patchSession } = await import('./registry')
+        return patchSession(id, { endedAt: endedAt ?? new Date().toISOString() })
+      },
       async onConversation(id, conversationId) {
         // Refused (and logged) when another row owns that conversation — CROSSBIND, `registry.ts`. A
         // contended lock is retried on the next poll; a live holder later, in case it ends.
@@ -126,8 +130,8 @@ export async function resolveBackend(): Promise<SessionBackend> {
 
 /**
  * F2.0b — take back the structured sessions whose child outlived the previous server. Called ONCE, by
- * `agentop server` at boot: the server is the process that owns them. Any other process (the cockpit,
- * a one-shot `agentop session …`) lists such a row as running and never drives it.
+ * `agentop server` at boot: the server is the process that owns them. The prompt host also recovers
+ * relays created by a CLI after boot before sending. Other processes only list these rows.
  */
 export async function reattachStructuredSessions(): Promise<void> {
   const b = await resolveBackend()

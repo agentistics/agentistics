@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { normalizeFleetPayload, type FleetPayload } from './fleet'
+import { needsClosedFleet, normalizeFleetPayload, type FleetPayload } from './fleet'
 
 /**
  * Reported on v2.65.0: the Sessions page threw `TypeError: Cannot read properties of undefined
@@ -65,4 +65,11 @@ describe('search index on every row', () => {
     const { matchesQuery } = await import('../../../tui/src/control/search-scope')
     expect(() => matchesQuery(undefined as never, 'abc')).not.toThrow()
   })
+})
+
+
+test('active-only views still request deferred history for sleeping pins', () => {
+  expect(needsClosedFleet(true, 1)).toBe(true)
+  expect(needsClosedFleet(true, 0)).toBe(false)
+  expect(needsClosedFleet(false, 0)).toBe(true)
 })

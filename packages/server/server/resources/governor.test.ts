@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { buildInventory, classifyProcess, type ProcEntry } from './inventory'
 import { killAllowed, planGovernor, type HelperState } from './governor'
 import { parseHelperRegistration, pruneHelpers } from './helpers'
-import { heavyLockPath, heavyReserveBytes, heavySlots, queuePosition, HEAVY_JOB_BYTES } from './heavy'
+import { heavyLockPath, heavyTreePids, heavyReserveBytes, heavySlots, queuePosition, HEAVY_JOB_BYTES } from './heavy'
 import { parseStat, pickEnv } from './proc-read'
 
 const MB = 1024 * 1024
@@ -49,7 +49,16 @@ describe('planGovernor — kills', () => {
     const i = inv([entry({ pid: 9, ppid: 500, argv: ['agentop', 'mcp'], exe: '/u/agentop.bak (deleted)' })])
     const plan = planGovernor({ inventory: i, helpers: [], nowMs: 0 })
     expect(plan.kills).toEqual([])
-    expect(plan.alerts[0]).toMatchObject({ reason: 'stale-binary', fix: { action: 'reconnect-session' } })
+    expect(plan.alerts.map(a => a.reason)).toEqual(['stale-binary'])
+  })
+  test('old binary notices exclude only helpers with a hot-swap capability card', () => {
+    const commands = ['mcp', '__structured-relay', '__relay-worker', 'server', 'watch', 'start', 'session']
+    const inventory = inv(commands.map((sub, n) => entry({ pid: n + 10, argv: ['agentop', sub], exe: '/u/agentop (deleted)', helperHotSwap: true })))
+    expect(inventory.map(p => p.stale)).toEqual([false, false, false, true, true, true, true])
+    expect(planGovernor({ inventory, helpers: [], nowMs: 0 }).alerts.map(a => a.pid)).toEqual([13, 14, 15, 16])
+    const legacy = inv(commands.slice(0, 3).map((sub, n) => entry({ pid: n + 20, argv: ['agentop', sub], exe: '/u/agentop (deleted)' })))
+    expect(legacy.map(p => p.stale)).toEqual([true, true, true])
+    expect(planGovernor({ inventory: legacy, helpers: [], nowMs: 0 }).alerts.map(a => a.pid)).toEqual([20, 21, 22])
   })
   test('a test leftover is killed ONLY when its recorded owner is gone; the main HOME never is', () => {
     const iso = { HOME: '/tmp/tuicheck.x', CLAUDE_PID: '700' }
@@ -136,8 +145,15 @@ describe('heavy slot', () => {
     expect(heavySlots(4.4 * GB, 1.7 * GB)).toBe(2)
   })
   test('admission keeps room for one heavy job, minus what running ones hold', () => {
-    expect(heavyReserveBytes(0)).toBe(HEAVY_JOB_BYTES)
+    expect(heavyReserveBytes(0, 0)).toBe(0)
+    expect(heavyReserveBytes(0, 1)).toBe(HEAVY_JOB_BYTES)
+    expect(heavyReserveBytes(0.8 * GB, 1)).toBe(GB)
     expect(heavyReserveBytes(3 * GB)).toBe(0)
+  })
+  test('heavy process trees include deep descendants and count overlapping roots once', () => {
+    const table = Array.from({ length: 10 }, (_, i) => ({ pid: i + 1, ppid: i }))
+    expect(heavyTreePids([1, 3], table).sort((a, b) => a - b)).toEqual(table.map(r => r.pid))
+    expect(heavyTreePids([20], table)).toEqual([20])
   })
   test('queue position counts only live waiters, in arrival order', () => {
     const w = [{ pid: 3, sinceMs: 30, command: 'c' }, { pid: 1, sinceMs: 10, command: 'a' }, { pid: 2, sinceMs: 20, command: 'b' }]
@@ -168,6 +184,7 @@ describe('manual flock jobs', () => {
     ].join('\n')
     expect(flockHolders(locks, 124234)).toEqual([2233903])
     expect(flockHolders(locks, 999)).toEqual([])
+    expect(flockHolders('1: FLOCK ADVISORY WRITE -1 08:20:124234 0 EOF', 124234)).toEqual([-1])
   })
   test('parseFlockArgv finds the lock and the command past the options', async () => {
     const { parseFlockArgv } = await import('./heavy')

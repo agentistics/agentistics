@@ -88,16 +88,27 @@ async function request(sessionId: string, method: string, suffix = '', body?: un
   })
 }
 
+/** The last state seen per session, so a second reader (the chat's "Open check-in" button, the modal)
+ *  paints from what is known instead of flashing "nothing". Also the seam tests use. */
+const known = new Map<string, CheckinState>()
+export function rememberCheckinState(sessionId: string, state: CheckinState | null): void {
+  if (state) known.set(sessionId, state); else known.delete(sessionId)
+}
+
 export function useCheckin(sessionId: string | undefined): {
   state: CheckinState | null; update: (partial: Partial<CheckinConfig>) => Promise<void>; runNow: () => Promise<boolean>
 } {
-  const [state, setState] = useState<CheckinState | null>(null)
+  const [state, setStateRaw] = useState<CheckinState | null>(() => (sessionId ? known.get(sessionId) ?? null : null))
+  const setState = useCallback((next: CheckinState | null) => {
+    if (sessionId) rememberCheckinState(sessionId, next)
+    setStateRaw(next)
+  }, [sessionId])
   const load = useCallback(async () => {
     if (!sessionId) { setState(null); return }
     const response = await request(sessionId, 'GET')
     if (response.status === 404) { setState(null); return }
     if (response.ok) setState(await response.json() as CheckinState)
-  }, [sessionId])
+  }, [sessionId, setState])
   useEffect(() => {
     void load()
     if (!sessionId) return

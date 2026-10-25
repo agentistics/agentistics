@@ -1,3 +1,4 @@
+import { sessionDay } from '@agentistics/core'
 /**
  * projections/session-meta.ts — PURE, version 1. Canonical events → the legacy `SessionMeta`.
  *
@@ -198,7 +199,7 @@ export type ProjectedSessionMeta =
     | 'model' | 'harness'>>
   & {
     model_usage?: Record<string, ModelUsage>
-    /** Four counters per UTC day, the day of the response's first line — legacy `daily[day].*_tokens`. */
+    /** Four counters per machine-local activity day, the day of the response's first line — legacy `daily[day].*_tokens`. */
     daily_tokens?: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }>
     /**
      * `task-rollup.ts`'s ROUNDS — defined there as `user_message_count`, and projected under that
@@ -538,7 +539,7 @@ function foldOne(s: SessionMetaState, e: AnyAgentisticsEvent): void {
       let m = acc.byModel.get(e.data.model)
       if (!m) { m = zero(); acc.byModel.set(e.data.model, m) }
       add(m, u)
-      const day = e.occurredAt.slice(0, 10)
+      const day = sessionDay(e.occurredAt)
       if (day.length === 10) {
         let d = acc.daily.get(day)
         if (!d) { d = zero(); acc.daily.set(day, d) }
@@ -1054,7 +1055,8 @@ function finish(s: SessionMetaState): SessionMetaProjection {
 export const sessionMetaProjection: Projection<SessionMetaState, SessionMetaProjection> = {
   name: 'session-meta',
   // v2 (A4, 2026-09-27): `countScope` — kimi sessions sum every agent's counts, as legacy does.
-  version: 2,
+  // v3: response-day tokens follow the machine-local activity calendar.
+  version: 3,
   empty: () => ({
     seen: new Set(), agents: new Map(), started: new Map(), ended: new Map(), toolNameById: new Map(),
     failures: [], modelFailures: [], sessionStart: undefined, startAt: undefined, sessionEnd: undefined, run: undefined,

@@ -1,3 +1,6 @@
+import { ActionNotice } from './components/sessions/ActionNotice'
+import { HandoffMeter } from './components/sessions/HandoffWarning'
+import { PageRouteFrame } from './components/PageRouteFrame'
 import { useEscapeOwner } from './lib/overlayStack'
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -118,6 +121,9 @@ import { journalBackfillPollMs } from './lib/journalBackfill'
 import { initialLang } from './lib/lang'
 import { fleetOpenStore, sessionsFiltersOpenStore, sessionTabsStore, studioSeenStore } from './lib/appFlags'
 import { SessionTabStrip } from './components/sessions/SessionTabStrip'
+import { reopenSession } from './lib/reopeningStore'
+import { replaceTab } from './lib/sessionTabs'
+import { getOpenTabs, setOpenTabs } from './lib/sessionTabsStore'
 import { pageMaxWidth } from './lib/pageWidth'
 import {
   DEFAULT_ORDER, sortSessions, type ControlSession,
@@ -156,6 +162,7 @@ import { reopenedSessionRoute, sessionPath } from './lib/sessionRoute'
 import { initialSessionView } from './lib/sessionView'
 import { SessionTitleFlag } from './components/sessions/SessionTitleFlag'
 import { SessionLinkInfo } from './components/sessions/SessionLinkInfo'
+import { CheckinModalHost } from './components/sessions/CheckinModal'
 import { sessionLinks } from './lib/sessionParent'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
@@ -165,7 +172,8 @@ import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateS
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
 import { HOST_SESSION_PATH, resolveHostSessionRefresh } from './lib/hostSession'
-import { bootWatchdog, fetchWithTimeout, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
+import { bootSlowLine, bootWatchdog, fetchWithTimeout, holdLoadError, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
+import { sinceUpdate, useFinaleActive } from './lib/finaleGate'
 import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
 
 /**
@@ -251,7 +259,7 @@ function useBootWatchdog(): BootVerdict {
     const t0 = Date.now()
     let health: 'ok' | 'down' | 'unknown' = 'unknown'
     let cancelled = false
-    const tick = () => { if (!cancelled) setVerdict(bootWatchdog(Date.now() - t0, health)) }
+    const tick = () => { if (!cancelled) setVerdict(bootWatchdog(Date.now() - t0, health, sinceUpdate())) }
     const probe = () => {
       fetchWithTimeout('/api/health', 4000, { cache: 'no-store' })
         .then(r => { health = r.ok ? 'ok' : 'down' })
@@ -268,7 +276,7 @@ function useBootWatchdog(): BootVerdict {
 
 /** A failure, said in words a person can act on, with the way out: retry now, and a note that it is
  *  already retrying by itself when it is. */
-function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; problem: LoadError; onRetry: () => void; autoRetry: boolean }) {
+export function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; problem: LoadError; onRetry: () => void; autoRetry: boolean }) {
   const { title, body } = loadErrorText(problem, lang === 'pt' ? 'pt' : 'en', typeof location !== 'undefined' ? location.host : '')
   return (
     <div role="alert" style={{ minHeight: 'calc(100vh / var(--ui-zoom, 1))', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '40px 16px', textAlign: 'center', background: 'var(--bg-base)', boxSizing: 'border-box' }}>
@@ -283,7 +291,8 @@ function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; pr
         {lang === 'pt' ? 'Tentar novamente' : 'Try again'}
       </button>
       {autoRetry && (
-        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+        <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+          <AgentisticsLoader size={18} accent="var(--anthropic-orange)" baseOpacity={0.8} label={lang === 'pt' ? 'Tentando novamente' : 'Retrying'} />
           {lang === 'pt' ? 'Tentando de novo sozinho a cada poucos segundos.' : 'Also retrying on its own every few seconds.'}
         </div>
       )}
@@ -302,14 +311,15 @@ function ServerProblem({ lang, problem, onRetry, autoRetry }: { lang: string; pr
  */
 function LoadingScreen({ lang }: { lang: string }) {
   const verdict = useBootWatchdog()
-  const [underSplash] = useState(() => !bootReleased())
+  // After an update the FINALE takes the splash's place (`FinaleHost` releases it on its first frame),
+  // so this screen draws its own loader beneath it: when the finale leaves before the data has, the
+  // person sees the loader and its line — never the empty dark page that used to sit there.
+  const [underSplash] = useState(() => !bootReleased() && sinceUpdate() === null)
   // The server stopped answering: say so instead of spinning (the ServerProblem screen holds nothing,
   // so the splash leaves for it). The requests keep retrying and the probe keeps running.
   const unreachable = verdict === 'unreachable'
   useBootHold(underSplash && !unreachable)
-  const slowLine = verdict === 'slow'
-    ? (lang === 'pt' ? 'Ainda carregando — o servidor está respondendo.' : 'Still loading — the server is answering.')
-    : null
+  const slowLine = verdict === 'slow' ? bootSlowLine(lang === 'pt' ? 'pt' : 'en', sinceUpdate()) : null
   useEffect(() => { if (underSplash) setBootStatus(slowLine) }, [underSplash, slowLine])
   if (unreachable) {
     return <ServerProblem lang={lang} problem={{ kind: 'unreachable', detail: '' }} onRetry={() => location.reload()} autoRetry />
@@ -1237,8 +1247,8 @@ function SideNav({
               <SessionsRail
                 rows={railRows} allRows={fleet.rows} lang={pt ? 'pt' : 'en'}
                 {...(sessionId ? { selectedId: sessionId } : {})}
-                filtersOpen={filtersOpen} filtersCount={filtersCount}
-                onToggleFilters={onToggleFilters} filtersButtonRef={filtersButtonRef}
+                rowsById={asideRowIndex}
+                act={req => fleetAct({ ...req, action: req.action as FleetActionId })}
               />
             ) : (
               <>
@@ -2104,11 +2114,10 @@ export default function AppLayout() {
     const el = filtrosButtonElRef.current
     if (!el) { setSessionsFiltersAnchor(null); return }
     const r = el.getBoundingClientRect()
-    setSessionsFiltersAnchor({
-      left: r.left,
-      top: r.bottom + 6,
-      maxHeight: Math.max(160, window.innerHeight - (r.bottom + 6) - 16),
-    })
+    const next = { left: r.left, top: r.bottom + 6, maxHeight: Math.max(160, window.innerHeight - (r.bottom + 6) - 16) }
+    // Same place → same state object, so a re-measure never re-renders the app by itself.
+    setSessionsFiltersAnchor(cur =>
+      cur && cur.left === next.left && cur.top === next.top && cur.maxHeight === next.maxHeight ? cur : next)
   }, [])
   const setFiltrosButtonEl = useCallback((el: HTMLButtonElement | null) => {
     filtrosButtonElRef.current = el
@@ -2184,7 +2193,9 @@ export default function AppLayout() {
    */
   const sessionTabsOn = useSyncExternalStore(sessionTabsStore.subscribe, sessionTabsStore.get, sessionTabsStore.serverSnapshot)
   const tabsRowOn = sessionTabsOn && !isMobile && headerSession !== undefined
-  const topbarExtra = tabsRowOn ? TABS_ROW_H : 0
+  const [tabNotice, setTabNotice] = useState<string | null>(null)
+  const [tabNoticeHeight, setTabNoticeHeight] = useState(0)
+  const topbarExtra = tabsRowOn ? TABS_ROW_H + tabNoticeHeight : 0
   useEffect(() => {
     document.documentElement.style.setProperty('--ag-topbar-h', `${isMobile ? 0 : TOPBAR_H + topbarExtra}px`)
   }, [isMobile, topbarExtra])
@@ -2795,7 +2806,11 @@ export default function AppLayout() {
   // totals — the exact defect `resolveMachineCacheScope` exists to prevent for team/machine scope.
   const derivedActiveOnly = activeOnly && fleetReadable
   const runningIds = useMemo(() => runningConversationIds(headerFleet.rows), [headerFleet.rows])
-  const legacyDerived = useDerivedStats(data, filters, tagsList, derivedActiveOnly, runningIds)
+  // While the update finale is on screen the dashboard beneath it is hidden: computing its stats and
+  // rendering it there are long tasks on the finale's own thread — the stutter at the end of an
+  // update. Both wait for the finale to leave (`finaleGate.ts`); the loader holds until then.
+  const finaleUp = useFinaleActive()
+  const legacyDerived = useDerivedStats(finaleUp ? null : data, filters, tagsList, derivedActiveOnly, runningIds)
   // A4.7: the session, cost and tool figures from the projections, laid over the legacy answer when
   // the server says this surface opted in and the filters are ones the API can express.
   const projectedOverlay = useProjectedDerived({
@@ -3394,6 +3409,9 @@ export default function AppLayout() {
     // problem" send a person to different places — and it retries on its own (useData) except for an
     // auth status, which the gates above resolve.
     const problem: LoadError = loadError ?? { kind: 'server', detail: String(error) }
+    // Right after an update the server is known to be up and still starting: the loader stays (it
+    // says why) while the load retries, instead of "can't reach agentistics" under the finale.
+    if (holdLoadError(problem, sinceUpdate())) return <LoadingScreen lang={lang} />
     const autoRetry = !(problem.kind === 'server' && (problem.status === 401 || problem.status === 403))
     return <ServerProblem lang={lang} problem={problem} onRetry={refetch} autoRetry={autoRetry} />
   }
@@ -3664,6 +3682,8 @@ export default function AppLayout() {
           copies of it agreeing by convention. The header is left with only the title, the
           magnifier and the "⋯" session-actions menu, per the owner's drawing: "the top bar becomes
           clean and dedicated to the title etc." */}
+
+      {headerSessionRow && <HandoffMeter id={headerSessionRow.id} pt={lang === 'pt'} act={headerFleetAct} />}
 
       {headerSessionRow && (
         <SessionActions
@@ -4069,7 +4089,7 @@ export default function AppLayout() {
           page panel. Dashboard only — these are STORED metrics, and a live fleet already states its own
           "Connected · last sync" in the aside. */}
       {/* Guarded by this row's own condition — see `dashboardTopBar`. */}
-      {(() => {
+      {!location.pathname.startsWith('/settings') && (() => {
         return (
           // It hangs from the PAGE PANEL's top edge now, not from the strip: the panel sits
           // `OUTER_GAP` below the strip with a 1px border, and the tab starts right inside that
@@ -4414,6 +4434,8 @@ export default function AppLayout() {
       {/* The fixed strip above the aside — desktop only. */}
       {!isMobile && (
         <TopBar
+          below={tabsRowOn && tabNotice ? <ActionNotice message={tabNotice} lang={lang} onDismiss={() => setTabNotice(null)} /> : null}
+          onBelowHeight={setTabNoticeHeight}
           height={TOPBAR_H}
           asideWidth={sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth}
           // Owner-approved central-pane inset (2026-09-26): the sessions workspace's pane now
@@ -4424,11 +4446,23 @@ export default function AppLayout() {
             aboveHeight: TABS_ROW_H,
             above: (
               <SessionTabStrip
+                onNoticeChange={setTabNotice}
                 lang={lang === 'pt' ? 'pt' : 'en'}
                 rows={headerFleet.rows}
                 fleetReady={!headerFleetUnsupported && headerFleet.rows.length > 0}
                 active={headerSession}
                 onGo={id => navigate(sessionPath(id))}
+                onReopen={async row => {
+                  const out = await reopenSession(row.id, headerFleetAct)
+                  if (out.ok && out.id) {
+                    if (row.conversationId === undefined) {
+                      setOpenTabs('main', replaceTab(getOpenTabs('main'), row.id, out.id))
+                    }
+                    const r = reopenedSessionRoute(out.id, { id: row.id, harness: row.harness, title: row.title })
+                    navigate(r.path, r.options)
+                  }
+                  return out
+                }}
                 onNone={() => navigate('/sessions')}
               />
             ),
@@ -4738,27 +4772,16 @@ export default function AppLayout() {
               gap: isMobile ? 14 : 20,
             }
       }>
-        {inSessionsWorkspace || isMobile ? <>{!inSessionsWorkspace && backfillNote}<Outlet context={appCtx} /></> : (
-          <div ref={pageScrollRef} data-page-scroller style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
-            <div style={{
-              // Table pages grow with the screen; the rest keep 1400 — see `pageWidth.ts`.
-              maxWidth: pageMaxWidth(location.pathname), margin: '0 auto', width: '100%',
-              boxSizing: 'border-box', padding: '24px 32px',
-              // At least the panel's own height, so the footer below always sits a scroll away
-              // rather than floating up into a half-empty panel on a short page.
-              minHeight: '100%',
-              display: 'flex', flexDirection: 'column', gap: 20,
-            }}>
-              {/* Only where its tab exists (`dashboardTopBar`), so it can always be closed again. */}
-              {fleetOpen && dashboardTopBar && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>{fleetStrip}</div>
-              )}
-              {backfillNote}
-              <Outlet context={appCtx} />
-            </div>
-            {pageFooter}
-          </div>
-        )}
+        <PageRouteFrame compact={inSessionsWorkspace || isMobile} scrollRef={pageScrollRef}
+          maxWidth={pageMaxWidth(location.pathname)} footer={pageFooter}
+          before={<>
+            {!inSessionsWorkspace && !isMobile && fleetOpen && dashboardTopBar && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>{fleetStrip}</div>
+            )}
+            {!inSessionsWorkspace && backfillNote}
+          </>}>
+          <Outlet context={appCtx} />
+        </PageRouteFrame>
       </main>
 
       {/* Install Modal — shown once after first data load */}
@@ -4946,6 +4969,7 @@ export default function AppLayout() {
       {retryImportModal}
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />
+      <CheckinModalHost lang={lang === 'pt' ? 'pt' : 'en'} />
       <AwayDialogHost />
 
       {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this

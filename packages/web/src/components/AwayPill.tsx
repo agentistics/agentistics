@@ -12,11 +12,11 @@ import { SESSION_CHIP_STYLE } from './sessions/RoleChip'
 /**
  * How the top-bar pill looks — change this ONE constant to swap it.
  * A: the small outlined chip the session role chip uses, accent coloured, moon + "Ausente".
- * B: icon-only moon button, the same 32px square as the vault and bell beside it, tinted.
+ * B: icon-only moon button, the same 32px rounded square as the vault and bell beside it, outlined in the accent like A.
  * C: plain "Ausente" text in the bar's quiet type, accent coloured, no box.
  */
 export type AwayPillVariant = 'A' | 'B' | 'C'
-export const AWAY_PILL_VARIANT: AwayPillVariant = 'A'
+export const AWAY_PILL_VARIANT: AwayPillVariant = 'B'
 
 export default function AwayPill({ lang, enabled, variant = AWAY_PILL_VARIANT }: { lang: 'pt' | 'en'; enabled: boolean; variant?: AwayPillVariant }) {
   const pt = lang === 'pt'
@@ -31,8 +31,8 @@ export default function AwayPill({ lang, enabled, variant = AWAY_PILL_VARIANT }:
   let style: React.CSSProperties; let content: React.ReactNode
   if (variant === 'B' || isMobile) {
     style = { ...base, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8,
-      border: '1px solid var(--border)', background: 'var(--anthropic-orange-dim)' }
-    content = <Moon size={14} aria-hidden />
+      border: '1px solid currentColor' }
+    content = <Moon size={15} aria-hidden />
   } else if (variant === 'C') {
     style = { ...base, display: 'inline-flex', alignItems: 'center', border: 'none', padding: '0 2px', fontSize: 11, fontWeight: 600 }
     content = word

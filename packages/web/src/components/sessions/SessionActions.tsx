@@ -16,9 +16,12 @@
  * rather than a modal so the row it acts on stays on screen while the question is being answered.
  */
 
+import { ConfirmModal } from '../../pages/settings/primitives'
 import { useEscapeOwner } from '../../lib/overlayStack'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { MoreHorizontal, X } from 'lucide-react'
+import { AccountSwitchDialog, useSwitchInfo } from './AccountSwitch'
+import { canSwitch } from '../../lib/accountSwitch'
 import { SessionFiling } from '../tasks/SessionFiling'
 import { StopSessionConfirm } from '../tasks/StopSessionConfirm'
 import { boardCopy } from '../tasks/copy'
@@ -100,7 +103,7 @@ const TEXT_VERBS = new Set<string>(['rename', 'note'])
 // `archive` / `delete` arrive only on a NATIVE row (the server offers them nowhere else), after `kill`
 // because both need the session ended first.
 // `terminal` (F2.0b) is offered by the server only on a row running over its harness's protocol.
-const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'terminal', 'kill', 'archive', 'delete']
+const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'terminal', 'kill', 'forget', 'archive', 'delete']
 
 /** The verbs that belong to the delivery board rather than to the session itself. */
 const TASK_VERBS = new Set<string>(['task'])
@@ -116,6 +119,7 @@ export function SessionActions({
   const [asking, setAsking] = useState<FleetVerb | null>(null)
   const [draft, setDraft] = useState('')
   const [confirming, setConfirming] = useState(false)
+  const [confirmingForget, setConfirmingForget] = useState(false)
   /** `delete` is PERMANENT, so it asks once more, in words, before it runs. */
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   /** `terminal` on a row that is mid-turn ends that turn, so it asks first (a idle one just switches). */
@@ -123,10 +127,13 @@ export function SessionActions({
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  // CONTA.TROCA: asked only while the menu is open, so a list of rows costs nothing.
+  const [switching, setSwitching] = useState(false)
+  const [switchInfo] = useSwitchInfo(open || inline || switching ? row.id : undefined, lang)
 
   // A different row is a different set of answers: an in-flight rename must not carry across.
   useEffect(() => {
-    setOpen(false); setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingTerminal(false); setNotice(null)
+    setOpen(false); setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingForget(false); setConfirmingTerminal(false); setNotice(null)
   }, [row.id])
 
   useEffect(() => { if (asking) inputRef.current?.focus() }, [asking])
@@ -146,9 +153,9 @@ export function SessionActions({
     // menu closes and an inline notice would go with it.
     if (action === 'terminal') pushNotification(terminalToast(out, lang))
     if (!out.ok) { setConfirmingTerminal(false); return }
-    setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingTerminal(false); setOpen(false)
+    setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingForget(false); setConfirmingTerminal(false); setOpen(false)
     // An archived or deleted session leaves the list exactly as an ended one does.
-    if (action === 'kill' || action === 'archive' || action === 'delete') onGone?.()
+    if (action === 'kill' || action === 'forget' || action === 'archive' || action === 'delete') onGone?.()
     // A REOPEN LANDS SOMEWHERE. It mints a NEW row and retires the one it was asked about, so
     // staying put leaves the reader on a dead session with a success message over it — reported as
     // "the reopen did nothing". The server hands back the new id precisely so this can follow it.
@@ -167,12 +174,32 @@ export function SessionActions({
       return
     }
     if (v.action === 'kill') { setConfirming(true); return }
+    if (v.action === 'forget') { setConfirmingForget(true); return }
     if (v.action === 'delete') { setConfirmingDelete(true); return }
     if (v.action === 'terminal' && terminalNeedsConfirm(row.state)) { setConfirmingTerminal(true); return }
     void run(v.action as FleetActionId)
   }
 
   const shown = inline || open
+  // CONTA.TROCA: offered whenever another account (of this or any other harness) can take it — just above `kill`,
+  // with the other verbs that act on the session itself.
+  const switchItem = canSwitch(switchInfo) ? (
+                  <button
+                    type="button"
+                    data-account-switch-item
+                    onClick={() => { setOpen(false); setSwitching(true) }}
+                    style={{
+                      display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8,
+                      ...(inline ? { minHeight: 44 } : {}),
+                      border: 'none', background: 'transparent', color: 'var(--text-primary)', cursor: 'pointer',
+                      fontFamily: 'inherit', fontSize: inline ? 14 : 12.5,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {pt ? 'Trocar conta' : 'Switch account'}
+                  </button>
+  ) : null
   useEscapeOwner(asking !== null, () => { setAsking(null); setDraft('') })
   return (
     <div style={inline ? { display: 'flex', flexDirection: 'column' } : { position: 'relative', flexShrink: 0 }}>
@@ -202,6 +229,11 @@ export function SessionActions({
           onChanged={() => setNotice(boardCopy(lang).filed)}
           onClose={() => setLinking(false)}
         />
+      )}
+
+      {switchInfo && (
+        <AccountSwitchDialog open={switching} sessionId={row.id} info={switchInfo} lang={lang} fromLimit={!!switchInfo.limit}
+          onClose={() => setSwitching(false)} onSwitched={id => onOpened?.(id)} />
       )}
 
       {shown && (
@@ -337,8 +369,9 @@ export function SessionActions({
             ) : (
               <>
                 {verbs.map(v => (
+                  <Fragment key={v.action}>
+                  {v.action === 'kill' && switchItem}
                   <button
-                    key={v.action}
                     onClick={() => pick(v)}
                     disabled={!v.enabled}
                     title={v.reason}
@@ -374,7 +407,9 @@ export function SessionActions({
                       </span>
                     )}
                   </button>
+                  </Fragment>
                 ))}
+                {!verbs.some(v => v.action === 'kill') && switchItem}
                 {/* Attaching hands over a real terminal, which a browser tab does not have. The
                     command is offered instead of a button that cannot work. A native session has
                     no terminal at all (`attachCommand` is empty), so the block is left out. */}
@@ -412,6 +447,16 @@ export function SessionActions({
           </div>
         </>
       )}
+      {confirmingForget && <ConfirmModal
+        open
+        title={pt ? 'Remover da lista?' : 'Remove from list?'}
+        message={pt ? 'A conversa será preservada. Se o processo estiver rodando, ele continuará.' : 'The conversation is preserved. A running process will keep running.'}
+        confirmLabel={pt ? 'Remover da lista' : 'Remove from list'}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        busy={busy}
+        onConfirm={() => { void run('forget') }}
+        onCancel={() => setConfirmingForget(false)}
+      />}
     </div>
   )
 }

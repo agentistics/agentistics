@@ -10,7 +10,7 @@ import UsageHistoryPage from './UsageHistoryPage'
 import UsagePlanPage, { UsagePlanContent } from './UsagePlanPage'
 import UsageLimitsPage from './UsageLimitsPage'
 import { NayLimitsTab } from '../../components/nay/NayLimitsTab'
-import { updatedPhrase, fmtWhen } from '../../lib/planLimits'
+import { updatedPhrase, shortWhen } from '../../lib/planLimits'
 import { PlanLimitBars, PlanUsageCard } from '../../components/PlanLimitMeter'
 import { usageHeadline } from '../../lib/usagePlan'
 import { UsageCharts, usageChartData } from './UsageCharts'
@@ -91,7 +91,7 @@ describe('usage account cards', () => {
       expect(html.match(new RegExp(lang === 'pt' ? 'atualizado há' : 'updated ', 'g'))).toHaveLength(2)
       expect(html).not.toContain('Updated ')
       const compact = render(<PlanLimitBars limits={limits[0]!} now={NOW} lang={lang} />, 390, lang)
-      expect(compact).toContain(fmtWhen(limits[0]!.windows[0]!.resetsAt, NOW, lang))
+      expect(compact).toContain(shortWhen(limits[0]!.windows[0]!.resetsAt, NOW, lang, limits[0]!.windows[0]!.kind))
     }
   })
   test('a low percent with an early exhaustion forecast never claims room to spare', () => {

@@ -4,6 +4,18 @@
 sessions are hosted by tmux on its own socket (`-L agentop`), so they survive `agentop` exiting and
 never mix with your own tmux sessions.
 
+An ended session is never part of the "sessions that fell" recovery group. The poller persists
+`endedAt` when the backend reports a dead command; structured drivers record normal termination
+before dropping their records, and boot consumes relay-recorded exits before discarding dead relays.
+A confirmed session kill records the decision before removing its pane (a refused kill restores
+the previous value). None of these rules depends on the harness or on leader/worker role.
+
+The poller must observe a tmux command's exit while its dead pane still exists. If the command ends
+while the application server is stopped and the tmux backend then disappears before the next poll,
+there is no durable termination evidence to distinguish it from a session lost in a reboot.
+Structured relays retain their own exit records and do not have this gap. Older sessions without
+recorded termination cannot be classified retrospectively with certainty.
+
 Large or multiline launch arguments (including hand-off context and initial briefs) travel through
 a private `0600` shell launcher under `session-context/<session-id>/` in the agentistics data
 directory. tmux receives only the launcher path; the launcher execs the harness with the complete
@@ -774,3 +786,64 @@ harness. The first registry read also repairs saved managed-id entries for alrea
 using one preferences update for the batch. Preference failures do not reject a recorded link;
 restarting the server retries orphan repair. Open session tabs remain browser-local; the server's
 `ui.sessionTabs` preference is only the feature flag.
+
+### Worker defaults and leader succession
+
+A spawn from a verified parent inherits its board task, sidebar folder and recorded canonical approval
+mode when those options are omitted. A worker does not inherit the parent's subtask: pass its own
+`--subtask` when it has one. An explicit task, folder or mode takes precedence.
+
+A worker stays filed on an inherited task when its working directory belongs to another repository
+or is outside a repository; the filing result includes a warning. An explicit `--task` still requires a matching
+repository for a worker; a mismatch refuses the launch and lists known checkouts. Short `org/repo`
+task names match full remotes by organization and repository; explicit remote hosts remain distinct.
+Missing directories and occupied main checkouts still refuse unless sharing is explicitly allowed
+for the latter with `--shared-cwd`. The live parent counts as another session: single CLI start,
+batch and web creation use the same rule. Reopening a worker also checks the checkout, excluding
+only the row being replaced; leaders and launches by a person retain their role exemptions.
+
+CLI start and batch accept `--mode default|accept-edits|plan|no-questions`; batch applies it to subsequent `--session`
+entries and can omit `--task` when a verified parent supplies one. Approval modes and briefing roles
+are separate: role `auto` does not select an approval mode, and Claude's native classifier `auto` is
+not converted to `no-questions`. A spawn that cannot apply an approval mode through either its terminal flags or structured driver refuses the launch.
+
+From inside the predecessor, use `agentop session <harness> --handoff --bg -p "Read the hand-off file
+and take over"` for leader succession. This retains task/subtask, folder, pin position, check-in,
+mute, title, role, away and recorded approval mode. Starting another leader on the verified leader
+parent's same task without `--handoff` is refused with that command. Starting a leader on a different
+task is allowed. Setting a role to leader warns when another live leader already leads that task;
+it does not block the change.
+
+Filing is checked again after registry creation and before the process starts. A filing failure
+prevents the worker's first prompt from running. Permission or read-only filesystem errors at the
+session CLI boundary exit non-zero with the affected path and instructions to make the data directory
+writable; a failure before launch starts no process. Folder and handoff preferences are applied after
+startup. Failed configuration steps receive one idempotent retry; start/batch JSON and API results
+report `configuration.ready`, `applied` and `pending`. A running session with incomplete configuration
+is reported with its existing id and a repair message; do not retry by spawning another session.
+Reopening preserves the recorded approval mode and confirming an existing folder preserves its pin.
+Engine delegation is a separate adapter and is not covered by these spawn defaults.
+
+CLI background start/handoff, batch and `session open` pass the same structured intent as server
+spawns, including original prompt, instructions on fresh sessions, MCP, model/effort and approval
+mode. They use origin `background`, so `adapter-chat` and a ready driver can select the protocol.
+Attached starts and takeover use origin `terminal`. A reopen is registered before launch so protocol
+callbacks can record its conversation immediately.
+
+### Corrupt preferences recovery
+
+Invalid JSON in `~/.agentistics/preferences.json` is moved to `preferences.json.corrupt-<timestamp>`
+and its backup path is logged once. Readers continue with defaults (or the existing legacy migration
+when available), so a background preferences read does not terminate the server. The corrupt bytes
+remain available for recovery, and a later preferences write creates a valid file. If the backup
+cannot be made, the read fails rather than allowing a write to destroy the original bytes.
+
+### Conversation ownership diagnostics
+
+When another session already owns a conversation, the registry, transcript fork resolver and
+adapter chat reader refuse to bind to it. These warnings belong to the server log; one-shot CLI
+commands, including `agentop session list`, keep them out of the terminal even when launched from
+a shell that inherited the server's `SERVE_STATIC` variable. Each diagnostic key is retained for
+the process lifetime, including after a row is removed, so encountering more than 512 distinct
+collisions cannot make earlier warnings repeat. Only the pair's identifiers and source paths are
+retained, without transcript content; restarting the process resets the diagnostic history.

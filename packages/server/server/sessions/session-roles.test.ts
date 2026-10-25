@@ -410,3 +410,37 @@ describe('markCallerVerified (PLAN.ACCOUNTS D3 — the wire never states it eith
     expect(body.callerVerified).toBe(true)
   })
 })
+
+describe('ORQ.FORA live leader uniqueness warning', () => {
+  test('warns with the other leader name and id, without blocking the role change', async () => {
+    const rows = [
+      { id: 'leader', title: 'Motor', state: 'working' },
+      { id: 'child', title: 'Successor', state: 'waiting' },
+    ]
+    const { deps } = fake(rows, { taskOf: async () => 't-one' })
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { leader: 'leader' } })
+    expect(await roleOp(null, { ref: 'child', role: 'leader' }, deps)).toMatchObject({ ok: true, role: 'leader', warning: 'Another live leader on task t-one: Motor (leader).' })
+  })
+  test('leaders of other tasks and closed leaders do not warn', async () => {
+    const rows = [
+      { id: 'other', title: 'Other front', state: 'working' },
+      { id: 'old', title: 'Old', state: 'closed' },
+      { id: 'child', title: 'New', state: 'waiting' },
+    ]
+    const { deps } = fake(rows, { taskOf: async id => id === 'other' ? 't-other' : 't-one' })
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { other: 'leader', old: 'leader' } })
+    const result = await roleOp(null, { ref: 'child', role: 'leader' }, deps)
+    expect(result.ok && result.warning).toBeUndefined()
+  })
+})
+
+describe('LIDER.ROTA: a session that becomes a leader leaves its parent\'s team', () => {
+  test('setting leader (own or by the person) calls leaveTeam; worker does not', async () => {
+    const left: string[] = []
+    const { deps } = fake([{ id: 'w', title: 'Side' }, { id: 'x', title: 'X' }], { leaveTeam: async id => { left.push(id); return true } })
+    expect((await roleOp('w', { role: 'leader' }, deps)).ok).toBe(true)
+    expect((await roleOp(null, { ref: 'x', role: 'worker' }, deps)).ok).toBe(true)
+    expect((await roleOp(null, { ref: 'x', role: 'leader' }, deps)).ok).toBe(true)
+    expect(left).toEqual(['w', 'x'])
+  })
+})

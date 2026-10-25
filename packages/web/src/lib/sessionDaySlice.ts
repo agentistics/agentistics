@@ -1,3 +1,6 @@
+import { sessionDay } from '@agentistics/core'
+import { addDays, format, startOfDay } from 'date-fns'
+
 /**
  * sessionDaySlice.ts — PURE: what a session did INSIDE a date range.
  *
@@ -18,9 +21,8 @@
  * session for those would reintroduce the 86x on exactly the sessions that cannot be checked, so
  * they fall back to being filed on their start day — the answer this product has always given.
  *
- * The day key is `slice(0, 10)` on an ISO instant, UTC, matching `tagSessionDay`,
- * `stats-cache.json`'s own day series and the parser that wrote the field. Two day rules exist in
- * this repo and mixing them drifts a session across a boundary.
+ * Activity days use the local clock, matching the server parser on the user's machine.
+ * Billing and tag projections keep their separate UTC contract.
  */
 
 export interface DayUsage {
@@ -61,7 +63,7 @@ export const EMPTY_DAY: DayUsage = {
 
 /** The ISO day an instant belongs to, or `''`. The one place this rule is written for the web. */
 export function dayKey(iso: string | undefined): string {
-  return iso && iso.length >= 10 ? iso.slice(0, 10) : ''
+  return sessionDay(iso)
 }
 
 /**
@@ -80,11 +82,9 @@ export const MAX_RANGE_DAYS = 400
 export function daysBetween(startMs: number, endMs: number, max = MAX_RANGE_DAYS): string[] {
   const out: string[] = []
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return out
-  const DAY = 86_400_000
-  // Anchored to UTC midnight so the count of days does not depend on where the browser sits.
-  let t = Math.floor(startMs / DAY) * DAY
-  for (let i = 0; i < max && t <= endMs; i++, t += DAY) {
-    out.push(new Date(t).toISOString().slice(0, 10))
+  let day = startOfDay(new Date(startMs))
+  for (let i = 0; i < max && day.getTime() <= endMs; i++, day = addDays(day, 1)) {
+    out.push(format(day, 'yyyy-MM-dd'))
   }
   return out
 }
@@ -136,9 +136,10 @@ export function expandHours(hours: Record<string, number> | undefined): number[]
   return out
 }
 
-/** The ISO day an instant in milliseconds belongs to, UTC. `''` when it is not a real instant. */
+/** The local activity day of an instant. `''` when it is not a real instant. */
 export function dayKeyOfMs(ms: number): string {
-  return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : ''
+  const date = new Date(ms)
+  return Number.isFinite(ms) && !Number.isNaN(date.getTime()) ? format(date, 'yyyy-MM-dd') : ''
 }
 
 /** A day entry that records real work. The parser only writes one for a turn; an older writer
@@ -155,7 +156,7 @@ const worked = (d: DayUsage | undefined): boolean => !!d && (d.messages > 0 || d
  * this answers in a couple of comparisons where the set could not answer at all.
  *
  * Day keys are ISO and fixed-width, so comparing them as STRINGS is the same order as comparing
- * the dates — and it keeps the whole test on the one UTC day rule this module documents, with no
+ * the dates — and it keeps the whole test on the local activity day rule this module documents, with no
  * second parse to drift against it.
  */
 export function activeInWindow(s: SliceableSession, startMs: number, endMs: number): boolean {

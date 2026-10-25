@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { computePlanCost, normalizeBillingSettings, type BillingSettings } from '@agentistics/core'
 import { createAccountMutator } from './accountMutations'
 import {
-  saveThenClose, saveErrorPlace,
-  accountsNeedingPlan, answerNotice, billableAccounts, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
+  saveThenClose, saveErrorPlace, planCoverageText,
+  accountsNeedingPlan, answerNotice, billableAccounts, billingRows, closeBefore, defaultStart, foldUnnamed, planOptionsFor, rowScope, scopePeriods, withScopePeriods, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
   type BillingAccount,
 } from './accountBilling'
 
@@ -132,4 +132,170 @@ describe('L4/L5 saveErrorPlace', () => {
     expect(saveErrorPlace(err, {}, true)).toBeNull()
     expect(saveErrorPlace(null, {}, true)).toBeNull()
   })
+})
+
+const sub = (planId: string, from = '2026-09-01') => ({ id: newId(), mode: 'subscription' as const, planId, price: { amount: 100, currency: 'USD' as const }, from })
+const L = (h: string) => ({ claude: 'Claude Code', codex: 'Codex CLI', gemini: 'Gemini CLI' } as Record<string, string>)[h] ?? h
+
+describe('rowScope — the timeline a row prices on is the one core counts', () => {
+  test('own first; the default goes to the FIRST account without one; nobody else inherits it', () => {
+    const a = acc('a'), b = acc('b', { firstSeen: Date.parse('2026-09-02T00:00:00Z') }), c = acc('c', { firstSeen: Date.parse('2026-09-03T00:00:00Z') })
+    const billing: BillingSettings = { profiles: { claude: { periods: [sub('anthropic-max-5x')] } }, accountProfiles: { a: { periods: [sub('anthropic-pro')] } } }
+    const mine = [a, b, c]
+    expect(rowScope(billing, mine, a)).toEqual({ kind: 'own', id: 'a' })
+    expect(rowScope(billing, mine, b)).toEqual({ kind: 'default', harness: 'claude' })
+    expect(rowScope(billing, mine, c)).toEqual({ kind: 'none', id: 'c' })
+    expect(accountsNeedingPlan(mine, billing, ['claude']).map(x => x.id)).toEqual(['c'])
+  })
+  test('writing a scope back touches only that timeline', () => {
+    const billing: BillingSettings = { profiles: { claude: { periods: [sub('anthropic-max-5x')] } } }
+    const p = sub('anthropic-pro')
+    expect(withScopePeriods(billing, { kind: 'default', harness: 'claude' }, [p]).profiles.claude?.periods).toEqual([p])
+    const own = withScopePeriods(billing, { kind: 'none', id: 'x' }, [p])
+    expect(own.accountProfiles?.x?.periods).toEqual([p])
+    expect(own.profiles.claude?.periods).toHaveLength(1)
+    expect(scopePeriods(own, { kind: 'own', id: 'x' })).toEqual([p])
+    expect(withScopePeriods(billing, { kind: 'default', harness: 'claude' }, []).profiles.claude).toBeUndefined()
+  })
+})
+
+describe('billingRows — one row per account, nothing said twice', () => {
+  test('a nickname takes the title; the login moves to the subtitle beside the assistant', () => {
+    const rows = billingRows([acc('a', { label: 'me@x.io' }), acc('b', { nickname: 'Work', label: 'w@x.io', firstSeen: Date.parse('2026-09-02T00:00:00Z') })], none, ['claude'], L as never, false)
+    expect(rows.map(r => [r.title, r.sub])).toEqual([['me@x.io', 'Claude Code'], ['Work', 'Claude Code · w@x.io']])
+    for (const r of rows) expect(r.sub.includes(r.title)).toBe(false)
+  })
+  test('the reserve row (id "") never becomes a row beside an identified account', () => {
+    const rows = billingRows([acc('acc_1', { harness: 'codex', label: 'Conta padrão' }), acc('', { harness: 'codex', label: 'Conta padrão' })], none, ['codex'], L as never, true)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.title).toBe('Codex CLI')
+    expect(rows[0]!.sub).toBe('Codex CLI')
+  })
+  test('an assistant with no identified account is one row on its own timeline; two unnamed accounts are numbered', () => {
+    const rows = billingRows([acc('', { harness: 'gemini', label: 'Conta padrão' }), acc('k1', { harness: 'codex', label: 'Conta padrão' }), acc('k2', { harness: 'codex', label: 'Default account', firstSeen: Date.parse('2026-09-05T00:00:00Z') })], none, ['codex', 'gemini'], L as never, false)
+    expect(rows.map(r => [r.key, r.title])).toEqual([['k1', 'Codex CLI #1'], ['k2', 'Codex CLI #2'], ['harness:gemini', 'Gemini CLI']])
+    expect(rows[2]!.scope).toEqual({ kind: 'default', harness: 'gemini' })
+    expect(rows[2]!.account).toBeNull()
+    expect(rows[2]!.sub).toBe('account not reported')
+  })
+})
+
+describe('planCoverageText', () => {
+  const row = (mode: 'subscription' | 'api' | 'thirdparty' | 'unknown') => ({ plan: { mode }, problem: false })
+  test('only known, sound current plans count; absent and unknown plans remain unset', () => {
+    const rows = [row('subscription'), row('api'), row('unknown'), row('unknown'), { plan: null, problem: false }, { ...row('subscription'), problem: true }]
+    expect(planCoverageText(rows, 'pt')).toBe('2 de 6 com plano informado · 4 sem informar')
+    expect(planCoverageText(rows, 'en')).toBe('2 of 6 with a plan · 4 not set')
+  })
+  test('all plans set: omit the unset suffix', () => {
+    const rows = Array.from({ length: 6 }, () => row('subscription'))
+    expect(planCoverageText(rows, 'pt')).toBe('6 de 6 com plano informado')
+    expect(planCoverageText(rows, 'en')).toBe('6 of 6 with a plan')
+    expect(planCoverageText([row('thirdparty')], 'pt')).toBe('1 de 1 com plano informado')
+  })
+})
+
+describe('closeBefore — the seam of a plan change', () => {
+  test('the plan in force ends the day before its successor starts; others are untouched', () => {
+    const a = { id: 'a', mode: 'subscription' as const, planId: 'anthropic-max-5x', price: { amount: 100, currency: 'USD' as const }, from: '2026-09-01' }
+    const b = { ...a, id: 'b', from: '2026-05-01', to: '2026-08-31' }
+    expect(closeBefore([a, b], 'a', '2026-10-17')).toEqual([{ ...a, to: '2026-10-16' }, b])
+  })
+  test('a seam before the old plan began is not applied', () => {
+    const a = { id: 'a', mode: 'subscription' as const, planId: 'anthropic-pro', price: { amount: 20, currency: 'USD' as const }, from: '2026-09-01' }
+    expect(closeBefore([a], 'a', '2026-08-01')).toEqual([a])
+  })
+})
+
+describe('foldUnnamed — a sign-in the harness cannot name is not a second account', () => {
+  const ph = (id: string, o: Partial<BillingAccount> = {}) => acc(id, { harness: 'gemini', label: 'Default account', key: `root:${id}`, ...o })
+  const rows = (accounts: BillingAccount[], billing = none) =>
+    billingRows(accounts, billing, ['gemini'], () => 'Gemini CLI', true)
+
+  test('two unnamed accounts of one harness are ONE row, titled without a number', () => {
+    const r = rows([ph('g1'), ph('g2', { firstSeen: Date.parse('2026-09-05T00:00:00Z') })])
+    expect(r.map(x => x.key)).toEqual(['g1'])
+    expect(r[0]!.title).toBe('Gemini CLI')
+    expect(r[0]!.scope).toEqual({ kind: 'none', id: 'g1' })
+  })
+
+  test('the kept row is the one carrying a plan of its own', () => {
+    const billing: BillingSettings = { profiles: {}, accountProfiles: { g2: { periods: [{ id: 'p', mode: 'unknown', from: '2026-09-01' }] } } }
+    expect(rows([ph('g1'), ph('g2')], billing).map(x => x.key)).toEqual(['g2'])
+  })
+
+  test('beside exactly one named account, the unnamed one folds into it', () => {
+    const r = rows([ph('g1'), acc('g2', { harness: 'gemini', label: 'me@x.io' })])
+    expect(r.map(x => x.key)).toEqual(['g2'])
+  })
+
+  test('beside two named accounts it stays its own row (no telling which it is)', () => {
+    const r = rows([ph('g0'), acc('g1', { harness: 'gemini', label: 'a@x.io' }), acc('g2', { harness: 'gemini', label: 'b@x.io' })])
+    expect(r).toHaveLength(3)
+  })
+
+  test('an unnamed account under a real identity key is not a fallback: never folded', () => {
+    expect(foldUnnamed([ph('g1', { key: 'uuid-1' }), ph('g2', { key: 'uuid-2' })], none).map(a => a.id)).toEqual(['g1', 'g2'])
+  })
+
+  test('a nickname names an account; a single unnamed account is untouched', () => {
+    expect(foldUnnamed([ph('g1', { nickname: 'Work' }), ph('g2')], none).map(a => a.id)).toEqual(['g1'])
+    expect(foldUnnamed([ph('g1')], none).map(a => a.id)).toEqual(['g1'])
+  })
+
+  test('the folded duplicate raises no "which plan?" notice', () => {
+    expect(accountsNeedingPlan([ph('g1'), ph('g2')], none, ['gemini']).map(a => a.id)).toEqual(['g1'])
+  })
+
+  test('the real shape: 8 registry rows for 6 accounts read as 6 rows', () => {
+    const accounts = [
+      acc('c', { label: 'z@x.io', nickname: 'Principal' }),
+      acc('x', { harness: 'codex', label: 'ChatGPT 1a58', nickname: 'Principal' }),
+      ph('g1'), ph('g2'),
+      acc('p', { harness: 'copilot', label: 'blp' }),
+      ph('a1', { harness: 'antigravity' }), ph('a2', { harness: 'antigravity' }),
+      ph('k', { harness: 'kimi' }),
+    ]
+    const r = billingRows(accounts, none, ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi'], h => h, true)
+    expect(r.map(x => x.key)).toEqual(['c', 'x', 'g1', 'p', 'a1', 'k'])
+  })
+})
+
+describe('planOptionsFor', () => {
+  test('Codex lists only ChatGPT plans plus the "other" entries', () => {
+    const ids = planOptionsFor('codex').map(p => p.id)
+    expect(ids.some(id => id.startsWith('anthropic'))).toBe(false)
+    expect(ids).toContain('other')
+    expect(ids).toContain('api-payg')
+  })
+  test('a plan already chosen from elsewhere stays listed', () => {
+    expect(planOptionsFor('codex', 'anthropic-pro').map(p => p.id)).toContain('anthropic-pro')
+  })
+})
+
+describe('defaultStart', () => {
+  test('no earlier plan: today', () => {
+    expect(defaultStart([], '2026-10-17')).toBe('2026-10-17')
+  })
+  test('the day after the last earlier plan ended', () => {
+    expect(defaultStart([
+      { id: 'a', mode: 'unknown', from: '2026-09-01', to: '2026-09-30' },
+      { id: 'b', mode: 'unknown', from: '2026-10-04', to: '2026-10-15' },
+    ], '2026-10-17')).toBe('2026-10-16')
+  })
+  test('never a day in the future', () => {
+    expect(defaultStart([{ id: 'a', mode: 'unknown', from: '2026-10-01', to: '2026-10-20' }], '2026-10-17')).toBe('2026-10-17')
+  })
+})
+
+
+test('Codex billing never prints the generated ChatGPT id label, keeping real names and emails', () => {
+  const make = (label: string, nickname?: string) => billingRows([
+    acc('codex-id', { harness: 'codex', label, ...(nickname ? { nickname } : {}) }),
+  ], none, ['codex'], () => 'Codex CLI', true)[0]!
+  expect(make('ChatGPT 1a583a5f', 'Principal')).toMatchObject({ title: 'Principal', sub: 'Codex CLI' })
+  expect(make('ChatGPT 1a583a5f')).toMatchObject({ title: 'Codex CLI', sub: 'Codex CLI' })
+  expect(make('person@example.com', 'Principal')).toMatchObject({ title: 'Principal', sub: 'Codex CLI · person@example.com' })
+  expect(make('Jane Doe', 'Principal').sub).toBe('Codex CLI · Jane Doe')
+  expect(make('Jane Doe').title).toBe('Jane Doe')
 })

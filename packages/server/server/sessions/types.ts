@@ -251,7 +251,7 @@ export interface BackendSpawn {
 export interface StructuredIntent {
   harness: HarnessId
   /** `web` = born in the browser: structured when the flag is on and a driver is ready. */
-  origin?: 'web' | 'terminal'
+  origin?: 'web' | 'terminal' | 'background'
   model?: string
   effort?: string
   /** The id offered for assignment (fresh sessions). */
@@ -335,6 +335,9 @@ export interface ManagedSession {
   cwd: string
   /** ISO string: this is a local JSON store, where ISO is the correct representation. */
   createdAt: string
+  /** Requested approval policy; separate from the briefing role. */
+  mode?: CanonicalMode
+  spawnConfiguration?: import('./spawn-configuration').SpawnConfiguration
   model?: string
   effort?: string
   /**
@@ -593,6 +596,18 @@ export interface AttentionRules {
    * absent the old behaviour stands exactly.
    */
   mainWorking?: RegExp[]
+  /**
+   * A dialog that draws NO footer at all, recognised instead by the line DIRECTLY above its option
+   * block. claude's `AskUserQuestion` review step is the case (`Ready to submit your answers?` /
+   * `❯ 1. Submit answers` / `2. Cancel`, nothing below — claude 2.1.309, 2026-10-23): with only
+   * footers to go on, the last step of every multi-question form read as plain `waiting`, the card
+   * vanished, and the composer would have typed into the dialog. Matched only against the
+   * `within` non-blank lines above a block `readDialog` anchored at the bottom of the screen, so a
+   * quotation of the sentence elsewhere on screen does not count. `marker` reads a NUMBERLESS block
+   * (`❯ Trust and continue` / `Exit`): kimi 2.2.0's folder-trust prompt moved its footer to the TOP,
+   * under the title (2026-10-23), so that dialog has no last-line footer either.
+   */
+  menuHeaders?: { re: RegExp; within: number; marker?: true }[]
   /** Provenance — the exact CLI version the frames came from, and the date. */
   probed: string
 }
@@ -680,9 +695,13 @@ export interface SessionBackend {
    *
    * One call and not three for the same reason `sendChoiceText` is one: `writeToPane` locks per
    * pane, and three locked calls leave two gaps another writer can land in.
+   *
+   * `confirm` is a named key, or `{ literal }` — TEXT typed onto the landed row with no return: a
+   * multi-select's write-your-own box opens its field when the cursor reaches it, and a return
+   * there would leave the form (claude 2.1.309, 2026-10-23).
    */
   sendMoveChoice?(
-    id: string, keys: readonly string[], confirmKey: string, landed: (frame: string[]) => boolean,
+    id: string, keys: readonly string[], confirm: string | { literal: string }, landed: (frame: string[]) => boolean,
   ): Promise<'sent' | 'wrong-row' | 'failed'>
   sendTextRaw(id: string, text: string): Promise<boolean>
   /**
@@ -773,7 +792,7 @@ export interface SessionBackend {
    * these rows; `undefined`/false for every other session, a TUI that came back from `toTerminal` included.
    */
   isStructured?(id: string): boolean
-  /** F2.0b — take back the structured sessions that outlived the previous server (the owner process only). */
+  /** F2.0b — recover surviving/CLI-born structured sessions (owner process only; concurrent calls share recovery). */
   reattach?(): Promise<void>
 }
 

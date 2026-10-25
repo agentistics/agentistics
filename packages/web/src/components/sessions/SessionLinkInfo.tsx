@@ -28,11 +28,10 @@ import { TabSelect } from '../../pages/settings/primitives'
 import { RoleChip } from './RoleChip'
 import { ToggleSwitch } from '../ToggleSwitch'
 import { clockLabel, formatNextRun, formatSkipped, useCheckin, type CheckinConfig, type CheckinRound } from '../../lib/checkin'
-import { useTaskActivity, type TaskEvent } from '../../lib/tasks'
 import { RailSection } from '../tasks/RailSection'
 import { CheckinConfigControls } from './CheckinConfigControls'
 import { setSessionAway, useAway } from '../../lib/awayMode'
-import { Sheet } from '../../pages/vault/vaultUi'
+import { openCheckinModal, useCheckinModalRequest } from '../../lib/checkinModal'
 
 export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
 
@@ -78,19 +77,13 @@ export function CheckinRoundSections({ round, pt, prefix = 'checkin', expanded =
   </div>
 }
 
-function CheckinModal({ round, history, pt, isMobile, onClose }: { round: CheckinRound; history: TaskEvent[]; pt: boolean; isMobile: boolean; onClose: () => void }) {
-  const title = pt ? 'Detalhes do check-in' : 'Check-in details'
-  return <div data-testid="checkin-modal"><Sheet closeLabel={pt ? 'Fechar' : 'Close'} isMobile={isMobile} title={title} onClose={onClose} wide><div style={{ display: 'grid', gap: 12 }}>{round.headline && <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{round.headline}</div>}<CheckinRoundSections round={round} pt={pt} prefix="checkin-modal-current" expanded />{history.length > 0 && <div style={{ display: 'grid', gap: 6, marginTop: 2 }}><div style={SECTION}>{pt ? 'Últimas rodadas' : 'Recent rounds'}</div>{history.slice(0, 5).map((event, i) => <RailSection key={event.id} id={`checkin-history-${event.id}`} title={event.at ? new Date(event.at).toLocaleString(pt ? 'pt-BR' : 'en-GB') : `${i + 1}`} badge={event.state ?? ''} defaultOpen><CheckinRoundSections round={{ state: event.state ?? 'ok', summary: event.summary ?? '', headline: event.headline, delivered: event.delivered, inProgress: event.inProgress, next: event.next, health: event.health, needs: event.needs }} pt={pt} prefix={`checkin-history-${event.id}-body`} expanded /></RailSection>)}</div>}</div></Sheet></div>
-}
-
-export function CheckinPanel({ state, pt, isMobile, onGo, update, runNow, taskPath, taskId, bare = false, modalOpen = false, onModalChange }: {
+export function CheckinPanel({ state, pt, isMobile, onGo, update, runNow, taskPath, taskId, bare = false }: {
   state: NonNullable<ReturnType<typeof useCheckin>['state']>; pt: boolean; isMobile: boolean; bare?: boolean; taskId?: string
-  onGo: (path: string) => void; update: (partial: Partial<CheckinConfig>) => Promise<void>; runNow: () => Promise<boolean>; taskPath: string | null; modalOpen?: boolean; onModalChange?: (open: boolean) => void
+  onGo: (path: string) => void; update: (partial: Partial<CheckinConfig>) => Promise<void>; runNow: () => Promise<boolean>; taskPath: string | null
 }) {
   const paused = state.paused !== null
   const [ran, setRan] = useState<null | 'busy' | 'ok' | 'refused'>(null)
   const run = async () => { setRan('busy'); setRan(await runNow() ? 'ok' : 'refused') }
-  const activity = useTaskActivity(taskId, 20)
   const last = state.last ? `${state.last.state === 'needs_you' ? (pt ? 'precisa de você' : 'needs you') : state.last.summary}` : (pt ? 'ainda não rodou' : 'not run yet')
   return <div data-testid="checkin-panel" style={bare ? {} : { borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 7 }}>
     <div style={{ ...SECTION, display: bare ? 'none' : 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 0 }}>
@@ -99,13 +92,12 @@ export function CheckinPanel({ state, pt, isMobile, onGo, update, runNow, taskPa
     </div>
     <div style={{ display: 'grid', gap: 2 }}>
       <div style={CHECKIN_ROW}><Clock3 size={15} /><span>{pt ? 'Próxima rodada' : 'Next round'}</span><span style={{ marginLeft: 'auto', color: 'var(--text-primary)' }}>{formatNextRun(state.nextRunAt, Date.now(), pt)}</span></div>
-      <div style={{ display: 'grid', gap: 7, padding: '4px 0 7px' }}><div style={{ ...CHECKIN_ROW, alignItems: 'flex-start' }}><Check size={15} style={{ marginTop: 2, flexShrink: 0 }} /><div style={{ minWidth: 0, flex: 1 }}><div style={{ color: 'var(--text-tertiary)', marginBottom: 4 }}>{pt ? 'Última' : 'Last'}{state.lastRunAt && ` · ${clockLabel(state.lastRunAt, pt)}`}</div>{state.last ? <><div style={{ color: 'var(--text-primary)', fontWeight: 600, lineHeight: 1.4 }}>{state.last.headline ?? last}</div><CheckinRoundSections round={state.last} pt={pt} /></> : <div style={{ color: 'var(--text-primary)' }}>{last}</div>}</div></div><button type="button" data-testid="checkin-open-larger" onClick={() => onModalChange?.(true)} style={{ ...ROW_STYLE, width: 'auto', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--border)', marginLeft: 22 }}><Maximize2 size={13} />{pt ? 'Abrir maior' : 'Open larger'}</button></div>
+      <div style={{ display: 'grid', gap: 7, padding: '4px 0 7px' }}><div style={{ ...CHECKIN_ROW, alignItems: 'flex-start' }}><Check size={15} style={{ marginTop: 2, flexShrink: 0 }} /><div style={{ minWidth: 0, flex: 1 }}><div style={{ color: 'var(--text-tertiary)', marginBottom: 4 }}>{pt ? 'Última' : 'Last'}{state.lastRunAt && ` · ${clockLabel(state.lastRunAt, pt)}`}</div>{state.last ? <><div style={{ color: 'var(--text-primary)', fontWeight: 600, lineHeight: 1.4 }}>{state.last.headline ?? last}</div><CheckinRoundSections round={state.last} pt={pt} /></> : <div style={{ color: 'var(--text-primary)' }}>{last}</div>}</div></div><button type="button" data-testid="checkin-open-larger" onClick={() => openCheckinModal(state.session)} style={{ ...ROW_STYLE, width: 'auto', justifyContent: 'center', cursor: 'pointer', border: '1px solid var(--border)', marginLeft: 22 }}><Maximize2 size={13} />{pt ? 'Abrir maior' : 'Open larger'}</button></div>
       {formatSkipped(state.skipped, pt) && <div role="status" style={{ ...CHECKIN_ROW, fontSize: 11, color: 'var(--text-tertiary)' }}>{formatSkipped(state.skipped, pt)}</div>}
     </div>
     <CheckinConfigControls config={state} pt={pt} isMobile={isMobile} update={update} />
     <div style={{ display: 'flex', gap: 6, marginTop: 7, flexWrap: 'wrap' }}><button type="button" disabled={ran === 'busy'} onClick={() => void run()} style={{ ...ROW_STYLE, width: 'auto', cursor: 'pointer', border: '1px solid var(--border)', ...(isMobile ? { minHeight: 44 } : {}) }}><Play size={14} />{pt ? 'Rodar agora' : 'Run now'}</button>{taskPath && <button type="button" onClick={() => onGo(taskPath)} style={{ ...ROW_STYLE, width: 'auto', cursor: 'pointer', border: '1px solid var(--border)', color: 'var(--text-secondary)', ...(isMobile ? { minHeight: 44 } : {}) }}><List size={14} />{pt ? 'Ver registro' : 'View log'}</button>}</div>
     {ran && ran !== 'busy' && <div role="status" style={{ fontSize: 11.5, marginTop: 5, color: ran === 'ok' ? 'var(--accent-green)' : 'var(--accent-red)' }}>{ran === 'ok' ? (pt ? 'Check-in enviado ao líder.' : 'Check-in sent to the leader.') : (pt ? 'O líder não aceitou o check-in agora (ocupado, num diálogo ou parado). Tente de novo em instantes.' : 'The leader did not take the check-in now (busy, in a dialog or stopped). Try again shortly.')}</div>}
-    {modalOpen && state.last && <CheckinModal round={state.last} history={activity.events.filter(e => e.kind === 'checkin')} pt={pt} isMobile={isMobile} onClose={() => onModalChange?.(false)} />}
   </div>
 }
 
@@ -197,7 +189,7 @@ export function SessionAwayRow({ managedId, away, pt, isMobile = false }: { mana
   )
 }
 
-export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, pt, onGo, isMobile = false, hideCheckin = false, awayId, away = false, openCheckinModal = false, onCheckinModalChange, handoffSeq }: {
+export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, pt, onGo, isMobile = false, hideCheckin = false, awayId, away = false, handoffSeq }: {
   links: SessionLinks; startedAt?: number; /** Leader hand-off generation (the title never carries it). */ handoffSeq?: number; sessionId?: string; roleFallbackId?: string; pt: boolean; onGo: (path: string) => void; isMobile?: boolean
   /** The phone drawer draws the check-in as a card of its own (`SessionCheckinCard`). */
   hideCheckin?: boolean
@@ -205,16 +197,11 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
   awayId?: string
   /** The row's own `away` flag. */
   away?: boolean
-  openCheckinModal?: boolean
-  onCheckinModalChange?: (open: boolean) => void
 }) {
   const [searching, setSearching] = useState(false)
   const [query, setQuery] = useState('')
   const [endedOpen, setEndedOpen] = useState(false)
   const [rolePickerOpen, setRolePickerOpen] = useState(false)
-  const [checkinModalOpen, setCheckinModalOpen] = useState(openCheckinModal)
-  const changeCheckinModal = (open: boolean) => { setCheckinModalOpen(open); onCheckinModalChange?.(open) }
-  useEffect(() => { setCheckinModalOpen(openCheckinModal) }, [openCheckinModal])
   const inputRef = useRef<HTMLInputElement | null>(null)
   const primaryRole = useSessionRole(sessionId ?? '')
   const fallbackRole = useSessionRole(roleFallbackId ?? '')
@@ -302,7 +289,7 @@ export function SessionLinkPanel({ links, startedAt, sessionId, roleFallbackId, 
       })}
       {generation && <div data-testid="handoff-generation" style={{ ...SECTION, textTransform: 'none', letterSpacing: 0, fontWeight: 400, marginTop: 10 }}>{generation}</div>}
       {started && <div style={{ ...SECTION, textTransform: 'none', letterSpacing: 0, fontWeight: 400, marginTop: generation ? 2 : 10 }}>{started}</div>}
-      {role === 'leader' && !hideCheckin && checkin.state && <CheckinPanel state={checkin.state} pt={pt} isMobile={isMobile} onGo={onGo} update={checkin.update} runNow={checkin.runNow} taskId={links.task?.id} taskPath={links.task ? `/tasks/${encodeURIComponent(links.task.id)}?tab=activity&filter=checkins` : null} modalOpen={checkinModalOpen} onModalChange={changeCheckinModal} />}
+      {role === 'leader' && !hideCheckin && checkin.state && <CheckinPanel state={checkin.state} pt={pt} isMobile={isMobile} onGo={onGo} update={checkin.update} runNow={checkin.runNow} taskId={links.task?.id} taskPath={links.task ? `/tasks/${encodeURIComponent(links.task.id)}?tab=activity&filter=checkins` : null} />}
     </div>
   )
 }
@@ -317,7 +304,8 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
 }) {
   const pt = lang === 'pt'
   const [open, setOpen] = useState(false)
-  const [checkinModalRequested, setCheckinModalRequested] = useState(false)
+  const checkinModal = useCheckinModalRequest()
+  useEffect(() => { if (checkinModal) setOpen(false) }, [checkinModal])
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -327,7 +315,7 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
     if (!open) return
     const away = (e: Event) => {
       const t = e.target as Node
-      if (btnRef.current?.contains(t) || panelRef.current?.contains(t) || document.querySelector('[data-testid="checkin-modal"]')?.contains(t) || isInsidePortalledMenu(t)) return
+      if (btnRef.current?.contains(t) || panelRef.current?.contains(t) || isInsidePortalledMenu(t)) return
       setOpen(false)
     }
     const scroll = (e: Event) => { if (scrollIsOutside(panelRef.current, e.target)) setOpen(false) }
@@ -338,23 +326,6 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
       window.removeEventListener('scroll', scroll, true)
     }
   }, [open])
-
-  useEffect(() => {
-    const request = (event: Event) => {
-      const target = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId
-      const id = session.id ?? session.conversationId
-      if (target && id && target !== id) return
-      setCheckinModalRequested(true)
-      if (!open && btnRef.current) {
-        const r = btnRef.current.getBoundingClientRect()
-        const width = Math.min(320, window.innerWidth - 24)
-        setPos({ top: r.bottom + 6, left: Math.max(12, Math.min(r.left, window.innerWidth - width - 12)) })
-        setOpen(true)
-      }
-    }
-    window.addEventListener('agentistics:open-checkin', request)
-    return () => window.removeEventListener('agentistics:open-checkin', request)
-  }, [open, session.id, session.conversationId])
 
   if (!session.id && !links) return null
   const label = pt ? 'Vínculos desta sessão' : 'Session links'
@@ -385,7 +356,7 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
           maxHeight: 'calc(60vh / var(--ui-zoom, 1))', overflowY: 'auto', padding: '4px 10px 10px', borderRadius: 10,
           background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
         }}>
-          <SessionLinkPanel links={links ?? { parent: null, children: [], task: null }} {...(session.startedAt ? { startedAt: session.startedAt } : {})} {...(session.handoffSeq ? { handoffSeq: session.handoffSeq } : {})} sessionId={session.id ? sessionIdentityKey(session as { id: string; conversationId?: string }) : undefined} roleFallbackId={session.id} pt={pt} isMobile={isMobile} openCheckinModal={checkinModalRequested} onCheckinModalChange={setCheckinModalRequested}
+          <SessionLinkPanel links={links ?? { parent: null, children: [], task: null }} {...(session.startedAt ? { startedAt: session.startedAt } : {})} {...(session.handoffSeq ? { handoffSeq: session.handoffSeq } : {})} sessionId={session.id ? sessionIdentityKey(session as { id: string; conversationId?: string }) : undefined} roleFallbackId={session.id} pt={pt} isMobile={isMobile}
             {...(session.id && session.actionable && session.state !== 'closed' ? { awayId: session.id, away: session.away === true } : {})}
             onGo={p => { setOpen(false); onGo(p) }} />
         </div>, document.body)}

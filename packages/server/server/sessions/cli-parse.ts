@@ -10,7 +10,7 @@
  */
 
 import { MIN_QUIET_FOR_MS } from './retire-plan'
-import { HARNESS_ORDER, type HarnessId, type SessionRole } from '@agentistics/core'
+import { HARNESS_ORDER, type HarnessId, type SessionRole, type CanonicalMode, isCanonicalMode } from '@agentistics/core'
 // `GROUPINGS` is the ONE list of the dimensions a fleet can be grouped along — the same rule
 // `HARNESS_SORT` follows: a second hand-written list here would accept a value the table cannot
 // draw, or refuse one it can, and TypeScript would accept both.
@@ -24,6 +24,7 @@ export type SessionCommand =
       prompt?: string
       model?: string
       effort?: string
+      mode?: CanonicalMode
       cwd?: string
       label?: string
       task?: string
@@ -113,6 +114,8 @@ export type SessionCommand =
   | { kind: 'archive' | 'unarchive' | 'delete'; ref: string }
   | { kind: 'rename'; ref: string; label: string }
   | { kind: 'note'; ref: string; text: string }
+  /** CONTA.TROCA: move a session to another account of its harness. No account: list the options. */
+  | { kind: 'switch-account'; ref: string; accountId?: string; harness?: string; resend?: boolean; json?: boolean }
   | { kind: 'help' }
   | { kind: 'error'; message: string }
 
@@ -132,6 +135,7 @@ export interface BatchSpec {
   cwd?: string
   model?: string
   effort?: string
+  mode?: CanonicalMode
   name?: string
   /** See `start.notify`. */
   notify?: NotifySwitch
@@ -149,7 +153,7 @@ function notifyValue(v: string): NotifySwitch | null {
 }
 
 const VALUE_FLAGS = new Set([
-  '-p', '--prompt', '--model', '--effort', '--cwd', '--name', '--task', '--subtask', '--session', '--attempt', '--notify', '--role', '--folder',
+  '-p', '--prompt', '--mode', '--model', '--effort', '--cwd', '--name', '--task', '--subtask', '--session', '--attempt', '--notify', '--role', '--folder',
   '--account',
 ])
 
@@ -267,6 +271,19 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     return { kind: head, ref }
   }
 
+  if (head === 'switch-account') {
+    const hi = argv.indexOf('--harness')
+    const harness = hi > 0 ? argv[hi + 1] : undefined
+    if (hi > 0 && (!harness || harness.startsWith('--'))) return { kind: 'error', message: 'Usage: agentop session switch-account <id|name> [<account-id>] [--harness <harness>] [--resend]' }
+    const rest = argv.slice(1).filter((a, i) => a !== '--resend' && a !== '--json' && a !== '--harness' && !(hi > 0 && i === hi))
+    const ref = rest[0]
+    if (!ref) return { kind: 'error', message: 'Usage: agentop session switch-account <id|name> [<account-id>] [--harness <harness>] [--resend]' }
+    return {
+      kind: 'switch-account', ref, ...(rest[1] ? { accountId: rest[1] } : {}), ...(harness ? { harness } : {}),
+      ...(argv.includes('--resend') ? { resend: true } : {}), ...(jsonFlag ? { json: true } : {}),
+    }
+  }
+
   if (head === 'rename') {
     const ref = argv[1]
     const label = argv.slice(2).join(' ').trim()
@@ -326,6 +343,10 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
       if (n === null) return { kind: 'error', message: `--notify takes "on" or "off", not "${value}".` }
       cmd.notify = n
       continue
+    }
+    if (arg === '--mode') {
+      if (!isCanonicalMode(value)) return { kind: 'error', message: '--mode takes default, accept-edits, plan or no-questions (approval mode, not role auto).' }
+      cmd.mode = value; continue
     }
     if (arg === '--folder') { cmd.folder = value; continue }
     if (arg === '--account') { cmd.account = value; continue }
@@ -419,7 +440,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
   let task = ''
   let subtask: string | undefined
   const specs: BatchSpec[] = []
-  const shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string; account?: string } = {}
+  const shared: { cwd?: string; model?: string; effort?: string; mode?: CanonicalMode; attempt?: string; notify?: NotifySwitch; folder?: string; account?: string } = {}
 
   let force = false
   let sharedCwd = false
@@ -448,6 +469,10 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
     // is usually many assistants on one repository, and repeating the path per session is how a
     // generated command line gets long enough to be got wrong.
     if (arg === '--cwd') { shared.cwd = value; continue }
+    if (arg === '--mode') {
+      if (!isCanonicalMode(value)) return { kind: 'error', message: '--mode takes default, accept-edits, plan or no-questions.' }
+      shared.mode = value; continue
+    }
     if (arg === '--model') { shared.model = value; continue }
     if (arg === '--effort') { shared.effort = value; continue }
     // `--attempt` is a positional default like the three above: it applies to every `--session`
@@ -476,7 +501,6 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
     return { kind: 'error', message: `${arg} is not accepted by batch — use --session for each one.` }
   }
 
-  if (!task) return { kind: 'error', message: 'batch needs --task "<name>" so the sessions belong together.' }
   if (specs.length === 0) return { kind: 'error', message: 'batch needs at least one --session "<harness>: <prompt>".' }
   return { kind: 'batch', task, ...(subtask ? { subtask } : {}), specs, ...(json ? { json: true } : {}), ...(force ? { force: true } : {}), ...(sharedCwd ? { sharedCwd: true } : {}), ...(away !== undefined ? { away } : {}) }
 }
@@ -484,7 +508,7 @@ function parseBatch(argv: string[], json: boolean): SessionCommand {
 /** `<harness>[@<cwd>]: <prompt>` — the one string that describes a session in a batch. */
 export function parseBatchSpec(
   value: string,
-  shared: { cwd?: string; model?: string; effort?: string; attempt?: string; notify?: NotifySwitch; folder?: string; account?: string } = {},
+  shared: { cwd?: string; model?: string; effort?: string; mode?: CanonicalMode; attempt?: string; notify?: NotifySwitch; folder?: string; account?: string } = {},
 ): { spec: BatchSpec } | { error: string } {
   const colon = value.indexOf(':')
   const head = (colon === -1 ? value : value.slice(0, colon)).trim()
@@ -502,6 +526,7 @@ export function parseBatchSpec(
       harness,
       ...(prompt ? { prompt } : {}),
       ...(cwd ? { cwd } : shared.cwd ? { cwd: shared.cwd } : {}),
+      ...(shared.mode ? { mode: shared.mode } : {}),
       ...(shared.model ? { model: shared.model } : {}),
       ...(shared.effort ? { effort: shared.effort } : {}),
       ...(shared.attempt ? { attempt: shared.attempt } : {}),

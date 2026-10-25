@@ -26,7 +26,13 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, children, footer, tone = 'danger', icon }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction, closeLabel }: {
+  /** Optional wider content and phone bottom-sheet presentation; defaults preserve confirmations. */
+  maxWidth?: number
+  mobileSheet?: boolean
+  className?: string
+  headerAction?: React.ReactNode
+  closeLabel?: string
   open: boolean
   title: string
   message: string
@@ -39,6 +45,8 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   requireText?: string
   /** Prompt shown above the input, e.g. `Type "Client X" to confirm`. */
   requireTextHint?: string
+  /** Keep long content at the top instead of scrolling to its first input. */
+  focusPanel?: boolean
   focusCancel?: boolean
   children?: React.ReactNode
   /** Optional replacement for the standard two-button footer. */
@@ -48,12 +56,14 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   tone?: 'danger' | 'default'
   /** Replaces the tone's icon (the `default` tone's is a download arrow, right for an install only). */
   icon?: React.ReactNode
+  /** The confirmed action is running: the confirm button is disabled until it answers. */
+  busy?: boolean
 }) {
   const isMobile = useIsMobile()
   const [typed, setTyped] = React.useState('')
   // Reset between openings, otherwise the previous answer would pre-arm the next delete.
   React.useEffect(() => { if (open) setTyped('') }, [open])
-  const armed = requireText === undefined || typed === requireText
+  const armed = (requireText === undefined || typed === requireText) && !busy
   // The top-most overlay owns Escape (lib/overlayStack): a Drawer or screen underneath stays open.
   useEscapeOwner(open, onCancel)
   const titleId = React.useId()
@@ -71,13 +81,13 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
     const panel = panelRef.current
     const focusables = () => Array.from(panel?.querySelectorAll<HTMLElement>(
       'button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])') ?? [])
-    if (panel && !panel.contains(document.activeElement)) (focusables()[0] ?? panel).focus()
+    if (panel && !panel.contains(document.activeElement)) (focusPanel ? panel : focusables()[0] ?? panel).focus({ preventScroll: true })
     const trap = (e: KeyboardEvent) => {
       if (e.key !== 'Tab' || !panel) return
       const f = focusables()
       if (f.length === 0) { e.preventDefault(); panel.focus(); return }
       const first = f[0]!, last = f[f.length - 1]!
-      if (!panel.contains(document.activeElement)) { e.preventDefault(); first.focus() }
+      if (!panel.contains(document.activeElement) || document.activeElement === panel) { e.preventDefault(); (e.shiftKey ? last : first).focus() }
       else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
     }
@@ -86,17 +96,17 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
       document.removeEventListener('keydown', trap)
       if (prev && prev.isConnected) prev.focus()
     }
-  }, [open])
+  }, [open, focusPanel])
   if (!open) return null
   return (
-    <div onClick={onCancel} style={{
-      position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: 16,
+    <div className={className ? `${className}-backdrop` : undefined} onClick={onCancel} style={{
+      position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: mobileSheet && isMobile ? 'flex-end' : 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: mobileSheet && isMobile ? 0 : 16,
     }}>
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+      <div className={className} ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
         onClick={e => e.stopPropagation()} style={{ outline: 'none',
-        width: '100%', maxWidth: 420, background: 'var(--bg-card)', border: '1px solid var(--border)',
-        borderRadius: 12, padding: 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
+        width: '100%', maxWidth: mobileSheet && isMobile ? '100%' : maxWidth, ...(mobileSheet ? { boxSizing: 'border-box' as const } : {}), maxHeight: mobileSheet ? 'calc(92dvh / var(--ui-zoom, 1))' : 'calc(100dvh / var(--ui-zoom, 1) - 32px)', overflowY: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)',
+        borderRadius: mobileSheet && isMobile ? '18px 18px 0 0' : 12, padding: mobileSheet && isMobile ? '18px 16px max(18px, env(safe-area-inset-bottom))' : 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -105,9 +115,11 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
             : { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
             {icon ?? (tone === 'danger' ? <AlertTriangle size={17} /> : <Download size={17} />)}
           </span>
-          <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</span>
+          <span id={titleId} style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>{title}</span>
+          {headerAction}
+          {closeLabel && <button type="button" aria-label={closeLabel} onClick={onCancel} style={{ ...dialogButtonStyle('secondary', isMobile), width: isMobile ? 44 : undefined, minWidth: isMobile ? 44 : undefined }}>×</button>}
         </div>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>
+        {message && <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>}
         {children}
         {requireText !== undefined && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -146,10 +158,11 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
 // 390px, so on mobile each row renders as a stacked card: title + badge, a subtitle, label/value
 // field rows, and a footer of full-width 44px actions. The desktop <table> is kept as-is beside
 // it — this is an additional branch, never a replacement.
-export function RecordCard({ title, subtitle, badge, fields, actions, onClick, leading, fieldLayout = 'inline', children }: {
+export function RecordCard({ title, subtitle, badge, fields, actions, onClick, leading, fieldLayout = 'inline', children, wrapTitle = false }: {
   children?: React.ReactNode
   fieldLayout?: 'inline' | 'stacked'
   title: React.ReactNode
+  wrapTitle?: boolean
   subtitle?: React.ReactNode
   /** Role / presence pill, rendered top-right on the title line. */
   badge?: React.ReactNode
@@ -174,9 +187,9 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           {leading && <span onClick={e => e.stopPropagation()} style={{ display: 'flex', flexShrink: 0 }}>{leading}</span>}
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: fieldLayout === 'stacked' ? undefined : 'ellipsis', whiteSpace: fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: 'anywhere' }}>{title}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: wrapTitle || fieldLayout === 'stacked' ? undefined : 'ellipsis', whiteSpace: wrapTitle || fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: wrapTitle || fieldLayout === 'stacked' ? 'anywhere' : undefined }}>{title}</div>
             {subtitle && (
-              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: fieldLayout === 'stacked' ? undefined : 'ellipsis', whiteSpace: fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: 'anywhere', marginTop: 1 }}>{subtitle}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: fieldLayout === 'stacked' ? undefined : 'ellipsis', whiteSpace: fieldLayout === 'stacked' ? 'normal' : 'nowrap', overflowWrap: fieldLayout === 'stacked' ? 'anywhere' : undefined, marginTop: 1 }}>{subtitle}</div>
             )}
           </div>
           {badge && <span style={{ flexShrink: 0 }}>{badge}</span>}
@@ -187,7 +200,7 @@ export function RecordCard({ title, subtitle, badge, fields, actions, onClick, l
             {fields.map(f => (
               <div key={f.label} style={{ display: 'flex', flexDirection: fieldLayout === 'stacked' ? 'column' : 'row', alignItems: 'flex-start', gap: fieldLayout === 'stacked' ? 3 : 10, fontSize: 12 }}>
                 <span style={{ color: 'var(--text-tertiary)', flexShrink: 0, minWidth: 82 }}>{f.label}</span>
-                <span style={{ color: 'var(--text-secondary)', minWidth: 0, maxWidth: '100%', flex: fieldLayout === 'stacked' ? undefined : 1, textAlign: fieldLayout === 'stacked' ? 'left' : 'right', overflowWrap: 'anywhere' }}>{f.value}</span>
+                <span style={{ color: 'var(--text-secondary)', minWidth: 0, maxWidth: '100%', flex: fieldLayout === 'stacked' ? undefined : 1, textAlign: fieldLayout === 'stacked' ? 'left' : 'right', overflowWrap: fieldLayout === 'stacked' ? 'anywhere' : undefined }}>{f.value}</span>
               </div>
             ))}
           </div>
@@ -368,16 +381,18 @@ export function Divider() {
 }
 
 export function TabSelect<T extends string>({
-  options, value, onChange, accent = 'var(--anthropic-orange)', buttonMinHeight,
+  options, value, onChange, accent = 'var(--anthropic-orange)', buttonMinHeight, wrap = false,
 }: {
   options: { value: T; label: string }[]
   value: T
   onChange: (v: T) => void
   accent?: string
   buttonMinHeight?: number
+  /** Independent wrapping chips when options cannot fit in a single segmented row. */
+  wrap?: boolean
 }) {
   return (
-    <div style={{ display: 'inline-flex', width: 'fit-content', border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+    <div style={{ display: 'inline-flex', width: 'fit-content', ...(wrap ? { maxWidth: '100%' } : {}), flexWrap: wrap ? 'wrap' : 'nowrap', gap: wrap ? 6 : 0, border: wrap ? 'none' : '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
       {options.map((opt, i) => {
         const active = opt.value === value
         return (
@@ -389,8 +404,9 @@ export function TabSelect<T extends string>({
               fontSize: 12, fontWeight: active ? 700 : 500,
               background: active ? `color-mix(in srgb, ${accent} 18%, transparent)` : 'transparent',
               color: active ? accent : 'var(--text-secondary)',
-              border: 'none',
-              borderRight: i < options.length - 1 ? '1px solid var(--border)' : 'none',
+              ...(wrap
+                ? { border: `1px solid ${active ? accent : 'var(--border)'}`, borderRadius: 7 }
+                : { border: 'none', borderRight: i < options.length - 1 ? '1px solid var(--border)' : 'none' }),
               cursor: active ? 'default' : 'pointer',
               fontFamily: 'inherit',
               transition: 'background 0.15s, color 0.15s',
@@ -503,13 +519,13 @@ export function RowSwitch({ on, onToggle, label, sub, icon, disabled, dimmed, wr
           fontSize: 13, fontWeight: 500, color: 'var(--text-primary)',
           textDecoration: dimmed ? 'line-through' : 'none',
           opacity: dimmed ? 0.55 : 1,
-          overflow: wrap ? undefined : 'hidden', textOverflow: wrap ? undefined : 'ellipsis', whiteSpace: wrap ? 'normal' : 'nowrap', overflowWrap: 'anywhere',
+          overflow: wrap ? undefined : 'hidden', textOverflow: wrap ? undefined : 'ellipsis', whiteSpace: wrap ? 'normal' : 'nowrap', overflowWrap: wrap ? 'anywhere' : undefined,
         }}>{label}</div>
         {sub && (
           <div style={{
             fontSize: wrap ? 13 : 11, color: wrap ? 'var(--text-secondary)' : 'var(--text-tertiary)', marginTop: 1,
             opacity: dimmed ? 0.55 : 1,
-            overflow: wrap ? undefined : 'hidden', textOverflow: wrap ? undefined : 'ellipsis', whiteSpace: wrap ? 'normal' : 'nowrap', overflowWrap: 'anywhere',
+            overflow: wrap ? undefined : 'hidden', textOverflow: wrap ? undefined : 'ellipsis', whiteSpace: wrap ? 'normal' : 'nowrap', overflowWrap: wrap ? 'anywhere' : undefined,
           }}>{sub}</div>
         )}
       </span>
@@ -572,9 +588,11 @@ export function StatusDot({ state, size = 8 }: {
  * included — adding an inline 16px here would be dead code that reads like a live requirement.
  */
 export function FieldInput({
-  label, sub, value, onChange, min, step, invalid, describedBy, unit, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false,
+  label, sub, value, onChange, min, step, invalid, describedBy, unit, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false, minHeight, hideReveal,
 }: {
   label: string
+  minHeight?: number
+  hideReveal?: boolean
   sub?: string
   value: string
   onChange: (v: string) => void
@@ -623,9 +641,9 @@ export function FieldInput({
         spellCheck={spellCheck}
         aria-label={unit ? `${label} (${unit})` : label}
         style={{
-          width: '100%', boxSizing: 'border-box', minHeight: isMobile ? 44 : undefined,
+          width: '100%', boxSizing: 'border-box', minHeight: minHeight ?? (isMobile ? 44 : undefined),
           padding: '7px 10px',
-          ...(type === 'password' ? { paddingRight: REVEAL_PAD } : unit ? { paddingRight: 76 } : null),
+          ...(type === 'password' && !hideReveal ? { paddingRight: REVEAL_PAD } : unit ? { paddingRight: 76 } : null),
           background: 'var(--bg-elevated)',
           border: '1px solid var(--border)',
           borderRadius: 7,
@@ -640,7 +658,7 @@ export function FieldInput({
         onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
       />
       {unit && <span aria-hidden="true" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', fontSize: 13, pointerEvents: 'none' }}>{unit}</span>}
-      {type === 'password' && <RevealButton shown={shown} onToggle={() => setShown(v => !v)} />}
+      {type === 'password' && !hideReveal && <RevealButton shown={shown} onToggle={() => setShown(v => !v)} />}
       </div>
     </div>
   )
@@ -756,23 +774,34 @@ export function Checkbox({ checked, onChange, label, disabled, ariaLabel }: {
         minHeight: isMobile ? 44 : undefined,
       }}
     >
-      <div
-        aria-hidden
-        style={{
-          width: 16, height: 16, borderRadius: 4, flexShrink: 0,
-          border: `1px solid ${checked ? 'var(--anthropic-orange)' : 'var(--border)'}`,
-          background: checked ? 'var(--anthropic-orange)' : 'transparent',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'all 0.15s',
-        }}
-      >
-        {checked && (
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </div>
+      <CheckboxBox checked={checked} />
       {label && <span>{label}</span>}
+    </div>
+  )
+}
+
+/**
+ * The BOX of `Checkbox`, alone — for a row that is already a control of its own (the question
+ * card's multi-select option is a button), where nesting a second focusable checkbox would put two
+ * controls on one row. Same look, one definition.
+ */
+export function CheckboxBox({ checked }: { checked: boolean }) {
+  return (
+    <div
+      aria-hidden
+      style={{
+        width: 16, height: 16, borderRadius: 4, flexShrink: 0,
+        border: `1px solid ${checked ? 'var(--anthropic-orange)' : 'var(--border)'}`,
+        background: checked ? 'var(--anthropic-orange)' : 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'all 0.15s',
+      }}
+    >
+      {checked && (
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2 6L5 9L10 3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
     </div>
   )
 }

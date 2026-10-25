@@ -75,6 +75,8 @@ function relayConnection(sockPath: string, from: number, on: {
   line(l: string, t: number): void
   exit(code: number | null): void
   replaced(): void
+  replayError?(why: string): void
+  replayAck?(): void
 }) {
   let sock: Socket | null = null
   let closed = false
@@ -111,6 +113,8 @@ function relayConnection(sockPath: string, from: number, on: {
         if (typeof msg.o === 'string') on.line(msg.o, typeof msg.t === 'number' ? msg.t : Date.now())
         else if ('x' in msg) finish(typeof msg.x === 'number' ? msg.x : null)
         else if (msg.bye === 'replaced') { replaced = true; on.replaced() }
+        else if (typeof msg.replayError === 'string') on.replayError?.(msg.replayError)
+        else if (msg.replayAck === true) on.replayAck?.()
       }
     })
     s.on('error', () => {})
@@ -119,7 +123,7 @@ function relayConnection(sockPath: string, from: number, on: {
     flush()
   })()
   return {
-    write(w: string) { queue.push(`${JSON.stringify({ w })}\n`); flush() },
+    write(w: string, replayAt?: number) { queue.push(`${JSON.stringify({ w, ...(replayAt !== undefined ? { replayAt } : {}) })}\n`); flush() },
     kill() { queue.push(`${JSON.stringify({ k: 1 })}\n`); flush() },
     /** Drop the connection without touching the child (what a dying server does, and the tests). */
     detach() { closed = true; sock?.destroy() },
@@ -183,6 +187,8 @@ export interface DurableStore {
   lastActivityMs(id: string): number
   /** Ids with a directory whose relay is gone (collected at boot). */
   dead(): string[]
+  /** A relay-recorded child exit, distinct from a relay lost in a reboot. */
+  endedAt?(id: string): string | null
   /** Say WHY the child is about to end, so its exit is not read as a failure to fall back from. */
   markEnding(id: string, why: string): void
   ending(id: string): string | null
@@ -230,6 +236,13 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
   const store: DurableStore = {
     root,
     dirOf,
+    endedAt(id) {
+      try {
+        const exit = JSON.parse(read(id, FILES.exit) ?? 'null')
+        return typeof exit?.at === 'number' && Number.isFinite(exit.at)
+          ? new Date(exit.at).toISOString() : null
+      } catch { return null }
+    },
     create(id, saved) {
       const dir = dirOf(id)
       rmSync(dir, { recursive: true, force: true })
@@ -294,6 +307,10 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
       const delivered = parseJsonl<InRecord>(read(id, FILES.in) ?? '', isInRecord)
       const calls = parseJsonl<ReplayCall>(read(id, FILES.calls) ?? '', isReplayCall)
       const check = writeCheck(delivered)
+      // Old relays may survive an upgrade; do not send an extension they would silently ignore.
+      const replayOffsets = (() => { try { return JSON.parse(read(id, FILES.pid) ?? '{}').replayOffsets === true } catch { return false } })()
+      let writeOffset = 0
+      let pendingWrites = 0
       const lines = pacedLines()
       let session: StructuredSession | null = null
       let bound: () => void = () => {}
@@ -334,6 +351,11 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
         }
         await immediate()
         await immediate()
+        // A relay acknowledgement is the delivery check for writes beyond our stale snapshot.
+        const deadline = Date.now() + 5000
+        while (pendingWrites > 0 && !failed && Date.now() < deadline) await sleep(5)
+        if (failed) return
+        if (pendingWrites > 0) { fail('the relay did not acknowledge replayed input'); return }
         replaying = false
         if (!check.complete()) { fail(`the re-created driver wrote ${check.remaining()} fewer bytes than the original`); return }
         for (const p of pendingLive.splice(0)) lines.push(p.l, p.t)
@@ -366,14 +388,24 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
               lines.end(); exitResolve(c)
             },
             replaced: () => {},
+            replayError: fail,
+            replayAck: () => { pendingWrites-- },
           })
           const iterate = lines.iterate(async () => { if (!failed) void before() })
           return {
             source: { [Symbol.asyncIterator]: () => iterate },
             write(w) {
+              const at = writeOffset
+              writeOffset += w.length
               const r = check.take(w)
               if (r === 'diverged') fail('the re-created driver wrote something the original did not')
-              else if (r === 'live' && !failed) conn?.write(w)
+              else if (r === 'live' && !failed) {
+                // The original writer may have reached the relay AFTER our file snapshot. Check
+                // the offset there, atomically with delivery, rather than re-send those bytes.
+                if (replaying && !replayOffsets) { fail('the surviving relay cannot verify late replay input'); return }
+                if (replaying) pendingWrites++
+                conn?.write(w, replaying ? at : undefined)
+              }
             },
             kill: () => conn?.kill(),
             exited,

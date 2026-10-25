@@ -92,7 +92,7 @@ export function planCrashGroup(o: {
   const window = o.windowMs ?? CRASH_WINDOW_MS
 
   const candidates = o.entries.filter(e => {
-    // Ending a session is a decision. It is never a fall, whatever else is true of the row.
+    // A kill OR an observed harness exit is a recorded end. It is never a fall.
     if (e.endedAt) return false
     // The backend still has it: it is running, or it exited on its own. Either way nothing took it.
     if (o.backendIds.has(e.id)) return false

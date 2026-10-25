@@ -18,8 +18,10 @@
  * agreeing to.
  */
 
-import { useState } from 'react'
-import { AlertCircle, Check } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertCircle, Check, ChevronLeft, ChevronRight } from 'lucide-react'
+import { CheckboxBox, dialogButtonStyle } from '../../pages/settings/primitives'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { approvalIdentity, splitApprovalFrame } from '../../lib/approvalQuestion'
 import { optionLabel } from '../../lib/nativeSession'
@@ -27,7 +29,7 @@ import { optionLabel } from '../../lib/nativeSession'
 export interface ApprovalCardProps {
   row: FleetRow
   lang: 'pt' | 'en'
-  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number })
+  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; step?: 'next' | 'back'; choices?: number[] })
     => Promise<{ ok: boolean; message: string; id?: string }>
   /**
    * THE FREE-TEXT OPTION HANDS THE COMPOSER OVER, rather than growing a field of its own.
@@ -37,16 +39,22 @@ export interface ApprovalCardProps {
    * second composer with none of the composer's features — no dictation, no paste-an-image, no
    * attachments, no auto-grow — and its own separate idea of what Enter does.
    */
-  onWrite?: (option: { number: number; label: string }) => void
+  onWrite?: (option: { number: number; label: string; choices?: number[] }) => void
+  /**
+   * The composer's own send — for the card's "Send answer" while the composer holds a typed answer
+   * on a structured multi-select, so the words and the ticks go together (`composerAnswerRequest`).
+   */
+  onSendAnswering?: () => void
   /** Which option the composer is currently answering, so the row can say so. */
   answering?: number | null
 }
 
-export function ApprovalCard({ row, lang, act, onWrite, answering = null }: ApprovalCardProps) {
+export function ApprovalCard({ row, lang, act, onWrite, onSendAnswering, answering = null }: ApprovalCardProps) {
   const pt = lang === 'pt'
   /** What is being asked, split from the terminal chrome the buttons already repeat. */
   const { question } = splitApprovalFrame(row.approvalLines ?? [])
-  const [busy, setBusy] = useState<number | 'confirm' | null>(null)
+  const [busy, setBusy] = useState<number | 'confirm' | 'next' | 'back' | null>(null)
+  const isMobile = useIsMobile()
   const [notice, setNotice] = useState<string | null>(null)
   /**
    * Did the last attempt FAIL? A refusal and a confirmation are not the same sentence and must not
@@ -61,6 +69,21 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
 
   const options = row.dialogOptions ?? []
   const approve = row.verbs.find(v => v.action === 'approve')
+  /**
+   * ONE STEP OF A FORM, not the whole question. A multi-question `AskUserQuestion` (claude) or
+   * `ask_question` (agy) shows one question at a time, and a MULTI-SELECT step is left with the step
+   * keys rather than answered by a pick — so the card draws where the form is, ticks boxes instead
+   * of answering, and offers the step buttons the server says this harness can press (`canStep`).
+   */
+  const form = row.dialogForm
+  const multi = form?.multi === true
+  /**
+   * A STRUCTURED multi-select (`together`): the protocol takes every tick in ONE answer, so the ticks
+   * live here until "Send" — nothing reaches the session per click. Reset when the question changes.
+   */
+  const together = multi && form?.together === true
+  const [ticks, setTicks] = useState<ReadonlySet<number>>(new Set())
+  const [ticksFor, setTicksFor] = useState<string | null>(null)
 
   /**
    * WHICH DIALOG THIS IS — the QUESTION plus its options, not the options alone.
@@ -94,6 +117,46 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
    */
   const alreadyAnswered = answeredShape !== null && answeredShape === shape
 
+  if (together && ticksFor !== shape) { setTicksFor(shape); setTicks(new Set()) }
+  const tickedNow = (n: number, fromRow: boolean | undefined) =>
+    (together ? ticks.has(n) || answering === n : fromRow === true)
+  /**
+   * A STRUCTURED multi-select's typed answer travels WITH the other ticks (`choices`), and a tick
+   * changed while the composer holds the answer reaches it too — the typed text replaced them before.
+   */
+  const answeringFree = together && answering !== null && options.some(o => o.number === answering && o.freeText)
+  const ticksKey = [...ticks].sort((a, b) => a - b).join(',')
+  /**
+   * While the composer holds the typed answer, "Send" is the COMPOSER's send: the typed words live in
+   * its draft, and the card sending the ticks alone dropped them in silence (live QA r2: only "Green"
+   * arrived). The count includes the typed option, which is shown ticked.
+   */
+  const sendViaComposer = answeringFree && onSendAnswering !== undefined
+  const sendCount = ticks.size + (answeringFree && answering !== null && !ticks.has(answering) ? 1 : 0)
+  useEffect(() => {
+    if (!answeringFree || answering === null) return
+    const o = options.find(x => x.number === answering)
+    if (o) onWrite?.({ number: o.number, label: o.label, choices: [...ticks].sort((a, b) => a - b) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticksKey, answeringFree])
+
+  async function sendTicks() {
+    setBusy('confirm')
+    const out = await act({ id: row.id, action: 'approve', choices: [...ticks].sort((a, b) => a - b) })
+    setBusy(null)
+    setNotice(out.message)
+    setFailed(!out.ok)
+    if (out.ok) setAnsweredShape(shape)
+  }
+
+  async function step(dir: 'next' | 'back') {
+    setBusy(dir)
+    const out = await act({ id: row.id, action: 'approve', step: dir })
+    setBusy(null)
+    setNotice(out.message)
+    setFailed(!out.ok)
+  }
+
   async function answer(choice?: number, text?: string) {
     setBusy(choice ?? 'confirm')
     const out = await act({
@@ -105,7 +168,8 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
     setBusy(null)
     setNotice(out.message)
     setFailed(!out.ok)
-    if (out.ok) setAnsweredShape(shape)
+    // A tick is not an answer: the same question stays open for more ticks and the step buttons.
+    if (out.ok && !(multi && choice !== undefined && options.find(o => o.number === choice)?.checked !== undefined)) setAnsweredShape(shape)
   }
 
   return (
@@ -128,6 +192,53 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
           among twenty inside the block below, in the smallest and faintest text on the card, with
           the options repeated underneath as buttons; the one thing the block alone carried was the
           one thing nobody could find. See `approvalQuestion.ts`. */}
+      {form && (form.steps?.length || form.position) && (
+        <div
+          role="list"
+          aria-label={pt ? 'Etapas da pergunta' : 'Question steps'}
+          style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, fontSize: 11.5 }}
+        >
+          {form.position && (
+            <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+              {pt ? `Pergunta ${form.position.at} de ${form.position.of}` : `Question ${form.position.at} of ${form.position.of}`}
+            </span>
+          )}
+          {(form.steps ?? []).map((st, i) => (
+            <span
+              key={`${i}-${st.label}`}
+              role="listitem"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '3px 9px', borderRadius: 999,
+                border: `1px solid ${st.done ? 'var(--anthropic-orange)' : 'var(--border-subtle)'}`,
+                background: 'var(--bg-card)',
+                color: st.done ? 'var(--text-primary)' : 'var(--text-tertiary)',
+              }}
+            >
+              {st.done && <Check size={11} color="var(--anthropic-orange)" />}
+              {st.label}
+            </span>
+          ))}
+          {form.steps && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 999,
+              border: `1px solid ${form.review ? 'var(--anthropic-orange)' : 'var(--border-subtle)'}`,
+              background: 'var(--bg-card)', color: form.review ? 'var(--text-primary)' : 'var(--text-tertiary)',
+            }}>
+              {pt ? 'Enviar' : 'Submit'}
+            </span>
+          )}
+        </div>
+      )}
+
+      {multi && (
+        <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+          {together
+            ? (pt ? 'Marque quantas quiser e envie.' : 'Tick as many as you want, then send.')
+            : (pt ? 'Marque quantas quiser e depois avance.' : 'Tick as many as you want, then go on.')}
+        </p>
+      )}
+
       {question.length > 0 && (
         <div style={{
           margin: 0, padding: '10px 12px', borderRadius: 10,
@@ -178,13 +289,18 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
             {options.map(o => (
               <button
                 key={o.number}
+                {...(o.checked !== undefined ? { role: 'checkbox', 'aria-checked': tickedNow(o.number, o.checked) } : {})}
                 onClick={() => {
+                  if (together && !o.freeText) {
+                    setTicks(prev => { const n = new Set(prev); if (n.has(o.number)) n.delete(o.number); else n.add(o.number); return n })
+                    return
+                  }
                   // THE FREE-TEXT OPTION ANSWERS NOTHING BY ITSELF — it hands the COMPOSER over.
                   // In the session the digit does not submit either: it turns that row into a
                   // field, and every further press types the digit INTO it, which is how
                   // `33333333333333333` happened. So the digit and the words travel together,
                   // once, when the composer sends — see `answerSession`.
-                  if (o.freeText) { onWrite?.({ number: o.number, label: o.label }); return }
+                  if (o.freeText) { onWrite?.({ number: o.number, label: o.label, ...(together ? { choices: [...ticks].sort((a, b) => a - b) } : {}) }); return }
                   void answer(o.number)
                 }}
                 // Picking the free-text option SENDS NOTHING — it hands the composer over — so it
@@ -205,15 +321,17 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
                   opacity: o.freeText ? 1 : (alreadyAnswered ? 0.5 : (busy !== null && busy !== o.number ? 0.5 : 1)),
                 }}
               >
-                <span style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 20, height: 20, borderRadius: 6, flexShrink: 0,
-                  background: answering === o.number ? 'var(--anthropic-orange)' : 'var(--bg-elevated)',
-                  color: answering === o.number ? '#fff' : 'var(--text-tertiary)',
-                  fontSize: 10.5, fontWeight: 700,
-                }}>
-                  {o.number}
-                </span>
+                {o.checked !== undefined ? <CheckboxBox checked={tickedNow(o.number, o.checked)} /> : (
+                  <span style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 20, height: 20, borderRadius: 6, flexShrink: 0,
+                    background: answering === o.number ? 'var(--anthropic-orange)' : 'var(--bg-elevated)',
+                    color: answering === o.number ? '#fff' : 'var(--text-tertiary)',
+                    fontSize: 10.5, fontWeight: 700,
+                  }}>
+                    {o.number}
+                  </span>
+                )}
                 <span style={{ minWidth: 0, flex: 1 }}>{optionLabel(o.label, pt ? 'pt' : 'en')}</span>
                 {/* THE COMPOSER IS THE FIELD, and the row has to say where the answer goes — a row
                     that highlights and grows nothing reads as a click that did nothing. */}
@@ -232,6 +350,49 @@ export function ApprovalCard({ row, lang, act, onWrite, answering = null }: Appr
               </button>
             ))}
 
+            {together && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => { if (sendViaComposer) onSendAnswering!(); else void sendTicks() }}
+                  disabled={busy !== null || alreadyAnswered || sendCount === 0}
+                  style={dialogButtonStyle('primary', isMobile, busy !== null || alreadyAnswered || sendCount === 0)}
+                >
+                  <Check size={14} />
+                  {pt ? `Enviar resposta (${sendCount})` : `Send answer (${sendCount})`}
+                </button>
+              </div>
+            )}
+
+            {form?.canStep && (
+              <div style={{
+                display: 'flex', gap: 8, marginTop: 4,
+                flexDirection: isMobile ? 'column-reverse' : 'row', justifyContent: 'flex-end',
+              }}>
+                {!(form.position?.at === 1) && (
+                  <button
+                    type="button"
+                    onClick={() => void step('back')}
+                    disabled={busy !== null}
+                    style={dialogButtonStyle('secondary', isMobile, busy !== null)}
+                  >
+                    <ChevronLeft size={14} />
+                    {pt ? 'Pergunta anterior' : 'Previous question'}
+                  </button>
+                )}
+                {!form.review && !(form.position && form.position.at >= form.position.of && !multi) && (
+                  <button
+                    type="button"
+                    onClick={() => void step('next')}
+                    disabled={busy !== null}
+                    style={dialogButtonStyle('primary', isMobile, busy !== null)}
+                  >
+                    {pt ? 'Próxima' : 'Next'}
+                    <ChevronRight size={14} />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )
       ) : approve?.enabled ? (

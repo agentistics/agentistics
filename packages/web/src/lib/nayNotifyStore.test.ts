@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
 import { alertKey, type NayAlert } from './nayNotify'
 import {
-  bellEntriesToDrop, dismissAlert, observeFleet, pushAlert, readNayAlerts, releaseDue, resetNayNotifyStore, setOpenSession, setVisibleSessions, snoozeAlert,
+  bellEntriesToDrop, dismissVaultExpiryAlert, dismissAlert, dismissCleanAlert, observeFleet, pushAlert, readNayAlerts, releaseDue, resetNayNotifyStore, setOpenSession, setVisibleSessions, snoozeAlert,
   waitingSince,
 } from './nayNotifyStore'
 
@@ -142,5 +142,52 @@ describe('a hidden card lives in the bell until the session no longer needs the 
   })
   it('leaves everything that is not a card notification alone', () => {
     expect(bellEntriesToDrop(bell, () => false)).toEqual(['1', '2', '3'])
+  })
+})
+
+
+describe('cleanup notices share Nay lifecycle without naming a fleet session', () => {
+  const clean = (): NayAlert => ({ ...alert('clean:scan', 'clean'), clean: { scanId: 'scan', bytes: 4096, count: 2, kept: 1 } })
+  it('survives fleet updates while ordinary answered cards are removed', () => {
+    pushAlert(clean())
+    pushAlert(alert('session'))
+    observeFleet([{ id: 'session', state: 'working' }], 0, 2000)
+    expect(readNayAlerts().map(a => a.kind)).toEqual(['clean'])
+  })
+  it('snoozes and returns even when the fleet is empty', async () => {
+    const a = clean(); pushAlert(a, 1000)
+    snoozeAlert(a.key, 1000, 1000)
+    expect(readNayAlerts()).toHaveLength(0)
+    releaseDue(2001)
+    await Promise.resolve()
+    expect(readNayAlerts().map(a => a.kind)).toEqual(['clean'])
+  })
+  it('finalizing forgets both displayed and snoozed cards for this scan only', async () => {
+    const a = clean(); pushAlert(a, 1000); snoozeAlert(a.key, 1000, 1000)
+    pushAlert(alert('session'))
+    dismissCleanAlert('scan')
+    releaseDue(2001); await Promise.resolve()
+    expect(readNayAlerts().map(a => a.sessionId)).toEqual(['session'])
+  })
+})
+
+
+describe('vault expiry notices', () => {
+  it('shares the queue, deduplicates an occurrence and survives unrelated fleet polls', () => {
+    const vault = alert('vault-expiry', 'vault-expiry')
+    pushAlert(alert('a'))
+    expect(pushAlert(vault)).toBe(true)
+    expect(pushAlert(vault)).toBe(false)
+    observeFleet([{ id: 'a', state: 'waiting' }], 0)
+    expect(readNayAlerts().map(a => a.kind)).toEqual(['turn', 'vault-expiry'])
+  })
+
+  it('clears only the vault warning when the countdown is extended or the vault locks', () => {
+    pushAlert(alert('a'))
+    pushAlert(alert('vault-expiry', 'vault-expiry'))
+    dismissVaultExpiryAlert()
+    expect(readNayAlerts().map(a => a.kind)).toEqual(['turn'])
+    pushAlert(alert('vault-expiry', 'vault-expiry', 2000))
+    expect(readNayAlerts()).toHaveLength(2)
   })
 })

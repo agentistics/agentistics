@@ -29,7 +29,7 @@ import type {
 import { answerFits } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
-import { modeNeedsProtocolSentence, routableDriver, routeSpawn, type SpawnRoute } from './structured-route'
+import { modeNeedsProtocolSentence, routableDriver, routeSpawn, structuredOrigin, type SpawnRoute } from './structured-route'
 import type { BackendSession, BackendSpawn, SessionActivity, SessionBackend, TerminalCapture } from './types'
 
 /** Which harness an argv starts — by its binary's base name against the spawn specs. */
@@ -58,6 +58,8 @@ export interface StructuredProvider {
   onConversation?(id: string, conversationId: string): void | Promise<void | { retry: true; retryMs?: number }>
   /** A session is now hosted over its protocol (route `structured` only). */
   onStarted?(id: string, driver: StructuredDriverId): void
+  /** Persist a normal end BEFORE its durable/live records disappear. */
+  onEnded?(id: string, endedAt?: string): Promise<unknown>
   /** A structured session fell back to tmux (or could not), for the log / the row's note. */
   onFallback?(id: string, outcome: { reason: string; resumed: boolean }): void
   /**
@@ -274,8 +276,8 @@ export type StructuredBackend = SessionBackend & {
   structuredSessions(): Array<{ id: string; route: Exclude<SpawnRoute, 'tmux'>; driver: StructuredDriverId }>
   /**
    * F2.0b — take back every structured session whose child outlived the previous server: replay its
-   * record into a re-created driver, then continue live. Called ONCE, by the process that owns the
-   * sessions (`agentop server`); `list()` waits for it, so no poll reads such a row as `lost` meanwhile.
+   * record into a re-created driver, then continue live. Called at boot and before sending to a
+   * CLI-born session this server has not adopted yet; concurrent calls share the recovery.
    */
   reattach(): Promise<void>
   /**
@@ -319,6 +321,12 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
   const onExit = (id: string, l: Live) => async (e: StructuredExit) => {
     if (live.get(id) !== l) return
     if (e.kind !== 'failed') {
+      // Disposed also covers switching to terminal; that continues under this SAME id.
+      if (e.kind === 'ended') {
+        // Keep the evidence for the next poll/boot if persistence failed (or spawn has not filed
+        // the registry row yet). Deleting it here would turn this known end back into a fall.
+        try { if (await provider.onEnded?.(id) === false) return } catch { return }
+      }
       if (durable && l.route === 'structured') { live.delete(id); l.off(); durable.remove(id) }
       return
     }
@@ -358,7 +366,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     return true
   }
 
-  /** One re-attach per process; `list()` waits on it. */
+  /** One recovery at a time; a later CLI spawn can add a relay after boot. `list()` waits on it. */
   let reattaching: Promise<void> | null = null
 
   async function reattachOne(id: string, reg: EngineStructured | null): Promise<void> {
@@ -398,12 +406,18 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     reattach() {
       if (!durable) return Promise.resolve()
       reattaching ??= (async () => {
-        for (const id of durable.dead()) durable.remove(id)
+        for (const id of durable.dead()) {
+          const endedAt = durable.endedAt?.(id)
+          if (endedAt) {
+            try { if (await provider.onEnded?.(id, endedAt) === false) continue } catch { continue }
+          }
+          durable.remove(id)
+        }
         const ids = durable.alive().filter(id => !live.has(id))
         if (ids.length === 0) return
         const reg = await provider.structured().catch(() => null)
         await Promise.all(ids.map(id => reattachOne(id, reg).catch(() => {})))
-      })()
+      })().finally(() => { reattaching = null })
       return reattaching
     },
     async toTerminal(id) {
@@ -434,7 +448,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       const flagOn = provider.flagOn?.() ?? false
       const origin = req.structured?.origin
       // Only ask what this route needs: flag off and not web → never touch `structured()`.
-      const wantsStructured = flagOn && origin === 'web' && harness !== null
+      const wantsStructured = flagOn && structuredOrigin(origin) && harness !== null
       const acp = await provider.acp().catch(() => null)
       const reg = wantsStructured
         ? (await provider.structured().catch(() => null)) ?? (acp ? acpAsStructured(acp) : null)
@@ -550,7 +564,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       return Promise.resolve(s.answer({ choice: Number(k), text: t }) ? 'sent' as const : 'failed' as const)
     }
   }
-  if (base.sendMoveChoice) backend.sendMoveChoice = (id, keys, confirmKey, landed) => (of(id) ? Promise.resolve('failed' as const) : base.sendMoveChoice!(id, keys, confirmKey, landed))
+  if (base.sendMoveChoice) backend.sendMoveChoice = (id, keys, confirm, landed) => (of(id) ? Promise.resolve('failed' as const) : base.sendMoveChoice!(id, keys, confirm, landed))
   if (base.rewindTo) backend.rewindTo = (id, text, occurrence) => (of(id) ? Promise.resolve('failed' as const) : base.rewindTo!(id, text, occurrence))
   if (base.sendQueuedNow) backend.sendQueuedNow = id => (of(id) ? Promise.resolve('nothing' as const) : base.sendQueuedNow!(id))
   return backend

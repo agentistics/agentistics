@@ -201,6 +201,7 @@ export async function readProcEntries(alwaysPids: ReadonlySet<number> = new Set(
         env,
         ...(cwdGone ? { cwdGone } : {}),
         ...(ancestorManagedId ? { ancestorManagedId } : {}),
+        ...(own?.helperHotSwap ? { helperHotSwap: true } : {}),
         ...(own?.owner ? { cardOwner: own.owner } : {}),
       })
     } catch { /* exited mid-read, or not ours */ }

@@ -15,7 +15,7 @@
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { controlStrings } from '@agentistics/tui/control/i18n'
-import { resolveChatTranscriptPath } from './chat-tail'
+import { resolveClaudeTranscriptAnyAccount } from './chat-tail'
 // The tail window moved into `transcript-window.ts`, shared with every harness reader.
 import { TAIL_BYTES, readTailBytes } from './transcript-window'
 import { conversationOfRow } from './row-conversation'
@@ -76,7 +76,7 @@ export async function readSessionStep(
     }
   }
 
-  const conversationPath = await resolveChatTranscriptPath(row.cwd, conversationId).catch(() => null)
+  const conversationPath = await resolveClaudeTranscriptAnyAccount(row.cwd, conversationId).catch(() => null)
   if (agentId !== undefined && !AGENT_ID.test(agentId)) {
     return { ok: false, message: pt ? 'Identificador de subagente inválido.' : 'Invalid subagent identifier.' }
   }

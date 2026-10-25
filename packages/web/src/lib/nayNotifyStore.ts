@@ -163,6 +163,19 @@ export function pushAlert(a: NayAlert, now = Date.now()): boolean {
   return true
 }
 
+/** A finalized scan must also forget a snoozed completion card. */
+export function dismissCleanAlert(scanId: string): void {
+  snoozes = snoozes.filter(s => s.alert.clean?.scanId !== scanId)
+  writeJson(SNOOZE_KEY, snoozes)
+  state = { ...state, queue: state.queue.filter(a => a.clean?.scanId !== scanId) }
+  emit()
+}
+
+/** The countdown was extended or the vault locked: queued expiry notices are no longer true. */
+export function dismissVaultExpiryAlert(): void {
+  for (const a of state.queue) if (a.kind === 'vault-expiry') dismissAlert(a.key)
+}
+
 export function dismissAlert(key: string): void {
   const next = state.queue.filter(a => a.key !== key)
   if (next.length === state.queue.length) return
@@ -267,7 +280,7 @@ export function releaseDue(now = Date.now()): void {
     const keep: Snooze[] = []
     for (const s of snoozes) {
       if (s.until > now) { keep.push(s); continue }
-      if (!latest.has(s.alert.sessionId) && since.size === 0) { keep.push(s); continue }
+      if (s.alert.kind !== 'clean' && !latest.has(s.alert.sessionId) && since.size === 0) { keep.push(s); continue }
       if (!alertStillTrue(s.alert.kind, latest.get(s.alert.sessionId))) continue
       queueMicrotask(() => { releaseHandler ? releaseHandler(s.alert) : pushAlert(s.alert) })
     }

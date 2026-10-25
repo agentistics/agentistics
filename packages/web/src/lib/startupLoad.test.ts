@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { acceptPayload, dataUrl, livenessStep, bootWatchdog, classifyLoadError, loadErrorText, partialPollMs, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
+import { acceptPayload, dataUrl, livenessStep, bootSlowLine, bootWatchdog, classifyLoadError, holdLoadError, loadErrorText, partialPollMs, POST_UPDATE_GRACE_MS, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
 
 describe('classifyLoadError', () => {
   test('a status is a server error and keeps the HTTP detail the auth gates read', () => {
@@ -86,5 +86,42 @@ describe('dataUrl', () => {
   test('the first load asks for the slim payload, later ones for the full build', () => {
     expect(dataUrl(false)).toBe('/api/data?partial=1&slim=1')
     expect(dataUrl(true)).toBe('/api/data?partial=1')
+  })
+})
+
+test('an unanswered first start explains history reading after updates in both languages', () => {
+  expect(loadErrorText({ kind: 'unreachable', detail: '' }, 'pt', 'host').body).toContain('primeira abertura lê todo o histórico e pode levar alguns minutos')
+  expect(loadErrorText({ kind: 'unreachable', detail: '' }, 'en', 'host').body).toContain('first start reads your whole history and can take a few minutes')
+})
+
+// UPDATE.FIM (2026-10-24): after every in-app update the boot of the new bundle landed on the server's
+// first build, one probe missed its 4 s deadline, and "Não foi possível falar com o agentistics" +
+// "Tentar novamente" appeared as the finale ended — over a server that was up and starting.
+describe('the boot right after an update', () => {
+  test('a missed probe is "still starting", never unreachable, inside the grace', () => {
+    expect(bootWatchdog(UNREACHABLE_AFTER_MS + 2000, 'down', 4000)).toBe('slow')
+    expect(bootWatchdog(UNREACHABLE_AFTER_MS + 2000, 'down', POST_UPDATE_GRACE_MS - 1)).toBe('slow')
+  })
+  test('past the grace, and on an ordinary boot, an unanswered server is reported as before', () => {
+    expect(bootWatchdog(UNREACHABLE_AFTER_MS, 'down', POST_UPDATE_GRACE_MS)).toBe('unreachable')
+    expect(bootWatchdog(UNREACHABLE_AFTER_MS, 'down', null)).toBe('unreachable')
+    expect(bootWatchdog(UNREACHABLE_AFTER_MS, 'down')).toBe('unreachable')
+  })
+  test('a failed first load keeps the loader only for what a starting server looks like', () => {
+    const since = 6000
+    expect(holdLoadError({ kind: 'unreachable', detail: 'Failed to fetch' }, since)).toBe(true)
+    expect(holdLoadError({ kind: 'timeout', detail: 'aborted' }, since)).toBe(true)
+    expect(holdLoadError({ kind: 'server', status: 503, detail: 'HTTP 503' }, since)).toBe(true)
+    expect(holdLoadError({ kind: 'server', status: 401, detail: 'HTTP 401' }, since)).toBe(false)
+    expect(holdLoadError({ kind: 'server', status: 404, detail: 'HTTP 404' }, since)).toBe(false)
+    expect(holdLoadError({ kind: 'incompatible', detail: 'x' }, since)).toBe(false)
+    expect(holdLoadError({ kind: 'unreachable', detail: 'x' }, null)).toBe(false)
+    expect(holdLoadError({ kind: 'unreachable', detail: 'x' }, POST_UPDATE_GRACE_MS)).toBe(false)
+  })
+  test('the slow line says why, in both languages, and is unchanged otherwise', () => {
+    expect(bootSlowLine('pt', 5000)).toContain('acabou de reiniciar')
+    expect(bootSlowLine('en', 5000)).toContain('just restarted')
+    expect(bootSlowLine('pt', null)).toBe('Ainda carregando — o servidor está respondendo.')
+    expect(bootSlowLine('en', null)).toBe('Still loading — the server is answering.')
   })
 })

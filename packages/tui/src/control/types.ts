@@ -774,7 +774,13 @@ export interface ControlSession {
    * prod?" with four different answers, in front of a key called `approve` that would have silently
    * taken whichever was highlighted.
    */
-  dialogOptions?: Array<{ number: number; label: string; selected: boolean; freeText?: boolean }>
+  dialogOptions?: Array<{ number: number; label: string; selected: boolean; freeText?: boolean; checked?: boolean }>
+  /**
+   * WHERE in a multi-question form this dialog is (`dialog-choice.ts`'s `DialogForm`), plus
+   * `canStep` when the harness's step keys were driven (`ApprovalSpec.steps`). Absent on a plain
+   * question.
+   */
+  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; together?: true; canStep?: true }
   /**
    * Whether the user may pick one of `dialogOptions` from here.
    *
@@ -1262,6 +1268,8 @@ export interface ControlStatus {
 }
 
 export interface ActionResult {
+  /** The live row that received a prompt sent through a retired row. */
+  id?: string
   ok: boolean
   /** Already-localized one-line outcome, shown in the status line. */
   message: string
@@ -1635,8 +1643,11 @@ export interface ControlHost {
    * One keystroke, and the harness decides which mode comes next — there is no key that picks one
    * by name, so this is a cycle rather than a chooser. Refused, in words, for a harness whose modes
    * nobody has driven: a guessed key is a keypress nobody asked for. See `mode-spec.ts`.
+   *
+   * MODE.NOQ — with a `target` mode id, presses and reads until the footer names it, and refuses in words
+   * when one full revolution never did (the mode is not in this session's cycle).
    */
-  cycleSessionMode?(id: string): Promise<ActionResult>
+  cycleSessionMode?(id: string, target?: string): Promise<ActionResult>
 
   /**
    * F4.D — set a STRUCTURED session's permission mode DIRECTLY, through its protocol (`modeId` is one of
@@ -1671,7 +1682,9 @@ export interface ControlHost {
    * asking, or when the options on screen no longer match what the user was shown. A snapshot is up
    * to five seconds old, and an answer to a question that has changed is worse than no answer.
    */
-  answerSession?(id: string, choice?: number, text?: string): Promise<ActionResult>
+  answerSession?(id: string, choice?: number, text?: string, choices?: readonly number[]): Promise<ActionResult>
+  /** Move a multi-question form to its next/previous question without answering this one. */
+  stepDialog?(id: string, dir: 'next' | 'back'): Promise<ActionResult>
 
   /**
    * Reopen the sessions of the last fall, in the background.
@@ -1725,6 +1738,13 @@ export interface ControlHost {
    * that resumes the same conversation.
    */
   resumeSession?(req: ResumeSessionRequest): Promise<SpawnSessionResult>
+
+  /**
+   * CONTA.TROCA — end a running session and resume the SAME conversation on another account of its
+   * harness. The transcript is copied (never moved) into the target account's root first; the new row
+   * inherits the old one's identity exactly as a reopen does. See `account-switch.ts`.
+   */
+  switchSessionAccount?(req: SwitchAccountRequest): Promise<SpawnSessionResult & { code?: string }>
 
   /**
    * Reopen every session of one task, in the background.
@@ -1983,6 +2003,13 @@ export interface SpawnSessionRequest {
   accountDecided?: boolean
   /** PLAN.ACCOUNTS D3: the request carries a VERIFIED session identity — an agent is asking. */
   callerVerified?: boolean
+  /**
+   * CONTA.TROCA v2 — the managed id this session REPLACES on another harness. It inherits that row's
+   * filing, folder, pin, mute and note exactly as a hand-off successor does (`handoffOf` +
+   * `configureSpawn`'s predecessor), while `parentSessionId` and `role` stay what the caller states —
+   * a switched worker still reports to its own leader, not to the session it replaced. Server-set only.
+   */
+  switchFrom?: string
 }
 
 export interface ResumeSessionRequest {
@@ -2015,9 +2042,40 @@ export interface ResumeSessionRequest {
   origin?: 'web' | 'terminal'
   /** PLAN.ACCOUNTS D3: a VERIFIED agent is reopening — refused when the row's account is off for agents. */
   callerVerified?: boolean
+  /**
+   * CONTA.TROCA — resume on THIS account instead of the row's recorded one. Set only by
+   * `switchSessionAccount`, after the conversation was copied into that account's root; every other
+   * reopen keeps the recorded account.
+   */
+  switchToAccount?: string
+  /**
+   * CONTA.TROCA — skip the memory admission. Set only by the account switch, which has just ENDED
+   * the process this resume replaces, so the net memory cost is ~zero; refusing there would leave
+   * the person with no session at all.
+   */
+  force?: boolean
+}
+
+/** CONTA.TROCA — move a running session to another account of the same harness. */
+export interface SwitchAccountRequest {
+  /** The managed row id. */
+  id: string
+  /** The target account (`acc_…`). */
+  accountId: string
+  /**
+   * CONTA.TROCA v2 — the target harness. Absent or the session's own: the same conversation continues
+   * on the other account. Another harness: a NEW session there in the same cwd/filing/folder/role,
+   * briefed with a summary, and the old one ended only once the new one runs.
+   */
+  harness?: string
+  /** Re-send the prompt the usage limit refused, once, as the resumed session's first prompt. */
+  resendPending?: boolean
+  callerVerified?: boolean
 }
 
 export interface SpawnSessionResult {
+  /** Applied configuration and incomplete steps; id remains valid when configuration failed. */
+  configuration?: { ready: boolean; applied: string[]; pending: Array<{ item: string; reason: string }> }
   ok: boolean
   /** Already-localized outcome for the status line. */
   message: string

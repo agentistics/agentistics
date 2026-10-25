@@ -14,7 +14,7 @@
  */
 
 /** What a card is about. Each maps to one row of the notification settings. */
-export type NayAlertKind = 'turn' | 'approval' | 'stale' | 'limit' | 'checkin'
+export type NayAlertKind = 'turn' | 'approval' | 'stale' | 'limit' | 'checkin' | 'clean' | 'vault-expiry'
 
 export interface NayAlert {
   /** Identity of THIS occurrence: one session can wait many times, and each is its own card. */
@@ -39,6 +39,7 @@ export interface NayAlert {
    *  synthetic `limits:<harness>` so one card per harness replaces the last. */
   /** CHECKIN.S4: one round's needs (or the held-back summary) as ONE card; `sessionId` is the synthetic
    *  `checkin:<leader session>` so a newer round replaces the older card instead of stacking. */
+  clean?: { scanId: string; bytes: number; count: number; kept: number }
   checkin?: {
     leader: string
     summary?: 'away' | 'morning'
@@ -191,7 +192,7 @@ export function staleDue(o: {
  */
 export function alertStillTrue(kind: NayAlertKind, state: string | undefined): boolean {
   // A plan-limit card is about a plan, not a session: true until dismissed or snoozed.
-  if (kind === 'limit' || kind === 'checkin') return true
+  if (kind === 'limit' || kind === 'checkin' || kind === 'clean' || kind === 'vault-expiry') return true
   if (kind === 'approval') return state === 'waiting-approval'
   return state === 'waiting' || state === 'waiting-approval'
 }

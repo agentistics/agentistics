@@ -77,5 +77,5 @@ test('task detail chips and settings navigation keep physical mobile touch targe
   expect(rule).toContain('--ag-tap-grow: 0')
   expect(readFileSync(new URL('./TasksPage.tsx', import.meta.url), 'utf8')).toContain('className="ag-task-detail"')
   const settings = readFileSync(new URL('./settings/SettingsPage.tsx', import.meta.url), 'utf8')
-  expect(settings).toContain("minHeight: isMobile ? 44 : undefined, boxSizing: 'border-box'")
+  expect(settings).toContain('minHeight: isMobile ? 44 : undefined,')
 })

@@ -8,16 +8,16 @@
  */
 import { homedir } from 'node:os'
 import { resolveLang } from './cli-lang'
-import { applyClean, repoOf, worktreeFacts } from './clean/clean-io'
+import { applyClean, repoOf, worktreeFacts, type CleanIoOpts } from './clean/clean-io'
 import { formatPlan, planClean, reclaimable, STALE_DAYS, type WorktreeFacts } from './clean/clean-plan'
 
 /** The repositories to look at: the ones named, else this directory's and every known project's. */
-export async function cleanRepos(argv: readonly string[]): Promise<string[]> {
+export async function cleanRepos(argv: readonly string[], o: CleanIoOpts = {}): Promise<string[]> {
   const named: string[] = []
   for (let i = 0; i < argv.length; i++) if (argv[i] === '--repo' && argv[i + 1]) named.push(argv[++i]!)
   const candidates = named.length > 0 ? named : [process.cwd(), ...(await knownProjectPaths())]
   const repos = new Set<string>()
-  for (const p of candidates) { const r = await repoOf(p); if (r) repos.add(r) }
+  for (const p of candidates) { o.signal?.throwIfAborted(); const r = await repoOf(p, o); if (r) repos.add(r) }
   return [...repos].sort()
 }
 
@@ -30,13 +30,14 @@ async function knownProjectPaths(): Promise<string[]> {
   } catch { return [] }
 }
 
-export async function collectCleanFacts(repos: readonly string[], o: { lowPriority?: boolean; onProgress?: (done: number, total: number) => void } = {}): Promise<WorktreeFacts[]> {
+export async function collectCleanFacts(repos: readonly string[], o: CleanIoOpts & { onProgress?: (done: number, total: number) => void } = {}): Promise<WorktreeFacts[]> {
   const all: WorktreeFacts[] = []
   const pool = 2
   let next = 0
   let done = 0
   const worker = async () => {
     while (next < repos.length) {
+      o.signal?.throwIfAborted()
       const r = repos[next++]!
       process.stderr.write(`\rScanning clean candidates (${done}/${repos.length} repositories)`)
       all.push(...(await worktreeFacts(r, o)))

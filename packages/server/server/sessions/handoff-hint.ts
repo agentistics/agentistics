@@ -10,6 +10,8 @@ export interface HandoffHintRow {
   id: string
   title: string
   leader?: boolean
+  /** Owner setting, shared with the visible meter/panel. */
+  cutTokens?: number
   contextTokens?: number
   contextWindow?: number
   hintedLevel?: number
@@ -206,7 +208,7 @@ export function computeHandoffWhy(row: HandoffHintRow, deps: HandoffWhyDeps = {}
   out.growthPerCall = Math.round(g)
   out.growthMeasured = gMeasured
   out.targetTokens = Math.round(handoffTargetTokens(base.tokens, g, c))
-  out.thresholdTokens = Math.round(handoffThreshold(base.tokens, g, c, row.contextWindow))
+  out.thresholdTokens = Math.round(row.cutTokens ?? handoffThreshold(base.tokens, g, c, row.contextWindow))
   const gain = c - base.tokens
   if (gain > 0) {
     out.gainPerCallTokens = Math.round(gain)
@@ -239,7 +241,7 @@ export function planHandoffHints(rows: readonly HandoffHintRow[]): HandoffHint[]
     const tokens = row.contextTokens!
     const fraction = row.contextWindow && row.contextWindow > 0 ? tokens / row.contextWindow : 0
     const base = successorBase(row.baseSamples).tokens
-    const threshold = handoffThreshold(base, growthPerCall(row).g, tokens, row.contextWindow)
+    const threshold = row.cutTokens ?? handoffThreshold(base, growthPerCall(row).g, tokens, row.contextWindow)
     if (tokens < threshold) return []
     const inFlight = row.workInFlight?.length || row.activity === 'working' || row.state === 'working'
     if (inFlight || row.ownerWaiting) return []
@@ -267,7 +269,7 @@ export function handoffHintText(hint: HandoffHint, awayNote = ''): string {
       : ''
     numbers = ` Sucessor começa em ${f}; passagem custa H ≈ ${k(why.overheadTokens ?? 0)} tokens de cache; ponto ótimo T* = F + √(2·H·g) ≈ ${k(why.targetTokens)} (g ≈ ${((why.growthPerCall ?? 0) / 1_000).toFixed(1)}k/chamada)${gain}.`
   }
-  return `Hora de passar a liderança: contexto ${k(hint.tokens)} tokens (${pct}% do limite).${numbers} Prepare a passagem e abra a sessão sucessora (handoff:true).${awayNote}`
+  return `Hora de passar a liderança: contexto ${k(hint.tokens)} tokens (${pct}% do limite).${numbers} Prepare a passagem e abra a sessão sucessora com \`agentop session <harness> --handoff --bg -p "Leia o arquivo de passagem e assuma"\`.${awayNote}`
 }
 
 export interface HandoffHintDeps {
@@ -281,7 +283,28 @@ export interface HandoffHintDeps {
   awayNote?: (id: string) => Promise<string>
   /** Read fresh right before sending: the owner's latest message has no reply yet. Absent = never. */
   ownerWaiting?: (id: string) => Promise<boolean>
+  /**
+   * OPEN-PERF: a row skipped because the owner is waiting, or whose send failed, is not tried again
+   * before this instant. Without it the pass ran on EVERY fleet build (each hub tick, per view): for a
+   * leader over the threshold whose owner was waiting it wrote the registry twice (claim, put back)
+   * and read the transcript each time — measured at ~1000 registry writes in 90 s on a 1868-row
+   * registry, each one invalidating the parse every other reader shares. Absent = retry at once.
+   */
+  deferUntil?: Map<string, number>
+  now?: () => number
 }
+
+/**
+ * The fleet rows a hint may go to: the ones RUNNING in a pane agentop hosts. The registry keeps every
+ * leader that ever ran (hundreds, on a long-lived machine), and a finished one over the threshold was
+ * claimed, prompted, refused and put back on every fleet build, forever (OPEN-PERF).
+ */
+export function hintCandidates<T extends { status: string }>(views: readonly T[]): T[] {
+  return views.filter(v => v.status === 'running')
+}
+
+/** How long a skipped or failed hint waits before the next try. A hint is a nudge; a minute is soon. */
+export const HANDOFF_HINT_RETRY_MS = 60_000
 
 const inFlight = new Set<string>()
 
@@ -291,8 +314,11 @@ const inFlight = new Set<string>()
  */
 export async function sendHandoffHints(deps: HandoffHintDeps): Promise<number> {
   let sent = 0
+  const now = deps.now ?? Date.now
+  const defer = (id: string) => { deps.deferUntil?.set(id, now() + HANDOFF_HINT_RETRY_MS) }
   for (const row of await deps.rows().catch(() => [])) {
     if (inFlight.has(row.id)) continue
+    if ((deps.deferUntil?.get(row.id) ?? -Infinity) > now()) continue
     // The row carries the state as the caller last read it. A hint that state does not call for is
     // not called for by a fresher one either (a level only moves up, bar a failed send putting it
     // back, which the next run then sees) — so only a row that MAY get a hint pays the fresh read.
@@ -303,22 +329,22 @@ export async function sendHandoffHints(deps: HandoffHintDeps): Promise<number> {
       const prev = await deps.hinted(row.id).catch(() => ({ level: row.hintedLevel ?? 0, tokens: row.hintedTokens }))
       const [hint] = planHandoffHints([{ ...row, hintedLevel: prev.level, hintedTokens: prev.tokens }])
       if (!hint) continue
-      if (!(await deps.markHinted(row.id, hint.level, hint.tokens).catch(() => false))) continue
+      // Read-only, so asked BEFORE the claim: a waiting owner then costs no write to undo.
+      if (deps.ownerWaiting && await deps.ownerWaiting(row.id).catch(() => false)) { defer(row.id); continue }
+      if (!(await deps.markHinted(row.id, hint.level, hint.tokens).catch(() => false))) { defer(row.id); continue }
       const awayNote = await (deps.awayNote?.(row.id) ?? Promise.resolve('')).catch(() => '')
       const handoff = row.handoffPath !== undefined || row.handoffBytes !== undefined
         ? { path: row.handoffPath, bytes: row.handoffBytes }
         : await findHandoffFile(row.cwd)
-      if (deps.ownerWaiting && await deps.ownerWaiting(row.id).catch(() => false)) {
-        await deps.markHinted(row.id, prev.level, prev.tokens).catch(() => false)
-        continue
-      }
       const detailed = { ...hint, why: computeHandoffWhy(row, {
         model: row.model,
         ...(handoff ? { handoffPath: handoff.path, handoffBytes: handoff.bytes } : {}),
       }) }
       const result = await deps.prompt(row.id, `[from agentistics · question]\n${handoffHintText(detailed, awayNote)}`).catch(() => ({ ok: false }))
-      if (result.ok) sent++
-      else await deps.markHinted(row.id, prev.level, prev.tokens).catch(() => false)
+      if (result.ok) { sent++; deps.deferUntil?.delete(row.id) } else {
+        await deps.markHinted(row.id, prev.level, prev.tokens).catch(() => false)
+        defer(row.id)
+      }
     } finally {
       inFlight.delete(row.id)
     }

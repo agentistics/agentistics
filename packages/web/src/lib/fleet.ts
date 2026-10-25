@@ -33,7 +33,7 @@ const parseRelayActResult = parseActResult
 
 /** Mirrors `SessionAction` in `@agentistics/tui/control/sessions`, minus the verbs a page cannot do. */
 export type FleetActionId =
-  | 'resume' | 'approve' | 'prompt' | 'rename' | 'note' | 'task' | 'kill'
+  | 'resume' | 'approve' | 'prompt' | 'rename' | 'note' | 'task' | 'kill' | 'forget'
   /** Stop the current turn without ending the session. See the server's own union. */
   | 'interrupt'
   /** F2.0b — "open in terminal" on a structured session (protocol-driven): the same conversation as a TUI. */
@@ -64,7 +64,7 @@ export type FleetActionId =
 
 /** The verbs this page can PERFORM. The rest are shown, dimmed, with their reason. */
 export const PERFORMABLE: ReadonlySet<FleetActionId> = new Set<FleetActionId>([
-  'resume', 'approve', 'prompt', 'rename', 'note', 'task', 'kill', 'archive', 'delete',
+  'resume', 'approve', 'prompt', 'rename', 'note', 'task', 'kill', 'forget', 'archive', 'delete',
 ])
 
 /** The verbs that take a line of text before they can run. */
@@ -104,7 +104,9 @@ export interface FleetRow {
   conversationId?: string
   approvalLines?: string[]
   /** `freeText` marks the option that is a FIELD — picking it opens one. See `approval-spec.ts`. */
-  dialogOptions?: { number: number; label: string; selected?: boolean; freeText?: boolean }[]
+  dialogOptions?: { number: number; label: string; selected?: boolean; freeText?: boolean; checked?: boolean }[]
+  /** A multi-question form around the dialog (server-read): its steps, review, multi-select. */
+  dialogForm?: { steps?: { label: string; done: boolean }[]; position?: { at: number; of: number }; review?: true; multi?: true; together?: true; canStep?: true }
   approvalBlind?: string
   approveBlind?: string
   chooseBlind?: string
@@ -225,6 +227,10 @@ export interface FleetState {
     action: FleetActionId
     text?: string
     choice?: number
+    /** `approve` on a STRUCTURED multi-select question: every ticked option, as one answer. */
+    choices?: number[]
+    /** `approve` on a multi-question form: move to the next/previous question instead of answering. */
+    step?: 'next' | 'back'
     /** `rewind` only: which appearance of `text` — counting from the latest, 0 first. */
     occurrence?: number
     /**
@@ -480,6 +486,11 @@ function openFleetStream(): void {
     writeFleetCache(snapshot)
     emit()
   })
+}
+
+/** Pins are explicit intent: their sleeping rows need history even in an active-only view. */
+export function needsClosedFleet(activeOnly: boolean, pinnedCount: number): boolean {
+  return !activeOnly || pinnedCount > 0
 }
 
 /** History is loaded in pages when an existing list asks to draw inactive sessions. */

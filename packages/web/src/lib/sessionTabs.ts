@@ -7,7 +7,7 @@
  *
  * Which tabs are open is a fact about THIS screen, so it lives per browser (`sessionTabsStore.ts`).
  * PINS are not stored here: they are `pinnedSessions.ts`, server-shared, the same set the aside's
- * "Fixadas" band reads. A pinned session is always a tab and leads the strip.
+ * "Fixadas" band reads. Live pinned sessions lead the strip; pinned ended sessions sleep in its menu.
  */
 
 export const MAX_OPEN_TABS = 12
@@ -157,4 +157,21 @@ export function enterTab(
 /** A tab shortcut belongs to the pane the person is working in, and to no one who already took it. */
 export function ownsTabShortcut(pane: string, activePane: string, defaultPrevented: boolean): boolean {
   return pane === activePane && !defaultPrevented
+}
+
+/** Pinned ended conversations sleep without changing the shared pin store. */
+export const ENDED = new Set(['exited', 'closed', 'lost', 'unknown'])
+
+/** The same partition serves the tab strip and the aside's pinned band, preserving their order. */
+export function splitSleepingTabs(
+  keys: readonly string[], pins: readonly string[], stateOf: (key: string) => string | undefined,
+): { drawn: string[]; sleeping: string[] } {
+  const drawn: string[] = [], sleeping: string[] = []
+  const pinned = new Set(pins)
+  for (const key of keys) {
+    const state = stateOf(key)
+    if (pinned.has(key) && state !== undefined && ENDED.has(state)) sleeping.push(key)
+    else drawn.push(key)
+  }
+  return { drawn, sleeping }
 }

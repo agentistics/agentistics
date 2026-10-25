@@ -10,6 +10,373 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.149.0': {
+    features: [
+      {
+        pt: 'O indicador de líder no cabeçalho virou uma coroa num círculo com os tokens ao lado, mudando de cor conforme a conversa enche.',
+        en: 'The leader indicator in the header is now a crown in a circle with the token count beside it, changing colour as the conversation fills up.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.148.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões novas não são mais recusadas por falta de memória quando há memória livre de sobra.',
+        en: 'New sessions are no longer refused for memory while plenty is free.',
+      },
+    ],
+  },
+  '2.148.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A limpeza de disco mostra o tamanho real de cada pasta e quanto dá para liberar — antes aparecia 0 B em tudo.',
+        en: 'Disk cleanup shows each folder\'s real size and how much can be freed — it used to show 0 B everywhere.',
+      },
+      {
+        pt: 'Os comandos de terminal não mostram mais avisos "refused to follow".',
+        en: 'Terminal commands no longer print "refused to follow" warnings.',
+      },
+    ],
+  },
+  '2.148.0': {
+    features: [
+      {
+        pt: 'Troque a conta de uma sessão direto pelo cartão "Limites de uso", vendo os limites de cada conta antes de escolher.',
+        en: 'Switch a session\'s account right from the "Usage limits" card, seeing every account\'s limits before you pick.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Os ajudantes em segundo plano passam sozinhos para a versão nova depois de uma atualização — o aviso de "programa antigo" não aparece mais.',
+        en: 'Background helpers move to the new version by themselves after an update — no more "old binary" notice.',
+      },
+      {
+        pt: 'Testes num ambiente descartável não entram mais em laço infinito quando o bun vem do Volta.',
+        en: 'Test runs in a throwaway no longer loop forever when bun comes from Volta.',
+      },
+    ],
+  },
+  '2.147.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O fim de uma atualização não engasga mais nem mostra "Não foi possível falar com o agentistics": enquanto a versão nova lê o seu histórico, a tela de carregamento fica e explica o motivo.',
+        en: 'The end of an update no longer stutters or shows "Can\'t reach agentistics": while the new version reads your history, the loading screen stays and says why.',
+      },
+    ],
+  },
+  '2.147.0': {
+    features: [
+      {
+        pt: '"Trocar conta" agora deixa escolher a conta e o assistente. Na mesma ferramenta a conversa continua igual; em outro assistente a sessão continua na mesma pasta e tarefa, com um resumo do que foi feito.',
+        en: '"Switch account" now lets you pick the account and the assistant. With the same tool the conversation carries on as is; with another assistant the session continues in the same folder and task, with a summary of what was done.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.146.0': {
+    features: [
+      {
+        pt: '"Sem perguntas" aparece em vermelho no seletor de modo das sessões, com um aviso do risco; os nomes dos modos agora estão em português.',
+        en: '"No questions" shows in red in the session mode selector, with a risk warning; mode names now follow your language.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Na visão "só líderes", o cartão de cada líder não mostra mais a seta de abrir a equipe, e tocar no nome abre a sessão do líder.',
+        en: 'In the "leaders only" view, each leader card no longer shows the arrow to open its team, and tapping the name opens the leader’s session.',
+      },
+    ],
+  },
+  '2.145.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Ligar o modo ausente avisa todas as sessões quase na hora; uma sessão que não responde não atrasa mais as outras.',
+        en: 'Turning on away mode tells every session almost at once; a session that does not answer no longer delays the others.',
+      },
+      {
+        pt: 'Uma sessão externa cuja conversa ou pasta foi apagada pode ser encerrada ou tirada da lista pelo menu dela ("Encerrar" e "Remover da lista").',
+        en: 'An external session whose conversation or folder was deleted can be ended or taken off the list from its menu ("End" and "Remove from list").',
+      },
+    ],
+  },
+  '2.145.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O app parado gasta menos processador: a lista de sessões não é mais regravada a cada poucos segundos.',
+        en: 'The idle app uses less CPU: the session list is no longer rewritten every few seconds.',
+      },
+      {
+        pt: 'Um repositório que mudou de dono continua valendo para as tarefas que já apontavam para ele: o mesmo nome sob outro dono conta como o mesmo repositório.',
+        en: 'A repository that changed owner still counts for the tasks that pointed to it: the same name under another owner is the same repository.',
+      },
+      {
+        pt: '"agentop session list" e "agentop session kill" não imprimem mais avisos internos no meio da resposta.',
+        en: '"agentop session list" and "agentop session kill" no longer print internal warnings in the middle of their output.',
+      },
+    ],
+  },
+  '2.145.0': {
+    features: [
+      {
+        pt: 'Trocar a conta de uma sessão no meio dela: quando a conta bate o limite, um aviso acima da caixa de mensagem oferece continuar em outra conta, e "Trocar conta" fica no menu da sessão a qualquer momento. A conversa continua a mesma.',
+        en: 'Switch a session’s account mid-session: when the account hits its limit, a notice above the message box offers to continue on another account, and "Switch account" is in the session menu at any time. The conversation stays the same.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.144.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Reabrir uma sessão encerrada, ou escrever nela, não cria mais uma segunda linha da mesma conversa na lista.',
+        en: 'Reopening an ended session, or writing to it, no longer creates a second row for the same conversation in the list.',
+      },
+      {
+        pt: 'Abrir uma sessão na mesma pasta que outra já usa explica o motivo e sugere uma worktree, e um arquivo de preferências corrompido não impede mais o app de abrir.',
+        en: 'Starting a session in a folder another live session already uses explains why and suggests a worktree, and a corrupt preferences file no longer stops the app from starting.',
+      },
+    ],
+  },
+  '2.144.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O aviso de que o cofre vai se trancar agora é falado pela Nay, num cartão opaco que não cobre o botão nem o chat dela.',
+        en: 'The vault auto-lock warning is now spoken by Nay, in an opaque card that covers neither her button nor her chat.',
+      },
+      {
+        pt: '"Manter aberto" no cofre pede o Windows Hello no computador e a biometria no celular, nunca o código do autenticador.',
+        en: '"Keep open" on the vault asks for Windows Hello on the computer and biometrics on the phone, never the authenticator code.',
+      },
+      {
+        pt: 'O painel de passagem preenche "Janela 5 h" e "Semana" com o consumo da conta da própria sessão, inclusive com várias contas Claude, com uma casa decimal e o motivo dito uma vez quando faltam dados.',
+        en: 'The hand-off panel fills "5 h window" and "Week" from the session’s own account, including multiple Claude accounts, with one decimal and the reason said once when data is missing.',
+      },
+      {
+        pt: 'Resumos de ferramentas no chat mostram um ícone do que foi feito (>_ para comandos, a logo do MCP) e ficam alinhados aos avisos do sistema.',
+        en: 'Chat tool summaries show an icon for what was done (>_ for commands, the MCP’s logo) and align with system notices.',
+      },
+      {
+        pt: 'Perguntas de múltipla escolha de uma sessão aparecem no cartão do chat como a pergunta, e "Enviar resposta" manda todas as opções marcadas e o texto digitado.',
+        en: 'A session’s multiple-choice questions show in the chat card as the question, and "Send answer" sends every ticked option plus the typed text.',
+      },
+      {
+        pt: 'O pedido de "confiar nesta pasta" pode ser respondido pelo app.',
+        en: 'The "trust this folder" prompt can be answered from the app.',
+      },
+      {
+        pt: 'Um comando local, como /rename, não deixa mais a sessão presa em "trabalhando".',
+        en: 'A local command such as /rename no longer leaves the session stuck on "working".',
+      },
+    ],
+  },
+  '2.143.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Mensagens entre sessões chegam de verdade, uma vez só, também às sessões abertas em segundo plano e depois de reiniciar o servidor.',
+        en: 'Messages between sessions really arrive, exactly once, also to background sessions and after a server restart.',
+      },
+      {
+        pt: 'Dormindo mostra só sessões fixadas que terminaram. O aviso de sessões que caíram pode ser dispensado, as linhas ficam juntas e os números dos botões ficam centralizados.',
+        en: 'Sleeping shows only pinned sessions that ended. The fallen-session notice can be dismissed, its rows stay together, and button counts are centered.',
+      },
+      {
+        pt: 'Ao passar a liderança, fica um só líder com a equipe inteira (antiga e nova); o líder anterior é encerrado quando fica ocioso.',
+        en: 'A leader hand-off leaves one leader with the whole team (old and new); the previous leader is closed once it goes idle.',
+      },
+      {
+        pt: 'Um líder aberto por outro líder fica no topo com os demais líderes, nunca dentro da equipe de outro.',
+        en: 'A leader started by another leader stays at the top with the other leaders, never inside another team.',
+      },
+      {
+        pt: 'Novas ações no menu da sessão: "Tirar da equipe" e "Mover para a equipe de…".',
+        en: 'New session menu actions: "Take out of the team" and "Move to a leader\'s team…".',
+      },
+      {
+        pt: 'Sessões em "Sem líder" mostram o papel de cada uma e o projeto quando for diferente do resto.',
+        en: 'Sessions under "No leader" show each one\'s role, and the project when it differs from the rest.',
+      },
+    ],
+  },
+  '2.143.0': {
+    features: [
+      {
+        pt: 'Novo painel de sessões em três abas: Ativas, Grupos e Encerradas.',
+        en: 'New sessions panel in three tabs: Active, Groups and Ended.',
+      },
+      {
+        pt: 'Em Ativas, cada líder aparece com a equipe dele embaixo; dá para dobrar a equipe, e ela abre sozinha quando alguém dela espera por você.',
+        en: 'In Active, each leader shows its team underneath; a team can be folded, and it unfolds by itself when one of its sessions is waiting for you.',
+      },
+      {
+        pt: 'Sessões que caíram aparecem discretamente no rodapé, com Ver e Reabrir, e completas na aba Encerradas.',
+        en: 'Sessions that fell show discreetly at the bottom, with See and Reopen, and in full in the Ended tab.',
+      },
+      {
+        pt: 'O painel recolhido mostra as mesmas abas, líderes, equipes e pastas em ícones.',
+        en: 'The collapsed panel shows the same tabs, leaders, teams and folders as icons.',
+      },
+      {
+        pt: 'Filtros, ordem e as outras ações da lista ficam no menu ⋮ ao lado da busca.',
+        en: 'Filters, order and the list’s other actions live in the ⋮ menu next to search.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Líderes voltam a abrir sessões em outro projeto; a sessão fica na tarefa do líder, com um aviso.',
+        en: 'Leaders can start sessions in another project again; the session stays on the leader’s task, with a notice.',
+      },
+      {
+        pt: 'Avisos do sistema no chat começam alinhados à esquerda, com a linha só depois do texto.',
+        en: 'System notices in the chat start at the left edge, with the line only after the text.',
+      },
+    ],
+  },
+  '2.142.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões de uma segunda conta mostram o próprio chat e os próprios limites, inclusive depois de terminar.',
+        en: 'Sessions on a second account show their own chat and their own limits, even after they end.',
+      },
+      {
+        pt: 'Sessões abertas em segundo plano — pelo app, por um líder, numa passagem de líder ou ao reabrir — voltam a usar o chat completo em vez do terminal.',
+        en: 'Sessions opened in the background — from the app, by a leader, in a leader hand-off or on reopen — use the full chat again instead of the terminal.',
+      },
+      {
+        pt: 'Sessões abertas por um líder herdam o fluxo de trabalho dele também fora dos projetos já configurados.',
+        en: 'Sessions a leader opens inherit its workflow outside already set-up projects too.',
+      },
+      {
+        pt: 'Quando a pasta de dados não pode ser gravada, abrir ou reabrir uma sessão explica isso numa frase, sem travar.',
+        en: 'When the data folder cannot be written, opening or reopening a session says so in one sentence instead of failing silently.',
+      },
+    ],
+  },
+  '2.142.0': {
+    features: [
+      {
+        pt: 'Nova limpeza de disco: a varredura mostra o progresso, pode seguir em segundo plano pelo sino e termina numa lista com filtros, tamanhos e o que dá para liberar.',
+        en: 'New disk cleanup: the scan shows its progress, can keep going in the background from the bell, and ends in a list with filters, sizes and what can be freed.',
+      },
+      {
+        pt: 'Sessões líderes mostram um medidor da conversa no topo e, na hora certa, um aviso com o painel "continuar ou passar o líder", com custos lado a lado.',
+        en: 'Leader sessions show a conversation meter at the top and, when it is time, a notice with the "continue or hand off" panel, costs side by side.',
+      },
+      {
+        pt: 'Em Configurações › Sessões dá para escolher quando avisar sobre a passagem de líder.',
+        en: 'Settings › Sessions lets you choose when to be told about a leader hand-off.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.141.0': {
+    features: [
+      {
+        pt: '"Adicionar conta" agora mostra o link de login com os botões Abrir e Copiar, sem abrir terminal nem navegador sozinho.',
+        en: '"Add account" now shows the sign-in link with Open and Copy buttons, without opening a terminal or a browser by itself.',
+      },
+      {
+        pt: 'No Claude e no Gemini, você cola o código que a página mostrar; no Codex, Copilot e Kimi, o código aparece grande e a janela fecha sozinha quando você termina de entrar.',
+        en: 'For Claude and Gemini you paste the code the page shows; for Codex, Copilot and Kimi the code is shown large and the window closes by itself once you finish signing in.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Sessões que terminaram normalmente não aparecem mais como "caíram" depois que o app reinicia.',
+        en: 'Sessions that ended normally no longer show up as "fell" after the app restarts.',
+      },
+      {
+        pt: 'Código errado no login mostra um aviso e um link novo, e Cancelar fecha a janela na hora.',
+        en: 'A wrong sign-in code shows a notice and a fresh link, and Cancel closes the window at once.',
+      },
+    ],
+  },
+  '2.140.12': {
+    features: [
+      {
+        pt: 'Sessões fixadas que foram encerradas descansam em "Dormindo", no menu das abas e na lista lateral, prontas para reabrir.',
+        en: 'Pinned sessions that ended rest under "Sleeping", in the tabs menu and the sidebar, ready to reopen.',
+      },
+      {
+        pt: 'Pastas sem nenhuma sessão ativa vão para "Encerradas" no fim do grupo e voltam sozinhas quando algo começa nelas.',
+        en: 'Folders with no active session move to "Ended" at the end of their group and come back as soon as something starts in them.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'As conversas fixadas continuam visíveis com “Só ativas”. Avisos longos ficam em “Detalhes”, e a primeira abertura após atualizar explica a leitura do histórico enquanto tenta novamente.',
+        en: 'Pinned conversations stay visible with “Active only”. Long notices have a “Details” disclosure, and the first start after updating explains history loading while retrying.',
+      },
+      {
+        pt: 'A sequência e o recorde de dias usam o mesmo dia local: atividade entre 21h e meia-noite não pula mais para o dia seguinte.',
+        en: 'The day streak and the record use the same local day: late-evening activity no longer jumps to the next day.',
+      },
+      {
+        pt: 'As abas das sessões viraram pílulas, com o menu das abas em primeiro lugar à esquerda.',
+        en: 'Session tabs are now pills, with the tabs menu first on the left.',
+      },
+      {
+        pt: 'O check-in da liderança fica em uma coluna, com tudo em sequência e sem textos cortados.',
+        en: 'The leadership check-in is one column, everything in order and no cut-off text.',
+      },
+      {
+        pt: 'No sino, o botão liga/desliga não some mais ao rolar, e o botão de reabrir sessões que caíram cabe numa linha.',
+        en: 'In the bell, the on/off switch no longer scrolls away, and the reopen button for sessions that fell fits on one line.',
+      },
+    ],
+  },
+  '2.140.11': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Com um histórico grande, o app continua respondendo enquanto lê o histórico na primeira abertura depois de uma atualização.',
+        en: 'With a large history, the app keeps answering while it reads the history on the first start after an update.',
+      },
+    ],
+  },
+  '2.140.10': {
+    features: [
+      {
+        pt: 'Configurações → Cobrança tem um botão "Adicionar conta" em cada assistente: ele abre o login de uma segunda conta.',
+        en: 'Settings → Billing has an "Add account" button for each assistant: it opens the sign-in for a second account.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Reabrir ou assumir uma sessão não trava mais o app por alguns segundos quando o Claude Code demora a responder.',
+        en: 'Reopening or taking over a session no longer freezes the app for a few seconds when Claude Code is slow to answer.',
+      },
+    ],
+  },
+  '2.140.9': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Configurações → Cobrança mostra uma linha por conta e um só lugar para editar o plano; contas repetidas sumiram.',
+        en: 'Settings → Billing shows one row per account and a single place to edit the plan; repeated accounts are gone.',
+      },
+      {
+        pt: 'Valores aparecem com os centavos (R$ 110,50), a lista de planos mostra só os do assistente certo e a data inicial já vem certa.',
+        en: "Prices keep their cents (R$ 110.50), the plan list shows only that assistant's plans and the start date comes pre-filled correctly.",
+      },
+      {
+        pt: 'A janela do check-in da liderança abre sozinha, em duas colunas, sem informações repetidas e também no celular.',
+        en: 'The leadership check-in window opens on its own, in two columns, without repeated details, on phones too.',
+      },
+      {
+        pt: 'O modo Ausente virou um botão quadrado com uma lua laranja, igual aos outros botões do cabeçalho.',
+        en: 'Away mode is now a square button with an orange moon, matching the other header buttons.',
+      },
+    ],
+  },
   '2.140.8': {
     features: [],
     fixes: [

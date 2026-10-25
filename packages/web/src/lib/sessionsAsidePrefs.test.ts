@@ -106,7 +106,16 @@ describe('writeAsideGroupPrefs', () => {
       expandedEndedGroups: [],
       sortExplicit: false,
       leadersOnly: false,
+      tab: 'active',
+      foldedTeams: [],
     })
+  })
+
+  test('the tab and the folded teams persist, and junk reads as the defaults', () => {
+    writeAsideGroupPrefs({ tab: 'ended', foldedTeams: ['conv-1'] })
+    expect(read().tab).toBe('ended')
+    expect(read().foldedTeams).toEqual(['conv-1'])
+    expect(parseAsideGroupPrefs({ tab: 'nonsense', foldedTeams: [1, 'k'] })).toMatchObject({ tab: 'active', foldedTeams: ['k'] })
   })
 
   test('a partial write merges over what is already stored', () => {

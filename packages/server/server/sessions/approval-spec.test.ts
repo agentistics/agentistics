@@ -55,7 +55,8 @@ describe('choiceKey', () => {
   it('REFUSES on a harness where nobody has verified how to choose', () => {
     // There is no safe fallback to the confirm key. Confirming the highlighted row on a dialog
     // somebody is being shown four answers to is choosing for them, which is the whole defect.
-    for (const id of ['kimi', 'gemini', 'copilot'] as const) {
+    // copilot left this list on 2026-10-23: its boxed folder-trust prompt took a bare `1` (1.0.98).
+    for (const id of ['kimi', 'gemini'] as const) {
       expect(choiceKey(approvalFor(id), 1), id).toBeNull()
     }
   })

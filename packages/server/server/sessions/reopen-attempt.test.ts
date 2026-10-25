@@ -27,7 +27,8 @@ function makeDeps(
 ): ReopenAttemptDeps {
   return {
     freshState: store.freshState,
-    holderOf: async () => ({ id: 'winner-row', label: 'the one that landed first', kind: 'managed' as const }),
+    holderOf: async () => store.rows.some(r => r.conversationId === conversationId && store.alive.has(r.id))
+      ? { id: 'winner-row', label: 'the one that landed first', kind: 'managed' as const } : undefined,
     spawn: async () => {
       onSpawn?.()
       store.rows.push({
@@ -109,4 +110,17 @@ describe('attemptReopenRow — a backend that cannot be read (2026-10-03)', () =
     expect(await attemptReopenRow('conv-1', 'row-1', deps)).toEqual({ kind: 'failed' })
     expect(spawned).toBe(0)
   })
+})
+
+it('a fresh live claim for the requested row or a CLI relay prevents any group spawn', async () => {
+  let spawned = 0
+  const holder = { id: 'cli-relay', label: 'CLI worker', kind: 'managed' as const }
+  const out = await attemptReopenRow('conversation', 'cli-relay', {
+    freshState: async () => ({ entries: [], aliveIds: new Set(['cli-relay']) }),
+    holderOf: async () => holder,
+    spawn: async () => { spawned++; return { ok: true } },
+    onSpawned: async () => {},
+  })
+  expect(out).toEqual({ kind: 'held', holder })
+  expect(spawned).toBe(0)
 })

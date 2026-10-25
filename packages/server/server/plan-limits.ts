@@ -54,7 +54,7 @@ const sessionHomes: Record<HarnessId, string> = {
 }
 
 /** Explicit managed ids and transcript roots win over the default/only-visible fallback. */
-function fallbackSessionAccount(harness: HarnessId, registry: AccountsFile, visible: readonly string[]): string | undefined {
+export function fallbackSessionAccount(harness: HarnessId, registry: AccountsFile, visible: readonly string[]): string | undefined {
   const bound = registry.bindings[`${harness}:`]
   // A default binding that points at a hidden or retired account must not swallow default-home
   // sessions while exactly one other account is the visible one.
@@ -64,7 +64,7 @@ function fallbackSessionAccount(harness: HarnessId, registry: AccountsFile, visi
 }
 
 type LiveSessionRef = { session_id: string; harness: string; native_session_id?: string; project_path?: string }
-const resolveLiveTranscriptPath = async (s: LiveSessionRef, bindings: Record<string, string>): Promise<string | null> => {
+export const resolveLiveTranscriptPath = async (s: LiveSessionRef, bindings: Record<string, string>): Promise<string | null> => {
   const readers = await import('./sessions/harness-transcript')
   const ref = { conversationId: s.native_session_id ?? s.session_id, cwd: s.project_path }
   const prefix = `${s.harness}:`
@@ -79,7 +79,8 @@ const resolveLiveTranscriptPath = async (s: LiveSessionRef, bindings: Record<str
         break
       }
       case 'codex': path = await readers.resolveCodexTranscript(ref, join(root, 'sessions')); break
-      case 'gemini': path = await readers.resolveGeminiTranscript(ref, join(root, 'tmp')); break
+      // GEMINI_CLI_HOME is a HOME: the store is `<root>/.gemini/tmp` (`account-transcript-roots.ts`).
+      case 'gemini': path = await readers.resolveGeminiTranscript(ref, join(root, '.gemini', 'tmp')); break
       case 'copilot': path = await readers.resolveCopilotTranscript(ref, join(root, 'session-state')); break
       case 'kimi': path = await readers.resolveKimiTranscript(ref, join(root, 'sessions')); break
       case 'antigravity': path = await readers.resolveAntigravityTranscript(ref, join(root, 'brain')); break
@@ -92,7 +93,7 @@ let liveTranscriptPath = resolveLiveTranscriptPath
 /** Tests only: avoid looking for transcripts in the owner's home. */
 export function __setLiveTranscriptPathForTest(f: typeof liveTranscriptPath | null): void { liveTranscriptPath = f ?? resolveLiveTranscriptPath }
 
-function accountAtPath(harness: HarnessId, path: string, bindings: Record<string, string>, retired: ReadonlySet<string> = new Set()): string | undefined {
+export function accountAtPath(harness: HarnessId, path: string, bindings: Record<string, string>, retired: ReadonlySet<string> = new Set()): string | undefined {
   return attributeAtPath(harness, path, bindings, retired)?.account
 }
 
@@ -358,8 +359,20 @@ async function maybeMigrateDefault(registry?: AccountsFile): Promise<void> {
   if (await migrateDefaultRecords()) persistSoon()
 }
 
+/** One lane per harness:account: a reading waits for the one before it, so readings in flight at
+ * once are judged in arrival order instead of in whichever order their awaits happen to finish. */
+const ingestLanes = new Map<string, Promise<unknown>>()
+
 /** Store `l` when it is newer than what is held; notices and the SSE signal follow a real change. */
-export async function ingestPlanLimits(reading: PlanLimits): Promise<boolean> {
+export function ingestPlanLimits(reading: PlanLimits): Promise<boolean> {
+  const lane = `${reading.harness}:${reading.account}`
+  const run = (ingestLanes.get(lane) ?? Promise.resolve()).catch(() => {}).then(() => ingestPlanLimitsNow(reading))
+  ingestLanes.set(lane, run)
+  void run.finally(() => { if (ingestLanes.get(lane) === run) ingestLanes.delete(lane) }).catch(() => {})
+  return run
+}
+
+async function ingestPlanLimitsNow(reading: PlanLimits): Promise<boolean> {
   await load()
   let l = reading
   if (l.account !== 'default') {
@@ -388,7 +401,8 @@ export async function ingestPlanLimits(reading: PlanLimits): Promise<boolean> {
     const switched = await accountSwitch(l)
     // Signal 1: the root now holds ANOTHER login — the reading is that account's; the held one
     // (and its hold) is left exactly as it was.
-    if (switched) return ingestPlanLimits({ ...l, account: switched })
+    // Called directly: waiting on a lane from inside one could wait on itself.
+    if (switched) return ingestPlanLimitsNow({ ...l, account: switched })
     // The awaits above let another reading land: judge against what is held NOW, so an older
     // reading never overwrites a newer one and one discontinuity opens one segment.
     const fresh = state.limits[key]

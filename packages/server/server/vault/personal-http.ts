@@ -382,8 +382,8 @@ export async function handlePersonalHttp(c: PersonalHttpCtx): Promise<Response |
     if (!secure) return reply(notSecure())
     const action = typeof b.action === 'string' ? b.action : ''
     const target = typeof b.target === 'string' ? b.target.slice(0, 200) : ''
-    if (!/^(?:personal-(?:reveal|edit|trash|restore|restore-version|purge|group-delete|grant)|use-approve)$/.test(action)) return reply(bad())
-    const g = await step('personal-list', b)
+    if (!/^(?:personal-(?:reveal|edit|trash|restore|restore-version|purge|group-delete|grant)|use-approve|extend-open)$/.test(action)) return reply(bad())
+    const g = action === 'extend-open' ? await gate.prepareExtendOpenGesture() : await step('personal-list', b)
     if (!g.ok) return reply(g)
     const r = await mobile.beginAssertion(session, `${action}:${target}`, rpId, origin)
     if (!r.ok) return reply(fail('no-passkey', 'This device has no passkey registered for the vault yet.', 'Este aparelho ainda não tem uma passkey registrada para o cofre.'))

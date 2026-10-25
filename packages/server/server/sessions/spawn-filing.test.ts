@@ -288,22 +288,24 @@ describe('folder', () => {
   test('parent: the caller\'s folder when the caller is filed on the same task', () => {
     const g = { groups: [{ id: 'p', name: 'Lead', sessionKeys: ['caller'] }] }
     const caller = R('caller', { taskId: 't-1' })
-    expect(ok(planFiling(base({ taskRef: 't-1', groups: g, rows: [caller], caller })))).toMatchObject({ folderId: 'p', folderSource: 'task' })
+    expect(ok(planFiling(base({ taskRef: 't-1', groups: g, rows: [caller], caller })))).toMatchObject({ folderId: 'p', folderSource: 'parent' })
     // no other filed session in a folder → parent
     const caller2 = R('lead', { taskId: 't-1' })
     const g2 = { groups: [{ id: 'p', name: 'Lead', sessionKeys: ['lead'] }] }
     expect(ok(planFiling(base({ taskRef: 't-1', groups: g2, rows: [], caller: caller2 })))).toMatchObject({ folderId: 'p', folderSource: 'parent' })
   })
-  test('parent: not taken when the caller is on another task, or in a finished folder', () => {
+  test('parent: inherited across tasks, but not from a finished folder', () => {
     const g = { groups: [{ id: 'p', name: 'Lead', sessionKeys: ['lead'] }, { id: 'f', name: 'Finished', sessionKeys: ['lead2'] }] }
     const p1 = ok(planFiling(base({ taskRef: 't-1', groups: g, caller: R('lead', { taskId: 't-2' }) })))
-    expect(p1).toMatchObject({ folderSource: 'none' })
-    expect(p1.folderId).toBeUndefined()
-    expect(p1.warnings).toContain('no_folder')
+    expect(p1).toMatchObject({ folderId: 'p', folderSource: 'parent' })
+    expect(p1.warnings).not.toContain('no_folder')
     expect(ok(planFiling(base({ taskRef: 't-1', groups: g, caller: R('lead2', { taskId: 't-1' }) }))).folderSource).toBe('none')
   })
-  test('no task and no explicit folder → none', () => {
-    expect(ok(planFiling(base({ groups, rows, caller: R('caller') })))).toMatchObject({ folderSource: 'none' })
+  test('no task and no explicit folder inherits the parent folder', () => {
+    expect(ok(planFiling(base({ groups, rows, caller: R('caller') })))).toMatchObject({ folderId: 'other', folderSource: 'parent' })
+  })
+  test('no task, explicit folder or parent folder → none', () => {
+    expect(ok(planFiling(base({ groups, rows, caller: R('folderless-parent') })))).toMatchObject({ folderSource: 'none' })
   })
 })
 
@@ -318,6 +320,13 @@ describe('hand-off', () => {
       role: 'leader', cwd: '/home/u/workspace', cwdSource: 'predecessor',
       taskId: 't-1', subtaskId: 's-1', taskTitle: 'Atomic spawn', folderId: 'lead', folderSource: 'predecessor',
     })
+  })
+  test('a harness SWITCH inherits the same filing but keeps the role it was given (none stays none)', () => {
+    for (const role of ['worker', undefined] as const) {
+      const p = ok(planFiling(base({ role, handoffOf: pred, handoffKeepsRole: true, groups })))
+      expect(p).toMatchObject({ cwd: '/home/u/workspace', taskId: 't-1', subtaskId: 's-1', folderId: 'lead' })
+      expect(p.role).toBe(role)
+    }
   })
   test('explicit references and folder still win', () => {
     const p = ok(planFiling(base({ handoffOf: pred, groups, taskRef: 't-2', folderRef: 'Workers', cwd: '/home/u/agentistics' })))
@@ -378,6 +387,115 @@ describe('repository comparison (L1, L2)', () => {
   })
 })
 
+describe('SPAWN.REPO — short board repository names', () => {
+  const shortBook = { tasks: [T('t-short', 'Workspace', 'agentistics/agentistics-workspace')], subtasks: [] }
+  test('short task repo matches a full checkout remote', () => {
+    const p = ok(planFiling(base({
+      book: shortBook, taskRef: 't-short', cwd: '/home/u/workspace',
+      repoOf: () => ({ remote: 'github.com/agentistics/agentistics-workspace', worktree: true }),
+    })))
+    expect(p).toMatchObject({ taskId: 't-short', cwd: '/home/u/workspace' })
+    expect(p.warnings).not.toContain('inherited_task_repo_mismatch')
+  })
+  test('short task repo refuses a different checkout remote', () => {
+    const p = refused(planFiling(base({
+      book: shortBook, taskRef: 't-short', cwd: '/home/u/agentistics-engine',
+    })))
+    expect(p.code).toBe('cwd_wrong_repo')
+  })
+  test('short task repo accepts another organization with the same repository name after transfer', () => {
+    expect(ok(planFiling(base({
+      book: shortBook, taskRef: 't-short',
+      repoOf: () => ({ remote: 'github.com/other/agentistics-workspace', worktree: true }),
+    }))).taskId).toBe('t-short')
+  })
+  for (const repo of [REMOTE, 'https://github.com/agentistics/agentistics.git', 'git@github.com:agentistics/agentistics', 'ssh://git@github.com/agentistics/agentistics.git']) {
+    test(`task remote retains host comparison: ${repo}`, () => {
+      const remoteBook = { tasks: [T('t-remote', 'Remote', repo)], subtasks: [] }
+      expect(ok(planFiling(base({ book: remoteBook, taskRef: 't-remote', repoOf: () => ({ remote: REMOTE, worktree: true }) }))).taskId).toBe('t-remote')
+      expect(refused(planFiling(base({ book: remoteBook, taskRef: 't-remote', cwd: '/home/u/gitlab' }))).code).toBe('cwd_wrong_repo')
+    })
+  }
+})
+
+describe('SPAWN.TRANSFER — repository owner transfer', () => {
+  for (const repo of ['blpsoares/agentistics', 'github.com/blpsoares/agentistics', 'https://github.com/blpsoares/agentistics.git', 'git@github.com:blpsoares/agentistics.git']) {
+    const transferredBook = { tasks: [T('t-transfer', 'Transferred repo', repo)], subtasks: [] }
+    test(`old task owner accepts the current checkout: ${repo}`, () => {
+      const p = ok(planFiling(base({
+        book: transferredBook, taskRef: 't-transfer',
+        repoOf: () => ({ remote: REMOTE, worktree: true }),
+      })))
+      expect(p.taskId).toBe('t-transfer')
+      expect(p.warnings).not.toContain('inherited_task_repo_mismatch')
+    })
+    test(`old task owner accepts short checkout facts: ${repo}`, () => {
+      expect(ok(planFiling(base({ book: transferredBook, taskRef: 't-transfer' }))).taskId).toBe('t-transfer')
+    })
+    test(`old task owner refuses a different repository name: ${repo}`, () => {
+      expect(refused(planFiling(base({
+        book: transferredBook, taskRef: 't-transfer', cwd: '/home/u/agentistics-engine',
+      }))).code).toBe('cwd_wrong_repo')
+    })
+    test(`old task owner lists transferred checkouts as candidates: ${repo}`, () => {
+      const checkout = '/home/u/agentistics/.claude/worktrees/x'
+      const p = refused(planFiling(base({
+        book: transferredBook, taskRef: 't-transfer', cwd: '/home/u/workspace',
+        rows: [R('transferred', { cwd: checkout }), R('other', { cwd: '/home/u/agentistics-engine' })],
+        repoOf: dir => dir === checkout ? { remote: REMOTE, worktree: true } : repoOf(dir),
+      })))
+      expect(p).toMatchObject({ code: 'cwd_wrong_repo', candidates: [checkout] })
+    })
+  }
+  test('different hosts stay different even when the owner also changed', () => {
+    const transferredBook = { tasks: [T('t-transfer', 'Transferred repo', 'github.com/blpsoares/agentistics')], subtasks: [] }
+    expect(refused(planFiling(base({
+      book: transferredBook, taskRef: 't-transfer', cwd: '/home/u/gitlab',
+    }))).code).toBe('cwd_wrong_repo')
+  })
+})
+
+describe('SPAWN.REPO — inherited task repository policy', () => {
+  const caller = R('leader', { taskId: 't-1', cwd: '/home/u/workspace' })
+  test('inherited task and explicit cwd in another repo stay filed with a warning', () => {
+    const p = ok(planFiling(base({ caller, cwd: '/home/u/agentistics-engine' })))
+    expect(p).toMatchObject({ taskId: 't-1', taskTitle: 'Atomic spawn', cwd: '/home/u/agentistics-engine', cwdSource: 'explicit' })
+    expect(p.warnings).toContain('inherited_task_repo_mismatch')
+  })
+  test('inherited task and caller cwd outside a repo stay filed with a warning', () => {
+    const p = ok(planFiling(base({ caller, callerCwd: '/home/u/workspace' })))
+    expect(p).toMatchObject({ taskId: 't-1', cwdSource: 'caller' })
+    expect(p.warnings).toContain('inherited_task_repo_mismatch')
+  })
+  test('inherited task in the same repo adds no mismatch warning', () => {
+    expect(ok(planFiling(base({ caller }))).warnings).not.toContain('inherited_task_repo_mismatch')
+  })
+  test('explicit task still refuses another repo even when the caller has that task', () => {
+    expect(refused(planFiling(base({ caller, taskRef: 't-1', cwd: '/home/u/agentistics-engine' }))).code).toBe('cwd_wrong_repo')
+    expect(refused(planFiling(base({ caller, taskRef: 't-1', callerCwd: '/home/u/workspace' }))).code).toBe('cwd_needed')
+  })
+  test('inherited task mismatch does not bypass the missing directory guard', () => {
+    expect(refused(planFiling(base({ caller, cwd: '/gone' }))).code).toBe('cwd_missing')
+  })
+  test('inherited task mismatch preserves shared checkout refusal and override warning', () => {
+    const input = base({ caller, cwd: '/home/u/agentistics-engine', liveInCwd: () => 1 })
+    expect(refused(planFiling(input)).code).toBe('cwd_shared_checkout')
+    const p = ok(planFiling({ ...input, sharedCwd: true }))
+    expect(p.taskId).toBe('t-1')
+    expect(p.warnings).toContain('inherited_task_repo_mismatch')
+    expect(p.warnings).toContain('shared_checkout_override')
+  })
+  test('a handoff still inherits its predecessor task across repositories', () => {
+    const p = ok(planFiling(base({ handoffOf: caller })))
+    expect(p).toMatchObject({ taskId: 't-1', cwd: '/home/u/workspace', role: 'leader' })
+  })
+  test('a subtask resolved outside a missing inherited task keeps its repository check', () => {
+    expect(refused(planFiling(base({
+      caller: R('leader', { taskId: 't-gone' }), subtaskRef: 's-1', cwd: '/home/u/agentistics-engine',
+    }))).code).toBe('cwd_wrong_repo')
+  })
+})
+
 describe('checkout candidates (L3)', () => {
   test('trailing slashes collapse, vanished directories drop out, newest first', () => {
     const rows = [
@@ -391,14 +509,14 @@ describe('checkout candidates (L3)', () => {
 })
 
 describe('shared checkout probe (L4)', () => {
-  test('the caller itself is excluded from the live count', () => {
+  test('a new worker counts its caller as another live session', () => {
     const seen: Array<string | undefined> = []
     const p = planFiling(base({
       callerCwd: '/home/u/agentistics', caller: R('me'),
       liveInCwd: (_d, ex) => { seen.push(ex); return ex === 'me' ? 0 : 1 },
     }))
-    expect(ok(p).cwd).toBe('/home/u/agentistics')
-    expect(seen).toEqual(['me'])
+    expect(refused(p).code).toBe('cwd_shared_checkout')
+    expect(seen).toEqual([undefined])
   })
 })
 
@@ -436,5 +554,34 @@ describe('a spawn with no parent and no role is a PERSON, not a worker (H1)', ()
   test('refusal texts carry no CLI-only wording without naming it as the CLI', () => {
     const p = planFiling({ ...base, role: 'worker' })
     if (!p.ok) expect(p.detail).toContain('(CLI: --shared-cwd)')
+  })
+})
+
+describe('ORQ.FORA — verified parent continuation', () => {
+  const caller = R('parent', { taskId: 't-1', subtaskId: 's-1', cwd: '/home/u/agentistics/.claude/worktrees/x' })
+  test('worker inherits task without inheriting the leader subtask', () => {
+    expect(ok(planFiling(base({ caller })))).toMatchObject({ taskId: 't-1' })
+    expect(ok(planFiling(base({ caller }))).subtaskId).toBeUndefined()
+  })
+  test('the parent folder wins over a newer unrelated front on the task', () => {
+    const plan = ok(planFiling(base({ caller, rows: [R('recent', { taskId: 't-1' })], groups: { groups: [
+      { id: 'parent-folder', name: 'Workers', sessionKeys: ['parent'] },
+      { id: 'recent-folder', name: 'Other front', sessionKeys: ['recent'] },
+    ] } })))
+    expect(plan).toMatchObject({ folderId: 'parent-folder', folderSource: 'parent' })
+  })
+  test('explicit task, subtask and folder override inheritance', () => {
+    expect(ok(planFiling(base({ caller, taskRef: 't-2', subtaskRef: 's-2', folderRef: 'f', groups: { groups: [{ id: 'f', name: 'Chosen', sessionKeys: [] }] } })))).toMatchObject({ taskId: 't-2', subtaskId: 's-2', folderId: 'f' })
+  })
+  test('same-task leader intent refuses with the exact successor command', () => {
+    const plan = planFiling(base({ caller, callerRole: 'leader', role: 'leader', harness: 'codex' }))
+    expect(plan).toMatchObject({ ok: false, code: 'handoff_required' })
+    if (!plan.ok) expect(plan.detail).toContain('agentop session codex --handoff')
+  })
+  test('a leader can start a leader for a different task/front', () => {
+    expect(ok(planFiling(base({ caller, callerRole: 'leader', role: 'leader', taskRef: 't-2' })))).toMatchObject({ taskId: 't-2', role: 'leader' })
+  })
+  test('explicit handoff preserves the same task and subtask', () => {
+    expect(ok(planFiling(base({ caller, callerRole: 'leader', handoffOf: caller })))).toMatchObject({ taskId: 't-1', subtaskId: 's-1', role: 'leader' })
   })
 })

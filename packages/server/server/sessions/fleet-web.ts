@@ -1,3 +1,5 @@
+import { readPreferences, updatePreferences } from '../preferences'
+import { normalizeHandoffConfig, handoffCut } from '@agentistics/core'
 /**
  * fleet-web.ts — the WEB dashboard's window onto the session fleet.
  *
@@ -51,8 +53,13 @@ import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
 import { readRegistry, patchSession } from './registry'
+import { loadConversations } from './conversations'
+import { createHandoffQuotaSampler, handoffMetrics, type HandoffQuotaRate } from './handoff-panel'
+import { readAccounts } from '../harness-accounts'
+import { handoffSessionLimit, artifactReplyCounts, readBilledReplies, refreshArtifactReplies, windowQuotaRate, retainedQuotaRate, readQuotaRates, saveQuotaRates, countBilledReplies, replyKey } from './handoff-usage'
+import type { SessionSnapshot } from './sessions-host'
 import type { ManagedSession } from './types'
-import { computeHandoffWhy, findHandoffFile, HANDOFF_RAMP_CALLS, isLeaderRow, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
+import { computeHandoffWhy, findHandoffFile, HANDOFF_RAMP_CALLS, hintCandidates, isLeaderRow, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
 
 // The REQUEST shape lives in the leaf `fleet-row.ts` so `index.ts` can name it without naming
 // this module — see the note there.
@@ -212,7 +219,7 @@ async function hostFor(lang: CliLang): Promise<StartHost> {
       if (inflight && now - at < SNAPSHOT_TTL_MS && current === mapped) return inflight
       at = now
       mapped = current
-      inflight = cachedSessions.call(host)
+      inflight = timeFleetPhase('host.sessions: map', () => cachedSessions.call(host))
       // A failed read must not be remembered as the answer for the next second.
       void inflight.catch(() => { inflight = null; at = 0 })
       return inflight
@@ -233,7 +240,12 @@ let hubRef: SessionHub | null = null
 export async function fleetSessionHub(): Promise<SessionHub> {
   if (hubRef) return hubRef
   const { ensureSessionHub } = await import('../cli-start')
-  hubRef = await ensureSessionHub()
+  const hub = await ensureSessionHub()
+  if (!hubRef) {
+    hubRef = hub
+    // Passive: collect calibration while the existing fleet is ticking, without adding demand.
+    hubRef.observe(snap => { void sampleHandoffQuotas(snap).catch(() => {}) })
+  }
   return hubRef
 }
 
@@ -275,18 +287,23 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
   try {
     const host = await hostFor(lang)
     if (!host.sessions) return { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
-    const fleet = await timeFleetPhase('readFleet: host.sessions()', () => host.sessions!())
+    const source = await timeFleetPhase('readFleet: host.sessions()', () => host.sessions!())
+    const fleet = { ...source, sessions: [...source.sessions] }
+    const forgotten = (await readPreferences()).ui?.forgottenSessionRows
+    if (Array.isArray(forgotten)) fleet.sessions = fleet.sessions.filter(r => !forgotten.includes(r.id))
     // Leaders get one low-noise handoff hint. It reads the RAW context numbers off the hub's
     // snapshot (the formatted `context` on a ControlSession is a label, not a count) and never holds
     // the fleet response open.
-    void (async () => {
+    // ONE pass at a time (OPEN-PERF): `readFleet` runs per frame key per hub tick, and overlapping
+    // passes each re-read the registry for the same rows.
+    if (!hintPass) hintPass = (async () => {
       const [registry, raw] = await Promise.all([readRegistry().catch(() => []), fleetSessionHub().then(h => h.read())])
       const titles = new Map(fleet.sessions.map(row => [row.id, fleetRow(row, s).title]))
       const byId = new Map(registry.map(row => [row.id, row]))
       const baseSamples = handoffBaseSamples(registry)
-      const rows: HandoffHintRow[] = await Promise.all(raw.sessions.map(async view => {
+      const cutTokens = handoffCut(normalizeHandoffConfig((await readPreferences()).handoffConfig))
+      const rows: HandoffHintRow[] = await Promise.all(hintCandidates(raw.sessions).map(async view => {
         const managed = byId.get(view.id)
-        const handoff = await findHandoffFile(view.cwd)
         // HANDOFF.CALC: record this leader's context after its first ~15 calls — a sample of F.
         if (managed && managed.handoffBaseTokens === undefined && view.contextTokens !== undefined
           && isLeaderRow({ title: titles.get(view.id) ?? '', ...(managed.leader ? { leader: true } : {}) })
@@ -294,7 +311,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           await patchSession(view.id, { handoffBaseTokens: view.contextTokens }).catch(() => false)
         }
         return {
-          baseSamples,
+          baseSamples, cutTokens,
           ...(view.calls !== undefined ? { calls: view.calls } : {}),
           id: view.id,
           title: titles.get(view.id) ?? '',
@@ -306,7 +323,8 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           ...(view.model !== undefined ? { model: view.model } : {}),
           ...(view.turns !== undefined ? { turns: view.turns } : {}),
           ...(view.costUSD !== undefined ? { costUSD: view.costUSD } : {}),
-          ...(handoff ? { handoffPath: handoff.path, handoffBytes: handoff.bytes } : {}),
+          // No handoff-file lookup here: `sendHandoffHints` finds it for the one row it hints, and a
+          // readdir + stat per fleet row per pass (1868 rows on the owner's machine) bought nothing.
           ...(view.cwd ? { cwd: view.cwd } : {}),
           ...(view.activity !== undefined ? { activity: view.activity, state: view.activity } : {}),
           ...((view.activity === 'working' || view.background) ? {
@@ -318,6 +336,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
         }
       }))
       await sendHandoffHints({
+        deferUntil: HINT_DEFER,
         rows: async () => rows,
         prompt: async (id, text) => {
           const out = await runFleetAction(lang, { action: 'prompt', id, text })
@@ -336,7 +355,7 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
           return awayHandoffNote(sessionAwayState(parseAwayState((await readPreferences()).away), own, Date.now()), Date.now())
         },
       })
-    })().catch(() => {})
+    })().catch(() => {}).finally(() => { hintPass = null })
     // Nay conversations are filed into "Nay › Ativas" / "Nay › Inativas" by whether they run. It
     // rides the fleet read because that is the one moment every state change is seen, and it never
     // holds the reply: a filing is a convenience, the fleet is what this route is for.
@@ -387,6 +406,11 @@ export function handoffBaseSamples(registry: readonly ManagedSession[], max = 10
     .map(m => m.handoffBaseTokens!)
 }
 
+let hintPass: Promise<void> | null = null
+
+/** Rows whose hint was skipped or failed, and until when (`sendHandoffHints`' retry window). */
+const HINT_DEFER = new Map<string, number>()
+
 /** The owner's latest message in this session has no reply yet (HANDOFF.RELAY's own reading). */
 async function ownerWaitingOn(id: string): Promise<boolean> {
   const m = (await readRegistry().catch(() => [] as ManagedSession[])).find(r => r.id === id)
@@ -405,6 +429,7 @@ export async function readHandoffWhy(lang: CliLang, id: string): Promise<ReturnT
   if (!view) return null
   const managed = registry.find(row => row.id === id)
   const row: HandoffHintRow = {
+    cutTokens: handoffCut(normalizeHandoffConfig((await readPreferences()).handoffConfig)),
     id,
     title: managed?.label ?? '',
     ...(managed?.leader ? { leader: true } : {}),
@@ -428,6 +453,93 @@ export async function readHandoffWhy(lang: CliLang, id: string): Promise<ReturnT
     model: view.model ?? managed?.model,
     ...(handoff ? { handoffPath: handoff.path, handoffBytes: handoff.bytes } : {}),
   })
+}
+
+/** Read-only panel: all screens consume this one contract; workers have no panel. */
+const handoffQuotaSampler = createHandoffQuotaSampler()
+let quotaSampling: Promise<Map<string, HandoffQuotaRate>> | undefined
+let quotaSampleAt = -Infinity
+let quotaRates = new Map<string, HandoffQuotaRate>()
+let billedReplyCounts = new Map<string, number>()
+let retainedRates: Record<string, HandoffQuotaRate> | undefined
+/** Passive sampling is bounded to 30 seconds; open panels refresh the same calibration. */
+async function sampleHandoffQuotas(raw: SessionSnapshot): Promise<Map<string, HandoffQuotaRate>> {
+  if (quotaSampling) return quotaSampling
+  if (Date.now() - quotaSampleAt < 30_000) return quotaRates
+  quotaSampling = (async () => {
+    const [registry, prefs, conversations, accountRegistry] = await Promise.all([readRegistry(), readPreferences(), loadConversations(), readAccounts()])
+    const { planLimitsPayload, planAccountKey } = await import('../plan-limits')
+    const limits = await planLimitsPayload(prefs.billing)
+    const { engineIntegrations } = await import('../engine/load')
+    const replies = await refreshArtifactReplies(await readBilledReplies(accountRegistry, registry, limits.limits), engineIntegrations(), accountRegistry, registry, limits.limits)
+    billedReplyCounts = countBilledReplies(replies)
+    retainedRates ??= await readQuotaRates()
+    const before = JSON.stringify(retainedRates)
+    const next = new Map<string, HandoffQuotaRate>()
+    const byId = new Map(registry.map(m => [m.id, m]))
+    for (const limit of limits.limits) {
+      const key = planAccountKey(limit.harness, limit.account)
+      const peers = raw.sessions.filter(v => {
+        const m = byId.get(v.id)
+        return v.harness === limit.harness && v.status !== 'closed' && v.activity !== 'exited'
+          && handoffSessionLimit(limit.harness, m ?? {}, accountRegistry, limits.limits) === limit
+      }).map(v => handoffMetrics({ ...v, title: '', conversationId: v.conversationId ?? byId.get(v.id)?.conversationId }, conversations))
+      const fromWindow = windowQuotaRate(limit, replies, Date.now())
+      const canSample = peers.length > 0 && peers.every(v => Number.isFinite(v.costUSD)) && Date.now() - limit.updatedAt <= 30 * 60_000
+      const live = canSample ? handoffQuotaSampler.observe(key, {
+        at: Date.now(), totalUSD: peers.reduce((sum, v) => sum + v.costUSD!, 0),
+        population: peers.map(v => v.id).sort().join(','),
+        fiveHour: limit.windows.find(w => w.kind === '5h'),
+        week: limit.windows.find(w => w.kind === 'week'),
+      }) : { fiveHourPctPerUSD: null, weekPctPerUSD: null }
+      const rate = retainedQuotaRate(retainedQuotaRate(live, fromWindow), retainedRates[key])
+      retainedRates[key] = rate
+      next.set(key, {
+        fiveHourPctPerUSD: limit.windows.some(w => w.kind === '5h') ? rate.fiveHourPctPerUSD : null,
+        weekPctPerUSD: limit.windows.some(w => w.kind === 'week') ? rate.weekPctPerUSD : null,
+      })
+    }
+    if (JSON.stringify(retainedRates) !== before) await saveQuotaRates(retainedRates)
+    for (const key of quotaRates.keys()) if (!next.has(key)) handoffQuotaSampler.forget(key)
+    quotaRates = next
+    quotaSampleAt = Date.now()
+    return next
+  })()
+  try { return await quotaSampling } finally { quotaSampling = undefined }
+}
+export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?: number): Promise<import('@agentistics/core').HandoffPanel | null> {
+  await hostFor(lang)
+  const [raw, registry, prefs, accountRegistry] = await Promise.all([
+    fleetSessionHub().then(h => h.read()), readRegistry().catch(() => [] as ManagedSession[]), readPreferences(), readAccounts(),
+  ])
+  const view = raw.sessions.find(r => r.id === id)
+  const managed = registry.find(r => r.id === id)
+  if (!view || !managed || view.status === 'closed' || view.activity === 'exited' || !isLeaderRow({ title: managed.label ?? '', leader: managed.leader })) return null
+  const { computeHandoffPanel } = await import('./handoff-panel')
+  const { planLimitsPayload } = await import('../plan-limits')
+  const limits = await planLimitsPayload(prefs.billing)
+  const accounts = limits.limits.filter(l => l.harness === view.harness)
+  const limit = handoffSessionLimit(view.harness ?? managed.harness, managed, accountRegistry, limits.limits)
+  const rates = await sampleHandoffQuotas(raw)
+  const quota = { ...(limit ? rates.get(`${limit.harness}:${limit.account}`) : undefined),
+    fiveHourPctPerUSD: limit ? rates.get(`${limit.harness}:${limit.account}`)?.fiveHourPctPerUSD ?? null : null,
+    weekPctPerUSD: limit ? rates.get(`${limit.harness}:${limit.account}`)?.weekPctPerUSD ?? null : null,
+    unavailableReason: !limit ? (accounts.length > 1 && !managed.accountId && !accountRegistry.bindings[`${view.harness}:`] ? 'account-unknown' : 'no-meter') as 'account-unknown' | 'no-meter'
+      : !limit.windows.some(w => w.kind === '5h') || !limit.windows.some(w => w.kind === 'week') ? 'missing-window' as const
+      : undefined,
+  }
+  const conversations = await loadConversations()
+  const file = await findHandoffFile(view.cwd)
+  return computeHandoffPanel(handoffMetrics({
+    harness: view.harness, conversationId: view.conversationId ?? managed.conversationId,
+    id, title: managed.label ?? '', leader: true,
+    contextTokens: view.contextTokens, contextWindow: view.contextWindow,
+    model: view.model ?? managed.model, turns: view.turns, costUSD: view.costUSD, calls: view.calls || conversations.find(c => c.harness === view.harness && (c.sessionId === managed.conversationId || c.nativeId === managed.conversationId))?.calls || artifactReplyCounts.get(replyKey(view.harness ?? managed.harness, view.conversationId ?? managed.conversationId ?? '')) || billedReplyCounts.get(replyKey(view.harness ?? managed.harness, view.conversationId ?? managed.conversationId ?? '')),
+    baseSamples: handoffBaseSamples(registry),
+    ...(file ? { handoffPath: file.path, handoffBytes: file.bytes } : {}),
+    workInFlight: [...(view.activity === 'working' ? ['main-response'] : []), ...(view.background ? ['background-work'] : [])],
+  }, conversations), extraPercent !== undefined && Number.isInteger(extraPercent) && extraPercent >= 0 && extraPercent <= 100
+    ? { ...normalizeHandoffConfig(prefs.handoffConfig), extraPercent } : prefs.handoffConfig, quota)
 }
 
 /**
@@ -553,6 +665,11 @@ async function runFleetActionOnce(
 
   switch (req.action) {
     case 'approve': {
+      // A multi-question form's step buttons: no option is picked, the form moves (`stepDialog`).
+      if (req.step === 'next' || req.step === 'back') {
+        if (!host.stepDialog) return { ok: false, message: s.sessionsNoHost }
+        return host.stepDialog(req.id, req.step)
+      }
       if (!host.answerSession) return { ok: false, message: s.sessionsNoHost }
       // `text` rides along for the FREE-TEXT option, where picking is only the first of three
       // steps — see `answerSession`. Every other option ignores it.
@@ -563,7 +680,10 @@ async function runFleetActionOnce(
       // next actual marker turn, and forces that turn's count to disagree with its own markers:
       // a turn that would otherwise resolve draws a chip instead. It also cost a background fleet
       // read on every text answer for a record nothing could ever use.
-      const answered = await host.answerSession(req.id, req.choice, req.text ?? '')
+      // A declared type is not a parse: only a list of finite numbers is passed on.
+      const choices = Array.isArray(req.choices) && req.choices.every(c => typeof c === 'number' && Number.isFinite(c))
+        ? req.choices : undefined
+      const answered = await host.answerSession(req.id, req.choice, req.text ?? '', choices)
       // The engine's attention producer learns the wait ended HERE, with the option index (never its
       // label) — carried on the next confirmed transition out of `waiting-approval` (`fleet-hub.ts`).
       if (answered.ok && typeof req.choice === 'number') {
@@ -612,14 +732,29 @@ async function runFleetActionOnce(
         const message = 'value' in late ? late.value.message : (lang === 'pt' ? 'A mensagem não foi entregue.' : 'The message was not delivered.')
         void import('../sse').then(m => m.broadcastNotification({ type: 'error', title: 'Message not delivered', message })).catch(() => {})
       })
-      if (!raced.settled) return { ok: true, message: (lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.') }
+      if (!raced.settled) {
+        // The write continues after this acknowledgement. Preserve navigation for a prompt sent
+        // through an ended row even when delivery is slower than the acknowledgement deadline.
+        let redirectedId: string | undefined
+        try {
+          const row = (await readRegistry()).find(r => r.id === req.id)
+          if (row?.conversationId) {
+            const [{ resolveBackend }, { liveConversationHolders }, { conversationHeldBy }] = await Promise.all([
+              import('./index'), import('./live-claims'), import('./conversation-claim'),
+            ])
+            const holder = conversationHeldBy(await liveConversationHolders(await resolveBackend()), row.conversationId, req.id)
+            if (holder?.kind === 'managed') redirectedId = holder.id
+          }
+        } catch { /* delivery still owns the outcome and reports a late failure above */ }
+        return { ok: true, message: (lang === 'pt' ? 'Mensagem enviada.' : 'Message sent.'), ...(redirectedId ? { id: redirectedId } : {}) }
+      }
       const out = raced.value
       if (out.ok) await record()
       return out
     }
     case 'cycleMode':
       if (!host.cycleSessionMode) return { ok: false, message: s.sessionsNoHost }
-      return await host.cycleSessionMode(req.id)
+      return await host.cycleSessionMode(req.id, text || undefined)
     case 'setMode':
       if (!host.setSessionMode) return { ok: false, message: s.sessionsNoHost }
       return await host.setSessionMode(req.id, text)
@@ -632,7 +767,26 @@ async function runFleetActionOnce(
     case 'task':
       if (!host.taskSession) return { ok: false, message: s.sessionsNoHost }
       return await host.taskSession(req.id, text)
+    case 'forget': {
+      // Forget the row only: neither transcript deletion nor process termination needs to succeed.
+      const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id)
+      if (!row || row.harness === 'agentistics') return { ok: false, message: s.sessionsRowGone }
+      if (!fleetRow(row, s).verbs.some(v => v.action === 'forget' && v.enabled)) return { ok: false, message: s.sessionsForgetLive }
+      await updatePreferences(cur => ({ ui: { ...cur.ui, forgottenSessionRows: [...new Set([
+        ...(Array.isArray(cur.ui?.forgottenSessionRows) ? cur.ui.forgottenSessionRows.filter((v): v is string => typeof v === 'string') : []), req.id,
+      ])] } }))
+      BODIES.clear(); FRAMES.clear()
+      return { ok: true, message: lang === 'pt' ? 'Sessão removida da lista.' : 'Session removed from list.' }
+    }
     case 'kill':
+      if (isExternalRowId(req.id)) {
+        const row = (await host.sessions?.())?.sessions.find(r => r.id === req.id)
+        if (!row || row.pid === undefined) return { ok: false, message: s.sessionsRowGone }
+        const { endExternalProcess } = await import('./external-end')
+        const ok = await endExternalProcess(row.pid)
+        const name = row.title || row.project || req.id
+        return { ok, message: ok ? cliStrings(lang).sessKilled(name) : cliStrings(lang).sessKillUnconfirmed(name) }
+      }
       if (!host.killSession) return { ok: false, message: s.sessionsNoHost }
       return await host.killSession(req.id)
     // Only a NATIVE session has a store to archive or delete from (`native-fleet.ts`); any other id is
@@ -925,8 +1079,8 @@ export async function readConversationFacts(
         : 'This session has no linked conversation yet.'),
     }
   }
-  const { countCompactions, resolveChatTranscriptPath } = await import('./chat-tail')
-  const path = await resolveChatTranscriptPath(row.cwd, row.conversationId).catch(() => null)
+  const { countCompactions, resolveClaudeTranscriptAnyAccount } = await import('./chat-tail')
+  const path = await resolveClaudeTranscriptAnyAccount(row.cwd, row.conversationId).catch(() => null)
   if (!path) {
     return {
       unavailable: pt
