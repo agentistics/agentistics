@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { ChatDeclaration, HarnessChat, HarnessChatDelta } from '@agentistics/engine-api'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import {
@@ -19,6 +21,10 @@ describe('planScreen — when an adapter-stated row still needs its screen', () 
     expect(planScreen({ ...base, reading: { ...idle, working: true, coversAttention: true } })).toBe(false))
   it('waiting on a person per the file: the screen, for the options', () =>
     expect(planScreen({ ...base, reading: { working: true, attention: true, coversAttention: true } })).toBe(true))
+  it('a dialog on the last screen read keeps the screen read, even for an idle row', () => {
+    expect(planScreen({ ...base, reading: idle, screenApproval: true })).toBe(true)
+    expect(planScreen({ ...base, reading: idle, screenApproval: false })).toBe(false)
+  })
   it('the periodic refresh and a forced read win', () => {
     expect(planScreen({ ...base, reading: idle, nowMs: base.lastScreenMs + SCREEN_REFRESH_MS })).toBe(true)
     expect(planScreen({ ...base, reading: idle, lastScreenMs: undefined })).toBe(true)
@@ -163,7 +169,7 @@ function fakeEngine() {
 const NOW = 1_786_600_000_000
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }
 
-function harnessPoller(harness: HarnessId, o: { feed: AdapterStateFeed | null; frame: string[]; now: () => number; activityOf?: () => SessionActivity | undefined }) {
+function harnessPoller(harness: HarnessId, o: { feed: AdapterStateFeed | null; frame: string[] | (() => string[]); now: () => number; activityOf?: () => SessionActivity | undefined }) {
   const captures: string[] = []
   const session: BackendSession = { id: 'r1', createdMs: NOW - 600_000, attached: false, alive: true, lastActivityMs: NOW - 30_000 }
   const backend: SessionBackend = {
@@ -171,7 +177,7 @@ function harnessPoller(harness: HarnessId, o: { feed: AdapterStateFeed | null; f
     async unavailable() { return undefined },
     async spawn() {},
     async list() { return [session] },
-    async capture(id) { captures.push(id); return o.frame },
+    async capture(id) { captures.push(id); return typeof o.frame === 'function' ? o.frame() : o.frame },
     async captureTerminal() { return { lines: [], info: { cols: 80, rows: 0, cursorX: 0, cursorY: 0, alive: true, historySize: 0 } } },
     async kill() { return true },
     attachCommand: id => ['tmux', 'attach', id],
@@ -284,6 +290,58 @@ describe('the poller, per harness — the harness states its state when ON; the 
     expect(captures.length).toBe(2)
     t += SCREEN_REFRESH_MS; await poller.poll()
     expect(captures.length).toBe(3)
+    feed.stop()
+  })
+})
+
+// A dialog the harness's transcript does not record (agy's directory-trust prompt, captured from agy
+// 1.4.7) while the file says the turn is over: it must be confirmed by the screen and must not flip back.
+describe('agy: a screen dialog outside a turn is confirmed and kept', () => {
+  const trust = readFileSync(join(import.meta.dir, 'fixtures', 'antigravity-1.4.7', 'trust.txt'), 'utf8').trimEnd().split('\n') // the backend trims capture-pane's padding
+  const idleChat = ['agy idle prompt', '', '> ', '', '  Gemini 3.8 Flash · high']
+
+  it('idle, screen, idle, screen: waiting-approval after the 2nd screen read, and it stays', async () => {
+    let t = NOW
+    let frame = idleChat
+    const eng = fakeEngine()
+    const feed = createAdapterStateFeed({ chatOf: eng.chatOf, setTimer: () => 0, clearTimer: () => {} })
+    const { poller, captures } = harnessPoller('antigravity', { feed, frame: () => frame, now: () => t })
+    await poller.poll(); await flush()
+    eng.state('conv-antigravity', false) // the transcript says the turn is over
+    t += 5_000
+    expect((await poller.poll()).sessions[0]!.activity).toBe('waiting') // idle: no screen
+    const before = captures.length
+    frame = trust // the dialog appears; nothing in the transcript changes
+    feed.forceScreen('r1') // first screen read (an act / the periodic refresh)
+    t += 5_000
+    expect((await poller.poll()).sessions[0]!.activity).toBe('waiting') // one read is not yet a fact
+    expect(captures.length).toBe(before + 1)
+    for (let i = 0; i < 4; i++) {
+      t += 5_000
+      expect((await poller.poll()).sessions[0]!.activity).toBe('waiting-approval') // confirmed, and kept
+    }
+    expect(captures.length).toBe(before + 5) // the screen is read on EVERY poll while the dialog is up
+    feed.stop()
+  })
+
+  it('once the dialog is gone the row is waiting again and the cadence returns to normal', async () => {
+    let t = NOW
+    let frame = trust
+    const eng = fakeEngine()
+    const feed = createAdapterStateFeed({ chatOf: eng.chatOf, setTimer: () => 0, clearTimer: () => {} })
+    const { poller, captures } = harnessPoller('antigravity', { feed, frame: () => frame, now: () => t })
+    await poller.poll(); await flush()
+    eng.state('conv-antigravity', false)
+    feed.forceScreen('r1')
+    for (let i = 0; i < 3; i++) { t += 5_000; await poller.poll() }
+    expect((await poller.poll()).sessions[0]!.activity).toBe('waiting-approval')
+    frame = idleChat
+    t += 5_000
+    expect((await poller.poll()).sessions[0]!.activity).toBe('waiting')
+    expect(feed.screenApproval('r1')).toBe(false)
+    const n = captures.length
+    for (let i = 0; i < 3; i++) { t += 5_000; expect((await poller.poll()).sessions[0]!.activity).toBe('waiting') }
+    expect(captures.length).toBe(n) // idle again: no screen read until the periodic refresh
     feed.stop()
   })
 })

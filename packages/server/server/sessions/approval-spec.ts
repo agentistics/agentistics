@@ -194,6 +194,9 @@ export const APPROVAL_SPECS: Record<HarnessId, ApprovalSpec | null> = {
   antigravity: {
     key: 'Enter',
     probed: 'agy 1.1.12, 2026-08-13',
+    // `choice: digit` was ALSO verified live on agy 1.4.7 permission prompts (`Run this command?`,
+    // `Allow calling this tool?`): the digit alone, no Enter, approves. agy's `Models & Quota` panel
+    // (footer `esc Close`) is a status panel, not a dialog — it carries no approval rule on purpose.
     choice: { kind: 'digit', probed: 'agy 1.1.25, 2026-09-09 (AskUserQuestion / ask_question)' },
     move: { down: 'Down', up: 'Up', probed: 'agy 1.1.25, 2026-09-09 (option picker)' },
     // agy's select draws `>` and not `❯`, and `>` is also its chat prompt, so the footer is the
