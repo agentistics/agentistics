@@ -78,6 +78,8 @@ export interface MemoryBudget {
   /** `max - used`, floored at zero. */
   left: number
   cost: SessionCost
+  /** Safety floor used by this measurement, excluding the heavy-job reserve. */
+  reservedBytes?: number
   /**
    * How much of the machine is IN USE, 0-100 — RAM and swap together.
    *
@@ -125,18 +127,11 @@ export function memoryBudget(o: {
     ? { bytes: Math.round(o.sessionBytes / o.sessions), basis: 'measured' }
     : { bytes: o.assumedBytes ?? ASSUMED_SESSION_BYTES, basis: 'assumed' }
 
-  // What the sessions ALREADY hold is part of the room for sessions: they are the thing being
-  // counted. Measuring only what is free would report a ceiling that shrinks as the machine is used
-  // correctly — four sessions running would claim a smaller total than the same machine with none.
-  //
-  // So `room` is the whole envelope and `floor(room / cost)` is the TOTAL, not the remainder. Adding
-  // `sessions` on top of it was double counting, caught by the test above: the same machine reported
-  // 32 empty and 36 with four running.
-  const room = o.sample.available + o.sessionBytes - reserved
-  // Never below what is already up: an over-committed machine is a real state, and "2 of 4" is a
-  // number nobody can act on. It says 4 of 4, none left.
-  const max = Math.max(o.sessions, Math.floor(room / Math.max(1, cost.bytes)))
-  const left = Math.max(0, max - o.sessions)
+  // MemAvailable already excludes the running sessions. Price only NEW sessions after the
+  // safety floor and heavy-job reserve, then add the running count for the displayed total.
+  // Deriving the remainder from a rounded total can lose a slot when measured cost is rounded.
+  const left = Math.max(0, Math.floor((o.sample.available - reserved) / Math.max(1, cost.bytes)))
+  const max = o.sessions + left
 
   const swapping = o.sample.swapTotal > 0
     && o.sample.swapUsed / o.sample.swapTotal >= SWAP_ALARM_FRACTION
@@ -152,7 +147,7 @@ export function memoryBudget(o: {
   const percent = capacity > 0 ? Math.min(100, Math.max(0, Math.round((1 - free / capacity) * 100))) : 0
 
   return {
-    max, used: o.sessions, left, cost, percent,
+    max, used: o.sessions, left, cost, percent, reservedBytes: o.reservedBytes ?? RESERVED_BYTES,
     red: alarm !== undefined, ...(alarm ? { alarm } : {}),
   }
 }

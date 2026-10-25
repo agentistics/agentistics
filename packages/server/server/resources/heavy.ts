@@ -45,9 +45,11 @@ export function heavySlots(availableBytes: number, runningBytes = 0): number {
 
 /**
  * What the ADMISSION gate keeps back for heavy work — PURE. Room for one heavy job, minus what the
- * running ones already hold (that is already out of `MemAvailable`).
+ * running ones already hold (that is already out of `MemAvailable`). With no running jobs, reserve
+ * zero; a new lock holder with no measurable RSS keeps the full reservation.
  */
-export function heavyReserveBytes(runningBytes: number): number {
+export function heavyReserveBytes(runningBytes: number, runningJobs = 1): number {
+  if (runningJobs === 0) return 0
   return Math.max(0, HEAVY_JOB_BYTES - Math.max(0, runningBytes))
 }
 
@@ -72,7 +74,7 @@ export function flockHolders(procLocks: string, inode: number): number[] {
   const out: number[] = []
   for (const line of procLocks.split('\n')) {
     if (line.includes('->')) continue
-    const m = /\bFLOCK\s+\S+\s+\S+\s+(\d+)\s+[0-9a-f]+:[0-9a-f]+:(\d+)\b/.exec(line)
+    const m = /\bFLOCK\s+\S+\s+\S+\s+(-?\d+)\s+[0-9a-f]+:[0-9a-f]+:(\d+)\b/.exec(line)
     if (m && Number(m[2]) === inode) out.push(Number(m[1]))
   }
   return out
@@ -91,4 +93,23 @@ export function parseFlockArgv(argv: string[]): { lock: string; command: string 
   const lock = argv[i]
   if (!lock) return null
   return { lock, command: argv.slice(i + 1).join(' ').split('\n')[0]!.slice(0, 200) }
+}
+
+/** All processes below lock holders, including children started by another thread; each pid once. */
+export function heavyTreePids(roots: readonly number[], table: readonly { pid: number; ppid: number }[]): number[] {
+  const children = new Map<number, number[]>()
+  for (const row of table) {
+    const list = children.get(row.ppid) ?? []
+    list.push(row.pid)
+    children.set(row.ppid, list)
+  }
+  const seen = new Set<number>()
+  const pending = [...roots]
+  for (let i = 0; i < pending.length; i++) {
+    const pid = pending[i]!
+    if (seen.has(pid)) continue
+    seen.add(pid)
+    pending.push(...(children.get(pid) ?? []))
+  }
+  return [...seen]
 }
