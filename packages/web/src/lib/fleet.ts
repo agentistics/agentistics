@@ -23,6 +23,7 @@ import { chatHoldsText, confirmSendLanded, parseActResult, sendUnconfirmedMessag
 import { nativeAct, readNativeFleet } from './nativeFleet'
 import { withNativeSessions } from './nativeFleetRow'
 import { isNativeSessionId } from './sessionRoute'
+import { withEnding } from './endingSessions'
 
 // Central relay support was removed with the member UI. These local-only placeholders keep the
 // old transport branch inert while the shared fleet state remains a machine-local concern.
@@ -310,6 +311,21 @@ function emit(): void {
   for (const l of listeners) l()
 }
 
+/** Use the shared fleet feed: an acknowledged kill can still have a live row for another poll. */
+function waitUntilInactive(id: string): Promise<void> {
+  return new Promise(resolve => {
+    const changed = () => {
+      const row = snapshot.sessions.find(row => row.id === id || row.conversationId === id)
+      if (row && ['working', 'waiting', 'waiting-approval'].includes(row.state)) return
+      listeners.delete(changed)
+      if (listeners.size === 0) stopPolling()
+      resolve()
+    }
+    listeners.add(changed)
+    changed()
+  })
+}
+
 /**
  * On a CENTRAL there is no local fleet, and the workspace still has to work.
  *
@@ -571,7 +587,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
 
   const refresh = useCallback(() => { void pollOnce() }, [])
 
-  const act = useCallback<FleetState['act']>(async req => {
+  const actRaw = useCallback<FleetState['act']>(async req => {
     let machineIdAtCall: string | null | undefined
     // A NATIVE session's row verbs go to the engine (`nativeFleet.ts`) — the machine's
     // `/api/fleet/act` has no row by that id. The answer has the same shape, so the menu needs no branch.
@@ -697,6 +713,13 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
       }
     }
   }, [lang])
+
+  // ENDING A SESSION HAS A STATE: hold success until it is readable and no longer active (see
+  // `endingSessions.ts`). Here because this is the one door every surface ends a session through.
+  const act = useCallback<FleetState['act']>(async req => {
+    if (req.action !== 'kill') return actRaw(req)
+    return withEnding(req.id, () => actRaw(req), () => waitUntilInactive(req.id))
+  }, [actRaw])
 
   return {
     fleet: enabled ? snapshot : EMPTY,

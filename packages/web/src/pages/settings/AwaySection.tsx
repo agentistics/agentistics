@@ -12,20 +12,20 @@ import { RowSwitch, SectionHeader } from './primitives'
 import AwayModeDialog from '../../components/AwayModeDialog'
 import { awayUntilLabel, setAway, useAway } from '../../lib/awayMode'
 
-export default function AwaySection({ lang, capable }: { lang: 'pt' | 'en'; capable: boolean }) {
+export default function AwaySection({ lang, capable, embedded = false }: { lang: 'pt' | 'en'; capable: boolean; embedded?: boolean }) {
   const pt = lang === 'pt'
   const away = useAway()
   const [dialog, setDialog] = useState(false)
   const [confirmOff, setConfirmOff] = useState(false)
   if (!capable) return null
   const sub = away.active && away.state
-    ? `${awayUntilLabel(away.state, lang, Date.now())} · ${away.state.authorised.map(a => AWAY_AUTH_LABEL[a][lang]).join(', ') || (pt ? 'nada pré-autorizado' : 'nothing pre-authorised')}`
+    ? `${embedded ? '' : `${awayUntilLabel(away.state, lang, Date.now())} · `}${away.state.authorised.map(a => AWAY_AUTH_LABEL[a][lang].replace(/^./u, first => first.toLocaleLowerCase(lang === 'pt' ? 'pt-BR' : 'en-US'))).join(', ') || (pt ? 'nada pré-autorizado' : 'nothing pre-authorised')}`
     : (pt ? 'Quando ligado, as sessões não perguntam nada a você: os líderes decidem e registram, os workers reportam ao líder.'
       : 'When on, sessions ask you nothing: leaders decide and record, workers report to their leader.')
   return (
     <>
-      <SectionHeader label={pt ? 'Modo ausente' : 'Away mode'} />
-      <RowSwitch
+      {!embedded && <SectionHeader label={pt ? 'Modo ausente' : 'Away mode'} />}
+      <RowSwitch wrap
         on={away.active}
         disabled={away.state === null}
         icon={<Moon size={15} />}

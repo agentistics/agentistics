@@ -115,9 +115,8 @@ export function ToolMetricsPanel({ toolCounts, toolOutputTokens, agentFileReads,
                   fontWeight: isVillain ? 700 : 500,
                   color: isVillain ? '#ef4444' : 'var(--text-secondary)',
                   textAlign: 'right',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
+                  whiteSpace: 'normal',
+                  overflowWrap: 'anywhere',
                   flexShrink: 0,
                 }}>
                   {name}

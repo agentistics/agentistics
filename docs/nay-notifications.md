@@ -133,3 +133,19 @@ When a session replies (`waiting`) and the page is **not** `/sessions`, the butt
 | `lib/notificationSounds.ts` | the 13 synthesized sounds |
 | `components/nay/NayNotifyCard.tsx` | the card, mounted by `NayDock` |
 | `components/nay/NayEndSession.tsx` | the "Encerrar" choice |
+
+## Toast bursts and returning to the app
+
+The fixed notification overlay shows at most three cards, including its summary. More than three
+eligible updates within two seconds collapse into one “+N more — open the bell” card. Errors can
+retain an individual card within that same limit; additional errors remain in the summary and bell.
+Slower arrivals that would overflow the overlay also share one summary.
+
+While the tab is hidden or global away mode is active, notifications accumulate in one “N updates
+while you were away” summary. It appears on return and gets its full reading time then. Summaries
+open the existing bell panel by click, Enter or Space, including routes without a header bell. Grouping and dismissing toasts leave history and
+unread counts untouched; opening the bell marks entries read as usual. Existing category, Nay card,
+update and do-not-disturb exclusions still apply. Copy follows the PT/EN language toggle.
+
+While a bell panel is open, its summary toast stays hidden so the panel header remains readable.
+A summary shown alone uses “N novidades” / “N updates”; beside individual cards it keeps “+N”.

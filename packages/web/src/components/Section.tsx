@@ -8,10 +8,11 @@ interface Props {
   action?: React.ReactNode
   onExpand?: () => void
   flashId?: string
+  contentStyle?: React.CSSProperties
   style?: React.CSSProperties
 }
 
-export function Section({ title, children, action, onExpand, flashId, style: extraStyle }: Props) {
+export function Section({ title, children, action, onExpand, flashId, style: extraStyle, contentStyle }: Props) {
   const isMobile = useIsMobile()
   return (
     <div
@@ -87,7 +88,7 @@ export function Section({ title, children, action, onExpand, flashId, style: ext
       </div>
       {/* minHeight:0 so a scrollable/looser child can shrink inside the flex column rather than
           overflowing it. */}
-      <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>{children}</div>
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, ...contentStyle }}>{children}</div>
     </div>
   )
 }

@@ -486,6 +486,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   const panel = dock.open && (
     <div
       ref={panelRef}
+      className="ag-nay-dock"
       role="dialog"
       aria-label="Nay"
       style={isMobile
@@ -513,7 +514,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           style={{ position: 'absolute', ...edgeX, ...edgeY, width: 12, height: 12, cursor: cornerCursor, zIndex: 3 }} />
       </>)}
 
-      <header style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      <header style={{ display: 'flex', flexWrap: panelSession ? 'nowrap' : 'wrap', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         {panelSession ? (<>
           <IconButton label={pt ? 'Voltar' : 'Back'} onClick={() => setDock(d => ({ ...d, panelSession: null }))} isMobile={isMobile}>
             <ArrowLeft size={15} />
@@ -546,22 +547,22 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           <img src={versionedAsset('/minimalistLogo.png')} alt="" style={{ width: 20, height: 20, borderRadius: 6, marginLeft: 4 }} />
           {/* The dock's own underline tabs (owner, 2026-10-05: restored — no pill behind them; the selected
               tab is orange text over an orange bar, exactly as before the shared strip replaced them). */}
-          <div role="tablist" aria-label={pt ? 'Painel da Nay' : 'Nay panel'} style={{ display: 'flex', flex: 1, minWidth: 0 }}>
+          <div role="tablist" aria-label={pt ? 'Painel da Nay' : 'Nay panel'} style={{ display: 'flex', flexWrap: 'wrap', flex: '1 1 100%', order: 1, minWidth: 0 }}>
             {DOCK_TABS.map(id => {
               const on = tab === id && !panelSession
               return (
                 <button key={id} type="button" role="tab" aria-selected={on} data-dock-tab={id}
                   onClick={() => { setTab(id); setDock(d => ({ ...d, panelSession: null })) }}
                   style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0,
-                    padding: isMobile ? '0 14px' : '6px 12px', minHeight: isMobile ? 44 : undefined,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '1 0 auto', gap: 5, minWidth: 44,
+                    padding: '6px 10px', minHeight: 44,
                     border: 'none', borderBottom: `2px solid ${on ? ORANGE : 'transparent'}`,
                     background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5,
                     fontWeight: on ? 700 : 500, color: on ? ORANGE : 'var(--text-secondary)',
                   }}
                 >
                   {id === 'vault' && <VaultGlyph size={13} />}
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
                     {id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : id === 'limits' ? (pt ? 'Limites' : 'Limits') : (pt ? 'Sessões' : 'Sessions')}
                   </span>
                 </button>
@@ -569,10 +570,12 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
             })}
           </div>
         </>)}
-        <DockSettings pt={pt} isMobile={isMobile} open={settingsOpen} onToggle={() => setSettingsOpen(o => !o)} />
-        <IconButton label={pt ? 'Fechar' : 'Close'} onClick={() => setDock(d => ({ ...d, open: false }))} isMobile={isMobile}>
-          <X size={15} />
-        </IconButton>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <DockSettings pt={pt} isMobile={isMobile} open={settingsOpen} onToggle={() => setSettingsOpen(o => !o)} />
+          <IconButton label={pt ? 'Fechar' : 'Close'} onClick={() => setDock(d => ({ ...d, open: false }))} isMobile={isMobile}>
+            <X size={15} />
+          </IconButton>
+        </div>
       </header>
 
       <div ref={setNoticeHost} data-nay-notice-host style={{ display: 'flex', flexDirection: 'column', flex: '0 1 auto', minHeight: 0, maxHeight: '50%' }} />
@@ -858,7 +861,7 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
       {launchLine && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, fontSize: 11.5, color: 'var(--text-tertiary)', minWidth: 0 }}>
           <span style={{ flexShrink: 0 }}>{pt ? 'Com' : 'With'}</span>
-          <span style={{ flex: 1, minWidth: 0, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{launchLine}</span>
+          <span style={{ flex: 1, minWidth: 0, color: 'var(--text-secondary)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{launchLine}</span>
           <button type="button" onClick={onTogglePicker} aria-expanded={pickerOpen} style={{
             flexShrink: 0, border: 'none', background: 'transparent', padding: isMobile ? '10px 4px' : '2px 4px', cursor: 'pointer',
             fontFamily: 'inherit', fontSize: 11.5, color: ORANGE, textDecoration: 'underline', textUnderlineOffset: 3,

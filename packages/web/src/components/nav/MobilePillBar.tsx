@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { followOffset, isDrag, restOffset, slotAt } from '../../lib/bottomNavDrag'
+import { SOLID_COUNT } from './countBadge'
 import { MOBILE_PILL_BAR_Z } from '../../lib/zLayers'
 
 /**
@@ -20,8 +21,14 @@ import { MOBILE_PILL_BAR_Z } from '../../lib/zLayers'
 export interface PillItem {
   key: string
   label: string
+  /** Richer label for the place pill (quiet area, bold page); `label` stays the plain text. */
+  content?: React.ReactNode
   icon: LucideIcon
   onActivate: () => void
+  ariaLabel?: string
+  expanded?: boolean
+  hasPopup?: 'dialog'
+  badge?: number
 }
 
 /** Gap between the indicator and the edges of its slot. */
@@ -34,8 +41,10 @@ function prefersReducedMotion(): boolean {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false }
 }
 
-export function MobilePillBar({ items, activeIndex, ariaLabel }: {
+export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' }: {
   items: PillItem[]
+  /** Place pill plus a round sessions shortcut, using the same drag gesture as the tab bar. */
+  variant?: 'tabs' | 'place'
   /** -1 when the current page is none of the items: the indicator is then not drawn at all. */
   activeIndex: number
   ariaLabel: string
@@ -61,8 +70,15 @@ export function MobilePillBar({ items, activeIndex, ariaLabel }: {
     return () => ro.disconnect()
   }, [])
 
+  const place = variant === 'place'
   const count = items.length
-  const localX = (clientX: number) => clientX - (trackRef.current?.getBoundingClientRect().left ?? 0)
+  const localX = (clientX: number) => {
+    const x = clientX - (trackRef.current?.getBoundingClientRect().left ?? 0)
+    // Convert the unequal place/round widths to the equal slots bottomNavDrag operates on.
+    if (!place || count < 2 || width <= 62) return x
+    const boundary = width - 57
+    return x < boundary ? x / boundary * (width / 2) : width / 2 + (x - boundary) / 57 * (width / 2)
+  }
   const hoverSlot = dragX !== null ? slotAt(dragX, width, count) : -1
   const litIndex = hoverSlot >= 0 ? hoverSlot : activeIndex
   const showIndicator = width > 0 && (dragX !== null || activeIndex >= 0)
@@ -119,6 +135,7 @@ export function MobilePillBar({ items, activeIndex, ariaLabel }: {
         boxShadow: '0 10px 30px rgba(0, 0, 0, 0.45)',
         padding: INSET,
         // The bar owns horizontal movement on it: without this a drag scrolls or zooms the page.
+        ...(place ? { background: 'transparent', border: 'none', boxShadow: 'none', padding: 0 } : {}),
         touchAction: 'none',
         userSelect: 'none',
         WebkitUserSelect: 'none',
@@ -132,9 +149,9 @@ export function MobilePillBar({ items, activeIndex, ariaLabel }: {
         onPointerUp={e => endPress(e, true)}
         onPointerCancel={e => endPress(e, false)}
         onClickCapture={e => { if (suppressClick.current) { e.preventDefault(); e.stopPropagation(); suppressClick.current = false } }}
-        style={{ position: 'relative', display: 'flex', height: '100%' }}
+        style={{ position: 'relative', display: 'flex', height: '100%', gap: place ? 10 : 0 }}
       >
-        {showIndicator && (
+        {!place && showIndicator && (
           <div
             aria-hidden
             style={{
@@ -162,7 +179,10 @@ export function MobilePillBar({ items, activeIndex, ariaLabel }: {
               key={item.key}
               type="button"
               onClick={item.onActivate}
-              aria-current={i === activeIndex ? 'page' : undefined}
+              aria-label={item.ariaLabel ?? (place && i === 1 ? item.label : undefined)}
+              aria-expanded={item.expanded}
+              aria-haspopup={item.hasPopup}
+              aria-current={item.expanded === undefined && i === activeIndex ? 'page' : undefined}
               style={{
                 position: 'relative', flex: 1, minWidth: 0, minHeight: 44,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -170,18 +190,30 @@ export function MobilePillBar({ items, activeIndex, ariaLabel }: {
                 color: lit ? ORANGE : IDLE, fontFamily: 'inherit', cursor: 'pointer',
                 fontSize: 10.5, fontWeight: lit ? 700 : 500,
                 transition: reduced.current ? 'none' : 'color 0.18s',
+                ...(place ? {
+                  flex: i === 0 ? 1 : '0 0 52px', minWidth: 44, height: 52, borderRadius: 999,
+                  flexDirection: 'row', gap: 8, padding: i === 0 ? '0 16px' : 0,
+                  background: 'rgba(17, 17, 24, 0.94)', border: '1px solid rgba(255, 255, 255, 0.12)',
+                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.45)', fontSize: 15, color: 'rgba(255,255,255,0.92)',
+                } : {}),
               }}
             >
-              <span style={{
+              {(!place || i === 1) && <span style={{
                 display: 'inline-flex',
                 transform: crossing ? 'translateY(-2px) scale(1.14)' : 'none',
                 transition: reduced.current ? 'none' : `transform 220ms ${SPRING}`,
               }}>
                 <Icon size={20} strokeWidth={lit ? 2.1 : 1.8} />
-              </span>
-              <span style={{ width: '100%', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {item.label}
-              </span>
+              </span>}
+              {(!place || i === 0) && <span style={{ width: place ? undefined : '100%', minWidth: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {place ? (item.content ?? item.label) : item.label}
+              </span>}
+              {place && i === 0 && <Icon size={16} strokeWidth={1.8} aria-hidden style={{ flexShrink: 0, opacity: 0.8 }} />}
+              {item.badge !== undefined && item.badge > 0 && <span data-area-badge style={{
+                position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, padding: '0 4px',
+                borderRadius: 9, ...SOLID_COUNT, fontSize: 11, fontWeight: 700,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}>{item.badge}</span>}
             </button>
           )
         })}

@@ -711,6 +711,8 @@ export interface PlanLimitsPayload {
   registered: { harness: HarnessId; account: string; plan: string }[]
   budgets: AccountBudgetRow[]
   hiddenFromAgents: AccountBudgetRow[]
+  /** Owner-only in-memory history, including accounts hidden from agents. Times are epoch ms. */
+  readings: { account: string; harness: HarnessId; points: { at: number; weekPct: number | null; fiveHourPct: number | null }[] }[]
   freeSlots: number
   freeSlotsByHarness: Partial<Record<HarnessId, number>>
   freeSlotsByAccount: Record<string, number>
@@ -834,6 +836,18 @@ export async function planLimitsPayload(
     return !!rx && !!ry && sameLogin(rx, ry)
   }
   const budgets = yieldStaleRows(visibleBudgets, sameAccount)
+  const readings: PlanLimitsPayload['readings'] = [...history.values()].flatMap(list => {
+    const last = list.at(-1)
+    if (!last) return []
+    return [{
+      account: last.account, harness: last.harness,
+      points: [...list].sort((a, b) => a.updatedAt - b.updatedAt).map(l => ({
+        at: l.updatedAt,
+        weekPct: l.windows.find(w => w.kind === 'week')?.usedPct ?? null,
+        fiveHourPct: l.windows.find(w => w.kind === '5h')?.usedPct ?? null,
+      })),
+    }]
+  })
   // Plans registered in Settings → Billing whose account has reported no window yet: listed by
   // name with NO meters (nothing observed is not nothing used). Hidden accounts are absent.
   const registered: PlanLimitsPayload['registered'] = []
@@ -870,7 +884,7 @@ export async function planLimitsPayload(
     return live.length > 0 && live.every(a => !a.available)
   }
   const publicHarnesses = Object.fromEntries(Object.entries(spawnability).filter(([h]) => !hiddenOutright(h as HarnessId))) as Partial<Record<HarnessId, HarnessSpawnability>>
-  return { harnesses: publicHarnesses, limits, registered, budgets, hiddenFromAgents, freeSlots, freeSlotsByHarness, freeSlotsByAccount, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
+  return { harnesses: publicHarnesses, limits, registered, budgets, hiddenFromAgents, readings, freeSlots, freeSlotsByHarness, freeSlotsByAccount, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }
 
 /** Tests only. */

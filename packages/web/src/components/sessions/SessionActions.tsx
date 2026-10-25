@@ -144,6 +144,9 @@ export function SessionActions({
 
   async function run(action: FleetActionId, text?: string) {
     setBusy(true)
+    // ENDING shows its own state on the session view (`SessionEnding`), so the question and the menu
+    // step aside at once instead of sitting over it — on a phone that is the drawer covering it.
+    if (action === 'kill') { setConfirming(false); setOpen(false) }
     const call = () => act({ id: row.id, action, ...(text !== undefined ? { text } : {}) })
     const out = await (action === 'resume' ? withReopening([row.id], call) : call())
     setBusy(false)
@@ -152,6 +155,8 @@ export function SessionActions({
     // harness that cannot resume by id answers with a sentence naming itself), because on success the
     // menu closes and an inline notice would go with it.
     if (action === 'terminal') pushNotification(terminalToast(out, lang))
+    // Each refused attempt needs feedback, even when its text matches a previously seen bell row.
+    if (action === 'kill' && !out.ok) pushNotification({ type: 'error', title: pt ? 'Encerrar sessão' : 'End session', message: out.message, meta: { notificationKey: `session-kill-refused:${row.id}:${crypto.randomUUID()}` } })
     if (!out.ok) { setConfirmingTerminal(false); return }
     setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingForget(false); setConfirmingTerminal(false); setOpen(false)
     // An archived or deleted session leaves the list exactly as an ended one does.

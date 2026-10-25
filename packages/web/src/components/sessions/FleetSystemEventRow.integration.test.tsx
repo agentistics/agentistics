@@ -10,6 +10,9 @@ const subscribe = (listener: () => void) => { listeners.add(listener); return ()
 type Sender = { id: string; conversationId: string; title: string; state: string }
 let snapshot: { fleet: { rows: Sender[] }; loading: boolean } = { fleet: { rows: [] }, loading: false }
 const loadClosedFleet = mock(() => {})
+// A module mock outlives its file: put the real fleet module back so later files do not read the fixture.
+const realFleetSnapshot = { ...realFleet }
+afterAll(() => { mock.module('../../lib/fleet', () => realFleetSnapshot) })
 mock.module('../../lib/fleet', () => ({
   ...realFleet,
   useFleet: () => useSyncExternalStore(subscribe, () => snapshot, () => snapshot),

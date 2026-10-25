@@ -1,4 +1,4 @@
-import { parseInjectedHeader, roleLine, unwrapAllPasted } from '@agentistics/core'
+import { parseInjectedHeader, roleLine, slashInvocation, unwrapAllPasted } from '@agentistics/core'
 
 /**
  * systemEvent.ts — PURE: recognise a message agentistics itself injected into a session.
@@ -13,7 +13,7 @@ import { parseInjectedHeader, roleLine, unwrapAllPasted } from '@agentistics/cor
  * so the header is no longer the first line. Whole-message wrappers are unwrapped before matching;
  * a wrapper the person really pasted around ordinary text still finds no header and stays theirs.
  */
-export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin' | 'role' | 'relay' | 'notice' | 'session-note'
+export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin' | 'role' | 'rename' | 'relay' | 'notice' | 'session-note'
 
 export interface SystemEvent {
   kind: SystemEventKind
@@ -32,6 +32,10 @@ export function parseSystemEvent(raw: string): SystemEvent | null {
   const text = unwrapAllPasted(raw)
   const h = parseInjectedHeader(raw)
   if (!h) {
+    const invocation = slashInvocation(text)
+    if (invocation?.command === '/rename' && invocation.args && !/[\r\n]/.test(invocation.args)) {
+      return { kind: 'rename', body: invocation.args }
+    }
     // Match the entire historical producer output, never a mention of its marker in typed prose.
     if ((['leader', 'worker', null] as const).some(role =>
       text.trim() === `[agentistics] your role is now ${role ? role.toUpperCase() : 'AUTO'} — ${roleLine(role)}`,
@@ -71,6 +75,7 @@ export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): stri
   const title = systemEventTitle(who)
   const suffix = title ? ` · ${title}` : ''
   switch (e.kind) {
+    case 'rename': return pt ? `Sessão renomeada para “${e.body}”` : `Session renamed to “${e.body}”`
     case 'role': return pt ? 'Papel da sessão atualizado' : 'Session role updated'
     case 'checkin': return pt ? 'Check-in da liderança · sistema' : 'Leadership check-in · system'
     case 'away-off': return pt ? 'Modo ausente desligado nesta sessão' : 'Away mode turned off for this session'

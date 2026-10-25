@@ -112,6 +112,37 @@ describe('switchSessionAccountImpl', () => {
     expect(out).toMatchObject({ ok: false })
     expect(w.resumed).toHaveLength(2)
     expect(out.message).toContain('Reopen')
+    // The session WAS ended, the person is told so plainly, and the UI gets the row to reopen.
+    expect(out.message).toContain('was ended')
+    expect(out.message).not.toMatch(/nothing (was ended|changed)/i)
+    expect(out).toMatchObject({ ended: true, endedId: 'm1' })
+    expect(w.live()).toEqual([])
+  })
+
+  test('the double failure speaks Portuguese too, and a single failure carries no ended flag', async () => {
+    const w = world({ refuseAll: true })
+    const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, { ...w.deps, lang: 'pt' })
+    expect(out.message).toContain('foi encerrada')
+    expect(out.message).toContain('Reabrir')
+    expect(out).toMatchObject({ ended: true, endedId: 'm1' })
+    const soft = world({ refuseTarget: true })
+    const back = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, soft.deps)
+    expect(back.ended).toBeUndefined()
+    expect(back.message).toContain('continues on its previous account')
+  })
+
+  test('text audit: "nothing was ended / nada foi encerrado" appears only on refusals that end nothing', async () => {
+    for (const lang of ['en', 'pt'] as const) {
+      const w = world({ transcript: false })
+      const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, { ...w.deps, lang })
+      expect(out.message).toMatch(/nothing was ended|nada foi encerrado/i)
+      expect(w.killed).toEqual([])
+      // Once the kill has happened no result may claim otherwise.
+      const after = world({ refuseAll: true })
+      const lost = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, { ...after.deps, lang })
+      expect(after.killed).toEqual(['m1'])
+      expect(lost.message).not.toMatch(/nothing was ended|nada foi encerrado|nothing changed|nada mudou/i)
+    }
   })
 
   test('refusals end nothing', async () => {
@@ -168,7 +199,7 @@ describe('switchSessionAccountImpl — another harness (v2 hand-off)', () => {
         limit: async () => ({ pendingPrompt: 'fix the CSV header' }),
         killAndRetire: async (id, kill) => { order.push(`retire:${id}`); return kill() },
         startable: async () => (opts.installed ?? ['claude', 'codex']) as never,
-        turns: async () => ({ turns: [{ role: 'user', text: 'Add export' }, { role: 'assistant', text: 'Done; tests next.' }] }),
+        turns: async () => ({ turns: [{ role: 'user', text: 'Add export' }, { role: 'assistant', text: 'Done; tests next.' }, { role: 'assistant', text: "You've hit your session limit · resets 6:30pm" }] }),
         role: async () => 'worker',
         label: async () => 'a@x',
         link: async (a, b) => { links.push(`${a}->${b}`) },
@@ -188,6 +219,8 @@ describe('switchSessionAccountImpl — another harness (v2 hand-off)', () => {
     })
     expect(w.spawned[0]!.prompt).toContain('Claude Code (account a@x)')
     expect(w.spawned[0]!.prompt).toContain('Add export')
+    expect(w.spawned[0]!.prompt).toContain('## State (last assistant reply)\nDone; tests next.')
+    expect(w.spawned[0]!.prompt).not.toContain("You've hit your session limit")
     expect(w.spawned[0]!.prompt!.endsWith('fix the CSV header')).toBe(true)
     expect(w.links).toEqual(['m1->m9'])
     expect([...w.alive]).toEqual(['m9'])

@@ -5,6 +5,7 @@
  * session's own chat channel. A5.4's ACP scenarios stay in `acp-backend.test.ts`, run through this module.
  */
 import { describe, expect, test } from 'bun:test'
+import { featureOn } from '@agentistics/core'
 import type {
   EngineAcp, EngineStructured, HarnessChatDelta, HarnessId, StructuredAnswer, StructuredAttention,
   StructuredDeclaration, StructuredExit, StructuredSession, StructuredSpawn,
@@ -190,6 +191,31 @@ describe('structuredRegistry / stubDriver / answerFits (engine-api, pure)', () =
 })
 
 describe('withStructured — routing', () => {
+  for (const origin of ['background', 'web'] as const) for (const raw of ['0', undefined]) {
+    test(`${origin}: AGENTISTICS_ADAPTER_CHAT=${raw ?? 'unset'} uses the shared feature decision`, async () => {
+      const base = fakeBase()
+      const eng = fakeEngine()
+      const env = { AGENTISTICS_ADAPTER_CHAT: raw }
+      let asked = 0
+      const b = withStructured(base, provider(eng.reg, {
+        flagOn: () => featureOn('adapter-chat', env),
+        structured: async () => { asked++; return eng.reg },
+      }))
+      const req = web('gemini')
+      req.structured = { ...req.structured!, origin }
+      await b.spawn(req)
+      if (raw === '0') {
+        expect(base.calls).toEqual([['spawn', req]])
+        expect(asked).toBe(0)
+        expect(eng.started).toEqual([])
+      } else {
+        expect(base.calls).toEqual([])
+        expect(eng.started).toHaveLength(1)
+      }
+      await b.kill(req.id)
+    })
+  }
+
   for (const origin of ['background', 'terminal', 'web'] as const) {
     test(`flag ON + ${origin} origin: ${origin === 'terminal' ? 'tmux' : 'structured driver'}`, async () => {
       const base = fakeBase()

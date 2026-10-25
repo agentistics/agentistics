@@ -58,6 +58,7 @@ export function TokenStatCard({
 
   return (
     <div
+      className="ag-stat-card"
       style={{
         background: 'var(--bg-card)',
         border: '1px solid var(--border)',

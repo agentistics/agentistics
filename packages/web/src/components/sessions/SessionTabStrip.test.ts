@@ -47,3 +47,14 @@ test('rounded tabs in a segmented track, no full pill', () => {
   expect(src).toContain('borderRadius: 10')
   expect(src).not.toContain('borderRadius: 999')
 })
+
+test('the row the top bar reserves is the strip\'s own height, built from the terms the strip draws with', async () => {
+  const { TAB_STRIP_H, TAB_H, TABLIST_PAD, TABLIST_BORDER, TABLIST_MARGIN_Y, STRIP_HAIRLINE } = await import('./SessionTabStrip')
+  expect(TAB_STRIP_H).toBe(TAB_H + 2 * (TABLIST_PAD + TABLIST_BORDER + TABLIST_MARGIN_Y) + STRIP_HAIRLINE)
+  expect(TAB_STRIP_H).toBe(47)
+})
+
+test('App reserves exactly that, never a typed number (a short row let the strip cross the title divider)', () => {
+  const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8')
+  expect(app).toMatch(/const TABS_ROW_H = TAB_STRIP_H\b/)
+})

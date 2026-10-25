@@ -69,7 +69,8 @@ const REAL_IO: SwitchIo = {
   link: async (oldId, newId) => (await import('./handoff-relay-io')).recordHandoffLink(oldId, newId, undefined),
 }
 
-export type SwitchResult = SpawnSessionResult & { code?: SwitchRefusal; status?: number }
+/** `ended` + `endedId`: the session WAS ended and could not be given back — the UI offers Reopen on that row. */
+export type SwitchResult = SpawnSessionResult & { code?: SwitchRefusal; status?: number; ended?: boolean; endedId?: string }
 
 function refuse(reason: SwitchRefusal, detail: string, lang: 'en' | 'pt'): SwitchResult {
   return {
@@ -140,7 +141,7 @@ export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: 
       const back = await deps.resume(base).catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }) as SpawnSessionResult)
       if (back.ok) return { ...back, ok: false, message: why }
       console.error(`[account-switch] ${row.id}: reopening on the previous account failed too: ${back.message}`)
-      return { ok: false, message: switchLostMessage(lang) }
+      return { ok: false, message: switchLostMessage(lang), ended: true, endedId: row.id }
     }
     try {
       await io.copy(copies)
@@ -189,7 +190,7 @@ async function crossHarnessSwitch(row: ManagedSession, req: SwitchAccountRequest
   const turns = await io.turns(row).catch(e => ({ unavailable: e instanceof Error ? e.message : String(e) }))
   const fromAccount = await io.label(harness, row.accountId).catch(() => undefined)
   const prompt = crossSwitchPrompt({
-    lang, fromHarness: HARNESS_LABELS[harness] ?? harness, ...(fromAccount ? { fromAccount } : {}),
+    lang, fromHarness: HARNESS_LABELS[harness] ?? harness, fromHarnessId: harness, ...(fromAccount ? { fromAccount } : {}),
     turns: 'unavailable' in turns ? turns : turns.turns, ...(pending ? { pending } : {}),
   })
   const role = await io.role([conv, row.id]).catch(() => undefined)

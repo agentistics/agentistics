@@ -448,3 +448,9 @@ checks process identities before signalling, and escalates surviving processes t
 kill confirmation logic. Neither operation needs the working directory or conversation to exist.
 
 The header leader meter reserves space for its reading so polling between numbers and no reading does not move adjacent actions. Attention uses a darker mix of existing theme tokens in light mode. Without a context reading, its details explain that estimates are pending and hide the comparison; handoff and reminder actions stay disabled until a reading arrives. The composer warning keeps the full current/cut count, while the meter shows the current count and its popover focuses on reply costs.
+
+Ending a session keeps “Encerrando…” / “Ending…”, its title and the aside status visible for at
+least 800 ms and until the fleet confirms it has left Active, whichever takes longer. Navigation
+waits for both, and the ending view remains visible until the route change commits. The conversation
+stays mounted with its composer hidden; a refused kill restores the draft immediately and each
+refused attempt reports a toast, including repeated identical refusals.

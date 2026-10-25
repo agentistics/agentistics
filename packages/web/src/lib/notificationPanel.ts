@@ -1,3 +1,19 @@
+import { useSyncExternalStore } from 'react'
+
+const panels = new Set<symbol>()
+const listeners = new Set<() => void>()
+const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
+
+/** Track every existing bell, including the toast host on routes without a header. */
+export function setNotificationPanelOpen(panel: symbol, open: boolean) {
+  if (open) panels.add(panel)
+  else panels.delete(panel)
+  for (const listener of listeners) listener()
+}
+export function useNotificationPanelOpen() {
+  return useSyncExternalStore(subscribe, () => panels.size > 0)
+}
+
 export interface NotificationPanelPlacement {
   left: number
   width: number

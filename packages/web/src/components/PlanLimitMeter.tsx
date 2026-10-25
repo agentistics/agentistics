@@ -40,8 +40,7 @@ export function PlanUsageRing({ pct, size = 36, stroke = 3, children }: { pct: n
   </span>
 }
 
-export function LimitLevelIcon({ pct, size = 16, lang = 'pt' }: { pct: number | null; size?: number; lang?: Lang }) {
-  const level = limitLevel(pct)
+export function LimitLevelIcon({ pct, size = 16, lang = 'pt', level = limitLevel(pct) }: { pct: number | null; size?: number; lang?: Lang; level?: ReturnType<typeof limitLevel> }) {
   if (level === 'ok') return null
   const critical = level === 'critical'
   return <svg aria-label={limitLevelWord(level, lang)} width={size} height={size} viewBox="0 0 20 20" role="img" style={{ color: critical ? 'var(--accent-red)' : 'var(--anthropic-orange)', flexShrink: 0 }}>
@@ -85,10 +84,10 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
   </>
 }
 
-export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen }: { onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang }) {
+export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen, embedded = false }: { onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang; /** Inside a card that already carries the title: fill its width, no own title or inset. */ embedded?: boolean }) {
   const rows = subscriptionRows(limits, registered, accountLabels)
-  return <div data-plan-usage-summary style={{ width: 344, padding: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span><span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
+  return <div data-plan-usage-summary style={{ width: '100%', maxWidth: embedded ? undefined : 344, boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>{!embedded && <>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span></>}<span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
     {rows.map((row, i) => <div key={`${row.harness}:${i}`} data-plan-row={row.harness} style={{ ...PLAN_ROW_GRID, padding: '8px 4px', borderTop: '1px solid var(--border)' }}>
       <PlanUsageRowCells harness={row.harness} name={subscriptionName(row.harness, row.accountLabel)} plan={row.plan} limits={row.limits} now={now} lang={lang} />
     </div>)}
@@ -105,10 +104,13 @@ function WindowRow({ w, now, lang, ring, forecast = true }: { w: PlanLimitWindow
   const f = forecast ? warnForecast(w, now) : null
   return <div data-plan-window={w.kind} style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
     <PlanUsageRing pct={pct} size={ring}>{renewed ? '–' : ring >= 44 ? `${Math.round(pct)}%` : Math.round(pct)}</PlanUsageRing>
-    <div style={{ minWidth: 0, flex: 1, fontSize: 12 }}>
+    <div style={{ minWidth: 0, flex: 1, fontSize: 12, lineHeight: 1.5 }}>
       <b style={{ display: 'block', whiteSpace: 'nowrap' }}>{renewed ? `${windowLabel(w.kind, lang)} · –` : `${windowLabel(w.kind, lang)} · ${Math.round(pct)}% ${pt ? 'usado' : 'used'}`}</b>
-      <span style={{ display: 'block', color: 'var(--text-secondary)' }}>{renewed ? '' : `${pt ? `restam ${100 - Math.round(pct)}%` : `${100 - Math.round(pct)}% left`} · `}{windowResetPhrase(w, now, lang)}</span>
-      {f && <span style={{ display: 'block', color: LIMIT_WARN, fontWeight: 600 }}>{forecastPhrase(f, now, lang)}</span>}
+      <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 5, color: 'var(--text-secondary)' }}>
+        {!renewed && <span style={{ whiteSpace: 'nowrap' }}>{pt ? `restam ${100 - Math.round(pct)}%` : `${100 - Math.round(pct)}% left`} ·</span>}
+        {windowResetPhrase(w, now, lang).split(/ (\((?:em|in) .+\))$/).filter(Boolean).map((part, i) => <span key={i} style={{ whiteSpace: renewed ? 'normal' : 'nowrap' }}>{part}</span>)}
+      </div>
+      {forecast && <span data-plan-forecast-slot style={{ display: 'block', minHeight: '1.5em', color: LIMIT_WARN, fontWeight: 600 }}>{f ? forecastPhrase(f, now, lang) : null}</span>}
     </div>
     <LimitLevelIcon pct={pct} lang={lang} />
   </div>
@@ -127,22 +129,23 @@ export function PlanSessionBlock({ limits, now, lang }: { limits: PlanLimits; no
  * The DETAILED card (Nay's Limits tab, mobile panel). `limits: null` is a registered plan that has
  * reported nothing yet: named, state "waiting for the first reading", NO ring and no zero.
  */
-export function PlanUsageCard({ limits, pending, accountLabel, now, lang }: { accountLabel?: string; limits: PlanLimits | null; pending?: { harness: PlanLimits['harness']; plan: string }; now: number; lang: Lang }) {
+export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedded = false, showPlan = true }: { showPlan?: boolean; embedded?: boolean; accountLabel?: string; limits: PlanLimits | null; pending?: { harness: PlanLimits['harness']; plan: string }; now: number; lang: Lang }) {
   const pt = lang === 'pt'
   const harness = limits?.harness ?? pending!.harness
   const plan = limits ? (limits.plan ?? limits.sourcePlan) : pending?.plan
   const worst = limits ? Math.max(...limits.windows.map(w => currentUsedPct(w, now)), 0) : null
-  const level = limitLevel(worst)
+  const early = limits?.windows.some(w => warnForecast(w, now) !== null) ?? false
+  const level = early && limitLevel(worst) === 'ok' ? 'attention' : limitLevel(worst)
   const state = limits ? limitLevelWord(level, lang) : (pt ? 'aguardando leitura' : 'waiting for the first reading')
   const stale = limits ? stalePhrase(limits, now, lang) : null
-  return <div data-plan-usage-card={harness} style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12, borderRadius: 12, background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+  return <div data-plan-usage-card={harness} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, padding: embedded ? 0 : 12, borderRadius: 12, background: 'var(--bg-card)', border: embedded ? undefined : '1px solid var(--border)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
       <HarnessMark harness={harness} size={24} />
-      <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 14 }}>{subscriptionName(harness, accountLabel)}</b><span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{plan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span></div>
-      <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', color: !limits ? 'var(--text-tertiary)' : level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} size={14} lang={lang} />{state}</span>
+      <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 14 }}>{subscriptionName(harness, accountLabel)}</b>{showPlan && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{plan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span>}</div>
+      <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', color: !limits ? 'var(--text-tertiary)' : level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} level={level} size={14} lang={lang} />{state}</span>
     </div>
     {limits && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{limits.windows.map(w => <div key={w.kind} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} lang={lang} ring={48} /></div>)}</div>}
-    {stale && <span style={{ fontSize: 11, color: 'var(--anthropic-orange)' }}>{stale}</span>}
+    <span style={{ minHeight: 14, fontSize: 11, color: stale ? LIMIT_WARN : 'var(--text-tertiary)' }}>{limits ? updatedPhrase(limits, now, lang) : null}</span>
   </div>
 }
 

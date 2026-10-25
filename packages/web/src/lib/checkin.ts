@@ -135,3 +135,29 @@ export function useCheckin(sessionId: string | undefined): {
   }, [sessionId])
   return { state, update, runNow }
 }
+
+/** Latest rounds for every leader, read from the same store as the session check-in panel. */
+export function useCheckinReports(enabled = true) {
+  const [reports, setReports] = useState<CheckinState[] | null>(null)
+  const [error, setError] = useState(false)
+  useEffect(() => {
+    if (!enabled) return
+    let active = true
+    let generation = 0
+    const load = async () => {
+      const current = ++generation
+      try {
+        const response = await fetch('/api/checkin')
+        if (!response.ok) throw new Error('load failed')
+        const body = await response.json() as CheckinState[]
+        if (!Array.isArray(body)) throw new Error('invalid reports')
+        if (active && current === generation) { setReports(body); setError(false) }
+      } catch { if (active && current === generation) setError(true) }
+    }
+    void load()
+    const off = subscribeEvent('checkin', () => { void load() })
+    const offConnected = subscribeEvent('connected', () => { void load() })
+    return () => { active = false; off(); offConnected() }
+  }, [enabled])
+  return { reports, error }
+}

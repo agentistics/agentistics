@@ -3,7 +3,7 @@ import { CheckinConfigControls } from '../../components/sessions/CheckinConfigCo
 import { buildCheckinPatch, checkinDefaults, saveCheckinDefaults, type CheckinConfig } from '../../lib/checkin'
 import { SectionHeader } from './primitives'
 
-export default function CheckinDefaultsSection({ pt, isMobile }: { pt: boolean; isMobile: boolean }) {
+export default function CheckinDefaultsSection({ pt, isMobile, embedded = false }: { pt: boolean; isMobile: boolean; embedded?: boolean }) {
   const [config, setConfig] = useState<CheckinConfig>(() => checkinDefaults())
   const [loaded, setLoaded] = useState(false)
   const [counts, setCounts] = useState<{ following: number; adjusted: number } | null>(null)
@@ -37,8 +37,8 @@ export default function CheckinDefaultsSection({ pt, isMobile }: { pt: boolean; 
   }
 
   return <section data-testid="checkin-defaults-section">
-    <SectionHeader label={pt ? 'Check-in dos líderes' : 'Leader check-ins'} />
-    <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '0 0 14px' }}>
+    {!embedded && <SectionHeader label={pt ? 'Check-in dos líderes' : 'Leader check-ins'} />}
+    <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.55, margin: '0 0 14px' }}>
       {pt ? 'Líderes sem ajuste individual seguem este padrão, inclusive quando ele muda. Sessões que você ajustou mantêm suas escolhas.'
         : 'Leaders without an individual adjustment follow these defaults as they change. Sessions you adjusted keep their choices.'}
     </p>

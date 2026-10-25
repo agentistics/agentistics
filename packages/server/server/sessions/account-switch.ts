@@ -24,6 +24,7 @@
  */
 import { join, relative, isAbsolute, dirname, basename } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
+import { limitRuleFor } from './limit'
 import {
   decideSpawnAccount, decideRecordedAccount, type SpawnAccountContext, type SpawnAccountRefusal, type SpawnAccountRow,
 } from './spawn-account'
@@ -261,6 +262,7 @@ const clip = (s: string, n: number): string => {
 export function crossSwitchPrompt(o: {
   lang: 'en' | 'pt'
   fromHarness: string
+  fromHarnessId: HarnessId
   fromAccount?: string
   turns: readonly SummaryTurn[] | { unavailable: string }
   pending?: string
@@ -274,7 +276,11 @@ export function crossSwitchPrompt(o: {
     out.push(pt ? `A conversa anterior não pôde ser lida (${o.turns.unavailable}). Estabeleça o estado pelo repositório (git status, git log) antes de agir.`
       : `The previous conversation could not be read (${o.turns.unavailable}). Establish the state from the repository (git status, git log) before acting.`)
   } else {
-    const turns = o.turns.filter(t => !t.composer && t.text.trim())
+    const rule = limitRuleFor(o.fromHarnessId)
+    // A refusal is the reason for switching, not the work's state. Filter before taking the
+    // recent window so repeated refusals cannot crowd out the last real replies.
+    const turns = o.turns.filter(t => !t.composer && t.text.trim()
+      && !(t.role === 'assistant' && rule?.banner.some(re => re.test(t.text))))
     const goal = turns.find(t => t.role === 'user')
     const state = [...turns].reverse().find(t => t.role === 'assistant')
     if (goal) out.push(`${pt ? '## Objetivo (primeira mensagem)' : '## Goal (first message)'}\n${clip(goal.text, SUMMARY_GOAL)}`)
@@ -288,7 +294,7 @@ export function crossSwitchPrompt(o: {
       const shown = files.slice(-SUMMARY_FILES)
       out.push(`${pt ? '## Arquivos tocados' : '## Files touched'}\n${shown.map(f => `- ${f}`).join('\n')}${files.length > shown.length ? `\n- … (+${files.length - shown.length})` : ''}`)
     }
-    if (!turns.length) out.push(pt ? 'A conversa anterior não tinha mensagens legíveis. Estabeleça o estado pelo repositório antes de agir.' : 'The previous conversation had no readable messages. Establish the state from the repository before acting.')
+    if (!state) out.push(pt ? 'Estabeleça o estado pelo repositório antes de agir.' : 'Establish the state from the repository before acting.')
   }
   out.push(o.pending
     ? `${pt ? '## Mensagem pendente — a anterior foi recusada; responda a ela agora' : '## Pending message — it was refused before; answer it now'}\n${o.pending}`
@@ -470,6 +476,9 @@ export const isCodexRolloutOf = (path: string, conversationId: string): boolean 
 /** Claude's sidecar directory sits beside the transcript, named after the conversation. */
 export const claudeSidecarOf = (transcript: string, conversationId: string): string => join(dirname(transcript), conversationId)
 
+/** The CLI's own "started <name> in the background" status line (EN/PT), which is not part of any reason. */
+const CLI_STARTED_TAIL = /[\s.…]*(?:\bstarted\s+[^.…!?]+?\s+in the background|(?<![^.…!?\s])[^.…!?]+?\s+iniciada em background)[.…\s]*$/i
+
 const DIED_AT_SPAWN = /^(the session exited as soon as it started|a sessão terminou assim que começou)\b/i
 
 /**
@@ -478,7 +487,7 @@ const DIED_AT_SPAWN = /^(the session exited as soon as it started|a sessão term
  * of its own; anything else keeps its words, capitalised and closed with a full stop.
  */
 export function startFailureSentence(message: string | undefined, lang: 'en' | 'pt'): string {
-  const m = (message ?? '').trim()
+  const m = (message ?? '').replace(CLI_STARTED_TAIL, '').trim()
   if (!m) return ''
   if (DIED_AT_SPAWN.test(m)) {
     return lang === 'pt'
@@ -498,9 +507,9 @@ export function switchFallbackMessage(reason: string | undefined, lang: 'en' | '
   return why ? `${head} ${why}` : head
 }
 
-/** Neither the new account nor the old one could start: the conversation is intact, the pane is not. */
+/** Neither the new account nor the old one could start: the session WAS ENDED, the conversation is intact. */
 export function switchLostMessage(lang: 'en' | 'pt'): string {
   return lang === 'pt'
-    ? 'A sessão não iniciou na outra conta nem pôde ser reaberta na conta de antes. A conversa está guardada: use Reabrir.'
-    : 'The session did not start on the other account and could not be reopened on its previous account. The conversation is kept: use Reopen.'
+    ? 'A sessão foi encerrada: ela não iniciou na outra conta nem pôde ser reaberta na conta de antes. A conversa está guardada — use Reabrir.'
+    : 'The session was ended: it did not start on the other account and could not be reopened on its previous account. The conversation is kept — use Reopen.'
 }

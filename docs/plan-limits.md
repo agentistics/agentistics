@@ -121,6 +121,40 @@ follows the reopened session, replacing its tab when needed and keeping the othe
 Tab reaches both actions in the footer popover; clicking Switch closes that popover first.
 Escape dismisses the account dialog before any underlying Plan usage modal.
 
+## Usage area
+
+The Usage area reads the same plan-limit store as the composer and Nay. `/usage` shows one card
+per account (including registered accounts awaiting a reading), ordered by the surface harness
+registry and account label. Accounts excluded from agent routing remain visible to the owner.
+Capacity without a measured rate is described as unmeasured; it does not become a zero.
+Harnesses without subscription plans have registration links to Settings → Billing. The native
+runtime uses provider billing rather than subscription plans and is excluded from that list.
+
+`/usage/plan` accepts a positive number of hours, defaulting to four, and uses the shared
+`planSessions` helper for sustainable parallel capacity and pause times. `/usage/limits` renders
+the same `NayLimitsTab` as the usage modal. `/usage/history` shows account readings for the weekly
+and five-hour windows and states that history begins when the server starts. History is held in
+memory; these pages add no persistence or polling loop.
+
+Expected usage is a straight line from zero at the current window's start to 100% at renewal.
+Actual percentages retain their measured values on the same percentage scale, without independent
+normalization. Without a renewal time, no expected line is invented. Agora compares the current
+weekly window; history retains older observed readings, with the expected line limited to the
+current known window.
+
+### Usage area presentation
+
+Usage › Now and Plan use the same measured-capacity test (`freeSlotsMeasured` and a finite,
+positive burn rate). When the last live session leaves the fleet, Plan retains the server's
+`suggestedParallel` recommendation. Unknown capacity is described as unmeasured.
+
+Now omits the recent burn/ideal pair because the account status also considers the weekly
+budget; equal recent rates can coexist with an over-budget week. Its weekly expected tile and
+status remain visible. Current account readings and historical samples have separate lifetimes:
+the charts describe history recorded since server startup, rather than implying no current
+reading exists. Limits show the update age per account, from that account's `updatedAt`, without
+a competing modal-wide age.
+
 ## Adding a login in Billing (experimental `multi-account`)
 
 Settings → Billing → **Add account** opens a link/code dialog. The owner opens the link in their
