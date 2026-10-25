@@ -1034,7 +1034,7 @@ export function createSessionsPoller(o: {
       // Decided against the BACKEND's own list rather than the reconciled statuses, because that is
       // the question: a row the backend has never heard of is one the machine took.
       const backendIds = new Set(backendSessions.map(b => b.id))
-      const fell = planCrashGroup({ entries: registry, backendIds })
+      const fell = planCrashGroup({ entries: registry, backendIds, now: nowMs })
 
       const canReadProc = await procAvailable()
       const sessionHardware = new Map<string, { pid?: number; cpuPercent?: number | null; rssBytes?: number | null }>()

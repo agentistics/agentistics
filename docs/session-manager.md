@@ -10,6 +10,13 @@ before dropping their records, and boot consumes relay-recorded exits before dis
 A confirmed session kill records the decision before removing its pane (a refused kill restores
 the previous value). None of these rules depends on the harness or on leader/worker role.
 
+Only the latest crash group with heartbeat evidence from the last 24 hours is announced as
+“sessions that fell”. Older losses remain in Ended and can still be reopened individually.
+Ended row menus omit End session, including lost rows whose end time comes from their last
+heartbeat; a running pane with unread activity keeps its stop action. Dismissing the recovery
+notice persists across reloads and stays dismissed while only those same fallen IDs remain.
+A new fallen ID makes the notice visible again.
+
 The poller must observe a tmux command's exit while its dead pane still exists. If the command ends
 while the application server is stopped and the tmux backend then disappears before the next poll,
 there is no durable termination evidence to distinguish it from a session lost in a reboot.
