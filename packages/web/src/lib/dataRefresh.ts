@@ -1,6 +1,7 @@
 /** The app owns freshness: events stay connected; polling is a visible-tab fallback. */
 export const WORKING_REFRESH_MS = 10_000
 export const IDLE_REFRESH_MS = 60_000
+type RefreshTimer = ReturnType<typeof setTimeout> | number
 
 export function startDataRefresh(o: {
   working: boolean
@@ -9,10 +10,15 @@ export function startDataRefresh(o: {
   refresh: () => void
   healthy: () => boolean
   pause: () => void
-  timers?: { set: typeof setTimeout; clear: typeof clearTimeout }
+  timers?: { set: (fn: () => void, ms: number) => RefreshTimer; clear: (id: RefreshTimer) => void }
 }): () => void {
-  const timers = o.timers ?? { set: setTimeout, clear: clearTimeout }
-  let timer: ReturnType<typeof setTimeout> | undefined
+  // Browser timers require the Window/global receiver. Storing them directly here invokes them
+  // with `this === timers`, which throws Illegal invocation in a real browser.
+  const timers = o.timers ?? {
+    set: (fn: () => void, ms: number) => setTimeout(fn, ms),
+    clear: (id: RefreshTimer) => clearTimeout(id),
+  }
+  let timer: RefreshTimer | undefined
   const clear = () => { if (timer !== undefined) timers.clear(timer); timer = undefined }
   const arm = () => {
     clear()

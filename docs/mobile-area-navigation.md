@@ -31,6 +31,8 @@ Hidden tabs pause fallback reads and load retries. Focus or visibility return re
 immediately, while respecting the update finale's existing deferral of heavy payloads. Legacy
 `liveUpdates` and `updateInterval` values are ignored. The retired `/settings/live` URL redirects to
 Preferences.
+Default timer adapters call browser timers through wrappers; storing native timer functions directly
+on an adapter object gives them a foreign receiver and can crash the browser with Illegal invocation.
 
 Leaders, Check-ins, Hand-offs and Away mode are subpages of Sessions, retaining their `/leadership`
 URLs. The central Home tab returns these document pages to the session list.
