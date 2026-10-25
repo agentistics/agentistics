@@ -501,9 +501,9 @@ export function switchFallbackMessage(reason: string | undefined, lang: 'en' | '
   return why ? `${head} ${why}` : head
 }
 
-/** Neither the new account nor the old one could start: the conversation is intact, the pane is not. */
+/** Neither the new account nor the old one could start: the session WAS ENDED, the conversation is intact. */
 export function switchLostMessage(lang: 'en' | 'pt'): string {
   return lang === 'pt'
-    ? 'A sessão não iniciou na outra conta nem pôde ser reaberta na conta de antes. A conversa está guardada: use Reabrir.'
-    : 'The session did not start on the other account and could not be reopened on its previous account. The conversation is kept: use Reopen.'
+    ? 'A sessão foi encerrada: ela não iniciou na outra conta nem pôde ser reaberta na conta de antes. A conversa está guardada — use Reabrir.'
+    : 'The session was ended: it did not start on the other account and could not be reopened on its previous account. The conversation is kept — use Reopen.'
 }

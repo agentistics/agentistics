@@ -1744,7 +1744,7 @@ export interface ControlHost {
    * harness. The transcript is copied (never moved) into the target account's root first; the new row
    * inherits the old one's identity exactly as a reopen does. See `account-switch.ts`.
    */
-  switchSessionAccount?(req: SwitchAccountRequest): Promise<SpawnSessionResult & { code?: string }>
+  switchSessionAccount?(req: SwitchAccountRequest): Promise<SpawnSessionResult & { code?: string; ended?: boolean; endedId?: string }>
 
   /**
    * Reopen every session of one task, in the background.

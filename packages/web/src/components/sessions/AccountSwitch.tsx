@@ -21,6 +21,8 @@ import {
   canSwitch, fetchSwitchInfo, harnessName, noticeTitle, postSwitch, resetPhrase, showLimitNotice, type SwitchInfo,
 } from '../../lib/accountSwitch'
 import { pushNotification } from '../../lib/notifications'
+import { reopenSession } from '../../lib/reopeningStore'
+import { useFleet } from '../../lib/fleet'
 import './handoffWarning.css'
 
 /** How often an open session asks whether its last turn hit a limit. A transcript tail read. */
@@ -69,13 +71,16 @@ function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
   const [resend, setResend] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Set when the switch failed twice: the session WAS ended, and this is the row Reopen brings back.
+  const [endedId, setEndedId] = useState<string | null>(null)
+  const { act } = useFleet(pt ? 'pt' : 'en', false)
   // Reset on OPEN and when the set of pickable rows really changes — never on a poll that returns the
   // same list as a new array, or the person's pick snaps back to the default while they are choosing.
   const pickable = rows.filter(r => r.kind === 'option').map(r => r.key)
   const optionsKey = pickable.join(',')
   useEffect(() => {
     if (!open) return
-    setResend(true); setError(null); setBusy(false)
+    setResend(true); setError(null); setEndedId(null); setBusy(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
   useEffect(() => {
@@ -96,7 +101,7 @@ function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
         : `The session is ended and the same conversation continues on ${accountDisplayName(chosen.harness, chosen.id, chosen.label, {})}. The conversation is copied, not moved: the history on the current account stays there.`)
   async function confirm() {
     if (!chosen) return
-    setBusy(true); setError(null)
+    setBusy(true); setError(null); setEndedId(null)
     const out = await postSwitch(sessionId, chosen.id, !!pending && resend, lang, handoff ? chosen.harness : undefined)
     setBusy(false)
     if (!out.ok) {
@@ -107,15 +112,26 @@ function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
         return
       }
       setError(out.message)
+      if (out.ended && out.endedId) setEndedId(out.endedId)
       return
     }
     pushNotification({ type: 'success', title: handoff ? (pt ? 'Continuado em outro assistente' : 'Continued on another assistant') : (pt ? 'Conta trocada' : 'Account switched'), message: out.message })
     onDone(out.id)
   }
+  // The SAME reopen the ended-row menu runs (`reopenSession`): it mints the new row and we follow it.
+  async function reopen() {
+    if (!endedId) return
+    setBusy(true)
+    const out = await reopenSession(endedId, act)
+    setBusy(false)
+    if (!out.ok) { setError(out.message); return }
+    setEndedId(null)
+    onDone(out.id)
+  }
   const confirmLabel = busy
     ? (handoff ? (pt ? 'Iniciando…' : 'Starting…') : (pt ? 'Trocando…' : 'Switching…'))
     : (handoff ? (pt ? `Continuar em ${harnessName(chosen?.harness)}` : `Continue on ${harnessName(chosen?.harness)}`) : (pt ? 'Confirmar troca' : 'Confirm switch'))
-  return { rows, plan, pick, setPick, chosen, handoff, message, pending, resend, setResend, busy, error, confirm, confirmLabel }
+  return { rows, plan, pick, setPick, chosen, handoff, message, pending, resend, setResend, busy, error, endedId, reopen, confirm, confirmLabel }
 }
 
 type SwitchFlow = ReturnType<typeof useSwitchFlow>
@@ -171,6 +187,7 @@ export function AccountPicker({ flow, lang }: { flow: SwitchFlow; lang: string }
 /** What sits under the picker on both surfaces: the re-send choice and the server's refusal. */
 function SwitchExtras({ flow, lang }: { flow: SwitchFlow; lang: string }) {
   const pt = lang === 'pt'
+  const isMobile = useIsMobile()
   return <>
     {flow.pending && (
       <>
@@ -190,6 +207,12 @@ function SwitchExtras({ flow, lang }: { flow: SwitchFlow; lang: string }) {
       </p>
     )}
     {flow.error && <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--accent-red)', overflowWrap: 'anywhere' }}>{flow.error}</p>}
+    {flow.endedId && (
+      <button type="button" data-account-switch-reopen disabled={flow.busy} onClick={() => { void flow.reopen() }}
+        style={{ ...dialogButtonStyle('primary', isMobile, flow.busy), width: '100%', gap: 8 }}>
+        {flow.busy ? (pt ? 'Reabrindo…' : 'Reopening…') : (pt ? 'Reabrir' : 'Reopen')}
+      </button>
+    )}
   </>
 }
 

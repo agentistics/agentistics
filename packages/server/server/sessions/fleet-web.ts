@@ -32,7 +32,7 @@ import { conversationOfRow } from './row-conversation'
 import { attachmentMessageOf, recordAttachmentMessage } from './attachment-web'
 import { controlStrings } from '@agentistics/tui/control/i18n'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
-import type { ProjectSearchResult } from '@agentistics/tui/control'
+import type { ProjectSearchResult, SpawnSessionResult } from '@agentistics/tui/control'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import { fleetRow, type FleetActionRequest, type FleetRow } from './fleet-row'
 import { planFleetSpawn, type FleetSpawnBody } from './fleet-spawn'
@@ -60,6 +60,7 @@ import { handoffSessionLimit, artifactReplyCounts, readBilledReplies, refreshArt
 import type { SessionSnapshot } from './sessions-host'
 import type { ManagedSession } from './types'
 import { computeHandoffWhy, findHandoffFile, HANDOFF_RAMP_CALLS, hintCandidates, isLeaderRow, sendHandoffHints, type HandoffHintRow } from './handoff-hint'
+import { startFailureSentence } from './account-switch'
 
 // The REQUEST shape lives in the leaf `fleet-row.ts` so `index.ts` can name it without naming
 // this module — see the note there.
@@ -1405,9 +1406,15 @@ export async function runFleetSpawn(
   // F2.0: born in the browser — with `adapter-chat` on and a ready driver it runs structured.
   const out = await host.spawnSession({ ...decision.plan, origin: 'web' })
   if (out.ok) kickFleet()
+  return spawnResponse(out, lang)
+}
+
+/** The browser's answer for a finished spawn. Pure, so the wording rules are testable without a host. */
+export function spawnResponse(out: SpawnSessionResult, lang: CliLang): FleetSpawnResponse {
   return {
     ok: out.ok,
-    message: out.message,
+    // A refusal is a reason, never the CLI's "Started <name> in the background" status line that can ride on its tail.
+    message: out.ok ? out.message : startFailureSentence(out.message, lang === 'pt' ? 'pt' : 'en') || out.message,
     ...(out.id ? { id: out.id } : {}),
     // Flattened rather than nested — `out.admission` is `{code, refusal, message}` and this
     // response already carries its own `message`, so nesting it again would give the client two

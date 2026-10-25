@@ -30,6 +30,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Quando a troca de conta falha, a mensagem mostra só o motivo, sem o texto técnico do final.',
         en: 'When an account switch fails, the message shows only the reason, without the technical text at the end.',
       },
+      {
+        pt: 'Se a troca de conta falhar e a sessão não voltar na conta de antes, o aviso diz que ela foi encerrada e traz o botão Reabrir.',
+        en: 'If an account switch fails and the session does not come back on its previous account, the notice says it was ended and offers a Reopen button.',
+      },
     ],
   },
   '2.150.0': {
