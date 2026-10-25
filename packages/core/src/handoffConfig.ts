@@ -36,6 +36,14 @@ export interface HandoffProjection {
   fiveHourPct: number | null
   weekPct: number | null
 }
+export interface HandoffProgress {
+  stage: 'preparing' | 'successor-open' | 'taken-over' | 'closing'
+  successorId?: string
+  requestedAt?: string
+  deadlineAt?: string
+  /** Stage progress, 0..1; completion is the predecessor ending. */
+  progress: number
+}
 /** Unknown measurements remain null; all money is estimated API-equivalent USD. */
 export interface HandoffPanel {
   version: 1
@@ -59,4 +67,5 @@ export interface HandoffPanel {
   quotaUnavailableReason?: 'no-meter' | 'account-unknown' | 'missing-window'
   workInFlight: string[]
   handoffPath: string | null
+  handoff?: HandoffProgress
 }

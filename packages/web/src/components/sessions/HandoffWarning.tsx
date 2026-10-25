@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { Link } from 'react-router-dom'
+import { sessionPath } from '../../lib/sessionRoute'
+import { ProgressBar } from '../tasks/TaskProgressBar'
 import { createPortal } from 'react-dom'
 import { ArrowRightLeft, Crown, X } from 'lucide-react'
 import { fmtCost, type HandoffLevel, type HandoffPanel } from '@agentistics/core'
@@ -86,25 +89,37 @@ export function HandoffMeter({ id, pt, act }: { id: string; pt: boolean; act: Se
   const collapsed = state.collapsed && (p.level === 'due' || p.level === 'overdue') && p.config.warnings[p.level]
   return <>
     <LeaderMeterButton panel={p} pt={pt} buttonRef={anchor} onClick={() => collapsed ? actions.expand(id) : actions.open(id)} />
-    {state.popover && createPortal(<div className="handoff-popover" role="status" style={{ top: position.top, left: position.left, '--handoff-tone': LEADER_METER_TONE[leaderMeterState(p.level, p.contextTokens)] } as CSSProperties}>
+    {state.popover && !p.handoff && createPortal(<div className="handoff-popover" role="status" style={{ top: position.top, left: position.left, '--handoff-tone': LEADER_METER_TONE[leaderMeterState(p.level, p.contextTokens)] } as CSSProperties}>
       <strong>{handoffPanelLabel(p, pt)}</strong>
       <HandoffPopoverCopy panel={p} pt={pt} />
       <div className="handoff-actions"><button type="button" className="primary" onClick={() => actions.open(id)}>{pt ? 'Ver as contas' : 'See the numbers'}</button><button type="button" onClick={closePopover}>Ok</button></div>
     </div>, document.body)}
-    <HandoffLivePanel panel={p} open={state.open} pt={pt} act={act} />
+    <HandoffLivePanel panel={p} open={state.open && !p.handoff} pt={pt} act={act} />
   </>
 }
 
 export function HandoffBand({ id, pt }: { id: string; pt: boolean }) {
   const state = useHandoffPanel(id)
   const p = state.panel
+  return <HandoffBandView id={id} panel={p} collapsed={state.collapsed} pt={pt} />
+}
+
+export function HandoffBandView({ id, panel: p, collapsed = false, pt }: { id: string; panel: HandoffPanel | null; collapsed?: boolean; pt: boolean }) {
   const enabled = !!p && p.contextTokens !== null && (p.level === 'due' || p.level === 'overdue') && p.config.warnings[p.level]
-  const visible = enabled && !state.collapsed
+  const visible = !!p?.handoff || (enabled && !collapsed)
   const ratio = p && p.nextReplyUSD !== null && p.successorReplyUSD !== null && p.successorReplyUSD > 0 ? p.nextReplyUSD / p.successorReplyUSD : null
   return <div className={`handoff-band-wrap ${visible ? 'visible' : ''}`} inert={!visible} aria-hidden={!visible}>
-    <div className="handoff-band-clip"><div className="handoff-band" style={{ '--handoff-tone': tones[p?.level ?? 'due'] } as CSSProperties}>
-      <div className="handoff-band-copy"><strong>{p?.level === 'overdue' ? (pt ? 'Passou do ponto de passar o líder' : 'Leader handoff is overdue') : (pt ? 'Hora de passar o líder' : 'Time to hand off the leader')}</strong><span>{tokens(p?.contextTokens ?? null, pt)} {pt ? 'de' : 'of'} {tokens(p?.cutTokens ?? null, pt)}{ratio !== null ? (pt ? ` · cada resposta custa ~${ratio.toLocaleString(pt ? 'pt-BR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}× uma sessão nova` : ` · each reply costs ~${ratio.toLocaleString(pt ? 'pt-BR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}× a new session`) : ''}</span></div>
+    <div className="handoff-band-clip"><div className="handoff-band" style={{ '--handoff-tone': p?.handoff ? 'var(--anthropic-orange)' : tones[p?.level ?? 'due'] } as CSSProperties}>
+      {p?.handoff ? <>
+        <div className="handoff-band-copy" role="status">
+          <strong>{pt ? 'Passagem em andamento' : 'Handoff in progress'}</strong>
+          <span>{({ preparing: pt ? 'Preparando a passagem' : 'Preparing the handoff', 'successor-open': pt ? 'Sucessor aberto' : 'Successor opened', 'taken-over': pt ? 'Sucessor assumiu' : 'Successor took over', closing: pt ? 'Encerrando este líder' : 'Closing this leader' })[p.handoff.stage]}</span>
+          <div className="handoff-progress-track"><ProgressBar percent={p.handoff.progress * 100} label={pt ? 'Passagem em andamento' : 'Handoff in progress'} height={5} color="var(--handoff-tone)" /></div>
+        </div>
+        {p.handoff.successorId && <Link className="handoff-successor" to={sessionPath(p.handoff.successorId)}>{pt ? 'Ver sucessor' : 'View successor'}</Link>}
+      </> : <><div className="handoff-band-copy"><strong>{p?.level === 'overdue' ? (pt ? 'Passou do ponto de passar o líder' : 'Leader handoff is overdue') : (pt ? 'Hora de passar o líder' : 'Time to hand off the leader')}</strong><span>{tokens(p?.contextTokens ?? null, pt)} {pt ? 'de' : 'of'} {tokens(p?.cutTokens ?? null, pt)}{ratio !== null ? (pt ? ` · cada resposta custa ~${ratio.toLocaleString(pt ? 'pt-BR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}× uma sessão nova` : ` · each reply costs ~${ratio.toLocaleString(pt ? 'pt-BR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}× a new session`) : ''}</span></div>
       <div className="handoff-actions"><button type="button" onClick={() => actions.open(id)}>{pt ? 'Ver as contas' : 'See the numbers'}</button><button type="button" className="primary" onClick={() => { actions.open(id); window.dispatchEvent(new CustomEvent('agentistics:handoff-confirm', { detail: id })) }}>{pt ? 'Passar agora' : 'Hand off now'}</button><button type="button" className="icon" aria-label={pt ? 'Lembrar depois' : 'Remind me later'} onClick={() => actions.dismiss(id, true)}><X size={16} /></button></div>
+      </>}
     </div></div>
   </div>
 }
@@ -130,10 +145,11 @@ export function HandoffLivePanel({ panel: p, open, pt, act }: { panel: HandoffPa
     setSending(true); setError('')
     try {
       // Ask the existing leader to prepare its durable brief and use the verified --handoff flow.
-      const out = await act({ id: p.sessionId, action: 'prompt', text: pt
+      const out = await act({ id: p.sessionId, action: 'prompt', handoff: true, text: pt
         ? 'Quero passar a liderança agora. Prepare o arquivo durável de passagem com estado, decisões, sessões ativas e fila. Use o fluxo existente agentop session --handoff (handoff:true), preserve a configuração e diga ao sucessor para fechar este líder depois de assumir.'
         : 'Hand off leadership now. Prepare the durable handoff file with state, decisions, active sessions and queue. Use the existing agentop session --handoff (handoff:true) flow, preserve the configuration, and tell the successor to close this leader after taking over.' })
       if (!out.ok) { setError(out.message); return }
+      actions.requested(p.sessionId)
       actions.close(p.sessionId)
     } catch { setError(pt ? 'Não foi possível solicitar a passagem. Tente novamente.' : 'Could not request the handoff. Try again.') }
     finally { setSending(false) }

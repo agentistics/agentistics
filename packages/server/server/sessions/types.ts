@@ -357,6 +357,8 @@ export interface ManagedSession {
    * Absent = not away on its own.
    */
   away?: boolean
+  /** Last confirmed handoff prompt delivery (manual or automatic). */
+  handoffRequestedAt?: string
   /** Highest LEADER.HANDOFF.HINT level already delivered. */
   handoffHintLevel?: number
   /** Context size when the last hint went out; reminders come every +50k after it. */

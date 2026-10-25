@@ -26,14 +26,19 @@ async function refresh(id: string) {
     const panel = await res.json() as HandoffPanel
     if (controller.signal.aborted) return
     const previous = e.state.panel
-    const enabled = panel.level !== 'normal' && panel.config.warnings[panel.level]
+    const enabled = !panel.handoff && panel.level !== 'normal' && panel.config.warnings[panel.level]
     const changed = previous?.level !== panel.level
     const reminder = e.state.collapsed && handoffReminderDue(Date.now(), e.state.dismissAt, e.state.remindTokens, panel.contextTokens)
-    patch(id, { panel, ...(!enabled ? { popover: false } : changed ? { popover: true } : {}), ...(reminder ? { collapsed: false, remindTokens: null } : {}) })
+    patch(id, { panel, ...(!enabled ? { popover: false } : changed ? { popover: true } : {}), ...(reminder || (previous?.handoff && !panel.handoff) ? { collapsed: false, remindTokens: null } : {}) })
   } catch { /* keep the last measured reading during a transient poll failure */ }
   finally { e.loading = false }
 }
 export const handoffPanelActions = {
+  requested: (id: string) => {
+    const panel = entry(id).state.panel
+    if (panel) patch(id, { panel: { ...panel, handoff: { stage: 'preparing', requestedAt: new Date().toISOString(), progress: .1 } }, collapsed: false, popover: false })
+    void refresh(id)
+  },
   simulate: (id: string, extraPercent: number) => { entry(id).extraPercent = extraPercent; void refresh(id) },
   open: (id: string) => patch(id, { open: true, popover: false }),
   close: (id: string) => patch(id, { open: false }),

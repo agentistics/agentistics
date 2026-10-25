@@ -847,3 +847,17 @@ a shell that inherited the server's `SERVE_STATIC` variable. Each diagnostic key
 the process lifetime, including after a row is removed, so encountering more than 512 distinct
 collisions cannot make earlier warnings repeat. Only the pair's identifiers and source paths are
 retained, without transcript content; restarting the process resets the diagnostic history.
+
+
+Once an automatic handoff hint or a confirmed **Hand off now** prompt is delivered, the composer
+shows **Handoff in progress** instead of the context warning. Its progress track follows preparation,
+the successor opening, the successor taking over (a retire request), and the predecessor closing.
+During takeover, the track advances with time toward the retirement deadline; it stays below complete
+until the predecessor ends. **View successor** opens the linked session. Handoff and reminder buttons
+are hidden during this flow. An expired retire request or a stopped/missing successor restores the
+warning; a preparation request without a successor expires after 30 minutes.
+
+The optional `HandoffPanel.handoff` block carries the stage, successor, request/deadline timestamps,
+and progress fraction. `ManagedSession.handoffRequestedAt` records confirmed prompt delivery for both
+manual requests (`prompt` with `handoff: true`) and automatic hints. Failed deliveries do not start
+progress. Existing successor links and retire requests also supply progress for older sessions.
