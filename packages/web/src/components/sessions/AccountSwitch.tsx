@@ -191,14 +191,14 @@ function SwitchExtras({ flow, lang }: { flow: SwitchFlow; lang: string }) {
   const isMobile = useIsMobile()
   return <>
     {flow.pending && (
-      <>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
         <Checkbox checked={flow.resend} onChange={flow.setResend} label={pt ? 'Reenviar a última mensagem na nova conta' : 'Re-send the last message on the new account'} />
         {flow.resend && (
-          <blockquote style={{ margin: 0, padding: '6px 10px', borderLeft: '3px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, overflowWrap: 'anywhere' }}>
+          <blockquote style={{ alignSelf: 'stretch', margin: 0, padding: '6px 10px', borderLeft: '3px solid var(--border)', color: 'var(--text-secondary)', fontSize: 12, overflowWrap: 'anywhere' }}>
             {flow.pending}
           </blockquote>
         )}
-      </>
+      </div>
     )}
     {flow.busy && (
       <p role="status" data-account-switch-progress style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>
@@ -245,6 +245,7 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
       mobileSheet
       maxWidth={920}
       aside={<AccountPicker flow={flow} lang={lang} />}
+      focusPanel
     >
       <div data-account-switch style={{ display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0 }}>
         <SwitchExtras flow={flow} lang={lang} />
