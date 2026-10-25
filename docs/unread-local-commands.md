@@ -16,6 +16,12 @@ while those prompts still wait. This conservative rule applies to all slash invo
 driver, rather than the browser, knows which commands are local. Ordinary prompt reconciliation
 keeps its existing ordering and containment rules.
 
+The browser uses the same slash-invocation identification exported by `echoMatch` to display a
+confirmed `/rename <title>` as a compact system line in either language, across harnesses and both
+chat surfaces. A pending command keeps its delivery status until confirmation. Empty invocations,
+mentions in prose, other skills, and multiline prompts keep their ordinary message rendering.
+This presentation does not classify other commands as local or acknowledge their delivery.
+
 The engine change is supplied as `patches/unread-local-engine.patch`, against engine pin
 `dea9b9186e6a6fc892d0bc4c2a8dc49fbbf13c7c`. Apply it to the engine repository and update `engine.pin`
 to the resulting reviewed commit before releasing this fix. The patch is a hand-off artifact and
