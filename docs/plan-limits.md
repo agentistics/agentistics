@@ -176,6 +176,13 @@ to exclude the author's harness. If no route exists because plans are unregister
 yielded or excluded for QA, the router says no eligible plan, rather than claiming they are held.
 “All plans on hold” is reserved for actual hold rows and names the earliest account pause time.
 
+A low absolute percentage can still carry the tight warning early in a window. For example,
+4% weekly usage with 6.85 days left means only 3.6 hours have elapsed out of 168: the linear expected
+usage is 2.14%. At that window-average rate the remaining 96% lasts 86.4 hours, shorter than the
+164.4 hours to renewal. The warning is therefore tight, independently of the 5h percentage and of
+recent burn. Recent burn can simultaneously be under pace; that account remains routable. At the
+same 4% with 6.5 days left, the average forecast lasts through renewal and the budget is ok.
+
 Plan shows the server's suggested parallel cadence, including availability overrides, rather than
 recalculating it in the browser. The requested hours record the intended interval; recommendation
 remains sustainable through renewal, independent of that duration. Suggested cadence is 0 for

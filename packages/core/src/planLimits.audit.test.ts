@@ -78,11 +78,11 @@ describe('Usage audit: budgets, measurements and thresholds', () => {
 
 describe('Usage audit: tight is a warning, not a routing hold', () => {
   const rows = () => (['claude', 'codex'] as const).map((harness, i) => {
-    const l = limits(40, NOW + 160 * H, NOW, `${harness}-account`)
+    const l = limits(i === 0 ? 66 : 4, NOW + (i === 0 ? 4.55 : 6.85) * 24 * H, NOW, `${harness}-account`)
     l.harness = harness
     l.plan = 'Registered plan'
     l.windows.push({ kind: '5h', usedPct: i === 0 ? 72 : 27, resetsAt: NOW + 2 * H })
-    const history = [{ ...l, updatedAt: NOW - H, windows: l.windows.map(w => w.kind === 'week' ? { ...w, usedPct: 39.85 } : w) }]
+    const history = [{ ...l, updatedAt: NOW - 0.8 * H, windows: l.windows.map(w => w.kind === 'week' ? { ...w, usedPct: w.usedPct - (i === 0 ? 0.1 : 0.2) } : w) }]
     return { ...planBudget(l, NOW), ...planPace(l, NOW, history), account: l.account, spawnable: true }
   })
 
@@ -94,6 +94,7 @@ describe('Usage audit: tight is a warning, not a routing hold', () => {
       expect(r.harness).not.toBeNull()
       expect(r.cadence.parallel).toBe(2)
       expect(r.reason).not.toContain('all plans on hold')
+      expect(r.reason).toContain('Tight budget warning.')
       if (kind === 'qa') expect(r.harness).toBe('codex')
     })
   }
@@ -119,6 +120,22 @@ describe('Usage audit: tight is a warning, not a routing hold', () => {
 })
 
 describe('Usage audit: window average forecasts and renewal', () => {
+  for (const fiveHourPct of [0, 27, 84.9]) test(`4% week with 6.85 days left is tight independently of 5h=${fiveHourPct}`, () => {
+    const weekly = { kind: 'week' as const, usedPct: 4, resetsAt: NOW + 6.85 * 24 * H }
+    const l = limits(weekly.usedPct, weekly.resetsAt)
+    l.windows.push({ kind: '5h', usedPct: fiveHourPct, resetsAt: NOW + 2 * H })
+    const elapsedHours = (NOW - (weekly.resetsAt - PLAN_WINDOW_MS.week)) / H
+    expect(elapsedHours).toBeCloseTo(3.6)
+    expect(elapsedHours / (7 * 24) * 100).toBeCloseTo(2.142857)
+    expect(forecastWindow(weekly, NOW, l.updatedAt)).toEqual({ kind: 'runs-out', at: NOW + 86.4 * H })
+    expect(planBudget(l, NOW)).toMatchObject({ status: 'tight', fiveHourPct, weekPct: 4, daysToWeekReset: 6.85 })
+  })
+  test('the same 4% lasts when enough of the week has elapsed', () => {
+    const l = limits(4, NOW + 6.5 * 24 * H)
+    l.windows.push({ kind: '5h', usedPct: 27, resetsAt: NOW + 2 * H })
+    expect(forecastWindow(l.windows[0]!, NOW, l.updatedAt)).toEqual({ kind: 'lasts' })
+    expect(planBudget(l, NOW).status).toBe('ok')
+  })
   for (const pct of [4, 5, 66]) test(`${pct}% forecast stays fixed between readings`, () => {
     const w = { kind: 'week' as const, usedPct: pct, resetsAt: NOW + PLAN_WINDOW_MS.week * 0.99 }
     const expected = forecastWindow(w, NOW, NOW)

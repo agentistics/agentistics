@@ -103,6 +103,14 @@ numeric tiles on the Usage pages.
 
 ## Regression evidence and acceptance
 
+The reported 08:50 case is pinned explicitly: Claude 5h 72% / week 66%, Codex 5h 27% / week 4%,
+both tight with recent under pace, two suggested workers and two free slots. All seven routing
+kinds remain eligible (QA excludes its author's harness), and the reason names the tight warning.
+Codex at 4% with 6.85 days left is correctly tight: expected usage is 2.14% after 3.6 hours; remaining
+quota lasts 86.4 hours versus 164.4 hours to renewal. This uses the weekly window alone, without
+recent history or extrapolation from 5h. Tests vary 5h from 0 to 84.9% without changing that verdict;
+with 6.5 days remaining the same 4% becomes ok. Tight is a window-average warning, not a hold.
+
 `packages/core/src/planLimits.audit.test.ts` uses tables for forecasts, renewal boundaries, overage,
 hold thresholds, 0.8/1.2 pace boundaries, zero quota, missing week, account/reset/segment isolation,
 pause equations and decimal slots. Captured provider fixtures remain in `planLimits.test.ts` and

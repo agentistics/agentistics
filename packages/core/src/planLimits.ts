@@ -604,6 +604,7 @@ export function routeRecommendation(
       .filter(b => !(b.harness === pick.harness && b.account === pick.account))
       .map(b => ({ harness: b.harness, account: b.account ?? 'default' })))
   const paceText = pick.note ? ` ${pick.note}` : ''
+  const budgetText = pick.status === 'tight' ? ' Tight budget warning.' : ''
   const measured = candidates.some(b => b.freeSlotsMeasured)
   const parallel = measured
     ? pickAgg.freeSlots
@@ -613,7 +614,7 @@ export function routeRecommendation(
     ...(pick.account ? { account: pick.account } : {}),
     ...(pick.accountLabel ? { accountLabel: pick.accountLabel } : {}),
     ...(selected?.[1] ? { model: selected[1] } : {}),
-    reason: `${pick.harness} is the preferred eligible plan for ${kind}.${paceText}`,
+    reason: `${pick.harness} is the preferred eligible plan for ${kind}.${budgetText}${paceText}`,
     alternatives,
     accountAlternatives,
     cadence: { parallel, note: pick.note ?? 'Keep one worker running.' },
