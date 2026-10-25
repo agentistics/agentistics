@@ -17,11 +17,10 @@ export function areaBadges(input: {
 }): Partial<Record<AreaId, number>> {
   const out: Partial<Record<AreaId, number>> = {}
   const set = (id: AreaId, n: number | undefined) => { if (typeof n === 'number' && n > 0) out[id] = n }
-  set('sessions', input.attention)
+  set('sessions', Math.max(0, input.attention ?? 0) + Math.max(0, input.checkinsOverdue ?? 0))
   if (input.usageRows) {
     // The SAME rule as the Uso › Agora sentence ("N de M planos acima do ritmo"): one reading of over pace.
     set('usage', input.usageRows.filter(r => ['hold', 'over'].includes(usagePaceState(r))).length)
   }
-  set('leadership', input.checkinsOverdue)
   return out
 }

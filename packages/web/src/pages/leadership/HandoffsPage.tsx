@@ -11,7 +11,7 @@ export default function HandoffsPage() {
 export function HandoffsContent({ lang }: { lang: 'pt' | 'en' }) {
   const pt = lang === 'pt'
   return <div style={{ minWidth: 0 }}>
-    <PageHeader lang={lang} areaId="leadership" pageId="handoffs" />
+    <PageHeader lang={lang} areaId="sessions" pageId="handoffs" />
     <Section title={pt ? 'Configuração de passagem' : 'Hand-off configuration'}>
       <p style={{ margin: 0, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{pt
         ? 'A configuração de passagem (limite global, medidor e custo por fatia extra) chega na próxima entrega.'

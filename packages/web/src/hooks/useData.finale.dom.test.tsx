@@ -84,6 +84,29 @@ test('an ordinary boot is unchanged: slim, then the full payload right after', a
   } finally { await unmount() }
 })
 
+test('a hidden mount pauses reads despite old live preferences; visibility return fetches immediately', async () => {
+  const oldHidden = Object.getOwnPropertyDescriptor(document, 'hidden')
+  Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+  localStorage.setItem('liveUpdates', 'false')
+  localStorage.setItem('updateInterval', '300')
+  const unmount = await mount()
+  try {
+    await wait(400)
+    expect(asked).toEqual([])
+    window.dispatchEvent(new Event('focus'))
+    await wait(100)
+    expect(asked).toEqual([])
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await wait(400)
+    expect(asked).toEqual(['/api/data?partial=1&slim=1', '/api/data?partial=1'])
+  } finally {
+    await unmount()
+    if (oldHidden) Object.defineProperty(document, 'hidden', oldHidden)
+    else delete (document as any).hidden
+  }
+})
+
 // The other half: with data on screen the liveness probe (2 s deadline) raised "The server is not
 // answering … Try again" over the page while the new server was still building — as the finale ended.
 const cached = () => localStorage.setItem('agentistics-data-cache-v1', JSON.stringify({ statsCache: {}, sessions: [], projects: [] }))

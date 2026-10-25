@@ -1,6 +1,6 @@
 /** Which settings sections a viewer can see. UX-only gate — the server enforces real authz. */
 export type SettingsSectionId =
-  | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'billing' | 'install' | 'whatsnew' | 'connection' | 'live'
+  | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'billing' | 'install' | 'whatsnew' | 'connection'
   | 'chat' | 'providers' | 'memory' | 'notifications' | 'backup'
   | 'users' | 'teams' | 'machines' | 'repositories'
 
@@ -35,10 +35,9 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'billing', labelEn: 'Billing', labelPt: 'Cobrança', group: 'personal' },
   { id: 'install', labelEn: 'Install', labelPt: 'Instalação', group: 'personal' },
   { id: 'whatsnew', labelEn: "What's new", labelPt: 'Novidades', group: 'personal' },
-  { id: 'live', labelEn: 'Live', labelPt: 'Ao vivo', group: 'personal' },
   { id: 'chat', labelEn: 'Chat', labelPt: 'Chat', group: 'personal' },
   // Runtime provider credentials (Anthropic, OpenAI, OpenRouter, DeepSeek, LiteLLM, 9Router,
-  // Ollama) — a machine-local secret store, same reason `connection`/`live`/`chat` are host-only.
+  // Ollama) — a machine-local secret store, same reason `connection`/`chat` are host-only.
   { id: 'providers', labelEn: 'Providers', labelPt: 'Provedores', group: 'personal' },
   { id: 'memory', labelEn: 'Memory', labelPt: 'Memória', group: 'personal' },
   { id: 'users', labelEn: 'Users', labelPt: 'Usuários', group: 'governance' },
@@ -51,13 +50,12 @@ export function visibleSettingsSections(v: SettingsViewer): SettingsSection[] {
   return SETTINGS_SECTIONS.filter(s => {
     switch (s.id) {
       case 'connection': return !v.central
-      case 'live': return !v.central
       // A central aggregates other machines and has no local harness directories of its own to
-      // back up — same reason `connection` and `live` are machine-only.
+      // back up — same reason `connection` are machine-only.
       case 'backup': return !v.central
       // A central holds no per-machine vault of its own to show; the route answers 404 there too.
       // Chat spawns an assistant CLI on THIS host. A central has no local harness to spawn, so
-      // there is nothing there to configure — the same reason `connection` and `live` are hidden.
+      // there is nothing there to configure — the same reason `connection` are hidden.
       // Two gates, not one. `chatEnabled` (the user's switch) gates the ROWS inside the section;
       // this gates the SECTION. Collapsing them would hide the enable switch whenever chat is off,
       // which is a one-way door: there would be no way to turn it back on.
@@ -67,7 +65,7 @@ export function visibleSettingsSections(v: SettingsViewer): SettingsSection[] {
       // cost basis does not exist there and neither does the screen that configures it.
       case 'billing': return !v.central
       // Runtime providers are credentials for THIS machine's own local runtime — a central has no
-      // local runtime to spawn assistants with, the same reason `chat`/`connection`/`live` hide.
+      // local runtime to spawn assistants with, the same reason `chat`/`connection` hide.
       // And only where the native runtime may be shown: an engine that provides it AND the experimental
       // flag on (`nativeRuntimeFrom`). Unknown yet (loading) reads as hidden, never flashed.
       // B6.6: the native runtime's memory — shown only where the native runtime may be (strictly).

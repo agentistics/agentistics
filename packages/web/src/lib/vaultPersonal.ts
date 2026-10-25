@@ -129,14 +129,22 @@ export function parseTags(s: string): string[] {
 
 export const CLIPBOARD_CLEAR_MS = 30_000
 export const REVEAL_HIDE_MS = 30_000
+type ClipboardTimer = ReturnType<typeof setTimeout> | number
 
 /**
  * Copy, then overwrite the clipboard with "" after 30 s (owner rule). Returns a cancel. The overwrite
  * happens whether or not the page is still open on this screen — the timer is the page's, so leaving
  * the page early runs it now.
  */
-export function copyWithAutoClear(text: string, clip: Pick<Clipboard, 'writeText'> = navigator.clipboard, timers: { set: typeof setTimeout; clear: typeof clearTimeout } = { set: setTimeout, clear: clearTimeout }): { done: Promise<boolean>; cancel: () => void } {
-  let t: ReturnType<typeof setTimeout> | null = null
+export function copyWithAutoClear(text: string, clip: Pick<Clipboard, 'writeText'> = navigator.clipboard, timers: {
+  set: (fn: () => void, ms: number) => ClipboardTimer
+  clear: (id: ClipboardTimer) => void
+} = {
+  // Invoke browser timers through the global binding, never with the adapter as their receiver.
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: id => clearTimeout(id),
+}): { done: Promise<boolean>; cancel: () => void } {
+  let t: ClipboardTimer | null = null
   const done = clip.writeText(text).then(() => {
     t = timers.set(() => { void clip.writeText('').catch(() => {}) }, CLIPBOARD_CLEAR_MS)
     return true

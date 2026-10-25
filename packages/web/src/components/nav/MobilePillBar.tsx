@@ -29,6 +29,8 @@ export interface PillItem {
   expanded?: boolean
   hasPopup?: 'dialog'
   badge?: number
+  /** Option A's central Sessions/Home destination keeps its orange disc and bold label. */
+  emphasis?: boolean
 }
 
 /** Gap between the indicator and the edges of its slot. */
@@ -53,11 +55,18 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
   const [width, setWidth] = useState(0)
   /** The finger's x in the track's own coordinates while dragging; null at rest. */
   const [dragX, setDragX] = useState<number | null>(null)
-  const press = useRef<{ id: number; x0: number; dragging: boolean; lastSlot: number } | null>(null)
+  const press = useRef<{ id: number; x0: number; y0: number; dragging: boolean; lastSlot: number } | null>(null)
   const suppressClick = useRef(false)
-  const reduced = useRef(false)
+  const [reduced, setReduced] = useState(prefersReducedMotion)
 
-  useEffect(() => { reduced.current = prefersReducedMotion() }, [])
+  useEffect(() => {
+    const media = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!media) return
+    const sync = () => setReduced(media.matches)
+    sync()
+    media.addEventListener?.('change', sync)
+    return () => media.removeEventListener?.('change', sync)
+  }, [])
 
   useLayoutEffect(() => {
     const el = trackRef.current
@@ -86,19 +95,25 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
     ? followOffset(dragX, width, count, INSET)
     : restOffset(Math.max(0, activeIndex), width, count, INSET)
   const slotW = count > 0 ? width / count : 0
+  const withinPill = (y: number) => {
+    const rect = trackRef.current?.parentElement?.getBoundingClientRect()
+    return !!rect && y >= rect.top && y <= rect.bottom
+  }
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
-    press.current = { id: e.pointerId, x0: e.clientX, dragging: false, lastSlot: -1 }
+    press.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, dragging: false, lastSlot: -1 }
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const p = press.current
     if (!p || p.id !== e.pointerId) return
     if (!p.dragging) {
-      if (!isDrag(e.clientX - p.x0)) return
+      if (!isDrag(e.clientX - p.x0) && !isDrag(e.clientY - p.y0)) return
       p.dragging = true
       try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* already released */ }
     }
+    // A vertical drag-off abandons the selection; re-entering the pill resumes following.
+    if (!withinPill(e.clientY)) { setDragX(null); return }
     const x = localX(e.clientX)
     const slot = slotAt(x, width, count)
     if (slot !== p.lastSlot) {
@@ -117,7 +132,7 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
     // The browser still fires a click after a drag ends; it must not activate a second item.
     suppressClick.current = true
     window.setTimeout(() => { suppressClick.current = false }, 350)
-    if (commit) items[slotAt(localX(e.clientX), width, count)]?.onActivate()
+    if (commit && withinPill(e.clientY)) items[slotAt(localX(e.clientX), width, count)]?.onActivate()
   }
 
   return (
@@ -160,8 +175,8 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
               borderRadius: 999,
               background: 'rgba(5, 5, 9, 0.9)',
               border: '1px solid rgba(255, 255, 255, 0.07)',
-              transform: `translateX(${left}px) scale(${dragX !== null ? 1.06 : 1})`,
-              transition: reduced.current
+              transform: `translateX(${left}px) scale(${dragX !== null && !reduced ? 1.06 : 1})`,
+              transition: reduced
                 ? 'none'
                 : dragX !== null
                   ? 'transform 90ms linear'
@@ -187,9 +202,10 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
                 position: 'relative', flex: 1, minWidth: 0, minHeight: 44,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 gap: 3, padding: '0 2px', border: 'none', background: 'transparent',
-                color: lit ? ORANGE : IDLE, fontFamily: 'inherit', cursor: 'pointer',
-                fontSize: 10.5, fontWeight: lit ? 700 : 500,
-                transition: reduced.current ? 'none' : 'color 0.18s',
+                color: lit || item.emphasis ? ORANGE : IDLE, fontFamily: 'inherit', cursor: 'pointer',
+                fontSize: 10.5, fontWeight: lit || item.emphasis ? 700 : 500,
+                transition: reduced ? 'none' : 'color 0.18s',
+                ...(item.emphasis ? { gap: 1 } : {}),
                 ...(place ? {
                   flex: i === 0 ? 1 : '0 0 52px', minWidth: 44, height: 52, borderRadius: 999,
                   flexDirection: 'row', gap: 8, padding: i === 0 ? '0 16px' : 0,
@@ -200,12 +216,18 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
             >
               {(!place || i === 1) && <span style={{
                 display: 'inline-flex',
-                transform: crossing ? 'translateY(-2px) scale(1.14)' : 'none',
-                transition: reduced.current ? 'none' : `transform 220ms ${SPRING}`,
+                transform: crossing && !reduced ? (item.emphasis ? 'scale(1.12)' : 'translateY(-2px) scale(1.14)') : 'none',
+                transition: reduced ? 'none' : `transform 220ms ${SPRING}`,
+                ...(item.emphasis ? {
+                  width: 40, height: 40, borderRadius: '50%', alignItems: 'center', justifyContent: 'center',
+                  background: 'color-mix(in srgb, var(--anthropic-orange) 16%, transparent)',
+                  boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--anthropic-orange) 45%, transparent)',
+                  color: ORANGE,
+                } : {}),
               }}>
-                <Icon size={20} strokeWidth={lit ? 2.1 : 1.8} />
+                <Icon size={item.emphasis ? 22 : 20} strokeWidth={lit || item.emphasis ? 2.1 : 1.8} />
               </span>}
-              {(!place || i === 0) && <span style={{ width: place ? undefined : '100%', minWidth: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {(!place || i === 0) && <span style={{ width: place ? undefined : '100%', minWidth: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...(item.emphasis ? { marginTop: -2 } : {}) }}>
                 {place ? (item.content ?? item.label) : item.label}
               </span>}
               {place && i === 0 && <Icon size={16} strokeWidth={1.8} aria-hidden style={{ flexShrink: 0, opacity: 0.8 }} />}
