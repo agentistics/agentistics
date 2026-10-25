@@ -16,6 +16,7 @@
  * `storeDirOf` is PURE; `accountRootsFor` / `accountRootOf` read the registry, cached briefly — the
  * chat poll runs every few seconds and the registry changes when somebody signs in.
  */
+import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 
@@ -92,6 +93,35 @@ export async function accountStoreDirs(harness: HarnessId): Promise<string[]> {
     if (dir) dirs.push(dir)
   }
   return dirs
+}
+
+/**
+ * The default store's answer and the SAME exact conversation id in each account root, the one written
+ * most recently winning. An account switch COPIES the transcript into the target root
+ * (`planSwitchCopies`), so after it the id exists in two stores and only the new one keeps growing:
+ * "first hit wins" pinned the chat to the old, frozen copy (measured 2026-10-25, a switched leader whose
+ * chat stopped at the switch while its TUI went on). Only extra stats when a harness has account roots.
+ */
+export async function newestTranscript(
+  harness: HarnessId,
+  found: string | null,
+  at: (dir: string) => Promise<string | null>,
+): Promise<string | null> {
+  const dirs = await accountStoreDirs(harness)
+  if (dirs.length === 0) return found
+  const hits = new Set<string>()
+  if (found) hits.add(found)
+  for (const dir of dirs) {
+    const path = await at(dir).catch(() => null)
+    if (path) hits.add(path)
+  }
+  if (hits.size <= 1) return [...hits][0] ?? null
+  let best: { path: string; at: number } | null = null
+  for (const path of hits) {
+    const mtime = await stat(path).then(st => st.mtimeMs, () => -1)
+    if (!best || mtime > best.at) best = { path, at: mtime }
+  }
+  return best!.path
 }
 
 /** The config root an account runs in, or `null` (the default home, or an unknown id). */

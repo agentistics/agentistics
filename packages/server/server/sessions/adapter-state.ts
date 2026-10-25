@@ -9,7 +9,11 @@
  * `adapter-chat` flag on, that statement is the row's activity, the poll is asked for at once
  * (`onChange`), and the screen is captured only where it still has something to say:
  *
- * - never for an IDLE row (its harness said the turn ended — a permission dialog lives inside a turn);
+ * - never for an IDLE row, unless its LAST screen read showed a dialog: a harness's transcript can say
+ *   the turn is over while a dialog is still up (agy's directory-trust prompt, a permission prompt after
+ *   a planner response with no tool call), so a row whose screen showed one keeps being read on every
+ *   poll until the dialog is gone (`screenApproval`) — otherwise the screenless poll would overwrite it
+ *   with the harness's exact `waiting` and the two-poll confirmation of a screen dialog never completes;
  * - for a WORKING row only when the harness's file cannot say it is waiting on a person
  *   (`declares.attention` absent), because then only the screen can show the dialog;
  * - always when the file says a person is being waited on (the options are read off the screen);
@@ -53,9 +57,12 @@ export function planScreen(o: {
   lastScreenMs: number | undefined
   nowMs: number
   forced: boolean
+  /** The row's last screen read showed a dialog the file did not state. */
+  screenApproval?: boolean
 }): boolean {
   if (!o.reading) return true
   if (o.forced) return true
+  if (o.screenApproval) return true
   if (o.lastScreenMs === undefined || o.nowMs - o.lastScreenMs >= SCREEN_REFRESH_MS) return true
   if (o.reading.attention) return true
   return o.reading.working && !o.reading.coversAttention
@@ -92,6 +99,9 @@ export interface AdapterStateFeed {
   /** When the row's screen was last read (the poller says so). */
   screenRead(id: string, atMs: number): void
   lastScreen(id: string): number | undefined
+  /** Remember whether the row's last screen read showed a dialog (keeps the screen read every poll). */
+  setScreenApproval(id: string, on: boolean): void
+  screenApproval(id: string): boolean
   /** Called (debounced) when any reading changes. */
   onChange(cb: () => void): () => void
   /** Rows followed now — tests and health. */
@@ -134,6 +144,7 @@ export function createAdapterStateFeed(o: {
   const entries = new Map<string, Entry>()
   const forced = new Set<string>()
   const screens = new Map<string, number>()
+  const approvals = new Set<string>()
   const listeners = new Set<() => void>()
   let debounce: unknown = null
 
@@ -150,6 +161,7 @@ export function createAdapterStateFeed(o: {
     entries.delete(id)
     screens.delete(id)
     forced.delete(id)
+    approvals.delete(id)
   }
 
   function setReading(e: Entry, next: AdapterReading) {
@@ -275,6 +287,8 @@ export function createAdapterStateFeed(o: {
     takeForced(id) { return forced.delete(id) },
     screenRead(id, atMs) { screens.set(id, atMs) },
     lastScreen: id => screens.get(id),
+    setScreenApproval(id, on) { if (on) approvals.add(id); else approvals.delete(id) },
+    screenApproval: id => approvals.has(id),
     onChange(cb) { listeners.add(cb); return () => { listeners.delete(cb) } },
     followed: () => [...entries.keys()],
     stop() {

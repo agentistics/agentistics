@@ -23,16 +23,29 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
   )
 }
 
+/** The dialog's own max-height, one place for both the panel and its split columns. */
+const dialogMaxHeight = (mobileSheet: boolean) => mobileSheet ? 'calc(92dvh / var(--ui-zoom, 1))' : 'calc(100dvh / var(--ui-zoom, 1) - 32px)'
+/** Each split column's ceiling: the dialog's max-height minus its 22px padding and 1px border, twice,
+ *  so only the columns scroll and the panel never outgrows the screen. */
+const splitBodyMax = (mobileSheet: boolean) => `calc(${dialogMaxHeight(mobileSheet)} - 46px)`
+
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction, closeLabel }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction, closeLabel, aside, splitFrom = 900, lockCancel = false }: {
   /** Optional wider content and phone bottom-sheet presentation; defaults preserve confirmations. */
   maxWidth?: number
   mobileSheet?: boolean
   className?: string
   headerAction?: React.ReactNode
   closeLabel?: string
+  /** A long list that scrolls on its own. From `splitFrom` px of viewport it is the RIGHT column (the
+   *  title, message, children and buttons stay left); narrower, it sits under the message and the
+   *  panel stops scrolling as a whole, so the header and the buttons are always on screen. */
+  aside?: React.ReactNode
+  splitFrom?: number
+  /** The confirmed action cannot be aborted once sent: while true, Cancel is disabled and Esc/backdrop do nothing. */
+  lockCancel?: boolean
   open: boolean
   title: string
   message: string
@@ -60,12 +73,23 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   busy?: boolean
 }) {
   const isMobile = useIsMobile()
+  const [vw, setVw] = React.useState(() => (typeof window === 'undefined' ? 0 : window.innerWidth))
+  React.useEffect(() => {
+    if (!aside) return
+    const on = () => setVw(window.innerWidth)
+    on()
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [aside])
+  const split = !!aside && !isMobile && vw >= splitFrom
   const [typed, setTyped] = React.useState('')
   // Reset between openings, otherwise the previous answer would pre-arm the next delete.
   React.useEffect(() => { if (open) setTyped('') }, [open])
   const armed = (requireText === undefined || typed === requireText) && !busy
   // The top-most overlay owns Escape (lib/overlayStack): a Drawer or screen underneath stays open.
-  useEscapeOwner(open, onCancel)
+  const locked = lockCancel
+  const cancel = locked ? () => {} : onCancel
+  useEscapeOwner(open, cancel)
   const titleId = React.useId()
   const panelRef = React.useRef<HTMLDivElement>(null)
   // The opener is read DURING the render that first shows the dialog: an effect is too late, because a
@@ -99,17 +123,22 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   }, [open, focusPanel])
   if (!open) return null
   return (
-    <div className={className ? `${className}-backdrop` : undefined} onClick={onCancel} style={{
+    <div className={className ? `${className}-backdrop` : undefined} onClick={cancel} style={{
       position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: mobileSheet && isMobile ? 'flex-end' : 'center', justifyContent: 'center',
       background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: mobileSheet && isMobile ? 0 : 16,
     }}>
       <div className={className} ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+        data-confirm-layout={aside ? (split ? 'split' : 'stacked') : undefined}
         onClick={e => e.stopPropagation()} style={{ outline: 'none',
-        width: '100%', maxWidth: mobileSheet && isMobile ? '100%' : maxWidth, ...(mobileSheet ? { boxSizing: 'border-box' as const } : {}), maxHeight: mobileSheet ? 'calc(92dvh / var(--ui-zoom, 1))' : 'calc(100dvh / var(--ui-zoom, 1) - 32px)', overflowY: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)',
+        width: '100%', maxWidth: mobileSheet && isMobile ? '100%' : maxWidth, ...(mobileSheet ? { boxSizing: 'border-box' as const } : {}), maxHeight: dialogMaxHeight(mobileSheet), overflowY: aside ? 'hidden' : 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)',
         borderRadius: mobileSheet && isMobile ? '18px 18px 0 0' : 12, padding: mobileSheet && isMobile ? '18px 16px max(18px, env(safe-area-inset-bottom))' : 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
-        display: 'flex', flexDirection: 'column', gap: 14,
+        display: split ? 'grid' : 'flex', flexDirection: 'column', gap: split ? 22 : 14,
+        ...(split ? { gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.2fr)', gridTemplateRows: 'minmax(0, auto)', boxSizing: 'border-box' as const } : {}),
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Split: the list is first in the DOM (grid-placed on the right) so Tab reads rows → checkbox → buttons, as stacked does. */}
+        {split && <div data-confirm-aside style={{ gridColumn: 2, gridRow: 1, minWidth: 0, minHeight: 0, maxHeight: splitBodyMax(mobileSheet), overflowY: 'auto', overscrollBehavior: 'contain' }}>{aside}</div>}
+        <div data-confirm-main style={split ? { gridColumn: 1, gridRow: 1, display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0, minHeight: 0, maxHeight: splitBodyMax(mobileSheet), overflowY: 'auto' } : { display: 'contents' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           <span style={tone === 'danger'
             ? { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'color-mix(in srgb, #ef4444 15%, transparent)', color: '#ef4444' }
             : { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
@@ -119,7 +148,10 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
           {headerAction}
           {closeLabel && <button type="button" aria-label={closeLabel} onClick={onCancel} style={{ ...dialogButtonStyle('secondary', isMobile), width: isMobile ? 44 : undefined, minWidth: isMobile ? 44 : undefined }}>×</button>}
         </div>
-        {message && <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>}
+        {message && <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0, flexShrink: 0 }}>{message}</p>}
+        {aside && !split && (
+          <div data-confirm-aside style={{ flex: '1 1 auto', minHeight: 120, overflowY: 'auto', overscrollBehavior: 'contain' }}>{aside}</div>
+        )}
         {children}
         {requireText !== undefined && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -147,9 +179,10 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
           // The phone sheet scrolls as one; the answer buttons stay on the sheet's floor, never below the fold.
           ...(mobileSheet && isMobile ? { position: 'sticky' as const, bottom: 0, zIndex: 1, background: 'var(--bg-card)', padding: '8px 0 2px', boxShadow: '0 -8px 8px -8px rgba(0,0,0,0.35)' } : {}),
         }}>
-          <button type="button" autoFocus={focusCancel} onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{cancelLabel}</button>
+          <button type="button" autoFocus={focusCancel} onClick={cancel} disabled={locked} style={dialogButtonStyle('secondary', isMobile, locked)}>{cancelLabel}</button>
           <button type="button" onClick={() => { if (armed) onConfirm() }} disabled={!armed} style={dialogButtonStyle(tone === 'danger' ? 'danger' : 'primary', isMobile, !armed)}>{confirmLabel}</button>
         </div>}
+        </div>
       </div>
     </div>
   )
