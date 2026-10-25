@@ -9,14 +9,13 @@ import { version } from '../../../package.json'
 import {
   Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart2, Bot,
   Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
-  Clock, Code2, Cpu, DollarSign, Download,
-  FileCode, FileDown, Flame, FolderOpen, FolderTree, GitBranch,
-  GitCommit, GitCompare, Globe, Home, KeyRound, Layers,
-  LogOut, Maximize2, MessageSquare, MessagesSquare, Moon, MoreHorizontal,
+  Clock, Code2, Cpu, Download,
+  FileCode, Flame, FolderOpen, FolderTree, GitBranch,
+  GitCommit, Globe, Home, KeyRound,
+  LogOut, Maximize2, MessageSquare, MessagesSquare, Moon,
   PanelLeft, RefreshCw, Server, Settings, ShieldCheck,
-  SlidersHorizontal, Sparkles, Sun, Tag as TagIcon, Target, TerminalSquare,
-  TrendingUp, Trophy, Users, Wrench, X, Zap,
-  ZoomIn, ClipboardList, BellOff,
+  SlidersHorizontal, Sparkles, Sun, Target, TerminalSquare,
+  TrendingUp, Users, X, Zap, BellOff,
 } from 'lucide-react'
 import { mutedTooltip, useSessionMuted } from './lib/notifyMenu'
 import { useData, useDerivedStats, LIVE_INTERVAL_OPTIONS, LIVE_INTERVAL_OPTIONS_RISKY } from './hooks/useData'
@@ -95,15 +94,14 @@ import { InstallModal } from './components/InstallModal'
 import { isNoticeSnoozed, snoozeNotice } from './lib/noticeSnooze'
 import { ArchiveConsentModal, type ArchiveMode } from './components/ArchiveConsentModal'
 import { resolveArchiveChoice } from './lib/archive'
-import { ModeSwitch } from './components/nav/ModeSwitch'
 import { useEngineCaps } from './hooks/useEngineCaps'
 import { visibleSettingsSections } from './lib/settingsSections'
 import { AreaTree } from './components/nav/AreaTree'
+import { areaOfPath } from './lib/appAreas'
 import { AREA_RAIL_W, AreaRail } from './components/nav/AreaRail'
 import { areaBadges } from './lib/areaBadges'
-import { MobileAreaBar, MobileActionTile } from './components/nav/MobileAreaBar'
+import { MobileAreaBar } from './components/nav/MobileAreaBar'
 import { usePlanLimits } from './lib/planLimits'
-import { MobilePillBar } from './components/nav/MobilePillBar'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
 import { openArtifacts } from './lib/artifactsStore'
@@ -130,7 +128,6 @@ import {
   DEFAULT_ORDER, sortSessions, type ControlSession,
 } from '@agentistics/tui/control/session-fleet'
 import { AsideResizer } from './components/nav/AsideResizer'
-import { modeOfPath } from './lib/workspaceMode'
 import { ASIDE_DEFAULT, ASIDE_MAX, ASIDE_MIN, clampAsideWidth } from './lib/asideWidth'
 import { PanelGap } from './components/sessions/PanelGap'
 import { OUTER_GAP, PANEL_BORDER, PANEL_GAP, PANEL_RADIUS } from './lib/panelLayout'
@@ -658,255 +655,6 @@ function fmtCostFull(usd: number, currency: 'USD' | 'BRL' = 'USD', rate = 1): st
   return `USD ${usd.toFixed(6)}`
 }
 
-function MobileBottomNav({
-  lang, harnesses, onRefresh, onOpenHardware, liveUpdates, onToggleLive, updateInterval, healthIssues, isCentral, hasWorkflows,
-  principal, theme, onToggleTheme, onToggleLang, a11yEnabled,
-}: {
-  lang: Lang
-  harnesses?: SurfaceHarnessId[]
-  onRefresh: () => void
-  /** Hardware is a modal, not a destination — on mobile its entry point is a tile in this sheet. */
-  onOpenHardware: () => void
-  liveUpdates: boolean
-  onToggleLive: () => void
-  updateInterval: number
-  healthIssues?: HealthIssue[]
-  /** A central updates in real time via SSE — no Live toggle. */
-  isCentral?: boolean
-  hasWorkflows?: boolean
-  /** Signed-in account. Absent on a solo machine with no IAM — the account block then hides. */
-  principal?: IamAccount
-  theme: Theme
-  onToggleTheme: () => void
-  onToggleLang: () => void
-  /** Whether the magnifier feature is on. Once it is, the header button is the way in — a tile
-   *  here too would be a second entry point to the same screen. */
-  a11yEnabled: boolean
-}) {
-  const location = useLocation()
-  const navigate = useNavigate()
-  const pt = lang === 'pt'
-  const [moreOpen, setMoreOpen] = useState(false)
-  const orange = 'var(--anthropic-orange)'
-  // The sheet has two faces: the tile grid, and (after tapping the account row) the account
-  // actions. A nested popover behaves badly on a phone, so we swap the body in place instead
-  // of stacking another floating layer over the sheet.
-  const [accountOpen, setAccountOpen] = useState(false)
-  const [pwOpen, setPwOpen] = useState(false)
-  const [mfaOpen, setMfaOpen] = useState(false)
-  const roleLabel = principal
-    ? (principal.role === 'owner' ? 'Owner' : (principal.memberships.some(m => m.role === 'manager') ? 'Manager' : 'User'))
-    : ''
-  const logout = () => { void fetch('/api/iam/logout', { method: 'POST' }).then(() => window.location.reload()) }
-  const closeSheet = () => { setMoreOpen(false); setAccountOpen(false) }
-
-  // Primary destinations live in the bar; the rest go behind a "More" sheet so
-  // the bar never crams more than 5 slots on a narrow phone.
-  const primary = [
-    { to: '/',         labelPt: 'Home',       labelEn: 'Home',      icon: Home },
-    { to: '/costs',    labelPt: 'Custos',     labelEn: 'Costs',     icon: DollarSign },
-    // Repositories took the slot Projects held. It is the page that now answers "which projects" —
-    // the repository is the key that survives a different path on every machine — so somebody
-    // reaching for the old tile lands where the information actually is. It leaves the "More"
-    // sheet by the same move: one destination, one place to press it.
-    { to: '/repositories', labelPt: 'Repositórios', labelEn: 'Repositories', icon: GitBranch },
-    { to: '/tools',    labelPt: 'Tools',      labelEn: 'Tools',     icon: Wrench },
-  ] as const
-
-  // Square tiles in the "More" sheet: nav destinations + the actions that used
-  // to crowd the top header (settings, live toggle, refresh, warnings).
-  type Tile = {
-    key: string
-    label: string
-    icon: typeof Home
-    onClick: () => void
-    active?: boolean
-    accent?: boolean
-    badge?: string
-    /** See the desktop rail: the two navs mark the same features, or one of them lies. */
-    beta?: boolean
-  }
-  // The switch's badge, from the SHARED fleet poll (see lib/fleet.ts) — no extra request.
-  const { fleet: mobileFleet } = useFleet(lang === 'pt' ? 'pt' : 'en')
-  const attention = mobileFleet.attention
-
-  const navTiles: Tile[] = [
-    // Repositories is NOT here: it is a fixed slot in the bar now (see `primary`). A destination
-    // in both places is the same feature marked twice, and the sheet is where the ones that did
-    // not fit live.
-    // Members/machines only exist on a central — a solo machine has exactly one of each.
-    ...(isCentral
-      ? [{ key: 'members', label: pt ? 'Membros' : 'Members', icon: Users, onClick: () => { closeSheet(); navigate('/members') }, active: location.pathname.startsWith('/members') } as Tile]
-      : []),
-    { key: 'top', label: pt ? 'Top' : 'Top', icon: Trophy, onClick: () => { closeSheet(); navigate('/top') }, active: location.pathname.startsWith('/top') },
-    { key: 'tasks', label: 'Agentask', icon: ClipboardList, onClick: () => { closeSheet(); navigate('/tasks') }, active: location.pathname.startsWith('/tasks'), beta: true },
-    { key: 'tags', label: 'Tags', icon: TagIcon, onClick: () => { closeSheet(); navigate('/tags') }, active: location.pathname.startsWith('/tags') },
-    { key: 'custom', label: pt ? 'Personalizado' : 'Custom', icon: Layers, onClick: () => { closeSheet(); navigate('/custom') }, active: location.pathname.startsWith('/custom') },
-    { key: 'export', label: pt ? 'Exportar' : 'Export', icon: FileDown, onClick: () => { closeSheet(); navigate('/export') }, active: location.pathname.startsWith('/export') },
-    // Unconditional: the page's filter mode compares two SCOPES and needs no second harness.
-    // Only the by-harness mode inside it stays gated.
-    { key: 'compare', label: pt ? 'Comparar' : 'Compare', icon: GitCompare, onClick: () => { closeSheet(); navigate('/compare') }, active: location.pathname.startsWith('/compare') },
-    // Only while the feature is OFF: once it's on, the header magnifier button (beside the bell)
-    // is the way in, and two entry points to the same screen on a phone is one too many. Same
-    // ZoomIn icon as the header button — one feature, one icon.
-    ...(a11yEnabled
-      ? []
-      : [{ key: 'accessibility', label: pt ? 'Acessibilidade' : 'Accessibility', icon: ZoomIn, onClick: () => { closeSheet(); navigate('/settings/accessibility') }, active: location.pathname.startsWith('/settings/accessibility') } as Tile]),
-  ]
-  const activeIssueCount = healthIssues?.length ?? 0
-  const actionTiles: Tile[] = [
-    // Live toggle — hidden on a central (real-time via SSE, nothing to toggle).
-    ...(isCentral ? [] : [{
-      key: 'live', label: pt ? 'Ao vivo' : 'Live', icon: Activity,
-      onClick: () => onToggleLive(), accent: liveUpdates,
-      badge: liveUpdates ? (updateInterval >= 60 ? `${updateInterval / 60}m` : `${updateInterval}s`) : undefined,
-    } as Tile]),
-    { key: 'refresh', label: pt ? 'Atualizar' : 'Refresh', icon: RefreshCw, onClick: () => { onRefresh(); closeSheet() } },
-    // An overlay, so it belongs with the actions: nothing in the bottom bar can be "on /hardware".
-    { key: 'hardware', label: 'Hardware', icon: Cpu, onClick: () => { closeSheet(); onOpenHardware() } },
-    { key: 'settings', label: pt ? 'Ajustes' : 'Settings', icon: SlidersHorizontal, onClick: () => { closeSheet(); navigate('/settings') }, active: location.pathname.startsWith('/settings') },
-    // Theme and language live here because the sidebar that hosts them on desktop is not
-    // rendered on mobile. Neither closes the sheet — you toggle and immediately re-judge.
-    { key: 'theme', label: pt ? 'Tema' : 'Theme', icon: theme === 'dark' ? Sun : Moon, onClick: () => onToggleTheme() },
-    { key: 'lang', label: pt ? 'Idioma' : 'Language', icon: Globe, onClick: () => onToggleLang(), badge: pt ? 'PT' : 'EN' },
-    // Health warnings moved next to the notification bell in the mobile top bar (its own popover).
-  ]
-  const allTiles = [...navTiles, ...actionTiles]
-
-  const navAction = navTiles.some(t => t.active)
-  // A repo's own page is `/repo/:id`, not a child of `/repositories` — the slot has to know it,
-  // or the section stops marking itself the moment you open a repository.
-  const primaryActive = primary.findIndex(tab => tab.to === '/'
-    ? location.pathname === '/'
-    : tab.to === '/repositories'
-      ? location.pathname.startsWith('/repositories') || location.pathname.startsWith('/repo')
-      : location.pathname.startsWith(tab.to))
-
-  const accountActionStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 44,
-    padding: '0 14px', borderRadius: 12, border: '1px solid var(--border)',
-    background: 'var(--bg-elevated)', color: 'var(--text-primary)',
-    fontSize: '0.8438rem', fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', textAlign: 'left',
-  }
-
-  return (
-    <>
-      {/* "More" bottom sheet — square tiles for bigger, friendlier tap targets */}
-      <div
-        onClick={() => closeSheet()}
-        style={{
-          position: 'fixed', inset: 0, zIndex: 310, background: 'rgba(0,0,0,0.45)',
-          opacity: moreOpen ? 1 : 0,
-          pointerEvents: moreOpen ? 'auto' : 'none',
-          transition: 'opacity 0.25s ease',
-        }}
-      />
-      <div style={{
-        // Down to the FLOOR, with the pill floating over its foot: stopped at the pill's top it left a
-        // strip of page showing around the see-through bar.
-        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 320,
-        background: 'var(--bg-surface)', borderTop: '1px solid var(--border)',
-        borderRadius: '16px 16px 0 0', boxShadow: '0 -8px 30px rgba(0,0,0,0.35)',
-        padding: '8px 12px calc(16px + var(--mobile-nav-h))',
-        // The bar under it is a see-through floating pill now, so the closed sheet must travel past the
-        // floor entirely — a fraction short of its own height left an edge showing through the pill.
-        transform: moreOpen ? 'translateY(0)' : 'translateY(calc(100% + 24px))',
-        transition: 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)',
-      }}>
-        <div style={{
-          width: 36, height: 4, borderRadius: 2, background: 'var(--border)',
-          margin: '4px auto 12px',
-        }} />
-        {/* Account block — the mobile home for the profile menu that lives in the desktop
-            sidebar. Without it a phone user has no way to change their password or log out. */}
-        {principal && (
-          <button
-            onClick={() => setAccountOpen(o => !o)}
-            aria-expanded={accountOpen}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 10, width: '100%', minHeight: 44,
-              padding: '8px 10px', marginBottom: 10, borderRadius: 12,
-              border: `1px solid ${accountOpen ? orange : 'var(--border)'}`,
-              background: accountOpen ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-              cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
-            }}
-          >
-            <span style={{
-              width: 32, height: 32, borderRadius: '50%', background: 'var(--bg-surface)',
-              border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', flexShrink: 0,
-            }}>{principal.name.slice(0, 2)}</span>
-            <span style={{ minWidth: 0, flex: 1 }}>
-              <span style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{principal.name}</span>
-              <span style={{ display: 'block', fontSize: '0.625rem', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{roleLabel}</span>
-            </span>
-            <ChevronDown size={16} style={{ flexShrink: 0, color: 'var(--text-tertiary)', transform: accountOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-          </button>
-        )}
-        {accountOpen && principal ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <button
-              onClick={() => { setAccountOpen(false); setMoreOpen(false); setPwOpen(true) }}
-              style={accountActionStyle}
-            >
-              <KeyRound size={16} /> {pt ? 'Trocar senha' : 'Change password'}
-            </button>
-            <button
-              onClick={() => { setAccountOpen(false); setMoreOpen(false); setMfaOpen(true) }}
-              style={accountActionStyle}
-            >
-              <ShieldCheck size={16} /> {pt ? 'Duas etapas' : 'Two-factor'}
-            </button>
-            <button
-              onClick={logout}
-              style={{ ...accountActionStyle, color: '#ef4444', borderColor: 'color-mix(in srgb, #ef4444 40%, transparent)' }}
-            >
-              <LogOut size={16} /> {pt ? 'Sair' : 'Log out'}
-            </button>
-          </div>
-        ) : (
-        <>
-        {/* The workspace switch. The aside that hosts it on desktop is not rendered on mobile, and
-            a mode a phone cannot reach is a mode a phone cannot leave. */}
-        <div style={{ marginBottom: 12 }}>
-          <ModeSwitch lang={lang === 'pt' ? 'pt' : 'en'} attention={attention} onNavigate={closeSheet} />
-        </div>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: 8,
-        }}>
-          {allTiles.map(tile => <MobileActionTile key={tile.key} tile={tile} />)}
-        </div>
-        </>
-        )}
-      </div>
-
-      <MobilePillBar
-        ariaLabel={pt ? 'Navegação principal' : 'Main navigation'}
-        items={[
-          ...primary.map(tab => ({
-            key: tab.to,
-            label: pt ? tab.labelPt : tab.labelEn,
-            icon: tab.icon,
-            onActivate: () => { closeSheet(); navigate(tab.to) },
-          })),
-          {
-            key: 'more',
-            label: pt ? 'Mais' : 'More',
-            icon: MoreHorizontal,
-            onActivate: () => { if (moreOpen) closeSheet(); else setMoreOpen(true) },
-          },
-        ]}
-        activeIndex={moreOpen || navAction ? primary.length : primaryActive}
-      />
-
-      {pwOpen && <ChangePasswordSelf lang={lang} onClose={() => setPwOpen(false)} />}
-      {mfaOpen && <MfaSetup lang={lang} onClose={() => setMfaOpen(false)} canDisable={principal?.role !== 'owner'} />}
-    </>
-  )
-}
-
 /**
  * The fixed strip along the top of the page, to the right of the aside. The aside runs the full
  * height and its header row (`AsideHeader`) has this same height, so the two bands stay level.
@@ -1027,7 +775,7 @@ function SideNav({
   // The row's context menu (Task 6) needs the verb-carrying shape, not the arrangement-only one —
   // `useFleetIndex` is the SAME map the header and the panel already build from `fleet.sessions`.
   const asideRowIndex = useFleetIndex(fleet.sessions)
-  const mode = modeOfPath(location.pathname)
+  const mode = areaOfPath(location.pathname)?.area.id === 'sessions' ? 'sessions' as const : 'dashboard' as const
   // The collapsed rail's order — the SAME order the open list draws, so collapsing the aside never
   // reshuffles the sessions. Pinned first (that is what pinning is for), then `sortSessions(…,
   // DEFAULT_ORDER)` — the ranking the terminal cockpit breaks ties on, so "sorted by status" means
@@ -1646,7 +1394,7 @@ export default function AppLayout() {
   // was pressed — the sidebar visibly resizing on a control whose job is to change what is IN it.
   // Only the sessions workspace offers the handle, but whatever it is dragged to applies to both.
   const liveAsideWidth = asideWidth
-  const inSessionsWorkspace = modeOfPath(location.pathname) === 'sessions'
+  const inSessionsWorkspace = areaOfPath(location.pathname)?.area.id === 'sessions'
   // The fixed aside's real width: the list (or the collapsed rail), plus the Sessões area's own
   // area rail and its gap. Every inset that clears the aside reads this one figure.
   const leftAsideW = (sidebarCollapsed ? SIDEBAR_W_COLLAPSED : liveAsideWidth) + (inSessionsWorkspace ? AREA_RAIL_W + PANEL_GAP : 0)

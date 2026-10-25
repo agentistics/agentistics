@@ -10,6 +10,31 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.150.0': {
+    features: [
+      {
+        pt: 'Nova barra lateral por áreas: Sessões, Agentask, Liderança, Uso, Métricas, Repositórios, Cofre e Ajustes, com busca de páginas (Ctrl K).',
+        en: 'A new sidebar by areas: Sessions, Agentask, Leadership, Usage, Metrics, Repositories, Vault and Settings, with page search (Ctrl K).',
+      },
+      {
+        pt: 'Em Sessões, uma coluna de ícones das áreas fica ao lado da lista; o seletor Painel/Sessões saiu.',
+        en: 'In Sessions, a column of area icons sits beside the list; the Dashboard/Sessions switch is gone.',
+      },
+      {
+        pt: 'Página Uso: o ritmo de cada plano agora, o plano de sessões até a renovação, os limites e o histórico.',
+        en: 'Usage page: each plan\'s pace right now, a session plan until renewal, the limits and the history.',
+      },
+      {
+        pt: 'Página Liderança: líderes, check-ins, passagens e modo ausente num só lugar.',
+        en: 'Leadership page: leaders, check-ins, hand-offs and away mode in one place.',
+      },
+      {
+        pt: 'No celular, um botão "onde estou" embaixo abre o menu de áreas.',
+        en: 'On a phone, a "where am I" button at the bottom opens the areas menu.',
+      },
+    ],
+    fixes: [],
+  },
   '2.149.0': {
     features: [
       {

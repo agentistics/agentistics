@@ -22,7 +22,7 @@ export interface MobileAreaAction {
   keepOpen?: boolean
 }
 
-/** The original More tile, shared with the unmounted legacy bar during migration. */
+/** A global action tile in the areas sheet (theme, language, refresh, …). */
 export function MobileActionTile({ tile }: { tile: MobileAreaAction }) {
   const orange = 'var(--anthropic-orange)'
   const Icon = tile.icon

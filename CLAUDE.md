@@ -3032,7 +3032,7 @@ Four front doors, and a person saying "the sessions screen" has to land on exact
 These are the names to use in conversation, in commits and in comments; they are not
 interchangeable.
 
-- **the Sessions workspace** — the WEB one: `/sessions`, the aside with the fleet on the left and
+- **the Sessions workspace** (the **Sessões area**) — the WEB one: `/sessions`, the aside with the fleet on the left and
   the centre holding either the overview (`FleetOverview`) or the open session's chat and terminal.
   On a central it is the same workspace, showing the relayed fleet of the machine its picker has
   chosen. When someone says "a interface de sessões", "a tela de sessões" or "the sessions view",
@@ -3048,6 +3048,13 @@ interchangeable.
   the left list or the artifacts aside), a T-junction square hot zone drags both boundaries at once,
   each on its own axis. `Ctrl/Cmd+B` toggles the left list, `Ctrl/Cmd+Shift+B` the artifacts aside,
   `Ctrl/Cmd+'`/`` Ctrl/Cmd+` `` the bottom band (`lib/panelShortcuts.ts`) — mobile is untouched.
+- **The app's navigation is AREAS, and `lib/appAreas.ts` is its single registry** (APP.AREAS,
+  spec `docs/superpowers/specs/2026-10-17-app-areas.md`). `APP_AREAS` lists each area (Sessões,
+  Agentask, Liderança, Uso, Métricas, Repositórios, Cofre, Ajustes) and its pages; `areaOfPath` is
+  the one answer to "where am I", read by the desktop `AreaTree`, the Sessões `AreaRail` (60px of
+  area icons beside the sessions list, with a "show tree" panel), `PageHeader` and the phone's
+  `MobileAreaBar`. There is no Painel/Sessões switch any more: in the Sessões area the rail replaces
+  it and the sessions list itself (`SessionsAside` + its collapsed `SessionsRail`) is unchanged.
 - **the cockpit** — the TERMINAL one: `agentop`'s control center (`packages/tui/src/control`), whose
   own `sessions` tab draws the fleet. Never call the web one a cockpit; the ambiguity is the whole
   reason this list exists.
@@ -3259,7 +3266,7 @@ harness must not break.
   - Build the mobile branch *in the same change*, not as a follow-up. A "we'll do mobile later" pass
     is how the whole governance area shipped desktop-only and needed the C4 rescue.
   - Follow the existing conventions rather than inventing new ones — `useIsMobile()` (768px),
-    `MobileBottomNav` + the "More" sheet, full-screen drawers/modals, the `.ag-grid cols-N` utility,
+    `MobileAreaBar` (the place pill + its areas sheet), full-screen drawers/modals, the `.ag-grid cols-N` utility,
     tables collapsing into `RecordCard` lists, `MultiPicker`/`Select` popovers that flip up.
   - **Touch targets ≥ 44px on mobile** — and 44px is the *mobile* number: applying it on desktop
     too turns a segmented control into a row of buttons.
@@ -3269,8 +3276,9 @@ harness must not break.
   - **Verify at 390px, do not assume**: `document.documentElement.scrollWidth <= window.innerWidth`
     must hold on every page. Wide tables and code blocks scroll inside their own container, never
     the page body.
-  - New pages need their nav entry in **both** the desktop `SideNav` `items` array **and** the
-    `MobileBottomNav` `navTiles` array in `App.tsx` — adding only the first hides the page on a phone.
+  - New pages need ONE entry: their area page in `lib/appAreas.ts` (`APP_AREAS`). The desktop tree,
+    the Sessões rail, the phone's place pill and its sheet all read that registry, so a page added
+    there is reachable everywhere; a route left out of it must be listed in `UNLISTED_ROUTES`.
 - **A REOPEN LANDS SOMEWHERE, and the wait belongs to the ID.** Reopening retires the row it was
   asked about and mints a new one, so the id in the URL stops naming anything the instant it
   succeeds. `lib/sessionRoute.ts` is the ONE place both halves live — `reopenedSessionRoute` (the
@@ -3630,7 +3638,7 @@ harness must not break.
   missing from `embed-dist.ts`'s `TEXT_EXTS`, arrived base64 and skipped the rewrite in silence.
 - **Mobile / responsive UI** — the whole dashboard is responsive; gate mobile-only branches on the `useIsMobile()` hook (`packages/web/src/hooks/useIsMobile.ts`, `MOBILE_BREAKPOINT = 768`). Conventions:
   - **Sticky header** holds everything needed for interaction. On mobile the header shows only the logo; the lang/theme/export/settings/health/live/refresh controls are **not** in the top row — they live in the bottom-nav "More" sheet (see below). Desktop keeps the full action row.
-  - **`MobileBottomNav`** (in `App.tsx`) is the only mobile chrome: 4 primary tabs (Home/Costs/Repositories/Tools) + a **"More" bottom sheet rendered as a 3-column grid of square tiles** (Custom / Export / Compare when >1 harness, plus the moved actions: Live toggle w/ interval badge, Refresh, Settings, Warnings w/ issue count). The More button shows a dot when health warnings exist. The sheet slides in via a `transform` transition. Do not move these actions back into the top header on mobile, and keep the tiles compact (no square `aspect-ratio`).
+  - **`MobileAreaBar`** (`components/nav/MobileAreaBar.tsx`) is the phone's navigation: a floating place pill ("Uso › Agora", area quiet, page bold) beside a round Sessions shortcut (not drawn on Sessions itself), and the pill opens a `BottomSheet` holding the same `AreaTree` the desktop uses, the moved global action tiles and the account actions. See `docs/mobile-area-navigation.md`. Do not move those actions back into the top header on mobile.
   - **Collapsible filter bar**: on mobile the full `FiltersBar` (harness chips + date/projects/models) sits in the sticky header and can be minimized to a slim "Filters" row (with an active-filter count badge) via `filtersCollapsed`. The open/close is animated with a `grid-template-rows: 0fr↔1fr` transition. The animation wrapper needs `overflow: hidden`, which would clip the Models popover — so it's only clipped while animating/collapsed (`filtersClip` + `onTransitionEnd`), then switches to `visible`.
   - **`FiltersBar` `compact` prop** (used on mobile): hides the vestigial vertical dividers and tightens padding. On mobile the controls also stretch to fill each row (date presets `flex:1`, custom range full-width, the ＋ Filtro button full-width).
   - **`FiltersBar` "＋ Filtro" model**: the top bar shows only the date presets + custom range + a single dashed **＋ Filtro** button (with an active-dimension count badge). It opens a menu of the *available* dimensions (Members/Harnesses/Presence shown only on central-with-data; Repos only when a repo dimension exists; Projects/Models when present); picking one opens that dimension's inline value picker (Projects opens the full `ProjectsModal`). The selected values are NOT shown in the top bar — they render in the animated per-category chip rows below (`AnimatedRow`/`ChipRow`/`FilterChip`, one row per dimension incl. Presence). Do not re-add always-visible dimension dropdowns to the top bar.

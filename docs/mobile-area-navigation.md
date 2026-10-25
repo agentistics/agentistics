@@ -17,8 +17,7 @@ safe inset. The navigation sheet and `FiltersSheet` share that frame. Filters st
 the footer offers Done and conditionally Clear, which is the sheet's only clear action
 (`FiltersBar hideClearAll`). Chip remove buttons project a 44px target and the date range row is 44px
 on a phone. The sheet's page search is a 44px field with no keyboard-shortcut hint. `MobilePillBar` supplies the floating styling and drag
-gesture for both its original tabs and the place layout. The legacy `MobileBottomNav` stays unmounted
-until the final area-navigation cleanup.
+gesture for both its original tabs and the place layout.
 
 Mobile shell header controls, the collapsed stats strip and list/overview tabs have 44px minimum targets. Header rows can wrap
 when optional status controls are present.

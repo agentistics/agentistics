@@ -1561,7 +1561,7 @@ export function SessionsAside({
         )}
       </div>
 
-      {/* THE TABS — the segmented control `ModeSwitch` draws (`SegmentedTabs`), not a second one. */}
+      {/* THE TABS — the shared segmented control (`SegmentedTabs`), not a second one. */}
       <div style={{ padding: '0 2px' }}>
         <SegmentedTabs<AsideTab>
           ariaLabel={pt ? 'Sessões' : 'Sessions'}
