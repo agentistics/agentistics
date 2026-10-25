@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { PlanLimits } from '@agentistics/core'
-import { defaultPick, limitsFor, pickerRows, spentUntil, unavailableReason } from './accountPicker'
+import { accountDisplayName, defaultPick, limitsFor, pickerRows, planDisplayName, spentUntil, unavailableReason } from './accountPicker'
 import type { SwitchInfo } from './accountSwitch'
 
 const now = Date.UTC(2026, 9, 24, 12, 0)
@@ -68,5 +68,23 @@ describe('pickerRows', () => {
   test('a missing CLI is said as a fact about this computer, not a capability', () => {
     expect(unavailableReason('harness_unavailable', 'pt')).toBe('Não encontrado neste computador')
     expect(unavailableReason('harness_unavailable', 'en')).toBe('Not found on this computer')
+  })
+})
+
+describe('names shared with the plan list (CONTA.P3)', () => {
+  const l = lim('claude', 'acc_a', 10, 10, 'Claude Pro')
+  test('the plan is the list\'s own name; a raw registry word is dressed the same way', () => {
+    expect(planDisplayName('claude', 'pro', l)).toBe('Claude Pro')
+    expect(planDisplayName('claude', 'max 5x', null)).toBe('Claude Max 5x')
+    expect(planDisplayName('claude', 'Claude Max 20x', null)).toBe('Claude Max 20x')
+    expect(planDisplayName('codex', 'plus', null)).toBe('Plus')
+    expect(planDisplayName('claude', undefined, null)).toBeUndefined()
+  })
+  test('picker rows carry the listed plan and the owner\'s label, named as the plan list names it', () => {
+    const rows = pickerRows({ ...info, options: [{ id: 'acc_b', harness: 'claude', label: 'b@x', plan: 'pro' }], unavailable: [] }, [lim('claude', 'acc_b', 5, 5, 'Claude Pro')], now, 'pt', { acc_b: 'Conta pessoal' })
+    expect(rows.find(r => r.id === 'acc_b')).toMatchObject({ label: 'Conta pessoal', plan: 'Claude Pro' })
+    expect(accountDisplayName('claude', 'acc_b', 'b@x', { acc_b: 'Conta pessoal' })).toBe('Claude Code · Conta pessoal')
+    expect(accountDisplayName('claude', 'acc_z', 'Claude Code #2', {})).toBe('Claude Code #2')
+    expect(accountDisplayName('claude', 'acc_z', undefined, {})).toBe('Claude Code')
   })
 })

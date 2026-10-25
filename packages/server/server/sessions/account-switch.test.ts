@@ -258,6 +258,12 @@ describe('start failure sentences', () => {
     expect(startFailureSentence('a sessão terminou assim que começou: copilot: error X', 'pt')).toBe('Ela terminou assim que começou (os detalhes estão no log do servidor).')
     expect(startFailureSentence('the session exited as soon as it started: copilot: x', 'en')).not.toContain('copilot')
   })
+  test('the CLI "started … in the background" tail is stripped (EN and PT)', () => {
+    expect(startFailureSentence('memory is low. Started s2 in the background…', 'en')).toBe('Memory is low.')
+    expect(startFailureSentence('memória insuficiente. s2 iniciada em background.', 'pt')).toBe('Memória insuficiente.')
+    expect(startFailureSentence('Started s2 in the background…', 'en')).toBe('')
+    expect(switchFallbackMessage('the account is signed out. started s2 in the background.', 'en')).not.toMatch(/background/i)
+  })
   test('other reasons are capitalised and closed', () => {
     expect(startFailureSentence('memória insuficiente', 'pt')).toBe('Memória insuficiente.')
     expect(startFailureSentence('Already fine.', 'en')).toBe('Already fine.')

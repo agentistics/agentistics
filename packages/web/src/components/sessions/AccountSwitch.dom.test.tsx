@@ -149,6 +149,33 @@ describe('AccountSwitchDialog — every harness (v2)', () => {
     await act(async () => { root.unmount() })
   })
 
+  test('at 390 px the dialog footer sticks to the sheet floor; at 1200 it does not', async () => {
+    const open = async () => mount(createElement(mod.AccountSwitchDialog, {
+      open: true, sessionId: 'm1', info: multi, lang: 'en', fromLimit: false, onClose: () => {}, onSwitched: () => {},
+    }))
+    window.innerWidth = 390
+    const narrow = await open()
+    const footer = document.querySelector('[data-dialog-footer]') as HTMLElement
+    expect(footer.style.position).toBe('sticky')
+    expect(footer.style.bottom).toBe('0px')
+    await act(async () => { narrow.root.unmount() })
+    window.innerWidth = 1200
+    const wide = await open()
+    expect((document.querySelector('[data-dialog-footer]') as HTMLElement).style.position).toBe('')
+    await act(async () => { wide.root.unmount() })
+  })
+
+  test('the Usage limits card is one component: plan list + the switch button, EN and PT', async () => {
+    const card = await import('./SessionLimitsCard')
+    for (const lang of ['en', 'pt'] as const) {
+      getBody = limited
+      const { host, root } = await mount(createElement(card.SessionLimitsCard, { sessionId: 'm1', lang, onSwitched: () => {}, onOpenAll: () => {} }))
+      expect(host.querySelector('[data-plan-usage-summary]')).not.toBeNull()
+      expect(host.querySelector('[data-account-switch-open]')?.textContent).toContain(lang === 'pt' ? 'Trocar de conta' : 'Switch account')
+      await act(async () => { root.unmount() })
+    }
+  })
+
   test('a handoff target changes the words and posts the harness', async () => {
     posts.length = 0
     const only = { ...multi, options: [multi.options[2]!] }

@@ -15,7 +15,7 @@ import type { PlanLimits } from '@agentistics/core'
 import { Checkbox, ConfirmModal, DialogActions, dialogButtonStyle } from '../../pages/settings/primitives'
 import { PLAN_ROW_GRID, PlanUsageRowCells } from '../PlanLimitMeter'
 import { usePlanLimits } from '../../lib/planLimits'
-import { defaultPick, pickerRows } from '../../lib/accountPicker'
+import { accountDisplayName, defaultPick, pickerRows } from '../../lib/accountPicker'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
   canSwitch, fetchSwitchInfo, harnessName, noticeTitle, postSwitch, resetPhrase, showLimitNotice, type SwitchInfo,
@@ -63,7 +63,7 @@ function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
 }) {
   const pt = lang === 'pt'
   const plan = usePlanLimits()
-  const rows = pickerRows(info, plan.limits, plan.now, pt ? 'pt' : 'en')
+  const rows = pickerRows(info, plan.limits, plan.now, pt ? 'pt' : 'en', plan.accountLabels)
   const [pick, setPick] = useState('')
   const pending = fromLimit ? info.limit?.pendingPreview : undefined
   const [resend, setResend] = useState(true)
@@ -92,8 +92,8 @@ function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
         ? `Outro assistente começa uma conversa NOVA em ${harnessName(chosen.harness)}, na mesma pasta, tarefa e papel, com um resumo desta (objetivo, estado, últimos turnos, arquivos tocados). Esta sessão só é encerrada depois que a nova estiver rodando.`
         : `Another assistant starts a NEW conversation on ${harnessName(chosen.harness)}, in the same folder, task and role, briefed with a summary of this one (goal, state, last turns, files touched). This session is ended only once the new one is running.`)
       : (pt
-        ? `A sessão é encerrada e a mesma conversa continua na conta ${chosen.label}. A conversa é copiada, não movida: o histórico na conta atual continua lá.`
-        : `The session is ended and the same conversation continues on ${chosen.label}. The conversation is copied, not moved: the history on the current account stays there.`)
+        ? `A sessão é encerrada e a mesma conversa continua na conta ${accountDisplayName(chosen.harness, chosen.id, chosen.label, {})}. A conversa é copiada, não movida: o histórico na conta atual continua lá.`
+        : `The session is ended and the same conversation continues on ${accountDisplayName(chosen.harness, chosen.id, chosen.label, {})}. The conversation is copied, not moved: the history on the current account stays there.`)
   async function confirm() {
     if (!chosen) return
     setBusy(true); setError(null)
@@ -135,8 +135,8 @@ export function AccountPicker({ flow, lang }: { flow: SwitchFlow; lang: string }
       {flow.rows.map(r => {
         // The ACCOUNT is the name (the mark already says which assistant); the line under it says
         // the assistant and the plan, so a 335 px panel never cuts the one thing that tells rows apart.
-        const name = r.label || harnessName(r.harness)
-        const sub = [r.label ? harnessName(r.harness) : '', r.plan ?? (pt ? 'plano não registrado' : 'plan not registered')].filter(Boolean).join(' · ')
+        const name = accountDisplayName(r.harness, r.id, r.label, {})
+        const sub = r.plan ?? (pt ? 'plano não registrado' : 'plan not registered')
         const cells = (
           <PlanUsageRowCells
             harness={r.harness as PlanLimits['harness']} name={name} plan={sub} limits={r.limits} now={flow.plan.now} lang={l} wrap

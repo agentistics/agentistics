@@ -98,6 +98,7 @@ import { turnAnchorIds } from '../../lib/promptHistory'
 import { RepoNote as Note } from './repoNote'
 import { createSharedPref } from '../../lib/sharedPref'
 import type { TabPanelId } from '../../lib/panelSlots'
+import { SessionLimitsCard } from './SessionLimitsCard'
 import { panelTitle } from '../../lib/panelMeta'
 
 /**
@@ -172,6 +173,8 @@ export interface ArtifactsAsideProps {
   onOpenTask?: (taskId: string) => void
   /** The filing changed — the caller re-reads the fleet so the row's badge agrees with the tab. */
   onTaskChanged?: () => void
+  /** Desktop only: the "Usage limits" card (plan list + account switch) in the Metrics tab. */
+  limitsCard?: { onSwitched: (newId: string) => void; onOpenAll: () => void }
   /** Every file this session touched, newest first. */
   artifacts: readonly Artifact[]
   /** The conversation has not answered yet — distinct from having answered with nothing. */
@@ -255,7 +258,7 @@ export interface ArtifactsAsideProps {
 export function ArtifactsAside({
   sessionId, cwd, lang, artifacts, loading, unavailable, older, turns, state, onClose,
   unlistedWrites, outsideNote, hideCloseButton, headerControls,
-  activeTab, focusRequest, session, onOpenTask, onTaskChanged, metrics, onHandedToChat,
+  activeTab, focusRequest, session, onOpenTask, onTaskChanged, limitsCard, metrics, onHandedToChat,
 }: ArtifactsAsideProps) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
@@ -1211,6 +1214,14 @@ export function ArtifactsAside({
           <div style={{ padding: '12px 14px 0' }}>
             <SessionDrilldownHead session={metrics.session} lang={metrics.lang} title={false} />
           </div>
+          {limitsCard && (
+            <section data-metrics-limits style={{ margin: '12px 14px 0', padding: '8px 10px 10px', border: '1px solid var(--border)', background: 'var(--bg-card)', borderRadius: 12 }}>
+              <span style={{ display: 'block', padding: '4px 0 6px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-tertiary)' }}>
+                {pt ? 'Limites de uso' : 'Usage limits'}
+              </span>
+              <SessionLimitsCard sessionId={sessionId} lang={pt ? 'pt' : 'en'} onSwitched={limitsCard.onSwitched} onOpenAll={limitsCard.onOpenAll} />
+            </section>
+          )}
           <SessionDrilldownBody {...metrics} />
         </>
       )}

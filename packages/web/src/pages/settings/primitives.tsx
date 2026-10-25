@@ -141,9 +141,11 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
             />
           </div>
         )}
-        {footer ?? <div style={{
+        {footer ?? <div data-dialog-footer style={{
           display: 'flex', gap: 8, marginTop: 2, justifyContent: 'flex-end',
           flexDirection: isMobile ? 'column-reverse' : 'row',
+          // The phone sheet scrolls as one; the answer buttons stay on the sheet's floor, never below the fold.
+          ...(mobileSheet && isMobile ? { position: 'sticky' as const, bottom: 0, zIndex: 1, background: 'var(--bg-card)', padding: '8px 0 2px', boxShadow: '0 -8px 8px -8px rgba(0,0,0,0.35)' } : {}),
         }}>
           <button type="button" autoFocus={focusCancel} onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{cancelLabel}</button>
           <button type="button" onClick={() => { if (armed) onConfirm() }} disabled={!armed} style={dialogButtonStyle(tone === 'danger' ? 'danger' : 'primary', isMobile, !armed)}>{confirmLabel}</button>

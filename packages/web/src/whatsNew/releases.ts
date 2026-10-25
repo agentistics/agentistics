@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.151.0': {
+    features: [
+      {
+        pt: 'O cartão "Limites de uso", com a troca de conta da sessão, agora também aparece no painel lateral (aba Métricas) no computador.',
+        en: 'The "Usage limits" card, with the session’s account switch, now also appears in the side panel (Metrics tab) on desktop.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ao trocar de conta, os nomes das contas e dos planos ("Claude Pro", "Claude Max 5x") são os mesmos do Uso dos planos.',
+        en: 'When switching accounts, account and plan names ("Claude Pro", "Claude Max 5x") now match the Plan usage list.',
+      },
+      {
+        pt: 'No celular, os botões Confirmar e Cancelar da troca de conta ficam sempre visíveis, mesmo com muitas contas.',
+        en: 'On a phone, the Confirm and Cancel buttons of the account switch always stay visible, even with many accounts.',
+      },
+      {
+        pt: 'Quando a troca de conta falha, a mensagem mostra só o motivo, sem o texto técnico do final.',
+        en: 'When an account switch fails, the message shows only the reason, without the technical text at the end.',
+      },
+    ],
+  },
   '2.150.0': {
     features: [
       {

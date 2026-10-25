@@ -25,8 +25,7 @@ import { useAway } from '../lib/awayMode'
 import { sessionLinks } from '../lib/sessionParent'
 import { SessionCheckinCard, SessionLinkInfo, SessionLinkPanel } from '../components/sessions/SessionLinkInfo'
 import { Drawer } from '../components/Drawer'
-import { PlanUsageSummary } from '../components/PlanLimitMeter'
-import { AccountSwitchInline } from '../components/sessions/AccountSwitch'
+import { SessionLimitsCard } from '../components/sessions/SessionLimitsCard'
 import { ContextRing } from '../components/sessions/SessionStatsMenu'
 import { HarnessMark } from '../components/sessions/HarnessMark'
 import { HARNESS_LABELS } from '../lib/harness'
@@ -1363,6 +1362,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       onOpenTask={taskId => navigate(`/tasks/${encodeURIComponent(taskId)}`)}
       // The badge on the row is the fleet's; re-poll so it agrees with what the tab just did.
       onTaskChanged={refresh}
+      // The "Usage limits" card (with the account switch) lives in the Metrics tab on desktop; the phone
+      // has it in the drawer, so it is not handed down there.
+      {...(!isMobile ? { limitsCard: { onSwitched: (id: string) => goToReopened(id), onOpenAll: requestPlanUsageModal } } : {})}
       // See `sessionMetrics`: present exactly when the store has a record, which is the same fact
       // that decides whether the metrics card offers its link.
       {...(sessionMetrics ? { metrics: sessionMetrics } : {})}
@@ -2920,18 +2922,12 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           )
         })(), (
           // CONTA.LIMITES: the list of plans, and the switch right where the limits are.
-          <AccountSwitchInline sessionId={selected.id} lang={tPt} onSwitched={id => { setSessionDrawer(false); goToReopened(id) }}>
-            <button
-              type="button"
-              onClick={() => { closeSessionDrawer(); requestPlanUsageModal() }}
-              aria-label={pt ? 'Ver todos os limites' : 'See every limit'}
-              style={{
-                all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: 'pointer',
-              }}
-            >
-              <PlanUsageSummary limits={planLimits.limits} registered={planLimits.registered} accountLabels={planLimits.accountLabels} now={planLimits.now} lang={tPt} />
-            </button>
-          </AccountSwitchInline>
+          <SessionLimitsCard
+            sessionId={selected.id}
+            lang={tPt}
+            onSwitched={id => { setSessionDrawer(false); goToReopened(id) }}
+            onOpenAll={() => { closeSessionDrawer(); requestPlanUsageModal() }}
+          />
         ), { open: drawerLimitsOpen, toggle: () => setDrawerLimitsOpen(v => !v) })}
 
         {/* A leader's check-in is a card of its own (folded inside "Sessão" it was the hardest control
