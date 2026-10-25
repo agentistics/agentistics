@@ -26,13 +26,18 @@ export function ScopeNote({ children }: { children: React.ReactNode }) {
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction, closeLabel }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction, closeLabel, aside, splitFrom = 900 }: {
   /** Optional wider content and phone bottom-sheet presentation; defaults preserve confirmations. */
   maxWidth?: number
   mobileSheet?: boolean
   className?: string
   headerAction?: React.ReactNode
   closeLabel?: string
+  /** A long list that scrolls on its own. From `splitFrom` px of viewport it is the RIGHT column (the
+   *  title, message, children and buttons stay left); narrower, it sits under the message and the
+   *  panel stops scrolling as a whole, so the header and the buttons are always on screen. */
+  aside?: React.ReactNode
+  splitFrom?: number
   open: boolean
   title: string
   message: string
@@ -60,6 +65,15 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   busy?: boolean
 }) {
   const isMobile = useIsMobile()
+  const [vw, setVw] = React.useState(() => (typeof window === 'undefined' ? 0 : window.innerWidth))
+  React.useEffect(() => {
+    if (!aside) return
+    const on = () => setVw(window.innerWidth)
+    on()
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [aside])
+  const split = !!aside && !isMobile && vw >= splitFrom
   const [typed, setTyped] = React.useState('')
   // Reset between openings, otherwise the previous answer would pre-arm the next delete.
   React.useEffect(() => { if (open) setTyped('') }, [open])
@@ -104,12 +118,15 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
       background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: mobileSheet && isMobile ? 0 : 16,
     }}>
       <div className={className} ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+        data-confirm-layout={aside ? (split ? 'split' : 'stacked') : undefined}
         onClick={e => e.stopPropagation()} style={{ outline: 'none',
-        width: '100%', maxWidth: mobileSheet && isMobile ? '100%' : maxWidth, ...(mobileSheet ? { boxSizing: 'border-box' as const } : {}), maxHeight: mobileSheet ? 'calc(92dvh / var(--ui-zoom, 1))' : 'calc(100dvh / var(--ui-zoom, 1) - 32px)', overflowY: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)',
+        width: '100%', maxWidth: mobileSheet && isMobile ? '100%' : maxWidth, ...(mobileSheet ? { boxSizing: 'border-box' as const } : {}), maxHeight: mobileSheet ? 'calc(92dvh / var(--ui-zoom, 1))' : 'calc(100dvh / var(--ui-zoom, 1) - 32px)', overflowY: aside ? 'hidden' : 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)',
         borderRadius: mobileSheet && isMobile ? '18px 18px 0 0' : 12, padding: mobileSheet && isMobile ? '18px 16px max(18px, env(safe-area-inset-bottom))' : 22, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
-        display: 'flex', flexDirection: 'column', gap: 14,
+        display: split ? 'grid' : 'flex', flexDirection: 'column', gap: split ? 22 : 14,
+        ...(split ? { gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.2fr)', boxSizing: 'border-box' as const } : {}),
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div data-confirm-main style={split ? { display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0, minHeight: 0, overflowY: 'auto' } : { display: 'contents' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           <span style={tone === 'danger'
             ? { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'color-mix(in srgb, #ef4444 15%, transparent)', color: '#ef4444' }
             : { display: 'inline-flex', padding: 8, borderRadius: 9, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)' }}>
@@ -119,7 +136,10 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
           {headerAction}
           {closeLabel && <button type="button" aria-label={closeLabel} onClick={onCancel} style={{ ...dialogButtonStyle('secondary', isMobile), width: isMobile ? 44 : undefined, minWidth: isMobile ? 44 : undefined }}>×</button>}
         </div>
-        {message && <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0 }}>{message}</p>}
+        {message && <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, margin: 0, flexShrink: 0 }}>{message}</p>}
+        {aside && !split && (
+          <div data-confirm-aside style={{ flex: '1 1 auto', minHeight: 120, overflowY: 'auto', overscrollBehavior: 'contain' }}>{aside}</div>
+        )}
         {children}
         {requireText !== undefined && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -150,6 +170,8 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
           <button type="button" autoFocus={focusCancel} onClick={onCancel} style={dialogButtonStyle('secondary', isMobile)}>{cancelLabel}</button>
           <button type="button" onClick={() => { if (armed) onConfirm() }} disabled={!armed} style={dialogButtonStyle(tone === 'danger' ? 'danger' : 'primary', isMobile, !armed)}>{confirmLabel}</button>
         </div>}
+        </div>
+        {split && <div data-confirm-aside style={{ minWidth: 0, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>{aside}</div>}
       </div>
     </div>
   )

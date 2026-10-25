@@ -142,7 +142,7 @@ describe('AccountSwitchDialog — every harness (v2)', () => {
     const { root } = await mount(createElement(mod.AccountSwitchDialog, {
       open: true, sessionId: 'm1', info: { ...multi, options: [multi.options[0]!, multi.options[2]!] }, lang: 'pt', fromLimit: false, onClose: () => {}, onSwitched: () => {},
     }))
-    const dialog = Array.from(document.querySelectorAll('[data-account-switch]')).at(-1)!
+    const dialog = Array.from(document.querySelectorAll('[role="dialog"]')).at(-1)!
     const current = dialog.querySelector('[data-account-switch-current]')!
     expect(current.textContent).toContain('a@x.com')
     expect(current.textContent).toContain('Agora')
@@ -201,7 +201,7 @@ describe('AccountSwitchDialog — every harness (v2)', () => {
     const root = createRoot(host)
     const props = (info: SwitchInfo) => ({ open: true, sessionId: 'm1', info, lang: 'pt', fromLimit: false, onClose: () => {}, onSwitched: () => {} })
     await act(async () => { root.render(createElement(mod.AccountSwitchDialog, props(multi))) })
-    const dialog = () => Array.from(document.querySelectorAll('[data-account-switch]')).at(-1)!
+    const dialog = () => Array.from(document.querySelectorAll('[role="dialog"]')).at(-1)!
     const codex = dialog().querySelector('[data-account-row="codex:acc_k"]') as HTMLButtonElement
     await act(async () => { codex.click() })
     expect(codex.getAttribute('aria-checked')).toBe('true')
@@ -312,5 +312,45 @@ describe('AccountSwitchDialog — the session was ended (double failure)', () =>
     expect(document.querySelector('[data-account-switch-reopen]')).toBeNull()
     await act(async () => { root.unmount() })
     postReply = { ok: true, message: 'Session continued on the other account.', id: 'm2' }
+  })
+})
+
+describe('AccountSwitchDialog — layout', () => {
+  const many: SwitchInfo = {
+    ...limited,
+    options: Array.from({ length: 9 }, (_, i) => ({ id: `acc_${i}`, harness: 'claude' as const, label: `u${i}@x.com` })),
+  }
+  const props = (info: SwitchInfo) => ({ open: true, sessionId: 'm1', info, lang: 'en', fromLimit: true, onClose: () => {}, onSwitched: () => {} })
+
+  test('wide viewport: texts and actions on the left, the account list alone in a right column that scrolls', async () => {
+    window.innerWidth = 1440
+    const { root } = await mount(createElement(mod.AccountSwitchDialog, props(many)))
+    const dialog = document.querySelector('[role="dialog"]') as HTMLElement
+    expect(dialog.getAttribute('data-confirm-layout')).toBe('split')
+    expect(dialog.style.display).toBe('grid')
+    const main = dialog.querySelector('[data-confirm-main]') as HTMLElement
+    const aside = dialog.querySelector('[data-confirm-aside]') as HTMLElement
+    expect(main.contains(dialog.querySelector('#' + CSS.escape(dialog.getAttribute('aria-labelledby')!)))).toBe(true)
+    expect(main.textContent).toContain('fix the bug')
+    expect(main.querySelector('[data-dialog-footer]')).not.toBeNull()
+    expect(main.querySelector('[role="radiogroup"]')).toBeNull()
+    expect(aside.querySelectorAll('[data-account-row]').length).toBe(10)
+    expect(aside.style.overflowY).toBe('auto')
+    expect(dialog.style.overflowY).toBe('hidden')
+    await act(async () => { root.unmount() })
+  })
+
+  test('narrow viewport: one column, the list scrolls on its own and the header never scrolls away', async () => {
+    window.innerWidth = 700
+    const { root } = await mount(createElement(mod.AccountSwitchDialog, props(many)))
+    const dialog = document.querySelector('[role="dialog"]') as HTMLElement
+    expect(dialog.getAttribute('data-confirm-layout')).toBe('stacked')
+    const aside = dialog.querySelector('[data-confirm-aside]') as HTMLElement
+    expect(aside.style.overflowY).toBe('auto')
+    expect(dialog.style.overflowY).toBe('hidden')
+    expect(aside.querySelectorAll('[role="radio"]').length).toBe(9)
+    expect(dialog.querySelector('[data-dialog-footer]')).not.toBeNull()
+    await act(async () => { root.unmount() })
+    window.innerWidth = 1200
   })
 })

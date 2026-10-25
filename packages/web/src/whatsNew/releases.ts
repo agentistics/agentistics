@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.153.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A janela de trocar de conta ficou mais larga: explicação à esquerda, contas à direita, e o topo não é mais cortado.',
+        en: 'The switch-account dialog is wider: explanation on the left, accounts on the right, and its top is no longer cut off.',
+      },
+    ],
+  },
   '2.152.0': {
     features: [
       {

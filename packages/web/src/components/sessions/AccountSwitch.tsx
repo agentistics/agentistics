@@ -243,13 +243,10 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
       onCancel={onClose}
       busy={flow.busy || !flow.chosen}
       mobileSheet
-      maxWidth={460}
+      maxWidth={920}
+      aside={<AccountPicker flow={flow} lang={lang} />}
     >
-      <div data-account-switch style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 4 }}>
-        {/* The list scrolls, the dialog does not: with many accounts Cancel/Continue stay on screen (800 px desktop). */}
-        <div data-account-switch-list style={{ maxHeight: 'max(200px, calc(100dvh / var(--ui-zoom, 1) - 380px))', overflowY: 'auto', overscrollBehavior: 'contain' }}>
-          <AccountPicker flow={flow} lang={lang} />
-        </div>
+      <div data-account-switch style={{ display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0 }}>
         <SwitchExtras flow={flow} lang={lang} />
       </div>
     </ConfirmModal>
