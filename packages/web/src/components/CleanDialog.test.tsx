@@ -9,14 +9,14 @@ const scan: CleanScanState = { id: 'scan', state: 'scanning', step: 2, label: 'm
   log: [{ at: 1000, state: 'done', name: 'completed-name', bytes: 1024 }, { at: 1100, state: 'running', name: 'running-name' }, { at: 1200, state: 'queued', name: 'queued-project' }] }
 test('live scan shows localized bytes, counters, step, ETA, progress and all three log states', () => {
   const html = renderToStaticMarkup(<CleanScanView scan={scan} lang="pt" />)
-  for (const label of ['Encontrado até agora', '1,5 GB', 'Etapa', '46%', 'cerca de 40 s', 'O que está acontecendo', 'completed-name', 'medindo ', 'na fila: ', 'role="log"', 'value="0.46"']) expect(html).toContain(label)
+  for (const label of ['Dá para liberar até agora', '1,5 GB', 'Etapa', '46%', 'cerca de 40 s', 'O que está acontecendo', 'completed-name', 'medindo ', 'na fila: ', 'role="log"', 'value="0.46"']) expect(html).toContain(label)
 })
 test('the same state is readable in English, and first render has no stale progress', () => {
   const html = renderToStaticMarkup(<CleanScanView scan={scan} lang="en" />)
-  for (const label of ['Found so far', '1.5 GB', 'Step', 'about 40 s', 'queued: ']) expect(html).toContain(label)
+  for (const label of ['Can be freed so far', '1.5 GB', 'Step', 'about 40 s', 'queued: ']) expect(html).toContain(label)
   const initial = renderToStaticMarkup(<CleanScanView scan={null} lang="en" />)
   expect(initial).toContain('0 B')
-  expect(initial).toContain('estimating time')
+  expect(initial).toContain('estimating…')
   expect(initial).not.toContain('completed-name')
 })
 test('unknown scan labels show a localized generic checking step', () => {
@@ -42,10 +42,10 @@ test('wrapping chips keep all four borders, including the last option', () => {
   const segmented = renderToStaticMarkup(<TabSelect options={options} value="all" onChange={() => {}} />)
   expect(segmented).toContain('border-right:none')
 })
-test('project, folder and scan-log names wrap without CSS truncation', () => {
+test('project and folder names wrap without CSS truncation (the scan log is the one ellipsis exception)', () => {
   const css = readFileSync(new URL('./CleanDialog.css', import.meta.url), 'utf8')
-  expect(css).not.toContain('text-overflow: ellipsis')
-  for (const selector of ['.clean-log-name', '.clean-card-name, .clean-card-subtitle', '.clean-table th, .clean-table td']) {
+  expect(css.replace(/^\.clean-log-name \{[^}]*\}/m, '')).not.toContain('text-overflow: ellipsis')
+  for (const selector of ['.clean-card-name, .clean-card-subtitle', '.clean-table th, .clean-table td']) {
     const rule = css.slice(css.indexOf('\n' + selector + ' {')).split('}')[0]!
     expect(rule).toContain('white-space: normal')
     expect(rule).toContain('overflow-wrap: anywhere')
@@ -61,4 +61,21 @@ test('result summary distinguishes cleanup candidates from all rows including ke
     expect(html).not.toContain('39')
     expect(html).toContain(`<span style="white-space:nowrap">${new Date(plan.scannedAt).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>`)
   }
+})
+
+test('a kept folder shows its MEASURED size, never 0 B (LIMPEZA.ZERO regression)', () => {
+  const html = renderToStaticMarkup(<CleanScanView scan={{ ...scan, foundBytes: 0, measuredBytes: 3 * 1024 ** 3,
+    log: [{ at: 1000, state: 'done', name: 'aipe', bytes: 2 * 1024 ** 3, kept: true }, { at: 1100, state: 'done', name: 'old', bytes: 1024 ** 3, freeBytes: 512 * 1024 ** 2 }, { at: 1200, state: 'done', name: 'slow', bytes: 0, unknown: true }, { at: 1300, state: 'done', name: 'all', bytes: 1024 ** 3, freeBytes: 1024 ** 3 }] }} lang="pt" />)
+  for (const label of ['2 GB · mantido', '1 GB · libera 512 MB', '1 GB · libera 1 GB', 'não medido', 'de 3 GB medidos']) expect(html).toContain(label)
+})
+
+test('the log name truncates with an ellipsis and keeps the size on one line (P3)', () => {
+  const css = readFileSync(new URL('./CleanDialog.css', import.meta.url), 'utf8')
+  expect(css).toMatch(/\.clean-log-name \{[^}]*white-space: nowrap[^}]*text-overflow: ellipsis/)
+  expect(css).toMatch(/\.clean-log-line > \.clean-muted:last-child \{[^}]*white-space: nowrap/)
+})
+
+test('mobile list subtitle translates the merged status in PT (P3)', () => {
+  const src = readFileSync(new URL('./CleanDialog.tsx', import.meta.url), 'utf8')
+  expect(src).toContain("(pt ? 'mesclado' : 'merged')")
 })

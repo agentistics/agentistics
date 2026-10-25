@@ -653,6 +653,33 @@ describe('one conversation, one row (CROSSBIND)', () => {
     expect((await ok.read()).find(x => x.id === 'free')?.conversationId).toBeUndefined()
   })
 
+  it('keeps refusals quiet in CLI readers and remembers over 512 pairs after removal', async () => {
+    const r = createSessionRegistry(file)
+    const own = `queued-${dir}`
+    const owners = Array.from({ length: 520 }, (_, i) => born(`owner-${i}`, `conversation-${i}`))
+    await writeFile(file, JSON.stringify([...owners, born(own, B)]))
+    const saved = process.env.SERVE_STATIC
+    const warns: string[] = []
+    const orig = console.warn
+    console.warn = (m: string) => { warns.push(String(m)) }
+    try {
+      delete process.env.SERVE_STATIC
+      expect(await r.link(own, { conversationId: owners[0]!.conversationId })).toEqual({ ok: false, heldBy: 'owner-0' })
+      expect(warns).toHaveLength(0)
+      process.env.SERVE_STATIC = '1'
+      for (const owner of owners) await r.link(own, { conversationId: owner.conversationId })
+      await r.remove(own)
+      await r.add(born(own, B))
+      for (const owner of owners) await r.link(own, { conversationId: owner.conversationId })
+      expect(warns).toHaveLength(520)
+      expect((await r.read()).find(row => row.id === own)?.conversationId).toBe(B)
+    } finally {
+      console.warn = orig
+      if (saved === undefined) delete process.env.SERVE_STATIC
+      else process.env.SERVE_STATIC = saved
+    }
+  })
+
   it('LOW-1: the same refusal is logged once, not on every poll', async () => {
     const r = createSessionRegistry(file)
     await r.add(born('forced', A))
@@ -660,9 +687,15 @@ describe('one conversation, one row (CROSSBIND)', () => {
     const warns: string[] = []
     const orig = console.warn
     console.warn = (m: string) => { warns.push(String(m)) }
+    const saved = process.env.SERVE_STATIC
+    process.env.SERVE_STATIC = '1'
     try {
       for (let i = 0; i < 3; i++) await r.link('queued2', { conversationId: A })
-    } finally { console.warn = orig }
+    } finally {
+      console.warn = orig
+      if (saved === undefined) delete process.env.SERVE_STATIC
+      else process.env.SERVE_STATIC = saved
+    }
     expect(warns.length).toBe(1)
   })
 })

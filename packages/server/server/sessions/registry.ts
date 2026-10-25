@@ -29,7 +29,7 @@ import { MANAGED_SESSIONS_FILE } from '../config'
 import { CONVERSATION_LINK_REASONS as LINK_REASONS, type ConversationLinkReason } from '@agentistics/core'
 import type { ManagedSession, RetireRequest } from './types'
 import { withFileLock } from './file-lock'
-import { BoundedKeys } from './bounded-keys'
+import { RefusalLog } from './refusal-log'
 import { withIdentityPreferences } from './session-identity-prefs'
 
 /** Distinguishes two writes from the SAME process; the pid distinguishes the processes. */
@@ -96,8 +96,8 @@ export function conversationOwnedElsewhere(
     && !opts.notRunning?.has(s.id) && exactLink(s)) ?? null
 }
 
-/** Refusals already logged — the poller retries every 5 s. Bounded, and dropped with the row. */
-const warnedRefusals = new BoundedKeys(512)
+/** Refusals already logged for this process — the poller retries every 5 s. */
+const warnedRefusals = new RefusalLog()
 
 export interface SessionPatch {
   spawnConfiguration?: import('./spawn-configuration').SpawnConfiguration
@@ -481,7 +481,6 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
       })
     },
     remove(id) {
-      warnedRefusals.dropWhere(k => k.startsWith(`${id}\0`))
       return enqueue(async () => {
         const list = await read()
         // Nothing to remove: writing anyway would touch the file (and pointlessly clear a pending
@@ -517,9 +516,8 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
         if (idx === -1) return { ok: false }
         const owner = conversationOwnedElsewhere(list, id, patch.conversationId, opts)
         if (owner) {
-          if (warnedRefusals.add(`${id}\0${patch.conversationId}`)) {
-            console.warn(`[sessions] refused to link ${id} to conversation ${patch.conversationId}: session ${owner.id} owns it`)
-          }
+          warnedRefusals.warn(`${id}\0${patch.conversationId}`,
+            `[sessions] refused to link ${id} to conversation ${patch.conversationId}: session ${owner.id} owns it`)
           return { ok: false, heldBy: owner.id }
         }
         const next = { ...list[idx]!, ...patch } as Record<string, unknown>
