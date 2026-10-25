@@ -55,7 +55,7 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
   const [width, setWidth] = useState(0)
   /** The finger's x in the track's own coordinates while dragging; null at rest. */
   const [dragX, setDragX] = useState<number | null>(null)
-  const press = useRef<{ id: number; x0: number; dragging: boolean; lastSlot: number } | null>(null)
+  const press = useRef<{ id: number; x0: number; y0: number; dragging: boolean; lastSlot: number } | null>(null)
   const suppressClick = useRef(false)
   const [reduced, setReduced] = useState(prefersReducedMotion)
 
@@ -95,19 +95,25 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
     ? followOffset(dragX, width, count, INSET)
     : restOffset(Math.max(0, activeIndex), width, count, INSET)
   const slotW = count > 0 ? width / count : 0
+  const withinPill = (y: number) => {
+    const rect = trackRef.current?.parentElement?.getBoundingClientRect()
+    return !!rect && y >= rect.top && y <= rect.bottom
+  }
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
-    press.current = { id: e.pointerId, x0: e.clientX, dragging: false, lastSlot: -1 }
+    press.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, dragging: false, lastSlot: -1 }
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const p = press.current
     if (!p || p.id !== e.pointerId) return
     if (!p.dragging) {
-      if (!isDrag(e.clientX - p.x0)) return
+      if (!isDrag(e.clientX - p.x0) && !isDrag(e.clientY - p.y0)) return
       p.dragging = true
       try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* already released */ }
     }
+    // A vertical drag-off abandons the selection; re-entering the pill resumes following.
+    if (!withinPill(e.clientY)) { setDragX(null); return }
     const x = localX(e.clientX)
     const slot = slotAt(x, width, count)
     if (slot !== p.lastSlot) {
@@ -126,7 +132,7 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
     // The browser still fires a click after a drag ends; it must not activate a second item.
     suppressClick.current = true
     window.setTimeout(() => { suppressClick.current = false }, 350)
-    if (commit) items[slotAt(localX(e.clientX), width, count)]?.onActivate()
+    if (commit && withinPill(e.clientY)) items[slotAt(localX(e.clientX), width, count)]?.onActivate()
   }
 
   return (

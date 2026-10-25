@@ -2,7 +2,9 @@
 
 On phones, option A uses one dark floating pill with five equal slots: Agentask, Usage, Sessions,
 Metrics and More. The indicator follows the finger across the shared track; releasing activates the
-slot under it. Sessions always has an orange disc and bold label. The pill stays dark in both themes,
+slot under it. Moving off the pill vertically restores the current indicator; releasing there cancels
+without navigating, including a purely vertical gesture. Re-entering resumes the drag. Sessions
+always has an orange disc and bold label. The pill stays dark in both themes,
 and count badges use the shared `SOLID_COUNT` styling only for measured positive values. Reduced
 motion disables springs and icon lift/scale, including when the preference changes while the app is
 open. The bar hides while a session is open. The header continues to host the magnifier.

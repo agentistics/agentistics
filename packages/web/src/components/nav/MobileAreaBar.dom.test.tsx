@@ -50,8 +50,29 @@ async function render(pathname = '/sessions') {
   return { track, buttons, indicator: () => track.querySelector<HTMLElement>('[aria-hidden="true"]')! }
 }
 const click = (el: HTMLElement) => act(async () => { el.click() })
-const pointer = (el: HTMLElement, type: string, x: number) => act(async () => {
-  el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: 12 + x }))
+const pointer = (el: HTMLElement, type: string, x: number, y = 728) => act(async () => {
+  el.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerId: 1, pointerType: 'touch', clientX: 12 + x, clientY: y }))
+})
+
+test('vertical drag-off cancels both horizontal and purely vertical gestures', async () => {
+  const view = await render('/usage')
+  for (const x of [20, 250]) {
+    await pointer(view.track, 'pointerdown', 20)
+    await pointer(view.track, 'pointermove', x, 500)
+    expect(view.indicator().style.transform).toContain(`translateX(${restOffset(1, 356, 5, 4)}px)`)
+    await pointer(view.track, 'pointerup', x, 500)
+    await click(view.buttons[3]!)
+    expect(went).toEqual([])
+  }
+})
+
+test('a finger may re-enter after a vertical drag-off and activate the slot on release', async () => {
+  const view = await render('/usage')
+  await pointer(view.track, 'pointerdown', 20)
+  await pointer(view.track, 'pointermove', 250, 500)
+  await pointer(view.track, 'pointermove', 250)
+  await pointer(view.track, 'pointerup', 250)
+  expect(went).toEqual(['/'])
 })
 
 test('Home scrolls the session panes to top and an open conversation returns to the list', async () => {
