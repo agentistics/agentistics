@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, KeyRound, LogOut, ShieldCheck, MessagesSquare, type LucideIcon } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronUp, KeyRound, LogOut, ShieldCheck, MessagesSquare, type LucideIcon } from 'lucide-react'
 import type { IamAccount } from '../../App'
 import { areaOfPath, isSessionsWorkspace, pageLabel, type AreaId } from '../../lib/appAreas'
 import { BottomSheet } from '../BottomSheet'
-import { BetaTag } from '../BetaTag'
 import { ChangePasswordSelf } from '../ChangePasswordSelf'
 import { MfaSetup } from '../MfaSetup'
-import { AreaTree } from './AreaTree'
+import { AreaTree, areaRowStyle } from './AreaTree'
 import { MobilePillBar } from './MobilePillBar'
 
 export interface MobileAreaAction {
@@ -14,49 +13,34 @@ export interface MobileAreaAction {
   label: string
   icon: LucideIcon
   onClick: () => void
-  active?: boolean
   accent?: boolean
   badge?: string
-  beta?: boolean
+  value?: string
+  description?: string
   /** Toggles such as language and theme remain open for immediate feedback. */
   keepOpen?: boolean
 }
 
-/** A global action tile in the areas sheet (theme, language, refresh, …). */
-export function MobileActionTile({ tile }: { tile: MobileAreaAction }) {
-  const orange = 'var(--anthropic-orange)'
-  const Icon = tile.icon
-  const lit = tile.active || tile.accent
+/** Global actions share the area-list geometry, with current values aligned to the right. */
+export function MobileActionRow({ action }: { action: MobileAreaAction }) {
+  const Icon = action.icon
   return (
-    <button
-      onClick={tile.onClick}
-      style={{
-        position: 'relative',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        minWidth: 44, minHeight: 64, gap: 6, padding: '11px 4px',
-        borderRadius: 12,
-        border: `1px solid ${lit ? orange : 'var(--border)'}`,
-        background: lit ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-        color: lit ? orange : 'var(--text-primary)',
-        cursor: 'pointer', fontFamily: 'inherit',
-        fontSize: '0.6875rem', fontWeight: 600,
-        transition: 'all 0.15s',
-      }}
-    >
-      <Icon size={19} strokeWidth={1.8} />
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{tile.label}</span>
-      {/* Top-LEFT, so it cannot collide with the count badge on the right. */}
-      {tile.beta && <BetaTag what={tile.label} style={{ position: 'absolute', top: 4, left: 5 }} />}
-      {tile.badge && (
-        <span style={{
-          position: 'absolute', top: 4, right: 5,
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          minWidth: 15, height: 15, padding: '0 4px', borderRadius: 8,
-          background: orange, color: '#fff', fontSize: '0.5625rem', fontWeight: 700,
-        }}>
-          {tile.badge}
-        </span>
-      )}
+    <button type="button" onClick={action.onClick} style={{
+      ...areaRowStyle(true), width: '100%', flex: 'none', border: '1px solid transparent',
+      cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+      ...(action.accent ? {
+        borderColor: 'var(--anthropic-orange)', color: 'var(--anthropic-orange)',
+        background: 'var(--anthropic-orange-dim)',
+      } : {}),
+    }}>
+      <Icon size={17} style={{ flexShrink: 0 }} />
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: 'block', fontWeight: action.accent ? 700 : 500 }}>{action.label}</span>
+        {action.description && <span style={{ display: 'block', whiteSpace: 'normal', fontSize: 12, color: 'var(--text-tertiary)' }}>{action.description}</span>}
+      </span>
+      {action.badge ? <span style={{ borderRadius: 9, padding: '2px 9px', background: 'var(--anthropic-orange)', color: '#111', fontSize: 10, fontWeight: 700 }}>{action.badge}</span>
+        : action.value ? <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{action.value}</span>
+        : <ChevronRight size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />}
     </button>
   )
 }
@@ -119,8 +103,8 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
       <BottomSheet open={open} onClose={closeSheet} title={pt ? 'Ir para' : 'Go to'} lang={lang}>
         <div style={{ padding: '0 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <AreaTree lang={lang} pathname={pathname} variant="sheet" badges={badges} onNavigate={go} visibleSettings={visibleSettings} />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
-            {actions.map(action => <MobileActionTile key={action.key} tile={{ ...action, onClick: () => { if (!action.keepOpen) closeSheet(); action.onClick() } }} />)}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            {actions.map(action => <MobileActionRow key={action.key} action={{ ...action, onClick: () => { if (!action.keepOpen) closeSheet(); action.onClick() } }} />)}
           </div>
         {principal && (
           <button

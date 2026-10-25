@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { RefreshCw } from 'lucide-react'
-import { MobileActionTile, MobileAreaBar } from './MobileAreaBar'
+import { MobileActionRow, MobileAreaBar } from './MobileAreaBar'
 
 function render(pathname: string, attention?: number, lang: 'pt' | 'en' = 'pt') {
   return renderToStaticMarkup(
@@ -67,12 +67,23 @@ describe('MobileAreaBar', () => {
     expect(buttons[1]).toContain('flex:0 0 52px')
   })
 
-  test('the moved action tile keeps its badge and a full touch target', () => {
-    const html = renderToStaticMarkup(<MobileActionTile tile={{ key: 'refresh', label: 'Refresh', icon: RefreshCw, onClick: () => {}, badge: 'EN' }} />)
-    expect(html).toContain('min-width:44px')
-    expect(html).toContain('min-height:64px')
-    expect(html).toContain('Refresh')
+  test('global action rows share area geometry and show their current value', () => {
+    const html = renderToStaticMarkup(<MobileActionRow action={{ key: 'lang', label: 'Language', icon: RefreshCw, onClick: () => {}, value: 'EN' }} />)
+    expect(html).toContain('width:100%')
+    expect(html).toContain('min-height:46px')
+    expect(html).toContain('Language')
     expect(html).toContain('>EN</span>')
+    expect(html).not.toContain('lucide-chevron-right')
+  })
+
+  test('the update row has its description and badge; hardware has a trailing chevron', () => {
+    const html = renderToStaticMarkup(<MobileActionRow action={{ key: 'update-app', label: 'Atualizar app', icon: RefreshCw, onClick: () => {}, accent: true, description: 'Nova versão disponível', badge: 'NOVO' }} />)
+    expect(html).toContain('Atualizar app')
+    expect(html).toContain('Nova versão disponível')
+    expect(html).toContain('>NOVO</span>')
+    expect(html).toContain('border-color:var(--anthropic-orange)')
+    const hardware = renderToStaticMarkup(<MobileActionRow action={{ key: 'hardware', label: 'Hardware', icon: RefreshCw, onClick: () => {} }} />)
+    expect(hardware).toContain('lucide-chevron-right')
   })
 })
 

@@ -92,6 +92,16 @@ export interface AreaTreeProps {
   visibleSettings?: ReadonlySet<string>
 }
 
+/** Shared geometry for navigation areas and the sheet's global actions. */
+export function areaRowStyle(sheet: boolean): React.CSSProperties {
+  return {
+    display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, boxSizing: 'border-box', flex: 1,
+    minHeight: sheet ? 46 : 40, padding: '0 12px', borderRadius: 10,
+    fontSize: sheet ? 15 : '0.8438rem', fontWeight: 500, whiteSpace: 'nowrap',
+    color: 'var(--text-secondary)', background: 'transparent',
+  }
+}
+
 const GROUP_HEADING = { personal: { pt: 'Pessoal', en: 'Personal' }, governance: { pt: 'Governança', en: 'Governance' } } as const
 
 export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside', badges = {}, onNavigate, visibleSettings }: AreaTreeProps) {
@@ -131,10 +141,10 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
           aria-current={active && !area.pages.length ? 'page' : undefined}
           onClick={e => { e.preventDefault(); if (hasPages) areaOpenStore.set(openedArea(openMap, area.id)); go(to) }}
           style={{
-            display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, boxSizing: 'border-box', flex: 1,
-            minHeight: sheet ? 46 : 40, padding: collapsed ? '0' : '0 12px',
-            justifyContent: collapsed ? 'center' : 'flex-start', borderRadius: 10, textDecoration: 'none',
-            fontSize: sheet ? 15 : '0.8438rem', fontWeight: active ? 700 : 500, whiteSpace: 'nowrap',
+            ...areaRowStyle(sheet),
+            padding: collapsed ? '0' : '0 12px',
+            justifyContent: collapsed ? 'center' : 'flex-start', textDecoration: 'none',
+            fontWeight: active ? 700 : 500,
             color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
             background: active && !area.pages.length ? 'var(--anthropic-orange-dim)' : 'transparent',
           }}

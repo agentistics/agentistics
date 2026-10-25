@@ -7,18 +7,19 @@ import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams }
 import { createPortal } from 'react-dom'
 import { version } from '../../../package.json'
 import {
-  Activity, AlertTriangle, ArrowLeft, ArrowRight, BarChart2, Bot,
+  AlertTriangle, ArrowLeft, ArrowRight, BarChart2, Bot,
   Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
   Clock, Code2, Cpu, Download,
   FileCode, Flame, FolderOpen, FolderTree, GitBranch,
   GitCommit, Globe, Home, KeyRound,
   LogOut, Maximize2, MessageSquare, MessagesSquare, Moon,
-  PanelLeft, RefreshCw, Server, Settings, ShieldCheck,
-  SlidersHorizontal, Sparkles, Sun, Target, TerminalSquare,
+  PanelLeft, Server, Settings, ShieldCheck,
+  SlidersHorizontal, Sun, Target, TerminalSquare,
   TrendingUp, Users, X, Zap, BellOff,
 } from 'lucide-react'
 import { mutedTooltip, useSessionMuted } from './lib/notifyMenu'
-import { useData, useDerivedStats, LIVE_INTERVAL_OPTIONS, LIVE_INTERVAL_OPTIONS_RISKY } from './hooks/useData'
+import { useData, useDerivedStats } from './hooks/useData'
+import { subscribeEvent } from './lib/eventStream'
 import { usePlanBasis } from './hooks/usePlanBasis'
 import { useBillingAccounts } from './hooks/useBillingAccounts'
 import { createBillingSaver } from './lib/billingSaver'
@@ -143,7 +144,6 @@ import { StepUpPrompt } from './components/StepUpPrompt'
 import { HARNESS_LABELS } from './lib/harness'
 import { PlanUsageFootButton } from './components/PlanUsageFootButton'
 import { format, parseISO, parse } from 'date-fns'
-import { ToggleSwitch } from './components/ToggleSwitch'
 import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/fleetFilter'
 import { runningConversationIds } from './lib/activeConversations'
 import { countActiveFilters } from './lib/activeFilterCount'
@@ -473,172 +473,6 @@ function fmtDuration(ms: number): string {
   const m = Math.floor((ms % 3_600_000) / 60_000)
   if (h > 0) return `${h}h ${m}m`
   return `${m}m`
-}
-
-function LiveSettingsModal({
-  lang, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval,
-  riskyMode, setRiskyMode, highlightUpdates, setHighlightUpdates, onClose,
-}: {
-  lang: Lang
-  liveUpdates: boolean
-  setLiveUpdates: (v: boolean) => void
-  updateInterval: number
-  setUpdateInterval: (v: number) => void
-  riskyMode: boolean
-  setRiskyMode: (v: boolean) => void
-  highlightUpdates: boolean
-  setHighlightUpdates: (v: boolean) => void
-  onClose: () => void
-}) {
-  useEscapeOwner(true, onClose)
-
-  const allIntervals = [
-    ...(riskyMode ? LIVE_INTERVAL_OPTIONS_RISKY : []),
-    ...LIVE_INTERVAL_OPTIONS,
-  ]
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, zIndex: 400,
-        background: 'rgba(0,0,0,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        backdropFilter: 'blur(4px)',
-      }}
-    >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border)',
-          borderRadius: 14,
-          padding: '24px',
-          width: 360,
-          boxShadow: '0 8px 40px rgba(0,0,0,0.4)',
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Settings size={14} style={{ color: 'var(--text-secondary)' }} />
-            <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-              {lang === 'pt' ? 'Configurações de live' : 'Live update settings'}
-            </span>
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: 'transparent', border: '1px solid var(--border)', borderRadius: 7,
-              color: 'var(--text-tertiary)', cursor: 'pointer',
-            }}
-          >
-            <X size={13} />
-          </button>
-        </div>
-
-        {/* Live on/off */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-          <div>
-            <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
-              {lang === 'pt' ? 'Atualização em tempo real' : 'Live updates'}
-            </div>
-            <div style={{ fontSize: '0.6875rem', color: 'var(--text-tertiary)' }}>
-              {lang === 'pt' ? 'Monitora mudanças automaticamente' : 'Automatically polls for changes'}
-            </div>
-          </div>
-          <ToggleSwitch on={liveUpdates} onToggle={() => setLiveUpdates(!liveUpdates)} />
-        </div>
-
-        <div style={{ height: 1, background: 'var(--border)', marginBottom: 20 }} />
-
-        {/* Update interval */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            {lang === 'pt' ? 'Intervalo de atualização' : 'Update interval'}
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {allIntervals.map(opt => {
-              const isRisky = opt.value < 10
-              const active = updateInterval === opt.value
-              return (
-                <button
-                  key={opt.value}
-                  onClick={() => { setUpdateInterval(opt.value); if (!liveUpdates) setLiveUpdates(true) }}
-                  style={{
-                    padding: '5px 12px',
-                    borderRadius: 6,
-                    border: active
-                      ? `1px solid ${isRisky ? '#ef4444' : 'var(--anthropic-orange)'}80`
-                      : '1px solid var(--border)',
-                    background: active
-                      ? isRisky ? 'rgba(239,68,68,0.12)' : 'var(--anthropic-orange-dim)'
-                      : 'var(--bg-elevated)',
-                    color: active
-                      ? isRisky ? '#ef4444' : 'var(--anthropic-orange)'
-                      : 'var(--text-secondary)',
-                    fontSize: '0.75rem', fontWeight: active ? 700 : 500,
-                    cursor: 'pointer', fontFamily: 'inherit',
-                    transition: 'all 0.1s',
-                  }}
-                >
-                  {isRisky ? `⚡ ${opt.label}` : opt.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        <div style={{ height: 1, background: 'var(--border)', marginBottom: 20 }} />
-
-        {/* Risky mode */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 20 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-              <Zap size={12} style={{ color: riskyMode ? '#ef4444' : 'var(--text-tertiary)' }} fill={riskyMode ? '#ef4444' : 'none'} />
-              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                {lang === 'pt' ? 'Modo arriscado' : 'Risky mode'}
-              </span>
-            </div>
-            <div style={{ fontSize: '0.6875rem', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-              {lang === 'pt'
-                ? 'Desbloqueia intervalos abaixo de 10s (até 1s). Pode aumentar o uso de CPU e I/O.'
-                : 'Unlocks sub-10s intervals (down to 1s). May increase CPU and I/O load.'}
-            </div>
-          </div>
-          <ToggleSwitch
-            on={riskyMode}
-            onToggle={() => {
-              const next = !riskyMode
-              setRiskyMode(next)
-              if (!next && updateInterval < 10) setUpdateInterval(10)
-            }}
-          />
-        </div>
-
-        <div style={{ height: 1, background: 'var(--border)', marginBottom: 20 }} />
-
-        {/* Update highlights */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-              <Sparkles size={12} style={{ color: highlightUpdates ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }} />
-              <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                {lang === 'pt' ? 'Destaques de atualização' : 'Update highlights'}
-              </span>
-            </div>
-            <div style={{ fontSize: '0.6875rem', color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
-              {lang === 'pt'
-                ? 'Destaca visualmente as seções que mudaram na última atualização.'
-                : 'Briefly glows sections that changed on the last data update.'}
-            </div>
-          </div>
-          <ToggleSwitch on={highlightUpdates} onToggle={() => setHighlightUpdates(!highlightUpdates)} />
-        </div>
-      </div>
-    </div>
-  )
 }
 
 function fmtFull(n: number): string {
@@ -1156,12 +990,12 @@ export default function AppLayout() {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
-  const { data, loading, error, loadError, offline, startup, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval } = useData()
-  const [riskyMode, setRiskyMode] = useState(false)
   const [lang, setLangState] = useState<Lang>(() => initialLang(
     typeof window === 'undefined' ? null : window.localStorage,
     typeof navigator === 'undefined' ? undefined : navigator.language,
   ))
+  const { fleet: headerFleet, act: headerFleetAct, unsupported: headerFleetUnsupported } = useFleet(lang === 'pt' ? 'pt' : 'en')
+  const { data, loading, error, loadError, offline, startup, refetch } = useData(headerFleet.rows.some(row => row.state === 'working'))
   // A local mirror of the language, for the one sentence the boot splash may say before the bundle
   // (and the preferences) arrive — the same reason the theme is mirrored. The first render's 'en' is a
   // placeholder, not a choice, so only a CHANGE is written.
@@ -1244,8 +1078,6 @@ export default function AppLayout() {
   // Surface server-pushed notifications (member connection/auth errors) as toasts + bell.
   useNotificationStream(lang)
 
-  // A central updates in real time via SSE (presence + ingest), so it hides the Live toggle
-  // and keeps live updates always on (the SSE 'change' subscription is gated on liveUpdates).
   const isCentral = false
 
   /**
@@ -1904,7 +1736,6 @@ export default function AppLayout() {
   // A CENTRAL's fleet is the RELAY's, for the machine the aside's picker chose. Set once, here,
   // because the poller is module-scoped and every surface reads the same snapshot.
   useEffect(() => { setFleetSourceCentral(isCentral) }, [isCentral])
-  const { fleet: headerFleet, act: headerFleetAct, unsupported: headerFleetUnsupported } = useFleet(lang === 'pt' ? 'pt' : 'en')
   const mobilePlanLimits = usePlanLimits()
   const { nativeRuntime: mobileNativeRuntime } = useEngineCaps()
   const mobileVisibleSettings = new Set(visibleSettingsSections({
@@ -2116,6 +1947,7 @@ export default function AppLayout() {
   const [showUpdateModal, setShowUpdateModal] = useState(false)
   // The popup left this page (closed, timed out, installed): it does not come back until a reload.
   const [promptGone, setPromptGone] = useState<string | null>(null)
+  const [requestedUpdate, setRequestedUpdate] = useState<string | null>(null)
   const [retryImportOpen, setRetryImportOpen] = useState(false)
   const loadingNoticeSeen = useRef({ startup: false, journal: false })
   useEffect(() => {
@@ -2262,8 +2094,6 @@ export default function AppLayout() {
     })
   }, [setCardOrder])
   const [scrolled, setScrolled] = useState(false)
-  const [highlightUpdates, setHighlightUpdates] = useState(true)
-  const highlightUpdatesRef = useRef(true)
   const flashTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const prevDerivedFingerprintRef = useRef<Record<string, string>>({})
   const liveFlashFirstRunRef = useRef(true)
@@ -2368,9 +2198,9 @@ export default function AppLayout() {
     let lastAt: number | null = null
     let first = true
     let cancelled = false
-    const check = (trigger: 'interval' | 'focus') => {
+    const check = (trigger: 'interval' | 'focus', reconnected = false) => {
       const now = Date.now()
-      if (!versionRefetchDue({ now, lastAt, trigger, visible: document.visibilityState === 'visible' })) return
+      if (!versionRefetchDue({ now, lastAt: reconnected ? null : lastAt, trigger, visible: document.visibilityState === 'visible' })) return
       lastAt = now
       const isFirst = first
       first = false
@@ -2409,6 +2239,9 @@ export default function AppLayout() {
     check('interval')
     const tick = window.setInterval(() => check('interval'), 60_000)
     const onVisible = () => check('focus')
+    // An upgrade launched elsewhere restarts the server too. Reconcile the fixed update entry
+    // on the shared stream's reconnect, without waiting for the five-minute version poll.
+    const offConnected = subscribeEvent('connected', () => check('focus', true))
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
     // Back online (a phone that lost the server while it restarted) is the moment a stale bundle
@@ -2416,6 +2249,7 @@ export default function AppLayout() {
     window.addEventListener('online', onVisible)
     return () => {
       cancelled = true
+      offConnected()
       window.clearInterval(tick)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
@@ -2428,10 +2262,13 @@ export default function AppLayout() {
   const pinned = pinnedUpdate(versionAnswer, isCentral)
   useEffect(() => { setPendingUpdate(pinned) }, [pinned?.latest, pinned?.current, pinned?.critical]) // eslint-disable-line react-hooks/exhaustive-deps
   const updateInstallable = updateVerdict.show || (updateVerdict.show === false && updateVerdict.why === 'snoozed')
-  const promptVisible = updateVerdict.show && !promptDismissedFor(promptGone, versionAnswer?.latest ?? '') && !showUpdateModal && upgradeFlow.phase === 'idle'
+  const promptRequested = !!pinned && requestedUpdate === pinned.latest
+  const promptVisible = ((updateVerdict.show && !promptDismissedFor(promptGone, versionAnswer?.latest ?? '')) || promptRequested)
+    && !showUpdateModal && upgradeFlow.phase === 'idle'
   const onPromptExit = useCallback((exit: PromptExit) => {
     if (!versionAnswer) return
     const o = promptExit(exit, versionAnswer, Date.now())
+    setRequestedUpdate(null)
     setPromptGone(versionAnswer.latest)
     if (o.snooze) snoozeUpdate(o.snooze.version, versionAnswer.critical === true)
     if (o.bell) pushNotification(o.bell)
@@ -2527,7 +2364,6 @@ export default function AppLayout() {
   }
 
   const triggerFlash = useCallback((ids: string[]) => {
-    if (!highlightUpdatesRef.current) return
     const expanded = [...ids]
     for (const id of ids) {
       const extra = CATALOG_FLASH_MAP[id]
@@ -2760,7 +2596,7 @@ export default function AppLayout() {
 
   // Live update highlight detection
   useEffect(() => {
-    if (!liveUpdates || !derived) return
+    if (!derived) return
     const fp = prevDerivedFingerprintRef.current
     const toFlash: string[] = []
 
@@ -2793,7 +2629,7 @@ export default function AppLayout() {
 
     liveFlashFirstRunRef.current = false
     if (toFlash.length > 0) triggerFlash([...new Set(toFlash)])
-  }, [derived, liveUpdates, triggerFlash])
+  }, [derived, triggerFlash])
 
   // Session count per project from enriched sessions (have valid start_time).
   // Used in the Projects modal so its count matches the card when "All" is selected.
@@ -3305,8 +3141,6 @@ export default function AppLayout() {
     savePreferences,
     pwaPrompt,
     onPwaInstalled: () => { setPwaInstalled(true); setPwaPrompt(null) },
-    liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval,
-    riskyMode, setRiskyMode, highlightUpdates, setHighlightUpdates,
     monthlyBudgetUSD, updateBudget,
     totalInputTokens, totalOutputTokens,
     setExpandedChart, setSelectedSession, setInfoModalIndex,
@@ -3830,36 +3664,16 @@ export default function AppLayout() {
           border: '1px solid var(--border)', background: 'transparent',
           color: 'var(--text-tertiary)', cursor: 'pointer', position: 'relative',
         }} />
-        {!isCentral && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px 0 10px', height: 32,
-            borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-secondary)',
-          }}>
-            <Activity size={12} style={{ color: liveUpdates ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', flexShrink: 0, transition: 'color 0.2s' }} />
-            <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: liveUpdates ? 'var(--text-primary)' : 'var(--text-tertiary)', whiteSpace: 'nowrap', userSelect: 'none' }}>Live</span>
-            <button
-              onClick={() => setLiveUpdates(v => !v)}
-              title={liveUpdates ? 'Pause live updates' : 'Enable live updates'}
-              style={{ position: 'relative', width: 28, height: 16, borderRadius: 8, border: 'none', background: liveUpdates ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', cursor: 'pointer', padding: 0, transition: 'background 0.2s', flexShrink: 0 }}
-            >
-              <span style={{ position: 'absolute', top: 2, left: liveUpdates ? 14 : 2, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
-            </button>
-            {liveUpdates && (
-              <span style={{ fontSize: '0.625rem', fontWeight: 700, color: riskyMode && updateInterval < 10 ? '#ef4444' : 'var(--anthropic-orange)', userSelect: 'none' }}>
-                {riskyMode && updateInterval < 10 ? `⚡ ${updateInterval}s` : `${updateInterval >= 60 ? `${updateInterval / 60}m` : `${updateInterval}s`}`}
-              </span>
-            )}
-          </div>
+        {pinned && upgradeFlow.phase === 'idle' && (
+          <button
+            onClick={() => setRequestedUpdate(pinned.latest)}
+            title={lang === 'pt' ? 'Atualizar app' : 'Update app'}
+            aria-label={lang === 'pt' ? 'Atualizar app' : 'Update app'}
+            style={{ minHeight: 32, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', borderRadius: 8, border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            <Download size={14} /> {lang === 'pt' ? 'Atualizar app' : 'Update app'}
+          </button>
         )}
-        <button
-          onClick={refetch}
-          title={lang === 'pt' ? 'Atualizar' : 'Refresh'}
-          style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer', transition: 'all 0.15s' }}
-          onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.color = 'var(--text-primary)'; t.style.borderColor = 'var(--text-tertiary)' }}
-          onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.color = 'var(--text-tertiary)'; t.style.borderColor = 'var(--border)' }}
-        >
-          <RefreshCw size={14} />
-        </button>
       </div>
       )}
       {/* The collapsible "fleet stats" tab, which hangs BELOW this row (position: absolute,
@@ -4712,16 +4526,16 @@ export default function AppLayout() {
           visibleSettings={mobileVisibleSettings}
           principal={iam?.account}
           actions={[
-            ...(isCentral ? [] : [{
-              key: 'live', label: lang === 'pt' ? 'Ao vivo' : 'Live', icon: Activity,
-              onClick: () => setLiveUpdates(v => !v), accent: liveUpdates, keepOpen: true,
-              badge: liveUpdates ? (updateInterval >= 60 ? `${updateInterval / 60}m` : `${updateInterval}s`) : undefined,
-            }]),
-            { key: 'refresh', label: lang === 'pt' ? 'Atualizar' : 'Refresh', icon: RefreshCw, onClick: refetch },
+            ...(pinned && upgradeFlow.phase === 'idle' ? [{
+              key: 'update-app', label: lang === 'pt' ? 'Atualizar app' : 'Update app', icon: Download,
+              onClick: () => setRequestedUpdate(pinned.latest), accent: true,
+              description: lang === 'pt' ? 'Nova versão disponível — leva alguns segundos' : 'New version available — takes a few seconds',
+              badge: lang === 'pt' ? 'NOVO' : 'NEW',
+            }] : []),
             { key: 'hardware', label: 'Hardware', icon: Cpu, onClick: () => setHardwareOpen(true) },
-            { key: 'theme', label: lang === 'pt' ? 'Tema' : 'Theme', icon: theme === 'dark' ? Sun : Moon,
+            { key: 'theme', label: lang === 'pt' ? 'Tema' : 'Theme', icon: theme === 'dark' ? Sun : Moon, value: theme === 'dark' ? (lang === 'pt' ? 'Escuro' : 'Dark') : (lang === 'pt' ? 'Claro' : 'Light'),
               onClick: () => setTheme(theme === 'dark' ? 'light' : 'dark'), keepOpen: true },
-            { key: 'lang', label: lang === 'pt' ? 'Idioma' : 'Language', icon: Globe, badge: lang === 'pt' ? 'PT' : 'EN', keepOpen: true,
+            { key: 'lang', label: lang === 'pt' ? 'Idioma' : 'Language', icon: Globe, value: lang === 'pt' ? 'PT' : 'EN', keepOpen: true,
               onClick: () => { const next = lang === 'pt' ? 'en' : 'pt'; setLang(next); if (next === 'pt') setCurrency('BRL'); else if (currency === 'BRL') setCurrency('USD') } },
           ]}
         />
@@ -4738,11 +4552,11 @@ export default function AppLayout() {
           ctx={appCtx}
           filters={filters}
           activeOnly={dockActiveOnly(inSessionsWorkspace, activeOnly)}
-          {...(renderUpdatePrompt ? { renderUpdatePrompt } : {})}
+          {...(!promptRequested && renderUpdatePrompt ? { renderUpdatePrompt } : {})}
         />
       )}
       {/* No Nay dock on this page (chat switched off): the update popup stands in its corner. */}
-      {!nayOffered && renderUpdatePrompt?.('corner')}
+      {(!nayOffered || promptRequested) && renderUpdatePrompt?.('corner')}
 
       {/* The footer — below the page on a phone. On the desktop board it is the LAST thing inside
           the page panel instead (see `<main>`), because the panel is what scrolls there. */}
