@@ -708,6 +708,8 @@ export interface ControlSession {
    * every row of a harness that cannot report one — see `conversationBlind`.
    */
   conversationId?: string
+  /** Exact managed successor recorded by the existing handoff registry. */
+  handoffTo?: string
   /** WHERE the link came from (LIVE.1); `null` = not linked yet. Computed from legacy facts. */
   link?: SessionConversationLink | null
   /**

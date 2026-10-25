@@ -104,9 +104,15 @@ When a session replies (`waiting`) and the page is **not** `/sessions`, the butt
   same in every tab (the minute, not the millisecond), so the server's dedupe keeps one row. The
   generic toast skips the three card codes, since the card shows them.
 - A source row that exits during an account switch is held while the browser’s existing reopen
-  marker is active. Once settled, a live row linked by the exact conversation id suppresses
+  marker is active. Once settled, a live row linked by the exact conversation id or the registry’s existing
+  `handoffTo` successor id (including another harness and conversation) suppresses
   `session.exited`; the switch notice explains the continuation, including a fallback to the
   previous account. A double failure with no live continuation still records the exit.
+- An observed `exited` transition is announced immediately: the fleet stream sends changes, so
+  another identical snapshot may never arrive. Activity changes still require two observations.
+  A pending account switch retains its observed exit even if the source row disappears; failure
+  then announces it once. Rows first seen already exited stay silent, including after page load.
+  Disappearance alone is not evidence of an exit.
 - **Tab visible** → the card and the event's sound.
 - **Tab in the background** → the system notification, since a card there would go unseen (switch:
   "Notificação do sistema com a aba em segundo plano").
