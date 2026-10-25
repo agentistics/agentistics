@@ -6,7 +6,11 @@ import { pushLimitAlert } from '../lib/planLimitNotice'
 import { UPDATE_NOTICE_CODE } from '../lib/updateToast'
 import { openWhatsNew } from '../whatsNew/open'
 import { setSessionMuted } from '../lib/mutedSessions'
+import { useNotificationPanelOpen } from '../lib/notificationPanel'
+import { NotificationBell } from './NotificationBell'
 import { SESSION_MUTED_CODE } from '../lib/notifyMenu'
+import { useAway } from '../lib/awayMode'
+import { emptyToastQueue, enqueueToasts, removeToast, summaryToast, SUMMARY_ID } from '../lib/toastQueue'
 
 // How long a toast lingers before it auto-dismisses (ms). Errors/warnings stay longer
 // so they're readable; info/success clear a bit faster.
@@ -38,7 +42,32 @@ interface Props {
  */
 export function NotificationToasts({ lang }: Props) {
   const notes = useNotifications()
-  const [toasts, setToasts] = useState<AppNotification[]>([])
+  const away = useAway().active
+  const panelOpen = useNotificationPanelOpen()
+  const [hidden, setHidden] = useState(() => document.visibilityState === 'hidden')
+  const [queue, setQueue] = useState(emptyToastQueue)
+  const quiet = hidden || away
+  const wasQuiet = useRef(quiet)
+  const quietSince = useRef(quiet ? Date.now() : Infinity)
+  const returnedAt = useRef(0)
+  const toasts = quiet ? [] : [...queue.items, ...(queue.summary && !panelOpen ? [summaryToast(queue.summary, lang, queue.items.length > 0)] : [])]
+
+  useEffect(() => {
+    const changed = () => {
+      // Record synchronously: notifications can land before React commits the visibility update.
+      if (document.visibilityState === 'hidden') quietSince.current = Date.now()
+      else returnedAt.current = Date.now()
+      setHidden(document.visibilityState === 'hidden')
+    }
+    document.addEventListener('visibilitychange', changed)
+    return () => document.removeEventListener('visibilitychange', changed)
+  }, [])
+  useEffect(() => {
+    if (quiet && !wasQuiet.current) quietSince.current = Date.now()
+    if (!quiet && wasQuiet.current) returnedAt.current = Date.now()
+    wasQuiet.current = quiet
+    if (quiet) setQueue(q => enqueueToasts(q, q.items, Date.now(), true))
+  }, [quiet])
   const [leaving, setLeaving] = useState<Set<string>>(new Set())
   const seen = useRef<Map<string, NotificationType>>(new Map())
   const initialized = useRef(false)
@@ -55,7 +84,7 @@ export function NotificationToasts({ lang }: Props) {
     })
     if (timers.current[id]) clearTimeout(timers.current[id])
     timers.current[id] = setTimeout(() => {
-      setToasts(t => t.filter(x => x.id !== id))
+      setQueue(q => removeToast(q, id))
       setLeaving(prev => {
         if (!prev.has(id)) return prev
         const next = new Set(prev)
@@ -74,6 +103,7 @@ export function NotificationToasts({ lang }: Props) {
       for (const n of notes) seen.current.set(n.id, n.type)
       return
     }
+    const incoming: AppNotification[] = []
     for (const n of notes) {
       const previousType = seen.current.get(n.id)
       seen.current.set(n.id, n.type)
@@ -92,14 +122,38 @@ export function NotificationToasts({ lang }: Props) {
         if (autoTimers.current[n.id]) clearTimeout(autoTimers.current[n.id])
         delete timers.current[n.id]
         delete autoTimers.current[n.id]
+        setLeaving(prev => { const next = new Set(prev); next.delete(n.id); return next })
       }
-      setToasts(t => [n, ...t.filter(existing => existing.id !== n.id)])
+      incoming.push(n)
+    }
+    if (incoming.length) {
+      const backlog = quiet || document.visibilityState === 'hidden' || incoming.some(n => n.ts >= quietSince.current && n.ts <= returnedAt.current)
+      setQueue(q => enqueueToasts(q, incoming, Date.now(), backlog))
+    }
+  }, [notes, startLeave, quiet])
+
+  // Reconcile timers against the bounded presentation. Hidden/away summaries get their full
+  // reading time on return; grouped cards cannot retain timers that later dismiss new content.
+  useEffect(() => {
+    const cards = quiet ? [] : [...queue.items, ...(queue.summary && !panelOpen ? [summaryToast(queue.summary, lang, queue.items.length > 0)] : [])]
+    const active = new Set(cards.map(n => n.id))
+    for (const id of Object.keys(autoTimers.current)) {
+      if (!active.has(id) || id === SUMMARY_ID) { clearTimeout(autoTimers.current[id]); delete autoTimers.current[id] }
+    }
+    for (const id of Object.keys(timers.current)) {
+      if (!active.has(id) || (id === SUMMARY_ID && queue.summary)) {
+        clearTimeout(timers.current[id]); delete timers.current[id]
+        setLeaving(prev => { const next = new Set(prev); next.delete(id); return next })
+      }
+    }
+    for (const n of cards) {
+      if (autoTimers.current[n.id]) continue
       autoTimers.current[n.id] = setTimeout(() => {
         delete autoTimers.current[n.id]
         startLeave(n.id)
       }, AUTO_MS[n.type])
     }
-  }, [notes, startLeave])
+  }, [queue, quiet, lang, startLeave, panelOpen])
 
   // Clear any pending timers on unmount.
   useEffect(() => () => {
@@ -107,10 +161,10 @@ export function NotificationToasts({ lang }: Props) {
     for (const id of Object.keys(autoTimers.current)) clearTimeout(autoTimers.current[id])
   }, [])
 
-  if (toasts.length === 0) return null
-
   return (
-    <div style={{
+    <>
+    <NotificationBell lang={lang} toastHost />
+    {toasts.length > 0 && <div style={{
       position: 'fixed', top: 16, right: 16, zIndex: 4000,
       display: 'flex', flexDirection: 'column', gap: 10,
       maxWidth: 'min(360px, calc(100vw / var(--ui-zoom, 1) - 32px))', pointerEvents: 'none',
@@ -121,6 +175,7 @@ export function NotificationToasts({ lang }: Props) {
         const isLeaving = leaving.has(n.id)
         // Same opt-in handoff as the bell row (see NotificationBell.tsx): the update check is
         // automatic, the modal it can open is not.
+        const isSummary = n.id === SUMMARY_ID
         const isUpdate = n.code === 'app.update_available'
         const isWhatsNew = n.code === 'app.whats_new'
         const isMuted = n.code === SESSION_MUTED_CODE
@@ -129,10 +184,12 @@ export function NotificationToasts({ lang }: Props) {
         return (
           <div
             key={n.id}
-            role={isUpdate || isWhatsNew ? 'button' : 'status'}
+            data-testid={isSummary ? 'notification-summary' : 'notification-toast'}
+            role={isSummary || isUpdate || isWhatsNew ? 'button' : 'status'}
             aria-live="polite"
-            tabIndex={isUpdate || isWhatsNew ? 0 : undefined}
-            onClick={isUpdate ? () => { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); startLeave(n.id) }
+            tabIndex={isSummary || isUpdate || isWhatsNew ? 0 : undefined}
+            onKeyDown={isSummary ? e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setQueue(q => removeToast(q, SUMMARY_ID)); window.dispatchEvent(new CustomEvent('agentistics:open-notifications')) } } : undefined}
+            onClick={isSummary ? () => { setQueue(q => removeToast(q, SUMMARY_ID)); window.dispatchEvent(new CustomEvent('agentistics:open-notifications')) } : isUpdate ? () => { window.dispatchEvent(new CustomEvent('agentistics:open-update-modal')); startLeave(n.id) }
               : isWhatsNew ? () => { openWhatsNew(n.meta); startLeave(n.id) } : undefined}
             style={{
               pointerEvents: 'auto',
@@ -141,7 +198,7 @@ export function NotificationToasts({ lang }: Props) {
               background: 'var(--bg-card)', border: '1px solid var(--border)',
               borderLeft: `3px solid ${color}`,
               boxShadow: '0 12px 32px rgba(0,0,0,0.4)',
-              cursor: isUpdate || isWhatsNew ? 'pointer' : undefined,
+              cursor: isSummary || isUpdate || isWhatsNew ? 'pointer' : undefined,
               animation: isLeaving
                 ? `toastOut ${EXIT_MS}ms ease-in forwards`
                 : 'toastIn 0.18s ease-out',
@@ -180,6 +237,7 @@ export function NotificationToasts({ lang }: Props) {
             {isJournalFailed && <button onClick={e => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('agentistics:retry-journal-import')); startLeave(n.id) }} style={{ flexShrink: 0, padding: '4px 7px', borderRadius: 6, border: '1px solid var(--anthropic-orange)60', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}>{lang === 'pt' ? 'Tentar importar de novo' : 'Retry the import'}</button>}
             <button
               onClick={e => { e.stopPropagation(); startLeave(n.id) }}
+              className="ag-tap-icon"
               aria-label="dismiss"
               style={{
                 flexShrink: 0, display: 'flex', padding: 2, border: 'none',
@@ -195,7 +253,8 @@ export function NotificationToasts({ lang }: Props) {
         @keyframes toastIn { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
         @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(24px); } }
       `}</style>
-    </div>
+    </div>}
+    </>
   )
 }
 
