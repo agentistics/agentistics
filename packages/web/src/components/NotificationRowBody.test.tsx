@@ -24,3 +24,19 @@ test('pinned cleanup uses the existing row body with live accessible progress an
   expect(html.indexOf('bell-clean-progress')).toBeGreaterThan(html.indexOf('bell-message'))
   expect(html).toContain('Review and clean')
 })
+
+test('a digest being built shows the server steps instead of the buttons: done ticked, current named, rest dim', () => {
+  const html = renderToStaticMarkup(<NotificationRowBody {...base} pt isAwayDigest digestBusy digestPhase="send" />)
+  expect(html).toContain('away-digest-progress')
+  expect(html).not.toContain('away-digest-actions')
+  expect(html.match(/data-state="done"/g)?.length).toBe(2)
+  expect(html).toContain('data-state="now"')
+  expect(html).toContain('Enviando para a Nay…')
+  expect(html.match(/data-state="next"/g)?.length).toBe(1)
+})
+
+test('before the first step arrives the buttons stay (disabled), never a fake first step', () => {
+  const html = renderToStaticMarkup(<NotificationRowBody {...base} isAwayDigest digestBusy digestPhase={null} />)
+  expect(html).toContain('away-digest-actions')
+  expect(html).not.toContain('away-digest-progress')
+})

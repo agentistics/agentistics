@@ -1,9 +1,13 @@
 /** Server-owned away-mode summary offers and the bounded digest sent to Nay. */
-import { AWAY_OFF, awayActive, parseAwayState, redactSecrets, type AwayState } from '@agentistics/core'
+import {
+  AWAY_OFF, DEFAULT_AWAY_DIGEST_SCHEDULE, awayActive, awayDigestDurationLabel, parseAwayDigestSchedule, parseAwayState, redactSecrets,
+  type AwayDigestSchedule, type AwayState,
+} from '@agentistics/core'
 import type { PreferencesMutator } from './preferences'
 
-export const AWAY_DIGEST_AFTER = 5 * 60 * 60 * 1000
-export const AWAY_DIGEST_BUCKET = 15 * 60 * 1000
+/** The defaults (`DEFAULT_AWAY_DIGEST_SCHEDULE`) in milliseconds; the live values come from preferences. */
+export const AWAY_DIGEST_AFTER = (DEFAULT_AWAY_DIGEST_SCHEDULE.firstAfterMin ?? 0) * 60 * 1000
+export const AWAY_DIGEST_BUCKET = DEFAULT_AWAY_DIGEST_SCHEDULE.everyMin * 60 * 1000
 
 export interface AwayDigestState {
   since: string
@@ -19,12 +23,15 @@ export function awayDigestWindow(away: AwayState, now: number, digest?: AwayDige
   return { since, until: now }
 }
 
-export function awayDigestOfferDue(away: AwayState, state: AwayDigestState | undefined, now: number): number | null {
+export function awayDigestOfferDue(
+  away: AwayState, state: AwayDigestState | undefined, now: number, schedule: AwayDigestSchedule = DEFAULT_AWAY_DIGEST_SCHEDULE,
+): number | null {
+  if (schedule.firstAfterMin === null) return null
   const window = awayDigestWindow(away, now, state)
-  if (!window || now - window.since < AWAY_DIGEST_AFTER) return null
+  if (!window || now - window.since < schedule.firstAfterMin * 60 * 1000) return null
   if (state?.since !== away.since) state = undefined
   if (state?.snoozedUntil && now < state.snoozedUntil) return null
-  const bucket = Math.floor((now - window.since) / AWAY_DIGEST_BUCKET)
+  const bucket = Math.floor((now - window.since) / (schedule.everyMin * 60 * 1000))
   return state?.lastBucket === bucket ? null : bucket
 }
 
@@ -140,12 +147,17 @@ export async function buildAwayDigest(away: AwayState, now: number): Promise<Rec
 export type AwayDigestAnswer = { ok: true; conversationId: string; bucket: number } | { ok: false; error: 'stale' | 'bad_answer' | 'not_away' | 'failed' }
 
 export interface AwayDigestAnswerDeps {
-  read: () => Promise<{ away?: AwayState; awayDigest?: AwayDigestState }>
+  read: () => Promise<{ away?: AwayState; awayDigest?: AwayDigestState; awayDigestSchedule?: unknown }>
   update: (mutate: PreferencesMutator) => Promise<unknown>
   build: (away: AwayState, now: number) => Promise<Record<string, unknown>>
   startNay: (lang: 'pt' | 'en') => Promise<{ ok: boolean; id?: string; launch?: { harness: string; model?: string; effort?: string } }>
   prompt: (lang: 'pt' | 'en', id: string, text: string) => Promise<{ ok: boolean }>
+  /** Called as each real step STARTS — the web's step indicator draws exactly these. */
+  onPhase?: (phase: AwayDigestPhase) => void
 }
+
+/** The steps a "yes" really goes through, in order. `writing` is the wait for Nay's first words. */
+export type AwayDigestPhase = 'collect' | 'prepare' | 'send' | 'writing'
 
 export function awayDigestPrompt(
   lang: 'pt' | 'en',
@@ -176,7 +188,7 @@ async function answerAwayDigestWithDepsUnlocked(answer: unknown, bucket: unknown
   const away = parseAwayState(prefs.away ?? AWAY_OFF)
   if (since !== away.since) return { ok: false, error: 'stale' }
   if (!awayActive(away, now)) return { ok: false, error: 'not_away' }
-  const due = awayDigestOfferDue(away, prefs.awayDigest, now)
+  const due = awayDigestOfferDue(away, prefs.awayDigest, now, parseAwayDigestSchedule(prefs.awayDigestSchedule))
   if (prefs.awayDigest?.conversationId && prefs.awayDigest.lastBucket === key) return { ok: true, conversationId: prefs.awayDigest.conversationId, bucket: key }
   if (due !== key && prefs.awayDigest?.lastBucket !== key) return { ok: false, error: awayActive(away, now) ? 'stale' : 'not_away' }
   const persist = async (state: AwayDigestState): Promise<boolean> => {
@@ -193,9 +205,12 @@ async function answerAwayDigestWithDepsUnlocked(answer: unknown, bucket: unknown
     if (!(await persist({ ...awayDigestOfferState(away.since, key, prefs.awayDigest), snoozedUntil: now + 60 * 60 * 1000 }))) return { ok: false, error: 'stale' }
     return { ok: true, conversationId: '', bucket: key }
   }
+  deps.onPhase?.('collect')
   const digest = await deps.build(away, now)
+  deps.onPhase?.('prepare')
   const out = await deps.startNay(lang)
   if (!out.ok || !out.id) return { ok: false, error: 'failed' }
+  deps.onPhase?.('send')
   if (!(await deps.prompt(lang, out.id, awayDigestPrompt(lang, away, now, digest, prefs.awayDigest?.lastDeliveredAt))).ok) return { ok: false, error: 'failed' }
   if (!(await persist({ since: away.since, lastBucket: key, lastDeliveredAt: now, conversationId: out.id }))) return { ok: false, error: 'stale' }
   return { ok: true, conversationId: out.id, bucket: key }
@@ -216,7 +231,9 @@ export async function answerAwayDigestWithDeps(answer: unknown, bucket: unknown,
   try { return await run } finally { answerDepsLocks.delete(key) }
 }
 
-export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: 'pt' | 'en', now = Date.now(), since?: unknown): Promise<AwayDigestAnswer> {
+export async function answerAwayDigest(
+  answer: unknown, bucket: unknown, lang: 'pt' | 'en', now = Date.now(), since?: unknown, onPhase?: (phase: AwayDigestPhase) => void,
+): Promise<AwayDigestAnswer> {
   const { readPreferences, updatePreferences } = await import('./preferences')
   const { startNaySession, defaultNayDeps } = await import('./sessions/nay-web')
   const { runFleetAction } = await import('./sessions/fleet-web')
@@ -227,7 +244,74 @@ export async function answerAwayDigest(answer: unknown, bucket: unknown, lang: '
     build: buildAwayDigest,
     startNay: async selectedLang => { const out = await startNaySession(selectedLang, defaultNayDeps(PORT)); return { ok: out.ok, id: out.id } },
     prompt: async (selectedLang, id, text) => ({ ok: (await runFleetAction(selectedLang, { action: 'prompt', id, text })).ok }),
+    onPhase,
   }, now, since)
+}
+
+/** What one fleet row says about Nay's answer: `started`, still `waiting`, or `gone` (it ended first). */
+/** The fields of a fleet row (`SessionView`) this reads. */
+export interface NayAnswerRow { id: string; status: string; activity?: string; chatTurns?: readonly { role: string; text: string; pending?: boolean }[] }
+
+export function nayAnswerProgress(row: Omit<NayAnswerRow, 'id'> | undefined): 'started' | 'waiting' | 'gone' {
+  if (!row) return 'waiting'
+  if (row.status === 'exited' || row.status === 'lost' || row.status === 'closed' || row.activity === 'exited') return 'gone'
+  // A harness whose turns the poll can read: the answer has started when Nay has said something.
+  if (row.chatTurns) return row.chatTurns.some(t => t.role === 'assistant' && !t.pending && t.text.trim() !== '') ? 'started' : 'waiting'
+  // One it cannot read: the turn starting is the most that can be observed.
+  return row.activity === 'working' ? 'started' : 'waiting'
+}
+
+export const NAY_ANSWER_WAIT_MS = 120_000
+
+/** Polls the fleet until Nay's answer starts. `false` when it ended or the bound ran out — never a guess. */
+export async function waitForNayAnswer(
+  id: string,
+  read: () => Promise<{ sessions: readonly NayAnswerRow[] }>,
+  opts: { timeoutMs?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number } = {},
+): Promise<boolean> {
+  const timeout = opts.timeoutMs ?? NAY_ANSWER_WAIT_MS
+  const interval = opts.intervalMs ?? 1500
+  const sleep = opts.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)))
+  const now = opts.now ?? Date.now
+  const deadline = now() + timeout
+  for (;;) {
+    let progress: 'started' | 'waiting' | 'gone' = 'waiting'
+    try { progress = nayAnswerProgress((await read()).sessions.find(s => s.id === id)) } catch { /* a failed poll is not an answer */ }
+    if (progress === 'started') return true
+    if (progress === 'gone' || now() >= deadline) return false
+    await sleep(interval)
+  }
+}
+
+export type AwayDigestStreamLine = { phase: AwayDigestPhase } | { done: true; result: AwayDigestAnswer; answerStarted?: boolean }
+
+/**
+ * The answer as NDJSON lines: one `{phase}` as each real step starts, then `{done, result}`. A "yes"
+ * that delivered also reports `writing` and waits for Nay's first words before `done`, so the web's
+ * indicator ends when the answer starts, not on a timer.
+ */
+export function awayDigestAnswerStream(
+  run: (onPhase: (phase: AwayDigestPhase) => void) => Promise<AwayDigestAnswer>,
+  wait: (conversationId: string) => Promise<boolean>,
+  answer: unknown,
+): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder()
+  return new ReadableStream({
+    async start(controller) {
+      const send = (line: AwayDigestStreamLine) => { try { controller.enqueue(enc.encode(`${JSON.stringify(line)}\n`)) } catch { /* client left */ } }
+      let result: AwayDigestAnswer
+      try { result = await run(phase => send({ phase })) } catch { result = { ok: false, error: 'failed' } }
+      if (answer === 'yes' && result.ok && result.conversationId) {
+        send({ phase: 'writing' })
+        // A blank line every few seconds keeps an idle-timeout proxy from closing a stream that is waiting.
+        const keepAlive = setInterval(() => { try { controller.enqueue(enc.encode('\n')) } catch { /* client left */ } }, 10_000)
+        let started = false
+        try { started = await wait(result.conversationId) } catch { started = false } finally { clearInterval(keepAlive) }
+        send({ done: true, result, answerStarted: started })
+      } else send({ done: true, result })
+      try { controller.close() } catch { /* already closed */ }
+    },
+  })
 }
 
 export async function offerAwayDigest(now = Date.now()): Promise<void> {
@@ -240,13 +324,14 @@ async function offerAwayDigestLocked(now: number): Promise<void> {
   const { readPreferences, updatePreferences } = await import('./preferences')
   const prefs = await readPreferences()
   const away = parseAwayState(prefs.away ?? AWAY_OFF)
-  const bucket = awayDigestOfferDue(away, prefs.awayDigest, now)
+  const schedule = parseAwayDigestSchedule(prefs.awayDigestSchedule)
+  const bucket = awayDigestOfferDue(away, prefs.awayDigest, now, schedule)
   if (bucket === null) return
   let claimed = false
   await updatePreferences(cur => {
     const currentAway = parseAwayState(cur.away ?? AWAY_OFF)
     if (currentAway.since !== away.since) return undefined
-    if (awayDigestOfferDue(currentAway, cur.awayDigest, now) !== bucket) return undefined
+    if (awayDigestOfferDue(currentAway, cur.awayDigest, now, parseAwayDigestSchedule(cur.awayDigestSchedule)) !== bucket) return undefined
     claimed = true
     return { awayDigest: awayDigestOfferState(away.since, bucket, cur.awayDigest) }
   })
@@ -254,8 +339,16 @@ async function offerAwayDigestLocked(now: number): Promise<void> {
   const { broadcastNotification } = await import('./sse')
   const { sendMobileNotice, readMobileSubscriptions, webPushTransport } = await import('./events/mobile-push')
   const pt = prefs.lang === 'pt'
-  broadcastNotification({ type: 'info', code: 'away.digest_offer', meta: { bucket, since: away.since, notificationKey: `away.digest:${away.since}:${bucket}` } })
-  void sendMobileNotice(pt ? 'Agentistics · Resumo do modo ausente' : 'Agentistics · Away-mode summary', pt ? 'Fiquei fora há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' : 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?', await readMobileSubscriptions(), webPushTransport).catch(() => {})
+  const after = awayDigestDurationLabel(schedule.firstAfterMin ?? 0)
+  broadcastNotification({ type: 'info', code: 'away.digest_offer', meta: { bucket, since: away.since, after, notificationKey: `away.digest:${away.since}:${bucket}` } })
+  void sendMobileNotice(pt ? 'Agentistics · Resumo do modo ausente' : 'Agentistics · Away-mode summary', awayDigestOfferText(pt ? 'pt' : 'en', after), await readMobileSubscriptions(), webPushTransport).catch(() => {})
+}
+
+/** The offer's sentence. `after` is a duration label; the web carries the same sentence in `notifications.ts`. */
+export function awayDigestOfferText(lang: 'pt' | 'en', after: string): string {
+  return lang === 'pt'
+    ? `Você está fora há mais de ${after}. Quer que a Nay prepare um resumo do que aconteceu?`
+    : `You’ve been away for more than ${after}. Would you like Nay to prepare a summary of what happened?`
 }
 
 let timer: ReturnType<typeof setInterval> | null = null

@@ -100,6 +100,7 @@ export { applyFleetWire, historicalWireRow, expandFleetView, followFleet, type F
 export { applyDataPatch, planDataPatch, dataSessionKey, type DataPatch } from './dataPatch'
 export * from './planLimits'
 export * from './awayMode'
+export * from './awayDigestSchedule'
 export * from './newProject'
 export * from './injectedHeader'
 

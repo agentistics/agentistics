@@ -23,6 +23,18 @@ describe('away digest trigger', () => {
     expect(awayDigestOfferDue(next, { since: away.since, lastBucket: 99 }, start + AWAY_DIGEST_AFTER + 1000)).toBe(20)
   })
 
+  test('a configured schedule moves the first offer and the re-offer interval', () => {
+    const schedule = { firstAfterMin: 60, everyMin: 30 }
+    expect(awayDigestOfferDue(away, undefined, start + 60 * 60 * 1000 - 1, schedule)).toBeNull()
+    expect(awayDigestOfferDue(away, undefined, start + 60 * 60 * 1000, schedule)).toBe(2)
+    expect(awayDigestOfferDue(away, { since: away.since, lastBucket: 2 }, start + 89 * 60 * 1000, schedule)).toBeNull()
+    expect(awayDigestOfferDue(away, { since: away.since, lastBucket: 2 }, start + 90 * 60 * 1000, schedule)).toBe(3)
+  })
+
+  test('the off setting never offers, however long the owner is away', () => {
+    expect(awayDigestOfferDue(away, undefined, start + 48 * 60 * 60 * 1000, { firstAfterMin: null, everyMin: 15 })).toBeNull()
+  })
+
   test('snooze suppresses offers until the snooze deadline', () => {
     const now = start + AWAY_DIGEST_AFTER + 1
     expect(awayDigestOfferDue(away, { since: away.since, lastBucket: 0, snoozedUntil: now + 1000 }, now)).toBeNull()

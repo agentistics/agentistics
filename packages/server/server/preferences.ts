@@ -131,6 +131,9 @@ export interface Preferences {
   /** AWAY MODE — the owner is out and sessions must not ask them (`server/away.ts`). Read through
    *  `parseAwayState`/`awayActive` (@agentistics/core); written only by `setAway`. */
   away?: AwayState
+  /** When the away summary is offered (`@agentistics/core` `awayDigestSchedule.ts`). Absent reads as
+   *  the defaults (5 h, then every 15 min); always read through `parseAwayDigestSchedule`. */
+  awayDigestSchedule?: { firstAfterMin: number | null; everyMin: number }
   /** Server-owned away summary offer/delivery state. */
   awayDigest?: {
     since: string

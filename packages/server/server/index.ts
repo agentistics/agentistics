@@ -1212,6 +1212,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           const { normalizeHandoffConfig } = await import('@agentistics/core')
           body.handoffConfig = normalizeHandoffConfig(body.handoffConfig)
         }
+        if (body.awayDigestSchedule !== undefined) {
+          const { parseAwayDigestSchedule } = await import('@agentistics/core')
+          body.awayDigestSchedule = parseAwayDigestSchedule(body.awayDigestSchedule)
+        }
         // C1: never let a PUT wipe `connections[]`. An old cached tab still PUTs a full flat solo
         // `team` object to disconnect (the current UI uses DELETE /api/team/connections/:id), and
         // that payload carries `connections: []` — which mergeTeamPayload honours as an explicit
@@ -2214,8 +2218,19 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
     if (url.pathname === '/api/away/digest/answer' && req.method === 'POST') {
       const body = await req.json().catch(() => ({})) as { answer?: unknown; bucket?: unknown; since?: unknown; lang?: unknown }
-      const { answerAwayDigest } = await import('./away-digest')
-      const out = await answerAwayDigest(body.answer, body.bucket, body.lang === 'pt' ? 'pt' : 'en', Date.now(), body.since)
+      const { answerAwayDigest, awayDigestAnswerStream, waitForNayAnswer } = await import('./away-digest')
+      const digestLang = body.lang === 'pt' ? 'pt' : 'en'
+      // The web asks for the steps as they happen (NDJSON); any other caller keeps the one JSON answer.
+      if ((req.headers.get('accept') ?? '').includes('application/x-ndjson')) {
+        const { ensureSessionHub } = await import('./cli-start')
+        const stream = awayDigestAnswerStream(
+          onPhase => answerAwayDigest(body.answer, body.bucket, digestLang, Date.now(), body.since, onPhase),
+          async id => { const hub = await ensureSessionHub(); return waitForNayAnswer(id, () => hub.read({ maxAgeMs: 1000 })) },
+          body.answer,
+        )
+        return new Response(stream, { status: 200, headers: { ...CORS_HEADERS, 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' } })
+      }
+      const out = await answerAwayDigest(body.answer, body.bucket, digestLang, Date.now(), body.since)
       return json(out, out.ok ? 200 : out.error === 'stale' || out.error === 'not_away' ? 409 : 400)
     }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see

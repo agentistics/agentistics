@@ -310,8 +310,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     en: { title: 'Leader notice (away mode)', message: '{text}' },
   },
   'away.digest_offer': {
-    pt: { title: 'Resumo do modo ausente', message: 'Fiquei fora há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' },
-    en: { title: 'Away-mode summary', message: 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?' },
+    // `{after}` is the configured delay (Settings → Sessions → Away mode); an offer saved before the
+    // setting existed carries none and was always the 5 h default.
+    pt: { title: 'Resumo do modo ausente', message: 'Você está fora há mais de {after}. Quer que a Nay prepare um resumo do que aconteceu?' },
+    en: { title: 'Away-mode summary', message: 'You’ve been away for more than {after}. Would you like Nay to prepare a summary of what happened?' },
   },
   'away.digest_failed': {
     pt: { title: 'Não foi possível abrir o resumo', message: 'Tente novamente em instantes.' },
@@ -523,6 +525,7 @@ export function resolveNotification(n: AppNotification, lang: 'pt' | 'en'): Loca
   // A placeholder with NO value in `meta` is LEFT ALONE rather than replaced: printing the word
   // `undefined` inside a sentence a person reads is worse than a visible brace, because it looks
   // like the value.
+  if (message && n.code === 'away.digest_offer') message = message.replace(/\{after\}/g, typeof n.meta?.after === 'string' ? n.meta.after : '5 h')
   if (message && n.meta) {
     const meta = n.meta
     message = message.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (whole, key: string) => {

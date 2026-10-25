@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Trash2, X, Download, Search } from 'lucide-react'
+import { Bell, BellOff, AlertCircle, AlertTriangle, Info, CheckCircle2, Check, Trash2, X, Download, Search } from 'lucide-react'
 import { useNotifications, markAllRead, clearNotifications, dismissNotification, pushLocalNotification, resolveNotification, notificationLink, type NotificationType } from '../lib/notifications'
 import { useEscapeOwner } from '../lib/overlayStack'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -13,7 +13,8 @@ import { cleanSize } from '../lib/cleanPresentation'
 import { usePendingUpdate } from '../lib/pendingUpdate'
 import { ToggleSwitch } from './ToggleSwitch'
 import { setNotificationPanelOpen } from '../lib/notificationPanel'
-import { answerAwayDigest } from '../lib/awayDigest'
+import { answerAwayDigest, AWAY_DIGEST_PHASES, AWAY_DIGEST_PHASE_LABEL, type AwayDigestPhase } from '../lib/awayDigest'
+import { AgentisticsLoader } from './AgentisticsLoader'
 
 const ICON: Record<NotificationType, { color: string; Icon: typeof AlertCircle }> = {
   error:   { color: '#ef4444', Icon: AlertCircle },
@@ -63,8 +64,34 @@ export function AwayDigestActions({ pt, busy, onAnswer }: { pt: boolean; busy: b
 }
 
 /** The text column of a bell row: title, message, then the actions on their own rows BELOW the message. */
-export function NotificationRowBody({ pt, title, message, isJournalFailed, isClean, isAwayDigest, digestBusy, onAnswer, onRetryJournal, onClean, progress, cleanReady }: {
-  progress?: number; cleanReady?: boolean
+/**
+ * What a "yes" is doing right now: the server's own steps (`/api/away/digest/answer`, streamed), done
+ * ones ticked, the current one animated, the rest dim. It moves only when the server reports a step,
+ * never on a timer, and ends when Nay's answer starts.
+ */
+export function AwayDigestProgress({ pt, phase }: { pt: boolean; phase: AwayDigestPhase | null }) {
+  const at = phase ? AWAY_DIGEST_PHASES.indexOf(phase) : -1
+  return (
+    <ol data-testid="away-digest-progress" aria-live="polite" style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'grid', gap: 4 }}>
+      {AWAY_DIGEST_PHASES.map((p, i) => {
+        const state = i < at ? 'done' : i === at ? 'now' : 'next'
+        return (
+          <li key={p} data-state={state} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: state === 'next' ? 'var(--text-tertiary, var(--text-secondary))' : 'var(--text-primary)', opacity: state === 'next' ? 0.55 : 1 }}>
+            <span style={{ width: 14, height: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              {state === 'done' ? <Check size={12} color="#22c55e" aria-hidden />
+                : state === 'now' ? <AgentisticsLoader size={13} label={AWAY_DIGEST_PHASE_LABEL[p][pt ? 'pt' : 'en']} />
+                : <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor' }} />}
+            </span>
+            <span style={{ fontWeight: state === 'now' ? 600 : 400 }}>{AWAY_DIGEST_PHASE_LABEL[p][pt ? 'pt' : 'en']}</span>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+export function NotificationRowBody({ pt, title, message, isJournalFailed, isClean, isAwayDigest, digestBusy, digestPhase = null, onAnswer, onRetryJournal, onClean, progress, cleanReady }: {
+  progress?: number; cleanReady?: boolean; digestPhase?: AwayDigestPhase | null
   pt: boolean; title: React.ReactNode; message?: React.ReactNode; isJournalFailed: boolean; isClean: boolean; isAwayDigest: boolean
   digestBusy: boolean; onAnswer: (a: 'yes' | 'no') => void; onRetryJournal: () => void; onClean: () => void
 }) {
@@ -88,7 +115,7 @@ export function NotificationRowBody({ pt, title, message, isJournalFailed, isCle
         onClick={e => { e.stopPropagation(); onClean() }}
         style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', font: 'inherit', fontSize: 11 }}
       >{cleanReady ? (pt ? 'Ver e limpar' : 'Review and clean') : (pt ? 'Ver o que dá para limpar' : 'See what can be cleaned')}</button></div>}
-      {isAwayDigest && <AwayDigestActions pt={pt} busy={digestBusy} onAnswer={onAnswer} />}
+      {isAwayDigest && (digestBusy && digestPhase ? <AwayDigestProgress pt={pt} phase={digestPhase} /> : <AwayDigestActions pt={pt} busy={digestBusy} onAnswer={onAnswer} />)}
     </>
   )
 }
@@ -112,6 +139,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label, to
     return () => setNotificationPanelOpen(id, false)
   }, [open])
   const [digestBusyId, setDigestBusyId] = useState<string | null>(null)
+  const [digestPhase, setDigestPhase] = useState<AwayDigestPhase | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const unread = notes.filter(n => !n.read).length
   const muteWorkers = useMuteWorkers()
@@ -290,9 +318,9 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label, to
               const isAwayDigest = n.code === 'away.digest_offer'
               const digestBusy = digestBusyId === n.id
               const answerDigest = async (answer: 'yes' | 'no') => {
-                setDigestBusyId(n.id)
+                setDigestBusyId(n.id); setDigestPhase(null)
                 try {
-                  const body = await answerAwayDigest(answer, n.meta?.bucket, n.meta?.since, lang)
+                  const body = await answerAwayDigest(answer, n.meta?.bucket, n.meta?.since, lang, answer === 'yes' ? setDigestPhase : undefined)
                   if (!body.ok) {
                     const stale = body.status === 409
                     if (stale) dismissNotification(n.id)
@@ -303,7 +331,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label, to
                   if (answer === 'yes' && body.conversationId) { setOpen(false); navigate(`/sessions/${encodeURIComponent(body.conversationId)}`) }
                 } catch {
                   pushLocalNotification({ type: 'error', code: 'away.digest_failed' })
-                } finally { setDigestBusyId(null) }
+                } finally { setDigestBusyId(null); setDigestPhase(null) }
               }
               const clickable = link !== null || isUpdate || isIdle || isWhatsNew
               const go = () => {
@@ -336,7 +364,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label, to
                   <Icon size={15} color={color} style={{ flexShrink: 0, marginTop: 1 }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <NotificationRowBody pt={pt} title={title} message={message} isJournalFailed={isJournalFailed} isClean={isClean} isAwayDigest={isAwayDigest}
-                      digestBusy={digestBusy} onAnswer={a => { void answerDigest(a) }}
+                      digestBusy={digestBusy} digestPhase={digestBusy ? digestPhase : null} onAnswer={a => { void answerDigest(a) }}
                       onRetryJournal={() => { setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:retry-journal-import')) }}
                       onClean={() => { setOpen(false); window.dispatchEvent(new CustomEvent('agentistics:open-clean')) }} />
                   </div>

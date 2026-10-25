@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { answerAwayDigestWithDeps, awayDigestPrompt, type AwayDigestAnswerDeps, type AwayDigestState } from './away-digest'
+import { answerAwayDigestWithDeps, awayDigestAnswerStream, awayDigestPrompt, nayAnswerProgress, waitForNayAnswer, type AwayDigestAnswerDeps, type AwayDigestState } from './away-digest'
 
 const start = Date.parse('2026-01-01T00:00:00.000Z')
 const away = { on: true as const, since: new Date(start).toISOString(), until: null, authorised: [], note: '', maxWorkers: 6, topCaps: {} }
@@ -172,3 +172,64 @@ describe('away digest answers', () => {
     expect({ starts, prompts }).toEqual({ starts: 1, prompts: 1 })
   })
 })
+
+describe('away digest progress', () => {
+  test('reports each real step as it starts, in order, and only on yes', async () => {
+    const f = fixture()
+    const phases: string[] = []
+    await answerAwayDigestWithDeps('yes', bucket, 'en', { ...f.deps, onPhase: p => phases.push(p) }, start + 5 * 60 * 60 * 1000, away.since)
+    expect(phases).toEqual(['collect', 'prepare', 'send'])
+    const g = fixture()
+    const none: string[] = []
+    await answerAwayDigestWithDeps('no', bucket, 'en', { ...g.deps, onPhase: p => none.push(p) }, start + 5 * 60 * 60 * 1000, away.since)
+    expect(none).toEqual([])
+  })
+
+  test('a failed start stops at prepare: send is never claimed', async () => {
+    const f = fixture({ start: async () => ({ ok: false }) })
+    const phases: string[] = []
+    expect(await answerAwayDigestWithDeps('yes', bucket, 'en', { ...f.deps, onPhase: p => phases.push(p) }, start + 5 * 60 * 60 * 1000, away.since)).toEqual({ ok: false, error: 'failed' })
+    expect(phases).toEqual(['collect', 'prepare'])
+  })
+
+  test('a configured schedule decides which bucket an answer belongs to', async () => {
+    const f = fixture({ state: { since: away.since, lastBucket: 2 } })
+    const deps = { ...f.deps, read: async () => ({ away, awayDigest: f.state, awayDigestSchedule: { firstAfterMin: 60, everyMin: 30 } }) }
+    expect((await answerAwayDigestWithDeps('yes', 2, 'en', deps, start + 60 * 60 * 1000, away.since)).ok).toBe(true)
+  })
+
+  test('the stream ends with writing and waits for the answer before done', async () => {
+    const lines = await readLines(awayDigestAnswerStream(async onPhase => { onPhase('collect'); onPhase('prepare'); onPhase('send'); return { ok: true, conversationId: 'nay-1', bucket } }, async id => id === 'nay-1', 'yes'))
+    expect(lines).toEqual([{ phase: 'collect' }, { phase: 'prepare' }, { phase: 'send' }, { phase: 'writing' }, { done: true, result: { ok: true, conversationId: 'nay-1', bucket }, answerStarted: true }])
+  })
+
+  test('a failure or a no never claims writing', async () => {
+    expect(await readLines(awayDigestAnswerStream(async () => ({ ok: false, error: 'stale' }), async () => true, 'yes')))
+      .toEqual([{ done: true, result: { ok: false, error: 'stale' } }])
+    expect(await readLines(awayDigestAnswerStream(async () => ({ ok: true, conversationId: '', bucket }), async () => true, 'no')))
+      .toEqual([{ done: true, result: { ok: true, conversationId: '', bucket } }])
+  })
+
+  test('nayAnswerProgress: text from Nay starts it; a pending tool note does not; an ended row is gone', () => {
+    expect(nayAnswerProgress(undefined)).toBe('waiting')
+    expect(nayAnswerProgress({ status: 'running', activity: 'working', chatTurns: [{ role: 'user', text: 'x' }, { role: 'assistant', text: 'Reading', pending: true }] })).toBe('waiting')
+    expect(nayAnswerProgress({ status: 'running', activity: 'working', chatTurns: [{ role: 'assistant', text: '# Resumo' }] })).toBe('started')
+    expect(nayAnswerProgress({ status: 'running', activity: 'working' })).toBe('started')
+    expect(nayAnswerProgress({ status: 'running', activity: 'waiting' })).toBe('waiting')
+    expect(nayAnswerProgress({ status: 'exited' })).toBe('gone')
+  })
+
+  test('waitForNayAnswer is bounded and never reports a start it did not see', async () => {
+    let t = 0
+    const clock = { now: () => t, sleep: async (ms: number) => { t += ms }, intervalMs: 1000, timeoutMs: 3000 }
+    expect(await waitForNayAnswer('a', async () => ({ sessions: [{ id: 'a', status: 'running', activity: 'waiting' }] }), clock)).toBe(false)
+    let polls = 0
+    expect(await waitForNayAnswer('a', async () => ({ sessions: [{ id: 'a', status: 'running', activity: ++polls >= 2 ? 'working' : 'waiting' }] }), { ...clock, now: () => 0 })).toBe(true)
+    expect(await waitForNayAnswer('a', async () => { throw new Error('poll') }, { ...clock, now: (() => { let n = 0; return () => (n += 2000) })() })).toBe(false)
+  })
+})
+
+async function readLines(stream: ReadableStream<Uint8Array>): Promise<unknown[]> {
+  const text = await new Response(stream).text()
+  return text.split('\n').filter(l => l.trim()).map(l => JSON.parse(l))
+}

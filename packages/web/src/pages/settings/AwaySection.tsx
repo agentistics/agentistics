@@ -10,6 +10,7 @@ import { Moon } from 'lucide-react'
 import { AWAY_AUTH_LABEL } from '@agentistics/core'
 import { RowSwitch, SectionHeader } from './primitives'
 import AwayModeDialog from '../../components/AwayModeDialog'
+import AwayDigestScheduleSection from './AwayDigestScheduleSection'
 import { awayUntilLabel, setAway, useAway } from '../../lib/awayMode'
 
 export default function AwaySection({ lang, capable, embedded = false }: { lang: 'pt' | 'en'; capable: boolean; embedded?: boolean }) {
@@ -33,6 +34,7 @@ export default function AwaySection({ lang, capable, embedded = false }: { lang:
         sub={sub}
         onToggle={() => { if (away.active) setConfirmOff(true); else setDialog(true) }}
       />
+      <AwayDigestScheduleSection pt={pt} />
       <ConfirmModal open={confirmOff} tone="default" title={pt ? 'Voltou?' : 'Back?'}
         message={pt ? 'Isto limpa o modo ausente de todas as sessões.' : 'This clears away mode for every session.'}
         confirmLabel={pt ? 'Desligar' : 'Turn off'} cancelLabel={pt ? 'Cancelar' : 'Cancel'}
