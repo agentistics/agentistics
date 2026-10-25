@@ -108,6 +108,19 @@ positional default for the `--session`s that follow) and every reopen.
 - Antigravity and opencode have no isolation variable: an account root is refused for them in words
   (`account-unsupported`).
 
+## Switching the open session from Plan usage
+
+The sidebar footer's Plan usage popover and the Plan usage modal identify the session currently
+open in the Sessions workspace and its account, using the same account names as the usage list.
+With another account available, “Switch the open session's account” opens the existing account
+switch dialog. Without a target, the session line stays visible with the existing unavailable
+reason. Outside an open session, both surfaces omit this section entirely.
+
+The shell supplies the selected session; no separate selection store exists. A completed switch
+follows the reopened session, replacing its tab when needed and keeping the other split pane.
+Tab reaches both actions in the footer popover; clicking Switch closes that popover first.
+Escape dismisses the account dialog before any underlying Plan usage modal.
+
 ## Adding a login in Billing (experimental `multi-account`)
 
 Settings → Billing → **Add account** opens a link/code dialog. The owner opens the link in their
