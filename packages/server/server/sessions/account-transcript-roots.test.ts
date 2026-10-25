@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  __setAccountRootsForTest, accountRootFrom, accountRootOf, accountRootsFrom, accountStoreDirs, storeDirOf,
+  __setAccountRootsForTest, accountRootFrom, newestTranscript, accountRootOf, accountRootsFrom, accountStoreDirs, storeDirOf,
   type AccountRootsSource,
 } from './account-transcript-roots'
 import { encodeProjectDir, forgetChatTailPaths, resolveClaudeTranscriptAnyAccount } from './chat-tail'
@@ -107,5 +107,51 @@ describe('a second account\'s conversation is found in its own root', () => {
     __setAccountRootsForTest(registryWith('claude'))
     expect(await accountRootOf('acc_second')).toBe(root)
     expect(await accountRootOf(undefined)).toBeNull()
+  })
+})
+
+describe('an account switch leaves the conversation in TWO roots: the chat follows the live one', () => {
+  // 2026-10-25: a leader switched Principal → Vini; the switch COPIED its transcript into the new root,
+  // then the session kept writing there. The reader took the first hit (the old root, frozen at the
+  // switch), so the web chat stopped at the switch while the TUI went on.
+  const CONV = '1b2c3d4e-5f60-4718-8a9b-0c1d2e3f4a5b'
+  const CWD = '/home/someone/ws'
+  let oldRoot: string
+  let newRoot: string
+  const file = (root: string) => join(root, 'projects', encodeProjectDir(CWD), `${CONV}.jsonl`)
+
+  beforeAll(async () => {
+    oldRoot = await mkdtemp(join(tmpdir(), 'acct-old-'))
+    newRoot = await mkdtemp(join(tmpdir(), 'acct-new-'))
+    for (const r of [oldRoot, newRoot]) {
+      await mkdir(join(r, 'projects', encodeProjectDir(CWD)), { recursive: true })
+      await writeFile(file(r), JSON.stringify({ type: 'user', uuid: 'u', timestamp: '2026-10-25T10:00:00Z', message: { role: 'user', content: 'x' } }) + '\n')
+    }
+    await utimes(file(oldRoot), new Date('2026-10-25T13:30:00Z'), new Date('2026-10-25T13:30:00Z'))
+    await utimes(file(newRoot), new Date('2026-10-25T15:00:00Z'), new Date('2026-10-25T15:00:00Z'))
+  })
+  afterEach(() => { __setAccountRootsForTest(null); forgetChatTailPaths() })
+  afterAll(async () => { await rm(oldRoot, { recursive: true, force: true }); await rm(newRoot, { recursive: true, force: true }) })
+
+  const both = (first: string, second: string): AccountRootsSource => ({
+    accounts: [{ id: 'a1', harness: 'claude', root: first }, { id: 'a2', harness: 'claude', root: second }], bindings: {},
+  })
+
+  it('the newest copy wins whichever root the registry lists first', async () => {
+    __setAccountRootsForTest(both(oldRoot, newRoot))
+    expect(await resolveClaudeTranscriptAnyAccount(CWD, CONV)).toBe(file(newRoot))
+    expect(await transcriptReaderFor('claude')!.resolve({ conversationId: CONV, cwd: CWD })).toBe(file(newRoot))
+    __setAccountRootsForTest(both(newRoot, oldRoot))
+    forgetChatTailPaths()
+    expect(await resolveClaudeTranscriptAnyAccount(CWD, CONV)).toBe(file(newRoot))
+  })
+
+  it('newestTranscript keeps the default store\'s hit when it is the newest, and a lone hit as it is', async () => {
+    __setAccountRootsForTest(both(oldRoot, newRoot))
+    expect(await newestTranscript('claude', file(newRoot), async dir => (dir === join(oldRoot, 'projects') ? file(oldRoot) : null)))
+      .toBe(file(newRoot))
+    expect(await newestTranscript('claude', null, async dir => (dir === join(oldRoot, 'projects') ? file(oldRoot) : null)))
+      .toBe(file(oldRoot))
+    expect(await newestTranscript('claude', null, async () => null)).toBeNull()
   })
 })

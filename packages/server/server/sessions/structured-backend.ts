@@ -61,7 +61,7 @@ export interface StructuredProvider {
   /** Persist a normal end BEFORE its durable/live records disappear. */
   onEnded?(id: string, endedAt?: string): Promise<unknown>
   /** A structured session fell back to tmux (or could not), for the log / the row's note. */
-  onFallback?(id: string, outcome: { reason: string; resumed: boolean }): void
+  onFallback?(id: string, outcome: { reason: string; resumed: boolean; structured?: boolean }): void
   /**
    * F3.3 — before a structured start: what the tmux backend does before every pane (the session-identity
    * key the agentistics MCP proves its session with, `session-identity.ts`). Absent = nothing.
@@ -310,8 +310,36 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
   /** Ended ON PURPOSE (a kill, "open in terminal" — from any process): its exit is not a failure. */
   const endedOnPurpose = (id: string) => !!durable && (durable.ending(id) !== null || durable.saved(id) === null)
 
+  /** Structured relaunches per id, so a child that dies at once every time ends in tmux, not in a loop. */
+  const relaunches = new Map<string, number[]>()
+  const RELAUNCH_MAX = 3
+  const RELAUNCH_WINDOW_MS = 5 * 60_000
+
+  /**
+   * FALLBACK.STRUCTURED — a structured child that died unexpectedly (or could not be re-attached)
+   * comes back STRUCTURED: the same conversation, resumed by id under the same managed id. Never the
+   * first prompt again, never the opening context (a resume carries neither).
+   */
+  const relaunchStructured = async (id: string, req: BackendSpawn, conv: string): Promise<boolean> => {
+    const i = req.structured
+    if (!i || !(provider.flagOn?.() ?? false)) return false
+    const now = Date.now()
+    const recent = (relaunches.get(id) ?? []).filter(t => now - t < RELAUNCH_WINDOW_MS)
+    if (recent.length >= RELAUNCH_MAX) return false
+    relaunches.set(id, [...recent, now])
+    const reg = await provider.structured().catch(() => null)
+    if (!reg || reg.driverFor(i.harness) === null) return false
+    const { prompt: _p, instructions: _i, conversationId: _c, ...rest } = i
+    const { initialPrompt: _ip, ...bare } = req
+    return startVia({ ...bare, structured: { ...rest, resumeId: conv } }, 'structured', i.harness, reg, null).catch(() => false)
+  }
+
   const fallBack = async (id: string, req: BackendSpawn, conv: string | null, reason: string): Promise<boolean> => {
-    const resume = conv && provider.resumeSpawn ? await provider.resumeSpawn(req, conv).catch(() => null) : null
+    if (conv && await relaunchStructured(id, req, conv)) {
+      provider.onFallback?.(id, { reason, resumed: true, structured: true })
+      return true
+    }
+    const resume =conv && provider.resumeSpawn ? await provider.resumeSpawn(req, conv).catch(() => null) : null
     let resumed = false
     if (resume) resumed = await base.spawn({ ...resume, id }).then(() => true, () => false)
     provider.onFallback?.(id, { reason, resumed })

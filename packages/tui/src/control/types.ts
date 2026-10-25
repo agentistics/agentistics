@@ -1624,6 +1624,12 @@ export interface ControlHost {
   openInTerminal?(id: string): Promise<ActionResult>
 
   /**
+   * FALLBACK.STRUCTURED — "back to the new mode": end a row that runs as a TUI and resume the SAME
+   * conversation over the harness's protocol (the reopen machinery; row identity inherited).
+   */
+  backToStructured?(id: string): Promise<ActionResult>
+
+  /**
    * Restore a session's conversation to the point BEFORE one of the person's own prompts, using the
    * harness's own rewind. `occurrence` picks among identical prompts, 0 = the latest. Refused, in a
    * sentence, where no rewind was measured for the harness, while a dialog is open, or when the
