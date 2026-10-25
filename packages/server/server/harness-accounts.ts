@@ -59,6 +59,23 @@ async function readCodexIdentity(file: string): Promise<AccountIdentity> {
   return codexIdentity(JSON.parse(await readFile(file, 'utf8')))
 }
 
+/**
+ * Antigravity keeps its login in `antigravity-oauth-token` (JSON, 0600) beside live OAuth tokens.
+ * Only `id_token_email` and `auth_method` are read; the `token` object is never touched, kept or
+ * logged, and a failure never echoes the file. `consumer` is a personal Google account, `gcp` Google Cloud.
+ */
+export function antigravityIdentity(raw: unknown): AccountIdentity {
+  const doc = raw as { id_token_email?: unknown; auth_method?: unknown } | null
+  const email = text(doc?.id_token_email)
+  if (!email) return fallback()
+  const method = doc?.auth_method === 'gcp' ? 'Google Cloud' : doc?.auth_method === 'consumer' ? 'Google' : undefined
+  return { key: email, label: method ? `${email} · ${method}` : email }
+}
+
+async function readAntigravityIdentity(file: string): Promise<AccountIdentity> {
+  return antigravityIdentity(JSON.parse(await readFile(file, 'utf8')))
+}
+
 async function readCopilotIdentity(file: string): Promise<AccountIdentity> {
   // Copilot writes full-line JSONC comments. Anchoring at line start preserves // inside strings.
   const raw = JSON.parse((await readFile(file, 'utf8')).replace(/^[\t ]*\/\/[^\r\n]*/gm, '')) as {
@@ -103,7 +120,7 @@ export const IDENTITY_PROBES: Record<HarnessId, ((root: string | null) => Promis
   copilot: root => readCopilotIdentity(join(root ?? DEFAULT_ROOTS.copilot(), 'config.json')),
   gemini: null,
   kimi: null,
-  antigravity: null,
+  antigravity: root => readAntigravityIdentity(join(root ?? DEFAULT_ROOTS.antigravity(), 'antigravity-oauth-token')),
   opencode: null,
 }
 
@@ -250,8 +267,8 @@ function foldAccount(data: AccountsFile, keep: HarnessAccount, drop: HarnessAcco
 }
 
 /**
- * A `default` record of a harness WITH an identity probe is the login on a root that could not be
- * identified yet (a v1 list, or a probe that read nothing). The first CONFIRMED identity bound to
+ * A `default` record (or a `root:<hash>` one, minted while the harness had no probe at all) of a
+ * harness WITH an identity probe is the login on a root that could not be identified yet (a v1 list, or a probe that read nothing). The first CONFIRMED identity bound to
  * that same root is that login, so the placeholder folds into it — exactly one placeholder, never
  * one another root is bound to. Without this the placeholder outlives the fix that identifies the
  * login and shows as a second, never-read plan beside the real one.
@@ -261,7 +278,7 @@ function foldPlaceholder(data: AccountsFile, account: HarnessAccount, displaced?
   const bound = new Set(Object.values(data.bindings))
   // `displaced` was bound to this root a moment ago; `adopt` has already cleared its root.
   const placeholders = data.accounts.filter(a => a !== account && a.harness === account.harness
-    && a.key === 'default' && !bound.has(a.id) && (a === displaced || sameRoot(account.harness, a.root, account.root)))
+    && (a.key === 'default' || a.key.startsWith('root:')) && !bound.has(a.id) && (a === displaced || sameRoot(account.harness, a.root, account.root)))
   if (placeholders.length !== 1) return false
   // The identified login takes the placeholder's id: Billing profiles, session rows and nicknames the
   // owner already keyed by it keep resolving with no alias lookup; the fresh id becomes the alias.

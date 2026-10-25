@@ -231,7 +231,7 @@ test('meterless harnesses key canonical roots and expose isolation capabilities 
     expect(await probeAccountIdentity(harness, alias)).toEqual(result)
     expect((await probeAccountIdentity(harness, other)).key).not.toBe(result.key)
   }
-  expect(IDENTITY_PROBES.antigravity).toBeNull()
+  expect(IDENTITY_PROBES.antigravity).toBeInstanceOf(Function)
   expect(ISOLATION_ENV).toEqual({ claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', copilot: 'COPILOT_HOME', gemini: 'GEMINI_CLI_HOME', kimi: 'KIMI_CODE_HOME', antigravity: null, opencode: null })
 })
 
@@ -669,4 +669,49 @@ test('an unconfirmed probe adds an id-less row only while the harness has no rec
   await writeFile(file, JSON.stringify({ version: 2, bindings: {}, segments: {},
     accounts: [{ id: 'acc_known000000', root: null, key: 'k', harness: 'codex', label: 'k', available: true, firstSeen: 1, lastSeen: 1 }] }))
   expect((await store.list(['codex'])).map(a => a.id)).toEqual(['acc_known000000'])
+})
+
+const FAKE_ACCESS = 'ya29.FAKE-ACCESS-TOKEN-do-not-leak'
+async function agyRoot(doc: string | null): Promise<string> {
+  const root = join(dir, 'agy')
+  await mkdir(root, { recursive: true })
+  if (doc !== null) await writeFile(join(root, 'antigravity-oauth-token'), doc, { mode: 0o600 })
+  return root
+}
+const agyDoc = (method: string) => JSON.stringify({
+  auth_method: method, id_token_email: 'person@example.invalid',
+  token: { access_token: FAKE_ACCESS, refresh_token: 'FAKE-REFRESH', expiry: '2099-01-01T00:00:00Z' },
+})
+
+test('antigravity probe: reads only the e-mail and the method, from a fake token file', async () => {
+  for (const [method, suffix] of [['consumer', 'Google'], ['gcp', 'Google Cloud']] as const) {
+    const out = await IDENTITY_PROBES.antigravity!(await agyRoot(agyDoc(method)))
+    expect(out).toEqual({ key: 'person@example.invalid', label: `person@example.invalid · ${suffix}` })
+    expect(JSON.stringify(out)).not.toContain(FAKE_ACCESS)
+    expect(JSON.stringify(out)).not.toContain('FAKE-REFRESH')
+    expect(Object.keys(out).sort()).toEqual(['key', 'label'])
+  }
+})
+
+test('antigravity probe: missing or malformed file answers like the other probes', async () => {
+  // Like codex's, a missing file rejects and the store turns that into the unknown identity.
+  await expect(IDENTITY_PROBES.antigravity!(await agyRoot(null))).rejects.toThrow()
+  expect((await createHarnessAccounts({ file: join(dir, 'm.json'), probe: (h, r) => IDENTITY_PROBES[h]!(r) }).current('antigravity', await agyRoot(null))).key).toBe('default')
+  const bad = await IDENTITY_PROBES.antigravity!(await agyRoot('{ not json ' + FAKE_ACCESS)).catch(e => e as Error)
+  expect(bad).toBeInstanceOf(Error)
+  expect((bad as Error).message).not.toContain(FAKE_ACCESS)
+  const store = createHarnessAccounts({ file: join(dir, 'a.json'), probe: (h, r) => IDENTITY_PROBES[h]!(r) })
+  expect((await store.current('antigravity', await agyRoot('{ not json'))).key).toBe('default')
+  expect(await IDENTITY_PROBES.antigravity!(await agyRoot('{"auth_method":"gcp"}'))).toMatchObject({ key: 'default' })
+})
+
+test('antigravity: an existing root-keyed default account keeps its id once the login is identified', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: { 'antigravity:': 'acc_agyroot00000' },
+    accounts: [{ id: 'acc_agyroot00000', root: null, key: 'root:abcdef012345', harness: 'antigravity', label: 'Default account',
+      nickname: 'Home', available: true, firstSeen: 1, lastSeen: 5 }] }))
+  const store = createHarnessAccounts({ file, probe: async () => ({ key: 'person@example.invalid', label: 'person@example.invalid · Google' }) })
+  const account = await store.current('antigravity')
+  expect(account).toMatchObject({ id: 'acc_agyroot00000', key: 'person@example.invalid', nickname: 'Home', firstSeen: 1 })
+  expect((await store.readAccounts()).accounts.filter(a => a.harness === 'antigravity')).toHaveLength(1)
 })
