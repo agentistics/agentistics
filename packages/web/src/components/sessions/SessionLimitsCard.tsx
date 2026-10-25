@@ -23,7 +23,7 @@ export function SessionLimitsCard({ sessionId, lang, onSwitched, onOpenAll }: {
         aria-label={lang === 'pt' ? 'Ver todos os limites' : 'See every limit'}
         style={{ all: 'unset', boxSizing: 'border-box', display: 'block', width: '100%', cursor: 'pointer' }}
       >
-        <PlanUsageSummary limits={plan.limits} registered={plan.registered} accountLabels={plan.accountLabels} now={plan.now} lang={lang} />
+        <PlanUsageSummary limits={plan.limits} registered={plan.registered} accountLabels={plan.accountLabels} now={plan.now} lang={lang} embedded />
       </button>
     </AccountSwitchInline>
   )

@@ -170,7 +170,11 @@ describe('AccountSwitchDialog — every harness (v2)', () => {
     for (const lang of ['en', 'pt'] as const) {
       getBody = limited
       const { host, root } = await mount(createElement(card.SessionLimitsCard, { sessionId: 'm1', lang, onSwitched: () => {}, onOpenAll: () => {} }))
-      expect(host.querySelector('[data-plan-usage-summary]')).not.toBeNull()
+      const summary = host.querySelector<HTMLElement>('[data-plan-usage-summary]')
+      expect(summary).not.toBeNull()
+      // The card already carries the "Usage limits" title: no second title, and the list fills the card.
+      expect(host.querySelector('#plan-usage-summary-title')).toBeNull()
+      expect(summary!.style.maxWidth).toBe('')
       expect(host.querySelector('[data-account-switch-open]')?.textContent).toContain(lang === 'pt' ? 'Trocar de conta' : 'Switch account')
       await act(async () => { root.unmount() })
     }
