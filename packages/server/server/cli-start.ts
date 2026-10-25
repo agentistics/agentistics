@@ -2985,7 +2985,8 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // cost of proceeding is ~zero, and refusing here would destroy the very session the user asked
       // to bring back, which is worse than never having gated it. An ordinary resume (no holder to
       // end, `plan.kind !== 'takeover'`) has no such offset and is gated normally.
-      ...(plan.kind === 'takeover' ? { skipAdmission: true } : {}),
+      // The account switch (`req.force`) is the same case: it ended the row this resume replaces.
+      ...(plan.kind === 'takeover' || req.force === true ? { skipAdmission: true } : {}),
       // A reopen runs structured unless a person attaches to it in a terminal (`reopenOrigin`).
       ...(reopenOrigin(req.origin, req.attach) ? { origin: reopenOrigin(req.origin, req.attach)! } : {}),
       ...(req.callerVerified ? { callerVerified: true } : {}),

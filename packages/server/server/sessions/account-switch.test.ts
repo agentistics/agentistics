@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   allSwitchOptions, claudeProjectDir, crossSwitchPrompt, decideCrossSwitch, decideSwitch, detectLimitInTail, planSwitchCopies,
-  switchMessage, switchOptions, switchSupported, SWITCH_LAYOUT,
+  startFailureSentence, switchFallbackMessage, switchMessage, switchOptions, switchSupported, SWITCH_LAYOUT, unavailableSwitchTargets,
 } from './account-switch'
 import type { SpawnAccountContext, SpawnAccountRow } from './spawn-account'
 import { HARNESS_ORDER } from '@agentistics/core'
@@ -180,6 +180,35 @@ describe('allSwitchOptions (v2: every harness)', () => {
   })
 })
 
+describe('unavailableSwitchTargets (CONTA.LIMITES)', () => {
+  const accounts = [
+    ...two,
+    row({ id: 'acc_hidden', root: '/r/h', available: false, firstSeen: 3 }),
+    row({ id: 'acc_out', root: '/r/o', bound: false, firstSeen: 4 }),
+    row({ id: 'acc_old', root: '/r/old', retired: true }),
+    row({ id: 'acc_k', harness: 'codex', root: null, firstSeen: 5 }),
+    row({ id: 'acc_kimi', harness: 'kimi', root: null, firstSeen: 6 }),
+    row({ id: 'acc_cop', harness: 'copilot', root: null, firstSeen: 7 }),
+  ]
+  const base = { harness: 'claude' as const, currentAccountId: 'acc_a', meta: [{ id: 'acc_hidden', label: 'h@x', plan: 'Max' }] }
+  test('every live account the options leave out, with the reason; current and retired never listed', () => {
+    const startable = ['claude', 'codex'] as const
+    const offered = allSwitchOptions({ ...base, agentCaller: false, context: ctx(accounts), startable })
+    expect(offered.map(o => o.id)).toEqual(['acc_b', 'acc_k'])
+    const out = unavailableSwitchTargets({ ...base, context: ctx(accounts), startable, offered })
+    expect(out.map(o => `${o.id}:${o.reason}`)).toEqual(['acc_hidden:not_agentic', 'acc_out:signed_out', 'acc_kimi:harness_unavailable', 'acc_cop:harness_unavailable'])
+    expect(out[0]).toMatchObject({ label: 'h@x', plan: 'Max', harness: 'claude' })
+  })
+  test('a session whose harness cannot carry its conversation: its own other accounts say so', () => {
+    const own = [row({ id: 'acc_g1', harness: 'gemini' }), row({ id: 'acc_g2', harness: 'gemini', root: '/r/g2' })]
+    const out = unavailableSwitchTargets({ harness: 'gemini', currentAccountId: 'acc_g1', meta: [], context: ctx(own), startable: ['gemini'], offered: [] })
+    expect(out).toEqual([{ id: 'acc_g2', harness: 'gemini', label: 'acc_g2', reason: 'cant_carry' }])
+  })
+  test('nothing with the flag off', () => {
+    expect(unavailableSwitchTargets({ ...base, context: { enabled: false, accounts }, startable: ['claude'], offered: [] })).toEqual([])
+  })
+})
+
 describe('decideCrossSwitch', () => {
   const accounts = [...two, row({ id: 'acc_k', harness: 'codex', root: '/r/k' }), row({ id: 'acc_kout', harness: 'codex', root: '/r/x', bound: false })]
   const o = { harness: 'claude' as const, targetHarness: 'codex' as const, running: true, agentCaller: false, context: ctx(accounts), startable: ['claude', 'codex'] as const }
@@ -221,5 +250,20 @@ describe('crossSwitchPrompt', () => {
     expect(big).toContain('Confirme o estado')
     const none = crossSwitchPrompt({ lang: 'pt', fromHarness: 'Gemini CLI', turns: { unavailable: 'sem leitor' } })
     expect(none).toContain('não pôde ser lida (sem leitor)')
+  })
+})
+
+describe('start failure sentences', () => {
+  test('raw stderr never reaches the person', () => {
+    expect(startFailureSentence('a sessão terminou assim que começou: copilot: error X', 'pt')).toBe('Ela terminou assim que começou (os detalhes estão no log do servidor).')
+    expect(startFailureSentence('the session exited as soon as it started: copilot: x', 'en')).not.toContain('copilot')
+  })
+  test('other reasons are capitalised and closed', () => {
+    expect(startFailureSentence('memória insuficiente', 'pt')).toBe('Memória insuficiente.')
+    expect(startFailureSentence('Already fine.', 'en')).toBe('Already fine.')
+    expect(startFailureSentence(undefined, 'en')).toBe('')
+  })
+  test('fallback leads with what happened to the session', () => {
+    expect(switchFallbackMessage('', 'pt')).toBe('A sessão não iniciou na outra conta; ela continua na conta de antes.')
   })
 })

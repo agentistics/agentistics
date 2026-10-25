@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.148.0': {
+    features: [
+      {
+        pt: 'Troque a conta de uma sessão direto pelo cartão "Limites de uso", vendo os limites de cada conta antes de escolher.',
+        en: 'Switch a session\'s account right from the "Usage limits" card, seeing every account\'s limits before you pick.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Os ajudantes em segundo plano passam sozinhos para a versão nova depois de uma atualização — o aviso de "programa antigo" não aparece mais.',
+        en: 'Background helpers move to the new version by themselves after an update — no more "old binary" notice.',
+      },
+      {
+        pt: 'Testes num ambiente descartável não entram mais em laço infinito quando o bun vem do Volta.',
+        en: 'Test runs in a throwaway no longer loop forever when bun comes from Volta.',
+      },
+    ],
+  },
   '2.147.1': {
     features: [],
     fixes: [
