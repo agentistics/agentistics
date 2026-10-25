@@ -65,6 +65,9 @@ import { AwayChip, AwayDialogHost, awayMenuItems } from './components/sessions/A
 import { useAway } from './lib/awayMode'
 import AwayPill from './components/AwayPill'
 import { HardwareModal } from './components/HardwareModal'
+import { AccountSwitchDialog, useSwitchInfo } from './components/sessions/AccountSwitch'
+import type { PlanUsageSession } from './components/PlanUsageSessionSwitch'
+import { usePlanLimits } from './lib/planLimits'
 import { PlanUsageModal } from './components/PlanUsageModal'
 import { subscribePlanUsageModal } from './lib/planUsageModalRequests'
 import { CleanDialog } from './components/CleanDialog'
@@ -100,7 +103,7 @@ import { MobilePillBar } from './components/nav/MobilePillBar'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
 import { openArtifacts } from './lib/artifactsStore'
-import { splitIdOf } from './lib/splitRoute'
+import { readSplitRoute, replaceInPane, splitHref, splitIdOf } from './lib/splitRoute'
 import { getPanelLayout, isPanelShown, setBandOpen, setSlotRightOpen, showPanel, usePanelSlots } from './lib/panelSlots'
 import { shouldHandleGlobally } from './lib/studioShortcuts'
 import { runStudioShortcut } from './lib/studioSearchRequest'
@@ -982,7 +985,7 @@ function CollapsedTip({ label, show, children }: { label: string; show: boolean;
 function SideNav({
   lang, harnesses, isCentral, hasWorkflows, collapsed, width, onResize, onCommitWidth, onToggle,
   theme, onToggleTheme, onToggleLang, onExport, principal, sessionsFilters, sessionsActiveOnly,
-  filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
+  filtersOpen, filtersCount, onToggleFilters, filtersButtonRef, openSession,
 }: {
   lang: Lang; harnesses?: SurfaceHarnessId[]; isCentral?: boolean; hasWorkflows?: boolean
   collapsed: boolean; onToggle: () => void
@@ -992,6 +995,8 @@ function SideNav({
   onCommitWidth: (w: number) => void
   theme: Theme; onToggleTheme: () => void; onToggleLang: () => void; onExport: () => void
   principal?: IamAccount
+  /** The session already resolved by the shell for the Plan usage surfaces. */
+  openSession?: PlanUsageSession
   /** The SAME filters/switch the shared header's `FiltersBar` edits — see `App.tsx`'s own state.
    *  `SideNav` only reads them, to hand to `SessionsAside`; it owns neither. */
   sessionsFilters: Filters
@@ -1205,7 +1210,7 @@ function SideNav({
             <SlidersHorizontal size={15} />
           </NavLink>
         </CollapsedTip>
-        {!isCentral && <PlanUsageFootButton lang={pt ? 'pt' : 'en'} collapsed={collapsed} footBtn={footBtn} />}
+        {!isCentral && <PlanUsageFootButton lang={pt ? 'pt' : 'en'} collapsed={collapsed} footBtn={footBtn} openSession={openSession} />}
       </div>
     </div>
   )
@@ -3172,6 +3177,29 @@ export default function AppLayout() {
   // mobile from the "More" sheet, where every other header action lives.
   const [hardwareOpen, setHardwareOpen] = useState(false)
   const [planUsageOpen, setPlanUsageOpen] = useState(false)
+  const [usageSwitchInfo] = useSwitchInfo(selectedFleetSession?.id, lang)
+  const usagePlan = usePlanLimits()
+  const [usageSwitchTarget, setUsageSwitchTarget] = useState<{
+    session: ControlSession; info: NonNullable<typeof usageSwitchInfo>
+  } | null>(null)
+  const openUsageSession: PlanUsageSession | undefined = selectedFleetSession ? {
+    id: selectedFleetSession.id,
+    title: selectedFleetSession.title,
+    accountLabel: (usageSwitchInfo?.current?.id ? usagePlan.accountLabels[usageSwitchInfo.current.id] : undefined)
+      ?? usageSwitchInfo?.current?.label ?? (lang === 'pt' ? 'não identificada' : 'unidentified'),
+    info: usageSwitchInfo,
+    onSwitch: () => { if (usageSwitchInfo) setUsageSwitchTarget({ session: selectedFleetSession, info: usageSwitchInfo }) },
+  } : undefined
+  const onUsageSwitched = (id: string) => {
+    const from = usageSwitchTarget?.session
+    setUsageSwitchTarget(null)
+    setPlanUsageOpen(false)
+    if (sessionTabsOn && from && from.conversationId === undefined) {
+      setOpenTabs('main', replaceTab(getOpenTabs('main'), from.id, id))
+    }
+    const r = reopenedSessionRoute(id, from ? { id: from.id, harness: from.harness, title: from.title } : undefined)
+    navigate(splitActive ? splitHref(replaceInPane(readSplitRoute(selectedSessionId, splitSearch), 'main', id), splitSearch) : r.path, r.options)
+  }
   useEffect(() => subscribePlanUsageModal(() => setPlanUsageOpen(true)), [])
   // Collapsible "fleet stats" tab below the header (updated/members/machines/teams/projects/repos).
   // **CLOSED BY DEFAULT ON A PHONE, OPEN ON THE DESKTOP** — one preference, two defaults. A stored
@@ -4538,6 +4566,7 @@ export default function AppLayout() {
         onToggleLang={() => { const next = lang === 'pt' ? 'en' : 'pt'; setLang(next); if (next === 'pt') setCurrency('BRL'); else if (currency === 'BRL') setCurrency('USD') }}
         onExport={() => navigate('/export')}
         principal={iam?.account}
+        openSession={openUsageSession}
         sessionsFilters={filters}
         sessionsActiveOnly={activeOnly}
         filtersOpen={sessionsFiltersOpen}
@@ -4960,7 +4989,8 @@ export default function AppLayout() {
         />
       )}
 
-      {planUsageOpen && <PlanUsageModal lang={lang === 'pt' ? 'pt' : 'en'} onClose={() => setPlanUsageOpen(false)} />}
+      {usageSwitchTarget && <AccountSwitchDialog open sessionId={usageSwitchTarget.session.id} info={usageSwitchTarget.info} lang={lang} fromLimit={false} onClose={() => setUsageSwitchTarget(null)} onSwitched={onUsageSwitched} />}
+      {planUsageOpen && <PlanUsageModal lang={lang === 'pt' ? 'pt' : 'en'} onClose={() => setPlanUsageOpen(false)} openSession={openUsageSession} switchDialogOpen={usageSwitchTarget !== null} />}
       {hardwareOpen && <HardwareModal lang={lang} onClose={() => setHardwareOpen(false)} />}
       <CleanDialog lang={lang === 'pt' ? 'pt' : 'en'} open={cleanOpen} onClose={() => setCleanOpen(false)} />
 

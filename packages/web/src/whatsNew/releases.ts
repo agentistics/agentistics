@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.150.0': {
+    features: [
+      {
+        pt: 'Troque a conta da sessão aberta pelo Uso dos planos, com o nome da sessão e da conta à vista.',
+        en: 'Switch the open session’s account from Plan usage, with the session and account names in view.',
+      },
+    ],
+    fixes: [],
+  },
   '2.149.0': {
     features: [
       {
