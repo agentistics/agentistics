@@ -189,7 +189,7 @@ async function crossHarnessSwitch(row: ManagedSession, req: SwitchAccountRequest
   const turns = await io.turns(row).catch(e => ({ unavailable: e instanceof Error ? e.message : String(e) }))
   const fromAccount = await io.label(harness, row.accountId).catch(() => undefined)
   const prompt = crossSwitchPrompt({
-    lang, fromHarness: HARNESS_LABELS[harness] ?? harness, ...(fromAccount ? { fromAccount } : {}),
+    lang, fromHarness: HARNESS_LABELS[harness] ?? harness, fromHarnessId: harness, ...(fromAccount ? { fromAccount } : {}),
     turns: 'unavailable' in turns ? turns : turns.turns, ...(pending ? { pending } : {}),
   })
   const role = await io.role([conv, row.id]).catch(() => undefined)

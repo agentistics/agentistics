@@ -235,7 +235,7 @@ describe('crossSwitchPrompt', () => {
     { role: 'assistant' as const, text: 'Tests written; one fails on the CSV header.' },
   ]
   test('goal, state, last turns, files touched, and the pending message', () => {
-    const p = crossSwitchPrompt({ lang: 'en', fromHarness: 'Claude Code', fromAccount: 'a@x', turns, pending: 'fix the CSV header' })
+    const p = crossSwitchPrompt({ lang: 'en', fromHarness: 'Claude Code', fromHarnessId: 'claude', fromAccount: 'a@x', turns, pending: 'fix the CSV header' })
     expect(p).toContain('Claude Code (account a@x)')
     expect(p).toContain('## Goal (first message)\nAdd the export button')
     expect(p).toContain('## State (last assistant reply)\nTests written; one fails')
@@ -245,12 +245,54 @@ describe('crossSwitchPrompt', () => {
     expect(p.endsWith('fix the CSV header')).toBe(true)
   })
   test('long texts are clipped; an unreadable conversation is said', () => {
-    const big = crossSwitchPrompt({ lang: 'pt', fromHarness: 'Codex', turns: [{ role: 'user', text: 'x'.repeat(5000) }] })
+    const big = crossSwitchPrompt({ lang: 'pt', fromHarness: 'Codex', fromHarnessId: 'codex', turns: [{ role: 'user', text: 'x'.repeat(5000) }] })
     expect(big.length).toBeLessThan(2000)
     expect(big).toContain('Confirme o estado')
-    const none = crossSwitchPrompt({ lang: 'pt', fromHarness: 'Gemini CLI', turns: { unavailable: 'sem leitor' } })
+    const none = crossSwitchPrompt({ lang: 'pt', fromHarness: 'Gemini CLI', fromHarnessId: 'gemini', turns: { unavailable: 'sem leitor' } })
     expect(none).toContain('não pôde ser lida (sem leitor)')
   })
+  for (const lang of ['en', 'pt'] as const) {
+    test(`${lang}: a person's message quoting a limit is retained`, () => {
+      const text = "You've hit your session limit — investigate this banner"
+      const p = crossSwitchPrompt({ lang, fromHarness: 'Claude Code', fromHarnessId: 'claude', turns: [{ role: 'user', text }] })
+      expect(p).toContain(text)
+      expect(p).toContain(`${lang === 'pt' ? '- Pessoa' : '- Person'}: ${text}`)
+    })
+    for (const fromHarnessId of ['codex', 'gemini'] as const) {
+      test(`${lang}: ${fromHarnessId} without a limit rule preserves assistant text`, () => {
+        const p = crossSwitchPrompt({ lang, fromHarness: fromHarnessId, fromHarnessId, turns })
+        expect(p).toContain(`${lang === 'pt' ? '## Estado (última resposta do assistente)' : '## State (last assistant reply)'}\nTests written; one fails`)
+        expect(p).toContain(`${lang === 'pt' ? '- Assistente' : '- Assistant'}: Added it.`)
+      })
+    }
+    test(`${lang}: limit notices cannot replace real replies or fill the recent window`, () => {
+      const notice = "You've hit your session limit · resets 6:30pm\n/upgrade to increase your usage limit."
+      const p = crossSwitchPrompt({
+        lang, fromHarness: 'Claude Code', fromHarnessId: 'claude',
+        turns: [...turns, ...Array.from({ length: 8 }, () => ({ role: 'assistant' as const, text: notice }))],
+      })
+      expect(p).toContain(`${lang === 'pt' ? '## Estado (última resposta do assistente)' : '## State (last assistant reply)'}\nTests written; one fails`)
+      expect(p).toContain(`${lang === 'pt' ? '- Assistente' : '- Assistant'}: Tests written; one fails`)
+      expect(p).toContain('Add the export button')
+      expect(p).not.toContain(notice)
+      expect(p).not.toContain('/upgrade')
+    })
+    test(`${lang}: all assistant replies are limits: omit state and establish it from the repository`, () => {
+      for (const userTurns of [[], [{ role: 'user' as const, text: 'Finish the export' }]]) {
+        const p = crossSwitchPrompt({
+          lang, fromHarness: 'Claude Code', fromHarnessId: 'claude',
+          turns: [...userTurns, { role: 'assistant', text: "You've hit your session limit", tools: [{ writes: ['src/export.ts'] }] }],
+        })
+        expect(p).not.toContain('## State')
+        expect(p).not.toContain('## Estado')
+        expect(p).not.toContain("You've hit")
+        expect(p).toContain(lang === 'pt' ? 'Estabeleça o estado pelo repositório' : 'Establish the state from the repository')
+        expect(p).toContain('src/export.ts')
+        if (userTurns.length) expect(p).toContain('Finish the export')
+        else expect(p).not.toContain(lang === 'pt' ? '## Últimos turnos' : '## Last turns')
+      }
+    })
+  }
 })
 
 describe('start failure sentences', () => {

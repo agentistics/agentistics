@@ -24,6 +24,7 @@
  */
 import { join, relative, isAbsolute, dirname, basename } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
+import { limitRuleFor } from './limit'
 import {
   decideSpawnAccount, decideRecordedAccount, type SpawnAccountContext, type SpawnAccountRefusal, type SpawnAccountRow,
 } from './spawn-account'
@@ -261,6 +262,7 @@ const clip = (s: string, n: number): string => {
 export function crossSwitchPrompt(o: {
   lang: 'en' | 'pt'
   fromHarness: string
+  fromHarnessId: HarnessId
   fromAccount?: string
   turns: readonly SummaryTurn[] | { unavailable: string }
   pending?: string
@@ -274,7 +276,11 @@ export function crossSwitchPrompt(o: {
     out.push(pt ? `A conversa anterior não pôde ser lida (${o.turns.unavailable}). Estabeleça o estado pelo repositório (git status, git log) antes de agir.`
       : `The previous conversation could not be read (${o.turns.unavailable}). Establish the state from the repository (git status, git log) before acting.`)
   } else {
-    const turns = o.turns.filter(t => !t.composer && t.text.trim())
+    const rule = limitRuleFor(o.fromHarnessId)
+    // A refusal is the reason for switching, not the work's state. Filter before taking the
+    // recent window so repeated refusals cannot crowd out the last real replies.
+    const turns = o.turns.filter(t => !t.composer && t.text.trim()
+      && !(t.role === 'assistant' && rule?.banner.some(re => re.test(t.text))))
     const goal = turns.find(t => t.role === 'user')
     const state = [...turns].reverse().find(t => t.role === 'assistant')
     if (goal) out.push(`${pt ? '## Objetivo (primeira mensagem)' : '## Goal (first message)'}\n${clip(goal.text, SUMMARY_GOAL)}`)
@@ -288,7 +294,7 @@ export function crossSwitchPrompt(o: {
       const shown = files.slice(-SUMMARY_FILES)
       out.push(`${pt ? '## Arquivos tocados' : '## Files touched'}\n${shown.map(f => `- ${f}`).join('\n')}${files.length > shown.length ? `\n- … (+${files.length - shown.length})` : ''}`)
     }
-    if (!turns.length) out.push(pt ? 'A conversa anterior não tinha mensagens legíveis. Estabeleça o estado pelo repositório antes de agir.' : 'The previous conversation had no readable messages. Establish the state from the repository before acting.')
+    if (!state) out.push(pt ? 'Estabeleça o estado pelo repositório antes de agir.' : 'Establish the state from the repository before acting.')
   }
   out.push(o.pending
     ? `${pt ? '## Mensagem pendente — a anterior foi recusada; responda a ela agora' : '## Pending message — it was refused before; answer it now'}\n${o.pending}`
