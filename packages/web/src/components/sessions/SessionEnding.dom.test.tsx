@@ -65,3 +65,14 @@ test('useFleet marks every kill as ending and always clears it when the call set
   const src = await Bun.file(new URL('../../lib/fleet.ts', import.meta.url)).text()
   expect(src).toMatch(/req\.action !== 'kill'\) return actRaw\(req\)\s+markEnding\(req\.id\)\s+try \{ return await actRaw\(req\) \} finally \{ unmarkEnding\(req\.id\) \}/)
 })
+
+test("the aside row says 'Ending…' beside the title while its session is being ended, like the reopening status", async () => {
+  const { SessionLine } = await import('../nav/SessionLine')
+  const session = { id: 'row1', title: 'T', harness: 'claude', cwd: '/x', project: 'x', state: 'waiting', stateLabel: 'needs you', actionable: true, attachCommand: '', verbs: [] } as never
+  act(() => root.render(createElement(SessionLine, { session, selected: false, onOpen: () => {}, lang: 'en' })))
+  expect(host.querySelector('[data-row-ending]')).toBeNull()
+  act(() => ending.markEnding('row1'))
+  expect(host.querySelector('[data-row-ending]')!.textContent).toContain('Ending…')
+  act(() => ending.unmarkEnding('row1'))
+  expect(host.querySelector('[data-row-ending]')).toBeNull()
+})

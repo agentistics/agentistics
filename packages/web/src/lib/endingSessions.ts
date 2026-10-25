@@ -44,3 +44,6 @@ export function useEnding(id: string | undefined): boolean {
   useSyncExternalStore(subscribe, () => version, () => 0)
   return isEnding(id)
 }
+
+/** The in-progress label — one wording for the session view and the aside row. */
+export const endingLabel = (pt: boolean): string => (pt ? 'Encerrando…' : 'Ending…')

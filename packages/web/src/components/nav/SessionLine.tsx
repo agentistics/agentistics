@@ -20,6 +20,7 @@ import { sessionIdentityKey } from '../../lib/sessionIdentity'
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { registerSessionRoleAlias, useSessionRole } from '../../lib/sessionRoles'
 import { reopeningLabel, useReopening } from '../../lib/reopeningStore'
+import { endingLabel, useEnding } from '../../lib/endingSessions'
 import { isLive, isWaitingState } from '../../lib/asideTabs'
 import type { RowVerb } from '../../lib/rowMenu'
 import { AgentisticsLoader } from '../AgentisticsLoader'
@@ -79,6 +80,7 @@ export function SessionLine({
   useEffect(() => { registerSessionRoleAlias(session.id, roleKey) }, [session.id, roleKey])
   const muted = useMutedKeys().includes(roleKey)
   const reopening = useReopening().has(session.id)
+  const ending = useEnding(session.id)
   const goTo = useContext(GoToSessionContext)
   const waiting = isWaitingState(session.state)
   const dot = lineDot(session.state, fell)
@@ -163,6 +165,13 @@ export function SessionLine({
           <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
             <AgentisticsLoader size={12} label={reopeningLabel(pt)} />
             {reopeningLabel(pt)}
+          </span>
+        )}
+        {/* Being ended: the reopening status, in the same place and look (see `endingSessions.ts`). */}
+        {ending && (
+          <span role="status" data-row-ending style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
+            <AgentisticsLoader size={12} label={endingLabel(pt)} />
+            {endingLabel(pt)}
           </span>
         )}
         {time && (

@@ -7,9 +7,9 @@
  */
 import type { ReactNode } from 'react'
 import { AgentisticsLoader } from '../AgentisticsLoader'
-import { useEnding } from '../../lib/endingSessions'
+import { endingLabel, useEnding } from '../../lib/endingSessions'
 
-export function SessionEnding({ lang, label }: { lang: 'pt' | 'en'; label?: string }) {
+export function SessionEnding({ lang, label, title }: { lang: 'pt' | 'en'; label?: string; title?: string }) {
   const pt = lang === 'pt'
   return (
     <div
@@ -20,13 +20,13 @@ export function SessionEnding({ lang, label }: { lang: 'pt' | 'en'; label?: stri
       style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
     >
       <div style={{ width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <AgentisticsLoader size={56} label={pt ? 'Encerrando' : 'Ending'} style={{ alignSelf: 'center' }} />
+        <AgentisticsLoader size={56} label={endingLabel(pt)} style={{ alignSelf: 'center' }} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 15, fontWeight: 650, color: 'var(--text-primary)' }}>
-            {label || (pt ? 'Encerrando…' : 'Ending…')}
+            {label || endingLabel(pt)}
           </span>
           <span style={{ fontSize: 12.5, lineHeight: '18px', minHeight: 18, color: 'var(--text-secondary)' }}>
-            {pt ? 'Isso leva alguns segundos.' : 'This takes a few seconds.'}
+            {title || (pt ? 'Isso leva alguns segundos.' : 'This takes a few seconds.')}
           </span>
         </div>
       </div>
@@ -39,11 +39,11 @@ export function SessionEnding({ lang, label }: { lang: 'pt' | 'en'; label?: stri
  * refused kill restores the conversation, its draft and its scroll exactly as they were; outside
  * the ending window the wrapper is `display: contents` and changes no layout.
  */
-export function SessionEndingGate({ id, lang, label, children }: { id: string; lang: 'pt' | 'en'; label?: string; children: ReactNode }) {
+export function SessionEndingGate({ id, lang, label, title, children }: { id: string; lang: 'pt' | 'en'; label?: string; title?: string; children: ReactNode }) {
   const ending = useEnding(id)
   return (
     <>
-      {ending && <SessionEnding lang={lang} {...(label ? { label } : {})} />}
+      {ending && <SessionEnding lang={lang} {...(label ? { label } : {})} {...(title ? { title } : {})} />}
       <div style={{ display: ending ? 'none' : 'contents' }} {...(ending ? { inert: true } : {})}>{children}</div>
     </>
   )
