@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import type { Root } from 'react-dom/client'
 import { barFollow, barSlots } from '../../lib/bottomNavDrag'
 
-const SLOTS = barSlots(356, 48, 2, 2, 4, 10)
+const SLOTS = barSlots(356, 40, 2, 2, 4, 18)
 const INDICATOR_AT = (i: number) => SLOTS[i]!.left + 4
 
 let createRoot: typeof import('react-dom/client').createRoot
@@ -108,7 +108,15 @@ test('the bar is three pieces: left pill, standalone round Início, right pill',
   // Left pill holds Agentask + Uso, right pill Métricas + Mais.
   expect(pills[0]!.parentElement!.querySelectorAll('button').length).toBe(2)
   expect(pills[1]!.parentElement!.querySelectorAll('button').length).toBe(2)
-  expect(pills[0]!.getAttribute('style')).toContain('mask-image')
+  // Each outline is an opaque filled PATH whose own stroke is the border, with a concave arc end.
+  for (const pill of Array.from(pills)) {
+    const path = pill.querySelector('path')!
+    expect(path.getAttribute('d')).toContain(' A ')
+    expect(path.getAttribute('fill')).toBe('var(--bg-card)')
+    expect(path.getAttribute('stroke')).toBe('var(--border)')
+  }
+  expect(view.nav.innerHTML).not.toContain('mask')
+  expect(view.buttons[2]!.querySelector('svg.lucide-house')).not.toBeNull()
 })
 
 test('the active slot gets a large indicator; Início active puts the fill on the circle instead', async () => {
@@ -116,7 +124,7 @@ test('the active slot gets a large indicator; Início active puts the fill on th
   expect(view.buttons[1]!.getAttribute('aria-current')).toBe('page')
   expect(view.indicator()).not.toBeNull()
   expect(view.indicator().style.width).toBe(`${SLOTS[1]!.width - 8}px`)
-  expect(Number.parseFloat(view.indicator().style.width)).toBeGreaterThan(60)
+  expect(Number.parseFloat(view.indicator().style.width)).toBeGreaterThanOrEqual(60)
   view = await render('/sessions')
   expect(view.indicator()).toBeNull()
   expect(view.buttons[2]!.getAttribute('aria-current')).toBe('page')

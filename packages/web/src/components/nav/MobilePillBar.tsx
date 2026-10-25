@@ -33,24 +33,19 @@ export interface PillItem {
 const INSET = 4
 /** The round button, and the even gap kept between it and the pills' concave ends. */
 const CIRCLE = 58
-const GAP = 7
 /** Width of the spacer the circle sits in; the circle is wider, so it bites into each pill. */
-const SPACER = 48
+const SPACER = 40
 /** Padding inside a pill: small at the outer end, wider where the concave bite is. */
 const PAD_OUT = 4
-const PAD_IN = 10
+const PAD_IN = 18
 const ORANGE = 'var(--anthropic-orange)'
 const SPRING = 'cubic-bezier(0.34, 1.36, 0.64, 1)'
 const SURFACE = 'var(--bg-card)'
-const SHADOW = '0 8px 24px rgba(0, 0, 0, 0.32)'
 const CIRCLE_SHADOW = '0 2px 8px rgba(0, 0, 0, 0.25)'
 
 function prefersReducedMotion(): boolean {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false }
 }
-
-const bite = (centre: string) =>
-  `radial-gradient(circle at ${centre} 50%, transparent ${CIRCLE / 2 + GAP}px, #000 ${CIRCLE / 2 + GAP + 0.5}px)`
 
 export function MobilePillBar({ items, activeIndex, centerIndex, ariaLabel }: {
   /** Left pill items, then the centre button, then the right pill items. */
@@ -63,6 +58,7 @@ export function MobilePillBar({ items, activeIndex, centerIndex, ariaLabel }: {
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
+  const [height, setHeight] = useState(64)
   /** The finger's x in the track's own coordinates while dragging; null at rest. */
   const [dragX, setDragX] = useState<number | null>(null)
   const press = useRef<{ id: number; x0: number; y0: number; dragging: boolean } | null>(null)
@@ -81,7 +77,7 @@ export function MobilePillBar({ items, activeIndex, centerIndex, ariaLabel }: {
   useLayoutEffect(() => {
     const el = trackRef.current
     if (!el) return
-    const measure = () => setWidth(el.getBoundingClientRect().width)
+    const measure = () => { const r = el.getBoundingClientRect(); setWidth(r.width); if (r.height > 0) setHeight(r.height) }
     measure()
     if (typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(measure)
@@ -207,15 +203,24 @@ export function MobilePillBar({ items, activeIndex, centerIndex, ariaLabel }: {
     )
   }
 
+  /**
+   * One pill's outline as a PATH, so the border is the path's own stroke and follows the curve: a
+   * rounded outer end, and an inner end that is an arc of the circle centred on the round button,
+   * running corner to corner so the gap around the circle is even.
+   */
   const pillLayer = (side: 'left' | 'right') => {
-    const mask = bite(side === 'left' ? `calc(100% + ${SPACER / 2 - 6}px)` : `${-(SPACER / 2 - 6)}px`)
+    const W = Math.max(0, (width - SPACER) / 2)
+    const H = height
+    const r = H / 2
+    const R = Math.hypot(SPACER / 2, H / 2)
+    const d = side === 'left'
+      ? `M ${r} 0 H ${W} A ${R} ${R} 0 0 0 ${W} ${H} H ${r} A ${r} ${r} 0 0 1 ${r} 0 Z`
+      : `M 0 0 H ${W - r} A ${r} ${r} 0 0 1 ${W - r} ${H} H 0 A ${R} ${R} 0 0 0 0 0 Z`
     return (
-      <span aria-hidden data-bar-pill={side} style={{
-        position: 'absolute', inset: 0, pointerEvents: 'none',
-        background: SURFACE, border: '1px solid var(--border)', boxSizing: 'border-box',
-        borderRadius: side === 'left' ? '999px 0 0 999px' : '0 999px 999px 0',
-        boxShadow: SHADOW, WebkitMaskImage: mask, maskImage: mask,
-      }} />
+      <svg aria-hidden data-bar-pill={side} width={W} height={H} viewBox={`0 0 ${W} ${H}`}
+        style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', pointerEvents: 'none', filter: 'drop-shadow(0 6px 10px rgba(0, 0, 0, 0.22))' }}>
+        <path d={d} fill={SURFACE} stroke="var(--border)" strokeWidth={1} strokeLinejoin="round" />
+      </svg>
     )
   }
   const group = (side: 'left' | 'right', from: number, to: number) => (

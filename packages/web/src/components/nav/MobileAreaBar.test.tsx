@@ -20,7 +20,7 @@ describe('MobileAreaBar', () => {
       const labels = lang === 'pt' ? ['Agentask', 'Uso', 'Sessões', 'Métricas', 'Mais'] : ['Agentask', 'Usage', 'Sessions', 'Metrics', 'More']
       let at = -1
       for (const label of labels) {
-        const found = label === labels[2] ? html.indexOf(`aria-label="${label}`, at + 1) : html.indexOf(`>${label}</span>`, at + 1)
+        const found = label === labels[2] ? html.indexOf(`aria-label="${lang === 'pt' ? 'Início' : 'Home'}`, at + 1) : html.indexOf(`>${label}</span>`, at + 1)
         at = found; expect(at).toBeGreaterThan(-1)
       }
       // Four slot buttons share the two pills; the fifth is the standalone round centre.
@@ -49,12 +49,13 @@ describe('MobileAreaBar', () => {
         expect(html.match(/<button\b/g) ?? []).toHaveLength(5)
       }
     }
-    expect(render('/usage')).toContain('lucide-terminal')
+    expect(render('/usage')).toContain('lucide-house')
+    expect(render('/usage')).not.toContain('lucide-terminal')
   })
 
   test('the central destination reports attention only when measured and positive', () => {
     const html = render('/usage', 4)
-    expect(html).toContain('aria-label="Sessões, 4 precisam de você"')
+    expect(html).toContain('aria-label="Início, 4 precisam de você"')
     expect(html).toContain('background:var(--anthropic-orange);color:#0a0a0f')
     expect(html).toMatch(/>4<\/span>/)
     for (const count of [undefined, 0]) {

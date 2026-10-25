@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Ellipsis, Gauge, House, KeyRound, LogOut, ShieldCheck, Terminal, type LucideIcon } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Ellipsis, Gauge, House, KeyRound, LogOut, ShieldCheck, type LucideIcon } from 'lucide-react'
 import type { IamAccount } from '../../App'
 import { areaOfPath, type AreaId } from '../../lib/appAreas'
 import { activateMobileSessions, mobileAreaSlot, scrollMobileSessionsToTop } from '../../lib/mobileAreaTabs'
@@ -72,8 +72,7 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
   useEffect(() => { closeSheet() }, [pathname, closeSheet])
   const go = (to: string) => { closeSheet(); onNavigate(to) }
   const current = areaOfPath(pathname)
-  const onSessions = current?.area.id === 'sessions'
-  const sessions = onSessions ? (pt ? 'Início' : 'Home') : (pt ? 'Sessões' : 'Sessions')
+  const sessions = pt ? 'Início' : 'Home'
   const sessionBadge = badges?.sessions ?? attention
   const orange = 'var(--anthropic-orange)'
   const roleLabel = principal
@@ -97,7 +96,7 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
           { key: 'tasks', label: 'Agentask', icon: ClipboardList, onActivate: () => go('/tasks'), badge: badges?.tasks },
           { key: 'usage', label: pt ? 'Uso' : 'Usage', icon: Gauge, onActivate: () => go('/usage'), badge: badges?.usage },
           { key: 'sessions', label: sessions, ariaLabel: sessionBadge && sessionBadge > 0 ? `${sessions}, ${sessionBadge} ${pt ? 'precisam de você' : 'need you'}` : sessions,
-            icon: onSessions ? House : Terminal, onActivate: () => { closeSheet(); activateMobileSessions(pathname, onNavigate, scrollMobileSessionsToTop) }, badge: sessionBadge },
+            icon: House, onActivate: () => { closeSheet(); activateMobileSessions(pathname, onNavigate, scrollMobileSessionsToTop) }, badge: sessionBadge },
           { key: 'metrics', label: pt ? 'Métricas' : 'Metrics', icon: BarChart3, onActivate: () => go('/'), badge: badges?.metrics },
           { key: 'more', label: pt ? 'Mais' : 'More', icon: Ellipsis, onActivate: () => setOpen(v => !v), expanded: open, hasPopup: 'dialog' },
         ]}
