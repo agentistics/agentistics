@@ -70,8 +70,11 @@ test("the aside row says 'Ending…' beside the title while its session is being
   expect(host.querySelector('[data-row-ending]')).toBeNull()
   act(() => ending.markEnding('row1'))
   expect(host.querySelector('[data-row-ending]')!.textContent).toContain('Ending…')
+  // The title keeps one line (truncated) while the label takes the trailing room.
+  expect((host.querySelector('[data-line-title]') as HTMLElement).style.whiteSpace).toBe('nowrap')
   act(() => ending.unmarkEnding('row1'))
   expect(host.querySelector('[data-row-ending]')).toBeNull()
+  expect((host.querySelector('[data-line-title]') as HTMLElement).style.whiteSpace).toBe('normal')
 })
 
 for (const lang of ['pt', 'en'] as const) {

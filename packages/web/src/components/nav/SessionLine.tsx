@@ -140,8 +140,13 @@ export function SessionLine({
         {/* Title and the folded team's summary share one wrapping box: the summary drops under the
             name when the line is short, instead of crushing the name to a letter per line. */}
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 1 }}>
-          <span style={{
-            flex: '0 1 auto', minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: 1.35,
+          {/* While a status label (reopening / ending) takes the trailing room, the title keeps one
+              line and truncates instead of breaking into a word per line. */}
+          <span data-line-title style={{
+            flex: '0 1 auto', minWidth: 0, lineHeight: 1.35,
+            ...(ending || reopening
+              ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+              : { whiteSpace: 'normal', overflowWrap: 'anywhere' }),
             fontSize: 13, fontWeight: lead || waiting ? 600 : 500,
             color: fell ? STATE_COLOR.lost : undefined,
           }}>
