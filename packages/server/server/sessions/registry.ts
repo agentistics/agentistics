@@ -102,6 +102,8 @@ const warnedRefusals = new RefusalLog()
 export interface SessionPatch {
   spawnConfiguration?: import('./spawn-configuration').SpawnConfiguration
   leader?: boolean
+  /** Last confirmed handoff prompt delivery (manual or automatic). */
+  handoffRequestedAt?: string
   handoffHintLevel?: number
   handoffHintTokens?: number
   handoffTo?: string
@@ -214,6 +216,7 @@ function sanitize(raw: unknown): ManagedSession | null {
       ? { handoffHintLevel: s.handoffHintLevel } : {}),
     ...(typeof s.handoffHintTokens === 'number' && Number.isFinite(s.handoffHintTokens) && s.handoffHintTokens >= 0
       ? { handoffHintTokens: s.handoffHintTokens } : {}),
+    ...(typeof s.handoffRequestedAt === 'string' && Number.isFinite(Date.parse(s.handoffRequestedAt)) ? { handoffRequestedAt: s.handoffRequestedAt } : {}),
     ...(typeof s.handoffTo === 'string' && s.handoffTo ? { handoffTo: s.handoffTo } : {}),
     ...(typeof s.handoffFrom === 'string' && s.handoffFrom ? { handoffFrom: s.handoffFrom } : {}),
     ...(typeof s.handoffSeq === 'number' && Number.isInteger(s.handoffSeq) && s.handoffSeq >= 2 ? { handoffSeq: s.handoffSeq } : {}),

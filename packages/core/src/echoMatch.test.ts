@@ -114,3 +114,19 @@ test('a SHORT coincidental match never retires the messages before it', () => {
     ['ok'],
   )).toEqual(['uma mensagem de verdade que ainda espera'])
 })
+
+
+test('local command completion cannot retire an earlier unread model prompt', () => {
+  const prompts = ['Please review the queued changes', '/rename A sufficiently long name']
+  expect(pendingEchoes(prompts, [prompts[1]!])).toEqual([prompts[0]!])
+})
+
+test('a model prompt echo cannot retire a still-running local command', () => {
+  const prompts = ['/rename A sufficiently long name', 'Please review the queued changes']
+  expect(pendingEchoes(prompts, [prompts[1]!])).toEqual([prompts[0]!])
+})
+
+test('unknown slash skills still require their own echo; paths remain ordinary prompts', () => {
+  expect(pendingEchoes(['/plugin:review changes', 'A later prompt with enough text'], ['A later prompt with enough text'])).toEqual(['/plugin:review changes'])
+  expect(pendingEchoes(['short', '/home/user/project/file.md'], ['/home/user/project/file.md'])).toEqual([])
+})

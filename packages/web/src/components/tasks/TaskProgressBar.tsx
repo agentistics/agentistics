@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import { useState, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { taskProgress, type TaskStatusDef } from '@agentistics/core'
 import { liveStatusOrder, microLabel, statusStyle } from './board'
@@ -31,6 +31,18 @@ export function ProgressTooltip({ model, x, y }: { model: ProgressTooltipModel; 
   )
 }
 
+/** Shared progress track used by task counts and the handoff lifecycle. */
+export function ProgressBar({ percent, label, height = 4, color = 'var(--anthropic-orange)', children, onMouseEnter, onMouseLeave }: {
+  percent: number; label: string; height?: number; color?: string; children?: ReactNode
+  onMouseEnter?: (event: MouseEvent<HTMLDivElement>) => void; onMouseLeave?: () => void
+}) {
+  return <div role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.floor(percent)}
+    onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
+    style={{ flex: 1, minWidth: 24, height, borderRadius: height / 2, background: 'var(--bg-elevated)', overflow: 'hidden', position: 'relative' }}>
+    {children ?? <i style={{ position: 'absolute', left: 0, top: 0, width: `${percent}%`, height: '100%', background: color }} />}
+  </div>
+}
+
 export function TaskProgressBar({ done, total, inProgress = 0, blocked = 0, statusCounts, statuses = null, showPercent = true, height = 4, label, subtaskTitles = [], lang = 'en' }: {
   done: number; total: number; showPercent?: boolean; height?: number; inProgress?: number; blocked?: number
   statusCounts?: Readonly<Record<string, number>>; statuses?: readonly TaskStatusDef[] | null; label?: string
@@ -47,7 +59,7 @@ export function TaskProgressBar({ done, total, inProgress = 0, blocked = 0, stat
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
       {label && <span style={{ ...microLabel, fontSize: 9, flexShrink: 0 }}>{label}</span>}
-      <div onMouseEnter={showTooltip} onMouseLeave={() => setTooltip(null)} style={{ flex: 1, minWidth: 24, height, borderRadius: height / 2, background: 'var(--bg-elevated)', overflow: 'hidden', position: 'relative' }} aria-label={`${p.percent}% · ${p.done} de ${p.total}`}>
+      <ProgressBar percent={p.percent} label={`${p.percent}% · ${p.done} de ${p.total}`} height={height} onMouseEnter={showTooltip} onMouseLeave={() => setTooltip(null)}>
         {ids.map(id => {
           const count = p.counts[id] ?? 0
           if (count <= 0) return null
@@ -56,7 +68,7 @@ export function TaskProgressBar({ done, total, inProgress = 0, blocked = 0, stat
           left += width
           return node
         })}
-      </div>
+      </ProgressBar>
       {showPercent && <span style={{ ...microLabel, fontSize: 10, flexShrink: 0, fontVariantNumeric: 'tabular-nums', color: p.complete ? statusStyle(statuses, 'done').color : 'var(--text-tertiary)' }}>{p.percent}% · {p.done}/{p.total}</span>}
       {tooltip && typeof document !== 'undefined' && <ProgressTooltip model={model} x={tooltip.x} y={tooltip.y} />}
     </div>

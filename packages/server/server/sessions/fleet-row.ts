@@ -169,6 +169,8 @@ export interface FleetActionRequest {
    * deliberately different; see `selectFell`.
    */
   ids?: string[]
+  /** This prompt requests a leader handoff; record only confirmed delivery. */
+  handoff?: boolean
   /**
    * EXT.OPEN: the person said YES to ending an external process so its conversation continues here.
    * Without it a `prompt` to an external row answers `confirm` and changes nothing.

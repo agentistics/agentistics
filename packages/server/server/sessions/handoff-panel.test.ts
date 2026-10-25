@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { computeHandoffPanel, createHandoffQuotaSampler, handoffMetrics, quotaRate, type QuotaObservation } from './handoff-panel'
+import { handoffProgress, computeHandoffPanel, createHandoffQuotaSampler, handoffMetrics, quotaRate, type QuotaObservation } from './handoff-panel'
 import { toConversation } from './conversations'
 import type { HarnessId, SessionMeta } from '@agentistics/core'
 import { parseGeminiChat } from '../adapters/gemini-parse'
@@ -158,5 +158,51 @@ describe('quota calibration lifecycle', () => {
     expect(sampler.observe('claude:a', sample(40 * 60_000, 20, 40, 40))).toEqual({ fiveHourPctPerUSD: null, weekPctPerUSD: null })
     sampler.forget('claude:a')
     expect(sampler.observe('claude:a', sample(41 * 60_000, 21, 42, 41)).fiveHourPctPerUSD).toBeNull()
+  })
+})
+
+
+describe('handoff lifecycle progress', () => {
+  const now = Date.parse('2026-10-25T03:00:00Z')
+  const requestedAt = new Date(now - 60_000).toISOString()
+  const deadlineAt = new Date(now + 60_000).toISOString()
+  const retire = { requestedAt, deadlineAt, by: 'next', successorId: 'next', quietForMs: 5_000 }
+  const successor = { id: 'next' }
+  it('starts only after a recorded delivery and expires preparation after 30 minutes', () => {
+    expect(handoffProgress({ session: {} }, now)).toBeUndefined()
+    expect(handoffProgress({ session: { handoffRequestedAt: requestedAt } }, now)).toMatchObject({ stage: 'preparing', progress: .1 })
+    expect(handoffProgress({ session: { handoffRequestedAt: requestedAt } }, now + 30 * 60_000)).toBeUndefined()
+    expect(handoffProgress({ session: { handoffRequestedAt: 'invalid' } }, now)).toBeUndefined()
+  })
+  it('distinguishes the successor opening, taking over and closing the predecessor', () => {
+    const session = { handoffRequestedAt: requestedAt, handoffTo: 'next' }
+    expect(handoffProgress({ session, successor }, now)).toMatchObject({ stage: 'successor-open', successorId: 'next', progress: .35 })
+    expect(handoffProgress({ session: { ...session, retire }, successor }, now)).toMatchObject({ stage: 'taken-over', successorId: 'next', requestedAt, deadlineAt, progress: .7 })
+    expect(handoffProgress({ session: { ...session, retire, handoffRelayClosing: requestedAt }, successor }, now)).toMatchObject({ stage: 'closing', progress: .95 })
+  })
+  it('advances elapsed takeover progress without claiming retirement is complete', () => {
+    const start = handoffProgress({ session: { retire }, successor }, Date.parse(requestedAt))!
+    const later = handoffProgress({ session: { retire }, successor }, now)!
+    expect(later.progress).toBeGreaterThan(start.progress)
+    expect(later.progress).toBeLessThan(1)
+    expect(later.stage).toBe('taken-over')
+  })
+  it('falls back when retirement expires or the successor stops/disappears', () => {
+    for (const lifecycle of [
+      { session: { retire: { ...retire, expiredAt: requestedAt } }, successor },
+      { session: { retire: { ...retire, deadlineAt: new Date(now).toISOString() } }, successor },
+      { session: { retire }, successor: { ...successor, endedAt: requestedAt } },
+      { session: { retire }, successor, successorGone: true },
+      { session: { handoffTo: 'next', handoffRequestedAt: requestedAt } },
+      { session: { retire }, successor: undefined },
+    ]) expect(handoffProgress(lifecycle, now)).toBeUndefined()
+  })
+  it('keeps a live predecessor in closing after the pre-kill end decision is recorded', () => {
+    expect(handoffProgress({ session: { retire, endedAt: requestedAt }, successor }, now)).toMatchObject({ stage: 'closing', progress: .95 })
+  })
+  it('includes lifecycle state in the panel response', () => {
+    const panel = computeHandoffPanel(leader, null, undefined, now, { session: { retire }, successor })
+    expect(panel.handoff?.stage).toBe('taken-over')
+    expect(computeHandoffPanel(leader, null, undefined, now, { session: { retire: { ...retire, expiredAt: requestedAt } }, successor }).handoff).toBeUndefined()
   })
 })

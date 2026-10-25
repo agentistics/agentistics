@@ -4,6 +4,7 @@
  * body IS Nay's Limits tab (`NayLimitsTab`), so no meter or number is derived a second time.
  * Shell as `HardwareModal`: backdrop and `esc` close, focus is trapped and returned, edge-to-edge on a phone.
  */
+import { PlanUsageSessionSwitch, type PlanUsageSession } from './PlanUsageSessionSwitch'
 import { useEffect, useRef } from 'react'
 import { Gauge, X } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -11,15 +12,18 @@ import { OVERLAY_TOP } from '../lib/mobileOverlay'
 import { NayLimitsTab } from './nay/NayLimitsTab'
 import { useEscapeOwner } from '../lib/overlayStack'
 
-export function PlanUsageModal({ lang, onClose }: { lang: 'pt' | 'en'; onClose: () => void }) {
+export function PlanUsageModal({ lang, onClose, openSession, switchDialogOpen = false }: { lang: 'pt' | 'en'; onClose: () => void; openSession?: PlanUsageSession; switchDialogOpen?: boolean }) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const box = useRef<HTMLDivElement>(null)
+  // The existing account dialog owns focus while it sits above this modal.
+  const switchActive = useRef(switchDialogOpen)
+  switchActive.current = switchDialogOpen
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null
     box.current?.querySelector<HTMLElement>('button')?.focus()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab' || !box.current) return
+      if (switchActive.current || e.key !== 'Tab' || !box.current) return
       const f = Array.from(box.current.querySelectorAll<HTMLElement>('button,a[href],[tabindex]:not([tabindex="-1"])'))
       if (f.length === 0) return
       const first = f[0]!, last = f[f.length - 1]!
@@ -43,6 +47,7 @@ export function PlanUsageModal({ lang, onClose }: { lang: 'pt' | 'en'; onClose: 
           <button type="button" className="ag-tap-icon" onClick={onClose} aria-label={pt ? 'Fechar' : 'Close'}
             style={{ border: 0, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', minWidth: isMobile ? 30 : 32, height: isMobile ? 30 : 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} /></button>
         </div>
+        <PlanUsageSessionSwitch session={openSession} lang={lang} />
         <NayLimitsTab lang={lang} isMobile={isMobile} onNavigate={onClose} />
       </div>
     </div>

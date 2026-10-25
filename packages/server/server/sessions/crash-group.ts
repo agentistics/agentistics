@@ -38,12 +38,12 @@
  * absent: a registry written by an older build, or a row this process never once saw alive, is not
  * in the group. It will join the next one, because the heartbeat stamps it as soon as it is seen.
  *
- * ## What is deliberately NOT a rule
+ * ## Boundaries of the recovery offer
  *
  *  - **No minimum size.** One session open when the laptop died is one session that fell, and the
  *    heading states the count and the time, so a group of one claims nothing a group of six does not.
- *  - **No maximum age.** A fall from three days ago that was never picked up is still the sessions
- *    that fell. The UI says WHEN, so "three days ago" is never mistaken for "just now".
+ *  - **Recent falls only.** After 24 hours the rows remain individually reopenable in Ended,
+ *    but stop being announced as a recovery group.
  *  - **No requirement that the conversation be resolvable.** That is `planTaskReopen`'s business, and
  *    it already reports an unresolvable row as skipped AND counted. Filtering here instead would make
  *    the group quietly smaller than the fall it describes.
@@ -70,6 +70,9 @@ export const HEARTBEAT_MS = 60_000
  */
 export const CRASH_WINDOW_MS = 2 * HEARTBEAT_MS
 
+/** How long a fall is news; older rows remain available individually in Ended. */
+export const CRASH_MAX_AGE_MS = 24 * 60 * 60_000
+
 export interface CrashGroup {
   /** When the fall happened, as the newest evidence of life among its members. */
   atMs: number
@@ -87,9 +90,12 @@ export function planCrashGroup(o: {
    * record of at all is one the machine took, which is the event this describes.
    */
   backendIds: ReadonlySet<string>
+  /** Clock supplied by tests; production reads the current time on each selection. */
+  now?: number
   windowMs?: number
 }): CrashGroup | null {
   const window = o.windowMs ?? CRASH_WINDOW_MS
+  const now = o.now ?? Date.now()
 
   const candidates = o.entries.filter(e => {
     // A kill OR an observed harness exit is a recorded end. It is never a fall.
@@ -99,6 +105,7 @@ export function planCrashGroup(o: {
     // No evidence it was ever alive under a build that records evidence. Excluded rather than
     // guessed at from `createdAt`, which says nothing about whether it was still open.
     return typeof e.lastSeenMs === 'number' && Number.isFinite(e.lastSeenMs)
+      && e.lastSeenMs <= now && now - e.lastSeenMs <= CRASH_MAX_AGE_MS
   })
   if (candidates.length === 0) return null
 

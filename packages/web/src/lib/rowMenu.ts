@@ -62,9 +62,11 @@ export function rowMenuEntries(
   state: string,
   /** Client-side entries appended after the verbs — see the note above. */
   extra: readonly MenuEntry[] = [],
+  /** Recorded end / last heartbeat of a backend-confirmed loss; absent on unread live panes. */
+  endedAt?: number,
 ): MenuEntry[] {
   const find = (a: string) => verbs.find(v => v.action === a)
-  const stop = ENDED.has(state) ? undefined : MID_TURN.has(state) ? find('interrupt') : find('kill')
+  const stop = ENDED.has(state) || (state === 'lost' && endedAt !== undefined) ? undefined : MID_TURN.has(state) ? find('interrupt') : find('kill')
   // `archive` exists only on a NATIVE row (the server offers it nowhere else). `delete` is deliberately
   // NOT here: it permanently deletes a conversation — it lives in the
   // session's own menu (`SessionActions`), which asks first.

@@ -655,7 +655,7 @@ export function SessionsAside({
       window.removeEventListener('dragend', done, true)
     }
   }, [])
-  const [menu, setMenu] = useState<{ x: number; y: number; id: string; state: string; verbs: RowVerb[] } | null>(null)
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string; state: string; endedAt?: number; verbs: RowVerb[] } | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null)
   /** The task picker, anchored where the menu was — see `pickMenuAction`. */
   const [linking, setLinking] = useState<{ id: string; x: number; y: number } | null>(null)
@@ -683,7 +683,7 @@ export function SessionsAside({
   }
 
   const openMenu = (session: ControlSession, x: number, y: number, verbs: RowVerb[]) => {
-    setMenu({ x, y, id: session.id, state: session.state, verbs })
+    setMenu({ x, y, id: session.id, state: session.state, endedAt: session.endedAt, verbs })
   }
 
   const reopenRow = async (id: string) => {
@@ -2090,6 +2090,7 @@ export function SessionsAside({
               })(),
               ...notifyExtras(rows.find(r => r.id === menu.id), mutedKeys, pt),
             ],
+            menu.endedAt,
           ), pt, !isMobile)}
           onPick={pickMenuAction}
           onClose={() => setMenu(null)}
