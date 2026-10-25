@@ -45,6 +45,8 @@ export interface MessageDeps {
   comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind } }) => Promise<{ ok: boolean }>
   /** `handback` from a session filed on a subtask: move that subtask in_progress → in_review. */
   handbackSubtask?: (subtaskId: string) => Promise<void>
+  /** Includes retired rows, so prefixes are resolved before following successors. */
+  registryRows?: () => Promise<readonly FleetRowForGroups[]>
   /** A reference naming a row that was replaced (reopen, account switch, hand-off) → its live successor's id. */
   redirect?: (to: string) => Promise<string>
   now: () => number
@@ -93,7 +95,11 @@ export async function sendSessionMessage(
   const kind = req.kind
 
   const rows = await deps.rows().catch(() => [] as FleetRowForGroups[])
-  const routed = deps.redirect ? await deps.redirect(to).catch(() => to) : to
+  const registry = deps.registryRows ? await deps.registryRows() : rows
+  const original = resolveSessionForGroup(registry, to)
+  if (!original.ok && original.code === 'ambiguous_session') return fail(original.code, undefined, original.matches)
+  const resolved = original.ok ? original.session.id : to
+  const routed = deps.redirect ? await deps.redirect(resolved).catch(() => resolved) : resolved
   const r = resolveSessionForGroup(rows, routed)
   if (!r.ok) return fail(r.code, undefined, r.matches)
   const target = r.session
@@ -172,6 +178,7 @@ export async function defaultMessageDeps(): Promise<MessageDeps> {
       const next = sub ? statusAfterHandback(sub.status) : null
       if (next) await tw.patchSubtask(subtaskId, { status: next })
     },
+    registryRows: async () => (await (await import('./registry')).readRegistry()).map(m => ({ ...m, title: m.label ?? m.harnessName ?? m.id })),
     redirect: async to => {
       const [{ readRegistry }, { liveSuccessorOf }] = await Promise.all([import('./registry'), import('./team-links')])
       return liveSuccessorOf(await readRegistry(), to)

@@ -874,3 +874,14 @@ The optional `HandoffPanel.handoff` block carries the stage, successor, request/
 and progress fraction. `ManagedSession.handoffRequestedAt` records confirmed prompt delivery for both
 manual requests (`prompt` with `handoff: true`) and automatic hints. Failed deliveries do not start
 progress. Existing successor links and retire requests also supply progress for older sessions.
+
+A fresh verified worker spawn resolves an automatic parent to leader, including explicit CLI
+`--role worker` requests and roles inferred by the host filing planner. Stored parent roles win;
+resume and handoff launches do not trigger promotion. Promotion renames the parent and removes
+its own parent link so it appears at the root of its team.
+
+Session messages first resolve managed/conversation IDs, titles and unique prefixes against the
+registry, including retired rows, and refuse ambiguous references. Delivery then follows a bounded
+chain of conversation replacements and handoffs, including replacements that already retired after
+handing off. Web handoffs that cannot reuse the predecessor account return a localized `note`
+with the refusal reason and the automatic fallback, alongside any admission override notice.

@@ -88,19 +88,32 @@ export function currentLeaderId(rows: readonly TeamRow[], id: string): string {
  * new managed id for the same conversation and retires the old row, so a worker that recorded its
  * leader's id at spawn kept addressing a row that no longer runs (measured 25/10: a worker sat waiting
  * on a parent that had switched accounts). An ENDED (or handed-off) row is followed through its hand-off chain
- * (`currentLeaderId`) and then to the LIVE row carrying the same conversation; a row that is still
- * running, or one with no live continuation, is its own answer — never a guess by directory or name.
+ * and conversation replacement links in ONE bounded, cycle-safe chain. A replacement may itself
+ * have handed off, even if it is now retired. Never guess by directory or name.
  */
 export function liveSuccessorOf(rows: readonly TeamRow[], id: string): string {
-  const row = rows.find(r => r.id === id || (!!r.conversationId && r.conversationId === id))
-  // A leader that HANDED OFF is on its way out (its retirement waits for its turn to end): its team
-  // already moved to the successor, so its workers' reports go there too.
-  if (!row || (!row.endedAt && !row.handoffTo)) return id
-  const led = currentLeaderId(rows, row.id)
-  const cur = rows.find(r => r.id === led) ?? row
-  if (!cur.endedAt) return cur.id
-  const live = cur.conversationId ? rows.find(r => r.id !== cur.id && !r.endedAt && r.conversationId === cur.conversationId) : undefined
-  return live ? live.id : id
+  const first = rows.find(r => r.id === id) ?? rows.find(r => r.conversationId === id)
+  if (!first) return id
+  let cur: TeamRow = first
+  const seen = new Set<string>()
+  for (let i = 0; i < 16; i++) {
+    const current: TeamRow = cur
+    seen.add(current.id)
+    if (current.handoffTo) {
+      const next: TeamRow | undefined = rows.find(r => r.id === current.handoffTo)
+      if (!next || seen.has(next.id)) return cur.id
+      cur = next
+      continue
+    }
+    if (!cur.endedAt || !cur.conversationId) return cur.id
+    const replacements = rows.slice(rows.indexOf(current) + 1).filter(r => r.conversationId === current.conversationId && !seen.has(r.id))
+    // The registry appends replacement rows. Prefer the newest live owner; an ended replacement
+    // with a hand-off still records a continuation we must traverse.
+    const next = replacements.findLast(r => !r.endedAt) ?? replacements.findLast(r => !!r.handoffTo)
+    if (!next) return cur.id
+    cur = next
+  }
+  return cur.id
 }
 
 /** The rows whose team link names the replaced row `oldId` by managed id: they follow its replacement. */

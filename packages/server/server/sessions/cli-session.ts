@@ -632,7 +632,7 @@ export async function start(
 
   if (role) await applyRoleTitle(id, label ?? id, role, lang).catch(() => false)
   // AUTO → LEADER: a session with no role that starts a worker has declared itself a leader by doing it.
-  const promotedParent = role === 'worker' && !wantedRole && !cmd.handoff
+  const promotedParent = role === 'worker' && !cmd.handoff
     ? (await promoteSpawningParentNow(parentSessionId, parentVerified, lang === 'pt' ? 'pt' : 'en').catch(() => ({ promoted: false }))).promoted
     : false
   if (promotedParent) console.error(PROMOTED_PARENT_LINE)

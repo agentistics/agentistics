@@ -2317,7 +2317,7 @@ export async function spawnManaged(req: {
   }
   if (storedContextRole.role) await markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)
   // AUTO → LEADER: a session with no role that starts a worker has declared itself a leader by doing it.
-  const promotedParent = role === 'worker' && !req.role && !req.handoff && !req.resumeId && !req.inherit
+  const promotedParent = role === 'worker' && !req.handoff && !req.resumeId && !req.inherit
     ? (await promoteSpawningParentNow(req.parentSessionId, req.parentVerified === true, lang === 'pt' ? 'pt' : 'en').catch(() => ({ promoted: false }))).promoted
     : false
   if (handoffParentRow) {

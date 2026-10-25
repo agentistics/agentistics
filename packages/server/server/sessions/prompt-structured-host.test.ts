@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
 import { createControlHost } from '../cli-start'
 import { __setSessionBackendForTest } from './index'
+import { __setHarnessAgentsReaderForTest } from './harness-agents-io'
 import { addSession, removeSession } from './registry'
 import { messageStatus, resetMessageRateLimit, sendSessionMessage } from './session-message'
 import type { SessionBackend } from './types'
@@ -8,10 +9,12 @@ import type { SessionBackend } from './types'
 const filed: string[] = []
 let savedUpdateCheck: string | undefined
 beforeAll(() => {
+  __setHarnessAgentsReaderForTest(async () => [])
   savedUpdateCheck = process.env.AGENTISTICS_NO_UPDATE_CHECK
   process.env.AGENTISTICS_NO_UPDATE_CHECK = '1'
 })
 afterAll(() => {
+  __setHarnessAgentsReaderForTest(null)
   if (savedUpdateCheck === undefined) delete process.env.AGENTISTICS_NO_UPDATE_CHECK
   else process.env.AGENTISTICS_NO_UPDATE_CHECK = savedUpdateCheck
 })

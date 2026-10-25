@@ -58,6 +58,27 @@ describe('a replaced row (reopen / account switch) hands its workers to its repl
     const r: TeamRow[] = [{ id: 'old', conversationId: 'c1', handoffTo: 'n' }, { id: 'n', conversationId: 'c2' }]
     expect(liveSuccessorOf(r, 'old')).toBe('n')
   })
+  test.each([undefined, 'retired'])('reopen → handoff, replacement endedAt=%s', endedAt => {
+    const r: TeamRow[] = [
+      { id: 'a', conversationId: 'c1', endedAt: 'old' },
+      { id: 'b', conversationId: 'c1', endedAt, handoffTo: 'c' },
+      { id: 'c', conversationId: 'c2' },
+    ]
+    expect(liveSuccessorOf(r, 'a')).toBe('c')
+    // Repeat the same combination after another replacement and handoff.
+    r[2]!.endedAt = 'old'
+    r.push({ id: 'd', conversationId: 'c2', endedAt: 'old', handoffTo: 'e' }, { id: 'e', conversationId: 'c3' })
+    expect(liveSuccessorOf(r, 'a')).toBe('e')
+    r[4]!.handoffTo = 'a'
+    expect(liveSuccessorOf(r, 'a')).toBe('e') // shared visited set across both edge types
+  })
+  test('a retired replacement never returns to an older handoff in its conversation', () => {
+    expect(liveSuccessorOf([{ id: 'a', conversationId: 'c', endedAt: 'old', handoffTo: 'b' }, { id: 'b', conversationId: 'c', endedAt: 'new' }], 'b')).toBe('b')
+  })
+  test('a long mixed chain stays bounded', () => {
+    const r: TeamRow[] = Array.from({ length: 100 }, (_, i) => ({ id: String(i), conversationId: String(Math.floor(i / 2)), endedAt: 'old', ...(i % 2 ? { handoffTo: String(i + 1) } : {}) }))
+    expect(Number(liveSuccessorOf(r, '0'))).toBeLessThanOrEqual(16)
+  })
   test('the workers naming the old id are re-filed', () => {
     expect(childrenOfReplaced(rows, 'old', 'new')).toEqual(['w1'])
     expect(childrenOfReplaced(rows, 'new', 'new')).toEqual([])
@@ -77,6 +98,31 @@ describe('a replaced row (reopen / account switch) hands its workers to its repl
     expect(out.ok).toBe(true)
     expect(prompts).toEqual(['new'])
   })
+  test.each(['retired-123', 'conversation-old'])('messages resolve retired reference %s before following successors', async ref => {
+    resetMessageRateLimit()
+    const registry: Array<TeamRow & { title: string }> = [
+      { id: 'retired-123456', title: 'Former', conversationId: 'conversation-old-full', endedAt: 'old' },
+      { id: 'replacement', title: 'Replacement', conversationId: 'conversation-old-full', endedAt: 'old', handoffTo: 'live' },
+      { id: 'live', title: 'Leader', conversationId: 'current' },
+    ]
+    const prompts: string[] = []
+    const d: MessageDeps = {
+      rows: async () => [registry[2]!], registryRows: async () => registry,
+      redirect: async id => liveSuccessorOf(registry, id),
+      prompt: async id => { prompts.push(id); return { ok: true } },
+      senderTask: async () => ({}), comment: async () => ({ ok: true }), now: () => 1,
+    }
+    // Conversation prefixes are ambiguous when several registry rows share that conversation.
+    if (ref === 'conversation-old') registry[1]!.conversationId = 'other-conversation'
+    if (ref === 'conversation-old') registry[0]!.handoffTo = 'replacement'
+    expect((await sendSessionMessage('worker', { to: ref, kind: 'handback', body: 'done' }, d)).ok).toBe(true)
+    expect(prompts).toEqual(['live'])
+    registry.push({ id: 'retired-123999', title: 'Other', conversationId: 'conversation-old-other', endedAt: 'old' })
+    const refused = await sendSessionMessage('worker', { to: ref, kind: 'handback', body: 'done' }, d)
+    expect(refused).toMatchObject({ ok: false, code: 'ambiguous_session' })
+    expect(prompts).toEqual(['live'])
+  })
+
 })
 
 describe('auto → leader: a session with no role that starts a worker', () => {

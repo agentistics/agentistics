@@ -1397,6 +1397,11 @@ export async function runFleetSpawn(
     : undefined
   const inherited = inheritedAccount ? planFleetSpawn({ ...body, account: inheritedAccount }, startable, await spawnAccountContext([])) : undefined
   const decision = inherited?.ok ? inherited : planFleetSpawn(body, startable, accountCtx)
+  const fallbackNote = inherited && !inherited.ok && isAccountRefusal(inherited.reason)
+    ? (lang === 'pt'
+      ? `A conta da sessão anterior não pode ser usada (${spawnAccountMessage(inherited.reason, inherited.detail ?? '', 'pt')}); a sucessora usa a escolha automática.`
+      : `The predecessor's account cannot be used (${spawnAccountMessage(inherited.reason, inherited.detail ?? '', 'en')}); the successor uses the automatic choice.`)
+    : undefined
   // A harness refused as unknown because the host's PATH reaches NO assistant at all is the PATH's
   // fault, and "no spawn spec for it here" would send someone looking for a bug in agentop.
   const blindNotice = !decision.ok && decision.reason === 'unknown_harness' ? host.harnessNotice?.() : undefined
@@ -1418,7 +1423,7 @@ export async function runFleetSpawn(
   // F2.0: born in the browser — with `adapter-chat` on and a ready driver it runs structured.
   const out = await host.spawnSession({ ...decision.plan, origin: 'web' })
   if (out.ok) kickFleet()
-  return spawnResponse(out, lang)
+  return spawnResponse(out.ok && fallbackNote ? { ...out, note: [out.note, fallbackNote].filter(Boolean).join(' ') } : out, lang)
 }
 
 /** The browser's answer for a finished spawn. Pure, so the wording rules are testable without a host. */
@@ -1434,7 +1439,8 @@ export function spawnResponse(out: SpawnSessionResult, lang: CliLang): FleetSpaw
     ...(out.admission ? { code: out.admission.code, refusal: out.admission.refusal } : {}),
     // The host's final account recheck (a root removed after planning) keeps its code too.
     ...(out.accountRefusal ? { code: out.accountRefusal } : {}),
-    ...(out.overridden ? { overridden: true as const, note: out.note } : {}),
+    ...(out.overridden ? { overridden: true as const } : {}),
+    ...(out.note ? { note: out.note } : {}),
     ...(out.queued ? { queued: out.queued } : {}),
   }
 }
