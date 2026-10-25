@@ -13,7 +13,7 @@ import { subscribeEvent } from './eventStream'
 import { HARNESS_LABELS } from './harness'
 import type { UsageBudgetRow } from './usagePlan'
 
-export type RegisteredPlan = { harness: PlanLimits['harness']; plan: string; account?: string }
+export type RegisteredPlan = { harness: PlanLimits['harness']; plan: string; account?: string; accountLabel?: string }
 export interface PlanReadings {
   account: string
   harness: PlanLimits['harness']
@@ -50,6 +50,7 @@ async function refresh(): Promise<void> {
     const body = await r.json() as { limits?: PlanLimits[]; registered?: RegisteredPlan[]; budgets?: UsageBudgetRow[]; hiddenFromAgents?: UsageBudgetRow[]; readings?: PlanReadings[] }
     const budgets = [...(body.budgets ?? []), ...(body.hiddenFromAgents ?? [])]
     const accountLabels: Record<string, string> = {}
+    for (const r of body.registered ?? []) if (r.account && r.accountLabel) accountLabels[r.account] = r.accountLabel
     for (const b of budgets) if (b.account && b.accountLabel) accountLabels[b.account] = b.accountLabel
     emit({
       accountLabels,
@@ -89,7 +90,8 @@ export function usePlanLimits(): PlanLimitsSnapshot {
 
 /** Tests / fixtures: put a snapshot in place without the network. */
 export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.now(), registered: PlanLimitsSnapshot['registered'] = [], budgets: UsageBudgetRow[] = [], readings: PlanReadings[] = []): void {
-  emit({ limits, registered, budgets, readings, now })
+  const accountLabels = Object.fromEntries([...registered, ...budgets].flatMap(r => r.account && r.accountLabel ? [[r.account, r.accountLabel]] : []))
+  emit({ limits, registered, budgets, readings, now, accountLabels })
 }
 
 // ─── Words ────────────────────────────────────────────────────────────────────────────────────
@@ -176,7 +178,8 @@ export function limitLevel(pct: number | null): LimitLevel {
 }
 
 /** The level in WORDS, for aria-labels: the colour and the glyph never carry it alone. */
-export function limitLevelWord(level: LimitLevel, lang: Lang): string {
+export function limitLevelWord(level: LimitLevel, lang: Lang, pct?: number | null): string {
+  if (pct !== null && pct !== undefined && pct > 100) return lang === 'pt' ? 'Acima do limite' : 'Over limit'
   if (level === 'critical') return lang === 'pt' ? 'quase no fim' : 'almost exhausted'
   if (level === 'attention') return lang === 'pt' ? 'atenção' : 'attention'
   return lang === 'pt' ? 'com folga' : 'room to spare'
@@ -184,7 +187,7 @@ export function limitLevelWord(level: LimitLevel, lang: Lang): string {
 
 export interface SubscriptionRow {
   harness: PlanLimits['harness']; plan: string | undefined; limits: PlanLimits | null
-  /** Set only when the harness has several accounts on screen: which one this row is. */
+  /** The same telling account name used by the Usage overview, including a single account. */
   accountLabel?: string
 }
 
@@ -196,15 +199,13 @@ export function subscriptionRows(limits: PlanLimits[] | null, registered: Regist
     ...(limits ?? []).map(l => ({ harness: l.harness, plan: l.plan ?? l.sourcePlan, limits: l, account: l.account })),
     ...registered
       .filter(r => (r.account ? !foundAccount.has(`${r.harness}:${r.account}`) : !found.has(r.harness)))
-      .map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null, ...(r.account ? { account: r.account } : {}) })),
+      .map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null, accountLabel: r.accountLabel, ...(r.account ? { account: r.account } : {}) })),
   ]
-  const perHarness = new Map<string, number>()
-  for (const r of rows) perHarness.set(r.harness, (perHarness.get(r.harness) ?? 0) + 1)
   return rows.map(({ account, ...r }) => {
-    const label = account ? labels[account] : undefined
+    const label = (account ? labels[account] : undefined) ?? r.accountLabel
     // A label that is only the assistant's own name says nothing the row does not ("Codex CLI · Codex CLI").
     const telling = label && label !== HARNESS_LABELS[r.harness] ? label : undefined
-    return (perHarness.get(r.harness) ?? 0) > 1 && telling ? { ...r, accountLabel: telling } : r
+    return telling ? { ...r, accountLabel: telling } : r
   })
 }
 
@@ -270,8 +271,8 @@ export function segmentNoticeText(harness: string, lang: Lang): { title: string;
 export const LIMIT_WARN = 'var(--accent-amber, #f59e0b)'
 
 /** The forecast worth saying: only a window that runs out (or ran out) BEFORE it renews. */
-export function warnForecast(w: PlanLimitWindow, now: number): PlanForecast | null {
-  const f = forecastWindow(w, now)
+export function warnForecast(w: PlanLimitWindow, now: number, observedAt = now): PlanForecast | null {
+  const f = forecastWindow(w, now, observedAt)
   return f.kind === 'runs-out' || f.kind === 'exhausted' ? f : null
 }
 

@@ -10,6 +10,36 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.151.1': {
+    features: [
+      {
+        pt: 'A área Uso ganhou o selo BETA, como o Agentask: as contas foram conferidas, mas a página ainda está mudando.',
+        en: 'The Usage area now carries a BETA tag, like Agentask: its math was checked, but the page is still changing.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Plano acima de 100% mostra "Acima do limite" em vez de "restam −5%".',
+        en: 'A plan over 100% shows "Over limit" instead of "−5% left".',
+      },
+      {
+        pt: 'Sem ritmo medido, a página diz que ainda não mediu em vez de recomendar 0 de 1 sessão.',
+        en: 'With no measured pace, the page says it has not measured yet instead of recommending 0 of 1 session.',
+      },
+      {
+        pt: 'A previsão "acaba ~" não anda mais sozinha entre uma leitura e outra.',
+        en: 'The "runs out ~" forecast no longer drifts on its own between readings.',
+      },
+      {
+        pt: 'Cada conta aparece pelo nome, nunca por um código interno.',
+        en: 'Every account shows by its name, never by an internal code.',
+      },
+      {
+        pt: 'Planos só apertados (não pausados) voltam a receber sessões, e o aviso não diz mais "todos em pausa".',
+        en: 'Plans that are only tight (not paused) get sessions again, and the notice no longer says "all on hold".',
+      },
+    ],
+  },
   '2.151.0': {
     features: [
       {

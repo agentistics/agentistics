@@ -123,7 +123,7 @@ describe('budgets, pacing, and routing', () => {
   const reset5 = now + 5 * H
   const resetWeek = now + 3 * 24 * H
   const withPlan = (harness: 'claude' | 'codex', five: number, week: number, plan: string): PlanLimits => ({
-    ...lim(harness, [win('5h', five, reset5), win('week', week, resetWeek)]), plan,
+    ...lim(harness, [win('5h', five, reset5), win('week', week, resetWeek)], now), plan,
   })
 
   test('hold is driven by the five-hour or 95% weekly threshold', () => {
@@ -293,7 +293,7 @@ describe('renewed windows project their next period', () => {
       paceStatus: 'on', burnPctPerHour: 0.4505851966576492,
       sustainablePctPerHour: 0.4505851966576492, suggestedParallel: 1,
       note: 'On pace: keep the current cadence through the weekly reset.',
-      freeSlots: 1, freeSlotsMeasured: true, liveSessions: [],
+      freeSlots: 1, freeSlotsMeasured: false, liveSessions: [],
     })
   })
 
@@ -366,10 +366,10 @@ describe('per-account primitives (B1)', () => {
     expect(r.account).toBe('acc_c')
   })
 
-  test('route: registered tight account + unregistered ok account is not eligible off-lead', () => {
+  test('route: registered tight account remains eligible off-lead; unregistered account does not', () => {
     const tight = { ...row(mk('claude', 'acc_a', 10, 85)), status: 'tight' as const }
     const unreg = { ...row(mk('claude', 'acc_b', 10, 10)), plan: 'unregistered' }
-    expect(routeRecommendation([tight, unreg], 'mechanical').harness).toBeNull()
+    expect(routeRecommendation([tight, unreg], 'mechanical').account).toBe('acc_a')
     expect(routeRecommendation([tight, unreg], 'lead').account).toBe('acc_a')
   })
 

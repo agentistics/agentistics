@@ -131,7 +131,8 @@ Harnesses without subscription plans have registration links to Settings → Bil
 runtime uses provider billing rather than subscription plans and is excluded from that list.
 
 `/usage/plan` accepts a positive number of hours, defaulting to four, and uses the shared
-`planSessions` helper for sustainable parallel capacity and pause times. `/usage/limits` renders
+`planSessions` helper for sustainable parallel capacity and pause times. Hours are planning metadata,
+not an input to capacity arithmetic. `/usage/limits` renders
 the same `NayLimitsTab` as the usage modal. `/usage/history` shows account readings for the weekly
 and five-hour windows and states that history begins when the server starts. History is held in
 memory; these pages add no persistence or polling loop.
@@ -141,6 +142,64 @@ Actual percentages retain their measured values on the same percentage scale, wi
 normalization. Without a renewal time, no expected line is invented. Agora compares the current
 weekly window; history retains older observed readings, with the expected line limited to the
 current known window.
+
+### Usage math and policy
+
+Usage is BETA; the shared beta chip appears in the area tree, rail tooltip, mobile sheet and page
+titles. The detailed formula/verdict audit is [usage-math-audit.md](usage-math-audit.md).
+
+The shared exhaustion forecast uses average consumption up to the last observation: percent divided
+by elapsed time from window start to that reading (at least one minute). Its estimated exhaustion
+instant is anchored to that reading's `updatedAt`, so clock ticks alone do not move it. It does not
+use recent measured burn. No usage means no warning; 100% or more is exhausted. Remaining quota is
+clamped at zero; over 100% shows an explicit over-limit state and retains the reported percentage.
+Pending registered accounts carry the same friendly `accountLabel` as measured accounts, never a
+raw account id or owner login. A telling account label remains visible in Limits even for one account.
+
+Recent weekly pace uses same-account, same-renewal observations from the last six hours, after the
+current account segment starts. Burn is the nonnegative percentage delta divided by elapsed hours
+(at least one minute). Without two observations it falls back to the sustainable rate as policy,
+not a measurement. Sustainable rate is remaining weekly quota divided by remaining hours (at least
+half an hour); projected periods cap it at 198%/h. A positive live per-session measurement can
+still establish measured capacity. A flat zero burn cannot establish per-session capacity.
+
+Recent burn/sustainable ratios below 0.8 are under pace, above 1.2 over pace; both boundaries belong
+to on pace, allowing only floating-point noise. Positive burn against zero quota is over pace.
+Budget hold starts at 85% of 5h or 95% of week. A week at 80%, or one forecast to run out early,
+is tight. The page combines these fields: hold first, tight/recent over next, otherwise on/under.
+The area warning count uses that same decision. MCP exposes budget and pace as separate fields.
+
+`tight` is a warning, not a routing hold. Registered, available accounts with that status remain
+eligible for every work kind; only `hold` crosses a quota stop threshold. Thus a tight account
+whose recent burn is under pace can still receive workers at its measured cadence. QA continues
+to exclude the author's harness. If no route exists because plans are unregistered, unavailable,
+yielded or excluded for QA, the router says no eligible plan, rather than claiming they are held.
+“All plans on hold” is reserved for actual hold rows and names the earliest account pause time.
+
+A low absolute percentage can still carry the tight warning early in a window. For example,
+4% weekly usage with 6.85 days left means only 3.6 hours have elapsed out of 168: the linear expected
+usage is 2.14%. At that window-average rate the remaining 96% lasts 86.4 hours, shorter than the
+164.4 hours to renewal. The warning is therefore tight, independently of the 5h percentage and of
+recent burn. Recent burn can simultaneously be under pace; that account remains routable. At the
+same 4% with 6.5 days left, the average forecast lasts through renewal and the budget is ok.
+
+Plan shows the server's suggested parallel cadence, including availability overrides, rather than
+recalculating it in the browser. The requested hours record the intended interval; recommendation
+remains sustainable through renewal, independent of that duration. Suggested cadence is 0 for
+hold/recent over, otherwise a 1–8 heuristic from recent/sustainable rates. It differs from free
+slots, which subtract measured live burn and divide remaining rate by average per-session burn.
+The running count includes attributed positive-burn sessions, not all open fleet sessions.
+
+Daily budget is nonnegative remaining weekly quota divided by days remaining (at least half a day).
+Hold pause time is the weekly reset when weekly quota binds, otherwise the 5h reset. An over-pace
+pause solves for when remaining quota can sustain the measured burn through renewal, capped at
+the next 5h reset as a recheck time. The page headline uses the latest future account pause; MCP's
+aggregate uses the earliest recheck. Account cards retain their own pause times and future days.
+
+History retains at most 32 observations per account within seven days of the latest sample, in
+memory only. Durations use absolute milliseconds (week=168h); dates use the browser's time zone.
+Meters tick on the client clock, whereas budget snapshots refresh through the existing SSE store.
+The audit records the stale-snapshot, planning-horizon and projection limitations explicitly.
 
 ### Usage area presentation
 

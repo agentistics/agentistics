@@ -29,7 +29,7 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
   // Native calls use provider billing, not a subscription plan; keep the registry's surface order.
   const noPlan = surfaceHarnesses(false).filter(h => !registered.some(r => r.harness === h) && !budgets.some(r => r.harness === h && r.plan) && !limits?.some(r => r.harness === h && r.plan))
   const pending = registered.filter(r => !budgets.some(b => b.harness === r.harness && (b.account ?? 'default') === (r.account ?? 'default')))
-  const cards = [...rows, ...pending.map(r => ({ ...r, accountLabel: r.account }))].sort((a, b) => SURFACE_HARNESS_ORDER.indexOf(a.harness) - SURFACE_HARNESS_ORDER.indexOf(b.harness) || accountLabel(a).localeCompare(accountLabel(b))) // @native-gated: ordering rows from the subscription store.
+  const cards = [...rows, ...pending.map(r => ({ ...r, accountLabel: r.accountLabel ?? HARNESS_LABELS[r.harness] }))].sort((a, b) => SURFACE_HARNESS_ORDER.indexOf(a.harness) - SURFACE_HARNESS_ORDER.indexOf(b.harness) || accountLabel(a).localeCompare(accountLabel(b))) // @native-gated: ordering rows from the subscription store.
   // Share header, meter and metric rows across each pair; forecast wrapping cannot shift tiles.
   const cardRows = { display: 'grid', gridTemplateRows: 'subgrid', gridRow: 'span 3', minWidth: 0 } as const
   const contentRows = { display: 'grid', gridTemplateRows: 'subgrid', gridRow: 'span 2' } as const
@@ -48,9 +48,10 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
         const pace = usagePaceState(row)
         const hold = pace === 'hold'
         const over = pace === 'over'
+        const under = pace === 'under'
         const measured = hasMeasuredPace(row)
         return <div key={accountKey(row)} data-usage-account={accountKey(row)} style={{ ...cardRows, overflowWrap: 'anywhere' }}>
-          <Section title={row.plan} style={cardRows} contentStyle={contentRows} action={<Pill tone={hold ? 'error' : over ? 'warn' : 'ok'}>{hold ? (pt ? 'Em pausa' : 'On hold') : over ? (pt ? 'Acima do ritmo' : 'Over pace') : (pt ? 'No ritmo' : 'On pace')}</Pill>}>
+          <Section title={row.plan} style={cardRows} contentStyle={contentRows} action={<Pill tone={hold ? 'error' : over ? 'warn' : 'ok'}>{hold ? (pt ? 'Em pausa' : 'On hold') : over ? (pt ? 'Acima do ritmo' : 'Over pace') : under ? (pt ? 'Abaixo do ritmo' : 'Under pace') : (pt ? 'No ritmo' : 'On pace')}</Pill>}>
             <PlanUsageCard embedded showPlan={false} limits={limitsForAccount} pending={{ harness: row.harness, plan: row.plan }} accountLabel={accountLabel(row)} now={now} lang={lang} />
             <div data-usage-metrics style={{ alignSelf: 'start', minWidth: 0 }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 12 }}>
