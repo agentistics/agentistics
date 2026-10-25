@@ -1,61 +1,67 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { followOffset, isDrag, restOffset, slotAt } from '../../lib/bottomNavDrag'
+import { barFollow, barSlotAt, barSlots, isDrag } from '../../lib/bottomNavDrag'
 import { SOLID_COUNT } from './countBadge'
 import { MOBILE_PILL_BAR_Z } from '../../lib/zLayers'
 
 /**
- * THE MOBILE BOTTOM BAR — a floating pill in our dark tone, slightly see-through, with an
- * indicator that sits behind the current item.
+ * THE MOBILE BOTTOM BAR — three pieces, as the owner drew it: a LEFT pill, a standalone ROUND
+ * centre button, a RIGHT pill. The pills' inner ends are concave, curving around the circle with an
+ * even gap (a radial mask, so the shape is the same at every width).
  *
- * Two ways to move: TAP an item (the ordinary click), or press anywhere on the bar and DRAG — the
- * indicator follows the finger, the item under it lights up as it is crossed, and letting go
- * activates that item. The arithmetic is `lib/bottomNavDrag.ts` (pure, tested).
+ * The active slot wears a large soft pill behind its icon AND label; when the centre button is the
+ * active one the circle itself carries the fill. Two ways to move: TAP an item, or press anywhere
+ * on the bar and DRAG — the indicator follows the finger inside the pill it is over, the circle
+ * lights when the finger is over it, and letting go activates what is under the finger. The
+ * arithmetic is `lib/bottomNavDrag.ts` (pure, tested).
  *
- * The pill is dark in BOTH themes on purpose: it is a floating control over the page, and the
- * owner asked for our dark tone rather than a surface that follows the theme. Its colours are
- * therefore literal here and not the theme tokens, which would turn its text dark on light.
- * No backdrop blur — "no liquid glass" was the other half of that request.
+ * Surfaces come from the theme tokens, so the bar follows light and dark.
  */
 
 export interface PillItem {
   key: string
   label: string
-  /** Richer label for the place pill (quiet area, bold page); `label` stays the plain text. */
-  content?: React.ReactNode
   icon: LucideIcon
   onActivate: () => void
   ariaLabel?: string
   expanded?: boolean
   hasPopup?: 'dialog'
   badge?: number
-  /** Option A's central Sessions/Home destination keeps its orange disc and bold label. */
-  emphasis?: boolean
 }
 
 /** Gap between the indicator and the edges of its slot. */
 const INSET = 4
+/** The round button, and the even gap kept between it and the pills' concave ends. */
+const CIRCLE = 58
+/** Width of the spacer the circle sits in; the circle is wider, so it bites into each pill. */
+const SPACER = 40
+/** Padding inside a pill: small at the outer end, wider where the concave bite is. */
+const PAD_OUT = 4
+const PAD_IN = 18
 const ORANGE = 'var(--anthropic-orange)'
-const IDLE = 'rgba(255, 255, 255, 0.62)'
 const SPRING = 'cubic-bezier(0.34, 1.36, 0.64, 1)'
+const SURFACE = 'var(--bg-card)'
+const CIRCLE_SHADOW = '0 2px 8px rgba(0, 0, 0, 0.25)'
 
 function prefersReducedMotion(): boolean {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false }
 }
 
-export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' }: {
+export function MobilePillBar({ items, activeIndex, centerIndex, ariaLabel }: {
+  /** Left pill items, then the centre button, then the right pill items. */
   items: PillItem[]
-  /** Place pill plus a round sessions shortcut, using the same drag gesture as the tab bar. */
-  variant?: 'tabs' | 'place'
-  /** -1 when the current page is none of the items: the indicator is then not drawn at all. */
+  /** Which item is the standalone round button. */
+  centerIndex: number
+  /** -1 when the current page is none of the items: nothing is then drawn as active. */
   activeIndex: number
   ariaLabel: string
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
+  const [height, setHeight] = useState(64)
   /** The finger's x in the track's own coordinates while dragging; null at rest. */
   const [dragX, setDragX] = useState<number | null>(null)
-  const press = useRef<{ id: number; x0: number; y0: number; dragging: boolean; lastSlot: number } | null>(null)
+  const press = useRef<{ id: number; x0: number; y0: number; dragging: boolean } | null>(null)
   const suppressClick = useRef(false)
   const [reduced, setReduced] = useState(prefersReducedMotion)
 
@@ -71,7 +77,7 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
   useLayoutEffect(() => {
     const el = trackRef.current
     if (!el) return
-    const measure = () => setWidth(el.getBoundingClientRect().width)
+    const measure = () => { const r = el.getBoundingClientRect(); setWidth(r.width); if (r.height > 0) setHeight(r.height) }
     measure()
     if (typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(measure)
@@ -79,30 +85,25 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
     return () => ro.disconnect()
   }, [])
 
-  const place = variant === 'place'
-  const count = items.length
-  const localX = (clientX: number) => {
-    const x = clientX - (trackRef.current?.getBoundingClientRect().left ?? 0)
-    // Convert the unequal place/round widths to the equal slots bottomNavDrag operates on.
-    if (!place || count < 2 || width <= 62) return x
-    const boundary = width - 57
-    return x < boundary ? x / boundary * (width / 2) : width / 2 + (x - boundary) / 57 * (width / 2)
-  }
-  const hoverSlot = dragX !== null ? slotAt(dragX, width, count) : -1
+  const leftCount = centerIndex
+  const rightCount = items.length - centerIndex - 1
+  const slots = barSlots(width, SPACER, leftCount, rightCount, PAD_OUT, PAD_IN)
+  const localX = (clientX: number) => clientX - (trackRef.current?.getBoundingClientRect().left ?? 0)
+  const hoverSlot = dragX !== null ? barSlotAt(dragX, slots) : -1
   const litIndex = hoverSlot >= 0 ? hoverSlot : activeIndex
-  const showIndicator = width > 0 && (dragX !== null || activeIndex >= 0)
-  const left = dragX !== null
-    ? followOffset(dragX, width, count, INSET)
-    : restOffset(Math.max(0, activeIndex), width, count, INSET)
-  const slotW = count > 0 ? width / count : 0
-  const withinPill = (y: number) => {
-    const rect = trackRef.current?.parentElement?.getBoundingClientRect()
+  const indicatorSlot = slots[litIndex]
+  const showIndicator = width > 0 && !!indicatorSlot && indicatorSlot.kind !== 'centre'
+  const indicatorLeft = dragX !== null && hoverSlot >= 0
+    ? barFollow(dragX, slots, INSET)
+    : (indicatorSlot ? indicatorSlot.left + INSET : 0)
+  const withinBar = (y: number) => {
+    const rect = trackRef.current?.getBoundingClientRect()
     return !!rect && y >= rect.top && y <= rect.bottom
   }
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return
-    press.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, dragging: false, lastSlot: -1 }
+    press.current = { id: e.pointerId, x0: e.clientX, y0: e.clientY, dragging: false }
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const p = press.current
@@ -110,18 +111,9 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
     if (!p.dragging) {
       if (!isDrag(e.clientX - p.x0) && !isDrag(e.clientY - p.y0)) return
       p.dragging = true
-      try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* already released */ }
     }
-    // A vertical drag-off abandons the selection; re-entering the pill resumes following.
-    if (!withinPill(e.clientY)) { setDragX(null); return }
-    const x = localX(e.clientX)
-    const slot = slotAt(x, width, count)
-    if (slot !== p.lastSlot) {
-      // A tick as each item is crossed, where the platform has one (Android); iOS ignores it.
-      if (p.lastSlot !== -1) { try { navigator.vibrate?.(6) } catch { /* not allowed */ } }
-      p.lastSlot = slot
-    }
-    setDragX(x)
+    if (!withinBar(e.clientY)) { setDragX(null); return }
+    setDragX(localX(e.clientX))
   }
   const endPress = (e: React.PointerEvent<HTMLDivElement>, commit: boolean) => {
     const p = press.current
@@ -129,32 +121,124 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
     press.current = null
     if (!p.dragging) return
     setDragX(null)
-    // The browser still fires a click after a drag ends; it must not activate a second item.
     suppressClick.current = true
     window.setTimeout(() => { suppressClick.current = false }, 350)
-    if (commit && withinPill(e.clientY)) items[slotAt(localX(e.clientX), width, count)]?.onActivate()
+    if (commit && withinBar(e.clientY)) items[barSlotAt(localX(e.clientX), slots)]?.onActivate()
   }
+
+  const slotButton = (item: PillItem, i: number) => {
+    const Icon = item.icon
+    const lit = i === litIndex
+    const crossing = dragX !== null && i === hoverSlot
+    return (
+      <button
+        key={item.key}
+        type="button"
+        onClick={item.onActivate}
+        aria-label={item.ariaLabel}
+        aria-expanded={item.expanded}
+        aria-haspopup={item.hasPopup}
+        aria-current={item.expanded === undefined && i === activeIndex ? 'page' : undefined}
+        style={{
+          position: 'relative', flex: 1, minWidth: 0, minHeight: 44,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 3, padding: '0 2px', border: 'none', background: 'transparent',
+          color: lit ? ORANGE : 'var(--text-secondary)', fontFamily: 'inherit', cursor: 'pointer',
+          fontSize: 10.5, fontWeight: lit ? 700 : 500,
+          transition: reduced ? 'none' : 'color 0.18s',
+        }}
+      >
+        <span style={{
+          position: 'relative', display: 'inline-flex',
+          transform: crossing && !reduced ? 'translateY(-2px) scale(1.14)' : 'none',
+          transition: reduced ? 'none' : `transform 220ms ${SPRING}`,
+        }}>
+          <Icon size={20} strokeWidth={lit ? 2.1 : 1.8} />
+          {item.badge !== undefined && item.badge > 0 && <span data-area-badge style={{
+            position: 'absolute', top: -7, left: 'calc(100% - 4px)', minWidth: 18, height: 18, padding: '0 4px',
+            borderRadius: 9, ...SOLID_COUNT, fontSize: 11, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}>{item.badge}</span>}
+        </span>
+        <span style={{ width: '100%', minWidth: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {item.label}
+        </span>
+      </button>
+    )
+  }
+
+  const circle = (item: PillItem, i: number) => {
+    const Icon = item.icon
+    const lit = i === litIndex
+    const Badge = item.badge !== undefined && item.badge > 0
+    return (
+      <div key={item.key} data-bar-centre style={{ position: 'relative', flex: `0 0 ${SPACER}px`, alignSelf: 'stretch' }}>
+        <button
+          type="button"
+          onClick={item.onActivate}
+          aria-label={item.ariaLabel ?? item.label}
+          aria-current={i === activeIndex ? 'page' : undefined}
+          style={{
+            position: 'absolute', left: '50%', top: '50%', width: CIRCLE, height: CIRCLE, borderRadius: '50%',
+            transform: `translate(-50%, -50%) scale(${lit && dragX !== null && !reduced ? 1.06 : 1})`,
+            transition: reduced ? 'none' : `transform 220ms ${SPRING}, border-color 0.18s`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer',
+            color: lit ? ORANGE : 'var(--text-secondary)', fontFamily: 'inherit',
+            background: lit
+              ? 'linear-gradient(var(--anthropic-orange-dim), var(--anthropic-orange-dim)), var(--bg-card)'
+              : SURFACE,
+            border: `1.5px solid ${lit ? ORANGE : 'var(--border)'}`,
+            boxShadow: CIRCLE_SHADOW,
+          }}
+        >
+          <Icon size={26} strokeWidth={lit ? 2.1 : 1.8} />
+        </button>
+        {Badge && <span data-area-badge style={{
+          position: 'absolute', top: 'calc(50% - 38px)', left: `calc(50% + ${CIRCLE / 2 - 4}px)`,
+          minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9, ...SOLID_COUNT,
+          fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none',
+        }}>{item.badge}</span>}
+      </div>
+    )
+  }
+
+  /**
+   * One pill's outline as a PATH, so the border is the path's own stroke and follows the curve: a
+   * rounded outer end, and an inner end that is an arc of the circle centred on the round button,
+   * running corner to corner so the gap around the circle is even.
+   */
+  const pillLayer = (side: 'left' | 'right') => {
+    const W = Math.max(0, (width - SPACER) / 2)
+    const H = height
+    const r = H / 2
+    const R = Math.hypot(SPACER / 2, H / 2)
+    const d = side === 'left'
+      ? `M ${r} 0 H ${W} A ${R} ${R} 0 0 0 ${W} ${H} H ${r} A ${r} ${r} 0 0 1 ${r} 0 Z`
+      : `M 0 0 H ${W - r} A ${r} ${r} 0 0 1 ${W - r} ${H} H 0 A ${R} ${R} 0 0 0 0 0 Z`
+    return (
+      <svg aria-hidden data-bar-pill={side} width={W} height={H} viewBox={`0 0 ${W} ${H}`}
+        style={{ position: 'absolute', left: 0, top: 0, overflow: 'visible', pointerEvents: 'none', filter: 'drop-shadow(0 6px 10px rgba(0, 0, 0, 0.22))' }}>
+        <path d={d} fill={SURFACE} stroke="var(--border)" strokeWidth={1} strokeLinejoin="round" />
+      </svg>
+    )
+  }
+  const group = (side: 'left' | 'right', from: number, to: number) => (
+    <div style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0 }}>
+      {pillLayer(side)}
+      <div style={{ position: 'relative', display: 'flex', flex: 1, minWidth: 0, padding: side === 'left' ? `0 ${PAD_IN}px 0 ${PAD_OUT}px` : `0 ${PAD_OUT}px 0 ${PAD_IN}px` }}>
+        {items.slice(from, to).map((item, k) => slotButton(item, from + k))}
+      </div>
+    </div>
+  )
 
   return (
     <nav
       className="mobile-bottom-nav"
       aria-label={ariaLabel}
       style={{
-        position: 'fixed',
-        left: 12,
-        right: 12,
-        zIndex: MOBILE_PILL_BAR_Z,
-        borderRadius: 999,
-        background: 'rgba(17, 17, 24, 0.84)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        boxShadow: '0 10px 30px rgba(0, 0, 0, 0.45)',
-        padding: INSET,
-        // The bar owns horizontal movement on it: without this a drag scrolls or zooms the page.
-        ...(place ? { background: 'transparent', border: 'none', boxShadow: 'none', padding: 0 } : {}),
-        touchAction: 'none',
-        userSelect: 'none',
-        WebkitUserSelect: 'none',
-        // Height and bottom come from .mobile-bottom-nav (the pill plus the home-indicator inset).
+        position: 'fixed', left: 12, right: 12, zIndex: MOBILE_PILL_BAR_Z,
+        touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none',
       }}
     >
       <div
@@ -164,18 +248,21 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
         onPointerUp={e => endPress(e, true)}
         onPointerCancel={e => endPress(e, false)}
         onClickCapture={e => { if (suppressClick.current) { e.preventDefault(); e.stopPropagation(); suppressClick.current = false } }}
-        style={{ position: 'relative', display: 'flex', height: '100%', gap: place ? 10 : 0 }}
+        style={{ position: 'relative', display: 'flex', height: '100%' }}
       >
-        {!place && showIndicator && (
+        {group('left', 0, centerIndex)}
+        {circle(items[centerIndex]!, centerIndex)}
+        {group('right', centerIndex + 1, items.length)}
+        {showIndicator && indicatorSlot && (
           <div
             aria-hidden
+            data-bar-indicator
             style={{
-              position: 'absolute', top: 0, bottom: 0, left: 0,
-              width: Math.max(0, slotW - INSET * 2),
+              position: 'absolute', top: INSET, bottom: INSET, left: 0,
+              width: Math.max(0, indicatorSlot.width - INSET * 2),
               borderRadius: 999,
-              background: 'rgba(5, 5, 9, 0.9)',
-              border: '1px solid rgba(255, 255, 255, 0.07)',
-              transform: `translateX(${left}px) scale(${dragX !== null && !reduced ? 1.06 : 1})`,
+              background: 'color-mix(in srgb, var(--anthropic-orange) 16%, transparent)',
+              transform: `translateX(${indicatorLeft}px) scale(${dragX !== null && !reduced ? 1.04 : 1})`,
               transition: reduced
                 ? 'none'
                 : dragX !== null
@@ -185,60 +272,6 @@ export function MobilePillBar({ items, activeIndex, ariaLabel, variant = 'tabs' 
             }}
           />
         )}
-        {items.map((item, i) => {
-          const Icon = item.icon
-          const lit = i === litIndex
-          const crossing = dragX !== null && i === hoverSlot
-          return (
-            <button
-              key={item.key}
-              type="button"
-              onClick={item.onActivate}
-              aria-label={item.ariaLabel ?? (place && i === 1 ? item.label : undefined)}
-              aria-expanded={item.expanded}
-              aria-haspopup={item.hasPopup}
-              aria-current={item.expanded === undefined && i === activeIndex ? 'page' : undefined}
-              style={{
-                position: 'relative', flex: 1, minWidth: 0, minHeight: 44,
-                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                gap: 3, padding: '0 2px', border: 'none', background: 'transparent',
-                color: lit || item.emphasis ? ORANGE : IDLE, fontFamily: 'inherit', cursor: 'pointer',
-                fontSize: 10.5, fontWeight: lit || item.emphasis ? 700 : 500,
-                transition: reduced ? 'none' : 'color 0.18s',
-                ...(item.emphasis ? { gap: 1 } : {}),
-                ...(place ? {
-                  flex: i === 0 ? 1 : '0 0 52px', minWidth: 44, height: 52, borderRadius: 999,
-                  flexDirection: 'row', gap: 8, padding: i === 0 ? '0 16px' : 0,
-                  background: 'rgba(17, 17, 24, 0.94)', border: '1px solid rgba(255, 255, 255, 0.12)',
-                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.45)', fontSize: 15, color: 'rgba(255,255,255,0.92)',
-                } : {}),
-              }}
-            >
-              {(!place || i === 1) && <span style={{
-                display: 'inline-flex',
-                transform: crossing && !reduced ? (item.emphasis ? 'scale(1.12)' : 'translateY(-2px) scale(1.14)') : 'none',
-                transition: reduced ? 'none' : `transform 220ms ${SPRING}`,
-                ...(item.emphasis ? {
-                  width: 40, height: 40, borderRadius: '50%', alignItems: 'center', justifyContent: 'center',
-                  background: 'color-mix(in srgb, var(--anthropic-orange) 16%, transparent)',
-                  boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--anthropic-orange) 45%, transparent)',
-                  color: ORANGE,
-                } : {}),
-              }}>
-                <Icon size={item.emphasis ? 22 : 20} strokeWidth={lit || item.emphasis ? 2.1 : 1.8} />
-              </span>}
-              {(!place || i === 0) && <span style={{ width: place ? undefined : '100%', minWidth: 0, textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...(item.emphasis ? { marginTop: -2 } : {}) }}>
-                {place ? (item.content ?? item.label) : item.label}
-              </span>}
-              {place && i === 0 && <Icon size={16} strokeWidth={1.8} aria-hidden style={{ flexShrink: 0, opacity: 0.8 }} />}
-              {item.badge !== undefined && item.badge > 0 && <span data-area-badge style={{
-                position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, padding: '0 4px',
-                borderRadius: 9, ...SOLID_COUNT, fontSize: 11, fontWeight: 700,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              }}>{item.badge}</span>}
-            </button>
-          )
-        })}
       </div>
     </nav>
   )

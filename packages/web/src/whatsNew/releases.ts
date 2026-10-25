@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.152.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A barra de baixo no celular agora tem três peças: dois grupos de botões e o Início num círculo maior no meio, com as pontas curvas em volta dele.',
+        en: 'The bottom bar on the phone now has three pieces: two button groups and a bigger round Home button in the middle, with curved ends around it.',
+      },
+      {
+        pt: 'A aba selecionada ganha um destaque grande atrás do ícone e do nome, e o Início acende o próprio círculo.',
+        en: 'The selected tab gets a large highlight behind its icon and name, and Home lights up its own circle.',
+      },
+      {
+        pt: 'Tocar em Início sempre volta para a lista de sessões, mesmo vindo do "Resumo da frota".',
+        en: 'Tapping Home always returns to the sessions list, even from the "Fleet summary".',
+      },
+    ],
+  },
   '2.152.0': {
     features: [
       {

@@ -15,8 +15,16 @@ export function activateMobileSessions(pathname: string, navigate: (to: string) 
   else navigate('/sessions')
 }
 
-/** The mobile workspace scrolls inside its list/overview, rather than in the document. */
+/** Fired by the bar's Início: the sessions page answers by showing its LIST, not only by scrolling. */
+export const MOBILE_SESSIONS_HOME_EVENT = 'ag:mobile-sessions-home'
+
+/**
+ * The mobile workspace scrolls inside its list/overview, rather than in the document. It also asks
+ * the page to leave the fleet-summary tab: tapping Início there only scrolled a screen that was
+ * already at the top, which read as "goes nowhere".
+ */
 export function scrollMobileSessionsToTop(): void {
+  window.dispatchEvent(new Event(MOBILE_SESSIONS_HOME_EVENT))
   document.querySelectorAll<HTMLElement>('[data-mobile-sessions-scroll]').forEach(el => { el.scrollTop = 0 })
   window.scrollTo(0, 0)
 }
