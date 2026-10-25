@@ -17,11 +17,18 @@ Both pages read their labels from the area registry through `PageHeader`. Existi
 (`/tasks`, `/tasks/:id`) and repository (`/repositories`, `/repo/:id`) routes remain available.
 
 
-Leadership lives at `/leadership` (leaders), `/leadership/checkins`,
+Leadership pages belong to Sessions: `/leadership` (leaders), `/leadership/checkins`,
 `/leadership/handoffs` and `/leadership/away`. Leaders use the shared fleet and role
 stores and the active-leaders filter. Their record cards show the task when known,
 state, elapsed time when known, and direct children resolved by managed or conversation
 identity. Loading, unavailable and stale fleet states never claim an empty fleet.
+
+These URLs remain unchanged for bookmarks and deep links. The desktop tree, rail, search and
+mobile sheet resolve them to Sessions; there is no separate top-level Leadership entry. Sessions
+starts with the session workspace, followed by Leaders, Check-ins, Hand-offs and Away mode. Its
+area badge sums session attention and overdue check-in warnings. Navigation ownership is distinct
+from the terminal workspace layout: only `/sessions` and its child routes use the terminal/chat
+canvas. Leadership pages retain document scrolling, padding and their own content on phones.
 
 Check-ins read `GET /api/checkin` for each leader's latest round and follow check-in
 and reconnect events. `/api/checkin/report` is the authenticated POST ingestion route,

@@ -167,6 +167,12 @@ export default defineConfig({
         name: 'Agentistics',
         short_name: 'Agentistics',
         description: 'Local analytics dashboard for AI coding assistants',
+        // Explicit and equal to the implicit defaults (identity does not change), so the manifest
+        // differs byte-wise from the one an installed WebAPK last fetched: Chrome re-syncs the
+        // WebAPK — including the system navigation-bar colour it baked in while theme_color was
+        // orange (#FD8924, until 955f79e6f) — only when the manifest changes.
+        id: '/',
+        scope: '/',
         start_url: '/',
         display: 'standalone',
         background_color: '#0a0a0f',

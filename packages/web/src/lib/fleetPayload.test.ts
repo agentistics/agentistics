@@ -73,3 +73,11 @@ test('active-only views still request deferred history for sleeping pins', () =>
   expect(needsClosedFleet(true, 0)).toBe(false)
   expect(needsClosedFleet(false, 0)).toBe(true)
 })
+
+test('the compact wire preserves the optional handoff successor for browser notifications', () => {
+  const out = normalizeFleetPayload({
+    sessions: [{ id: 'source', state: 'exited', handoffTo: 'target' }], tasks: [], finishedTasks: [],
+  } as unknown as FleetPayload)
+  expect(out.rows[0]!.handoffTo).toBe('target')
+  expect(out.sessions[0]!.handoffTo).toBe('target')
+})

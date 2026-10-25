@@ -6,6 +6,8 @@ import {
 } from './sessionNotifications'
 import { setSessionMuted } from './mutedSessions'
 import { setMuteWorkers, setSessionRole, __resetRoleChecksForTest } from './sessionRoles'
+import { postSwitch } from './accountSwitch'
+import { getReopening } from './reopeningStore'
 import { readNayAlerts, releaseDue, snoozeAlert } from './nayNotifyStore'
 
 /**
@@ -491,5 +493,176 @@ describe('muted workers', () => {
     expect(bells).toHaveLength(2)
     expect(readNayAlerts()).toHaveLength(2)
     expect(sounds).toBe(6)
+  })
+})
+
+
+describe('account switches announce continuation instead of a generic exit', () => {
+  const originalFetch = globalThis.fetch
+  const originalDocument = globalThis.document
+  let bells: string[]
+  const source = { id: 'switch-source', conversationId: 'switch-conversation', state: 'working', harness: 'claude' }
+
+  beforeEach(() => {
+    bells = []
+    ;(globalThis as Record<string, unknown>).document = { visibilityState: 'visible' }
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      if (String(url) === '/api/notifications' && init?.method === 'POST') {
+        bells.push(JSON.parse(String(init.body)).code)
+      }
+      return new Response(null, { status: 204 })
+    }) as typeof fetch
+  })
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    if (originalDocument === undefined) delete (globalThis as Record<string, unknown>).document
+    else globalThis.document = originalDocument
+  })
+
+  for (const ok of [true, false]) {
+    it(`${ok ? 'successful switch' : 'single failure with fallback'} keeps the exit out of the bell`, async () => {
+      // Both outcomes return a new live row for the exact same conversation, even when ok=false.
+      let respond!: (response: Response) => void
+      const notificationFetch = globalThis.fetch
+      globalThis.fetch = ((url: unknown, init?: RequestInit) =>
+        String(url).startsWith('/api/fleet/switch-account')
+          ? new Promise<Response>(resolve => { respond = resolve })
+          : notificationFetch(url as string, init)) as typeof fetch
+      let prev = notifyFleetTransitions(null, [source], 'en')
+      const request = postSwitch(source.id, 'other-account', false, 'en')
+      for (let poll = 0; poll < 3; poll++) {
+        prev = notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      }
+      expect(bells).toEqual([])
+      respond(Response.json({ ok, id: ok ? 'target-account' : 'previous-account', message: 'Continued' }))
+      expect(await request).toMatchObject({ ok })
+      const rows = [
+        { ...source, state: 'exited' },
+        { ...source, id: ok ? 'target-account' : 'previous-account', state: 'waiting' },
+      ]
+      prev = notifyFleetTransitions(prev, rows, 'en')
+      prev = notifyFleetTransitions(prev, rows, 'en')
+      notifyFleetTransitions(prev, rows, 'en')
+      expect(prev[source.id]).toBe('exited')
+      expect(bells).not.toContain('session.exited')
+      expect(captured).toHaveLength(0)
+    })
+  }
+
+  it('defers an exit during the request, then keeps it after double failure', async () => {
+    let respond!: (response: Response) => void
+    const notificationFetch = globalThis.fetch
+    globalThis.fetch = ((url: unknown, init?: RequestInit) =>
+      String(url).startsWith('/api/fleet/switch-account')
+        ? new Promise<Response>(resolve => { respond = resolve })
+        : notificationFetch(url as string, init)) as typeof fetch
+    let prev = notifyFleetTransitions(null, [source], 'en')
+    const request = postSwitch(source.id, 'other-account', false, 'en')
+    expect(getReopening().has(source.id)).toBe(true)
+    const ended = [{ ...source, state: 'exited' }]
+    prev = notifyFleetTransitions(prev, ended, 'en')
+    prev = notifyFleetTransitions(prev, ended, 'en')
+    expect(bells).toEqual([])
+    expect(prev[source.id]).toBe('working')
+    respond(Response.json({ ok: false, message: 'Both starts failed', ended: true, endedId: source.id }))
+    expect(await request).toMatchObject({ ended: true })
+    expect(getReopening().has(source.id)).toBe(false)
+    prev = notifyFleetTransitions(prev, ended, 'en')
+    notifyFleetTransitions(prev, ended, 'en')
+    expect(bells).toEqual(['session.exited'])
+  })
+
+
+  for (const state of ['working', 'waiting', 'waiting-approval', 'exited', 'lost', 'unknown', 'closed', 'missing']) {
+    it(`cross-harness handoff to a ${state} successor only suppresses a live continuation`, () => {
+      const linked = { ...source, handoffTo: 'cross-harness-target' }
+      let prev = notifyFleetTransitions(null, [linked], 'en')
+      const target = { id: linked.handoffTo, conversationId: 'new-conversation', harness: 'codex', state }
+      const rows = [{ ...linked, state: 'exited' }, ...(state === 'missing' ? [] : [target])]
+      prev = notifyFleetTransitions(prev, rows, 'en')
+      const live = ['working', 'waiting', 'waiting-approval'].includes(state)
+      expect(bells.filter(code => code === 'session.exited')).toEqual(live ? [] : ['session.exited'])
+      prev = notifyFleetTransitions(prev, rows, 'en')
+      notifyFleetTransitions(prev, rows, 'en')
+      expect(bells.filter(code => code === 'session.exited')).toEqual(live ? [] : ['session.exited'])
+    })
+  }
+
+  for (const success of [true, false]) {
+    it(`retains an exit through source removal during a switch, then ${success ? 'suppresses continuation' : 'announces failure'}`, async () => {
+      let respond!: (response: Response) => void
+      const notificationFetch = globalThis.fetch
+      globalThis.fetch = ((url: unknown, init?: RequestInit) =>
+        String(url).startsWith('/api/fleet/switch-account')
+          ? new Promise<Response>(resolve => { respond = resolve })
+          : notificationFetch(url as string, init)) as typeof fetch
+      let prev = notifyFleetTransitions(null, [source], 'en')
+      const request = postSwitch(source.id, 'other-account', false, 'en')
+      prev = notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      prev = notifyFleetTransitions(prev, [], 'en')
+      // A removed source may reappear before the request finishes; it is still the same pending end.
+      prev = notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      prev = notifyFleetTransitions(prev, [], 'en')
+      expect(bells).toEqual([])
+      respond(Response.json(success
+        ? { ok: true, id: 'successor', message: 'Continued' }
+        : { ok: false, ended: true, endedId: source.id, message: 'Failed' }))
+      await request
+      const rows = success ? [{ ...source, id: 'successor', state: 'waiting' }] : []
+      prev = notifyFleetTransitions(prev, rows, 'en')
+      notifyFleetTransitions(prev, rows, 'en')
+      expect(bells).toEqual(success ? [] : ['session.exited'])
+    })
+  }
+
+  it('keeps a plain kill even with an unrelated live session in the same folder', () => {
+    let prev = notifyFleetTransitions(null, [source], 'en')
+    const rows = [
+      { ...source, state: 'exited' },
+      { ...source, id: 'unrelated', conversationId: 'different-conversation' },
+    ]
+    prev = notifyFleetTransitions(prev, rows, 'en')
+    notifyFleetTransitions(prev, rows, 'en')
+    expect(bells).toEqual(['session.exited'])
+  })
+
+  it('keeps an exit when the linked continuation has also ended', () => {
+    let prev = notifyFleetTransitions(null, [source], 'en')
+    const rows = [{ ...source, state: 'exited' }, { ...source, id: 'failed-continuation', state: 'exited' }]
+    prev = notifyFleetTransitions(prev, rows, 'en')
+    notifyFleetTransitions(prev, rows, 'en')
+    expect(bells).toEqual(['session.exited'])
+  })
+})
+
+describe('authoritative session ends do not need a second SSE change', () => {
+  for (const state of ['working', 'waiting']) {
+    it(`announces a kill while ${state} on the first exit, exactly once after vanishing`, () => {
+      const source = { id: 'killed', state, title: 'Killed worker', cwd: '/repo/task', harness: 'codex' }
+      let prev = notifyFleetTransitions(null, [source], 'en')
+      prev = notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      expect(captured).toHaveLength(1)
+      expect(captured[0]!.title).toContain('Session Closed')
+      expect(captured[0]!.body).toContain('Killed worker')
+      prev = notifyFleetTransitions(prev, [], 'en')
+      prev = notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      notifyFleetTransitions(prev, [{ ...source, state: 'exited' }], 'en')
+      expect(captured).toHaveLength(1)
+    })
+  }
+
+  it('keeps old exited rows silent on page load and subsequent snapshots', () => {
+    const rows = [{ id: 'old', state: 'exited' }]
+    let prev = notifyFleetTransitions(null, rows, 'en')
+    prev = notifyFleetTransitions(prev, rows, 'en')
+    notifyFleetTransitions(prev, rows, 'en')
+    expect(captured).toHaveLength(0)
+  })
+
+  it('recognizes an end of a newly observed live row before activity confirmation', () => {
+    let prev = notifyFleetTransitions(null, [], 'en')
+    prev = notifyFleetTransitions(prev, [{ id: 'new', state: 'working' }], 'en')
+    notifyFleetTransitions(prev, [{ id: 'new', state: 'exited' }], 'en')
+    expect(captured).toHaveLength(1)
   })
 })

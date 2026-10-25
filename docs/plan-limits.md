@@ -134,8 +134,10 @@ runtime uses provider billing rather than subscription plans and is excluded fro
 `planSessions` helper for sustainable parallel capacity and pause times. Hours are planning metadata,
 not an input to capacity arithmetic. `/usage/limits` renders
 the same `NayLimitsTab` as the usage modal. `/usage/history` shows account readings for the weekly
-and five-hour windows and states that history begins when the server starts. History is held in
-memory; these pages add no persistence or polling loop.
+and five-hour windows. History is persisted by `plan-history.ts` in `plan-history.json`: one point
+per 5-minute bucket (the newest reading wins), 14 days, at most 4032 points per account, each point
+carrying its windows' reset ids so Real breaks where a window renewed. A new meter segment drops the
+account's series. The raw in-memory readings still feed the pace maths; these pages add no polling loop.
 
 Expected usage is a straight line from zero at the current window's start to 100% at renewal.
 Actual percentages retain their measured values on the same percentage scale, without independent
@@ -210,7 +212,7 @@ positive burn rate). When the last live session leaves the fleet, Plan retains t
 Now omits the recent burn/ideal pair because the account status also considers the weekly
 budget; equal recent rates can coexist with an over-budget week. Its weekly expected tile and
 status remain visible. Current account readings and historical samples have separate lifetimes:
-the charts describe history recorded since server startup, rather than implying no current
+the charts describe the persisted history, rather than implying no current
 reading exists. Limits show the update age per account, from that account's `updatedAt`, without
 a competing modal-wide age.
 

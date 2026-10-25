@@ -3,6 +3,7 @@
  */
 
 import { versionedAsset } from './brand'
+import { getReopening } from './reopeningStore'
 import type { SessionMeta } from '@agentistics/core'
 import { isNayCwd, sessionLabel } from '@agentistics/core'
 import { HARNESS_LABELS } from './harness'
@@ -614,7 +615,10 @@ export function fleetActivityStates(
  */
 let unconfirmed: Record<string, SessionActivity> = {}
 
-type FleetNotifyRow = { id: string; conversationId?: string; state: string; title?: string; cwd?: string; harness?: string; model?: string }
+/** Observed terminal transitions awaiting an in-flight switch, including a vanished source. */
+const pendingExits = new Map<string, FleetNotifyRow>()
+
+type FleetNotifyRow = { id: string; conversationId?: string; handoffTo?: string; state: string; title?: string; cwd?: string; harness?: string; model?: string }
 
 /**
  * "Not opened for a while": read this poll into the store's waiting clocks and raise each session
@@ -662,10 +666,12 @@ export function notifyFleetTransitions(
   raiseStale(rows, lang)
   // `null` is the first snapshot — see the rule above. It is deliberately distinct from `{}`, which
   // is a machine that genuinely had no sessions a moment ago and now has one.
-  if (prev === null) { unconfirmed = seen; return seen }
+  if (prev === null) { pendingExits.clear(); unconfirmed = seen; return seen }
 
   /*
-   * A STATE COUNTS ONLY ONCE IT HAS BEEN SEEN TWICE IN A ROW.
+   * AN ACTIVITY STATE COUNTS ONLY ONCE IT HAS BEEN SEEN TWICE IN A ROW.
+   * An authoritative exit is different: SSE sends changes, not repeated polls, so waiting for
+   * another exited snapshot can lose a real end forever. Exits are handled separately below.
    *
    * `attention.ts` decides `working` from whether the pane MOVED, and a pane moves for reasons that
    * are not a turn: a repaint, an advisory line, a plugin notice. One of those flips a session to
@@ -709,18 +715,46 @@ export function notifyFleetTransitions(
   const announce: Record<string, SessionActivity> = {}
   for (const [id, state] of Object.entries(seen)) {
     if (prev[id] === state) continue          // already announced, nothing new
-    if (unconfirmed[id] !== state) continue   // first sighting — wait for the next poll
+    if (state === 'exited') {
+      if (pendingExits.has(id)) {
+        pendingExits.set(id, rows.find(r => r.id === id)!)
+        continue
+      }
+      // First seen already ended is history. A row seen live, even for one snapshot, did end here.
+      const before = prev[id] ?? unconfirmed[id]
+      if (before && before !== 'exited') {
+        pendingExits.set(id, rows.find(r => r.id === id)!)
+      } else {
+        next[id] = state
+      }
+      continue
+    }
+    if (unconfirmed[id] !== state) continue   // activity flicker — wait for the next observation
     const firstSight = prev[id] === undefined
     next[id] = state
     if (!firstSight || state === 'waiting-approval') announce[id] = state
+  }
+  for (const [id, source] of pendingExits) {
+    // Keep the evidence even if the source disappears while its switch request is pending.
+    if (getReopening().has(id)) continue
+    const continued = rows.some(r => r.id !== id &&
+      (r.id === source.handoffTo || (!!source.conversationId && r.conversationId === source.conversationId)) &&
+      (r.state === 'working' || r.state === 'waiting' || r.state === 'waiting-approval'))
+    next[id] = 'exited'
+    if (!continued) announce[id] = 'exited'
   }
   // A row that vanished from the fleet stops being tracked, or its last state would be re-announced
   // if it came back to the same one.
   for (const id of Object.keys(next)) if (!(id in seen)) delete next[id]
   unconfirmed = seen
-  if (Object.keys(announce).length === 0) return next
+  // Settled exits no longer need retained row metadata. Pending switches remain until settled.
+  const settledExits = [...pendingExits.keys()].filter(id => !getReopening().has(id))
+  if (Object.keys(announce).length === 0) {
+    for (const id of settledExits) pendingExits.delete(id)
+    return next
+  }
   const map = new Map<string, NotifiableSession>()
-  for (const r of rows) {
+  for (const r of [...rows, ...pendingExits.values()]) {
     map.set(r.id, {
       ...(r.title ? { title: r.title } : {}),
       ...(r.cwd ? { project_path: r.cwd } : {}),
@@ -728,10 +762,11 @@ export function notifyFleetTransitions(
       ...(r.model ? { model: r.model } : {}),
     })
   }
-  // Only what was CONFIRMED this poll AND is a transition — `prev` is passed as the baseline so the
+  // Only confirmed activity changes and authoritative exits — `prev` is passed as the baseline so the
   // handler's own "has it changed" check still holds for each of them. `next` is what the caller
   // keeps, withheld rows included: a row seen for the first time now is not news, and must be a
   // baseline the moment it changes.
+  for (const id of settledExits) pendingExits.delete(id)
   handleSessionStateTransitions(prev, announce, map, lang)
   return next
 }
@@ -740,6 +775,7 @@ export function notifyFleetTransitions(
 export function resetNotificationMemory(): void {
   latestSeen = {}
   unconfirmed = {}
+  pendingExits.clear()
   resetNayNotifyStore()
 }
 

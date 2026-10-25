@@ -2,12 +2,16 @@ import { describe, expect, it } from 'bun:test'
 import { areaBadges } from './areaBadges'
 
 describe('areaBadges', () => {
+  it('check-in warnings join Sessions even if fleet attention has not answered', () => {
+    expect(areaBadges({ checkinsOverdue: 2 })).toEqual({ sessions: 2 })
+    expect(areaBadges({ attention: 4, checkinsOverdue: 0 })).toEqual({ sessions: 4 })
+  })
   it('maps each source to its area', () => {
     expect(areaBadges({
       attention: 4,
       usageRows: [{ paceStatus: 'over' }, { status: 'hold' }, { paceStatus: 'under' }],
       checkinsOverdue: 2,
-    })).toEqual({ sessions: 4, usage: 2, leadership: 2 })
+    })).toEqual({ sessions: 6, usage: 2 })
   })
   it('leaves the key absent when the source did not answer or counts zero', () => {
     expect(areaBadges({})).toEqual({})

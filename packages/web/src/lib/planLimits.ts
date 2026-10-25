@@ -17,7 +17,7 @@ export type RegisteredPlan = { harness: PlanLimits['harness']; plan: string; acc
 export interface PlanReadings {
   account: string
   harness: PlanLimits['harness']
-  points: { at: number; weekPct: number | null; fiveHourPct: number | null }[]
+  points: { at: number; weekPct: number | null; fiveHourPct: number | null; weekReset?: number; fiveReset?: number }[]
 }
 
 export interface PlanLimitsSnapshot {

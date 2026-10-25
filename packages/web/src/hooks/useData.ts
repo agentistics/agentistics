@@ -10,6 +10,7 @@ import { afterFinale, sinceUpdate } from '../lib/finaleGate'
 import { acceptPayload, classifyLoadError, holdLoadError, inUpdateGrace, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, dataUrl, SLIM_FOLLOWUP_MS, type LoadError, type StartupStripState } from '../lib/startupLoad'
 import { cacheFiguresOf } from '../lib/cacheFigures'
 import { useNativeVisible } from './useEngineCaps'
+import { startDataRefresh } from '../lib/dataRefresh'
 
 /**
  * True only for a non-empty string. `start_time`/`end_time`/`date` fields are typed as `string`
@@ -367,20 +368,7 @@ export function clearDataCache(): void {
   try { localStorage.removeItem(DATA_CACHE_KEY) } catch { /* disabled — nothing to clear */ }
 }
 
-export const LIVE_INTERVAL_OPTIONS = [
-  { label: '10s', value: 10 },
-  { label: '30s', value: 30 },
-  { label: '1m', value: 60 },
-  { label: '5m', value: 300 },
-]
-
-export const LIVE_INTERVAL_OPTIONS_RISKY = [
-  { label: '1s', value: 1 },
-  { label: '2s', value: 2 },
-  { label: '5s', value: 5 },
-]
-
-export function useData() {
+export function useData(working = false) {
   // Seed from the local cache so a reopen paints immediately instead of the
   // loading screen; a background refresh then replaces it with fresh data.
   const [data, setData] = useState<AppData | null>(() => readDataCache())
@@ -392,8 +380,6 @@ export function useData() {
   /** The last refresh failed while data WAS on screen: the page stays, a line says the server is not
    *  answering. Cleared by the next success. */
   const [offline, setOffline] = useState<LoadError | null>(null)
-  const [liveUpdates, setLiveUpdates] = useState(true)
-  const [updateInterval, setUpdateInterval] = useState(30)
   const streamRef = useRef<EventSource | null>(null)
   const refreshFlightRef = useRef({ inFlight: false, pending: false })
   const patchEpochRef = useRef(0)
@@ -424,6 +410,7 @@ export function useData() {
   const schedule = useCallback((ms: number) => {
     const p = pollRef.current
     if (p.timer) clearTimeout(p.timer)
+    if (typeof document !== 'undefined' && document.hidden) return
     p.timer = setTimeout(() => { p.timer = null; void refreshRef.current() }, ms)
   }, [])
 
@@ -434,6 +421,7 @@ export function useData() {
    * which retries on its own.
    */
   const refresh = useCallback(async () => {
+    if (typeof document !== 'undefined' && document.hidden) return
     const flight = refreshFlightRef.current
     if (flight.inFlight) { flight.pending = true; return }
     flight.inFlight = true
@@ -490,7 +478,7 @@ export function useData() {
   }, [openProgress, schedule])
   refreshRef.current = refresh
 
-  // Silent background refresh (a `change` event, the live-updates interval).
+  // Silent background refresh from server events or the automatic fallback.
   const fetchData = useCallback(async () => { await refresh() }, [refresh])
 
   useEffect(() => {
@@ -514,7 +502,6 @@ export function useData() {
   // (see lib/eventStream.ts) with the notification stream rather than opening a second one — two
   // sockets to the same URL spent two of the browser's ~6 per-origin slots that live terminals need.
   useEffect(() => {
-    if (!liveUpdates) return
     const offConnected = subscribeEvent('connected', () => {
       if (dataRevisionRef.current) void fetchData()
     })
@@ -539,17 +526,24 @@ export function useData() {
       void fetchData()
     })
     return () => { offConnected(); offPatch(); offChange() }
-  }, [liveUpdates, fetchData])
+  }, [fetchData])
 
-  // Fallback polling at the selected interval when live updates are enabled.
-  useEffect(() => {
-    if (!liveUpdates) return
-    const id = setInterval(() => {
-      if (dataRevisionRef.current && eventStream.healthy()) return
-      void fetchData()
-    }, updateInterval * 1000)
-    return () => { clearInterval(id) }
-  }, [liveUpdates, updateInterval, fetchData])
+  // Faster while sessions work, slower while idle. Returning to the page always asks immediately,
+  // even with a healthy stream: a suspended browser may have missed events. Old live/interval
+  // preferences are deliberately never read.
+  useEffect(() => startDataRefresh({
+    working, document, window,
+    healthy: () => !!dataRevisionRef.current && eventStream.healthy(),
+    refresh: () => {
+      if (!dataRef.current) { void fetchData(); return }
+      parkedRef.current?.()
+      parkedRef.current = afterFinale(() => { parkedRef.current = null; void fetchData() })
+    },
+    pause: () => {
+      if (pollRef.current.timer) clearTimeout(pollRef.current.timer)
+      pollRef.current.timer = null
+    },
+  }), [working, fetchData])
 
   // Liveness: with data on screen, a stopped server is noticed in seconds (not at the next 30 s refresh),
   // and when it answers again the data is refreshed by itself — no manual reload.
@@ -599,7 +593,7 @@ export function useData() {
     projects: loadProgress.projects?.progress,
   }
 
-  return { data: shown, loading, loadProgress, error, loadError, offline, startup, refetch, liveUpdates, setLiveUpdates, updateInterval, setUpdateInterval }
+  return { data: shown, loading, loadProgress, error, loadError, offline, startup, refetch }
 }
 
 /**

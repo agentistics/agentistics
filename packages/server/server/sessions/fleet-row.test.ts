@@ -177,3 +177,8 @@ describe('fleetRow — "open in terminal" (F2.0b)', () => {
     }
   })
 })
+
+it('carries the exact handoff successor into the browser row', () => {
+  expect(fleetRow(row({ handoffTo: 'target', state: 'exited' }), S).handoffTo).toBe('target')
+  expect(fleetRow(row(), S).handoffTo).toBeUndefined()
+})

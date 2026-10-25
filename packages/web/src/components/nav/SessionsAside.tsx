@@ -1795,6 +1795,7 @@ export function SessionsAside({
 
       <div
         ref={asideScrollRef}
+        data-mobile-sessions-scroll={isMobile || undefined}
         className="ag-noscroll"
         style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}
         onDragOverCapture={autoScrollDuringDrag}

@@ -103,6 +103,8 @@ export interface FleetRow {
   /** F4.D — the modes a structured row can be set to directly; absent: only `cycleMode` exists. */
   modes?: SessionMode[]
   conversationId?: string
+  /** Exact managed successor recorded by the existing handoff registry. */
+  handoffTo?: string
   approvalLines?: string[]
   /** `freeText` marks the option that is a FIELD — picking it opens one. See `approval-spec.ts`. */
   dialogOptions?: { number: number; label: string; selected?: boolean; freeText?: boolean; checked?: boolean }[]

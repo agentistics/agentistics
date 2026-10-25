@@ -1,12 +1,24 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { APP_AREAS, UNLISTED_ROUTES, areaOfPath, searchAreas, firstPath } from './appAreas'
+import { APP_AREAS, UNLISTED_ROUTES, areaOfPath, isSessionsWorkspace, searchAreas, firstPath } from './appAreas'
 
 describe('areaOfPath', () => {
+  for (const [path, page] of [['/leadership', 'leaders'], ['/leadership/checkins', 'checkins'],
+    ['/leadership/handoffs', 'handoffs'], ['/leadership/away', 'away']] as const) {
+    test(`${path} remains a deep link in Sessions without becoming a terminal workspace`, () => {
+      expect(areaOfPath(path)?.area.id).toBe('sessions')
+      expect(areaOfPath(path)?.page?.id).toBe(page)
+      expect(isSessionsWorkspace(path)).toBe(false)
+      expect(searchAreas(page === 'leaders' ? 'Líderes' : page === 'handoffs' ? 'Passagens' : page === 'away' ? 'Away' : 'Check-ins', 'en').some(r => r.area.id === 'sessions' && r.page.path === path)).toBe(true)
+    })
+  }
   test('sessions and everything under it', () => {
     expect(areaOfPath('/sessions')?.area.id).toBe('sessions')
     expect(areaOfPath('/sessions/3b84a922/terminal')?.area.id).toBe('sessions')
+    expect(isSessionsWorkspace('/sessions')).toBe(true)
+    expect(isSessionsWorkspace('/sessions/3b84a922/terminal')).toBe(true)
+    expect(isSessionsWorkspace('/sessions-report')).toBe(false)
   })
   test('a lookalike prefix is not the area', () => {
     expect(areaOfPath('/sessions-report')).toBeNull()
@@ -45,7 +57,7 @@ describe('registry shape', () => {
     }
   })
   test('order is the owner-approved one', () => {
-    expect(APP_AREAS.map(a => a.id)).toEqual(['sessions', 'tasks', 'leadership', 'usage', 'metrics', 'repositories', 'vault', 'settings'])
+    expect(APP_AREAS.map(a => a.id)).toEqual(['sessions', 'tasks', 'usage', 'metrics', 'repositories', 'vault', 'settings'])
   })
 })
 
@@ -75,6 +87,11 @@ describe('searchAreas', () => {
 })
 
 describe('firstPath', () => {
+  test('Sessions defaults to its workspace and remembers its leadership pages', () => {
+    const sessions = APP_AREAS.find(a => a.id === 'sessions')!
+    expect(firstPath(sessions)).toBe('/sessions')
+    expect(firstPath(sessions, '/leadership/checkins')).toBe('/leadership/checkins')
+  })
   test('the remembered page wins only when it belongs to the area', () => {
     const usage = APP_AREAS.find(a => a.id === 'usage')!
     expect(firstPath(usage)).toBe('/usage')
