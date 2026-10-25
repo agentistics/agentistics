@@ -2,7 +2,7 @@
  * SessionEnding — what the session view shows between pressing "End session" and the session being
  * gone. The twin of `SessionCreating`: the same loader, the same centred column and the same type
  * tokens, so opening and ending read as one pair of states. It REPLACES the conversation (and with
- * it the composer) for exactly as long as the kill is in flight; `SessionEndingGate` puts the
+ * it the composer) for at least 800 ms and until the session leaves Active; `SessionEndingGate` puts the
  * conversation back, untouched, if the kill is refused.
  */
 import type { ReactNode } from 'react'

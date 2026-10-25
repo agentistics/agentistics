@@ -23,7 +23,7 @@ import { chatHoldsText, confirmSendLanded, parseActResult, sendUnconfirmedMessag
 import { nativeAct, readNativeFleet } from './nativeFleet'
 import { withNativeSessions } from './nativeFleetRow'
 import { isNativeSessionId } from './sessionRoute'
-import { markEnding, unmarkEnding } from './endingSessions'
+import { withEnding } from './endingSessions'
 
 // Central relay support was removed with the member UI. These local-only placeholders keep the
 // old transport branch inert while the shared fleet state remains a machine-local concern.
@@ -307,6 +307,21 @@ let pollLang: 'pt' | 'en' = 'en'
 
 function emit(): void {
   for (const l of listeners) l()
+}
+
+/** Use the shared fleet feed: an acknowledged kill can still have a live row for another poll. */
+function waitUntilInactive(id: string): Promise<void> {
+  return new Promise(resolve => {
+    const changed = () => {
+      const row = snapshot.sessions.find(row => row.id === id || row.conversationId === id)
+      if (row && ['working', 'waiting', 'waiting-approval'].includes(row.state)) return
+      listeners.delete(changed)
+      if (listeners.size === 0) stopPolling()
+      resolve()
+    }
+    listeners.add(changed)
+    changed()
+  })
 }
 
 /**
@@ -697,12 +712,11 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
     }
   }, [lang])
 
-  // ENDING A SESSION HAS A STATE: from the moment a `kill` is sent until it settles (see
+  // ENDING A SESSION HAS A STATE: hold success until it is readable and no longer active (see
   // `endingSessions.ts`). Here because this is the one door every surface ends a session through.
   const act = useCallback<FleetState['act']>(async req => {
     if (req.action !== 'kill') return actRaw(req)
-    markEnding(req.id)
-    try { return await actRaw(req) } finally { unmarkEnding(req.id) }
+    return withEnding(req.id, () => actRaw(req), () => waitUntilInactive(req.id))
   }, [actRaw])
 
   return {

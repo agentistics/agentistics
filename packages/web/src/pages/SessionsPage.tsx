@@ -81,7 +81,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { FleetOverview } from '../components/sessions/FleetOverview'
 import { SessionCreating } from '../components/sessions/SessionCreating'
 import { SessionEndingGate } from '../components/sessions/SessionEnding'
-import { useEnding } from '../lib/endingSessions'
+import { useEndingSelection } from '../lib/endingSessions'
 import { NewSessionModal } from '../components/sessions/NewSessionModal'
 
 // How long a navigation may keep claiming its session is still coming is `ARRIVAL_WAIT_MS` in
@@ -498,9 +498,13 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   // Matched on BOTH ids for the same reason `fleetIndex` is keyed on both: a managed row is named
   // by its tmux session, while a closed conversation is named by its own conversation id, and a
   // link may carry either.
-  const selected = sessionId === undefined
+  const matchedSelected = sessionId === undefined
     ? undefined
     : fleet.rows.find(r => r.id === sessionId || r.conversationId === sessionId)
+  // The fleet may remove the row before the minimum ending interval has elapsed. Keep this view
+  // mounted until the kill completes, so its title and hidden draft survive that fast transition.
+  const { row: selected, ending: selectedEnding } = useEndingSelection(sessionId, matchedSelected)
+
   /** A STRUCTURED row's `cli` pane is the door to the same conversation as a TUI — every mount. */
   const selectedOpenInTerminal = openInTerminalFor(selected ? rowIndex.get(selected.id) : undefined, act)
 
@@ -2140,7 +2144,6 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   }, [])
   useEffect(() => { setSessionDrawer(false) }, [selected?.id])
   // Ending a session shows its own state on the session view; the drawer must not sit over it.
-  const selectedEnding = useEnding(selected?.id)
   useEffect(() => { if (selectedEnding) setSessionDrawer(false) }, [selectedEnding])
   const unreadInbox = useNotifications().filter(n => !n.read).length
   const planLimits = usePlanLimits()
