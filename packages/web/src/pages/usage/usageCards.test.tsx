@@ -1,14 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Outlet, Route, Routes, useOutletContext } from 'react-router-dom'
 import { isAdapterHarness, planBudget, planPace, surfaceHarnesses, type PlanLimits } from '@agentistics/core'
 import { __setPlanLimitsForTest } from '../../lib/planLimits'
 import type { UsageBudgetRow } from '../../lib/usagePlan'
 import { HARNESS_LABELS } from '../../lib/harness'
 import UsageNowPage from './UsageNowPage'
 import UsageHistoryPage from './UsageHistoryPage'
-import UsagePlanPage, { UsagePlanContent } from './UsagePlanPage'
-import UsageLimitsPage from './UsageLimitsPage'
 import { NayLimitsTab } from '../../components/nay/NayLimitsTab'
 import { updatedPhrase, shortWhen } from '../../lib/planLimits'
 import { PlanLimitBars, PlanUsageCard } from '../../components/PlanLimitMeter'
@@ -31,6 +29,7 @@ const limit = (r: UsageBudgetRow): PlanLimits => ({
   source: 'codex-rollout', updatedAt: NOW,
   windows: [{ kind: 'week', usedPct: r.weekPct, resetsAt: r.weekResetsAt }, { kind: '5h', usedPct: r.fiveHourPct, resetsAt: NOW + 3_600_000 }],
 })
+const UsageLimitsPage = () => { const { lang } = useOutletContext<{ lang: 'pt' | 'en' }>(); return <NayLimitsTab embedded lang={lang} isMobile={false} /> }
 function render(page = <UsageNowPage />, width = 1440, lang: 'pt' | 'en' = 'pt') {
   const root = globalThis as { window?: unknown }
   const previous = root.window
@@ -78,7 +77,7 @@ describe('usage account cards', () => {
       expect(budget.burnPctPerHour).toBeGreaterThan(0) // policy fallback is present, but not measured
       if (!renewed) expect(budget.status).toBe('tight')
       __setPlanLimitsForTest([observed], NOW, [], [budget])
-      for (const lang of ['pt', 'en'] as const) for (const page of [<UsageNowPage />, <UsagePlanPage />]) {
+      for (const lang of ['pt', 'en'] as const) for (const page of [<UsageNowPage />]) {
         const html = render(page, 390, lang)
         expect(html).toContain(lang === 'pt' ? 'Sem medida ainda' : 'Not measured yet')
         expect(html).not.toContain('0 / 1')
@@ -111,12 +110,9 @@ describe('usage account cards', () => {
     seed([row({ status: 'tight', burnPctPerHour: 0.19, sustainablePctPerHour: 0.19, liveSessions: [], suggestedParallel: 1 })])
     for (const lang of ['pt', 'en'] as const) for (const width of [390, 1440]) {
       const now = render(<UsageNowPage />, width, lang)
-      const plan = render(<UsagePlanPage />, width, lang)
       expect(now).toContain(lang === 'pt' ? 'Acima do ritmo' : 'Over pace')
       expect(now).not.toContain('0.19 / 0.19')
       expect(now).toContain('0 / 1')
-      expect(plan).toContain(lang === 'pt' ? '1 sessão em paralelo' : '1 parallel session')
-      expect(plan).not.toContain(lang === 'pt' ? 'Sem medida ainda' : 'Not measured yet')
       expect(now).toContain('grid-template-rows:subgrid')
       expect(now).toContain('data-usage-metrics')
     }
@@ -168,30 +164,6 @@ describe('usage account cards', () => {
       expect(html).not.toContain(lang === 'pt' ? '>Sem pausa<' : '>No pause<')
     }
   })
-  test('planning explains sustainable capacity and renders pause and unmeasured states', () => {
-    for (const lang of ['pt', 'en'] as const) {
-      seed([row({ status: 'hold', pauseUntil: NOW + 3_600_000 }), row({ harness: 'codex', freeSlotsMeasured: false })])
-      const html = render(<UsagePlanPage />, 390, lang)
-      expect(html).toContain(lang === 'pt' ? 'Em pausa até' : 'Paused until')
-      expect(html).toContain(lang === 'pt' ? 'Sem medida ainda' : 'Not measured yet')
-      expect(html).toContain(lang === 'pt' ? 'Período planejado' : 'Planning window')
-      expect(html).toContain(lang === 'pt' ? '4 horas' : '4 hours')
-      expect(html).toContain(lang === 'pt' ? 'aumentar as horas não aumenta a capacidade' : 'increasing hours does not increase plan capacity')
-    }
-  })
-  test('planning distinguishes identical account nicknames by harness and plan', () => {
-    seed([row({ accountLabel: 'Principal' }), row({ harness: 'codex', accountLabel: 'Principal', plan: 'ChatGPT Plus' })])
-    for (const lang of ['pt', 'en'] as const) {
-      const html = render(<UsagePlanPage />, 390, lang)
-      expect(html).toContain(`${HARNESS_LABELS.claude} · Principal`)
-      expect(html).toContain(`${HARNESS_LABELS.codex} · Principal`)
-      expect(html).toContain('ChatGPT Plus')
-      expect(html).toContain('min="0"')
-      expect(html).toContain('step="any"')
-      expect(html).toContain('aria-invalid="false"')
-      expect(html).toContain('text-align:left')
-    }
-  })
 
   test('two accounts of a harness produce two cards, with their own meters', () => {
     seed([row(), row({ account: 'work', accountLabel: 'Work', weekPct: 80 })])
@@ -241,13 +213,6 @@ describe('usage account cards', () => {
       expect(html).toContain(lang === 'pt' ? 'Registrar plano' : 'Register plan')
       if (width === 390) expect(html).toContain('min-height:44px')
     }
-  })
-  test('planning uses the shared helper and a numeric hours field', () => {
-    seed([row()])
-    const html = render(<UsagePlanPage />, 390)
-    expect(html).toContain('type="number"')
-    expect(html).toContain('value="4"')
-    expect(html).toContain('2 sessões em paralelo')
   })
   test('history states its empty state and empty readings', () => {
     __setPlanLimitsForTest([], NOW)
@@ -312,25 +277,6 @@ describe('usage percent series', () => {
   })
 })
 
-for (const lang of ['pt', 'en'] as const) test(`planning units, spacing and invalid edits retain account context in ${lang}`, () => {
-  seed([row()])
-  const html = render(<UsagePlanPage />, 390, lang)
-  expect(html).toContain(lang === 'pt' ? '>horas</span>' : '>hours</span>')
-  expect(html).toContain('margin:16px 0 20px')
-  expect(html).toContain(lang === 'pt' ? 'Em execução agora' : 'Running now')
-  expect(html).toContain(lang === 'pt' ? 'Renovação semanal' : 'Weekly renewal')
-  for (const initialHours of ['-2', '0', '', 'text']) {
-    const invalid = render(<UsagePlanContent initialHours={initialHours} />, 390, lang)
-    expect(invalid).toContain('aria-invalid="true"')
-    expect(invalid).toContain('aria-describedby=')
-    expect(invalid).toContain('role="alert"')
-    expect(invalid).toContain('color:var(--accent-red)')
-    expect(invalid).toContain('max5x')
-    expect(invalid).toContain('N/A')
-    expect(invalid).not.toContain(lang === 'pt' ? '2 sessões em paralelo' : '2 parallel sessions')
-  }
-})
-
 for (const lang of ['pt', 'en'] as const) test(`the pause tile reads plainly, in the same short form as "no pause" (${lang})`, () => {
   seed([row({ status: 'tight', pauseUntil: undefined })])
   const html = render(<UsageNowPage />, 390, lang)
@@ -373,10 +319,10 @@ for (const lang of ['pt', 'en'] as const) for (const width of [390, 1440]) test(
   }
 })
 
-for (const lang of ['pt', 'en'] as const) test(`Nay manage plans is a framed 44px action aligned with the cards in ${lang}`, () => {
+for (const lang of ['pt', 'en'] as const) test(`Nay manage accounts is a framed 44px action aligned with the cards in ${lang}`, () => {
   seed([row()])
   const html = render(<NayLimitsTab lang={lang} isMobile />, 390, lang)
-  expect(html).toContain(lang === 'pt' ? 'Gerenciar planos' : 'Manage plans')
+  expect(html).toContain(lang === 'pt' ? 'Gerenciar contas' : 'Manage accounts')
   expect(html).toContain('border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated);color:var(--text-primary)')
   expect(html).toContain('padding:2px 0 0')
   expect(html).toContain('min-height:44px;min-width:44px')

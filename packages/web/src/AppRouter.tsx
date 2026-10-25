@@ -7,8 +7,7 @@ import { bootReleased, useBootHold } from './lib/bootSplash'
 
 const HomePage = lazy(() => import('./pages/HomePage'))
 const UsageNowPage = lazy(() => import('./pages/usage/UsageNowPage'))
-const UsagePlanPage = lazy(() => import('./pages/usage/UsagePlanPage'))
-const UsageLimitsPage = lazy(() => import('./pages/usage/UsageLimitsPage'))
+const UsageAccountsPage = lazy(() => import('./pages/usage/UsageAccountsPage'))
 const UsageHistoryPage = lazy(() => import('./pages/usage/UsageHistoryPage'))
 const LeadersPage = lazy(() => import('./pages/leadership/LeadersPage'))
 const CheckinsPage = lazy(() => import('./pages/leadership/CheckinsPage'))
@@ -49,7 +48,6 @@ const ProvidersSettings = lazy(() => import('./pages/settings/ProvidersSettings'
 const MemorySettings = lazy(() => import('./pages/settings/MemorySettings'))
 const TeamsSettings = lazy(() => import('./pages/settings/TeamsSettings'))
 const PricingSettings = lazy(() => import('./pages/settings/PricingSettings'))
-const BillingSettings = lazy(() => import('./pages/settings/BillingSettings'))
 
 /**
  * A route's lazy chunk is on its way. During the BOOT this is the first route of the app, and the
@@ -71,8 +69,9 @@ export default function AppRouter() {
         <Route element={<AppLayout />}>
           <Route index element={<Suspense fallback={<PageFallback />}><HomePage /></Suspense>} />
           <Route path="usage" element={<Suspense fallback={<PageFallback />}><UsageNowPage /></Suspense>} />
-          <Route path="usage/plan" element={<Suspense fallback={<PageFallback />}><UsagePlanPage /></Suspense>} />
-          <Route path="usage/limits" element={<Suspense fallback={<PageFallback />}><UsageLimitsPage /></Suspense>} />
+          <Route path="usage/plan" element={<Navigate to="/usage" replace />} />
+          <Route path="usage/limits" element={<Navigate to="/usage/accounts" replace />} />
+          <Route path="usage/accounts" element={<Suspense fallback={<PageFallback />}><UsageAccountsPage /></Suspense>} />
           <Route path="usage/history" element={<Suspense fallback={<PageFallback />}><UsageHistoryPage /></Suspense>} />
           <Route path="leadership" element={<Suspense fallback={<PageFallback />}><LeadersPage /></Suspense>} />
           <Route path="leadership/checkins" element={<Suspense fallback={<PageFallback />}><CheckinsPage /></Suspense>} />
@@ -125,7 +124,7 @@ export default function AppRouter() {
             <Route path="backup" element={<Suspense fallback={<PageFallback />}><BackupSettings /></Suspense>} />
             <Route path="harnesses" element={<Suspense fallback={<PageFallback />}><HarnessesSettings /></Suspense>} />
             <Route path="pricing" element={<Suspense fallback={<PageFallback />}><PricingSettings /></Suspense>} />
-            <Route path="billing" element={<Suspense fallback={<PageFallback />}><BillingSettings /></Suspense>} />
+            <Route path="billing" element={<Navigate to="/usage/accounts" replace />} />
             <Route path="install" element={<Suspense fallback={<PageFallback />}><InstallSettings /></Suspense>} />
             <Route path="whatsnew" element={<Suspense fallback={<PageFallback />}><WhatsNewSettings /></Suspense>} />
             <Route path="live" element={<Suspense fallback={<PageFallback />}><LiveSettings /></Suspense>} />

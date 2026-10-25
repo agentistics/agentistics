@@ -54,9 +54,8 @@ export const APP_AREAS: readonly Area[] = [
   ] },
   { id: 'usage', icon: 'gauge', beta: true, labelPt: 'Uso', labelEn: 'Usage', pages: [
     { id: 'now', path: '/usage', labelPt: 'Agora', labelEn: 'Now' },
-    { id: 'plan', path: '/usage/plan', labelPt: 'Planejar', labelEn: 'Plan' },
-    { id: 'limits', path: '/usage/limits', labelPt: 'Limites', labelEn: 'Limits' },
     { id: 'history', path: '/usage/history', labelPt: 'Histórico', labelEn: 'History' },
+    { id: 'accounts', path: '/usage/accounts', labelPt: 'Contas', labelEn: 'Accounts' },
   ] },
   { id: 'metrics', icon: 'chart', labelPt: 'Métricas', labelEn: 'Metrics', pages: [
     { id: 'overview', path: '/', labelPt: 'Visão geral', labelEn: 'Overview' },
@@ -80,7 +79,7 @@ export const APP_AREAS: readonly Area[] = [
 ]
 
 /** Routes that are deliberately in no area: redirects, the footer's settings, export. */
-export const UNLISTED_ROUTES: readonly string[] = ['projects', 'hardware', 'export']
+export const UNLISTED_ROUTES: readonly string[] = ['projects', 'hardware', 'export', 'usage/plan', 'usage/limits']
 
 function under(pathname: string, prefix: string): boolean {
   if (prefix === '/') return pathname === '/'

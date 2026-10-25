@@ -4,7 +4,7 @@ import { visibleSettingsSections, SETTINGS_SECTIONS } from './settingsSections'
 const ids = (v: Parameters<typeof visibleSettingsSections>[0]) => visibleSettingsSections(v).map(s => s.id)
 
 test('solo/member: personal sections + live, no governance', () => {
-  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'billing', 'install', 'whatsnew', 'live', 'chat'])
+  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'install', 'whatsnew', 'live', 'chat'])
 })
 
 test('central owner: personal (no live) + all governance sections', () => {
@@ -26,8 +26,8 @@ test('every section has a group', () => {
   }
 })
 
-test('billing is a machine section — a central cannot price a fleet from one timeline', () => {
-  expect(ids({ central: false })).toContain('billing')
+test('billing no longer lists in Settings (moved to Usage → Accounts)', () => {
+  expect(ids({ central: false })).not.toContain('billing') // moved to Usage → Accounts
   expect(ids({ central: true, role: 'owner' })).not.toContain('billing')
   expect(ids({ central: true, role: 'member', isManager: true })).not.toContain('billing')
 })

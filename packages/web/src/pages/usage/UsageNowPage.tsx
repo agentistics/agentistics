@@ -35,8 +35,7 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
   const contentRows = { display: 'grid', gridTemplateRows: 'subgrid', gridRow: 'span 2' } as const
   return <div style={{ minWidth: 0 }}>
     <PageHeader lang={lang} areaId="usage" pageId="now" isMobile={isMobile} status={usageHeadline(rows, now, lang) ?? undefined} actions={[
-      { label: pt ? 'Ajustar limites' : 'Adjust limits', onClick: () => navigate('/usage/limits') },
-      { label: pt ? 'Planejar sessões' : 'Plan sessions', onClick: () => navigate('/usage/plan') },
+      { label: pt ? 'Gerenciar contas' : 'Manage accounts', onClick: () => navigate('/usage/accounts') },
     ]} />
     {!rows.length && !pending.length && <p style={{ color: 'var(--text-secondary)' }}>{pt ? 'Nenhum plano com leitura de uso ainda.' : 'No plans with usage readings yet.'}</p>}
     <div className="ag-grid cols-2" style={{ marginBottom: 20, ...(isMobile ? { gridTemplateColumns: 'minmax(0, 1fr)' } : {}) }}>
@@ -70,7 +69,7 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
       <UsageCharts budgets={rows} readings={readings} limits={limits} lang={lang} />
     </Section>
     {(noPlan.length > 0 || !cards.length) && <div style={{ marginTop: 20 }}>
-      <Section title={pt ? 'Sem plano registrado' : 'No registered plan'} action={<button type="button" style={dialogButtonStyle('secondary', isMobile)} onClick={() => navigate('/settings/billing')}>{pt ? 'Registrar plano' : 'Register plan'}</button>}>
+      <Section title={pt ? 'Sem plano registrado' : 'No registered plan'} action={<button type="button" style={dialogButtonStyle('secondary', isMobile)} onClick={() => navigate('/usage/accounts')}>{pt ? 'Registrar plano' : 'Register plan'}</button>}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{noPlan.map(h => <Pill key={h} tone="muted">{HARNESS_LABELS[h]}</Pill>)}</div>
       </Section>
     </div>}

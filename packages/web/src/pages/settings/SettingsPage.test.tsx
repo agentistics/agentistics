@@ -9,9 +9,9 @@ const savedWindow = g.window
 afterAll(() => { if (savedWindow) g.window = savedWindow; else delete g.window })
 for (const width of [1440, 390]) test(`settings sections fit their scrolling slot at ${width}px`, () => {
   g.window = { innerWidth: width }
-  const h = renderToStaticMarkup(<MemoryRouter initialEntries={['/settings/billing']}><Routes>
+  const h = renderToStaticMarkup(<MemoryRouter initialEntries={['/settings/preferences']}><Routes>
     <Route element={<Outlet context={{ lang: 'pt', isCentral: false }} />}>
-      <Route path="/settings" element={<SettingsPage />}><Route path="billing" element={<div>Billing content</div>} /></Route>
+      <Route path="/settings" element={<SettingsPage />}><Route path="preferences" element={<div>Billing content</div>} /></Route>
     </Route>
   </Routes></MemoryRouter>)
   expect(h).toContain('Billing content')

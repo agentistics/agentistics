@@ -32,7 +32,7 @@ export function BillingIntroModal({ open, mode, gaps, lang, onClose, onNeverShow
   const pt = lang === 'pt'
   if (!open) return null
 
-  const go = () => { onClose(); navigate('/settings/billing') }
+  const go = () => { onClose(); navigate('/usage/accounts') }
 
   return (
     <div

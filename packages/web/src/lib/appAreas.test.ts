@@ -78,7 +78,7 @@ describe('firstPath', () => {
   test('the remembered page wins only when it belongs to the area', () => {
     const usage = APP_AREAS.find(a => a.id === 'usage')!
     expect(firstPath(usage)).toBe('/usage')
-    expect(firstPath(usage, '/usage/plan')).toBe('/usage/plan')
+    expect(firstPath(usage, '/usage/accounts')).toBe('/usage/accounts')
     expect(firstPath(usage, '/costs')).toBe('/usage')
   })
 })

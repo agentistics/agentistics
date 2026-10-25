@@ -32,7 +32,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'backup', labelEn: 'Backup', labelPt: 'Backup', group: 'personal' },
   { id: 'harnesses', labelEn: 'Harnesses', labelPt: 'Harnesses', group: 'personal' },
   { id: 'pricing', labelEn: 'Pricing', labelPt: 'Preços', group: 'personal' },
-  { id: 'billing', labelEn: 'Billing', labelPt: 'Cobrança', group: 'personal' },
   { id: 'install', labelEn: 'Install', labelPt: 'Instalação', group: 'personal' },
   { id: 'whatsnew', labelEn: "What's new", labelPt: 'Novidades', group: 'personal' },
   { id: 'live', labelEn: 'Live', labelPt: 'Ao vivo', group: 'personal' },

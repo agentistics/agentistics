@@ -127,13 +127,12 @@ The Usage area reads the same plan-limit store as the composer and Nay. `/usage`
 per account (including registered accounts awaiting a reading), ordered by the surface harness
 registry and account label. Accounts excluded from agent routing remain visible to the owner.
 Capacity without a measured rate is described as unmeasured; it does not become a zero.
-Harnesses without subscription plans have registration links to Settings → Billing. The native
+Harnesses without subscription plans have registration links to Usage → Accounts. The native
 runtime uses provider billing rather than subscription plans and is excluded from that list.
 
-`/usage/plan` accepts a positive number of hours, defaulting to four, and uses the shared
-`planSessions` helper for sustainable parallel capacity and pause times. Hours are planning metadata,
-not an input to capacity arithmetic. `/usage/limits` renders
-the same `NayLimitsTab` as the usage modal. `/usage/history` shows account readings for the weekly
+`/usage/accounts` is the account and plan registry (formerly Settings → Billing, which redirects there).
+The old `/usage/plan` (an hours input that fed no arithmetic) and `/usage/limits` (the same cards as `/usage`)
+were removed and redirect. `NayLimitsTab` stays in Nay and the usage modal. `/usage/history` shows account readings for the weekly
 and five-hour windows. History is persisted by `plan-history.ts` in `plan-history.json`: one point
 per 5-minute bucket (the newest reading wins), 14 days, at most 4032 points per account, each point
 carrying its windows' reset ids so Real breaks where a window renewed. A new meter segment drops the
