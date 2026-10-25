@@ -123,7 +123,7 @@ test('payload exposes ordered account readings with missing windows as null, onl
   const now = Date.now()
   await ingestPlanLimits({ harness: 'codex', account: 'default', windows: [
     { kind: 'week', usedPct: 20, resetsAt: now + 3 * 86_400_000 },
-  ], updatedAt: now - 60_000, source: 'codex-rollout' })
+  ], updatedAt: now - 600_000, source: 'codex-rollout' })
   await ingestPlanLimits({ harness: 'codex', account: 'default', windows: [
     { kind: '5h', usedPct: 11, resetsAt: now + 3_600_000 },
   ], updatedAt: now, source: 'codex-rollout' })
@@ -134,8 +134,8 @@ test('payload exposes ordered account readings with missing windows as null, onl
   expect(body.readings).toEqual([{
     harness: 'codex', account: body.limits[0]!.account,
     points: [
-      { at: now - 60_000, weekPct: 20, fiveHourPct: null },
-      { at: now, weekPct: null, fiveHourPct: 11 },
+      { at: now - 600_000, weekPct: 20, fiveHourPct: null, weekReset: now + 3 * 86_400_000 },
+      { at: now, weekPct: null, fiveHourPct: 11, fiveReset: now + 3_600_000 },
     ],
   }])
   expect(planLimitsTool(undefined, body)).not.toHaveProperty('readings')

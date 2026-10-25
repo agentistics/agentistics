@@ -11,8 +11,11 @@ export function usageChartData(reading: PlanReadings, kind: 'week' | '5h', reset
   const duration = kind === 'week' ? WEEK : 5 * 3_600_000
   const start = reset === undefined ? undefined : reset - duration
   const points = new Map<number, { at: number; actual: number | null; expected: number | null }>()
+  const resets = new Map<number, number>()
   for (const p of reading.points) {
     const pct = kind === 'week' ? p.weekPct : p.fiveHourPct
+    const rid = kind === 'week' ? p.weekReset : p.fiveReset
+    if (rid !== undefined) resets.set(p.at, rid)
     // Agora compares the current window; history retains all observed percentages.
     if (currentWindowOnly && start !== undefined && (p.at < start || p.at > reset!)) continue
     points.set(p.at, { at: p.at, actual: pct, expected: start === undefined || p.at < start || p.at > reset! ? null : (p.at - start) / duration * 100 })
@@ -22,7 +25,29 @@ export function usageChartData(reading: PlanReadings, kind: 'week' | '5h', reset
     if (!points.has(start)) points.set(start, { at: start, actual: null, expected: 0 })
     if (!points.has(reset)) points.set(reset, { at: reset, actual: null, expected: 100 })
   }
-  return [...points.values()].sort((a, b) => a.at - b.at)
+  return breakAtResets([...points.values()].sort((a, b) => a.at - b.at), resets, duration)
+}
+
+/**
+ * Real is a connected line, but a renewed window starts a new line: between two measured points
+ * whose reset id differs (or whose percentage fell by a fifth of the scale) a gap point is added,
+ * so the chart never draws a fall from 90 % to 3 % as if usage had run backwards.
+ */
+export function breakAtResets<T extends { at: number; actual: number | null; expected: number | null }>(data: T[], resets: Map<number, number>, duration: number): T[] {
+  const out: T[] = []
+  let prev: T | undefined
+  for (const p of data) {
+    if (p.actual !== null) {
+      if (prev) {
+        const a = resets.get(prev.at), b = resets.get(p.at)
+        const renewed = a !== undefined && b !== undefined ? Math.abs(a - b) > Math.min(duration / 20, 600_000) : p.actual < prev.actual! - 20
+        if (renewed) out.push({ at: Math.round((prev.at + p.at) / 2), actual: null, expected: null } as T)
+      }
+      prev = p
+    }
+    out.push(p)
+  }
+  return out
 }
 
 /** Both pages compose the same chart and account matching rules. */
@@ -38,14 +63,16 @@ export function UsageCharts({ budgets, readings, limits, lang, bothWindows = fal
   for (const row of accounts) {
     if (labels.filter(label => label === row.label).length > 1) row.label += ` · ${row.account}`
   }
-  const empty = <p style={{ color: 'var(--text-secondary)' }}>{pt ? 'Ainda não há histórico de uso registrado desde que o servidor iniciou. As leituras atuais aparecem em Agora.' : 'No usage history recorded since the server started. Current readings appear in Now.'}</p>
+  const empty = <p style={{ color: 'var(--text-secondary)' }}>{pt ? 'Ainda não há histórico de uso registrado. As leituras atuais aparecem em Agora.' : 'No usage history recorded yet. Current readings appear in Now.'}</p>
   const charts = accounts.map(row => {
     const reading = readings.find(r => r.account === row.account && r.harness === row.harness)
     if (!reading) return { row, windows: [] }
     const windows = (bothWindows ? ['week', '5h'] as const : ['week'] as const).flatMap(kind => {
       const limit = limits?.find(l => l.account === row.account && l.harness === row.harness)?.windows.find(w => w.kind === kind)
       const reset = kind === 'week' ? row.budget?.weekResetsAt ?? limit?.resetsAt : limit?.resetsAt
-      const data = usageChartData(reading, kind, reset, !bothWindows)
+      // The 5-hour window renews many times a week: its chart shows the last two days, the week all of it.
+      const scoped = kind === '5h' && bothWindows ? { ...reading, points: reading.points.filter(p => p.at >= Date.now() - 48 * 3_600_000) } : reading
+      const data = usageChartData(scoped, kind, reset, !bothWindows)
       return data.length ? [{ kind, reset, data }] : []
     })
     return { row, windows }
