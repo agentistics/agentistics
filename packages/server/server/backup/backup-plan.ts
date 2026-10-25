@@ -482,6 +482,12 @@ const RUNTIME: ExcludeRule[] = [
       + 'machine\'s accounts at the moment they were taken.',
   },
   {
+    pattern: '.agentistics/plan-history.json', match: 'prefix', reason: 'regenerable',
+    why: 'The 14-day, 5-minute plan-meter history behind Usage > History. Built from the same readings as '
+      + '`plan-limits.json`, it refills from the next readings; the points belong to THIS machine\'s accounts '
+      + 'and their reset windows at the moment they were taken.',
+  },
+  {
     pattern: '.agentistics/managed-sessions.json', match: 'prefix', reason: 'runtime',
     why: 'Names tmux sessions that will not exist on the new machine. Restoring it yields rows pointing at nothing.',
   },

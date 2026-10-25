@@ -2,13 +2,13 @@
  * AreaTree — the app's navigation tree, rendered from the area registry.
  *
  * Desktop aside (`variant="aside"`) and the mobile sheet (`variant="sheet"`, larger targets) are the
- * same tree. Only the area holding the current URL is expanded; clicking another area goes to the page
+ * same tree. The sheet starts folded; the aside expands the area holding the current URL. Clicking an area goes to the page
  * last visited inside it (remembered per area in sessionStorage), else its first page.
  */
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { BarChart3, ChevronRight, ClipboardList, Crown, Gauge, GitBranch, Lock, SlidersHorizontal, Terminal } from 'lucide-react'
+import { BarChart3, ChevronRight, ClipboardList, Gauge, GitBranch, Lock, SlidersHorizontal, Terminal } from 'lucide-react'
 import {
   APP_AREAS, areaOfPath, firstPath, pageLabel, searchAreas, type Area, type AreaIcon, type AreaId,
 } from '../../lib/appAreas'
@@ -20,7 +20,6 @@ import { areaOpenStore, isAreaOpen, openedArea, toggledAreaOpen } from '../../li
 export const AREA_ICON: Record<AreaIcon, (size: number) => React.ReactNode> = {
   terminal: s => <Terminal size={s} />,
   clipboard: s => <ClipboardList size={s} />,
-  crown: s => <Crown size={s} />,
   gauge: s => <Gauge size={s} />,
   chart: s => <BarChart3 size={s} />,
   git: s => <GitBranch size={s} />,
@@ -93,6 +92,21 @@ export interface AreaTreeProps {
   visibleSettings?: ReadonlySet<string>
 }
 
+/** Shared geometry for navigation areas and the sheet's global actions. */
+export function areaRowStyle(sheet: boolean): React.CSSProperties {
+  return {
+    display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, boxSizing: 'border-box', flex: 1,
+    minHeight: sheet ? 46 : 40, padding: '0 12px', borderRadius: 10,
+    fontSize: sheet ? 15 : '0.8438rem', fontWeight: 500, whiteSpace: 'nowrap',
+    color: 'var(--text-secondary)', background: 'transparent',
+  }
+}
+
+/** Shared trailing column: values and chevrons occupy the same centre line. */
+export function areaTrailingStyle(sheet: boolean): React.CSSProperties {
+  return { width: sheet ? 44 : 28, height: sheet ? 44 : 28, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }
+}
+
 const GROUP_HEADING = { personal: { pt: 'Pessoal', en: 'Personal' }, governance: { pt: 'Governança', en: 'Governance' } } as const
 
 export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside', badges = {}, onNavigate, visibleSettings }: AreaTreeProps) {
@@ -102,6 +116,8 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
   const pt = lang === 'pt'
   const current = areaOfPath(pathname)
   const openMap = useSyncExternalStore(areaOpenStore.subscribe, areaOpenStore.get, areaOpenStore.serverSnapshot)
+  const [sheetArea, setSheetArea] = useState<AreaId | null>(null)
+  const expandedArea = (area: Area) => sheet ? sheetArea === area.id : isAreaOpen(openMap, area.id, current?.area.id === area.id)
   const [query, setQuery] = useState('')
   const results = searchAreas(query, lang).filter(r => r.area.id !== 'settings' || !visibleSettings || visibleSettings.has(r.page.id))
   const pagesOf = (area: Area) => area.id === 'settings' && visibleSettings ? area.pages.filter(p => visibleSettings.has(p.id)) : area.pages
@@ -110,11 +126,11 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
   // earlier visits, exactly like choosing it in the tree does. Writes only when something changes.
   const currentId = current?.area.id
   useEffect(() => {
-    if (!currentId) return
+    if (sheet || !currentId) return
     const map = areaOpenStore.get()
     // Arriving is also asking to see it: a `false` left by opening another area by hand is cleared.
     if (map[currentId] === false || Object.entries(map).some(([k, v]) => k !== currentId && v === true)) areaOpenStore.set(openedArea(map, currentId))
-  }, [currentId])
+  }, [currentId, sheet])
 
   const areaRow = (area: Area) => {
     const label = pageLabel(area, lang)
@@ -122,7 +138,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
     const n = badges[area.id]
     const to = firstPath(area, recalled(area.id))
     const hasPages = pagesOf(area).length > 0
-    const expanded = hasPages && isAreaOpen(openMap, area.id, active)
+    const expanded = hasPages && expandedArea(area)
     return (
       <Tip key={area.id} label={<>{label}{area.beta && <> <BetaTag what={label} lang={lang} /></>}</>} show={collapsed}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -130,14 +146,14 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
           href={to}
           aria-label={collapsed ? label : undefined}
           aria-current={active && !area.pages.length ? 'page' : undefined}
-          onClick={e => { e.preventDefault(); if (hasPages) areaOpenStore.set(openedArea(openMap, area.id)); go(to) }}
+          onClick={e => { e.preventDefault(); if (hasPages && !sheet) areaOpenStore.set(openedArea(openMap, area.id)); go(to) }}
           style={{
-            display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, boxSizing: 'border-box', flex: 1,
-            minHeight: sheet ? 46 : 40, padding: collapsed ? '0' : '0 12px',
-            justifyContent: collapsed ? 'center' : 'flex-start', borderRadius: 10, textDecoration: 'none',
-            fontSize: sheet ? 15 : '0.8438rem', fontWeight: active ? 700 : 500, whiteSpace: 'nowrap',
+            ...areaRowStyle(sheet),
+            padding: collapsed ? '0' : '0 12px',
+            justifyContent: collapsed ? 'center' : 'flex-start', textDecoration: 'none',
+            fontWeight: active ? 700 : 500,
             color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
-            background: active && !area.pages.length ? 'var(--anthropic-orange-dim)' : 'transparent',
+            background: active && (sheet || !area.pages.length) ? 'var(--anthropic-orange-dim)' : 'transparent',
           }}
         >
           <span style={{ flexShrink: 0, display: 'flex', position: 'relative' }}>
@@ -152,10 +168,10 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
           <button
             type="button" aria-expanded={expanded}
             aria-label={(expanded ? (pt ? 'Recolher ' : 'Collapse ') : (pt ? 'Expandir ' : 'Expand ')) + label}
-            onClick={() => areaOpenStore.set(toggledAreaOpen(openMap, area.id, active, current?.area.id))}
+            onClick={() => sheet ? setSheetArea(expanded ? null : area.id) : areaOpenStore.set(toggledAreaOpen(openMap, area.id, active, current?.area.id))}
             style={{
-              flexShrink: 0, width: sheet ? 44 : 28, height: sheet ? 44 : 28, display: 'flex', alignItems: 'center',
-              justifyContent: 'center', border: 'none', background: 'transparent', cursor: 'pointer',
+              ...areaTrailingStyle(sheet),
+              border: 'none', background: 'transparent', cursor: 'pointer',
               color: 'var(--text-tertiary)', borderRadius: 8,
             }}
           >
@@ -195,7 +211,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
       {APP_AREAS.map(area => (
         <div key={area.id}>
           {areaRow(area)}
-          {!collapsed && isAreaOpen(openMap, area.id, current?.area.id === area.id) && pagesOf(area).length > 0 && (
+          {!collapsed && expandedArea(area) && pagesOf(area).length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 1, margin: '2px 0 6px 22px', borderLeft: '1px solid var(--border)' }}>
               {pagesOf(area).map((page, i, list) => {
                 const active = current?.area.id === area.id && current.page?.id === page.id

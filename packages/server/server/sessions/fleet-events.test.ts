@@ -301,3 +301,15 @@ describe('compactFleetSession search payload', () => {
     expect('search' in compactFleetSession({ id: 'x' } as never, row)).toBe(false)
   })
 })
+
+test('handoff successors survive the compact SSE snapshot and delta wire', () => {
+  const source = row('source', { state: 'working', conversationId: 'old-conversation' })
+  const initial = buildFleetFrame(payload([source]), 0)
+  const ended = row('source', { state: 'exited', conversationId: 'old-conversation', handoffTo: 'target' })
+  const target = row('target', { harness: 'codex', conversationId: 'new-conversation' })
+  const frame = buildFleetFrame(payload([ended, target]), 0)
+  const snapshot = applyFleetWire(null, 'snapshot', snapshotBody(1, initial))
+  const { delta } = planFleetDelta(planFleetDelta(EMPTY_SENT, initial).next, frame)
+  const updated = applyFleetWire(snapshot, 'delta', deltaBody(2, frame, delta))
+  expect((updated.sessions.find(r => r.id === 'source') as { handoffTo?: string }).handoffTo).toBe('target')
+})

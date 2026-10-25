@@ -3,8 +3,8 @@ import { visibleSettingsSections, SETTINGS_SECTIONS } from './settingsSections'
 
 const ids = (v: Parameters<typeof visibleSettingsSections>[0]) => visibleSettingsSections(v).map(s => s.id)
 
-test('solo/member: personal sections + live, no governance', () => {
-  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'billing', 'install', 'whatsnew', 'live', 'chat'])
+test('solo/member: personal sections, no governance or live controls', () => {
+  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'billing', 'install', 'whatsnew', 'chat'])
 })
 
 test('central owner: personal (no live) + all governance sections', () => {

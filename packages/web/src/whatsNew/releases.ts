@@ -10,6 +10,40 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.152.0': {
+    features: [
+      {
+        pt: 'No celular, a barra de baixo tem cinco abas com Sessões no meio; arraste o dedo para trocar e, em Sessões, o botão vira Início.',
+        en: 'On the phone, the bottom bar has five tabs with Sessions in the middle; drag your finger to switch, and on Sessions the button becomes Home.',
+      },
+      {
+        pt: 'Liderança agora fica dentro de Sessões.',
+        en: 'Leadership now lives inside Sessions.',
+      },
+      {
+        pt: 'O app atualiza os dados sozinho: saíram a chave "Ao vivo" e o botão "Atualizar". "Atualizar app" só aparece quando há versão nova.',
+        en: 'The app refreshes its data on its own: the "Live" switch and the "Refresh" button are gone. "Update app" only shows when a new version exists.',
+      },
+      {
+        pt: 'O Histórico de Uso guarda 14 dias e não some quando o app reinicia; o uso real vira uma linha contínua, fácil de ler no celular.',
+        en: 'Usage History keeps 14 days and survives restarts; real usage is a continuous line, easy to read on the phone.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O sino agora avisa sempre que uma sessão é encerrada, e não avisa quando ela só muda de conta ou de assistente.',
+        en: 'The bell now always tells you when a session is closed, and stays quiet when it just moves to another account or assistant.',
+      },
+      {
+        pt: 'No Cofre, o que você copia volta a ser apagado da área de transferência depois de 30 segundos.',
+        en: 'In the Vault, what you copy is cleared from the clipboard again after 30 seconds.',
+      },
+      {
+        pt: 'No celular, o menu que sobe abre compacto, sem itens repetidos.',
+        en: 'On the phone, the menu sheet opens compact, with no repeated items.',
+      },
+    ],
+  },
   '2.151.2': {
     features: [],
     fixes: [

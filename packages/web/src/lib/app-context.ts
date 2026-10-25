@@ -122,16 +122,6 @@ export interface AppContext {
   pwaPrompt: PwaPrompt | null
   onPwaInstalled: () => void
 
-  // live-update settings (applied immediately — threaded to the Live settings page)
-  liveUpdates: boolean
-  setLiveUpdates: (v: boolean) => void
-  updateInterval: number
-  setUpdateInterval: (v: number) => void
-  riskyMode: boolean
-  setRiskyMode: (v: boolean) => void
-  highlightUpdates: boolean
-  setHighlightUpdates: (v: boolean) => void
-
   // budget
   monthlyBudgetUSD: number | null
   updateBudget: (v: number | null) => void

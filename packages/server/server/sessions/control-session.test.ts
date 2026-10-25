@@ -282,3 +282,8 @@ describe('F3.3 — which option is a field, as a structured session states it', 
     expect(c.dialogOptions?.map(o => !!o.freeText)).toEqual([false, true, false])
   })
 })
+
+it('carries the exact handoff successor into the control fleet', () => {
+  expect(toControlSession(view({ handoffTo: 'target', status: 'exited' }), S, LIVE).handoffTo).toBe('target')
+  expect(toControlSession(view(), S, LIVE).handoffTo).toBeUndefined()
+})
