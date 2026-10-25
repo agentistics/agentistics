@@ -115,7 +115,7 @@ describe('usage account cards', () => {
     for (const lang of ['pt', 'en'] as const) {
       const html = render(<UsageNowPage />, 390, lang)
       expect(html.match(/Claude Max 5x/g)).toHaveLength(1)
-      expect(html).toContain(lang === 'pt' ? 'N/A — sem horário recomendado' : 'N/A — no recommended time')
+      expect(html).toContain(lang === 'pt' ? 'Pausar, sem horário' : 'Pause, no time set')
       expect(html).not.toContain(lang === 'pt' ? '>Sem pausa<' : '>No pause<')
     }
   })
@@ -252,14 +252,14 @@ for (const lang of ['pt', 'en'] as const) test(`planning units, spacing and inva
   }
 })
 
-for (const lang of ['pt', 'en'] as const) test(`descriptive pause tiles wrap at a readable size in ${lang}`, () => {
+for (const lang of ['pt', 'en'] as const) test(`the pause tile reads plainly, in the same short form as "no pause" (${lang})`, () => {
   seed([row({ status: 'tight', pauseUntil: undefined })])
   const html = render(<UsageNowPage />, 390, lang)
-  const phrase = lang === 'pt' ? 'N/A — sem horário recomendado' : 'N/A — no recommended time'
-  expect(html).toContain(`font-size:14px;font-weight:700`)
-  const tile = html.slice(html.indexOf('class="ag-stat-value"', html.indexOf(`title="${phrase}"`)))
-  expect(tile.slice(0, tile.indexOf('</span>'))).toContain('white-space:normal;overflow-wrap:anywhere')
-  expect(tile.slice(0, tile.indexOf('</span>'))).not.toContain('text-overflow:ellipsis')
+  const phrase = lang === 'pt' ? 'Pausar, sem horário' : 'Pause, no time set'
+  expect(html).toContain(phrase)
+  expect(html).not.toContain('N/A —')
+  // Short enough to be a figure, not a sentence: the tile draws it at the figure size, like "Sem pausa".
+  expect(phrase.length).toBeLessThanOrEqual(20)
 })
 
 for (const lang of ['pt', 'en'] as const) test(`overview and limits share the near-renewal forecast rule in ${lang}`, () => {
