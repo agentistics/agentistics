@@ -21,6 +21,7 @@ import { durableStore, type DurableStore, type DurableTransport } from './struct
 import { callsAt, parseJsonl, isOutRecord, writeCheck } from './structured-replay'
 import { structuredIntentOf } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
+import { resumeAccountEnvironment } from './account-plan'
 
 const AGENT = path.join(import.meta.dir, 'fixtures', 'fake-structured-agent.ts')
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -173,7 +174,7 @@ function rig(): Rig {
         flagOn: () => o.flagOn ?? true,
         durable: store,
         conversationOf: async () => 'conv-fake-1',
-        async resumeSpawn(req, conv) { return { id: req.id, cwd: req.cwd, argv: ['gemini', '--resume', conv] } },
+        async resumeSpawn(req, conv) { return { id: req.id, cwd: req.cwd, argv: ['gemini', '--resume', conv], ...resumeAccountEnvironment({}, req, 'gemini') } },
       }
       return { b: withStructured(base, provider), base }
     },
@@ -433,6 +434,17 @@ describe('a structured session survives a server restart', () => {
 })
 
 describe('open in terminal, kill, and the flag', () => {
+  for (const extra of [false, true]) test(`another process opens in TUI with ${extra ? 'extra' : 'default'} account isolation`, async () => {
+    const r = rig()
+    const owner = r.server()
+    const isolation = extra ? { env: { GEMINI_CLI_HOME: '/accounts/extra' } } : { unsetEnv: ['GEMINI_CLI_HOME'] }
+    await owner.b.spawn({ ...webSpawn(r.root, 'one'), ...isolation })
+    await until(() => prompts(r).length === 1)
+    const cli = r.server()
+    expect(await cli.b.toTerminal('m-1')).toEqual({ ok: true })
+    expect(cli.base.spawned).toEqual([{ id: 'm-1', cwd: r.root, argv: ['gemini', '--resume', 'conv-fake-1'], ...isolation }])
+  }, 20000)
+
   test('toTerminal ends the child, then resumes the SAME conversation as a TUI under the same id', async () => {
     const r = rig()
     const A = r.server()

@@ -240,7 +240,7 @@ export function savedOf(req: BackendSpawn, harness: HarnessId, spawn: Structured
   const { transport: _t, ...rest } = spawn
   return {
     v: 1, harness, spawn: rest,
-    backend: { id: req.id, cwd: req.cwd, ...(req.env ? { env: req.env } : {}), ...(req.structured ? { structured: req.structured } : {}) },
+    backend: { id: req.id, cwd: req.cwd, ...(req.env ? { env: req.env } : {}), ...(req.unsetEnv ? { unsetEnv: req.unsetEnv } : {}), ...(req.structured ? { structured: req.structured } : {}) },
   }
 }
 
@@ -374,7 +374,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     const saved = durable.saved(id)
     const rt = durable.replay(id)
     const req: BackendSpawn = saved
-      ? { id, cwd: saved.backend.cwd, argv: [], ...(saved.backend.env ? { env: saved.backend.env } : {}), ...(saved.backend.structured ? { structured: saved.backend.structured as BackendSpawn['structured'] } : {}) }
+      ? { id, cwd: saved.backend.cwd, argv: [], ...(saved.backend.env ? { env: saved.backend.env } : {}), ...(saved.backend.unsetEnv ? { unsetEnv: saved.backend.unsetEnv } : {}), ...(saved.backend.structured ? { structured: saved.backend.structured as BackendSpawn['structured'] } : {}) }
       : { id, cwd: '', argv: [] }
     const giveUp = async (reason: string, s?: StructuredSession) => {
       durable.markEnding(id, 'reattach-failed')
@@ -426,7 +426,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       if (!(l && l.route === 'structured') && !durableAlive) return { ok: false, why: 'not-structured' }
       const saved = l ? null : durable!.saved(id)
       const req: BackendSpawn | null = l ? l.req
-        : saved ? { id, cwd: saved.backend.cwd, argv: [], ...(saved.backend.structured ? { structured: saved.backend.structured as BackendSpawn['structured'] } : {}) } : null
+        : saved ? { id, cwd: saved.backend.cwd, argv: [], ...(saved.backend.env ? { env: saved.backend.env } : {}), ...(saved.backend.unsetEnv ? { unsetEnv: saved.backend.unsetEnv } : {}), ...(saved.backend.structured ? { structured: saved.backend.structured as BackendSpawn['structured'] } : {}) } : null
       if (!req) return { ok: false, why: 'not-structured' }
       const conv = l?.s.conversationId() ?? (await provider.conversationOf?.(id).catch(() => null)) ?? req.structured?.resumeId ?? null
       if (!conv) return { ok: false, why: 'no-conversation' }

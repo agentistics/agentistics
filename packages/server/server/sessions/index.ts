@@ -81,12 +81,9 @@ export async function resolveBackend(): Promise<SessionBackend> {
         }, await spawnCapabilities(i.harness))
         if (!planned.ok) return null
         // PLAN.ACCOUNTS D3 — the TUI that continues a structured session stays in its account root:
-        // only the isolation variable is carried over from the original spawn's env.
-        const { ISOLATION_ENV } = await import('../account-isolation')
-        const isolation = ISOLATION_ENV[i.harness]
-        const root = isolation ? req.env?.[isolation] : undefined
-        const env = { ...(planned.plan.env ?? {}), ...(isolation && root ? { [isolation]: root } : {}) }
-        return { id: req.id, cwd: req.cwd, argv: planned.plan.argv, ...(Object.keys(env).length ? { env } : {}) }
+        // carry its isolation value or explicit removal from the original spawn.
+        const { resumeAccountEnvironment } = await import('./account-plan')
+        return { id: req.id, cwd: req.cwd, argv: planned.plan.argv, ...resumeAccountEnvironment(planned.plan, req, i.harness) }
       },
       onStarted(id, driver) {
         void import('./registry').then(r => r.patchSession(id, { structuredDriver: driver })).catch(() => {})

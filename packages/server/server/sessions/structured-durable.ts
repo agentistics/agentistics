@@ -45,7 +45,7 @@ export interface SavedSpawn {
   /** Exactly what the driver was given, minus the transport. */
   spawn: Omit<StructuredSpawn, 'transport'>
   /** The bits of the host's `BackendSpawn` the fallback needs (`resumeSpawn`). */
-  backend: { id: string; cwd: string; env?: Record<string, string>; structured?: unknown }
+  backend: { id: string; cwd: string; env?: Record<string, string>; unsetEnv?: string[]; structured?: unknown }
 }
 
 /** How the relay process is started: a checkout runs the source, a binary runs itself. */
@@ -259,7 +259,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
         launch(bin, args, cwd, env): StructuredPipe {
           let exitResolve!: (c: number | null) => void
           const exited = new Promise<number | null>(r => { exitResolve = r })
-          try { startRelay(id, { bin, args: [...args], cwd, ...(env ? { env: { ...env } } : {}) }) } catch { exitResolve(null); lines.end() }
+          try { startRelay(id, { bin, args: [...args], cwd, ...(env ? { env: { ...env } } : {}), ...(saved.backend.unsetEnv ? { unsetEnv: saved.backend.unsetEnv } : {}) }) } catch { exitResolve(null); lines.end() }
           // The account this session runs on (ManagedSession.accountId): looked up once, and only
           // when a rate-limit line actually arrives — no registry read for a session that never says one.
           const accountOf = sessionAccountOf(id)
