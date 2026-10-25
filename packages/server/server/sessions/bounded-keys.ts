@@ -1,11 +1,9 @@
 /**
  * bounded-keys.ts — a set of keys that cannot grow without bound (CROSSBIND MED-3).
  *
- * The refusal warnings are said once per pair, and the pairs are minted from session ids and source
- * paths: a long-running server that keeps meeting new collisions would otherwise hold every pair it
- * ever refused. The oldest key is evicted past `cap` (a re-added key moves to the newest end), and a
- * caller drops the keys of a session that left with `dropWhere`. Forgetting a key costs one repeated
- * log line, never a wrong answer.
+ * The oldest key is evicted past `cap` (a re-added key moves to the newest end), and a
+ * caller can drop related keys with `dropWhere`. Use only when forgetting old keys is acceptable;
+ * process-lifetime refusal diagnostics use `RefusalLog` instead.
  */
 export class BoundedKeys {
   private readonly keys = new Map<string, true>()

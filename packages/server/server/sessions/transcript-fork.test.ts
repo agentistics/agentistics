@@ -146,6 +146,30 @@ describe('fork refusal diagnostics', () => {
     }
   })
 
+  test('the server remembers refused pairs after more than 512 distinct collisions', async () => {
+    const saved = process.env.SERVE_STATIC
+    const warn = spyOn(console, 'warn').mockImplementation(() => {})
+    const fs = {
+      readdir: async () => ['old.jsonl', 'foreign.jsonl'],
+      stat: async (p: string) => ({ mtimeMs: p.endsWith('/old.jsonl') ? 1 : 2, size: 100 }),
+      readFile: async () => oldLines.join('\n'),
+    }
+    try {
+      process.env.SERVE_STATIC = '1'
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < 600; i++) {
+          const from = `/project-${i}/old.jsonl`
+          expect(await followFork(from, { fs, foreign: new Set(['foreign']) })).toBe(from)
+        }
+      }
+      expect(warn).toHaveBeenCalledTimes(600)
+    } finally {
+      warn.mockRestore()
+      if (saved === undefined) delete process.env.SERVE_STATIC
+      else process.env.SERVE_STATIC = saved
+    }
+  })
+
   test('the server logs a remembered successor refusal only once per pair', async () => {
     const saved = process.env.SERVE_STATIC
     const warn = spyOn(console, 'warn').mockImplementation(() => {})
