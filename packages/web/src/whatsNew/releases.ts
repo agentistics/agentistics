@@ -39,6 +39,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
+        pt: 'Sessões do Antigravity no modo novo continuam depois que o app reinicia.',
+        en: 'Antigravity sessions in the new mode carry on after the app restarts.',
+      },
+      {
         pt: 'Quando chegam muitas notificações de uma vez, elas viram um único resumo, e quem estava fora vê só "N novidades enquanto você estava fora".',
         en: 'When many notifications arrive at once they become a single summary, and coming back shows just "N updates while you were away".',
       },
