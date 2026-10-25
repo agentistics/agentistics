@@ -17,7 +17,20 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Switch the open session’s account from Plan usage, with the session and account names in view.',
       },
     ],
-    fixes: [],
+    fixes: [
+      {
+        pt: 'Comandos locais, como /rename, deixam de aparecer como não lidos quando a sessão termina de executá-los.',
+        en: 'Local commands such as /rename stop appearing as unread once the session finishes handling them.',
+      },
+      {
+        pt: 'A lista "Caíram" mostra só quedas das últimas 24 horas (as antigas ficam em Encerradas, prontas para reabrir), e sessões já encerradas não oferecem mais "Encerrar sessão".',
+        en: 'The "Fell" list only shows falls from the last 24 hours (older ones stay in Ended, ready to reopen), and sessions that already ended no longer offer "End session".',
+      },
+      {
+        pt: 'Quando um líder passa o bastão, o aviso vira "Passagem em andamento", com uma barra mostrando quanto falta para o sucessor assumir e encerrar o líder antigo.',
+        en: 'When a leader hands off, the warning becomes "Handoff in progress", with a bar showing how long until the successor takes over and closes the old leader.',
+      },
+    ],
   },
   '2.149.0': {
     features: [
