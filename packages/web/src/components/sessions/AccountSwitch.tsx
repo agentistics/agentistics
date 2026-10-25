@@ -88,7 +88,8 @@ function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
     setPick(p => (p && pickable.includes(p) ? p : defaultPick(rows)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, optionsKey])
-  const chosen = rows.find(r => r.key === pick && r.kind === 'option')
+  // An ended session has nothing left to switch: Reopen is the only way forward.
+  const chosen = endedId ? undefined : rows.find(r => r.key === pick && r.kind === 'option')
   const handoff = !!chosen?.handoff
   const message = !chosen
     ? (pt ? 'Escolha uma conta disponível na lista.' : 'Pick an available account from the list.')

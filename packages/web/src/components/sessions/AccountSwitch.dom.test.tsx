@@ -289,6 +289,8 @@ describe('AccountSwitchDialog — the session was ended (double failure)', () =>
       expect(document.querySelector('[role="alert"]')?.textContent).toBe(lost)
       const btn = document.querySelector('[data-account-switch-reopen]') as HTMLButtonElement
       expect(btn.textContent).toBe(reopen)
+      // Nothing is left to switch once the session is ended: Confirm is off, Reopen is the way forward.
+      expect(confirm.disabled).toBe(true)
       if (width === 390) expect(btn.style.width).toBe('100%')
       await act(async () => { btn.click(); await new Promise(r => setTimeout(r, 20)) })
       expect(acts).toEqual([{ id: 'm1', action: 'resume' }])
