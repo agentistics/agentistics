@@ -10,6 +10,7 @@ import {
   type AwayDigestSchedule,
 } from '@agentistics/core'
 import { PrefRow, Select } from './primitives'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
 const OFF = 'off'
 
@@ -29,6 +30,8 @@ export default function AwayDigestScheduleSection({ pt }: { pt: boolean }) {
   const [loaded, setLoaded] = useState(false)
   const [status, setStatus] = useState<'saving' | 'saved' | 'save-error' | 'load-error' | null>(null)
   const busy = useRef(false)
+  const isMobile = useIsMobile()
+  const box = { width: isMobile ? '100%' : 180 }
 
   useEffect(() => {
     let active = true
@@ -55,15 +58,15 @@ export default function AwayDigestScheduleSection({ pt }: { pt: boolean }) {
     <div data-testid="away-digest-schedule" style={{ marginTop: 12 }}>
       <PrefRow label={pt ? 'Resumo da ausência: primeiro depois de' : 'Away summary: first after'}
         sub={pt ? 'A Nay oferece um resumo do que aconteceu enquanto você estava fora.' : 'Nay offers a summary of what happened while you were away.'}>
-        <Select value={off ? OFF : String(schedule.firstAfterMin)} disabled={!loaded}
-          onChange={v => { void save({ ...schedule, firstAfterMin: v === OFF ? null : Number(v) }) }} options={firstAfterOptions(pt)} />
+        <div style={box}><Select value={off ? OFF : String(schedule.firstAfterMin)} disabled={!loaded}
+          onChange={v => { void save({ ...schedule, firstAfterMin: v === OFF ? null : Number(v) }) }} options={firstAfterOptions(pt)} /></div>
       </PrefRow>
       <PrefRow label={pt ? 'Depois, a cada' : 'Then every'}
         sub={off ? (pt ? 'Sem efeito com o resumo desligado.' : 'No effect while the summary is off.')
           : (pt ? 'Se você não responder, o aviso volta nesse intervalo. Depois de um resumo, a contagem recomeça.'
             : 'If you don’t answer, the offer comes back at this interval. After a summary, the count starts over.')}>
-        <Select value={String(schedule.everyMin)} disabled={!loaded || off}
-          onChange={v => { void save({ ...schedule, everyMin: Number(v) }) }} options={everyOptions()} />
+        <div style={box}><Select value={String(schedule.everyMin)} disabled={!loaded || off}
+          onChange={v => { void save({ ...schedule, everyMin: Number(v) }) }} options={everyOptions()} /></div>
       </PrefRow>
       <div role="status" style={{ fontSize: 12, minHeight: 16, color: status?.endsWith('error') ? 'var(--accent-red)' : 'var(--text-secondary)' }}>
         {status === 'saving' ? (pt ? 'Salvando…' : 'Saving…') : status === 'saved' ? (pt ? 'Salvo' : 'Saved')
