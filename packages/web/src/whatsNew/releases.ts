@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.152.0': {
+  '2.151.1': {
     features: [
       {
         pt: 'A área Uso ganhou o selo BETA, como o Agentask: as contas foram conferidas, mas a página ainda está mudando.',
