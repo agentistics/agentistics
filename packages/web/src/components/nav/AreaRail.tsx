@@ -61,7 +61,11 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
           const active = current === area.id
           const n = badges[area.id]
           const to = areaEntryPath(area)
-          const name = n ? `${label}, ${n} ${area.id === 'sessions' ? (pt ? 'precisam de você' : 'need you') : (pt ? 'avisos' : 'alerts')}` : label
+          // The badge's count named in words, per area: what it counts is different in each.
+          const what = area.id === 'sessions' ? (pt ? 'precisam de você' : 'need you')
+            : area.id === 'usage' ? (pt ? 'acima do ritmo' : 'over pace')
+            : (pt ? 'avisos' : 'alerts')
+          const name = n ? `${label}, ${n} ${what}` : label
           return (
             <Tip key={area.id} label={label} show>
               <a

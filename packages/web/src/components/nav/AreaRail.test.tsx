@@ -27,6 +27,7 @@ describe('AreaRail', () => {
       expect(html).toContain(lang === 'pt' ? 'aria-label="Sessões, 3 precisam de você"' : 'aria-label="Sessions, 3 need you"')
       expect(html).toMatch(/>3<\/span>/)
       expect(render(lang, { badges: { sessions: 0 } })).not.toMatch(/>0<\/span>/)
+      expect(render(lang, { badges: { usage: 2 } })).toContain(lang === 'pt' ? 'aria-label="Uso, 2 acima do ritmo"' : 'aria-label="Usage, 2 over pace"')
     })
     test(`"show tree" is a toggle that opens the area tree beside the rail (${lang})`, () => {
       const closed = render(lang)
