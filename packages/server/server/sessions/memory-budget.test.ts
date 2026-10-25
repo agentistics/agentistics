@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test'
 import {
-  memoryBudget, parseMeminfo, ASSUMED_SESSION_BYTES, RED_WITHIN, SWAP_ALARM_FRACTION,
+  memoryBudget, parseMeminfo, ASSUMED_SESSION_BYTES, RESERVED_BYTES, RED_WITHIN, SWAP_ALARM_FRACTION,
 } from './memory-budget'
 
 const GB = 1024 * 1024 * 1024
@@ -106,11 +106,21 @@ describe('memoryBudget', () => {
     expect(withFour).toBe(withNone)
   })
 
+  it('does not lose an available slot when the measured session cost rounds up', () => {
+    const cost = Math.round(5 * MB / 3)
+    const b = memoryBudget({
+      sample: sample({ available: RESERVED_BYTES + cost }),
+      sessionBytes: 5 * MB, sessions: 3,
+    })
+    expect(b.left).toBe(1)
+    expect(b.max).toBe(4)
+  })
+
   it('turns red by DISTANCE, not by percentage', () => {
     // Three left of thirty is comfortable; three left of fourteen is the last warning. A fraction
     // makes those the same number, and what gets spent is one session at a time.
     const tight = memoryBudget({
-      sample: sample({ available: 2 * GB + 3 * 250 * MB }),
+      sample: sample({ available: RESERVED_BYTES + 3 * 250 * MB }),
       sessionBytes: 11 * 250 * MB, sessions: 11, assumedBytes: 250 * MB,
     })
     expect(tight.left).toBe(RED_WITHIN)
@@ -118,7 +128,7 @@ describe('memoryBudget', () => {
     expect(tight.alarm).toBe('sessions')
 
     const roomy = memoryBudget({
-      sample: sample({ available: 2 * GB + 10 * 250 * MB }),
+      sample: sample({ available: RESERVED_BYTES + 10 * 250 * MB }),
       sessionBytes: 4 * 250 * MB, sessions: 4, assumedBytes: 250 * MB,
     })
     expect(roomy.left).toBeGreaterThan(RED_WITHIN)

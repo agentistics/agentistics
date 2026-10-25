@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.148.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões novas não são mais recusadas por falta de memória quando há memória livre de sobra.',
+        en: 'New sessions are no longer refused for memory while plenty is free.',
+      },
+    ],
+  },
   '2.148.1': {
     features: [],
     fixes: [

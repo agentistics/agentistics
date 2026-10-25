@@ -84,7 +84,7 @@ export async function readSpawnBudget(): Promise<SpawnBudget | null> {
     .then(async m => {
       const st = await m.readHeavyState()
       const { heavyReserveBytes } = await import('../resources/heavy')
-      return heavyReserveBytes(st.running.reduce((n, r) => n + (r.usedBytes ?? 0), 0))
+      return heavyReserveBytes(st.running.reduce((n, r) => n + (r.usedBytes ?? 0), 0), st.running.length)
     })
     .catch(() => 0)
   const load = await readLoad()
