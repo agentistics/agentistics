@@ -38,6 +38,8 @@ for (const width of [1440, 390]) describe(`Leadership at ${width}px`, () => {
   test('empty fleet says there are no leaders; unavailable and loading never claim zero', () => {
     const render = (extra: { loading?: boolean; unavailable?: boolean; stale?: string } = {}) => atWidth(width, () => renderToStaticMarkup(<MemoryRouter><LeadersContent lang="pt" rows={[]} roleOf={roleOf} {...extra} /></MemoryRouter>))
     expect(render()).toContain('Nenhuma sessão líder agora.')
+    // The empty sentence alone: no "0 líderes · 0 precisam de você" header repeating it.
+    expect(render()).not.toContain('0 líderes')
     for (const props of [{ loading: true }, { unavailable: true }, { stale: 'Offline' }]) {
       expect(render(props)).not.toContain('Nenhuma sessão líder agora.')
       expect(render(props)).not.toContain('0 líderes')

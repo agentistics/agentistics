@@ -37,9 +37,10 @@ export function LeadersContent({ lang, rows, roleOf, loading = false, unavailabl
   const isMobile = useIsMobile()
   const leaders = applyLeadersOnly(rows, true, roleOf)
   const needsYou = leaders.filter(row => row.state === 'waiting' || row.state === 'waiting-approval').length
+  // With no leader the empty sentence below says it; a "0 leaders · 0 need you" line above it would repeat it.
   return <div style={{ minWidth: 0 }}>
     <PageHeader lang={lang} areaId="leadership" pageId="leaders" isMobile={isMobile}
-      status={!loading && !unavailable && !stale ? (pt ? `${leadersText(leaders.length, pt)} · ${needsYou} ${needsYou === 1 ? 'precisa' : 'precisam'} de você` : `${leadersText(leaders.length, pt)} · ${needsYou} ${needsYou === 1 ? 'needs' : 'need'} you`) : undefined} />
+      status={!loading && !unavailable && !stale && leaders.length > 0 ? (pt ? `${leadersText(leaders.length, pt)} · ${needsYou} ${needsYou === 1 ? 'precisa' : 'precisam'} de você` : `${leadersText(leaders.length, pt)} · ${needsYou} ${needsYou === 1 ? 'needs' : 'need'} you`) : undefined} />
     {unavailable ? <p role="status">{pt ? 'A liderança não está disponível nesta instância.' : 'Leadership is unavailable on this instance.'}</p>
       : loading ? <p role="status">{pt ? 'Carregando líderes…' : 'Loading leaders…'}</p>
       : <>
