@@ -53,7 +53,18 @@ describe('POST /api/resources/kill', () => {
   }, 20_000)
 
   test('a pid that is not in the inventory is refused 403', async () => {
-    const res = await post(process.ppid > 1 ? process.ppid : 1)
-    expect(res!.status).toBe(403)
+    // A plain `sleep` this test owns, never `process.ppid`: under `agentop heavy` / `agentop run`
+    // (the pre-commit hook, a throwaway) the parent IS an agentop process in the inventory, so the
+    // route really killed it — the run died with "ended on request (SIGKILL)" or read 200. The
+    // bystander also drops the env markers the inventory classifies by (a child inheriting
+    // AGENTISTICS_HEAVY_JOB is a heavy job, AGENTISTICS_HELPER_ID a helper).
+    const env = { ...process.env } as Record<string, string | undefined>
+    delete env.AGENTISTICS_HEAVY_JOB; delete env.AGENTISTICS_HELPER_ID
+    const bystander = Bun.spawn(['sleep', '30'], { stdout: 'ignore', stderr: 'ignore', env: env as Record<string, string> })
+    try {
+      const res = await post(bystander.pid)
+      expect(res!.status).toBe(403)
+      expect(() => process.kill(bystander.pid, 0)).not.toThrow()
+    } finally { bystander.kill('SIGKILL') }
   }, 20_000)
 })

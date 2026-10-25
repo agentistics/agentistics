@@ -3,14 +3,19 @@ export type CleanKind = 'remove' | 'node-modules' | 'prune' | 'keep'
 export interface CleanWebItem {
   id: string; repo: string; project: string; path: string; name: string
   kind: CleanKind; bytes: number; reason: string; lastActivityMs: number | null
+  /** The folder could not be measured: `bytes` is not a measured 0. */
+  bytesUnknown?: boolean
 }
-export interface CleanScanLog { at: number; state: 'queued' | 'running' | 'done'; name: string; bytes?: number }
+/** `bytes` on a done line is the folder's MEASURED size; `kept` says none of it is offered for cleaning;
+ *  otherwise `freeBytes` is what the offered action would free. */
+export interface CleanScanLog { at: number; state: 'queued' | 'running' | 'done'; name: string; bytes?: number; kept?: boolean; freeBytes?: number; unknown?: boolean }
 export interface CleanScanState {
   id: string; state: 'scanning' | 'ready' | 'cancelled' | 'error'
   step: 1 | 2 | 3; label: 'discovering' | 'measuring' | 'preparing'
   /** Fraction in [0, 1], retained for existing plan clients. */
   progress: number; etaMs: number | null; startedAt: number; elapsedMs: number
-  foundBytes: number; itemCount: number; projectCount: number; projectTotal: number
+  /** foundBytes = what can be freed; measuredBytes = everything measured so far (absent on old servers). */
+  foundBytes: number; itemCount: number; projectCount: number; projectTotal: number; measuredBytes?: number
   log: CleanScanLog[]; background: boolean; error?: string
 }
 export interface CleanWebPlan {

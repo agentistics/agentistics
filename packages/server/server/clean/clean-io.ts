@@ -79,17 +79,42 @@ export async function repoOf(path: string, o: CleanIoOpts = {}): Promise<string 
   return common.endsWith(`${sep}.git`) ? common.slice(0, -5) : null
 }
 
-/** GNU du folds newest mtime into the size walk: no second recursive traversal. */
-async function diskFacts(path: string, o: CleanIoOpts): Promise<{ bytes: number; mtimeMs: number | null }> {
-  if (!existsSync(path)) return { bytes: 0, mtimeMs: null }
-  const timed = process.platform === 'linux'
-  const r = await run(timed ? ['du', '-sk', '--time', '--time-style=+%s', path] : ['du', '-sk', path], o)
-  const columns = r.out.split('\t')
-  const bytes = Number(columns[0]?.trim()) * 1024 || 0
-  let mtimeMs: number | null = null
-  if (timed && columns[1] && Number.isFinite(Number(columns[1]))) mtimeMs = Number(columns[1]) * 1000
+/** What one `du` reported for a tree, or null when it said nothing usable. Pure; exported for tests. */
+export function parseDu(out: string, path: string, timed: boolean): { bytes: number; mtimeMs: number | null; nodeModulesBytes: number } | null {
+  const nm = join(path, 'node_modules')
+  let total: { bytes: number; mtimeMs: number | null } | null = null
+  let nodeModulesBytes = 0
+  for (const line of out.split('\n')) {
+    const cols = line.split('\t')
+    if (cols.length < (timed ? 3 : 2)) continue
+    const kb = Number(cols[0]?.trim())
+    if (!Number.isFinite(kb) || cols[0]!.trim() === '') continue
+    const at = timed ? Number(cols[1]) : NaN
+    const where = resolve(cols.slice(timed ? 2 : 1).join('\t'))
+    if (where === resolve(path)) total = { bytes: kb * 1024, mtimeMs: Number.isFinite(at) ? at * 1000 : null }
+    else if (where === resolve(nm)) nodeModulesBytes = kb * 1024
+  }
+  return total ? { ...total, nodeModulesBytes } : null
+}
+
+/**
+ * ONE du per worktree: its total, its `node_modules` (a depth-1 line of the same walk) and, on GNU,
+ * the newest mtime. Worktrees nested INSIDE this one are excluded — the main checkout holds
+ * `.claude/worktrees/*`, and walking them again counted every worktree twice and made the main
+ * checkout's walk the one that outlived the timeout. A du that timed out or printed nothing is
+ * `unknown`, never a measured 0.
+ */
+async function diskFacts(path: string, nested: readonly string[], o: CleanIoOpts): Promise<{ bytes: number; nodeModulesBytes: number; mtimeMs: number | null; unknown: boolean }> {
+  if (!existsSync(path)) return { bytes: 0, nodeModulesBytes: 0, mtimeMs: null, unknown: false }
+  const gnu = process.platform === 'linux'
+  const argv = gnu
+    ? ['du', '-k', '-d', '1', '--time', '--time-style=+%s', ...nested.map(n => `--exclude=${n}`), path]
+    : ['du', '-k', '-d', '1', path]
+  const r = await run(argv, o)
+  const parsed = r.code === 124 ? null : parseDu(r.out, path, gnu)
+  let mtimeMs = parsed?.mtimeMs ?? null
   if (mtimeMs === null) { try { mtimeMs = statSync(path).mtimeMs } catch { /* disappeared */ } }
-  return { bytes, mtimeMs }
+  return { bytes: parsed?.bytes ?? 0, nodeModulesBytes: parsed?.nodeModulesBytes ?? 0, mtimeMs, unknown: parsed === null }
 }
 
 async function defaultRef(repo: string, o: CleanIoOpts): Promise<string | null> {
@@ -107,6 +132,7 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
   if (list.code !== 0) return []
   const base = await defaultRef(repo, o)
   const blocks = list.out.split('\n\n').filter(Boolean)
+  const allPaths = blocks.map(b => b.split('\n').find(l => l.startsWith('worktree '))?.slice(9)).filter((p): p is string => !!p).map(p => resolve(p))
   o.onDiscover?.(blocks.length)
   const out: Array<WorktreeFacts | undefined> = []
   let next = 0
@@ -121,18 +147,19 @@ export async function worktreeFacts(repo: string, o: CleanIoOpts = {}): Promise<
     const isMain = resolve(path) === resolve(repo)
     const missing = lines.some(l => l.startsWith('prunable')) || !existsSync(path)
     const locked = lines.some(l => l.startsWith('locked'))
-    let merged = false, dirty = false, lastCommitMs: number | null = null, sizeBytes = 0, nodeModulesBytes = 0, lastActivityMs: number | null = null
+    let merged = false, dirty = false, lastCommitMs: number | null = null, sizeBytes = 0, nodeModulesBytes = 0, lastActivityMs: number | null = null, sizeUnknown = false
     if (!missing) {
       if (base && headSha) merged = (await git(['-C', repo, 'merge-base', '--is-ancestor', headSha, base], o)).code === 0
       const st = await git(['-C', path, 'status', '--porcelain'], o)
       dirty = st.code !== 0 || st.out.trim() !== ''
       const lc = await git(['-C', path, 'log', '-1', '--format=%ct'], o)
       lastCommitMs = lc.code === 0 && lc.out.trim() ? Number(lc.out.trim()) * 1000 : null
-      const [tree, nm] = await Promise.all([diskFacts(path, o), diskFacts(join(path, 'node_modules'), o)])
-      sizeBytes = tree.bytes; nodeModulesBytes = nm.bytes
+      const own = resolve(path)
+      const tree = await diskFacts(path, allPaths.filter(p => p !== own && p.startsWith(own + sep)), o)
+      sizeBytes = tree.bytes; nodeModulesBytes = tree.nodeModulesBytes; sizeUnknown = tree.unknown
       lastActivityMs = Math.max(tree.mtimeMs ?? 0, lastCommitMs ?? 0) || null
     }
-    out[index] = { repo, path, branch, isMain, missing, locked, merged, dirty, lastCommitMs, lastActivityMs, sizeBytes, nodeModulesBytes }
+    out[index] = { repo, path, branch, isMain, missing, locked, merged, dirty, lastCommitMs, lastActivityMs, sizeBytes, nodeModulesBytes, ...(sizeUnknown ? { sizeUnknown } : {}) }
     o.onItem?.(out[index]!)
   }
   await Promise.all(Array.from({ length: Math.min(WORKTREE_POOL_SIZE, blocks.length) }, async () => {
