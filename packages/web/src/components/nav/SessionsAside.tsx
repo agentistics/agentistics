@@ -58,6 +58,7 @@ import { IdleReviewCard } from '../sessions/IdleReviewCard'
 import { PendingSessionCard } from '../sessions/PendingSessionCard'
 import { markSessionPending, reconcilePendingSessionsNow } from '../../lib/pendingSessionStore'
 import { reopenSession, reopeningLabel, useReopening, withReopening } from '../../lib/reopeningStore'
+import { endingLabel, useEnding } from '../../lib/endingSessions'
 import { buildPickRows } from '../../lib/sessionPick'
 import { NOTIFY_TOGGLE, mutedTooltip, notifyMenuExtras, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
@@ -2774,6 +2775,7 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
   useEffect(() => { registerSessionRoleAlias(session.id, roleKey) }, [session.id, roleKey])
   const wants = sessionNotify(session)
   const reopening = useReopening().has(session.id)
+  const ending = useEnding(session.id)
   const goTo = useContext(GoToSessionContext)
   const cardStyle = sessionCardStyle(session.state, cardColor, selected)
   const color = STATE_COLOR[session.state] ?? 'var(--text-tertiary)'
@@ -2874,6 +2876,13 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         <span role="status" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
           <AgentisticsLoader size={12} label={reopeningLabel(lang !== 'en')} />
           {reopeningLabel(lang !== 'en')}
+        </span>
+      )}
+      {/* The row's own sign that it is being ended: the reopening line, in the same place and look. */}
+      {ending && (
+        <span role="status" data-row-ending style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 11, color: 'var(--anthropic-orange)' }}>
+          <AgentisticsLoader size={12} label={endingLabel(lang !== 'en')} />
+          {endingLabel(lang !== 'en')}
         </span>
       )}
       <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', minWidth: 0 }}>

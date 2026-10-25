@@ -13,7 +13,7 @@
  * click away.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AlertTriangle, ArrowUpRight, Check, ChevronDown, Loader, Minus } from 'lucide-react'
 import { SystemLine, SYS_LINK, SYS_TEXT } from './ChatBubble'
 import { ActivityIcon } from './ActivityIcon'
@@ -103,14 +103,17 @@ export function ToolActivity({ group, lang, variant, defaultOpen = false, now: n
 }) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
-  const [open, setOpen] = useState(defaultOpen)
-  // What the person opened during the live phase does not survive completion: on live → done the
-  // run falls back to its closed line (a click AFTER completion sticks).
-  const wasRunning = useRef(group.running)
-  useEffect(() => {
-    if (wasRunning.current && !group.running) setOpen(defaultOpen)
-    wasRunning.current = group.running
-  }, [group.running, defaultOpen])
+  /**
+   * THE READER'S CHOICE, kept apart from the default. `null` = nobody has clicked: the line follows
+   * the run (the live tail while it runs, `defaultOpen` once it has ended). Once clicked it is the
+   * reader's, and it STAYS theirs through every live update and after the run finishes. It used to
+   * be one boolean that the live tail was derived from (`!open`) and that was reset when the run
+   * ended: collapsing a running group only swapped the full list for the same tail card — so the
+   * click looked ignored — and the choice was thrown away the moment the run finished.
+   */
+  const [choice, setChoice] = useState<boolean | null>(null)
+  const open = choice ?? defaultOpen
+  const setOpen = (v: boolean) => setChoice(v)
   const ticking = useNow(group.running && nowProp === undefined)
   const now = nowProp ?? ticking
   const span = fmtSpan(groupSpanMs(group, now))
@@ -141,7 +144,7 @@ export function ToolActivity({ group, lang, variant, defaultOpen = false, now: n
     ...(isMobile ? { minHeight: 44 } : {}),
   }
   const button = (
-    <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} style={toggle}>{label}</button>
+    <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} style={toggle}>{label}</button>
   )
 
   if (variant === 'divider') {
@@ -155,7 +158,7 @@ export function ToolActivity({ group, lang, variant, defaultOpen = false, now: n
   }
 
   // inline + live
-  const liveTail = variant === 'live' && group.running && !open
+  const liveTail = variant === 'live' && group.running && choice === null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, fontSize: 11, color: SYS_TEXT }}>
       <div style={{ display: 'flex', minWidth: 0 }}>{button}</div>
