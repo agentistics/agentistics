@@ -412,7 +412,7 @@ describe('a structured session survives a server restart', () => {
     expect(prompts(r)).toEqual(['one', 'two'])
   }, 20000)
 
-  test('a replay that does not reproduce the original falls back to the conversation-id resume', async () => {
+  test('a replay that does not reproduce the original comes back STRUCTURED by the conversation-id resume (FALLBACK.STRUCTURED)', async () => {
     const r = rig()
     const A = r.server()
     await A.b.spawn(webSpawn(r.root, 'one'))
@@ -424,11 +424,11 @@ describe('a structured session survives a server restart', () => {
     writeFileSync(inPath, readFileSync(inPath, 'utf8').replace('"one', '"ONE'))
     const B = r.server()
     await B.b.reattach()
-    expect(B.b.structuredSessions()).toHaveLength(0)
-    expect(B.base.spawned.map(s => s.argv)).toEqual([['gemini', '--resume', 'conv-fake-1']])
-    expect(B.base.spawned[0]!.id).toBe('m-1')
-    expect(r.store.isAlive('m-1')).toBe(false) // the child was ended before the TUI resumed it
-    expect(existsSync(r.store.dirOf('m-1'))).toBe(false)
+    // the old child was ended, and the same conversation is driven again — structured, under the same id
+    expect(B.base.spawned).toHaveLength(0)
+    expect(B.b.structuredSessions().map(s => s.id)).toEqual(['m-1'])
+    expect(r.started.at(-1)).toMatchObject({ id: 'm-1', resumeId: 'conv-fake-1' })
+    expect(r.started.at(-1)!.initialPrompt).toBeUndefined()
   }, 20000)
 })
 

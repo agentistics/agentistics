@@ -111,7 +111,8 @@ export async function resolveBackend(): Promise<SessionBackend> {
         await ensureSessionIdentityKey()
       },
       onFallback(id, o) {
-        console.warn(`[sessions] structured session ${id} fell back to tmux (${o.resumed ? 'resumed by conversation id' : 'could not resume'}): ${o.reason}`)
+        if (o.structured) console.warn(`[sessions] structured session ${id} came back structured (resumed by conversation id): ${o.reason}`)
+        else console.warn(`[sessions] structured session ${id} fell back to tmux (${o.resumed ? 'resumed by conversation id' : 'could not resume'}): ${o.reason}`)
       },
       // F2.0b — a structured child runs under a relay that outlives this process (`structured-durable.ts`).
       durable: (await import('./structured-durable')).defaultDurableStore(),

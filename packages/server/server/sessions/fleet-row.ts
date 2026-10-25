@@ -107,6 +107,8 @@ export type FleetActionId =
    * when the person asks for it. A session already in a terminal answers so, in a sentence.
    */
   | 'terminal'
+  /** FALLBACK.STRUCTURED — the inverse: a TUI row goes back to the structured (new) mode, same conversation. */
+  | 'structured'
   /**
    * Advance the harness to its NEXT mode — `auto` → `manual` → `accept edits` → `plan` → back.
    *

@@ -39,7 +39,7 @@ import { followFork } from './transcript-fork'
 import { readRegistry } from './registry'
 import { foreignConversations } from './row-conversation'
 import { createTranscriptPathMemo, resolveMemoizedPath } from './transcript-path-memo'
-import { accountStoreDirs } from './account-transcript-roots'
+import { newestTranscript } from './account-transcript-roots'
 import { parseChatName } from './gemini-family'
 import { listGeminiFamilies } from './gemini-family-io'
 
@@ -481,21 +481,16 @@ const KIMI: HarnessTranscript = {
 }
 
 /**
- * The default store's answer, else the SAME exact conversation id looked up in each account root of
- * this harness — a second login keeps its transcripts in its own config root
- * (`account-transcript-roots.ts`). Only reached on a miss, so a default-home session costs nothing more.
+ * The default store's answer AND the SAME exact conversation id looked up in each account root of
+ * this harness, the newest file winning (`newestTranscript`) — a second login keeps its transcripts in its own config root
+ * (`account-transcript-roots.ts`).
  */
 async function orAccountRoots(
   harness: HarnessId,
   found: string | null,
   at: (dir: string) => Promise<string | null>,
 ): Promise<string | null> {
-  if (found) return found
-  for (const dir of await accountStoreDirs(harness)) {
-    const path = await at(dir).catch(() => null)
-    if (path) return path
-  }
-  return null
+  return newestTranscript(harness, found, at)
 }
 
 const CLAUDE: HarnessTranscript = {
