@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter, Outlet, Route, Routes } from 'react-router-dom'
-import { isAdapterHarness, surfaceHarnesses, type PlanLimits } from '@agentistics/core'
+import { isAdapterHarness, planBudget, planPace, surfaceHarnesses, type PlanLimits } from '@agentistics/core'
 import { __setPlanLimitsForTest } from '../../lib/planLimits'
 import type { UsageBudgetRow } from '../../lib/usagePlan'
 import { HARNESS_LABELS } from '../../lib/harness'
@@ -56,12 +56,43 @@ describe('usage account cards', () => {
     }
   })
   test('overage retains the reported percentage with no negative remainder', () => {
-    seed([row({ weekPct: 125, status: 'hold' })])
-    for (const lang of ['pt', 'en'] as const) for (const page of [<UsageNowPage />, <UsageLimitsPage />]) {
-      const html = render(page, 390, lang)
-      expect(html).toContain('125%')
-      expect(html).toContain(lang === 'pt' ? 'restam 0%' : '0% left')
-      expect(html).not.toContain('-25%')
+    for (const weekPct of [105, 112, 125]) {
+      seed([row({ weekPct, status: 'hold' })])
+      for (const lang of ['pt', 'en'] as const) for (const page of [<UsageNowPage />, <UsageLimitsPage />]) {
+        const html = render(page, 390, lang)
+        expect(html).toContain(`${weekPct}%`)
+        expect(html).toContain(lang === 'pt' ? 'restam 0%' : '0% left')
+        expect(html).toContain(lang === 'pt' ? 'Acima do limite' : 'Over limit')
+        expect(html).not.toContain(`-${weekPct - 100}%`)
+      }
+    }
+  })
+  test('single-reading and renewed stale fallback rates never become a measured recommendation', () => {
+    for (const renewed of [false, true]) {
+      const observed: PlanLimits = { harness: 'codex', account: 'a', plan: 'Plus', source: 'codex-rollout',
+        updatedAt: renewed ? NOW - 10 * 86_400_000 : NOW,
+        windows: [{ kind: 'week', usedPct: renewed ? 99 : 4, resetsAt: renewed ? NOW - 3 * 86_400_000 : NOW + WEEK * 0.98 }] }
+      const budget = { ...planBudget(observed, NOW), ...planPace(observed, NOW), account: 'a' }
+      expect(budget.freeSlotsMeasured).toBe(false)
+      expect(budget.burnPctPerHour).toBeGreaterThan(0) // policy fallback is present, but not measured
+      if (!renewed) expect(budget.status).toBe('tight')
+      __setPlanLimitsForTest([observed], NOW, [], [budget])
+      for (const lang of ['pt', 'en'] as const) for (const page of [<UsageNowPage />, <UsagePlanPage />]) {
+        const html = render(page, 390, lang)
+        expect(html).toContain(lang === 'pt' ? 'Sem medida ainda' : 'Not measured yet')
+        expect(html).not.toContain('0 / 1')
+        expect(html).not.toContain(lang === 'pt' ? '1 sessão em paralelo' : '1 parallel session')
+      }
+    }
+  })
+  test('pending Copilot accounts use their display label in both Now and Limits, never their raw id', () => {
+    for (const accountLabel of ['Principal', undefined]) {
+      __setPlanLimitsForTest([], NOW, [{ harness: 'copilot', account: 'acc_e52704c55121', plan: 'Pro', accountLabel }])
+      for (const lang of ['pt', 'en'] as const) for (const page of [<UsageNowPage />, <UsageLimitsPage />]) {
+        const html = render(page, 390, lang)
+        expect(html).not.toContain('Copilot CLI · acc_e52704c55121')
+        if (accountLabel) expect(html).toContain('Copilot CLI · Principal')
+      }
     }
   })
   test('headline and account pills agree when the budget is tight but recent pace is on', () => {
@@ -288,7 +319,7 @@ for (const lang of ['pt', 'en'] as const) test(`the pause tile reads plainly, in
   expect(Math.abs(phrase.length - neighbour.length)).toBeLessThanOrEqual(3)
 })
 
-for (const lang of ['pt', 'en'] as const) test(`overview and limits share the near-renewal forecast rule in ${lang}`, () => {
+for (const lang of ['pt', 'en'] as const) test(`overview and limits keep the forecast anchored to the reading in ${lang}`, () => {
   const budget = row({ weekPct: 0, fiveHourPct: 50 })
   const limits = { ...limit(budget), windows: [{ kind: '5h' as const, usedPct: 50, resetsAt: NOW + 2.5 * 3_600_000 + 1000 }] }
   const phrase = lang === 'pt' ? 'acaba ~' : 'runs out ~'
@@ -296,12 +327,12 @@ for (const lang of ['pt', 'en'] as const) test(`overview and limits share the ne
     __setPlanLimitsForTest([limits], now, [], [budget])
     for (const page of [<UsageNowPage />, <UsageLimitsPage />]) {
       const html = render(page, 390, lang)
-      expect(html.includes(phrase)).toBe(now === NOW)
+      expect(html.includes(phrase)).toBe(true)
       expect(html).toContain('data-plan-forecast-slot')
       expect(html).toContain('min-height:1.5em')
     }
     const nay = render(<NayLimitsTab lang={lang} isMobile />, 390, lang)
-    expect(nay.includes(phrase)).toBe(now === NOW)
+    expect(nay.includes(phrase)).toBe(true)
     expect(nay).toContain('min-height:44px;min-width:44px')
   }
 })

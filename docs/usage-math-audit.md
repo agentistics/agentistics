@@ -30,14 +30,13 @@ Implementation sources:
 | Remaining %, Now/Limits | `max(0,100-round(U))` before renewal | Remaining quota is nonnegative | Fixed: 125% previously displayed “−25% left”. |
 | Renewal date and “in …”, Now/Limits | Local `fmtWhen(R,t)` plus `fmtSpan(R-t)` | Absolute timestamp and elapsed duration | Agrees; exact reset is already renewed. |
 | Estimated reset after old reset | `R+(floor((t-R)/L)+1)L`, use=0, `projected:true` | Projection distinguished from observation | Agrees, including several missed windows. |
-| “runs out ~HH:MM”, Now/Limits | `E=max(1 minute,t-(R-L))`; `at=t+(100-U)*E/U` | Average since window start, not recent measured burn | Agrees with policy caveat below. `U<=0`: lasts; `U>=100`: exhausted; renewed: no warning. `at>=R`: lasts. |
-| Meter state / warning, Now/Limits | attention ≥75%, critical ≥95%; early forecast upgrades “room to spare” | Severity plus early exhaustion warning | Agrees; distinct from hold and recent pace thresholds. |
+| “runs out ~HH:MM”, Now/Limits | `s=min(t,updatedAt)`; `E=max(1 minute,s-(R-L))`; `at=s+(100-U)*E/U` | Average at last observation, not recent measured burn | Fixed clock-only drift: estimate changes only with a new observation; `U<=0`: lasts; `U>=100`: exhausted; renewed: no warning; `at>=R`: lasts. |
+| Meter state / warning, Now/Limits | attention ≥75%, critical ≥95%; >100% explicitly over limit; early forecast upgrades “room to spare” | Severity plus early exhaustion warning | Fixed explicit over-limit wording; distinct from hold and recent pace thresholds. |
 | Updated age, Now/Limits | age <1 minute →just now; else rounded duration; stale iff age >10 minutes | Each account's own update age | Agrees. Exactly ten minutes is not stale. |
 | Week: expected %, Now | `clamp(100*(1-(weekResetsAt-t)/(7D)),0,100).toFixed(1)` | Straight 0→100 from start to renewal | Agrees. Requires known weekly meter and future budget reset. |
 | Renews in, Now | `fmtSpan(weekResetsAt-t)` when positive | Weekly renewal interval | Agrees. Absent week →no weekly tile. Projected weekly reset is an estimate. |
 | Parallel / recommended, Now | `liveSessions.length / suggestedParallel`, only with positive measured capacity | Authoritative server cadence | Agrees. Count includes attributed positive-burn sessions, not all open terminals. |
 | Parallel, Plan | server `suggestedParallel`; hold →0, unknown capacity →unknown | Same recommendation as Now/MCP | Fixed: local `floor(sustainable/(account burn/live count))` could disagree or override an unavailable account's zero. |
-| Hours input / interval, Plan | finite `Number(hours)>0`; default 4; helper does not vary cadence by hours | Sustainable cadence through renewal; requested interval displayed | Agrees with existing policy; limitation below. Blank/zero/negative/non-numeric edits show alert and N/A. |
 | Running now / weekly renewal, Plan | measured session count; local reset if future | Same account's count and weekly reset | Agrees; unknown count and absent weekly renewal are N/A. |
 | Pace pill, Now | hold if budget hold; over if tight OR recent over; else recent on/under | Combine budget severity with recent pace | Fixed: under previously became on. MCP can have `paceStatus:on` with `status:tight`; combined UI then warns. |
 | Area count / headline | count rows with combined hold/over state | One shared page/nav predicate | Agrees. Under produces no warning; hold counted once. “All on pace” means no warning, including under. |
@@ -47,7 +46,7 @@ Implementation sources:
 | Actual charts, Now/History | recorded week/5h % at timestamp; null stays missing; Now filters current week | Same percentage scale without normalization | Agrees. >100 preserved; keys include harness and account, duplicate nicknames disambiguated. |
 | Chart axes / tooltips / window labels | epoch-ms X/local date-time, percent Y nominal 0–100 (Recharts expands overage), Week or 5 h by kind | Time versus percent, per window | Agrees. Earlier expected windows cannot be reconstructed from payload. |
 | History scope | in-process samples, last 32 per account within seven days of latest reading | Recent in-memory history since server startup | Agrees with bounded retention now explicit; not a complete weekly archive. |
-| Limits plan / pending rows | observed %/resets; absent record →waiting, no numeric zero | Missing data is unknown | Agrees. Availability/registration settings are not numeric usage observations. |
+| Limits plan / pending rows | observed %/resets; absent record →waiting, no numeric zero; friendly account label retained | Missing data is unknown; account labels agree across Usage | Fixed pending raw-id fallback and single-account label inconsistency. Availability/registration settings are not numeric usage observations. |
 
 ## Budget and pace producers
 
@@ -78,10 +77,12 @@ numeric tiles on the Usage pages.
    cadence. Newly projected windows carry zero usage and estimated renewal, not observed capacity.
 3. **Window average versus recent burn:** exhaustion can warn while recent burn is zero, because
    earlier consumption was fast. It does not use measured recent burn. Whether to change this needs
-   a policy decision: both shared meters and budget tight status currently use window average.
-4. **Plan hours:** 1h, 4h and 168h give the same sustainable recommendation. No finite-horizon quota
-   optimizer or reset simulation exists. The page explicitly explains that hours do not increase
-   capacity. Making the input change the result needs a specified planning contract.
+   a policy decision: both shared meters and budget tight status use average at the last observation.
+   Estimates are now pinned to that observation's timestamp, preventing self-drift at low percentages.
+4. **Plan hours (UI metadata, excluded from the math tables):** 1h, 4h and 168h give the same
+   sustainable recommendation. The positive finite input defaults to four, displays the intended
+   interval and validates blank/zero/negative edits with an alert and N/A. No duration-based quota
+   arithmetic, finite-horizon optimizer or reset simulation exists; this audit makes no such claim.
 5. **Week versus 5h:** recent burn/capacity use the week; 5h supplies an 85% hold and recheck cap.
    No separate recent 5h sustainable rate exists. A missing weekly meter is not a measured week.
    Projected rolling windows may differ from providers that start a window on subsequent activity.

@@ -29,7 +29,7 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
   // Native calls use provider billing, not a subscription plan; keep the registry's surface order.
   const noPlan = surfaceHarnesses(false).filter(h => !registered.some(r => r.harness === h) && !budgets.some(r => r.harness === h && r.plan) && !limits?.some(r => r.harness === h && r.plan))
   const pending = registered.filter(r => !budgets.some(b => b.harness === r.harness && (b.account ?? 'default') === (r.account ?? 'default')))
-  const cards = [...rows, ...pending.map(r => ({ ...r, accountLabel: r.account }))].sort((a, b) => SURFACE_HARNESS_ORDER.indexOf(a.harness) - SURFACE_HARNESS_ORDER.indexOf(b.harness) || accountLabel(a).localeCompare(accountLabel(b))) // @native-gated: ordering rows from the subscription store.
+  const cards = [...rows, ...pending.map(r => ({ ...r, accountLabel: r.accountLabel ?? HARNESS_LABELS[r.harness] }))].sort((a, b) => SURFACE_HARNESS_ORDER.indexOf(a.harness) - SURFACE_HARNESS_ORDER.indexOf(b.harness) || accountLabel(a).localeCompare(accountLabel(b))) // @native-gated: ordering rows from the subscription store.
   // Share header, meter and metric rows across each pair; forecast wrapping cannot shift tiles.
   const cardRows = { display: 'grid', gridTemplateRows: 'subgrid', gridRow: 'span 3', minWidth: 0 } as const
   const contentRows = { display: 'grid', gridTemplateRows: 'subgrid', gridRow: 'span 2' } as const

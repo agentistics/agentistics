@@ -119,6 +119,14 @@ describe('Usage audit: tight is a warning, not a routing hold', () => {
 })
 
 describe('Usage audit: window average forecasts and renewal', () => {
+  for (const pct of [4, 5, 66]) test(`${pct}% forecast stays fixed between readings`, () => {
+    const w = { kind: 'week' as const, usedPct: pct, resetsAt: NOW + PLAN_WINDOW_MS.week * 0.99 }
+    const expected = forecastWindow(w, NOW, NOW)
+    expect(expected.kind).toBe('runs-out')
+    for (const minutes of [1, 4, 10]) expect(forecastWindow(w, NOW + minutes * 60_000, NOW)).toEqual(expected)
+    expect(forecastWindow(w, NOW + 60_000, NOW + 60_000)).not.toEqual(expected)
+    expect(forecastWindow(w, w.resetsAt, NOW)).toEqual({ kind: 'renewed' })
+  })
   for (const kind of ['week', '5h'] as PlanWindowKind[]) {
     const length = PLAN_WINDOW_MS[kind]
     for (const [pct, result] of [[0, 'lasts'], [20, 'lasts'], [80, 'runs-out'], [100, 'exhausted'], [120, 'exhausted']] as const) {

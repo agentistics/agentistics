@@ -131,7 +131,8 @@ Harnesses without subscription plans have registration links to Settings → Bil
 runtime uses provider billing rather than subscription plans and is excluded from that list.
 
 `/usage/plan` accepts a positive number of hours, defaulting to four, and uses the shared
-`planSessions` helper for sustainable parallel capacity and pause times. `/usage/limits` renders
+`planSessions` helper for sustainable parallel capacity and pause times. Hours are planning metadata,
+not an input to capacity arithmetic. `/usage/limits` renders
 the same `NayLimitsTab` as the usage modal. `/usage/history` shows account readings for the weekly
 and five-hour windows and states that history begins when the server starts. History is held in
 memory; these pages add no persistence or polling loop.
@@ -147,10 +148,13 @@ current known window.
 Usage is BETA; the shared beta chip appears in the area tree, rail tooltip, mobile sheet and page
 titles. The detailed formula/verdict audit is [usage-math-audit.md](usage-math-audit.md).
 
-The shared exhaustion forecast uses average consumption since the window opened: percent divided
-by elapsed time (at least one minute). It does not use the recent measured burn. No usage means no
-exhaustion warning; 100% or more is exhausted. Remaining quota is clamped at zero, while the reported
-used percentage remains visible even above 100%.
+The shared exhaustion forecast uses average consumption up to the last observation: percent divided
+by elapsed time from window start to that reading (at least one minute). Its estimated exhaustion
+instant is anchored to that reading's `updatedAt`, so clock ticks alone do not move it. It does not
+use recent measured burn. No usage means no warning; 100% or more is exhausted. Remaining quota is
+clamped at zero; over 100% shows an explicit over-limit state and retains the reported percentage.
+Pending registered accounts carry the same friendly `accountLabel` as measured accounts, never a
+raw account id or owner login. A telling account label remains visible in Limits even for one account.
 
 Recent weekly pace uses same-account, same-renewal observations from the last six hours, after the
 current account segment starts. Burn is the nonnegative percentage delta divided by elapsed hours

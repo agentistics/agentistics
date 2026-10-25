@@ -123,7 +123,7 @@ describe('budgets, pacing, and routing', () => {
   const reset5 = now + 5 * H
   const resetWeek = now + 3 * 24 * H
   const withPlan = (harness: 'claude' | 'codex', five: number, week: number, plan: string): PlanLimits => ({
-    ...lim(harness, [win('5h', five, reset5), win('week', week, resetWeek)]), plan,
+    ...lim(harness, [win('5h', five, reset5), win('week', week, resetWeek)], now), plan,
   })
 
   test('hold is driven by the five-hour or 95% weekly threshold', () => {

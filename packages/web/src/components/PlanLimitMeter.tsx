@@ -43,7 +43,7 @@ export function PlanUsageRing({ pct, size = 36, stroke = 3, children }: { pct: n
 export function LimitLevelIcon({ pct, size = 16, lang = 'pt', level = limitLevel(pct) }: { pct: number | null; size?: number; lang?: Lang; level?: ReturnType<typeof limitLevel> }) {
   if (level === 'ok') return null
   const critical = level === 'critical'
-  return <svg aria-label={limitLevelWord(level, lang)} width={size} height={size} viewBox="0 0 20 20" role="img" style={{ color: critical ? 'var(--accent-red)' : 'var(--anthropic-orange)', flexShrink: 0 }}>
+  return <svg aria-label={limitLevelWord(level, lang, pct)} width={size} height={size} viewBox="0 0 20 20" role="img" style={{ color: critical ? 'var(--accent-red)' : 'var(--anthropic-orange)', flexShrink: 0 }}>
     {critical ? <polygon points="6,1 14,1 19,6 19,14 14,19 6,19 1,14 1,6" fill="currentColor" /> : <polygon points="10,1 19,18 1,18" fill="currentColor" />}
     <text x="10" y={critical ? 14 : 15} textAnchor="middle" fontSize="12" fontWeight="800" fill="var(--bg-base)">!</text>
   </svg>
@@ -97,11 +97,11 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
 }
 
 /** One window as a ring + words. Shared by the detailed card (48px) and the composer block (34px). */
-function WindowRow({ w, now, lang, ring, forecast = true }: { w: PlanLimitWindow; now: number; lang: Lang; ring: number; forecast?: boolean }) {
+function WindowRow({ w, now, observedAt, lang, ring, forecast = true }: { w: PlanLimitWindow; now: number; observedAt: number; lang: Lang; ring: number; forecast?: boolean }) {
   const pt = lang === 'pt'
   const pct = currentUsedPct(w, now)
   const renewed = windowRenewed(w, now)
-  const f = forecast ? warnForecast(w, now) : null
+  const f = forecast ? warnForecast(w, now, observedAt) : null
   return <div data-plan-window={w.kind} style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
     <PlanUsageRing pct={pct} size={ring}>{renewed ? '–' : ring >= 44 ? `${Math.round(pct)}%` : Math.round(pct)}</PlanUsageRing>
     <div style={{ minWidth: 0, flex: 1, fontSize: 12, lineHeight: 1.5 }}>
@@ -120,7 +120,7 @@ function WindowRow({ w, now, lang, ring, forecast = true }: { w: PlanLimitWindow
 export function PlanSessionBlock({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
   const stale = stalePhrase(limits, now, lang)
   return <div data-plan-limits={limits.harness} style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-    {limits.windows.map(w => <WindowRow key={w.kind} w={w} now={now} lang={lang} ring={34} />)}
+    {limits.windows.map(w => <WindowRow key={w.kind} w={w} now={now} observedAt={limits.updatedAt} lang={lang} ring={34} />)}
     <div style={{ fontSize: 10.5, color: stale ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }}>{updatedPhrase(limits, now, lang)} · {lang === 'pt' ? 'fonte' : 'source'}: {SOURCE_LABEL[limits.source][lang]}</div>
   </div>
 }
@@ -134,9 +134,9 @@ export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedd
   const harness = limits?.harness ?? pending!.harness
   const plan = limits ? (limits.plan ?? limits.sourcePlan) : pending?.plan
   const worst = limits ? Math.max(...limits.windows.map(w => currentUsedPct(w, now)), 0) : null
-  const early = limits?.windows.some(w => warnForecast(w, now) !== null) ?? false
+  const early = limits?.windows.some(w => warnForecast(w, now, limits.updatedAt) !== null) ?? false
   const level = early && limitLevel(worst) === 'ok' ? 'attention' : limitLevel(worst)
-  const state = limits ? limitLevelWord(level, lang) : (pt ? 'aguardando leitura' : 'waiting for the first reading')
+  const state = limits ? limitLevelWord(level, lang, worst) : (pt ? 'aguardando leitura' : 'waiting for the first reading')
   const stale = limits ? stalePhrase(limits, now, lang) : null
   return <div data-plan-usage-card={harness} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, padding: embedded ? 0 : 12, borderRadius: 12, background: 'var(--bg-card)', border: embedded ? undefined : '1px solid var(--border)' }}>
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -144,16 +144,17 @@ export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedd
       <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 14 }}>{subscriptionName(harness, accountLabel)}</b>{showPlan && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{plan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span>}</div>
       <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', color: !limits ? 'var(--text-tertiary)' : level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} level={level} size={14} lang={lang} />{state}</span>
     </div>
-    {limits && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{limits.windows.map(w => <div key={w.kind} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} lang={lang} ring={48} /></div>)}</div>}
+    {limits && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{limits.windows.map(w => <div key={w.kind} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} observedAt={limits.updatedAt} lang={lang} ring={48} /></div>)}</div>}
     <span style={{ minHeight: 14, fontSize: 11, color: stale ? LIMIT_WARN : 'var(--text-tertiary)' }}>{limits ? updatedPhrase(limits, now, lang) : null}</span>
   </div>
 }
 
-export function PlanLimitMeter({ window: w, now, lang, forecast = false }: {
+export function PlanLimitMeter({ window: w, now, observedAt = now, lang, forecast = false }: {
   window: PlanLimitWindow
   now: number
+  observedAt?: number
   lang: Lang
-  /** Add the at-current-pace forecast under the bar (the new-session cards). */
+  /** Add the average-at-reading exhaustion forecast under the bar (the new-session cards). */
   forecast?: boolean
 }) {
   const pct = currentUsedPct(w, now)
@@ -162,7 +163,7 @@ export function PlanLimitMeter({ window: w, now, lang, forecast = false }: {
   const renewed = windowRenewed(w, now)
   const tone = limitTone(pct)
   // The forecast is said ONLY when the window runs out before it renews — in amber, never green.
-  const f = forecast ? warnForecast(w, now) : null
+  const f = forecast ? warnForecast(w, now, observedAt) : null
   const label = windowLabel(w.kind, lang)
   return (
     <div data-plan-window={w.kind} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
@@ -213,7 +214,7 @@ export function PlanLimitsBlock({ limits, now, lang, forecast = false, header = 
           </span>
         </div>
       )}
-      {limits.windows.map(w => <PlanLimitMeter key={w.kind} window={w} now={now} lang={lang} forecast={forecast} />)}
+      {limits.windows.map(w => <PlanLimitMeter key={w.kind} window={w} now={now} observedAt={limits.updatedAt} lang={lang} forecast={forecast} />)}
       {(details || stale) && (
         <div style={{ fontSize: 10.5, color: stale ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }}>
           {details ? updatedPhrase(limits, now, lang) : stale}
@@ -268,7 +269,7 @@ export function PlanLimitArcs({ limits, now, size }: { limits: PlanLimits; now: 
  * a window runs out before it renews. Same bar, colours and words as `PlanLimitMeter`.
  */
 export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
-  const warn = limits.windows.map(w => warnForecast(w, now)).find(Boolean) ?? null
+  const warn = limits.windows.map(w => warnForecast(w, now, limits.updatedAt)).find(Boolean) ?? null
   return (
     <div data-plan-limits={limits.harness} data-plan-compact style={{ display: 'grid', gridTemplateColumns: 'auto minmax(16px, 1fr) auto', alignItems: 'center', columnGap: 6, rowGap: 3, fontSize: 10.5, minWidth: 0 }}>
       {limits.windows.map(w => {

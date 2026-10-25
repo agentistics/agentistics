@@ -330,16 +330,18 @@ export type PlanForecast =
  * At the AVERAGE pace of the window so far (used ÷ elapsed since the window opened), does the
  * window last until it renews, or when does it run out? The window opened at
  * `resetsAt - length`; a pace measured over less than a minute is clamped to one minute.
+ * Anchor the projection to the observation timestamp; ticking the clock alone is not a new sample.
  */
-export function forecastWindow(w: PlanLimitWindow, nowMs: number): PlanForecast {
+export function forecastWindow(w: PlanLimitWindow, nowMs: number, observedAt = nowMs): PlanForecast {
   w = effectiveWindow(w, nowMs)
   if (w.projected) return { kind: 'renewed' }
   if (w.usedPct >= 100) return { kind: 'exhausted', until: w.resetsAt }
   if (w.usedPct <= 0) return { kind: 'lasts' }
   const opened = w.resetsAt - PLAN_WINDOW_MS[w.kind]
-  const elapsed = Math.max(60_000, nowMs - opened)
+  const sampledAt = Math.min(nowMs, observedAt)
+  const elapsed = Math.max(60_000, sampledAt - opened)
   const perMs = w.usedPct / elapsed
-  const at = nowMs + (100 - w.usedPct) / perMs
+  const at = sampledAt + (100 - w.usedPct) / perMs
   return at >= w.resetsAt ? { kind: 'lasts' } : { kind: 'runs-out', at: Math.round(at) }
 }
 
@@ -360,7 +362,7 @@ export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
   const weekResetsAt = week?.resetsAt ?? nowMs
   const daysToWeekReset = Math.max(0, (weekResetsAt - nowMs) / DAY_MS)
   const dailyBudgetPct = Math.max(0, 100 - weekPct) / Math.max(daysToWeekReset, 0.5)
-  const forecast = week ? forecastWindow(week, nowMs) : { kind: 'lasts' as const }
+  const forecast = week ? forecastWindow(week, nowMs, l.updatedAt) : { kind: 'lasts' as const }
   const status: PlanBudgetStatus = fiveHourPct >= PLAN_BUDGET_HOLD_5H_PCT || weekPct >= PLAN_BUDGET_HOLD_WEEK_PCT
     ? 'hold'
     : weekPct >= PLAN_BUDGET_TIGHT_WEEK_PCT || forecast.kind === 'runs-out'
