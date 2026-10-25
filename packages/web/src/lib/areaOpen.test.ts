@@ -22,3 +22,13 @@ describe('areaOpen', () => {
     expect(parseAreaOpen({ a: true, b: 3 })).toEqual({ a: true })
   })
 })
+
+it('opening an area closes the others held open, so the tree never stacks every visited area', () => {
+  let map = openedArea({}, 'leadership')
+  map = openedArea(map, 'usage')
+  map = openedArea(map, 'metrics')
+  expect(map).toEqual({ metrics: true })
+  for (const id of ['leadership', 'usage']) expect(isAreaOpen(map, id, false)).toBe(false)
+  // A hand-closed area stays closed.
+  expect(openedArea({ tasks: false, usage: true }, 'metrics')).toEqual({ tasks: false, metrics: true })
+})

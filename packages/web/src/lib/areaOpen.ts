@@ -24,9 +24,18 @@ export function toggledAreaOpen(map: AreaOpenMap, id: string, active: boolean): 
   return { ...map, [id]: !isAreaOpen(map, id, active) }
 }
 
-/** Selecting an area row opens it: going somewhere is also asking to see what is inside. */
+/**
+ * Selecting an area row opens it — going somewhere is also asking to see what is inside — and
+ * closes every other area held open, so the tree is an accordion (the prototype): visiting areas one
+ * after another must not stack their pages until Repositórios, Cofre and Ajustes fall below the fold.
+ * A hand-CLOSED area stays closed; only stale opens are dropped.
+ */
 export function openedArea(map: AreaOpenMap, id: string): AreaOpenMap {
-  return map[id] === true ? map : { ...map, [id]: true }
+  const out: AreaOpenMap = {}
+  for (const [k, v] of Object.entries(map)) if (k !== id && v === false) out[k] = false
+  out[id] = true
+  const same = Object.keys(out).length === Object.keys(map).length && Object.entries(out).every(([k, v]) => map[k] === v)
+  return same ? map : out
 }
 
 export const areaOpenStore = createSharedPref<AreaOpenMap>({

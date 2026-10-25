@@ -798,7 +798,9 @@ function SideNav({
     ...(principal ? { role: principal.role === 'owner' ? 'owner' as const : 'member' as const, isManager: principal.memberships.some(m => m.role === 'manager') } : {}),
     ...(nativeRuntime !== null ? { nativeRuntime } : {}),
   }).map(x => x.id)), [isCentral, principal, nativeRuntime])
-  const areaBadgeCounts = useMemo(() => areaBadges({ attention }), [attention])
+  // The rail/tree badges read the plan store the Uso page reads, so its badge matches the page.
+  const planLimits = usePlanLimits()
+  const areaBadgeCounts = useMemo(() => areaBadges({ attention, usageRows: isCentral ? undefined : planLimits.budgets }), [attention, isCentral, planLimits.budgets])
   const footBtn: React.CSSProperties = {
     width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
     borderRadius: 8, border: '1px solid var(--border)', background: 'transparent',

@@ -14,3 +14,13 @@ describe('areaBadges', () => {
     expect(areaBadges({ attention: 0, usageRows: [{ paceStatus: 'under' }], checkinsOverdue: 0 })).toEqual({})
   })
 })
+
+describe('the Uso badge counts what the Uso page calls over pace', () => {
+  it('a tight budget is over pace on the page, so it lights the badge too', async () => {
+    const { usageHeadline } = await import('./usagePlan')
+    const rows = [{ status: 'tight' }, { status: 'ok', paceStatus: 'over' }, { status: 'ok', paceStatus: 'on' }] as const
+    expect(areaBadges({ usageRows: rows })).toEqual({ usage: 2 })
+    // The page's own sentence reads the same rows the same way.
+    expect(usageHeadline(rows as never, 0, 'pt')).toBe('2 de 3 planos acima do ritmo.')
+  })
+})

@@ -95,11 +95,11 @@ export function FleetOverview({
                 : 'This install cannot read sessions. A central aggregates many machines and hosts none of their sessions, and an exposure profile with no host power refuses the read too — so there is no fleet to summarize here, which is not the same as an empty one.')
             : unavailable
               ? unavailable
-              // Nothing is RUNNING — which says nothing about history: the list beside this can hold
-              // hundreds of ended conversations, so "no sessions yet" would contradict it.
+              // The list beside this already says what is (not) running and how many ended; the
+              // centre only points at what to do, so the fact is said once (QA r2).
               : (pt
-                  ? 'Nada rodando nesta máquina agora. Comece uma sessão pelo + da lista, ou reabra uma conversa em Encerradas.'
-                  : 'Nothing is running on this machine right now. Start a session with the list’s +, or reopen a conversation from Ended.')}
+                  ? 'Escolha uma conversa na lista, ou comece uma sessão pelo +.'
+                  : 'Pick a conversation from the list, or start a session with +.')}
         >
           {genuinelyEmpty && <ProfilePanel baseline={baseline} pt={pt} />}
         </Notice>

@@ -106,6 +106,14 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
   const results = searchAreas(query, lang).filter(r => r.area.id !== 'settings' || !visibleSettings || visibleSettings.has(r.page.id))
   const pagesOf = (area: Area) => area.id === 'settings' && visibleSettings ? area.pages.filter(p => visibleSettings.has(p.id)) : area.pages
   useEffect(() => { rememberAreaPath(pathname) }, [pathname])
+  // Arriving in an area by ANY route (the rail, the sheet, a link) collapses areas left open from
+  // earlier visits, exactly like choosing it in the tree does. Writes only when something changes.
+  const currentId = current?.area.id
+  useEffect(() => {
+    if (!currentId) return
+    const map = areaOpenStore.get()
+    if (Object.entries(map).some(([k, v]) => k !== currentId && v === true)) areaOpenStore.set(openedArea(map, currentId))
+  }, [currentId])
 
   const areaRow = (area: Area) => {
     const label = pageLabel(area, lang)

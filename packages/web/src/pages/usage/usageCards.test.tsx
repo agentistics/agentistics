@@ -115,7 +115,7 @@ describe('usage account cards', () => {
     for (const lang of ['pt', 'en'] as const) {
       const html = render(<UsageNowPage />, 390, lang)
       expect(html.match(/Claude Max 5x/g)).toHaveLength(1)
-      expect(html).toContain(lang === 'pt' ? 'Pausar, sem horário' : 'Pause, no time set')
+      expect(html).toContain(lang === 'pt' ? 'Sem horário' : 'No time set')
       expect(html).not.toContain(lang === 'pt' ? '>Sem pausa<' : '>No pause<')
     }
   })
@@ -255,11 +255,12 @@ for (const lang of ['pt', 'en'] as const) test(`planning units, spacing and inva
 for (const lang of ['pt', 'en'] as const) test(`the pause tile reads plainly, in the same short form as "no pause" (${lang})`, () => {
   seed([row({ status: 'tight', pauseUntil: undefined })])
   const html = render(<UsageNowPage />, 390, lang)
-  const phrase = lang === 'pt' ? 'Pausar, sem horário' : 'Pause, no time set'
+  const phrase = lang === 'pt' ? 'Sem horário' : 'No time set'
   expect(html).toContain(phrase)
   expect(html).not.toContain('N/A —')
-  // Short enough to be a figure, not a sentence: the tile draws it at the figure size, like "Sem pausa".
-  expect(phrase.length).toBeLessThanOrEqual(20)
+  // As short as "Sem pausa" beside it, so both tiles are drawn at the same figure size (QA r2).
+  const neighbour = lang === 'pt' ? 'Sem pausa' : 'No pause'
+  expect(Math.abs(phrase.length - neighbour.length)).toBeLessThanOrEqual(3)
 })
 
 for (const lang of ['pt', 'en'] as const) test(`overview and limits share the near-renewal forecast rule in ${lang}`, () => {

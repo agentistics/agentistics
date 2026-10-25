@@ -16,7 +16,7 @@ const hhmm = (ms: number): string => {
 }
 
 /** One decision for the overview sentence and each account's pace pill. */
-export function usagePaceState(row: UsageBudgetRow): 'hold' | 'over' | 'on' {
+export function usagePaceState(row: Partial<Pick<UsageBudgetRow, 'status' | 'paceStatus'>>): 'hold' | 'over' | 'on' {
   if (row.status === 'hold') return 'hold'
   return row.paceStatus === 'over' || row.status === 'tight' ? 'over' : 'on'
 }
