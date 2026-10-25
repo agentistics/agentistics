@@ -250,40 +250,48 @@ export async function answerAwayDigest(
 
 /** What one fleet row says about Nay's answer: `started`, still `waiting`, or `gone` (it ended first). */
 /** The fields of a fleet row (`SessionView`) this reads. */
-export interface NayAnswerRow { id: string; status: string; activity?: string; chatTurns?: readonly { role: string; text: string; pending?: boolean }[] }
+export interface NayAnswerRow { id: string; status: string; activity?: string; lastLines?: readonly string[]; approvalLines?: readonly string[]; chatTurns?: readonly { role: string; text: string; pending?: boolean }[] }
 
-export function nayAnswerProgress(row: Omit<NayAnswerRow, 'id'> | undefined): 'started' | 'waiting' | 'gone' {
+/** The screens a harness shows before it can answer at all: not signed in, or asking to trust the folder. */
+const LOGIN_SCREEN = /\b(log ?in|sign ?in|select login method|paste (?:code|your) |oauth|authenticat|api key|trust the files|do you trust)\b/i
+
+export function nayAnswerProgress(row: Omit<NayAnswerRow, 'id'> | undefined): 'started' | 'waiting' | 'gone' | 'login' {
   if (!row) return 'waiting'
   if (row.status === 'exited' || row.status === 'lost' || row.status === 'closed' || row.activity === 'exited') return 'gone'
-  // A harness whose turns the poll can read: the answer has started when Nay has said something.
-  if (row.chatTurns) return row.chatTurns.some(t => t.role === 'assistant' && !t.pending && t.text.trim() !== '') ? 'started' : 'waiting'
-  // One it cannot read: the turn starting is the most that can be observed.
-  return row.activity === 'working' ? 'started' : 'waiting'
+  const said = row.chatTurns?.some(t => t.role === 'assistant' && !t.pending && t.text.trim() !== '') ?? false
+  if (said) return 'started'
+  // Nothing said yet: a login/trust screen is a problem to report, never "writing" (its banner repaints too).
+  if ([...(row.approvalLines ?? []), ...(row.lastLines ?? [])].some(l => LOGIN_SCREEN.test(l))) return 'login'
+  if (row.chatTurns) return 'waiting'
+  // A row whose turns the poll cannot read: working with something on screen is the most that can be observed.
+  return row.activity === 'working' && (row.lastLines?.length ?? 0) > 0 ? 'started' : 'waiting'
 }
 
 export const NAY_ANSWER_WAIT_MS = 120_000
 
-/** Polls the fleet until Nay's answer starts. `false` when it ended or the bound ran out — never a guess. */
+/** Polls the fleet until Nay's answer starts: `started`, or why not — a login screen, the session ended, or the bound ran out. Never a guess. */
 export async function waitForNayAnswer(
   id: string,
   read: () => Promise<{ sessions: readonly NayAnswerRow[] }>,
   opts: { timeoutMs?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void>; now?: () => number } = {},
-): Promise<boolean> {
+): Promise<'started' | 'login' | 'ended' | 'timeout'> {
   const timeout = opts.timeoutMs ?? NAY_ANSWER_WAIT_MS
   const interval = opts.intervalMs ?? 1500
   const sleep = opts.sleep ?? (ms => new Promise<void>(r => setTimeout(r, ms)))
   const now = opts.now ?? Date.now
   const deadline = now() + timeout
   for (;;) {
-    let progress: 'started' | 'waiting' | 'gone' = 'waiting'
+    let progress: ReturnType<typeof nayAnswerProgress> = 'waiting'
     try { progress = nayAnswerProgress((await read()).sessions.find(s => s.id === id)) } catch { /* a failed poll is not an answer */ }
-    if (progress === 'started') return true
-    if (progress === 'gone' || now() >= deadline) return false
+    if (progress === 'started') return 'started'
+    if (progress === 'login') return 'login'
+    if (progress === 'gone') return 'ended'
+    if (now() >= deadline) return 'timeout'
     await sleep(interval)
   }
 }
 
-export type AwayDigestStreamLine = { phase: AwayDigestPhase } | { done: true; result: AwayDigestAnswer; answerStarted?: boolean }
+export type AwayDigestStreamLine = { phase: AwayDigestPhase } | { done: true; result: AwayDigestAnswer; answerStarted?: boolean; needsLogin?: boolean }
 
 /**
  * The answer as NDJSON lines: one `{phase}` as each real step starts, then `{done, result}`. A "yes"
@@ -292,7 +300,7 @@ export type AwayDigestStreamLine = { phase: AwayDigestPhase } | { done: true; re
  */
 export function awayDigestAnswerStream(
   run: (onPhase: (phase: AwayDigestPhase) => void) => Promise<AwayDigestAnswer>,
-  wait: (conversationId: string) => Promise<boolean>,
+  wait: (conversationId: string) => Promise<'started' | 'login' | 'ended' | 'timeout'>,
   answer: unknown,
 ): ReadableStream<Uint8Array> {
   const enc = new TextEncoder()
@@ -300,14 +308,16 @@ export function awayDigestAnswerStream(
     async start(controller) {
       const send = (line: AwayDigestStreamLine) => { try { controller.enqueue(enc.encode(`${JSON.stringify(line)}\n`)) } catch { /* client left */ } }
       let result: AwayDigestAnswer
-      try { result = await run(phase => send({ phase })) } catch { result = { ok: false, error: 'failed' } }
-      if (answer === 'yes' && result.ok && result.conversationId) {
+      // A "yes" for a bucket already delivered runs no step: there is nothing to wait for, answer at once.
+      let ranSteps = false
+      try { result = await run(phase => { ranSteps = true; send({ phase }) }) } catch { result = { ok: false, error: 'failed' } }
+      if (answer === 'yes' && result.ok && result.conversationId && ranSteps) {
         send({ phase: 'writing' })
         // A blank line every few seconds keeps an idle-timeout proxy from closing a stream that is waiting.
         const keepAlive = setInterval(() => { try { controller.enqueue(enc.encode('\n')) } catch { /* client left */ } }, 10_000)
-        let started = false
-        try { started = await wait(result.conversationId) } catch { started = false } finally { clearInterval(keepAlive) }
-        send({ done: true, result, answerStarted: started })
+        let outcome: Awaited<ReturnType<typeof wait>> = 'timeout'
+        try { outcome = await wait(result.conversationId) } catch { outcome = 'timeout' } finally { clearInterval(keepAlive) }
+        send({ done: true, result, answerStarted: outcome === 'started', ...(outcome === 'login' ? { needsLogin: true } : {}) })
       } else send({ done: true, result })
       try { controller.close() } catch { /* already closed */ }
     },

@@ -29,6 +29,19 @@ export function parseAwayDigestSchedule(value: unknown): AwayDigestSchedule {
   return { firstAfterMin: first, everyMin: every }
 }
 
+/**
+ * A PUT may carry one half only: the half it does not name keeps the STORED value (then the usual
+ * normalisation). A half it names with junk reads as the default, as `parseAwayDigestSchedule` says.
+ */
+export function mergeAwayDigestSchedule(stored: unknown, incoming: unknown): AwayDigestSchedule {
+  const base = parseAwayDigestSchedule(stored)
+  const inc = incoming && typeof incoming === 'object' ? incoming as Record<string, unknown> : {}
+  return parseAwayDigestSchedule({
+    firstAfterMin: 'firstAfterMin' in inc ? inc.firstAfterMin : base.firstAfterMin,
+    everyMin: 'everyMin' in inc ? inc.everyMin : base.everyMin,
+  })
+}
+
 /** "5 h", "30 min" — the label both the setting and the offer's own sentence use. */
 export function awayDigestDurationLabel(min: number): string {
   return min % 60 === 0 ? `${min / 60} h` : `${min} min`

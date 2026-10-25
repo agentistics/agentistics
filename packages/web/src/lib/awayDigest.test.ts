@@ -29,6 +29,10 @@ describe('away digest bell action', () => {
 })
 
 describe('away digest streamed steps', () => {
+  test('a login screen reaches the caller as needsLogin', () => {
+    expect(readDigestLine('{"done":true,"result":{"ok":true,"conversationId":"nay-1"},"answerStarted":false,"needsLogin":true}', () => {}))
+      .toEqual({ ok: true, status: 200, conversationId: 'nay-1', answerStarted: false, needsLogin: true })
+  })
   test('readDigestLine reports phases, ignores junk and returns the final answer', () => {
     const seen: string[] = []
     expect(readDigestLine('{"phase":"collect"}', p => seen.push(p))).toBeNull()

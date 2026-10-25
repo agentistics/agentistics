@@ -40,3 +40,12 @@ test('before the first step arrives the buttons stay (disabled), never a fake fi
   expect(html).toContain('away-digest-actions')
   expect(html).not.toContain('away-digest-progress')
 })
+
+test('the active step is a visible loader (>=18px) with its label in the primary colour; done ticked, next dimmed', () => {
+  const html = renderToStaticMarkup(<NotificationRowBody {...base} isAwayDigest digestBusy digestPhase="prepare" />)
+  const now = html.slice(html.indexOf('data-state="now"'))
+  expect(Number(/<svg[^>]* width="(\d+)"/.exec(now)?.[1])).toBeGreaterThanOrEqual(18)
+  expect(now.slice(0, now.indexOf('</li>'))).toContain('var(--text-primary)')
+  expect(html.match(/data-state="done"/g)?.length).toBe(1)
+  expect(html).toMatch(/data-state="next"[^>]*opacity:0\.55/)
+})

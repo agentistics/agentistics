@@ -1213,8 +1213,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           body.handoffConfig = normalizeHandoffConfig(body.handoffConfig)
         }
         if (body.awayDigestSchedule !== undefined) {
-          const { parseAwayDigestSchedule } = await import('@agentistics/core')
-          body.awayDigestSchedule = parseAwayDigestSchedule(body.awayDigestSchedule)
+          // A partial value (one half) merges with what is stored — the other half is not reset.
+          const { parseAwayDigestSchedule, mergeAwayDigestSchedule } = await import('@agentistics/core')
+          body.awayDigestSchedule = mergeAwayDigestSchedule((await readPreferences()).awayDigestSchedule, body.awayDigestSchedule)
         }
         // C1: never let a PUT wipe `connections[]`. An old cached tab still PUTs a full flat solo
         // `team` object to disconnect (the current UI uses DELETE /api/team/connections/:id), and

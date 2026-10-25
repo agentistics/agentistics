@@ -199,14 +199,35 @@ describe('away digest progress', () => {
   })
 
   test('the stream ends with writing and waits for the answer before done', async () => {
-    const lines = await readLines(awayDigestAnswerStream(async onPhase => { onPhase('collect'); onPhase('prepare'); onPhase('send'); return { ok: true, conversationId: 'nay-1', bucket } }, async id => id === 'nay-1', 'yes'))
+    const lines = await readLines(awayDigestAnswerStream(async onPhase => { onPhase('collect'); onPhase('prepare'); onPhase('send'); return { ok: true, conversationId: 'nay-1', bucket } }, async id => id === 'nay-1' ? 'started' : 'timeout', 'yes'))
     expect(lines).toEqual([{ phase: 'collect' }, { phase: 'prepare' }, { phase: 'send' }, { phase: 'writing' }, { done: true, result: { ok: true, conversationId: 'nay-1', bucket }, answerStarted: true }])
   })
 
+  test('a login dialog is reported as needing login, never as writing started', () => {
+    const banner = ['Welcome to Claude Code', 'Select login method:', '1. Claude account']
+    expect(nayAnswerProgress({ status: 'running', activity: 'working', lastLines: banner })).toBe('login')
+    expect(nayAnswerProgress({ status: 'running', activity: 'working', chatTurns: [], lastLines: ['Do you trust the files in this folder?'] })).toBe('login')
+    expect(nayAnswerProgress({ status: 'running', activity: 'working', chatTurns: [{ role: 'assistant', text: 'Please log in to the site' }], lastLines: banner })).toBe('started')
+  })
+
+  test('waitForNayAnswer returns login at once; the stream reports needsLogin without a started answer', async () => {
+    const row = { id: 'a', status: 'running', activity: 'working', lastLines: ['Select login method'] }
+    expect(await waitForNayAnswer('a', async () => ({ sessions: [row] }), { timeoutMs: 100, intervalMs: 1, sleep: async () => {} })).toBe('login')
+    const lines = await readLines(awayDigestAnswerStream(async onPhase => { onPhase('collect'); return { ok: true, conversationId: 'nay-1', bucket } }, async () => 'login', 'yes'))
+    expect(lines.at(-1)).toEqual({ done: true, result: { ok: true, conversationId: 'nay-1', bucket }, answerStarted: false, needsLogin: true })
+  })
+
+  test('a repeated yes on an already delivered bucket answers done at once, without writing or waiting', async () => {
+    let waited = false
+    const lines = await readLines(awayDigestAnswerStream(async () => ({ ok: true, conversationId: 'nay-1', bucket }), async () => { waited = true; return 'timeout' }, 'yes'))
+    expect(lines).toEqual([{ done: true, result: { ok: true, conversationId: 'nay-1', bucket } }])
+    expect(waited).toBe(false)
+  })
+
   test('a failure or a no never claims writing', async () => {
-    expect(await readLines(awayDigestAnswerStream(async () => ({ ok: false, error: 'stale' }), async () => true, 'yes')))
+    expect(await readLines(awayDigestAnswerStream(async () => ({ ok: false, error: 'stale' }), async () => 'started', 'yes')))
       .toEqual([{ done: true, result: { ok: false, error: 'stale' } }])
-    expect(await readLines(awayDigestAnswerStream(async () => ({ ok: true, conversationId: '', bucket }), async () => true, 'no')))
+    expect(await readLines(awayDigestAnswerStream(async () => ({ ok: true, conversationId: '', bucket }), async () => 'started', 'no')))
       .toEqual([{ done: true, result: { ok: true, conversationId: '', bucket } }])
   })
 
@@ -214,7 +235,8 @@ describe('away digest progress', () => {
     expect(nayAnswerProgress(undefined)).toBe('waiting')
     expect(nayAnswerProgress({ status: 'running', activity: 'working', chatTurns: [{ role: 'user', text: 'x' }, { role: 'assistant', text: 'Reading', pending: true }] })).toBe('waiting')
     expect(nayAnswerProgress({ status: 'running', activity: 'working', chatTurns: [{ role: 'assistant', text: '# Resumo' }] })).toBe('started')
-    expect(nayAnswerProgress({ status: 'running', activity: 'working' })).toBe('started')
+    expect(nayAnswerProgress({ status: 'running', activity: 'working', lastLines: ['reading files'] })).toBe('started')
+    expect(nayAnswerProgress({ status: 'running', activity: 'working' })).toBe('waiting')
     expect(nayAnswerProgress({ status: 'running', activity: 'waiting' })).toBe('waiting')
     expect(nayAnswerProgress({ status: 'exited' })).toBe('gone')
   })
@@ -222,10 +244,10 @@ describe('away digest progress', () => {
   test('waitForNayAnswer is bounded and never reports a start it did not see', async () => {
     let t = 0
     const clock = { now: () => t, sleep: async (ms: number) => { t += ms }, intervalMs: 1000, timeoutMs: 3000 }
-    expect(await waitForNayAnswer('a', async () => ({ sessions: [{ id: 'a', status: 'running', activity: 'waiting' }] }), clock)).toBe(false)
+    expect(await waitForNayAnswer('a', async () => ({ sessions: [{ id: 'a', status: 'running', activity: 'waiting' }] }), clock)).toBe('timeout')
     let polls = 0
-    expect(await waitForNayAnswer('a', async () => ({ sessions: [{ id: 'a', status: 'running', activity: ++polls >= 2 ? 'working' : 'waiting' }] }), { ...clock, now: () => 0 })).toBe(true)
-    expect(await waitForNayAnswer('a', async () => { throw new Error('poll') }, { ...clock, now: (() => { let n = 0; return () => (n += 2000) })() })).toBe(false)
+    expect(await waitForNayAnswer('a', async () => ({ sessions: [{ id: 'a', status: 'running', activity: ++polls >= 2 ? 'working' : 'waiting', lastLines: ['reading'] }] }), { ...clock, now: () => 0 })).toBe('started')
+    expect(await waitForNayAnswer('a', async () => { throw new Error('poll') }, { ...clock, now: (() => { let n = 0; return () => (n += 2000) })() })).toBe('timeout')
   })
 })
 

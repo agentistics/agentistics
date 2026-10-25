@@ -76,13 +76,13 @@ export function AwayDigestProgress({ pt, phase }: { pt: boolean; phase: AwayDige
       {AWAY_DIGEST_PHASES.map((p, i) => {
         const state = i < at ? 'done' : i === at ? 'now' : 'next'
         return (
-          <li key={p} data-state={state} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: state === 'next' ? 'var(--text-tertiary, var(--text-secondary))' : 'var(--text-primary)', opacity: state === 'next' ? 0.55 : 1 }}>
-            <span style={{ width: 14, height: 14, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              {state === 'done' ? <Check size={12} color="#22c55e" aria-hidden />
-                : state === 'now' ? <AgentisticsLoader size={13} label={AWAY_DIGEST_PHASE_LABEL[p][pt ? 'pt' : 'en']} />
-                : <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor' }} />}
+          <li key={p} data-state={state} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: state === 'next' ? 'var(--text-tertiary, var(--text-secondary))' : 'var(--text-primary)', opacity: state === 'next' ? 0.55 : 1 }}>
+            <span style={{ width: 20, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              {state === 'done' ? <Check size={16} color="#22c55e" aria-hidden />
+                : state === 'now' ? <AgentisticsLoader size={20} baseOpacity={0.4} label={AWAY_DIGEST_PHASE_LABEL[p][pt ? 'pt' : 'en']} />
+                : <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />}
             </span>
-            <span style={{ fontWeight: state === 'now' ? 600 : 400 }}>{AWAY_DIGEST_PHASE_LABEL[p][pt ? 'pt' : 'en']}</span>
+            <span style={{ fontWeight: state === 'now' ? 600 : 400, color: state === 'now' ? 'var(--text-primary)' : undefined }}>{AWAY_DIGEST_PHASE_LABEL[p][pt ? 'pt' : 'en']}</span>
           </li>
         )
       })}
@@ -328,6 +328,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label, to
                     return
                   }
                   dismissNotification(n.id)
+                  if (body.needsLogin) pushLocalNotification({ type: 'error', code: 'away.digest_login' })
                   if (answer === 'yes' && body.conversationId) { setOpen(false); navigate(`/sessions/${encodeURIComponent(body.conversationId)}`) }
                 } catch {
                   pushLocalNotification({ type: 'error', code: 'away.digest_failed' })

@@ -319,6 +319,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Não foi possível abrir o resumo', message: 'Tente novamente em instantes.' },
     en: { title: 'Could not open the summary', message: 'Please try again shortly.' },
   },
+  'away.digest_login': {
+    pt: { title: 'A Nay precisa de login', message: 'Abra a conversa da Nay e entre na sua conta para ela escrever o resumo.' },
+    en: { title: 'Nay needs you to sign in', message: 'Open Nay’s conversation and sign in so it can write the summary.' },
+  },
   'away.digest_stale': {
     pt: { title: 'Oferta de resumo expirada', message: 'Esta oferta não está mais disponível.' },
     en: { title: 'Summary offer expired', message: 'This offer is no longer available.' },

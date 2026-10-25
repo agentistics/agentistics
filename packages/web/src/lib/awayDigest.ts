@@ -9,9 +9,9 @@ export const AWAY_DIGEST_PHASE_LABEL: Record<AwayDigestPhase, { pt: string; en: 
   writing: { pt: 'Nay está escrevendo…', en: 'Nay is writing…' },
 }
 
-export interface AwayDigestAnswerResult { ok: boolean; conversationId?: string; status: number; answerStarted?: boolean }
+export interface AwayDigestAnswerResult { ok: boolean; conversationId?: string; status: number; answerStarted?: boolean; needsLogin?: boolean }
 
-type StreamLine = { phase?: AwayDigestPhase; done?: boolean; result?: { ok: boolean; conversationId?: string; error?: string }; answerStarted?: boolean }
+type StreamLine = { phase?: AwayDigestPhase; done?: boolean; result?: { ok: boolean; conversationId?: string; error?: string }; answerStarted?: boolean; needsLogin?: boolean }
 
 /** Applies one NDJSON line; returns the final answer when the line is the last one. Pure, for tests. */
 export function readDigestLine(line: string, onPhase: (p: AwayDigestPhase) => void): AwayDigestAnswerResult | null {
@@ -22,7 +22,7 @@ export function readDigestLine(line: string, onPhase: (p: AwayDigestPhase) => vo
   if (!parsed.done || !parsed.result) return null
   const r = parsed.result
   const status = r.ok ? 200 : r.error === 'stale' || r.error === 'not_away' ? 409 : 400
-  return { ok: r.ok, status, conversationId: r.conversationId, ...(parsed.answerStarted !== undefined ? { answerStarted: parsed.answerStarted } : {}) }
+  return { ok: r.ok, status, conversationId: r.conversationId, ...(parsed.answerStarted !== undefined ? { answerStarted: parsed.answerStarted } : {}), ...(parsed.needsLogin ? { needsLogin: true } : {}) }
 }
 
 /**
