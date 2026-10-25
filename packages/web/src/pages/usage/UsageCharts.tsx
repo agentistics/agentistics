@@ -70,7 +70,9 @@ export function UsageCharts({ budgets, readings, limits, lang, bothWindows = fal
     const windows = (bothWindows ? ['week', '5h'] as const : ['week'] as const).flatMap(kind => {
       const limit = limits?.find(l => l.account === row.account && l.harness === row.harness)?.windows.find(w => w.kind === kind)
       const reset = kind === 'week' ? row.budget?.weekResetsAt ?? limit?.resetsAt : limit?.resetsAt
-      const data = usageChartData(reading, kind, reset, !bothWindows)
+      // The 5-hour window renews many times a week: its chart shows the last two days, the week all of it.
+      const scoped = kind === '5h' && bothWindows ? { ...reading, points: reading.points.filter(p => p.at >= Date.now() - 48 * 3_600_000) } : reading
+      const data = usageChartData(scoped, kind, reset, !bothWindows)
       return data.length ? [{ kind, reset, data }] : []
     })
     return { row, windows }

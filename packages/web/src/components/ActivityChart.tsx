@@ -292,7 +292,7 @@ export function ActivityPercentChart({ data, series, lang, height = 220 }: {
   const min = data.length ? Math.min(...data.map(p => p.at)) : 0
   const max = data.length ? Math.max(...data.map(p => p.at)) : 0
   const short = max - min < 36 * 3_600_000
-  const tickLabel = (at: number) => new Date(at).toLocaleString(locale, short ? { hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' })
+  const tickLabel = (at: number) => new Date(at).toLocaleString(locale, short ? { hour: '2-digit', minute: '2-digit' } : max - min < 4 * 24 * 3_600_000 ? { day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' })
   const narrow = typeof window !== 'undefined' && window.innerWidth < 520
   const ticks = timeTicks(min, max, narrow ? 4 : 7)
   // The tooltip follows the pointer and leaves with it; on touch, a tap outside the chart closes it.
