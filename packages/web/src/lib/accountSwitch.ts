@@ -5,6 +5,7 @@
  */
 
 import { HARNESS_LABELS } from '@agentistics/core'
+import { withReopening } from './reopeningStore'
 
 /** One account a session could move to. `harness` other than the session's own = a hand-off (new conversation + summary). */
 export interface SwitchOption { id: string; harness: string; label: string; plan?: string; recommended?: boolean }
@@ -38,16 +39,18 @@ export async function fetchSwitchInfo(id: string, lang: string): Promise<SwitchI
 }
 
 export async function postSwitch(id: string, accountId: string, resendPending: boolean, lang: string, harness?: string): Promise<SwitchOutcome> {
-  try {
-    const r = await fetch(`/api/fleet/switch-account?lang=${lang === 'pt' ? 'pt' : 'en'}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, accountId, ...(harness ? { harness } : {}), resendPending }),
-    })
-    const body = await r.json().catch(() => null) as SwitchOutcome | null
-    return body ?? { ok: false, message: lang === 'pt' ? 'O servidor não respondeu.' : 'The server did not answer.' }
-  } catch {
-    return { ok: false, message: lang === 'pt' ? 'O servidor não respondeu.' : 'The server did not answer.' }
-  }
+  return withReopening([id], async () => {
+    try {
+      const r = await fetch(`/api/fleet/switch-account?lang=${lang === 'pt' ? 'pt' : 'en'}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, accountId, ...(harness ? { harness } : {}), resendPending }),
+      })
+      const body = await r.json().catch(() => null) as SwitchOutcome | null
+      return body ?? { ok: false, message: lang === 'pt' ? 'O servidor não respondeu.' : 'The server did not answer.' }
+    } catch {
+      return { ok: false, message: lang === 'pt' ? 'O servidor não respondeu.' : 'The server did not answer.' }
+    }
+  })
 }
 
 /**
