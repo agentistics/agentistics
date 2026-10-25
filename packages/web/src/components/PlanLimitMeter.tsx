@@ -85,10 +85,10 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
   </>
 }
 
-export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen }: { onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang }) {
+export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen, embedded = false }: { onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang; /** Inside a card that already carries the title: fill its width, no own title or inset. */ embedded?: boolean }) {
   const rows = subscriptionRows(limits, registered, accountLabels)
-  return <div data-plan-usage-summary style={{ width: 344, padding: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span><span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
+  return <div data-plan-usage-summary style={{ width: '100%', maxWidth: embedded ? undefined : 344, boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>{!embedded && <>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span></>}<span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
     {rows.map((row, i) => <div key={`${row.harness}:${i}`} data-plan-row={row.harness} style={{ ...PLAN_ROW_GRID, padding: '8px 4px', borderTop: '1px solid var(--border)' }}>
       <PlanUsageRowCells harness={row.harness} name={subscriptionName(row.harness, row.accountLabel)} plan={row.plan} limits={row.limits} now={now} lang={lang} />
     </div>)}

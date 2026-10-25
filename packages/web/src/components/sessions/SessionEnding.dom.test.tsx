@@ -243,9 +243,11 @@ test('each identical refused kill shows a toast even when the bell already has t
     await refreshNotifications()
     const row = { id: 'refused', title: 'Refused session', harness: 'claude', cwd: '/x', project: 'x', state: 'waiting', stateLabel: 'needs you', actionable: true, attachCommand: '', verbs: [{ action: 'kill', label: 'Stop session', enabled: true }] } as never
     const refuse = () => ending.withEnding('refused', async () => ({ ok: false, message }), async () => {})
-    act(() => root.render(createElement('div', {},
+    const { MemoryRouter } = await import('react-router-dom')
+    // The toasts can render the bell (burst summary), which navigates: give them a router.
+    act(() => root.render(createElement(MemoryRouter, {}, createElement('div', {},
       createElement(SessionActions, { row, lang: 'en', act: refuse }),
-      createElement(NotificationToasts, { lang: 'en' }))))
+      createElement(NotificationToasts, { lang: 'en' })))))
     const click = (label: string) => {
       const button = Array.from(host.querySelectorAll('button')).find(b => b.textContent?.trim() === label || b.getAttribute('aria-label') === label)
       expect(button, label).toBeDefined()

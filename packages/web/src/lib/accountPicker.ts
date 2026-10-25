@@ -7,7 +7,7 @@
  * until it renews.
  */
 import { currentUsedPct, type PlanLimits } from '@agentistics/core'
-import { fmtWhen } from './planLimits'
+import { fmtWhen, subscriptionName } from './planLimits'
 import { isHandoff, type SwitchInfo, type SwitchUnavailableReason } from './accountSwitch'
 
 type Lang = 'pt' | 'en'
@@ -59,24 +59,45 @@ export function spentUntil(l: PlanLimits | null, now: number): number | null {
   return spent.length ? Math.max(...spent.map(w => w.resetsAt)) : null
 }
 
-export function pickerRows(info: SwitchInfo, limits: readonly PlanLimits[] | null, now: number, lang: Lang): PickerRow[] {
+/**
+ * A plan as the "Plan usage" list names it ("Claude Pro", "Claude Max 5x"). The list's own name (the
+ * plan registered in Billing, else the one the assistant reported) wins; the registry's raw word
+ * ("pro", "max 5x") is only dressed the same way when no reading carries one.
+ */
+export function planDisplayName(harness: string, raw: string | undefined, l: PlanLimits | null): string | undefined {
+  const listed = l?.plan ?? l?.sourcePlan
+  if (listed) return listed
+  const w = raw?.trim()
+  if (!w) return undefined
+  const cap = w.charAt(0).toUpperCase() + w.slice(1)
+  return harness === 'claude' && !/^claude\b/i.test(w) ? `Claude ${cap}` : cap
+}
+
+/** The account's name in the picker: the label the owner gave, drawn exactly as the plan list draws it. */
+export function accountDisplayName(harness: string, id: string | undefined, label: string | undefined, labels: Record<string, string>): string {
+  const own = (id ? labels[id] : undefined) ?? label
+  return subscriptionName(harness as PlanLimits['harness'], own || undefined)
+}
+
+export function pickerRows(info: SwitchInfo, limits: readonly PlanLimits[] | null, now: number, lang: Lang, labels: Record<string, string> = {}): PickerRow[] {
   const pt = lang === 'pt'
+  const nameOf = (id: string | undefined, label: string | undefined) => (id && labels[id]) || label || ''
   const rows: PickerRow[] = []
   const cur = info.current
   if (cur?.harness) {
     const l = limitsFor(limits, cur.harness, cur.id)
-    const plan = cur.plan ?? l?.plan ?? l?.sourcePlan
+    const plan = planDisplayName(cur.harness, cur.plan, l)
     rows.push({
-      key: `${cur.harness}:${cur.id ?? ''}`, id: cur.id ?? '', harness: cur.harness, label: cur.label ?? '',
+      key: `${cur.harness}:${cur.id ?? ''}`, id: cur.id ?? '', harness: cur.harness, label: nameOf(cur.id, cur.label),
       ...(plan ? { plan } : {}), limits: l, kind: 'current', handoff: false,
     })
   }
   for (const o of info.options) {
     const l = limitsFor(limits, o.harness, o.id)
     const until = spentUntil(l, now)
-    const plan = o.plan ?? l?.plan ?? l?.sourcePlan
+    const plan = planDisplayName(o.harness, o.plan, l)
     rows.push({
-      key: `${o.harness}:${o.id}`, id: o.id, harness: o.harness, label: o.label, ...(plan ? { plan } : {}), limits: l,
+      key: `${o.harness}:${o.id}`, id: o.id, harness: o.harness, label: nameOf(o.id, o.label), ...(plan ? { plan } : {}), limits: l,
       kind: until === null ? 'option' : 'disabled',
       ...(until !== null ? { reason: pt ? `No limite · renova ${fmtWhen(until, now, lang)}` : `At its limit · resets ${fmtWhen(until, now, lang)}` } : {}),
       handoff: isHandoff(info, o.harness),
@@ -85,9 +106,9 @@ export function pickerRows(info: SwitchInfo, limits: readonly PlanLimits[] | nul
   }
   for (const u of info.unavailable ?? []) {
     const l = limitsFor(limits, u.harness, u.id)
-    const plan = u.plan ?? l?.plan ?? l?.sourcePlan
+    const plan = planDisplayName(u.harness, u.plan, l)
     rows.push({
-      key: `${u.harness}:${u.id}`, id: u.id, harness: u.harness, label: u.label, ...(plan ? { plan } : {}), limits: l,
+      key: `${u.harness}:${u.id}`, id: u.id, harness: u.harness, label: nameOf(u.id, u.label), ...(plan ? { plan } : {}), limits: l,
       kind: 'disabled', reason: unavailableReason(u.reason, lang), handoff: isHandoff(info, u.harness),
     })
   }

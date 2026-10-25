@@ -12,6 +12,7 @@ let mod: typeof import('./AccountSwitch')
 let lib: typeof import('../../lib/accountSwitch')
 let originalFetch: typeof globalThis.fetch
 const posts: unknown[] = []
+const acts: unknown[] = []
 let getBody: SwitchInfo
 let postReply: unknown = { ok: true, message: 'Session continued on the other account.', id: 'm2' }
 
@@ -30,6 +31,7 @@ beforeAll(async () => {
       return json(postReply)
     }
     if (String(url).startsWith('/api/fleet/switch-account')) return json(getBody)
+    if (String(url).startsWith('/api/fleet/act')) { acts.push(JSON.parse(String(init?.body))); return json({ ok: true, message: 'reopened', id: 'm9' }) }
     return json({})
   }
   createRoot = (await import('react-dom/client')).createRoot
@@ -149,6 +151,37 @@ describe('AccountSwitchDialog — every harness (v2)', () => {
     await act(async () => { root.unmount() })
   })
 
+  test('at 390 px the dialog footer sticks to the sheet floor; at 1200 it does not', async () => {
+    const open = async () => mount(createElement(mod.AccountSwitchDialog, {
+      open: true, sessionId: 'm1', info: multi, lang: 'en', fromLimit: false, onClose: () => {}, onSwitched: () => {},
+    }))
+    window.innerWidth = 390
+    const narrow = await open()
+    const footer = document.querySelector('[data-dialog-footer]') as HTMLElement
+    expect(footer.style.position).toBe('sticky')
+    expect(footer.style.bottom).toBe('0px')
+    await act(async () => { narrow.root.unmount() })
+    window.innerWidth = 1200
+    const wide = await open()
+    expect((document.querySelector('[data-dialog-footer]') as HTMLElement).style.position).toBe('')
+    await act(async () => { wide.root.unmount() })
+  })
+
+  test('the Usage limits card is one component: plan list + the switch button, EN and PT', async () => {
+    const card = await import('./SessionLimitsCard')
+    for (const lang of ['en', 'pt'] as const) {
+      getBody = limited
+      const { host, root } = await mount(createElement(card.SessionLimitsCard, { sessionId: 'm1', lang, onSwitched: () => {}, onOpenAll: () => {} }))
+      const summary = host.querySelector<HTMLElement>('[data-plan-usage-summary]')
+      expect(summary).not.toBeNull()
+      // The card already carries the "Usage limits" title: no second title, and the list fills the card.
+      expect(host.querySelector('#plan-usage-summary-title')).toBeNull()
+      expect(summary!.style.maxWidth).toBe('')
+      expect(host.querySelector('[data-account-switch-open]')?.textContent).toContain(lang === 'pt' ? 'Trocar de conta' : 'Switch account')
+      await act(async () => { root.unmount() })
+    }
+  })
+
   test('a handoff target changes the words and posts the harness', async () => {
     posts.length = 0
     const only = { ...multi, options: [multi.options[2]!] }
@@ -235,5 +268,49 @@ describe('AccountSwitchInline (the "Usage limits" card)', () => {
     const { host, root } = await mount(createElement(mod.AccountSwitchInline, { sessionId: 'm1', lang: 'pt', onSwitched: () => {}, children: null }))
     expect(host.querySelector('[data-account-switch-open]')).toBeNull()
     await act(async () => { root.unmount() })
+  })
+})
+
+describe('AccountSwitchDialog — the session was ended (double failure)', () => {
+  for (const [lang, width, lost, reopen] of [
+    ['en', 1280, 'The session was ended: it did not start.', 'Reopen'],
+    ['pt', 390, 'A sessão foi encerrada: ela não iniciou.', 'Reabrir'],
+  ] as const) {
+    test(`${lang} at ${width}px: the message plus a Reopen button that runs the app's own reopen and follows the new row`, async () => {
+      window.innerWidth = width
+      posts.length = 0; acts.length = 0
+      postReply = { ok: false, message: lost, ended: true, endedId: 'm1' }
+      let followed = ''
+      const { root } = await mount(createElement(mod.AccountSwitchDialog, {
+        open: true, sessionId: 'm1', info: limited, lang, fromLimit: false, onClose: () => {}, onSwitched: (id: string) => { followed = id },
+      }))
+      const confirm = Array.from(document.querySelectorAll('button')).find(b => b.textContent === (lang === 'pt' ? 'Confirmar troca' : 'Confirm switch'))!
+      await act(async () => { confirm.click(); await new Promise(r => setTimeout(r, 20)) })
+      expect(document.querySelector('[role="alert"]')?.textContent).toBe(lost)
+      const btn = document.querySelector('[data-account-switch-reopen]') as HTMLButtonElement
+      expect(btn.textContent).toBe(reopen)
+      // Nothing is left to switch once the session is ended: Confirm is off, Reopen is the way forward.
+      expect(confirm.disabled).toBe(true)
+      if (width === 390) expect(btn.style.width).toBe('100%')
+      await act(async () => { btn.click(); await new Promise(r => setTimeout(r, 20)) })
+      expect(acts).toEqual([{ id: 'm1', action: 'resume' }])
+      expect(followed).toBe('m9')
+      await act(async () => { root.unmount() })
+      postReply = { ok: true, message: 'Session continued on the other account.', id: 'm2' }
+      window.innerWidth = 1200
+    })
+  }
+
+  test('a plain refusal shows no Reopen button', async () => {
+    postReply = { ok: false, message: 'Nothing was ended.' }
+    const { root } = await mount(createElement(mod.AccountSwitchDialog, {
+      open: true, sessionId: 'm1', info: limited, lang: 'en', fromLimit: false, onClose: () => {}, onSwitched: () => {},
+    }))
+    const confirm = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Confirm switch')!
+    await act(async () => { confirm.click(); await new Promise(r => setTimeout(r, 20)) })
+    expect(document.querySelector('[role="alert"]')).not.toBeNull()
+    expect(document.querySelector('[data-account-switch-reopen]')).toBeNull()
+    await act(async () => { root.unmount() })
+    postReply = { ok: true, message: 'Session continued on the other account.', id: 'm2' }
   })
 })

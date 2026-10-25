@@ -476,6 +476,9 @@ export const isCodexRolloutOf = (path: string, conversationId: string): boolean 
 /** Claude's sidecar directory sits beside the transcript, named after the conversation. */
 export const claudeSidecarOf = (transcript: string, conversationId: string): string => join(dirname(transcript), conversationId)
 
+/** The CLI's own "started <name> in the background" status line (EN/PT), which is not part of any reason. */
+const CLI_STARTED_TAIL = /[\s.…]*(?:\bstarted\s+[^.…!?]+?\s+in the background|(?<![^.…!?\s])[^.…!?]+?\s+iniciada em background)[.…\s]*$/i
+
 const DIED_AT_SPAWN = /^(the session exited as soon as it started|a sessão terminou assim que começou)\b/i
 
 /**
@@ -484,7 +487,7 @@ const DIED_AT_SPAWN = /^(the session exited as soon as it started|a sessão term
  * of its own; anything else keeps its words, capitalised and closed with a full stop.
  */
 export function startFailureSentence(message: string | undefined, lang: 'en' | 'pt'): string {
-  const m = (message ?? '').trim()
+  const m = (message ?? '').replace(CLI_STARTED_TAIL, '').trim()
   if (!m) return ''
   if (DIED_AT_SPAWN.test(m)) {
     return lang === 'pt'
@@ -504,9 +507,9 @@ export function switchFallbackMessage(reason: string | undefined, lang: 'en' | '
   return why ? `${head} ${why}` : head
 }
 
-/** Neither the new account nor the old one could start: the conversation is intact, the pane is not. */
+/** Neither the new account nor the old one could start: the session WAS ENDED, the conversation is intact. */
 export function switchLostMessage(lang: 'en' | 'pt'): string {
   return lang === 'pt'
-    ? 'A sessão não iniciou na outra conta nem pôde ser reaberta na conta de antes. A conversa está guardada: use Reabrir.'
-    : 'The session did not start on the other account and could not be reopened on its previous account. The conversation is kept: use Reopen.'
+    ? 'A sessão foi encerrada: ela não iniciou na outra conta nem pôde ser reaberta na conta de antes. A conversa está guardada — use Reabrir.'
+    : 'The session was ended: it did not start on the other account and could not be reopened on its previous account. The conversation is kept — use Reopen.'
 }
