@@ -80,6 +80,8 @@ import { loadClosedFleet, useFleet, useFleetIndex, type FleetActionId } from '..
 import { useIsMobile } from '../hooks/useIsMobile'
 import { FleetOverview } from '../components/sessions/FleetOverview'
 import { SessionCreating } from '../components/sessions/SessionCreating'
+import { SessionEndingGate } from '../components/sessions/SessionEnding'
+import { useEnding } from '../lib/endingSessions'
 import { NewSessionModal } from '../components/sessions/NewSessionModal'
 
 // How long a navigation may keep claiming its session is still coming is `ARRIVAL_WAIT_MS` in
@@ -2011,6 +2013,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   ) : null
 
   const panel = selected === undefined ? null : (
+    <SessionEndingGate id={selected.id} lang={pt ? 'pt' : 'en'}>
     <SessionPanel
       session={selected}
       {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}
@@ -2056,6 +2059,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       // The Studio entry's first-open dot — one flag, read wherever the bar renders it.
       studioSeen={ctx.studioSeen}
     />
+    </SessionEndingGate>
   )
 
   /**
@@ -2135,6 +2139,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     return () => window.removeEventListener('popstate', onPop)
   }, [])
   useEffect(() => { setSessionDrawer(false) }, [selected?.id])
+  // Ending a session shows its own state on the session view; the drawer must not sit over it.
+  const selectedEnding = useEnding(selected?.id)
+  useEffect(() => { if (selectedEnding) setSessionDrawer(false) }, [selectedEnding])
   const unreadInbox = useNotifications().filter(n => !n.read).length
   const planLimits = usePlanLimits()
 

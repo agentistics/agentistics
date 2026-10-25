@@ -23,6 +23,7 @@ import { chatHoldsText, confirmSendLanded, parseActResult, sendUnconfirmedMessag
 import { nativeAct, readNativeFleet } from './nativeFleet'
 import { withNativeSessions } from './nativeFleetRow'
 import { isNativeSessionId } from './sessionRoute'
+import { markEnding, unmarkEnding } from './endingSessions'
 
 // Central relay support was removed with the member UI. These local-only placeholders keep the
 // old transport branch inert while the shared fleet state remains a machine-local concern.
@@ -569,7 +570,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
 
   const refresh = useCallback(() => { void pollOnce() }, [])
 
-  const act = useCallback<FleetState['act']>(async req => {
+  const actRaw = useCallback<FleetState['act']>(async req => {
     let machineIdAtCall: string | null | undefined
     // A NATIVE session's row verbs go to the engine (`nativeFleet.ts`) — the machine's
     // `/api/fleet/act` has no row by that id. The answer has the same shape, so the menu needs no branch.
@@ -695,6 +696,14 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
       }
     }
   }, [lang])
+
+  // ENDING A SESSION HAS A STATE: from the moment a `kill` is sent until it settles (see
+  // `endingSessions.ts`). Here because this is the one door every surface ends a session through.
+  const act = useCallback<FleetState['act']>(async req => {
+    if (req.action !== 'kill') return actRaw(req)
+    markEnding(req.id)
+    try { return await actRaw(req) } finally { unmarkEnding(req.id) }
+  }, [actRaw])
 
   return {
     fleet: enabled ? snapshot : EMPTY,
