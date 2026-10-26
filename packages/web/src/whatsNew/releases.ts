@@ -26,6 +26,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Os limites de uso de cada conta não se misturam mais quando um líder roda em outra conta.',
         en: 'Each account\'s usage limits no longer mix when a leader runs on another account.',
       },
+      {
+        pt: 'O uso de contexto das sessões do Gemini aparece certo no anel e no aviso de passagem.',
+        en: 'Gemini sessions show their context use correctly in the ring and the hand-off hint.',
+      },
     ],
   },
   '2.153.0': {
