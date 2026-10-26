@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.155.0': {
+    features: [
+      {
+        pt: 'O app agora protege o computador: com pouca memória livre, sessões novas e tarefas pesadas esperam, e o sino avisa o que está usando mais memória.',
+        en: 'The app now protects the computer: with little free memory, new sessions and heavy jobs wait, and the bell says what is using the most memory.',
+      },
+    ],
+    fixes: [],
+  },
   '2.154.0': {
     features: [
       {

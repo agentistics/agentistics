@@ -2971,6 +2971,13 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const ended = await endProcess(plan.holder.pid)
       if (!ended) return { ok: false, message: s.sessAdoptFailed(plan.holder.label ?? req.sessionId) }
     }
+    // MEM.GUARD: a forced resume skips admission (it replaces the row it just ended), but below the
+    // hard floor the person must still be told — measured BEFORE the spawn, while the number is true.
+    let floorNote: string | null = null
+    if (req.force === true) {
+      const probe = admitSpawn(await readSpawnBudget(), 1, { force: true })
+      if (probe.admit && probe.overridden && probe.refusal.hardFloor) floorNote = admissionOverrideNote(probe, lang === 'pt' ? 'pt' : 'en')
+    }
     const spawned = await spawnManaged({
       harness: req.harness as HarnessId,
       cwd: req.cwd,
@@ -3016,6 +3023,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // The store's view of what is running just changed, and the next poll must see it rather
       // than waiting out the cache and showing the conversation as still closed.
       forgetConversations()
+      if (floorNote) return { ...spawned, overridden: true, note: floorNote }
     }
     return spawned
   }
