@@ -69,12 +69,12 @@ const REAL_IO: SwitchIo = {
   link: async (oldId, newId) => (await import('./handoff-relay-io')).recordHandoffLink(oldId, newId, undefined),
 }
 
-/** `ended` + `endedId`: the session WAS ended and could not be given back — the UI offers Reopen on that row. */
 /** MEM.GUARD: a forced start below the hard memory floor says so in the sentence the switch returns. */
 function floorSentence(r: SpawnSessionResult): string {
   return r.overridden && r.note ? ` ${r.note}` : ''
 }
 
+/** `ended` + `endedId`: the session WAS ended and could not be given back — the UI offers Reopen on that row. */
 export type SwitchResult = SpawnSessionResult & { code?: SwitchRefusal; status?: number; ended?: boolean; endedId?: string }
 
 function refuse(reason: SwitchRefusal, detail: string, lang: 'en' | 'pt'): SwitchResult {
