@@ -4426,7 +4426,11 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
 
       const live = (await backend.list().catch(() => [])).find(b => b.id === id)
       if (!live?.alive) {
-        const holder = conversationHeldBy(await liveConversationHolders(backend), managed.conversationId, id)
+        // No recorded conversation = nothing a holder could match (`conversationHeldBy` answers
+        // undefined), so skip the /proc + harness-file scan `liveConversationHolders` costs.
+        const holder = managed.conversationId
+          ? conversationHeldBy(await liveConversationHolders(backend), managed.conversationId, id)
+          : undefined
         if (holder?.kind === 'managed') {
           const out = await this.promptSession!(holder.id, body)
           return { ...out, ...(out.ok ? { id: holder.id } : {}) }
