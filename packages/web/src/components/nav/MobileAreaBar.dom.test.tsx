@@ -139,6 +139,8 @@ test('badges sit on the icons and the circle badge stays outside the circle', as
   const badges = view.nav.querySelectorAll('[data-area-badge]')
   expect(Array.from(badges).map(b => b.textContent)).toEqual(['3', '1', '2'])
   expect(view.buttons[2]!.contains(badges[2]!)).toBe(false)
+  // The right pill is painted after the circle: without its own layer the count hides behind it.
+  expect((badges[2] as HTMLElement).style.zIndex).toBe('2')
 })
 
 test('drag follows the finger through the pills and activates only on release and activates only on release', async () => {

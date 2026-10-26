@@ -193,8 +193,9 @@ export function MobilePillBar({ items, activeIndex, centerIndex, ariaLabel }: {
         >
           <Icon size={26} strokeWidth={lit ? 2.1 : 1.8} />
         </button>
+        {/* Above the right pill: that pill is drawn after the circle and used to cover the count. */}
         {Badge && <span data-area-badge style={{
-          position: 'absolute', top: 'calc(50% - 38px)', left: `calc(50% + ${CIRCLE / 2 - 4}px)`,
+          position: 'absolute', zIndex: 2, top: 'calc(50% - 38px)', left: `calc(50% + ${CIRCLE / 2 - 4}px)`,
           minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9, ...SOLID_COUNT,
           fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           pointerEvents: 'none',
