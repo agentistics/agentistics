@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { PlanLimits } from '@agentistics/core'
-import { antigravityAccessToken, fetchAntigravityUsage, startAntigravityUsagePoll, __resetAntigravityUsageForTest, type AntigravityUsageDeps } from './antigravity-usage'
+import { agyLiveFrom, antigravityAccessToken, fetchAntigravityUsage, startAntigravityUsagePoll, __resetAntigravityUsageForTest, type AntigravityUsageDeps } from './antigravity-usage'
 
 const body = JSON.parse(readFileSync(join(import.meta.dir, '../../core/src/__fixtures__/agy-fetch-models.json'), 'utf8'))
 const NOW = Date.parse('2026-10-28T12:00:00Z')
@@ -143,5 +143,17 @@ describe('startAntigravityUsagePoll', () => {
     stop()
     expect(r.ingested).toHaveLength(0)
     expect(r.calls).toHaveLength(0)
+  })
+})
+
+describe('agyLiveFrom', () => {
+  const no = async () => false, yes = async () => true
+  test('a scanned process counts', async () => expect(await agyLiveFrom({ scanned: yes, managedRunning: no })).toBe(true))
+  test('a running managed agy session counts even with no scanned process', async () => expect(await agyLiveFrom({ scanned: no, managedRunning: yes })).toBe(true))
+  test('neither → not alive; a throwing source never fails the other', async () => {
+    expect(await agyLiveFrom({ scanned: no, managedRunning: no })).toBe(false)
+    const boom = async (): Promise<boolean> => { throw new Error('x') }
+    expect(await agyLiveFrom({ scanned: boom, managedRunning: yes })).toBe(true)
+    expect(await agyLiveFrom({ scanned: boom, managedRunning: boom })).toBe(false)
   })
 })

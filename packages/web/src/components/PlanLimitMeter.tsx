@@ -102,7 +102,7 @@ function WindowRow({ w, now, observedAt, lang, ring, forecast = true }: { w: Pla
   const pct = currentUsedPct(w, now)
   const renewed = windowRenewed(w, now)
   const f = forecast ? warnForecast(w, now, observedAt) : null
-  return <div data-plan-window={w.kind} style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
+  return <div data-plan-window={windowKey(w)} style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
     <PlanUsageRing pct={pct} size={ring}>{renewed ? '–' : ring >= 44 ? `${Math.round(pct)}%` : Math.round(pct)}</PlanUsageRing>
     <div style={{ minWidth: 0, flex: 1, fontSize: 12, lineHeight: 1.5 }}>
       <b style={{ display: 'block', whiteSpace: 'nowrap' }}>{renewed ? `${windowLabel(w.kind, lang, w.scope)} · –` : `${windowLabel(w.kind, lang, w.scope)} · ${Math.round(pct)}% ${pt ? 'usado' : 'used'}`}</b>
@@ -166,7 +166,7 @@ export function PlanLimitMeter({ window: w, now, observedAt = now, lang, forecas
   const f = forecast ? warnForecast(w, now, observedAt) : null
   const label = windowLabel(w.kind, lang, w.scope)
   return (
-    <div data-plan-window={w.kind} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+    <div data-plan-window={windowKey(w)} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
         <span style={{ color: 'var(--text-tertiary)', width: 44, flexShrink: 0 }}>{label}</span>
         <div
@@ -284,7 +284,7 @@ export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: 
             style={{ height: 3, minWidth: 16, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
             <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: '100%', background: limitTone(pct), borderRadius: 2 }} />
           </div>,
-          <span key={`${windowKey(w)}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+          <span key={`${windowKey(w)}v`} data-plan-window={windowKey(w)} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
             {renewed ? '–' : `${Math.round(pct)}% · ${shortWhen(w.resetsAt, now, lang, w.kind)}`}
           </span>,
           ...(renewed ? [<span key={`${windowKey(w)}reset`} data-plan-renewal style={{ gridColumn: '1 / -1', color: 'var(--text-secondary)', whiteSpace: 'normal', overflowWrap: 'normal', lineHeight: 1.4 }}>

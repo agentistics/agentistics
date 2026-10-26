@@ -66,12 +66,31 @@ export interface AntigravityUsageDeps {
   accountRoots?: () => Promise<string[]>
 }
 
-const defaultAgyLive = async (): Promise<boolean> => {
-  try {
+/** What "an agy is alive" reads: a scanned process, or a managed agy session whose pane is running. */
+export interface AgyLiveSources {
+  scanned: () => Promise<boolean>
+  managedRunning: () => Promise<boolean>
+}
+
+export async function agyLiveFrom(src: AgyLiveSources): Promise<boolean> {
+  // A source that cannot answer is "not alive" — it never fails the other one.
+  if (await src.scanned().catch(() => false)) return true
+  return src.managedRunning().catch(() => false)
+}
+
+const defaultAgyLive = (): Promise<boolean> => agyLiveFrom({
+  scanned: async () => {
     const { scanProcesses } = await import('./live-sessions')
     return (await scanProcesses()).procs.some(p => p.harness === 'antigravity')
-  } catch { return false }
-}
+  },
+  managedRunning: async () => {
+    const [{ readRegistry }, { resolveBackend }, { reconcileSessions }] = await Promise.all([
+      import('./sessions/registry'), import('./sessions/index'), import('./sessions/session-ref'),
+    ])
+    const rows = reconcileSessions(await readRegistry(), await (await resolveBackend()).list())
+    return rows.some(r => r.status === 'running' && r.managed?.harness === 'antigravity')
+  },
+})
 
 // The plan label is asked at most once per 6 h per root and kept in memory only.
 const planLabels = new Map<string, { at: number; label?: string }>()

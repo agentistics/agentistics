@@ -107,3 +107,14 @@ describe('L3 accountDetailLine', () => {
     expect(accountDetailLine({ label: 'a@b.c' }, false, 'no plan')).toBe('a@b.c · no plan')
   })
 })
+
+test('worstBars keeps a scoped harness\'s two weekly groups apart', () => {
+  const g = { id: 'google', label: 'Gemini models' }, c = { id: 'anthropic+openai', label: 'Claude and GPT models' }
+  const agy = { harness: 'antigravity', account: 'default', updatedAt: NOW, source: 'antigravity-quota-api', windows: [
+    { kind: 'week', usedPct: 4, resetsAt: NOW + 1000, scope: g }, { kind: 'week', usedPct: 60, resetsAt: NOW + 2000, scope: c },
+  ] } as PlanLimits
+  const w = worstBars([agy, lim('claude', 'x', 10, 20)], NOW)!.windows
+  expect(w.filter(x => x.kind === 'week')).toHaveLength(3)
+  expect(w.find(x => x.scope?.id === 'google')!.usedPct).toBe(4)
+  expect(w.find(x => x.scope?.id === 'anthropic+openai')!.usedPct).toBe(60)
+})

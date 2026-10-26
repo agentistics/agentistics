@@ -37,7 +37,7 @@ test('two scoped windows render two meters with distinct keys and no React key w
       renderToStaticMarkup(<PlanLimitBars limits={agy} now={NOW} lang="en" />),
       renderToStaticMarkup(<PlanUsageCard limits={agy} now={NOW} lang="pt" />),
     ]) {
-      expect((html.match(/data-plan-window="week"/g) ?? []).length).toBeGreaterThanOrEqual(2)
+      expect((html.match(/data-plan-window="week:(google|anthropic\+openai)"/g) ?? []).length).toBeGreaterThanOrEqual(2)
     }
     expect(renderToStaticMarkup(<PlanLimitsBlock limits={agy} now={NOW} lang="pt" />)).toContain('Semana · Modelos Gemini')
     expect(renderToStaticMarkup(<PlanLimitBars limits={agy} now={NOW} lang="en" />)).toContain('Claude and GPT')
@@ -69,4 +69,14 @@ test('seriesName shows the harness only when the account label lacks it', async 
   expect(seriesName('Claude Code', 'claude code #2')).toBe('claude code #2')
   expect(seriesName('Codex CLI', 'Work')).toBe('Codex CLI · Work')
   expect(seriesName('Codex CLI', '')).toBe('Codex CLI')
+})
+
+test('PT render: every meter surface names the scoped groups in Portuguese', () => {
+  const bars = renderToStaticMarkup(<PlanLimitBars limits={agy} now={NOW} lang="pt" />)
+  const card = renderToStaticMarkup(<PlanUsageCard limits={agy} now={NOW} lang="pt" />)
+  for (const html of [bars, card]) {
+    expect(html).toMatch(/Gemini/)
+    expect(html).toMatch(/Claude e GPT/)
+    expect(html).not.toMatch(/Claude and GPT/)
+  }
 })

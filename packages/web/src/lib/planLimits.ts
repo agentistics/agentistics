@@ -13,6 +13,12 @@ import { subscribeEvent } from './eventStream'
 import { HARNESS_LABELS } from './harness'
 import type { UsageBudgetRow } from './usagePlan'
 
+/**
+ * The key of `accountLabels`. An account id is only unique within its harness (agy and Claude both
+ * have a `default`), so every write AND every lookup goes through this one function.
+ */
+export const accountLabelKey = (harness: string, account: string): string => `${harness}:${account}`
+
 export type RegisteredPlan = { harness: PlanLimits['harness']; plan: string; account?: string; accountLabel?: string }
 export interface PlanReadings {
   account: string
@@ -32,7 +38,7 @@ export interface PlanLimitsSnapshot {
   /** Every owner's account, including rows hidden from agents. */
   budgets: UsageBudgetRow[]
   readings: PlanReadings[]
-  /** `account id → "<Harness> #n"` (or nickname), from the agent-visible and hidden budget rows. */
+  /** `accountLabelKey(harness, account) → "<Harness> #n"` (or nickname), from the agent-visible and hidden budget rows. */
   accountLabels: Record<string, string>
   /** A clock that ticks once a minute while anything is subscribed, for "in X min" / "X min ago". */
   now: number
@@ -54,8 +60,8 @@ async function refresh(): Promise<void> {
     const body = await r.json() as { limits?: PlanLimits[]; registered?: RegisteredPlan[]; budgets?: UsageBudgetRow[]; hiddenFromAgents?: UsageBudgetRow[]; readings?: PlanReadings[] }
     const budgets = [...(body.budgets ?? []), ...(body.hiddenFromAgents ?? [])]
     const accountLabels: Record<string, string> = {}
-    for (const r of body.registered ?? []) if (r.account && r.accountLabel) accountLabels[r.account] = r.accountLabel
-    for (const b of budgets) if (b.account && b.accountLabel) accountLabels[b.account] = b.accountLabel
+    for (const r of body.registered ?? []) if (r.account && r.accountLabel) accountLabels[accountLabelKey(r.harness, r.account)] = r.accountLabel
+    for (const b of budgets) if (b.account && b.accountLabel) accountLabels[accountLabelKey(b.harness, b.account)] = b.accountLabel
     emit({
       accountLabels,
       budgets,
@@ -94,7 +100,7 @@ export function usePlanLimits(): PlanLimitsSnapshot {
 
 /** Tests / fixtures: put a snapshot in place without the network. */
 export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.now(), registered: PlanLimitsSnapshot['registered'] = [], budgets: UsageBudgetRow[] = [], readings: PlanReadings[] = []): void {
-  const accountLabels = Object.fromEntries([...registered, ...budgets].flatMap(r => r.account && r.accountLabel ? [[r.account, r.accountLabel]] : []))
+  const accountLabels = Object.fromEntries([...registered, ...budgets].flatMap(r => r.account && r.accountLabel ? [[accountLabelKey(r.harness, r.account), r.accountLabel]] : []))
   emit({ limits, registered, budgets, readings, now, accountLabels })
 }
 
@@ -233,7 +239,7 @@ export function subscriptionRows(limits: PlanLimits[] | null, registered: Regist
       .map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null, accountLabel: r.accountLabel, ...(r.account ? { account: r.account } : {}) })),
   ]
   return rows.map(({ account, ...r }) => {
-    const label = (account ? labels[account] : undefined) ?? r.accountLabel
+    const label = (account ? labels[accountLabelKey(r.harness, account)] : undefined) ?? r.accountLabel
     // A label that is only the assistant's own name says nothing the row does not ("Codex CLI · Codex CLI").
     const telling = label && label !== HARNESS_LABELS[r.harness] ? label : undefined
     return telling ? { ...r, accountLabel: telling } : r
