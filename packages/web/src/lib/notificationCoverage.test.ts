@@ -17,7 +17,11 @@ const SERVER = join(import.meta.dir, '../../../server/server')
 
 /** Codes that appear only inside tests and fixtures — they are not events this product raises. */
 // Pure retire-plan result/reason codes: never broadcast as notification codes.
-const PLAN_CODES = new Set(['handoff_pending', 'working'])
+// retirePredecessor refusal codes: returned to the calling tool (session-roles.ts), never notified.
+const PLAN_CODES = new Set([
+  'handoff_pending', 'working',
+  'not_own', 'not_leader_target', 'different_task', 'not_live', 'no_task', 'self', 'no_such_session', 'not_wired',
+])
 
 const FIXTURES = new Set(['a', 'b', 'c', 'x', 'custom', 'ambiguous', 'missing_field', 'some.new_code_nobody_scoped'])
 
