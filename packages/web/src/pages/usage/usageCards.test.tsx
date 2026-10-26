@@ -262,7 +262,6 @@ describe('usage account cards', () => {
       const html = render(<UsageHistoryPage />, 390, lang)
       const scope = lang === 'pt' ? /Ainda não há histórico de uso registrado/g : /No usage history recorded yet/g
       expect(html.match(scope)).toHaveLength(1)
-      expect(html).toContain(lang === 'pt' ? 'As leituras atuais aparecem em Agora.' : 'Current readings appear in Now.')
     }
   })
 })

@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '0.0.0-next': {
+    features: [
+      {
+        pt: 'Uso abre direto nos gráficos: limites de 5 h e da semana ao longo do tempo, horas de uso e picos, com um filtro único (tudo sobreposto, um harness ou uma conta).',
+        en: 'Usage opens straight on the charts: 5 h and weekly limits over time, hours of use and peaks, with one filter (all overlaid, one harness or one account).',
+      },
+    ],
+    fixes: [],
+  },
   '2.157.0': {
     features: [
       {
