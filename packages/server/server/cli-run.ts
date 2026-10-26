@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
+import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
 const REAL_API_PORT = 47291
 const REAL_WEB_PORT = 47292
@@ -212,7 +213,56 @@ async function listRuns(): Promise<number> {
   return 0
 }
 
+/** cmdlines of this process's ancestors (Linux /proc); empty where unreadable. */
+function ancestorCmdlines(): string[] {
+  const out: string[] = []
+  let pid = process.ppid
+  for (let depth = 0; pid > 1 && depth < 32; depth++) {
+    try {
+      out.push(readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').trim())
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+      pid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1])
+    } catch { break }
+  }
+  return out
+}
+
+function memAvailableBytes(): number | null {
+  try {
+    const m = /^MemAvailable:\s+(\d+) kB/m.exec(readFileSync('/proc/meminfo', 'utf8'))
+    return m ? Number(m[1]) * 1024 : null
+  } catch { return null }
+}
+
+/**
+ * MEM.GUARD: a heavy job does not start while the machine is short of memory. Runs BEFORE anything
+ * is created on disk, so an interrupted wait leaves nothing behind. Gives up after `runWaitMaxMs`
+ * (false); `AGENTISTICS_RUN_NO_WAIT=1` skips. Unmeasured (not Linux) never waits.
+ */
+async function waitForMemory(): Promise<boolean> {
+  if (process.env.AGENTISTICS_RUN_NO_WAIT === '1') return true
+  const min = runMinAvailableBytes()
+  const deadline = Date.now() + runWaitMaxMs()
+  let last: { gb: string; at: number } | null = null
+  for (;;) {
+    const avail = memAvailableBytes()
+    if (!shouldWaitForMemory(avail, min)) return true
+    const now = Date.now()
+    if (now >= deadline) {
+      console.error(`agentop run: gave up after waiting ${Math.round(runWaitMaxMs() / 60000)} min — the machine still has only ${(avail! / 1024 ** 3).toFixed(1)} GB of memory free. Close something heavy and try again.`)
+      return false
+    }
+    if (shouldAnnounceWait(last, avail!, now)) {
+      const gb = (avail! / 1024 ** 3).toFixed(1)
+      console.error(`agentop run: waiting for memory — ${gb} GB available, need ${(min / 1024 ** 3).toFixed(1)} GB`)
+      last = { gb, at: now }
+    }
+    await Bun.sleep(2000)
+  }
+}
+
 async function startRun(options: RunOptions): Promise<number> {
+  if (!await waitForMemory()) return 3
   mkdirSync(stateRoot(), { recursive: true, mode: 0o700 })
   if (existsSync(statePath(options.name))) throw new Error(`a throwaway run named ${options.name} already exists`)
   const home = mkdtempSync(join(stateRoot(), `${safeName(options.name)}-`))
@@ -233,7 +283,11 @@ async function startRun(options: RunOptions): Promise<number> {
   const { apiPort, webPort, reservationPaths } = ports
   const state: ThrowawayState = { name: options.name, home, apiPort, webPort, reservationPaths, startedAt: new Date().toISOString(), command: options.command }
   const script = process.argv[1]
-  const argv = options.command.length ? options.command : (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'server'] : [process.execPath, 'server'])
+  const heavyPrefix = shouldWrapHeavy({
+    hasCommand: options.command.length > 0, linux: process.platform === 'linux', hasFlock: !!Bun.which('flock'),
+    inside: insideHeavyLock(process.env, ancestorCmdlines()),
+  }) ? (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'heavy', '--'] : [process.execPath, 'heavy', '--']) : []
+  const argv = options.command.length ? [...heavyPrefix, ...options.command] : (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'server'] : [process.execPath, 'server'])
   const env = buildThrowawayEnv(home, options.name, apiPort, webPort)
   mkdirSync(env.TMPDIR!, { recursive: true, mode: 0o700 })
   const unit = `agentistics-throwaway-${options.name}.scope`

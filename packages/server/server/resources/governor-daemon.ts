@@ -11,6 +11,7 @@
  */
 
 import { readProcEntries, pidAlive, pidStarttime } from './proc-read'
+import { memoryAlarmStep, type MemAlarmState } from './mem-guard'
 import { buildInventory, DEFAULT_TEMP_ROOTS, type AgentopProcess } from './inventory'
 import { tmpdir } from 'node:os'
 import { planGovernor, type Alert, type Kill } from './governor'
@@ -48,6 +49,7 @@ const announced = new Set<string>()
 let timer: ReturnType<typeof setInterval> | null = null
 let running: Promise<ResourcesSnapshot> | null = null
 let lastStaleMcpCount = 0
+let memAlarm: MemAlarmState = { raised: false }
 
 export function resourcesSnapshot(): ResourcesSnapshot | null {
   // The queue moves between ticks (a spawn queued a second ago); read it live.
@@ -59,6 +61,13 @@ const killsEnabled = (): boolean => process.env.AGENTISTICS_GOVERNOR !== '0'
 function terminate(pid: number): void {
   try { process.kill(pid, 'SIGTERM') } catch { return }
   setTimeout(() => { if (pidAlive(pid)) { try { process.kill(pid, 'SIGKILL') } catch { /* gone */ } } }, KILL_GRACE_MS).unref?.()
+}
+
+async function memAvailableNow(): Promise<number | null> {
+  try {
+    const m = /^MemAvailable:\s+(\d+) kB/m.exec(await Bun.file('/proc/meminfo').text())
+    return m ? Number(m[1]) * 1024 : null
+  } catch { return null }
 }
 
 /** One governor pass. Concurrent callers share the pass in flight. */
@@ -129,6 +138,18 @@ export function governorTick(deps: GovernorDeps): Promise<ResourcesSnapshot> {
         type: 'warning',
         code: a.reason === 'stale-binary' ? 'hardware.process_stale' : a.reason === 'spinning' ? 'hardware.process_spinning' : 'hardware.process_over_budget',
         meta: { label: a.label, pid: a.pid, size: mbText(a.usedBytes), budget: mbText(a.budgetBytes ?? null) },
+      })
+    }
+    // MEM.GUARD: one bell notice under the hard floor, naming the biggest process; re-arms past 3 GB.
+    const alarm = memoryAlarmStep(memAlarm, await memAvailableNow())
+    memAlarm = alarm.state
+    if (alarm.raise) {
+      const { readBiggestConsumer } = await import('../sessions/memory-probe')
+      const hog = await readBiggestConsumer().catch(() => null)
+      deps.notify({
+        type: 'warning',
+        code: 'hardware.memory_critical',
+        meta: { available: mbText(await memAvailableNow()), label: hog?.label ?? '?', pid: hog?.pid ?? 0, size: mbText(hog?.usedBytes ?? null) },
       })
     }
     // An alert that cleared may be announced again if it comes back.
