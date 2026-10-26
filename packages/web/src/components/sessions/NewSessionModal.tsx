@@ -352,7 +352,7 @@ export function NewSessionModal({
   // See `unsetText`'s own note, shared with `StagedSessionCompose`.
   // The native harness REQUIRES a model (the engine has no default to fall back on): its unset row is
   // a request, not a description of a default.
-  const modelUnset = isNative ? (pt ? 'Escolha um modelo' : 'Choose a model') : unsetText(harness?.defaultModel, pt)
+  const modelUnset = isNative ? (pt ? 'Escolha um modelo' : 'Choose a model') : unsetText(harness?.defaultModel, pt, harness?.defaultModelStale)
   const effortUnset = unsetText(harness?.defaultEffort, pt)
 
   const STEP_TITLE: Record<StepId, string> = {

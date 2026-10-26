@@ -18,7 +18,8 @@
  * - codex     `~/.codex/config.toml`    → `model`, `model_reasoning_effort`.
  * - kimi      `~/.kimi-code/config.toml`→ `default_model`, which `kimi --help` names by KEY.
  * - antigravity `~/.gemini/antigravity-cli/settings.json` → `model` (a DISPLAY name, e.g.
- *   `Gemini 3.6 Flash (Medium)`) — shown as read, never mapped onto a `--model` value it may not be.
+ *   `Gemini 3.6 Flash (Medium)`) — shown as read, never mapped onto a `--model` value it may not be;
+ *   checked against `agy models` and flagged `modelStale` when that list no longer has it.
  * - gemini    `~/.gemini/settings.json` carries no model key. ABSENT, and absent is the answer.
  * - copilot   its user settings file carries no model key. ABSENT.
  *
@@ -42,6 +43,18 @@ import { HOME_DIR } from '../config'
 export interface HarnessDefaults {
   model?: string
   effort?: string
+  /** The saved model is not offered by the CLI any more; `model` is then the first one it lists. */
+  modelStale?: true
+}
+
+/**
+ * Check a saved display label against the CLI's own list. Pure. An empty list proves nothing, so the
+ * saved label is then kept; a label the list lacks is replaced by the first listed model and marked.
+ */
+export function reconcileSavedModel(saved: string, listed: readonly { id: string; label: string }[]): HarnessDefaults {
+  const norm = (v: string) => v.trim().toLowerCase()
+  if (listed.length === 0 || listed.some(m => norm(m.label) === norm(saved) || norm(m.id) === norm(saved))) return { model: saved }
+  return { model: listed[0]!.label, modelStale: true }
 }
 
 /**
@@ -118,7 +131,13 @@ export async function readHarnessDefaults(harness: HarnessId): Promise<HarnessDe
     case 'antigravity': {
       const t = await text(join(HOME_DIR, '.gemini', 'antigravity-cli', 'settings.json'))
       const model = t ? jsonStringKey(t, 'model') : undefined
-      return model ? { model } : {}
+      if (!model) return {}
+      // The saved label can name a model agy no longer offers (it resolves it to another one). The
+      // list comes from the catalog's cache of `agy models` — never awaited, never written back to
+      // settings.json; cold or failed, the catalog answers with its table and the saved label stands.
+      const { peekModelCatalog } = await import('../model-catalog')
+      const catalog = peekModelCatalog('antigravity')
+      return catalog.source === 'cli' ? reconcileSavedModel(model, catalog.models) : { model }
     }
     // Their settings files carry no model key at all — see the header. Absent is the answer, and
     // it is listed rather than defaulted so a harness added later cannot fall through silently.
