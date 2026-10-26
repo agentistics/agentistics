@@ -195,9 +195,12 @@ export function withScopePeriods(billing: BillingSettings, s: RowScope, periods:
  * account `'default'` (Antigravity and Claude Code on one machine), and an account-only match handed one
  * row the other's bars.
  */
-export function limitsForRow(limits: readonly PlanLimits[] | null | undefined, row: Pick<BillingRow, 'harness' | 'account'>): PlanLimits | null {
+export function limitsForRow(limits: readonly PlanLimits[] | null | undefined, row: Pick<BillingRow, 'harness' | 'account'> & { foldedIds?: readonly string[] }): PlanLimits | null {
   if (!row.account) return null
-  return limits?.find(l => l.harness === row.harness && l.account === row.account!.id) ?? null
+  const mine = limits?.filter(l => l.harness === row.harness) ?? []
+  // A sign-in the harness cannot name is folded into the row (`foldUnnamed`), and the server may have filed
+  // the reading under that folded account: it is the same login's meter.
+  return mine.find(l => l.account === row.account!.id) ?? mine.find(l => row.foldedIds?.includes(l.account)) ?? null
 }
 
 /**
@@ -216,6 +219,8 @@ export interface BillingRow {
   /** What the title does not already say: the assistant, plus the login beside a nickname. */
   sub: string
   scope: RowScope
+  /** Accounts folded into this row (same sign-in seen again): their meters are this row's meters. */
+  foldedIds?: string[]
 }
 
 /** Old Codex readers used a ChatGPT id fragment as the login label. It names no person. */
@@ -249,7 +254,8 @@ export function billingRows(
       // What the title does not already say: never the assistant's name twice.
       const raw = nick ? (login ? `${label} · ${login}` : label) : login ? label : a.harness === 'codex' ? label : assistantNamed ? '' : unknownWho
       const sub = raw === title ? '' : raw
-      out.push({ key: accountLabelKey(h, a.id), harness: h, account: a, title, sub, scope: rowScope(billing, shown, a) })
+      const foldedIds = mine.filter(x => x.id !== a.id && !shown.includes(x)).map(x => x.id)
+      out.push({ key: accountLabelKey(h, a.id), harness: h, account: a, title, sub, scope: rowScope(billing, shown, a), ...(foldedIds.length ? { foldedIds } : {}) })
     }
   }
   return out

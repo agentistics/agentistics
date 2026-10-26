@@ -368,3 +368,15 @@ describe('config B — Antigravity and Claude both on `default`, plus a second C
     expect(REPORTS_LIMITS.has('antigravity')).toBe(true)
   })
 })
+
+describe('a meter filed under a folded sign-in is the row\'s meter', () => {
+  test('the unnamed fallback beside Antigravity\'s account is folded, and its reading still reaches the row', () => {
+    const named = acc('default', { harness: 'antigravity', label: 'Antigravity', key: 'antigravity:default', firstSeen: 1 })
+    const ghost = acc('acc_ghost', { harness: 'antigravity', label: 'Default account', key: 'root:abc', firstSeen: 2 })
+    const rows = billingRows([named, ghost], none, ['antigravity'], (() => 'Antigravity') as never, false)
+    expect(rows).toHaveLength(1)
+    const lim = { harness: 'antigravity', account: 'acc_ghost', updatedAt: 1, windows: [] } as never
+    expect(limitsForRow([lim], rows[0]!)).toBe(lim)
+    expect(limitsForRow([{ ...(lim as object), harness: 'claude' } as never], rows[0]!)).toBeNull()
+  })
+})
