@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.154.0': {
+    features: [
+      {
+        pt: 'Antigravity: a conta logada agora é reconhecida pelo nome.',
+        en: 'Antigravity: the signed-in account is now recognised by name.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O app avisa quando o modelo padrão escolhido para o Antigravity saiu da lista dele.',
+        en: 'The app warns when the default model picked for Antigravity is no longer in its list.',
+      },
+      {
+        pt: 'Os limites de uso de cada conta não se misturam mais quando um líder roda em outra conta.',
+        en: 'Each account\'s usage limits no longer mix when a leader runs on another account.',
+      },
+    ],
+  },
   '2.153.0': {
     features: [
       {
