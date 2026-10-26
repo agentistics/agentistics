@@ -542,9 +542,9 @@ export function SessionsAside({
     setFoldedGroupsSectionState(next)
     writeAsideGroupPrefs({ foldedGroupsSection: next })
   }
-  /** The create-group dialog. `forKey` carries a session identity when opened from that row's
+  /** The create-group popover (a centred dialog when no anchor is known). `forKey` carries a session identity when opened from that row's
    *  "Novo grupo…" path, so submitting both creates the group AND files the session in one step. */
-  const [creatingGroup, setCreatingGroup] = useState<{ forKey?: string } | null>(null)
+  const [creatingGroup, setCreatingGroup] = useState<{ forKey?: string; anchor?: { x: number; y: number } } | null>(null)
   const [newGroupName, setNewGroupName] = useState('')
   const [renamingGroup, setRenamingGroup] = useState<{ id: string } | null>(null)
   const [renameGroupDraft, setRenameGroupDraft] = useState('')
@@ -1962,7 +1962,7 @@ export function SessionsAside({
             <button
               type="button"
               data-new-folder
-              onClick={() => { setNewGroupName(''); setCreatingGroup({}) }}
+              onClick={e => { const r = e.currentTarget.getBoundingClientRect(); setNewGroupName(''); setCreatingGroup({ anchor: { x: r.left, y: r.bottom + 4 } }) }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6, width: '100%', minHeight: tap ?? 30, marginTop: 4,
                 padding: '0 8px', borderRadius: 7, border: 'none', background: 'transparent', cursor: 'pointer',
@@ -1972,7 +1972,7 @@ export function SessionsAside({
               onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-tertiary)' }}
             >
               <FolderPlus size={13} />
-              {pt ? 'Nova pasta' : 'New folder'}
+              {pt ? 'Novo grupo' : 'New group'}
             </button>
           </div>
         )}
@@ -2115,7 +2115,7 @@ export function SessionsAside({
               const key = pinKeyOf(target)
               if (action === '__new_group__') {
                 setNewGroupName('')
-                setCreatingGroup({ forKey: key })
+                setCreatingGroup({ forKey: key, anchor: { x: groupPicker.x, y: groupPicker.y } })
               } else {
                 // The menu path (mandatory on a phone, which cannot drag): "Move to group…" on a
                 // pinned row must also unpin it — same gesture as the drag, without a mouse.
@@ -2365,11 +2365,12 @@ export function SessionsAside({
         <div
           role="dialog"
           aria-label={pt ? 'Novo grupo' : 'New group'}
-          style={{ position: 'fixed', inset: 0, zIndex: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          data-new-group-popover={creatingGroup.anchor ? '' : undefined}
+          style={{ position: 'fixed', inset: 0, zIndex: 700, ...(creatingGroup.anchor ? {} : { display: 'flex', alignItems: 'center', justifyContent: 'center' }) }}
         >
           <div
             onClick={() => setCreatingGroup(null)}
-            style={{ position: 'absolute', inset: 0, background: 'var(--ag-scrim, rgba(0,0,0,0.4))' }}
+            style={{ position: 'absolute', inset: 0, background: creatingGroup.anchor ? 'transparent' : 'var(--ag-scrim, rgba(0,0,0,0.4))' }}
           />
           <form
             onSubmit={e => {
@@ -2380,7 +2381,8 @@ export function SessionsAside({
               setCreatingGroup(null)
             }}
             style={{
-              position: 'relative', zIndex: 1, minWidth: 260, maxWidth: 340,
+              position: creatingGroup.anchor ? 'fixed' : 'relative', zIndex: 1, minWidth: 260, maxWidth: 340,
+              ...(creatingGroup.anchor ? { left: Math.max(8, Math.min(creatingGroup.anchor.x, window.innerWidth - 348)), top: Math.max(8, Math.min(creatingGroup.anchor.y, window.innerHeight - 190)) } : {}),
               background: 'var(--bg-surface)', border: '1px solid var(--border)',
               borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 10,
               boxShadow: 'var(--ag-shadow-menu)',
