@@ -5,7 +5,7 @@
  * it the composer) for at least 800 ms and until the session leaves Active; `SessionEndingGate` puts the
  * conversation back, untouched, if the kill is refused.
  */
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { endingLabel, endingTimeoutText, unmarkEnding, useEnding, useEndingTimedOut } from '../../lib/endingSessions'
 
@@ -50,6 +50,7 @@ export function SessionEnding({ lang, label, title, id, onRetry }: { lang: 'pt' 
  * the ending window the wrapper is `display: contents` and changes no layout.
  */
 export function SessionEndingGate({ id, lang, label, title, ending: heldEnding, onRetry, children }: { ending?: boolean; onRetry?: () => void; id: string; lang: 'pt' | 'en'; label?: string; title?: string; children: ReactNode }) {
+  useEffect(() => () => unmarkEnding(id), [id])
   const pending = useEnding(id)
   const ending = heldEnding ?? pending
   return (

@@ -14,7 +14,7 @@ import { useEffect, useReducer, useRef, useSyncExternalStore } from 'react'
 
 // A selection can keep this attempt after it leaves the map. That lets a successful loader
 // survive the router's deferred navigation without retaining completed sessions globally.
-interface EndingAttempt { succeeded: boolean; doneAt?: number }
+interface EndingAttempt { succeeded: boolean; doneAt?: number; controller: AbortController }
 const ending = new Map<string, EndingAttempt>()
 /** Ids whose kill was acknowledged but whose row never left Active within ENDING_TIMEOUT_MS. */
 const timedOut = new Set<string>()
@@ -25,11 +25,12 @@ function emit(): void { version++; for (const l of listeners) l() }
 
 export function markEnding(id: string): void {
   if (ending.has(id)) return
-  ending.set(id, { succeeded: false })
+  ending.set(id, { succeeded: false, controller: new AbortController() })
   emit()
 }
 
 export function unmarkEnding(id: string): void {
+  ending.get(id)?.controller.abort()
   const had = ending.delete(id)
   const out = timedOut.delete(id)
   if (had || out) emit()
@@ -46,6 +47,7 @@ export function isEndingTimedOut(id: string | undefined): boolean {
 
 /** Test seam: forget everything. */
 export function resetEnding(): void {
+  for (const attempt of ending.values()) attempt.controller.abort()
   ending.clear()
   timedOut.clear()
   emit()
@@ -82,27 +84,37 @@ export function useEndingTimedOut(id: string | undefined): boolean {
 export async function withEnding<T extends { ok: boolean }>(
   id: string,
   action: () => Promise<T>,
-  waitUntilInactive: () => Promise<void>,
+  waitUntilInactive: (signal: AbortSignal) => Promise<void>,
   isActive: () => boolean = () => true,
   timeoutMs: number = ENDING_TIMEOUT_MS,
   timeoutMessage: string = endingTimeoutText(false).body,
 ): Promise<T> {
   const started = Date.now()
+  unmarkEnding(id) // A retry owns a fresh wait; the previous attempt cannot finish this one.
   markEnding(id)
+  const attempt = ending.get(id)!
+  const { signal } = attempt.controller
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let minimum: ReturnType<typeof setTimeout> | undefined
+  let onAbort: (() => void) | undefined
   let keep = false
   try {
     const result = await action()
+    if (signal.aborted) return { ...result, ok: false }
     if (result.ok) {
-      let timer: ReturnType<typeof setTimeout> | undefined
       const expired = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), timeoutMs) })
+      const cancelled = new Promise<'cancelled'>(resolve => {
+        onAbort = () => resolve('cancelled')
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
       const outcome = await Promise.race([
         Promise.all([
-          waitUntilInactive(),
-          new Promise<void>(resolve => setTimeout(resolve, Math.max(0, ENDING_MIN_MS - (Date.now() - started)))),
+          waitUntilInactive(signal),
+          new Promise<void>(resolve => { minimum = setTimeout(resolve, Math.max(0, ENDING_MIN_MS - (Date.now() - started))) }),
         ]).then(() => 'done' as const),
-        expired,
+        expired, cancelled,
       ])
-      clearTimeout(timer)
+      if (outcome === 'cancelled' || signal.aborted) return { ...result, ok: false }
       if (outcome === 'timeout' && isActive()) {
         // Do not spin forever: leave the mark, flag the outcome and let the overlay offer a retry.
         timedOut.add(id)
@@ -112,12 +124,17 @@ export async function withEnding<T extends { ok: boolean }>(
         // the session (and the overlay offers a retry) instead of navigating away from a live one.
         return { ...result, ok: false, message: timeoutMessage } as T
       } else {
-        const attempt = ending.get(id)
-        if (attempt) { attempt.succeeded = true; attempt.doneAt = Date.now() }
+        attempt.succeeded = true; attempt.doneAt = Date.now()
       }
     }
     return result
-  } finally { if (!keep) unmarkEnding(id) }
+  } finally {
+    clearTimeout(timer)
+    clearTimeout(minimum)
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+    attempt.controller.abort() // Dispose the fleet waiter even when timeout/error won the race.
+    if (!keep && ending.get(id) === attempt) unmarkEnding(id)
+  }
 }
 
 /** Retain the selected view when a fast fleet update removes its row during the reading interval. */

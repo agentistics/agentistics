@@ -319,18 +319,26 @@ function isRowActive(id: string): boolean {
 }
 
 /** Use the shared fleet feed: an acknowledged kill can still have a live row for another poll. */
-function waitUntilInactive(id: string): Promise<void> {
+function waitUntilInactive(id: string, signal: AbortSignal): Promise<void> {
   return new Promise(resolve => {
-    const changed = () => {
-      const row = snapshot.sessions.find(row => row.id === id || row.conversationId === id)
-      if (row && ['working', 'waiting', 'waiting-approval'].includes(row.state)) return
+    const dispose = () => {
+      signal.removeEventListener('abort', dispose)
       listeners.delete(changed)
       if (listeners.size === 0) stopPolling()
       resolve()
     }
+    const changed = () => { if (!isRowActive(id)) dispose() }
+    if (signal.aborted) { resolve(); return }
+    signal.addEventListener('abort', dispose, { once: true })
     listeners.add(changed)
     changed()
   })
+}
+
+/** Test seam for request waiter ownership, using the real shared fleet subscription. */
+export const __endingFleetForTest = {
+  waitUntilInactive,
+  resources: () => ({ listeners: listeners.size, polling: timer !== null }),
 }
 
 /**
@@ -725,7 +733,7 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
   // `endingSessions.ts`). Here because this is the one door every surface ends a session through.
   const act = useCallback<FleetState['act']>(async req => {
     if (req.action !== 'kill') return actRaw(req)
-    return withEnding(req.id, () => actRaw(req), () => waitUntilInactive(req.id), () => isRowActive(req.id), undefined, endingTimeoutText(lang === 'pt').body)
+    return withEnding(req.id, () => actRaw(req), signal => waitUntilInactive(req.id, signal), () => isRowActive(req.id), undefined, endingTimeoutText(lang === 'pt').body)
   }, [actRaw, lang])
 
   return {

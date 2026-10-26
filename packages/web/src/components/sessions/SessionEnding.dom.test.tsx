@@ -297,3 +297,78 @@ test('an unconfirmed kill is reported as NOT done, so the caller does not naviga
   expect(r.message).toBe('still running')
   expect(ending.isEndingTimedOut('s7')).toBe(true)
 })
+
+test('real fleet timeout retry dismiss and unmount release every waiter and poll', async () => {
+  if (!process.env.ENDING_CLEANUP_ISOLATED) {
+    const child = Bun.spawn([process.execPath, 'test', fileURLToPath(import.meta.url), '--test-name-pattern', 'real fleet timeout retry dismiss'], {
+      env: { ...process.env, ENDING_CLEANUP_ISOLATED: '1' }, stdout: 'ignore', stderr: 'pipe',
+    })
+    const errors = await new Response(child.stderr).text()
+    expect(await child.exited, errors).toBe(0)
+    return
+  }
+  const { useFleet, __endingFleetForTest: fleet } = await import('../../lib/fleet')
+  const previousFetch = globalThis.fetch
+  const row = { id: 'cleanup', title: 'Still active', harness: 'claude', cwd: '/x', project: 'x', state: 'waiting', stateLabel: 'needs you', actionable: true, attachCommand: '', verbs: [] }
+  globalThis.fetch = (async (url: string) => url.startsWith('/api/fleet?')
+    ? Response.json({ sessions: [row], rows: [], attention: 0, tasks: [], finishedTasks: [] })
+    : new Response(null, { status: 404 })) as typeof fetch
+  let state!: ReturnType<typeof useFleet>
+  let completion!: Promise<{ ok: boolean }>
+  const run = () => { completion = ending.withEnding(row.id, async () => ({ ok: true }), signal => fleet.waitUntilInactive(row.id, signal), () => true, 30) }
+  function Driver() {
+    state = useFleet('en')
+    return createElement(SessionEndingGate, { id: row.id, lang: 'en', onRetry: run, children: createElement('i') })
+  }
+  try {
+    await act(async () => { root.render(createElement(Driver)); await Bun.sleep(20) })
+    await act(async () => { state.refresh(); await Bun.sleep(20) })
+    expect(fleet.resources()).toEqual({ listeners: 1, polling: true })
+    await act(async () => { run(); await Bun.sleep(0) })
+    expect(fleet.resources().listeners).toBe(2)
+    await act(async () => { await completion })
+    expect(fleet.resources()).toEqual({ listeners: 1, polling: true })
+    expect(overlay()!.hasAttribute('data-session-ending-timeout')).toBe(true)
+    await act(async () => { (host.querySelector('[data-ending-retry]') as HTMLButtonElement).click(); await Bun.sleep(0) })
+    expect(ending.isEndingTimedOut(row.id)).toBe(false)
+    expect(fleet.resources().listeners).toBe(2)
+    await act(async () => { await completion })
+    expect(fleet.resources().listeners).toBe(1)
+    act(() => (host.querySelector('[data-ending-dismiss]') as HTMLButtonElement).click())
+    expect(overlay()).toBeNull()
+    act(() => root.render(createElement('div')))
+    expect(fleet.resources()).toEqual({ listeners: 0, polling: false })
+    // Unmount also cancels an attempt BEFORE its timeout; it cannot revive state later.
+    await act(async () => { root.render(createElement(Driver)); await Bun.sleep(0); run(); await Bun.sleep(0) })
+    expect(fleet.resources().listeners).toBe(2)
+    await act(async () => { root.render(createElement('div')); await completion })
+    expect(fleet.resources()).toEqual({ listeners: 0, polling: false })
+    expect(ending.isEnding(row.id)).toBe(false)
+    expect(ending.isEndingTimedOut(row.id)).toBe(false)
+  } finally { act(() => root.render(createElement('div'))); globalThis.fetch = previousFetch }
+})
+
+test('a rejecting inactivity waiter aborts its signal and releases ending state', async () => {
+  let signal!: AbortSignal
+  await act(async () => {
+    await expect(ending.withEnding('rejected-wait', async () => ({ ok: true }), async current => {
+      signal = current
+      throw new Error('wait failed')
+    })).rejects.toThrow('wait failed')
+  })
+  expect(signal.aborted).toBe(true)
+  expect(ending.isEnding('rejected-wait')).toBe(false)
+})
+
+test('a cancelled late kill cannot clear the retry attempt', async () => {
+  let resolveOld!: (value: { ok: boolean }) => void
+  let old!: Promise<{ ok: boolean }>, retry!: Promise<{ ok: boolean }>
+  await act(async () => {
+    old = ending.withEnding('retry-race', () => new Promise(resolve => { resolveOld = resolve }), async () => {})
+    retry = ending.withEnding('retry-race', async () => ({ ok: true }), () => new Promise<void>(() => {}))
+  })
+  await act(async () => { resolveOld({ ok: true }); expect((await old).ok).toBe(false) })
+  expect(ending.isEnding('retry-race')).toBe(true)
+  await act(async () => { ending.unmarkEnding('retry-race'); expect((await retry).ok).toBe(false) })
+  expect(ending.isEnding('retry-race')).toBe(false)
+})
