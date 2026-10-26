@@ -224,7 +224,7 @@ export function limitLevelWord(level: LimitLevel, lang: Lang, pct?: number | nul
 }
 
 export interface SubscriptionRow {
-  harness: PlanLimits['harness']; plan: string | undefined; limits: PlanLimits | null
+  harness: PlanLimits['harness']; plan: string | undefined; limits: PlanLimits | null; account?: string
   /** The same telling account name used by the Usage overview, including a single account. */
   accountLabel?: string
 }
@@ -239,7 +239,8 @@ export function subscriptionRows(limits: PlanLimits[] | null, registered: Regist
       .filter(r => (r.account ? !foundAccount.has(`${r.harness}:${r.account}`) : !found.has(r.harness)))
       .map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null, accountLabel: r.accountLabel, ...(r.account ? { account: r.account } : {}) })),
   ]
-  const named = rows.map(({ account, ...r }) => {
+  const named = rows.map(r => {
+    const { account } = r
     const label = (account ? labels[accountLabelKey(r.harness, account)] : undefined) ?? r.accountLabel
     // A label that is only the assistant's own name says nothing the row does not ("Codex CLI · Codex CLI").
     const telling = label && label !== HARNESS_LABELS[r.harness] ? label : undefined

@@ -48,7 +48,7 @@ export function PlanUsageModal({ lang, onClose, openSession, switchDialogOpen = 
             style={{ border: 0, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', minWidth: isMobile ? 30 : 32, height: isMobile ? 30 : 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} /></button>
         </div>
         <PlanUsageSessionSwitch session={openSession} lang={lang} />
-        <NayLimitsTab lang={lang} isMobile={isMobile} onNavigate={onClose} />
+        <NayLimitsTab manageAgentUse lang={lang} isMobile={isMobile} onNavigate={onClose} />
       </div>
     </div>
   )

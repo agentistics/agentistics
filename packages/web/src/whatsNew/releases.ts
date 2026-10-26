@@ -10,6 +10,13 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  'NEXT': {
+    features: [{
+      pt: 'Em Uso dos planos, escolha quais contas os agentes podem usar. As contas desligadas continuam mostrando seu uso.',
+      en: 'In Plan usage, choose which accounts agents can use. Accounts switched off still show their usage.',
+    }],
+    fixes: [],
+  },
   '2.157.0': {
     features: [
       {
