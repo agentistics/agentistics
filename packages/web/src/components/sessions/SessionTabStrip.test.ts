@@ -42,16 +42,16 @@ test('the last strip unmounting clears the anchors even without a store reset', 
   expect(getPrevActive('main')).toBeNull()
 })
 
-test('rounded tabs in a segmented track, no full pill', () => {
+test('desktop tabs have rounded tops and square bottoms, no full pill', () => {
   expect(src).toContain('borderRadius: 8')
-  expect(src).toContain('borderRadius: 10')
+  expect(src).toContain("'10px 10px 0 0'")
   expect(src).not.toContain('borderRadius: 999')
 })
 
 test('the row the top bar reserves is the strip\'s own height, built from the terms the strip draws with', async () => {
-  const { TAB_STRIP_H, TAB_H, TABLIST_PAD, TABLIST_BORDER, TABLIST_MARGIN_Y, STRIP_HAIRLINE } = await import('./SessionTabStrip')
-  expect(TAB_STRIP_H).toBe(TAB_H + 2 * (TABLIST_PAD + TABLIST_BORDER + TABLIST_MARGIN_Y) + STRIP_HAIRLINE)
-  expect(TAB_STRIP_H).toBe(47)
+  const { TAB_STRIP_H, TAB_H, TABLIST_TOP_PAD } = await import('./SessionTabStrip')
+  expect(TAB_STRIP_H).toBe(TAB_H + TABLIST_TOP_PAD)
+  expect(TAB_STRIP_H).toBe(44)
 })
 
 test('App reserves exactly that, never a typed number (a short row let the strip cross the title divider)', () => {

@@ -10,12 +10,14 @@
  * clears the mark immediately so the mounted conversation and draft return. This is transient
  * request state, held in memory and never persisted.
  */
-import { useRef, useSyncExternalStore } from 'react'
+import { useEffect, useReducer, useRef, useSyncExternalStore } from 'react'
 
 // A selection can keep this attempt after it leaves the map. That lets a successful loader
 // survive the router's deferred navigation without retaining completed sessions globally.
-interface EndingAttempt { succeeded: boolean }
+interface EndingAttempt { succeeded: boolean; doneAt?: number; controller: AbortController }
 const ending = new Map<string, EndingAttempt>()
+/** Ids whose kill was acknowledged but whose row never left Active within ENDING_TIMEOUT_MS. */
+const timedOut = new Set<string>()
 const listeners = new Set<() => void>()
 let version = 0
 
@@ -23,21 +25,31 @@ function emit(): void { version++; for (const l of listeners) l() }
 
 export function markEnding(id: string): void {
   if (ending.has(id)) return
-  ending.set(id, { succeeded: false })
+  ending.set(id, { succeeded: false, controller: new AbortController() })
   emit()
 }
 
 export function unmarkEnding(id: string): void {
-  if (ending.delete(id)) emit()
+  ending.get(id)?.controller.abort()
+  const had = ending.delete(id)
+  const out = timedOut.delete(id)
+  if (had || out) emit()
 }
 
 export function isEnding(id: string | undefined): boolean {
   return id !== undefined && ending.has(id)
 }
 
+/** True when the kill was acknowledged but the session still shows as running after the timeout. */
+export function isEndingTimedOut(id: string | undefined): boolean {
+  return id !== undefined && timedOut.has(id)
+}
+
 /** Test seam: forget everything. */
 export function resetEnding(): void {
+  for (const attempt of ending.values()) attempt.controller.abort()
   ending.clear()
+  timedOut.clear()
   emit()
 }
 
@@ -53,23 +65,76 @@ export function useEnding(id: string | undefined): boolean {
 export const endingLabel = (pt: boolean): string => (pt ? 'Encerrando…' : 'Ending…')
 
 export const ENDING_MIN_MS = 800
+/** After this long without the fleet confirming, the overlay stops spinning and states the outcome. */
+export const ENDING_TIMEOUT_MS = 15_000
+/** How long a successful ending keeps the overlay across the router's deferred navigation. */
+export const ENDING_HOLD_MS = 2_000
+
+/** The outcome sentence once the timeout has passed. */
+export const endingTimeoutText = (pt: boolean): { title: string; body: string; retry: string; dismiss: string } => pt
+  ? { title: 'Ainda aparece em execução', body: 'O pedido foi aceito, mas a sessão não saiu da lista de ativas.', retry: 'Tentar de novo', dismiss: 'Fechar aviso' }
+  : { title: 'Still shown as running', body: 'The request was accepted, but the session has not left the active list.', retry: 'Try again', dismiss: 'Dismiss' }
+
+export function useEndingTimedOut(id: string | undefined): boolean {
+  useSyncExternalStore(subscribe, () => version, () => 0)
+  return isEndingTimedOut(id)
+}
 
 /** Keep success visible until both the reading interval and the fleet transition have finished. */
-export async function withEnding<T extends { ok: boolean }>(id: string, action: () => Promise<T>, waitUntilInactive: () => Promise<void>): Promise<T> {
+export async function withEnding<T extends { ok: boolean }>(
+  id: string,
+  action: () => Promise<T>,
+  waitUntilInactive: (signal: AbortSignal) => Promise<void>,
+  isActive: () => boolean = () => true,
+  timeoutMs: number = ENDING_TIMEOUT_MS,
+  timeoutMessage: string = endingTimeoutText(false).body,
+): Promise<T> {
   const started = Date.now()
+  unmarkEnding(id) // A retry owns a fresh wait; the previous attempt cannot finish this one.
   markEnding(id)
+  const attempt = ending.get(id)!
+  const { signal } = attempt.controller
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let minimum: ReturnType<typeof setTimeout> | undefined
+  let onAbort: (() => void) | undefined
+  let keep = false
   try {
     const result = await action()
+    if (signal.aborted) return { ...result, ok: false }
     if (result.ok) {
-      await Promise.all([
-        waitUntilInactive(),
-        new Promise<void>(resolve => setTimeout(resolve, Math.max(0, ENDING_MIN_MS - (Date.now() - started)))),
+      const expired = new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), timeoutMs) })
+      const cancelled = new Promise<'cancelled'>(resolve => {
+        onAbort = () => resolve('cancelled')
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
+      const outcome = await Promise.race([
+        Promise.all([
+          waitUntilInactive(signal),
+          new Promise<void>(resolve => { minimum = setTimeout(resolve, Math.max(0, ENDING_MIN_MS - (Date.now() - started))) }),
+        ]).then(() => 'done' as const),
+        expired, cancelled,
       ])
-      const attempt = ending.get(id)
-      if (attempt) attempt.succeeded = true
+      if (outcome === 'cancelled' || signal.aborted) return { ...result, ok: false }
+      if (outcome === 'timeout' && isActive()) {
+        // Do not spin forever: leave the mark, flag the outcome and let the overlay offer a retry.
+        timedOut.add(id)
+        keep = true
+        emit()
+        // The kill was accepted but is not confirmed: report it as not done, so the caller stays on
+        // the session (and the overlay offers a retry) instead of navigating away from a live one.
+        return { ...result, ok: false, message: timeoutMessage } as T
+      } else {
+        attempt.succeeded = true; attempt.doneAt = Date.now()
+      }
     }
     return result
-  } finally { unmarkEnding(id) }
+  } finally {
+    clearTimeout(timer)
+    clearTimeout(minimum)
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+    attempt.controller.abort() // Dispose the fleet waiter even when timeout/error won the race.
+    if (!keep && ending.get(id) === attempt) unmarkEnding(id)
+  }
 }
 
 /** Retain the selected view when a fast fleet update removes its row during the reading interval. */
@@ -80,7 +145,15 @@ export function useEndingSelection<T extends { id: string }>(route: string | und
   if (held.current.route !== route) held.current = { route, row }
   // Clearing request state is synchronous; navigation commits in a React transition. Keep the
   // successful attempt on THIS selection until that commit, so the chat never flashes between.
-  const holding = rowEnding || heldEnding || held.current.attempt?.succeeded === true
+  const attempt = held.current.attempt
+  const graceLeft = attempt?.succeeded === true && attempt.doneAt !== undefined ? ENDING_HOLD_MS - (Date.now() - attempt.doneAt) : 0
+  const [, release] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    if (graceLeft <= 0) return
+    const t = setTimeout(release, graceLeft + 20)
+    return () => clearTimeout(t)
+  }, [graceLeft])
+  const holding = rowEnding || heldEnding || graceLeft > 0
   if (!holding) held.current = { route, row }
   else if (!held.current.attempt) {
     const id = rowEnding ? row?.id : held.current.row?.id

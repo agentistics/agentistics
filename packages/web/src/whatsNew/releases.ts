@@ -10,6 +10,48 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.158.0': {
+    features: [
+      {
+        pt: 'Uso abre direto nos gráficos: limites ao longo do tempo, horários de uso e picos, com filtro para ver tudo sobreposto, um harness ou uma conta.',
+        en: 'Usage opens straight on the charts: limits over time, hours of use and peaks, with a filter for everything overlaid, one harness or one account.',
+      },
+      {
+        pt: 'Menu numa barra só: ao abrir, a própria barra de ícones cresce com os nomes. Métricas vem primeiro, Sessões em segundo, e clicar em Sessões abre os gráficos de uso.',
+        en: 'One menu bar: opening it grows the icon bar itself into labels. Metrics comes first, Sessions second, and clicking Sessions opens the usage charts.',
+      },
+      {
+        pt: 'Cada conta no Uso dos planos tem uma chave "Uso por agentes" para liberar ou bloquear o uso por agentes.',
+        en: 'Each account in plan usage has an "Agent use" switch to allow or block use by agents.',
+      },
+      {
+        pt: '"Nova pasta" virou "Novo grupo" e abre as opções logo abaixo do botão.',
+        en: '"New folder" is now "New group" and opens its options right below the button.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Encerrar sessão: o aviso "Encerrando…" sai sozinho; se a sessão não parar em 15 segundos, ele diz o que aconteceu e oferece "Tentar de novo".',
+        en: 'Ending a session: the "Ending…" notice leaves by itself; if the session has not stopped after 15 seconds it says so and offers "Try again".',
+      },
+      {
+        pt: 'Ao reabrir uma sessão de outra conta, o chat volta a mostrar o histórico.',
+        en: 'Reopened sessions on another account show their conversation history again.',
+      },
+      {
+        pt: 'Abas das sessões: a aba ativa se funde ao cabeçalho e o botão da lista de abas fica alinhado aos nomes.',
+        en: 'Session tabs: the active tab merges into the header and the open-tabs button lines up with the tab names.',
+      },
+      {
+        pt: 'Celular: o botão do centro abre Sessões, o contador fica acima da pílula e o indicador segue a curva.',
+        en: 'Phone: the centre button opens Sessions, the count sits above the pill and the indicator follows its curve.',
+      },
+      {
+        pt: 'O ícone de worker aparece só como ícone, em ciano, alinhado à primeira linha do nome.',
+        en: 'The worker icon shows as an icon only, in cyan, aligned with the first line of the name.',
+      },
+    ],
+  },
   '2.157.0': {
     features: [
       {

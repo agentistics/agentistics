@@ -12,7 +12,7 @@ describe('RoleIcon', () => {
   test('worker is the blue crossed tools', () => {
     const h = renderToStaticMarkup(<RoleIcon kind="worker" size={13} pt={false} />)
     expect(h).toContain('data-role-icon="worker"')
-    expect(h).toContain('var(--accent-blue)')
+    expect(h).toContain('var(--accent-cyan)')
     expect(h).toContain('width="13"')
   })
   test('auto is a quiet grey mark named in both languages', () => {

@@ -237,7 +237,7 @@ for (const width of [1280, 390]) test(`sleeping and pinned leader names wrap, ba
       const pin = card.querySelector<HTMLButtonElement>('[aria-label="Desafixar"]')!
       expect(open.textContent).toContain(name)
       expect(open.textContent).not.toContain('[ LÍDER ]')
-      expect(open.textContent).toContain('Líder')
+      expect(open.querySelector('[data-role-icon="leader"]')).not.toBeNull()
       expect(pin.tagName).toBe('BUTTON')
       expect(pin.parentElement).toBe(open.parentElement)
       expect(card.querySelector('button button, button [role="button"]')).toBeNull()
@@ -249,7 +249,7 @@ for (const width of [1280, 390]) test(`sleeping and pinned leader names wrap, ba
       await click(resume)
       await act(async () => markReopening(session.id))
       expect(open.textContent).toContain('Reabrindo…')
-      const badge = Array.from(open.querySelectorAll<HTMLElement>('span')).find(el => el.textContent === 'Líder' && el.style.whiteSpace === 'nowrap')!
+      const badge = open.querySelector<HTMLElement>('[data-role-icon="leader"]')!
       expect(badge.style.flexShrink).toBe('0')
       expect(card.style.flexWrap).toBe(compact ? 'nowrap' : 'wrap')
       await act(async () => clearReopening(session.id))
@@ -437,3 +437,20 @@ for (const state of ['closed', 'exited', 'lost'] as const) test(`ended ${state} 
   expect(labels).toContain('Remover da lista')
   expect(labels).not.toContain('Encerrar sessão')
 })
+
+for (const lang of ['en', 'pt'] as const) {
+  test(`the "new group" button opens an anchored popover under itself, not a centred modal (${lang})`, async () => {
+    await render(fleet, 1280, lang)
+    const button = host.querySelector<HTMLElement>('[data-new-folder]')!
+    expect(button.textContent).toBe(lang === 'pt' ? 'Novo grupo' : 'New group')
+    expect(button.textContent).not.toMatch(/pasta|folder/i)
+    await click(button)
+    const pop = host.ownerDocument.querySelector<HTMLElement>('[data-new-group-popover]')
+    expect(pop).not.toBeNull()
+    expect(pop!.getAttribute('aria-label')).toBe(lang === 'pt' ? 'Novo grupo' : 'New group')
+    // Anchored: the form is positioned itself and the scrim does not dim the page.
+    expect(pop!.style.display).not.toBe('flex')
+    expect(pop!.querySelector<HTMLElement>('form')!.style.position).toBe('fixed')
+    expect(pop!.querySelector<HTMLElement>('div')!.style.background).toBe('transparent')
+  })
+}

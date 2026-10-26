@@ -41,6 +41,15 @@ export interface Area {
 }
 
 export const APP_AREAS: readonly Area[] = [
+  { id: 'metrics', icon: 'chart', labelPt: 'Métricas', labelEn: 'Metrics', pages: [
+    { id: 'overview', path: '/', labelPt: 'Visão geral', labelEn: 'Overview' },
+    { id: 'costs', path: '/costs', labelPt: 'Custos', labelEn: 'Costs' },
+    { id: 'top', path: '/top', labelPt: 'Top de uso', labelEn: 'Top usage' },
+    { id: 'compare', path: '/compare', labelPt: 'Comparar', labelEn: 'Compare' },
+    { id: 'tools', path: '/tools', labelPt: 'Ferramentas', labelEn: 'Tools' },
+    { id: 'custom', path: '/custom', labelPt: 'Personalizado', labelEn: 'Custom' },
+    { id: 'tags', path: '/tags', labelPt: 'Tags', labelEn: 'Tags' },
+  ] },
   { id: 'sessions', icon: 'terminal', labelPt: 'Sessões', labelEn: 'Sessions', pages: [
     { id: 'workspace', path: '/sessions', labelPt: 'Lista', labelEn: 'List' },
     { id: 'leaders', path: '/leadership', labelPt: 'Líderes', labelEn: 'Leaders' },
@@ -57,15 +66,6 @@ export const APP_AREAS: readonly Area[] = [
     { id: 'plan', path: '/usage/plan', labelPt: 'Planejar', labelEn: 'Plan' },
     { id: 'limits', path: '/usage/limits', labelPt: 'Limites', labelEn: 'Limits' },
     { id: 'history', path: '/usage/history', labelPt: 'Histórico', labelEn: 'History' },
-  ] },
-  { id: 'metrics', icon: 'chart', labelPt: 'Métricas', labelEn: 'Metrics', pages: [
-    { id: 'overview', path: '/', labelPt: 'Visão geral', labelEn: 'Overview' },
-    { id: 'costs', path: '/costs', labelPt: 'Custos', labelEn: 'Costs' },
-    { id: 'top', path: '/top', labelPt: 'Top de uso', labelEn: 'Top usage' },
-    { id: 'compare', path: '/compare', labelPt: 'Comparar', labelEn: 'Compare' },
-    { id: 'tools', path: '/tools', labelPt: 'Ferramentas', labelEn: 'Tools' },
-    { id: 'custom', path: '/custom', labelPt: 'Personalizado', labelEn: 'Custom' },
-    { id: 'tags', path: '/tags', labelPt: 'Tags', labelEn: 'Tags' },
   ] },
   { id: 'repositories', icon: 'git', labelPt: 'Repositórios', labelEn: 'Repositories', pages: [
     { id: 'list', path: '/repositories', also: ['/repo'], labelPt: 'Lista', labelEn: 'List' },
@@ -132,6 +132,18 @@ export function searchAreas(query: string, _lang: 'pt' | 'en'): { area: Area; pa
     }
   }
   return out
+}
+
+/**
+ * Areas whose HEADER always lands on one fixed page instead of the last page visited in them.
+ * Sessões used to resume the last open conversation, which dropped people into a screen rather than a
+ * listing; its header now opens the Usage charts. The List subpage still opens the workspace.
+ */
+export const AREA_HEADER_PATH: Partial<Record<AreaId, string>> = { sessions: '/usage' }
+
+/** Where clicking an area's header goes: its fixed landing page when it has one, else `firstPath`. */
+export function areaHeaderPath(area: Area, remembered?: string | null): string {
+  return AREA_HEADER_PATH[area.id] ?? firstPath(area, remembered)
 }
 
 /** Where clicking an area goes: the remembered page of THAT area, else its first page. */

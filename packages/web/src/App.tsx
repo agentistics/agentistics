@@ -818,7 +818,7 @@ function SideNav({
          * RESIZE GAP is withheld while collapsed (`!collapsed` below): a fixed 64px rail has nothing
          * to resize.
          */
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: PANEL_GAP }}>
+        <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', gap: PANEL_GAP }}>
         {/* APP.AREAS Task 4: the areas as a rail of icons beside the list, which is unchanged. */}
         <AreaRail lang={pt ? 'pt' : 'en'} pathname={location.pathname} badges={areaBadgeCounts} visibleSettings={visibleSettings} />
         <div style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -3203,6 +3203,7 @@ export default function AppLayout() {
       // same vertical line the content below it does — that is the alignment worth keeping, and it
       // is the left edge, which is the one the eye follows down the page.
       width: '100%', padding: `0 ${PAGE_INSET}px`, boxSizing: 'border-box',
+      height: '100%', background: tabsRowOn ? 'var(--bg-card)' : undefined,
       display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, position: 'relative',
     }}>
       {/* A conversation in SELECTION MODE turns this strip into "N selected · Forward · Copy ·
