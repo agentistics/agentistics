@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test'
+import { afterAll, beforeAll, expect, spyOn, test } from 'bun:test'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +9,7 @@ import { addSession, readRegistry, removeSession } from './registry'
 import { __setHarnessAgentsReaderForTest } from './harness-agents-io'
 import { __setSpawnBudgetForTest } from './memory-probe'
 import { resetHarnessAvailability } from './harness-available'
+import { ensureSpawnRole } from './session-roles'
 import type { ManagedSession, SessionBackend } from './types'
 
 const alive = new Set<string>()
@@ -110,4 +111,28 @@ test('unreadable backend liveness refuses a reopen without spawning', async () =
     expect(await host().resumeSession!({ sessionId: conversationId, harness: 'claude', cwd: dir, label: 'worker', attach: false })).toMatchObject({ ok: false })
     expect(created.length).toBe(before)
   } finally { __setSessionBackendForTest(backend) }
+})
+
+// A crash leaves a leader row behind; restoring its role also goes through fleet rename.
+test('reopening a fallen leader returns a result and keeps its role', async () => {
+  const conversationId = randomUUID()
+  const old = await row(conversationId, { endedAt: new Date().toISOString(), label: '[ LEADER ] - Motor' })
+  await ensureSpawnRole([old.id, conversationId], 'leader')
+  const out = await host().resumeSession!({ sessionId: conversationId, harness: 'claude', cwd: dir, label: old.label!, attach: false, origin: 'web', replaces: old.id })
+  expect(out).toMatchObject({ ok: true, id: expect.any(String) })
+}, 15_000)
+
+test('an internal host resume failure is logged and returned in words', async () => {
+  const log = spyOn(console, 'error').mockImplementation(() => {})
+  __setSessionBackendForTest({ ...backend, list: async () => { throw new TypeError('private backend diagnostic') } })
+  try {
+    const out = await host().resumeSession!({ sessionId: randomUUID(), harness: 'claude', cwd: dir, label: 'Motor', attach: false })
+    expect(out.ok).toBe(false)
+    expect(out.message).toContain('Could not reopen')
+    expect(out.message).not.toContain('private backend diagnostic')
+    expect(log).toHaveBeenCalled()
+  } finally {
+    __setSessionBackendForTest(backend)
+    log.mockRestore()
+  }
 })

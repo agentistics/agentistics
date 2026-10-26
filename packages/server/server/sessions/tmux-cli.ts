@@ -139,7 +139,7 @@ export const PANE_COLS = 120
 export const PANE_ROWS = 50
 
 export function newSessionArgs(
-  o: { id: string; cwd: string; argv: string[]; truecolor?: boolean; socket?: string; path?: string; env?: Record<string, string> },
+  o: { id: string; cwd: string; argv: string[]; truecolor?: boolean; socket?: string; path?: string; env?: Record<string, string>; unsetEnv?: readonly string[] },
 ): string[] {
   const env = o.truecolor ? ['-e', 'COLORTERM=truecolor'] : []
   // THE PANE GETS THE CALLER'S PATH, stated explicitly rather than left to tmux. A tmux server
@@ -152,10 +152,12 @@ export function newSessionArgs(
   if (o.path) env.push('-e', `PATH=${o.path}`)
   // The login-resolved toolchain variables (`login-env.ts`, an allowlist — never credentials).
   for (const [k, v] of Object.entries(o.env ?? {})) if (k !== 'PATH' || !o.path) env.push('-e', `${k}=${v}`)
+  // Remove variables in this child only; the tmux server may retain another account's environment.
+  // An empty assignment would leave the variable present and is not equivalent to removal.
   return sock([
     'new-session', '-d', '-s', tmuxName(o.id),
     '-x', String(PANE_COLS), '-y', String(PANE_ROWS),
-    '-c', o.cwd, ...env, '--', ...o.argv,
+    '-c', o.cwd, ...env, '--', ...(o.unsetEnv?.length ? ['env', ...o.unsetEnv.flatMap(k => ['-u', k]), '--'] : []), ...o.argv,
   ], o.socket)
 }
 
@@ -519,7 +521,7 @@ export function serverOptionsArgs(profile: TerminalProfile): string[][] {
  */
 export function spawnArgs(
   profile: TerminalProfile,
-  o: { id: string; cwd: string; argv: string[]; path?: string; env?: Record<string, string> },
+  o: { id: string; cwd: string; argv: string[]; path?: string; env?: Record<string, string>; unsetEnv?: readonly string[] },
 ): string[] {
   // ONE profile drives both halves of truecolor: the client-side capability
   // (`terminal-features` in serverOptionsArgs) and the pane-side `COLORTERM` here. Deriving the
@@ -530,6 +532,7 @@ export function spawnArgs(
       id: o.id, cwd: o.cwd, argv: o.argv, truecolor: profile.truecolorTerm !== null,
       ...(o.path ? { path: o.path } : {}),
       ...(o.env ? { env: o.env } : {}),
+      ...(o.unsetEnv ? { unsetEnv: o.unsetEnv } : {}),
     }),
   ]
   const chained: string[] = []

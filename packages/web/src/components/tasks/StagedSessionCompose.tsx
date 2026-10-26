@@ -113,7 +113,7 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
   const harness = useMemo(() => harnesses?.find(h => h.id === harnessId) ?? null, [harnesses, harnessId])
   const wizardHarness = useMemo(() => harness ? toWizardHarness(harness) : null, [harness])
   const questions = visibleQuestions(wizardHarness)
-  const modelUnset = unsetText(harness?.defaultModel, pt)
+  const modelUnset = unsetText(harness?.defaultModel, pt, harness?.defaultModelStale)
   const effortUnset = unsetText(harness?.defaultEffort, pt)
 
   /**

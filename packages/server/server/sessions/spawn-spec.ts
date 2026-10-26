@@ -425,7 +425,7 @@ export function planSpawn(req: SpawnRequest, capabilities: { codexNoDaemon?: boo
   // PLAN.ACCOUNTS D3 — an account root is one environment variable; a harness without one cannot
   // keep a second login apart, and starting it in the default root would be a different account.
   const isolation = req.account ? ISOLATION_ENV[req.harness] : null
-  if (req.account && !isolation) return { ok: false, error: { code: 'account-unsupported', harness: req.harness } }
+  if (req.account?.root != null && !isolation) return { ok: false, error: { code: 'account-unsupported', harness: req.harness } }
 
   const startupArgs = req.harness === 'codex' && !capabilities.codexNoDaemon ? [] : spec.startupArgs ?? []
   const argv: string[] = [spec.bin, ...startupArgs]
@@ -475,8 +475,8 @@ export function planSpawn(req: SpawnRequest, capabilities: { codexNoDaemon?: boo
     }
   }
 
-  // The account root rides the same env channel (a path, not a secret). The default root adds nothing.
-  if (req.account && isolation) env = { ...(env ?? {}), [isolation]: req.account.root }
+  // An explicitly selected default account must not inherit another login from its parent.
+  if (req.account?.root && isolation) env = { ...(env ?? {}), [isolation]: req.account.root }
 
   // How the initial prompt will be DELIVERED once the session is up — see `initial-prompt.ts`. A
   // `positional` prompt is in argv but may not have been auto-submitted (`submit`); a `send-keys`
@@ -503,6 +503,7 @@ export function planSpawn(req: SpawnRequest, capabilities: { codexNoDaemon?: boo
     plan: {
       argv,
       ...(env ? { env } : {}),
+      ...(req.account && req.account.root === null && isolation ? { unsetEnv: [isolation] } : {}),
       ...(contextFile ? { contextFile } : {}),
       ...(contextExtraFiles ? { contextExtraFiles } : {}),
       ...(req.context && !req.resumeId ? { contextVia } : {}),
