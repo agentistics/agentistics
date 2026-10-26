@@ -72,7 +72,7 @@ import { boardCopy } from '../tasks/copy'
 import { attachSession, detachSession } from '../../lib/tasks'
 import { CompactSessionFacts } from '../sessions/CompactSessionFacts'
 import { SessionFacts } from '../sessions/SessionFacts'
-import { RoleChip } from '../sessions/RoleChip'
+import { RoleIcon } from './RoleIcon'
 import { reopenedSessionRoute, sessionPath } from '../../lib/sessionRoute'
 import {
   MAX_PINNED, getPinnedIds, movePinnedSession, pinnedServerSnapshot, resolvePinnedRows,
@@ -1876,20 +1876,13 @@ export function SessionsAside({
               // trailing slots sit in the same columns as the rows inside the cards above.
               <div data-team-loose style={{ padding: '0 5px' }}>
                 <div style={sectionHeading}>{pt ? 'Sem líder' : 'No leader'}</div>
-                {/* An orphan says what it is — its role and its project / who started it — with the same
-                    role chip the rest of the list wears, so it can be told apart without opening it. */}
+                {/* An orphan says what it is — its project / who started it; its role is already the
+                    icon at the start of the line, so no second, written role chip. */}
                 {(() => {
                   const common = commonProjectOf(shownLoose)
                   return shownLoose.map(r => {
                   const facts = looseFacts(r, rows, pt, common)
-                  return renderLine(r, {
-                    facts: (
-                      <>
-                        {roleOfRow(r) && <RoleChip role={roleOfRow(r)} pt={pt} />}
-                        {facts && <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{facts}</span>}
-                      </>
-                    ),
-                  })
+                  return renderLine(r, facts ? { facts: <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{facts}</span> } : {})
                   })
                 })()}
               </div>
@@ -2887,8 +2880,8 @@ export function SessionRow({ session, selected, compact = false, pinned, tap, on
         </span>
       )}
       <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', minWidth: 0 }}>
-      {compact ? <CompactSessionFacts showHarness={!pinned} session={session} titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined} /> : <SessionFacts
-        titleBadge={role ? <RoleChip role={role} pt={lang !== 'en'} /> : undefined}
+      {compact ? <CompactSessionFacts showHarness={!pinned} session={session} titleBadge={role ? <RoleIcon kind={role} size={13} pt={lang !== 'en'} /> : undefined} /> : <SessionFacts
+        titleBadge={role ? <RoleIcon kind={role} size={13} pt={lang !== 'en'} /> : undefined}
         session={session}
         selected={selected}
         {...(lang ? { lang } : {})}

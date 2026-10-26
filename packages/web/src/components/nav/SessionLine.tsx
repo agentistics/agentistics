@@ -70,6 +70,9 @@ export interface SessionLineProps {
   lang: 'pt' | 'en'
 }
 
+/** The title's line box (13px × 1.35): the role icon is centred in a box exactly this tall. */
+const TITLE_LINE_PX = 17.5
+
 export function SessionLine({
   session, selected, tap, time, fell = false, lead = false, summary, facts, leading, pinned = false, onPin, onOpen, openLabel,
   verbs, onOpenMenu, onReopen, reopenVerb, lang,
@@ -137,14 +140,18 @@ export function SessionLine({
           border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer',
         }}
       >
-        <RoleIcon kind={role} size={13} pt={pt} style={{ alignSelf: 'flex-start', marginTop: 2 }} />
+        {/* Icon and title share one top-aligned box, centred in the row as a whole: the icon sits on the
+            title's FIRST line (a box as tall as that line), whether the row is taller than its text (a
+            leader card) or the title wraps (a long worker name). */}
+        <span data-line-head style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <RoleIcon kind={role} size={13} pt={pt} style={{ height: TITLE_LINE_PX, alignItems: 'center' }} />
         {/* Title and the folded team's summary share one wrapping box: the summary drops under the
             name when the line is short, instead of crushing the name to a letter per line. */}
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 1 }}>
           {/* While a status label (reopening / ending) takes the trailing room, the title keeps one
               line and truncates instead of breaking into a word per line. */}
           <span data-line-title style={{
-            flex: '0 1 auto', minWidth: 0, lineHeight: 1.35,
+            flex: '0 1 auto', minWidth: 0, lineHeight: `${TITLE_LINE_PX}px`,
             ...(ending || reopening
               ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
               : { whiteSpace: 'normal', overflowWrap: 'anywhere' }),
@@ -159,6 +166,7 @@ export function SessionLine({
           {facts && (
             <span data-session-facts style={{ flexBasis: '100%', minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginTop: 2, fontSize: 11, lineHeight: 1.35, color: 'var(--text-tertiary)' }}>{facts}</span>
           )}
+        </span>
         </span>
         {/* Muted sits with the title, not in the trailing columns, so time and dot keep their x. */}
         {muted && (

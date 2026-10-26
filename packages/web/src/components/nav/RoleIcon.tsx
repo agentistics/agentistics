@@ -21,7 +21,8 @@ export function WorkerTools({ size = 14, style }: { size?: number; style?: CSSPr
 
 export const ROLE_COLOR: Record<RoleIconKind, string> = {
   leader: 'var(--accent-purple)',
-  worker: 'var(--accent-blue)',
+  // The same cyan the role chip and the role menu already give a worker.
+  worker: 'var(--accent-cyan)',
   auto: 'var(--text-tertiary)',
 }
 
