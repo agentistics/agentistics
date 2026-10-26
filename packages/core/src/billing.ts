@@ -83,13 +83,23 @@ export interface BillingTimeline {
   periods: BillingPeriod[]
 }
 
+/** The key of an account's own timeline in `accountProfiles`: `harness:account`, because two assistants
+ *  can both report the account `default`. */
+export const accountProfileKey = (harness: HarnessId, accountId: string): string => `${harness}:${accountId}`
+
+/** An account's own timeline. A key written before the harness joined it (a bare, globally unique
+ *  account id) is still read. */
+export function accountProfileOf<T>(profiles: Record<string, T> | undefined, harness: HarnessId, accountId: string): T | undefined {
+  return profiles?.[accountProfileKey(harness, accountId)] ?? profiles?.[accountId]
+}
+
 /** The timeline an account prices on: its own, else the harness default (`undefined` if none). */
 export function accountTimeline(
   billing: BillingSettings | undefined,
   harness: HarnessId,
   accountId?: string,
 ): BillingTimeline | undefined {
-  return (accountId ? billing?.accountProfiles?.[accountId] : undefined) ?? billing?.profiles?.[harness]
+  return (accountId ? accountProfileOf(billing?.accountProfiles, harness, accountId) : undefined) ?? billing?.profiles?.[harness]
 }
 
 export type BillingProfiles = Partial<Record<HarnessId, BillingTimeline>>
@@ -533,7 +543,7 @@ function selectedTimelines(
   const timelines: (BillingTimeline | undefined)[] = []
   let defaultUsed = false
   for (const account of accounts) {
-    const own = accountProfiles[account.id]
+    const own = accountProfileOf(accountProfiles, account.harness, account.id)
     if (own) timelines.push(own)
     else if (!defaultUsed) {
       defaultUsed = true
@@ -955,7 +965,7 @@ export function monthlyCommitment(args: {
   // A harness whose accounts carry their own timelines commits even with no harness default.
   if (accounts && accountProfiles) {
     for (const a of accounts) {
-      if (accountProfiles[a.id] && !entries.some(([k]) => k === a.harness)) {
+      if (accountProfileOf(accountProfiles, a.harness, a.id) && !entries.some(([k]) => k === a.harness)) {
         entries.push([a.harness, undefined])
       }
     }

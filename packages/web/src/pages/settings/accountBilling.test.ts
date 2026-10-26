@@ -3,7 +3,7 @@ import { computePlanCost, normalizeBillingSettings, type BillingSettings } from 
 import { createAccountMutator } from './accountMutations'
 import {
   saveThenClose, saveErrorPlace, planCoverageText,
-  accountsNeedingPlan, answerNotice, billableAccounts, billingRows, closeBefore, defaultStart, foldUnnamed, planOptionsFor, rowScope, scopePeriods, withScopePeriods, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
+  ownPeriods, accountsNeedingPlan, answerNotice, billableAccounts, billingRows, closeBefore, defaultStart, foldUnnamed, planOptionsFor, rowScope, scopePeriods, withScopePeriods, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
   limitsForRow,
   type BillingAccount,
 } from './accountBilling'
@@ -20,7 +20,7 @@ describe('accountsNeedingPlan', () => {
     const accounts = [acc('a', { plan: 'max' }), acc('b', { firstSeen: Date.parse('2026-09-02T00:00:00Z') })]
     expect(accountsNeedingPlan(accounts, none, ['claude']).map(a => a.id)).toEqual(['a', 'b'])
     const answered = answerNotice(none, accounts[0]!, 'anthropic-pro', '2026-10-16', newId)!
-    expect(answered.accountProfiles?.a?.periods).toHaveLength(1)
+    expect(answered.accountProfiles?.['claude:a']?.periods).toHaveLength(1)
     expect(accountsNeedingPlan(accounts, answered, ['claude']).map(a => a.id)).toEqual(['b'])
   })
 
@@ -28,7 +28,7 @@ describe('accountsNeedingPlan', () => {
     const [a] = [acc('a'), acc('b')]
     const accounts = [a!, acc('b')]
     const unknown = answerNotice(none, a!, null, '2026-10-16', newId)!
-    expect(unknown.accountProfiles?.a?.periods[0]?.mode).toBe('unknown')
+    expect(unknown.accountProfiles?.['claude:a']?.periods[0]?.mode).toBe('unknown')
     expect(accountsNeedingPlan(accounts, unknown, ['claude']).map(x => x.id)).toEqual(['b'])
     const cost = computePlanCost({
       timeline: undefined, window: { from: '2026-10-01', to: '2026-10-10' }, brlRate: 5,
@@ -66,13 +66,13 @@ describe('accountsNeedingPlan', () => {
 describe('two Claude accounts hold their own plan; cost basis reflects both', () => {
   test('accountProfiles written per id round-trip through normalize and sum in C', () => {
     let b = answerNotice(none, acc('a'), 'anthropic-pro', '2026-10-16', newId)!
-    b = answerNotice(b, acc('b'), 'anthropic-max-20x', '2026-10-16', newId) ?? withAccountPeriods(b, 'b', [{ id: 'q', mode: 'subscription', planId: 'anthropic-max-20x', price: { amount: 200, currency: 'USD' }, from: '2026-09-01' }])
+    b = answerNotice(b, acc('b'), 'anthropic-max-20x', '2026-10-16', newId) ?? withAccountPeriods(b, acc('b'), [{ id: 'q', mode: 'subscription', planId: 'anthropic-max-20x', price: { amount: 200, currency: 'USD' }, from: '2026-09-01' }])
     const back = normalizeBillingSettings(JSON.parse(JSON.stringify(b)))
-    expect(Object.keys(back.accountProfiles ?? {}).sort()).toEqual(['a', 'b'])
+    expect(Object.keys(back.accountProfiles ?? {}).sort()).toEqual(['claude:a', 'claude:b'])
     const refs = [{ id: 'a', harness: 'claude' as const }, { id: 'b', harness: 'claude' as const }]
     const window = { from: '2026-10-01', to: '2026-10-30' }
     const both = computePlanCost({ timeline: undefined, window, brlRate: 5, accounts: refs, accountProfiles: back.accountProfiles })
-    const onlyA = computePlanCost({ timeline: undefined, window, brlRate: 5, accounts: refs.slice(0, 1), accountProfiles: { a: back.accountProfiles!.a! } })
+    const onlyA = computePlanCost({ timeline: undefined, window, brlRate: 5, accounts: refs.slice(0, 1), accountProfiles: { 'claude:a': back.accountProfiles!['claude:a']! } })
     expect(both.subscriptionCostUSD).toBeGreaterThan(onlyA.subscriptionCostUSD)
     expect(both.segments).toHaveLength(2)
   })
@@ -143,19 +143,19 @@ describe('rowScope — the timeline a row prices on is the one core counts', () 
     const a = acc('a'), b = acc('b', { firstSeen: Date.parse('2026-09-02T00:00:00Z') }), c = acc('c', { firstSeen: Date.parse('2026-09-03T00:00:00Z') })
     const billing: BillingSettings = { profiles: { claude: { periods: [sub('anthropic-max-5x')] } }, accountProfiles: { a: { periods: [sub('anthropic-pro')] } } }
     const mine = [a, b, c]
-    expect(rowScope(billing, mine, a)).toEqual({ kind: 'own', id: 'a' })
+    expect(rowScope(billing, mine, a)).toEqual({ kind: 'own', id: 'a', harness: 'claude' })
     expect(rowScope(billing, mine, b)).toEqual({ kind: 'default', harness: 'claude' })
-    expect(rowScope(billing, mine, c)).toEqual({ kind: 'none', id: 'c' })
+    expect(rowScope(billing, mine, c)).toEqual({ kind: 'none', id: 'c', harness: 'claude' })
     expect(accountsNeedingPlan(mine, billing, ['claude']).map(x => x.id)).toEqual(['c'])
   })
   test('writing a scope back touches only that timeline', () => {
     const billing: BillingSettings = { profiles: { claude: { periods: [sub('anthropic-max-5x')] } } }
     const p = sub('anthropic-pro')
     expect(withScopePeriods(billing, { kind: 'default', harness: 'claude' }, [p]).profiles.claude?.periods).toEqual([p])
-    const own = withScopePeriods(billing, { kind: 'none', id: 'x' }, [p])
-    expect(own.accountProfiles?.x?.periods).toEqual([p])
+    const own = withScopePeriods(billing, { kind: 'none', id: 'x', harness: 'claude' }, [p])
+    expect(own.accountProfiles?.['claude:x']?.periods).toEqual([p])
     expect(own.profiles.claude?.periods).toHaveLength(1)
-    expect(scopePeriods(own, { kind: 'own', id: 'x' })).toEqual([p])
+    expect(scopePeriods(own, { kind: 'own', id: 'x', harness: 'claude' })).toEqual([p])
     expect(withScopePeriods(billing, { kind: 'default', harness: 'claude' }, []).profiles.claude).toBeUndefined()
   })
 })
@@ -217,7 +217,7 @@ describe('foldUnnamed — a sign-in the harness cannot name is not a second acco
     const r = rows([ph('g1'), ph('g2', { firstSeen: Date.parse('2026-09-05T00:00:00Z') })])
     expect(r.map(x => x.key)).toEqual(['gemini:g1'])
     expect(r[0]!.title).toBe('Gemini CLI')
-    expect(r[0]!.scope).toEqual({ kind: 'none', id: 'g1' })
+    expect(r[0]!.scope).toEqual({ kind: 'none', id: 'g1', harness: 'gemini' })
   })
 
   test('the kept row is the one carrying a plan of its own', () => {
@@ -319,5 +319,26 @@ describe('billingRows — the title is never repeated in the subtitle', () => {
     for (const r of rows) expect(r.sub === r.title || r.sub.split(' · ').includes(r.title)).toBe(false)
     expect(rows.map(r => r.key)).toEqual(['claude:default', 'antigravity:default'])
     expect(rows.map(r => r.harness)).toEqual(['claude', 'antigravity'])
+  })
+})
+
+describe('accountProfiles — keyed harness:account', () => {
+  const p1 = sub('anthropic-pro'), p2 = sub('anthropic-max-5x')
+  const claude = acc('default', { harness: 'claude' }), agy = acc('default', { harness: 'antigravity' })
+  test('two `default` accounts of different assistants keep separate own timelines', () => {
+    let b = withAccountPeriods(none, claude, [p1])
+    b = withAccountPeriods(b, agy, [p2])
+    expect(Object.keys(b.accountProfiles ?? {}).sort()).toEqual(['antigravity:default', 'claude:default'])
+    expect(ownPeriods(b, claude)).toEqual([p1])
+    expect(ownPeriods(b, agy)).toEqual([p2])
+    expect(rowScope(b, [claude], claude)).toEqual({ kind: 'own', id: 'default', harness: 'claude' })
+    expect(withAccountPeriods(b, claude, []).accountProfiles?.['claude:default']).toBeUndefined()
+    expect(ownPeriods(withAccountPeriods(b, claude, []), agy)).toEqual([p2])
+  })
+  test('a bare-id key written by an older build is still read, and replaced on the next write', () => {
+    const legacy: BillingSettings = { profiles: {}, accountProfiles: { acc_1: { periods: [p1] } } }
+    const a = acc('acc_1')
+    expect(ownPeriods(legacy, a)).toEqual([p1])
+    expect(Object.keys(withAccountPeriods(legacy, a, [p2]).accountProfiles ?? {})).toEqual(['claude:acc_1'])
   })
 })

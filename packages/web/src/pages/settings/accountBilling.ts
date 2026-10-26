@@ -6,7 +6,7 @@
  * the SCREEN says about an account's plan and when to ask "which plan is this?".
  */
 import {
-  dayFromIndex, dayIndex, findPlan, plansForHarness, sortPeriods, validatePeriod, SENTINEL_PLAN_IDS,
+  accountProfileKey, accountProfileOf, dayFromIndex, dayIndex, findPlan, plansForHarness, sortPeriods, validatePeriod, SENTINEL_PLAN_IDS,
   type BillingPeriod, type BillingSettings, type HarnessId, type PlanLimits,
 } from '@agentistics/core'
 import { applyPlan, emptyDraft, periodFromDraft, periodName, splitTimeline, validateDraft } from './billingForm'
@@ -23,14 +23,14 @@ export function billableAccounts<A extends BillingAccount>(accounts: readonly A[
     .sort((x, y) => (x.firstSeen ?? 0) - (y.firstSeen ?? 0) || x.id.localeCompare(y.id))
 }
 
-export const ownPeriods = (billing: BillingSettings, id: string): BillingPeriod[] =>
-  billing.accountProfiles?.[id]?.periods ?? []
+export const ownPeriods = (billing: BillingSettings, a: Pick<BillingAccount, 'id' | 'harness'>): BillingPeriod[] =>
+  accountProfileOf(billing.accountProfiles, a.harness, a.id)?.periods ?? []
 
 /** What an account's row says about its plan today. `default` = it prices on the harness timeline. */
 export function planSummary(
   billing: BillingSettings, a: Pick<BillingAccount, 'id' | 'harness'>, today: string,
 ): { name: string | null; source: 'own' | 'default' | 'none' } {
-  const own = ownPeriods(billing, a.id)
+  const own = ownPeriods(billing, a)
   if (own.length > 0) {
     const cur = splitTimeline(sortPeriods(own), today).current
     return { name: cur ? periodName(cur) || null : null, source: 'own' }
@@ -85,10 +85,12 @@ export function unknownPeriod(from: string, newId: () => string): BillingPeriod 
   return { id: newId(), mode: 'unknown', from }
 }
 
-export function withAccountPeriods(billing: BillingSettings, id: string, periods: BillingPeriod[]): BillingSettings {
+export function withAccountPeriods(billing: BillingSettings, a: Pick<BillingAccount, 'id' | 'harness'>, periods: BillingPeriod[]): BillingSettings {
   const accountProfiles = { ...(billing.accountProfiles ?? {}) }
-  if (periods.length > 0) accountProfiles[id] = { periods }
-  else delete accountProfiles[id]
+  // Written under `harness:account`; a bare-id key an older build wrote is the same timeline, so it goes.
+  delete accountProfiles[a.id]
+  if (periods.length > 0) accountProfiles[accountProfileKey(a.harness, a.id)] = { periods }
+  else delete accountProfiles[accountProfileKey(a.harness, a.id)]
   const { accountProfiles: _old, ...rest } = billing
   return Object.keys(accountProfiles).length > 0 ? { ...rest, accountProfiles } : rest
 }
@@ -101,7 +103,7 @@ export function answerNotice(
   const from = dayOf(a.firstSeen, today)
   const period = planId === null ? unknownPeriod(from, newId) : periodForPick(planId, from, newId)
   if (!period || validatePeriod(period, []).length > 0) return null
-  return withAccountPeriods(billing, a.id, [period])
+  return withAccountPeriods(billing, a, [period])
 }
 
 /** The availability switch: ONE PATCH, addressed by account id. */
@@ -166,22 +168,22 @@ export function saveErrorPlace(
  * `selectedTimelines` applies: an account's own timeline, else the harness default for the FIRST
  * account (in list order) that has none, else nothing. A row never shows a plan it is not paying.
  */
-export type RowScope = { kind: 'own'; id: string } | { kind: 'default'; harness: HarnessId } | { kind: 'none'; id: string }
+export type RowScope = { kind: 'own'; id: string; harness: HarnessId } | { kind: 'default'; harness: HarnessId } | { kind: 'none'; id: string; harness: HarnessId }
 
 export function rowScope(billing: BillingSettings, mine: readonly Pick<BillingAccount, 'id' | 'harness'>[], a: Pick<BillingAccount, 'id' | 'harness'>): RowScope {
-  if (ownPeriods(billing, a.id).length > 0) return { kind: 'own', id: a.id }
+  if (ownPeriods(billing, a).length > 0) return { kind: 'own', id: a.id, harness: a.harness }
   const hasDefault = (billing.profiles[a.harness]?.periods.length ?? 0) > 0
-  const firstWithout = mine.find(x => ownPeriods(billing, x.id).length === 0)
-  return hasDefault && firstWithout?.id === a.id ? { kind: 'default', harness: a.harness } : { kind: 'none', id: a.id }
+  const firstWithout = mine.find(x => ownPeriods(billing, x).length === 0)
+  return hasDefault && firstWithout?.id === a.id && firstWithout.harness === a.harness ? { kind: 'default', harness: a.harness } : { kind: 'none', id: a.id, harness: a.harness }
 }
 
 export function scopePeriods(billing: BillingSettings, s: RowScope): BillingPeriod[] {
-  return s.kind === 'default' ? billing.profiles[s.harness]?.periods ?? [] : ownPeriods(billing, s.id)
+  return s.kind === 'default' ? billing.profiles[s.harness]?.periods ?? [] : ownPeriods(billing, s)
 }
 
 /** Writes a scope's periods back: an account's own timeline, or the harness default. */
 export function withScopePeriods(billing: BillingSettings, s: RowScope, periods: BillingPeriod[]): BillingSettings {
-  if (s.kind !== 'default') return withAccountPeriods(billing, s.id, periods)
+  if (s.kind !== 'default') return withAccountPeriods(billing, s, periods)
   const profiles = { ...billing.profiles }
   if (periods.length > 0) profiles[s.harness] = { periods }
   else delete profiles[s.harness]
@@ -269,7 +271,7 @@ export function foldUnnamed<A extends BillingAccount>(mine: readonly A[], billin
   if (without.length === 0) return [...mine]
   if (withName.length === 1) return withName
   if (withName.length > 1) return [...mine]
-  const keep = without.find(a => ownPeriods(billing, a.id).length > 0) ?? without[0]
+  const keep = without.find(a => ownPeriods(billing, a).length > 0) ?? without[0]
   return keep ? [keep] : []
 }
 
