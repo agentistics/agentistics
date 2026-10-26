@@ -53,6 +53,10 @@ describe('peaks', () => {
     expect(peak!.ratePerHour).toBe(20)
     expect(topPeaks(series, '5h').every(p => p.rise > 0)).toBe(true)
   })
+  test('a window renewal is never a rise, however short the interval', () => {
+    const s = [{ key: 'k', harness: 'claude' as const, account: 'a', label: 'l', points: [{ at: T0, pct: 1, reset: T0 + 5 * H }, { at: T0 + 60_000, pct: 90, reset: T0 + 10 * H }] }]
+    expect(topPeaks(s, '5h')).toEqual([])
+  })
   test('rate rows are capped and carry the interval end', () => {
     const { series } = limitSeries([claude], '5h', label)
     expect(rateRows(series, 100)).toEqual([{ at: T0 + H, rate: 20 }])

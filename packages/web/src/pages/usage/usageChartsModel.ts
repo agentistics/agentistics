@@ -82,7 +82,8 @@ export function riseIntervals(series: readonly LimitSeries[]): { at: number; lab
       const a = s.points[i - 1]!, b = s.points[i]!
       const hours = (b.at - a.at) / 3_600_000
       const rise = b.pct - a.pct
-      if (hours <= 0 || rise <= 0) continue
+      const renewed = a.reset !== undefined && b.reset !== undefined && Math.abs(a.reset - b.reset) > 600_000
+      if (hours <= 0 || rise <= 0 || renewed) continue
       out.push({ at: b.at, label: s.label, rise, ratePerHour: rise / hours })
     }
   }
@@ -97,7 +98,7 @@ export function topPeaks(series: readonly LimitSeries[], kind: 'week' | '5h', n 
     // Coarsen to >= minHours steps: peaks are about sustained climbs.
     for (const p of s.points) {
       const last = merged.at(-1)
-      if (!last || (p.at - last.at) / 3_600_000 >= minHours || (p.reset !== undefined && last.reset !== undefined && p.reset !== last.reset)) merged.push(p)
+      if (!last || (p.at - last.at) / 3_600_000 >= minHours) merged.push(p)
     }
     for (const r of riseIntervals([{ ...s, points: merged }])) peaks.push({ label: r.label, kind, at: r.at, ratePerHour: r.ratePerHour, rise: r.rise })
   }

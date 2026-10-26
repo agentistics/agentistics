@@ -65,7 +65,7 @@ export function UsageChartsPanel({ budgets, readings, sessions, lang, now = Date
   const lineChart = (kind: '5h' | 'week', data: typeof view.five, first = false) => {
     const { rows, keys } = toChartRows(data.series, WINDOW_MS[kind])
     return rows.length
-      ? <ActivityPercentChart lang={lang} data={rows} series={keys.map(k => ({ key: k.key, label: k.label, color: colorOf(k.harness, k.key, keys), connectNulls: false }))} />
+      ? <ActivityPercentChart lang={lang} data={rows} series={keys.map(k => ({ key: k.key, label: k.label, color: colorOf(k.harness, k.key, keys), connectNulls: true }))} />
       : <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{view.five.series.length + view.week.series.length ? t.noWindow : first ? t.none : ''}</p>
   }
   const heading = (text: string) => <h2 style={{ fontSize: 13, margin: '0 0 8px' }}>{text}</h2>
@@ -91,7 +91,7 @@ export function UsageChartsPanel({ budgets, readings, sessions, lang, now = Date
       <div data-usage-chart="hours" style={sub}>
         {heading(t.hours)}
         {view.msgs.total === 0 ? <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{t.noMsgs}</p> : <div style={two}>
-          <div style={sub}><div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>{t.perDay}</div><ActivityHeatmap data={view.msgs.perDay} weeks={2} /></div>
+          <div style={sub}><div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>{t.perDay}</div><ActivityHeatmap data={view.msgs.perDay} weeks={8} /></div>
           <div style={sub}><div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>{t.perHour}</div><HourChart hourCounts={view.msgs.hourCounts} height={isMobile ? 220 : 260} /></div>
         </div>}
       </div>
@@ -103,7 +103,7 @@ export function UsageChartsPanel({ budgets, readings, sessions, lang, now = Date
             {view.peaks.map((p, i) => <StatTile key={`${p.label}:${p.kind}:${p.at}`} label={`${t.top(i + 1)} · ${p.label} · ${p.kind === 'week' ? t.week : '5 h'}`}
               value={`+${p.ratePerHour.toFixed(1)} pp/h`} title={new Date(p.at).toLocaleString(lang === 'pt' ? 'pt-BR' : 'en-US')} />)}
           </div>
-          <ActivityPercentChart lang={lang} data={view.rate} series={[{ key: 'rate', label: t.rate, color: 'var(--anthropic-orange)' }]} height={160} />
+          <ActivityPercentChart lang={lang} data={view.rate} series={[{ key: 'rate', label: t.rate, color: 'var(--anthropic-orange)', connectNulls: true }]} height={160} />
         </>}
       </div>
     </div>
