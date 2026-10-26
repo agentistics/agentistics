@@ -385,7 +385,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
         onClick={e => listMenu(e.currentTarget)}
         style={{
           display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 30, minWidth: mobile ? 44 : 0, justifyContent: 'center',
-          padding: '0 8px', marginLeft: 6, boxSizing: 'border-box', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
+          padding: '0 8px', marginLeft: 6, marginTop: mobile ? 0 : TABLIST_TOP_PAD, boxSizing: 'border-box', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
           cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
         }}
       ><List size={13} aria-hidden />{order.length}{sleeping.length > 0 && <Moon size={10} fill="currentColor" aria-hidden style={{ color: 'var(--text-tertiary)' }} />}<ChevronDown size={12} aria-hidden /></button>
