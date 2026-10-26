@@ -52,7 +52,7 @@ import {
 import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
 import { BillingAccountList, type BillingRowView } from './AccountRow'
 import {
-  accountsNeedingPlan, billingRows, closeBefore, defaultStart, planOptionsFor, matchDetectedPlan, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
+  accountsNeedingPlan, billingRows, closeBefore, defaultStart, limitsForRow, planOptionsFor, matchDetectedPlan, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
   unknownPeriod, withScopePeriods, type BillingAccount, type SaveError,
 } from './accountBilling'
 import { createAccountMutator } from './accountMutations'
@@ -128,7 +128,7 @@ export default function BillingSettings() {
       ...r,
       plan: cur ? { name: periodName(cur, ctx.lang) || modeLabel(cur.mode, pt ? 'pt' : 'en'), price: priceText(cur, pt), mode: cur.mode } : null,
       problem: validateTimeline({ periods }).size > 0,
-      limits: r.account ? planLimits?.find(l => l.account === r.account!.id) ?? null : null,
+      limits: limitsForRow(planLimits, r),
     }
   }), [accounts, ctx.billing, harnesses, pt, planLimits])
 

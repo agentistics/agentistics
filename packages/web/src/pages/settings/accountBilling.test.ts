@@ -4,6 +4,7 @@ import { createAccountMutator } from './accountMutations'
 import {
   saveThenClose, saveErrorPlace, planCoverageText,
   accountsNeedingPlan, answerNotice, billableAccounts, billingRows, closeBefore, defaultStart, foldUnnamed, planOptionsFor, rowScope, scopePeriods, withScopePeriods, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
+  limitsForRow,
   type BillingAccount,
 } from './accountBilling'
 
@@ -298,4 +299,16 @@ test('Codex billing never prints the generated ChatGPT id label, keeping real na
   expect(make('person@example.com', 'Principal')).toMatchObject({ title: 'Principal', sub: 'Codex CLI · person@example.com' })
   expect(make('Jane Doe', 'Principal').sub).toBe('Codex CLI · Jane Doe')
   expect(make('Jane Doe').title).toBe('Jane Doe')
+})
+
+describe('limitsForRow', () => {
+  const lim = (harness: string, mark: number) => ({ harness, account: 'default', updatedAt: mark, windows: [] }) as never
+  test('two assistants on the default account each get their own limits', () => {
+    const limits = [lim('claude', 1), lim('antigravity', 2)]
+    const account = { id: 'default' } as never
+    expect(limitsForRow(limits, { harness: 'antigravity', account })?.updatedAt).toBe(2)
+    expect(limitsForRow(limits, { harness: 'claude', account })?.updatedAt).toBe(1)
+    expect(limitsForRow(limits, { harness: 'codex', account })).toBeNull()
+    expect(limitsForRow(limits, { harness: 'claude', account: null })).toBeNull()
+  })
 })

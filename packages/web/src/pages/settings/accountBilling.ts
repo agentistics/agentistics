@@ -7,7 +7,7 @@
  */
 import {
   dayFromIndex, dayIndex, findPlan, plansForHarness, sortPeriods, validatePeriod, SENTINEL_PLAN_IDS,
-  type BillingPeriod, type BillingSettings, type HarnessId,
+  type BillingPeriod, type BillingSettings, type HarnessId, type PlanLimits,
 } from '@agentistics/core'
 import { applyPlan, emptyDraft, periodFromDraft, periodName, splitTimeline, validateDraft } from './billingForm'
 import { isPlaceholderName, isUnidentified, type AccountRowData } from './accountsSummary'
@@ -192,6 +192,16 @@ export function withScopePeriods(billing: BillingSettings, s: RowScope, periods:
  * account at all — the assistant's own timeline. The registry's reserve row (`id: ''`) never becomes
  * a row of its own: with an identified account beside it, it is the same login said twice.
  */
+/**
+ * The limits a billing row shows. Matched by harness AND account: two assistants can both report the
+ * account `'default'` (Antigravity and Claude Code on one machine), and an account-only match handed one
+ * row the other's bars.
+ */
+export function limitsForRow(limits: readonly PlanLimits[] | null | undefined, row: Pick<BillingRow, 'harness' | 'account'>): PlanLimits | null {
+  if (!row.account) return null
+  return limits?.find(l => l.harness === row.harness && l.account === row.account!.id) ?? null
+}
+
 export interface BillingRow {
   key: string
   harness: HarnessId
