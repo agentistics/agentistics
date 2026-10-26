@@ -17,15 +17,15 @@ import { basename, dirname, join, resolve, sep } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
   agentVisible, alternativeWithRoom, harnessAggregate, HARNESS_LABELS, HARNESS_ORDER, meterDiscontinuity, newerLimits, parseClaudeRateLimitEvent,
-  parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel, resetNoticesFor, withPlanLabel, yieldStaleRows,
+  parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel, resetNoticesFor, scopeForModel, scopeIds, withPlanLabel, yieldStaleRows,
   type HarnessId,
-  type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
+  type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice, type ScopeBudget,
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, KIMI_DIR, OPENCODE_DIR } from './config'
 import {
   bind, byId, canonicalAccountId, forceProbe, sameLogin, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
 } from './harness-accounts'
-import { allHistory, dropHistory, moveHistory, recordHistory, __resetPlanHistoryForTest } from './plan-history'
+import { allHistory, dropHistory, moveHistory, pointOf, recordHistory, type HistoryPoint, __resetPlanHistoryForTest } from './plan-history'
 import { withFileLock } from './sessions/file-lock'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
@@ -716,7 +716,7 @@ export interface PlanLimitsPayload {
   budgets: AccountBudgetRow[]
   hiddenFromAgents: AccountBudgetRow[]
   /** Owner-only in-memory history, including accounts hidden from agents. Times are epoch ms. */
-  readings: { account: string; harness: HarnessId; points: { at: number; weekPct: number | null; fiveHourPct: number | null; weekReset?: number; fiveReset?: number }[] }[]
+  readings: { account: string; harness: HarnessId; points: HistoryPoint[] }[]
   freeSlots: number
   freeSlotsByHarness: Partial<Record<HarnessId, number>>
   freeSlotsByAccount: Record<string, number>
@@ -809,8 +809,25 @@ export async function planLimitsPayload(
     // billed tokens remain in the public live summary, without diluting the measured burn.
     const planSessions = resolvedSessions.filter(s => s.burnPctPerHour > 0 && belongsTo(s, l))
     const availability = spawnability[l.harness]!
-    return { ...budget, ...planPace(l, nowMs, history.get(meterKey.get(l) ?? keyOf(l)) ?? [], planSessions, segmentOf(l.account)), ...availability,
+    const past = history.get(meterKey.get(l) ?? keyOf(l)) ?? []
+    // A record with model groups: the top-level row is the TIGHTEST group (never better than the worst),
+    // and `scopes` carries each group on its own. A session enters a group's slots when its model is in
+    // it; one with an unknown model counts in every group (conservative).
+    const scopes = scopeIds(l).length ? scopeIds(l).map((id): ScopeBudget => {
+      const scope = l.windows.find(w => w.scope?.id === id)!.scope!
+      const model = scope.models[0]
+      const mine = planSessions.filter(s => !s.model || !scopeForModel(l, s.model) || scope.models.some(m => m.toLowerCase() === s.model.toLowerCase()))
+      const b = planBudget(l, nowMs, { model }), p = planPace(l, nowMs, past, mine, segmentOf(l.account), { model })
+      return {
+        scope, weekPct: b.weekPct, weekResetsAt: b.weekResetsAt, daysToWeekReset: b.daysToWeekReset,
+        dailyBudgetPct: b.dailyBudgetPct, status: b.status, ...(p.paceStatus ? { paceStatus: p.paceStatus } : {}),
+        ...(!availability.spawnable ? { freeSlots: 0, suggestedParallel: 0 }
+          : { ...(p.freeSlots !== undefined ? { freeSlots: p.freeSlots } : {}), ...(p.suggestedParallel !== undefined ? { suggestedParallel: p.suggestedParallel } : {}) }),
+      }
+    }) : undefined
+    return { ...budget, ...planPace(l, nowMs, past, planSessions, segmentOf(l.account)), ...availability,
       ...(!availability.spawnable ? { freeSlots: 0, suggestedParallel: 0 } : {}),
+      ...(scopes ? { scopes } : {}),
       account: l.account, accountLabel: labelOf(l.harness, l.account),
     }
   })
@@ -860,6 +877,7 @@ export async function planLimitsPayload(
         at: l.updatedAt,
         weekPct: l.windows.find(w => w.kind === 'week')?.usedPct ?? null,
         fiveHourPct: l.windows.find(w => w.kind === '5h')?.usedPct ?? null,
+        ...(pointOf(l).scopes ? { scopes: pointOf(l).scopes } : {}),
       })),
     })
   }

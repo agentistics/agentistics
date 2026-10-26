@@ -276,6 +276,8 @@ if (!TEAM_CENTRAL) {
     pl.watchPlanLimitsFile()
     // TUI claude sessions emit no stream-json: read the subscription usage Claude Code's /usage reads.
     void import('./claude-usage').then(m => m.startClaudeUsagePoll()).catch(() => {})
+    // agy keeps one weekly quota per model group: read it while an agy process is alive.
+    void import('./antigravity-usage').then(m => m.startAntigravityUsagePoll()).catch(() => {})
     return pl.seedPlanLimits(sd.STRUCTURED_DIR)
   }).catch(err => console.warn('[plan-limits] seed failed:', String(err)))
 }
