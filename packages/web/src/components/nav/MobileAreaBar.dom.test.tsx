@@ -123,15 +123,31 @@ test('the bar is three pieces: left pill, standalone round centre, right pill', 
 })
 
 test('the active slot gets a large indicator; Início active puts the fill on the circle instead', async () => {
-  let view = await render('/usage')
-  expect(view.buttons[1]!.getAttribute('aria-current')).toBe('page')
-  expect(view.indicator()).not.toBeNull()
-  expect(view.indicator().style.width).toBe(`${SLOTS[1]!.width - 8}px`)
+  // An outer slot keeps the plain round indicator.
+  let view = await render('/tasks')
+  expect(view.buttons[0]!.getAttribute('aria-current')).toBe('page')
+  expect(view.indicator().getAttribute('data-bar-indicator')).not.toBe('notch')
+  expect(view.indicator().style.width).toBe(`${SLOTS[0]!.width - 8}px`)
   expect(Number.parseFloat(view.indicator().style.width)).toBeGreaterThanOrEqual(60)
   view = await render('/sessions')
   expect(view.indicator()).toBeNull()
   expect(view.buttons[2]!.getAttribute('aria-current')).toBe('page')
   expect(view.buttons[2]!.style.borderColor || view.buttons[2]!.getAttribute('style')).toContain('anthropic-orange')
+})
+
+test('the slots beside the circle wear the pill\'s concave end, not a round cap', async () => {
+  for (const [path, i] of [['/usage', 1], ['/', 3]] as const) {
+    const view = await render(path)
+    const ind = view.indicator()
+    expect(ind.getAttribute('data-bar-indicator')).toBe('notch')
+    // The inner end is an arc of radius R (the pill's arc plus the inset), hugging the circle's gap.
+    const R = Math.hypot(20, 28) + 4
+    expect(ind.querySelector('path')!.getAttribute('d')).toContain(`A ${R} ${R} 0 0 0`)
+    const w = Number(ind.getAttribute('width'))
+    expect(w).toBeGreaterThan(SLOTS[i]!.width - 8)
+    if (i === 1) expect(ind.style.transform).toContain(`translateX(${INDICATOR_AT(1)}px)`)
+    else expect(Number.parseFloat(ind.style.transform.slice(11)) + w).toBeCloseTo(SLOTS[3]!.left + SLOTS[3]!.width - 4, 5)
+  }
 })
 
 test('badges sit on the icons and the circle badge stays outside the circle', async () => {
