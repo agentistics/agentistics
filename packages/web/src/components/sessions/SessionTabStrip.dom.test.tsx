@@ -79,6 +79,34 @@ afterEach(async () => {
 })
 
 describe('desktop', () => {
+  test('needs-you tabs keep their status dot and bold title without an underline', () => {
+    render()
+    const needs = tab('b')
+    expect(needs.style.fontWeight).toBe('650')
+    expect(needs.style.color).toBe('var(--text-primary)')
+    expect(needs.style.boxShadow).toBe('none')
+    expect(needs.style.borderBottomStyle).toBe('none')
+    expect(needs.querySelector('[role="img"][aria-label="needs you"]')).not.toBeNull()
+  })
+
+  test('the desktop band leaves room for the active tab to overlap the header without scroll clipping', () => {
+    render()
+    const band = host.querySelector<HTMLElement>('[data-session-tabs]')!
+    const track = host.querySelector<HTMLElement>('[role="tablist"]')!
+    expect(band.style.height).toBe('44px')
+    expect(band.style.background).toBe('var(--bg-base)')
+    expect(band.style.borderBottomWidth).toBe('')
+    expect(tab('a').style.background).toBe('var(--bg-card)')
+    expect(tab('a').style.borderTopLeftRadius).toBe('10px')
+    expect(tab('a').style.borderBottomLeftRadius).toBe('0px')
+    expect(tab('a').style.borderBottomRightRadius).toBe('0px')
+    expect(tab('a').style.boxShadow).toBe('0 2px 0 var(--bg-card)')
+    expect(track.style.height).toBe('38px')
+    expect(track.style.paddingBottom).toBe('2px')
+    expect(track.style.marginBottom).toBe('-2px')
+    expect(track.style.zIndex).toBe('1')
+  })
+
   test('the active tab shows its ×; the others hide it until hover; the harness icon is drawn', () => {
     render()
     expect(host.querySelectorAll('[role="tab"]').length).toBe(3)
@@ -123,6 +151,13 @@ describe('narrow / touch', () => {
   test('× is visible on EVERY unpinned tab, with a ≥32px hit target', () => {
     ;(window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width: 390, height: 800 })
     render()
+    const track = host.querySelector<HTMLElement>('[role="tablist"]')!
+    expect(track.style.padding).toBe('3px')
+    expect(track.style.margin).toBe('4px 6px')
+    expect(track.style.borderRadius).toBe('10px')
+    expect(tab('a').style.minHeight).toBe('44px')
+    expect(tab('a').style.borderRadius).toBe('8px')
+    expect(tab('a').style.background).toBe('var(--bg-elevated)')
     for (const id of ['a', 'b', 'c']) {
       const x = close(id)!
       expect(opacity(x)).toBe('1')
