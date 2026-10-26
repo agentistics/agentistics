@@ -57,7 +57,7 @@ describe('registry shape', () => {
     }
   })
   test('order is the owner-approved one', () => {
-    expect(APP_AREAS.map(a => a.id)).toEqual(['sessions', 'tasks', 'usage', 'metrics', 'repositories', 'vault', 'settings'])
+    expect(APP_AREAS.map(a => a.id)).toEqual(['metrics', 'sessions', 'tasks', 'usage', 'repositories', 'vault', 'settings'])
   })
 })
 

@@ -40,6 +40,9 @@ export function lineDot(state: ControlSession['state'], fell = false): { backgro
   return { background: 'transparent', border: '1px solid var(--border)' }
 }
 
+/** The title's line box, in px — the one number the role icon is centred on. */
+export const LINE_H = 18
+
 export interface SessionLineProps {
   session: ControlSession
   selected: boolean
@@ -133,18 +136,21 @@ export function SessionLine({
         title={fell ? `${title} · ${pt ? 'esta sessão caiu' : 'this session fell'}` : title}
         style={{
           flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
-          minHeight: tap ?? (lead ? 32 : 28), padding: leading ? '3px 6px 3px 4px' : '3px 6px', borderRadius: 6,
+          // The vertical padding makes the content box exactly one title line (LINE_H) on a single-line
+          // row, so the role icon and the title's first line share one centre; a wrapped title grows
+          // the box downwards and the icon stays on line one.
+          minHeight: tap ?? (lead ? 32 : 28), padding: `${((tap ?? (lead ? 32 : 28)) - LINE_H) / 2}px 6px ${((tap ?? (lead ? 32 : 28)) - LINE_H) / 2}px ${leading ? 4 : 6}px`, borderRadius: 6,
           border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer',
         }}
       >
         <RoleIcon kind={role} size={13} pt={pt} style={{ alignSelf: 'flex-start', marginTop: 2 }} />
         {/* Title and the folded team's summary share one wrapping box: the summary drops under the
             name when the line is short, instead of crushing the name to a letter per line. */}
-        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 1 }}>
+        <span style={{ flex: 1, alignSelf: 'stretch', alignContent: 'flex-start', minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 8, rowGap: 1 }}>
           {/* While a status label (reopening / ending) takes the trailing room, the title keeps one
               line and truncates instead of breaking into a word per line. */}
           <span data-line-title style={{
-            flex: '0 1 auto', minWidth: 0, lineHeight: 1.35,
+            flex: '0 1 auto', minWidth: 0, lineHeight: `${LINE_H}px`,
             ...(ending || reopening
               ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
               : { whiteSpace: 'normal', overflowWrap: 'anywhere' }),

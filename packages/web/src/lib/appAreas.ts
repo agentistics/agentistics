@@ -41,6 +41,15 @@ export interface Area {
 }
 
 export const APP_AREAS: readonly Area[] = [
+  { id: 'metrics', icon: 'chart', labelPt: 'Métricas', labelEn: 'Metrics', pages: [
+    { id: 'overview', path: '/', labelPt: 'Visão geral', labelEn: 'Overview' },
+    { id: 'costs', path: '/costs', labelPt: 'Custos', labelEn: 'Costs' },
+    { id: 'top', path: '/top', labelPt: 'Top de uso', labelEn: 'Top usage' },
+    { id: 'compare', path: '/compare', labelPt: 'Comparar', labelEn: 'Compare' },
+    { id: 'tools', path: '/tools', labelPt: 'Ferramentas', labelEn: 'Tools' },
+    { id: 'custom', path: '/custom', labelPt: 'Personalizado', labelEn: 'Custom' },
+    { id: 'tags', path: '/tags', labelPt: 'Tags', labelEn: 'Tags' },
+  ] },
   { id: 'sessions', icon: 'terminal', labelPt: 'Sessões', labelEn: 'Sessions', pages: [
     { id: 'workspace', path: '/sessions', labelPt: 'Lista', labelEn: 'List' },
     { id: 'leaders', path: '/leadership', labelPt: 'Líderes', labelEn: 'Leaders' },
@@ -57,15 +66,6 @@ export const APP_AREAS: readonly Area[] = [
     { id: 'plan', path: '/usage/plan', labelPt: 'Planejar', labelEn: 'Plan' },
     { id: 'limits', path: '/usage/limits', labelPt: 'Limites', labelEn: 'Limits' },
     { id: 'history', path: '/usage/history', labelPt: 'Histórico', labelEn: 'History' },
-  ] },
-  { id: 'metrics', icon: 'chart', labelPt: 'Métricas', labelEn: 'Metrics', pages: [
-    { id: 'overview', path: '/', labelPt: 'Visão geral', labelEn: 'Overview' },
-    { id: 'costs', path: '/costs', labelPt: 'Custos', labelEn: 'Costs' },
-    { id: 'top', path: '/top', labelPt: 'Top de uso', labelEn: 'Top usage' },
-    { id: 'compare', path: '/compare', labelPt: 'Comparar', labelEn: 'Compare' },
-    { id: 'tools', path: '/tools', labelPt: 'Ferramentas', labelEn: 'Tools' },
-    { id: 'custom', path: '/custom', labelPt: 'Personalizado', labelEn: 'Custom' },
-    { id: 'tags', path: '/tags', labelPt: 'Tags', labelEn: 'Tags' },
   ] },
   { id: 'repositories', icon: 'git', labelPt: 'Repositórios', labelEn: 'Repositories', pages: [
     { id: 'list', path: '/repositories', also: ['/repo'], labelPt: 'Lista', labelEn: 'List' },

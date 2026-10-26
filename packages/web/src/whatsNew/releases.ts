@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '0.0.0-next': {
+    features: [
+      {
+        pt: 'A barra de navegação agora é uma só: ao abrir o menu, os ícones ganham o nome e as seções na própria barra, sem uma segunda coluna.',
+        en: 'Navigation is now a single bar: opening the menu gives the icons their labels and sections in the same bar, with no second column.',
+      },
+      {
+        pt: 'Métricas passa a ser a primeira área da barra, seguida de Sessões.',
+        en: 'Metrics is now the first area in the bar, followed by Sessions.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Na lista de sessões, o ícone de papel (líder/worker) fica alinhado com a primeira linha do título, mesmo quando o título quebra em duas linhas.',
+        en: 'In the sessions list, the role icon (leader/worker) lines up with the first line of the title, even when the title wraps to two lines.',
+      },
+    ],
+  },
   '2.157.0': {
     features: [
       {
