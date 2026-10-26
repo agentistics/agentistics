@@ -266,3 +266,27 @@ test('each identical refused kill shows a toast even when the bell already has t
     expect(keys.size).toBe(3)
   } finally { globalThis.fetch = previousFetch; globalThis.EventSource = previousEventSource }
 })
+
+test('timeout: the spinner leaves, the outcome and a retry are shown; retry clears it', async () => {
+  show('s9', 'pt')
+  let retried = 0
+  act(() => root.render(createElement(ending_gate(), { id: 's9', lang: 'pt', onRetry: () => { retried++ }, children: createElement('i') })))
+  const run = ending.withEnding('s9', async () => ({ ok: true }), () => new Promise<void>(() => {}), () => true, 30)
+  await act(async () => { await run })
+  const o = overlay()!
+  expect(o.hasAttribute('data-session-ending-timeout')).toBe(true)
+  expect(o.textContent).toContain('Ainda aparece em execução')
+  expect(o.getAttribute('aria-busy')).toBe('false')
+  act(() => (o.querySelector('[data-ending-retry]') as HTMLButtonElement).click())
+  expect(retried).toBe(1)
+  expect(overlay()).toBeNull()
+})
+
+test('timeout with the session already inactive just settles; ANY terminal state frees the overlay', async () => {
+  show('s8', 'en')
+  await act(async () => { await ending.withEnding('s8', async () => ({ ok: true }), () => new Promise<void>(() => {}), () => false, 20) })
+  expect(ending.isEndingTimedOut('s8')).toBe(false)
+  expect(ending.isEnding('s8')).toBe(false)
+})
+
+function ending_gate() { return SessionEndingGate }
