@@ -130,6 +130,8 @@ export interface RoleDeps {
   parentOf: (rowId: string) => Promise<string | undefined>
   /** A session declared LEADER leaves its parent's team (`team-links.ts`, rule 2). Absent = not wired. */
   leaveTeam?: (rowId: string) => Promise<boolean>
+  /** Write a retire request on the predecessor (`retire-runner.ts` carries it out). Absent = not wired. */
+  requestRetire?: (predecessorId: string, successorId: string) => Promise<boolean>
 }
 
 export interface RoleRequest {
@@ -138,10 +140,16 @@ export interface RoleRequest {
   /** Absent = just read. `auto` clears. */
   role?: string
   lang?: string
+  /** A leader taking over: the previous leader on the same task, to be closed once it goes quiet. */
+  retirePredecessor?: string
 }
 
+export type RetireOutcome =
+  | { ok: true; id: string; title: string }
+  | { ok: false; code: 'not_own' | 'not_leader_target' | 'different_task' | 'not_live' | 'no_task' | 'self' | 'no_such_session' | 'not_wired' }
+
 export type RoleReply =
-  | { ok: true; key: string; id?: string; title?: string; role: SessionRole | 'auto'; changed: boolean; renamed: boolean; notified: boolean; origin?: RoleOrigin; warning?: string; line: string; message: string }
+  | { ok: true; key: string; id?: string; title?: string; role: SessionRole | 'auto'; changed: boolean; renamed: boolean; notified: boolean; origin?: RoleOrigin; warning?: string; retire?: RetireOutcome; line: string; message: string }
   | { ok: false; code: string; message: string; matches?: string[] }
 
 const MESSAGES: Record<string, string> = {
@@ -231,11 +239,16 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     const { base, next, changed } = state
     // A leader sits at the ROOT with the other leaders, never as another leader's worker.
     if (next === 'leader' && deps.leaveTeam) await deps.leaveTeam(resolved.id).catch(() => false)
+    let retire: RetireOutcome | undefined
+    const wantRetire = req.retirePredecessor?.trim()
+    if (next === 'leader' && wantRetire) retire = await planPredecessorRetire(wantRetire, { own, senderId, resolved, rows, roles: state.roles, deps })
+    // The retired predecessor is no longer "another live leader"; a third one still is.
+    const retiredId = retire?.ok ? retire.id : undefined
     let warning: string | undefined
     if (next === 'leader' && deps.taskOf) {
       const taskId = await deps.taskOf(resolved.id)
       if (taskId) {
-        const other = (await Promise.all(rows.filter(r => r.id !== resolved.id && ['working', 'waiting', 'waiting-approval'].includes(r.state ?? '') && roleOfRow(state.roles, r) === 'leader').map(async r =>
+        const other = (await Promise.all(rows.filter(r => r.id !== resolved.id && r.id !== retiredId && ['working', 'waiting', 'waiting-approval'].includes(r.state ?? '') && roleOfRow(state.roles, r) === 'leader').map(async r =>
           await deps.taskOf!(r.id) === taskId ? r : undefined))).find(Boolean)
         if (other) warning = `Another live leader on task ${taskId}: ${other.title} (${other.id}).`
       }
@@ -256,12 +269,32 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     }
     return {
       ...(warning ? { warning } : {}),
+      ...(retire ? { retire } : {}),
       ok: true, ...base, role: next ?? 'auto', changed, renamed, notified, ...(next ? { origin } : {}), line: roleLine(next),
       message: (changed
         ? `Role set to ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}${notified ? '; the session was told' : ''}.`
-        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (warning ? ` ${warning}` : ''),
+        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (retire?.ok ? ` ${retire.title} will be closed when it goes quiet.` : '') + (warning ? ` ${warning}` : ''),
     }
   })()
+}
+
+/** Honour `retirePredecessor`: only the caller's own session, declared leader, retiring a DIFFERENT live leader of the same task. */
+async function planPredecessorRetire(
+  ref: string,
+  c: { own: boolean; senderId: string | null; resolved: FleetRowForGroups; rows: readonly FleetRowForGroups[]; roles: Record<string, SessionRole>; deps: RoleDeps },
+): Promise<RetireOutcome> {
+  if (!c.own || c.senderId === null) return { ok: false, code: 'not_own' }
+  const r = resolveSessionForGroup(c.rows, ref)
+  if (!r.ok) return { ok: false, code: 'no_such_session' }
+  const pred = r.session
+  if (pred.id === c.resolved.id) return { ok: false, code: 'self' }
+  if (!['working', 'waiting', 'waiting-approval'].includes(pred.state ?? '')) return { ok: false, code: 'not_live' }
+  if (roleOfRow(c.roles, pred) !== 'leader') return { ok: false, code: 'not_leader_target' }
+  const mine = await c.deps.taskOf?.(c.resolved.id).catch(() => undefined)
+  if (!mine) return { ok: false, code: 'no_task' }
+  if ((await c.deps.taskOf?.(pred.id).catch(() => undefined)) !== mine) return { ok: false, code: 'different_task' }
+  if (!c.deps.requestRetire || !(await c.deps.requestRetire(pred.id, c.resolved.id).catch(() => false))) return { ok: false, code: 'not_wired' }
+  return { ok: true, id: pred.id, title: pred.title }
 }
 
 /**
@@ -382,6 +415,7 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
     taskOf: async rowId => (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.taskId,
     parentOf: async rowId => (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.parentSessionId,
     leaveTeam: async rowId => (await import('./team-links-io')).leaveTeamAsLeader(rowId),
+    requestRetire: async (predecessorId, successorId) => (await import('./team-links-io')).requestRetire(predecessorId, successorId),
   }
 }
 

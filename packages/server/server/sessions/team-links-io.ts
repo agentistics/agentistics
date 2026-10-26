@@ -64,6 +64,15 @@ export async function completeLeaderHandoff(
   return { moved, retireRequested }
 }
 
+/** Ask the server to retire `predecessorId` once it goes quiet, on behalf of a leader that replaces it. Never throws. */
+export async function requestRetire(predecessorId: string, successorId: string, deps?: HandoffDeps): Promise<boolean> {
+  const d = deps ?? await defaultHandoffDeps()
+  const pred = (await d.read().catch(() => [] as ManagedSession[])).find(r => r.id === predecessorId)
+  if (!pred || pred.endedAt) return false
+  const req = planRetireRequest(pred.retire, { by: successorId, successorId }, d.now())
+  return req.ok ? await d.patch(predecessorId, { retire: req.request }).catch(() => false) : false
+}
+
 /**
  * The parent a NEW worker should be filed under: the caller, or — when the caller has since handed
  * off — its current successor (a predecessor still finishing its turn must not grow a second team).
