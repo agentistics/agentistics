@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.153.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'No celular, o botão do meio volta a mostrar Sessões e vira Início quando você está dentro de uma sessão.',
+        en: 'On the phone, the middle button shows Sessions again and turns into Home while you are inside a session.',
+      },
+    ],
+  },
   '2.153.0': {
     features: [
       {

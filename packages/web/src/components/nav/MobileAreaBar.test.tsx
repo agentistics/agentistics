@@ -20,7 +20,7 @@ describe('MobileAreaBar', () => {
       const labels = lang === 'pt' ? ['Agentask', 'Uso', 'Sessões', 'Métricas', 'Mais'] : ['Agentask', 'Usage', 'Sessions', 'Metrics', 'More']
       let at = -1
       for (const label of labels) {
-        const found = label === labels[2] ? html.indexOf(`aria-label="${lang === 'pt' ? 'Início' : 'Home'}`, at + 1) : html.indexOf(`>${label}</span>`, at + 1)
+        const found = label === labels[2] ? html.indexOf(`aria-label="${label}`, at + 1) : html.indexOf(`>${label}</span>`, at + 1)
         at = found; expect(at).toBeGreaterThan(-1)
       }
       // Four slot buttons share the two pills; the fifth is the standalone round centre.
@@ -38,24 +38,31 @@ describe('MobileAreaBar', () => {
     }
   })
 
-  test('the centre becomes Home throughout the Sessions area, including open conversations', () => {
-    for (const pathname of ['/sessions', '/sessions/abc', '/leadership/checkins']) {
+  test('the centre is Home inside the Sessions area away from the list, Sessions everywhere else', () => {
+    for (const pathname of ['/sessions/abc', '/leadership/checkins']) {
       for (const lang of ['pt', 'en'] as const) {
         const html = render(pathname, 2, lang)
         expect(html).toContain(lang === 'pt' ? 'aria-label="Início' : 'aria-label="Home')
         expect(html).toContain('lucide-house')
+        expect(html).not.toContain('lucide-terminal')
         expect(html).toContain('border-radius:50%')
         expect(html).toContain('width:58px;height:58px')
         expect(html.match(/<button\b/g) ?? []).toHaveLength(5)
       }
     }
-    expect(render('/usage')).toContain('lucide-house')
-    expect(render('/usage')).not.toContain('lucide-terminal')
+    for (const pathname of ['/sessions', '/usage', '/tasks', '/']) {
+      for (const lang of ['pt', 'en'] as const) {
+        const html = render(pathname, undefined, lang)
+        expect(html).toContain(lang === 'pt' ? 'aria-label="Sessões' : 'aria-label="Sessions')
+        expect(html).toContain('lucide-terminal')
+        expect(html).not.toContain('lucide-house')
+      }
+    }
   })
 
   test('the central destination reports attention only when measured and positive', () => {
     const html = render('/usage', 4)
-    expect(html).toContain('aria-label="Início, 4 precisam de você"')
+    expect(html).toContain('aria-label="Sessões, 4 precisam de você"')
     expect(html).toContain('background:var(--anthropic-orange);color:#0a0a0f')
     expect(html).toMatch(/>4<\/span>/)
     for (const count of [undefined, 0]) {

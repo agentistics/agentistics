@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Ellipsis, Gauge, House, KeyRound, LogOut, ShieldCheck, type LucideIcon } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Ellipsis, Gauge, House, KeyRound, LogOut, ShieldCheck, Terminal, type LucideIcon } from 'lucide-react'
 import type { IamAccount } from '../../App'
 import { areaOfPath, type AreaId } from '../../lib/appAreas'
 import { activateMobileSessions, mobileAreaSlot, scrollMobileSessionsToTop } from '../../lib/mobileAreaTabs'
@@ -72,7 +72,11 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
   useEffect(() => { closeSheet() }, [pathname, closeSheet])
   const go = (to: string) => { closeSheet(); onNavigate(to) }
   const current = areaOfPath(pathname)
-  const sessions = pt ? 'Início' : 'Home'
+  // Away from the sessions list the centre is the way back to it: a house labelled Início inside the
+  // Sessions area (an open conversation, Leadership), the Sessions icon everywhere else and on the list itself.
+  const atSessionsList = pathname === '/sessions' || pathname === '/sessions/'
+  const homeButton = current?.area.id === 'sessions' && !atSessionsList
+  const sessions = homeButton ? (pt ? 'Início' : 'Home') : (pt ? 'Sessões' : 'Sessions')
   const sessionBadge = badges?.sessions ?? attention
   const orange = 'var(--anthropic-orange)'
   const roleLabel = principal
@@ -96,7 +100,7 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
           { key: 'tasks', label: 'Agentask', icon: ClipboardList, onActivate: () => go('/tasks'), badge: badges?.tasks },
           { key: 'usage', label: pt ? 'Uso' : 'Usage', icon: Gauge, onActivate: () => go('/usage'), badge: badges?.usage },
           { key: 'sessions', label: sessions, ariaLabel: sessionBadge && sessionBadge > 0 ? `${sessions}, ${sessionBadge} ${pt ? 'precisam de você' : 'need you'}` : sessions,
-            icon: House, onActivate: () => { closeSheet(); activateMobileSessions(pathname, onNavigate, scrollMobileSessionsToTop) }, badge: sessionBadge },
+            icon: homeButton ? House : Terminal, onActivate: () => { closeSheet(); activateMobileSessions(pathname, onNavigate, scrollMobileSessionsToTop) }, badge: sessionBadge },
           { key: 'metrics', label: pt ? 'Métricas' : 'Metrics', icon: BarChart3, onActivate: () => go('/'), badge: badges?.metrics },
           { key: 'more', label: pt ? 'Mais' : 'More', icon: Ellipsis, onActivate: () => setOpen(v => !v), expanded: open, hasPopup: 'dialog' },
         ]}
