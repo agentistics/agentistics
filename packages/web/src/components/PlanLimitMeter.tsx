@@ -8,7 +8,7 @@
  * A harness with no record draws NOTHING (the callers simply have no `PlanLimits` for it) — never a
  * zero bar: nothing observed is not nothing used.
  */
-import { effectiveWindow, windowRenewed, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
+import { effectiveWindow, windowKey, windowRenewed, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import { HARNESS_LABELS } from '../lib/harness'
@@ -80,7 +80,7 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
         : <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>{tag}<span style={{ ...text, minWidth: 0, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{plan ?? (lang === 'pt' ? 'plano não registrado' : 'plan not registered')}</span></span>}
       {note && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{note}</span>}
     </div>
-    {limits ? limits.windows.map(w => <div key={w.kind} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang)}</span></div>) : wrap ? null : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
+    {limits ? limits.windows.map(w => <div key={windowKey(w)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}><PlanUsageRing pct={currentUsedPct(w, now)} size={36}>{Math.round(currentUsedPct(w, now))}</PlanUsageRing><span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{windowLabel(w.kind, lang, w.scope)}</span></div>) : wrap ? null : <span style={{ gridColumn: '3 / -1', fontSize: 11.5, color: 'var(--text-secondary)' }}>{waiting}</span>}
   </>
 }
 
@@ -91,7 +91,7 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
     {rows.map((row, i) => <div key={`${row.harness}:${i}`} data-plan-row={row.harness} style={{ ...PLAN_ROW_GRID, padding: '8px 4px', borderTop: '1px solid var(--border)' }}>
       <PlanUsageRowCells harness={row.harness} name={subscriptionName(row.harness, row.accountLabel)} plan={row.plan} limits={row.limits} now={now} lang={lang} />
     </div>)}
-    {rows.some(r => r.limits?.windows.some(w => currentUsedPct(w, now) >= 75)) && <div style={{ padding: '7px 4px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{rows.flatMap(r => (r.limits?.windows ?? []).filter(w => currentUsedPct(w, now) >= 75).slice(0, 1).map(w => <span key={`${r.harness}:${w.kind}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><LimitLevelIcon pct={currentUsedPct(w, now)} lang={lang} />{HARNESS_LABELS[r.harness]}: {windowLabel(w.kind, lang)} {lang === 'pt' ? 'em' : 'at'} {Math.round(currentUsedPct(w, now))}% · {lang === 'pt' ? 'renova' : 'resets'} {fmtWhen(w.resetsAt, now, lang)}</span>))}</div>}
+    {rows.some(r => r.limits?.windows.some(w => currentUsedPct(w, now) >= 75)) && <div style={{ padding: '7px 4px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{rows.flatMap(r => (r.limits?.windows ?? []).filter(w => currentUsedPct(w, now) >= 75).slice(0, 1).map(w => <span key={`${r.harness}:${windowKey(w)}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><LimitLevelIcon pct={currentUsedPct(w, now)} lang={lang} />{HARNESS_LABELS[r.harness]}: {windowLabel(w.kind, lang, w.scope)} {lang === 'pt' ? 'em' : 'at'} {Math.round(currentUsedPct(w, now))}% · {lang === 'pt' ? 'renova' : 'resets'} {fmtWhen(w.resetsAt, now, lang)}</span>))}</div>}
     <div style={{ borderTop: '1px solid var(--border)', padding: '8px 4px 4px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>{lang === 'pt' ? 'Clique para ver tudo' : 'Click to see everything'} <button type="button" data-plan-usage-open onClick={onOpen} style={{ float: 'right', border: 0, background: 'transparent', padding: 0, font: 'inherit', fontWeight: 700, color: 'var(--anthropic-orange)', cursor: 'pointer' }}>{lang === 'pt' ? 'Abrir ›' : 'Open ›'}</button></div>
   </div>
 }
@@ -105,7 +105,7 @@ function WindowRow({ w, now, observedAt, lang, ring, forecast = true }: { w: Pla
   return <div data-plan-window={w.kind} style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
     <PlanUsageRing pct={pct} size={ring}>{renewed ? '–' : ring >= 44 ? `${Math.round(pct)}%` : Math.round(pct)}</PlanUsageRing>
     <div style={{ minWidth: 0, flex: 1, fontSize: 12, lineHeight: 1.5 }}>
-      <b style={{ display: 'block', whiteSpace: 'nowrap' }}>{renewed ? `${windowLabel(w.kind, lang)} · –` : `${windowLabel(w.kind, lang)} · ${Math.round(pct)}% ${pt ? 'usado' : 'used'}`}</b>
+      <b style={{ display: 'block', whiteSpace: 'nowrap' }}>{renewed ? `${windowLabel(w.kind, lang, w.scope)} · –` : `${windowLabel(w.kind, lang, w.scope)} · ${Math.round(pct)}% ${pt ? 'usado' : 'used'}`}</b>
       <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 5, color: 'var(--text-secondary)' }}>
         {!renewed && <span style={{ whiteSpace: 'nowrap' }}>{pt ? `restam ${Math.max(0, 100 - Math.round(pct))}%` : `${Math.max(0, 100 - Math.round(pct))}% left`} ·</span>}
         {windowResetPhrase(w, now, lang).split(/ (\((?:em|in) .+\))$/).filter(Boolean).map((part, i) => <span key={i} style={{ whiteSpace: renewed ? 'normal' : 'nowrap' }}>{part}</span>)}
@@ -120,7 +120,7 @@ function WindowRow({ w, now, observedAt, lang, ring, forecast = true }: { w: Pla
 export function PlanSessionBlock({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
   const stale = stalePhrase(limits, now, lang)
   return <div data-plan-limits={limits.harness} style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-    {limits.windows.map(w => <WindowRow key={w.kind} w={w} now={now} observedAt={limits.updatedAt} lang={lang} ring={34} />)}
+    {limits.windows.map(w => <WindowRow key={windowKey(w)} w={w} now={now} observedAt={limits.updatedAt} lang={lang} ring={34} />)}
     <div style={{ fontSize: 10.5, color: stale ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }}>{updatedPhrase(limits, now, lang)} · {lang === 'pt' ? 'fonte' : 'source'}: {SOURCE_LABEL[limits.source][lang]}</div>
   </div>
 }
@@ -144,7 +144,7 @@ export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedd
       <div style={{ minWidth: 0 }}><b style={{ display: 'block', fontSize: 14 }}>{subscriptionName(harness, accountLabel)}</b>{showPlan && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{plan ?? (pt ? 'plano não registrado' : 'plan not registered')}</span>}</div>
       <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, whiteSpace: 'nowrap', color: !limits ? 'var(--text-tertiary)' : level === 'critical' ? 'var(--accent-red)' : level === 'attention' ? 'var(--anthropic-orange)' : 'var(--accent-green)' }}><LimitLevelIcon pct={worst} level={level} size={14} lang={lang} />{state}</span>
     </div>
-    {limits && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{limits.windows.map(w => <div key={w.kind} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} observedAt={limits.updatedAt} lang={lang} ring={48} /></div>)}</div>}
+    {limits && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{limits.windows.map(w => <div key={windowKey(w)} style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)' }}><WindowRow w={w} now={now} observedAt={limits.updatedAt} lang={lang} ring={48} /></div>)}</div>}
     <span style={{ minHeight: 14, fontSize: 11, color: stale ? LIMIT_WARN : 'var(--text-tertiary)' }}>{limits ? updatedPhrase(limits, now, lang) : null}</span>
   </div>
 }
@@ -164,7 +164,7 @@ export function PlanLimitMeter({ window: w, now, observedAt = now, lang, forecas
   const tone = limitTone(pct)
   // The forecast is said ONLY when the window runs out before it renews — in amber, never green.
   const f = forecast ? warnForecast(w, now, observedAt) : null
-  const label = windowLabel(w.kind, lang)
+  const label = windowLabel(w.kind, lang, w.scope)
   return (
     <div data-plan-window={w.kind} style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
@@ -214,7 +214,7 @@ export function PlanLimitsBlock({ limits, now, lang, forecast = false, header = 
           </span>
         </div>
       )}
-      {limits.windows.map(w => <PlanLimitMeter key={w.kind} window={w} now={now} observedAt={limits.updatedAt} lang={lang} forecast={forecast} />)}
+      {limits.windows.map(w => <PlanLimitMeter key={windowKey(w)} window={w} now={now} observedAt={limits.updatedAt} lang={lang} forecast={forecast} />)}
       {(details || stale) && (
         <div style={{ fontSize: 10.5, color: stale ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }}>
           {details ? updatedPhrase(limits, now, lang) : stale}
@@ -234,7 +234,8 @@ export function PlanLimitArcs({ limits, now, size }: { limits: PlanLimits; now: 
   const gap = 1.4
   const outer = size + 2 * 2 * (stroke + gap)
   const ring = (kind: '5h' | 'week', index: number) => {
-    const w = limits.windows.find(x => x.kind === kind)
+    // Scoped records hold one window per model group: the arc shows the tightest.
+    const w = limits.windows.filter(x => x.kind === kind).sort((a, b) => currentUsedPct(b, now) - currentUsedPct(a, now))[0]
     if (!w) return null
     const pct = currentUsedPct(w, now)
     const r = size / 2 + gap + stroke / 2 + index * (stroke + gap)
@@ -275,18 +276,18 @@ export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: 
       {limits.windows.map(w => {
         const pct = currentUsedPct(w, now)
         const renewed = windowRenewed(w, now)
-        const label = windowShort(w.kind, lang)
+        const label = windowShort(w.kind, lang, w.scope)
         return [
-          <span key={`${w.kind}l`} style={{ color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{label}</span>,
-          <div key={`${w.kind}b`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}
-            aria-label={`${windowLabel(w.kind, lang)}: ${Math.round(pct)}%`}
+          <span key={`${windowKey(w)}l`} style={{ color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{label}</span>,
+          <div key={`${windowKey(w)}b`} role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}
+            aria-label={`${windowLabel(w.kind, lang, w.scope)}: ${Math.round(pct)}%`}
             style={{ height: 3, minWidth: 16, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
             <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: '100%', background: limitTone(pct), borderRadius: 2 }} />
           </div>,
-          <span key={`${w.kind}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+          <span key={`${windowKey(w)}v`} data-plan-window={w.kind} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
             {renewed ? '–' : `${Math.round(pct)}% · ${shortWhen(w.resetsAt, now, lang, w.kind)}`}
           </span>,
-          ...(renewed ? [<span key={`${w.kind}reset`} data-plan-renewal style={{ gridColumn: '1 / -1', color: 'var(--text-secondary)', whiteSpace: 'normal', overflowWrap: 'normal', lineHeight: 1.4 }}>
+          ...(renewed ? [<span key={`${windowKey(w)}reset`} data-plan-renewal style={{ gridColumn: '1 / -1', color: 'var(--text-secondary)', whiteSpace: 'normal', overflowWrap: 'normal', lineHeight: 1.4 }}>
             {windowResetPhrase(w, now, lang)}
           </span>] : []),
         ]

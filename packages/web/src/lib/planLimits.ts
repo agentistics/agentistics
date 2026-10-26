@@ -17,7 +17,11 @@ export type RegisteredPlan = { harness: PlanLimits['harness']; plan: string; acc
 export interface PlanReadings {
   account: string
   harness: PlanLimits['harness']
-  points: { at: number; weekPct: number | null; fiveHourPct: number | null; weekReset?: number; fiveReset?: number }[]
+  points: {
+    at: number; weekPct: number | null; fiveHourPct: number | null; weekReset?: number; fiveReset?: number
+    /** Per model group (scoped harnesses); `weekPct` above is the tightest one. */
+    scopes?: Record<string, { weekPct: number; weekReset?: number }>
+  }[]
 }
 
 export interface PlanLimitsSnapshot {
@@ -98,13 +102,29 @@ export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.n
 
 type Lang = 'pt' | 'en'
 
-export function windowLabel(kind: PlanWindowKind, lang: Lang): string {
-  return kind === '5h'
-    ? (lang === 'pt' ? 'Sessão 5 h' : '5-h session')
-    : (lang === 'pt' ? 'Semana' : 'Week')
+/** A model group's name: translated for the groups Antigravity reports, else the harness's own label. */
+export function scopeName(scope: { id: string; label: string }, lang: Lang): string {
+  if (scope.id === 'google') return lang === 'pt' ? 'Modelos Gemini' : 'Gemini models'
+  if (scope.id === 'anthropic+openai') return lang === 'pt' ? 'Modelos Claude e GPT' : 'Claude and GPT models'
+  return scope.label
 }
 
-export function windowShortLabel(kind: PlanWindowKind, lang: Lang): string {
+/** The short form of a group's name for one-line meters: "Gemini", "Claude e GPT". */
+export function scopeShortName(scope: { id: string; label: string }, lang: Lang): string {
+  if (scope.id === 'google') return 'Gemini'
+  if (scope.id === 'anthropic+openai') return lang === 'pt' ? 'Claude e GPT' : 'Claude and GPT'
+  return scope.label.replace(/ models$/i, '')
+}
+
+export function windowLabel(kind: PlanWindowKind, lang: Lang, scope?: { id: string; label: string }): string {
+  const base = kind === '5h'
+    ? (lang === 'pt' ? 'Sessão 5 h' : '5-h session')
+    : (lang === 'pt' ? 'Semana' : 'Week')
+  return scope ? `${base} · ${scopeName(scope, lang)}` : base
+}
+
+export function windowShortLabel(kind: PlanWindowKind, lang: Lang, scope?: { id: string; label: string }): string {
+  if (scope) return scopeShortName(scope, lang)
   return kind === '5h' ? '5 h' : (lang === 'pt' ? 'Semana' : 'Week')
 }
 
@@ -229,6 +249,8 @@ export interface LimitNoticeMeta {
   pct: number
   resetsAt: number
   alt?: string
+  /** The model group of a scoped window (Antigravity). */
+  scope?: { id: string; label: string }
 }
 
 /** Read a notification's `meta` back into a notice, or null when it is not one. */
@@ -237,7 +259,8 @@ export function limitNoticeMeta(meta: Record<string, unknown> | undefined): Limi
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
   const threshold = n(meta.threshold), pct = n(meta.pct), resetsAt = n(meta.resetsAt)
   if (threshold === null || pct === null || resetsAt === null) return null
-  return { harness: meta.harness, window: meta.window, threshold, pct, resetsAt, ...(typeof meta.alt === 'string' ? { alt: meta.alt } : {}) }
+  const scope = typeof meta.scopeId === 'string' && meta.scopeId ? { id: meta.scopeId, label: typeof meta.scopeLabel === 'string' ? meta.scopeLabel : meta.scopeId } : undefined
+  return { harness: meta.harness, window: meta.window, threshold, pct, resetsAt, ...(typeof meta.alt === 'string' ? { alt: meta.alt } : {}), ...(scope ? { scope } : {}) }
 }
 
 const harnessName = (h: string): string => (HARNESS_LABELS as Record<string, string>)[h] ?? h
@@ -245,7 +268,8 @@ const harnessName = (h: string): string => (HARNESS_LABELS as Record<string, str
 export function limitNoticeText(m: LimitNoticeMeta, lang: Lang, now = Date.now()): { title: string; message: string } {
   const pt = lang === 'pt'
   const name = harnessName(m.harness)
-  const win = m.window === '5h' ? (pt ? 'janela de 5 h' : '5-hour window') : (pt ? 'janela semanal' : 'weekly window')
+  const win0 = m.window === '5h' ? (pt ? 'janela de 5 h' : '5-hour window') : (pt ? 'janela semanal' : 'weekly window')
+  const win = m.scope ? `${win0} · ${scopeName(m.scope, lang)}` : win0
   const when = `${fmtWhen(m.resetsAt, now, lang)} (${pt ? 'em' : 'in'} ${fmtSpan(m.resetsAt - now, lang)})`
   if (m.threshold >= 100) {
     const alt = m.alt ? (pt ? ` Dá para continuar no ${harnessName(m.alt)}, que tem folga.` : ` You can continue in ${harnessName(m.alt)}, which has room.`) : ''
@@ -278,8 +302,8 @@ export function warnForecast(w: PlanLimitWindow, now: number, observedAt = now):
 }
 
 /** The short form for a one-line meter: the same "5 h" / "7 d". */
-export function windowShort(kind: PlanWindowKind, lang: Lang): string {
-  return windowShortLabel(kind, lang)
+export function windowShort(kind: PlanWindowKind, lang: Lang, scope?: { id: string; label: string }): string {
+  return windowShortLabel(kind, lang, scope)
 }
 
 /** When it renews, as short as it can be said: the clock for the 5-hour window (it renews within
