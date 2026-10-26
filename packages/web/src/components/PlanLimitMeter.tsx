@@ -105,7 +105,7 @@ function WindowRow({ w, now, observedAt, lang, ring, forecast = true }: { w: Pla
   return <div data-plan-window={windowKey(w)} style={{ display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
     <PlanUsageRing pct={pct} size={ring}>{renewed ? '–' : ring >= 44 ? `${Math.round(pct)}%` : Math.round(pct)}</PlanUsageRing>
     <div style={{ minWidth: 0, flex: 1, fontSize: 12, lineHeight: 1.5 }}>
-      <b style={{ display: 'block', whiteSpace: 'normal', overflowWrap: 'normal' }}>{renewed ? `${windowLabel(w.kind, lang, w.scope)} · –` : `${windowLabel(w.kind, lang, w.scope)} · ${Math.round(pct)}% ${pt ? 'usado' : 'used'}`}</b>
+      <b style={{ display: 'block', whiteSpace: 'normal', overflowWrap: 'normal' }}>{windowLabel(w.kind, lang, w.scope)}</b>
       <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: 5, color: 'var(--text-secondary)' }}>
         {!renewed && <span style={{ whiteSpace: 'nowrap' }}>{pt ? `restam ${Math.max(0, 100 - Math.round(pct))}%` : `${Math.max(0, 100 - Math.round(pct))}% left`} ·</span>}
         {windowResetPhrase(w, now, lang).split(/ (\((?:em|in) .+\))$/).filter(Boolean).map((part, i) => <span key={i} style={{ whiteSpace: renewed ? 'normal' : 'nowrap' }}>{part}</span>)}

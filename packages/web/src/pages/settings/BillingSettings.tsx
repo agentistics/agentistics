@@ -82,7 +82,7 @@ export default function BillingSettings() {
   const pt = ctx.lang === 'pt'
   const isMobile = useIsMobile()
 
-  const { limits: planLimits, now: limitsNow } = usePlanLimits()
+  const { limits: planLimits, now: limitsNow, accountLabels } = usePlanLimits()
   const [accounts, setAccounts] = useState<BillingAccount[]>([])
   // The list arrived (a failed fetch never counts): only then may stale `failed` answers be pruned.
   const [accountsLoaded, setAccountsLoaded] = useState(false)
@@ -121,7 +121,7 @@ export default function BillingSettings() {
     if (accountsLoaded) billingNotices.prune(new Set(needPlan.map(a => accountLabelKey(a.harness, a.id))))
   }, [accountsLoaded, needPlan])
 
-  const rows: BillingRowView[] = useMemo(() => billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt).map(r => {
+  const rows: BillingRowView[] = useMemo(() => billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt, accountLabels).map(r => {
     const periods = scopePeriods(ctx.billing, r.scope)
     const cur = splitTimeline(sortPeriods(periods), today()).current
     return {
@@ -130,7 +130,7 @@ export default function BillingSettings() {
       problem: validateTimeline({ periods }).size > 0,
       limits: limitsForRow(planLimits, r),
     }
-  }), [accounts, ctx.billing, harnesses, pt, planLimits])
+  }), [accounts, ctx.billing, harnesses, pt, planLimits, accountLabels])
 
   const toggleAccount = async (a: BillingAccount) => {
     if (mutator.has(a.id)) return
@@ -317,7 +317,7 @@ export default function BillingSettings() {
           : 'One row per account: the plan you pay for and how much of its limits you have used. Every cost in the app is an API-price estimate until you register the plan — then it reflects what you actually pay. Agents only use accounts with “Agents” on. It all stays on this machine.'}
       </p>
 
-      <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds}
+      <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
         selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow} />
       <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
 

@@ -114,7 +114,7 @@ export function toggleAvailability<A>(
 }
 
 /** Harnesses with a usage-limits reader (spec §6 sentence table). @harness-adapters-only: a reader table, adapters only. */
-export const REPORTS_LIMITS: ReadonlySet<HarnessId> = new Set<HarnessId>(['claude', 'codex'])
+export const REPORTS_LIMITS: ReadonlySet<HarnessId> = new Set<HarnessId>(['claude', 'codex', 'antigravity'])
 
 /**
  * The notices on screen: every account still needing a plan, plus the ones whose answer is being
@@ -219,12 +219,14 @@ export interface BillingRow {
 }
 
 /** Old Codex readers used a ChatGPT id fragment as the login label. It names no person. */
-const billingLogin = (a: BillingAccount): string | null =>
-  isPlaceholderName(a.label) || (a.harness === 'codex' && /^ChatGPT\s+[0-9a-f-]+$/i.test(a.label.trim())) ? null : a.label
+const billingLogin = (a: BillingAccount, assistant: string): string | null =>
+  isPlaceholderName(a.label) || (a.harness === 'codex' && /^ChatGPT\s+[0-9a-f-]+$/i.test(a.label.trim())) || a.label.trim().toLowerCase() === assistant.toLowerCase() ? null : a.label
 
 export function billingRows(
   accounts: readonly BillingAccount[], billing: BillingSettings, harnesses: readonly HarnessId[],
   harnessLabel: (h: HarnessId) => string, pt: boolean,
+  /** `accountLabelKey(harness, account) → name` as the server numbered it (Now, Limits and the bell say the same). */
+  serverLabels: Readonly<Record<string, string>> = {},
 ): BillingRow[] {
   const out: BillingRow[] = []
   const unknownWho = pt ? 'conta não informada' : 'account not reported'
@@ -236,14 +238,16 @@ export function billingRows(
       continue
     }
     const shown = foldUnnamed(mine, billing)
-    const unnamed = shown.filter(a => !(a.nickname && !isPlaceholderName(a.nickname)) && billingLogin(a) === null)
+    const unnamed = shown.filter(a => !(a.nickname && !isPlaceholderName(a.nickname)) && billingLogin(a, label) === null)
     for (const a of shown) {
       const nick = a.nickname && !isPlaceholderName(a.nickname) ? a.nickname : null
-      const login = billingLogin(a)
+      const login = billingLogin(a, label)
       const n = unnamed.indexOf(a)
-      const title = nick ?? login ?? (unnamed.length > 1 ? `${label} #${n + 1}` : label)
+      // An assistant's own name is no login: such an account is unnamed, and is told apart exactly as every other screen does.
+      const assistantNamed = !nick && !login && !isPlaceholderName(a.label) && a.label.trim().toLowerCase() === label.toLowerCase()
+      const title = nick ?? login ?? serverLabels[accountLabelKey(h, a.id)] ?? (unnamed.length > 1 ? `${label} #${n + 1}` : label)
       // What the title does not already say: never the assistant's name twice.
-      const raw = nick ? (login ? `${label} · ${login}` : label) : login ? label : a.harness === 'codex' ? label : unknownWho
+      const raw = nick ? (login ? `${label} · ${login}` : label) : login ? label : a.harness === 'codex' ? label : assistantNamed ? '' : unknownWho
       const sub = raw === title ? '' : raw
       out.push({ key: accountLabelKey(h, a.id), harness: h, account: a, title, sub, scope: rowScope(billing, shown, a) })
     }

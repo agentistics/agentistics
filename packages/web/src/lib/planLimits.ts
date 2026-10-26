@@ -6,7 +6,7 @@
  */
 import { useSyncExternalStore } from 'react'
 import {
-  currentUsedPct, forecastWindow, limitsStale, windowRenewed,
+  currentUsedPct, forecastWindow, limitsStale, SURFACE_HARNESS_ORDER, windowRenewed,
   type PlanForecast, type PlanLimitSource, type PlanLimitWindow, type PlanLimits, type PlanWindowKind,
 } from '@agentistics/core'
 import { subscribeEvent } from './eventStream'
@@ -157,7 +157,7 @@ export function fmtSpan(ms: number, lang: Lang): string {
   const min = Math.max(0, Math.round(ms / 60_000))
   if (min < 60) return `${min} min`
   const h = Math.floor(min / 60)
-  if (h < 48) return `${h} h ${String(min % 60).padStart(2, '0')}`
+  if (h < 48) return min % 60 === 0 ? `${h} h` : `${h} h ${min % 60} min`
   return lang === 'pt' ? `${Math.floor(h / 24)} d ${h % 24} h` : `${Math.floor(h / 24)} d ${h % 24} h`
 }
 
@@ -238,12 +238,15 @@ export function subscriptionRows(limits: PlanLimits[] | null, registered: Regist
       .filter(r => (r.account ? !foundAccount.has(`${r.harness}:${r.account}`) : !found.has(r.harness)))
       .map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null, accountLabel: r.accountLabel, ...(r.account ? { account: r.account } : {}) })),
   ]
-  return rows.map(({ account, ...r }) => {
+  const named = rows.map(({ account, ...r }) => {
     const label = (account ? labels[accountLabelKey(r.harness, account)] : undefined) ?? r.accountLabel
     // A label that is only the assistant's own name says nothing the row does not ("Codex CLI · Codex CLI").
     const telling = label && label !== HARNESS_LABELS[r.harness] ? label : undefined
     return telling ? { ...r, accountLabel: telling } : r
   })
+  // By assistant (the order Now draws them in), then by name with "#2" after "#1" and before "#10".
+  const rank = (h: string) => { const i = (SURFACE_HARNESS_ORDER as readonly string[]).indexOf(h); return i < 0 ? 99 : i } // @native-gated: ordering rows already returned by the store.
+  return named.sort((a, b) => rank(a.harness) - rank(b.harness) || (a.accountLabel ?? '').localeCompare(b.accountLabel ?? '', undefined, { numeric: true }))
 }
 
 /** A subscription's name: the assistant, plus the account only when it adds something. A label that

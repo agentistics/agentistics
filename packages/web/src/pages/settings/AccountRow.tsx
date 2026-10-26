@@ -47,6 +47,8 @@ export interface BillingAccountListProps {
   now: number
   pendingIds: ReadonlySet<string>
   failedIds: ReadonlySet<string>
+  /** False until the first plan-limits answer: a row must not claim "not reported" before anybody was asked. */
+  limitsReady?: boolean
   /** The row whose editor is open, so it reads as selected. */
   selectedKey: string | null
   onToggle: (a: BillingAccount) => void
@@ -67,8 +69,9 @@ function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
   )
 }
 
-function Usage({ r, now, lang, t }: { r: BillingRowView; now: number; lang: Lang; t: ReturnType<typeof T> }) {
+function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: number; lang: Lang; t: ReturnType<typeof T>; ready?: boolean }) {
   if (r.limits) return <div data-billing-usage style={{ minWidth: 0, overflowWrap: 'normal' }}><PlanLimitBars limits={r.limits} now={now} lang={lang} labelWidth="9em" /></div>
+  if (!ready && r.account) return <span aria-busy="true" style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>…</span>
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>
 }
 
@@ -105,7 +108,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
                 subtitle={<AccountSubtitle row={r} />}
                 fields={[
                   { label: t.plan, value: r.problem || !r.plan ? <PlanCell r={r} t={t} /> : `${r.plan.name}${r.plan.price ? ` · ${r.plan.price}` : ''}` },
-                  { label: t.usage, value: <Usage r={r} now={p.now} lang={p.lang} t={t} /> },
+                  { label: t.usage, value: <Usage r={r} now={p.now} lang={p.lang} t={t} ready={p.limitsReady ?? true} /> },
                   ...(r.account ? [{ label: t.agents, value: <span style={{ display: 'inline-flex' }}>{toggle(r)}</span> }] : []),
                 ]}
                 actions={<RecordCardAction label={`${actionLabel(r, t)} · ${r.title}`} onClick={() => p.onEdit(r)}>{actionLabel(r, t)}</RecordCardAction>}
@@ -132,7 +135,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
                 </span>
               </span>
               <PlanCell r={r} t={t} />
-              <Usage r={r} now={p.now} lang={p.lang} t={t} />
+              <Usage r={r} now={p.now} lang={p.lang} t={t} ready={p.limitsReady ?? true} />
               <span>{toggle(r)}</span>
               <button type="button" style={{ ...dialogButtonStyle(r.plan && !r.problem ? 'secondary' : 'primary', false), whiteSpace: 'nowrap', width: '100%' }}
                 aria-label={`${actionLabel(r, t)} · ${r.title}`} onClick={() => p.onEdit(r)}>{actionLabel(r, t)}</button>

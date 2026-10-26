@@ -6,7 +6,7 @@ import { limitLevel, limitLevelWord, subscriptionName, subscriptionRows, account
 const M = 60_000
 test('spans', () => {
   expect(fmtSpan(12 * M, 'pt')).toBe('12 min')
-  expect(fmtSpan(125 * M, 'pt')).toBe('2 h 05')
+  expect(fmtSpan(125 * M, 'pt')).toBe('2 h 5 min')
   expect(fmtSpan(50 * 60 * M, 'en')).toBe('2 d 2 h')
 })
 test('a renewed window says so instead of a zero', () => {
@@ -72,7 +72,7 @@ test('an account label that is only the assistant name is not appended to it', (
 test('two accounts of one harness are two rows, each named; a single account keeps its label', () => {
   const rd = (account: string) => ({ harness: 'claude', account, plan: 'Max', source: 'stream', updatedAt: 1, windows: [{ kind: '5h', usedPct: 10, resetsAt: 9e12 }] }) as never
   const labels = { 'claude:a': 'Work', 'claude:b': 'Claude Code #2' }
-  expect(subscriptionRows([rd('a'), rd('b')], [], labels).map(r => r.accountLabel)).toEqual(['Work', 'Claude Code #2'])
+  expect(subscriptionRows([rd('a'), rd('b')], [], labels).map(r => r.accountLabel)).toEqual(['Claude Code #2', 'Work'])
   expect(subscriptionRows([rd('a')], [], labels)[0]!.accountLabel).toBe('Work')
   // A registered plan of an account that has a reading is not listed twice; one without is.
   expect(subscriptionRows([rd('a')], [{ harness: 'claude', account: 'a', plan: 'Max' }, { harness: 'claude', account: 'b', plan: 'Max' }], labels)).toHaveLength(2)
@@ -85,4 +85,10 @@ test('account labels are keyed by harness AND account: agy and Claude on "defaul
   expect(rows.map(r => subscriptionName(r.harness, r.accountLabel))).toEqual(['Claude Code', 'Antigravity #1'])
   // A label written for the OTHER harness's "default" never leaks.
   expect(subscriptionRows([rd('antigravity')], [], { [accountLabelKey('claude', 'default')]: 'Claude Code' })[0]!.accountLabel).toBeUndefined()
+})
+
+test('cards are ordered by assistant, then #1, #2, #10', () => {
+  const rd = (harness: string, account: string) => ({ harness, account, plan: 'P', source: 'stream', updatedAt: 1, windows: [{ kind: '5h', usedPct: 10, resetsAt: 9e12 }] }) as never
+  const labels = { 'antigravity:x': 'Antigravity', 'claude:b': 'Claude Code #2', 'claude:a': 'Claude Code #1', 'claude:c': 'Claude Code #10' }
+  expect(subscriptionRows([rd('antigravity', 'x'), rd('claude', 'b'), rd('claude', 'c'), rd('claude', 'a')], [], labels).map(r => r.accountLabel ?? r.harness)).toEqual(['Claude Code #1', 'Claude Code #2', 'Claude Code #10', 'antigravity'])
 })
