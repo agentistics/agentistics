@@ -98,7 +98,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
       {isMobile ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {p.rows.map(r => (
-            <div key={r.key} data-billing-row={r.key}>
+            <div key={`${r.harness}:${r.key}`} data-billing-row={r.key}>
               <RecordCard
                 leading={<HarnessMark harness={r.harness} size={22} />}
                 title={r.title}
@@ -120,7 +120,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
             <span>{t.account}</span><span>{t.plan}</span><span>{t.usage}</span><span>{t.agents}</span><span />
           </div>
           {p.rows.map(r => (
-            <div key={r.key} data-billing-row={r.key} style={{
+            <div key={`${r.harness}:${r.key}`} data-billing-row={r.key} style={{
               display: 'grid', gridTemplateColumns: GRID, gap: 14, alignItems: 'center', padding: '12px 14px',
               borderTop: '1px solid var(--border)', background: p.selectedKey === r.key ? 'var(--bg-elevated)' : undefined,
             }}>

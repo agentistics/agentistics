@@ -188,11 +188,6 @@ export function withScopePeriods(billing: BillingSettings, s: RowScope, periods:
 }
 
 /**
- * One row of Settings → Billing: an identified account, or — for an assistant with no identified
- * account at all — the assistant's own timeline. The registry's reserve row (`id: ''`) never becomes
- * a row of its own: with an identified account beside it, it is the same login said twice.
- */
-/**
  * The limits a billing row shows. Matched by harness AND account: two assistants can both report the
  * account `'default'` (Antigravity and Claude Code on one machine), and an account-only match handed one
  * row the other's bars.
@@ -202,6 +197,11 @@ export function limitsForRow(limits: readonly PlanLimits[] | null | undefined, r
   return limits?.find(l => l.harness === row.harness && l.account === row.account!.id) ?? null
 }
 
+/**
+ * One row of Settings → Billing: an identified account, or — for an assistant with no identified
+ * account at all — the assistant's own timeline. The registry's reserve row (`id: ''`) never becomes
+ * a row of its own: with an identified account beside it, it is the same login said twice.
+ */
 export interface BillingRow {
   key: string
   harness: HarnessId
