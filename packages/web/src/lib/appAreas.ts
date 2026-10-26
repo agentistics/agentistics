@@ -134,6 +134,18 @@ export function searchAreas(query: string, _lang: 'pt' | 'en'): { area: Area; pa
   return out
 }
 
+/**
+ * Areas whose HEADER always lands on one fixed page instead of the last page visited in them.
+ * Sessões used to resume the last open conversation, which dropped people into a screen rather than a
+ * listing; it now lands on its list. Point the value elsewhere to change where the header goes.
+ */
+export const AREA_HEADER_PATH: Partial<Record<AreaId, string>> = { sessions: '/sessions' }
+
+/** Where clicking an area's header goes: its fixed landing page when it has one, else `firstPath`. */
+export function areaHeaderPath(area: Area, remembered?: string | null): string {
+  return AREA_HEADER_PATH[area.id] ?? firstPath(area, remembered)
+}
+
 /** Where clicking an area goes: the remembered page of THAT area, else its first page. */
 export function firstPath(area: Area, remembered?: string | null): string {
   const r = (remembered ?? '').trim()
