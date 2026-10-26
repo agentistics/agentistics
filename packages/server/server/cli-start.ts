@@ -130,6 +130,7 @@ import { resolveLang } from './cli-lang'
 import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
+import { sessionActionError } from './sessions/action-error'
 import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { spawnCapabilities } from './sessions/codex-capabilities'
 import { readHarnessVersion } from './sessions/harness-version'
@@ -4195,12 +4196,15 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // both writing into one transcript. The lock serialises the whole check-and-spawn sequence
       // per conversation id, so the second caller's check only runs once the first has settled.
       // A NATIVE session is reopened by the engine, which keeps its id: nothing is spawned, nothing replaced.
-      if (isNativeSessionId(req.sessionId)) {
-        const out = await runNativeVerb(req.sessionId, 'resume', lang)
-        return { ...out, ...(out.ok ? { id: req.sessionId } : {}) }
+      try {
+        if (isNativeSessionId(req.sessionId)) {
+          const out = await runNativeVerb(req.sessionId, 'resume', lang)
+          return { ...out, ...(out.ok ? { id: req.sessionId } : {}) }
+        }
+        return await withResumeLock(req.sessionId, () => resumeSessionLocked(req, this))
+      } catch (error) {
+        return sessionActionError(lang, 'resume', req.sessionId, error)
       }
-      try { return await withResumeLock(req.sessionId, () => resumeSessionLocked(req, this)) }
-      catch (e) { return { ok: false, message: e instanceof Error ? e.message : String(e) } }
     },
 
     async switchSessionAccount(req: SwitchAccountRequest) {

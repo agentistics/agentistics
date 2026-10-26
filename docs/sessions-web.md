@@ -31,6 +31,10 @@ state sleep in the strip's menu instead of occupying a tab. Unpinned ended tabs 
 The menu button stays at the left of the scrolling track, counts the visible tabs, and shows a
 moon when any pinned session sleeps. Its **Sleeping** entries reopen through the fleet's existing
 `resume` action and focus the resulting conversation in the current pane.
+Unknown action names are refused with a sentence asking the client to refresh. Internal action
+failures, including reopen failures, return a localized sentence and log the diagnostic on the
+server; JavaScript exceptions are not shown in the session controls. Account refusals keep their
+specific sentence and code, and a successful reopen returns the replacement session id.
 
 In the aside's **Ended** tab, **Sleeping** contains only explicitly pinned ended sessions.
 An unpinned ended leader goes under today's or older finished sessions, just like a worker.
