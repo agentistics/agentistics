@@ -31,7 +31,7 @@ for (const lang of ['pt', 'en'] as const) {
     const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
     await act(async () => root!.render(createElement(Router, null,
       createElement(Tree, { lang, pathname: '/usage', variant }))))
-    const usage = document.querySelector('a[href="/usage"]')!
+    const usage = Array.from(document.querySelectorAll('a[href="/usage"]')).find(a => a.textContent?.startsWith(lang === 'pt' ? 'Uso' : 'Usage'))!
     const tasks = document.querySelector('a[href="/tasks"]')!
     const chip = usage.querySelector('span[title]') as HTMLElement
     const reference = tasks.querySelector('span[title]') as HTMLElement
@@ -44,7 +44,7 @@ for (const lang of ['pt', 'en'] as const) {
     await act(async () => root!.render(createElement(Router, null,
       createElement(Rail, { lang, pathname: '/sessions' }),
       ...['now', 'plan', 'limits', 'history'].map(pageId => createElement(Header, { key: pageId, lang, areaId: 'usage', pageId })))))
-    const link = document.querySelector('a[href="/usage"]')!
+    const link = document.querySelector(`a[href="/usage"][aria-label="${lang === 'pt' ? 'Uso' : 'Usage'}"]`)!
     await act(async () => link.parentElement!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
     const tip = document.querySelector('[role="tooltip"]')!
     expect(tip.textContent).toContain(lang === 'pt' ? 'Uso' : 'Usage')

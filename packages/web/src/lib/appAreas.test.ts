@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { APP_AREAS, UNLISTED_ROUTES, areaOfPath, isSessionsWorkspace, searchAreas, firstPath } from './appAreas'
+import { APP_AREAS, UNLISTED_ROUTES, areaOfPath, isSessionsWorkspace, searchAreas, firstPath, areaHeaderPath, AREA_HEADER_PATH } from './appAreas'
 
 describe('areaOfPath', () => {
   for (const [path, page] of [['/leadership', 'leaders'], ['/leadership/checkins', 'checkins'],
@@ -57,7 +57,7 @@ describe('registry shape', () => {
     }
   })
   test('order is the owner-approved one', () => {
-    expect(APP_AREAS.map(a => a.id)).toEqual(['sessions', 'tasks', 'usage', 'metrics', 'repositories', 'vault', 'settings'])
+    expect(APP_AREAS.map(a => a.id)).toEqual(['metrics', 'sessions', 'tasks', 'usage', 'repositories', 'vault', 'settings'])
   })
 })
 
@@ -97,5 +97,18 @@ describe('firstPath', () => {
     expect(firstPath(usage)).toBe('/usage')
     expect(firstPath(usage, '/usage/plan')).toBe('/usage/plan')
     expect(firstPath(usage, '/costs')).toBe('/usage')
+  })
+})
+
+describe('area header landing', () => {
+  const area = (id: string) => APP_AREAS.find(a => a.id === id)!
+  test('Sessões always lands on Usage charts, even with a conversation remembered', () => {
+    expect(areaHeaderPath(area('sessions'), '/sessions/abc123')).toBe('/usage')
+    expect(areaHeaderPath(area('sessions'))).toBe('/usage')
+    expect(AREA_HEADER_PATH.sessions).toBe('/usage')
+  })
+  test('other areas keep resuming the last page visited', () => {
+    expect(areaHeaderPath(area('metrics'), '/costs')).toBe('/costs')
+    expect(areaHeaderPath(area('metrics'))).toBe('/')
   })
 })
