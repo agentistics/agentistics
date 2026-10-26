@@ -771,9 +771,13 @@ export async function planLimitsPayload(
   const labelOf = (harness: HarnessId, account: string): string => {
     const known = acct(harness, account)
     if (known?.nickname && !known.nickname.includes('@')) return known.nickname
-    // The registry's reserve row (no id) is the same login as an identified account beside it.
+    // The same rule Settings → Billing counts rows by (`foldUnnamed`): the registry's reserve row (no id)
+    // and a `root:` fallback the harness cannot name are the same login as the one account beside them.
     const live = accounts.filter(a => a.harness === harness && a.available && !a.retired)
-    const ofHarness = (live.some(a => a.id) ? live.filter(a => a.id) : live).sort((x, y) => x.firstSeen - y.firstSeen)
+    const isFallback = (a: { key?: string; label?: string; nickname?: string }) =>
+      (a.key ?? '').startsWith('root:') && /^(default account|conta padrão)$/i.test((a.label ?? '').trim()) && !a.nickname
+    const named = live.filter(a => a.id && !isFallback(a))
+    const ofHarness = (named.length === 1 ? named : named.length > 1 ? live.filter(a => a.id) : live.filter(a => a.id).slice(0, 1)).sort((x, y) => x.firstSeen - y.firstSeen)
     const n = ofHarness.findIndex(a => accountId(a) === account) + 1
     // Numbered per assistant, and only when it has several accounts.
     return n > 0 && ofHarness.length > 1 ? `${HARNESS_LABELS[harness]} #${n}` : HARNESS_LABELS[harness]
