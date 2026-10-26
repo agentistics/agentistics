@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.158.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Encerrar sessão: o aviso "Encerrando…" agora sai sozinho; se a sessão não parar em 15 segundos, ele diz o que aconteceu e oferece "Tentar de novo".',
+        en: 'Ending a session: the "Ending…" notice now leaves by itself; if the session has not stopped after 15 seconds it says what happened and offers "Try again".',
+      },
+      {
+        pt: 'O ícone e o texto de "Encerrando…" ficam centralizados, e o ponteiro de espera volta a girar (ponteiro padrão do sistema).',
+        en: 'The icon and text of "Ending…" are now centred, and the waiting pointer spins again (the system pointer).',
+      },
+    ],
+  },
   '2.157.0': {
     features: [
       {
