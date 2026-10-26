@@ -231,7 +231,7 @@ test('meterless harnesses key canonical roots and expose isolation capabilities 
     expect(await probeAccountIdentity(harness, alias)).toEqual(result)
     expect((await probeAccountIdentity(harness, other)).key).not.toBe(result.key)
   }
-  expect(IDENTITY_PROBES.antigravity).toBeNull()
+  expect(IDENTITY_PROBES.antigravity).toBeInstanceOf(Function)
   expect(ISOLATION_ENV).toEqual({ claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', copilot: 'COPILOT_HOME', gemini: 'GEMINI_CLI_HOME', kimi: 'KIMI_CODE_HOME', antigravity: null, opencode: null })
 })
 
@@ -669,4 +669,108 @@ test('an unconfirmed probe adds an id-less row only while the harness has no rec
   await writeFile(file, JSON.stringify({ version: 2, bindings: {}, segments: {},
     accounts: [{ id: 'acc_known000000', root: null, key: 'k', harness: 'codex', label: 'k', available: true, firstSeen: 1, lastSeen: 1 }] }))
   expect((await store.list(['codex'])).map(a => a.id)).toEqual(['acc_known000000'])
+})
+
+const FAKE_ACCESS = 'ya29.FAKE-ACCESS-TOKEN-do-not-leak'
+async function agyRoot(doc: string | null): Promise<string> {
+  const root = join(dir, 'agy')
+  await mkdir(root, { recursive: true })
+  if (doc !== null) await writeFile(join(root, 'antigravity-oauth-token'), doc, { mode: 0o600 })
+  return root
+}
+const agyDoc = (method: string) => JSON.stringify({
+  auth_method: method, id_token_email: 'person@example.invalid',
+  token: { access_token: FAKE_ACCESS, refresh_token: 'FAKE-REFRESH', expiry: '2099-01-01T00:00:00Z' },
+})
+
+test('antigravity probe: reads only the e-mail and the method, from a fake token file', async () => {
+  for (const [method, suffix] of [['consumer', 'Google'], ['gcp', 'Google Cloud']] as const) {
+    const out = await IDENTITY_PROBES.antigravity!(await agyRoot(agyDoc(method)))
+    expect(out).toEqual({ key: 'person@example.invalid', label: `person@example.invalid · ${suffix}` })
+    expect(JSON.stringify(out)).not.toContain(FAKE_ACCESS)
+    expect(JSON.stringify(out)).not.toContain('FAKE-REFRESH')
+    expect(Object.keys(out).sort()).toEqual(['key', 'label'])
+  }
+})
+
+test('antigravity probe: missing or malformed file answers like the other probes', async () => {
+  // Like codex's, a missing file rejects and the store turns that into the unknown identity.
+  await expect(IDENTITY_PROBES.antigravity!(await agyRoot(null))).rejects.toThrow()
+  expect((await createHarnessAccounts({ file: join(dir, 'm.json'), probe: (h, r) => IDENTITY_PROBES[h]!(r) }).current('antigravity', await agyRoot(null))).key).toBe('default')
+  const bad = await IDENTITY_PROBES.antigravity!(await agyRoot('{ not json ' + FAKE_ACCESS)).catch(e => e as Error)
+  expect(bad).toBeInstanceOf(Error)
+  expect((bad as Error).message).not.toContain(FAKE_ACCESS)
+  const store = createHarnessAccounts({ file: join(dir, 'a.json'), probe: (h, r) => IDENTITY_PROBES[h]!(r) })
+  expect((await store.current('antigravity', await agyRoot('{ not json'))).key).toBe('default')
+  expect(await IDENTITY_PROBES.antigravity!(await agyRoot('{"auth_method":"gcp"}'))).toMatchObject({ key: 'default' })
+})
+
+test('antigravity: an existing root-keyed default account keeps its id once the login is identified', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify({ version: 2, segments: {}, bindings: { 'antigravity:': 'acc_agyroot00000' },
+    accounts: [{ id: 'acc_agyroot00000', root: null, key: 'root:abcdef012345', harness: 'antigravity', label: 'Default account',
+      nickname: 'Home', available: true, firstSeen: 1, lastSeen: 5 }] }))
+  const store = createHarnessAccounts({ file, probe: async () => ({ key: 'person@example.invalid', label: 'person@example.invalid · Google' }) })
+  const account = await store.current('antigravity')
+  expect(account).toMatchObject({ id: 'acc_agyroot00000', key: 'person@example.invalid', nickname: 'Home', firstSeen: 1 })
+  expect((await store.readAccounts()).accounts.filter(a => a.harness === 'antigravity')).toHaveLength(1)
+})
+
+test('antigravity: legacy default/root duplicates fold before identification without leaving ghosts', async () => {
+  const file = join(dir, 'accounts.json')
+  await writeFile(file, JSON.stringify({ version: 2, segments: { acc_D: 10, acc_R: 40 },
+    bindings: { 'antigravity:': 'acc_R' }, accounts: [
+      { id: 'acc_D', root: null, key: 'default', harness: 'antigravity', label: 'Default account', available: true, firstSeen: 1, lastSeen: 2 },
+      { id: 'acc_R', root: null, key: 'root:abcdef012345', harness: 'antigravity', label: 'Default account', nickname: 'Home', available: true, firstSeen: 2, lastSeen: 3 },
+    ] }))
+  const store = createHarnessAccounts({ file, probe: async () => ({ key: 'person@example.invalid', label: 'person@example.invalid (Google)' }) })
+  const before = await store.readAccounts()
+  expect(before.accounts).toHaveLength(1)
+  expect(before.accounts[0]).toMatchObject({ id: 'acc_R', nickname: 'Home', key: 'root:abcdef012345' })
+  expect(before.aliases?.acc_D).toBe('acc_R')
+  expect(await store.current('antigravity')).toMatchObject({ id: 'acc_R', nickname: 'Home', key: 'person@example.invalid' })
+  const after = await store.readAccounts()
+  expect(after.accounts).toHaveLength(1)
+  expect(after.bindings).toEqual({ 'antigravity:': 'acc_R' })
+  expect(after.segments).toEqual({ acc_R: 40 })
+  expect((await store.list(['antigravity'])).map(a => a.id)).toEqual(['acc_R'])
+  expect((await createHarnessAccounts({ file }).readAccounts()).accounts).toHaveLength(1)
+})
+
+test('default/root cross-spelling allows Antigravity placeholders and preserves other probe exclusions', () => {
+  const rec = (harness: 'antigravity' | 'codex' | 'claude' | 'copilot' | 'gemini' | 'kimi', key: string, root: string | null = null) =>
+    ({ harness, key, root, label: 'Default account' })
+  for (const harness of ['antigravity', 'codex', 'claude', 'copilot', 'gemini', 'kimi'] as const) {
+    const mergesPlaceholders = harness === 'antigravity' || harness === 'gemini' || harness === 'kimi'
+    expect(sameLogin(rec(harness, 'default'), rec(harness, 'root:abcdef012345'))).toBe(mergesPlaceholders)
+    expect(sameLogin(rec(harness, 'root:abcdef012345'), rec(harness, 'default'))).toBe(mergesPlaceholders)
+    expect(sameLogin(rec(harness, 'default'), rec(harness, 'person@example.invalid'))).toBe(false)
+  }
+  expect(sameLogin(rec('antigravity', 'default'), rec('antigravity', 'root:abcdef012345', '/elsewhere'))).toBe(false)
+  expect(sameLogin(rec('antigravity', 'default', '/elsewhere'), rec('antigravity', 'root:abcdef012345'))).toBe(false)
+})
+
+test('other harnesses retain a bound root-keyed account when another login is identified', async () => {
+  for (const harness of ['codex', 'claude', 'copilot', 'gemini', 'kimi'] as const) {
+    const file = join(dir, `${harness}.json`)
+    const previous = { id: 'acc_X', root: null, key: 'root:abcdef012345', harness, label: 'Default account',
+      nickname: 'Previous login', available: true, firstSeen: 1, lastSeen: 2 }
+    await writeFile(file, JSON.stringify({ version: 2, segments: { acc_X: 40 }, bindings: { [`${harness}:`]: 'acc_X' }, accounts: [previous] }))
+    const store = createHarnessAccounts({ file, now: () => 5000, probe: async () => ({ key: 'bob@example.invalid', label: 'bob@example.invalid' }) })
+    const identified = await store.current(harness)
+    expect(identified.id).not.toBe('acc_X')
+    expect(identified).toMatchObject({ key: 'bob@example.invalid', firstSeen: 5000 })
+    expect(identified.nickname).toBeUndefined()
+    const data = await store.readAccounts()
+    expect(data.accounts).toHaveLength(2)
+    expect(data.accounts.find(a => a.id === 'acc_X')).toEqual(previous)
+    expect(data.segments).toEqual({ acc_X: 40 })
+    expect(data.bindings[`${harness}:`]).toBe(identified.id)
+    expect(data.aliases ?? {}).toEqual({})
+    // The explicit adoption API must also report the displaced account, as before this change.
+    await writeFile(file, JSON.stringify({ version: 2, segments: { acc_X: 40 }, bindings: { [`${harness}:`]: 'acc_X' }, accounts: [previous] }))
+    const result = await store.bind(null, { harness, key: 'bob@example.invalid', label: 'bob@example.invalid' })
+    expect(result.previous).toEqual(previous)
+    expect(result.account.id).not.toBe('acc_X')
+  }
 })

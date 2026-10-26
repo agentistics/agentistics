@@ -130,6 +130,7 @@ import { resolveLang } from './cli-lang'
 import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
+import { sessionActionError } from './sessions/action-error'
 import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { spawnCapabilities } from './sessions/codex-capabilities'
 import { readHarnessVersion } from './sessions/harness-version'
@@ -2109,13 +2110,13 @@ export async function spawnManaged(req: {
   // An agent is held to the hidden-account rule here too, including a row with no account (the
   // default root's login) — the one check every door ends in.
   const accountId = req.inherit ? req.inherit.accountId : req.accountId
-  let accountRoot: string | null = null
+  let accountRoot: string | null | undefined
   if (accountId || req.callerVerified) {
     const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
     const { spawnAccountMessage } = await import('./sessions/spawn-account')
     const decided = await recordedSpawnAccount(accountId, { agentCaller: req.callerVerified === true, harness: req.harness })
     if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', !!req.inherit), accountRefusal: decided.reason }
-    accountRoot = decided.account?.root ?? null
+    accountRoot = decided.account?.root
   }
 
   // THE GATE — before anything is spawned or written to the registry. A session that has already
@@ -2208,7 +2209,7 @@ export async function spawnManaged(req: {
     // Offered for a FRESH session; `planSpawn` applies it only where the CLI accepts one and reports
     // back what it actually did. A resume ignores it — that conversation already has an id.
     conversationId: offeredConversationId,
-    ...(accountRoot ? { account: { root: accountRoot } } : {}),
+    ...(accountRoot !== undefined ? { account: { root: accountRoot } } : {}),
   }, await spawnCapabilities(req.harness))
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
   if (req.account) applyAccountToPlan(planned.plan, req.account)
@@ -2280,6 +2281,7 @@ export async function spawnManaged(req: {
       cwd: req.cwd,
       argv: planned.plan.argv,
       ...(planned.plan.env ? { env: planned.plan.env } : {}),
+      ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
       // Deliver the initial prompt once the harness is ready (see `initial-prompt.ts`). The harness's
       // screen rules ride along so the backend can tell an idle prompt from a startup dialog.
       ...(planned.plan.initialPrompt
@@ -4195,12 +4197,15 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // both writing into one transcript. The lock serialises the whole check-and-spawn sequence
       // per conversation id, so the second caller's check only runs once the first has settled.
       // A NATIVE session is reopened by the engine, which keeps its id: nothing is spawned, nothing replaced.
-      if (isNativeSessionId(req.sessionId)) {
-        const out = await runNativeVerb(req.sessionId, 'resume', lang)
-        return { ...out, ...(out.ok ? { id: req.sessionId } : {}) }
+      try {
+        if (isNativeSessionId(req.sessionId)) {
+          const out = await runNativeVerb(req.sessionId, 'resume', lang)
+          return { ...out, ...(out.ok ? { id: req.sessionId } : {}) }
+        }
+        return await withResumeLock(req.sessionId, () => resumeSessionLocked(req, this))
+      } catch (error) {
+        return sessionActionError(lang, 'resume', req.sessionId, error)
       }
-      try { return await withResumeLock(req.sessionId, () => resumeSessionLocked(req, this)) }
-      catch (e) { return { ok: false, message: e instanceof Error ? e.message : String(e) } }
     },
 
     async switchSessionAccount(req: SwitchAccountRequest) {

@@ -154,10 +154,10 @@ export interface SpawnRequest {
   attemptId?: string
   /**
    * PLAN.ACCOUNTS D3: the account root to run in (`ManagedSession.accountId`'s root). Its isolation
-   * variable (`ISOLATION_ENV`) joins `SpawnPlan.env`; absent (the default root) adds NOTHING, so a
-   * single-account machine spawns byte for byte as before.
+   * variable (`ISOLATION_ENV`) joins `SpawnPlan.env`; an explicit null root removes the inherited
+   * variable. An absent account preserves the legacy environment.
    */
-  account?: { root: string }
+  account?: { root: string | null }
 }
 
 /**
@@ -182,6 +182,8 @@ export interface SpawnPlan {
   modeNeedsProtocol?: CanonicalMode
   /** Extra environment for the pane (an `env-dir` context channel). */
   env?: Record<string, string>
+  /** Remove inherited variables before launching the child. */
+  unsetEnv?: string[]
   /** A file the CALLER must write before spawning (this module is pure). */
   contextFile?: { dir: string; name: string; text: string }
   /** Further files of a `files` channel, written beside `contextFile` (same dir). */
@@ -226,6 +228,8 @@ export interface BackendSpawn {
   argv: string[]
   /** Extra environment variables for the pane, merged over the session env. */
   env?: Record<string, string>
+  /** Remove inherited variables before launching the child. */
+  unsetEnv?: string[]
   /**
    * How to deliver the initial prompt once the harness is ready to receive it.
    *

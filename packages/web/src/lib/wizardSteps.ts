@@ -42,6 +42,8 @@ export interface WizardHarness {
   efforts: string[]
   /** What the CLI itself publishes as its default, where it publishes one. See `unsetAnswer`. */
   defaultModel?: string
+  /** The saved default is no longer offered by the CLI; `defaultModel` is the first one it lists. */
+  defaultModelStale?: boolean
   defaultEffort?: string
   /** MODE.EVERYWHERE — the permission modes a session of it can start in here (default included). */
   modes?: CanonicalMode[]
@@ -175,6 +177,7 @@ export interface HarnessAnswer {
   efforts: string[]
   /** What the CLI uses when the flag is not passed, and ONLY where the CLI publishes it. */
   defaultModel?: string
+  defaultModelStale?: boolean
   defaultEffort?: string
   installed?: boolean
   /** MODE.EVERYWHERE — absent from an older server: the field is then not asked. */
@@ -201,6 +204,7 @@ export function toWizardHarness(h: HarnessAnswer): WizardHarness {
     ...(h.modelRequired ? { modelRequired: true } : {}),
     efforts: h.efforts,
     ...(h.defaultModel ? { defaultModel: h.defaultModel } : {}),
+    ...(h.defaultModelStale ? { defaultModelStale: true } : {}),
     ...(h.defaultEffort ? { defaultEffort: h.defaultEffort } : {}),
     ...(h.modes && h.modes.filter(isCanonicalMode).length > 1 ? { modes: h.modes.filter(isCanonicalMode) } : {}),
   }
@@ -211,10 +215,12 @@ export function toWizardHarness(h: HarnessAnswer): WizardHarness {
  * why a vague sentence is the honest one where the CLI publishes no default. Shared so the wizard's
  * step 1 and the staged-session compose panel can never word the same unset state two ways.
  */
-export function unsetText(published: string | undefined, pt: boolean): string {
+export function unsetText(published: string | undefined, pt: boolean, stale = false): string {
   const answer = unsetAnswer(published)
   return answer.known
-    ? (pt ? `Padrão (${answer.value})` : `Default (${answer.value})`)
+    ? (stale
+      ? (pt ? `Padrão (${answer.value}) — o modelo salvo não existe mais` : `Default (${answer.value}) — the saved model no longer exists`)
+      : (pt ? `Padrão (${answer.value})` : `Default (${answer.value})`))
     : (pt ? 'Padrão do assistente' : "The assistant's default")
 }
 

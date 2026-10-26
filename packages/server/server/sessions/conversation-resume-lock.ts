@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } 
 import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { withResumeLock } from './resume-lock'
+import { SessionNotice } from './action-error'
 
 /** Injectable root lets independent callers test the same on-disk exclusion without a real HOME. */
 export function createConversationResumeLock(root: string, timeoutMs = 60_000) {
@@ -58,7 +59,7 @@ export function createConversationResumeLock(root: string, timeoutMs = 60_000) {
             } finally { if (!moved) rmSync(reaping, { recursive: true, force: true }) }
           }
         }
-        if (Date.now() >= deadline) throw new Error('Conversation reopen is already in progress; retry shortly.')
+        if (Date.now() >= deadline) throw new SessionNotice('Conversation reopen is already in progress; retry shortly.')
         await new Promise(r => setTimeout(r, 25))
       }
     }

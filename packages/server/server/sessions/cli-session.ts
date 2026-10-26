@@ -535,7 +535,7 @@ export async function start(
     ...(logFile ? { logFile } : {}),
     conversationId: offeredConversationId,
     context: ctx,
-    ...(account.account?.root ? { account: { root: account.account.root } } : {}),
+    ...(account.account ? { account: { root: account.account.root } } : {}),
   }, await spawnCapabilities(cmd.harness))
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
   if (!cmd.background && planned.plan.modeNeedsProtocol) { console.error(`${cmd.harness} cannot start a terminal in ${planned.plan.modeNeedsProtocol} mode; use a supported mode or a structured session.`); return 1 }
@@ -598,7 +598,7 @@ export async function start(
   await writeContextFile(planned.plan)
   try {
     if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...spawnPromptArg(planned.plan, cmd.harness),
+    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}), ...spawnPromptArg(planned.plan, cmd.harness),
       structured: structuredIntentOf({ harness: cmd.harness, origin: cmd.background ? 'background' : 'terminal', prompt: cmd.prompt, mode: launch.mode }, { ...launch, ctx, conversationId: offeredConversationId, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
       ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
     })
@@ -849,7 +849,7 @@ export async function batch(
       ...(spec.model ? { model: spec.model } : {}),
       ...(spec.effort ? { effort: spec.effort } : {}),
       conversationId: offeredConversationId,
-      ...(account.account?.root ? { account: { root: account.account.root } } : {}),
+      ...(account.account ? { account: { root: account.account.root } } : {}),
     }, await spawnCapabilities(spec.harness))
     if (!planned.ok) { failed.push({ harness: spec.harness, reason: explainPlanError(planned.error) }); continue }
 
@@ -902,7 +902,7 @@ export async function batch(
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
       await backend.spawn({
         id, cwd, argv: planned.plan.argv,
-        ...(planned.plan.env ? { env: planned.plan.env } : {}),
+        ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
         ...spawnPromptArg(planned.plan, spec.harness),
         structured: structuredIntentOf({ harness: spec.harness, origin: 'background', prompt: spec.prompt, mode: spec.mode ?? parentRow?.mode }, { model: spec.model, effort: spec.effort, ctx, conversationId: offeredConversationId, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
         ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
@@ -1022,7 +1022,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       // PLAN.ACCOUNTS D3 — the row's own account, in its own root; a removed account refuses in words.
       const account = await recordedSpawnAccount(m.accountId, { agentCaller, harness: m.harness })
       if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); return }
-      const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
+      const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
       if (!planned.ok) { skipped.push(m.id); return }
       await addSession({
         id, harness: m.harness, cwd: m.cwd, createdAt: new Date().toISOString(), task,
@@ -1045,7 +1045,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     })
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({ id, cwd: m.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}),
+      await backend.spawn({ id, cwd: m.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
         structured: structuredIntentOf({ harness: m.harness, origin: 'background', resumeId: row.resumeId, mode: m.mode }, { ...inheritedLaunch(m, m.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
         ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
       })
@@ -1381,7 +1381,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
     const previous = newestRowOfConversation(await readRegistry(), live.sessionId)
     const account = await recordedSpawnAccount(previous?.accountId, { agentCaller: await callerHoldsIdentity(callerSessionId()), harness: live.harness })
     if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, 'en', true)); return 1 }
-    const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...inheritedLaunch(previous, live.harness), ...(logFile ? { logFile } : {}), ...(account.account?.root ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
+    const planned = planSpawn({ harness: live.harness, cwd: live.cwd, resumeId: live.sessionId, ...inheritedLaunch(previous, live.harness), ...(logFile ? { logFile } : {}), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(live.harness))
     if (planned.ok && planned.plan.modeNeedsProtocol) { console.error(`Cannot reopen ${live.sessionId}: terminal cannot apply ${planned.plan.modeNeedsProtocol} approval mode`); return 1 }
     const plan = planTakeover({
       conversationId: live.sessionId,
@@ -1415,7 +1415,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
 
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}),
+      await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
         structured: structuredIntentOf({ harness: live.harness, origin: 'terminal', resumeId: live.sessionId, mode: previous?.mode }, { ...inheritedLaunch(previous, live.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
       })
     } catch (e) {

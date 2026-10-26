@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { jsonStringKey, readHarnessDefaults, tomlTopKey } from './harness-defaults'
+import { jsonStringKey, readHarnessDefaults, reconcileSavedModel, tomlTopKey } from './harness-defaults'
 
 describe('jsonStringKey', () => {
   it('reads the key it was asked for', () => {
@@ -99,5 +99,22 @@ describe('the module names ONE key per file and nothing else', () => {
     // person's configured default as this machine's.
     expect(source).toContain('HOME_DIR')
     expect(source).not.toContain('CLAUDE_DIR')
+  })
+})
+
+describe('reconcileSavedModel', () => {
+  const listed = [
+    { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (Thinking)' },
+  ]
+  it('keeps a saved label the CLI still lists', () => {
+    expect(reconcileSavedModel('gemini 3.8 flash (high)', listed)).toEqual({ model: 'gemini 3.8 flash (high)' })
+  })
+  it('replaces a label the CLI no longer lists with the first one and marks it', () => {
+    expect(reconcileSavedModel('Gemini 3.6 Flash (Medium)', listed))
+      .toEqual({ model: 'Gemini 3.8 Flash (High)', modelStale: true })
+  })
+  it('an empty list proves nothing: the saved label stands', () => {
+    expect(reconcileSavedModel('Gemini 3.6 Flash (Medium)', [])).toEqual({ model: 'Gemini 3.6 Flash (Medium)' })
   })
 })

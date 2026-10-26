@@ -52,7 +52,7 @@ export interface SavedSpawn {
   /** Exactly what the driver was given, minus the transport. */
   spawn: Omit<StructuredSpawn, 'transport'>
   /** The bits of the host's `BackendSpawn` the fallback needs (`resumeSpawn`). */
-  backend: { id: string; cwd: string; env?: Record<string, string>; structured?: unknown }
+  backend: { id: string; cwd: string; env?: Record<string, string>; unsetEnv?: string[]; structured?: unknown }
 }
 
 /** How the relay process is started: a checkout runs the source, a binary runs itself. */
@@ -354,8 +354,8 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     }
   }
 
-  const specOf = (bin: string, args: readonly string[], cwd: string, env?: Readonly<Record<string, string>>): RelayLaunchSpec =>
-    ({ bin, args: [...args], cwd, ...(env ? { env: { ...env } } : {}) })
+  const specOf = (bin: string, args: readonly string[], cwd: string, env?: Readonly<Record<string, string>>, unsetEnv?: readonly string[]): RelayLaunchSpec =>
+    ({ bin, args: [...args], cwd, ...(env ? { env: { ...env } } : {}), ...(unsetEnv ? { unsetEnv: [...unsetEnv] } : {}) })
 
   const store: DurableStore = {
     root,
@@ -387,7 +387,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
         detach: () => { for (const g of gens) g.detach() },
         launch(bin, args, cwd, env): StructuredPipe {
           mayLaunch(cur())
-          const { gen, pipe } = liveGeneration(id, gens.length, saved.harness, specOf(bin, args, cwd, env), cur())
+          const { gen, pipe } = liveGeneration(id, gens.length, saved.harness, specOf(bin, args, cwd, env, saved.backend.unsetEnv), cur())
           gens.push(gen)
           return pipe
         },
@@ -420,7 +420,8 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     replay(id) {
       const n = generations(id)
       if (n === 0 || !isAlive(id)) return null
-      const harness = (() => { try { return (JSON.parse(read(id, FILES.saved) ?? '') as SavedSpawn).harness } catch { return '' } })()
+      const savedSpawn = (() => { try { return JSON.parse(read(id, FILES.saved) ?? '') as SavedSpawn } catch { return null } })()
+      const harness = savedSpawn?.harness ?? ''
       /** What each generation recorded. Only the LAST can still have a running child. */
       const recs = Array.from({ length: n }, (_, k) => {
         const exit = (() => { try { const e = JSON.parse(readGen(id, k, FILES.exit) ?? 'null') as { code?: unknown } | null; return e ? { code: typeof e.code === 'number' ? e.code : null } : null } catch { return null } })()
@@ -594,7 +595,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
         done,
         launch(bin, args, cwd, env): StructuredPipe {
           const k = launched.length
-          const spec = specOf(bin, args, cwd, env)
+          const spec = specOf(bin, args, cwd, env, savedSpawn?.backend?.unsetEnv)
           if (k < n) {
             const { gen, pipe } = replayGeneration(k, spec)
             launched.push(gen)

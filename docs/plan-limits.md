@@ -65,13 +65,20 @@ positional default for the `--session`s that follow) and every reopen.
 
 - The account's root reaches the pane as its harness's one isolation variable (`ISOLATION_ENV`:
   `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `COPILOT_HOME`, `GEMINI_CLI_HOME`, `KIMI_CODE_HOME`) through the
-  spawn env, never the command line. The default root adds nothing: with the flag off, or on a
-  single-account machine, argv and env are byte for byte what they were.
+  spawn env. Choosing the default account explicitly removes its inherited isolation variable, so
+  a worker running on another account cannot pass that login to the new session. Structured relays
+  delete it from the child environment; tmux panes use `env -u` for that child only. The removal is
+  saved for recovery and retained when continuing in a TUI. With no account selected, the legacy
+  environment is preserved.
 - An account runs where it is SIGNED IN: its root is read from the registry's bindings, never from
   `HarnessAccount.root` alone (a signed-out account reads `null` too, which is not the default
   login). Naming a signed-out account, or reopening a row recorded on one, is refused in words
   (**409 `account_signed_out`**) for the owner as well — it never runs under whatever login holds a
   root now.
+- Antigravity's legacy `default` and `root:<hash>` records for the default root merge before
+  identification. Its first confirmed identity keeps the surviving record's id and nickname.
+  Only Antigravity treats `root:` records as unidentified placeholders: it minted those keys
+  before it had an identity probe. Other harnesses keep `root:` records separate from a new login.
 - No `account` → the router's pick for that harness (C2's agent-visible budgets, `pickAccount`), else
   the default root when its account is visible, else the oldest visible signed-in account (a
   secondary-only account included), else the owner keeps the default root and an agent is refused.

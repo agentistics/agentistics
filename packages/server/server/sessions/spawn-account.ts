@@ -42,7 +42,7 @@ export interface SpawnAccountRow {
   firstSeen?: number
 }
 
-/** The account a spawn runs on. `root: null` adds nothing to the spawn. */
+/** The account a spawn runs on. `root: null` removes its inherited isolation variable. */
 export interface SpawnAccount { id: string; root: string | null }
 
 export type SpawnAccountRefusal =
