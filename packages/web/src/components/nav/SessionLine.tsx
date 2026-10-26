@@ -21,7 +21,7 @@ import { sessionIdentityKey } from '../../lib/sessionIdentity'
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { registerSessionRoleAlias, useSessionRole } from '../../lib/sessionRoles'
 import { reopeningLabel, useReopening } from '../../lib/reopeningStore'
-import { endingLabel, useEnding } from '../../lib/endingSessions'
+import { endingLabel, useEnding, useEndingTimedOut } from '../../lib/endingSessions'
 import { isLive, isWaitingState } from '../../lib/asideTabs'
 import type { RowVerb } from '../../lib/rowMenu'
 import { AgentisticsLoader } from '../AgentisticsLoader'
@@ -81,7 +81,9 @@ export function SessionLine({
   useEffect(() => { registerSessionRoleAlias(session.id, roleKey) }, [session.id, roleKey])
   const muted = useMutedKeys().includes(roleKey)
   const reopening = useReopening().has(session.id)
-  const ending = useEnding(session.id)
+  const endingMark = useEnding(session.id)
+  const endingTimedOut = useEndingTimedOut(session.id)
+  const ending = endingMark && !endingTimedOut
   const goTo = useContext(GoToSessionContext)
   const waiting = isWaitingState(session.state)
   const dot = lineDot(session.state, fell)

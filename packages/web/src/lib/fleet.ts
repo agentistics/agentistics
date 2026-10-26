@@ -23,7 +23,7 @@ import { chatHoldsText, confirmSendLanded, parseActResult, sendUnconfirmedMessag
 import { nativeAct, readNativeFleet } from './nativeFleet'
 import { withNativeSessions } from './nativeFleetRow'
 import { isNativeSessionId } from './sessionRoute'
-import { withEnding } from './endingSessions'
+import { endingTimeoutText, withEnding } from './endingSessions'
 
 // Central relay support was removed with the member UI. These local-only placeholders keep the
 // old transport branch inert while the shared fleet state remains a machine-local concern.
@@ -725,8 +725,8 @@ export function useFleet(lang: 'pt' | 'en', enabled = true): FleetState {
   // `endingSessions.ts`). Here because this is the one door every surface ends a session through.
   const act = useCallback<FleetState['act']>(async req => {
     if (req.action !== 'kill') return actRaw(req)
-    return withEnding(req.id, () => actRaw(req), () => waitUntilInactive(req.id), () => isRowActive(req.id))
-  }, [actRaw])
+    return withEnding(req.id, () => actRaw(req), () => waitUntilInactive(req.id), () => isRowActive(req.id), undefined, endingTimeoutText(lang === 'pt').body)
+  }, [actRaw, lang])
 
   return {
     fleet: enabled ? snapshot : EMPTY,

@@ -271,7 +271,7 @@ test('timeout: the spinner leaves, the outcome and a retry are shown; retry clea
   show('s9', 'pt')
   let retried = 0
   act(() => root.render(createElement(ending_gate(), { id: 's9', lang: 'pt', onRetry: () => { retried++ }, children: createElement('i') })))
-  const run = ending.withEnding('s9', async () => ({ ok: true }), () => new Promise<void>(() => {}), () => true, 30)
+  const run = ending.withEnding('s9', async () => ({ ok: true }), () => new Promise<void>(() => {}), () => true, 30, 'x')
   await act(async () => { await run })
   const o = overlay()!
   expect(o.hasAttribute('data-session-ending-timeout')).toBe(true)
@@ -290,3 +290,10 @@ test('timeout with the session already inactive just settles; ANY terminal state
 })
 
 function ending_gate() { return SessionEndingGate }
+
+test('an unconfirmed kill is reported as NOT done, so the caller does not navigate away', async () => {
+  const r = await ending.withEnding('s7', async () => ({ ok: true as boolean, message: '' }), () => new Promise<void>(() => {}), () => true, 20, 'still running')
+  expect(r.ok).toBe(false)
+  expect(r.message).toBe('still running')
+  expect(ending.isEndingTimedOut('s7')).toBe(true)
+})

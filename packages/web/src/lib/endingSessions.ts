@@ -85,6 +85,7 @@ export async function withEnding<T extends { ok: boolean }>(
   waitUntilInactive: () => Promise<void>,
   isActive: () => boolean = () => true,
   timeoutMs: number = ENDING_TIMEOUT_MS,
+  timeoutMessage: string = endingTimeoutText(false).body,
 ): Promise<T> {
   const started = Date.now()
   markEnding(id)
@@ -107,6 +108,9 @@ export async function withEnding<T extends { ok: boolean }>(
         timedOut.add(id)
         keep = true
         emit()
+        // The kill was accepted but is not confirmed: report it as not done, so the caller stays on
+        // the session (and the overlay offers a retry) instead of navigating away from a live one.
+        return { ...result, ok: false, message: timeoutMessage } as T
       } else {
         const attempt = ending.get(id)
         if (attempt) { attempt.succeeded = true; attempt.doneAt = Date.now() }
