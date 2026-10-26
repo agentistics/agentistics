@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.157.0': {
+    features: [
+      {
+        pt: 'Na troca de líder, o novo líder pode encerrar o anterior sozinho: ele sai quando termina o que estava fazendo.',
+        en: 'On a leader hand-off, the new leader can retire the previous one by itself: it closes once it finishes what it was doing.',
+      },
+    ],
+    fixes: [],
+  },
   '2.156.0': {
     features: [
       {
