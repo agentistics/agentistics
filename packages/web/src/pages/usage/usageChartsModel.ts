@@ -26,18 +26,22 @@ export function scopeSessions<S extends Pick<SessionMeta, 'harness' | 'account'>
   return [...sessions]
 }
 
-export interface LimitSeries { key: string; harness: ReadingHarness; account: string; label: string; points: { at: number; pct: number; reset?: number }[] }
+export interface LimitSeries { key: string; harness: ReadingHarness; account: string; label: string; points: { at: number; pct: number; reset?: number; gapBefore?: boolean }[] }
 
 /** One line per reading for a window kind; a reading with no point of that kind is `omitted` (named, not drawn as 0). */
 export function limitSeries(readings: readonly PlanReadings[], kind: 'week' | '5h', labelOf: (r: PlanReadings) => string, since?: number): { series: LimitSeries[]; omitted: string[] } {
   const series: LimitSeries[] = []
   const omitted: string[] = []
   for (const r of readings) {
-    const points = r.points.flatMap(p => {
+    let missing = false
+    const points = [...r.points].sort((a, b) => a.at - b.at).flatMap(p => {
       const pct = kind === 'week' ? p.weekPct : p.fiveHourPct
-      if (pct === null || (since !== undefined && p.at < since)) return []
+      if (since !== undefined && p.at < since) return []
+      if (pct === null || !Number.isFinite(pct)) { missing = true; return [] }
       const reset = kind === 'week' ? p.weekReset : p.fiveReset
-      return [{ at: p.at, pct, ...(reset !== undefined ? { reset } : {}) }]
+      const point = { at: p.at, pct, ...(reset !== undefined ? { reset } : {}), ...(missing ? { gapBefore: true } : {}) }
+      missing = false
+      return [point]
     })
     if (points.length) series.push({ key: readingKey(r), harness: r.harness, account: r.account, label: labelOf(r), points })
     else omitted.push(labelOf(r))
@@ -45,31 +49,35 @@ export function limitSeries(readings: readonly PlanReadings[], kind: 'week' | '5
   return { series, omitted }
 }
 
-/** Series → the rows `ActivityPercentChart` draws, with a gap where a window renewed (the line must not fall). */
-export function toChartRows(series: readonly LimitSeries[], duration: number): { rows: { at: number; [key: string]: number | null }[]; keys: { key: string; label: string; harness: ReadingHarness }[] } {
-  const rows = new Map<number, { at: number; [key: string]: number | null }>()
+type LimitPoint = LimitSeries['points'][number]
+/** Five-minute samples may jitter; a changed reset, decrease, or hour without readings breaks continuity. */
+const disconnected = (a: LimitPoint, b: LimitPoint): boolean =>
+  !!b.gapBefore || b.at - a.at > 3_600_000 || b.pct < a.pct
+  || (a.reset !== undefined && b.reset !== undefined && Math.abs(a.reset - b.reset) > 300_000)
+
+/** Series → chart rows. Nulls are real breaks; union timestamps inside a segment interpolate the
+ * same straight line the chart draws, so another account's sample never interrupts this one. */
+export function toChartRows(series: readonly LimitSeries[], _duration: number): { rows: { at: number; [key: string]: number | null }[]; keys: { key: string; label: string; harness: ReadingHarness }[] } {
+  const times = new Set<number>()
   const keys = series.map((s, i) => ({ key: `s${i}`, label: s.label, harness: s.harness }))
+  for (const s of series) {
+    s.points.forEach(p => times.add(p.at))
+    for (let i = 1; i < s.points.length; i++) {
+      const a = s.points[i - 1]!, b = s.points[i]!
+      if (disconnected(a, b) && b.at - a.at > 1) times.add(Math.floor((a.at + b.at) / 2))
+    }
+  }
+  const rows = [...times].sort((a, b) => a - b).map(at => ({ at } as { at: number; [key: string]: number | null }))
   series.forEach((s, i) => {
-    let prev: LimitSeries['points'][number] | undefined
-    for (const p of s.points) {
-      if (prev) {
-        const renewed = prev.reset !== undefined && p.reset !== undefined ? Math.abs(prev.reset - p.reset) > Math.min(duration / 20, 600_000) : p.pct < prev.pct - 20
-        if (renewed) {
-          const at = Math.round((prev.at + p.at) / 2)
-          const gap = rows.get(at) ?? { at }
-          gap[`s${i}`] = null
-          rows.set(at, gap)
-        }
-      }
-      const row = rows.get(p.at) ?? { at: p.at }
-      row[`s${i}`] = p.pct
-      rows.set(p.at, row)
-      prev = p
+    let next = 0
+    for (const row of rows) {
+      while (next < s.points.length && s.points[next]!.at < row.at) next++
+      const b = s.points[next], a = s.points[next - 1]
+      row[`s${i}`] = b?.at === row.at ? b.pct
+        : a && b && !disconnected(a, b) ? a.pct + (b.pct - a.pct) * (row.at - a.at) / (b.at - a.at) : null
     }
   })
-  const out = [...rows.values()].sort((a, b) => a.at - b.at)
-  for (const r of out) for (const k of keys) r[k.key] ??= null
-  return { rows: out, keys }
+  return { rows, keys }
 }
 
 export interface Peak { label: string; kind: 'week' | '5h'; at: number; ratePerHour: number; rise: number }
@@ -82,8 +90,7 @@ export function riseIntervals(series: readonly LimitSeries[]): { at: number; lab
       const a = s.points[i - 1]!, b = s.points[i]!
       const hours = (b.at - a.at) / 3_600_000
       const rise = b.pct - a.pct
-      const renewed = a.reset !== undefined && b.reset !== undefined && Math.abs(a.reset - b.reset) > 600_000
-      if (hours <= 0 || rise <= 0 || renewed) continue
+      if (hours <= 0 || rise <= 0 || disconnected(a, b)) continue
       out.push({ at: b.at, label: s.label, rise, ratePerHour: rise / hours })
     }
   }
@@ -94,18 +101,23 @@ export function riseIntervals(series: readonly LimitSeries[]): { at: number; lab
 export function topPeaks(series: readonly LimitSeries[], kind: 'week' | '5h', n = 3, minHours = 0.5): Peak[] {
   const peaks: Peak[] = []
   for (const s of series) {
-    const merged: LimitSeries['points'] = []
-    // Coarsen to >= minHours steps: peaks are about sustained climbs.
-    for (const p of s.points) {
+    let merged: LimitSeries['points'] = []
+    const collect = () => {
+      for (const r of riseIntervals([{ ...s, points: merged }])) peaks.push({ label: r.label, kind, at: r.at, ratePerHour: r.ratePerHour, rise: r.rise })
+    }
+    // Segment BEFORE coarsening: otherwise a skipped reset can turn into an invented climb.
+    for (let i = 0; i < s.points.length; i++) {
+      const p = s.points[i]!, prev = s.points[i - 1]
+      if (prev && disconnected(prev, p)) { collect(); merged = [] }
       const last = merged.at(-1)
       if (!last || (p.at - last.at) / 3_600_000 >= minHours) merged.push(p)
     }
-    for (const r of riseIntervals([{ ...s, points: merged }])) peaks.push({ label: r.label, kind, at: r.at, ratePerHour: r.ratePerHour, rise: r.rise })
+    collect()
   }
   return peaks.sort((a, b) => b.ratePerHour - a.ratePerHour).slice(0, n)
 }
 
-/** Hourly-resolved rate rows (pp/h, max across the selected lines per interval end), for the peaks chart. */
+/** Observed interval rate rows (pp/h, max across the selected lines per interval end), for the peaks chart. */
 export function rateRows(series: readonly LimitSeries[], cap = 100): { at: number; rate: number | null }[] {
   const by = new Map<number, number>()
   for (const r of riseIntervals(series)) by.set(r.at, Math.max(by.get(r.at) ?? 0, Math.min(cap, r.ratePerHour)))

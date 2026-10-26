@@ -65,7 +65,7 @@ export function UsageChartsPanel({ budgets, readings, sessions, lang, now = Date
   const lineChart = (kind: '5h' | 'week', data: typeof view.five, first = false) => {
     const { rows, keys } = toChartRows(data.series, WINDOW_MS[kind])
     return rows.length
-      ? <ActivityPercentChart lang={lang} data={rows} series={keys.map(k => ({ key: k.key, label: k.label, color: colorOf(k.harness, k.key, keys), connectNulls: true }))} />
+      ? <ActivityPercentChart lang={lang} data={rows} series={keys.map(k => ({ key: k.key, label: k.label, color: colorOf(k.harness, k.key, keys), connectNulls: false }))} />
       : <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{view.five.series.length + view.week.series.length ? t.noWindow : first ? t.none : ''}</p>
   }
   const heading = (text: string) => <h2 style={{ fontSize: 13, margin: '0 0 8px' }}>{text}</h2>

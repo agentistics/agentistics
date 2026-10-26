@@ -72,3 +72,50 @@ describe('messageActivity', () => {
     expect(Object.values(a.hourCounts).reduce((n, v) => n + v, 0)).toBe(2)
   })
 })
+
+describe('series boundaries', () => {
+  test('accounts sharing a label stay independent at interleaved timestamps', () => {
+    const a: PlanReadings = { harness: 'claude', account: 'a', points: [
+      { at: T0, weekPct: 80, fiveHourPct: 90, weekReset: T0 + 10 * H },
+      { at: T0 + H, weekPct: 82, fiveHourPct: 95, weekReset: T0 + 10 * H },
+    ] }
+    const b: PlanReadings = { harness: 'claude', account: 'b', points: [
+      { at: T0 + H / 2, weekPct: 30, fiveHourPct: 20, weekReset: T0 + 20 * H },
+    ] }
+    const c: PlanReadings = { ...b, harness: 'codex', account: 'a' }
+    const { series } = limitSeries([a, b, c], 'week', () => 'Principal')
+    expect(series.map(s => s.key)).toEqual(['claude:a', 'claude:b', 'codex:a'])
+    const { rows } = toChartRows(series, 7 * 24 * H)
+    expect(rows.map(r => r.s0)).toEqual([80, 81, 82])
+    expect(rows.map(r => r.s1)).toEqual([null, 30, null])
+    expect(scopeReadings([a, b, c], { mode: 'account', key: 'claude:b' })).toEqual([b])
+  })
+  test('interleaved window identities never draw vertical joins', () => {
+    const { series } = limitSeries([{ harness: 'claude', account: 'a', points: [
+      { at: T0, weekPct: 100, fiveHourPct: 100, weekReset: T0 + 10 * H },
+      { at: T0 + H / 12, weekPct: 35, fiveHourPct: 35, weekReset: T0 + 20 * H },
+      { at: T0 + H / 6, weekPct: 100, fiveHourPct: 100, weekReset: T0 + 10 * H },
+    ] }], 'week', label)
+    const { rows } = toChartRows(series, 7 * 24 * H)
+    expect(rows.map(r => r.s0)).toEqual([100, null, 35, null, 100])
+    expect(topPeaks(series, 'week', 3, 0.1)).toEqual([])
+  })
+  test('coarsening cannot skip a reset and manufacture a peak', () => {
+    const series = [{ key: 'a', harness: 'claude' as const, account: 'a', label: 'a', points: [
+      { at: T0, pct: 10 }, { at: T0 + H / 6, pct: 0 }, { at: T0 + H / 2, pct: 50 },
+    ] }]
+    // Unknown reset ids: the decrease still starts a new window segment.
+    expect(topPeaks(series, '5h')).toEqual([])
+  })
+  test('missing readings and long gaps are not connected or counted as peaks', () => {
+    const { series } = limitSeries([{ harness: 'claude', account: 'a', points: [
+      { at: T0, weekPct: 10, fiveHourPct: 10 },
+      { at: T0 + H / 4, weekPct: null, fiveHourPct: null },
+      { at: T0 + H / 2, weekPct: 20, fiveHourPct: 20 },
+      { at: T0 + 4 * H, weekPct: 60, fiveHourPct: 60 },
+    ] }], 'week', label)
+    expect(toChartRows(series, 7 * 24 * H).rows.map(r => r.s0)).toEqual([10, null, 20, null, 60])
+    expect(topPeaks(series, 'week')).toEqual([])
+    expect(rateRows(series)).toEqual([])
+  })
+})
