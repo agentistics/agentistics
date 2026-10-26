@@ -1,3 +1,4 @@
+import type { SessionMeta } from '@agentistics/core'
 import { surfaceHarnesses, SURFACE_HARNESS_ORDER } from '@agentistics/core' // @native-gated: subscription card ordering only.
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import type { AppContext } from '../../lib/app-context'
@@ -11,16 +12,16 @@ import { HARNESS_LABELS } from '../../lib/harness'
 import { fmtSpan, fmtWhen, usePlanLimits } from '../../lib/planLimits'
 import { hasMeasuredPace, usageHeadline, usagePaceState } from '../../lib/usagePlan'
 import { dialogButtonStyle } from '../settings/primitives'
-import { UsageCharts } from './UsageCharts'
+import { UsageChartsPanel } from './UsageChartsPanel'
 import { accountKey, accountLabel, orderedBudgets, unmeasured, type Lang } from './usageView'
 
 export default function UsageNowPage() {
-  const { lang } = useOutletContext<AppContext>()
-  return <UsageNowContent lang={lang} />
+  const { lang, data } = useOutletContext<AppContext>()
+  return <UsageNowContent lang={lang} sessions={data?.sessions} />
 }
 
 /** Also rendered by fixture tests without mounting the application shell. */
-export function UsageNowContent({ lang }: { lang: Lang }) {
+export function UsageNowContent({ lang, sessions = [] }: { lang: Lang; sessions?: SessionMeta[] }) {
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const { budgets, limits, registered, readings, now } = usePlanLimits()
@@ -38,6 +39,7 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
       { label: pt ? 'Ajustar limites' : 'Adjust limits', onClick: () => navigate('/usage/limits') },
       { label: pt ? 'Planejar sessões' : 'Plan sessions', onClick: () => navigate('/usage/plan') },
     ]} />
+    <div style={{ marginBottom: 20 }}><UsageChartsPanel budgets={rows} readings={readings} sessions={sessions} lang={lang} now={now} /></div>
     {!rows.length && !pending.length && <p style={{ color: 'var(--text-secondary)' }}>{pt ? 'Nenhum plano com leitura de uso ainda.' : 'No plans with usage readings yet.'}</p>}
     <div className="ag-grid cols-2" style={{ marginBottom: 20, ...(isMobile ? { gridTemplateColumns: 'minmax(0, 1fr)' } : {}) }}>
       {cards.map(row => {
@@ -66,9 +68,6 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
         </div>
       })}
     </div>
-    <Section title={pt ? 'Semana: esperado × real' : 'Week: expected × actual'}>
-      <UsageCharts budgets={rows} readings={readings} limits={limits} lang={lang} />
-    </Section>
     {(noPlan.length > 0 || !cards.length) && <div style={{ marginTop: 20 }}>
       <Section title={pt ? 'Sem plano registrado' : 'No registered plan'} action={<button type="button" style={dialogButtonStyle('secondary', isMobile)} onClick={() => navigate('/settings/billing')}>{pt ? 'Registrar plano' : 'Register plan'}</button>}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>{noPlan.map(h => <Pill key={h} tone="muted">{HARNESS_LABELS[h]}</Pill>)}</div>
