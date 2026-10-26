@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { BarChart3, ChevronRight, ClipboardList, Gauge, GitBranch, Lock, SlidersHorizontal, Terminal } from 'lucide-react'
 import {
-  APP_AREAS, areaOfPath, firstPath, pageLabel, searchAreas, type Area, type AreaIcon, type AreaId,
+  APP_AREAS, areaOfPath, areaHeaderPath, firstPath, pageLabel, searchAreas, type Area, type AreaIcon, type AreaId,
 } from '../../lib/appAreas'
 import { BetaTag } from '../BetaTag'
 import { FieldInput } from '../../pages/settings/primitives'
@@ -41,7 +41,7 @@ function recalled(id: AreaId): string | null {
 
 /** Where a click on an area lands: the page last visited inside it, else its first page. */
 export function areaEntryPath(area: Area): string {
-  return firstPath(area, recalled(area.id))
+  return areaHeaderPath(area, recalled(area.id))
 }
 
 /** Themed hover tooltip for the icons-only state. */
@@ -136,7 +136,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
     const label = pageLabel(area, lang)
     const active = current?.area.id === area.id
     const n = badges[area.id]
-    const to = firstPath(area, recalled(area.id))
+    const to = areaEntryPath(area)
     const hasPages = pagesOf(area).length > 0
     const expanded = hasPages && expandedArea(area)
     return (

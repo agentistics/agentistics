@@ -26,6 +26,11 @@ The summary filter does not narrow this flat list; its selection is restored in 
 When no active leaders match, the list says **No active leaders** (**Nenhum líder ativo**), even
 when workers or ended leaders are pinned.
 
+On desktop, the open-session strip has its own background band. The active tab shares the
+session header's card surface and overlaps it by 2px so their join has no divider. Tabs needing
+attention use their orange status dot and bold title without an underline. The title, state and
+header actions are vertically centred. The phone strip keeps its existing layout and styling.
+
 With the `sessionTabs` flag enabled, pinned sessions in `exited`, `closed`, `lost` or `unknown`
 state sleep in the strip's menu instead of occupying a tab. Unpinned ended tabs stay visible.
 The menu button stays at the left of the scrolling track, counts the visible tabs, and shows a

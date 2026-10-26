@@ -96,6 +96,30 @@ export function MobilePillBar({ items, activeIndex, centerIndex, ariaLabel }: {
   const indicatorLeft = dragX !== null && hoverSlot >= 0
     ? barFollow(dragX, slots, INSET)
     : (indicatorSlot ? indicatorSlot.left + INSET : 0)
+  /**
+   * The slots beside the round button wear the pill's own concave end: the indicator's inner end is
+   * an arc concentric with the pill's (INSET further out), not a round cap. The outer slots keep the
+   * plain round indicator. While a finger drags it stays round, since it is between slots.
+   */
+  const notch = (() => {
+    if (!showIndicator || !indicatorSlot || dragX !== null) return null
+    const inner = (indicatorSlot.kind === 'left' && litIndex === centerIndex - 1)
+      || (indicatorSlot.kind === 'right' && litIndex === centerIndex + 1)
+    if (!inner) return null
+    const h = Math.max(0, height - INSET * 2)
+    const R = Math.hypot(SPACER / 2, height / 2) + INSET
+    const dx = Math.sqrt(Math.max(0, R * R - (h / 2) * (h / 2)))
+    const cx = width / 2
+    const r = h / 2
+    if (indicatorSlot.kind === 'left') {
+      const x0 = indicatorSlot.left + INSET
+      const w = Math.max(r, cx - dx - x0)
+      return { x0, w, h, d: `M ${r} 0 H ${w} A ${R} ${R} 0 0 0 ${w} ${h} H ${r} A ${r} ${r} 0 0 1 ${r} 0 Z` }
+    }
+    const x0 = cx + dx
+    const w = Math.max(r, indicatorSlot.left + indicatorSlot.width - INSET - x0)
+    return { x0, w, h, d: `M 0 0 H ${w - r} A ${r} ${r} 0 0 1 ${w - r} ${h} H 0 A ${R} ${R} 0 0 0 0 0 Z` }
+  })()
   const withinBar = (y: number) => {
     const rect = trackRef.current?.getBoundingClientRect()
     return !!rect && y >= rect.top && y <= rect.bottom
@@ -193,8 +217,9 @@ export function MobilePillBar({ items, activeIndex, centerIndex, ariaLabel }: {
         >
           <Icon size={26} strokeWidth={lit ? 2.1 : 1.8} />
         </button>
+        {/* Above the right pill: that pill is drawn after the circle and used to cover the count. */}
         {Badge && <span data-area-badge style={{
-          position: 'absolute', top: 'calc(50% - 38px)', left: `calc(50% + ${CIRCLE / 2 - 4}px)`,
+          position: 'absolute', zIndex: 2, top: 'calc(50% - 38px)', left: `calc(50% + ${CIRCLE / 2 - 4}px)`,
           minWidth: 18, height: 18, padding: '0 4px', borderRadius: 9, ...SOLID_COUNT,
           fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           pointerEvents: 'none',
@@ -253,7 +278,17 @@ export function MobilePillBar({ items, activeIndex, centerIndex, ariaLabel }: {
         {group('left', 0, centerIndex)}
         {circle(items[centerIndex]!, centerIndex)}
         {group('right', centerIndex + 1, items.length)}
-        {showIndicator && indicatorSlot && (
+        {notch && (
+          <svg aria-hidden data-bar-indicator="notch" width={notch.w} height={notch.h} viewBox={`0 0 ${notch.w} ${notch.h}`}
+            style={{
+              position: 'absolute', top: INSET, left: 0, overflow: 'visible', pointerEvents: 'none',
+              transform: `translateX(${notch.x0}px)`,
+              transition: reduced ? 'none' : `transform 380ms ${SPRING}`,
+            }}>
+            <path d={notch.d} style={{ fill: 'color-mix(in srgb, var(--anthropic-orange) 16%, transparent)' }} />
+          </svg>
+        )}
+        {!notch && showIndicator && indicatorSlot && (
           <div
             aria-hidden
             data-bar-indicator

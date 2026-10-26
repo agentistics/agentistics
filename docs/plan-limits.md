@@ -1,5 +1,11 @@
 # Account availability and plan limits
 
+The Plan usage modal also offers **Agent use** on each registered account card. The switch saves
+through `PATCH /api/accounts/:id` with `{ "available": boolean }`. It changes immediately while
+saving; a failed save restores the previous choice and shows an error toast. Accounts switched off
+stay visible with their meters and a quiet explanation. Legacy readings without a registry account
+have no switch. The status and switch wrap within the header on narrow screens.
+
 Settings → Billing lists detected harness accounts and their availability to agents. Switching an
 account off keeps its login and owner-visible meters intact. Agent budgets, free slot totals,
 per-harness slots, live session summaries, and routing recommendations exclude that account while

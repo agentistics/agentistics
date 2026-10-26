@@ -2025,7 +2025,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   ) : null
 
   const panel = selected === undefined ? null : (
-    <SessionEndingGate ending={selectedEnding} id={selected.id} lang={pt ? 'pt' : 'en'} title={selected.title}>
+    <SessionEndingGate ending={selectedEnding} id={selected.id} onRetry={() => { void act({ id: selected.id, action: 'kill' }) }} lang={pt ? 'pt' : 'en'} title={selected.title}>
     <SessionPanel
       session={selected}
       {...(rowIndex.get(selected.id) ? { row: rowIndex.get(selected.id)! } : {})}

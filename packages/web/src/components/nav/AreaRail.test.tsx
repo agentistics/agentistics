@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
-import { AREA_RAIL_W, AreaRail } from './AreaRail'
+import { AREA_RAIL_OPEN_W, AREA_RAIL_W, AreaRail } from './AreaRail'
 import { APP_AREAS, pageLabel } from '../../lib/appAreas'
 
 const render = (lang: 'pt' | 'en', extra: Partial<Parameters<typeof AreaRail>[0]> = {}) => renderToStaticMarkup(
@@ -35,15 +35,30 @@ describe('AreaRail', () => {
       expect(render(lang, { badges: { sessions: 0 } })).not.toMatch(/>0<\/span>/)
       expect(render(lang, { badges: { usage: 2 } })).toContain(lang === 'pt' ? 'aria-label="Uso, 2 acima do ritmo"' : 'aria-label="Usage, 2 over pace"')
     })
-    test(`"show tree" is a toggle that opens the area tree beside the rail (${lang})`, () => {
+    test(`"show tree" widens the SAME bar: no second column, labels and sections inside it (${lang})`, () => {
       const closed = render(lang)
       expect(closed).toContain('aria-expanded="false"')
+      expect(closed).toContain('data-open="false"')
       expect(closed).not.toContain('id="ag-area-rail-tree"')
       const open = render(lang, { initialTreeOpen: true })
       expect(open).toContain('aria-expanded="true"')
+      expect(open).toContain('data-open="true"')
       expect(open).toContain('id="ag-area-rail-tree"')
-      expect(open).toContain('role="dialog"')
-      expect(open).toContain(lang === 'pt' ? 'Agentask' : 'Agentask')
+      expect(open).not.toContain('role="dialog"')
+      // One <nav data-area-rail> hosting the tree: the tree's own nav is the only other one, and it is inside.
+      expect(open.match(/data-area-rail/g)).toHaveLength(1)
+      expect(open).toContain(`width:max(${AREA_RAIL_OPEN_W}px, 100%)`)
+      expect(open).toContain('Agentask')
+      // Each area appears once (no icon column duplicating the tree rows).
+      const first = pageLabel(APP_AREAS[0]!, lang)
+      expect(open.split(`>${first}</a>`).length - 1).toBe(1)
+    })
+    test(`Métricas leads and Sessões follows (${lang})`, () => {
+      const html = render(lang)
+      const at = (id: string) => html.indexOf(`aria-label="${pageLabel(APP_AREAS.find(a => a.id === id)!, lang)}`)
+      expect(APP_AREAS.slice(0, 2).map(a => a.id)).toEqual(['metrics', 'sessions'])
+      expect(at('metrics')).toBeGreaterThan(-1)
+      expect(at('metrics')).toBeLessThan(at('sessions'))
     })
   }
   test('area badges are dark ink on the solid accent and never the breathing attention class (QA r3)', () => {

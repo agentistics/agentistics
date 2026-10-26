@@ -86,19 +86,20 @@ test('Home scrolls the session panes to top and an open conversation returns to 
   for (const pane of panes) { pane.scrollTop = 300; document.body.appendChild(pane) }
   try {
     let view = await render()
-    expect(view.buttons[2]!.getAttribute('aria-label')).toContain('Início')
+    expect(view.buttons[2]!.getAttribute('aria-label')).toContain('Sessões')
     await click(view.buttons[2]!)
     expect(panes[0]!.scrollTop).toBe(0)
     expect(panes[1]!.scrollTop).toBe(300)
     expect(scrolls).toBe(1)
     expect(went).toEqual([])
     view = await render('/sessions/abc')
+    expect(view.buttons[2]!.getAttribute('aria-label')).toContain('Início')
     await click(view.buttons[2]!)
     expect(went).toEqual(['/sessions'])
   } finally { panes.forEach(el => el.remove()) }
 })
 
-test('the bar is three pieces: left pill, standalone round Início, right pill', async () => {
+test('the bar is three pieces: left pill, standalone round centre, right pill', async () => {
   const view = await render('/usage')
   const pills = view.nav.querySelectorAll('[data-bar-pill]')
   expect(Array.from(pills).map(p => p.getAttribute('data-bar-pill'))).toEqual(['left', 'right'])
@@ -116,14 +117,17 @@ test('the bar is three pieces: left pill, standalone round Início, right pill',
     expect(path.getAttribute('stroke')).toBe('var(--border)')
   }
   expect(view.nav.innerHTML).not.toContain('mask')
-  expect(view.buttons[2]!.querySelector('svg.lucide-house')).not.toBeNull()
+  expect(view.buttons[2]!.querySelector('svg.lucide-terminal')).not.toBeNull()
+  const inConversation = await render('/sessions/abc')
+  expect(inConversation.buttons[2]!.querySelector('svg.lucide-house')).not.toBeNull()
 })
 
 test('the active slot gets a large indicator; Início active puts the fill on the circle instead', async () => {
-  let view = await render('/usage')
-  expect(view.buttons[1]!.getAttribute('aria-current')).toBe('page')
-  expect(view.indicator()).not.toBeNull()
-  expect(view.indicator().style.width).toBe(`${SLOTS[1]!.width - 8}px`)
+  // An outer slot keeps the plain round indicator.
+  let view = await render('/tasks')
+  expect(view.buttons[0]!.getAttribute('aria-current')).toBe('page')
+  expect(view.indicator().getAttribute('data-bar-indicator')).not.toBe('notch')
+  expect(view.indicator().style.width).toBe(`${SLOTS[0]!.width - 8}px`)
   expect(Number.parseFloat(view.indicator().style.width)).toBeGreaterThanOrEqual(60)
   view = await render('/sessions')
   expect(view.indicator()).toBeNull()
@@ -131,11 +135,28 @@ test('the active slot gets a large indicator; Início active puts the fill on th
   expect(view.buttons[2]!.style.borderColor || view.buttons[2]!.getAttribute('style')).toContain('anthropic-orange')
 })
 
+test('the slots beside the circle wear the pill\'s concave end, not a round cap', async () => {
+  for (const [path, i] of [['/usage', 1], ['/', 3]] as const) {
+    const view = await render(path)
+    const ind = view.indicator()
+    expect(ind.getAttribute('data-bar-indicator')).toBe('notch')
+    // The inner end is an arc of radius R (the pill's arc plus the inset), hugging the circle's gap.
+    const R = Math.hypot(20, 28) + 4
+    expect(ind.querySelector('path')!.getAttribute('d')).toContain(`A ${R} ${R} 0 0 0`)
+    const w = Number(ind.getAttribute('width'))
+    expect(w).toBeGreaterThan(SLOTS[i]!.width - 8)
+    if (i === 1) expect(ind.style.transform).toContain(`translateX(${INDICATOR_AT(1)}px)`)
+    else expect(Number.parseFloat(ind.style.transform.slice(11)) + w).toBeCloseTo(SLOTS[3]!.left + SLOTS[3]!.width - 4, 5)
+  }
+})
+
 test('badges sit on the icons and the circle badge stays outside the circle', async () => {
   const view = await render('/usage')
   const badges = view.nav.querySelectorAll('[data-area-badge]')
   expect(Array.from(badges).map(b => b.textContent)).toEqual(['3', '1', '2'])
   expect(view.buttons[2]!.contains(badges[2]!)).toBe(false)
+  // The right pill is painted after the circle: without its own layer the count hides behind it.
+  expect((badges[2] as HTMLElement).style.zIndex).toBe('2')
 })
 
 test('drag follows the finger through the pills and activates only on release and activates only on release', async () => {
