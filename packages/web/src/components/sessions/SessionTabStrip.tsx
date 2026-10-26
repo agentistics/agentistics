@@ -112,15 +112,18 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
   }
   const style: CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0, cursor: 'pointer', fontFamily: 'inherit',
-    minHeight: mobile ? 44 : TAB_H, padding: '5px 6px 5px 12px', borderRadius: 8, boxSizing: 'border-box',
+    minHeight: mobile ? 44 : TAB_H, height: mobile ? undefined : TAB_H,
+    padding: mobile ? '5px 6px 5px 12px' : '0 6px 0 12px', borderRadius: mobile ? 8 : '10px 10px 0 0', boxSizing: 'border-box',
     fontSize: 12, scrollSnapAlign: 'center', scrollSnapStop: 'always',
     minWidth: mobile ? 132 : 110, width: mobile ? '100%' : 'max-content', maxWidth: mobile ? '100%' : 360,
     fontWeight: active || needs ? 650 : 500,
-    color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
-    background: active ? 'var(--bg-elevated)' : hover ? 'color-mix(in srgb, var(--bg-elevated) 50%, transparent)' : 'transparent',
+    color: active || (!mobile && needs) ? 'var(--text-primary)' : 'var(--text-tertiary)',
+    background: active ? (mobile ? 'var(--bg-elevated)' : 'var(--bg-card)') : hover ? 'color-mix(in srgb, var(--bg-elevated) 50%, transparent)' : 'transparent',
     border: 'none',
-    boxShadow: active ? 'var(--ag-shadow-seg), 0 0 0 1px var(--border)'
-      : needs ? 'inset 0 -2px 0 color-mix(in srgb, var(--anthropic-orange) 55%, transparent)' : 'none',
+    // The track includes space for this overlap so horizontal scrolling cannot clip the join.
+    boxShadow: mobile
+      ? (active ? 'var(--ag-shadow-seg), 0 0 0 1px var(--border)' : needs ? 'inset 0 -2px 0 color-mix(in srgb, var(--anthropic-orange) 55%, transparent)' : 'none')
+      : active ? `0 ${TAB_HEADER_OVERLAP}px 0 var(--bg-card)` : 'none',
   }
   return (
     <div
@@ -180,20 +183,12 @@ function Tab({ k, row, active, pinned, mobile, touch, pt, onFocused, onFocusTab,
   )
 }
 
-/**
- * THE DESKTOP STRIP'S HEIGHT IS ARITHMETIC, AND `App.tsx` RESERVES EXACTLY THIS MUCH FOR IT. The row
- * the top bar sets aside for the strip used to be a hand-typed 35 ("34px + its hairline") while the
- * strip really measured 47 (tab 30 + the tablist's padding, border and margin + the hairline), so
- * its bottom edge ran 12px into the title row and the title and the right-hand buttons crossed the
- * divider. Every term lives here, the style reads them, and `TAB_STRIP_H` is their sum — change one
- * and the reserved row follows.
- */
-export const TAB_H = 30
-export const TABLIST_PAD = 3
-export const TABLIST_BORDER = 1
-export const TABLIST_MARGIN_Y = 4
-export const STRIP_HAIRLINE = 1
-export const TAB_STRIP_H = TAB_H + 2 * (TABLIST_PAD + TABLIST_BORDER + TABLIST_MARGIN_Y) + STRIP_HAIRLINE
+/** App reserves precisely this band. The active tab paints 2px into the header, outside the
+ * reserved height; the scroll track's bottom padding keeps that paint inside its clipping box. */
+export const TAB_H = 36
+export const TABLIST_TOP_PAD = 8
+export const TAB_HEADER_OVERLAP = 2
+export const TAB_STRIP_H = TAB_H + TABLIST_TOP_PAD
 
 export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen, onNone, onNoticeChange }: SessionTabStripProps) {
   const pt = lang === 'pt'
@@ -383,13 +378,13 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
   }
 
   return (
-    <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0, boxSizing: 'border-box', borderBottom: `${STRIP_HAIRLINE}px solid var(--border-subtle)`, ...(mobile ? null : { height: TAB_STRIP_H }) }}>
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0 }}>
+    <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0, boxSizing: 'border-box', ...(mobile ? { borderBottom: '1px solid var(--border-subtle)' } : { height: TAB_STRIP_H, background: 'var(--bg-base)' }) }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0, ...(mobile ? null : { height: TAB_STRIP_H }) }}>
       <button
         type="button" aria-haspopup="menu" aria-label={pt ? 'Abas abertas e dormindo' : 'Open and sleeping tabs'}
         onClick={e => listMenu(e.currentTarget)}
         style={{
-          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : TAB_H, minWidth: mobile ? 44 : 0, justifyContent: 'center',
+          display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 30, minWidth: mobile ? 44 : 0, justifyContent: 'center',
           padding: '0 8px', marginLeft: 6, boxSizing: 'border-box', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
           cursor: 'pointer', fontFamily: 'inherit', fontSize: 11,
         }}
@@ -398,7 +393,14 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
         ref={attach} className="tabscroll" role="tablist" aria-label={pt ? 'Sessões abertas' : 'Open sessions'} onScroll={measure}
         style={{
           display: 'flex', alignItems: 'stretch', gap: 3, overflowX: 'auto', flex: 1, minWidth: 0,
-          background: 'var(--bg-base)', border: `${TABLIST_BORDER}px solid var(--border-subtle)`, borderRadius: 10, padding: TABLIST_PAD, margin: `${TABLIST_MARGIN_Y}px 6px`,
+          ...(mobile ? {
+            background: 'var(--bg-base)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 3, margin: '4px 6px',
+          } : {
+            // Lift above the following header and extend the clipping box into it. No seam at 1× or 2× DPR.
+            position: 'relative', zIndex: 1, alignSelf: 'flex-end', boxSizing: 'border-box',
+            height: TAB_H + TAB_HEADER_OVERLAP, paddingBottom: TAB_HEADER_OVERLAP,
+            margin: `0 6px -${TAB_HEADER_OVERLAP}px`,
+          }),
           WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory',
           ...(!mobile && fade !== null ? { maskImage: fade, WebkitMaskImage: fade } : null),
         }}

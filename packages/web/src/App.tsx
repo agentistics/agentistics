@@ -3203,6 +3203,7 @@ export default function AppLayout() {
       // same vertical line the content below it does — that is the alignment worth keeping, and it
       // is the left edge, which is the one the eye follows down the page.
       width: '100%', padding: `0 ${PAGE_INSET}px`, boxSizing: 'border-box',
+      height: '100%', background: tabsRowOn ? 'var(--bg-card)' : undefined,
       display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, position: 'relative',
     }}>
       {/* A conversation in SELECTION MODE turns this strip into "N selected · Forward · Copy ·
