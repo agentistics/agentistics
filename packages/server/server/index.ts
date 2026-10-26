@@ -2156,7 +2156,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json({ roles: await listRoles(deps), origins: await listRoleOrigins(deps) })
     }
     if (url.pathname === '/api/session-roles' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { ref?: unknown; role?: unknown; lang?: unknown; session?: unknown }
+      const body = await req.json().catch(() => ({})) as { ref?: unknown; role?: unknown; lang?: unknown; session?: unknown; retirePredecessor?: unknown }
       const { verifySessionIdentity } = await import('./sessions/session-identity')
       const { roleOp, roleStatus, roleSenderFromBody, defaultRoleDeps } = await import('./sessions/session-roles')
       const who = await roleSenderFromBody(body, verifySessionIdentity, body.lang === 'pt' ? 'pt' : 'en')
@@ -2166,6 +2166,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         ...(body.ref !== undefined ? { ref: String(body.ref) } : {}),
         ...(body.role !== undefined && body.role !== null ? { role: String(body.role) } : {}),
         ...(body.lang !== undefined ? { lang: String(body.lang) } : {}),
+        ...(typeof body.retirePredecessor === 'string' && body.retirePredecessor.trim() ? { retirePredecessor: body.retirePredecessor.trim() } : {}),
       }, await defaultRoleDeps())
       return json(out, roleStatus(out))
     }

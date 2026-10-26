@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { sessionRoleBody } from "./session-role-args";
 import "./orphan-guard-boot";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -607,6 +608,7 @@ const TOOLS: Tool[] = [
       properties: {
         ref: { type: "string", description: "A session reference (managed id, conversation id, exact title or unique id prefix). Omit for your own session." },
         role: { type: "string", enum: ["leader", "worker", "auto"], description: "The role to set. Omit to read it." },
+        retirePredecessor: { type: "string", description: "A leader taking over can pass the previous leader on the SAME task (managed id, conversation id, exact title or unique id prefix); the server closes it when it goes quiet. Only for your own session declared leader; otherwise the role still changes and the reply says why the retire was refused." },
       },
       required: [],
     },
@@ -1159,13 +1161,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
       case "agentistics_session_role": {
         const a = args as any;
-        const body = await apiSend("POST", "/api/session-roles", {
-          ...(a?.ref ? { ref: a.ref } : {}),
-          ...(a?.role !== undefined ? { role: a.role } : {}),
-          // Always present (null without proof): the server refuses an unproven MCP instead of
-          // mistaking it for the person at the browser.
-          session: sessionProof(process.env) ?? null,
-        });
+        const body = await apiSend("POST", "/api/session-roles", sessionRoleBody(a, sessionProof(process.env)));
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_session_switch_account": {

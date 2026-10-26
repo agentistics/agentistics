@@ -444,3 +444,92 @@ describe('LIDER.ROTA: a session that becomes a leader leaves its parent\'s team'
     expect(left).toEqual(['w', 'x'])
   })
 })
+
+describe('LIDER.KILL: a new leader retires its predecessor', () => {
+  const live = (id: string, title: string, state = 'waiting') => ({ id, title, state })
+  const setup = (rows: Array<{ id: string; title: string; state: string }>, tasks: Record<string, string | undefined>, ok = true) => {
+    const retired: Array<[string, string]> = []
+    const f = fake(rows, { taskOf: async id => tasks[id], requestRetire: async (p, s) => { retired.push([p, s]); return ok } })
+    return { ...f, retired }
+  }
+  const pred = () => writeRolesDoc(dir, { version: 1, migrated: true, roles: { old: 'leader' } })
+
+  test('honoured: writes ONE retire request with the caller as successor, and says so', async () => {
+    await pred()
+    const { deps, retired } = setup([live('old', 'Old lead', 'waiting'), live('new', 'New', 'working')], { old: 't1', new: 't1' })
+    const out = await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, deps)
+    expect(out).toMatchObject({ ok: true, role: 'leader', retire: { ok: true, id: 'old', title: 'Old lead' } })
+    expect(retired).toEqual([['old', 'new']])
+    expect(out.ok && out.message).toContain('Old lead will be closed when it goes quiet.')
+    expect(out.ok && out.warning).toBeUndefined()
+  })
+  test('a working predecessor is live too', async () => {
+    await pred()
+    const { deps, retired } = setup([live('old', 'Old', 'working'), live('new', 'New')], { old: 't1', new: 't1' })
+    expect((await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, deps) as any).retire.ok).toBe(true)
+    expect(retired.length).toBe(1)
+  })
+  const refused = async (code: string, run: () => Promise<{ out: any; retired: unknown[] }>) => {
+    const { out, retired } = await run()
+    expect(out).toMatchObject({ ok: true, role: 'leader', retire: { ok: false, code } })
+    expect(retired).toEqual([])
+  }
+  test('refusals never fail the role change', async () => {
+    await pred()
+    await refused('no_such_session', async () => {
+      const s = setup([live('new', 'New')], { new: 't1' })
+      return { out: await roleOp('new', { role: 'leader', retirePredecessor: 'ghost' }, s.deps), retired: s.retired }
+    })
+    await refused('self', async () => {
+      const s = setup([live('old', 'Old'), live('new', 'New')], { old: 't1', new: 't1' })
+      return { out: await roleOp('new', { role: 'leader', retirePredecessor: 'new' }, s.deps), retired: s.retired }
+    })
+    await refused('not_leader_target', async () => {
+      const s = setup([live('wk', 'Worker'), live('new', 'New')], { wk: 't1', new: 't1' })
+      return { out: await roleOp('new', { role: 'leader', retirePredecessor: 'wk' }, s.deps), retired: s.retired }
+    })
+    await refused('different_task', async () => {
+      const s = setup([live('old', 'Old'), live('new', 'New')], { old: 't2', new: 't1' })
+      return { out: await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, s.deps), retired: s.retired }
+    })
+    await refused('no_task', async () => {
+      const s = setup([live('old', 'Old'), live('new', 'New')], { old: 't1' })
+      return { out: await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, s.deps), retired: s.retired }
+    })
+    await refused('not_live', async () => {
+      const s = setup([live('old', 'Old', 'closed'), live('new', 'New')], { old: 't1', new: 't1' })
+      return { out: await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, s.deps), retired: s.retired }
+    })
+  })
+  test('a refused retire keeps the live-leader warning', async () => {
+    await pred()
+    const s = setup([live('old', 'Old'), live('new', 'New')], { old: 't2', new: 't1' })
+    const out = await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, s.deps)
+    expect(out.ok && out.warning).toBeUndefined() // different task: no warning either
+    await pred()
+    const s2 = setup([live('old', 'Old'), live('new', 'New')], { old: 't1', new: 't1' }, false)
+    const out2 = await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, s2.deps)
+    expect(out2).toMatchObject({ ok: true, retire: { ok: false }, warning: 'Another live leader on task t1: Old (old).' })
+  })
+  test('not_own: only the caller\'s own session, and never for the person or someone else\'s session', async () => {
+    await pred()
+    const s = setup([live('old', 'Old'), live('new', 'New'), live('kid', 'Kid')], { old: 't1', new: 't1', kid: 't1' })
+    s.deps.parentOf = async id => id === 'kid' ? 'new' : undefined
+    expect(await roleOp('new', { ref: 'kid', role: 'leader', retirePredecessor: 'old' }, s.deps)).toMatchObject({ ok: true, retire: { ok: false, code: 'not_own' } })
+    expect(await roleOp(null, { ref: 'new', role: 'leader', retirePredecessor: 'old' }, s.deps)).toMatchObject({ ok: true, retire: { ok: false, code: 'not_own' } })
+    expect(s.retired).toEqual([])
+  })
+  test('no retire is attempted for a worker role (and no retire field)', async () => {
+    await pred()
+    const s = setup([live('old', 'Old'), live('new', 'New')], { old: 't1', new: 't1' })
+    const out = await roleOp('new', { role: 'worker', retirePredecessor: 'old' }, s.deps)
+    expect(out.ok && out.retire).toBeUndefined()
+    expect(s.retired).toEqual([])
+  })
+  test('no retire field when none was asked', async () => {
+    await pred()
+    const s = setup([live('old', 'Old'), live('new', 'New')], { old: 't1', new: 't1' })
+    const out = await roleOp('new', { role: 'leader' }, s.deps)
+    expect(out.ok && out.retire).toBeUndefined()
+  })
+})
