@@ -94,7 +94,7 @@ describe('admitSpawn — the table', () => {
     expect(a.admit).toBe(false)
     const r = admissionRefusal(a)!
     expect(r).toEqual({
-      heavyReserveBytes: 1.8 * GB, load1: 1, cores: 8, hog,
+      heavyReserveBytes: 1.8 * GB, load1: 1, cores: 8, hog, hardFloor: true,
       reservedBytes: 2 * GB, reason: 'no-room', requested: 1, fits: 0,
       availableBytes: 100 * MB, swapUsedBytes: 0, swapTotalBytes: 4 * GB,
       costBytes: 500 * MB, costBasis: 'measured', used: 4, max: 4,
@@ -234,7 +234,7 @@ describe('rendering', () => {
   })
 
   it('an override says it overrode, and only then', () => {
-    const forced = admitSpawn(OVERCOMMITTED, 1, { force: true })
+    const forced = admitSpawn(THREE_LEFT, 5, { force: true })
     expect(admissionOverrideNote(forced, 'en')).toStartWith('Started anyway, overriding the memory check:')
     expect(admissionOverrideNote(forced, 'pt')).toStartWith('Iniciada mesmo assim')
     expect(admissionOverrideNote(admitSpawn(FIVE_LEFT, 1), 'en')).toBeNull()
@@ -264,5 +264,30 @@ describe('processLabel', () => {
     expect(processLabel(['/home/u/.local/bin/agentop', 'mcp'])).toBe('agentop mcp')
     expect(processLabel(['bun'])).toBe('bun')
     expect(processLabel([])).toBe('')
+  })
+})
+
+describe('MEM.GUARD — the hard floor', () => {
+  // A reserve override of 256 MB would leave `left` > 0 at 1.5 GB available; the floor ignores it.
+  const lowSample: MemorySample = { ...noSwap, available: 1.5 * GB }
+  const LOW = { sample: lowSample, budget: memoryBudget({ sample: lowSample, sessionBytes: 0, sessions: 0, reservedBytes: 256 * MB }) }
+  it('the fixture would fit by the budget arithmetic alone', () => {
+    expect(LOW.budget.left).toBeGreaterThan(0)
+  })
+  it('refuses under 2 GB whatever the reserve, flagged hardFloor', () => {
+    const a = admitSpawn(LOW, 1)
+    expect(a.admit).toBe(false)
+    if (!a.admit) { expect(a.refusal.hardFloor).toBe(true); expect(a.refusal.fits).toBe(0) }
+  })
+  it('force still admits, overridden, with a loud note', () => {
+    const a = admitSpawn(LOW, 1, { force: true })
+    expect(a.admit && a.overridden).toBe(true)
+    expect(admissionOverrideNote(a, 'en')).toContain('BELOW THE HARD MEMORY FLOOR')
+    expect(admissionOverrideNote(a, 'pt')).toContain('ABAIXO DO PISO')
+  })
+  it('at or above 2 GB there is no hardFloor flag', () => {
+    const a = admitSpawn(FIVE_LEFT, 6)
+    expect(a.admit).toBe(false)
+    if (!a.admit) expect(a.refusal.hardFloor).toBeUndefined()
   })
 })

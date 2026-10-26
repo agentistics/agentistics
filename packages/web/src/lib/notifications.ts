@@ -190,6 +190,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Processo acima do orçamento de memória', message: '{label} (pid {pid}) está usando {size} de RAM+swap, acima do limite de {budget}. Abra Hardware → Recursos para a correção.' },
     en: { title: 'Process over its memory budget', message: '{label} (pid {pid}) is using {size} of RAM+swap, over its {budget} budget. Open Hardware → Resources for the fix.' },
   },
+  'hardware.memory_critical': {
+    pt: { title: 'Memória crítica', message: 'Só {available} de memória livre. O que mais usa memória agora é {label} ({size}). Novas sessões esperam a memória voltar.' },
+    en: { title: 'Memory critical', message: 'Only {available} of memory free. Using the most right now: {label} ({size}). New sessions wait until memory recovers.' },
+  },
   'hardware.process_stale': {
     pt: { title: 'Processo rodando um binário antigo', message: '{label} (pid {pid}) ainda roda um agentop que uma atualização já substituiu. Abra Hardware → Recursos para a correção.' },
     en: { title: 'Process running an old binary', message: '{label} (pid {pid}) still runs an agentop an upgrade already replaced. Open Hardware → Resources for the fix.' },
