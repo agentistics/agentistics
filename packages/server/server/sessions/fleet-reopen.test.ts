@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test'
 import { __setFleetHostForTest, runFleetAction } from './fleet-web'
+import { SessionNotice } from './action-error'
 
 const errors: ReturnType<typeof spyOn>[] = []
 afterEach(() => {
@@ -18,7 +19,7 @@ function host(resumeSession: () => Promise<unknown>) {
 test('an unsupported action returns a sentence instead of falling through to undefined', async () => {
   __setFleetHostForTest('en', host(async () => ({ ok: true })))
   const out = await runFleetAction('en', { action: 'reopen', id: 'fallen' } as never)
-  expect(out).toMatchObject({ ok: false, message: expect.any(String) })
+  expect(out).toMatchObject({ ok: false, message: expect.stringContaining('not supported') })
 })
 
 for (const lang of ['en', 'pt'] as const) {
@@ -47,4 +48,9 @@ test('a resume result keeps the replacement id and account refusal', async () =>
   expect(await runFleetAction('en', { action: 'resume', id: 'fallen' })).toEqual({ ok: true, id: 'replacement', message: 'Started' })
   __setFleetHostForTest('en', host(async () => ({ ok: false, message: 'Signed out', accountRefusal: 'account_signed_out' })))
   expect(await runFleetAction('en', { action: 'resume', id: 'fallen' })).toEqual({ ok: false, message: 'Signed out', code: 'account_signed_out' })
+})
+
+test('a notice thrown by the resume (a reopen already in progress) keeps its own sentence', async () => {
+  __setFleetHostForTest('en', host(async () => { throw new SessionNotice('Conversation reopen is already in progress; retry shortly.') }))
+  expect(await runFleetAction('en', { action: 'resume', id: 'fallen' })).toEqual({ ok: false, message: 'Conversation reopen is already in progress; retry shortly.' })
 })
