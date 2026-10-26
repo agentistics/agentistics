@@ -511,6 +511,13 @@ describe('LIDER.KILL: a new leader retires its predecessor', () => {
     const out2 = await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, s2.deps)
     expect(out2).toMatchObject({ ok: true, retire: { ok: false }, warning: 'Another live leader on task t1: Old (old).' })
   })
+  test('a third live leader is still warned about when only the predecessor is retired', async () => {
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { old: 'leader', third: 'leader' } })
+    const s = setup([live('third', 'Third'), live('old', 'Old'), live('new', 'New')], { old: 't1', third: 't1', new: 't1' })
+    const out = await roleOp('new', { role: 'leader', retirePredecessor: 'old' }, s.deps)
+    expect(out).toMatchObject({ ok: true, retire: { ok: true, id: 'old' }, warning: 'Another live leader on task t1: Third (third).' })
+    expect(s.retired).toEqual([['old', 'new']])
+  })
   test('not_own: only the caller\'s own session, and never for the person or someone else\'s session', async () => {
     await pred()
     const s = setup([live('old', 'Old'), live('new', 'New'), live('kid', 'Kid')], { old: 't1', new: 't1', kid: 't1' })

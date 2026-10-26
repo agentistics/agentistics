@@ -239,20 +239,19 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     const { base, next, changed } = state
     // A leader sits at the ROOT with the other leaders, never as another leader's worker.
     if (next === 'leader' && deps.leaveTeam) await deps.leaveTeam(resolved.id).catch(() => false)
+    let retire: RetireOutcome | undefined
+    const wantRetire = req.retirePredecessor?.trim()
+    if (next === 'leader' && wantRetire) retire = await planPredecessorRetire(wantRetire, { own, senderId, resolved, rows, roles: state.roles, deps })
+    // The retired predecessor is no longer "another live leader"; a third one still is.
+    const retiredId = retire?.ok ? retire.id : undefined
     let warning: string | undefined
     if (next === 'leader' && deps.taskOf) {
       const taskId = await deps.taskOf(resolved.id)
       if (taskId) {
-        const other = (await Promise.all(rows.filter(r => r.id !== resolved.id && ['working', 'waiting', 'waiting-approval'].includes(r.state ?? '') && roleOfRow(state.roles, r) === 'leader').map(async r =>
+        const other = (await Promise.all(rows.filter(r => r.id !== resolved.id && r.id !== retiredId && ['working', 'waiting', 'waiting-approval'].includes(r.state ?? '') && roleOfRow(state.roles, r) === 'leader').map(async r =>
           await deps.taskOf!(r.id) === taskId ? r : undefined))).find(Boolean)
         if (other) warning = `Another live leader on task ${taskId}: ${other.title} (${other.id}).`
       }
-    }
-    let retire: RetireOutcome | undefined
-    const wantRetire = req.retirePredecessor?.trim()
-    if (next === 'leader' && wantRetire) {
-      retire = await planPredecessorRetire(wantRetire, { own, senderId, resolved, rows, roles: state.roles, deps })
-      if (retire.ok) warning = undefined
     }
     const lang: RoleLang = req.lang === 'pt' || req.lang === 'en' ? req.lang : await deps.uiLang().catch(() => 'en' as RoleLang)
     // External title/note I/O stays outside `serial`; either can wait for the fleet poll.
