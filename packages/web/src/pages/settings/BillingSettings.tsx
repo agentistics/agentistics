@@ -52,12 +52,12 @@ import {
 import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
 import { BillingAccountList, type BillingRowView } from './AccountRow'
 import {
-  accountsNeedingPlan, billingRows, closeBefore, defaultStart, planOptionsFor, matchDetectedPlan, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
+  accountsNeedingPlan, billingRows, closeBefore, defaultStart, limitsForRow, planOptionsFor, matchDetectedPlan, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
   unknownPeriod, withScopePeriods, type BillingAccount, type SaveError,
 } from './accountBilling'
 import { createAccountMutator } from './accountMutations'
 import AddAccount from './AddAccount'
-import { usePlanLimits } from '../../lib/planLimits'
+import { accountLabelKey, usePlanLimits } from '../../lib/planLimits'
 
 /** The wire shape of `GET /api/billing/plan-prices`. Declared here rather than imported: the web
  *  bundle must never reach into `packages/server`. */
@@ -82,7 +82,7 @@ export default function BillingSettings() {
   const pt = ctx.lang === 'pt'
   const isMobile = useIsMobile()
 
-  const { limits: planLimits, now: limitsNow } = usePlanLimits()
+  const { limits: planLimits, now: limitsNow, accountLabels } = usePlanLimits()
   const [accounts, setAccounts] = useState<BillingAccount[]>([])
   // The list arrived (a failed fetch never counts): only then may stale `failed` answers be pruned.
   const [accountsLoaded, setAccountsLoaded] = useState(false)
@@ -118,29 +118,30 @@ export default function BillingSettings() {
   const needPlan = useMemo(() => accountsNeedingPlan(accounts, ctx.billing, harnesses), [accounts, ctx.billing, harnesses])
   const noticeState = useNoticeSaveState()
   useEffect(() => {
-    if (accountsLoaded) billingNotices.prune(new Set(needPlan.map(a => a.id)))
+    if (accountsLoaded) billingNotices.prune(new Set(needPlan.map(a => accountLabelKey(a.harness, a.id))))
   }, [accountsLoaded, needPlan])
 
-  const rows: BillingRowView[] = useMemo(() => billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt).map(r => {
+  const rows: BillingRowView[] = useMemo(() => billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt, accountLabels).map(r => {
     const periods = scopePeriods(ctx.billing, r.scope)
     const cur = splitTimeline(sortPeriods(periods), today()).current
     return {
       ...r,
       plan: cur ? { name: periodName(cur, ctx.lang) || modeLabel(cur.mode, pt ? 'pt' : 'en'), price: priceText(cur, pt), mode: cur.mode } : null,
       problem: validateTimeline({ periods }).size > 0,
-      limits: r.account ? planLimits?.find(l => l.account === r.account!.id) ?? null : null,
+      limits: limitsForRow(planLimits, r),
     }
-  }), [accounts, ctx.billing, harnesses, pt, planLimits])
+  }), [accounts, ctx.billing, harnesses, pt, planLimits, accountLabels])
 
   const toggleAccount = async (a: BillingAccount) => {
     if (mutator.has(a.id)) return
-    setPending(h => new Set(h).add(a.id))
+    const k = accountLabelKey(a.harness, a.id)
+    setPending(h => new Set(h).add(k))
     const res = await toggleAvailability(mutator, a)
-    setPending(h => { const n = new Set(h); n.delete(a.id); return n })
+    setPending(h => { const n = new Set(h); n.delete(k); return n })
     if (res.status === 'ok') {
-      setAccounts(h => h.map(x => x.id === a.id ? { ...x, ...res.account } : x))
-      setFailed(h => { const n = new Set(h); n.delete(a.id); return n })
-    } else if (res.status === 'failed') setFailed(h => new Set(h).add(a.id))
+      setAccounts(h => h.map(x => x.id === a.id && x.harness === a.harness ? { ...x, ...res.account } : x))
+      setFailed(h => { const n = new Set(h); n.delete(k); return n })
+    } else if (res.status === 'failed') setFailed(h => new Set(h).add(k))
   }
 
   // ── the one editor ──────────────────────────────────────────────────────────────────────────
@@ -255,7 +256,7 @@ export default function BillingSettings() {
     const scope = row.scope
     const change = (cur: BillingSettingsShape): BillingSettingsShape => withScopePeriods(cur, scope, next)
     setSaveError(null)
-    const tracked = row.account !== null && needPlan.some(a => a.id === row.account!.id) ? row.account.id : null
+    const tracked = row.account !== null && needPlan.some(a => a.id === row.account!.id && a.harness === row.harness) ? row.key : null
     let ok: boolean
     if (tracked) {
       billingNotices.mark(tracked, 'saving')
@@ -316,7 +317,7 @@ export default function BillingSettings() {
           : 'One row per account: the plan you pay for and how much of its limits you have used. Every cost in the app is an API-price estimate until you register the plan — then it reflects what you actually pay. Agents only use accounts with “Agents” on. It all stays on this machine.'}
       </p>
 
-      <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds}
+      <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
         selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow} />
       <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
 
@@ -339,7 +340,7 @@ export default function BillingSettings() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, minWidth: 0 }}>
               <HarnessMark harness={row.harness} size={22} />
-              <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sub}</span>
+              <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sub || row.title}</span>
             </div>
             {errPlace === 'drawer' && saveError && <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>}
             {timelineErrors.size > 0 && (

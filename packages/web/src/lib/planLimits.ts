@@ -9,15 +9,26 @@ import {
   currentUsedPct, forecastWindow, limitsStale, windowRenewed,
   type PlanForecast, type PlanLimitSource, type PlanLimitWindow, type PlanLimits, type PlanWindowKind,
 } from '@agentistics/core'
+import { SURFACE_HARNESS_ORDER } from '@agentistics/core' // @native-gated: only orders rows the store already returned
 import { subscribeEvent } from './eventStream'
 import { HARNESS_LABELS } from './harness'
 import type { UsageBudgetRow } from './usagePlan'
+
+/**
+ * The key of `accountLabels`. An account id is only unique within its harness (agy and Claude both
+ * have a `default`), so every write AND every lookup goes through this one function.
+ */
+export const accountLabelKey = (harness: string, account: string): string => `${harness}:${account}`
 
 export type RegisteredPlan = { harness: PlanLimits['harness']; plan: string; account?: string; accountLabel?: string }
 export interface PlanReadings {
   account: string
   harness: PlanLimits['harness']
-  points: { at: number; weekPct: number | null; fiveHourPct: number | null; weekReset?: number; fiveReset?: number }[]
+  points: {
+    at: number; weekPct: number | null; fiveHourPct: number | null; weekReset?: number; fiveReset?: number
+    /** Per model group (scoped harnesses); `weekPct` above is the tightest one. */
+    scopes?: Record<string, { weekPct: number; weekReset?: number }>
+  }[]
 }
 
 export interface PlanLimitsSnapshot {
@@ -28,7 +39,7 @@ export interface PlanLimitsSnapshot {
   /** Every owner's account, including rows hidden from agents. */
   budgets: UsageBudgetRow[]
   readings: PlanReadings[]
-  /** `account id → "<Harness> #n"` (or nickname), from the agent-visible and hidden budget rows. */
+  /** `accountLabelKey(harness, account) → "<Harness> #n"` (or nickname), from the agent-visible and hidden budget rows. */
   accountLabels: Record<string, string>
   /** A clock that ticks once a minute while anything is subscribed, for "in X min" / "X min ago". */
   now: number
@@ -50,8 +61,8 @@ async function refresh(): Promise<void> {
     const body = await r.json() as { limits?: PlanLimits[]; registered?: RegisteredPlan[]; budgets?: UsageBudgetRow[]; hiddenFromAgents?: UsageBudgetRow[]; readings?: PlanReadings[] }
     const budgets = [...(body.budgets ?? []), ...(body.hiddenFromAgents ?? [])]
     const accountLabels: Record<string, string> = {}
-    for (const r of body.registered ?? []) if (r.account && r.accountLabel) accountLabels[r.account] = r.accountLabel
-    for (const b of budgets) if (b.account && b.accountLabel) accountLabels[b.account] = b.accountLabel
+    for (const r of body.registered ?? []) if (r.account && r.accountLabel) accountLabels[accountLabelKey(r.harness, r.account)] = r.accountLabel
+    for (const b of budgets) if (b.account && b.accountLabel) accountLabels[accountLabelKey(b.harness, b.account)] = b.accountLabel
     emit({
       accountLabels,
       budgets,
@@ -90,7 +101,7 @@ export function usePlanLimits(): PlanLimitsSnapshot {
 
 /** Tests / fixtures: put a snapshot in place without the network. */
 export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.now(), registered: PlanLimitsSnapshot['registered'] = [], budgets: UsageBudgetRow[] = [], readings: PlanReadings[] = []): void {
-  const accountLabels = Object.fromEntries([...registered, ...budgets].flatMap(r => r.account && r.accountLabel ? [[r.account, r.accountLabel]] : []))
+  const accountLabels = Object.fromEntries([...registered, ...budgets].flatMap(r => r.account && r.accountLabel ? [[accountLabelKey(r.harness, r.account), r.accountLabel]] : []))
   emit({ limits, registered, budgets, readings, now, accountLabels })
 }
 
@@ -98,13 +109,39 @@ export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.n
 
 type Lang = 'pt' | 'en'
 
-export function windowLabel(kind: PlanWindowKind, lang: Lang): string {
-  return kind === '5h'
-    ? (lang === 'pt' ? 'Sessão 5 h' : '5-h session')
-    : (lang === 'pt' ? 'Semana' : 'Week')
+/**
+ * The name of a series/account on a chart or title: the harness name only when the account label does
+ * not already carry it ("Antigravity #1" stands alone; "Work" becomes "Claude Code · Work").
+ */
+export function seriesName(harnessLabel: string, account: string): string {
+  const a = account.trim()
+  if (!a) return harnessLabel
+  return a.toLowerCase().includes(harnessLabel.toLowerCase()) ? a : `${harnessLabel} · ${a}`
 }
 
-export function windowShortLabel(kind: PlanWindowKind, lang: Lang): string {
+/** A model group's name: translated for the groups Antigravity reports, else the harness's own label. */
+export function scopeName(scope: { id: string; label: string }, lang: Lang): string {
+  if (scope.id === 'google') return lang === 'pt' ? 'Modelos Gemini' : 'Gemini models'
+  if (scope.id === 'anthropic+openai') return lang === 'pt' ? 'Modelos Claude e GPT' : 'Claude and GPT models'
+  return scope.label
+}
+
+/** The short form of a group's name for one-line meters: "Gemini", "Claude e GPT". */
+export function scopeShortName(scope: { id: string; label: string }, lang: Lang): string {
+  if (scope.id === 'google') return 'Gemini'
+  if (scope.id === 'anthropic+openai') return lang === 'pt' ? 'Claude e GPT' : 'Claude and GPT'
+  return scope.label.replace(/ models$/i, '')
+}
+
+export function windowLabel(kind: PlanWindowKind, lang: Lang, scope?: { id: string; label: string }): string {
+  const base = kind === '5h'
+    ? (lang === 'pt' ? 'Sessão 5 h' : '5-h session')
+    : (lang === 'pt' ? 'Semana' : 'Week')
+  return scope ? `${base} · ${scopeName(scope, lang)}` : base
+}
+
+export function windowShortLabel(kind: PlanWindowKind, lang: Lang, scope?: { id: string; label: string }): string {
+  if (scope) return scopeShortName(scope, lang)
   return kind === '5h' ? '5 h' : (lang === 'pt' ? 'Semana' : 'Week')
 }
 
@@ -113,6 +150,7 @@ export const SOURCE_LABEL: Record<PlanLimitSource, { pt: string; en: string }> =
   'claude-usage-api': { pt: 'uso da assinatura do Claude Code', en: 'Claude Code subscription usage' },
   'codex-rollout': { pt: 'registro da sessão do Codex', en: 'Codex session log' },
   'codex-app-server': { pt: 'protocolo do Codex', en: 'Codex protocol' },
+  'antigravity-quota-api': { pt: 'cota do Antigravity', en: 'Antigravity quota' },
 }
 
 /** "12 min", "3 h 05", "2 d 4 h". */
@@ -120,7 +158,7 @@ export function fmtSpan(ms: number, lang: Lang): string {
   const min = Math.max(0, Math.round(ms / 60_000))
   if (min < 60) return `${min} min`
   const h = Math.floor(min / 60)
-  if (h < 48) return `${h} h ${String(min % 60).padStart(2, '0')}`
+  if (h < 48) return min % 60 === 0 ? `${h} h` : `${h} h ${min % 60} min`
   return lang === 'pt' ? `${Math.floor(h / 24)} d ${h % 24} h` : `${Math.floor(h / 24)} d ${h % 24} h`
 }
 
@@ -201,12 +239,15 @@ export function subscriptionRows(limits: PlanLimits[] | null, registered: Regist
       .filter(r => (r.account ? !foundAccount.has(`${r.harness}:${r.account}`) : !found.has(r.harness)))
       .map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null, accountLabel: r.accountLabel, ...(r.account ? { account: r.account } : {}) })),
   ]
-  return rows.map(({ account, ...r }) => {
-    const label = (account ? labels[account] : undefined) ?? r.accountLabel
+  const named = rows.map(({ account, ...r }) => {
+    const label = (account ? labels[accountLabelKey(r.harness, account)] : undefined) ?? r.accountLabel
     // A label that is only the assistant's own name says nothing the row does not ("Codex CLI · Codex CLI").
     const telling = label && label !== HARNESS_LABELS[r.harness] ? label : undefined
     return telling ? { ...r, accountLabel: telling } : r
   })
+  // By assistant (the order Now draws them in), then by name with "#2" after "#1" and before "#10".
+  const rank = (h: string) => { const i = (SURFACE_HARNESS_ORDER as readonly string[]).indexOf(h); return i < 0 ? 99 : i } // @native-gated: ordering rows already returned by the store.
+  return named.sort((a, b) => rank(a.harness) - rank(b.harness) || (a.accountLabel ?? '').localeCompare(b.accountLabel ?? '', undefined, { numeric: true }))
 }
 
 /** A subscription's name: the assistant, plus the account only when it adds something. A label that
@@ -228,6 +269,8 @@ export interface LimitNoticeMeta {
   pct: number
   resetsAt: number
   alt?: string
+  /** The model group of a scoped window (Antigravity). */
+  scope?: { id: string; label: string }
 }
 
 /** Read a notification's `meta` back into a notice, or null when it is not one. */
@@ -236,7 +279,8 @@ export function limitNoticeMeta(meta: Record<string, unknown> | undefined): Limi
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
   const threshold = n(meta.threshold), pct = n(meta.pct), resetsAt = n(meta.resetsAt)
   if (threshold === null || pct === null || resetsAt === null) return null
-  return { harness: meta.harness, window: meta.window, threshold, pct, resetsAt, ...(typeof meta.alt === 'string' ? { alt: meta.alt } : {}) }
+  const scope = typeof meta.scopeId === 'string' && meta.scopeId ? { id: meta.scopeId, label: typeof meta.scopeLabel === 'string' ? meta.scopeLabel : meta.scopeId } : undefined
+  return { harness: meta.harness, window: meta.window, threshold, pct, resetsAt, ...(typeof meta.alt === 'string' ? { alt: meta.alt } : {}), ...(scope ? { scope } : {}) }
 }
 
 const harnessName = (h: string): string => (HARNESS_LABELS as Record<string, string>)[h] ?? h
@@ -244,17 +288,20 @@ const harnessName = (h: string): string => (HARNESS_LABELS as Record<string, str
 export function limitNoticeText(m: LimitNoticeMeta, lang: Lang, now = Date.now()): { title: string; message: string } {
   const pt = lang === 'pt'
   const name = harnessName(m.harness)
-  const win = m.window === '5h' ? (pt ? 'janela de 5 h' : '5-hour window') : (pt ? 'janela semanal' : 'weekly window')
+  const used = m.window === '5h' ? (pt ? 'da sessão de 5 h' : 'of the 5-hour session') : (pt ? 'da semana' : 'of the week')
+  const head = m.scope ? `${name} · ${scopeName(m.scope, lang)}` : name
   const when = `${fmtWhen(m.resetsAt, now, lang)} (${pt ? 'em' : 'in'} ${fmtSpan(m.resetsAt - now, lang)})`
+  // One number (what is used) in the title; the body says only what the title does not.
   if (m.threshold >= 100) {
     const alt = m.alt ? (pt ? ` Dá para continuar no ${harnessName(m.alt)}, que tem folga.` : ` You can continue in ${harnessName(m.alt)}, which has room.`) : ''
     return pt
-      ? { title: `${name}: ${win} esgotada`, message: `O plano chegou a 100% da ${win}. Renova ${when}.${alt}` }
-      : { title: `${name}: ${win} used up`, message: `The plan reached 100% of its ${win}. It resets ${when}.${alt}` }
+      ? { title: `${head}: 100% ${used} usada — esgotada`, message: `Renova ${when}.${alt}` }
+      : { title: `${head}: 100% ${used} used — used up`, message: `Resets ${when}.${alt}` }
   }
+  const pct = Math.round(m.pct)
   return pt
-    ? { title: `${name}: ${m.threshold}% da ${win}`, message: `Já foram ${Math.round(m.pct)}% da ${win} do plano. Renova ${when}.` }
-    : { title: `${name}: ${m.threshold}% of the ${win}`, message: `${Math.round(m.pct)}% of the plan's ${win} is used. It resets ${when}.` }
+    ? { title: `${head}: ${pct}% ${used} usada`, message: `Renova ${when}.` }
+    : { title: `${head}: ${pct}% ${used} used`, message: `Resets ${when}.` }
 }
 
 /** `plan.segment`: a sharp drop the probe could not explain — the account counts from zero again. */
@@ -277,8 +324,8 @@ export function warnForecast(w: PlanLimitWindow, now: number, observedAt = now):
 }
 
 /** The short form for a one-line meter: the same "5 h" / "7 d". */
-export function windowShort(kind: PlanWindowKind, lang: Lang): string {
-  return windowShortLabel(kind, lang)
+export function windowShort(kind: PlanWindowKind, lang: Lang, scope?: { id: string; label: string }): string {
+  return windowShortLabel(kind, lang, scope)
 }
 
 /** When it renews, as short as it can be said: the clock for the 5-hour window (it renews within

@@ -30,7 +30,7 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: {
   const level = limitLevel(worst?.pct ?? null)
   const base = pt ? 'Uso dos planos' : 'Plan usage'
   const label = worst && level !== 'ok'
-    ? `${base} — ${limitLevelWord(level, lang)}: ${HARNESS_LABELS[worst.l.harness]}, ${windowLabel(worst.w.kind, lang)} ${pt ? 'em' : 'at'} ${Math.round(worst.pct)}%`
+    ? `${base} — ${limitLevelWord(level, lang)}: ${HARNESS_LABELS[worst.l.harness]}, ${windowLabel(worst.w.kind, lang, worst.w.scope)} ${pt ? 'em' : 'at'} ${Math.round(worst.pct)}%`
     : base
   const open = useCallback(() => { if (timer.current) clearTimeout(timer.current); const r = btnRef.current?.getBoundingClientRect(); if (r) setRect(r) }, [])
   const close = useCallback(() => { if (timer.current) clearTimeout(timer.current); setRect(null) }, [])

@@ -81,10 +81,24 @@ describe('names shared with the plan list (CONTA.P3)', () => {
     expect(planDisplayName('claude', undefined, null)).toBeUndefined()
   })
   test('picker rows carry the listed plan and the owner\'s label, named as the plan list names it', () => {
-    const rows = pickerRows({ ...info, options: [{ id: 'acc_b', harness: 'claude', label: 'b@x', plan: 'pro' }], unavailable: [] }, [lim('claude', 'acc_b', 5, 5, 'Claude Pro')], now, 'pt', { acc_b: 'Conta pessoal' })
+    const rows = pickerRows({ ...info, options: [{ id: 'acc_b', harness: 'claude', label: 'b@x', plan: 'pro' }], unavailable: [] }, [lim('claude', 'acc_b', 5, 5, 'Claude Pro')], now, 'pt', { 'claude:acc_b': 'Conta pessoal' })
     expect(rows.find(r => r.id === 'acc_b')).toMatchObject({ label: 'Conta pessoal', plan: 'Claude Pro' })
-    expect(accountDisplayName('claude', 'acc_b', 'b@x', { acc_b: 'Conta pessoal' })).toBe('Claude Code · Conta pessoal')
+    expect(accountDisplayName('claude', 'acc_b', 'b@x', { 'claude:acc_b': 'Conta pessoal' })).toBe('Claude Code · Conta pessoal')
     expect(accountDisplayName('claude', 'acc_z', 'Claude Code #2', {})).toBe('Claude Code #2')
     expect(accountDisplayName('claude', 'acc_z', undefined, {})).toBe('Claude Code')
+  })
+})
+
+describe('account labels are keyed by harness:account', () => {
+  const two: SwitchInfo = {
+    ok: true, supported: true, limit: null,
+    current: { id: 'default', label: 'a@x', harness: 'claude' },
+    options: [{ id: 'default', harness: 'antigravity', label: 'g@x' }],
+  }
+  const labels = { 'claude:default': 'Claude Code', 'antigravity:default': 'Antigravity #1' }
+  test('the same account id on two harnesses keeps two names', () => {
+    expect(pickerRows(two, [], now, 'en', labels).map(r => r.label)).toEqual(['Claude Code', 'Antigravity #1'])
+    expect(accountDisplayName('antigravity', 'default', 'g@x', labels)).toBe('Antigravity #1')
+    expect(accountDisplayName('claude', 'default', 'a@x', labels)).toBe('Claude Code')
   })
 })

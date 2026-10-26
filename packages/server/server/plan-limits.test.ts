@@ -1224,7 +1224,24 @@ describe('a `default` meter beside identified accounts (BILLING.SIMPLE §7)', ()
     expect(body.limits.map(l => l.account)).toEqual(['acc_codex000001'])
     expect(body.limits[0]!.plan).toBe('ChatGPT Plus')
     expect(body.registered).toEqual([])
-    expect(body.budgets.map(b => [b.account, b.accountLabel])).toEqual([['acc_codex000001', 'Codex CLI #1']])
+    expect(body.budgets.map(b => [b.account, b.accountLabel])).toEqual([['acc_codex000001', 'Codex CLI']])
+  })
+
+  test('a nameless `root:` fallback beside the one real account is not a second account', async () => {
+    const now = now0()
+    const real = { ...codexAccount('acc_real0000001', '/r1'), label: 'me@example.test' }
+    const ghost = { ...codexAccount('acc_ghost000001', '/r2'), key: 'root:abc', label: 'Default account' }
+    writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ version: 2, bindings: {}, segments: {}, accounts: [real, ghost] }))
+    await ingestPlanLimits({ harness: 'codex', account: 'acc_real0000001', windows: [{ kind: 'week', usedPct: 10, resetsAt: now + 72 * H }], updatedAt: now, source: 'codex-rollout' })
+    const body = await planLimitsPayload(undefined, now)
+    expect(body.budgets.map(b => b.accountLabel)).toEqual(['Codex CLI'])
+  })
+
+  test('one account per assistant, a legacy `default` meter each: plain names, never numbered across assistants', async () => {
+    const now = now0()
+    for (const harness of ['claude', 'gemini'] as const) await ingestPlanLimits({ harness, account: 'default', windows: [{ kind: 'week', usedPct: 10, resetsAt: now + 72 * H }], updatedAt: now, source: 'codex-rollout' })
+    const body = await planLimitsPayload(undefined, now)
+    expect(body.budgets.map(b => [b.harness, b.accountLabel]).sort()).toEqual([['claude', 'Claude Code'], ['gemini', 'Gemini CLI']])
   })
 
   test('two live accounts: the meter stays `default`, and no row wears the bare harness name', async () => {

@@ -12,7 +12,14 @@ import type { PlanLimits } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
 import { withFileLock } from './sessions/file-lock'
 
-export interface HistoryPoint { at: number; weekPct: number | null; fiveHourPct: number | null; weekReset?: number; fiveReset?: number }
+/** One model group's week reading inside a point (scoped harnesses, e.g. Antigravity). */
+export interface ScopePoint { weekPct: number; weekReset?: number }
+
+/**
+ * `weekPct`/`weekReset` stay the TIGHTEST group's on a scoped record, so a reader that ignores `scopes`
+ * (an older build, a flat chart) stays meaningful and conservative.
+ */
+export interface HistoryPoint { at: number; weekPct: number | null; fiveHourPct: number | null; weekReset?: number; fiveReset?: number; scopes?: Record<string, ScopePoint> }
 
 export const BUCKET_MS = 5 * 60_000
 export const RETAIN_MS = 14 * 24 * 3_600_000
@@ -20,9 +27,16 @@ export const RETAIN_MS = 14 * 24 * 3_600_000
 export const MAX_POINTS = 14 * 24 * 12
 
 export function pointOf(l: PlanLimits): HistoryPoint {
-  const week = l.windows.find(w => w.kind === 'week'), five = l.windows.find(w => w.kind === '5h')
+  const weeks = l.windows.filter(w => w.kind === 'week')
+  // Scoped: the tightest group is the flat value (parsers sort tightest-first, but never rely on it).
+  const week = l.windows.some(w => w.scope)
+    ? weeks.reduce<typeof weeks[number] | undefined>((a, w) => (!a || w.usedPct > a.usedPct ? w : a), undefined)
+    : weeks[0]
+  const five = l.windows.find(w => w.kind === '5h')
+  const scoped = weeks.filter(w => w.scope)
   return {
-    at: l.updatedAt, weekPct: week?.usedPct ?? null, fiveHourPct: five?.usedPct ?? null,
+    at: l.updatedAt,
+    ...(scoped.length ? { scopes: Object.fromEntries(scoped.map(w => [w.scope!.id, { weekPct: w.usedPct, weekReset: w.resetsAt }])) } : {}), weekPct: week?.usedPct ?? null, fiveHourPct: five?.usedPct ?? null,
     ...(week?.resetsAt !== undefined ? { weekReset: week.resetsAt } : {}),
     ...(five?.resetsAt !== undefined ? { fiveReset: five.resetsAt } : {}),
   }
@@ -50,6 +64,7 @@ export function appendPoint(series: readonly HistoryPoint[], next: HistoryPoint)
       weekPct: next.weekPct ?? last.weekPct, fiveHourPct: next.fiveHourPct ?? last.fiveHourPct,
       ...(next.weekReset === undefined && last.weekReset !== undefined ? { weekReset: last.weekReset } : {}),
       ...(next.fiveReset === undefined && last.fiveReset !== undefined ? { fiveReset: last.fiveReset } : {}),
+      ...(next.scopes || last.scopes ? { scopes: { ...last.scopes, ...next.scopes } } : {}),
     }
   } else out.push(next)
   return out.length > MAX_POINTS ? out.slice(-MAX_POINTS) : out
@@ -74,6 +89,8 @@ const valid = (p: unknown): p is HistoryPoint => {
   const x = p as HistoryPoint
   return !!x && typeof x.at === 'number' && Number.isFinite(x.at)
     && (x.weekPct === null || typeof x.weekPct === 'number') && (x.fiveHourPct === null || typeof x.fiveHourPct === 'number')
+    && (x.scopes === undefined || (!!x.scopes && typeof x.scopes === 'object'
+      && Object.values(x.scopes).every(s => !!s && typeof s.weekPct === 'number' && Number.isFinite(s.weekPct))))
 }
 
 async function readDisk(): Promise<Record<string, HistoryPoint[]>> {

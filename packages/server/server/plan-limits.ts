@@ -16,16 +16,16 @@ import { readFile, readdir, stat, writeFile, rename, mkdir } from 'node:fs/promi
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
-  agentVisible, alternativeWithRoom, harnessAggregate, HARNESS_LABELS, HARNESS_ORDER, meterDiscontinuity, newerLimits, parseClaudeRateLimitEvent,
-  parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel, resetNoticesFor, withPlanLabel, yieldStaleRows,
+  accountProfileKey, agentVisible, alternativeWithRoom, harnessAggregate, HARNESS_LABELS, HARNESS_ORDER, meterDiscontinuity, newerLimits, parseClaudeRateLimitEvent,
+  parseCodexRateLimits, planBudget, planPace, planThresholdNotices, registeredPlanLabel, resetNoticesFor, scopeForModel, scopeIds, withPlanLabel, yieldStaleRows,
   type HarnessId,
-  type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice,
+  type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice, type ScopeBudget,
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, KIMI_DIR, OPENCODE_DIR } from './config'
 import {
   bind, byId, canonicalAccountId, forceProbe, sameLogin, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
 } from './harness-accounts'
-import { allHistory, dropHistory, moveHistory, recordHistory, __resetPlanHistoryForTest } from './plan-history'
+import { allHistory, dropHistory, moveHistory, pointOf, recordHistory, type HistoryPoint, __resetPlanHistoryForTest } from './plan-history'
 import { withFileLock } from './sessions/file-lock'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
@@ -716,7 +716,7 @@ export interface PlanLimitsPayload {
   budgets: AccountBudgetRow[]
   hiddenFromAgents: AccountBudgetRow[]
   /** Owner-only in-memory history, including accounts hidden from agents. Times are epoch ms. */
-  readings: { account: string; harness: HarnessId; points: { at: number; weekPct: number | null; fiveHourPct: number | null; weekReset?: number; fiveReset?: number }[] }[]
+  readings: { account: string; harness: HarnessId; points: HistoryPoint[] }[]
   freeSlots: number
   freeSlotsByHarness: Partial<Record<HarnessId, number>>
   freeSlotsByAccount: Record<string, number>
@@ -736,9 +736,12 @@ export async function planLimitsPayload(
   await maybeMigrateDefault(registry)
   // A plan registered under an id the registry merged away is the survivor's (unless it has its own).
   let billing = billingIn
-  const aliasedProfiles = Object.entries(registry.aliases ?? {})
-    .flatMap(([from]) => { const to = canonicalAccountId(registry, from), p = billingIn?.accountProfiles?.[from]
-      return p && !billingIn?.accountProfiles?.[to] ? [[to, p] as const] : [] })
+  const aliasedProfiles = Object.entries(registry.aliases ?? {}).flatMap(([from]) => {
+    const to = canonicalAccountId(registry, from), target = registry.accounts.find(x => x.id === to)
+    const keys = (id: string) => [id, ...(target ? [accountProfileKey(target.harness, id)] : [])]
+    const p = keys(from).map(k => billingIn?.accountProfiles?.[k]).find(Boolean)
+    return p && !keys(to).some(k => billingIn?.accountProfiles?.[k]) ? [[target ? accountProfileKey(target.harness, to) : to, p] as const] : []
+  })
   if (billingIn && aliasedProfiles.length) billing = { ...billingIn, accountProfiles: { ...billingIn.accountProfiles, ...Object.fromEntries(aliasedProfiles) } }
   const registrySegments = registry.segments
   const segmentOf = (account: string): number | undefined => {
@@ -747,7 +750,7 @@ export async function planLimitsPayload(
   }
   const profileHarnesses = [...new Set([
     ...Object.keys(billing?.profiles ?? {}).filter(isHarnessId),
-    ...Object.keys(billing?.accountProfiles ?? {}).flatMap(id => registry.accounts.filter(a => a.id === id).map(a => a.harness)),
+    ...Object.keys(billing?.accountProfiles ?? {}).flatMap(key => registry.accounts.filter(a => key === a.id || key === accountProfileKey(a.harness, a.id)).map(a => a.harness)),
   ])]
   // The stored meters are read BEFORE the registry await: an answer never mixes a meter stored
   // while the accounts were being resolved with accounts resolved before it existed.
@@ -759,15 +762,25 @@ export async function planLimitsPayload(
   ])]
   const accounts = harnesses.length ? await listHarnessAccounts(harnesses) : []
   const accountId = (a: { id: string; harness: HarnessId }) => a.id || `${a.harness}:current`
-  const byAccount = new Map(accounts.map(a => [accountId(a), a]))
+  // Keyed by harness AND id: two assistants can both report the account `default`.
+  const byAccount = new Map(accounts.map(a => [`${a.harness}:${accountId(a)}`, a]))
+  const acct = (harness: HarnessId | undefined, id: string) =>
+    harness ? byAccount.get(`${harness}:${id}`) : accounts.find(a => accountId(a) === id)
   const visibility = accounts.map(a => ({ id: accountId(a), harness: a.harness, available: a.available, ...(a.retired ? { retired: true } : {}) }))
   // "<Harness> #n" by firstSeen order within the harness; a nickname stands in unless it looks like an email.
   const labelOf = (harness: HarnessId, account: string): string => {
-    const known = byAccount.get(account)
+    const known = acct(harness, account)
     if (known?.nickname && !known.nickname.includes('@')) return known.nickname
-    const ofHarness = accounts.filter(a => a.harness === harness && a.available && !a.retired).sort((x, y) => x.firstSeen - y.firstSeen)
+    // The same rule Settings → Billing counts rows by (`foldUnnamed`): the registry's reserve row (no id)
+    // and a `root:` fallback the harness cannot name are the same login as the one account beside them.
+    const live = accounts.filter(a => a.harness === harness && a.available && !a.retired)
+    const isFallback = (a: { key?: string; label?: string; nickname?: string }) =>
+      (a.key ?? '').startsWith('root:') && /^(default account|conta padrão)$/i.test((a.label ?? '').trim()) && !a.nickname
+    const named = live.filter(a => a.id && !isFallback(a))
+    const ofHarness = (named.length === 1 ? named : named.length > 1 ? live.filter(a => a.id) : live.filter(a => a.id).slice(0, 1)).sort((x, y) => x.firstSeen - y.firstSeen)
     const n = ofHarness.findIndex(a => accountId(a) === account) + 1
-    return n > 0 ? `${HARNESS_LABELS[harness]} #${n}` : HARNESS_LABELS[harness]
+    // Numbered per assistant, and only when it has several accounts.
+    return n > 0 && ofHarness.length > 1 ? `${HARNESS_LABELS[harness]} #${n}` : HARNESS_LABELS[harness]
   }
   // A meter recorded as `default` (before its login was identified) is the ONE live account of the
   // harness when there is exactly one; with none or several it stays `default` — guessing among two
@@ -785,20 +798,20 @@ export async function planLimitsPayload(
   })
   const limits = resolvedStored
     .map(l => { const next = withPlanLabel(l, billing, nowMs); const k = meterKey.get(l); if (k) meterKey.set(next, k); return next })
-    .map(l => { const label = byAccount.get(l.account)?.label; if (!label) return l; const next = { ...l, label }; const k = meterKey.get(l); if (k) meterKey.set(next, k); return next })
+    .map(l => { const label = acct(l.harness, l.account)?.label; if (!label) return l; const next = { ...l, label }; const k = meterKey.get(l); if (k) meterKey.set(next, k); return next })
     .sort((a, b) => a.harness.localeCompare(b.harness) || a.account.localeCompare(b.account))
   const spawnability = harnessSpawnabilities(nowMs)
   const resolvedSessions = liveSessions.map(s => {
     if (s.account || !s.harness) return s
     const visible = [...new Set([
       ...accounts.filter(a => a.id && a.harness === s.harness && a.available && !a.retired).map(accountId),
-      ...limits.filter(l => l.harness === s.harness && !byAccount.has(l.account)).map(l => l.account),
+      ...limits.filter(l => l.harness === s.harness && !acct(l.harness, l.account)).map(l => l.account),
     ])]
     const account = fallbackSessionAccount(s.harness, registry, visible)
     return account ? { ...s, account } : s
   })
   const sessionVisible = (s: LivePlanSession) => {
-    const known = s.account ? byAccount.get(s.account) : undefined
+    const known = s.account ? acct(s.harness, s.account) : undefined
     return !known || (known.available && !known.retired && (!s.harness || known.harness === s.harness))
   }
   const belongsTo = (s: LivePlanSession, l: PlanLimits) =>
@@ -809,8 +822,25 @@ export async function planLimitsPayload(
     // billed tokens remain in the public live summary, without diluting the measured burn.
     const planSessions = resolvedSessions.filter(s => s.burnPctPerHour > 0 && belongsTo(s, l))
     const availability = spawnability[l.harness]!
-    return { ...budget, ...planPace(l, nowMs, history.get(meterKey.get(l) ?? keyOf(l)) ?? [], planSessions, segmentOf(l.account)), ...availability,
+    const past = history.get(meterKey.get(l) ?? keyOf(l)) ?? []
+    // A record with model groups: the top-level row is the TIGHTEST group (never better than the worst),
+    // and `scopes` carries each group on its own. A session enters a group's slots when its model is in
+    // it; one with an unknown model counts in every group (conservative).
+    const scopes = scopeIds(l).length ? scopeIds(l).map((id): ScopeBudget => {
+      const scope = l.windows.find(w => w.scope?.id === id)!.scope!
+      const model = scope.models[0]
+      const mine = planSessions.filter(s => !s.model || !scopeForModel(l, s.model) || scope.models.some(m => m.toLowerCase() === s.model.toLowerCase()))
+      const b = planBudget(l, nowMs, { model }), p = planPace(l, nowMs, past, mine, segmentOf(l.account), { model })
+      return {
+        scope, weekPct: b.weekPct, weekResetsAt: b.weekResetsAt, daysToWeekReset: b.daysToWeekReset,
+        dailyBudgetPct: b.dailyBudgetPct, status: b.status, ...(p.paceStatus ? { paceStatus: p.paceStatus } : {}),
+        ...(!availability.spawnable ? { freeSlots: 0, suggestedParallel: 0 }
+          : { ...(p.freeSlots !== undefined ? { freeSlots: p.freeSlots } : {}), ...(p.suggestedParallel !== undefined ? { suggestedParallel: p.suggestedParallel } : {}) }),
+      }
+    }) : undefined
+    return { ...budget, ...planPace(l, nowMs, past, planSessions, segmentOf(l.account)), ...availability,
       ...(!availability.spawnable ? { freeSlots: 0, suggestedParallel: 0 } : {}),
+      ...(scopes ? { scopes } : {}),
       account: l.account, accountLabel: labelOf(l.harness, l.account),
     }
   })
@@ -860,6 +890,7 @@ export async function planLimitsPayload(
         at: l.updatedAt,
         weekPct: l.windows.find(w => w.kind === 'week')?.usedPct ?? null,
         fiveHourPct: l.windows.find(w => w.kind === '5h')?.usedPct ?? null,
+        ...(pointOf(l).scopes ? { scopes: pointOf(l).scopes } : {}),
       })),
     })
   }
@@ -875,7 +906,7 @@ export async function planLimitsPayload(
       const account = a.id || 'default'
       // A login that already reports a meter (under its own id, an alias, or a same-login twin) is
       // not "waiting for a reading" — that row would be the same plan twice.
-      if (!a.available || limits.some(l => l.harness === h && (l.account === account || (a.id && sameAccount(l.account, a.id)) || (!a.id && !byAccount.has(l.account))))) continue
+      if (!a.available || limits.some(l => l.harness === h && (l.account === account || (a.id && sameAccount(l.account, a.id)) || (!a.id && !acct(h, l.account))))) continue
       registered.push({ harness: h, account, plan, accountLabel: labelOf(h, account) })
     }
   }

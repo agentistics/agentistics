@@ -10,7 +10,7 @@ const hadWindow = 'window' in g
 beforeAll(() => { if (!hadWindow) g.window = { innerWidth: 1280 } })
 afterAll(() => { if (!hadWindow) delete g.window })
 
-const L = (h: string) => ({ claude: 'Claude Code', codex: 'Codex CLI', gemini: 'Gemini CLI' } as Record<string, string>)[h] ?? h
+const L = (h: string) => ({ claude: 'Claude Code', codex: 'Codex CLI', gemini: 'Gemini CLI', antigravity: 'Antigravity' } as Record<string, string>)[h] ?? h
 const acc = (id: string, o: Partial<BillingAccount> = {}): BillingAccount => ({
   id, harness: 'claude', key: id, label: `${id}@private.io`, root: null, available: true, ...o,
 })
@@ -64,7 +64,7 @@ describe('BillingAccountList — every fact once', () => {
       g.window = { innerWidth: width }
       try {
         const props = view(Array.from({ length: 6 }, (_, i) => acc(`c${i}`)), ['claude'], r =>
-          Number(r.key.slice(1)) < 2 ? {} : { plan: { name: 'Cobrança desconhecida', price: null, mode: 'unknown' } })
+          Number(r.key.slice('claude:c'.length)) < 2 ? {} : { plan: { name: 'Cobrança desconhecida', price: null, mode: 'unknown' } })
         expect(renderToStaticMarkup(<BillingAccountList {...props} lang="pt" />)).toContain('2 de 6 com plano informado · 4 sem informar')
         expect(renderToStaticMarkup(<BillingAccountList {...props} lang="en" />)).toContain('2 of 6 with a plan · 4 not set')
       } finally { g.window = { innerWidth: 1280 } }
@@ -116,5 +116,19 @@ for (const width of [1440, 390]) test(`account subtitle separates harness and lo
     expect(h).toContain('data-billing-subtitle')
     expect(h).toContain('white-space:nowrap">Claude Code</span><span style="display:block">principal@exemplo.com</span>')
     expect(h).not.toContain('Claude Code ·')
+  } finally { g.window = { innerWidth: 1280 } }
+})
+
+for (const width of [1440, 390]) test(`an Antigravity scoped limit shows both model-group bars at ${width}px`, () => {
+  g.window = { innerWidth: width }
+  try {
+    const scope = (id: string, label: string) => ({ id, label, models: [id], providers: [id] })
+    const limits: PlanLimits = { harness: 'antigravity', account: 'default', source: 'antigravity-quota-api', updatedAt: 1,
+      windows: [{ kind: 'week', usedPct: 62, resetsAt: 9e12, scope: scope('google', 'Gemini models') }, { kind: 'week', usedPct: 4, resetsAt: 9e12, scope: scope('anthropic+openai', 'Claude and GPT models') }] } as PlanLimits
+    const h = renderToStaticMarkup(<BillingAccountList {...view([acc('default', { harness: 'antigravity', label: 'Antigravity' })], ['antigravity'], r => ({ limits: r.account ? limits : null }))} />)
+    const usage = h.slice(h.indexOf('data-billing-usage'))
+    expect(usage).toContain('Gemini')
+    expect(usage).toContain('Claude and GPT')
+    expect(h).not.toContain('Not reported')
   } finally { g.window = { innerWidth: 1280 } }
 })

@@ -71,7 +71,7 @@ test('a plan-limits signal on the open stream refreshes the open tab without a r
   expect(planLimitsSnapshot().registered).toEqual([{ harness: 'copilot', account: 'pending', plan: 'Pro', accountLabel: 'Copilot CLI #1' }])
   expect(planLimitsSnapshot().budgets).toEqual([...budgets, ...hiddenFromAgents])
   expect(planLimitsSnapshot().readings).toEqual(readings)
-  expect(planLimitsSnapshot().accountLabels).toEqual({ default: 'Personal', hidden: 'Work', pending: 'Copilot CLI #1' })
+  expect(planLimitsSnapshot().accountLabels).toEqual({ 'claude:default': 'Personal', 'codex:hidden': 'Work', 'copilot:pending': 'Copilot CLI #1' })
   expect(renders).toBeGreaterThan(1)
   off()
 })

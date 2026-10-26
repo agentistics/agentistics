@@ -56,6 +56,13 @@ describe('usage account cards', () => {
       expect(html).toContain(lang === 'pt' ? 'Todos os 1 planos no ritmo.' : 'All 1 plans on pace.')
     }
   })
+  test('the expected-week figure uses the locale decimal separator', () => {
+    seed([row({ weekPct: 30 })])
+    const pt = render(<UsageNowPage />, 390, 'pt'), en = render(<UsageNowPage />, 390, 'en')
+    expect(pt).toMatch(/Semana: esperado/)
+    expect(pt).toMatch(/>\d+,\d%</)
+    expect(en).toMatch(/>\d+\.\d%</)
+  })
   test('overage retains the reported percentage with no negative remainder', () => {
     for (const weekPct of [105, 112, 125]) {
       seed([row({ weekPct, status: 'hold' })])

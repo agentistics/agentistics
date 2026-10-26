@@ -3,7 +3,8 @@ import { computePlanCost, normalizeBillingSettings, type BillingSettings } from 
 import { createAccountMutator } from './accountMutations'
 import {
   saveThenClose, saveErrorPlace, planCoverageText,
-  accountsNeedingPlan, answerNotice, billableAccounts, billingRows, closeBefore, defaultStart, foldUnnamed, planOptionsFor, rowScope, scopePeriods, withScopePeriods, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
+  ownPeriods, REPORTS_LIMITS, accountsNeedingPlan, answerNotice, billableAccounts, billingRows, closeBefore, defaultStart, foldUnnamed, planOptionsFor, rowScope, scopePeriods, withScopePeriods, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
+  limitsForRow,
   type BillingAccount,
 } from './accountBilling'
 
@@ -19,7 +20,7 @@ describe('accountsNeedingPlan', () => {
     const accounts = [acc('a', { plan: 'max' }), acc('b', { firstSeen: Date.parse('2026-09-02T00:00:00Z') })]
     expect(accountsNeedingPlan(accounts, none, ['claude']).map(a => a.id)).toEqual(['a', 'b'])
     const answered = answerNotice(none, accounts[0]!, 'anthropic-pro', '2026-10-16', newId)!
-    expect(answered.accountProfiles?.a?.periods).toHaveLength(1)
+    expect(answered.accountProfiles?.['claude:a']?.periods).toHaveLength(1)
     expect(accountsNeedingPlan(accounts, answered, ['claude']).map(a => a.id)).toEqual(['b'])
   })
 
@@ -27,7 +28,7 @@ describe('accountsNeedingPlan', () => {
     const [a] = [acc('a'), acc('b')]
     const accounts = [a!, acc('b')]
     const unknown = answerNotice(none, a!, null, '2026-10-16', newId)!
-    expect(unknown.accountProfiles?.a?.periods[0]?.mode).toBe('unknown')
+    expect(unknown.accountProfiles?.['claude:a']?.periods[0]?.mode).toBe('unknown')
     expect(accountsNeedingPlan(accounts, unknown, ['claude']).map(x => x.id)).toEqual(['b'])
     const cost = computePlanCost({
       timeline: undefined, window: { from: '2026-10-01', to: '2026-10-10' }, brlRate: 5,
@@ -65,13 +66,13 @@ describe('accountsNeedingPlan', () => {
 describe('two Claude accounts hold their own plan; cost basis reflects both', () => {
   test('accountProfiles written per id round-trip through normalize and sum in C', () => {
     let b = answerNotice(none, acc('a'), 'anthropic-pro', '2026-10-16', newId)!
-    b = answerNotice(b, acc('b'), 'anthropic-max-20x', '2026-10-16', newId) ?? withAccountPeriods(b, 'b', [{ id: 'q', mode: 'subscription', planId: 'anthropic-max-20x', price: { amount: 200, currency: 'USD' }, from: '2026-09-01' }])
+    b = answerNotice(b, acc('b'), 'anthropic-max-20x', '2026-10-16', newId) ?? withAccountPeriods(b, acc('b'), [{ id: 'q', mode: 'subscription', planId: 'anthropic-max-20x', price: { amount: 200, currency: 'USD' }, from: '2026-09-01' }])
     const back = normalizeBillingSettings(JSON.parse(JSON.stringify(b)))
-    expect(Object.keys(back.accountProfiles ?? {}).sort()).toEqual(['a', 'b'])
+    expect(Object.keys(back.accountProfiles ?? {}).sort()).toEqual(['claude:a', 'claude:b'])
     const refs = [{ id: 'a', harness: 'claude' as const }, { id: 'b', harness: 'claude' as const }]
     const window = { from: '2026-10-01', to: '2026-10-30' }
     const both = computePlanCost({ timeline: undefined, window, brlRate: 5, accounts: refs, accountProfiles: back.accountProfiles })
-    const onlyA = computePlanCost({ timeline: undefined, window, brlRate: 5, accounts: refs.slice(0, 1), accountProfiles: { a: back.accountProfiles!.a! } })
+    const onlyA = computePlanCost({ timeline: undefined, window, brlRate: 5, accounts: refs.slice(0, 1), accountProfiles: { 'claude:a': back.accountProfiles!['claude:a']! } })
     expect(both.subscriptionCostUSD).toBeGreaterThan(onlyA.subscriptionCostUSD)
     expect(both.segments).toHaveLength(2)
   })
@@ -108,7 +109,7 @@ test('matchDetectedPlan prefills from the harness-reported plan, never guessing'
 test('capability sentences per harness', () => {
   expect(capabilityNotes('claude')).toEqual([])
   expect(capabilityNotes('gemini')).toEqual(['noMeter', 'noIdentity'])
-  expect(capabilityNotes('antigravity')).toEqual(['noMeter', 'noIdentity', 'singleAccount'])
+  expect(capabilityNotes('antigravity')).toEqual(['noIdentity', 'singleAccount'])
 })
 
 describe('R3 saveThenClose', () => {
@@ -142,19 +143,19 @@ describe('rowScope — the timeline a row prices on is the one core counts', () 
     const a = acc('a'), b = acc('b', { firstSeen: Date.parse('2026-09-02T00:00:00Z') }), c = acc('c', { firstSeen: Date.parse('2026-09-03T00:00:00Z') })
     const billing: BillingSettings = { profiles: { claude: { periods: [sub('anthropic-max-5x')] } }, accountProfiles: { a: { periods: [sub('anthropic-pro')] } } }
     const mine = [a, b, c]
-    expect(rowScope(billing, mine, a)).toEqual({ kind: 'own', id: 'a' })
+    expect(rowScope(billing, mine, a)).toEqual({ kind: 'own', id: 'a', harness: 'claude' })
     expect(rowScope(billing, mine, b)).toEqual({ kind: 'default', harness: 'claude' })
-    expect(rowScope(billing, mine, c)).toEqual({ kind: 'none', id: 'c' })
+    expect(rowScope(billing, mine, c)).toEqual({ kind: 'none', id: 'c', harness: 'claude' })
     expect(accountsNeedingPlan(mine, billing, ['claude']).map(x => x.id)).toEqual(['c'])
   })
   test('writing a scope back touches only that timeline', () => {
     const billing: BillingSettings = { profiles: { claude: { periods: [sub('anthropic-max-5x')] } } }
     const p = sub('anthropic-pro')
     expect(withScopePeriods(billing, { kind: 'default', harness: 'claude' }, [p]).profiles.claude?.periods).toEqual([p])
-    const own = withScopePeriods(billing, { kind: 'none', id: 'x' }, [p])
-    expect(own.accountProfiles?.x?.periods).toEqual([p])
+    const own = withScopePeriods(billing, { kind: 'none', id: 'x', harness: 'claude' }, [p])
+    expect(own.accountProfiles?.['claude:x']?.periods).toEqual([p])
     expect(own.profiles.claude?.periods).toHaveLength(1)
-    expect(scopePeriods(own, { kind: 'own', id: 'x' })).toEqual([p])
+    expect(scopePeriods(own, { kind: 'own', id: 'x', harness: 'claude' })).toEqual([p])
     expect(withScopePeriods(billing, { kind: 'default', harness: 'claude' }, []).profiles.claude).toBeUndefined()
   })
 })
@@ -169,11 +170,11 @@ describe('billingRows — one row per account, nothing said twice', () => {
     const rows = billingRows([acc('acc_1', { harness: 'codex', label: 'Conta padrão' }), acc('', { harness: 'codex', label: 'Conta padrão' })], none, ['codex'], L as never, true)
     expect(rows).toHaveLength(1)
     expect(rows[0]!.title).toBe('Codex CLI')
-    expect(rows[0]!.sub).toBe('Codex CLI')
+    expect(rows[0]!.sub).toBe('')
   })
   test('an assistant with no identified account is one row on its own timeline; two unnamed accounts are numbered', () => {
     const rows = billingRows([acc('', { harness: 'gemini', label: 'Conta padrão' }), acc('k1', { harness: 'codex', label: 'Conta padrão' }), acc('k2', { harness: 'codex', label: 'Default account', firstSeen: Date.parse('2026-09-05T00:00:00Z') })], none, ['codex', 'gemini'], L as never, false)
-    expect(rows.map(r => [r.key, r.title])).toEqual([['k1', 'Codex CLI #1'], ['k2', 'Codex CLI #2'], ['harness:gemini', 'Gemini CLI']])
+    expect(rows.map(r => [r.key, r.title])).toEqual([['codex:k1', 'Codex CLI #1'], ['codex:k2', 'Codex CLI #2'], ['harness:gemini', 'Gemini CLI']])
     expect(rows[2]!.scope).toEqual({ kind: 'default', harness: 'gemini' })
     expect(rows[2]!.account).toBeNull()
     expect(rows[2]!.sub).toBe('account not reported')
@@ -214,19 +215,19 @@ describe('foldUnnamed — a sign-in the harness cannot name is not a second acco
 
   test('two unnamed accounts of one harness are ONE row, titled without a number', () => {
     const r = rows([ph('g1'), ph('g2', { firstSeen: Date.parse('2026-09-05T00:00:00Z') })])
-    expect(r.map(x => x.key)).toEqual(['g1'])
+    expect(r.map(x => x.key)).toEqual(['gemini:g1'])
     expect(r[0]!.title).toBe('Gemini CLI')
-    expect(r[0]!.scope).toEqual({ kind: 'none', id: 'g1' })
+    expect(r[0]!.scope).toEqual({ kind: 'none', id: 'g1', harness: 'gemini' })
   })
 
   test('the kept row is the one carrying a plan of its own', () => {
     const billing: BillingSettings = { profiles: {}, accountProfiles: { g2: { periods: [{ id: 'p', mode: 'unknown', from: '2026-09-01' }] } } }
-    expect(rows([ph('g1'), ph('g2')], billing).map(x => x.key)).toEqual(['g2'])
+    expect(rows([ph('g1'), ph('g2')], billing).map(x => x.key)).toEqual(['gemini:g2'])
   })
 
   test('beside exactly one named account, the unnamed one folds into it', () => {
     const r = rows([ph('g1'), acc('g2', { harness: 'gemini', label: 'me@x.io' })])
-    expect(r.map(x => x.key)).toEqual(['g2'])
+    expect(r.map(x => x.key)).toEqual(['gemini:g2'])
   })
 
   test('beside two named accounts it stays its own row (no telling which it is)', () => {
@@ -257,7 +258,7 @@ describe('foldUnnamed — a sign-in the harness cannot name is not a second acco
       ph('k', { harness: 'kimi' }),
     ]
     const r = billingRows(accounts, none, ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi'], h => h, true)
-    expect(r.map(x => x.key)).toEqual(['c', 'x', 'g1', 'p', 'a1', 'k'])
+    expect(r.map(x => x.key)).toEqual(['claude:c', 'codex:x', 'gemini:g1', 'copilot:p', 'antigravity:a1', 'kimi:k'])
   })
 })
 
@@ -294,8 +295,88 @@ test('Codex billing never prints the generated ChatGPT id label, keeping real na
     acc('codex-id', { harness: 'codex', label, ...(nickname ? { nickname } : {}) }),
   ], none, ['codex'], () => 'Codex CLI', true)[0]!
   expect(make('ChatGPT 1a583a5f', 'Principal')).toMatchObject({ title: 'Principal', sub: 'Codex CLI' })
-  expect(make('ChatGPT 1a583a5f')).toMatchObject({ title: 'Codex CLI', sub: 'Codex CLI' })
+  expect(make('ChatGPT 1a583a5f')).toMatchObject({ title: 'Codex CLI', sub: '' })
   expect(make('person@example.com', 'Principal')).toMatchObject({ title: 'Principal', sub: 'Codex CLI · person@example.com' })
   expect(make('Jane Doe', 'Principal').sub).toBe('Codex CLI · Jane Doe')
   expect(make('Jane Doe').title).toBe('Jane Doe')
+})
+
+describe('limitsForRow', () => {
+  const lim = (harness: string, mark: number) => ({ harness, account: 'default', updatedAt: mark, windows: [] }) as never
+  test('two assistants on the default account each get their own limits', () => {
+    const limits = [lim('claude', 1), lim('antigravity', 2)]
+    const account = { id: 'default' } as never
+    expect(limitsForRow(limits, { harness: 'antigravity', account })?.updatedAt).toBe(2)
+    expect(limitsForRow(limits, { harness: 'claude', account })?.updatedAt).toBe(1)
+    expect(limitsForRow(limits, { harness: 'codex', account })).toBeNull()
+    expect(limitsForRow(limits, { harness: 'claude', account: null })).toBeNull()
+  })
+})
+
+describe('billingRows — the title is never repeated in the subtitle', () => {
+  test('two assistants whose only account is "default" are titled by the assistant and say nothing under it', () => {
+    const rows = billingRows([acc('default', { harness: 'claude', label: 'Claude Code' }), acc('default', { harness: 'antigravity', label: 'Antigravity' })], none, ['claude', 'antigravity'], L as never, false)
+    for (const r of rows) expect(r.sub === r.title || r.sub.split(' · ').includes(r.title)).toBe(false)
+    expect(rows.map(r => r.key)).toEqual(['claude:default', 'antigravity:default'])
+    expect(rows.map(r => r.harness)).toEqual(['claude', 'antigravity'])
+  })
+})
+
+describe('accountProfiles — keyed harness:account', () => {
+  const p1 = sub('anthropic-pro'), p2 = sub('anthropic-max-5x')
+  const claude = acc('default', { harness: 'claude' }), agy = acc('default', { harness: 'antigravity' })
+  test('two `default` accounts of different assistants keep separate own timelines', () => {
+    let b = withAccountPeriods(none, claude, [p1])
+    b = withAccountPeriods(b, agy, [p2])
+    expect(Object.keys(b.accountProfiles ?? {}).sort()).toEqual(['antigravity:default', 'claude:default'])
+    expect(ownPeriods(b, claude)).toEqual([p1])
+    expect(ownPeriods(b, agy)).toEqual([p2])
+    expect(rowScope(b, [claude], claude)).toEqual({ kind: 'own', id: 'default', harness: 'claude' })
+    expect(withAccountPeriods(b, claude, []).accountProfiles?.['claude:default']).toBeUndefined()
+    expect(ownPeriods(withAccountPeriods(b, claude, []), agy)).toEqual([p2])
+  })
+  test('a bare-id key written by an older build is still read, and replaced on the next write', () => {
+    const legacy: BillingSettings = { profiles: {}, accountProfiles: { acc_1: { periods: [p1] } } }
+    const a = acc('acc_1')
+    expect(ownPeriods(legacy, a)).toEqual([p1])
+    expect(Object.keys(withAccountPeriods(legacy, a, [p2]).accountProfiles ?? {})).toEqual(['claude:acc_1'])
+  })
+})
+
+describe('config B — Antigravity and Claude both on `default`, plus a second Claude account', () => {
+  const accounts = [
+    acc('default', { harness: 'antigravity', label: 'Antigravity', firstSeen: 1 }),
+    acc('default', { harness: 'claude', label: 'Claude Code', firstSeen: 2 }),
+    acc('acc_claude00002', { harness: 'claude', label: 'Claude Code', firstSeen: 3 }),
+  ]
+  const names = (h: string) => ({ claude: 'Claude Code', antigravity: 'Antigravity' } as Record<string, string>)[h] ?? h
+  test('two Claude accounts are told apart in Billing, Antigravity stays plain', () => {
+    const rows = billingRows(accounts, none, ['claude', 'antigravity'], names as never, false)
+    expect(rows.map(r => r.title)).toEqual(['Claude Code #1', 'Claude Code #2', 'Antigravity'])
+    expect(rows.map(r => r.sub)).toEqual(['', '', ''])
+  })
+  test('the name the server already numbered wins, so every screen says the same thing', () => {
+    const labels = { 'claude:default': 'Claude Code #2', 'claude:acc_claude00002': 'Claude Code #1' }
+    const rows = billingRows(accounts, none, ['claude'], names as never, false, labels)
+    expect(rows.map(r => r.title)).toEqual(['Claude Code #2', 'Claude Code #1'])
+  })
+  test('each row finds its own limits; Antigravity is not left "not reported"', () => {
+    const lim = (harness: string, account: string) => ({ harness, account, updatedAt: 1, windows: [] }) as never
+    const limits = [lim('claude', 'default'), lim('claude', 'acc_claude00002'), lim('antigravity', 'default')]
+    const rows = billingRows(accounts, none, ['claude', 'antigravity'], names as never, false)
+    expect(rows.map(r => limitsForRow(limits, r) !== null)).toEqual([true, true, true])
+    expect(REPORTS_LIMITS.has('antigravity')).toBe(true)
+  })
+})
+
+describe('a meter filed under a folded sign-in is the row\'s meter', () => {
+  test('the unnamed fallback beside Antigravity\'s account is folded, and its reading still reaches the row', () => {
+    const named = acc('default', { harness: 'antigravity', label: 'Antigravity', key: 'antigravity:default', firstSeen: 1 })
+    const ghost = acc('acc_ghost', { harness: 'antigravity', label: 'Default account', key: 'root:abc', firstSeen: 2 })
+    const rows = billingRows([named, ghost], none, ['antigravity'], (() => 'Antigravity') as never, false)
+    expect(rows).toHaveLength(1)
+    const lim = { harness: 'antigravity', account: 'acc_ghost', updatedAt: 1, windows: [] } as never
+    expect(limitsForRow([lim], rows[0]!)).toBe(lim)
+    expect(limitsForRow([{ ...(lim as object), harness: 'claude' } as never], rows[0]!)).toBeNull()
+  })
 })
