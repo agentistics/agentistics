@@ -61,3 +61,12 @@ test('a scoped notice names the group', () => {
   expect(limitNoticeText(m, 'en', NOW).title).toBe('Antigravity: 85% of the weekly window · Gemini models')
   expect(limitNoticeMeta({ harness: 'claude', window: '5h', threshold: 85, pct: 86, resetsAt: NOW })?.scope).toBeUndefined()
 })
+
+test('seriesName shows the harness only when the account label lacks it', async () => {
+  const { seriesName } = await import('./planLimits')
+  expect(seriesName('Antigravity', 'Antigravity #1')).toBe('Antigravity #1')
+  expect(seriesName('Claude Code', 'Claude Code')).toBe('Claude Code')
+  expect(seriesName('Claude Code', 'claude code #2')).toBe('claude code #2')
+  expect(seriesName('Codex CLI', 'Work')).toBe('Codex CLI · Work')
+  expect(seriesName('Codex CLI', '')).toBe('Codex CLI')
+})

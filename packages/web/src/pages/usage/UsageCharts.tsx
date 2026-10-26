@@ -2,7 +2,7 @@ import type { PlanLimits } from '@agentistics/core'
 import { ActivityPercentChart } from '../../components/ActivityChart'
 import { Section } from '../../components/Section'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
-import { scopeName, type PlanReadings } from '../../lib/planLimits'
+import { scopeShortName, seriesName, type PlanReadings } from '../../lib/planLimits'
 import type { UsageBudgetRow } from '../../lib/usagePlan'
 import { accountKey, accountLabel, orderedBudgets, type Lang } from './usageView'
 
@@ -57,8 +57,8 @@ export function UsageCharts({ budgets, readings, limits, lang, bothWindows = fal
   const pt = lang === 'pt'
   const rows = orderedBudgets(budgets)
   // Keep readings visible even if their budget is temporarily unavailable.
-  const accounts = [...rows.map(r => ({ account: r.account ?? 'default', harness: r.harness, label: `${HARNESS_LABELS[r.harness]} · ${accountLabel(r)}`, budget: r })),
-    ...readings.filter(r => !rows.some(b => accountKey(b) === `${r.harness}:${r.account}`)).map(r => ({ ...r, label: `${HARNESS_LABELS[r.harness]} · ${r.account}`, budget: undefined }))]
+  const accounts = [...rows.map(r => ({ account: r.account ?? 'default', harness: r.harness, label: seriesName(HARNESS_LABELS[r.harness], accountLabel(r)), budget: r })),
+    ...readings.filter(r => !rows.some(b => accountKey(b) === `${r.harness}:${r.account}`)).map(r => ({ ...r, label: seriesName(HARNESS_LABELS[r.harness], r.account), budget: undefined }))]
   // A scoped harness (Antigravity) has one weekly line per model group: split its readings by group.
   const scopeLabels = new Map<string, { id: string; label: string }>()
   for (const l of limits ?? []) for (const w of l.windows) if (w.scope) scopeLabels.set(w.scope.id, w.scope)
@@ -66,7 +66,7 @@ export function UsageCharts({ budgets, readings, limits, lang, bothWindows = fal
     const reading = readings.find(r => r.account === row.account && r.harness === row.harness)
     const ids = [...new Set(reading?.points.flatMap(p => Object.keys(p.scopes ?? {})) ?? [])].sort()
     if (!ids.length) return [row]
-    return ids.map(id => ({ ...row, scopeId: id, label: `${row.label} · ${scopeName(scopeLabels.get(id) ?? { id, label: id }, lang)}` }))
+    return ids.map(id => ({ ...row, scopeId: id, label: `${row.label} · ${scopeShortName(scopeLabels.get(id) ?? { id, label: id }, lang)}` }))
   })
   accounts.splice(0, accounts.length, ...scopedAccounts)
   const labels = accounts.map(row => row.label)

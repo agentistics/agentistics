@@ -102,6 +102,16 @@ export function __setPlanLimitsForTest(limits: PlanLimits[] | null, now = Date.n
 
 type Lang = 'pt' | 'en'
 
+/**
+ * The name of a series/account on a chart or title: the harness name only when the account label does
+ * not already carry it ("Antigravity #1" stands alone; "Work" becomes "Claude Code · Work").
+ */
+export function seriesName(harnessLabel: string, account: string): string {
+  const a = account.trim()
+  if (!a) return harnessLabel
+  return a.toLowerCase().includes(harnessLabel.toLowerCase()) ? a : `${harnessLabel} · ${a}`
+}
+
 /** A model group's name: translated for the groups Antigravity reports, else the harness's own label. */
 export function scopeName(scope: { id: string; label: string }, lang: Lang): string {
   if (scope.id === 'google') return lang === 'pt' ? 'Modelos Gemini' : 'Gemini models'
