@@ -25,7 +25,10 @@ identity. Loading, unavailable and stale fleet states never claim an empty fleet
 
 These URLs remain unchanged for bookmarks and deep links. The desktop tree, rail, search and
 mobile sheet resolve them to Sessions; there is no separate top-level Leadership entry. Sessions
-starts with the session workspace, followed by Leaders, Check-ins, Hand-offs and Away mode. Its
+lists the session workspace, followed by Leaders, Check-ins, Hand-offs and Away mode. Clicking
+the Sessions area header opens `/usage`; the List subpage opens `/sessions`. On desktop, the
+expanded area bar covers the full width and height of the sessions list, including its controls,
+even after resizing the list. Its
 area badge sums session attention and overdue check-in warnings. Navigation ownership is distinct
 from the terminal workspace layout: only `/sessions` and its child routes use the terminal/chat
 canvas. Leadership pages retain document scrolling, padding and their own content on phones.

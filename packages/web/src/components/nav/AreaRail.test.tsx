@@ -47,7 +47,7 @@ describe('AreaRail', () => {
       expect(open).not.toContain('role="dialog"')
       // One <nav data-area-rail> hosting the tree: the tree's own nav is the only other one, and it is inside.
       expect(open.match(/data-area-rail/g)).toHaveLength(1)
-      expect(open).toContain(`width:${AREA_RAIL_OPEN_W}px`)
+      expect(open).toContain(`width:max(${AREA_RAIL_OPEN_W}px, 100%)`)
       expect(open).toContain('Agentask')
       // Each area appears once (no icon column duplicating the tree rows).
       const first = pageLabel(APP_AREAS[0]!, lang)

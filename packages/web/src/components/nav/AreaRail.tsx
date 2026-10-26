@@ -55,15 +55,16 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
 
   return (
     // The host keeps the closed width in the layout; the bar widens OVER the list beside it, so
-    // opening it never reflows (or squeezes) the Sessões panel.
-    <div style={{ position: 'relative', display: 'flex', flexShrink: 0, minHeight: 0, width: AREA_RAIL_W }}>
+    // opening it never reflows (or squeezes) the Sessões panel. Its positioned parent spans
+    // BOTH the rail and list, so 100% covers even a resized list, including its controls and edge.
+    <div style={{ display: 'flex', flexShrink: 0, minHeight: 0, width: AREA_RAIL_W }}>
       <nav
         aria-label={pt ? 'Áreas do app' : 'App areas'}
         data-area-rail
         data-open={treeOpen ? 'true' : 'false'}
         style={{
           position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: treeOpen ? 260 : 1,
-          width: treeOpen ? AREA_RAIL_OPEN_W : AREA_RAIL_W, boxSizing: 'border-box',
+          width: treeOpen ? `max(${AREA_RAIL_OPEN_W}px, 100%)` : AREA_RAIL_W, boxSizing: 'border-box',
           transition: reduced ? 'none' : 'width 150ms ease-out',
           display: 'flex', flexDirection: 'column', alignItems: treeOpen ? 'stretch' : 'center', gap: 4, padding: '8px 0',
           border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-surface)', overflow: 'hidden',
