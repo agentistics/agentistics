@@ -113,6 +113,7 @@ export const SOURCE_LABEL: Record<PlanLimitSource, { pt: string; en: string }> =
   'claude-usage-api': { pt: 'uso da assinatura do Claude Code', en: 'Claude Code subscription usage' },
   'codex-rollout': { pt: 'registro da sessão do Codex', en: 'Codex session log' },
   'codex-app-server': { pt: 'protocolo do Codex', en: 'Codex protocol' },
+  'antigravity-quota-api': { pt: 'cota do Antigravity', en: 'Antigravity quota' },
 }
 
 /** "12 min", "3 h 05", "2 d 4 h". */
