@@ -2,7 +2,7 @@ import type { PlanLimits } from '@agentistics/core'
 import { ActivityPercentChart } from '../../components/ActivityChart'
 import { Section } from '../../components/Section'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
-import type { PlanReadings } from '../../lib/planLimits'
+import { scopeShortName, seriesName, type PlanReadings } from '../../lib/planLimits'
 import type { UsageBudgetRow } from '../../lib/usagePlan'
 import { accountKey, accountLabel, orderedBudgets, type Lang } from './usageView'
 
@@ -57,19 +57,34 @@ export function UsageCharts({ budgets, readings, limits, lang, bothWindows = fal
   const pt = lang === 'pt'
   const rows = orderedBudgets(budgets)
   // Keep readings visible even if their budget is temporarily unavailable.
-  const accounts = [...rows.map(r => ({ account: r.account ?? 'default', harness: r.harness, label: `${HARNESS_LABELS[r.harness]} · ${accountLabel(r)}`, budget: r })),
-    ...readings.filter(r => !rows.some(b => accountKey(b) === `${r.harness}:${r.account}`)).map(r => ({ ...r, label: `${HARNESS_LABELS[r.harness]} · ${r.account}`, budget: undefined }))]
+  const accounts = [...rows.map(r => ({ account: r.account ?? 'default', harness: r.harness, label: seriesName(HARNESS_LABELS[r.harness], accountLabel(r)), budget: r })),
+    ...readings.filter(r => !rows.some(b => accountKey(b) === `${r.harness}:${r.account}`)).map(r => ({ ...r, label: seriesName(HARNESS_LABELS[r.harness], r.account), budget: undefined }))]
+  // A scoped harness (Antigravity) has one weekly line per model group: split its readings by group.
+  const scopeLabels = new Map<string, { id: string; label: string }>()
+  for (const l of limits ?? []) for (const w of l.windows) if (w.scope) scopeLabels.set(w.scope.id, w.scope)
+  const scopedAccounts = accounts.flatMap(row => {
+    const reading = readings.find(r => r.account === row.account && r.harness === row.harness)
+    const ids = [...new Set(reading?.points.flatMap(p => Object.keys(p.scopes ?? {})) ?? [])].sort()
+    if (!ids.length) return [row]
+    return ids.map(id => ({ ...row, scopeId: id, label: `${row.label} · ${scopeShortName(scopeLabels.get(id) ?? { id, label: id }, lang)}` }))
+  })
+  accounts.splice(0, accounts.length, ...scopedAccounts)
   const labels = accounts.map(row => row.label)
   for (const row of accounts) {
     if (labels.filter(label => label === row.label).length > 1) row.label += ` · ${row.account}`
   }
   const empty = <p style={{ color: 'var(--text-secondary)' }}>{pt ? 'Ainda não há histórico de uso registrado. As leituras atuais aparecem em Agora.' : 'No usage history recorded yet. Current readings appear in Now.'}</p>
   const charts = accounts.map(row => {
-    const reading = readings.find(r => r.account === row.account && r.harness === row.harness)
+    const raw = readings.find(r => r.account === row.account && r.harness === row.harness)
+    const scopeId = (row as { scopeId?: string }).scopeId
+    // One group's view of the readings: its own weekly value and reset stand in for the flat ones.
+    const reading = raw && scopeId ? { ...raw, points: raw.points.flatMap(p => p.scopes?.[scopeId]
+      ? [{ ...p, weekPct: p.scopes[scopeId]!.weekPct, weekReset: p.scopes[scopeId]!.weekReset }] : []) } : raw
     if (!reading) return { row, windows: [] }
     const windows = (bothWindows ? ['week', '5h'] as const : ['week'] as const).flatMap(kind => {
-      const limit = limits?.find(l => l.account === row.account && l.harness === row.harness)?.windows.find(w => w.kind === kind)
-      const reset = kind === 'week' ? row.budget?.weekResetsAt ?? limit?.resetsAt : limit?.resetsAt
+      const limit = limits?.find(l => l.account === row.account && l.harness === row.harness)?.windows.find(w => w.kind === kind && (!scopeId || w.scope?.id === scopeId))
+      const scopedBudget = scopeId ? row.budget?.scopes?.find(sb => sb.scope.id === scopeId) : undefined
+      const reset = kind === 'week' ? (scopeId ? scopedBudget?.weekResetsAt ?? limit?.resetsAt : row.budget?.weekResetsAt ?? limit?.resetsAt) : limit?.resetsAt
       // The 5-hour window renews many times a week: its chart shows the last two days, the week all of it.
       const scoped = kind === '5h' && bothWindows ? { ...reading, points: reading.points.filter(p => p.at >= Date.now() - 48 * 3_600_000) } : reading
       const data = usageChartData(scoped, kind, reset, !bothWindows)
@@ -105,7 +120,7 @@ export function UsageCharts({ budgets, readings, limits, lang, bothWindows = fal
     })
     return <ActivityPercentChart lang={lang} data={data} series={series} />
   }
-  return <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>{charts.map(({ row, windows }) => <Section key={`${row.harness}:${row.account}`} title={row.label}>
+  return <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>{charts.map(({ row, windows }) => <Section key={`${row.harness}:${row.account}:${(row as { scopeId?: string }).scopeId ?? ''}`} title={row.label}>
     {windows.map(({ kind, reset, data }) => <div key={kind}>
       <h2 style={{ fontSize: 13 }}>{kind === 'week' ? (pt ? 'Semana' : 'Week') : '5 h'}</h2>
       <ActivityPercentChart lang={lang} data={data} series={[
