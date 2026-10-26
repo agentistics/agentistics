@@ -284,18 +284,20 @@ const harnessName = (h: string): string => (HARNESS_LABELS as Record<string, str
 export function limitNoticeText(m: LimitNoticeMeta, lang: Lang, now = Date.now()): { title: string; message: string } {
   const pt = lang === 'pt'
   const name = harnessName(m.harness)
-  const win0 = m.window === '5h' ? (pt ? 'janela de 5 h' : '5-hour window') : (pt ? 'janela semanal' : 'weekly window')
-  const win = m.scope ? `${win0} · ${scopeName(m.scope, lang)}` : win0
+  const used = m.window === '5h' ? (pt ? 'da sessão de 5 h' : 'of the 5-hour session') : (pt ? 'da semana' : 'of the week')
+  const head = m.scope ? `${name} · ${scopeName(m.scope, lang)}` : name
   const when = `${fmtWhen(m.resetsAt, now, lang)} (${pt ? 'em' : 'in'} ${fmtSpan(m.resetsAt - now, lang)})`
+  // One number (what is used) in the title; the body says only what the title does not.
   if (m.threshold >= 100) {
     const alt = m.alt ? (pt ? ` Dá para continuar no ${harnessName(m.alt)}, que tem folga.` : ` You can continue in ${harnessName(m.alt)}, which has room.`) : ''
     return pt
-      ? { title: `${name}: ${win} esgotada`, message: `O plano chegou a 100% da ${win}. Renova ${when}.${alt}` }
-      : { title: `${name}: ${win} used up`, message: `The plan reached 100% of its ${win}. It resets ${when}.${alt}` }
+      ? { title: `${head}: 100% ${used} usada — esgotada`, message: `Renova ${when}.${alt}` }
+      : { title: `${head}: 100% ${used} used — used up`, message: `Resets ${when}.${alt}` }
   }
+  const pct = Math.round(m.pct)
   return pt
-    ? { title: `${name}: ${m.threshold}% da ${win}`, message: `Já foram ${Math.round(m.pct)}% da ${win} do plano. Renova ${when}.` }
-    : { title: `${name}: ${m.threshold}% of the ${win}`, message: `${Math.round(m.pct)}% of the plan's ${win} is used. It resets ${when}.` }
+    ? { title: `${head}: ${pct}% ${used} usada`, message: `Renova ${when}.` }
+    : { title: `${head}: ${pct}% ${used} used`, message: `Resets ${when}.` }
 }
 
 /** `plan.segment`: a sharp drop the probe could not explain — the account counts from zero again. */

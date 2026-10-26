@@ -57,8 +57,12 @@ test('unscoped rendering is unchanged', () => {
 test('a scoped notice names the group', () => {
   const m = limitNoticeMeta({ harness: 'antigravity', window: 'week', threshold: 85, pct: 86, resetsAt: NOW + 86_400_000, scopeId: 'google', scopeLabel: 'Gemini models' })!
   expect(m.scope?.id).toBe('google')
-  expect(limitNoticeText(m, 'pt', NOW).title).toContain('Modelos Gemini')
-  expect(limitNoticeText(m, 'en', NOW).title).toBe('Antigravity: 85% of the weekly window · Gemini models')
+  expect(limitNoticeText(m, 'pt', NOW).title).toBe('Antigravity · Modelos Gemini: 86% da semana usada')
+  expect(limitNoticeText(m, 'en', NOW).title).toBe('Antigravity · Gemini models: 86% of the week used')
+  // each fact once: the body carries only the renewal
+  expect(limitNoticeText(m, 'pt', NOW).message).toMatch(/^Renova .* \(em .*\)\.$/)
+  expect(limitNoticeText(m, 'pt', NOW).message).not.toMatch(/Modelos|86|semana/i)
+  expect(limitNoticeText(m, 'en', NOW).message).not.toMatch(/Gemini|86|week/i)
   expect(limitNoticeMeta({ harness: 'claude', window: '5h', threshold: 85, pct: 86, resetsAt: NOW })?.scope).toBeUndefined()
 })
 

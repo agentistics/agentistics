@@ -33,10 +33,12 @@ test('notice meta round trip and text', () => {
   const m = limitNoticeMeta(meta)!
   expect(m.alt).toBe('codex')
   const t = limitNoticeText(m, 'pt', now)
-  expect(t.title).toBe('Claude Code: janela de 5 h esgotada')
+  expect(t.title).toBe('Claude Code: 100% da sessão de 5 h usada — esgotada')
   expect(t.message).toContain('em 1 h 30')
   expect(t.message).toContain('Codex')
-  expect(limitNoticeText({ ...m, threshold: 85, pct: 86 }, 'en', now).title).toBe('Claude Code: 85% of the 5-hour window')
+  expect(limitNoticeText({ ...m, threshold: 85, pct: 86 }, 'en', now).title).toBe('Claude Code: 86% of the 5-hour session used')
+  expect(limitNoticeText({ ...m, window: 'week', threshold: 95, pct: 96, alt: undefined }, 'pt', now).title).toBe('Claude Code: 96% da semana usada')
+  expect(limitNoticeText({ ...m, window: 'week', threshold: 95, pct: 96, alt: undefined }, 'en', now).message).toMatch(/^Resets /)
   expect(limitNoticeMeta({ harness: 'claude' })).toBeNull()
 })
 
