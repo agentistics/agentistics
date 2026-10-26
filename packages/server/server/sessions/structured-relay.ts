@@ -44,6 +44,7 @@ export interface RelayLaunchSpec {
   args: string[]
   cwd: string
   env?: Record<string, string>
+  unsetEnv?: string[]
 }
 
 const KILL_GRACE_MS = 3000
@@ -90,7 +91,9 @@ export function runRelay(dir: string, pollMs = 5000): void {
   // conversation text and nothing reads it.
   // The ACP CLI may fork helpers of its own. Keeping the child in a detached process group lets the
   // relay terminate the whole tree, rather than leaving a helper behind when the CLI ignores TERM.
-  const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, detached: true, stdio: ['pipe', 'pipe', 'ignore'], env: { ...process.env, ...extra } })
+  const childEnv = { ...process.env, ...extra }
+  for (const key of spec.unsetEnv ?? []) delete childEnv[key]
+  const child = spawn(spec.bin, spec.args, { cwd: spec.cwd, detached: true, stdio: ['pipe', 'pipe', 'ignore'], env: childEnv })
 
   const makeWorker = (): JsonWorker => {
     const worker = new JsonWorker(helperCommand('__relay-worker'))

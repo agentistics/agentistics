@@ -2109,13 +2109,13 @@ export async function spawnManaged(req: {
   // An agent is held to the hidden-account rule here too, including a row with no account (the
   // default root's login) — the one check every door ends in.
   const accountId = req.inherit ? req.inherit.accountId : req.accountId
-  let accountRoot: string | null = null
+  let accountRoot: string | null | undefined
   if (accountId || req.callerVerified) {
     const { recordedSpawnAccount } = await import('./sessions/spawn-account-io')
     const { spawnAccountMessage } = await import('./sessions/spawn-account')
     const decided = await recordedSpawnAccount(accountId, { agentCaller: req.callerVerified === true, harness: req.harness })
     if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang === 'pt' ? 'pt' : 'en', !!req.inherit), accountRefusal: decided.reason }
-    accountRoot = decided.account?.root ?? null
+    accountRoot = decided.account?.root
   }
 
   // THE GATE — before anything is spawned or written to the registry. A session that has already
@@ -2208,7 +2208,7 @@ export async function spawnManaged(req: {
     // Offered for a FRESH session; `planSpawn` applies it only where the CLI accepts one and reports
     // back what it actually did. A resume ignores it — that conversation already has an id.
     conversationId: offeredConversationId,
-    ...(accountRoot ? { account: { root: accountRoot } } : {}),
+    ...(accountRoot !== undefined ? { account: { root: accountRoot } } : {}),
   }, await spawnCapabilities(req.harness))
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
   if (req.account) applyAccountToPlan(planned.plan, req.account)
@@ -2280,6 +2280,7 @@ export async function spawnManaged(req: {
       cwd: req.cwd,
       argv: planned.plan.argv,
       ...(planned.plan.env ? { env: planned.plan.env } : {}),
+      ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
       // Deliver the initial prompt once the harness is ready (see `initial-prompt.ts`). The harness's
       // screen rules ride along so the backend can tell an idle prompt from a startup dialog.
       ...(planned.plan.initialPrompt

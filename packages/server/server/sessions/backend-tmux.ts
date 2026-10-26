@@ -569,7 +569,7 @@ export const tmuxBackend: SessionBackend = {
     }
     try {
       const { code, out, err } = await tmuxStartingServer(
-        spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: launch.argv, path: env.PATH ?? process.env.PATH, env }),
+        spawnArgs(profile, { id: req.id, cwd: req.cwd, argv: launch.argv, path: env.PATH ?? process.env.PATH, env, unsetEnv: req.unsetEnv }),
       )
       if (code !== 0) throw new Error(tmuxSpawnError(code, out, err))
     } catch (e) {

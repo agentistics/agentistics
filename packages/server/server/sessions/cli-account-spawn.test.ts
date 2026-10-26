@@ -42,11 +42,11 @@ afterAll(() => {
 
 /** A backend that records the spawn (row + env) and refuses it, so nothing runs and the row goes away. */
 function recorder() {
-  const seen: { row?: ManagedSession; env?: Record<string, string> }[] = []
+  const seen: { row?: ManagedSession; env?: Record<string, string>; unsetEnv?: string[] }[] = []
   const backend = {
     id: 'tmux', unavailable: async () => undefined,
-    spawn: async (req: { id: string; env?: Record<string, string> }) => {
-      seen.push({ row: (await readRegistry()).find(m => m.id === req.id), env: req.env })
+    spawn: async (req: { id: string; env?: Record<string, string>; unsetEnv?: string[] }) => {
+      seen.push({ row: (await readRegistry()).find(m => m.id === req.id), env: req.env, unsetEnv: req.unsetEnv })
       throw new Error('pane refused')
     },
     list: async () => [], capture: async () => [], kill: async () => {},
@@ -71,10 +71,11 @@ describe('session batch — the automatic pick never lands on a hidden account',
 })
 
 describe('session start --account', () => {
-  test('the owner may name the account that is off for agents (default root: no env added)', async () => {
+  test('the owner may name the account that is off for agents (default root: inherited isolation removed)', async () => {
     const { seen, backend } = recorder()
     await quiet(() => start({ kind: 'start', harness: 'claude', background: true, prompt: 'x', cwd: process.cwd(), force: true, sharedCwd: true, account: homeId } as Parameters<typeof start>[0], backend))
     expect(seen[0]!.row?.accountId).toBe(homeId)
+    expect(seen[0]!.unsetEnv).toEqual(['CLAUDE_CONFIG_DIR'])
     expect(seen[0]!.env?.CLAUDE_CONFIG_DIR).toBeUndefined()
   })
   test('an unknown account starts nothing', async () => {
