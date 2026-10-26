@@ -19,6 +19,7 @@ import { normalizeHandoffConfig, handoffCut } from '@agentistics/core'
  */
 
 import { bounded } from './bounded'
+import { sessionActionError } from './action-error'
 import { PROMPT_ACK_MS, withDeadline } from './prompt-deadline'
 import type { CanonicalMode, HarnessId, ProjectKind } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
@@ -647,10 +648,15 @@ export async function runFleetAction(
   lang: CliLang,
   req: FleetActionRequest,
 ): Promise<FleetActionResponse> {
-  const out = await runFleetActionOnce(lang, req)
-  // Every verb that worked changed something a row shows (a state, a label, a dialog that closed).
-  if (out.ok) kickFleet(req.id)
-  return out
+  try {
+    const out = await runFleetActionOnce(lang, req)
+    if (!out || typeof out.ok !== 'boolean') throw new Error('Session action returned no result')
+    // Every verb that worked changed something a row shows (a state, a label, a dialog that closed).
+    if (out.ok) kickFleet(req.id)
+    return out
+  } catch (error) {
+    return sessionActionError(lang, req.action, req.id, error)
+  }
 }
 
 async function runFleetActionOnce(
@@ -912,11 +918,15 @@ async function runFleetActionOnce(
         // PLAN.ACCOUNTS D3: a verified agent may not reopen a row whose account is off for agents.
         ...(req.callerVerified === true ? { callerVerified: true } : {}),
       })
+      if (!out) throw new Error('resumeSession returned no result')
       // THE NEW ID TRAVELS. A reopen mints a new managed row and retires the old one, so a caller
       // that stays on the id it asked about is looking at a dead session — which is exactly how
       // "reopen does nothing" was reported, on an action the server had performed correctly.
       return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}) }
     }
+    default:
+      // The body is untrusted JSON, even though TypeScript names a closed action union.
+      return { ok: false, message: lang === 'pt' ? 'Esta ação de sessão não é suportada. Atualize a página e tente novamente.' : 'This session action is not supported. Refresh the page and try again.' }
   }
 }
 

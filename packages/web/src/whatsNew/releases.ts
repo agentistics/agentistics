@@ -30,6 +30,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'O uso de contexto das sessões do Gemini aparece certo no anel e no aviso de passagem.',
         en: 'Gemini sessions show their context use correctly in the ring and the hand-off hint.',
       },
+      {
+        pt: 'Reabrir uma sessão que caiu não mostra mais um erro técnico: se algo falhar, o app explica em uma frase.',
+        en: 'Reopening a session that fell no longer shows a technical error: if something fails, the app says why in one sentence.',
+      },
     ],
   },
   '2.153.0': {
