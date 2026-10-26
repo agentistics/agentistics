@@ -22,7 +22,7 @@ export const billingNotices = {
   clear(id: string) { if (!(id in state)) return; const { [id]: _gone, ...rest } = state; state = rest; emit() },
   /** A snapshot was stored: settle every account whose own plan it carries. */
   reconcile(stored: BillingSettings) {
-    const next = Object.fromEntries(Object.entries(state).filter(([id]) => !stored.accountProfiles?.[id]))
+    const next = Object.fromEntries(Object.entries(state).filter(([key]) => !stored.accountProfiles?.[key.slice(key.indexOf(':') + 1)]))
     if (Object.keys(next).length === Object.keys(state).length) return
     state = next; emit()
   },

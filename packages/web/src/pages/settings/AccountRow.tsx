@@ -68,7 +68,7 @@ function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
 }
 
 function Usage({ r, now, lang, t }: { r: BillingRowView; now: number; lang: Lang; t: ReturnType<typeof T> }) {
-  if (r.limits) return <div data-billing-usage style={{ minWidth: 0, overflowWrap: 'normal' }}><PlanLimitBars limits={r.limits} now={now} lang={lang} /></div>
+  if (r.limits) return <div data-billing-usage style={{ minWidth: 0, overflowWrap: 'normal' }}><PlanLimitBars limits={r.limits} now={now} lang={lang} labelWidth="9em" /></div>
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>
 }
 
@@ -86,10 +86,10 @@ export function BillingAccountList(p: BillingAccountListProps) {
   const t = T(pt)
   const isMobile = useIsMobile()
   const toggle = (r: BillingRowView) => r.account && (
-    <Toggle on={r.account.available} disabled={p.pendingIds.has(r.account.id)} label={`${t.agents} · ${r.title}`}
+    <Toggle on={r.account.available} disabled={p.pendingIds.has(r.key)} label={`${t.agents} · ${r.title}`}
       onToggle={() => r.account && p.onToggle(r.account)} />
   )
-  const failed = (r: BillingRowView) => r.account && p.failedIds.has(r.account.id) && (
+  const failed = (r: BillingRowView) => r.account && p.failedIds.has(r.key) && (
     <p role="alert" style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12, color: 'var(--accent-red)' }}>{t.saveFailed(r.title)}</p>
   )
   return (
@@ -98,7 +98,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
       {isMobile ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {p.rows.map(r => (
-            <div key={`${r.harness}:${r.key}`} data-billing-row={r.key}>
+            <div key={r.key} data-billing-row={r.key}>
               <RecordCard
                 leading={<HarnessMark harness={r.harness} size={22} />}
                 title={r.title}
@@ -120,7 +120,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
             <span>{t.account}</span><span>{t.plan}</span><span>{t.usage}</span><span>{t.agents}</span><span />
           </div>
           {p.rows.map(r => (
-            <div key={`${r.harness}:${r.key}`} data-billing-row={r.key} style={{
+            <div key={r.key} data-billing-row={r.key} style={{
               display: 'grid', gridTemplateColumns: GRID, gap: 14, alignItems: 'center', padding: '12px 14px',
               borderTop: '1px solid var(--border)', background: p.selectedKey === r.key ? 'var(--bg-elevated)' : undefined,
             }}>

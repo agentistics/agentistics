@@ -269,10 +269,10 @@ export function PlanLimitArcs({ limits, now, size }: { limits: PlanLimits; now: 
  * ONE line — "5 h ▬▬ 2% · 23:53", "sem ▬▬ 32% · qui" — and at most one short amber line, only when
  * a window runs out before it renews. Same bar, colours and words as `PlanLimitMeter`.
  */
-export function PlanLimitBars({ limits, now, lang }: { limits: PlanLimits; now: number; lang: Lang }) {
+export function PlanLimitBars({ limits, now, lang, labelWidth }: { limits: PlanLimits; now: number; lang: Lang; labelWidth?: string }) {
   const warn = limits.windows.map(w => warnForecast(w, now, limits.updatedAt)).find(Boolean) ?? null
   return (
-    <div data-plan-limits={limits.harness} data-plan-compact style={{ display: 'grid', gridTemplateColumns: 'auto minmax(16px, 1fr) auto', alignItems: 'center', columnGap: 6, rowGap: 3, fontSize: 10.5, minWidth: 0 }}>
+    <div data-plan-limits={limits.harness} data-plan-compact style={{ display: 'grid', gridTemplateColumns: `${labelWidth ?? 'auto'} minmax(16px, 1fr) auto`, alignItems: 'center', columnGap: 6, rowGap: 3, fontSize: 10.5, minWidth: 0 }}>
       {limits.windows.map(w => {
         const pct = currentUsedPct(w, now)
         const renewed = windowRenewed(w, now)

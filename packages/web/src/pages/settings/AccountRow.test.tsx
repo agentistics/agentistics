@@ -64,7 +64,7 @@ describe('BillingAccountList — every fact once', () => {
       g.window = { innerWidth: width }
       try {
         const props = view(Array.from({ length: 6 }, (_, i) => acc(`c${i}`)), ['claude'], r =>
-          Number(r.key.slice(1)) < 2 ? {} : { plan: { name: 'Cobrança desconhecida', price: null, mode: 'unknown' } })
+          Number(r.key.slice('claude:c'.length)) < 2 ? {} : { plan: { name: 'Cobrança desconhecida', price: null, mode: 'unknown' } })
         expect(renderToStaticMarkup(<BillingAccountList {...props} lang="pt" />)).toContain('2 de 6 com plano informado · 4 sem informar')
         expect(renderToStaticMarkup(<BillingAccountList {...props} lang="en" />)).toContain('2 of 6 with a plan · 4 not set')
       } finally { g.window = { innerWidth: 1280 } }

@@ -57,7 +57,7 @@ import {
 } from './accountBilling'
 import { createAccountMutator } from './accountMutations'
 import AddAccount from './AddAccount'
-import { usePlanLimits } from '../../lib/planLimits'
+import { accountLabelKey, usePlanLimits } from '../../lib/planLimits'
 
 /** The wire shape of `GET /api/billing/plan-prices`. Declared here rather than imported: the web
  *  bundle must never reach into `packages/server`. */
@@ -118,7 +118,7 @@ export default function BillingSettings() {
   const needPlan = useMemo(() => accountsNeedingPlan(accounts, ctx.billing, harnesses), [accounts, ctx.billing, harnesses])
   const noticeState = useNoticeSaveState()
   useEffect(() => {
-    if (accountsLoaded) billingNotices.prune(new Set(needPlan.map(a => a.id)))
+    if (accountsLoaded) billingNotices.prune(new Set(needPlan.map(a => accountLabelKey(a.harness, a.id))))
   }, [accountsLoaded, needPlan])
 
   const rows: BillingRowView[] = useMemo(() => billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt).map(r => {
@@ -134,13 +134,14 @@ export default function BillingSettings() {
 
   const toggleAccount = async (a: BillingAccount) => {
     if (mutator.has(a.id)) return
-    setPending(h => new Set(h).add(a.id))
+    const k = accountLabelKey(a.harness, a.id)
+    setPending(h => new Set(h).add(k))
     const res = await toggleAvailability(mutator, a)
-    setPending(h => { const n = new Set(h); n.delete(a.id); return n })
+    setPending(h => { const n = new Set(h); n.delete(k); return n })
     if (res.status === 'ok') {
-      setAccounts(h => h.map(x => x.id === a.id ? { ...x, ...res.account } : x))
-      setFailed(h => { const n = new Set(h); n.delete(a.id); return n })
-    } else if (res.status === 'failed') setFailed(h => new Set(h).add(a.id))
+      setAccounts(h => h.map(x => x.id === a.id && x.harness === a.harness ? { ...x, ...res.account } : x))
+      setFailed(h => { const n = new Set(h); n.delete(k); return n })
+    } else if (res.status === 'failed') setFailed(h => new Set(h).add(k))
   }
 
   // ── the one editor ──────────────────────────────────────────────────────────────────────────
@@ -255,7 +256,7 @@ export default function BillingSettings() {
     const scope = row.scope
     const change = (cur: BillingSettingsShape): BillingSettingsShape => withScopePeriods(cur, scope, next)
     setSaveError(null)
-    const tracked = row.account !== null && needPlan.some(a => a.id === row.account!.id) ? row.account.id : null
+    const tracked = row.account !== null && needPlan.some(a => a.id === row.account!.id && a.harness === row.harness) ? row.key : null
     let ok: boolean
     if (tracked) {
       billingNotices.mark(tracked, 'saving')
@@ -339,7 +340,7 @@ export default function BillingSettings() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, minWidth: 0 }}>
               <HarnessMark harness={row.harness} size={22} />
-              <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sub}</span>
+              <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sub || row.title}</span>
             </div>
             {errPlace === 'drawer' && saveError && <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>}
             {timelineErrors.size > 0 && (

@@ -11,6 +11,7 @@ import {
 } from '@agentistics/core'
 import { applyPlan, emptyDraft, periodFromDraft, periodName, splitTimeline, validateDraft } from './billingForm'
 import { isPlaceholderName, isUnidentified, type AccountRowData } from './accountsSummary'
+import { accountLabelKey } from '../../lib/planLimits'
 import type { PatchBody, PatchResult } from './accountMutations'
 
 export interface BillingAccount extends AccountRowData { firstSeen?: number }
@@ -203,6 +204,7 @@ export function limitsForRow(limits: readonly PlanLimits[] | null | undefined, r
  * a row of its own: with an identified account beside it, it is the same login said twice.
  */
 export interface BillingRow {
+  /** `harness:account` — two assistants can both report the account `'default'`. */
   key: string
   harness: HarnessId
   /** `null` = the assistant's own timeline (it cannot say which account is signed in). */
@@ -238,8 +240,10 @@ export function billingRows(
       const login = billingLogin(a)
       const n = unnamed.indexOf(a)
       const title = nick ?? login ?? (unnamed.length > 1 ? `${label} #${n + 1}` : label)
-      const sub = nick ? (login ? `${label} · ${login}` : label) : login ? label : a.harness === 'codex' ? label : unknownWho
-      out.push({ key: a.id, harness: h, account: a, title, sub, scope: rowScope(billing, shown, a) })
+      // What the title does not already say: never the assistant's name twice.
+      const raw = nick ? (login ? `${label} · ${login}` : label) : login ? label : a.harness === 'codex' ? label : unknownWho
+      const sub = raw === title ? '' : raw
+      out.push({ key: accountLabelKey(h, a.id), harness: h, account: a, title, sub, scope: rowScope(billing, shown, a) })
     }
   }
   return out

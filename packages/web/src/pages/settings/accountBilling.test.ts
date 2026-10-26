@@ -170,11 +170,11 @@ describe('billingRows — one row per account, nothing said twice', () => {
     const rows = billingRows([acc('acc_1', { harness: 'codex', label: 'Conta padrão' }), acc('', { harness: 'codex', label: 'Conta padrão' })], none, ['codex'], L as never, true)
     expect(rows).toHaveLength(1)
     expect(rows[0]!.title).toBe('Codex CLI')
-    expect(rows[0]!.sub).toBe('Codex CLI')
+    expect(rows[0]!.sub).toBe('')
   })
   test('an assistant with no identified account is one row on its own timeline; two unnamed accounts are numbered', () => {
     const rows = billingRows([acc('', { harness: 'gemini', label: 'Conta padrão' }), acc('k1', { harness: 'codex', label: 'Conta padrão' }), acc('k2', { harness: 'codex', label: 'Default account', firstSeen: Date.parse('2026-09-05T00:00:00Z') })], none, ['codex', 'gemini'], L as never, false)
-    expect(rows.map(r => [r.key, r.title])).toEqual([['k1', 'Codex CLI #1'], ['k2', 'Codex CLI #2'], ['harness:gemini', 'Gemini CLI']])
+    expect(rows.map(r => [r.key, r.title])).toEqual([['codex:k1', 'Codex CLI #1'], ['codex:k2', 'Codex CLI #2'], ['harness:gemini', 'Gemini CLI']])
     expect(rows[2]!.scope).toEqual({ kind: 'default', harness: 'gemini' })
     expect(rows[2]!.account).toBeNull()
     expect(rows[2]!.sub).toBe('account not reported')
@@ -215,19 +215,19 @@ describe('foldUnnamed — a sign-in the harness cannot name is not a second acco
 
   test('two unnamed accounts of one harness are ONE row, titled without a number', () => {
     const r = rows([ph('g1'), ph('g2', { firstSeen: Date.parse('2026-09-05T00:00:00Z') })])
-    expect(r.map(x => x.key)).toEqual(['g1'])
+    expect(r.map(x => x.key)).toEqual(['gemini:g1'])
     expect(r[0]!.title).toBe('Gemini CLI')
     expect(r[0]!.scope).toEqual({ kind: 'none', id: 'g1' })
   })
 
   test('the kept row is the one carrying a plan of its own', () => {
     const billing: BillingSettings = { profiles: {}, accountProfiles: { g2: { periods: [{ id: 'p', mode: 'unknown', from: '2026-09-01' }] } } }
-    expect(rows([ph('g1'), ph('g2')], billing).map(x => x.key)).toEqual(['g2'])
+    expect(rows([ph('g1'), ph('g2')], billing).map(x => x.key)).toEqual(['gemini:g2'])
   })
 
   test('beside exactly one named account, the unnamed one folds into it', () => {
     const r = rows([ph('g1'), acc('g2', { harness: 'gemini', label: 'me@x.io' })])
-    expect(r.map(x => x.key)).toEqual(['g2'])
+    expect(r.map(x => x.key)).toEqual(['gemini:g2'])
   })
 
   test('beside two named accounts it stays its own row (no telling which it is)', () => {
@@ -258,7 +258,7 @@ describe('foldUnnamed — a sign-in the harness cannot name is not a second acco
       ph('k', { harness: 'kimi' }),
     ]
     const r = billingRows(accounts, none, ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi'], h => h, true)
-    expect(r.map(x => x.key)).toEqual(['c', 'x', 'g1', 'p', 'a1', 'k'])
+    expect(r.map(x => x.key)).toEqual(['claude:c', 'codex:x', 'gemini:g1', 'copilot:p', 'antigravity:a1', 'kimi:k'])
   })
 })
 
@@ -295,7 +295,7 @@ test('Codex billing never prints the generated ChatGPT id label, keeping real na
     acc('codex-id', { harness: 'codex', label, ...(nickname ? { nickname } : {}) }),
   ], none, ['codex'], () => 'Codex CLI', true)[0]!
   expect(make('ChatGPT 1a583a5f', 'Principal')).toMatchObject({ title: 'Principal', sub: 'Codex CLI' })
-  expect(make('ChatGPT 1a583a5f')).toMatchObject({ title: 'Codex CLI', sub: 'Codex CLI' })
+  expect(make('ChatGPT 1a583a5f')).toMatchObject({ title: 'Codex CLI', sub: '' })
   expect(make('person@example.com', 'Principal')).toMatchObject({ title: 'Principal', sub: 'Codex CLI · person@example.com' })
   expect(make('Jane Doe', 'Principal').sub).toBe('Codex CLI · Jane Doe')
   expect(make('Jane Doe').title).toBe('Jane Doe')
@@ -310,5 +310,14 @@ describe('limitsForRow', () => {
     expect(limitsForRow(limits, { harness: 'claude', account })?.updatedAt).toBe(1)
     expect(limitsForRow(limits, { harness: 'codex', account })).toBeNull()
     expect(limitsForRow(limits, { harness: 'claude', account: null })).toBeNull()
+  })
+})
+
+describe('billingRows — the title is never repeated in the subtitle', () => {
+  test('two assistants whose only account is "default" are titled by the assistant and say nothing under it', () => {
+    const rows = billingRows([acc('default', { harness: 'claude', label: 'Claude Code' }), acc('default', { harness: 'antigravity', label: 'Antigravity' })], none, ['claude', 'antigravity'], L as never, false)
+    for (const r of rows) expect(r.sub === r.title || r.sub.split(' · ').includes(r.title)).toBe(false)
+    expect(rows.map(r => r.key)).toEqual(['claude:default', 'antigravity:default'])
+    expect(rows.map(r => r.harness)).toEqual(['claude', 'antigravity'])
   })
 })
