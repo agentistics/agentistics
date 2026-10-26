@@ -69,6 +69,11 @@ const REAL_IO: SwitchIo = {
   link: async (oldId, newId) => (await import('./handoff-relay-io')).recordHandoffLink(oldId, newId, undefined),
 }
 
+/** MEM.GUARD: a forced start below the hard memory floor says so in the sentence the switch returns. */
+function floorSentence(r: SpawnSessionResult): string {
+  return r.overridden && r.note ? ` ${r.note}` : ''
+}
+
 /** `ended` + `endedId`: the session WAS ended and could not be given back — the UI offers Reopen on that row. */
 export type SwitchResult = SpawnSessionResult & { code?: SwitchRefusal; status?: number; ended?: boolean; endedId?: string }
 
@@ -153,7 +158,8 @@ export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: 
       .catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }) as SpawnSessionResult)
     if (out.ok) {
       const done = lang === 'pt' ? 'Sessão continuada na outra conta.' : 'Session continued on the other account.'
-      return { ...out, message: pending ? `${done} ${lang === 'pt' ? 'A última mensagem foi reenviada.' : 'The last message was re-sent.'}` : done }
+      const resent = pending ? ` ${lang === 'pt' ? 'A última mensagem foi reenviada.' : 'The last message was re-sent.'}` : ''
+      return { ...out, message: `${done}${resent}${floorSentence(out)}` }
     }
     // The new account refused to start: never leave the person without the session.
     console.error(`[account-switch] ${row.id}: resume on ${decided.target.id} failed: ${out.message}`)
@@ -228,5 +234,5 @@ async function crossHarnessSwitch(row: ManagedSession, req: SwitchAccountRequest
   const ended = await io.killAndRetire(row.id, () => deps.backend.kill(row.id)).catch(() => false)
   const done = pt ? 'Trabalho continuado em outro assistente, numa conversa nova com um resumo da anterior.' : 'Work continued on another assistant, in a new conversation briefed with a summary of the previous one.'
   const tail = ended ? '' : (pt ? ' A sessão anterior não pôde ser encerrada: encerre-a você.' : ' The previous session could not be ended: end it yourself.')
-  return { ...started, ok: true, id: newId, message: `${done}${pending ? (pt ? ' A última mensagem foi reenviada.' : ' The last message was re-sent.') : ''}${tail}` }
+  return { ...started, ok: true, id: newId, message: `${done}${pending ? (pt ? ' A última mensagem foi reenviada.' : ' The last message was re-sent.') : ''}${floorSentence(started)}${tail}` }
 }

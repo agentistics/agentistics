@@ -49,6 +49,7 @@
 
 import type { MemoryBudget, MemorySample } from './memory-budget'
 import { SWAP_ALARM_FRACTION } from './memory-budget'
+import { HARD_FLOOR_BYTES } from '../resources/mem-guard'
 
 /**
  * The process holding the most RAM + swap when a spawn is refused (RES.1): a refusal names the
@@ -118,6 +119,8 @@ export interface AdmissionRefusal {
   cores?: number
   /** RES.1 — the biggest consumer, and its fix when agentop has one. */
   hog?: Hog
+  /** MEM.GUARD — MemAvailable was under the hard floor; `force` may still override, but loudly. */
+  hardFloor?: boolean
 }
 
 /** The decision. Discriminated on `admit`; an admitted result says HOW it was admitted. */
@@ -170,6 +173,7 @@ export function admitSpawn(
     ...(input.heavyReserveBytes ? { heavyReserveBytes: input.heavyReserveBytes } : {}),
     ...(input.load ? { load1: input.load.load1, cores: input.load.cores } : {}),
     ...(input.hog ? { hog: input.hog } : {}),
+    ...(sample.available < HARD_FLOOR_BYTES ? { hardFloor: true } : {}),
     ...(budget.reservedBytes !== undefined ? { reservedBytes: budget.reservedBytes } : {}),
     reason,
     requested,
@@ -188,11 +192,14 @@ export function admitSpawn(
   // schedule what it already runs.
   const saturated = input.load !== undefined && input.load.cores > 0
     && input.load.load1 / input.load.cores >= CPU_REFUSE_PER_CORE
+  // MEM.GUARD: under the hard floor nothing fits, whatever a reserve override or the budget arithmetic says.
   const refusal = saturated
     ? refusalOf('cpu', 0)
-    : requested > budget.left
-      ? refusalOf('no-room', budget.left)
-      : null
+    : sample.available < HARD_FLOOR_BYTES
+      ? refusalOf('no-room', 0)
+      : requested > budget.left
+        ? refusalOf('no-room', budget.left)
+        : null
 
   if (!refusal) return { admit: true, requested, unmeasured: false, overridden: false, fits: budget.left }
   if (opts.force) return { admit: true, requested, unmeasured: false, overridden: true, refusal }
@@ -333,6 +340,11 @@ export function admissionMessage(refusal: AdmissionRefusal, lang: AdmissionLang)
  */
 export function admissionOverrideNote(a: Admission, lang: AdmissionLang): string | null {
   if (!a.admit || !a.overridden) return null
+  if (a.refusal.hardFloor) {
+    return lang === 'pt'
+      ? `ATENÇÃO — iniciada ABAIXO DO PISO DE MEMÓRIA (2 GB livres), ignorando a verificação: ${admissionFacts(a.refusal, lang)}`
+      : `WARNING — started BELOW THE HARD MEMORY FLOOR (2 GB free), overriding the check: ${admissionFacts(a.refusal, lang)}`
+  }
   return lang === 'pt'
     ? `Iniciada mesmo assim, ignorando a verificação de memória: ${admissionFacts(a.refusal, lang)}`
     : `Started anyway, overriding the memory check: ${admissionFacts(a.refusal, lang)}`

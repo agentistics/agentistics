@@ -80,6 +80,15 @@ describe('switchSessionAccountImpl', () => {
     expect(w.resumed[0]!.prompt).toBeUndefined()
   })
 
+  test('a resume forced below the memory floor says so in the switch message', async () => {
+    const w = world()
+    const resume = w.deps.resume
+    w.deps.resume = async r => ({ ...(await resume(r)), overridden: true, note: 'WARNING — started BELOW THE HARD MEMORY FLOOR (2 GB free)' })
+    const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, w.deps)
+    expect(out.ok).toBe(true)
+    expect(out.message).toContain('BELOW THE HARD MEMORY FLOOR')
+  })
+
   test('a failed copy gives the session back on its own account', async () => {
     const w = world({ copyFails: true })
     const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b' }, w.deps)
