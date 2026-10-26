@@ -29,6 +29,18 @@ export const PLAN_WINDOW_MS: Record<PlanWindowKind, number> = {
   week: 7 * 24 * 60 * 60_000,
 }
 
+/** A group of models that shares one quota window (Antigravity: "Gemini models", "Claude and GPT models"). */
+export interface PlanLimitScope {
+  /** Stable id: the sorted lowercase providers joined by '+': 'google', 'anthropic+openai'. */
+  id: string
+  /** The harness's own English name for the group, shown when a surface has no translation for `id`. */
+  label: string
+  /** Model ids in the group, as the harness reports them, then their display names (resolves a requested model). */
+  models: string[]
+  /** Lowercase vendors in the group: 'google' | 'anthropic' | 'openai' | … (QA vendor exclusion). */
+  providers: string[]
+}
+
 export interface PlanLimitWindow {
   kind: PlanWindowKind
   /** 0..100 (may exceed 100 when a harness reports overage). */
@@ -37,9 +49,19 @@ export interface PlanLimitWindow {
   resetsAt: number
   /** The reset was projected after renewal, rather than reported by the harness. */
   projected?: true
+  /** The model group this window belongs to; absent for harnesses with one pool (claude, codex). */
+  scope?: PlanLimitScope
 }
 
-export type PlanLimitSource = 'claude-stream' | 'claude-usage-api' | 'codex-rollout' | 'codex-app-server'
+/**
+ * The identity of a window inside a record: the kind, plus the scope when there is one. An unscoped
+ * window keeps the bare kind, so every key built from it before scopes existed is unchanged.
+ */
+export const windowKey = (w: { kind: PlanWindowKind; scope?: { id: string } }): string =>
+  w.scope ? `${w.kind}:${w.scope.id}` : w.kind
+
+export type PlanLimitSource =
+  | 'claude-stream' | 'claude-usage-api' | 'codex-rollout' | 'codex-app-server' | 'antigravity-quota-api'
 
 export interface PlanLimits {
   harness: HarnessId
@@ -89,7 +111,24 @@ export const PLAN_BUDGET_HOLD_WEEK_PCT = 95
 export const PLAN_BUDGET_TIGHT_WEEK_PCT = 80
 
 export type PlanBudgetStatus = 'ok' | 'tight' | 'hold'
+/** The week budget of ONE model group of a scoped record. */
+export interface ScopeBudget {
+  scope: PlanLimitScope
+  weekPct: number
+  weekResetsAt: number
+  daysToWeekReset: number
+  dailyBudgetPct: number
+  status: PlanBudgetStatus
+  paceStatus?: PlanPaceStatus
+  freeSlots?: number
+  suggestedParallel?: number
+}
+
 export interface PlanBudget {
+  /** Id of the scope the top-level fields describe; absent for unscoped records. */
+  scope?: string
+  /** One entry per model group, for scoped records. */
+  scopes?: ScopeBudget[]
   spawnable?: boolean
   unavailableReason?: string
   harness: HarnessId
@@ -169,6 +208,8 @@ export type RouteKind = 'lead' | 'hard-bug' | 'design' | 'spec-impl' | 'mechanic
 export interface RouteRecommendation {
   harness: HarnessId | null
   model?: string
+  /** Id of the model group the recommendation draws from (scoped harnesses only). */
+  scope?: string
   reason: string
   /** The account of `harness` that takes the work (week resets first, then most room), when the rows named accounts. */
   account?: string
@@ -269,6 +310,78 @@ export function parseCodexRateLimits(line: unknown): PlanLimits | null {
 
 const round1 = (n: number): number => Math.round(n * 10) / 10
 
+const AGY_WEEK_MAX_MS = 7 * DAY_MS + 60 * 60_000
+const AGY_SAME_RESET_MS = 5 * 60_000
+
+const capitalise = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)
+
+function agyScope(providers: string[], models: string[]): PlanLimitScope {
+  const sorted = [...providers].sort()
+  const id = sorted.join('+')
+  const label = id === 'google' ? 'Gemini models'
+    : id === 'anthropic+openai' ? 'Claude and GPT models'
+    : `${sorted.map(capitalise).join(' and ')} models`
+  return { id, label, models, providers: sorted }
+}
+
+/**
+ * The body of Antigravity's `fetchAvailableModels` (already `JSON.parse`d) → an antigravity record
+ * with one WEEK window per model group, or `null` when no group is usable. Models are grouped by
+ * their shared reset (±5 min) and each group is named by its set of providers; the group's usage is
+ * the fullest of its models (conservative). A model with no `resetTime` (the internal chat/tab ids),
+ * no known provider or no `remainingFraction` is ignored: nothing observed is not 0 % used.
+ * A group renewing later than a week away is dropped rather than mislabelled as a week.
+ * Windows come out tightest-first, so a reader that only looks at the first `week` is conservative.
+ */
+export function parseAntigravityModels(body: unknown, atMs: number): PlanLimits | null {
+  const models = obj(obj(body)?.models)
+  if (!models || !finite(atMs)) return null
+  interface Seen { id: string; name: string; provider: string; used: number; reset: number }
+  const seen: Seen[] = []
+  for (const [id, raw] of Object.entries(models)) {
+    const m = obj(raw)
+    const quota = obj(m?.quotaInfo)
+    if (!m || !quota) continue
+    const provider = typeof m.modelProvider === 'string'
+      ? m.modelProvider.replace(/^MODEL_PROVIDER_/i, '').toLowerCase() : ''
+    if (!provider || provider === 'unspecified') continue
+    const reset = typeof quota.resetTime === 'string' ? Date.parse(quota.resetTime) : NaN
+    if (!Number.isFinite(reset)) continue
+    // TODO(R1 / P6): proto3 JSON omits a zero `remainingFraction`, so an EXHAUSTED group may arrive with
+    // a reset and no fraction. Until P6 confirms that against a real exhausted group, a reset with no
+    // fraction is "not observed" (never 0 % used); if confirmed, treat it as 0 remaining here.
+    if (!finite(quota.remainingFraction)) continue
+    seen.push({
+      id, provider, reset,
+      name: typeof m.displayName === 'string' ? m.displayName : '',
+      used: Math.max(0, (1 - quota.remainingFraction) * 100),
+    })
+  }
+  seen.sort((a, b) => a.reset - b.reset)
+  const clusters: Seen[][] = []
+  for (const s of seen) {
+    const c = clusters.at(-1)
+    if (c && s.reset - c[0]!.reset <= AGY_SAME_RESET_MS) c.push(s)
+    else clusters.push([s])
+  }
+  const byScope = new Map<string, PlanLimitWindow>()
+  for (const c of clusters) {
+    const resetsAt = c[0]!.reset
+    if (resetsAt - atMs > AGY_WEEK_MAX_MS) continue
+    const scope = agyScope(
+      [...new Set(c.map(s => s.provider))],
+      [...new Set([...c.map(s => s.id).sort(), ...c.map(s => s.name).filter(Boolean).sort()])],
+    )
+    const w: PlanLimitWindow = { kind: 'week', usedPct: round1(Math.max(...c.map(s => s.used))), resetsAt, scope }
+    const dup = byScope.get(scope.id)
+    if (!dup || w.usedPct > dup.usedPct) byScope.set(scope.id, w)
+  }
+  const windows = [...byScope.values()].sort((a, b) => b.usedPct - a.usedPct || a.resetsAt - b.resetsAt
+    || (a.scope!.id < b.scope!.id ? -1 : 1))
+  if (!windows.length) return null
+  return { harness: 'antigravity', account: 'default', windows, updatedAt: atMs, source: 'antigravity-quota-api' }
+}
+
 /** The newer of two records for the same account (by `updatedAt`). */
 export function newerLimits(a: PlanLimits | undefined, b: PlanLimits): PlanLimits {
   return a && a.updatedAt >= b.updatedAt ? a : b
@@ -305,7 +418,10 @@ export function effectiveWindow(w: PlanLimitWindow, nowMs: number): PlanLimitWin
   if (!windowRenewed(w, nowMs)) return w
   const length = PLAN_WINDOW_MS[w.kind]
   const periods = Math.floor((nowMs - w.resetsAt) / length) + 1
-  return { kind: w.kind, usedPct: 0, resetsAt: w.resetsAt + periods * length, projected: true }
+  return {
+    kind: w.kind, usedPct: 0, resetsAt: w.resetsAt + periods * length, projected: true,
+    ...(w.scope ? { scope: w.scope } : {}),
+  }
 }
 
 /** The used percentage that applies NOW — `0` once the window renewed (a fact, not a guess). */
@@ -352,7 +468,43 @@ export function bindingPct(l: PlanLimits, nowMs: number): number {
 
 const windowOf = (l: PlanLimits, kind: PlanWindowKind): PlanLimitWindow | undefined => l.windows.find(w => w.kind === kind)
 
-export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
+/** Distinct scope ids of a record, in window order; empty for an unscoped record. */
+export function scopeIds(l: PlanLimits): string[] {
+  return [...new Set(l.windows.flatMap(w => (w.scope ? [w.scope.id] : [])))]
+}
+
+/** `l` seen through one scope: its unscoped windows plus that scope's windows. */
+export function scopedView(l: PlanLimits, scopeId: string): PlanLimits {
+  return { ...l, windows: l.windows.filter(w => !w.scope || w.scope.id === scopeId) }
+}
+
+/** The scope whose week window is fullest now (ties: earliest reset, then id). */
+export function tightestScope(l: PlanLimits, nowMs: number): PlanLimitScope | undefined {
+  return l.windows
+    .filter(w => w.kind === 'week' && w.scope)
+    .map(w => {
+      const e = effectiveWindow(w, nowMs)
+      return { scope: w.scope!, pct: currentUsedPct(e, nowMs), reset: e.resetsAt }
+    })
+    .sort((a, b) => b.pct - a.pct || a.reset - b.reset || (a.scope.id < b.scope.id ? -1 : a.scope.id > b.scope.id ? 1 : 0))[0]?.scope
+}
+
+/** The scope whose `models` holds `model` (case-insensitive); `undefined` when none does. */
+export function scopeForModel(l: PlanLimits, model: string | undefined): PlanLimitScope | undefined {
+  if (!model) return undefined
+  const m = model.toLowerCase()
+  return l.windows.find(w => w.scope?.models.some(x => x.toLowerCase() === m))?.scope
+}
+
+/** The record seen through the group a request resolves to (its model's, else the tightest). */
+function resolveView(l: PlanLimits, nowMs: number, model?: string): { view: PlanLimits; scope?: string } {
+  if (!l.windows.some(w => w.scope)) return { view: l }
+  const scope = scopeForModel(l, model) ?? tightestScope(l, nowMs)
+  return scope ? { view: scopedView(l, scope.id), scope: scope.id } : { view: l }
+}
+
+export function planBudget(l0: PlanLimits, nowMs: number, opts: { model?: string } = {}): PlanBudget {
+  const { view: l, scope } = resolveView(l0, nowMs, opts.model)
   const fiveWindow = windowOf(l, '5h')
   const five = fiveWindow && effectiveWindow(fiveWindow, nowMs)
   const weekWindow = windowOf(l, 'week')
@@ -373,6 +525,7 @@ export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
     plan: l.plan ?? l.sourcePlan ?? 'unregistered',
     fiveHourPct, weekPct, weekResetsAt, daysToWeekReset, dailyBudgetPct, status,
     updatedAt: l.updatedAt, stale: limitsStale(l, nowMs),
+    ...(scope ? { scope } : {}),
     ...(week?.projected ? { weekResetProjected: true } : {}),
   }
 }
@@ -381,13 +534,15 @@ export function planBudget(l: PlanLimits, nowMs: number): PlanBudget {
 export const PROJECTED_MAX_PCT_PER_HOUR = (100 / 0.5) * 0.99
 
 export function planPace(
-  l: PlanLimits,
+  l0: PlanLimits,
   nowMs: number,
   history: readonly PlanLimits[] = [],
   liveSessions: readonly LivePlanSession[] = [],
   /** Readings before this instant (a new account segment) are ignored. */
   segmentStart?: number,
+  opts: { model?: string } = {},
 ): PlanPace {
+  const { view: l, scope } = resolveView(l0, nowMs, opts.model)
   const weekWindow = windowOf(l, 'week')
   const week = weekWindow && effectiveWindow(weekWindow, nowMs)
   const weekPct = week ? currentUsedPct(week, nowMs) : 0
@@ -400,6 +555,7 @@ export function planPace(
     : rawSustainable
   const readings = [...history.filter(x => x.updatedAt !== l.updatedAt), l]
     .filter(x => x.harness === l.harness && x.account === l.account)
+    .map(x => (scope ? scopedView(x, scope) : x))
     .filter(x => segmentStart === undefined || x.updatedAt >= segmentStart)
     .filter(x => x.updatedAt <= nowMs)
     .filter(x => !week || (x.updatedAt >= week.resetsAt - PLAN_WINDOW_MS.week
@@ -477,10 +633,19 @@ const ROUTE_PREFERENCES: Record<RouteKind, readonly [HarnessId, string?][]> = {
   qa: [['gemini'], ['copilot'], ['codex'], ['claude', 'sonnet']],
   probe: [['claude', 'haiku'], ['gemini']],
 }
+// Antigravity is appended LAST on the work it can take (owner may reorder); never on lead/hard-bug/design.
+for (const k of ['spec-impl', 'mechanical', 'qa', 'probe'] as const) ROUTE_PREFERENCES[k] = [...ROUTE_PREFERENCES[k], ['antigravity']]
+
+/** The vendor whose models a harness authors with; a QA of its work must come from another vendor. */
+const HARNESS_VENDOR: Partial<Record<string, string>> = { claude: 'anthropic', codex: 'openai', gemini: 'google' }
 
 /** A budget row, optionally attributed to one account of its harness. */
 export type AccountBudget = PlanBudget & Partial<PlanPace> & {
   account?: string; accountLabel?: string; updatedAt?: number
+  /** Set on a candidate expanded from one model group: a model of that group. */
+  model?: string
+  /** Set on a candidate expanded from one model group: that group's vendors. */
+  scopeProviders?: string[]
   /** Set by `yieldStaleRows`: a stale reading of a plan another account of the harness reports fresh. */
   yieldsTo?: string
 }
@@ -563,6 +728,18 @@ export function routeRecommendation(
   kind: RouteKind,
   authorHarness?: string,
 ): RouteRecommendation {
+  // A row with model groups is several independent pools: one candidate per group, so a group on
+  // hold no longer holds the other. Under `qa`, a group that includes the author's vendor is dropped.
+  const authorVendor = kind === 'qa' && authorHarness ? HARNESS_VENDOR[authorHarness] : undefined
+  budgets = budgets.flatMap((b): AccountBudget[] => {
+    if (!b.scopes?.length) return [b]
+    return b.scopes
+      .filter(sb => !(authorVendor && sb.scope.providers.includes(authorVendor)))
+      .map(({ scope, ...sb }) => {
+        const { scopes: _scopes, ...row } = b
+        return { ...row, ...sb, scope: scope.id, model: scope.models[0], scopeProviders: scope.providers }
+      })
+  })
   // Routing aggregates fold only registered accounts, so an unregistered meter can never make a
   // harness look available when every account that could take work is held.
   const aggregates = new Map(harnessAggregate(budgets.filter(b => b.plan !== 'unregistered')).map(a => [a.harness, a]))
@@ -613,7 +790,7 @@ export function routeRecommendation(
     harness: pick.harness,
     ...(pick.account ? { account: pick.account } : {}),
     ...(pick.accountLabel ? { accountLabel: pick.accountLabel } : {}),
-    ...(selected?.[1] ? { model: selected[1] } : {}),
+    ...(pick.scope && pick.model ? { model: pick.model, scope: pick.scope } : selected?.[1] ? { model: selected[1] } : {}),
     reason: `${pick.harness} is the preferred eligible plan for ${kind}.${budgetText}${paceText}`,
     alternatives,
     accountAlternatives,
@@ -646,13 +823,15 @@ export function alternativeWithRoom(
 
 export const PLAN_THRESHOLDS = [75, 85, 95, 100] as const
 
-/** Per `harness:account:kind`: which period (its `resetsAt`) and the highest threshold told. */
+/** Per `harness:account:windowKey` (the bare kind when unscoped): which period (its `resetsAt`) and the highest threshold told. */
 export type PlanNoticeState = Record<string, { resetsAt: number; told: number }>
 
 export interface PlanThresholdNotice {
   harness: HarnessId
   account: string
   kind: PlanWindowKind
+  /** The model group, for a scoped window. */
+  scope?: { id: string; label: string }
   threshold: number
   usedPct: number
   resetsAt: number
@@ -673,7 +852,7 @@ export function planThresholdNotices(
   const next: PlanNoticeState = { ...state }
   const notices: PlanThresholdNotice[] = []
   for (const w of l.windows) {
-    const key = `${l.harness}:${l.account}:${w.kind}`
+    const key = `${l.harness}:${l.account}:${windowKey(w)}`
     const prev = next[key]
     const samePeriod = prev && w.resetsAt - prev.resetsAt <= NEW_PERIOD_MS
     if (prev && w.resetsAt < prev.resetsAt - NEW_PERIOD_MS) continue // an older record: ignore
@@ -682,6 +861,7 @@ export function planThresholdNotices(
     if (reached > told) {
       notices.push({
         harness: l.harness, account: l.account, kind: w.kind,
+        ...(w.scope ? { scope: { id: w.scope.id, label: w.scope.label } } : {}),
         threshold: reached, usedPct: w.usedPct, resetsAt: w.resetsAt,
       })
     }
@@ -707,7 +887,7 @@ const DISCONTINUITY_RESET_MS = 60 * 60_000
  */
 export function meterDiscontinuity(prev: PlanLimits, next: PlanLimits): boolean {
   return next.windows.some(n => {
-    const p = prev.windows.find(w => w.kind === n.kind)
+    const p = prev.windows.find(w => windowKey(w) === windowKey(n))
     if (!p) return false
     return Math.abs(n.resetsAt - p.resetsAt) > DISCONTINUITY_RESET_MS
       && next.updatedAt < p.resetsAt

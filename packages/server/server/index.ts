@@ -267,7 +267,7 @@ if (!TEAM_CENTRAL) {
       notify: (n, alt) => sse.broadcastNotification({
         type: n.threshold >= 95 ? 'warning' : 'info',
         code: n.threshold >= 100 ? 'limits.exhausted' : 'limits.threshold',
-        meta: { harness: n.harness, window: n.kind, threshold: n.threshold, pct: Math.round(n.usedPct), resetsAt: n.resetsAt, ...(alt ? { alt } : {}) },
+        meta: { harness: n.harness, window: n.kind, threshold: n.threshold, pct: Math.round(n.usedPct), resetsAt: n.resetsAt, ...(alt ? { alt } : {}), ...(n.scope ? { scopeId: n.scope.id, scopeLabel: n.scope.label } : {}) },
       }),
       // A sharp drop the probe could not explain: that account's burn and notices start over.
       segment: s => sse.broadcastNotification({ type: 'info', code: 'plan.segment', meta: { harness: s.harness, account: s.account } }),
@@ -276,6 +276,8 @@ if (!TEAM_CENTRAL) {
     pl.watchPlanLimitsFile()
     // TUI claude sessions emit no stream-json: read the subscription usage Claude Code's /usage reads.
     void import('./claude-usage').then(m => m.startClaudeUsagePoll()).catch(() => {})
+    // agy keeps one weekly quota per model group: read it while an agy process is alive.
+    void import('./antigravity-usage').then(m => m.startAntigravityUsagePoll()).catch(() => {})
     return pl.seedPlanLimits(sd.STRUCTURED_DIR)
   }).catch(err => console.warn('[plan-limits] seed failed:', String(err)))
 }

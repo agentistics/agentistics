@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.156.0': {
+    features: [
+      {
+        pt: 'Uso: o Antigravity agora mostra sua cota da semana, separada para modelos Gemini e para Claude/GPT.',
+        en: 'Usage: Antigravity now shows its weekly quota, split between Gemini models and Claude/GPT.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Em Cobrança, cada conta aparece uma vez só; duas contas do mesmo assistente ganham número (#1, #2) e as barras ficam alinhadas.',
+        en: 'In Billing each account shows once; two accounts of the same assistant get a number (#1, #2) and the bars line up.',
+      },
+    ],
+  },
   '2.155.0': {
     features: [
       {

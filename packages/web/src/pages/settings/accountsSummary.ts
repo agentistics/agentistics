@@ -6,7 +6,7 @@
  * Every figure here is derived from the SAME account list the expanded rows draw, so the summary
  * can never disagree with what opens under it.
  */
-import { currentUsedPct } from '@agentistics/core'
+import { currentUsedPct, windowKey } from '@agentistics/core'
 import type { HarnessId, PlanLimits, PlanLimitWindow } from '@agentistics/core'
 
 export interface AccountRowData {
@@ -94,13 +94,14 @@ export function worstPct(limits: PlanLimits, now: number): number {
  * account's higher window of the other kind.
  */
 export function worstBars(limits: readonly PlanLimits[], now: number): PlanLimits | null {
-  const best = new Map<PlanLimitWindow['kind'], { w: PlanLimitWindow; pct: number }>()
+  const best = new Map<string, { w: PlanLimitWindow; pct: number }>()
   let from: PlanLimits | null = null
   for (const l of limits) {
     for (const w of l.windows) {
       const pct = currentUsedPct(w, now)
-      const cur = best.get(w.kind)
-      if (!cur || pct > cur.pct) best.set(w.kind, { w, pct })
+      const k = windowKey(w)
+      const cur = best.get(k)
+      if (!cur || pct > cur.pct) best.set(k, { w, pct })
       from ??= l
     }
   }

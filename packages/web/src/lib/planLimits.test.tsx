@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { LimitLevelIcon } from '../components/PlanLimitMeter'
-import { limitLevel, limitLevelWord, subscriptionName, subscriptionRows, fmtSpan, forecastPhrase, limitNoticeMeta, limitNoticeText, limitTone, resetPhrase, windowLabel, windowShortLabel } from './planLimits'
+import { limitLevel, limitLevelWord, subscriptionName, subscriptionRows, accountLabelKey, fmtSpan, forecastPhrase, limitNoticeMeta, limitNoticeText, limitTone, resetPhrase, windowLabel, windowShortLabel } from './planLimits'
 
 const M = 60_000
 test('spans', () => {
   expect(fmtSpan(12 * M, 'pt')).toBe('12 min')
-  expect(fmtSpan(125 * M, 'pt')).toBe('2 h 05')
+  expect(fmtSpan(125 * M, 'pt')).toBe('2 h 5 min')
   expect(fmtSpan(50 * 60 * M, 'en')).toBe('2 d 2 h')
 })
 test('a renewed window says so instead of a zero', () => {
@@ -33,10 +33,12 @@ test('notice meta round trip and text', () => {
   const m = limitNoticeMeta(meta)!
   expect(m.alt).toBe('codex')
   const t = limitNoticeText(m, 'pt', now)
-  expect(t.title).toBe('Claude Code: janela de 5 h esgotada')
+  expect(t.title).toBe('Claude Code: 100% da sessão de 5 h usada — esgotada')
   expect(t.message).toContain('em 1 h 30')
   expect(t.message).toContain('Codex')
-  expect(limitNoticeText({ ...m, threshold: 85, pct: 86 }, 'en', now).title).toBe('Claude Code: 85% of the 5-hour window')
+  expect(limitNoticeText({ ...m, threshold: 85, pct: 86 }, 'en', now).title).toBe('Claude Code: 86% of the 5-hour session used')
+  expect(limitNoticeText({ ...m, window: 'week', threshold: 95, pct: 96, alt: undefined }, 'pt', now).title).toBe('Claude Code: 96% da semana usada')
+  expect(limitNoticeText({ ...m, window: 'week', threshold: 95, pct: 96, alt: undefined }, 'en', now).message).toMatch(/^Resets /)
   expect(limitNoticeMeta({ harness: 'claude' })).toBeNull()
 })
 
@@ -62,16 +64,31 @@ test('a registered plan with no reading is a row with no limits (no ring, no zer
 })
 test('an account label that is only the assistant name is not appended to it', () => {
   const rd = (account: string) => ({ harness: 'codex', account, plan: 'Plus', source: 'codex-rollout', updatedAt: 1, windows: [{ kind: '5h', usedPct: 10, resetsAt: 9e12 }] }) as never
-  const rows = subscriptionRows([rd('default')], [{ harness: 'codex', account: 'acc_1', plan: 'Plus' }], { default: 'Codex CLI', acc_1: 'Codex CLI #1' })
+  const rows = subscriptionRows([rd('default')], [{ harness: 'codex', account: 'acc_1', plan: 'Plus' }], { 'codex:default': 'Codex CLI', 'codex:acc_1': 'Codex CLI #1' })
   expect(rows.map(r => r.accountLabel)).toEqual([undefined, 'Codex CLI #1'])
   expect(rows.map(r => subscriptionName(r.harness, r.accountLabel))).toEqual(['Codex CLI', 'Codex CLI #1'])
   expect(subscriptionName('claude', 'Work')).toBe('Claude Code · Work')
 })
 test('two accounts of one harness are two rows, each named; a single account keeps its label', () => {
   const rd = (account: string) => ({ harness: 'claude', account, plan: 'Max', source: 'stream', updatedAt: 1, windows: [{ kind: '5h', usedPct: 10, resetsAt: 9e12 }] }) as never
-  const labels = { a: 'Work', b: 'Claude Code #2' }
-  expect(subscriptionRows([rd('a'), rd('b')], [], labels).map(r => r.accountLabel)).toEqual(['Work', 'Claude Code #2'])
+  const labels = { 'claude:a': 'Work', 'claude:b': 'Claude Code #2' }
+  expect(subscriptionRows([rd('a'), rd('b')], [], labels).map(r => r.accountLabel)).toEqual(['Claude Code #2', 'Work'])
   expect(subscriptionRows([rd('a')], [], labels)[0]!.accountLabel).toBe('Work')
   // A registered plan of an account that has a reading is not listed twice; one without is.
   expect(subscriptionRows([rd('a')], [{ harness: 'claude', account: 'a', plan: 'Max' }, { harness: 'claude', account: 'b', plan: 'Max' }], labels)).toHaveLength(2)
+})
+
+test('account labels are keyed by harness AND account: agy and Claude on "default" do not share a label', () => {
+  const rd = (harness: string) => ({ harness, account: 'default', plan: 'P', source: 'stream', updatedAt: 1, windows: [{ kind: '5h', usedPct: 10, resetsAt: 9e12 }] }) as never
+  const labels = { [accountLabelKey('claude', 'default')]: 'Claude Code', [accountLabelKey('antigravity', 'default')]: 'Antigravity #1' }
+  const rows = subscriptionRows([rd('claude'), rd('antigravity')], [], labels)
+  expect(rows.map(r => subscriptionName(r.harness, r.accountLabel))).toEqual(['Claude Code', 'Antigravity #1'])
+  // A label written for the OTHER harness's "default" never leaks.
+  expect(subscriptionRows([rd('antigravity')], [], { [accountLabelKey('claude', 'default')]: 'Claude Code' })[0]!.accountLabel).toBeUndefined()
+})
+
+test('cards are ordered by assistant, then #1, #2, #10', () => {
+  const rd = (harness: string, account: string) => ({ harness, account, plan: 'P', source: 'stream', updatedAt: 1, windows: [{ kind: '5h', usedPct: 10, resetsAt: 9e12 }] }) as never
+  const labels = { 'antigravity:x': 'Antigravity', 'claude:b': 'Claude Code #2', 'claude:a': 'Claude Code #1', 'claude:c': 'Claude Code #10' }
+  expect(subscriptionRows([rd('antigravity', 'x'), rd('claude', 'b'), rd('claude', 'c'), rd('claude', 'a')], [], labels).map(r => r.accountLabel ?? r.harness)).toEqual(['Claude Code #1', 'Claude Code #2', 'Claude Code #10', 'antigravity'])
 })

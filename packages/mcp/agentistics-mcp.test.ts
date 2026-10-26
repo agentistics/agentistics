@@ -91,3 +91,25 @@ test("plan limits MCP tool forwards availability without budget samples", () => 
   expect(out.budgets).toEqual([]);
   expect(out.harnesses).toEqual(harnesses);
 });
+
+test("plan limits MCP tool passes scoped fields through untouched", async () => {
+  const { planBudget, planPace } = await import("@agentistics/core");
+  const now = Date.parse("2026-10-28T12:00:00Z");
+  const g = { id: "google", label: "Gemini models", models: ["gemini-3.1-pro"], providers: ["google"] };
+  const c = { id: "anthropic+openai", label: "Claude and GPT models", models: ["claude-sonnet-4-6"], providers: ["anthropic", "openai"] };
+  const limits = {
+    harness: "antigravity" as const, account: "default", plan: "Google AI Plus", updatedAt: now, source: "antigravity-quota-api" as const,
+    windows: [
+      { kind: "week" as const, usedPct: 4, resetsAt: now + 3 * 86_400_000, scope: g },
+      { kind: "week" as const, usedPct: 60, resetsAt: now + 3 * 86_400_000, scope: c },
+    ],
+  };
+  const scopes = [g, c].map((scope, i) => ({ scope, weekPct: i ? 60 : 4, weekResetsAt: now + 3 * 86_400_000, daysToWeekReset: 3, dailyBudgetPct: 30, status: "ok" as const }));
+  const budget = { ...planBudget(limits as any, now), ...planPace(limits as any, now, []), scopes };
+  const out = planLimitsTool(undefined, { budgets: [budget], now });
+  expect(out.budgets[0].scopes).toEqual(scopes);
+  expect(out.budgets[0].harness).toBe("antigravity");
+  // The recommendation reads the groups: a qa route for a claude-authored delivery never lands on the Claude group.
+  const qa = planLimitsTool({ kind: "qa", authorHarness: "claude" }, { budgets: [budget], now });
+  expect(qa.recommendation?.scope).not.toBe("anthropic+openai");
+});

@@ -57,7 +57,7 @@ export function UsageNowContent({ lang }: { lang: Lang }) {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 12 }}>
                 {measured && <StatTile label={pt ? 'Em paralelo / recomendado' : 'Parallel / recommended'} value={`${row.liveSessions.length} / ${row.suggestedParallel}`} />}
                 <StatTile label={pt ? 'Pausar até' : 'Pause until'} value={row.pauseUntil !== undefined && row.pauseUntil > now ? fmtWhen(row.pauseUntil, now, lang) : (hold || over ? (pt ? 'Sem horário' : 'No time set') : (pt ? 'Sem pausa' : 'No pause'))} />
-                {limitsForAccount?.windows.some(w => w.kind === 'week') && row.weekResetsAt > now && <StatTile label={pt ? 'Semana: esperado' : 'Week: expected'} value={`${Math.max(0, Math.min(100, (1 - (row.weekResetsAt - now) / (7 * 24 * 3_600_000)) * 100)).toFixed(1)}%`} />}
+                {limitsForAccount?.windows.some(w => w.kind === 'week') && row.weekResetsAt > now && <StatTile label={pt ? 'Semana: esperado' : 'Week: expected'} value={`${Math.max(0, Math.min(100, (1 - (row.weekResetsAt - now) / (7 * 24 * 3_600_000)) * 100)).toLocaleString(pt ? 'pt-BR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`} />}
                 {row.weekResetsAt > now && <StatTile label={pt ? 'Renova em' : 'Renews in'} value={fmtSpan(row.weekResetsAt - now, lang)} />}
               </div>
               {!measured && <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{unmeasured(lang)}</p>}

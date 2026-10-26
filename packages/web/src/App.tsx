@@ -67,7 +67,7 @@ import AwayPill from './components/AwayPill'
 import { HardwareModal } from './components/HardwareModal'
 import { AccountSwitchDialog, useSwitchInfo } from './components/sessions/AccountSwitch'
 import type { PlanUsageSession } from './components/PlanUsageSessionSwitch'
-import { usePlanLimits } from './lib/planLimits'
+import { accountLabelKey, usePlanLimits } from './lib/planLimits'
 import { PlanUsageModal } from './components/PlanUsageModal'
 import { subscribePlanUsageModal } from './lib/planUsageModalRequests'
 import { CleanDialog } from './components/CleanDialog'
@@ -2723,7 +2723,7 @@ export default function AppLayout() {
   const openUsageSession: PlanUsageSession | undefined = selectedFleetSession ? {
     id: selectedFleetSession.id,
     title: selectedFleetSession.title,
-    accountLabel: (usageSwitchInfo?.current?.id ? usagePlan.accountLabels[usageSwitchInfo.current.id] : undefined)
+    accountLabel: (usageSwitchInfo?.current?.id ? usagePlan.accountLabels[accountLabelKey(usageSwitchInfo.current.harness ?? '', usageSwitchInfo.current.id)] : undefined)
       ?? usageSwitchInfo?.current?.label ?? (lang === 'pt' ? 'não identificada' : 'unidentified'),
     info: usageSwitchInfo,
     onSwitch: () => { if (usageSwitchInfo) setUsageSwitchTarget({ session: selectedFleetSession, info: usageSwitchInfo }) },
