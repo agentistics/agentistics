@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '0.0.0-next': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Menu do celular bem mais rápido: trocar de área pela barra de baixo e abrir o menu "Mais" não trava mais a tela.',
+        en: 'Much faster phone menu: switching areas from the bottom bar and opening "More" no longer freezes the screen.',
+      },
+    ],
+  },
   '2.158.0': {
     features: [
       {
