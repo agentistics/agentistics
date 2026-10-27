@@ -845,6 +845,7 @@ function SideNav({
                   rows={fleet.rows}
                   finishedTasks={fleet.finishedTasks}
                   loading={fleetLoading}
+                  closedTotal={fleet.closedTotal ?? 0}
                   unsupported={fleetUnsupported}
                   filters={sessionsFilters}
                   activeOnly={sessionsActiveOnly}

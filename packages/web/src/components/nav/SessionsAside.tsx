@@ -125,6 +125,8 @@ export interface SessionsAsideProps {
   finishedTasks: readonly string[]
   /** True until the first poll answers — an empty list before then is "not asked yet". */
   loading: boolean
+  /** Ended conversations the live view did not send: an empty list is not "no sessions" then. */
+  closedTotal?: number
   /** This machine may not be asked at all: a central, or a profile with no host power. */
   unsupported: boolean
   /** Already-localized reason the list may not be the whole truth. */
@@ -276,7 +278,7 @@ function roleExtras(row: ControlSession | undefined, pt: boolean): MenuEntry[] {
 }
 
 export function SessionsAside({
-  lang, capacity, rows, loading, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
+  lang, capacity, rows, loading, closedTotal = 0, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
   onCreated, selectedId, onGoToSession,
 }: SessionsAsideProps) {
@@ -1891,7 +1893,7 @@ export function SessionsAside({
               <EmptyReason
                 pt={pt} loading={loading} unsupported={unsupported} unavailable={unavailable}
                 leadersOnly={leadersOnly} searching={narrowedLive}
-                withheld={valueFiltered.filter(r => !active.has(r.state)).length}
+                withheld={Math.max(valueFiltered.filter(r => !active.has(r.state)).length, closedTotal)}
                 withheldInTab
                 filterNarrowed={filterCount > 0 && valueFiltered.length < rows.length}
               />
