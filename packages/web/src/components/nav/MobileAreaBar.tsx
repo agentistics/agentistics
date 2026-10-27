@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Ellipsis, Gauge, House, KeyRound, LogOut, ShieldCheck, Terminal, type LucideIcon } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight, ClipboardList, Ellipsis, Gauge, KeyRound, LogOut, MessageSquare, ShieldCheck, type LucideIcon } from 'lucide-react'
 import type { IamAccount } from '../../App'
-import { areaOfPath, type AreaId } from '../../lib/appAreas'
-import { activateMobileSessions, mobileAreaSlot, scrollMobileSessionsToTop } from '../../lib/mobileAreaTabs'
+import { areaOfPath, APP_AREAS, type AreaId } from '../../lib/appAreas'
+import { mobileAreaSlot, previousPage, rememberPreviousPage } from '../../lib/mobileAreaTabs'
 import { BottomSheet } from '../BottomSheet'
 import { ChangePasswordSelf } from '../ChangePasswordSelf'
 import { MfaSetup } from '../MfaSetup'
-import { AreaTree, areaRowStyle, areaTrailingStyle } from './AreaTree'
+import { AREA_LUCIDE, AreaTree, areaRowStyle, areaTrailingStyle } from './AreaTree'
 import { MobilePillBar } from './MobilePillBar'
 
 export interface MobileAreaAction {
@@ -74,10 +74,13 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
   const current = areaOfPath(pathname)
   // Away from the sessions list the centre is the way back to it: a house labelled Início inside the
   // Sessions area (an open conversation, Leadership), the Sessions icon everywhere else and on the list itself.
-  const atSessionsList = pathname === '/sessions' || pathname === '/sessions/'
-  const homeButton = current?.area.id === 'sessions' && !atSessionsList
-  const sessions = homeButton ? (pt ? 'Início' : 'Home') : (pt ? 'Sessões' : 'Sessions')
-  const sessionBadge = badges?.sessions ?? attention
+  useEffect(() => { rememberPreviousPage(pathname + window.location.search) }, [pathname])
+  const inSessions = current?.area.id === 'sessions'
+  const backPath = inSessions ? previousPage() : '/'
+  const backArea = inSessions ? areaOfPath(backPath.split('?')[0]!)?.area ?? APP_AREAS.find(a => a.id === 'metrics')! : null
+  const backLabel = backArea ? (pt ? backArea.labelPt : backArea.labelEn) : ''
+  const sessions = inSessions ? (pt ? `Voltar para ${backLabel}` : `Back to ${backLabel}`) : (pt ? 'Sessões' : 'Sessions')
+  const sessionBadge = inSessions ? undefined : (badges?.sessions ?? attention)
   const orange = 'var(--anthropic-orange)'
   const roleLabel = principal
     ? (principal.role === 'owner' ? 'Owner' : (principal.memberships.some(m => m.role === 'manager') ? 'Manager' : 'User'))
@@ -100,7 +103,7 @@ export function MobileAreaBar({ lang, pathname, badges, attention, onNavigate, a
           { key: 'tasks', label: 'Agentask', icon: ClipboardList, onActivate: () => go('/tasks'), badge: badges?.tasks },
           { key: 'usage', label: pt ? 'Uso' : 'Usage', icon: Gauge, onActivate: () => go('/usage'), badge: badges?.usage },
           { key: 'sessions', label: sessions, ariaLabel: sessionBadge && sessionBadge > 0 ? `${sessions}, ${sessionBadge} ${pt ? 'precisam de você' : 'need you'}` : sessions,
-            icon: homeButton ? House : Terminal, onActivate: () => { closeSheet(); activateMobileSessions(pathname, onNavigate, scrollMobileSessionsToTop) }, badge: sessionBadge },
+            icon: backArea ? AREA_LUCIDE[backArea.icon] : MessageSquare, onActivate: () => { closeSheet(); onNavigate(inSessions ? backPath : '/sessions') }, badge: sessionBadge },
           { key: 'metrics', label: pt ? 'Métricas' : 'Metrics', icon: BarChart3, onActivate: () => go('/'), badge: badges?.metrics },
           { key: 'more', label: pt ? 'Mais' : 'More', icon: Ellipsis, onActivate: () => setOpen(v => !v), expanded: open, hasPopup: 'dialog' },
         ]}

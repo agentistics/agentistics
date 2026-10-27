@@ -6,6 +6,7 @@
  * last visited inside it (remembered per area in sessionStorage), else its first page.
  */
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import type { LucideIcon } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { BarChart3, ChevronRight, ClipboardList, Gauge, GitBranch, Lock, SlidersHorizontal, Terminal } from 'lucide-react'
@@ -17,15 +18,20 @@ import { FieldInput } from '../../pages/settings/primitives'
 import { SOLID_COUNT } from './countBadge'
 import { areaOpenStore, isAreaOpen, openedArea, toggledAreaOpen } from '../../lib/areaOpen'
 
-export const AREA_ICON: Record<AreaIcon, (size: number) => React.ReactNode> = {
-  terminal: s => <Terminal size={s} />,
-  clipboard: s => <ClipboardList size={s} />,
-  gauge: s => <Gauge size={s} />,
-  chart: s => <BarChart3 size={s} />,
-  git: s => <GitBranch size={s} />,
-  lock: s => <Lock size={s} />,
-  settings: s => <SlidersHorizontal size={s} />,
+/** The lucide component behind each area icon: the bar's centre button reuses the exact one. */
+export const AREA_LUCIDE: Record<AreaIcon, LucideIcon> = {
+  terminal: Terminal,
+  clipboard: ClipboardList,
+  gauge: Gauge,
+  chart: BarChart3,
+  git: GitBranch,
+  lock: Lock,
+  settings: SlidersHorizontal,
 }
+
+export const AREA_ICON: Record<AreaIcon, (size: number) => React.ReactNode> = Object.fromEntries(
+  (Object.keys(AREA_LUCIDE) as AreaIcon[]).map(k => { const I = AREA_LUCIDE[k]; return [k, (s: number) => <I size={s} />] }),
+) as Record<AreaIcon, (size: number) => React.ReactNode>
 
 const LAST_KEY = 'ag-area-last:'
 

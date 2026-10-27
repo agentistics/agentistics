@@ -80,23 +80,25 @@ test('a finger may re-enter after a vertical drag-off and activate the slot on r
   expect(went).toEqual(['/'])
 })
 
-test('Home scrolls the session panes to top and an open conversation returns to the list', async () => {
-  const panes = [document.createElement('div'), document.createElement('div')]
-  panes[0]!.setAttribute('data-mobile-sessions-scroll', '')
-  for (const pane of panes) { pane.scrollTop = 300; document.body.appendChild(pane) }
-  try {
-    let view = await render()
-    expect(view.buttons[2]!.getAttribute('aria-label')).toContain('Sessões')
-    await click(view.buttons[2]!)
-    expect(panes[0]!.scrollTop).toBe(0)
-    expect(panes[1]!.scrollTop).toBe(300)
-    expect(scrolls).toBe(1)
-    expect(went).toEqual([])
-    view = await render('/sessions/abc')
-    expect(view.buttons[2]!.getAttribute('aria-label')).toContain('Início')
-    await click(view.buttons[2]!)
-    expect(went).toEqual(['/sessions'])
-  } finally { panes.forEach(el => el.remove()) }
+test('inside Sessões the centre shows the last other area and returns to its full path', async () => {
+  sessionStorage.setItem('ag-mobile-prev-page', '/usage')
+  let view = await render('/sessions/abc')
+  expect(view.buttons[2]!.getAttribute('aria-label')).toBe('Voltar para Uso')
+  expect(view.buttons[2]!.querySelector('svg.lucide-gauge')).not.toBeNull()
+  await click(view.buttons[2]!)
+  expect(went).toEqual(['/usage'])
+  went.length = 0
+  sessionStorage.clear()
+  view = await render('/sessions')
+  expect(view.buttons[2]!.querySelector('svg.lucide-chart-column')).not.toBeNull()
+  await click(view.buttons[2]!)
+  expect(went).toEqual(['/'])
+  went.length = 0
+  view = await render('/tasks')
+  expect(view.buttons[2]!.querySelector('svg.lucide-message-square')).not.toBeNull()
+  await click(view.buttons[2]!)
+  expect(went).toEqual(['/sessions'])
+  expect(sessionStorage.getItem('ag-mobile-prev-page')).toBe('/tasks')
 })
 
 test('the bar is three pieces: left pill, standalone round centre, right pill', async () => {
@@ -117,9 +119,7 @@ test('the bar is three pieces: left pill, standalone round centre, right pill', 
     expect(path.getAttribute('stroke')).toBe('var(--border)')
   }
   expect(view.nav.innerHTML).not.toContain('mask')
-  expect(view.buttons[2]!.querySelector('svg.lucide-terminal')).not.toBeNull()
-  const inConversation = await render('/sessions/abc')
-  expect(inConversation.buttons[2]!.querySelector('svg.lucide-house')).not.toBeNull()
+  expect(view.buttons[2]!.querySelector('svg.lucide-message-square')).not.toBeNull()
 })
 
 test('the active slot gets a large indicator; Início active puts the fill on the circle instead', async () => {

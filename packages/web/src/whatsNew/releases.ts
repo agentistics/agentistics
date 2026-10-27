@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '0.0.0-next': {
+    features: [
+      {
+        pt: 'No celular, o botão redondo do centro agora é um ícone de chat e abre Sessões; dentro de Sessões ele mostra o ícone da área de onde você veio e leva de volta à página que estava aberta.',
+        en: 'On phones, the round centre button is now a chat icon that opens Sessions; inside Sessions it shows the icon of the area you came from and takes you back to the page you had open.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Os cards de Métricas ficaram compactos no celular: título e ícones na mesma linha, valor logo abaixo e legenda em até duas linhas.',
+        en: 'Metrics cards are compact on phones: title and icons on one line, the value right below and the caption on up to two lines.',
+      },
+    ],
+  },
   '2.159.0': {
     features: [
       {
