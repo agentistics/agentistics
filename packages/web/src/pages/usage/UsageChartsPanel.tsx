@@ -30,6 +30,7 @@ const T = {
     noReading: 'sem leitura de limites', omitted: (n: string) => `Sem janela de 5 h (omitido): ${n}.`,
     perDay: 'Mensagens por dia da semana e hora (14 dias)', hoursDesc: 'Mensagens enviadas nos últimos 14 dias, agrupadas pelo horário local.',
     peaks: 'Quando o limite subiu mais rápido', peaksDesc: 'Os momentos em que uma conta gastou mais do seu limite em pouco tempo.',
+    barsTitle: 'Uso do limite por hora',
     bars: 'Quanto do limite de 5 h foi usado em cada hora. Aumentos entre leituras são distribuídos pelo intervalo observado.',
     messagePeaks: 'Horários com mais mensagens', messagePeaksDesc: 'Sem leituras de limites, os horários de maior atividade vêm das mensagens.',
     messages: 'mensagens', used: 'gastou', of: 'do limite de', in: 'em', min: 'min', weekly: 'uma semana',
@@ -44,6 +45,7 @@ const T = {
     noReading: 'no limit readings', omitted: (n: string) => `No 5 h window (omitted): ${n}.`,
     perDay: 'Messages by weekday and hour (14 days)', hoursDesc: 'Messages sent in the last 14 days, grouped by local time.',
     peaks: 'When the limit was used fastest', peaksDesc: 'The moments when an account used more of its limit in a short time.',
+    barsTitle: 'Limit usage by hour',
     bars: 'How much of the 5 h limit was used each hour. Increases between readings are spread over the observed interval.',
     messagePeaks: 'Hours with the most messages', messagePeaksDesc: 'Without limit readings, the busiest hours come from messages.',
     messages: 'messages', used: 'used', of: 'of the', in: 'in', min: 'min', weekly: 'one week',
@@ -94,7 +96,7 @@ export function UsageChartsPanel({ budgets, readings, sessions, harnesses: avail
   const two = { display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))', gap: 16 } as const
   const lineChart = (kind: '5h' | 'week', series: typeof view.five.series) => {
     const { rows, keys } = toChartRows(series, WINDOW_MS[kind])
-    return rows.length ? <ActivityPercentChart lang={lang} data={rows} step timeRange={kind === '5h' ? [Math.floor((now - 48 * HOUR) / HOUR) * HOUR, now] : undefined} height={mode === 'accounts' ? 150 : 220}
+    return rows.length ? <ActivityPercentChart lang={lang} data={rows} step showDay={kind === 'week'} timeRange={kind === '5h' ? [Math.floor((now - 48 * HOUR) / HOUR) * HOUR, now] : undefined} height={mode === 'accounts' ? 150 : 220}
       series={keys.map(k => ({ key: k.key, label: k.label, color: color(k.identity), connectNulls: false }))} /> : description(t.noWindow)
   }
   const pair = (five: typeof view.five.series, week: typeof view.week.series) => <div style={two}>
@@ -136,7 +138,7 @@ export function UsageChartsPanel({ budgets, readings, sessions, harnesses: avail
               <strong style={{ color: color(p.key) }}>{p.label}</strong> — {t.used} {p.rise.toLocaleString(lang, { maximumFractionDigits: 1 })}% {t.of} {p.kind === '5h' ? '5 h' : t.weekly}{lang === 'en' ? ' limit' : ''} {t.in} {Math.round(p.duration / 60_000)} {t.min} · {date(p.at)}
             </p>)}
           </div>}
-          {view.five.series.length > 0 && <>{description(t.bars)}<UsageHourlyBars lang={lang} timeRange={[Math.floor((now - 48 * HOUR) / HOUR) * HOUR, now]} data={view.hourly} series={view.five.series.map(s => ({ key: s.key, label: s.label, color: color(s.key) }))} /></>}
+          {view.five.series.length > 0 && <>{heading(t.barsTitle)}{description(t.bars)}<UsageHourlyBars lang={lang} timeRange={[Math.floor((now - 48 * HOUR) / HOUR) * HOUR, now]} data={view.hourly} series={view.five.series.map(s => ({ key: s.key, label: s.label, color: color(s.key) }))} /></>}
         </> : view.messageRows.length ? <>
           {description([...view.messageRows].sort((a, b) => b.messages - a.messages).slice(0, 4).map(row => `${date(row.at)}: ${row.messages} ${t.messages}`).join(' · '))}
           <UsageHourlyBars lang={lang} messages data={view.messageRows} series={[{ key: 'messages', label: t.messages, color: 'var(--anthropic-orange)' }]} />

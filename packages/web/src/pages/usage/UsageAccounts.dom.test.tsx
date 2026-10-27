@@ -146,21 +146,20 @@ describe('#contas lands on the list (QA P2-1)', () => {
 })
 
 describe('the Agentes switch is a 44px target on a phone (QA P2-2)', () => {
-  test('at 390px the switch sits in a 44×44 label, and tapping the label toggles it', async () => {
+  test('at 390px the interactive switch owns the 44×44 target and its text toggles once', async () => {
     const prev = window.innerWidth
     ;(window as { innerWidth: number }).innerWidth = 390
     try {
       const el = mount('/usage')
       await flush()
-      const target = el.querySelector('[data-agents-target]') as HTMLLabelElement
-      expect(target.tagName).toBe('LABEL')
+      const target = el.querySelector('[role=switch]') as HTMLButtonElement
+      expect(target.tagName).toBe('BUTTON')
       expect(target.style.minWidth).toBe('44px')
       expect(target.style.minHeight).toBe('44px')
-      expect(target.querySelector('[role=switch]')).not.toBeNull()
-      act(() => (target.querySelector('span[aria-hidden]') as HTMLElement).click())
+      expect(target.textContent).toBe('Agents')
+      act(() => (target.lastElementChild as HTMLElement).click())
       await flush()
       expect(patches).toEqual([{ url: '/api/accounts/c1', body: { available: false } }])
     } finally { (window as { innerWidth: number }).innerWidth = prev }
   })
 })
-

@@ -150,7 +150,7 @@ for (const width of [1440, 390]) test(`an Antigravity scoped limit shows both mo
 test('row markers use the charts’ full account palette, independent of visible row order', () => {
   const readings = ['claude:archived', 'claude:c1', 'codex:x1'].map(key => {
     const [harness, account] = key.split(':')
-    return { harness: harness as 'claude' | 'codex', account: account!, points: [] }
+    return { harness: harness as 'claude' | 'codex', account: account!, points: [{ at: 1, weekPct: 10, fiveHourPct: 5 }] }
   })
   __setPlanLimitsForTest([], 1, [], [], readings)
   try {
@@ -164,5 +164,15 @@ test('row markers use the charts’ full account palette, independent of visible
         expect(marker).toContain(`background:${expected.get(identity)}`)
       }
     }
+  } finally { __setPlanLimitsForTest(null) }
+})
+
+
+test('accounts without limit readings use neutral markers instead of an unrelated chart colour', () => {
+  __setPlanLimitsForTest([], 1, [], [], [])
+  try {
+    const html = renderToStaticMarkup(<BillingAccountList {...view([acc('empty')])} />)
+    const marker = html.match(/data-account-color="claude:empty"[^>]*/)![0]
+    expect(marker).toContain('background:#94a3b8')
   } finally { __setPlanLimitsForTest(null) }
 })

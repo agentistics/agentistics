@@ -45,6 +45,7 @@ describe('UsageChartsPanel filter', () => {
     expect(el.querySelector('[data-usage-chart="limits"]')).not.toBeNull()
     expect(el.querySelector('[data-usage-chart="hours"]')).not.toBeNull()
     expect(el.querySelector('[data-usage-chart="peaks"]')).not.toBeNull()
+    expect(el.querySelector('[data-usage-chart="peaks"]')?.textContent).toContain('Limit usage by hour')
   })
   test('harnesses from sessions without readings remain selectable and show activity', () => {
     const el = mount()
@@ -100,6 +101,17 @@ describe('area rail interactions', () => {
     expect(nav.style.position).toBe('absolute')
     pointer(nav, 'pointerout')
     expect(nav.dataset.open).toBe('true')
+    await settle()
+    expect(nav.dataset.open).toBe('false')
+  })
+  test('focusing a collapsed icon opens the menu; leaving focus closes it', async () => {
+    const nav = await rail()
+    expect(nav.dataset.open).toBe('false')
+    act(() => (nav.querySelector('a') as HTMLElement).focus())
+    expect(nav.dataset.open).toBe('true')
+    // Expanding replaces the icons with the tree: focus stays in the rail.
+    expect(nav.contains(document.activeElement)).toBe(true)
+    act(() => (document.activeElement as HTMLElement).blur())
     await settle()
     expect(nav.dataset.open).toBe('false')
   })
