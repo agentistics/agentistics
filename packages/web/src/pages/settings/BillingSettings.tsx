@@ -1,5 +1,6 @@
 /**
- * Settings → Billing: ONE list of accounts (who, plan, usage, agents) and ONE editor.
+ * Usage → Accounts (moved from Settings → Billing, whose route now redirects here): ONE list of
+ * accounts (who, plan, usage, agents) and ONE editor.
  *
  * Every account — or, for an assistant that cannot say who is signed in, the assistant itself — is
  * one row, and that row's button opens the only editor on the page: nickname, plan, price, dates and
@@ -8,7 +9,7 @@
  * says and what the editor changes can never be two different plans.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { Navigate, useLocation, useOutletContext } from 'react-router-dom'
 import { Pencil, Trash2, AlertTriangle, Sparkles } from 'lucide-react'
 import {
   findPlan,
@@ -30,7 +31,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { Drawer } from '../../components/Drawer'
 import { DatePicker } from '../../components/DatePicker'
 import { HarnessMark } from '../../components/sessions/HarnessMark'
-import { Checkbox, ConfirmModal, FieldInput, SectionHeader, Select, TabSelect, dialogButtonStyle } from './primitives'
+import { Checkbox, ConfirmModal, FieldInput, SectionHeader, Select, TabSelect, Toggle, dialogButtonStyle } from './primitives'
 import {
   applyPlan,
   catalogPlanName,
@@ -57,7 +58,9 @@ import {
 } from './accountBilling'
 import { createAccountMutator } from './accountMutations'
 import AddAccount from './AddAccount'
-import { accountLabelKey, usePlanLimits } from '../../lib/planLimits'
+import { accountLabelKey, fmtWhen, usePlanLimits } from '../../lib/planLimits'
+import { hasMeasuredPace } from '../../lib/usagePlan'
+import { PlanLimitBars } from '../../components/PlanLimitMeter'
 
 /** The wire shape of `GET /api/billing/plan-prices`. Declared here rather than imported: the web
  *  bundle must never reach into `packages/server`. */
@@ -77,15 +80,27 @@ const today = (): string => new Date().toISOString().slice(0, 10)
 const priceText = (p: BillingPeriod, pt: boolean): string | null =>
   p.price ? `${formatPrice(p.price.amount, p.price.currency)}${pt ? '/mês' : '/mo'}` : null
 
+/** The old Settings → Billing route: everything it held now lives in Usage → Accounts. */
 export default function BillingSettings() {
+  return <Navigate to={{ pathname: '/usage', hash: '#contas' }} replace />
+}
+
+/** The anchor `/usage#contas` (and every old "adjust limits" / "manage plans" link) lands on. */
+export const ACCOUNTS_ANCHOR = 'contas'
+
+export function BillingAccountsPanel() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
   const isMobile = useIsMobile()
+  const { hash, key: locationKey } = useLocation()
+  const anchorRef = useRef<HTMLDivElement>(null)
 
-  const { limits: planLimits, now: limitsNow, accountLabels } = usePlanLimits()
+  const { limits: planLimits, now: limitsNow, accountLabels, budgets } = usePlanLimits()
   const [accounts, setAccounts] = useState<BillingAccount[]>([])
   // The list arrived (a failed fetch never counts): only then may stale `failed` answers be pruned.
   const [accountsLoaded, setAccountsLoaded] = useState(false)
+  // The first answer arrived, ok or not: the list has its final height, so `#contas` may be scrolled to.
+  const [accountsSettled, setAccountsSettled] = useState(false)
   const [pendingIds, setPending] = useState<Set<string>>(new Set())
   const [failedIds, setFailed] = useState<Set<string>>(new Set())
   const mutator = useRef(createAccountMutator<BillingAccount>((id, body) =>
@@ -104,8 +119,31 @@ export default function BillingSettings() {
         if (b) setAccountsLoaded(true)
       })
       .catch(() => { /* the assistants' own timelines still work without the list */ })
+      .finally(() => { if (!cancelled) setAccountsSettled(true) })
     return () => { cancelled = true }
   }, [accountsReload])
+
+  // `/usage#contas` (and every redirect to it) lands on the list. The list is under the charts and
+  // both load late, so scroll once the accounts answered, then follow the anchor briefly while the
+  // charts above settle — and stop the moment the reader scrolls, types or touches anything.
+  useEffect(() => {
+    if (hash !== `#${ACCOUNTS_ANCHOR}` || !accountsSettled) return
+    const el = anchorRef.current
+    if (!el) return
+    let stopped = false
+    const go = () => { if (!stopped) el.scrollIntoView?.({ block: 'start' }) }
+    const raf = requestAnimationFrame(go)
+    const timers = [400, 1200].map(ms => setTimeout(go, ms))
+    const stop = () => { stopped = true }
+    const events = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const
+    for (const e of events) window.addEventListener(e, stop, { passive: true, capture: true })
+    return () => {
+      stopped = true
+      cancelAnimationFrame(raf)
+      timers.forEach(clearTimeout)
+      for (const e of events) window.removeEventListener(e, stop, { capture: true })
+    }
+  }, [hash, locationKey, accountsSettled])
 
   // Plans are an ADAPTER fact (a subscription to a vendor's CLI): the native harness has none. An
   // assistant is listed when it has sessions here or a signed-in account.
@@ -308,18 +346,24 @@ export default function BillingSettings() {
   const editingPast = draft !== null && draft.id !== '' && draft.id !== current?.id
   const L = { fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 } as const
 
-  return (
-    <div>
-      <SectionHeader label={pt ? 'Assinaturas e uso' : 'Subscriptions & usage'} />
-      <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '0 0 14px' }}>
-        {pt
-          ? 'Uma linha por conta: o plano que você paga e quanto dos limites já usou. Todo custo no app é uma estimativa a preço de API até você cadastrar o plano — aí ele passa a refletir o que você realmente paga. Os agentes só usam as contas com “Agentes” ligado. Tudo fica nesta máquina.'
-          : 'One row per account: the plan you pay for and how much of its limits you have used. Every cost in the app is an API-price estimate until you register the plan — then it reflects what you actually pay. Agents only use accounts with “Agents” on. It all stays on this machine.'}
-      </p>
+  // The one useful part of the old "Plan" page, kept per account: the sustainable parallel count.
+  const pace = row ? budgets.find(b => b.harness === row.harness && (b.account ?? 'default') === (row.account?.id || 'default')) ?? null : null
 
+  return (
+    <div id={ACCOUNTS_ANCHOR} ref={anchorRef} data-usage-accounts style={{ scrollMarginTop: 72 }}>
+      <SectionHeader label={pt ? 'Contas' : 'Accounts'} />
       <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
         selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow} />
       <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
+
+      <div data-usage-billing style={{ marginTop: 24 }}>
+        <SectionHeader label={pt ? 'Cobrança' : 'Billing'} />
+        <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '0 0 14px' }}>
+          {pt
+            ? 'Todo custo no app é uma estimativa a preço de API até você cadastrar o plano de cada conta (no lápis da linha) — aí ele passa a refletir o que você realmente paga. Os agentes só usam as contas com “Agentes” ligado. Tudo fica nesta máquina.'
+            : 'Every cost in the app is an API-price estimate until you register each account’s plan (the row’s pencil) — then it reflects what you actually pay. Agents only use accounts with “Agents” on. It all stays on this machine.'}
+        </p>
+      </div>
 
       {errPlace === 'page' && saveError && (
         <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>
@@ -343,6 +387,22 @@ export default function BillingSettings() {
               <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.sub || row.title}</span>
             </div>
             {errPlace === 'drawer' && saveError && <div role="alert" style={{ marginBottom: 10, fontSize: 12, color: 'var(--accent-red)' }}>{saveError.msg}</div>}
+            {row.account && (
+              <div data-account-agents style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, minHeight: isMobile ? 44 : undefined }}>
+                <span style={L}>{pt ? 'Uso por agentes' : 'Agent use'}</span>
+                <Toggle on={row.account.available} disabled={pendingIds.has(row.key)} label={`${pt ? 'Agentes' : 'Agents'} · ${row.title}`}
+                  onToggle={() => { if (row.account) void toggleAccount(row.account) }} />
+              </div>
+            )}
+            {row.limits && <div data-account-limits style={{ marginBottom: 12 }}><PlanLimitBars limits={row.limits} now={limitsNow} lang={ctx.lang} /></div>}
+            {pace && hasMeasuredPace(pace) && (
+              <p data-account-pace style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-secondary)' }}>
+                {pt
+                  ? `Paralelo recomendado: ${pace.suggestedParallel} · em execução: ${pace.liveSessions.length}`
+                  : `Recommended parallel: ${pace.suggestedParallel} · running: ${pace.liveSessions.length}`}
+                {pace.pauseUntil !== undefined && pace.pauseUntil > limitsNow && ` · ${pt ? 'pausar até' : 'pause until'} ${fmtWhen(pace.pauseUntil, limitsNow, ctx.lang)}`}
+              </p>
+            )}
             {timelineErrors.size > 0 && (
               <div role="alert" style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginBottom: 14, padding: '10px 12px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--accent-red)' }}>
                 <AlertTriangle size={15} style={{ color: 'var(--accent-red)', flexShrink: 0, marginTop: 1 }} />

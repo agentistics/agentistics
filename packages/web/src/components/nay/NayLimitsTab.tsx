@@ -33,7 +33,7 @@ export function NayLimitsTab({ lang, isMobile, onNavigate, embedded = false, man
           ? <PlanUsageCard key={`${r.harness}:${r.limits.account}`} limits={r.limits} accountLabel={r.accountLabel} agentUse={agentUse(r.harness, r.account)} isMobile={isMobile} now={now} lang={lang} />
           : <PlanUsageCard key={`${r.harness}:${r.account ?? r.plan}`} limits={null} accountLabel={r.accountLabel} agentUse={agentUse(r.harness, r.account)} isMobile={isMobile} pending={{ harness: r.harness, plan: r.plan ?? '' }} now={now} lang={lang} />)}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 11.5, color: 'var(--text-tertiary)', padding: '2px 0 0' }}>
-          <RecordCardAction inline label={pt ? 'Gerenciar planos' : 'Manage plans'} onClick={() => { onNavigate?.(); navigate('/settings/billing') }}>{pt ? 'Gerenciar planos' : 'Manage plans'}</RecordCardAction>
+          <RecordCardAction inline label={pt ? 'Gerenciar planos' : 'Manage plans'} onClick={() => { onNavigate?.(); navigate('/usage#contas') }}>{pt ? 'Gerenciar planos' : 'Manage plans'}</RecordCardAction>
         </div>
       </>)}
     </div>

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { PlanReadings } from '../../lib/planLimits'
-import { limitSeries, messageActivity, rateRows, scopeReadings, scopeSessions, toChartRows, topPeaks } from './usageChartsModel'
+import { harnessSeries, hourlyUsage, limitSeries, messageActivity, rateRows, scopeReadings, scopeSessions, toChartRows, topPeaks } from './usageChartsModel'
 
 const H = 3_600_000
 const T0 = Date.parse('2026-10-20T00:00:00Z')
@@ -41,8 +41,7 @@ describe('limitSeries', () => {
   test('a renewed window breaks the line instead of falling', () => {
     const { series } = limitSeries([claude], '5h', label)
     const { rows } = toChartRows(series, 5 * H)
-    expect(rows.some(r => r.s0 === null)).toBe(true)
-    expect(rows.filter(r => r.s0 !== null).map(r => r.s0)).toEqual([5, 25, 2])
+    expect(rows.filter(r => r.s0 !== null).map(r => r.s0)).toEqual([5, 25]) // singleton after reset is omitted
   })
 })
 
@@ -86,18 +85,18 @@ describe('series boundaries', () => {
     const { series } = limitSeries([a, b, c], 'week', () => 'Principal')
     expect(series.map(s => s.key)).toEqual(['claude:a', 'claude:b', 'codex:a'])
     const { rows } = toChartRows(series, 7 * 24 * H)
-    expect(rows.map(r => r.s0)).toEqual([80, 81, 82])
-    expect(rows.map(r => r.s1)).toEqual([null, 30, null])
+    expect(rows.map(r => r.s0)).toEqual([80, 82])
+    expect(rows.map(r => r.s1)).toEqual([null, null])
     expect(scopeReadings([a, b, c], { mode: 'account', key: 'claude:b' })).toEqual([b])
   })
-  test('interleaved window identities never draw vertical joins', () => {
+  test('weekly chart breaks on the reset drop, ignoring timestamp-only reset changes', () => {
     const { series } = limitSeries([{ harness: 'claude', account: 'a', points: [
       { at: T0, weekPct: 100, fiveHourPct: 100, weekReset: T0 + 10 * H },
       { at: T0 + H / 12, weekPct: 35, fiveHourPct: 35, weekReset: T0 + 20 * H },
       { at: T0 + H / 6, weekPct: 100, fiveHourPct: 100, weekReset: T0 + 10 * H },
     ] }], 'week', label)
     const { rows } = toChartRows(series, 7 * 24 * H)
-    expect(rows.map(r => r.s0)).toEqual([100, null, 35, null, 100])
+    expect(rows.map(r => r.s0)).toEqual([35, 100]) // initial singleton omitted; weekly rise remains continuous
     expect(topPeaks(series, 'week', 3, 0.1)).toEqual([])
   })
   test('coarsening cannot skip a reset and manufacture a peak', () => {
@@ -107,15 +106,49 @@ describe('series boundaries', () => {
     // Unknown reset ids: the decrease still starts a new window segment.
     expect(topPeaks(series, '5h')).toEqual([])
   })
-  test('missing readings and long gaps are not connected or counted as peaks', () => {
+  test('weekly charts tolerate missing readings under six hours; peaks remain conservative', () => {
     const { series } = limitSeries([{ harness: 'claude', account: 'a', points: [
       { at: T0, weekPct: 10, fiveHourPct: 10 },
       { at: T0 + H / 4, weekPct: null, fiveHourPct: null },
       { at: T0 + H / 2, weekPct: 20, fiveHourPct: 20 },
       { at: T0 + 4 * H, weekPct: 60, fiveHourPct: 60 },
     ] }], 'week', label)
-    expect(toChartRows(series, 7 * 24 * H).rows.map(r => r.s0)).toEqual([10, null, 20, null, 60])
+    expect(toChartRows(series, 7 * 24 * H).rows.map(r => r.s0)).toEqual([10, 20, 60])
     expect(topPeaks(series, 'week')).toEqual([])
     expect(rateRows(series)).toEqual([])
+  })
+})
+
+
+describe('readable chart views', () => {
+  test('weekly small corrections are continuous, >20 point resets and >6h gaps break', () => {
+    const series = [{ key: 'a', harness: 'claude' as const, account: 'a', label: 'A', points: [
+      { at: T0, pct: 50 }, { at: T0 + H, pct: 49, gapBefore: true },
+      { at: T0 + 2 * H, pct: 10 }, { at: T0 + 3 * H, pct: 12 },
+      { at: T0 + 10 * H, pct: 15 }, { at: T0 + 11 * H, pct: 16 },
+    ] }]
+    expect(toChartRows(series, 7 * 24 * H).rows.map(r => r.s0)).toEqual([50, 49, null, 10, 12, null, 15, 16])
+  })
+  test('step values remain at the last reading across another account’s timestamp', () => {
+    const a = { key: 'a', harness: 'claude' as const, account: 'a', label: 'A', points: [{ at: T0, pct: 10 }, { at: T0 + H, pct: 30 }] }
+    const b = { ...a, key: 'b', account: 'b', points: [{ at: T0 + H / 2, pct: 20 }, { at: T0 + H, pct: 25 }] }
+    expect(toChartRows([a, b], 5 * H).rows.map(r => r.s0)).toEqual([10, 10, 30])
+    const grouped = harnessSeries([a, b], 5 * H, h => h)
+    expect(grouped).toHaveLength(1)
+    expect(grouped[0]!.points.map(p => p.pct)).toEqual([10, 20, 30])
+  })
+  test('hour bars conserve measured increases and divide across hour boundaries', () => {
+    const s = { key: 'a', harness: 'claude' as const, account: 'a', label: 'A', points: [{ at: T0 + H / 2, pct: 10 }, { at: T0 + H * 1.5, pct: 30 }] }
+    const bars = hourlyUsage([s], T0, T0 + 2 * H)
+    expect(bars.map(r => r.a ?? 0)).toEqual([10, 10, 0])
+    expect(topPeaks([s], '5h')[0]).toMatchObject({ rise: 20, duration: H, key: 'a' })
+  })
+  test('weekday × hour bins use local message timestamps and conserve total', () => {
+    const d = new Date(2026, 9, 26, 17, 30)
+    const result = messageActivity([{ user_message_timestamps: [d.toISOString(), d.toISOString()] }], d.getTime())
+    expect(result.cells).toHaveLength(7)
+    expect(result.cells.every(row => row.length === 24)).toBe(true)
+    expect(result.cells[0]![17]).toBe(2)
+    expect(result.cells.flat().reduce((a, b) => a + b, 0)).toBe(result.total)
   })
 })

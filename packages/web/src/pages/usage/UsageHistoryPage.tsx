@@ -1,4 +1,6 @@
-import UsageNowPage from './UsageNowPage'
+import { Navigate } from 'react-router-dom'
 
-/** History is the same screen as Now: the charts open the Usage area, with the account cards below. */
-export default UsageNowPage
+/** Preserve old bookmarks while Usage has one chart screen. */
+export default function UsageHistoryPage() {
+  return <Navigate to="/usage" replace />
+}

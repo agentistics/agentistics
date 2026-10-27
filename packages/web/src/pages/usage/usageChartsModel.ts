@@ -1,12 +1,11 @@
 /**
- * USAGE CHARTS MODEL — the pure shaping behind the Usage screen's three charts. One filter
- * (everything overlaid | one harness | one account) selects the readings and the sessions all
- * three charts draw, so they can never disagree about what "this view" is.
+ * Pure shaping for Usage: one scope selects plan readings and message activity. Account rows,
+ * overlays and harness comparisons all preserve registry identity and observed reset boundaries.
  */
 import type { SessionMeta } from '@agentistics/core'
 import type { PlanReadings } from '../../lib/planLimits'
 
-export type UsageScopeMode = 'all' | 'harness' | 'account'
+export type UsageScopeMode = 'accounts' | 'all' | 'harnesses' | 'harness' | 'account'
 export interface UsageScope { mode: UsageScopeMode; /** harness id, or `harness:account` */ key?: string }
 export type ReadingHarness = PlanReadings['harness']
 
@@ -26,7 +25,7 @@ export function scopeSessions<S extends Pick<SessionMeta, 'harness' | 'account'>
   return [...sessions]
 }
 
-export interface LimitSeries { key: string; harness: ReadingHarness; account: string; label: string; points: { at: number; pct: number; reset?: number; gapBefore?: boolean }[] }
+export interface LimitSeries { kind?: 'week' | '5h'; key: string; harness: ReadingHarness; account: string; label: string; points: { at: number; pct: number; reset?: number; gapBefore?: boolean }[] }
 
 /** One line per reading for a window kind; a reading with no point of that kind is `omitted` (named, not drawn as 0). */
 export function limitSeries(readings: readonly PlanReadings[], kind: 'week' | '5h', labelOf: (r: PlanReadings) => string, since?: number): { series: LimitSeries[]; omitted: string[] } {
@@ -43,55 +42,76 @@ export function limitSeries(readings: readonly PlanReadings[], kind: 'week' | '5
       missing = false
       return [point]
     })
-    if (points.length) series.push({ key: readingKey(r), harness: r.harness, account: r.account, label: labelOf(r), points })
+    if (points.length) series.push({ kind, key: readingKey(r), harness: r.harness, account: r.account, label: labelOf(r), points })
     else omitted.push(labelOf(r))
   }
   return { series, omitted }
 }
 
 type LimitPoint = LimitSeries['points'][number]
-/** Five-minute samples may jitter; a changed reset, decrease, or hour without readings breaks continuity. */
-const disconnected = (a: LimitPoint, b: LimitPoint): boolean =>
-  !!b.gapBefore || b.at - a.at > 3_600_000 || b.pct < a.pct
-  || (a.reset !== undefined && b.reset !== undefined && Math.abs(a.reset - b.reset) > 300_000)
+/** Weekly readings tolerate jitter and missing samples; short windows keep reset identities. */
+const disconnected = (a: LimitPoint, b: LimitPoint, kind: 'week' | '5h' = '5h'): boolean =>
+  kind === 'week' ? b.at - a.at > 6 * 3_600_000 || a.pct - b.pct > 20
+    : !!b.gapBefore || b.at - a.at > 3_600_000 || b.pct < a.pct
+      || (a.reset !== undefined && b.reset !== undefined && Math.abs(a.reset - b.reset) > 300_000)
 
-/** Series → chart rows. Nulls are real breaks; union timestamps inside a segment interpolate the
- * same straight line the chart draws, so another account's sample never interrupts this one. */
-export function toChartRows(series: readonly LimitSeries[], _duration: number): { rows: { at: number; [key: string]: number | null }[]; keys: { key: string; label: string; harness: ReadingHarness }[] } {
-  const times = new Set<number>()
-  const keys = series.map((s, i) => ({ key: `s${i}`, label: s.label, harness: s.harness }))
-  for (const s of series) {
-    s.points.forEach(p => times.add(p.at))
-    for (let i = 1; i < s.points.length; i++) {
-      const a = s.points[i - 1]!, b = s.points[i]!
-      if (disconnected(a, b) && b.at - a.at > 1) times.add(Math.floor((a.at + b.at) / 2))
+/** Chart rows hold the last observed value. Nulls separate resets; isolated readings are omitted. */
+export function toChartRows(series: readonly LimitSeries[], duration: number): { rows: { at: number; [key: string]: number | null }[]; keys: { key: string; identity: string; label: string; harness: ReadingHarness }[] } {
+  const kind = duration > 24 * 3_600_000 ? 'week' : '5h'
+  const segments = series.map(s => {
+    const out: LimitPoint[][] = []
+    for (const p of s.points) {
+      const last = out.at(-1)
+      if (!last || disconnected(last.at(-1)!, p, s.kind ?? kind)) out.push([p])
+      else last.push(p)
     }
-  }
-  const rows = [...times].sort((a, b) => a - b).map(at => ({ at } as { at: number; [key: string]: number | null }))
-  series.forEach((s, i) => {
-    let next = 0
-    for (const row of rows) {
-      while (next < s.points.length && s.points[next]!.at < row.at) next++
-      const b = s.points[next], a = s.points[next - 1]
-      row[`s${i}`] = b?.at === row.at ? b.pct
-        : a && b && !disconnected(a, b) ? a.pct + (b.pct - a.pct) * (row.at - a.at) / (b.at - a.at) : null
-    }
+    return out.filter(segment => segment.length >= 2)
   })
-  return { rows, keys }
+  const times = new Set<number>()
+  for (const group of segments) for (let i = 0; i < group.length; i++) {
+    group[i]!.forEach(p => times.add(p.at))
+    if (i) times.add(Math.floor((group[i - 1]!.at(-1)!.at + group[i]![0]!.at) / 2))
+  }
+  const rows = [...times].sort((a, b) => a - b).map(at => {
+    const row: { at: number; [key: string]: number | null } = { at }
+    segments.forEach((groups, i) => {
+      const segment = groups.find(g => at >= g[0]!.at && at <= g.at(-1)!.at)
+      row[`s${i}`] = segment?.findLast(p => p.at <= at)?.pct ?? null
+    })
+    return row
+  })
+  return { rows, keys: series.map((s, i) => ({ key: `s${i}`, identity: s.key, label: s.label, harness: s.harness })) }
 }
 
-export interface Peak { label: string; kind: 'week' | '5h'; at: number; ratePerHour: number; rise: number }
+/** Maximum observed account usage for each harness; never sum percentages of separate plans. */
+export function harnessSeries(series: readonly LimitSeries[], duration: number, label: (h: ReadingHarness) => string): LimitSeries[] {
+  const { rows, keys } = toChartRows(series, duration)
+  return [...new Set(series.map(s => s.harness))].map(harness => {
+    const own = keys.filter(k => k.harness === harness)
+    let missing = false
+    const points = rows.flatMap(row => {
+      const values = own.map(k => row[k.key]).filter((v): v is number => v != null)
+      if (!values.length) { missing = true; return [] }
+      const point = { at: row.at, pct: Math.max(...values), ...(missing ? { gapBefore: true } : {}) }
+      missing = false
+      return [point]
+    })
+    return { key: harness, harness, account: '', label: label(harness), points }
+  })
+}
+
+export interface Peak { label: string; kind: 'week' | '5h'; key: string; at: number; duration: number; ratePerHour: number; rise: number }
 
 /** Interval rises (pp per hour) between consecutive points of one window; a renewal (the % fell) is not a rise. */
-export function riseIntervals(series: readonly LimitSeries[]): { at: number; label: string; ratePerHour: number; rise: number }[] {
-  const out: { at: number; label: string; ratePerHour: number; rise: number }[] = []
+export function riseIntervals(series: readonly LimitSeries[]): { at: number; key: string; label: string; duration: number; ratePerHour: number; rise: number }[] {
+  const out: { at: number; key: string; label: string; duration: number; ratePerHour: number; rise: number }[] = []
   for (const s of series) {
     for (let i = 1; i < s.points.length; i++) {
       const a = s.points[i - 1]!, b = s.points[i]!
       const hours = (b.at - a.at) / 3_600_000
       const rise = b.pct - a.pct
       if (hours <= 0 || rise <= 0 || disconnected(a, b)) continue
-      out.push({ at: b.at, label: s.label, rise, ratePerHour: rise / hours })
+      out.push({ at: b.at, key: s.key, label: s.label, duration: b.at - a.at, rise, ratePerHour: rise / hours })
     }
   }
   return out
@@ -103,7 +123,7 @@ export function topPeaks(series: readonly LimitSeries[], kind: 'week' | '5h', n 
   for (const s of series) {
     let merged: LimitSeries['points'] = []
     const collect = () => {
-      for (const r of riseIntervals([{ ...s, points: merged }])) peaks.push({ label: r.label, kind, at: r.at, ratePerHour: r.ratePerHour, rise: r.rise })
+      for (const r of riseIntervals([{ ...s, points: merged }])) peaks.push({ key: r.key, label: r.label, kind, at: r.at, duration: r.duration, ratePerHour: r.ratePerHour, rise: r.rise })
     }
     // Segment BEFORE coarsening: otherwise a skipped reset can turn into an invented climb.
     for (let i = 0; i < s.points.length; i++) {
@@ -131,10 +151,12 @@ export function messageActivity(sessions: readonly Pick<SessionMeta, 'user_messa
   perDay: { date: string; value: number; sessions: number; tools: number }[]
   hourCounts: Record<number, number>
   total: number
+  cells: number[][]
 } {
   const since = now - days * 24 * 3_600_000
   const dayCounts = new Map<string, number>()
   const hourCounts: Record<number, number> = {}
+  const cells = Array.from({ length: 7 }, () => Array<number>(24).fill(0))
   let total = 0
   for (const s of sessions) {
     for (const ts of s.user_message_timestamps ?? []) {
@@ -143,8 +165,24 @@ export function messageActivity(sessions: readonly Pick<SessionMeta, 'user_messa
       const d = new Date(t)
       dayCounts.set(dayKey(d), (dayCounts.get(dayKey(d)) ?? 0) + 1)
       hourCounts[d.getHours()] = (hourCounts[d.getHours()] ?? 0) + 1
+      cells[(d.getDay() + 6) % 7]![d.getHours()]!++
       total++
     }
   }
-  return { perDay: [...dayCounts.entries()].map(([date, value]) => ({ date, value, sessions: 0, tools: 0 })), hourCounts, total }
+  return { perDay: [...dayCounts.entries()].map(([date, value]) => ({ date, value, sessions: 0, tools: 0 })), hourCounts, total, cells }
+}
+
+/** Allocate each observed increase across the hours it spans, conserving the measured amount. */
+export function hourlyUsage(series: readonly LimitSeries[], since: number, until: number) {
+  const rows = new Map<number, { at: number; [key: string]: number }>()
+  for (let at = Math.floor(since / 3_600_000) * 3_600_000; at <= until; at += 3_600_000) rows.set(at, { at })
+  for (const interval of riseIntervals(series)) {
+    const start = interval.at - interval.duration
+    for (let hour = Math.floor(start / 3_600_000) * 3_600_000; hour < interval.at; hour += 3_600_000) {
+      const overlap = Math.max(0, Math.min(interval.at, hour + 3_600_000, until) - Math.max(start, hour, since))
+      const row = rows.get(hour)
+      if (row && overlap) row[interval.key] = (row[interval.key] ?? 0) + interval.rise * overlap / interval.duration
+    }
+  }
+  return [...rows.values()]
 }
