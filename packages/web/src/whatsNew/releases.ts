@@ -14,6 +14,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     features: [],
     fixes: [
       {
+        pt: 'No celular, as atualizações ao vivo travam menos o toque: o painel recalcula as métricas em segundo plano e deixa de tentar guardar uma cópia local grande demais a cada mudança.',
+        en: 'On phones, live updates block taps less: the dashboard recomputes metrics in the background and stops trying to save a local copy that is too big on every change.',
+      },
+      {
         pt: 'No celular, o card de Tokens ficou compacto, os ícones dos cards não ficam mais sob o botão flutuante do Nay e o conteúdo não aparece mais pelo recorte da barra inferior ao lado do botão central.',
         en: 'On phones, the Tokens card is compact, card icons are no longer under the floating Nay button, and content no longer shows through the bottom bar cut-out beside the centre button.',
       },
