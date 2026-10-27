@@ -37,9 +37,9 @@ describe('AreaTree', () => {
     expect(html).toMatch(/aria-current="page"[^>]*>Lista/)
   })
   it('expands only the current area and marks the current page', () => {
-    const html = render({ at: '/usage/history' })
-    expect(html).toContain('Histórico')
-    expect(html).toMatch(/aria-current="page"[^>]*>Histórico|Histórico[^<]*<\/a>/)
+    const html = render({ at: '/usage' })
+    expect(html).not.toContain('Histórico')
+    expect(html).toMatch(/aria-current="page"[^>]*>Agora/)
     expect(html).not.toContain('Modo ausente')
     expect(html).not.toContain('Check-ins')
   })
