@@ -2,7 +2,7 @@ import { ActionNotice } from './components/sessions/ActionNotice'
 import { HandoffMeter } from './components/sessions/HandoffWarning'
 import { PageRouteFrame } from './components/PageRouteFrame'
 import { useEscapeOwner } from './lib/overlayStack'
-import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore } from 'react'
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore, useDeferredValue } from 'react'
 import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { version } from '../../../package.json'
@@ -2431,8 +2431,12 @@ export default function AppLayout() {
     return () => window.clearTimeout(t)
   }, [haveData, allWarm])
   const wantAll = !derivedActiveOnly || allWarm
-  const derivedAll = useDerivedStats(finaleUp || !wantAll ? null : data, filters, tagsList, false, NO_RUNNING_IDS)
-  const derivedRunning = useDerivedStats(finaleUp || !derivedActiveOnly ? null : data, filters, tagsList, true, runningIds)
+  // A refresh swaps `data` for a new multi-megabyte object; deriving from it is ~1 s on a phone. The
+  // derivations read the DEFERRED copy, so the render that carries the refresh stays cheap and a tap
+  // that lands first is answered first — the stats catch up in a low-priority render.
+  const derivedSource = useDeferredValue(data)
+  const derivedAll = useDerivedStats(finaleUp || !wantAll ? null : derivedSource, filters, tagsList, false, NO_RUNNING_IDS)
+  const derivedRunning = useDerivedStats(finaleUp || !derivedActiveOnly ? null : derivedSource, filters, tagsList, true, runningIds)
   const legacyDerived = derivedActiveOnly ? derivedRunning : derivedAll
   // A4.7: the session, cost and tool figures from the projections, laid over the legacy answer when
   // the server says this surface opted in and the filters are ones the API can express.

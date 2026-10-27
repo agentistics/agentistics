@@ -86,7 +86,7 @@ export function TokenStatCard({
     >
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: accent, opacity: 0.5 }} />
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+      <div className="ag-stat-head" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>
             {label ?? 'Tokens'}
@@ -102,7 +102,7 @@ export function TokenStatCard({
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {onTogglePrecision && total >= 1000 && (
+          {onTogglePrecision && !isMobile && total >= 1000 && (
             <PrecisionToggle full={!!fullPrecision} accent={accent} onToggle={onTogglePrecision} lang={lang} />
           )}
           <Coins size={15} style={{ color: accent, flexShrink: 0 }} />
@@ -127,10 +127,11 @@ export function TokenStatCard({
       {/* The four counters. Two columns wherever there is room — the card spans two grid cells on
           anything wider than a phone, so a single column would leave half of it empty. */}
       <div
+        className="ag-tok-parts"
         style={{
           display: 'grid',
-          gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'repeat(2, minmax(0, 1fr))',
-          gap: isMobile ? '6px 0' : '6px 18px',
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          gap: isMobile ? '6px 12px' : '6px 18px',
           marginTop: 'auto',
         }}
       >
@@ -155,7 +156,7 @@ export function TokenStatCard({
       </div>
 
       {sub && (
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>{sub}</div>
+        <div className="ag-stat-sub" style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>{sub}</div>
       )}
     </div>
   )

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, startTransition } from 'react'
 import { activeInDays, activeInWindow, dayKey, daysBetween, expandHours, MAX_RANGE_DAYS, sliceSession, type DayUsage } from '../lib/sessionDaySlice'
 import type { AppData, Filters, DateRange, AgentInvocation, SurfaceHarnessId, SessionMeta, TokenBreakdown } from '@agentistics/core'
 import { applyDataPatch, type DataPatch, calcStreak, calcCost, canonicalProjectPath, cutSessionUsage, sessionModelUsage, sessionCostUSD, unpricedTokens, getModelPrice, MODEL_PRICING, withoutHiddenNative, surfaceHarnesses, NATIVE_HARNESS_ID, HARNESS_CAPABILITIES, filterByUsers, filterByHarnesses, filterByTeams, filterByMachines, resolveMachineCacheScope, distinctHarnesses, mergeStatsCaches, repoShortName, EMPTY_TOKENS, addTokens, sessionTokens, sessionTokenTotal, sumTokens, totalTokens, usageTokenTotal, usageTokens } from '@agentistics/core'
@@ -354,12 +354,46 @@ function readDataCache(): AppData | null {
   } catch { return null }
 }
 
+/**
+ * A snapshot that does not fit is not retried on every refresh. `JSON.stringify` of a multi-megabyte
+ * payload is the expensive half (a long task on a phone) and it ran BEFORE `setItem` threw the quota
+ * error, once per `change` event — all for a write that could not succeed. A failure is remembered
+ * for the session and, in `localStorage` itself, for a day (the store is as full tomorrow as today,
+ * but a user who clears site data should get the cache back).
+ */
+const CACHE_FAIL_KEY = 'agentistics-data-cache-failed'
+const CACHE_FAIL_TTL_MS = 24 * 60 * 60 * 1000
+let cacheWriteFailed = (() => {
+  try {
+    const at = Number(localStorage.getItem(CACHE_FAIL_KEY))
+    return Number.isFinite(at) && at > 0 && Date.now() - at < CACHE_FAIL_TTL_MS
+  } catch { return false }
+})()
+let cacheWritePending: AppData | null = null
+
+function flushDataCache(): void {
+  const data = cacheWritePending
+  cacheWritePending = null
+  if (!data || cacheWriteFailed) return
+  try { localStorage.setItem(DATA_CACHE_KEY, JSON.stringify(data)) } catch {
+    // quota/disabled — skip, and stop paying for the stringify on every later refresh
+    cacheWriteFailed = true
+    try { localStorage.setItem(CACHE_FAIL_KEY, String(Date.now())) } catch { /* nowhere to remember it */ }
+  }
+}
+
 function writeDataCache(data: AppData): void {
   // Guarded on the way IN as well as out. A 200 that is not an `AppData` (a proxy page, a captive
   // portal, an ingest-only central) was cached by the same blind cast that read it back, so the
   // next reopen started from a snapshot no server would ever produce again.
-  if (!isUsableDataCache(data)) return
-  try { localStorage.setItem(DATA_CACHE_KEY, JSON.stringify(data)) } catch { /* quota/disabled — skip */ }
+  if (!isUsableDataCache(data) || cacheWriteFailed) return
+  // Off the refresh's own turn, and coalesced: only the newest payload is ever written.
+  const idle = typeof window !== 'undefined' ? (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback : undefined
+  const queued = cacheWritePending !== null
+  cacheWritePending = data
+  if (queued) return
+  if (idle) idle(flushDataCache, { timeout: 5000 })
+  else setTimeout(flushDataCache, 1000)
 }
 
 /** Forget the persisted snapshot. Exported for the root error boundary: a render crash caused by
@@ -438,7 +472,9 @@ export function useData(working = false) {
       dataRevisionRef.current = res.headers.get('X-Agentistics-Data-Revision')
       if (acceptPayload(dataRef.current, next)) {
         dataRef.current = next
-        setData(next)
+        // A refresh is never urgent: as a transition React can answer a tap that lands first and
+        // render the new payload in the gaps, instead of holding the thread for the whole commit.
+        startTransition(() => setData(next))
       }
       setError(null); setLoadError(null); setOffline(null)
       setLoading(false)
