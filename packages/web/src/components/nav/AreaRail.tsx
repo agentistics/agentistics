@@ -5,10 +5,9 @@
  * same bar (icons gain their labels and sections, drawn by `AreaTree`) — one bar, never a second
  * column beside it; closing folds it back to icons.
  *
- * Icons and the tooltip come from `AreaTree` — one icon per area, never a second map. Ajustes is not
- * on the rail: the panel's own footer carries the settings shortcut, and the tree lists its sections.
+ * Icons and labels come from AreaTree; every expanded parent also appears in the collapsed rail.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BetaTag } from '../BetaTag'
 import { ListTree } from 'lucide-react'
@@ -36,6 +35,25 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
   const navigate = useNavigate()
   const pt = lang === 'pt'
   const [treeOpen, setTreeOpen] = useState(initialTreeOpen)
+  const hover = useRef(false)
+  const focused = useRef(false)
+  const navRef = useRef<HTMLElement>(null)
+  const focusHref = useRef<string | null>(null)
+  // Opening replaces the icon links with the tree. Carry keyboard focus to the same destination.
+  useLayoutEffect(() => {
+    const nav = navRef.current
+    if (treeOpen && focused.current && nav && !nav.contains(document.activeElement)) {
+      const links = Array.from(nav.querySelectorAll<HTMLAnchorElement>('a[href]'))
+      ;(links.find(a => a.getAttribute('href') === focusHref.current) ?? links[0])?.focus()
+    }
+  }, [treeOpen])
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const cancelClose = () => clearTimeout(leaveTimer.current)
+  const closeSoon = () => {
+    cancelClose()
+    leaveTimer.current = setTimeout(() => { if (!hover.current && !focused.current) setTreeOpen(false) }, 150)
+  }
+  useEffect(() => () => cancelClose(), [])
   const current = areaOfPath(pathname)?.area.id
   // Navigating anywhere closes the tree panel: it answered "where to", and the answer was given.
   useEffect(() => { setTreeOpen(false) }, [pathname])
@@ -56,15 +74,19 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
   return (
     // The host keeps the closed width in the layout; the bar widens OVER the list beside it, so
     // opening it never reflows (or squeezes) the Sessões panel. Its positioned parent spans
-    // BOTH the rail and list, so 100% covers even a resized list, including its controls and edge.
+    // BOTH the rail and list; the open width is independent from the list width.
     <div style={{ display: 'flex', flexShrink: 0, minHeight: 0, width: AREA_RAIL_W }}>
-      <nav
+      <nav ref={navRef}
         aria-label={pt ? 'Áreas do app' : 'App areas'}
+        onPointerEnter={event => { if (event.pointerType !== 'touch') { hover.current = true; cancelClose(); setTreeOpen(true) } }}
+        onPointerLeave={event => { if (event.pointerType !== 'touch') { hover.current = false; closeSoon() } }}
+        onFocusCapture={event => { focusHref.current = (event.target as HTMLElement).closest('a')?.getAttribute('href') ?? null; focused.current = true; cancelClose(); setTreeOpen(true) }}
+        onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { focused.current = false; closeSoon() } }}
         data-area-rail
         data-open={treeOpen ? 'true' : 'false'}
         style={{
           position: 'absolute', top: 0, bottom: 0, left: 0, zIndex: treeOpen ? 260 : 1,
-          width: treeOpen ? `max(${AREA_RAIL_OPEN_W}px, 100%)` : AREA_RAIL_W, boxSizing: 'border-box',
+          width: treeOpen ? AREA_RAIL_OPEN_W : AREA_RAIL_W, boxSizing: 'border-box',
           transition: reduced ? 'none' : 'width 150ms ease-out',
           display: 'flex', flexDirection: 'column', alignItems: treeOpen ? 'stretch' : 'center', gap: 4, padding: '8px 0',
           border: '1px solid var(--border)', borderRadius: 10, background: 'var(--bg-surface)', overflow: 'hidden',
@@ -78,7 +100,7 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
           </div>
         ) : (
           <>
-            {APP_AREAS.filter(a => a.id !== 'settings').map(area => {
+            {APP_AREAS.map(area => {
               const label = pageLabel(area, lang)
               const active = current === area.id
               const n = badges[area.id]
@@ -117,12 +139,12 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
           </>
         )}
         <div style={{ display: 'flex', justifyContent: treeOpen ? 'flex-start' : 'center', padding: treeOpen ? '0 10px' : 0, flexShrink: 0 }}>
-          <Tip label={treeLabel} show={!treeOpen}>
             <button
               type="button"
               aria-label={treeOpen ? closeLabel : treeLabel}
               aria-expanded={treeOpen}
               aria-controls="ag-area-rail-tree"
+              title={treeOpen ? closeLabel : treeLabel}
               onClick={() => setTreeOpen(o => !o)}
               style={{
                 ...icon,
@@ -132,7 +154,6 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
             >
               <ListTree size={18} />
             </button>
-          </Tip>
         </div>
       </nav>
     </div>

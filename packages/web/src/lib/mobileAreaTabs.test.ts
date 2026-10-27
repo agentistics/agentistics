@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { activateMobileSessions, MOBILE_AREA_SLOTS, MOBILE_SESSIONS_HOME_EVENT, mobileAreaSlot, scrollMobileSessionsToTop } from './mobileAreaTabs'
+import { APP_AREAS } from './appAreas'
 import { slotAt } from './bottomNavDrag'
 
 describe('option A destinations', () => {
@@ -9,6 +10,11 @@ describe('option A destinations', () => {
     for (let i = 0; i < 5; i++) {
       expect(MOBILE_AREA_SLOTS[slotAt((i + 0.5) * width / 5, width, 5)]).toBe(MOBILE_AREA_SLOTS[i])
     }
+  })
+
+  test('mobile Usage has a single destination, including legacy History bookmarks', () => {
+    expect(APP_AREAS.find(a => a.id === 'usage')!.pages.map(p => p.path)).toEqual(['/usage'])
+    expect(mobileAreaSlot('/usage/history')).toBe(mobileAreaSlot('/usage'))
   })
 
   test('subpages select their area; all other destinations select More', () => {

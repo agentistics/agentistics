@@ -105,6 +105,7 @@ import { isSessionsWorkspace } from './lib/appAreas'
 import { AREA_RAIL_W, AreaRail } from './components/nav/AreaRail'
 import { areaBadges } from './lib/areaBadges'
 import { MobileAreaBar } from './components/nav/MobileAreaBar'
+import { setAreaSheetOpen, useAreaSheetOpen } from './lib/areaSheetStore'
 import { TopBar } from './components/nav/TopBar'
 import { COST_BASIS_W, FULL_BAR_W, MIN_BAR_W, headerFit, stripPadding } from './lib/headerFit'
 import { openArtifacts } from './lib/artifactsStore'
@@ -145,7 +146,7 @@ import { HARNESS_LABELS } from './lib/harness'
 import { PlanUsageFootButton } from './components/PlanUsageFootButton'
 import { format, parseISO, parse } from 'date-fns'
 import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/fleetFilter'
-import { runningConversationIds } from './lib/activeConversations'
+import { NO_RUNNING_IDS, runningConversationIds, stableRunningIds } from './lib/activeConversations'
 import { countActiveFilters } from './lib/activeFilterCount'
 import { useLeadersOnly } from './lib/sessionsAsidePrefs'
 import {
@@ -945,6 +946,11 @@ export function writeStudioSeen(storage: Pick<StorageLike, 'setItem'>): void {
   try { storage.setItem(STUDIO_SEEN_KEY, '1') } catch { /* private mode */ }
 }
 
+/** The update card steps aside while the phone's area sheet is up; only this wrapper follows the flag. */
+function HiddenWhileAreaSheetOpen({ children }: { children: React.ReactNode }) {
+  return useAreaSheetOpen() ? null : <>{children}</>
+}
+
 export default function AppLayout() {
   const [cleanOpen, setCleanOpen] = useState(false)
   useEffect(() => { const open = () => setCleanOpen(true); window.addEventListener('agentistics:open-clean', open); return () => window.removeEventListener('agentistics:open-clean', open) }, [])
@@ -979,7 +985,6 @@ export default function AppLayout() {
       Array<'members' | 'teams' | 'machines' | 'presence' | 'repos' | 'tags' | 'projects' | 'models'>
     : undefined
   const isMobile = useIsMobile()
-  const [areaSheetOpen, setAreaSheetOpen] = useState(false)
   /**
    * The viewport's own width, tracked reactively — `useIsMobile` only answers a boolean at its own
    * 768px breakpoint, and `filtrosPanelBounds` needs the actual figure at every size above it (the
@@ -2278,9 +2283,11 @@ export default function AppLayout() {
   }, [versionAnswer, lang])
   const nayOffered = !teamSession?.aggregatorOnly && teamSession?.capabilities?.localChat !== false
     && teamSession?.capabilities?.localShell !== false && chatOffered
-  const renderUpdatePrompt = !areaSheetOpen && promptVisible && versionAnswer
+  const renderUpdatePrompt = promptVisible && versionAnswer
     ? (placement: UpdateCardPlacement) => (
-        <NayUpdateCard lang={lang} isMobile={isMobile} info={versionAnswer} placement={placement} onExit={onPromptExit} />
+        <HiddenWhileAreaSheetOpen>
+          <NayUpdateCard lang={lang} isMobile={isMobile} info={versionAnswer} placement={placement} onExit={onPromptExit} />
+        </HiddenWhileAreaSheetOpen>
       )
     : undefined
 
@@ -2400,12 +2407,33 @@ export default function AppLayout() {
   // empty `runningIds` there would silently report a confident zero instead of the unfiltered
   // totals — the exact defect `resolveMachineCacheScope` exists to prevent for team/machine scope.
   const derivedActiveOnly = activeOnly && fleetReadable
-  const runningIds = useMemo(() => runningConversationIds(headerFleet.rows), [headerFleet.rows])
+  const fleetRunningIds = useMemo(() => runningConversationIds(headerFleet.rows), [headerFleet.rows])
+  // Only "active only" reads the set, and a fleet poll rebuilds it constantly; a new identity here
+  // re-ran the dashboard's whole derivation on whatever route the person had just tapped to.
+  const prevRunningIds = useRef<ReadonlySet<string> | undefined>(undefined)
+  const runningIds = stableRunningIds(prevRunningIds.current, fleetRunningIds, derivedActiveOnly)
+  prevRunningIds.current = runningIds
   // While the update finale is on screen the dashboard beneath it is hidden: computing its stats and
   // rendering it there are long tasks on the finale's own thread — the stutter at the end of an
   // update. Both wait for the finale to leave (`finaleGate.ts`); the loader holds until then.
   const finaleUp = useFinaleActive()
-  const legacyDerived = useDerivedStats(finaleUp ? null : data, filters, tagsList, derivedActiveOnly, runningIds)
+  // Two derivations, each memoised on its own. Entering/leaving the Sessions workspace flips
+  // `activeOnly`; with one memo that flip re-ran the unfiltered derivation over every stored
+  // session inside the tap's render (1 s+ on a phone). The unfiltered one is warmed while the
+  // browser is idle (`allWarm`), so the flip just picks the result that already exists.
+  const [allWarm, setAllWarm] = useState(false)
+  const haveData = data !== null
+  useEffect(() => {
+    if (!haveData || allWarm) return
+    const ric = (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback
+    if (ric) { const id = ric(() => setAllWarm(true), { timeout: 4000 }); return () => (window as { cancelIdleCallback?: (n: number) => void }).cancelIdleCallback?.(id) }
+    const t = window.setTimeout(() => setAllWarm(true), 2000)
+    return () => window.clearTimeout(t)
+  }, [haveData, allWarm])
+  const wantAll = !derivedActiveOnly || allWarm
+  const derivedAll = useDerivedStats(finaleUp || !wantAll ? null : data, filters, tagsList, false, NO_RUNNING_IDS)
+  const derivedRunning = useDerivedStats(finaleUp || !derivedActiveOnly ? null : data, filters, tagsList, true, runningIds)
+  const legacyDerived = derivedActiveOnly ? derivedRunning : derivedAll
   // A4.7: the session, cost and tool figures from the projections, laid over the legacy answer when
   // the server says this surface opted in and the filters are ones the API can express.
   const projectedOverlay = useProjectedDerived({

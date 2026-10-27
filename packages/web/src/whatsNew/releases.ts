@@ -10,6 +10,48 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.159.0': {
+    features: [
+      {
+        pt: 'Uso agora tem uma única tela, com limites separados por conta, cores distintas, comparação por harness e mensagens por dia da semana e hora. Os momentos de maior consumo mostram quanto foi usado e em quanto tempo.',
+        en: 'Usage now has one screen, with limits separated by account, distinct colors, harness comparisons and messages by weekday and hour. The busiest moments show how much was used and how long it took.',
+      },
+      {
+        pt: 'O menu de ícones inclui Ajustes e abre sobre a página ao passar o ponteiro, sem deslocar o conteúdo.',
+        en: 'The icon menu includes Settings and opens over the page on hover, without shifting the content.',
+      },
+      {
+        pt: 'Uso lista suas contas em linhas compactas: nome, harness e plano, os dois círculos de uso (5 h e semana), a chave de uso por agentes e um lápis para editar.',
+        en: 'Usage lists your accounts as compact rows: name, harness and plan, the two usage rings (5 h and week), the agent-use switch and a pencil to edit.',
+      },
+      {
+        pt: 'O lápis abre a edição daquela conta: apelido, plano, preço, datas, planos anteriores, uso por agentes e o paralelo recomendado.',
+        en: 'The pencil opens that account’s editor: nickname, plan, price, dates, earlier plans, agent use and the recommended parallel count.',
+      },
+      {
+        pt: 'Cobrança agora fica em Uso. Ajustes → Cobrança e "Ajustar limites" levam para a lista de contas; as páginas Planejar e Limites saíram.',
+        en: 'Billing now lives in Usage. Settings → Billing and "Adjust limits" take you to the accounts list; the Plan and Limits pages are gone.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Menu do celular bem mais rápido: trocar de área pela barra de baixo e abrir o menu "Mais" não trava mais a tela.',
+        en: 'Much faster phone menu: switching areas from the bottom bar and opening "More" no longer freezes the screen.',
+      },
+      {
+        pt: 'Gráficos de uso têm cores mais fáceis de distinguir e linhas sem oscilações de leituras conflitantes. Contas sem histórico usam um marcador cinza.',
+        en: 'Usage charts have easier-to-distinguish colors and lines without oscillations from conflicting readings. Accounts without history use a grey marker.',
+      },
+      {
+        pt: 'No celular, a chave Agentes responde ao toque em toda a área do botão. O menu de áreas também abre ao navegar pelo teclado.',
+        en: 'On phones, the Agents switch responds across its full button area. The area menu also opens during keyboard navigation.',
+      },
+      {
+        pt: 'O gráfico semanal identifica os dias, o uso por hora tem um título e as datas de Métricas seguem o idioma escolhido.',
+        en: 'The weekly chart identifies the days, hourly usage has a title and Metrics dates follow the chosen language.',
+      },
+    ],
+  },
   '2.158.0': {
     features: [
       {

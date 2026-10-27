@@ -37,3 +37,22 @@ export function runningConversationIds(
 export function keepRunning(sessions: readonly SessionMeta[], ids: ReadonlySet<string>): SessionMeta[] {
   return sessions.filter(s => ids.has(s.session_id))
 }
+
+/** Shared by every caller that does not need the running set, so a memo keyed on it never misses. */
+export const NO_RUNNING_IDS: ReadonlySet<string> = new Set()
+
+/**
+ * The set the dashboard's derived stats are keyed on. A fleet poll rebuilds the rows (and so the
+ * Set) far more often than the CONVERSATIONS running change, and a new Set identity re-runs the
+ * whole derivation (date-fns over every stored session — over a second on a phone). Returns `prev`
+ * when `next` holds the same ids, and the shared empty set when nobody reads it (`needed` false).
+ */
+export function stableRunningIds(
+  prev: ReadonlySet<string> | undefined,
+  next: ReadonlySet<string>,
+  needed: boolean,
+): ReadonlySet<string> {
+  if (!needed) return NO_RUNNING_IDS
+  if (prev && prev.size === next.size && [...next].every(id => prev.has(id))) return prev
+  return next
+}

@@ -26,7 +26,7 @@ describe('areaOfPath', () => {
   })
   test('subpages resolve to the most specific page', () => {
     expect(areaOfPath('/usage')?.page?.id).toBe('now')
-    expect(areaOfPath('/usage/history')?.page?.id).toBe('history')
+    expect(areaOfPath('/usage/history')?.page?.id).toBe('now')
     expect(areaOfPath('/leadership/away')?.page?.id).toBe('away')
     expect(areaOfPath('/tasks/activity')?.page?.id).toBe('activity')
     expect(areaOfPath('/tasks/t-123')?.page?.id).toBe('board')
@@ -78,7 +78,8 @@ describe('every router path is in the registry or explicitly unlisted', () => {
 
 describe('searchAreas', () => {
   test('accent-insensitive, both languages', () => {
-    expect(searchAreas('historico', 'pt').map(r => r.page.id)).toContain('history')
+    expect(searchAreas('historico', 'pt')).toEqual([])
+    expect(APP_AREAS.find(a => a.id === 'usage')!.pages.map(p => p.id)).toEqual(['now'])
     expect(searchAreas('away', 'pt').map(r => r.page.id)).toContain('away')
   })
   test('empty query finds nothing', () => {
