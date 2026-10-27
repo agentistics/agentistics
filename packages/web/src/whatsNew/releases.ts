@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '0.0.0-next': {
+  '2.159.3': {
     features: [],
     fixes: [
       {
