@@ -16,7 +16,7 @@ import { HarnessMark } from '../../components/sessions/HarnessMark'
 import { IconButton } from '../../components/sessions/RepoSearchView'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { currentUsedPct, resetPhrase, usePlanLimits, windowLabel, windowShort } from '../../lib/planLimits'
-import { usageColors, USAGE_COLORS } from '../../lib/usageColors'
+import { usageColors, USAGE_NO_READING_COLOR } from '../../lib/usageColors'
 import { Toggle } from './primitives'
 import { planCoverageText, REPORTS_LIMITS, type BillingAccount, type BillingRow } from './accountBilling'
 
@@ -129,7 +129,8 @@ export function BillingAccountList(p: BillingAccountListProps) {
             <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 220px' }}>
               <span aria-hidden="true" data-account-color={`${r.harness}:${r.account?.id || 'default'}`} style={{
                 width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                background: colors.get(`${r.harness}:${r.account?.id || 'default'}`) ?? USAGE_COLORS[0],
+                background: readings.some(a => a.harness === r.harness && a.account === (r.account?.id || 'default') && a.points.some(p => p.fiveHourPct != null || p.weekPct != null))
+                  ? colors.get(`${r.harness}:${r.account?.id || 'default'}`) ?? USAGE_NO_READING_COLOR : USAGE_NO_READING_COLOR,
               }} />
               <HarnessMark harness={r.harness} size={22} />
               <span style={{ minWidth: 0 }} title={r.sub.replaceAll(' · ', '\n')}>
@@ -142,13 +143,8 @@ export function BillingAccountList(p: BillingAccountListProps) {
             <span style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto', flexShrink: 0 }}>
               <Usage r={r} now={p.now} lang={p.lang} t={t} ready={p.limitsReady ?? true} />
               {r.account && (
-                // A <label> around the switch makes the whole cell (switch + word) its hit area: the
-                // switch keeps its 34×20 look while a phone gets a 44×44 target.
-                <label data-agents-target style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: target, minWidth: target, padding: '0 4px', boxSizing: 'border-box', cursor: p.pendingIds.has(r.key) ? 'default' : 'pointer', fontSize: 11.5, color: 'var(--text-tertiary)' }}>
-                  <Toggle on={r.account.available} disabled={p.pendingIds.has(r.key)} label={`${t.agents} · ${r.title}`}
-                    onToggle={() => r.account && p.onToggle(r.account)} />
-                  <span aria-hidden>{t.agents}</span>
-                </label>
+                <Toggle on={r.account.available} disabled={p.pendingIds.has(r.key)} label={`${t.agents} · ${r.title}`}
+                  targetSize={target} text={t.agents} onToggle={() => r.account && p.onToggle(r.account)} />
               )}
               <IconButton label={`${actionLabel(r, t)} · ${r.title}`} size={target} onClick={() => p.onEdit(r)}
                 color={r.plan && !r.problem ? 'var(--text-secondary)' : 'var(--anthropic-orange)'}><Pencil size={15} /></IconButton>

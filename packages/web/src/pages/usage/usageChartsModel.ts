@@ -27,13 +27,41 @@ export function scopeSessions<S extends Pick<SessionMeta, 'harness' | 'account'>
 
 export interface LimitSeries { kind?: 'week' | '5h'; key: string; harness: ReadingHarness; account: string; label: string; points: { at: number; pct: number; reset?: number; gapBefore?: boolean }[] }
 
+/**
+ * Two collectors can report different windows for one account at overlapping times. Keep the
+ * window stream with the newest observation over that overlap, rather than alternating between
+ * their percentages. Reset clocks within five minutes describe the same stream. Nonoverlapping
+ * history is retained; without reset identities we cannot safely choose a source.
+ */
+function coherentWeeklyPoints(points: PlanReadings['points']): PlanReadings['points'] {
+  const groups: { reset: number; points: PlanReadings['points'] }[] = []
+  for (const p of points) {
+    if (p.weekReset === undefined || p.weekPct == null) continue
+    let group = groups.find(g => Math.abs(g.reset - p.weekReset!) <= 300_000)
+    if (!group) { group = { reset: p.weekReset, points: [] }; groups.push(group) }
+    group.points.push(p)
+  }
+  groups.sort((a, b) => b.points.at(-1)!.at - a.points.at(-1)!.at || b.points.length - a.points.length || b.reset - a.reset)
+  const keep = new Set<PlanReadings['points'][number]>()
+  const claimed: { start: number; end: number }[] = []
+  for (const group of groups) {
+    for (const p of group.points) if (!claimed.some(c => p.at >= c.start && p.at <= c.end)) keep.add(p)
+    claimed.push({ start: group.points[0]!.at, end: group.points.at(-1)!.at })
+  }
+  return points.filter(p => p.weekReset === undefined || p.weekPct == null || keep.has(p))
+}
+
 /** One line per reading for a window kind; a reading with no point of that kind is `omitted` (named, not drawn as 0). */
 export function limitSeries(readings: readonly PlanReadings[], kind: 'week' | '5h', labelOf: (r: PlanReadings) => string, since?: number): { series: LimitSeries[]; omitted: string[] } {
   const series: LimitSeries[] = []
   const omitted: string[] = []
   for (const r of readings) {
     let missing = false
-    const points = [...r.points].sort((a, b) => a.at - b.at).flatMap(p => {
+    const sorted = [...r.points].sort((a, b) => a.at - b.at)
+    const source = coherentWeeklyPoints(sorted)
+    // A chart has one observation at a timestamp, even when two collectors wrote it.
+    const unique = [...new Map(source.map(p => [p.at, p])).values()]
+    const points = unique.flatMap(p => {
       const pct = kind === 'week' ? p.weekPct : p.fiveHourPct
       if (since !== undefined && p.at < since) return []
       if (pct === null || !Number.isFinite(pct)) { missing = true; return [] }
@@ -65,7 +93,7 @@ export function toChartRows(series: readonly LimitSeries[], duration: number): {
       if (!last || disconnected(last.at(-1)!, p, s.kind ?? kind)) out.push([p])
       else last.push(p)
     }
-    return out.filter(segment => segment.length >= 2)
+    return out.filter(segment => segment.length >= 2 && ((s.kind ?? kind) === 'week' || segment.at(-1)!.at - segment[0]!.at >= 60_000))
   })
   const times = new Set<number>()
   for (const group of segments) for (let i = 0; i < group.length; i++) {

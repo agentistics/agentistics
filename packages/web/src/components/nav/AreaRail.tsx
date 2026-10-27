@@ -7,7 +7,7 @@
  *
  * Icons and labels come from AreaTree; every expanded parent also appears in the collapsed rail.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BetaTag } from '../BetaTag'
 import { ListTree } from 'lucide-react'
@@ -37,6 +37,16 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
   const [treeOpen, setTreeOpen] = useState(initialTreeOpen)
   const hover = useRef(false)
   const focused = useRef(false)
+  const navRef = useRef<HTMLElement>(null)
+  const focusHref = useRef<string | null>(null)
+  // Opening replaces the icon links with the tree. Carry keyboard focus to the same destination.
+  useLayoutEffect(() => {
+    const nav = navRef.current
+    if (treeOpen && focused.current && nav && !nav.contains(document.activeElement)) {
+      const links = Array.from(nav.querySelectorAll<HTMLAnchorElement>('a[href]'))
+      ;(links.find(a => a.getAttribute('href') === focusHref.current) ?? links[0])?.focus()
+    }
+  }, [treeOpen])
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const cancelClose = () => clearTimeout(leaveTimer.current)
   const closeSoon = () => {
@@ -66,11 +76,11 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
     // opening it never reflows (or squeezes) the Sessões panel. Its positioned parent spans
     // BOTH the rail and list; the open width is independent from the list width.
     <div style={{ display: 'flex', flexShrink: 0, minHeight: 0, width: AREA_RAIL_W }}>
-      <nav
+      <nav ref={navRef}
         aria-label={pt ? 'Áreas do app' : 'App areas'}
         onPointerEnter={event => { if (event.pointerType !== 'touch') { hover.current = true; cancelClose(); setTreeOpen(true) } }}
         onPointerLeave={event => { if (event.pointerType !== 'touch') { hover.current = false; closeSoon() } }}
-        onFocusCapture={() => { focused.current = true; cancelClose() }}
+        onFocusCapture={event => { focusHref.current = (event.target as HTMLElement).closest('a')?.getAttribute('href') ?? null; focused.current = true; cancelClose(); setTreeOpen(true) }}
         onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { focused.current = false; closeSoon() } }}
         data-area-rail
         data-open={treeOpen ? 'true' : 'false'}

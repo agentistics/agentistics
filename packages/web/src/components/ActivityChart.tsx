@@ -281,12 +281,13 @@ export function timeTicks(min: number, max: number, count: number): number[] {
 }
 
 /** Percent comparisons share the activity chart's frame, with a fixed scale and no normalization. */
-export function ActivityPercentChart({ data, series, lang, height = 220, step = false, timeRange }: {
+export function ActivityPercentChart({ data, series, lang, height = 220, step = false, timeRange, showDay = false }: {
   data: { at: number; [key: string]: number | null }[]
   series: { key: string; label: string; color: string; expected?: boolean; connectNulls?: boolean }[]
   lang: 'pt' | 'en'
   height?: number
   step?: boolean
+  showDay?: boolean
   timeRange?: [number, number]
 }) {
   const locale = lang === 'pt' ? 'pt-BR' : 'en-US'
@@ -294,8 +295,8 @@ export function ActivityPercentChart({ data, series, lang, height = 220, step = 
   const min = timeRange?.[0] ?? (data.length ? Math.min(...data.map(p => p.at)) : 0)
   const max = timeRange?.[1] ?? (data.length ? Math.max(...data.map(p => p.at)) : 0)
   const short = max - min < 36 * 3_600_000
-  const tickLabel = (at: number) => new Date(at).toLocaleString(locale, short ? { hour: '2-digit', minute: '2-digit' } : max - min < 4 * 24 * 3_600_000 ? { day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' })
   const narrow = typeof window !== 'undefined' && window.innerWidth < 520
+  const tickLabel = (at: number) => new Date(at).toLocaleString(locale, showDay ? { weekday: 'short', day: 'numeric', ...(narrow ? {} : { hour: '2-digit', minute: '2-digit' } as const) } : short ? { hour: '2-digit', minute: '2-digit' } : max - min < 4 * 24 * 3_600_000 ? { day: 'numeric', hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' })
   const ticks = timeTicks(min, max, narrow ? 4 : 7)
   // The tooltip follows the pointer and leaves with it; on touch, a tap outside the chart closes it.
   const [open, setOpen] = useState(false)

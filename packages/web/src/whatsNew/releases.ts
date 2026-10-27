@@ -38,6 +38,18 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Menu do celular bem mais rápido: trocar de área pela barra de baixo e abrir o menu "Mais" não trava mais a tela.',
         en: 'Much faster phone menu: switching areas from the bottom bar and opening "More" no longer freezes the screen.',
       },
+      {
+        pt: 'Gráficos de uso têm cores mais fáceis de distinguir e linhas sem oscilações de leituras conflitantes. Contas sem histórico usam um marcador cinza.',
+        en: 'Usage charts have easier-to-distinguish colors and lines without oscillations from conflicting readings. Accounts without history use a grey marker.',
+      },
+      {
+        pt: 'No celular, a chave Agentes responde ao toque em toda a área do botão. O menu de áreas também abre ao navegar pelo teclado.',
+        en: 'On phones, the Agents switch responds across its full button area. The area menu also opens during keyboard navigation.',
+      },
+      {
+        pt: 'O gráfico semanal identifica os dias, o uso por hora tem um título e as datas de Métricas seguem o idioma escolhido.',
+        en: 'The weekly chart identifies the days, hourly usage has a title and Metrics dates follow the chosen language.',
+      },
     ],
   },
   '2.158.0': {

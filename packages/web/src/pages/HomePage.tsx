@@ -2,6 +2,7 @@ import React from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { format } from 'date-fns'
+import { fmtDateLocalized } from '../lib/dateFormat'
 import {
   MessageSquare, Zap, Clock, Flame, GitCommit,
   Wrench, FileCode, TrendingUp, BarChart2,
@@ -244,11 +245,11 @@ export default function HomePage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-tertiary)', flexWrap: 'wrap' }}>
           <Calendar size={12} style={{ flexShrink: 0, opacity: 0.6 }} />
           <span style={{ fontSize: 11, opacity: 0.7 }}>{lang === 'pt' ? '1ª sessão' : 'first session'}</span>
-          <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{format(derived.firstSessionDate, 'MMM d, yyyy')}</span>
+          <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{fmtDateLocalized(derived.firstSessionDate.toISOString(), lang)}</span>
           <span style={{ opacity: 0.4 }}>→</span>
           <span style={{ display: 'inline-flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 6 }}>
             <span style={{ fontSize: 11, opacity: 0.7 }}>{lang === 'pt' ? 'última sessão' : 'last session'}</span>
-            <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{format(derived.lastSessionDate, 'MMM d, yyyy')}</span>
+            <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>{fmtDateLocalized(derived.lastSessionDate.toISOString(), lang)}</span>
             <span style={{ opacity: 0.3, margin: '0 2px' }}>·</span>
             <span><strong style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{derived.sessionSpanDays.toLocaleString()}</strong> {lang === 'pt' ? 'dias' : 'days'}</span>
           </span>
