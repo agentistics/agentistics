@@ -1,18 +1,23 @@
 /**
- * AccountRow — Settings → Billing's one list: a row per account (or per assistant that cannot say
+ * AccountRow — Usage → Accounts' one list: a row per account (or per assistant that cannot say
  * which account is signed in), each saying ONCE who it is, what plan it pays, how much of its limits
  * it has used and whether agents may use it. The row's button is the only way into the editor.
- * Presentational: BillingSettings owns the data.
+ * BillingSettings owns row data; the shared plan snapshot supplies the chart color identity set.
  *
- * Reuses the app's pieces only: RecordCard, Toggle, Pill, PlanLimitBars, HarnessMark, dialogButtonStyle.
+ * Reuses the app's pieces only: Toggle, Pill, PlanUsageRing, HarnessMark, IconButton.
  */
 import React from 'react'
-import type { BillingMode, PlanLimits } from '@agentistics/core'
+import { Pencil } from 'lucide-react'
+import { windowKey, type BillingMode, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { PlanLimitBars } from '../../components/PlanLimitMeter'
+import { PlanUsageRing } from '../../components/PlanLimitMeter'
 import { Pill } from '../../components/Pill'
 import { HarnessMark } from '../../components/sessions/HarnessMark'
-import { RecordCard, RecordCardAction, Toggle, dialogButtonStyle } from './primitives'
+import { IconButton } from '../../components/sessions/RepoSearchView'
+import { HARNESS_LABELS } from '../../lib/harness'
+import { currentUsedPct, resetPhrase, usePlanLimits, windowLabel, windowShort } from '../../lib/planLimits'
+import { usageColors, USAGE_NO_READING_COLOR } from '../../lib/usageColors'
+import { Toggle } from './primitives'
 import { planCoverageText, REPORTS_LIMITS, type BillingAccount, type BillingRow } from './accountBilling'
 
 type Lang = 'pt' | 'en'
@@ -55,95 +60,101 @@ export interface BillingAccountListProps {
   onEdit: (row: BillingRowView) => void
 }
 
-const GRID = 'minmax(100px,1.3fr) minmax(150px,.8fr) minmax(190px,1.8fr) 54px 90px'
 const cellText: React.CSSProperties = { display: 'block', whiteSpace: 'normal', overflowWrap: 'break-word' }
 
+/** The plan half of the muted line: the plan's name, or the state that stands in for one. */
 function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
-  if (r.problem) return <span style={{ justifySelf: 'start' }}><Pill tone="error" nowrap>{t.problem}</Pill></span>
-  if (!r.plan) return <span style={{ justifySelf: 'start' }}><Pill tone="warn" nowrap>{t.noPlan}</Pill></span>
-  return (
-    <div style={{ minWidth: 0 }}>
-      <span style={{ ...cellText, fontSize: 12.5, color: 'var(--text-primary)' }}>{r.plan.name}</span>
-      {r.plan.price && <span style={{ ...cellText, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{r.plan.price}</span>}
-    </div>
-  )
+  if (r.problem) return <Pill tone="error" nowrap>{t.problem}</Pill>
+  if (!r.plan) return <Pill tone="warn" nowrap>{t.noPlan}</Pill>
+  return <span>{r.plan.name}{r.plan.price ? ` · ${r.plan.price}` : ''}</span>
+}
+
+/**
+ * The two rings a row carries: the 5-hour and the weekly window (unscoped first — a model-scoped
+ * weekly window is a third meter the editor shows in full). The renewal is the ring's tooltip.
+ */
+export function rowWindows(limits: PlanLimits): PlanLimitWindow[] {
+  const plain = limits.windows.filter(w => !w.scope)
+  const picked = (['5h', 'week'] as const).map(k => plain.find(w => w.kind === k)).filter((w): w is PlanLimitWindow => !!w)
+  return picked.length ? picked : limits.windows.slice(0, 2)
 }
 
 function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: number; lang: Lang; t: ReturnType<typeof T>; ready?: boolean }) {
-  if (r.limits) return <div data-billing-usage style={{ minWidth: 0, overflowWrap: 'normal' }}><PlanLimitBars limits={r.limits} now={now} lang={lang} labelWidth="9em" /></div>
+  if (r.limits) return (
+    <span data-billing-usage data-plan-limits={r.limits.harness} style={{ display: 'inline-flex', gap: 10 }}>
+      {rowWindows(r.limits).map(w => {
+        const pct = Math.round(currentUsedPct(w, now))
+        const tip = `${windowLabel(w.kind, lang, w.scope)}: ${pct}% · ${resetPhrase(w, now, lang)}`
+        return (
+          <span key={windowKey(w)} title={tip} aria-label={tip} role="img" data-usage-ring={w.kind}
+            style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+            <PlanUsageRing pct={pct} size={32}>{pct}</PlanUsageRing>
+            <span aria-hidden style={{ fontSize: 10, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{windowShort(w.kind, lang, w.scope)}</span>
+          </span>
+        )
+      })}
+    </span>
+  )
   if (!ready && r.account) return <span aria-busy="true" style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>…</span>
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>
 }
 
-/** Keep the assistant and login on separate lines at every row width. */
-function AccountSubtitle({ row }: { row: BillingRowView }) {
-  return <span data-billing-subtitle>{row.sub.split(' · ').map((line, i) =>
-    <span key={i} style={{ display: 'block', ...(i === 0 ? { whiteSpace: 'nowrap' as const } : {}) }}>{line}</span>,
-  )}</span>
-}
-
 const actionLabel = (r: BillingRowView, t: ReturnType<typeof T>) => (r.problem ? t.review : r.plan ? t.edit : t.setPlan)
 
+/**
+ * One compact ROW per account: harness mark + name, the assistant and plan muted under it, the two
+ * usage rings, the agent-use switch and a pencil. At phone width the row wraps to two lines — who
+ * on the first, the controls on the second — so nothing scrolls sideways.
+ */
 export function BillingAccountList(p: BillingAccountListProps) {
   const pt = p.lang === 'pt'
   const t = T(pt)
   const isMobile = useIsMobile()
-  const toggle = (r: BillingRowView) => r.account && (
-    <Toggle on={r.account.available} disabled={p.pendingIds.has(r.key)} label={`${t.agents} · ${r.title}`}
-      onToggle={() => r.account && p.onToggle(r.account)} />
-  )
-  const failed = (r: BillingRowView) => r.account && p.failedIds.has(r.key) && (
-    <p role="alert" style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12, color: 'var(--accent-red)' }}>{t.saveFailed(r.title)}</p>
-  )
+  const target = isMobile ? 44 : 32
+  const { budgets, readings } = usePlanLimits()
+  // Match the charts' full identity set before either surface filters or reorders accounts.
+  const colors = usageColors([
+    ...budgets.map(b => `${b.harness}:${b.account ?? 'default'}`),
+    ...readings.map(r => `${r.harness}:${r.account}`),
+  ])
   return (
     <div>
       <div style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>{planCoverageText(p.rows, p.lang)}</div>
-      {isMobile ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {p.rows.map(r => (
-            <div key={r.key} data-billing-row={r.key}>
-              <RecordCard
-                leading={<HarnessMark harness={r.harness} size={22} />}
-                title={r.title}
-                subtitle={<AccountSubtitle row={r} />}
-                fields={[
-                  { label: t.plan, value: r.problem || !r.plan ? <PlanCell r={r} t={t} /> : `${r.plan.name}${r.plan.price ? ` · ${r.plan.price}` : ''}` },
-                  { label: t.usage, value: <Usage r={r} now={p.now} lang={p.lang} t={t} ready={p.limitsReady ?? true} /> },
-                  ...(r.account ? [{ label: t.agents, value: <span style={{ display: 'inline-flex' }}>{toggle(r)}</span> }] : []),
-                ]}
-                actions={<RecordCardAction label={`${actionLabel(r, t)} · ${r.title}`} onClick={() => p.onEdit(r)}>{actionLabel(r, t)}</RecordCardAction>}
-              />
-              {failed(r)}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)', overflow: 'hidden', marginBottom: 14 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 14, padding: '8px 14px', fontSize: 10.5, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', background: 'var(--bg-elevated)' }}>
-            <span>{t.account}</span><span>{t.plan}</span><span>{t.usage}</span><span>{t.agents}</span><span />
-          </div>
-          {p.rows.map(r => (
-            <div key={r.key} data-billing-row={r.key} style={{
-              display: 'grid', gridTemplateColumns: GRID, gap: 14, alignItems: 'center', padding: '12px 14px',
-              borderTop: '1px solid var(--border)', background: p.selectedKey === r.key ? 'var(--bg-elevated)' : undefined,
-            }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <HarnessMark harness={r.harness} size={22} />
-                <span style={{ minWidth: 0 }}>
-                  <b style={{ ...cellText, fontSize: 13, color: 'var(--text-primary)' }}>{r.title}</b>
-                  <span title={r.sub.replaceAll(' · ', '\n')} style={{ ...cellText, fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}><AccountSubtitle row={r} /></span>
+      <div role="list" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)', overflow: 'hidden', marginBottom: 14 }}>
+        {p.rows.map((r, i) => (
+          <div role="listitem" key={r.key} data-billing-row={r.key} style={{
+            display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 14, rowGap: 8, padding: isMobile ? '10px 12px' : '8px 14px',
+            borderTop: i ? '1px solid var(--border)' : undefined, background: p.selectedKey === r.key ? 'var(--bg-elevated)' : undefined,
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 220px' }}>
+              <span aria-hidden="true" data-account-color={`${r.harness}:${r.account?.id || 'default'}`} style={{
+                width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                background: readings.some(a => a.harness === r.harness && a.account === (r.account?.id || 'default') && a.points.some(p => p.fiveHourPct != null || p.weekPct != null))
+                  ? colors.get(`${r.harness}:${r.account?.id || 'default'}`) ?? USAGE_NO_READING_COLOR : USAGE_NO_READING_COLOR,
+              }} />
+              <HarnessMark harness={r.harness} size={22} />
+              <span style={{ minWidth: 0 }} title={r.sub.replaceAll(' · ', '\n')}>
+                <b style={{ ...cellText, fontSize: 13, color: 'var(--text-primary)' }}>{r.title}</b>
+                <span data-billing-subtitle style={{ ...cellText, fontSize: 11.5, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
+                  {HARNESS_LABELS[r.harness] ?? r.harness} · <PlanCell r={r} t={t} />
                 </span>
               </span>
-              <PlanCell r={r} t={t} />
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto', flexShrink: 0 }}>
               <Usage r={r} now={p.now} lang={p.lang} t={t} ready={p.limitsReady ?? true} />
-              <span>{toggle(r)}</span>
-              <button type="button" style={{ ...dialogButtonStyle(r.plan && !r.problem ? 'secondary' : 'primary', false), whiteSpace: 'nowrap', width: '100%' }}
-                aria-label={`${actionLabel(r, t)} · ${r.title}`} onClick={() => p.onEdit(r)}>{actionLabel(r, t)}</button>
-              {failed(r)}
-            </div>
-          ))}
-        </div>
-      )}
+              {r.account && (
+                <Toggle on={r.account.available} disabled={p.pendingIds.has(r.key)} label={`${t.agents} · ${r.title}`}
+                  targetSize={target} text={t.agents} onToggle={() => r.account && p.onToggle(r.account)} />
+              )}
+              <IconButton label={`${actionLabel(r, t)} · ${r.title}`} size={target} onClick={() => p.onEdit(r)}
+                color={r.plan && !r.problem ? 'var(--text-secondary)' : 'var(--anthropic-orange)'}><Pencil size={15} /></IconButton>
+            </span>
+            {r.account && p.failedIds.has(r.key) && (
+              <p role="alert" style={{ flexBasis: '100%', margin: 0, fontSize: 12, color: 'var(--accent-red)' }}>{t.saveFailed(r.title)}</p>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

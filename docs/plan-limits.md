@@ -6,7 +6,7 @@ saving; a failed save restores the previous choice and shows an error toast. Acc
 stay visible with their meters and a quiet explanation. Legacy readings without a registry account
 have no switch. The status and switch wrap within the header on narrow screens.
 
-Settings → Billing lists detected harness accounts and their availability to agents. Switching an
+Usage → Accounts (formerly Settings → Billing) lists detected harness accounts and their availability to agents. Switching an
 account off keeps its login and owner-visible meters intact. Agent budgets, free slot totals,
 per-harness slots, live session summaries, and routing recommendations exclude that account while
 it is unavailable; other available accounts of the same harness remain usable. The owner API includes the excluded budgets in
@@ -136,17 +136,18 @@ Escape dismisses the account dialog before any underlying Plan usage modal.
 
 ## Usage area
 
-The Usage area reads the same plan-limit store as the composer and Nay. `/usage` shows one card
-per account (including registered accounts awaiting a reading), ordered by the surface harness
-registry and account label. Accounts excluded from agent routing remain visible to the owner.
-Capacity without a measured rate is described as unmeasured; it does not become a zero.
-Harnesses without subscription plans have registration links to Settings → Billing. The native
-runtime uses provider billing rather than subscription plans and is excluded from that list.
+The Usage area reads the same plan-limit store as the composer and Nay. `/usage` shows the charts,
+then **Accounts**: one compact row per account (harness mark, name, assistant and plan muted, the
+5-hour and weekly rings with the renewal in their tooltip, the agent-use switch and a pencil). The
+pencil opens the one editor for that account — nickname, plan, price, dates, earlier plans, agent
+use, its full limit bars and, when the pace is measured, the recommended parallel count. At 390px a
+row wraps to two lines and its controls are 44px targets. Below the list, **Billing** carries what
+used to be Settings → Billing's page-wide notes; the account binding (**Add account**) sits under
+the list. Settings → Billing, `/usage/limits` and every "adjust limits" / "manage plans" link now
+land on `/usage#contas`; `/usage/plan` redirects to `/usage` (the page planned nothing per account).
+The native runtime uses provider billing rather than subscription plans and has no row.
 
-`/usage/plan` accepts a positive number of hours, defaulting to four, and uses the shared
-`planSessions` helper for sustainable parallel capacity and pause times. Hours are planning metadata,
-not an input to capacity arithmetic. `/usage/limits` renders
-the same `NayLimitsTab` as the usage modal. `/usage/history` shows account readings for the weekly
+`/usage/history` shows account readings for the weekly
 and five-hour windows. History is persisted by `plan-history.ts` in `plan-history.json`: one point
 per 5-minute bucket (the newest reading wins), 14 days, at most 4032 points per account, each point
 carrying its windows' reset ids so Real breaks where a window renewed. A new meter segment drops the
@@ -231,7 +232,7 @@ a competing modal-wide age.
 
 ## Adding a login in Billing (experimental `multi-account`)
 
-Settings → Billing → **Add account** opens a link/code dialog. The owner opens the link in their
+Usage → Accounts → **Add account** opens a link/code dialog. The owner opens the link in their
 own browser; the server never opens a browser. Claude Code and Gemini ask for the authorization
 code shown by the page. Codex, Copilot and Kimi display a device code and wait for authorization.
 Kimi's link already includes its code. The dialog shows the assistant, identity and reported plan

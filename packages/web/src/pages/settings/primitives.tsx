@@ -473,8 +473,11 @@ export function PrefRow({ label, sub, children }: { label: string; sub?: string;
   )
 }
 
-export function Toggle({ on, onToggle, disabled, label }: {
+export function Toggle({ on, onToggle, disabled, label, targetSize, text }: {
   on: boolean; onToggle: () => void; disabled?: boolean
+  /** Full interactive size; the inner pill retains its 34×20 appearance. */
+  targetSize?: number
+  text?: string
   /** Names the switch for assistive tech; given, the button is announced as a switch with its state. */
   label?: string
 }) {
@@ -484,23 +487,23 @@ export function Toggle({ on, onToggle, disabled, label }: {
       disabled={disabled}
       {...(label ? { role: 'switch', 'aria-checked': on, 'aria-label': label } : {})}
       aria-disabled={disabled || undefined}
-      // `.ag-switch` opts this control OUT of the `.ag-settings button { min-height: 44px }`
-      // mobile rule (index.css). That rule exists for real buttons that were 22-33px tall on
-      // mobile; applied here it stretched this 20px-tall pill to 44px and left its knob (top: 3)
-      // pinned to the top third of a control three times its own height.
       className="ag-switch"
       style={{
-        position: 'relative', width: 34, height: 20, borderRadius: 10,
-        border: 'none', background: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)',
-        cursor: disabled ? 'not-allowed' : 'pointer', padding: 0, transition: 'background 0.2s', flexShrink: 0,
-        opacity: disabled ? 0.5 : 1,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        minWidth: targetSize ?? 34, minHeight: targetSize ?? 20, border: 'none', background: 'transparent',
+        cursor: disabled ? 'not-allowed' : 'pointer', padding: 0, flexShrink: 0,
+        color: 'var(--text-tertiary)', fontSize: 11.5, opacity: disabled ? 0.5 : 1,
       }}
     >
+      <span aria-hidden style={{ position: 'relative', display: 'inline-block', width: 34, height: 20, borderRadius: 10,
+        background: on ? 'var(--anthropic-orange)' : 'var(--text-tertiary)', transition: 'background 0.2s', flexShrink: 0 }}>
       <span style={{
         position: 'absolute', top: 3, left: on ? 17 : 3,
         width: 14, height: 14, borderRadius: '50%', background: '#fff',
         transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
       }} />
+      </span>
+      {text && <span aria-hidden>{text}</span>}
     </button>
   )
 }

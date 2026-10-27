@@ -63,9 +63,6 @@ export const APP_AREAS: readonly Area[] = [
   ] },
   { id: 'usage', icon: 'gauge', beta: true, labelPt: 'Uso', labelEn: 'Usage', pages: [
     { id: 'now', path: '/usage', labelPt: 'Agora', labelEn: 'Now' },
-    { id: 'plan', path: '/usage/plan', labelPt: 'Planejar', labelEn: 'Plan' },
-    { id: 'limits', path: '/usage/limits', labelPt: 'Limites', labelEn: 'Limits' },
-    { id: 'history', path: '/usage/history', labelPt: 'Histórico', labelEn: 'History' },
   ] },
   { id: 'repositories', icon: 'git', labelPt: 'Repositórios', labelEn: 'Repositories', pages: [
     { id: 'list', path: '/repositories', also: ['/repo'], labelPt: 'Lista', labelEn: 'List' },

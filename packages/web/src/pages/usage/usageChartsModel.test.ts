@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { PlanReadings } from '../../lib/planLimits'
-import { limitSeries, messageActivity, rateRows, scopeReadings, scopeSessions, toChartRows, topPeaks } from './usageChartsModel'
+import { harnessSeries, hourlyUsage, limitSeries, messageActivity, rateRows, scopeReadings, scopeSessions, toChartRows, topPeaks } from './usageChartsModel'
 
 const H = 3_600_000
 const T0 = Date.parse('2026-10-20T00:00:00Z')
@@ -41,8 +41,7 @@ describe('limitSeries', () => {
   test('a renewed window breaks the line instead of falling', () => {
     const { series } = limitSeries([claude], '5h', label)
     const { rows } = toChartRows(series, 5 * H)
-    expect(rows.some(r => r.s0 === null)).toBe(true)
-    expect(rows.filter(r => r.s0 !== null).map(r => r.s0)).toEqual([5, 25, 2])
+    expect(rows.filter(r => r.s0 !== null).map(r => r.s0)).toEqual([5, 25]) // singleton after reset is omitted
   })
 })
 
@@ -86,18 +85,18 @@ describe('series boundaries', () => {
     const { series } = limitSeries([a, b, c], 'week', () => 'Principal')
     expect(series.map(s => s.key)).toEqual(['claude:a', 'claude:b', 'codex:a'])
     const { rows } = toChartRows(series, 7 * 24 * H)
-    expect(rows.map(r => r.s0)).toEqual([80, 81, 82])
-    expect(rows.map(r => r.s1)).toEqual([null, 30, null])
+    expect(rows.map(r => r.s0)).toEqual([80, 82])
+    expect(rows.map(r => r.s1)).toEqual([null, null])
     expect(scopeReadings([a, b, c], { mode: 'account', key: 'claude:b' })).toEqual([b])
   })
-  test('interleaved window identities never draw vertical joins', () => {
+  test('a weekly reading from an overlapping older reset stream is omitted', () => {
     const { series } = limitSeries([{ harness: 'claude', account: 'a', points: [
       { at: T0, weekPct: 100, fiveHourPct: 100, weekReset: T0 + 10 * H },
       { at: T0 + H / 12, weekPct: 35, fiveHourPct: 35, weekReset: T0 + 20 * H },
       { at: T0 + H / 6, weekPct: 100, fiveHourPct: 100, weekReset: T0 + 10 * H },
     ] }], 'week', label)
     const { rows } = toChartRows(series, 7 * 24 * H)
-    expect(rows.map(r => r.s0)).toEqual([100, null, 35, null, 100])
+    expect(rows.map(r => r.s0)).toEqual([100, 100]) // the later-updated stream wins the overlap
     expect(topPeaks(series, 'week', 3, 0.1)).toEqual([])
   })
   test('coarsening cannot skip a reset and manufacture a peak', () => {
@@ -107,15 +106,95 @@ describe('series boundaries', () => {
     // Unknown reset ids: the decrease still starts a new window segment.
     expect(topPeaks(series, '5h')).toEqual([])
   })
-  test('missing readings and long gaps are not connected or counted as peaks', () => {
+  test('weekly charts tolerate missing readings under six hours; peaks remain conservative', () => {
     const { series } = limitSeries([{ harness: 'claude', account: 'a', points: [
       { at: T0, weekPct: 10, fiveHourPct: 10 },
       { at: T0 + H / 4, weekPct: null, fiveHourPct: null },
       { at: T0 + H / 2, weekPct: 20, fiveHourPct: 20 },
       { at: T0 + 4 * H, weekPct: 60, fiveHourPct: 60 },
     ] }], 'week', label)
-    expect(toChartRows(series, 7 * 24 * H).rows.map(r => r.s0)).toEqual([10, null, 20, null, 60])
+    expect(toChartRows(series, 7 * 24 * H).rows.map(r => r.s0)).toEqual([10, 20, 60])
     expect(topPeaks(series, 'week')).toEqual([])
     expect(rateRows(series)).toEqual([])
+  })
+})
+
+
+describe('readable chart views', () => {
+  test('weekly small corrections are continuous, >20 point resets and >6h gaps break', () => {
+    const series = [{ key: 'a', harness: 'claude' as const, account: 'a', label: 'A', points: [
+      { at: T0, pct: 50 }, { at: T0 + H, pct: 49, gapBefore: true },
+      { at: T0 + 2 * H, pct: 10 }, { at: T0 + 3 * H, pct: 12 },
+      { at: T0 + 10 * H, pct: 15 }, { at: T0 + 11 * H, pct: 16 },
+    ] }]
+    expect(toChartRows(series, 7 * 24 * H).rows.map(r => r.s0)).toEqual([50, 49, null, 10, 12, null, 15, 16])
+  })
+  test('step values remain at the last reading across another account’s timestamp', () => {
+    const a = { key: 'a', harness: 'claude' as const, account: 'a', label: 'A', points: [{ at: T0, pct: 10 }, { at: T0 + H, pct: 30 }] }
+    const b = { ...a, key: 'b', account: 'b', points: [{ at: T0 + H / 2, pct: 20 }, { at: T0 + H, pct: 25 }] }
+    expect(toChartRows([a, b], 5 * H).rows.map(r => r.s0)).toEqual([10, 10, 30])
+    const grouped = harnessSeries([a, b], 5 * H, h => h)
+    expect(grouped).toHaveLength(1)
+    expect(grouped[0]!.points.map(p => p.pct)).toEqual([10, 20, 30])
+  })
+  test('hour bars conserve measured increases and divide across hour boundaries', () => {
+    const s = { key: 'a', harness: 'claude' as const, account: 'a', label: 'A', points: [{ at: T0 + H / 2, pct: 10 }, { at: T0 + H * 1.5, pct: 30 }] }
+    const bars = hourlyUsage([s], T0, T0 + 2 * H)
+    expect(bars.map(r => r.a ?? 0)).toEqual([10, 10, 0])
+    expect(topPeaks([s], '5h')[0]).toMatchObject({ rise: 20, duration: H, key: 'a' })
+  })
+  test('weekday × hour bins use local message timestamps and conserve total', () => {
+    const d = new Date(2026, 9, 26, 17, 30)
+    const result = messageActivity([{ user_message_timestamps: [d.toISOString(), d.toISOString()] }], d.getTime())
+    expect(result.cells).toHaveLength(7)
+    expect(result.cells.every(row => row.length === 24)).toBe(true)
+    expect(result.cells[0]![17]).toBe(2)
+    expect(result.cells.flat().reduce((a, b) => a + b, 0)).toBe(result.total)
+  })
+})
+
+
+describe('QA r2 conflicting readings', () => {
+  test('weekly interleaved reset streams keep the most recently observed stream during overlap', () => {
+    const resetA = T0 + 100 * H, resetB = T0 + 130 * H
+    const points: PlanReadings['points'] = [
+      { at: T0, weekPct: 75, fiveHourPct: 1, weekReset: resetA },
+      ...Array.from({ length: 12 }, (_, i) => [
+        { at: T0 + (i + 1) * H / 12, weekPct: 25 + i, fiveHourPct: 10, weekReset: resetB + i * 100 },
+        { at: T0 + (i + 1) * H / 12 + 1000, weekPct: 75, fiveHourPct: 1, weekReset: resetA },
+      ]).flat(),
+      { at: T0 + 2 * H, weekPct: 38, fiveHourPct: 15, weekReset: resetB },
+    ]
+    const { series } = limitSeries([{ harness: 'claude', account: 'a', points }], 'week', label)
+    const rows = toChartRows(series, 7 * 24 * H).rows
+    expect(rows.filter(r => r.s0 !== null).map(r => r.s0)).toEqual([...Array.from({ length: 12 }, (_, i) => 25 + i), 38])
+    expect(topPeaks(series, 'week').every(p => p.rise < 20)).toBe(true)
+    // Reordering ingestion cannot change which source survives.
+    expect(limitSeries([{ harness: 'claude', account: 'a', points: [...points].reverse() }], 'week', label)).toEqual({ series, omitted: [] })
+  })
+  test('conflicting sources at identical timestamps yield one weekly observation each', () => {
+    const points = [0, 1, 2].flatMap(i => [
+      { at: T0 + i * H, weekPct: 75, fiveHourPct: 5, weekReset: T0 + 100 * H },
+      { at: T0 + i * H, weekPct: 25 + i, fiveHourPct: 10, weekReset: T0 + 130 * H },
+    ])
+    const { series } = limitSeries([{ harness: 'claude', account: 'a', points }], 'week', label)
+    expect(toChartRows(series, 7 * 24 * H).rows.map(r => r.s0)).toEqual([25, 26, 27])
+  })
+  test('a real subsequent weekly reset retains both sides of the history', () => {
+    const { series } = limitSeries([{ harness: 'claude', account: 'a', points: [
+      { at: T0, weekPct: 70, fiveHourPct: null, weekReset: T0 + H },
+      { at: T0 + H / 2, weekPct: 80, fiveHourPct: null, weekReset: T0 + H },
+      { at: T0 + H, weekPct: 1, fiveHourPct: null, weekReset: T0 + 169 * H },
+      { at: T0 + 2 * H, weekPct: 2, fiveHourPct: null, weekReset: T0 + 169 * H },
+    ] }], 'week', label)
+    expect(toChartRows(series, 7 * 24 * H).rows.map(r => r.s0)).toEqual([70, 80, null, 1, 2])
+  })
+  test('a duplicate timestamp is not two readings; sub-minute 5 h fragments do not draw dots', () => {
+    const { series } = limitSeries([{ harness: 'claude', account: 'a', points: [
+      { at: T0, weekPct: 10, fiveHourPct: 20 }, { at: T0, weekPct: 10, fiveHourPct: 20 },
+      { at: T0 + 1000, weekPct: 10, fiveHourPct: 20 },
+      { at: T0 + 2 * H, weekPct: 15, fiveHourPct: 1 }, { at: T0 + 3 * H, weekPct: 16, fiveHourPct: 5 },
+    ] }], '5h', label)
+    expect(toChartRows(series, 5 * H).rows.map(r => r.s0)).toEqual([1, 5])
   })
 })
