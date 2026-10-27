@@ -275,6 +275,17 @@ export function MobilePillBar({ items, activeIndex, centerIndex, ariaLabel }: {
         onClickCapture={e => { if (suppressClick.current) { e.preventDefault(); e.stopPropagation(); suppressClick.current = false } }}
         style={{ position: 'relative', display: 'flex', height: '100%' }}
       >
+        {height > 0 && (() => {
+          // The concave bites between the pills and the round button are transparent, so the page
+          // showed through them. A disc of the pills' own arc radius, in the bar's own surface, fills
+          // exactly that gap; clipped to the bar's height so it paints nothing above or below it.
+          const R = Math.hypot(SPACER / 2, height / 2)
+          return (
+            <div aria-hidden data-bar-cutout style={{ position: 'absolute', left: '50%', top: 0, width: R * 2, height, transform: 'translateX(-50%)', overflow: 'hidden', pointerEvents: 'none' }}>
+              <div style={{ position: 'absolute', left: 0, top: height / 2 - R, width: R * 2, height: R * 2, borderRadius: '50%', background: SURFACE }} />
+            </div>
+          )
+        })()}
         {group('left', 0, centerIndex)}
         {circle(items[centerIndex]!, centerIndex)}
         {group('right', centerIndex + 1, items.length)}
