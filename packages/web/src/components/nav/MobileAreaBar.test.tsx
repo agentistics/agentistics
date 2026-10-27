@@ -38,24 +38,23 @@ describe('MobileAreaBar', () => {
     }
   })
 
-  test('the centre is Home inside the Sessions area away from the list, Sessions everywhere else', () => {
-    for (const pathname of ['/sessions/abc', '/leadership/checkins']) {
-      for (const lang of ['pt', 'en'] as const) {
-        const html = render(pathname, 2, lang)
-        expect(html).toContain(lang === 'pt' ? 'aria-label="Início' : 'aria-label="Home')
-        expect(html).toContain('lucide-house')
-        expect(html).not.toContain('lucide-terminal')
-        expect(html).toContain('border-radius:50%')
-        expect(html).toContain('width:58px;height:58px')
-        expect(html.match(/<button\b/g) ?? []).toHaveLength(5)
-      }
-    }
-    for (const pathname of ['/sessions', '/usage', '/tasks', '/']) {
+  test('the centre is a chat icon outside Sessões, and the previous area icon inside it', () => {
+    for (const pathname of ['/usage', '/tasks', '/']) {
       for (const lang of ['pt', 'en'] as const) {
         const html = render(pathname, undefined, lang)
         expect(html).toContain(lang === 'pt' ? 'aria-label="Sessões' : 'aria-label="Sessions')
-        expect(html).toContain('lucide-terminal')
-        expect(html).not.toContain('lucide-house')
+        expect(html).toContain('lucide-message-square')
+        expect(html).not.toContain('lucide-terminal')
+      }
+    }
+    for (const pathname of ['/sessions', '/sessions/abc']) {
+      for (const lang of ['pt', 'en'] as const) {
+        const html = render(pathname, 2, lang)
+        // No previous page in a fresh window: back to Métricas, drawn with the Métricas icon.
+        expect(html).toContain(lang === 'pt' ? 'aria-label="Voltar para Métricas"' : 'aria-label="Back to Metrics"')
+        expect(html).not.toContain('lucide-message-square')
+        expect(html).toContain('width:58px;height:58px')
+        expect(html.match(/<button\b/g) ?? []).toHaveLength(5)
       }
     }
   })

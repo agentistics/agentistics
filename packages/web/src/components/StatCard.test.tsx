@@ -53,3 +53,18 @@ test('shared KPI touch rule reaches info, currency and other supplied action but
     }
   } finally { if (previous === undefined) delete root.window; else root.window = previous }
 })
+
+test('KPI card carries the hooks the phone layout compacts (label+controls one row, 2-line sub)', () => {
+  const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8')
+  const root = globalThis as { window?: unknown }
+  const previous = root.window
+  root.window = { innerWidth: 390 }
+  let html: string
+  try { html = renderToStaticMarkup(<StatCard label="L" value="1" sub="s" icon={<span />} info={{ source: 'x' }} />) }
+  finally { if (previous === undefined) delete root.window; else root.window = previous }
+  for (const c of ['ag-stat-head', 'ag-stat-label', 'ag-stat-ctrl', 'ag-stat-icon', 'ag-stat-sub']) {
+    expect(html).toContain(c)
+    expect(css).toContain(`.ag-stat-card .${c}`)
+  }
+  expect(css).toMatch(/@media \(max-width: 480px\)[\s\S]*-webkit-line-clamp: 2/)
+})

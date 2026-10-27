@@ -72,11 +72,11 @@ export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-or
         background: `linear-gradient(90deg, ${accent}60, ${accent}10, transparent)`,
       }} />
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', flexDirection: 'column', gap: 6, minHeight: 54 }}>
-        <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+      <div className="ag-stat-head" style={{ display: 'flex', alignItems: 'flex-start', flexDirection: 'column', gap: 6, minHeight: 54 }}>
+        <span className="ag-stat-label" style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
           {label}
         </span>
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+        <div className="ag-stat-ctrl" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
           {action}
           {onTogglePrecision && !isMobile && (
             <PrecisionToggle
@@ -89,6 +89,7 @@ export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-or
           {info && (
             <button
               type="button"
+              className="ag-tap-icon"
               aria-label={lang === 'pt' ? `Sobre ${label}` : `About ${label}`}
               onClick={onInfoClick}
               style={{
@@ -106,7 +107,7 @@ export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-or
               <Info size={13} />
             </button>
           )}
-          <span style={{
+          <span className="ag-stat-icon" style={{
             width: 32, height: 32,
             borderRadius: 8,
             background: `${accent}18`,
@@ -122,6 +123,7 @@ export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-or
       <div>
         <div
           title={valueTitle}
+          className="ag-stat-value-line"
           style={{
             fontSize: valueFontSize(sizeBasis ?? value),
             fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.15,
@@ -135,6 +137,7 @@ export function StatCard({ label, value, sub, icon, accent = 'var(--anthropic-or
           // `pre-line` so a sub can be several short labelled lines instead of one run-on
           // sentence — a card that reports two different quantities has to name both.
           <div
+            className="ag-stat-sub"
             style={{
               fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4,
               whiteSpace: 'pre-line', overflowWrap: 'anywhere',
