@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { followFleet, type Baseline, type FleetWire, type SessionMode } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
-import { fleetSeedNotice, fleetStaleNotice } from './fleetStale'
+import { fleetSeedNotice, fleetStaleNotice, stillLoadingAfterPoll } from './fleetStale'
 import { cacheIsUsable, stripVolatile } from './fleetCache'
 import { notifyFleetTransitions, type SessionActivity } from './sessionNotifications'
 import { chatHoldsText, confirmSendLanded, parseActResult, sendUnconfirmedMessage } from './fleetAct'
@@ -489,7 +489,7 @@ async function pollOnce(): Promise<void> {
     // it did not arrive.
     snapFailures++
   } finally {
-    snapLoading = false
+    snapLoading = stillLoadingAfterPoll({ answered: snapLastOkMs !== null || snapUnsupported, failures: snapFailures })
     emit()
   }
 }

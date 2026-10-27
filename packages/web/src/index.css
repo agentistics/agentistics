@@ -1185,6 +1185,12 @@ tr:focus-within .ag-row-actions,
   .ag-stat-card .ag-tok-parts { gap: 4px 10px !important; }
 }
 
+/* Usage charts: the floating Nay button (bottom-right) covered the end of a chart's X axis. Same
+   remedy as the Métricas card heads above — keep the chart's right edge out from under it. */
+@media (max-width: 480px) {
+  [data-usage-chart] { padding-right: 52px; box-sizing: border-box; }
+}
+
 @media (max-width: 767px) {
   /* Task chips have inline minimums; keep the target rule authoritative here. */
   .ag-task-detail :is(button, [role="button"]) {

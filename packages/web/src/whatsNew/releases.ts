@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '0.0.0-next': {
+    features: [],
+    fixes: [
+      {
+        pt: 'No celular, o botão flutuante do Nay não cobre mais o fim do eixo dos gráficos na página Uso.',
+        en: 'On phones, the floating Nay button no longer covers the end of the chart axes on the Usage page.',
+      },
+      {
+        pt: 'Ao abrir Sessões direto, a lista mostra "Lendo as sessões…" até a primeira resposta chegar, em vez de dizer por alguns segundos que não há sessões.',
+        en: 'Opening Sessions directly now shows "Reading this machine’s sessions…" until the first answer arrives, instead of briefly claiming there are no sessions.',
+      },
+      {
+        pt: 'Na tabela do Agentask, removido um pontinho perdido na primeira coluna.',
+        en: 'In the Agentask table, removed a stray dot in the first column.',
+      },
+    ],
+  },
   '2.159.2': {
     features: [],
     fixes: [
