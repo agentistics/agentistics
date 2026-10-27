@@ -33,7 +33,12 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Billing now lives in Usage. Settings → Billing and "Adjust limits" take you to the accounts list; the Plan and Limits pages are gone.',
       },
     ],
-    fixes: [],
+    fixes: [
+      {
+        pt: 'Menu do celular bem mais rápido: trocar de área pela barra de baixo e abrir o menu "Mais" não trava mais a tela.',
+        en: 'Much faster phone menu: switching areas from the bottom bar and opening "More" no longer freezes the screen.',
+      },
+    ],
   },
   '2.158.0': {
     features: [
