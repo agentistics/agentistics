@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '0.0.0-next': {
+    features: [
+      {
+        pt: 'Uso lista suas contas em linhas compactas: nome, harness e plano, os dois círculos de uso (5 h e semana), a chave de uso por agentes e um lápis para editar.',
+        en: 'Usage lists your accounts as compact rows: name, harness and plan, the two usage rings (5 h and week), the agent-use switch and a pencil to edit.',
+      },
+      {
+        pt: 'O lápis abre a edição daquela conta: apelido, plano, preço, datas, planos anteriores, uso por agentes e o paralelo recomendado.',
+        en: 'The pencil opens that account’s editor: nickname, plan, price, dates, earlier plans, agent use and the recommended parallel count.',
+      },
+      {
+        pt: 'Cobrança agora fica em Uso. Ajustes → Cobrança e "Ajustar limites" levam para a lista de contas; as páginas Planejar e Limites saíram.',
+        en: 'Billing now lives in Usage. Settings → Billing and "Adjust limits" take you to the accounts list; the Plan and Limits pages are gone.',
+      },
+    ],
+    fixes: [],
+  },
   '2.158.0': {
     features: [
       {

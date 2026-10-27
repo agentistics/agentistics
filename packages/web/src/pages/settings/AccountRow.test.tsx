@@ -39,7 +39,9 @@ describe('BillingAccountList — every fact once', () => {
         expect(count(text(h), 'Claude Max 5x')).toBe(1)
         expect(count(text(h), 'Claude Code')).toBe(1)
         expect(count(h, /role="switch"/g)).toBe(1)
-        expect(count(text(h), /\bEdit\b/g)).toBe(1)
+        expect(count(h, 'aria-label="Edit · me@private.io"')).toBe(1)
+        expect(count(h, 'data-usage-ring=')).toBe(2)
+        expect(h).toContain('lucide-pencil')
         expect(h).not.toContain('(default)')
       } finally { g.window = { innerWidth: 1280 } }
     })
@@ -86,36 +88,45 @@ describe('BillingAccountList — every fact once', () => {
   })
 })
 
-for (const width of [1440, 390]) test(`renewed Codex usage wraps within its own cell at ${width}px`, () => {
+for (const width of [1440, 390]) test(`a renewed Codex window is one ring whose tooltip says so at ${width}px`, () => {
   g.window = { innerWidth: width }
   try {
     const limits: PlanLimits = { ...reading('x1'), harness: 'codex', source: 'codex-rollout', windows: [{ kind: '5h', usedPct: 70, resetsAt: 1 }] }
     const h = renderToStaticMarkup(<BillingAccountList {...view([acc('x1', { harness: 'codex' })], ['codex'], () => ({ limits }))} now={100000} lang="pt" />)
-    const usage = h.slice(h.indexOf('data-billing-usage'), h.indexOf('data-billing-usage') + 3000)
-    expect(usage).toContain('renovado')
-    expect(usage).toContain('white-space:normal')
-    expect(usage).toContain('grid-column:1 / -1')
-    expect(usage).not.toContain('overflow-wrap:anywhere')
-    expect(usage).not.toContain('text-overflow:ellipsis')
+    const usage = h.slice(h.indexOf('data-billing-usage'))
+    expect(count(usage, 'data-usage-ring=')).toBe(1)
+    expect(usage).toMatch(/title="Sessão 5 h: \d+% · renovado/)
   } finally { g.window = { innerWidth: 1280 } }
 })
 
-test('making room for usage preserves full plan names and account subtitles', () => {
+test('the row keeps full plan names and logins, never an ellipsis', () => {
   g.window = { innerWidth: 1440 }
   const h = renderToStaticMarkup(<BillingAccountList {...view([acc('c1', { label: 'principal@exemplo.com' })], ['claude'], () => ({ plan: { name: 'Cobrança desconhecida', price: null, mode: 'unknown' } }))} lang="pt" />)
   expect(h).toContain('Cobrança desconhecida')
   expect(h).toContain('principal@exemplo.com')
-  expect(h).toContain('minmax(150px,.8fr)')
   expect(h).not.toContain('text-overflow:ellipsis')
 })
 
-for (const width of [1440, 390]) test(`account subtitle separates harness and login without dots at ${width}px`, () => {
+for (const width of [1440, 390]) test(`a nicknamed row: the name, then the assistant and plan muted, the login on hover (${width}px)`, () => {
   g.window = { innerWidth: width }
   try {
     const h = renderToStaticMarkup(<BillingAccountList {...view([acc('c1', { nickname: 'Principal', label: 'principal@exemplo.com' })], ['claude'])} lang="pt" />)
+    expect(h).toContain('>Principal</b>')
     expect(h).toContain('data-billing-subtitle')
-    expect(h).toContain('white-space:nowrap">Claude Code</span><span style="display:block">principal@exemplo.com</span>')
-    expect(h).not.toContain('Claude Code ·')
+    expect(text(h).replace(/\s+/g, ' ')).toContain('Claude Code · Claude Max 5x · $ 100/mo')
+    expect(h).toContain('title="Claude Code\nprincipal@exemplo.com"')
+  } finally { g.window = { innerWidth: 1280 } }
+})
+
+test('at 390px the row wraps instead of scrolling and its controls are 44px targets', () => {
+  g.window = { innerWidth: 390 }
+  try {
+    const h = renderToStaticMarkup(<BillingAccountList {...view([acc('c1')])} lang="pt" />)
+    expect(h).toContain('flex-wrap:wrap')
+    expect(h).toContain('flex:1 1 220px')
+    expect(h).toContain('width:44px;height:44px')
+    expect(h).toContain('min-height:44px')
+    expect(h).not.toContain('<table')
   } finally { g.window = { innerWidth: 1280 } }
 })
 

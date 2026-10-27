@@ -473,7 +473,7 @@ export default function PricingSettings() {
           ? 'O custo é o equivalente em API. Assinaturas (Claude Max, Copilot, Codex) não cobram por token, então o valor é quanto isto custaria pela API — não a sua fatura.'
           : 'Cost is the API equivalent. Subscriptions (Claude Max, Copilot, Codex) do not bill per token, so the figure is what this would cost through the API, not your invoice.'}
         {' '}
-        <NavLink to="/settings/billing" style={{ color: 'var(--anthropic-orange)', textDecoration: 'none' }}>
+        <NavLink to="/usage#contas" style={{ color: 'var(--anthropic-orange)', textDecoration: 'none' }}>
           {pt ? 'Cadastre seu plano' : 'Register your plan'}
         </NavLink>
         {pt
