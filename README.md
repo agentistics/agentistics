@@ -77,7 +77,7 @@ A metric a harness genuinely cannot produce renders as **N/A**, never as a confi
 ### Linux / WSL — one line
 
 ```bash
-curl -fsSL https://agentop.openvibes.tech/cli | bash
+curl -fsSL https://agentistics.com.br/cli | bash
 ```
 
 Or via npm — same binary, downloaded by `postinstall` from the same GitHub Release:
