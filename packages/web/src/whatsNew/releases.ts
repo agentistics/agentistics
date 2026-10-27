@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '0.0.0-next': {
+  '2.159.0': {
     features: [
       {
         pt: 'Uso agora tem uma única tela, com limites separados por conta, cores distintas, comparação por harness e mensagens por dia da semana e hora. Os momentos de maior consumo mostram quanto foi usado e em quanto tempo.',
