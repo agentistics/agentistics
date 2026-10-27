@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '0.0.0-next': {
+  '2.159.1': {
     features: [
       {
         pt: 'No celular, o botão redondo do centro agora é um ícone de chat e abre Sessões; dentro de Sessões ele mostra o ícone da área de onde você veio e leva de volta à página que estava aberta.',
