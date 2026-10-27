@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { fleetIsStale, fleetSeedNotice, fleetStaleNotice, STALE_AFTER_FAILURES } from './fleetStale'
+import { fleetIsStale, fleetSeedNotice, fleetStaleNotice, STALE_AFTER_FAILURES, stillLoadingAfterPoll } from './fleetStale'
 
 const NOW = 1_000_000
 
@@ -90,5 +90,17 @@ describe('fleetSeedNotice', () => {
     const staleMsg = fleetStaleNotice({ failures: 2, lastOkMs: NOW - 10_000 }, NOW, 'en')
     expect(seed).not.toBe(staleMsg)
     expect(fleetSeedNotice(NOW - 10_000, NOW, 'pt')).not.toBe(seed)
+  })
+})
+
+describe('stillLoadingAfterPoll', () => {
+  it('keeps loading after a first poll that failed once — not an empty fleet', () => {
+    expect(stillLoadingAfterPoll({ answered: false, failures: 1 })).toBe(true)
+  })
+  it('stops once something answered', () => {
+    expect(stillLoadingAfterPoll({ answered: true, failures: 0 })).toBe(false)
+  })
+  it('stops when failures reach the stale threshold', () => {
+    expect(stillLoadingAfterPoll({ answered: false, failures: 2 })).toBe(false)
   })
 })
