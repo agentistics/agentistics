@@ -1158,6 +1158,24 @@ tr:focus-within .ag-row-actions,
   }
 }
 
+/* Phones: a KPI card is label + controls on ONE row, the value, then a two-line sub — about 110px
+   instead of ~200. The controls stay icon-sized; their 44px target is the .ag-tap-icon overlay, so
+   it costs no height. Desktop is untouched (these rules live only in the query). */
+@media (max-width: 480px) {
+  .ag-stat-card { gap: 6px !important; padding: 12px !important; }
+  .ag-stat-card .ag-stat-head { flex-direction: row !important; align-items: center !important; justify-content: space-between; gap: 6px !important; min-height: 0 !important; }
+  .ag-stat-card .ag-stat-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.03em !important; }
+  .ag-stat-card .ag-stat-ctrl { flex-wrap: nowrap !important; flex: none; gap: 4px !important; }
+  .ag-stat-card .ag-stat-ctrl button { min-width: 0; min-height: 0; }
+  .ag-stat-card .ag-stat-ctrl button.ag-tap-icon { --ag-tap-grow: 4px; }
+  .ag-stat-card .ag-stat-icon { width: 22px !important; height: 22px !important; border-radius: 6px !important; }
+  .ag-stat-card .ag-stat-icon svg { width: 13px; height: 13px; }
+  .ag-stat-card .ag-stat-sub {
+    margin-top: 2px !important; white-space: normal !important; display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+}
+
 @media (max-width: 767px) {
   /* Task chips have inline minimums; keep the target rule authoritative here. */
   .ag-task-detail :is(button, [role="button"]) {

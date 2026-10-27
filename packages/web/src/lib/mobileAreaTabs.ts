@@ -28,3 +28,16 @@ export function scrollMobileSessionsToTop(): void {
   document.querySelectorAll<HTMLElement>('[data-mobile-sessions-scroll]').forEach(el => { el.scrollTop = 0 })
   window.scrollTo(0, 0)
 }
+
+const PREV_KEY = 'ag-mobile-prev-page'
+
+/** Remembers the last page outside Sessões, so the centre button can lead back to it. */
+export function rememberPreviousPage(path: string): void {
+  if (areaOfPath(path)?.area.id === 'sessions') return
+  try { sessionStorage.setItem(PREV_KEY, path) } catch { /* private window */ }
+}
+
+/** The last non-Sessões page (path + query), or Métricas when there is none. */
+export function previousPage(): string {
+  try { return sessionStorage.getItem(PREV_KEY) || '/' } catch { return '/' }
+}
