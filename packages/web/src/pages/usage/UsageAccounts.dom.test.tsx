@@ -109,3 +109,58 @@ describe('the account row and its editor', () => {
     expect(patches.at(-1)).toEqual({ url: '/api/accounts/c1', body: { nickname: 'Work' } })
   })
 })
+
+describe('#contas lands on the list (QA P2-1)', () => {
+  let scrolled: string[]
+  let original: typeof Element.prototype.scrollIntoView
+  beforeEach(() => {
+    scrolled = []
+    original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this.id) }
+  })
+  afterEach(() => { Element.prototype.scrollIntoView = original })
+
+  for (const at of ['/usage#contas', '/usage/limits', '/settings/billing']) {
+    test(`${at} scrolls the Contas section into view once the accounts answered`, async () => {
+      mount(at)
+      await flush()
+      await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+      expect(scrolled).toContain('contas')
+    })
+  }
+
+  test('plain /usage does not jump to the list', async () => {
+    mount('/usage')
+    await flush()
+    await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+    expect(scrolled).toEqual([])
+  })
+
+  test('a failed accounts request still scrolls to the section', async () => {
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    mount('/usage#contas')
+    await flush()
+    await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+    expect(scrolled).toContain('contas')
+  })
+})
+
+describe('the Agentes switch is a 44px target on a phone (QA P2-2)', () => {
+  test('at 390px the switch sits in a 44×44 label, and tapping the label toggles it', async () => {
+    const prev = window.innerWidth
+    ;(window as { innerWidth: number }).innerWidth = 390
+    try {
+      const el = mount('/usage')
+      await flush()
+      const target = el.querySelector('[data-agents-target]') as HTMLLabelElement
+      expect(target.tagName).toBe('LABEL')
+      expect(target.style.minWidth).toBe('44px')
+      expect(target.style.minHeight).toBe('44px')
+      expect(target.querySelector('[role=switch]')).not.toBeNull()
+      act(() => (target.querySelector('span[aria-hidden]') as HTMLElement).click())
+      await flush()
+      expect(patches).toEqual([{ url: '/api/accounts/c1', body: { available: false } }])
+    } finally { (window as { innerWidth: number }).innerWidth = prev }
+  })
+})
+

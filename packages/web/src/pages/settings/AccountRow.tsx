@@ -131,11 +131,13 @@ export function BillingAccountList(p: BillingAccountListProps) {
             <span style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto', flexShrink: 0 }}>
               <Usage r={r} now={p.now} lang={p.lang} t={t} ready={p.limitsReady ?? true} />
               {r.account && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: target, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+                // A <label> around the switch makes the whole cell (switch + word) its hit area: the
+                // switch keeps its 34×20 look while a phone gets a 44×44 target.
+                <label data-agents-target style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, minHeight: target, minWidth: target, padding: '0 4px', boxSizing: 'border-box', cursor: p.pendingIds.has(r.key) ? 'default' : 'pointer', fontSize: 11.5, color: 'var(--text-tertiary)' }}>
                   <Toggle on={r.account.available} disabled={p.pendingIds.has(r.key)} label={`${t.agents} · ${r.title}`}
                     onToggle={() => r.account && p.onToggle(r.account)} />
                   <span aria-hidden>{t.agents}</span>
-                </span>
+                </label>
               )}
               <IconButton label={`${actionLabel(r, t)} · ${r.title}`} size={target} onClick={() => p.onEdit(r)}
                 color={r.plan && !r.problem ? 'var(--text-secondary)' : 'var(--anthropic-orange)'}><Pencil size={15} /></IconButton>

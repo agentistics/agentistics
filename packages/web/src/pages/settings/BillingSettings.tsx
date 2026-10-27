@@ -92,16 +92,15 @@ export function BillingAccountsPanel() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
   const isMobile = useIsMobile()
-  const { hash } = useLocation()
+  const { hash, key: locationKey } = useLocation()
   const anchorRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (hash === `#${ACCOUNTS_ANCHOR}`) anchorRef.current?.scrollIntoView?.({ block: 'start' })
-  }, [hash])
 
   const { limits: planLimits, now: limitsNow, accountLabels, budgets } = usePlanLimits()
   const [accounts, setAccounts] = useState<BillingAccount[]>([])
   // The list arrived (a failed fetch never counts): only then may stale `failed` answers be pruned.
   const [accountsLoaded, setAccountsLoaded] = useState(false)
+  // The first answer arrived, ok or not: the list has its final height, so `#contas` may be scrolled to.
+  const [accountsSettled, setAccountsSettled] = useState(false)
   const [pendingIds, setPending] = useState<Set<string>>(new Set())
   const [failedIds, setFailed] = useState<Set<string>>(new Set())
   const mutator = useRef(createAccountMutator<BillingAccount>((id, body) =>
@@ -120,8 +119,31 @@ export function BillingAccountsPanel() {
         if (b) setAccountsLoaded(true)
       })
       .catch(() => { /* the assistants' own timelines still work without the list */ })
+      .finally(() => { if (!cancelled) setAccountsSettled(true) })
     return () => { cancelled = true }
   }, [accountsReload])
+
+  // `/usage#contas` (and every redirect to it) lands on the list. The list is under the charts and
+  // both load late, so scroll once the accounts answered, then follow the anchor briefly while the
+  // charts above settle — and stop the moment the reader scrolls, types or touches anything.
+  useEffect(() => {
+    if (hash !== `#${ACCOUNTS_ANCHOR}` || !accountsSettled) return
+    const el = anchorRef.current
+    if (!el) return
+    let stopped = false
+    const go = () => { if (!stopped) el.scrollIntoView?.({ block: 'start' }) }
+    const raf = requestAnimationFrame(go)
+    const timers = [400, 1200].map(ms => setTimeout(go, ms))
+    const stop = () => { stopped = true }
+    const events = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const
+    for (const e of events) window.addEventListener(e, stop, { passive: true, capture: true })
+    return () => {
+      stopped = true
+      cancelAnimationFrame(raf)
+      timers.forEach(clearTimeout)
+      for (const e of events) window.removeEventListener(e, stop, { capture: true })
+    }
+  }, [hash, locationKey, accountsSettled])
 
   // Plans are an ADAPTER fact (a subscription to a vendor's CLI): the native harness has none. An
   // assistant is listed when it has sessions here or a signed-in account.
