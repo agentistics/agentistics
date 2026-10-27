@@ -11,7 +11,7 @@ readings”; hours and busiest message times still come from their message times
 
 Identity is `harness:account`, never the display label. `lib/usageColors.ts` assigns the existing
 categorical chart hues to the sorted full identity set before filtering. Accounts keep their color
-across limit charts and peak cards; harness overlays use the same palette for harness identities.
+across limit charts, peak cards and the small marker beside each account in the list; harness overlays use the same palette for harness identities.
 Hovering a line or its legend dims the other lines. Descriptions explain each chart's percentages.
 
 Lines use steps, holding the last observed value until the next reading. Five-hour lines break on

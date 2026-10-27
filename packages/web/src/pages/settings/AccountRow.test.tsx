@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { PlanLimits } from '@agentistics/core'
 import { BillingAccountList, type BillingAccountListProps, type BillingRowView } from './AccountRow'
+import { __setPlanLimitsForTest } from '../../lib/planLimits'
+import { usageColors } from '../../lib/usageColors'
 import { billingRows, type BillingAccount } from './accountBilling'
 
 const g = globalThis as { window?: unknown }
@@ -142,4 +144,25 @@ for (const width of [1440, 390]) test(`an Antigravity scoped limit shows both mo
     expect(usage).toContain('Claude and GPT')
     expect(h).not.toContain('Not reported')
   } finally { g.window = { innerWidth: 1280 } }
+})
+
+
+test('row markers use the charts’ full account palette, independent of visible row order', () => {
+  const readings = ['claude:archived', 'claude:c1', 'codex:x1'].map(key => {
+    const [harness, account] = key.split(':')
+    return { harness: harness as 'claude' | 'codex', account: account!, points: [] }
+  })
+  __setPlanLimitsForTest([], 1, [], [], readings)
+  try {
+    const props = view([acc('x1', { harness: 'codex' }), acc('c1')], ['claude', 'codex'])
+    const expected = usageColors(readings.map(r => `${r.harness}:${r.account}`))
+    for (const rows of [props.rows, [...props.rows].reverse(), [props.rows[0]!]]) {
+      const html = renderToStaticMarkup(<BillingAccountList {...props} rows={rows} />)
+      for (const row of rows) {
+        const identity = `${row.harness}:${row.account!.id}`
+        const marker = html.match(new RegExp(`data-account-color="${identity}"[^>]*`))![0]
+        expect(marker).toContain(`background:${expected.get(identity)}`)
+      }
+    }
+  } finally { __setPlanLimitsForTest(null) }
 })

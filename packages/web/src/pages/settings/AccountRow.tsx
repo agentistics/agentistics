@@ -2,7 +2,7 @@
  * AccountRow — Usage → Accounts' one list: a row per account (or per assistant that cannot say
  * which account is signed in), each saying ONCE who it is, what plan it pays, how much of its limits
  * it has used and whether agents may use it. The row's button is the only way into the editor.
- * Presentational: BillingSettings owns the data.
+ * BillingSettings owns row data; the shared plan snapshot supplies the chart color identity set.
  *
  * Reuses the app's pieces only: Toggle, Pill, PlanUsageRing, HarnessMark, IconButton.
  */
@@ -15,7 +15,8 @@ import { Pill } from '../../components/Pill'
 import { HarnessMark } from '../../components/sessions/HarnessMark'
 import { IconButton } from '../../components/sessions/RepoSearchView'
 import { HARNESS_LABELS } from '../../lib/harness'
-import { currentUsedPct, resetPhrase, windowLabel, windowShort } from '../../lib/planLimits'
+import { currentUsedPct, resetPhrase, usePlanLimits, windowLabel, windowShort } from '../../lib/planLimits'
+import { usageColors, USAGE_COLORS } from '../../lib/usageColors'
 import { Toggle } from './primitives'
 import { planCoverageText, REPORTS_LIMITS, type BillingAccount, type BillingRow } from './accountBilling'
 
@@ -110,6 +111,12 @@ export function BillingAccountList(p: BillingAccountListProps) {
   const t = T(pt)
   const isMobile = useIsMobile()
   const target = isMobile ? 44 : 32
+  const { budgets, readings } = usePlanLimits()
+  // Match the charts' full identity set before either surface filters or reorders accounts.
+  const colors = usageColors([
+    ...budgets.map(b => `${b.harness}:${b.account ?? 'default'}`),
+    ...readings.map(r => `${r.harness}:${r.account}`),
+  ])
   return (
     <div>
       <div style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>{planCoverageText(p.rows, p.lang)}</div>
@@ -120,6 +127,10 @@ export function BillingAccountList(p: BillingAccountListProps) {
             borderTop: i ? '1px solid var(--border)' : undefined, background: p.selectedKey === r.key ? 'var(--bg-elevated)' : undefined,
           }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 220px' }}>
+              <span aria-hidden="true" data-account-color={`${r.harness}:${r.account?.id || 'default'}`} style={{
+                width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                background: colors.get(`${r.harness}:${r.account?.id || 'default'}`) ?? USAGE_COLORS[0],
+              }} />
               <HarnessMark harness={r.harness} size={22} />
               <span style={{ minWidth: 0 }} title={r.sub.replaceAll(' · ', '\n')}>
                 <b style={{ ...cellText, fontSize: 13, color: 'var(--text-primary)' }}>{r.title}</b>
