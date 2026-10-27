@@ -1176,6 +1176,15 @@ tr:focus-within .ag-row-actions,
   }
 }
 
+/* Phones: the Tokens breakdown card follows the KPI cards — tighter padding, the four counters in
+   two columns (two rows, not four) and a two-line sub. */
+@media (max-width: 480px) {
+  .ag-stat-card:has(.ag-tok-parts) { gap: 6px !important; padding: 12px !important; }
+  /* The floating Nay button sits bottom-right; keep the card controls out from under it. */
+  .ag-stat-card .ag-stat-head { padding-right: 64px; }
+  .ag-stat-card .ag-tok-parts { gap: 4px 10px !important; }
+}
+
 @media (max-width: 767px) {
   /* Task chips have inline minimums; keep the target rule authoritative here. */
   .ag-task-detail :is(button, [role="button"]) {

@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '0.0.0-next': {
+    features: [],
+    fixes: [
+      {
+        pt: 'No celular, o card de Tokens ficou compacto, os ícones dos cards não ficam mais sob o botão flutuante do Nay e o conteúdo não aparece mais pelo recorte da barra inferior ao lado do botão central.',
+        en: 'On phones, the Tokens card is compact, card icons are no longer under the floating Nay button, and content no longer shows through the bottom bar cut-out beside the centre button.',
+      },
+    ],
+  },
   '2.159.1': {
     features: [
       {
