@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { followFleet, type Baseline, type FleetWire, type SessionMode } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
-import { fleetSeedNotice, fleetStaleNotice } from './fleetStale'
+import { fleetSeedNotice, fleetStaleNotice, stillLoadingAfterPoll } from './fleetStale'
 import { cacheIsUsable, stripVolatile } from './fleetCache'
 import { notifyFleetTransitions, type SessionActivity } from './sessionNotifications'
 import { chatHoldsText, confirmSendLanded, parseActResult, sendUnconfirmedMessage } from './fleetAct'
@@ -144,6 +144,8 @@ export interface FleetPayload {
    * a summary line needs; the marks are what a list somebody ticks needs.
    */
   fell?: { count: number; atMs: number }
+  /** Closed conversations the machine holds but the live view did not send (`closed=0`). */
+  closedTotal?: number
 }
 
 const EMPTY: FleetPayload = { sessions: [], rows: [], attention: 0, tasks: [], finishedTasks: [] }
@@ -198,7 +200,14 @@ export function normalizeFleetPayload(raw: FleetPayload): FleetPayload {
     attention: typeof raw.attention === 'number' ? raw.attention : 0,
     tasks: list(raw.tasks),
     finishedTasks: list(raw.finishedTasks),
+    ...closedTotalOf(raw),
   }
+}
+
+function closedTotalOf(raw: FleetPayload): { closedTotal?: number } {
+  const r = raw as unknown as { closedTotal?: unknown; closed?: { total?: unknown } }
+  const n = typeof r.closedTotal === 'number' ? r.closedTotal : r.closed?.total
+  return typeof n === 'number' && n > 0 ? { closedTotal: n } : {}
 }
 
 /** How often the page re-reads the fleet. The cockpit polls at 5s; matching it keeps the two in step. */
@@ -489,7 +498,7 @@ async function pollOnce(): Promise<void> {
     // it did not arrive.
     snapFailures++
   } finally {
-    snapLoading = false
+    snapLoading = stillLoadingAfterPoll({ answered: snapLastOkMs !== null || snapUnsupported, failures: snapFailures })
     emit()
   }
 }

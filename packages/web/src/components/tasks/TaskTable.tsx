@@ -811,7 +811,10 @@ export function TaskTable(p: TaskTableProps) {
     if (dragging) w[dragging.id] = dragging.w
     return w
   }, [cols, savedWidths, dragging, colDefaults])
-  const leadWidth = isMobile ? 100 : 62
+  // Wide enough for the two controls it holds (open + chevron, each at least `tap`'s minimum) plus
+  // the cell's padding: narrower, and the cell's `text-overflow: ellipsis` drew a clipped "…" sliver
+  // at its edge — the stray dot beside every task name.
+  const leadWidth = isMobile ? 108 : 72
   const fitColumn = (id: string) => {
     const nodes = Array.from(document.querySelectorAll<HTMLElement>(`[data-col="${id}"]`))
     // The header is measured with the cells: a column never fits narrower than its own title.
@@ -1349,7 +1352,7 @@ export function TaskTable(p: TaskTableProps) {
                               * because expanding is also how a first subtask gets added — so the
                               * columns never shift between rows.
                               */}
-                            <td style={{ ...cellBox, whiteSpace: 'nowrap' }}>
+                            <td style={{ ...cellBox, whiteSpace: 'nowrap', textOverflow: 'clip' }}>
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: isMobile ? 0 : 4 }}>
                                 {sel.on && (
                                   <label

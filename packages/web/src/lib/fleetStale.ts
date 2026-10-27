@@ -80,3 +80,14 @@ export function fleetSeedNotice(at: number, now: number, lang: 'en' | 'pt'): str
     ? `Última lista conhecida, de ${age} atrás — esperando esta máquina confirmar.`
     : `Last known list, from ${age} ago — waiting for this machine to confirm it.`
 }
+
+/**
+ * Is the first answer still pending after a poll ended? A poll that FAILED (network error, a
+ * non-2xx) on a page nothing has ever answered is not a verdict of "no sessions": clearing the
+ * loading state there drew "no sessions on this machine yet" for the seconds until the retry
+ * landed. Loading ends once something answered (a live answer or a refusal), or once failures
+ * pile up to the point `fleetIsStale` already treats as real.
+ */
+export function stillLoadingAfterPoll(s: { answered: boolean; failures: number }): boolean {
+  return !s.answered && s.failures < STALE_AFTER_FAILURES
+}
