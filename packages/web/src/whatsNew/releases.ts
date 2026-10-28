@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.161.5': {
+    features: [],
+    fixes: [
+      {
+        pt: 'No Mac, o agentistics agora confere o login do Claude no mesmo lugar onde ele foi feito, então a conta aparece depois de "Login successful".',
+        en: 'On a Mac, agentistics now checks the Claude sign-in in the same place it was made, so the account shows up after "Login successful".',
+      },
+      {
+        pt: 'Se o Claude entrar e o agentistics ainda não conseguir ler o login, a janela diz exatamente isso (e não mais "não foi salvo") e oferece "Verificar de novo", que confere outra vez sem pedir um novo código.',
+        en: 'If Claude signs in and agentistics still cannot read the sign-in, the dialog says exactly that (no longer "not saved") and offers "Verify again", which checks once more without asking for a new code.',
+      },
+    ],
+  },
   '2.161.4': {
     features: [],
     fixes: [

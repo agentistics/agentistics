@@ -35,12 +35,12 @@ function Step({ n, state, title, note, last, children }: {
 
 const Spin = ({ size = 15 }: { size?: number }) => <Loader2 size={size} aria-hidden style={{ animation: 'ag-working-spin 1s linear infinite', flexShrink: 0 }} />
 
-export function AccountLoginModal({ harness, lang, login, bound, busy, submitted, error, expired = false, onSubmit, onCancel, onRetry }: {
+export function AccountLoginModal({ harness, lang, login, bound, busy, submitted, error, expired = false, onSubmit, onCancel, onRetry, onVerify, errorCode }: {
   harness: HarnessId; lang: Lang; login?: LoginInfoView; bound?: RootRowView
   busy: boolean; submitted: boolean; error: string | null
   /** The attempt is over (timed out, failed, or the server dropped it): only "Try again" moves on. */
   expired?: boolean
-  onSubmit: (code: string) => void; onCancel: () => void; onRetry?: () => void
+  onSubmit: (code: string) => void; onCancel: () => void; onRetry?: () => void; onVerify?: () => void; errorCode?: string
 }) {
   const t = ADD_COPY(lang === 'pt'), mobile = useIsMobile(), name = HARNESS_LABELS[harness] ?? harness
   const [code, setCode] = useState(''), [copied, setCopied] = useState(false), [opened, setOpened] = useState(false), [now, setNow] = useState(Date.now())
@@ -62,6 +62,8 @@ export function AccountLoginModal({ harness, lang, login, bound, busy, submitted
   }}>{t.cancelPending}</button>
   const footer = bound
     ? <DialogActions><button type="button" style={button('primary')} onClick={onCancel}>{t.finish}</button></DialogActions>
+    : errorCode === 'login_unreadable'
+      ? <DialogActions start={cancelLink}><button type="button" data-login-verify style={button('primary', busy)} disabled={busy} onClick={onVerify}>{busy ? <Spin /> : t.verifyAgain}</button></DialogActions>
     : expired
       ? <DialogActions start={cancelLink}><button type="button" data-login-retry style={button('primary')} onClick={onRetry}>{t.retry}</button></DialogActions>
       : <DialogActions>{cancelLink}</DialogActions>
