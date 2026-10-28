@@ -393,7 +393,7 @@ describe('CONTAS.LOGIN r3: a finished sign-in the probe cannot see says why (mac
     expect(await diagnoseLogin({ ...req, harness: 'codex' }, 'darwin', async () => 0)).toBeUndefined()
     for (const argv of calls) {
       expect(argv).not.toContain('-w'); expect(argv).not.toContain('-g')
-      expect(argv.slice(0, 4)).toEqual(['security', 'find-generic-password', '-s', claudeKeychainService(req.env)])
+      expect(argv).toEqual(['security', 'find-generic-password', '-s', claudeKeychainService(req.env)])
     }
   })
   test('the CLI ended cleanly with no account bound: the diagnosis replaces login_failed', async () => {
@@ -405,7 +405,7 @@ describe('CONTAS.LOGIN r3: a finished sign-in the probe cannot see says why (mac
     await handle.submit('FAKE_CODE')
     cli.exit(0)
     await new Promise(r => setTimeout(r, 50))
-    expect(failures).toEqual(['keychain_unreadable'])
+    expect(failures).toEqual(['login_unreadable'])
   })
 })
 

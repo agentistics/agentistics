@@ -33,6 +33,12 @@ export async function handleAccountsRequest(
       const out = await roots.submitCode(decodeURIComponent(codeMatch[1]!), body?.code)
       return out.ok ? json({ ok: true }) : json({ error: out.reason, message: out.message }, out.reason === 'not_found' ? 404 : 400)
     }
+    const verifyMatch = /^\/api\/accounts\/roots\/([^/]+)\/verify$/.exec(path)
+    if (verifyMatch) {
+      if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
+      const out = await roots.verifyPending(decodeURIComponent(verifyMatch[1]!))
+      return out.ok ? json(out) : json({ error: out.reason, message: out.message }, out.reason === 'not_found' ? 404 : 400)
+    }
     const m = /^\/api\/accounts\/roots\/([^/]+)$/.exec(path)
     if (!m) return json({ error: 'Not found' }, 404)
     if (req.method !== 'DELETE') return json({ error: 'Method not allowed' }, 405)

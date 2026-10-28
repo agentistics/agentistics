@@ -1,5 +1,4 @@
 /** Non-secret identities only. Credential objects never cross the probe boundary. */
-import { execFile } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -8,6 +7,7 @@ import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
 import { withFileLock } from './sessions/file-lock'
 import { ISOLATION_ENV } from './account-isolation'
+import { runClaudeInLoginContext } from './account-login'
 
 export interface HarnessAccount {
   id: string
@@ -125,27 +125,36 @@ export function claudeProbeEnv(root: string, env: NodeJS.ProcessEnv = process.en
   const { CLAUDE_SECURESTORAGE_CONFIG_DIR: _, ...rest } = env
   return { ...rest, CLAUDE_CONFIG_DIR: root }
 }
+const CLAUDE_PROBE_CONCURRENCY = 3
+let activeClaudeProbes = 0
+const claudeProbeWaiters: Array<() => void> = []
+async function withClaudeProbeSlot<T>(run: () => Promise<T>): Promise<T> {
+  if (activeClaudeProbes >= CLAUDE_PROBE_CONCURRENCY) await new Promise<void>(resolve => claudeProbeWaiters.push(resolve))
+  activeClaudeProbes++
+  try { return await run() } finally {
+    activeClaudeProbes--
+    claudeProbeWaiters.shift()?.()
+  }
+}
 export const IDENTITY_PROBES: Record<HarnessId, ((root: string | null) => Promise<AccountIdentity>) | null> = {
-  claude: async root => {
-    const stdout = await new Promise<string>((resolve, reject) => {
-      execFile('claude', ['auth', 'status', '--json'], {
-        timeout: CLAUDE_PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 64 * 1024,
-        ...(root === null ? {} : { env: claudeProbeEnv(root) }),
-      }, (error, stdout) => {
-        // Logged out, claude prints `{"loggedIn": false, …}` AND exits 1: read the answer first.
-        if (claudeSignedOut(stdout)) reject(new SignedOutError())
-        else if (error) reject(new Error('Account probe failed'))
-        else resolve(stdout)
-      })
-    })
-    const raw = JSON.parse(stdout) as { orgId?: unknown; email?: unknown; subscriptionType?: unknown; loggedIn?: unknown }
+  claude: root => withClaudeProbeSlot(async () => {
+    const result = await runClaudeInLoginContext(root, ['claude', 'auth', 'status', '--json'])
+    const stdout = result.stdout
+    const jsonStart = stdout.indexOf('{')
+    const jsonEnd = stdout.lastIndexOf('}') + 1
+    const payload = jsonStart >= 0 && jsonEnd > jsonStart ? stdout.slice(jsonStart, jsonEnd) : ''
+    // Logged out, claude prints `{"loggedIn": false, …}` AND exits 1: read the answer first.
+    if (claudeSignedOut(payload)) throw new SignedOutError()
+    if (result.code !== 0) throw new Error('Account probe failed')
+    if (!payload) throw new Error('Account probe returned no JSON')
+    const raw = JSON.parse(payload) as { orgId?: unknown; email?: unknown; subscriptionType?: unknown; loggedIn?: unknown }
     if (raw.loggedIn === false) throw new SignedOutError()
     const email = text(raw.email)
     const org = text(raw.orgId)
     const key = org && email ? `${org}:${email}` : email ?? org
     const plan = text(raw.subscriptionType)
     return key ? { key, label: email ?? key, ...(plan ? { plan } : {}) } : fallback()
-  },
+  }),
   codex: root => readCodexIdentity(join(root ?? DEFAULT_ROOTS.codex(), 'auth.json')),
   copilot: root => readCopilotIdentity(join(root ?? DEFAULT_ROOTS.copilot(), 'config.json')),
   gemini: null,
