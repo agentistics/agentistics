@@ -34,7 +34,10 @@ header actions are vertically centred. The phone strip keeps its existing layout
 With the `sessionTabs` flag enabled, pinned sessions in `exited`, `closed`, `lost` or `unknown`
 state sleep in the strip's menu instead of occupying a tab. Unpinned ended tabs stay visible.
 The menu button stays at the left of the scrolling track, counts the visible tabs, and shows a
-moon when any pinned session sleeps. Its **Sleeping** entries reopen through the fleet's existing
+moon when any pinned session sleeps. Clicking or tapping the button again closes the menu; its
+expanded state is exposed to assistive technology. The list is 380px wide, capped to the viewport
+with an 8px gutter on each side. Session menus use a frosted card tint when backdrop blur is
+supported, with the opaque card surface as fallback. Its **Sleeping** entries reopen through the fleet's existing
 `resume` action and focus the resulting conversation in the current pane.
 Unknown action names are refused with a sentence asking the client to refresh. Internal action
 failures, including reopen failures, return a localized sentence and log the diagnostic on the
@@ -51,7 +54,7 @@ The Pinned header counts both live and sleeping pins. Pins load their deferred e
 with Active only enabled; status/value filters leave them visible, while search narrows them. Sleeping cards can still be opened for reading,
 reopened, or unpinned; sleeping never removes the pin. Leader names omit the role prefix and keep
 an explicit Líder/Leader badge in cards and the tabs menu. Titles wrap without ellipses; the menu
-can grow to the viewport gutter. On phones each tab fits the scrolling track, with mandatory scroll
+keeps its compact width within the viewport gutter. On phones each tab fits the scrolling track, with mandatory scroll
 snapping and the active tab scrolled into view. Arrow keys, Home and End move the tab's focus;
 Enter or Space opens the focused tab. Row pin/open/reopen controls are separate buttons. Reopen
 uses an icon with an explicit label and foreground contrast. Disabled reopen icons expose the same
