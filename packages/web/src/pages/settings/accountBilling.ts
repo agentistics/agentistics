@@ -221,6 +221,8 @@ export interface BillingRow {
   scope: RowScope
   /** Accounts folded into this row (same sign-in seen again): their meters are this row's meters. */
   foldedIds?: string[]
+  /** The assistant has NO login on this computer: the row says "not connected", never a placeholder account. */
+  signedOut?: true
 }
 
 /** Old Codex readers used a ChatGPT id fragment as the login label. It names no person. */
@@ -239,7 +241,8 @@ export function billingRows(
     const label = harnessLabel(h)
     const mine = billableAccounts(accounts, h)
     if (mine.length === 0) {
-      out.push({ key: `harness:${h}`, harness: h, account: null, title: label, sub: unknownWho, scope: { kind: 'default', harness: h } })
+      const signedOut = accounts.some(a => a.harness === h && a.signedOut && !a.retired)
+      out.push({ key: `harness:${h}`, harness: h, account: null, title: label, sub: signedOut ? '' : unknownWho, scope: { kind: 'default', harness: h }, ...(signedOut ? { signedOut: true as const } : {}) })
       continue
     }
     const shown = foldUnnamed(mine, billing)

@@ -82,6 +82,8 @@ curl -fsSL https://agentop.openvibes.tech/cli | sh
 
 The installer is POSIX `sh`, so `| sh`, `| bash` and `| zsh` behave the same (including macOS's bash 3.2). Without root it installs to `~/.local/bin` and adds that directory to your PATH in the rc file of your login shell (`.zshrc`, `.bashrc`/`.bash_profile`, fish's `conf.d`, or `.profile`) — once; re-running does not duplicate the line.
 
+At the end it asks two questions on your terminal (read from `/dev/tty`, so they work under `curl | sh`): *Start agentistics now? [Y/n]* and, if yes, *Start it automatically when you log in / boot? [Y/n]* — Enter answers yes to both. Yes to both runs `agentop setup --defaults` (archive mode `consolidate`, only if you never chose one) and `agentop autostart server enable`; yes then no starts the server once in the background (log in `~/.agentistics/server.log`). Then open <http://localhost:47292>. With no terminal (CI, Docker) nothing is asked or started and the commands are printed; `AGENTOP_INSTALL_START=yes|no` and `AGENTOP_INSTALL_AUTOSTART=yes|no` answer for automation. As root the start-on-login offer is skipped (it is a per-user service).
+
 Or via npm — same binary, downloaded by `postinstall` from the same GitHub Release:
 
 ```bash

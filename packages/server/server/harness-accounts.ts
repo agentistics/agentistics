@@ -18,6 +18,12 @@ export interface HarnessAccount {
   harness: HarnessId
   label: string
   plan?: string
+  /**
+   * Never stored. Set on a row whose harness answered that it has NO login in that root (claude's
+   * `auth status` says `loggedIn: false`), so the screen says "not connected" instead of drawing a
+   * placeholder account that does not exist.
+   */
+  signedOut?: true
   available: boolean
   firstSeen: number
   lastSeen: number
@@ -36,6 +42,14 @@ export interface AccountsFile {
 }
 export type AccountIdentity = Pick<HarnessAccount, 'key' | 'label' | 'plan'>
 const fallback = (): AccountIdentity => ({ key: 'default', label: 'Conta padrão' })
+/** A probe that RAN and found no login, as opposed to one that failed or timed out. */
+export class SignedOutError extends Error { constructor() { super('Not signed in') } }
+/**
+ * How long one claude identity probe may take. A cold `claude auth status` measured 1.1 s on a fast
+ * Linux box; the first run of a freshly installed binary on macOS also pays Gatekeeper's scan, and
+ * the old 2 s cap killed it every time, so a pending root never bound (CONTAS.LOGIN).
+ */
+export const CLAUDE_PROBE_TIMEOUT_MS = 15_000
 const text = (value: unknown): string | undefined => typeof value === 'string' && value.trim() ? value : undefined
 
 /**
@@ -98,18 +112,34 @@ const DEFAULT_ROOTS: Record<HarnessId, () => string> = {
 }
 /** The login root a harness uses when no account root is set (its own env override, else its home dir). */
 export const defaultHarnessRoot = (harness: HarnessId): string => DEFAULT_ROOTS[harness]()
+/** PURE. Does `claude auth status --json` output say there is no login? Only `loggedIn` is read. */
+export function claudeSignedOut(stdout: string): boolean {
+  try { return (JSON.parse(stdout) as { loggedIn?: unknown } | null)?.loggedIn === false } catch { return false }
+}
+/**
+ * The env `claude auth status` runs under for a root. The macOS keychain item is named after
+ * sha256(CLAUDE_CONFIG_DIR) unless CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the login runs without
+ * it (`env -i`), so an inherited one would make the probe read a different item than the login wrote.
+ */
+export function claudeProbeEnv(root: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const { CLAUDE_SECURESTORAGE_CONFIG_DIR: _, ...rest } = env
+  return { ...rest, CLAUDE_CONFIG_DIR: root }
+}
 export const IDENTITY_PROBES: Record<HarnessId, ((root: string | null) => Promise<AccountIdentity>) | null> = {
   claude: async root => {
     const stdout = await new Promise<string>((resolve, reject) => {
       execFile('claude', ['auth', 'status', '--json'], {
-        timeout: 2000, killSignal: 'SIGKILL', maxBuffer: 64 * 1024,
-        ...(root === null ? {} : { env: { ...process.env, CLAUDE_CONFIG_DIR: root } }),
+        timeout: CLAUDE_PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 64 * 1024,
+        ...(root === null ? {} : { env: claudeProbeEnv(root) }),
       }, (error, stdout) => {
-        if (error) reject(new Error('Account probe failed'))
+        // Logged out, claude prints `{"loggedIn": false, …}` AND exits 1: read the answer first.
+        if (claudeSignedOut(stdout)) reject(new SignedOutError())
+        else if (error) reject(new Error('Account probe failed'))
         else resolve(stdout)
       })
     })
-    const raw = JSON.parse(stdout) as { orgId?: unknown; email?: unknown; subscriptionType?: unknown }
+    const raw = JSON.parse(stdout) as { orgId?: unknown; email?: unknown; subscriptionType?: unknown; loggedIn?: unknown }
+    if (raw.loggedIn === false) throw new SignedOutError()
     const email = text(raw.email)
     const org = text(raw.orgId)
     const key = org && email ? `${org}:${email}` : email ?? org
@@ -318,7 +348,7 @@ export function createHarnessAccounts(options: {
 }) {
   const probe = options.probe ?? probeAccountIdentity
   const now = options.now ?? Date.now
-  type Detection = { identity: AccountIdentity; confirmed: boolean }
+  type Detection = { identity: AccountIdentity; confirmed: boolean; signedOut?: true }
   const unknown = (): Detection => ({ identity: fallback(), confirmed: false })
   const cache = new Map<string, { at: number; identity: Promise<Detection> }>()
   let queue: Promise<unknown> = Promise.resolve()
@@ -336,16 +366,22 @@ export function createHarnessAccounts(options: {
     const held = cache.get(key)
     if (!force && held && now() - held.at < 60_000) return held.identity
     const pending = (async () => {
-      let timer: ReturnType<typeof setTimeout> | undefined
+      let timer: ReturnType<typeof setTimeout> | undefined, timedOut = false
+      const probing: Promise<Detection> = Promise.resolve().then(() => probe(harness, root)).then(identity => ({
+        identity,
+        confirmed: identity.key !== 'default' || !hasIdentityProbe(harness),
+      }))
+      // A probe that outlives the race still answers: its result replaces the "unknown" the race
+      // cached, so a cold CLI (first run on macOS) names the account on the next read, not a minute later.
+      void probing.then(d => { if (timedOut) cache.set(key, { at: now(), identity: Promise.resolve(d) }) },
+        e => { if (timedOut && e instanceof SignedOutError) cache.set(key, { at: now(), identity: Promise.resolve({ ...unknown(), signedOut: true as const }) }) })
       try {
         return await Promise.race([
-          Promise.resolve().then(() => probe(harness, root)).then(identity => ({
-            identity,
-            confirmed: identity.key !== 'default' || !hasIdentityProbe(harness),
-          })),
-          new Promise<Detection>(resolve => { timer = setTimeout(() => resolve(unknown()), options.timeoutMs ?? 2000) }),
+          probing,
+          // A forced probe (a pending login root) must wait for a cold CLI; the list keeps its 2 s.
+          new Promise<Detection>(resolve => { timer = setTimeout(() => { timedOut = true; resolve(unknown()) }, options.timeoutMs ?? (force ? CLAUDE_PROBE_TIMEOUT_MS : 2000)) }),
         ])
-      } catch { return unknown() }
+      } catch (error) { return error instanceof SignedOutError ? { ...unknown(), signedOut: true as const } : unknown() }
       finally { if (timer) clearTimeout(timer) }
     })()
     cache.set(key, { at: now(), identity: pending })
@@ -487,12 +523,13 @@ export function createHarnessAccounts(options: {
     const detected = await Promise.all(requested.map(async harness => ({ harness, ...await identity(harness, root) })))
     const resolveAll = (data: AccountsFile, mutate: boolean) => {
       let changed = false
-      const accounts = detected.map(({ harness, identity: found, confirmed }) => {
+      const accounts = detected.map(({ harness, identity: found, confirmed, signedOut }) => {
         const bound = data.accounts.find(a => a.id === data.bindings[bindingKey(harness, root)])
+        const out = signedOut ? { signedOut } : {}
         if (!confirmed) {
           // Legacy callers use default as the unknown identity, retaining its availability.
-          if (bound) return legacy ? { ...bound, ...fallback(), plan: undefined } : bound
-          return { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now() }
+          if (bound) return legacy ? { ...bound, ...fallback(), plan: undefined, ...out } : { ...bound, ...out }
+          return { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now(), ...out }
         }
         if (!mutate) return matchIdentity(data, harness, root, found) ?? bound
           ?? { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now() }

@@ -1,12 +1,12 @@
 import React, { useState } from 'react'
-import { useNavigate, useOutletContext } from 'react-router-dom'
+import { useOutletContext } from 'react-router-dom'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { Cpu, AlertCircle, CircleDot, ExternalLink } from 'lucide-react'
 import type { AppContext } from '../../lib/app-context'
-import { loginHarness, useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
+import { useChatHarnesses, type HarnessChatStatus } from '../../hooks/useChatHarnesses'
+import { useOpenAccountSignIn } from '../../lib/accountSignIn'
 import { SectionHeader, dialogButtonStyle } from './primitives'
 import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
-import { sessionPath } from '../../lib/sessionRoute'
 import { harnessSetupNote } from '../../lib/harnessNotes'
 import { CenteredLoader } from '../../components/CenteredLoader'
 import { Pill } from '../../components/Pill'
@@ -118,18 +118,13 @@ export default function HarnessesSettings() {
   const ctx = useOutletContext<AppContext>()
   const pt = ctx.lang === 'pt'
   const { harnesses, loading, reload } = useChatHarnesses()
-  const navigate = useNavigate()
   const isMobile = useIsMobile()
   const [target, setTarget] = useState<HarnessChatStatus | null>(null)
-  const [signingIn, setSigningIn] = useState<string | null>(null)
+  const signingIn: string | null = null
   const [notice, setNotice] = useState('')
-  const signIn = async (h: HarnessChatStatus) => {
-    setSigningIn(h.id); setNotice('')
-    const out = await loginHarness(h.id, pt ? 'pt' : 'en')
-    setSigningIn(null)
-    if (out.ok && out.id) navigate(sessionPath(out.id))
-    else setNotice(out.message || (pt ? 'Não consegui abrir o login agora. Tente de novo.' : 'Could not open the sign-in right now. Try again.'))
-  }
+  const openSignIn = useOpenAccountSignIn()
+  // "Entrar" opens Usage → Accounts' "Add account" dialog (the one in-app login), never a session.
+  const signIn = (h: HarnessChatStatus) => { setNotice(''); openSignIn(h.id) }
   const readyCount = harnesses.filter(h => h.ready).length
 
   return (
@@ -176,7 +171,7 @@ export default function HarnessesSettings() {
         </>
       )}
       {notice && <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--text-secondary)' }}>{notice}</div>}
-      <HarnessInstallDialog target={target} pt={pt} onClose={() => setTarget(null)} onDone={() => reload()} onSignedIn={id => navigate(sessionPath(id))} />
+      <HarnessInstallDialog target={target} pt={pt} onClose={() => setTarget(null)} onDone={() => reload()} />
     </div>
   )
 }

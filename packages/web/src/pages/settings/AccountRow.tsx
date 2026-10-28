@@ -7,7 +7,7 @@
  * Reuses the app's pieces only: Toggle, Pill, PlanUsageRing, HarnessMark, IconButton.
  */
 import React from 'react'
-import { Pencil } from 'lucide-react'
+import { Pencil, X } from 'lucide-react'
 import { windowKey, type BillingMode, type PlanLimitWindow, type PlanLimits } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { PlanUsageRing } from '../../components/PlanLimitMeter'
@@ -35,6 +35,12 @@ const T = (pt: boolean) => ({
   problem: pt ? 'Períodos com problema' : 'Periods need fixing',
   noMeter: pt ? 'Não informado' : 'Not reported',
   noMeterYet: pt ? 'Sem leitura ainda' : 'No reading yet',
+  signedOut: pt ? 'Não conectado' : 'Not connected',
+  signIn: pt ? 'Entre no assistente neste computador ou use “Adicionar conta” abaixo.' : 'Sign in to the assistant on this computer, or use “Add account” below.',
+  notSignedIn: (name: string) => (pt ? `${name} instalado, sem login` : `${name} is installed, not signed in`),
+  signInNow: pt ? 'Entrar' : 'Sign in',
+  signingIn: pt ? 'Abrindo…' : 'Opening…',
+  hideNotice: (name: string) => (pt ? `Ocultar o aviso do ${name}` : `Hide the ${name} notice`),
   saveFailed: (n: string) => (pt ? `Não foi possível salvar a conta “${n}”. Tente de novo.` : `Could not save the account “${n}”. Try again.`),
 })
 
@@ -61,12 +67,22 @@ export interface BillingAccountListProps {
   selectedKey: string | null
   onToggle: (a: BillingAccount) => void
   onEdit: (row: BillingRowView) => void
+  /** An assistant installed here with no login: its notice's "Sign in" (the install dialog's flow). */
+  onSignIn?: (harness: BillingRowView['harness']) => void
+  /** The assistant whose sign-in is being opened, so its button reads as busy. */
+  signingIn?: string | null
+  /** The sign-in's refusal, said under its notice. */
+  signInError?: { harness: string; message: string } | null
+  /** Assistants whose notice the person closed. */
+  hiddenSignedOut?: ReadonlySet<string>
+  onHideSignedOut?: (harness: BillingRowView['harness']) => void
 }
 
 const cellText: React.CSSProperties = { display: 'block', whiteSpace: 'normal', overflowWrap: 'break-word' }
 
 /** The plan half of the muted line: the plan's name, or the state that stands in for one. */
 function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
+  if (r.signedOut) return <Pill tone="neutral" nowrap>{t.signedOut}</Pill>
   if (r.problem) return <Pill tone="error" nowrap>{t.problem}</Pill>
   if (!r.plan && r.starts) return <Pill tone="neutral" nowrap>{t.starts(r.starts)}</Pill>
   if (!r.plan) return <Pill tone="warn" nowrap>{t.noPlan}</Pill>
@@ -84,6 +100,7 @@ export function rowWindows(limits: PlanLimits): PlanLimitWindow[] {
 }
 
 function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: number; lang: Lang; t: ReturnType<typeof T>; ready?: boolean }) {
+  if (r.signedOut) return <span data-signed-out style={{ fontSize: 11.5, color: 'var(--text-tertiary)', maxWidth: 260 }}>{t.signIn}</span>
   if (r.limits) return (
     <span data-billing-usage data-plan-limits={r.limits.harness} style={{ display: 'inline-flex', gap: 10 }}>
       {rowWindows(r.limits).map(w => {
@@ -121,11 +138,39 @@ export function BillingAccountList(p: BillingAccountListProps) {
     ...budgets.map(b => `${b.harness}:${b.account ?? 'default'}`),
     ...readings.map(r => `${r.harness}:${r.account}`),
   ])
+  // A harness with no login here is not an account: a closable notice, outside the list and its count.
+  const accountRows = p.rows.filter(r => !r.signedOut)
+  const notices = p.rows.filter(r => r.signedOut && !p.hiddenSignedOut?.has(r.harness))
   return (
     <div>
-      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>{planCoverageText(p.rows, p.lang)}</div>
+      {notices.map(r => {
+        const name = HARNESS_LABELS[r.harness] ?? r.harness
+        const busy = p.signingIn === r.harness
+        const err = p.signInError?.harness === r.harness ? p.signInError.message : null
+        return (
+          <div key={r.key} data-signed-out data-signed-out-notice={r.harness} role="status" style={{
+            display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, padding: isMobile ? '8px 10px' : '6px 10px', margin: '0 0 10px',
+            border: '1px dashed var(--border)', borderRadius: 'var(--radius-md, 8px)', fontSize: 12.5, color: 'var(--text-secondary)',
+          }}>
+            <HarnessMark harness={r.harness} size={18} />
+            <span style={{ flex: '1 1 160px', minWidth: 0 }}>{t.notSignedIn(name)}</span>
+            {p.onSignIn && (
+              <button type="button" disabled={busy} onClick={() => p.onSignIn?.(r.harness)} style={{
+                minHeight: target, padding: '0 12px', borderRadius: 'var(--radius-md, 8px)', border: '1px solid var(--anthropic-orange)',
+                background: 'transparent', color: 'var(--anthropic-orange)', fontSize: 12.5, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
+              }}>{busy ? t.signingIn : t.signInNow}</button>
+            )}
+            {p.onHideSignedOut && (
+              <IconButton label={t.hideNotice(name)} size={target} onClick={() => p.onHideSignedOut?.(r.harness)} color="var(--text-tertiary)"><X size={14} /></IconButton>
+            )}
+            {err && <p role="alert" style={{ flexBasis: '100%', margin: 0, fontSize: 12, color: 'var(--accent-red)' }}>{err}</p>}
+          </div>
+        )
+      })}
+      {accountRows.length > 0 && <>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>{planCoverageText(accountRows, p.lang)}</div>
       <div role="list" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)', overflow: 'hidden', marginBottom: 14 }}>
-        {p.rows.map((r, i) => (
+        {accountRows.map((r, i) => (
           <div role="listitem" key={r.key} data-billing-row={r.key} style={{
             display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 14, rowGap: 8, padding: isMobile ? '10px 12px' : '8px 14px',
             borderTop: i ? '1px solid var(--border)' : undefined, background: p.selectedKey === r.key ? 'var(--bg-elevated)' : undefined,
@@ -159,6 +204,7 @@ export function BillingAccountList(p: BillingAccountListProps) {
           </div>
         ))}
       </div>
+      </>}
     </div>
   )
 }

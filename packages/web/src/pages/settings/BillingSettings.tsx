@@ -8,8 +8,10 @@
  * actually prices on (its own, or the assistant default it inherits — `rowScope`), so what the row
  * says and what the editor changes can never be two different plans.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Navigate, useLocation, useOutletContext } from 'react-router-dom'
+import { signedOutHiddenStore } from '../../lib/appFlags'
+import { accountSignInStore } from '../../lib/accountSignIn'
 import { Pencil, Trash2, AlertTriangle, Sparkles } from 'lucide-react'
 import {
   findPlan,
@@ -95,6 +97,14 @@ export function BillingAccountsPanel() {
   const isMobile = useIsMobile()
   const { hash, key: locationKey } = useLocation()
   const anchorRef = useRef<HTMLDivElement>(null)
+  const hiddenList = useSyncExternalStore(signedOutHiddenStore.subscribe, signedOutHiddenStore.get)
+  const hiddenSignedOut = useMemo(() => new Set(hiddenList), [hiddenList])
+  const [signInError, setSignInError] = useState<{ harness: string; message: string } | null>(null)
+  // "Entrar" opens the same "Add account" dialog below — the one in-app login. Never a session.
+  const signIn = (harness: string) => { setSignInError(null); accountSignInStore.request(harness) }
+  const hideSignedOut = (harness: string) => {
+    if (!hiddenList.includes(harness)) signedOutHiddenStore.set([...hiddenList, harness])
+  }
 
   const { limits: planLimits, now: limitsNow, accountLabels, budgets } = usePlanLimits()
   const [accounts, setAccounts] = useState<BillingAccount[]>([])
@@ -374,8 +384,10 @@ export function BillingAccountsPanel() {
     <div id={ACCOUNTS_ANCHOR} ref={anchorRef} data-usage-accounts style={{ scrollMarginTop: 72 }}>
       <SectionHeader label={pt ? 'Contas' : 'Accounts'} />
       <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
-        selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow} />
-      <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
+        selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow}
+        onSignIn={signIn} signingIn={null} signInError={signInError}
+        hiddenSignedOut={hiddenSignedOut} onHideSignedOut={hideSignedOut} />
+      <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} onSignInUnavailable={(harness, message) => setSignInError({ harness, message })} />
       {removeError && <div role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--accent-red)' }}>{removeError}</div>}
 
       {/* Accounts that load late must not list every account timeline as stray for a moment. */}

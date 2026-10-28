@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { ADD_COPY, addAccountView, addErrorText, anyResolved, pendingRoots, type RootRowView } from './addAccountLogic'
+import { ADD_COPY, addAccountView, addErrorText, anyResolved, failureText, pendingRoots, type RootRowView } from './addAccountLogic'
 
 const root = (o: Partial<RootRowView>): RootRowView => ({ harness: 'claude', root: '/r', status: 'pending', pendingId: 'p1', ...o })
 
@@ -79,9 +79,20 @@ describe('wiring', () => {
     expect(page).toContain('onBound={reloadAccounts}')
   })
   test('the component reuses the app pieces and hand-rolls no modal', () => {
-    for (const piece of ['AccountLoginModal', 'dialogButtonStyle', 'RecordCard', 'MetricNote']) expect(comp).toContain(piece)
+    // RecordCard's bordered action footer was the grey bar the owner rejected (CONTAS.LOGIN r2): the
+    // pending card is one compact row with the app's own button styles instead.
+    for (const piece of ['AccountLoginModal', 'dialogButtonStyle', 'MetricNote']) expect(comp).toContain(piece)
     expect(comp).not.toContain('position: \'fixed\'')
     expect(comp).toContain("'/api/accounts/roots'")
     expect(comp).toContain("method: 'DELETE'")
+  })
+})
+
+describe('CONTAS.LOGIN r3: a failed attempt says what the assistant said', () => {
+  test('the sentence plus the CLI quote, in both languages; no quote when nothing was captured', () => {
+    expect(failureText({ error: 'login_failed', detail: 'Login failed: Request failed with status code 400' }, true))
+      .toBe('O login não foi concluído. Comece de novo. O assistente respondeu: “Login failed: Request failed with status code 400”')
+    expect(failureText({ error: 'login_failed', detail: 'OAuth error' }, false)).toBe('Sign-in did not finish. Start again. The assistant said: “OAuth error”')
+    expect(failureText({ error: 'login_failed' }, false)).toBe('Sign-in did not finish. Start again.')
   })
 })

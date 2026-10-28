@@ -32,7 +32,7 @@ import {
 } from './harness-accounts'
 import { agentisticsMcpLaunch, rootMcpRegistration } from './mcp-launch'
 import { reportAuditFailure, writeAudit } from './audit'
-import { LOGIN_ADAPTERS, LOGIN_MESSAGES, LoginFailure, startAccountLogin, type LoginError, type LoginHandle, type LoginInfo, type LoginOptions } from './account-login'
+import { claudeKeychainService, loginLog, LOGIN_ADAPTERS, LOGIN_MESSAGES, LoginFailure, startAccountLogin, type LoginError, type LoginHandle, type LoginInfo, type LoginOptions } from './account-login'
 import { applyAccountToPlan } from './sessions/account-plan'
 
 export { applyAccountToPlan }
@@ -127,7 +127,15 @@ export interface RootRow {
   label?: string
   plan?: string
   error?: LoginError
+  /** What the assistant's CLI said when the attempt failed after a code — masked, no code, no link. */
+  detail?: string
   login?: LoginInfo
+  /**
+   * A pending folder with no sign-in process behind it in THIS server (it restarted, or the attempt
+   * was abandoned): its link can never be completed, so the screen offers "start again", never a
+   * dead "open login". The poller still binds it if a login did land on disk.
+   */
+  stale?: true
 }
 
 export interface AccountRootsDeps {
@@ -148,6 +156,8 @@ export interface AccountRootsDeps {
   getAccount?: typeof byId
   listAccounts?: typeof readAccounts
   audit?: typeof writeAudit
+  /** Where the pending-login probe's outcome is recorded (facts only: no output, no token). */
+  log?: (line: string) => void
   /** Told when an audit write fails (op + target only, never the sink's diagnostic). */
   onAuditFailure?: (op: unknown, targetId: string | undefined) => void
 }
@@ -194,7 +204,18 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     void Promise.resolve().then(() => audit(input, reportFailure)).catch(reportFailure)
   }
   const logins = new Map<string, LoginHandle>()
+  const log = deps.log ?? loginLog
+  /** The last probe outcome logged per pending root: a line per CHANGE, not per 2 s poll. */
+  const probeNotes = new Map<string, string>()
+  const noteProbe = (dir: PendingRoot, note: string) => {
+    if (probeNotes.get(dir.pendingId) === note) return
+    probeNotes.set(dir.pendingId, note)
+    const item = dir.harness === 'claude' ? ` (keychain item "${claudeKeychainService(rootEnv(dir.harness, dir.root))}")` : ''
+    log(`[account-roots] pending ${dir.harness} root ${dir.pendingId}${item}: probe ${note}`)
+  }
   const failures = new Map<string, RootRow & { failedAt: number }>()
+  /** Pending ids between folder creation and the login handle existing: not stale yet. */
+  const starting = new Set<string>()
   const login = deps.login ?? startAccountLogin
   const probe = deps.probe ?? ((h: HarnessId, root: string) => forceProbe(h, root))
   const bind = deps.bind ?? bindAccount
@@ -255,6 +276,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
         status: !owner ? 'pending' : owner.retired ? 'retired' : 'bound',
         ...(owner ? { accountId: owner.id, label: owner.label, plan: owner.plan } : {}),
         ...(dir.login ? { login: dir.login } : {}),
+        ...(!owner && !logins.has(dir.pendingId) && !starting.has(dir.pendingId) ? { stale: true as const } : {}),
       })
     }
     for (const [id, row] of failures) {
@@ -295,17 +317,17 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     return { ok: true, pendingId, root, env: rootEnv(harness, root), linked }
   }
 
-  async function discardPendingUnlocked(harness: HarnessId, pendingId: string, root: string, error: LoginError) {
+  async function discardPendingUnlocked(harness: HarnessId, pendingId: string, root: string, error: LoginError, detail?: string) {
     // A timeout racing a successful bind must never remove a bound account's credentials.
     if ((await listAccounts()).accounts.some(a => a.root && resolve(a.root) === resolve(root))) return
-    failures.set(pendingId, { harness, pendingId, root, status: 'failed', error, failedAt: Date.now() })
+    failures.set(pendingId, { harness, pendingId, root, status: 'failed', error, ...(detail ? { detail } : {}), failedAt: Date.now() })
     logins.delete(pendingId)
     if (isRootPath(root) && !(await hasSymlinkPart(root))) await rm(root, { recursive: true, force: true })
   }
 
   async function startLogin(harness: HarnessId, pendingId: string, root: string, signal?: AbortSignal): Promise<LoginInfo> {
     const handle = await login({ harness, pendingId, root, env: rootEnv(harness, root) },
-      reason => serialized(() => discardPendingUnlocked(harness, pendingId, root, reason)), deps.loginOptions)
+      (reason, detail) => serialized(() => discardPendingUnlocked(harness, pendingId, root, reason, detail)), deps.loginOptions)
     logins.set(pendingId, handle)
     if (signal?.aborted) await handle.stop()
     try { return await handle.ready } catch (error) { await handle.stop(); logins.delete(pendingId); throw error }
@@ -315,6 +337,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   async function addRoot(harness: HarnessId, signal?: AbortSignal): Promise<({ ok: true; pendingId: string; root: string } & LoginInfo) | RootRefused> {
     const made = await createRoot(harness)
     if (!made.ok) return made
+    starting.add(made.pendingId)
     const cancelled = () => { void removeRoot(made.pendingId).catch(() => {}) }
     signal?.addEventListener('abort', cancelled, { once: true })
     try {
@@ -331,7 +354,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
       })
       const reason = error instanceof LoginFailure ? error.reason : 'login_unavailable'
       return { ok: false, reason, message: LOGIN_MESSAGES[reason] }
-    } finally { signal?.removeEventListener('abort', cancelled) }
+    } finally { starting.delete(made.pendingId); signal?.removeEventListener('abort', cancelled) }
   }
 
   async function submitCode(id: string, code: unknown) {
@@ -357,6 +380,8 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
         if (IDENTITY_PROBES[dir.harness]) {
           const found = await probe(dir.harness, dir.root).catch(() => null)
           if (found && found.key !== 'default') identity = found
+          // Only once a code went in: before that "no login" is the expected answer.
+          if (logins.get(dir.pendingId)?.submitted?.()) noteProbe(dir, !found ? 'failed' : identity ? 'found the login' : 'sees no login')
         } else {
           // No probe: only the harness's own marker on disk shows a login, and the fallback key is never an identity.
           if (await hasLoginMarker(dir.harness, dir.root)) {

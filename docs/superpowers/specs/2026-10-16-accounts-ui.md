@@ -51,7 +51,7 @@ Every option below is drawn **only** with these. A hand-rolled variant of any of
 | Destructive confirm | `ConfirmModal` | primitives |
 | Waiting state | `AgentisticsLoader` (inside a panel) / `CenteredLoader placement="area"` | components |
 | Muted footnote | `MetricNote` | components |
-| Opening a harness login | `loginHarness()` → managed login session (Settings → Harnesses' "Entrar") | `hooks/useChatHarnesses.ts` |
+| Opening a harness login | `useOpenAccountSignIn()` → Usage → Accounts' "Add account" dialog (paste the code); never a session (CONTAS.LOGIN r4) | `lib/accountSignIn.ts` |
 
 Group container (Option A) and table (Option B) reuse the `RecordCard` frame tokens
 (`--border`, `--radius-lg`, `--bg-card`, header band `--bg-elevated`) — no new colour, radius or
@@ -150,7 +150,7 @@ turns it on in step 3 — the spec's hard rule is "registered ≠ authorised", a
 just added on purpose is the moment to ask. Accounts detected automatically (a login made outside
 agentistics) keep today's default (`available: true`) — flagged as open question U2.
 
-The "Abrir o login" step reuses the Harnesses page's `loginHarness()` path (a managed login session
+The "Abrir o login" step is the headless paste-the-code login (`account-login.ts`); since CONTAS.LOGIN r4 every "Entrar" opens that same dialog — the old `loginHarness()` managed session is gone
 in the account root); the person never sees a command.
 
 ## 6. Other states

@@ -106,7 +106,7 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
       await render(width === 390 ? 1440 : 390, lang)
       expect(document.querySelector('[role="dialog"]')).toBe(dialog)
       expect(deletes).toHaveLength(0)
-      expect(document.querySelector('[data-login-url]')!.textContent).toBe(first.url)
+      expect(document.querySelector('[data-login-url]')!.getAttribute('href')).toBe(first.url)
     })
     test('invalid code refreshes the link, explains rejection and restores enabled paste input', async () => {
       await render(width, lang); await open(lang)
@@ -119,10 +119,35 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
       })
       await act(async () => { button(t.submit, document.querySelector('[role="dialog"]')!).click() })
       expect(codes).toEqual(['qa-fake-123'])
-      expect(document.querySelector('[data-login-url]')!.textContent).toContain('SECOND_FAKE')
+      expect(document.querySelector('[data-login-url]')!.getAttribute('href')).toContain('SECOND_FAKE')
       expect(document.querySelector('[role="alert"]')!.textContent).toBe(addErrorText({ error: 'invalid_code' }, lang === 'pt'))
       expect(input.disabled).toBe(false)
       expect(input.value).toBe('')
+    })
+    test('CONTAS.LOGIN: a refused code (403) is said in words, and Enter sends the code', async () => {
+      const inner = globalThis.fetch
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith('/code')) {
+          codes.push(JSON.parse(String(init?.body)).code)
+          return Response.json({ error: 'capability_disabled', capability: 'localShell' }, { status: 403 })
+        }
+        return inner(input, init)
+      }) as typeof fetch
+      await render(width, lang); await open(lang)
+      const input = document.querySelector<HTMLInputElement>('[role="dialog"] input')!
+      expect(input.type).toBe('text')
+      expect(input.getAttribute('autocomplete')).toBe('one-time-code')
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+        setter.call(input, 'qa-fake-403')
+        input.dispatchEvent(new window.Event('input', { bubbles: true }))
+        input.dispatchEvent(new window.Event('change', { bubbles: true }))
+      })
+      await act(async () => { input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await new Promise(r => setTimeout(r, 0)) })
+      expect(codes).toEqual(['qa-fake-403'])
+      expect(document.querySelector('[role="alert"]')!.textContent).toBe(addErrorText({ error: 'capability_disabled' }, lang === 'pt'))
+      expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain(t.submitted)
+      expect(input.disabled).toBe(false)
     })
   })
 }
@@ -137,5 +162,131 @@ describe('a fresh machine (no preference, no variable) can add an account (CONTA
     await act(async () => { await new Promise(r => setTimeout(r, 0)) })
     expect(host.querySelector(`[aria-label="${ADD_COPY(true).addTo('Gemini CLI')}"]`)).not.toBeNull()
     expect(host.textContent).not.toContain(ADD_COPY(true).flagOff)
+  })
+})
+
+describe('CONTAS.LOGIN r2 — "this account no longer exists" becomes a recoverable state', () => {
+  const t = ADD_COPY(true)
+  const gone = () => Response.json({ error: 'not_found', message: 'No such account root.' }, { status: 404 })
+  const stale: RootRowView = { harness: 'gemini', root: '/fake/old', status: 'pending', pendingId: 'r_old', stale: true }
+  const live: RootRowView = { harness: 'gemini', root: '/fake/live', status: 'pending', pendingId: 'r_live', login: { ...first } }
+  const settle = () => act(async () => { await new Promise(r => setTimeout(r, 0)) })
+  const mock = (handle: (url: string, init?: RequestInit) => Response | undefined | Promise<Response | undefined>) => {
+    const inner = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => (await handle(String(input), init)) ?? inner(input, init)) as typeof fetch
+  }
+  const texts = () => document.body.textContent ?? ''
+  const noLooseError = () => {
+    expect(texts()).not.toContain('Esta conta já não existe')
+  }
+
+  test('a leftover pending folder (server restarted) says "expired" and Try again starts a NEW sign-in', async () => {
+    rows = [stale]
+    const posts: string[] = []
+    mock((url, init) => {
+      if (init?.method === 'DELETE') { deletes.push(url); rows = []; return json({ ok: true }) }
+      if (url === '/api/accounts/roots' && init?.method === 'POST') {
+        posts.push(url); rows = [live]; return json({ ok: true, pendingId: 'r_live', ...first })
+      }
+    })
+    await render(1440, 'pt'); await settle()
+    const card = host.querySelector('[data-pending-card]')!
+    expect(card.getAttribute('data-pending-card')).toBe('expired')
+    expect(card.textContent).toContain(t.expired)
+    expect(Array.from(card.querySelectorAll('button')).some(b => b.textContent === t.openLogin)).toBe(false)
+    await act(async () => { button(t.retry, card).click() }); await settle()
+    expect(deletes).toEqual(['/api/accounts/roots/r_old'])
+    expect(posts).toHaveLength(1)
+    expect(document.querySelector('[role="dialog"] [data-login-url]')!.getAttribute('href')).toBe(first.url)
+    noLooseError()
+  })
+
+  test('cancelling a sign-in the server already dropped (404) is quiet, and a double click sends one DELETE', async () => {
+    rows = [live]
+    let release!: () => void
+    const held = new Promise<void>(r => { release = r })
+    mock(async (url, init) => {
+      if (init?.method === 'DELETE') { deletes.push(url); await held; rows = []; return gone() }
+    })
+    await render(1440, 'pt'); await settle()
+    const cancel = host.querySelector<HTMLButtonElement>(`[aria-label="${t.cancelAria('Gemini CLI')}"]`)!
+    expect(button(t.continueLogin, host.querySelector('[data-pending-card]')!)).toBeDefined()
+    await act(async () => { cancel.click() })
+    await act(async () => { cancel.click() })
+    await act(async () => { release(); await Promise.resolve() }); await settle()
+    expect(deletes).toHaveLength(1)
+    expect(host.querySelector('[data-pending-card]')).toBeNull()
+    expect(host.querySelector('[role="alert"]')).toBeNull()
+    expect(texts()).not.toContain(addErrorText({ error: 'not_found' }, true))
+    noLooseError()
+  })
+
+  test('a code sent to a sign-in that is gone (404) shows "expired" with Try again, never a loose error', async () => {
+    let posted = 0
+    mock((url, init) => {
+      if (url.endsWith('/code')) return gone()
+      if (url === '/api/accounts/roots' && init?.method === 'POST') {
+        posted++; rows = [{ ...live, pendingId: `r_${posted}` }]; return json({ ok: true, pendingId: `r_${posted}`, ...first })
+      }
+      if (init?.method === 'DELETE') { deletes.push(url); rows = []; return json({ ok: true }) }
+    })
+    await render(1440, 'pt'); await open('pt')
+    const input = document.querySelector<HTMLInputElement>('[role="dialog"] input')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!.call(input, 'qa-fake-gone')
+      input.dispatchEvent(new window.Event('input', { bubbles: true }))
+    })
+    await act(async () => { button(t.submit, document.querySelector('[role="dialog"]')!).click() }); await settle()
+    const dialog = document.querySelector('[role="dialog"]')!
+    expect(dialog.querySelector('[data-login-step="expired"]')).not.toBeNull()
+    noLooseError()
+    await act(async () => { dialog.querySelector<HTMLButtonElement>('[data-login-retry]')!.click() }); await settle()
+    expect(posted).toBe(2)
+    expect(deletes).toEqual(['/api/accounts/roots/r_1'])
+    expect(document.querySelector('[role="dialog"] [data-login-step="expired"]')).toBeNull()
+    expect(document.querySelector('[role="dialog"] [data-login-url]')).not.toBeNull()
+  })
+})
+
+describe('CONTAS.LOGIN r4: "Entrar" on the not-signed-in notice opens THIS dialog, never a session', () => {
+  test('clicking Entrar starts the paste-the-code login and asks nothing of /api/fleet', async () => {
+    const { BillingAccountList } = await import('./AccountRow')
+    const { accountSignInStore } = await import('../../lib/accountSignIn')
+    const g = globalThis as { EventSource?: unknown }
+    g.EventSource ??= class { addEventListener() {} removeEventListener() {} close() {} }
+    const calls: string[] = []
+    const inner = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => { calls.push(`${init?.method ?? 'GET'} ${String(input)}`); return inner(input, init) }) as typeof fetch
+    await act(async () => {
+      resize(1440)
+      root.render(<PageRouteFrame compact={false} scrollRef={null} maxWidth={1400}>
+        <BillingAccountList lang="pt" now={Date.now()} pendingIds={new Set()} failedIds={new Set()} selectedKey={null} onToggle={() => {}} onEdit={() => {}}
+          rows={[{ key: 'harness:gemini', harness: 'gemini', account: null, title: 'Gemini', sub: '', scope: { kind: 'default', harness: 'gemini' }, signedOut: true, plan: null, problem: false, limits: null }]}
+          onSignIn={h => accountSignInStore.request(h)} />
+        <AddAccount lang="pt" harnesses={['gemini']} onBound={() => {}} />
+      </PageRouteFrame>)
+    })
+    await act(async () => { await new Promise(r => setTimeout(r, 10)) })
+    const entrar = button('Entrar', document.querySelector('[data-signed-out-notice="gemini"]')!)
+    expect(entrar).toBeTruthy()
+    await act(async () => { entrar.click(); await new Promise(r => setTimeout(r, 20)) })
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    expect(document.querySelector('[role="dialog"] [data-login-url]')).not.toBeNull()
+    expect(calls).toContain('POST /api/accounts/roots')
+    expect(calls.some(c => c.includes('/api/fleet'))).toBe(false)
+    expect(accountSignInStore.get()).toBeNull()
+  })
+  test('with multiple accounts off, Entrar says how to sign in instead of doing nothing', async () => {
+    const { accountSignInStore } = await import('../../lib/accountSignIn')
+    const inner = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/experimental' ? json({ features: [] }) : inner(input, init)) as typeof fetch
+    const said: string[] = []
+    await act(async () => {
+      resize(1440)
+      root.render(<AddAccount lang="pt" harnesses={['claude']} onBound={() => {}} onSignInUnavailable={(_h, m) => said.push(m)} />)
+    })
+    await act(async () => { accountSignInStore.request('claude'); await new Promise(r => setTimeout(r, 10)) })
+    expect(said).toEqual([ADD_COPY(true).signInNeedsFlag])
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
 })

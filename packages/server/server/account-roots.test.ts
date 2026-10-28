@@ -133,6 +133,25 @@ describe('addRoot / login / poll', () => {
   })
 })
 
+describe('CONTAS.LOGIN r2 — a pending folder with no sign-in behind it', () => {
+  test('a live login is not stale; the same folder after a server restart is', async () => {
+    const { roots } = make()
+    const out = await roots.addRoot('claude')
+    if (!out.ok) throw new Error('refused')
+    expect((await roots.list())[0]!.stale).toBeUndefined()
+    roots.stopPoller()
+    // A new server process: the folder is still on disk, its login process is not.
+    const restarted = make().roots
+    const row = (await restarted.list())[0]!
+    expect(row.status).toBe('pending')
+    expect(row.stale).toBe(true)
+    expect(row.login).toBeUndefined()
+    // It can still be dropped without a typed confirmation.
+    expect((await restarted.removeRoot(out.pendingId)).ok).toBe(true)
+    expect(await restarted.list()).toEqual([])
+  })
+})
+
 describe('removeRoot', () => {
   async function bound(over = {}) {
     const m = make({ probe: async () => ({ key: 'k', label: 'l' }), ...over })
@@ -337,5 +356,34 @@ describe('audit latency does not block login or cancellation', () => {
       await expect(stat(out.root)).rejects.toThrow()
       expect(pendingAudits).toContain('root_delete')
     } finally { release(); await adding; await deleting; roots.stopPoller() }
+  })
+})
+
+describe('CONTAS.LOGIN r3: a pending login the probe cannot see is logged once per change, with its keychain item', () => {
+  test('after a code, "sees no login" is logged once with the item name; nothing is logged before a code', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'r3-roots-'))
+    const lines: string[] = []
+    let typed = false
+    const roots = createAccountRoots({
+      base, flagOn: () => true, defaultDir: () => join(base, 'none'), registerMcp: async () => {}, audit: async () => {},
+      log: l => lines.push(l),
+      probe: async () => ({ key: 'default', label: 'Default account' }),
+      listAccounts: async () => ({ accounts: [] }) as never,
+      login: async (_req, _fail) => ({
+        ready: Promise.resolve({ kind: 'paste' as const, url: 'https://claude.com/cai/oauth/authorize', expiresAt: Date.now() + 60_000 }),
+        info: () => undefined, submit: async () => {}, stop: async () => {}, submitted: () => typed,
+      }),
+    })
+    try {
+      const made = await roots.addRoot('claude')
+      expect(made.ok).toBe(true)
+      await roots.pollPending()
+      expect(lines).toEqual([])
+      typed = true
+      await roots.pollPending(); await roots.pollPending()
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatch(/probe sees no login/)
+      expect(lines[0]).toMatch(/keychain item "Claude Code-credentials-[0-9a-f]{8}"/)
+    } finally { roots.stopPoller?.(); await rm(base, { recursive: true, force: true }) }
   })
 })
