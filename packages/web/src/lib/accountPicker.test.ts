@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { PlanLimits } from '@agentistics/core'
-import { accountDisplayName, defaultPick, limitsFor, pickerRows, planDisplayName, spentUntil, unavailableReason } from './accountPicker'
+import { accountDisplayName, defaultPick, limitsFor, pickerRows, planDisplayName, sessionPlan, spentUntil, unavailableReason } from './accountPicker'
 import type { SwitchInfo } from './accountSwitch'
 
 const now = Date.UTC(2026, 9, 24, 12, 0)
@@ -100,5 +100,42 @@ describe('account labels are keyed by harness:account', () => {
     expect(pickerRows(two, [], now, 'en', labels).map(r => r.label)).toEqual(['Claude Code', 'Antigravity #1'])
     expect(accountDisplayName('antigravity', 'default', 'g@x', labels)).toBe('Antigravity #1')
     expect(accountDisplayName('claude', 'default', 'a@x', labels)).toBe('Claude Code')
+  })
+})
+
+// CONTA.IDENTIDADE: the composer chip and the switch dialog must name the SAME account. A session
+// restarted from Principal (acc_p) onto Vini (acc_v) runs on acc_v; the harness's first meter is
+// Nayara's Pro (acc_n) and must never be what the chip shows.
+describe('sessionPlan (composer chip)', () => {
+  const limits = [lim('claude', 'acc_n', 0, 25, 'Claude Pro'), lim('claude', 'acc_p', 4, 100, 'Claude Max 5x'), lim('claude', 'acc_v', 34, 61, 'Claude Max 5x')]
+
+  test("names the session's own account's plan, not the harness's first", () => {
+    const got = sessionPlan(limits, [], 'claude', 'acc_v')
+    expect(got.limits?.account).toBe('acc_v')
+    expect(got.name).toBe('Claude Max 5x')
+  })
+
+  test('chip and dialog agree on the current account and its plan', () => {
+    const dialog = pickerRows({ ok: true, supported: true, limit: null, current: { id: 'acc_v', harness: 'claude' }, options: [], unavailable: [] }, limits, now, 'en')
+    const current = dialog.find(r => r.kind === 'current')!
+    const chip = sessionPlan(limits, [], 'claude', 'acc_v')
+    expect(current.id).toBe(chip.limits!.account)
+    expect(current.plan).toBe(chip.name)
+  })
+
+  test('after a switch to another account the chip follows it', () => {
+    expect(sessionPlan(limits, [], 'claude', 'acc_p').name).toBe('Claude Max 5x')
+    expect(sessionPlan(limits, [], 'claude', 'acc_n').name).toBe('Claude Pro')
+  })
+
+  test('no account and several readings: no plan rather than a guess', () => {
+    expect(sessionPlan(limits, [], 'claude', undefined)).toEqual({ limits: null, name: undefined })
+  })
+
+  test('no reading: the registered plan of THAT account, or the only one', () => {
+    const reg = [{ harness: 'claude', plan: 'Pro', account: 'acc_n' }, { harness: 'claude', plan: 'Max', account: 'acc_v' }]
+    expect(sessionPlan(null, reg, 'claude', 'acc_v').name).toBe('Max')
+    expect(sessionPlan(null, reg, 'claude', undefined).name).toBeUndefined()
+    expect(sessionPlan(null, [reg[1]!], 'claude', undefined).name).toBe('Max')
   })
 })

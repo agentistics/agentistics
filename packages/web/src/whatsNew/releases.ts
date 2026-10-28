@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.160.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uma sessão reiniciada em outra conta agora mostra a mesma conta em todo lugar: o círculo de informações do campo de mensagem, a janela de troca de conta e os limites deixaram de apontar contas diferentes.',
+        en: 'A session restarted on another account now shows the same account everywhere: the message box info chip, the switch-account dialog and the limits no longer point at different accounts.',
+      },
+    ],
+  },
+  '2.160.0': {
+    features: [
+      {
+        pt: 'Depois de instalar um assistente, a própria janela de instalação oferece "Entrar agora" quando ainda falta entrar na conta dele, sem precisar ir até Configurações.',
+        en: 'After installing an assistant, the install dialog itself offers "Sign in now" when you still need to sign in to it, without going to Settings.',
+      },
+    ],
+    fixes: [],
+  },
   '2.159.5': {
     features: [],
     fixes: [

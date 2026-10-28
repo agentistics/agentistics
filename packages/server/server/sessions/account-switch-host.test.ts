@@ -265,3 +265,64 @@ describe('switchSessionAccountImpl — another harness (v2 hand-off)', () => {
     expect(w.spawned[0]!.prompt).not.toContain('fix the CSV header')
   })
 })
+
+// CONTA.IDENTIDADE (QA r1): the switch resolves WHO a session runs as through `session-account.ts`,
+// exactly like the dialog's GET, and keeps WHERE its files are the row's own record.
+describe('switchSessionAccountImpl — CONTA.IDENTIDADE', () => {
+  const defaultHome = () => {
+    const w = world({ pending: 'go on' })
+    delete w.rows[0]!.accountId // started before accounts: runs in the default home, bound to acc_a
+    const limitArgs: unknown[] = []
+    w.deps.io!.limit = async a => { limitArgs.push(a); return { pendingPrompt: 'go on' } }
+    return { ...w, limitArgs }
+  }
+
+  test('a default-home row IS the account bound there: asking for it again is same_account', async () => {
+    const w = defaultHome()
+    expect(await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_a' }, w.deps)).toMatchObject({ ok: false, code: 'same_account' })
+    expect(w.killed).toEqual([])
+  })
+
+  test('a default-home row still copies FROM the default home and reads its limit there (no account root)', async () => {
+    const w = defaultHome()
+    const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b', resendPending: true }, w.deps)
+    expect(out.ok).toBe(true)
+    expect(w.copied).toEqual([{ from: '/home/u/.claude/projects/-w/conv1.jsonl', to: '/r/b/projects/-w/conv1.jsonl', kind: 'file' }])
+    expect(w.limitArgs).toEqual([{ harness: 'claude', conversationId: 'conv1', cwd: '/w' }])
+  })
+
+  test('a row on its own account reads its limit under that account', async () => {
+    const w = world({ pending: 'x' })
+    const limitArgs: unknown[] = []
+    w.deps.io!.limit = async a => { limitArgs.push(a); return null }
+    await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b', resendPending: true }, w.deps)
+    expect(limitArgs).toEqual([{ harness: 'claude', conversationId: 'conv1', cwd: '/w', accountId: 'acc_a' }])
+  })
+})
+
+describe('switchSessionAccountImpl — CONTA.IDENTIDADE hand-off label', () => {
+  test('the "from" account of a default-home row is the account bound there, not nothing', async () => {
+    const rows: ManagedSession[] = [{ id: 'm1', harness: 'claude', cwd: '/w', createdAt: '2026-10-24T00:00:00Z', conversationId: 'conv1' }]
+    const asked: (string | undefined)[] = []
+    const deps: SwitchHostDeps = {
+      lang: 'en',
+      backend: { list: async () => [{ id: 'm1', alive: true }] as never, kill: async () => true },
+      withLock: withResumeLock,
+      resume: async () => { throw new Error('no resume') },
+      spawn: async () => ({ ok: true, message: 'started', id: 'm9' }),
+      io: {
+        readRows: async () => rows.map(r => ({ ...r })),
+        context: async () => ({ enabled: true, accounts: [acc({ id: 'acc_a' }), acc({ id: 'acc_k', harness: 'codex', root: '/r/k' })] }),
+        limit: async () => null,
+        killAndRetire: async (_id, kill) => kill(),
+        startable: async () => ['claude', 'codex'] as never,
+        turns: async () => ({ turns: [] }),
+        role: async () => undefined,
+        label: async (_h, id) => { asked.push(id); return id === 'acc_a' ? 'a@x' : undefined },
+        link: async () => {},
+      },
+    }
+    await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_k', harness: 'codex' }, deps)
+    expect(asked).toEqual(['acc_a'])
+  })
+})

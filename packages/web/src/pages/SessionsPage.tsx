@@ -2921,6 +2921,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             {...(selected.task ? { task: selected.task } : {})}
             onOpenTask={ref => leaveDrawerTo(`/tasks/${encodeURIComponent(ref)}`)}
             rowId={selected.id}
+            {...(selected.accountId ? { accountId: selected.accountId } : {})}
             onOpenLive={ref => { closeSessionDrawer(); openArtifacts('live', ref) }}
             {...(sessionMetrics ? { onOpenFull: () => { closeSessionDrawer(); openArtifacts('metrics') } } : {})}
             {...(selected.model ? { startedModel: selected.model } : {})}

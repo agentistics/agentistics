@@ -98,6 +98,8 @@ export interface FleetRow {
   model?: string
   /** The reasoning effort this session was started with. Absent = the harness's own default. */
   effort?: string
+  /** The account this session's process runs on now (server-resolved, CONTA.IDENTIDADE). */
+  accountId?: string
   /** The harness mode, in its own words. Absent where nobody has driven that harness's modes. */
   mode?: SessionMode
   /** F4.D — the modes a structured row can be set to directly; absent: only `cycleMode` exists. */
