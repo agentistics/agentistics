@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile, stat, chmod, symlink } from 'n
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readdir } from 'node:fs/promises'
-import { codexIdentity, createHarnessAccounts, probeAccountIdentity, sameLogin, __setHarnessAccountsForTest, IDENTITY_PROBES, ISOLATION_ENV } from './harness-accounts'
+import { claudeSignedOut, SignedOutError, CLAUDE_PROBE_TIMEOUT_MS, codexIdentity, createHarnessAccounts, probeAccountIdentity, sameLogin, __setHarnessAccountsForTest, IDENTITY_PROBES, ISOLATION_ENV } from './harness-accounts'
 import { handleAccountsRequest } from './accounts-web'
 import { routeCapability } from './capability-guard'
 
@@ -773,4 +773,30 @@ test('other harnesses retain a bound root-keyed account when another login is id
     expect(result.previous).toEqual(previous)
     expect(result.account.id).not.toBe('acc_X')
   }
+})
+
+test('CONTAS.LOGIN: claude says it has no login → the row is "signed out", never a placeholder account', async () => {
+  expect(claudeSignedOut('{"loggedIn": false, "authMethod": "none"}')).toBe(true)
+  expect(claudeSignedOut('{"loggedIn": true, "email": "a@b.test"}')).toBe(false)
+  expect(claudeSignedOut('not json')).toBe(false)
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new SignedOutError() } })
+  const row = await store.current('claude')
+  expect(row.id).toBe('')
+  expect(row.signedOut).toBe(true)
+  const listed = await store.list(['claude'])
+  expect(listed.find(a => a.harness === 'claude')?.signedOut).toBe(true)
+  // Nothing is written for a signed-out harness.
+  expect(await readFile(join(dir, 'accounts.json'), 'utf8').catch(() => null)).toBeNull()
+})
+
+test('CONTAS.LOGIN: a cold probe that outlives the list race names the account on the next read', async () => {
+  let release!: () => void
+  const gate = new Promise<void>(r => { release = r })
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), timeoutMs: 10, probe: async () => { await gate; return identity } })
+  const first = await store.current('claude')
+  expect(first.id).toBe('')
+  release(); await new Promise(r => setTimeout(r, 10))
+  const second = await store.current('claude')
+  expect(second.label).toBe(identity.label)
+  expect(CLAUDE_PROBE_TIMEOUT_MS).toBeGreaterThanOrEqual(10_000)
 })

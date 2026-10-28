@@ -80,6 +80,8 @@ export interface LoginOptions {
   launch?: (req: LoginRequest) => Promise<LoginProcess>
   readyTimeoutMs?: number
   overallTimeoutMs?: number
+  /** After a pasted code, how long the CLI may be gone with no account bound before it is a failure. */
+  bindGraceMs?: number
   now?: () => number
 }
 /** The controller holds only public link/device metadata. Pasted codes are written once and discarded. */
@@ -137,7 +139,13 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
       }
       const exit = await proc.exited
       if (!stopped && (exit !== 0 || !info)) await fail('login_failed')
-      // A successful CLI exit is not proof of identity. Root polling must still bind the account.
+      // A successful CLI exit is not proof of identity. Root polling must still bind the account —
+      // but not forever: a CLI that ended after the code and left no login behind is a failure the
+      // screen must SAY (the binding stops this handle first, which makes `fail` a no-op).
+      else if (!stopped && hasSubmitted) {
+        const grace = setTimeout(() => { void fail('login_failed').catch(() => {}) }, opts.bindGraceMs ?? 60_000)
+        grace.unref?.()
+      }
     } catch { await fail('login_failed').catch(() => {}) }
   })()
   return {
@@ -156,7 +164,9 @@ const quote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'"
 async function loginEnvironment(req: LoginRequest) {
   const bin = join(req.root, '.login-bin')
   await mkdir(bin, { mode: 0o700 })
-  for (const name of ['node', 'bun', 'python3', 'python', 'sh', 'bash', 'env', 'dirname', 'readlink']) {
+  // `security` is macOS's keychain tool: claude stores its login there, and without it on PATH the
+  // CLI cannot save the credential it just exchanged (absent on Linux, so nothing is linked there).
+  for (const name of ['node', 'bun', 'python3', 'python', 'sh', 'bash', 'env', 'dirname', 'readlink', 'security']) {
     const path = Bun.which(name)
     if (path) await symlink(path, join(bin, name))
   }

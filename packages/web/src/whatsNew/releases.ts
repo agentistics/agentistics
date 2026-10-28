@@ -10,14 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.160.4': {
+  '2.161.0': {
     features: [
       {
         pt: 'No fim da instalação pelo terminal, o instalador pergunta se você quer iniciar o agentistics agora e se ele deve iniciar sozinho quando o computador ligar (sim é o padrão nas duas), já com as configurações recomendadas.',
         en: 'At the end of the terminal install, the installer asks whether to start agentistics now and whether it should start by itself when the computer starts (yes is the default for both), already with the recommended settings.',
       },
     ],
-    fixes: [],
+    fixes: [
+      {
+        pt: 'Adicionar uma conta do Claude Code não fica mais "Esperando você entrar..." para sempre depois de colar o código: a conta aparece com o e-mail ou um erro claro aparece na tela.',
+        en: 'Adding a Claude Code account no longer stays on "Waiting for you to sign in..." forever after pasting the code: the account shows up with its email, or a clear error appears.',
+      },
+      {
+        pt: 'O campo do código de login não é mais tratado como senha pelo navegador, e Enter envia o código.',
+        en: 'The browser no longer treats the login code field as a password, and Enter submits the code.',
+      },
+      {
+        pt: 'Sem login no assistente, a tela de contas mostra "Não conectado" em vez de uma conta que não existe.',
+        en: 'With no sign-in on the assistant, the accounts screen shows "Not connected" instead of an account that does not exist.',
+      },
+    ],
   },
   '2.160.3': {
     features: [

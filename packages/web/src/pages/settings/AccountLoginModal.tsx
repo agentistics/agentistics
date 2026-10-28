@@ -15,11 +15,12 @@ export function AccountLoginModal({ harness, lang, login, bound, busy, submitted
   const [code, setCode] = useState(''), [copied, setCopied] = useState<string | null>(null), [now, setNow] = useState(Date.now())
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer) }, [])
   const button = (primary = false) => dialogButtonStyle(primary ? 'primary' : 'secondary', mobile)
+  const send = () => { onSubmit(code); setCode('') }
   const copy = async (value: string, which: string) => {
     try { await navigator.clipboard.writeText(value); setCopied(which) } catch { setCopied(null) }
   }
   const footer = <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-    {!bound && login?.kind === 'paste' && !submitted && <button type="button" disabled={busy || !code.trim()} style={button(true)} onClick={() => { onSubmit(code); setCode('') }}>{t.submit}</button>}
+    {!bound && login?.kind === 'paste' && !submitted && <button type="button" disabled={busy || !code.trim()} style={button(true)} onClick={send}>{t.submit}</button>}
     <button type="button" style={button(!!bound)} onClick={onCancel}>{bound ? t.finish : t.cancelPending}</button>
   </div>
   return <ConfirmModal open tone="default" maxWidth={560} closeLabel={t.close}
@@ -41,7 +42,10 @@ export function AccountLoginModal({ harness, lang, login, bound, busy, submitted
         </div>
       </div>
       <div data-login-step={login.kind}>
-        {login.kind === 'paste' ? <FieldInput label={`2 · ${t.pasteStep}`} value={code} onChange={setCode} type="password" hideReveal maxLength={8192} autoComplete="off" spellCheck={false} minHeight={mobile ? 44 : undefined} disabled={submitted || busy} /> : <>
+        {login.kind === 'paste' ? <div onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && code.trim() && !busy && !submitted) { e.preventDefault(); send() } }}>
+          {/* A one-time code, not a password: type=password made Chrome offer "Update password?" over it. */}
+          <FieldInput label={`2 · ${t.pasteStep}`} value={code} onChange={setCode} type="text" mono maxLength={8192} autoComplete="one-time-code" spellCheck={false} minHeight={mobile ? 44 : undefined} disabled={submitted || busy} />
+        </div> : <>
           <p style={{ fontSize: 14 }}>{`2 · ${harness === 'kimi' ? t.kimiStep : t.deviceStep}`}</p>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
             <strong style={{ fontFamily: 'monospace', fontSize: 26, letterSpacing: '.12em', overflowWrap: 'anywhere' }}>{login.code}</strong>
