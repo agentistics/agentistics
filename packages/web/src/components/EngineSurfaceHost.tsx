@@ -15,7 +15,7 @@ type Loader = (path: string) => Promise<unknown>
  * switching layout, or navigating to another screen, never unmounts the surface. It ends only on an
  * explicit close (the button, the surface's `ctx.close()`, or Esc while `full`).
  */
-export function EngineSurfaceHost({ load }: { load?: Loader } = {}) {
+export function EngineSurfaceHost({ load }: { load?: Loader }) {
   const open = useOpenEngineSurface()
   if (!open || typeof document === 'undefined') return null
   return createPortal(<Frame key={open.nonce} open={open} load={load} />, document.body)

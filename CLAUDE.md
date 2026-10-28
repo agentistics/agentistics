@@ -2184,6 +2184,14 @@ Claude Code deletes session transcripts (`~/.claude/projects/**/*.jsonl`) older 
   `sessions/*-chat.ts` / `chat-tail.ts` readers are held byte-equal to these by the engine's chat
   differential, so a fix to a reader here must land in the engine too (its differential fails until it
   does). The host switch (`adapter-chat` flag) is F1.2.
+- **Engine-owned surfaces (engine-api 1.15, `docs/engine-surfaces.md`)** — `/api/engine/x` is a reserved
+  prefix (`localShell`) where an engine route may serve assets (`engine/engine-assets.ts` stamps the
+  type, refuses `.wasm`: the CSP is unchanged), accept a WebSocket (`EngineRoute.upgrade`, only after the
+  guard, auth, Host and `wsInputOriginOk`; `engine/engine-sockets.ts` owns frame cap, connection limits
+  and closing on session end / engine dispose) and announce `manifest.surfaces` (validated by
+  `surfaceRefusals` at load; `GET /api/engine` lists them, `engine-surfaces.ts` drops an `experimental`
+  one whose flag is off). The web draws one generic button per surface and mounts its module into the
+  app-root `EngineSurfaceHost` (`full`/`side`, kept mounted across navigation). No engine: no button.
 - `engine/in-tree.ts` is TRANSITIONAL: the integrations and the provider verb still live in this tree
   and are packaged behind the contract there, so nothing else in the host imports them. When that
   code moves out, the file goes and the generator falls back to the null slot on its own.
