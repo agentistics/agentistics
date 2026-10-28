@@ -184,9 +184,32 @@ describe('CONTAS.LOGIN: an assistant with no login on this computer', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]!.signedOut).toBe(true)
     const h = renderToStaticMarkup(<BillingAccountList {...{ ...view([signedOut]), lang }} rows={rows.map(r => ({ ...r, plan: null, problem: false, limits: null }))} />)
-    expect(text(h)).toContain(lang === 'pt' ? 'Não conectado' : 'Not connected')
+    expect(text(h)).toContain(lang === 'pt' ? 'Claude Code instalado, sem login' : 'Claude Code is installed, not signed in')
+    expect(text(h)).not.toContain(lang === 'pt' ? 'Não conectado' : 'Not connected')
     expect(text(h)).not.toContain(lang === 'pt' ? 'Sem plano' : 'No plan')
     expect(text(h)).not.toContain(lang === 'pt' ? 'Sem leitura ainda' : 'No reading yet')
     expect(h).toContain('data-signed-out')
+  })
+})
+
+describe('CONTAS.LOGIN r3: an assistant with no login is a closable notice, not an account', () => {
+  const signedOut: BillingAccount = { id: '', harness: 'claude', key: 'default', label: 'Conta padrão', root: null, available: true, signedOut: true }
+  const asView = (rows: ReturnType<typeof billingRows>) => rows.map(r => ({ ...r, plan: null, problem: false, limits: null }))
+  for (const lang of ['en', 'pt'] as const) test(`offers Sign in and ×, and is outside the list and its count (${lang})`, () => {
+    // A signed-out claude beside a real account of another assistant.
+    const rows = [...asView(billingRows([signedOut], { profiles: {} }, ['claude'] as never, L as never, lang === 'pt')),
+      ...asView(billingRows([acc('real', { harness: 'codex' })], { profiles: {} }, ['codex'] as never, L as never, lang === 'pt'))]
+    const h = renderToStaticMarkup(<BillingAccountList {...{ ...view([signedOut, acc('real')]), lang }} rows={rows} onSignIn={() => {}} onHideSignedOut={() => {}} />)
+    expect(h).toContain('data-signed-out-notice="claude"')
+    expect(text(h)).toContain(lang === 'pt' ? 'Entrar' : 'Sign in')
+    expect(h).toContain(lang === 'pt' ? 'aria-label="Ocultar o aviso do Claude Code"' : 'aria-label="Hide the Claude Code notice"')
+    expect(text(h)).toContain(lang === 'pt' ? '0 de 1 com plano informado' : '0 of 1 with a plan')
+    expect((h.match(/role="listitem"/g) ?? []).length).toBe(1)
+  })
+  test('a hidden notice is gone, and with no account left no empty list is drawn', () => {
+    const rows = asView(billingRows([signedOut], { profiles: {} }, ['claude'] as never, L as never, false))
+    const h = renderToStaticMarkup(<BillingAccountList {...view([signedOut])} rows={rows} hiddenSignedOut={new Set(['claude'])} onHideSignedOut={() => {}} />)
+    expect(h).not.toContain('data-signed-out')
+    expect(h).not.toContain('role="list"')
   })
 })
