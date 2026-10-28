@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.161.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uma tentativa de login que expirou ou se perdeu não mostra mais "Esta conta já não existe": aparece "O login expirou" com "Tentar de novo", que começa um login novo.',
+        en: 'A sign-in attempt that expired or got lost no longer shows "This account no longer exists": it says "The sign-in expired" with "Try again", which starts a new sign-in.',
+      },
+      {
+        pt: 'A janela de adicionar conta ficou mais clara: três passos numerados, botões "Abrir página de login" e "Copiar link" no lugar do link enorme, e Cancelar discreto.',
+        en: 'The add-account dialog is clearer: three numbered steps, "Open sign-in page" and "Copy link" buttons instead of the huge link, and a quiet Cancel.',
+      },
+    ],
+  },
   '2.161.0': {
     features: [
       {
