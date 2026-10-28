@@ -267,6 +267,8 @@ start_in_background() {
 
 if [ "$WANT_START" -eq 0 ]; then
   echo ""
+  # Recommended first-run settings (archive mode consolidate) for EVERY "yes" path below: boot,
+  # one-off background start, and root. Never overrides a choice the person already made.
   "$BIN" setup --defaults || true
   if [ "$IS_ROOT" -eq 1 ]; then
     echo "Running as root: start-on-login is a per-user service, so it is not offered. Run the installer as your own user for that."
@@ -274,6 +276,8 @@ if [ "$WANT_START" -eq 0 ]; then
   else
     decide "${AGENTOP_INSTALL_AUTOSTART:-}" "Start agentistics automatically when you log in / boot?" && WANT_BOOT=0 || WANT_BOOT=$?
     if [ "$WANT_BOOT" -eq 0 ]; then
+      # An occupied port is the unit's job: its ExecCondition guard (`autostart guard server`) skips
+      # the start quietly when something already serves it, so no port check is made here.
       if "$BIN" autostart server enable; then
         STARTED=1
       else
