@@ -36,7 +36,7 @@ function strings(v: unknown, out: string[] = []): string[] {
 describe('seed-demo store', () => {
   test('no field of any harness carries the real home or user name', () => {
     const harnesses: HarnessId[] = ['claude', 'codex', 'gemini', 'copilot', 'antigravity', 'kimi', 'opencode' as HarnessId]
-    const real = new Map(harnesses.map(h => [h, [session(h, 1), session(h, 2)]] as const))
+    const real = new Map<HarnessId, SessionMeta[]>(harnesses.map(h => [h, [session(h, 1), session(h, 2)]]))
     const store = buildDemoStore(real)
     const forbidden = [REAL_HOME, 'realuser', homedir(), userInfo().username].filter(x => x.length > 2)
     for (const [harness, sessions] of store) {
