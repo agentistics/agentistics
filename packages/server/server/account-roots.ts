@@ -148,6 +148,8 @@ export interface AccountRootsDeps {
   flagOn?: () => boolean
   defaultDir?: (harness: HarnessId) => string
   login?: typeof startAccountLogin
+  /** Which sign-in-capable CLIs are installed now. Default: a fresh lookup on the harness search path. */
+  installed?: () => HarnessId[]
   loginOptions?: LoginOptions
   /** Is an account session still running? */
   sessionLive?: (sessionId: string) => Promise<boolean>

@@ -6,6 +6,7 @@ import { homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { isSessionGoneError, SHELL_SOCKET } from './sessions/tmux-cli'
+import { findHarnessBinary, harnessSearchPath } from './sessions/user-path'
 
 export type LoginKind = 'paste' | 'device'
 export type LoginError = 'login_unavailable' | 'login_timeout' | 'login_failed' | 'plaintext_refused' | 'invalid_code' | 'keychain_unreadable' | 'login_not_saved' | 'login_unreadable'
@@ -325,13 +326,16 @@ async function makeLoginEnvironment(root: string, extra: Record<string, string> 
   // `security` is macOS's keychain tool: claude stores its login there, and without it on PATH the
   // CLI cannot save the credential it just exchanged (absent on Linux, so nothing is linked there).
   for (const name of ['node', 'bun', 'python3', 'python', 'sh', 'bash', 'env', 'cat', 'dirname', 'readlink', 'security']) {
-    const path = Bun.which(name)
+    const path = findHarnessBinary(name)
     if (path) await symlink(path, join(bin, name))
   }
   // No inherited API keys, access tokens, agent variables, display or browser environment.
   // USER is explicit because LaunchAgent and the tmux server can inherit different values; Claude
   // uses it as the keychain account selector when no account flag is supplied.
   const env: Record<string, string> = { HOME: homedir(), USER: keychainAccount(), PATH: bin, TERM: 'xterm-256color', LANG: process.env.LANG ?? 'en_US.UTF-8', BROWSER: '/bin/true', NO_BROWSER: 'true', ...extra }
+  // A Volta shim (e.g. copilot installed through Volta) finds its toolchain through VOLTA_HOME, and
+  // falls back to $HOME/.volta — wrong whenever HOME was swapped. Pass the real one through.
+  if (process.env.VOLTA_HOME && !env.VOLTA_HOME) env.VOLTA_HOME = process.env.VOLTA_HOME
   return { bin, env }
 }
 async function tmux(args: string[], input?: string, missingOkay = false) {
@@ -385,17 +389,19 @@ async function runClaudeDirect(executable: string, argv: string[], env: Record<s
 }
 async function resolveExecutable(name: string): Promise<string | undefined> {
   if (name.includes('/')) return await Bun.file(name).exists() ? name : undefined
-  for (const dir of (process.env.PATH ?? '').split(':').filter(Boolean)) {
+  for (const dir of harnessSearchPath().split(':').filter(Boolean)) {
     const candidate = join(dir, name)
     if (await Bun.file(candidate).exists()) return candidate
   }
-  return Bun.which(name) ?? undefined
+  return findHarnessBinary(name)
 }
 /** Hidden PTYs use the existing utility socket: no registry, fleet row, transcript or terminal link. */
 export async function launchLoginProcess(req: LoginRequest): Promise<LoginProcess> {
   const adapter = LOGIN_ADAPTERS[req.harness]
   if (!adapter) throw new LoginFailure('login_unavailable')
-  const executable = Bun.which(adapter.argv[0]!)
+  // The same lookup path the installer and the version check use: a CLI installed a minute ago
+  // under ~/.local/bin, bun or Homebrew is found even when the server started with a bare PATH.
+  const executable = findHarnessBinary(adapter.argv[0]!)
   if (!executable) throw new LoginFailure('login_unavailable')
   // Gemini's first-run method picker would hide the URL. Use a private settings copy, never
   // write through the allowlisted symlink into the user's default configuration.
@@ -486,4 +492,14 @@ export async function launchLoginProcess(req: LoginRequest): Promise<LoginProces
       finished = true; wake?.(); await clean()
     },
   }
+}
+
+/**
+ * Which assistants can be signed in from the app AND have their CLI installed here right now. Looked
+ * up fresh on every call (a few `stat`s): the answer must follow an install made a moment ago, so
+ * nothing is cached.
+ */
+export function installedLoginHarnesses(find: (bin: string) => string | undefined = findHarnessBinary): HarnessId[] {
+  // @harness-adapters-only: the login recipe table is the source of which assistants can sign in
+  return (Object.keys(LOGIN_ADAPTERS) as HarnessId[]).filter(h => { const a = LOGIN_ADAPTERS[h]; return !!a && !!find(a.argv[0]!) })
 }
