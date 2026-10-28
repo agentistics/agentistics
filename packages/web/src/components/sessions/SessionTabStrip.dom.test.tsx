@@ -66,6 +66,7 @@ const close = (id: string) => tab(id).querySelector('[aria-label="Close tab"]') 
 const opacity = (el: HTMLElement) => el.style.opacity
 
 beforeEach(() => {
+  ;(window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width: 1200, height: 800 })
   store.resetOpenTabsCache()
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); went = []
   act(() => { store.setOpenTabs('main', ['a', 'b', 'c']) })
@@ -234,6 +235,7 @@ describe('sleeping tabs', () => {
     const menu = document.querySelector('[role="menu"]') as HTMLElement
     expect(menu.style.left).toBe(width === 390 ? '8px' : '12px')
     expect(menu.style.top).toBe('74px')
+    expect(menu.style.width).toBe(width === 390 ? '374px' : '380px')
     const entries = Array.from(menu.querySelectorAll('button'))
     const header = entries.find(e => e.textContent === 'Sleeping')!
     expect(header.disabled).toBe(true)
@@ -326,3 +328,63 @@ for (const width of [1280, 390]) {
     expect(sleeping.querySelector('[data-menu-title]')?.parentElement?.style.whiteSpace).toBe('normal')
   })
 }
+
+
+describe('session menu toggle and frosted surface', () => {
+  const trigger = () => host.querySelector<HTMLButtonElement>('[aria-label="Open and sleeping tabs"]')!
+  const menu = () => document.querySelector<HTMLElement>('[role="menu"]')
+
+  test.each([1200, 390])('trigger toggles across press and click events (%spx)', width => {
+    ;(window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height: 800 })
+    render()
+    const button = trigger()
+    const press = () => {
+      act(() => { button.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true, pointerType: width === 390 ? 'touch' : 'mouse' })) })
+      // Include compatibility mouse events produced by a tap, with React flushing between phases.
+      act(() => { button.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true })) })
+      act(() => button.click())
+    }
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    press()
+    expect(menu()).not.toBeNull()
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    press()
+    expect(menu()).toBeNull()
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    press()
+    expect(menu()).not.toBeNull()
+    act(() => { document.body.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true })) })
+    expect(menu()).toBeNull()
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    // Keyboard activation dispatches click without a preceding pointer event.
+    act(() => button.click())
+    expect(menu()).not.toBeNull()
+    act(() => { document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(menu()).toBeNull()
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  test.each(['standard', 'webkit', 'no-blur', 'no-tint'] as const)('both menus preserve the card color with %s support', support => {
+    const cssPrototype = Object.getPrototypeOf(window.CSS)
+    const originalSupports = cssPrototype.supports
+    cssPrototype.supports = ((property: string) => property === 'background' ? support !== 'no-tint'
+      : property === 'backdrop-filter' ? support === 'standard'
+      : property === '-webkit-backdrop-filter' ? support === 'webkit' : false) as typeof CSS.supports
+    try {
+      render()
+      act(() => trigger().click())
+      for (const context of [false, true]) {
+        if (context) act(() => { tab('a').dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })) })
+        const surface = menu()!
+        const glass = support === 'standard' || support === 'webkit'
+        expect(surface.style.width).toBe(context ? '210px' : '380px')
+        // happy-dom does not parse color-mix; verify the blur branch here and the opaque
+        // background when unsupported. Real-browser visual QA covers the supported tint.
+        if (!glass) expect(surface.style.background).toBe('var(--bg-card)')
+        expect(surface.style.backdropFilter).toBe(glass ? 'blur(16px) saturate(140%)' : '')
+        expect(surface.style.borderColor).toBe('var(--border)')
+        if (context) expect(trigger().getAttribute('aria-expanded')).toBe('false')
+      }
+    } finally { cssPrototype.supports = originalSupports }
+  })
+})
