@@ -1,3 +1,4 @@
+import { EngineSurfaceButtons } from './components/EngineSurfaceButtons'
 import { ActionNotice } from './components/sessions/ActionNotice'
 import { HandoffMeter } from './components/sessions/HandoffWarning'
 import { PageRouteFrame } from './components/PageRouteFrame'
@@ -3252,6 +3253,7 @@ export default function AppLayout() {
             {headerSession.title}
           </span>
           {headerSession.actionable && <AwayChip id={headerSession.id} away={headerSession.away === true} pt={lang === 'pt'} />}
+          <EngineSurfaceButtons placement="session-header" sessionId={headerSession.id} lang={lang === 'pt' ? 'pt' : 'en'} />
           {headerMuted && (
             <span role="img" aria-label={mutedTooltip(lang === 'pt')} title={mutedTooltip(lang === 'pt')}
               style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: 'var(--text-tertiary)' }}>
