@@ -29,8 +29,10 @@ const T = (pt: boolean) => ({
   agents: pt ? 'Agentes' : 'Agents',
   edit: pt ? 'Editar' : 'Edit',
   setPlan: pt ? 'Definir plano' : 'Set plan',
+  confirm: pt ? 'Confirmar plano' : 'Confirm plan',
   review: pt ? 'Revisar' : 'Review',
   noPlan: pt ? 'Sem plano' : 'No plan',
+  detected: (name: string) => (pt ? `Detectado: ${name} · confirme` : `Detected: ${name} · confirm`),
   starts: (day: string) => (pt ? `Plano começa em ${day}` : `Plan starts ${day}`),
   problem: pt ? 'Períodos com problema' : 'Periods need fixing',
   noMeter: pt ? 'Não informado' : 'Not reported',
@@ -50,6 +52,8 @@ export interface BillingRowView extends BillingRow {
   plan: { name: string; price: string | null; mode: BillingMode } | null
   /** With no plan in force, the day (`dd/MM/yyyy`) a registered plan starts — never "no plan" then. */
   starts?: string | null
+  /** With nothing registered, the plan the assistant reported (or detection found) — not saved until confirmed. */
+  detected?: string | null
   /** Its timeline has overlapping or broken periods: it cannot be priced until they are fixed. */
   problem: boolean
   limits: PlanLimits | null
@@ -85,6 +89,7 @@ function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
   if (r.signedOut) return <Pill tone="neutral" nowrap>{t.signedOut}</Pill>
   if (r.problem) return <Pill tone="error" nowrap>{t.problem}</Pill>
   if (!r.plan && r.starts) return <Pill tone="neutral" nowrap>{t.starts(r.starts)}</Pill>
+  if (!r.plan && r.detected) return <Pill tone="warn" nowrap>{t.detected(r.detected)}</Pill>
   if (!r.plan) return <Pill tone="warn" nowrap>{t.noPlan}</Pill>
   return <span>{r.plan.name}{r.plan.price ? ` · ${r.plan.price}` : ''}</span>
 }
@@ -120,7 +125,7 @@ function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: numb
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>
 }
 
-const actionLabel = (r: BillingRowView, t: ReturnType<typeof T>) => (r.problem ? t.review : r.plan || r.starts ? t.edit : t.setPlan)
+const actionLabel = (r: BillingRowView, t: ReturnType<typeof T>) => (r.problem ? t.review : r.plan || r.starts ? t.edit : r.detected ? t.confirm : t.setPlan)
 
 /**
  * One compact ROW per account: harness mark + name, the assistant and plan muted under it, the two

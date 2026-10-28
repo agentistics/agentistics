@@ -7,8 +7,9 @@
  */
 import {
   accountProfileKey, accountProfileOf, dayFromIndex, dayIndex, findPlan, plansForHarness, sortPeriods, validatePeriod, SENTINEL_PLAN_IDS,
-  type BillingPeriod, type BillingSettings, type HarnessId, type PlanLimits,
+  type BillingDetection, type BillingPeriod, type BillingSettings, type HarnessId, type PlanLimits,
 } from '@agentistics/core'
+import type { PeriodDraft } from './billingForm'
 import { applyPlan, emptyDraft, periodFromDraft, periodName, splitTimeline, validateDraft } from './billingForm'
 import { isPlaceholderName, isUnidentified, type AccountRowData } from './accountsSummary'
 import { accountLabelKey } from '../../lib/planLimits'
@@ -65,6 +66,30 @@ export function matchDetectedPlan(harness: HarnessId, reported: string | undefin
   const hit = plansForHarness(harness).find(p => p.id.toLowerCase() === r || p.label.toLowerCase() === r)
     ?? plansForHarness(harness).find(p => p.label.toLowerCase().includes(r) || r.includes(p.id.toLowerCase()))
   return hit?.id ?? ''
+}
+
+/**
+ * The plan a row with nothing registered would be prefilled with: what the account itself reported,
+ * else what detection pinned for its harness. `''` when nothing names one. Used by the editor (to
+ * prefill) and by the row (to say "detected, confirm" instead of "no plan") — one answer for both.
+ */
+export function detectedPlanId(
+  harness: HarnessId, account: Pick<BillingAccount, 'plan'> | null, detections: readonly BillingDetection[],
+): string {
+  const own = account ? matchDetectedPlan(harness, account.plan) : ''
+  if (own) return own
+  return detections.find(d => d.harness === harness && d.source !== 'none' && d.mode !== 'unknown')?.planId ?? ''
+}
+
+/**
+ * Whether pressing Save must write the period. A change always does. A NEW period that arrived
+ * prefilled (a detected plan and today's date) does too, even untouched: the drawer remembers what it
+ * opened WITH, so comparing against that alone read the prefill as "already stored" and Save closed
+ * without writing — the row stayed "No plan" while the editor showed the plan (CONTA.SEM.PLANO).
+ */
+export function planDraftWrites(draft: PeriodDraft, opened: PeriodDraft | null): boolean {
+  if (JSON.stringify(draft) !== JSON.stringify(opened)) return true
+  return draft.id === '' && draft.planId !== ''
 }
 
 const dayOf = (ms: number | undefined, fallback: string): string =>
