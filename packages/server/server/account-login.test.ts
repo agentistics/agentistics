@@ -7,9 +7,9 @@ import codexCapture from './fixtures/account-login/codex.json'
 import copilotCapture from './fixtures/account-login/copilot.json'
 import geminiPreamble from './fixtures/account-login/gemini.json'
 import geminiRetryCapture from './fixtures/account-login/gemini-url-invalid.json'
-import { LOGIN_ADAPTERS, stripLoginAnsi, loginRefusal, LoginFailure, parseLoginOutput, startAccountLogin, type LoginProcess, type LoginRequest } from './account-login'
-import { createAccountRoots } from './account-roots'
-import { createHarnessAccounts } from './harness-accounts'
+import { claudeKeychainService, diagnoseLogin, LOGIN_ADAPTERS, stripLoginAnsi, loginRefusal, LoginFailure, maskLoginText, loginScreenSaid, parseLoginOutput, parsePaneDead, startAccountLogin, submitPasted, type LoginProcess, type LoginRequest } from './account-login'
+import { createAccountRoots, rootEnv } from './account-roots'
+import { claudeProbeEnv, createHarnessAccounts } from './harness-accounts'
 
 // Captured installed CLIs, with one-time codes/state/PKCE replaced by same-shape fakes.
 const [geminiFirst, geminiRetry] = geminiRetryCapture.split('<<<QA: typed fake code qa-fake-123>>>')
@@ -173,7 +173,9 @@ describe('headless login adapters', () => {
 
   test('the login boundary never logs raw output or input', async () => {
     const src = await Bun.file(join(import.meta.dir, 'account-login.ts')).text()
-    expect(/console\.(?:log|info|warn|error|debug|trace)/.test(src)).toBe(false)
+    // One sink, fed only masked screens (see the r3 masking tests) and fixed facts.
+    expect(src.match(/console\.(?:log|info|warn|error|debug|trace)/g)).toEqual(['console.warn'])
+    expect(src).toContain('export const loginLog = (line: string) => console.warn(line)')
     expect(src).toContain("tmux(['load-buffer', '-b', buffer, '-'], code)")
   })
   test('device CLI argv cannot fall back to a localhost/browser flow', () => {
@@ -294,5 +296,113 @@ describe('login lifecycle with private roots', () => {
       expect((await roots.list())[0]!.error).toBe('login_timeout')
       expect((await roots.list())[0]!.status).toBe('failed')
     } finally { roots.stopPoller(); await rm(base, { recursive: true, force: true }) }
+  })
+})
+
+describe('CONTAS.LOGIN r3: the code is submitted, and a stuck or failed sign-in says what the CLI said', () => {
+  test('the Enter is sent apart from the paste, after a wait, and pressed once more when the screen did not move', async () => {
+    const events: string[] = []
+    let screen = 'Paste code here if prompted > '
+    await submitPasted({
+      paste: async () => { events.push('paste') },
+      enter: async () => { events.push('enter') },
+      screen: async () => screen,
+    }, { sleep: async ms => { events.push(`sleep ${ms}`) } })
+    expect(events).toEqual(['paste', 'sleep 500', 'enter', 'sleep 1500', 'enter'])
+    events.length = 0
+    await submitPasted({
+      paste: async () => { events.push('paste') },
+      enter: async () => { events.push('enter'); screen = 'Login successful' },
+      screen: async () => screen,
+    }, { sleep: async ms => { events.push(`sleep ${ms}`) } })
+    expect(events).toEqual(['paste', 'sleep 500', 'enter', 'sleep 1500'])
+  })
+  test('a dead pane reports its real exit status', () => {
+    expect(parsePaneDead('0 \n')).toBeNull()
+    expect(parsePaneDead('1 1\n')).toBe(1)
+    expect(parsePaneDead('1 0')).toBe(0)
+  })
+  test('a CLI still alive after the code fails with what its screen says, never waits forever', async () => {
+    const cli = fakeCli([samples.claude])
+    cli.proc.snapshot = true
+    const failures: { reason: string; detail?: string }[] = [], logs: string[] = []
+    const code = 'SECRETCODEabcdefghij0123456789#STATEPARTxyz'
+    const handle = await startAccountLogin(request('claude'), async (reason, detail) => { failures.push({ reason, detail }) },
+      { launch: async () => cli.proc, submitTimeoutMs: 30, log: l => logs.push(l) })
+    await handle.ready
+    await handle.submit(code)
+    cli.output(`${samples.claude}\nPaste code here if prompted > ${code}\nOAuth error: Invalid code`)
+    await new Promise(r => setTimeout(r, 80))
+    expect(failures).toHaveLength(1)
+    expect(failures[0]!.reason).toBe('login_failed')
+    expect(failures[0]!.detail).toContain('OAuth error: Invalid code')
+    for (const text of [failures[0]!.detail!, ...logs]) {
+      expect(text).not.toContain('SECRETCODE')
+      expect(text).not.toContain('STATEPART')
+      expect(text).not.toContain('https://')
+    }
+    expect(logs.join('\n')).toContain('OAuth error: Invalid code')
+  })
+  test('a CLI that exits non-zero after the code fails at once with its last words', async () => {
+    const cli = fakeCli([samples.claude])
+    cli.proc.snapshot = true
+    const failures: { reason: string; detail?: string }[] = []
+    const handle = await startAccountLogin(request('claude'), async (reason, detail) => { failures.push({ reason, detail }) },
+      { launch: async () => cli.proc, log: () => {} })
+    await handle.ready
+    await handle.submit('FAKECODE123#abc')
+    cli.output(`${samples.claude}\nPaste code here if prompted > Login failed: Request failed with status code 400`)
+    await tick()
+    cli.exit(1)
+    await tick(); await tick()
+    expect(failures).toEqual([{ reason: 'login_failed', detail: 'Login failed: Request failed with status code 400' }])
+  })
+  test('masking removes the code, its halves, links and long tokens', () => {
+    const out = maskLoginText('pasted ABCD1234#WXYZ9876 at https://claude.com/x?state=s and tok_' + 'q'.repeat(30), ['ABCD1234#WXYZ9876', 'ABCD1234', 'WXYZ9876'])
+    expect(out).not.toContain('ABCD1234'); expect(out).not.toContain('WXYZ9876'); expect(out).not.toContain('claude.com'); expect(out).not.toContain('qqqq')
+    expect(loginScreenSaid('header\nPaste code here if prompted > Login successful\nPane is dead (status 0)')).toBe('Login successful')
+  })
+})
+
+describe('CONTAS.LOGIN r3: login and probe name the same macOS keychain item', () => {
+  test('the item mirrors the CLI: sha256(CLAUDE_CONFIG_DIR)[:8], SECURESTORAGE wins, none = the plain item', () => {
+    const dir = '/Users/someone/.agentistics/accounts/claude/r_0123456789ab'
+    const hex = new Bun.CryptoHasher('sha256').update(dir).digest('hex').slice(0, 8)
+    expect(claudeKeychainService({ CLAUDE_CONFIG_DIR: dir })).toBe(`Claude Code-credentials-${hex}`)
+    expect(claudeKeychainService({})).toBe('Claude Code-credentials')
+    expect(claudeKeychainService({ CLAUDE_CONFIG_DIR: dir, CLAUDE_SECURESTORAGE_CONFIG_DIR: '/x' })).not.toBe(`Claude Code-credentials-${hex}`)
+  })
+  test('the probe env of a root names the item the login env of that root writes, even with an inherited SECURESTORAGE dir', () => {
+    const root = '/Users/someone/.agentistics/accounts/claude/r_0123456789ab'
+    const login = rootEnv('claude', root)
+    const probe = claudeProbeEnv(root, { HOME: '/Users/someone', CLAUDE_SECURESTORAGE_CONFIG_DIR: '/elsewhere', CLAUDE_CONFIG_DIR: '/old' })
+    expect(claudeKeychainService(probe as Record<string, string>)).toBe(claudeKeychainService(login))
+    expect(claudeKeychainService(login)).not.toBe('Claude Code-credentials')
+  })
+})
+
+describe('CONTAS.LOGIN r3: a finished sign-in the probe cannot see says why (macOS keychain)', () => {
+  const req = { harness: 'claude' as const, pendingId: 'r_x', root: '/Users/a/.agentistics/accounts/claude/r_x', env: { CLAUDE_CONFIG_DIR: '/Users/a/.agentistics/accounts/claude/r_x' } }
+  test('item present → keychain_unreadable; absent → login_not_saved; never -w; not macOS or not claude → nothing', async () => {
+    const calls: string[][] = []
+    expect(await diagnoseLogin(req, 'darwin', async argv => { calls.push(argv); return 0 })).toBe('keychain_unreadable')
+    expect(await diagnoseLogin(req, 'darwin', async argv => { calls.push(argv); return 44 })).toBe('login_not_saved')
+    expect(await diagnoseLogin(req, 'linux', async () => 0)).toBeUndefined()
+    expect(await diagnoseLogin({ ...req, harness: 'codex' }, 'darwin', async () => 0)).toBeUndefined()
+    for (const argv of calls) {
+      expect(argv).not.toContain('-w'); expect(argv).not.toContain('-g')
+      expect(argv.slice(0, 4)).toEqual(['security', 'find-generic-password', '-s', claudeKeychainService(req.env)])
+    }
+  })
+  test('the CLI ended cleanly with no account bound: the diagnosis replaces login_failed', async () => {
+    const cli = fakeCli([samples.claude])
+    const failures: string[] = []
+    const handle = await startAccountLogin(request('claude'), async r => { failures.push(r) },
+      { launch: async () => cli.proc, bindGraceMs: 10, diagnose: async () => 'keychain_unreadable', log: () => {} })
+    await handle.ready
+    await handle.submit('FAKE_CODE')
+    cli.exit(0)
+    await new Promise(r => setTimeout(r, 50))
+    expect(failures).toEqual(['keychain_unreadable'])
   })
 })

@@ -21,6 +21,8 @@ export interface RootRowView {
   label?: string
   plan?: string
   error?: string
+  /** What the assistant's CLI said when the attempt failed (masked by the server: no code, no link). */
+  detail?: string
   /** Pending, but no sign-in process is behind it any more (server restarted): only "start again" works. */
   stale?: boolean
 }
@@ -57,7 +59,7 @@ export function pendingCardState(row: RootRowView): 'live' | 'expired' {
  * Refusals that mean "this sign-in attempt is over" — the folder is gone, timed out or failed. Each
  * becomes the expired state with a "Try again" that starts a NEW login, never a loose sentence.
  */
-const OVER = new Set(['not_found', 'login_timeout', 'login_failed'])
+const OVER = new Set(['not_found', 'login_timeout', 'login_failed', 'keychain_unreadable', 'login_not_saved'])
 export const attemptIsOver = (code: string | undefined | null): boolean => !!code && OVER.has(code)
 export const refusalCode = (body: unknown): string | undefined => {
   const e = body && typeof body === 'object' ? (body as { error?: unknown }).error : undefined
@@ -72,6 +74,8 @@ const REFUSALS: Record<string, { pt: string; en: string }> = {
   login_failed: { pt: 'O login não foi concluído. Comece de novo.', en: 'Sign-in did not finish. Start again.' },
   plaintext_refused: { pt: 'O cofre de credenciais do sistema está indisponível. O Copilot não conseguiu salvar o login com segurança; salvar o token em texto simples foi recusado.', en: 'The system keychain is unavailable. Copilot could not save the login securely; storing the token in plain text was refused.' },
   invalid_code: { pt: 'O código não foi aceito. Abra o link atual e cole um novo código de autorização.', en: 'The code was not accepted. Open the current link and paste a new authorization code.' },
+  keychain_unreadable: { pt: 'O macOS não deixou o agentistics ler o login do Claude que acabou de ser salvo. Abra o Acesso às Chaves, procure o item “Claude Code-credentials” desta conta e permita o acesso — ou entre de novo e escolha “Permitir sempre” quando o macOS perguntar.', en: 'macOS did not let agentistics read the Claude login it just saved. Open Keychain Access, find the “Claude Code-credentials” item for this account and allow access — or sign in again and choose “Always Allow” when macOS asks.' },
+  login_not_saved: { pt: 'O login terminou, mas não foi salvo neste computador. Tente de novo; se repetir, entre uma vez num terminal com `claude auth login`.', en: 'The sign-in finished, but the login was not saved on this computer. Try again; if it repeats, sign in once in a terminal with `claude auth login`.' },
   root_in_use: { pt: 'Ainda há uma sessão aberta nesta conta. Encerre-a primeiro.', en: 'A session is still running in this account. End it first.' },
   unsupported: { pt: 'Este assistente mantém um só login por computador, então não dá para separar uma segunda conta.', en: 'This assistant keeps a single login per computer, so a second account cannot be kept apart.' },
   unsafe_path: { pt: 'A pasta de contas contém um atalho, então foi deixada como está.', en: 'The accounts folder contains a link, so it was left alone.' },
@@ -90,6 +94,13 @@ export function addErrorText(body: unknown, pt: boolean): string {
   const msg = obj?.message
   if (!pt && typeof msg === 'string' && msg.trim()) return msg
   return pt ? 'Não foi possível concluir. Tente de novo.' : 'Could not complete this. Try again.'
+}
+
+/** A failed attempt's sentence plus, when the server captured it, what the assistant itself said. */
+export function failureText(row: Pick<RootRowView, 'error' | 'detail'>, pt: boolean): string {
+  const base = addErrorText({ error: row.error }, pt)
+  const said = row.detail?.trim()
+  return said ? `${base} ${pt ? 'O assistente respondeu' : 'The assistant said'}: “${said}”` : base
 }
 
 export const ADD_COPY = (pt: boolean) => ({

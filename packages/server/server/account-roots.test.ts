@@ -358,3 +358,32 @@ describe('audit latency does not block login or cancellation', () => {
     } finally { release(); await adding; await deleting; roots.stopPoller() }
   })
 })
+
+describe('CONTAS.LOGIN r3: a pending login the probe cannot see is logged once per change, with its keychain item', () => {
+  test('after a code, "sees no login" is logged once with the item name; nothing is logged before a code', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'r3-roots-'))
+    const lines: string[] = []
+    let typed = false
+    const roots = createAccountRoots({
+      base, flagOn: () => true, defaultDir: () => join(base, 'none'), registerMcp: async () => {}, audit: async () => {},
+      log: l => lines.push(l),
+      probe: async () => ({ key: 'default', label: 'Default account' }),
+      listAccounts: async () => ({ accounts: [] }) as never,
+      login: async (_req, _fail) => ({
+        ready: Promise.resolve({ kind: 'paste' as const, url: 'https://claude.com/cai/oauth/authorize', expiresAt: Date.now() + 60_000 }),
+        info: () => undefined, submit: async () => {}, stop: async () => {}, submitted: () => typed,
+      }),
+    })
+    try {
+      const made = await roots.addRoot('claude')
+      expect(made.ok).toBe(true)
+      await roots.pollPending()
+      expect(lines).toEqual([])
+      typed = true
+      await roots.pollPending(); await roots.pollPending()
+      expect(lines).toHaveLength(1)
+      expect(lines[0]).toMatch(/probe sees no login/)
+      expect(lines[0]).toMatch(/keychain item "Claude Code-credentials-[0-9a-f]{8}"/)
+    } finally { roots.stopPoller?.(); await rm(base, { recursive: true, force: true }) }
+  })
+})

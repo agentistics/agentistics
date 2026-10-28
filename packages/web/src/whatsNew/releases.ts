@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.161.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Ao adicionar uma conta, o código colado é enviado de verdade ao assistente; se ele recusar, a janela mostra na hora o que ele respondeu, com "Tentar de novo", em vez de ficar esperando para sempre.',
+        en: 'When adding an account, the pasted code really reaches the assistant; if it refuses it, the dialog shows right away what it answered, with "Try again", instead of waiting forever.',
+      },
+      {
+        pt: 'No macOS, se o login terminou mas a conta não apareceu, a janela explica o motivo: o macOS não deixou o agentistics ler o login (Acesso às Chaves → Permitir sempre) ou o login não foi salvo.',
+        en: 'On macOS, when the sign-in finished but no account appeared, the dialog says why: macOS did not let agentistics read the sign-in (Keychain Access → Always Allow) or the sign-in was not saved.',
+      },
+      {
+        pt: 'Um assistente instalado sem login não aparece mais como se fosse uma conta com plano: vira o aviso "Claude Code instalado, sem login", com Entrar e um × para esconder.',
+        en: 'An assistant installed without a sign-in no longer looks like an account with a plan: it becomes the notice "Claude Code installed, not signed in", with Sign in and an × to hide it.',
+      },
+    ],
+  },
   '2.161.1': {
     features: [],
     fixes: [

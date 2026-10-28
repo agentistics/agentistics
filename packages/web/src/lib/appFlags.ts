@@ -43,3 +43,13 @@ export const chatActivityStore = createSharedPref<boolean>({
   // Same rule as sessionTabs: flag OFF (the default) writes nothing to localStorage.
   adoptLocalWhenAbsent: true, parse: asBool, decode: flag, encode: bit,
 })
+
+/**
+ * Assistants whose "installed, not signed in" notice the person closed on Usage → Accounts. A
+ * harness id list; absent = none hidden. A closed notice never hides an account: a signed-out
+ * harness is not one.
+ */
+export const signedOutHiddenStore = createSharedPref<string[]>({
+  key: 'agentistics-signed-out-hidden', prefKey: 'signedOutHidden', fallback: [],
+  parse: raw => (Array.isArray(raw) && raw.every(x => typeof x === 'string') ? raw : null),
+})
