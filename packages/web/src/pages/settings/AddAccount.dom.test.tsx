@@ -247,3 +247,46 @@ describe('CONTAS.LOGIN r2 — "this account no longer exists" becomes a recovera
     expect(document.querySelector('[role="dialog"] [data-login-url]')).not.toBeNull()
   })
 })
+
+describe('CONTAS.LOGIN r4: "Entrar" on the not-signed-in notice opens THIS dialog, never a session', () => {
+  test('clicking Entrar starts the paste-the-code login and asks nothing of /api/fleet', async () => {
+    const { BillingAccountList } = await import('./AccountRow')
+    const { accountSignInStore } = await import('../../lib/accountSignIn')
+    const g = globalThis as { EventSource?: unknown }
+    g.EventSource ??= class { addEventListener() {} removeEventListener() {} close() {} }
+    const calls: string[] = []
+    const inner = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => { calls.push(`${init?.method ?? 'GET'} ${String(input)}`); return inner(input, init) }) as typeof fetch
+    await act(async () => {
+      resize(1440)
+      root.render(<PageRouteFrame compact={false} scrollRef={null} maxWidth={1400}>
+        <BillingAccountList lang="pt" now={Date.now()} pendingIds={new Set()} failedIds={new Set()} selectedKey={null} onToggle={() => {}} onEdit={() => {}}
+          rows={[{ key: 'harness:gemini', harness: 'gemini', account: null, title: 'Gemini', sub: '', scope: { kind: 'default', harness: 'gemini' }, signedOut: true, plan: null, problem: false, limits: null }]}
+          onSignIn={h => accountSignInStore.request(h)} />
+        <AddAccount lang="pt" harnesses={['gemini']} onBound={() => {}} />
+      </PageRouteFrame>)
+    })
+    await act(async () => { await new Promise(r => setTimeout(r, 10)) })
+    const entrar = button('Entrar', document.querySelector('[data-signed-out-notice="gemini"]')!)
+    expect(entrar).toBeTruthy()
+    await act(async () => { entrar.click(); await new Promise(r => setTimeout(r, 20)) })
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    expect(document.querySelector('[role="dialog"] [data-login-url]')).not.toBeNull()
+    expect(calls).toContain('POST /api/accounts/roots')
+    expect(calls.some(c => c.includes('/api/fleet'))).toBe(false)
+    expect(accountSignInStore.get()).toBeNull()
+  })
+  test('with multiple accounts off, Entrar says how to sign in instead of doing nothing', async () => {
+    const { accountSignInStore } = await import('../../lib/accountSignIn')
+    const inner = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/experimental' ? json({ features: [] }) : inner(input, init)) as typeof fetch
+    const said: string[] = []
+    await act(async () => {
+      resize(1440)
+      root.render(<AddAccount lang="pt" harnesses={['claude']} onBound={() => {}} onSignInUnavailable={(_h, m) => said.push(m)} />)
+    })
+    await act(async () => { accountSignInStore.request('claude'); await new Promise(r => setTimeout(r, 10)) })
+    expect(said).toEqual([ADD_COPY(true).signInNeedsFlag])
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+  })
+})

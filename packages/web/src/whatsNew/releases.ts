@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.161.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Ao adicionar uma conta do Claude, o código certo não é mais recusado como "código inválido" quando o login demora alguns segundos para confirmar.',
+        en: 'When adding a Claude account, the right code is no longer refused as "invalid code" when the sign-in takes a few seconds to confirm.',
+      },
+      {
+        pt: 'O campo do código fica oculto enquanto você cola (com um botão de olho para ver) e o navegador não oferece mais salvá-lo como senha.',
+        en: 'The code field stays hidden while you paste (with an eye button to show it) and the browser no longer offers to save it as a password.',
+      },
+      {
+        pt: '"Entrar" no aviso "Claude Code instalado, sem login" e "Entrar agora" depois de instalar abrem a janela de adicionar conta, em vez de uma sessão vazia que fechava na hora.',
+        en: '"Sign in" on the "Claude Code installed, not signed in" notice and "Sign in now" after installing open the add-account dialog, instead of an empty session that closed at once.',
+      },
+    ],
+  },
   '2.161.2': {
     features: [],
     fixes: [

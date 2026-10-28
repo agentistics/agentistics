@@ -147,19 +147,6 @@ export async function installHarness(
   }
 }
 
-/** "Entrar": starts the harness (its own login prompt) in an ordinary session; resolves to its id. */
-export async function loginHarness(id: string, lang: 'pt' | 'en'): Promise<{ ok: boolean; id?: string; message: string }> {
-  try {
-    const res = await fetch(`/api/fleet/harness-login?lang=${lang}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ harness: id }),
-    })
-    const json = await res.json() as { ok: boolean; id?: string; message?: string }
-    return { ok: json.ok === true, ...(json.id ? { id: json.id } : {}), message: json.message ?? '' }
-  } catch {
-    return { ok: false, message: lang === 'pt' ? 'Não consegui falar com esta máquina.' : 'Could not reach this machine.' }
-  }
-}
-
 /** One harness's current status (fresh GET), or null when it is not listed (e.g. the native one) or the read fails. */
 export async function fetchHarnessStatus(id: string): Promise<HarnessChatStatus | null> {
   try {

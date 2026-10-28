@@ -167,7 +167,10 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
         invalidCount = (text.match(/invalid_grant|invalid (?:authorization )?code|(?:authorization |authentication )?code (?:is |was )?(?:invalid|expired)|authentication failed/gi) ?? []).length
         promptCount = (text.match(/Paste code here|Enter the authorization code/gi) ?? []).length
         const invalid = submitted && (invalidCount > invalidAtSubmit || promptCount > promptsAtSubmit)
-        if (invalid && info) { submitted = false; info = { ...info, error: 'invalid_code' } }
+        if (invalid && info) {
+          submitted = false; info = { ...info, error: 'invalid_code' }
+          log(`[account-login] ${req.harness} sign-in concluded invalid_code: ${invalidCount > invalidAtSubmit ? 'the CLI said the code is invalid' : 'the CLI asked for the code again'}; the CLI screen said: ${loginScreenSaid(lastScreen, secrets) ?? '(nothing)'}`)
+        }
         if (req.harness === 'copilot' && loginRefusal(output)) { await fail('plaintext_refused'); return }
         const parsed = parseLoginOutput(req.harness, output, linkAt ?? now())
         if (parsed) {
@@ -175,7 +178,10 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
           parsed.expiresAt = Math.min(parsed.expiresAt, deadline)
           if (!info || parsed.url !== info.url || parsed.expiresAt < info.expiresAt) {
             const retry = hasSubmitted && info?.kind === 'paste'
-            if (retry) submitted = false
+            if (retry) {
+              submitted = false
+              log(`[account-login] ${req.harness} sign-in concluded invalid_code: the CLI printed a new sign-in link after the code; the CLI screen said: ${loginScreenSaid(lastScreen, secrets) ?? '(nothing)'}`)
+            }
             info = { ...parsed, ...(retry || info?.error ? { error: 'invalid_code' as const } : {}) }; clearTimeout(readyTimer); clearTimeout(expiryTimer)
             expiryTimer = setTimeout(() => { void fail('login_timeout').catch(() => {}) }, Math.max(0, parsed.expiresAt - now()))
             expiryTimer.unref?.(); resolveReady(parsed)
@@ -256,20 +262,32 @@ export function parsePaneDead(out: string): number | null {
 
 export interface PasteTarget { paste: () => Promise<void>; enter: () => Promise<void>; screen: () => Promise<string> }
 /**
- * Paste, WAIT, then Enter — never in one burst. A TUI reads a fast burst as one paste and can take
- * the Enter inside it as text, leaving the code in the field. If the screen has not moved after the
- * Enter, press it once more: a second Enter on an emptied prompt does nothing, a missing one strands
- * the code until somebody opens the terminal.
+ * PURE. Is the typed code still sitting in the input after the Enter? Only then was the Enter lost.
+ * `claude auth login` reads stdin with readline and does NOT echo, and while it trades the code for
+ * a token its screen does not move — so "the screen did not change" is no evidence at all there.
  */
-export async function submitPasted(t: PasteTarget, opts: { settleMs?: number; confirmMs?: number; sleep?: (ms: number) => Promise<void> } = {}): Promise<void> {
+export function codeStillTyped(screen: string, code: string): boolean {
+  const tail = code.slice(-12)
+  if (tail.length < 8) return false
+  const last = stripLoginAnsi(screen).split('\n').map(l => l.trimEnd()).filter(Boolean).at(-1) ?? ''
+  return last.includes(tail)
+}
+/**
+ * Paste, WAIT, then Enter — never in one burst. A TUI reads a fast burst as one paste and can take
+ * the Enter inside it as text, leaving the code in the field. Press Enter once more ONLY when the
+ * code is still visible in the field: a blind second Enter is an EMPTY LINE to `claude auth login`,
+ * which answers "Invalid code. Please make sure the full code was copied." while the real code is
+ * still being exchanged — measured on 2.1.310 with a slow token exchange (CONTAS.LOGIN r4).
+ */
+export async function submitPasted(t: PasteTarget, opts: { code?: string; settleMs?: number; confirmMs?: number; sleep?: (ms: number) => Promise<void> } = {}): Promise<void> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
   await t.paste()
   await sleep(opts.settleMs ?? 500)
-  const before = await t.screen().catch(() => '')
   await t.enter()
+  if (!opts.code) return
   await sleep(opts.confirmMs ?? 1500)
   const after = await t.screen().catch(() => null)
-  if (after !== null && after === before) await t.enter()
+  if (after !== null && codeStillTyped(after, opts.code)) await t.enter()
 }
 
 /** The ONE log sink of this module. Callers pass only masked text (`maskLoginText`) or fixed facts. */
@@ -355,7 +373,7 @@ export async function launchLoginProcess(req: LoginRequest): Promise<LoginProces
             paste: () => tmux(['paste-buffer', '-d', '-r', '-b', buffer, '-t', name]).then(() => {}),
             enter: () => tmux(['send-keys', '-t', name, 'C-m']).then(() => {}),
             screen: capture,
-          })
+          }, { code })
         } finally { await tmux(['delete-buffer', '-b', buffer]).catch(() => {}) }
       },
       async stop() {

@@ -215,15 +215,3 @@ export async function handleHarnessInstallRoute(
   }
   return new Response(sse(events(), resolved.keepaliveMs ?? INSTALL_KEEPALIVE_MS), { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } })
 }
-
-/** POST /api/fleet/harness-login — the harness's own login runs in an ordinary managed session. */
-export async function handleHarnessLoginRoute(
-  body: { harness?: unknown } | null, lang: 'pt' | 'en',
-  spawn: (lang: 'pt' | 'en', body: { harness: string; cwd: string; label: string }) => Promise<{ ok: boolean; message: string; id?: string }>,
-): Promise<{ status: number; body: { ok: boolean; message: string; id?: string } }> {
-  const id = typeof body?.harness === 'string' ? body.harness : ''
-  if (!Object.hasOwn(HARNESS_INSTALLERS, id)) return { status: 404, body: { ok: false, message: 'unknown_harness' } }
-  const name = ({ claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', copilot: 'Copilot' } as Record<string, string>)[id]!
-  const out = await spawn(lang, { harness: id, cwd: homedir(), label: `${lang === 'pt' ? 'Entrar' : 'Sign in'} · ${name}` })
-  return { status: 200, body: out }
-}

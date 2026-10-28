@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { defaultRunner, handleHarnessInstallRoute, handleHarnessLoginRoute, installEnv, type Runner } from './harness-install'
+import { defaultRunner, handleHarnessInstallRoute, installEnv, type Runner } from './harness-install'
 import type { HarnessInstallFacts } from './harness-install-plan'
 
 const facts = (over: Partial<HarnessInstallFacts> = {}) => async (): Promise<HarnessInstallFacts> => ({
@@ -151,19 +151,5 @@ describe('harness install failures are never silent (macOS report, 2.159.3)', ()
       expect(lines).toContainEqual(['out', 'stdout'])
       expect(lines).toContainEqual(['boom', 'stderr'])
     } finally { process.env.PATH = saved }
-  })
-})
-
-describe('harness login route', () => {
-  test('starts the harness in an ordinary session in the home directory', async () => {
-    let seen: unknown
-    const out = await handleHarnessLoginRoute({ harness: 'codex' }, 'pt', async (_l, b) => { seen = b; return { ok: true, message: 'ok', id: 's1' } })
-    expect(out.body.id).toBe('s1')
-    expect((seen as { harness: string; cwd: string }).harness).toBe('codex')
-    expect((seen as { cwd: string }).cwd.startsWith('/')).toBe(true)
-  })
-  test('refuses a harness it does not manage', async () => {
-    const out = await handleHarnessLoginRoute({ harness: 'rm -rf' }, 'en', async () => ({ ok: true, message: '' }))
-    expect(out.status).toBe(404)
   })
 })

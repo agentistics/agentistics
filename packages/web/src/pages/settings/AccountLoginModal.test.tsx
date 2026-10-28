@@ -92,6 +92,17 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
       expect(html).toContain(t.finish)
       expect(html).not.toContain(t.copyLink)
     })
+    test('CONTAS.LOGIN r4: the pasted code is masked without being a password field', () => {
+      const html = render({ harness: 'claude', login: { kind: 'paste', url: 'https://claude.com/cai/oauth/authorize?x=1', expiresAt: Date.now() + 900000 } })
+      const input = html.match(/<input[^>]*>/)![0]
+      expect(input).toContain('type="text"')
+      expect(input).not.toContain('type="password"')
+      expect(input).toContain('-webkit-text-security:disc')
+      expect(input).toContain('data-1p-ignore')
+      expect(input).toContain('data-lpignore="true"')
+      expect(input).toContain('autoComplete="one-time-code"')
+      expect(html).toContain('aria-pressed')
+    })
     for (const reason of ['plaintext_refused', 'login_timeout', 'login_failed', 'invalid_code']) {
       test(`${reason}: localized refusal`, () => {
         const message = addErrorText({ error: reason }, lang === 'pt')

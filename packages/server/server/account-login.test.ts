@@ -7,7 +7,7 @@ import codexCapture from './fixtures/account-login/codex.json'
 import copilotCapture from './fixtures/account-login/copilot.json'
 import geminiPreamble from './fixtures/account-login/gemini.json'
 import geminiRetryCapture from './fixtures/account-login/gemini-url-invalid.json'
-import { claudeKeychainService, diagnoseLogin, LOGIN_ADAPTERS, stripLoginAnsi, loginRefusal, LoginFailure, maskLoginText, loginScreenSaid, parseLoginOutput, parsePaneDead, startAccountLogin, submitPasted, type LoginProcess, type LoginRequest } from './account-login'
+import { claudeKeychainService, diagnoseLogin, LOGIN_ADAPTERS, stripLoginAnsi, loginRefusal, LoginFailure, maskLoginText, loginScreenSaid, parseLoginOutput, parsePaneDead, startAccountLogin, submitPasted, codeStillTyped, type LoginProcess, type LoginRequest } from './account-login'
 import { createAccountRoots, rootEnv } from './account-roots'
 import { claudeProbeEnv, createHarnessAccounts } from './harness-accounts'
 
@@ -300,21 +300,23 @@ describe('login lifecycle with private roots', () => {
 })
 
 describe('CONTAS.LOGIN r3: the code is submitted, and a stuck or failed sign-in says what the CLI said', () => {
-  test('the Enter is sent apart from the paste, after a wait, and pressed once more when the screen did not move', async () => {
+  test('the Enter is sent apart from the paste, after a wait, and pressed once more only when the code is still in the field', async () => {
     const events: string[] = []
-    let screen = 'Paste code here if prompted > '
+    const code = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789#ZyXwVuTsRqPoNmLkJiHgFe'
+    let screen = `Paste code here if prompted > ${code}`
     await submitPasted({
       paste: async () => { events.push('paste') },
       enter: async () => { events.push('enter') },
       screen: async () => screen,
-    }, { sleep: async ms => { events.push(`sleep ${ms}`) } })
+    }, { code, sleep: async ms => { events.push(`sleep ${ms}`) } })
     expect(events).toEqual(['paste', 'sleep 500', 'enter', 'sleep 1500', 'enter'])
     events.length = 0
+    screen = 'Paste code here if prompted > '
     await submitPasted({
       paste: async () => { events.push('paste') },
       enter: async () => { events.push('enter'); screen = 'Login successful' },
       screen: async () => screen,
-    }, { sleep: async ms => { events.push(`sleep ${ms}`) } })
+    }, { code, sleep: async ms => { events.push(`sleep ${ms}`) } })
     expect(events).toEqual(['paste', 'sleep 500', 'enter', 'sleep 1500'])
   })
   test('a dead pane reports its real exit status', () => {
@@ -404,5 +406,83 @@ describe('CONTAS.LOGIN r3: a finished sign-in the probe cannot see says why (mac
     cli.exit(0)
     await new Promise(r => setTimeout(r, 50))
     expect(failures).toEqual(['keychain_unreadable'])
+  })
+})
+
+/**
+ * A model of `claude auth login` 2.1.310, read from its own source and checked live: readline over
+ * stdin, NO echo, each line split on '#'; a line missing either half prints "Invalid code. Please
+ * make sure the full code was copied." and keeps waiting; the first whole line is exchanged and
+ * nothing is printed until that exchange answers.
+ */
+function claudeReadline(initial: string) {
+  let screen = initial, field = '', taken = false
+  return {
+    get screen() { return screen },
+    paste(text: string) { field += text },
+    enter() {
+      const [code, state] = field.trim().split('#'); field = ''
+      if (!code || !state) { screen += 'Invalid code. Please make sure the full code was copied.\n'; return }
+      taken = true
+    },
+    taken: () => taken,
+  }
+}
+
+describe('CONTAS.LOGIN r4: a correct code is never reported as refused', () => {
+  const code = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AbCdEfG#ZyXwVuTsRqPoNmLkJiHgFeDcBa9876543210-_ZyXwVu'
+  test('a slow token exchange gets no second Enter, so the CLI never prints "Invalid code"', async () => {
+    const cli = claudeReadline(`${samples.claude}\nPaste code here if prompted > `)
+    const before = cli.screen
+    await submitPasted({ paste: async () => cli.paste(code), enter: async () => cli.enter(), screen: async () => cli.screen }, { code, sleep: async () => {} })
+    expect(cli.taken()).toBe(true)
+    expect(cli.screen).toBe(before)
+    expect(cli.screen).not.toContain('Invalid code')
+  })
+  test('end to end: the reader keeps waiting for the binding instead of concluding invalid_code', async () => {
+    const cli = claudeReadline(`${samples.claude}\nPaste code here if prompted > `)
+    let wake: (() => void) | undefined, last = '', resolveExit!: (n: number) => void
+    const proc: LoginProcess = {
+      snapshot: true, exited: new Promise<number>(r => { resolveExit = r }),
+      async read() { while (cli.screen === last) await new Promise<void>(r => { wake = r }); last = cli.screen; return last },
+      async write(c) { await submitPasted({ paste: async () => cli.paste(c), enter: async () => { cli.enter(); wake?.() }, screen: async () => cli.screen }, { code: c, sleep: async () => {} }) },
+      async stop() { resolveExit(0) },
+    }
+    const logs: string[] = []
+    const handle = await startAccountLogin(request('claude'), async () => {}, { launch: async () => proc, log: l => logs.push(l), submitTimeoutMs: 60_000 })
+    await handle.ready
+    await handle.submit(code)
+    await new Promise(r => setTimeout(r, 30))
+    expect(cli.taken()).toBe(true)
+    expect(handle.info()!.error).toBeUndefined()
+    expect(logs.filter(l => l.includes('invalid_code'))).toEqual([])
+    await handle.stop()
+  })
+  test('a code the CLI really refuses is invalid_code, and the server log says why, masked', async () => {
+    const cli = fakeCli([samples.claude])
+    cli.proc.snapshot = true
+    const logs: string[] = []
+    const handle = await startAccountLogin(request('claude'), async () => {}, { launch: async () => cli.proc, log: l => logs.push(l), submitTimeoutMs: 60_000 })
+    await handle.ready
+    await handle.submit('SECRETCODEonlyhalfnostate0123456789')
+    cli.output(`${samples.claude}\nPaste code here if prompted > Invalid code. Please make sure the full code was copied.`)
+    await new Promise(r => setTimeout(r, 30))
+    expect(handle.info()!.error).toBe('invalid_code')
+    const why = logs.find(l => l.includes('concluded invalid_code'))!
+    expect(why).toContain('the CLI said the code is invalid')
+    expect(why).toContain('Invalid code. Please make sure the full code was copied.')
+    expect(why).not.toContain('SECRETCODE')
+    expect(why).not.toContain('https://')
+    await handle.stop()
+  })
+  test('the code reaches the CLI whole: its #state half is never cut', async () => {
+    const cli = claudeReadline('Paste code here if prompted > ')
+    await submitPasted({ paste: async () => cli.paste(code), enter: async () => cli.enter(), screen: async () => cli.screen }, { code, sleep: async () => {} })
+    expect(cli.taken()).toBe(true)
+  })
+  test('codeStillTyped reads only the last line of the screen', () => {
+    expect(codeStillTyped(`Paste code here if prompted > ${code}`, code)).toBe(true)
+    expect(codeStillTyped('Paste code here if prompted > ', code)).toBe(false)
+    expect(codeStillTyped(`${code}\nLogin successful.`, code)).toBe(false)
   })
 })
