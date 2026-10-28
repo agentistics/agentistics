@@ -387,7 +387,7 @@ export function BillingAccountsPanel() {
         selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow}
         onSignIn={signIn} signingIn={null} signInError={signInError}
         hiddenSignedOut={hiddenSignedOut} onHideSignedOut={hideSignedOut} />
-      <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} onSignInUnavailable={(harness, message) => setSignInError({ harness, message })} />
+      <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
       {removeError && <div role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--accent-red)' }}>{removeError}</div>}
 
       {/* Accounts that load late must not list every account timeline as stray for a moment. */}

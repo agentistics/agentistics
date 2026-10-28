@@ -2,7 +2,7 @@
  * Pure logic for Settings → Billing's "Add account": which assistants offer it, what a refusal
  * says, and which login roots are still waiting. No IO, so every branch is testable.
  */
-import type { HarnessId } from '@agentistics/core'
+import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 
 export type Lang = 'pt' | 'en'
 
@@ -41,6 +41,41 @@ export function addAccountView(flagOn: boolean, harnesses: readonly HarnessId[])
     addable: harnesses.filter(h => !NO_SECOND_ACCOUNT.has(h)),
     unsupported: harnesses.filter(h => NO_SECOND_ACCOUNT.has(h)),
   }
+}
+
+/** Why an "Entrar" for `harness` cannot open the dialog — each reason has its own sentence and action. */
+export type SignInOutcome =
+  | { kind: 'begin' }
+  | { kind: 'notice'; reason: 'flag-off' | 'no-recipe' | 'not-found' }
+
+/**
+ * PURE. What an "Entrar" for `harness` does. `listed` are the assistants with sessions or accounts;
+ * `installed` the CLIs the server found on its search path RIGHT NOW. Either one makes an assistant
+ * addable, so a CLI installed a minute ago (no sessions, no account yet) opens the dialog. Anything
+ * else ends in a notice, never in silence.
+ */
+export function signInOutcome(flagOn: boolean, harness: HarnessId, listed: readonly HarnessId[], installed: readonly HarnessId[]): SignInOutcome {
+  if (!flagOn) return { kind: 'notice', reason: 'flag-off' }
+  if (NO_SECOND_ACCOUNT.has(harness)) return { kind: 'notice', reason: 'no-recipe' }
+  return [...listed, ...installed].includes(harness) ? { kind: 'begin' } : { kind: 'notice', reason: 'not-found' }
+}
+
+/** The assistants "Add account" offers: the ones with data plus every installed CLI, in the app's order. */
+export function offeredHarnesses(listed: readonly HarnessId[], installed: readonly HarnessId[]): HarnessId[] {
+  const all = new Set<HarnessId>([...listed, ...installed])
+  return HARNESS_ORDER.filter(h => all.has(h)) // @harness-adapters-only: login recipes are per adapter
+}
+
+/** How to sign in to an assistant the app cannot sign in for (no login command, or one login per computer). */
+export const MANUAL_SIGN_IN: Partial<Record<HarnessId, { pt: string; en: string }>> = {
+  antigravity: {
+    pt: 'O Antigravity (agy) não tem um comando de login: abra `agy` num terminal e entre na primeira execução. Depois o agentistics passa a ver a conta.',
+    en: 'Antigravity (agy) has no login command: run `agy` in a terminal and sign in on its first run. agentistics sees the account afterwards.',
+  },
+  opencode: {
+    pt: 'O OpenCode guarda um só login por computador: rode `opencode auth login` num terminal.',
+    en: 'OpenCode keeps a single login per computer: run `opencode auth login` in a terminal.',
+  },
 }
 
 export const pendingRoots = (roots: readonly RootRowView[]): RootRowView[] => roots.filter(r => r.status === 'pending')
@@ -149,6 +184,10 @@ export const ADD_COPY = (pt: boolean) => ({
   cancelPending: pt ? 'Cancelar' : 'Cancel',
   cancelAria: (label: string) => (pt ? `Cancelar login do ${label}` : `Cancel ${label} sign-in`),
   noSecond: (labels: string) => (pt ? `${labels}: ainda não permite manter uma segunda conta separada.` : `${labels}: cannot keep a second account apart yet.`),
+  notFound: (label: string) => pt
+    ? `${label} não foi encontrado neste computador. Se você acabou de instalar, procure de novo; senão instale em Ajustes → Assistentes.`
+    : `${label} was not found on this computer. If you just installed it, look again; otherwise install it in Settings → Assistants.`,
+  rescan: pt ? 'Procurar de novo' : 'Look again',
   flagOff: pt
     ? 'Várias contas é uma função experimental e está desligada neste computador.'
     : 'Multiple accounts is an experimental feature and is turned off on this computer.',

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { withUserBin } from './harness-install-plan'
+import { installSearchPath, withUserBin } from './harness-install-plan'
 
 /**
  * The per-user directories the assistants' OWN installers use besides `~/.local/bin` (the table in
@@ -39,4 +39,26 @@ export function userSearchPath(
 export function adoptUserBinOnPath(): void {
   const next = userSearchPath()
   if (next !== process.env.PATH) process.env.PATH = next
+}
+
+/**
+ * Where an assistant's CLI is looked for when something must RUN it (the in-app sign-in). The
+ * process's own PATH keeps deciding which binary wins; what a server started with a bare PATH (a
+ * LaunchAgent) lacks is APPENDED: the user's directories the installers use (`~/.local/bin`, bun,
+ * volta, kimi) and the system ones the installer also adds (`/opt/homebrew/bin`). So an assistant
+ * installed a minute ago is found by the sign-in exactly where the installer put it.
+ */
+export function harnessSearchPath(
+  path: string | undefined = process.env.PATH,
+  home: string = process.env.HOME || homedir(),
+  exists: (dir: string) => boolean = existsSync,
+): string {
+  const own = (path ?? '').split(':').filter(Boolean)
+  const user = userSearchPath('', home, exists).split(':').filter(Boolean) // ~/.local/bin first, then the fallbacks that exist
+  return installSearchPath([...own, ...user.filter(d => !own.includes(d))].join(':'))
+}
+
+/** Absolute path of an assistant's CLI on `harnessSearchPath()`, looked up fresh (never cached). */
+export function findHarnessBinary(name: string, path: string = harnessSearchPath()): string | undefined {
+  return Bun.which(name, { PATH: path }) ?? undefined
 }

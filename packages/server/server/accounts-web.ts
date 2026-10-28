@@ -1,4 +1,5 @@
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
+import { installedLoginHarnesses } from './account-login'
 import { accountRoots, type AccountRootsDeps } from './account-roots'
 import { listHarnessAccounts, setAccountAvailable, updateAccount } from './harness-accounts'
 
@@ -13,7 +14,7 @@ export async function handleAccountsRequest(
     const roots = accountRoots(rootsDeps)
     if (!roots.flagOn()) return json({ error: 'Not found' }, 404)
     if (path === '/api/accounts/roots') {
-      if (req.method === 'GET') { roots.ensurePoller(); return json({ roots: await roots.list() }) }
+      if (req.method === 'GET') { roots.ensurePoller(); return json({ roots: await roots.list(), installed: (rootsDeps?.installed ?? installedLoginHarnesses)() }) }
       if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
       if (!(req.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) return json({ error: 'Expected application/json' }, 415)
       let body: { harness?: unknown } | null

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { ADD_COPY, addAccountView, addErrorText, anyResolved, failureText, pendingRoots, type RootRowView } from './addAccountLogic'
+import { ADD_COPY, MANUAL_SIGN_IN, addAccountView, addErrorText, anyResolved, failureText, offeredHarnesses, pendingRoots, signInOutcome, type RootRowView } from './addAccountLogic'
 
 const root = (o: Partial<RootRowView>): RootRowView => ({ harness: 'claude', root: '/r', status: 'pending', pendingId: 'p1', ...o })
 
@@ -94,5 +94,31 @@ describe('CONTAS.LOGIN r3: a failed attempt says what the assistant said', () =>
       .toBe('O login não foi concluído. Comece de novo. O assistente respondeu: “Login failed: Request failed with status code 400”')
     expect(failureText({ error: 'login_failed', detail: 'OAuth error' }, false)).toBe('Sign-in did not finish. Start again. The assistant said: “OAuth error”')
     expect(failureText({ error: 'login_failed' }, false)).toBe('Sign-in did not finish. Start again.')
+  })
+})
+
+describe('HARNESS.LOGIN.TODOS: an installed assistant is always offered, and "Entrar" never goes silent', () => {
+  const ALL = ['claude', 'codex', 'gemini', 'copilot', 'kimi', 'antigravity'] as const
+  test('every installed assistant is offered even with no sessions and no account', () => {
+    for (const h of ALL) expect(offeredHarnesses([], [h])).toContain(h)
+    expect(offeredHarnesses(['claude'], ['codex'])).toEqual(['claude', 'codex'])
+    expect(offeredHarnesses([], [])).toEqual([])
+  })
+  test('the matrix: what "Entrar" does for each assistant', () => {
+    // installed here, nothing else known about it
+    for (const h of ALL.filter(x => x !== 'antigravity')) expect(signInOutcome(true, h, [], [h])).toEqual({ kind: 'begin' })
+    // listed (has sessions) counts too
+    expect(signInOutcome(true, 'codex', ['codex'], [])).toEqual({ kind: 'begin' })
+    // not found anywhere → a notice that offers "look again", never nothing
+    for (const h of ALL.filter(x => x !== 'antigravity')) expect(signInOutcome(true, h, [], [])).toEqual({ kind: 'notice', reason: 'not-found' })
+    // no recipe → says how to sign in by hand; the flag off wins over everything
+    expect(signInOutcome(true, 'antigravity', ['antigravity'], ['antigravity'])).toEqual({ kind: 'notice', reason: 'no-recipe' })
+    for (const h of ALL) expect(signInOutcome(false, h, [h], [h])).toEqual({ kind: 'notice', reason: 'flag-off' })
+  })
+  test('antigravity explains how to sign in, in both languages; not-found names the assistant and an action', () => {
+    expect(MANUAL_SIGN_IN.antigravity!.pt).toContain('agy')
+    expect(MANUAL_SIGN_IN.antigravity!.en).toContain('agy')
+    expect(ADD_COPY(true).notFound('Codex')).toContain('Codex')
+    expect(ADD_COPY(false).rescan).toBe('Look again')
   })
 })

@@ -8,7 +8,7 @@ import { MetricNote } from '../../components/MetricNote'
 import { dialogButtonStyle } from './primitives'
 import { AccountLoginModal, PendingLoginCard } from './AccountLoginModal'
 import { accountSignInStore } from '../../lib/accountSignIn'
-import { ADD_COPY, addAccountView, addErrorText, alreadyGone, failureText, anyResolved, attemptIsOver, pendingRoots, refusalCode, type Lang, type LoginInfoView, type RootRowView } from './addAccountLogic'
+import { ADD_COPY, MANUAL_SIGN_IN, addAccountView, offeredHarnesses, signInOutcome, addErrorText, alreadyGone, failureText, anyResolved, attemptIsOver, pendingRoots, refusalCode, type Lang, type LoginInfoView, type RootRowView } from './addAccountLogic'
 
 interface ActiveLogin { harness: HarnessId; pendingId?: string; login?: LoginInfoView; bound?: RootRowView; errorCode?: string }
 export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailable }: {
@@ -22,6 +22,9 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
   const [error, setError] = useState<string | null>(null), [errorCode, setErrorCode] = useState<string | undefined>(), [submitted, setSubmitted] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null), [expired, setExpired] = useState(false)
   const [cancelling, setCancelling] = useState<ReadonlySet<string>>(new Set())
+  // CLIs the server found installed now (null until the first answer); with `harnesses` they form the offer.
+  const [installed, setInstalled] = useState<HarnessId[] | null>(null)
+  const [notice, setNotice] = useState<{ harness: HarnessId; reason: 'flag-off' | 'no-recipe' | 'not-found'; message: string } | null>(null)
   const rootsRef = useRef<RootRowView[]>([]), generation = useRef(0), activeRef = useRef<ActiveLogin | null>(null)
   const creating = useRef<AbortController | null>(null), sending = useRef(false)
   const updateActive = (value: ActiveLogin | null) => { activeRef.current = value; setActive(value) }
@@ -52,8 +55,11 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
     const version = generation.current
     try {
       const res = await fetch('/api/accounts/roots')
-      if (!res.ok) return
-      const next: RootRowView[] = (await res.json()).roots ?? []
+      if (!res.ok) { setInstalled(prev => prev ?? []); return }
+      const answer = await res.json()
+      const next: RootRowView[] = answer.roots ?? []
+      if (Array.isArray(answer.installed)) setInstalled(answer.installed)
+      else setInstalled(prev => prev ?? [])
       if (generation.current !== version) return
       if (anyResolved(rootsRef.current, next)) onBound()
       rootsRef.current = next; setRoots(next)
@@ -163,24 +169,48 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
   }
   // "Entrar" anywhere in the app lands here: open this same dialog, never a session.
   const signInRequest = useSyncExternalStore(accountSignInStore.subscribe, accountSignInStore.get, accountSignInStore.get)
+  /** A fresh look at which CLIs are installed (no cache on the server side either). */
+  const rescan = useCallback(async (): Promise<HarnessId[]> => {
+    try {
+      const res = await fetch('/api/accounts/roots')
+      const answer = res.ok ? await res.json() : null
+      const list: HarnessId[] = Array.isArray(answer?.installed) ? answer.installed : []
+      setInstalled(list)
+      return list
+    } catch { return [] }
+  }, [])
+  const noticeText = (h: HarnessId, reason: 'flag-off' | 'no-recipe' | 'not-found') =>
+    reason === 'flag-off' ? t.signInNeedsFlag
+      : reason === 'no-recipe' ? (MANUAL_SIGN_IN[h]?.[pt ? 'pt' : 'en'] ?? t.noSecond(HARNESS_LABELS[h] ?? h))
+      : t.notFound(HARNESS_LABELS[h] ?? h)
+  const requestSignIn = async (h: HarnessId, known: HarnessId[] | null) => {
+    let outcome = signInOutcome(flagOn === true, h, harnesses, known ?? [])
+    // Not offered yet: the CLI may have been installed a moment ago, so look again before saying no.
+    if (outcome.kind === 'notice' && outcome.reason === 'not-found') outcome = signInOutcome(true, h, harnesses, await rescan())
+    if (outcome.kind === 'begin') { setNotice(null); if (!activeRef.current) void begin(h); return }
+    const message = noticeText(h, outcome.reason)
+    setNotice({ harness: h, reason: outcome.reason, message })
+    onSignInUnavailable?.(h, message)
+  }
   useEffect(() => {
     if (!signInRequest || flagOn === null) return
     accountSignInStore.take(signInRequest.nonce)
-    const h = signInRequest.harness as HarnessId
-    const view = addAccountView(flagOn, harnesses)
-    if (view.kind === 'on' && view.addable.includes(h)) { if (!activeRef.current) void begin(h); return }
-    onSignInUnavailable?.(h, view.kind === 'off' ? t.signInNeedsFlag : t.noSecond(HARNESS_LABELS[h] ?? h))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    void requestSignIn(signInRequest.harness as HarnessId, installed)
   }, [signInRequest, flagOn, harnesses])
   if (flagOn === null) return null
-  const view = addAccountView(flagOn, harnesses)
-  if (view.kind === 'off') return <MetricNote>{t.flagOff}</MetricNote>
+  const view = addAccountView(flagOn, offeredHarnesses(harnesses, installed ?? []))
+  const noticeEl = notice && <div role="alert" data-sign-in-notice={notice.harness} style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--accent-red)' }}>
+    {notice.message}
+    {notice.reason === 'not-found' && <button type="button" style={{ ...dialogButtonStyle('secondary', mobile), marginLeft: 10 }} onClick={() => { void requestSignIn(notice.harness, null) }}>{t.rescan}</button>}
+  </div>
+  if (view.kind === 'off') return <><MetricNote>{t.flagOff}</MetricNote>{noticeEl}</>
   const label = (h: HarnessId) => HARNESS_LABELS[h] ?? h
   const button = dialogButtonStyle('secondary', mobile)
   return <div data-add-account style={{ marginTop: 14 }}>
     {waiting.map(row => <PendingLoginCard key={row.pendingId} row={row} lang={lang} mobile={mobile} own={active?.pendingId === row.pendingId}
       busy={!!row.pendingId && cancelling.has(row.pendingId)} onResume={() => resume(row)} onRetry={() => { void retry(row.harness, row.pendingId) }}
       onCancel={() => { void cancelPending(row) }} />)}
+    {noticeEl}
     {cancelError && <p role="alert" style={{ fontSize: 13, color: 'var(--accent-red)', margin: '0 0 10px' }}>{cancelError}</p>}
     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>{t.add}</div>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
