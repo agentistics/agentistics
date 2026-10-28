@@ -6,7 +6,9 @@ and manage autostart + updates.
 
 Get the binary from the [install instructions](../README.md#install) (`install.sh`,
 `npm i -g @agentistics/agentop`, the Windows installer, or `bun run build:binary` from
-source). From a checkout you can also run it directly with
+source). The one-liner `curl -fsSL https://agentop.openvibes.tech/cli | sh` works with
+`sh`, `bash` or `zsh`; unprivileged installs go to `~/.local/bin` and the PATH line is added
+to your login shell's rc file (idempotent). From a checkout you can also run it directly with
 `bun run packages/server/bin/cli.ts <command>`.
 
 ```bash

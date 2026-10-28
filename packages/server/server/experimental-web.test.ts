@@ -186,3 +186,17 @@ describe('F4 fix2 — OFF from an ABSENT preference is persisted', () => {
     expect(writes).toEqual([])
   })
 })
+
+describe('multi-account — default ON on a fresh machine, switchable OFF (CONTAS.MAC.NOVO)', () => {
+  test('no preference and no variable: the report the accounts screen reads says ON', () => {
+    const row = buildExperimentalReport(undefined, {}).features.find(f => f.id === 'multi-account')!
+    expect(row).toMatchObject({ on: true, source: 'default', switchable: true })
+    expect(featureOn('multi-account', {})).toBe(true)
+  })
+  test('the login routes stay behind localShell: the default does not widen the security gate', () => {
+    expect(routeCapability('/api/accounts/roots')).toBe('localShell')
+  })
+  test('an explicit preference false still turns it off', () => {
+    expect(buildExperimentalReport(false, {}).features.find(f => f.id === 'multi-account')!.on).toBe(false)
+  })
+})

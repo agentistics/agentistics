@@ -9,12 +9,12 @@ const savedWindow = g.window
 afterAll(() => { if (savedWindow) g.window = savedWindow; else delete g.window })
 for (const width of [1440, 390]) test(`settings sections fit their scrolling slot at ${width}px`, () => {
   g.window = { innerWidth: width }
-  const h = renderToStaticMarkup(<MemoryRouter initialEntries={['/settings/billing']}><Routes>
+  const h = renderToStaticMarkup(<MemoryRouter initialEntries={['/settings/pricing']}><Routes>
     <Route element={<Outlet context={{ lang: 'pt', isCentral: false }} />}>
-      <Route path="/settings" element={<SettingsPage />}><Route path="billing" element={<div>Billing content</div>} /></Route>
+      <Route path="/settings" element={<SettingsPage />}><Route path="pricing" element={<div>Pricing content</div>} /></Route>
     </Route>
   </Routes></MemoryRouter>)
-  expect(h).toContain('Billing content')
+  expect(h).toContain('Pricing content')
   if (width === 390) {
     expect(h).toContain('scroll-snap-type:x mandatory')
     expect(h).toContain('flex:0 0 100%')

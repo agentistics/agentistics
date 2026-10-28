@@ -31,6 +31,7 @@ const T = (pt: boolean) => ({
   setPlan: pt ? 'Definir plano' : 'Set plan',
   review: pt ? 'Revisar' : 'Review',
   noPlan: pt ? 'Sem plano' : 'No plan',
+  starts: (day: string) => (pt ? `Plano começa em ${day}` : `Plan starts ${day}`),
   problem: pt ? 'Períodos com problema' : 'Periods need fixing',
   noMeter: pt ? 'Não informado' : 'Not reported',
   noMeterYet: pt ? 'Sem leitura ainda' : 'No reading yet',
@@ -41,6 +42,8 @@ const T = (pt: boolean) => ({
 export interface BillingRowView extends BillingRow {
   /** The plan in force today, or `null` when nothing prices this row. */
   plan: { name: string; price: string | null; mode: BillingMode } | null
+  /** With no plan in force, the day (`dd/MM/yyyy`) a registered plan starts — never "no plan" then. */
+  starts?: string | null
   /** Its timeline has overlapping or broken periods: it cannot be priced until they are fixed. */
   problem: boolean
   limits: PlanLimits | null
@@ -65,6 +68,7 @@ const cellText: React.CSSProperties = { display: 'block', whiteSpace: 'normal', 
 /** The plan half of the muted line: the plan's name, or the state that stands in for one. */
 function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
   if (r.problem) return <Pill tone="error" nowrap>{t.problem}</Pill>
+  if (!r.plan && r.starts) return <Pill tone="neutral" nowrap>{t.starts(r.starts)}</Pill>
   if (!r.plan) return <Pill tone="warn" nowrap>{t.noPlan}</Pill>
   return <span>{r.plan.name}{r.plan.price ? ` · ${r.plan.price}` : ''}</span>
 }
@@ -99,7 +103,7 @@ function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: numb
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>
 }
 
-const actionLabel = (r: BillingRowView, t: ReturnType<typeof T>) => (r.problem ? t.review : r.plan ? t.edit : t.setPlan)
+const actionLabel = (r: BillingRowView, t: ReturnType<typeof T>) => (r.problem ? t.review : r.plan || r.starts ? t.edit : t.setPlan)
 
 /**
  * One compact ROW per account: harness mark + name, the assistant and plan muted under it, the two
