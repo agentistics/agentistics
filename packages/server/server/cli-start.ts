@@ -1591,6 +1591,8 @@ export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeo
     backend, readRegistry, scanProcesses, loadConversations, touchSessions,
     endSessions: (ids, endedAt) => patchSessions(ids, { endedAt }),
     loadHarnessSessions,
+    // CONTA.IDENTIDADE: each row names the account its process runs on (`session-account.ts`).
+    readAccountRegistry: async () => (await import('./harness-accounts')).readAccounts(),
     // The exact-link reopen (`reopen-target.ts`): without it a row whose conversation the store
     // lacks — every agy session agentop started — offers no reopen.
     findExactLinks: exactLinksOnDisk,

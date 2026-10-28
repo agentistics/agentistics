@@ -330,6 +330,13 @@ export function decideSwitch(o: {
   conversationId?: string
   running: boolean
   currentAccountId?: string
+  /**
+   * WHERE the conversation's files are: the row's own recorded account, absent = the default home.
+   * Distinct from `currentAccountId` (WHO it runs as, resolved by `session-account.ts`): a row with no
+   * recorded account runs in the default home even when the account bound there also has a root of
+   * its own. Omitted: `currentAccountId` is used, as before.
+   */
+  sourceAccountId?: string | undefined
   requested: string
   agentCaller: boolean
   context: SpawnAccountContext
@@ -347,9 +354,10 @@ export function decideSwitch(o: {
   // "off" is the owner's own statement that work should not land there.
   if (o.context.accounts.find(a => a.id === o.requested)?.available === false) return { ok: false, reason: 'account_unavailable', detail: o.requested }
   // The row's own root: its recorded account must still resolve to a place on disk to copy FROM.
-  const source = decideRecordedAccount(o.currentAccountId, o.context.accounts)
+  const sourceId = 'sourceAccountId' in o ? o.sourceAccountId : o.currentAccountId
+  const source = decideRecordedAccount(sourceId, o.context.accounts)
   if (!source.ok && source.reason !== 'account_unavailable') return { ok: false, reason: source.reason, detail: source.detail }
-  const sourceRoot = source.ok ? source.account?.root ?? null : o.context.accounts.find(a => a.id === o.currentAccountId)?.root ?? null
+  const sourceRoot = source.ok ? source.account?.root ?? null : o.context.accounts.find(a => a.id === sourceId)?.root ?? null
   if (sourceRoot === target.account.root) return { ok: false, reason: 'same_account', detail: o.requested }
   return { ok: true, target: target.account, sourceRoot }
 }

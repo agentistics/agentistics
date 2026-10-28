@@ -51,6 +51,26 @@ export function limitsFor(limits: readonly PlanLimits[] | null, harness: string,
 }
 
 /**
+ * CONTA.IDENTIDADE — the plan reading and plan name of ONE session, for the composer chip: the
+ * reading of the account the server says the session runs on (`FleetRow.accountId`), else the
+ * harness's single legacy meter. Never the harness's FIRST account — that named another account's
+ * plan ("Pro") on a session running on a different one. With no reading, a registered plan is named
+ * only when it is that account's, or the harness's only one.
+ */
+export function sessionPlan(
+  limits: readonly PlanLimits[] | null,
+  registered: readonly { harness: string; plan: string; account?: string }[],
+  harness: string,
+  accountId: string | undefined,
+): { limits: PlanLimits | null; name: string | undefined } {
+  const l = limitsFor(limits, harness, accountId)
+  if (l) return { limits: l, name: l.plan ?? l.sourcePlan }
+  const mine = registered.filter(r => r.harness === harness)
+  const reg = accountId ? mine.find(r => r.account === accountId) : mine.length === 1 ? mine[0] : undefined
+  return { limits: null, name: reg?.plan }
+}
+
+/**
  * When a spent account is usable again: the LATEST reset among its windows at 100% (both spent means
  * waiting for both). `null` while every window has room.
  */

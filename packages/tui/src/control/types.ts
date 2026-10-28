@@ -874,6 +874,11 @@ export interface ControlSession {
    */
   effort?: string
   /**
+   * CONTA.IDENTIDADE — the account this session's process runs on now (`session-account.ts`).
+   * Absent when it cannot be established.
+   */
+  accountId?: string
+  /**
    * The MODE the harness is in — its own word for it (`auto mode`, `plan mode`, …).
    *
    * Absent for a harness whose modes nobody has driven, and for a session whose footer has not been
