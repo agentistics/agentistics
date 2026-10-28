@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { cleanInstallLine, NODE_LTS_VERSION, parseHarnessVersion, planHarnessInstall, planNodeInstall, withUserBin } from './harness-install-plan'
+import { cleanInstallLine, installFailureDetail, installSearchPath, NODE_LTS_VERSION, parseHarnessVersion, planHarnessInstall, planNodeInstall, withUserBin } from './harness-install-plan'
 
 const base = { platform: 'linux', nodePresent: true, npmGlobalWritable: true, npmPrefix: '/tmp/.local' }
 
 describe('harness installer plan', () => {
   test('uses the official installer table for every supported harness', () => {
-    expect(planHarnessInstall('claude', base).command).toEqual(['sh', '-c', 'curl -fsSL https://claude.ai/install.sh | bash'])
+    expect(planHarnessInstall('claude', base).command).toEqual(['/bin/sh', '-c', 'curl -fsSL https://claude.ai/install.sh | bash'])
     expect(planHarnessInstall('codex', base).command).toEqual(['npm', 'i', '-g', '--prefix', '/tmp/.local', '@openai/codex'])
     expect(planHarnessInstall('gemini', base).command).toEqual(['npm', 'i', '-g', '--prefix', '/tmp/.local', '@google/gemini-cli'])
     expect(planHarnessInstall('copilot', base).command).toEqual(['npm', 'i', '-g', '--prefix', '/tmp/.local', '@github/copilot'])
@@ -55,5 +55,26 @@ describe('harness installer plan', () => {
     expect(withUserBin('/usr/bin:/home/u/.local/bin', '/home/u')).toBe('/home/u/.local/bin:/usr/bin')
     expect(cleanInstallLine('\u001b[32mok\u001b[0m\r')).toBe('ok')
     expect(cleanInstallLine('x'.repeat(500)).length).toBe(200)
+  })
+
+  test('installer scripts run under /bin/sh by absolute path (a GUI-launched PATH may lack /bin)', () => {
+    expect(planHarnessInstall('claude', { ...base, platform: 'darwin' }).command![0]).toBe('/bin/sh')
+    expect(planNodeInstall({ ...base, arch: 'arm64', home: '/h' }).command![0]).toBe('/bin/sh')
+  })
+
+  test('the installer PATH always carries the system directories, after the user ones', () => {
+    const p = installSearchPath('/Users/u/.local/bin').split(':')
+    expect(p[0]).toBe('/Users/u/.local/bin')
+    for (const d of ['/usr/bin', '/bin', '/usr/sbin', '/sbin', '/opt/homebrew/bin']) expect(p).toContain(d)
+    expect(installSearchPath('').split(':')).toContain('/bin')
+    expect(installSearchPath('/bin:/usr/bin').split(':').filter(d => d === '/bin').length).toBe(1)
+  })
+
+  test('a failure is explained: spawn error, exit code, stderr tail — bounded and in the asked language', () => {
+    expect(installFailureDetail({ code: 1, spawnError: 'Executable not found in $PATH: "sh"' }, 'pt')).toBe('O instalador não iniciou: Executable not found in $PATH: "sh"')
+    expect(installFailureDetail({ code: 7 }, 'pt')).toBe('O instalador saiu com código 7 (sem nenhuma mensagem).')
+    expect(installFailureDetail({ code: 7 }, 'en')).toBe('The installer exited with code 7 (without any message).')
+    expect(installFailureDetail({ code: 22, stderrTail: ['a', 'curl: (22) 403', 'Download failed'] }, 'en')).toBe('The installer exited with code 22 (a · curl: (22) 403 · Download failed).')
+    expect(installFailureDetail({ code: 1, stderrTail: ['x'.repeat(900)] }, 'en').length).toBeLessThan(400)
   })
 })
