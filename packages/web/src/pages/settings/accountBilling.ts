@@ -330,3 +330,68 @@ export function planCoverageText(
     : `${informed} of ${rows.length} with a plan`
   return missing ? `${base} · ${missing} ${lang === 'pt' ? 'sem informar' : 'not set'}` : base
 }
+
+/**
+ * The plan that has not started yet: the earliest period whose first day is after `today`. A row whose
+ * only plan starts tomorrow is not "no plan" — it says when the plan starts, and its editor opens THAT
+ * period (where it can be removed) instead of a blank new one.
+ */
+export function upcomingPeriod(periods: readonly BillingPeriod[], today: string): BillingPeriod | null {
+  const now = dayIndex(today)
+  if (now === null) return null
+  let best: BillingPeriod | null = null
+  for (const p of periods) {
+    const from = dayIndex(p.from)
+    if (from === null || from <= now) continue
+    if (!best || from < (dayIndex(best.from) ?? Infinity)) best = p
+  }
+  return best
+}
+
+/**
+ * A stored timeline no row on screen edits: an account that left the list (retired, folded into another,
+ * no longer identified, or its login was removed) or a harness default every account overrode. It was
+ * reachable from nowhere — a plan the user could see the effect of and never delete. Listed under the
+ * accounts so it can be removed; never priced or edited from here.
+ */
+export interface OrphanTimeline {
+  /** `default:<harness>` for `profiles[h]`, else the `accountProfiles` key as stored. */
+  key: string
+  kind: 'account' | 'default'
+  /** `null` for a legacy bare-id key whose harness the key does not carry. */
+  harness: HarnessId | null
+  periods: BillingPeriod[]
+}
+
+export function orphanTimelines(billing: BillingSettings, rows: readonly Pick<BillingRow, 'scope'>[]): OrphanTimeline[] {
+  const usedAccount = new Set<string>()
+  const usedDefault = new Set<HarnessId>()
+  for (const r of rows) {
+    if (r.scope.kind === 'default') usedDefault.add(r.scope.harness)
+    else { usedAccount.add(accountProfileKey(r.scope.harness, r.scope.id)); usedAccount.add(r.scope.id) }
+  }
+  const out: OrphanTimeline[] = []
+  for (const [h, t] of Object.entries(billing.profiles) as [HarnessId, { periods: BillingPeriod[] } | undefined][]) {
+    if (t && t.periods.length > 0 && !usedDefault.has(h)) out.push({ key: `default:${h}`, kind: 'default', harness: h, periods: t.periods })
+  }
+  for (const [key, t] of Object.entries(billing.accountProfiles ?? {})) {
+    if (t.periods.length === 0 || usedAccount.has(key)) continue
+    const sep = key.indexOf(':')
+    const h = sep > 0 ? key.slice(0, sep) as HarnessId : null
+    out.push({ key, kind: 'account', harness: h, periods: t.periods })
+  }
+  return out
+}
+
+/** Drops one orphan timeline from the settings — the only write the orphan list makes. */
+export function withoutOrphan(billing: BillingSettings, o: Pick<OrphanTimeline, 'key' | 'kind' | 'harness'>): BillingSettings {
+  if (o.kind === 'default' && o.harness) {
+    const profiles = { ...billing.profiles }
+    delete profiles[o.harness]
+    return { ...billing, profiles }
+  }
+  const accountProfiles = { ...(billing.accountProfiles ?? {}) }
+  delete accountProfiles[o.key]
+  const { accountProfiles: _old, ...rest } = billing
+  return Object.keys(accountProfiles).length > 0 ? { ...rest, accountProfiles } : rest
+}

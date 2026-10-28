@@ -2947,8 +2947,8 @@ export default function AppLayout() {
         ? {
             label: pt ? 'Custo do plano' : 'Plan cost',
             source: pt
-              ? 'Configurações → Cobrança (períodos cadastrados) + as sessões filtradas'
-              : 'Settings → Billing (registered periods) + the filtered sessions',
+              ? 'Uso → Contas (planos cadastrados no lápis de cada conta) + as sessões filtradas'
+              : 'Usage → Accounts (plans registered on each account’s pencil) + the filtered sessions',
             formula: pt
               ? 'C = Σ dos períodos:  mensalidade × dias no filtro ÷ 30,44\n'
                 + 'A = custo a preços de API dos MESMOS dias\n'
@@ -2987,8 +2987,8 @@ export default function AppLayout() {
               ? 'Σ modelo [(input/1M × p.in) + (output/1M × p.out)\n  + (cacheRead/1M × p.cR) + (cacheWrite/1M × p.cW)]\n\nUma sessão sem modelo conhecido usa a taxa média ponderada pelo mix de modelos do período.'
               : 'Σ model [(input/1M × p.in) + (output/1M × p.out)\n  + (cacheRead/1M × p.cR) + (cacheWrite/1M × p.cW)]\n\nA session with no known model uses the average rate weighted by the period\'s model mix.',
             note: pt
-              ? 'Preços vêm de três fontes, nesta ordem de confiança: páginas oficiais dos fornecedores, a base comunitária LiteLLM e a tabela embutida no app. Como os harnesses usam vários fornecedores (Anthropic, OpenAI, Google), os preços não são só da Anthropic. Veja Configurações → Preços para a tarifa e a origem de cada modelo que esta máquina realmente usou. É estimativa de preço de API — não é sua fatura nem sua assinatura. Cadastrou seu plano? Configurações → Cobrança transforma isto no custo real.'
-              : 'Prices come from three sources, in this order of trust: the vendors\' official pages, the LiteLLM community dataset and the table built into the app. Because harnesses use several vendors (Anthropic, OpenAI, Google), prices are not Anthropic-only. See Settings → Pricing for the rate and origin of every model this machine actually used. This is an API-price estimate — not your invoice or your subscription. Registered your plan? Settings → Billing turns this into your real cost.',
+              ? 'Preços vêm de três fontes, nesta ordem de confiança: páginas oficiais dos fornecedores, a base comunitária LiteLLM e a tabela embutida no app. Como os harnesses usam vários fornecedores (Anthropic, OpenAI, Google), os preços não são só da Anthropic. Veja Configurações → Preços para a tarifa e a origem de cada modelo que esta máquina realmente usou. É estimativa de preço de API — não é sua fatura nem sua assinatura. Cadastrou seu plano? O lápis de cada conta em Uso → Contas transforma isto no custo real.'
+              : 'Prices come from three sources, in this order of trust: the vendors\' official pages, the LiteLLM community dataset and the table built into the app. Because harnesses use several vendors (Anthropic, OpenAI, Google), prices are not Anthropic-only. See Settings → Pricing for the rate and origin of every model this machine actually used. This is an API-price estimate — not your invoice or your subscription. Registered your plan? Each account’s pencil in Usage → Accounts turns this into your real cost.',
           },
       {
         label: pt ? 'Commits' : 'Commits',

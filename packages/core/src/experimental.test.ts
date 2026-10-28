@@ -112,3 +112,17 @@ describe('journal and projections are ON by default (the backfill item)', () => 
     expect(resolveExperimental(undefined, {}).find(x => x.id === 'provider')).toMatchObject({ on: false, source: 'default' })
   })
 })
+
+describe('multi-account — a fresh machine can add a second login', () => {
+  test('no variable and no preference: ON', () => {
+    expect(featureOn('multi-account', {})).toBe(true)
+    expect(resolveExperimental(undefined, {}).find(r => r.id === 'multi-account')).toMatchObject({ on: true, source: 'default' })
+  })
+  test('an explicit =0 or the switch turned off still narrows it', () => {
+    expect(featureOn('multi-account', { AGENTISTICS_MULTI_ACCOUNT: '0' })).toBe(false)
+    const env: Record<string, string | undefined> = {}
+    applyExperimental(false, env)
+    expect(env.AGENTISTICS_MULTI_ACCOUNT).toBe('0')
+    expect(featureOn('multi-account', env)).toBe(false)
+  })
+})

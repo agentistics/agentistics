@@ -10,6 +10,45 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.160.3': {
+    features: [
+      {
+        pt: 'Várias contas agora vem ligado: numa instalação nova já dá para entrar em outra conta de um assistente pela tela de contas.',
+        en: 'Multiple accounts is now on by default: a fresh install can sign in to another account of an assistant from the accounts screen.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'A instalação pelo terminal funciona com sh, bash, zsh ou fish e já coloca o agentop no caminho do seu terminal (no Mac, no .zshrc), sem passo manual.',
+        en: 'The terminal install works with sh, bash, zsh or fish and puts agentop on your terminal’s path by itself (on a Mac, in .zshrc), with no manual step.',
+      },
+      {
+        pt: 'Todo plano cadastrado pode ser removido pelo lápis da conta, inclusive um que começa depois ou um "Não sei agora"; planos de contas que saíram da lista aparecem para remover.',
+        en: 'Every registered plan can be removed from the account’s pencil, including one that starts later or a "Not sure yet" one; plans of accounts that left the list show up so you can remove them.',
+      },
+      {
+        pt: 'A aba Cobrança saiu das Configurações: o plano de cada conta fica no lápis da linha, em Uso → Contas.',
+        en: 'The Billing tab left Settings: each account’s plan is on its row’s pencil in Usage → Accounts.',
+      },
+      {
+        pt: 'Testes isolados não derrubam mais o navegador de testes por causa de um caminho temporário longo demais.',
+        en: 'Isolated test runs no longer crash the test browser because of a temporary path that was too long.',
+      },
+    ],
+  },
+  '2.160.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Clicar em "Sessões" no menu volta a abrir a lista de sessões, em vez de levar para a página de Uso.',
+        en: 'Clicking "Sessions" in the menu opens the sessions list again instead of taking you to the Usage page.',
+      },
+      {
+        pt: 'As sessões de exemplo do modo demonstração não mostram mais os caminhos reais das suas pastas.',
+        en: 'The sample sessions in demo mode no longer show the real paths of your folders.',
+      },
+    ],
+  },
   '2.160.1': {
     features: [],
     fixes: [

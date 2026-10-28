@@ -85,7 +85,7 @@ export const ADD_COPY = (pt: boolean) => ({
   submitted: pt ? 'Esperando você entrar…' : 'Waiting for you to sign in…',
   expires: (minutes: number) => pt ? `O código vale por mais ${minutes} min.` : `The code expires in ${minutes} min.`,
   done: pt ? 'Conta adicionada' : 'Account added',
-  doneNote: pt ? 'Ela já aparece na lista da Cobrança. Dê um nome a ela lá, se quiser.' : 'It now appears in Billing. You can give it a name there.',
+  doneNote: pt ? 'Ela já aparece na lista de contas. Dê um nome a ela no lápis da linha, se quiser.' : 'It now appears in the accounts list. You can name it with the row’s pencil.',
   finish: pt ? 'Pronto' : 'Done',
   close: pt ? 'Fechar' : 'Close',
   account: pt ? 'Conta' : 'Account',

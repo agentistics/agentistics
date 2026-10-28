@@ -1,10 +1,11 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
-import { buildThrowawayEnv, isRealAgentopPort, releaseThrowawayPorts, reserveThrowawayPorts, runRun } from './cli-run'
+import { buildThrowawayEnv, isRealAgentopPort, releaseThrowawayPorts, reserveThrowawayPorts, runRun, createRunTmp, removeRunTmp, RUN_TMP_PREFIX, SOCKET_PATH_MAX } from './cli-run'
+import { insideHeavyLock } from './resources/mem-guard'
 
 const testHome = mkdtempSync(join(tmpdir(), 'agentop-run-ports-'))
 const originalHome = process.env.HOME
@@ -50,6 +51,65 @@ function runCli(home: string, args: string[]) {
 }
 
 describe('agentop run --rm', () => {
+  test('TMPDIR is short enough for a Unix socket even under a long throwaway home', () => {
+    const home = join('/home/mithrandir/.cache/agentistics-throwaway', 'qa-codex-galeria-with-a-long-name-abcdef12-XXXXXX')
+    const tmp = createRunTmp()
+    try {
+      const env = buildThrowawayEnv(home, 'x', 48100, 48101, { HOME: '/h' }, { tmp })
+      expect(env.TMPDIR).toBe(tmp)
+      expect(tmp).toMatch(/^\/tmp\/agr-[A-Za-z0-9]{6}$/)
+      expect(statSync(tmp).mode & 0o777).toBe(0o700)
+      expect(Buffer.byteLength(`${tmp}/org.chromium.Chromium.AbCdEf/SingletonSocket`)).toBeLessThanOrEqual(SOCKET_PATH_MAX)
+    } finally { removeRunTmp(tmp) }
+    const env = buildThrowawayEnv(home, 'x', 48100, 48101, { HOME: '/h' }, { tmp: '/tmp/agr-AbCdEf' })
+    expect(env.TMUX_TMPDIR).toBe(env.TMPDIR)
+    expect(Buffer.byteLength(`${env.TMPDIR}/org.chromium.Chromium.AbCdEf/SingletonSocket`)).toBeLessThanOrEqual(SOCKET_PATH_MAX)
+  })
+
+  test('the run TMPDIR is created exclusively: never reuses a pre-existing dir or symlink', () => {
+    const a = createRunTmp(), b = createRunTmp()
+    try {
+      expect(a).not.toBe(b)
+      // a planted symlink at any agr- name is never what mkdtemp hands back
+      const outside = mkdtempSync(join(tmpdir(), 'agentop-run-outside-'))
+      const link = `${RUN_TMP_PREFIX}planted${process.pid}`
+      symlinkSync(outside, link)
+      try {
+        const c = createRunTmp()
+        expect(c).not.toBe(link)
+        expect(lstatSync(c).isSymbolicLink()).toBe(false)
+        removeRunTmp(c)
+        // removal never follows the link: the link goes, the target and its content stay
+        writeFileSync(join(outside, 'keep'), 'x')
+        removeRunTmp(link)
+        expect(existsSync(link)).toBe(false)
+        expect(existsSync(join(outside, 'keep'))).toBe(true)
+      } finally { rmSync(link, { force: true }); rmSync(outside, { recursive: true, force: true }) }
+    } finally { removeRunTmp(a); removeRunTmp(b) }
+  })
+
+  test('removeRunTmp only removes agr- dirs directly under /tmp', () => {
+    const foreign = mkdtempSync(join(tmpdir(), 'agentop-run-foreign-'))
+    try {
+      removeRunTmp(foreign); removeRunTmp(`${RUN_TMP_PREFIX}../${foreign}`); removeRunTmp(undefined)
+      expect(existsSync(foreign)).toBe(true)
+    } finally { rmSync(foreign, { recursive: true, force: true }) }
+  })
+
+  test('state.tmp is removed when the command cannot be spawned', async () => {
+    const before = new Set(readdirSync('/tmp').filter(n => n.startsWith('agr-')))
+    const { code } = await runCli(testHome, ['--rm', '--', '/nonexistent/bin/xyz'])
+    expect(code).not.toBe(0)
+    expect(readdirSync('/tmp').filter(n => n.startsWith('agr-') && !before.has(n))).toEqual([])
+  })
+
+  test('children of a run that holds the heavy lock are told so', () => {
+    expect(buildThrowawayEnv('/t', 'x', 1, 2, {}, { heavyHeld: true }).AGENTISTICS_HEAVY_JOB).toBe('1')
+    expect(buildThrowawayEnv('/t', 'x', 1, 2, {}).AGENTISTICS_HEAVY_JOB).toBeUndefined()
+    expect(insideHeavyLock(buildThrowawayEnv('/t', 'x', 1, 2, {}, { heavyHeld: true }), [])).toBe(true)
+    for (const v of ['0', '', 'true', 'yes']) expect(insideHeavyLock({ AGENTISTICS_HEAVY_JOB: v }, [])).toBe(false)
+  })
+
   test('pins the original Volta installation while isolating HOME and run state', () => {
     const sourceHome = join(testHome, 'volta-owner')
     mkdirSync(join(sourceHome, '.volta'), { recursive: true })
@@ -59,7 +119,7 @@ describe('agentop run --rm', () => {
     expect(env.HOME).toBe('/throwaway')
     expect(env.USERPROFILE).toBe('/throwaway')
     expect(env.AGENTISTICS_DIR).toBe('/throwaway/.agentistics')
-    expect(env.TMPDIR).toBe('/throwaway/tmp')
+    expect(env.TMPDIR).toMatch(/^\/tmp\/agr-/)
     expect(env.TMUX_TMPDIR).toBe(env.TMPDIR)
     expect(env.PORT).toBe('48100')
     expect(env.WEB_PORT).toBe('48101')
