@@ -128,6 +128,12 @@ export interface RootRow {
   plan?: string
   error?: LoginError
   login?: LoginInfo
+  /**
+   * A pending folder with no sign-in process behind it in THIS server (it restarted, or the attempt
+   * was abandoned): its link can never be completed, so the screen offers "start again", never a
+   * dead "open login". The poller still binds it if a login did land on disk.
+   */
+  stale?: true
 }
 
 export interface AccountRootsDeps {
@@ -195,6 +201,8 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   }
   const logins = new Map<string, LoginHandle>()
   const failures = new Map<string, RootRow & { failedAt: number }>()
+  /** Pending ids between folder creation and the login handle existing: not stale yet. */
+  const starting = new Set<string>()
   const login = deps.login ?? startAccountLogin
   const probe = deps.probe ?? ((h: HarnessId, root: string) => forceProbe(h, root))
   const bind = deps.bind ?? bindAccount
@@ -255,6 +263,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
         status: !owner ? 'pending' : owner.retired ? 'retired' : 'bound',
         ...(owner ? { accountId: owner.id, label: owner.label, plan: owner.plan } : {}),
         ...(dir.login ? { login: dir.login } : {}),
+        ...(!owner && !logins.has(dir.pendingId) && !starting.has(dir.pendingId) ? { stale: true as const } : {}),
       })
     }
     for (const [id, row] of failures) {
@@ -315,6 +324,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   async function addRoot(harness: HarnessId, signal?: AbortSignal): Promise<({ ok: true; pendingId: string; root: string } & LoginInfo) | RootRefused> {
     const made = await createRoot(harness)
     if (!made.ok) return made
+    starting.add(made.pendingId)
     const cancelled = () => { void removeRoot(made.pendingId).catch(() => {}) }
     signal?.addEventListener('abort', cancelled, { once: true })
     try {
@@ -331,7 +341,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
       })
       const reason = error instanceof LoginFailure ? error.reason : 'login_unavailable'
       return { ok: false, reason, message: LOGIN_MESSAGES[reason] }
-    } finally { signal?.removeEventListener('abort', cancelled) }
+    } finally { starting.delete(made.pendingId); signal?.removeEventListener('abort', cancelled) }
   }
 
   async function submitCode(id: string, code: unknown) {

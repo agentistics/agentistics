@@ -133,6 +133,25 @@ describe('addRoot / login / poll', () => {
   })
 })
 
+describe('CONTAS.LOGIN r2 — a pending folder with no sign-in behind it', () => {
+  test('a live login is not stale; the same folder after a server restart is', async () => {
+    const { roots } = make()
+    const out = await roots.addRoot('claude')
+    if (!out.ok) throw new Error('refused')
+    expect((await roots.list())[0]!.stale).toBeUndefined()
+    roots.stopPoller()
+    // A new server process: the folder is still on disk, its login process is not.
+    const restarted = make().roots
+    const row = (await restarted.list())[0]!
+    expect(row.status).toBe('pending')
+    expect(row.stale).toBe(true)
+    expect(row.login).toBeUndefined()
+    // It can still be dropped without a typed confirmation.
+    expect((await restarted.removeRoot(out.pendingId)).ok).toBe(true)
+    expect(await restarted.list()).toEqual([])
+  })
+})
+
 describe('removeRoot', () => {
   async function bound(over = {}) {
     const m = make({ probe: async () => ({ key: 'k', label: 'l' }), ...over })

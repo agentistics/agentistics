@@ -21,6 +21,8 @@ export interface RootRowView {
   label?: string
   plan?: string
   error?: string
+  /** Pending, but no sign-in process is behind it any more (server restarted): only "start again" works. */
+  stale?: boolean
 }
 
 export interface LoginInfoView { kind: 'paste' | 'device'; url: string; code?: string; expiresAt: number; error?: 'invalid_code' }
@@ -46,6 +48,24 @@ export function anyResolved(before: readonly RootRowView[], after: readonly Root
   return pendingRoots(before).some(r => !still.has(r.pendingId))
 }
 
+/** What a pending card can still do: continue a live sign-in, or only start again. */
+export function pendingCardState(row: RootRowView): 'live' | 'expired' {
+  return row.login && !row.stale ? 'live' : 'expired'
+}
+
+/**
+ * Refusals that mean "this sign-in attempt is over" — the folder is gone, timed out or failed. Each
+ * becomes the expired state with a "Try again" that starts a NEW login, never a loose sentence.
+ */
+const OVER = new Set(['not_found', 'login_timeout', 'login_failed'])
+export const attemptIsOver = (code: string | undefined | null): boolean => !!code && OVER.has(code)
+export const refusalCode = (body: unknown): string | undefined => {
+  const e = body && typeof body === 'object' ? (body as { error?: unknown }).error : undefined
+  return typeof e === 'string' ? e : undefined
+}
+/** Cancelling a sign-in that the server already dropped is a success: there is nothing left to cancel. */
+export const alreadyGone = (body: unknown): boolean => refusalCode(body) === 'not_found'
+
 /** Refusal codes of `POST/DELETE /api/accounts/roots`, in the user's language; the server sentence is the en fallback. */
 const REFUSALS: Record<string, { pt: string; en: string }> = {
   login_timeout: { pt: 'O login expirou. Comece de novo para obter outro link e código.', en: 'Sign-in expired. Start again to get a new link and code.' },
@@ -59,7 +79,7 @@ const REFUSALS: Record<string, { pt: string; en: string }> = {
   disabled: { pt: 'Várias contas está desligada neste computador.', en: 'Multiple accounts is turned off on this computer.' },
   unknown_harness: { pt: 'Assistente desconhecido.', en: 'Unknown assistant.' },
   capability_disabled: { pt: 'Este computador não permite iniciar logins por esta tela (o perfil de exposição desliga o acesso local). Abra o agentistics no próprio computador ou ligue o acesso local nas configurações do servidor.', en: 'This computer does not allow starting sign-ins from this screen (its exposure profile turns local access off). Open agentistics on the computer itself, or turn local access on in the server settings.' },
-  not_found: { pt: 'Esta conta já não existe.', en: 'This account no longer exists.' },
+  not_found: { pt: 'Este login já não está disponível. Comece de novo.', en: 'This sign-in is no longer available. Start again.' },
 }
 
 /** A refusal in the user's language by its code, never the raw code; the server sentence in English; then a fixed fallback. */
@@ -73,7 +93,16 @@ export function addErrorText(body: unknown, pt: boolean): string {
 }
 
 export const ADD_COPY = (pt: boolean) => ({
-  openLink: pt ? 'Abrir link' : 'Open link',
+  openLink: pt ? 'Abrir página de login' : 'Open sign-in page',
+  stepOpen: pt ? 'Abra a página de login' : 'Open the sign-in page',
+  stepOpenNote: pt ? 'Entre com a outra conta. O link abre em uma nova aba.' : 'Sign in with the other account. The link opens in a new tab.',
+  stepPaste: pt ? 'Cole o código' : 'Paste the code',
+  stepDevice: pt ? 'Digite o código na página' : 'Enter the code on the page',
+  stepDone: pt ? 'Pronto' : 'Done',
+  expired: pt ? 'O login expirou' : 'Sign-in expired',
+  expiredNote: pt ? 'Este link não vale mais. Comece de novo para receber outro.' : 'This link no longer works. Start again to get a new one.',
+  retry: pt ? 'Tentar de novo' : 'Try again',
+  continueLogin: pt ? 'Continuar' : 'Continue',
   copyLink: pt ? 'Copiar link' : 'Copy link',
   copyCode: pt ? 'Copiar código' : 'Copy code',
   copied: pt ? 'Copiado' : 'Copied',
@@ -103,6 +132,7 @@ export const ADD_COPY = (pt: boolean) => ({
   waiting: pt ? 'Aguardando login' : 'Waiting for sign-in',
   openLogin: pt ? 'Abrir login' : 'Open login',
   cancelPending: pt ? 'Cancelar' : 'Cancel',
+  cancelAria: (label: string) => (pt ? `Cancelar login do ${label}` : `Cancel ${label} sign-in`),
   noSecond: (labels: string) => (pt ? `${labels}: ainda não permite manter uma segunda conta separada.` : `${labels}: cannot keep a second account apart yet.`),
   flagOff: pt
     ? 'Várias contas é uma função experimental e está desligada neste computador.'
