@@ -1,9 +1,10 @@
 /* Real-screen evidence for the glass experiment. Run through agentop run --rm only. */
 import { chromium } from 'playwright'
-import { mkdtemp, mkdir, cp, rm, writeFile, readdir, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, cp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 
 const out = resolve(process.env.SHOTS_DIR ?? 'leader/design/vidro-real')
 // agentop run may assign isolated high ports through PORT/WEB_PORT. Never fall back to the
@@ -16,21 +17,61 @@ const sourceHome = process.env.HOME
 if (!sourceHome) throw new Error('HOME is required to seed the demo')
 const seedHome = process.env.SEED_HOME ?? sourceHome
 
+// Do not let a preview inherit path overrides that can point back at the owner's harnesses or
+// archive. The seed is allowed to read only the explicitly supplied source HOME; the app gets a
+// separate allowlist plus a private tmux socket below.
+const pathEnv = process.env.PATH ?? '/usr/bin:/bin'
+const seedEnv = { PATH: pathEnv, HOME: seedHome, USERPROFILE: seedHome, ...(process.env.VOLTA_HOME ? { VOLTA_HOME: process.env.VOLTA_HOME } : {}) }
+
 await mkdir(out, { recursive: true })
 const demoHome = await mkdtemp(join(tmpdir(), 'agentistics-vidro-demo-'))
 const seed = spawnSync('bun', ['run', 'packages/server/scripts/seed-demo.ts', '--out', demoHome, '--force'], {
-  cwd: resolve('.'), env: { ...process.env, HOME: seedHome }, encoding: 'utf8', stdio: 'pipe',
+  cwd: resolve('.'), env: seedEnv, encoding: 'utf8', stdio: 'pipe',
 })
 if (seed.status !== 0) throw new Error(`seed failed:\n${seed.stdout}\n${seed.stderr}`)
 
-// seed-demo deliberately omits raw chat. Add one wholly invented Claude fixture in the
-// throwaway HOME so the screenshots exercise the real transcript reader and composer without
-// ever touching the owner's conversations. The metadata is still seed-demo's scrubbed row.
-async function addDemoTranscript() {
-  const claudeDir = join(demoHome, '.agentistics', 'sessions', 'claude')
-  const files = (await readdir(claudeDir)).filter(name => name.endsWith('.json'))
-  if (!files.length) throw new Error('seed produced no Claude session for transcript fixture')
-  const turns = [
+// seed-demo deliberately omits raw chat. Write invented chat only after the server returns a real
+// Claude Fleet row, using that row's exact conversation id and cwd. Never infer a route from a seed
+// filename, and never read a transcript from the source HOME.
+const expectedChatText = 'Revise o cartão de sessões para destacar o estado atual.'
+const demoCwd = join(demoHome, 'demo-workspace')
+const demoManagedId = `glass-${randomUUID().replaceAll('-', '').slice(0, 20)}`
+const demoConversationId = randomUUID()
+function fnv8(value) {
+  let hash = 0x811c9dc5
+  for (const char of value) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 0x01000193) >>> 0 }
+  return hash.toString(16).padStart(8, '0')
+}
+const demoDataDir = resolve(join(demoHome, '.agentistics'))
+const demoTmuxSocket = `agentop-${fnv8(demoDataDir)}`
+const demoTmuxName = `agentop-${demoManagedId}`
+const appEnv = {
+  PATH: pathEnv, HOME: demoHome, USERPROFILE: demoHome,
+  AGENTISTICS_DIR: demoDataDir, AGENTISTICS_ARCHIVE_DIR: join(demoDataDir, 'archive'),
+  AGENTISTICS_JOURNAL_DIR: join(demoDataDir, 'journal'), AGENTISTICS_JOURNAL: '0',
+  CLAUDE_DIR: join(demoHome, '.claude'), CODEX_DIR: join(demoHome, '.codex'),
+  GEMINI_DIR: join(demoHome, '.gemini'), COPILOT_DIR: join(demoHome, '.copilot'),
+  AGENTISTICS_HARNESS_CODEX: '0', AGENTISTICS_HARNESS_GEMINI: '0', AGENTISTICS_HARNESS_COPILOT: '0',
+  AGENTISTICS_HARNESS_KIMI: '0', AGENTISTICS_HARNESS_ANTIGRAVITY: '0',
+  AGENTISTICS_TEAM_CENTRAL: '0', AGENTISTICS_SERVER_FOREGROUND: '1', AGENTISTICS_EXPERIMENTAL: '0',
+  TMUX_TMPDIR: join(demoHome, 'tmux'), TMPDIR: join(demoHome, 'tmp'),
+  PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1',
+  ...(process.env.VOLTA_HOME ? { VOLTA_HOME: process.env.VOLTA_HOME } : {}),
+}
+await mkdir(demoCwd, { recursive: true })
+await mkdir(join(demoHome, 'tmux'), { recursive: true })
+await mkdir(join(demoHome, 'tmp'), { recursive: true })
+await writeFile(join(demoDataDir, 'managed-sessions.json'), JSON.stringify([{
+  id: demoManagedId, harness: 'claude', cwd: demoCwd, createdAt: new Date().toISOString(),
+  conversationId: demoConversationId, conversationLink: 'assigned', conversationLinkVia: 'assigned-id',
+  label: 'Demonstração Vidro Real', mode: 'no-questions',
+}], null, 2))
+const tmuxSeed = spawnSync('tmux', ['-L', demoTmuxSocket, '-f', '/dev/null', 'new-session', '-d', '-s', demoTmuxName, '-c', demoCwd, '-e', `AGENTOP_MANAGED_ID=${demoManagedId}`, '--', 'sleep', '600'], { env: appEnv, encoding: 'utf8', stdio: 'pipe' })
+if (tmuxSeed.status !== 0) throw new Error(`[fixture] isolated tmux backend failed: ${tmuxSeed.stderr || tmuxSeed.stdout}`)
+function stopDemoTmux() {
+  spawnSync('tmux', ['-L', demoTmuxSocket, 'kill-server'], { env: appEnv, stdio: 'ignore' })
+}
+const inventedTurns = [
     ['user', 'Revise o cartão de sessões para destacar o estado atual.'],
     ['assistant', 'Vou revisar a estrutura do cartão e preservar os dados existentes.'],
     ['user', 'Comece pelo componente da lista e mantenha o layout responsivo.'],
@@ -47,36 +88,29 @@ async function addDemoTranscript() {
     ['assistant', 'A cópia está em português e os rótulos permanecem consistentes entre desktop e celular.'],
     ['user', 'Perfeito, deixe a conversa pronta para revisão.'],
   ]
-  for (const [fileIndex, file] of files.entries()) {
-    const session = JSON.parse(await readFile(join(claudeDir, file), 'utf8'))
-    if (fileIndex === 0) {
-      // Keep this one demo row actionable so the standard composer is visible behind the chat menu.
-      delete session.end_time
-      delete session.duration_minutes
-      await writeFile(join(claudeDir, file), JSON.stringify(session))
-    }
-    const encoded = session.project_path.replace(/[^a-zA-Z0-9-]/g, '-')
-    const transcriptDir = join(demoHome, '.claude', 'projects', encoded)
-    await mkdir(transcriptDir, { recursive: true })
-    const base = Date.now() - (15 + fileIndex) * 60_000
-    const lines = turns.map(([role, text], i) => JSON.stringify({
+async function addDemoTranscript(row) {
+  const sessionId = row.conversationId ?? row.id
+  if (!sessionId || !row.cwd || row.harness !== 'claude') throw new Error('[fixture] selected row lacks Claude id/cwd')
+  const encoded = row.cwd.replace(/[^a-zA-Z0-9-]/g, '-')
+  const transcriptDir = join(demoHome, '.claude', 'projects', encoded)
+  await mkdir(transcriptDir, { recursive: true })
+  const base = Date.now() - 15 * 60_000
+  const lines = inventedTurns.map(([role, text], i) => JSON.stringify({
       type: role,
       message: role === 'user' ? { role, content: text } : { role, content: [{ type: 'text', text }] },
-      session_id: session.session_id,
-      cwd: session.project_path,
+      session_id: sessionId,
+      cwd: row.cwd,
       timestamp: new Date(base + i * 55_000).toISOString(),
     }))
-    await writeFile(join(transcriptDir, `${session.session_id}.jsonl`), `${lines.join('\n')}\n`)
-  }
+  await writeFile(join(transcriptDir, `${sessionId}.jsonl`), `${lines.join('\n')}\n`)
   await writeFile(join(demoHome, '.agentistics', 'preferences.json'), JSON.stringify({ archiveMode: 'consolidate', lang: 'pt', theme: 'dark' }, null, 2))
 }
-await addDemoTranscript()
 
 const server = spawn(process.execPath, ['packages/server/server/index.ts'], {
-  cwd: resolve('.'), env: { ...process.env, HOME: demoHome, AGENTISTICS_DIR: join(demoHome, '.agentistics'), AGENTISTICS_ARCHIVE: '0', AGENTISTICS_JOURNAL: '0', PORT: String(apiPort) }, stdio: 'pipe',
+  cwd: resolve('.'), env: appEnv, stdio: 'pipe',
 })
 const vite = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(webPort), '--strictPort'], {
-  cwd: resolve('packages/web'), env: { ...process.env, PORT: String(apiPort), WEB_PORT: String(webPort) }, stdio: 'pipe',
+  cwd: resolve('packages/web'), env: appEnv, stdio: 'pipe',
 })
 let logs = ''
 server.stdout.on('data', b => { logs += b.toString() })
@@ -85,11 +119,18 @@ vite.stdout.on('data', b => { logs += b.toString() })
 vite.stderr.on('data', b => { logs += b.toString() })
 
 async function waitFor(url) {
+  const started = Date.now()
   for (let i = 0; i < 120; i++) {
-    try { if ((await fetch(url)).ok) return } catch {}
+    try {
+      const response = await fetch(url)
+      if (response.ok) { console.log(`[bootstrap] ready ${url} status=${response.status} after=${Date.now() - started}ms`); return }
+      if (i % 10 === 0) console.log(`[bootstrap] waiting ${url} status=${response.status}`)
+    } catch (error) {
+      if (i % 10 === 0) console.log(`[bootstrap] waiting ${url} error=${error instanceof Error ? error.message : String(error)}`)
+    }
     await new Promise(r => setTimeout(r, 500))
   }
-  throw new Error(`servers did not start:\n${logs.slice(-3000)}`)
+  throw new Error(`bootstrap timeout after 60000ms url=${url} api=${apiPort} web=${webPort}\n${logs.slice(-3000)}`)
 }
 async function ready(page) {
   await page.waitForFunction(() => !/Loading your data|Carregando/.test(document.body.innerText), undefined, { timeout: 90_000 }).catch(() => {})
@@ -130,27 +171,14 @@ async function openAreas(page, mobile) {
   await page.waitForTimeout(500)
 }
 async function openSession(page) {
-  await page.goto(`${base}/sessions`, { waitUntil: 'domcontentloaded' })
+  const id = preparedSession?.routeId
+  if (!id) throw new Error('[fixture] no preflighted live Claude Fleet row')
+  await page.goto(`${base}/sessions/${encodeURIComponent(id)}`, { waitUntil: 'domcontentloaded' })
   await ready(page)
-      // The throwaway HOME contains an invented Claude transcript linked to the scrubbed row.
-  const ended = page.getByRole('tab', { name: /Ended|Encerradas/ }).first()
-  if (await ended.count()) await ended.click({ force: true }).catch(() => {})
-  await page.waitForTimeout(400)
-  const candidates = page.locator('[data-session-open]:visible')
-  const count = Math.min(await candidates.count(), 12)
-  for (let i = 0; i < count; i++) {
-    await candidates.nth(i).click({ force: true }).catch(() => {})
-    await page.waitForURL(/\/sessions\/[^/?]+/, { timeout: 3000 }).catch(() => {})
-    if (/\/sessions\/[^/?]+/.test(new URL(page.url()).pathname)) {
-      const composer = page.locator('button[aria-label="Mais opções"], button[aria-label="More options"]').first()
-      if (await composer.count() && await composer.isVisible()) break
-    }
-    await page.goto(`${base}/sessions`, { waitUntil: 'domcontentloaded' }); await ready(page)
-    const again = page.getByRole('tab', { name: /Ended|Encerradas/ }).first()
-    if (await again.count()) await again.click({ force: true }).catch(() => {})
-    await page.waitForTimeout(300)
-  }
-  await page.waitForTimeout(1600)
+  await page.waitForSelector('textarea', { timeout: 30_000 })
+  await page.waitForFunction(text => document.body.innerText.includes(text), expectedChatText, { timeout: 30_000 })
+  await page.evaluate(() => { const el = document.querySelector('[data-session-row], main, [role="main"]'); if (el && 'scrollTop' in el) el.scrollTop = (el.scrollHeight - el.clientHeight) / 2 })
+  await page.waitForTimeout(500)
   const more = page.locator('button[aria-label="Mais opções"], button[aria-label="More options"]').first()
   if (await more.count() && await more.isVisible()) await more.click({ force: true }).catch(() => {})
   await page.waitForTimeout(500)
@@ -177,6 +205,51 @@ async function frameMeasure(page) {
 
 await waitFor(`http://127.0.0.1:${apiPort}/api/version`)
 await waitFor(`http://127.0.0.1:${webPort}/`)
+const probeResponse = await fetch(`http://127.0.0.1:${apiPort}/api/fleet`)
+const probeText = await probeResponse.text()
+let probe = {}
+try { probe = JSON.parse(probeText) } catch {}
+const probeRows = Array.isArray(probe.rows) ? probe.rows : (Array.isArray(probe.sessions) ? probe.sessions : [])
+const closedResponse = await fetch(`http://127.0.0.1:${apiPort}/api/fleet/closed`)
+const closedText = await closedResponse.text()
+let closed = {}
+try { closed = JSON.parse(closedText) } catch {}
+const closedRows = Array.isArray(closed.rows) ? closed.rows : (Array.isArray(closed.sessions) ? closed.sessions : [])
+// A closed row cannot prove a composer exists. Essential a/b evidence therefore requires an
+// active Claude row returned by Fleet with all three facts needed by the real chat reader.
+const fixtureRow = probeRows.find(row => row.id === demoManagedId
+  && row.conversationId === demoConversationId && row.harness === 'claude' && row.cwd === demoCwd)
+const probeId = fixtureRow?.id ?? null
+let preparedSession = null
+if (fixtureRow) {
+  await addDemoTranscript(fixtureRow)
+  preparedSession = { routeId: fixtureRow.id, conversationId: fixtureRow.conversationId, cwd: fixtureRow.cwd }
+}
+console.log(JSON.stringify({
+  probe: 'fleet', status: probeResponse.status, keys: Object.keys(probe), rowCount: probeRows.length, closedStatus: closedResponse.status, closedKeys: Object.keys(closed), closedRowCount: closedRows.length,
+  matched: Boolean(fixtureRow), rowShape: fixtureRow ? Object.keys(fixtureRow).sort() : null,
+  provenance: fixtureRow ? 'isolated-demo-registry+tmux' : 'unproven',
+  row: fixtureRow ? { id: 'demo-managed', conversationId: 'demo-conversation', harness: 'claude', cwd: 'demo-workspace' } : null,
+}, null, 2))
+if (probeId) {
+  const chatProbe = await fetch(`http://127.0.0.1:${apiPort}/api/fleet/chat?id=${encodeURIComponent(probeId)}&lang=pt`)
+  const chatText = await chatProbe.text()
+  let chat = {}
+  try { chat = JSON.parse(chatText) } catch {}
+  const hasExpectedText = chatText.includes(expectedChatText)
+  console.log(JSON.stringify({ probe: 'chat', status: chatProbe.status, keys: Object.keys(chat), turnCount: Array.isArray(chat.turns) ? chat.turns.length : null, live: chat.live, unavailable: chat.unavailable, hasExpectedText }, null, 2))
+  if (chatProbe.status !== 200 || !Array.isArray(chat.turns) || chat.turns.length < 2 || !hasExpectedText) {
+    throw new Error(`[fixture] preflight failed: chat=200, turns>=2 and invented text required; status=${chatProbe.status} turns=${Array.isArray(chat.turns) ? chat.turns.length : 'invalid'} expected=${hasExpectedText}`)
+  }
+} else {
+  throw new Error('[fixture] preflight failed: matched=false; no active Claude row with id, conversationId and cwd')
+}
+if (process.env.PROBE_ONLY === '1') {
+  server.kill('SIGTERM'); vite.kill('SIGTERM')
+  stopDemoTmux()
+  await rm(demoHome, { recursive: true, force: true })
+  process.exit(0)
+}
 const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE })
 const metrics = []
 try {
@@ -224,6 +297,7 @@ try {
 } finally {
   await browser.close()
   server.kill('SIGTERM'); vite.kill('SIGTERM')
+  stopDemoTmux()
   await rm(demoHome, { recursive: true, force: true })
 }
 await writeFile(join(out, 'metrics.json'), JSON.stringify(metrics, null, 2))
