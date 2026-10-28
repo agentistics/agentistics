@@ -26,15 +26,20 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
         const paste = harness === 'claude' || harness === 'gemini'
         const url = 'https://auth.example.test/authorize?public_state=' + 'a'.repeat(180)
         const html = render({ harness, login: { kind: paste ? 'paste' : 'device', url, code: 'ABCD-EFGH', expiresAt: Date.now() + 900000 } })
-        expect(html).toContain(url)
-        expect(html).toContain('overflow-wrap:anywhere')
-        expect(html).toContain('max-width:560px')
+        // CONTAS.LOGIN r2: the long link is a button and a copy action, never printed raw.
+        expect(html).toContain(`href="${url}"`)
+        expect(html.replace(/href="[^"]*"/g, '')).not.toContain(url)
+        expect(html).toContain('max-width:520px')
         expect(html).toContain(t.openLink)
         expect(html).toContain(t.copyLink)
         if (width === 390) expect(html).toContain('min-height:44px')
         else expect(html).not.toContain('min-height:44px')
         expect(html).toContain('data-login-url=')
-        expect(html).toContain('text-align:left')
+        // Three numbered steps; the first is the current one and carries the one primary action.
+        expect(html).toContain('data-step="1" data-step-state="active"')
+        expect(html).toContain('data-step="2" data-step-state="todo"')
+        expect(html).toContain('data-step="3" data-step-state="todo"')
+        expect(html).toContain(t.stepDone)
         expect(html).toContain(`data-login-step="${paste ? 'paste' : 'device'}"`)
         if (paste) {
           // CONTAS.LOGIN: a one-time code, never a password field (Chrome offered "Update password?").
@@ -66,6 +71,17 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
       expect(html).toContain('type="text"')
       expect(html).not.toMatch(/<input[^>]*disabled/)
       expect(html).toContain(t.submit)
+    })
+    test('CONTAS.LOGIN r2: an attempt that is over shows "expired" with Try again, never a loose error', () => {
+      const error = addErrorText({ error: 'not_found' }, lang === 'pt')
+      const html = render({ harness: 'claude', expired: true, error, login: { kind: 'paste', url: 'https://claude.ai/oauth', expiresAt: Date.now() + 300000 } })
+      expect(html).toContain('data-login-step="expired"')
+      expect(html).toContain(t.expired)
+      expect(html).toContain(t.retry)
+      expect(html).toContain('data-login-retry')
+      expect(html).not.toContain('Esta conta já não existe')
+      expect(html).not.toContain('This account no longer exists')
+      expect(html).not.toContain(t.copyLink)
     })
     test('success contains bound assistant, identity and plan', () => {
       const bound: RootRowView = { harness: 'codex', status: 'bound', root: '/root', label: 'person@example.test', plan: 'Pro' }
