@@ -79,7 +79,9 @@ describe('wiring', () => {
     expect(page).toContain('onBound={reloadAccounts}')
   })
   test('the component reuses the app pieces and hand-rolls no modal', () => {
-    for (const piece of ['AccountLoginModal', 'dialogButtonStyle', 'RecordCard', 'MetricNote']) expect(comp).toContain(piece)
+    // RecordCard's bordered action footer was the grey bar the owner rejected (CONTAS.LOGIN r2): the
+    // pending card is one compact row with the app's own button styles instead.
+    for (const piece of ['AccountLoginModal', 'dialogButtonStyle', 'MetricNote']) expect(comp).toContain(piece)
     expect(comp).not.toContain('position: \'fixed\'')
     expect(comp).toContain("'/api/accounts/roots'")
     expect(comp).toContain("method: 'DELETE'")
