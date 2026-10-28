@@ -1,0 +1,306 @@
+name: Clean install E2E
+
+on:
+  pull_request:
+    paths:
+      - install.sh
+      - '**/account-login*'
+      - '**/account-roots*'
+      - '**/harness-accounts*'
+      - '**/autostart*'
+      - '**/cli-setup*'
+      - .github/workflows/install-e2e.yml
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-e2e-${{ github.workflow }}-${{ github.ref }}
+  # Never cancel inside a release (workflow_call inherits the caller's event name).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-assets:
+    name: Build install assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Prepare generated sources
+        run: bun run stub
+      - name: Build dashboard assets
+        run: |
+          bun run build
+          bun run build:assets
+      - name: Compile platform binaries
+        run: |
+          mkdir -p e2e-assets
+          bun build --compile --minify packages/server/bin/cli.ts --outfile e2e-assets/agentop
+          bun build --compile --minify --target=bun-linux-x64-musl packages/server/bin/cli.ts --outfile e2e-assets/agentop-musl
+          bun build --compile --minify --target=bun-darwin-x64 packages/server/bin/cli.ts --outfile e2e-assets/agentop-darwin-x64
+          bun build --compile --minify --target=bun-darwin-arm64 packages/server/bin/cli.ts --outfile e2e-assets/agentop-darwin-arm64
+      - name: Package installer and assets
+        run: cp install.sh e2e-assets/install.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: install-e2e-assets
+          path: e2e-assets
+          if-no-files-found: error
+
+  install:
+    name: Install on ${{ matrix.name }}
+    needs: build-assets
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-latest
+            shell: bash
+            asset: agentop-darwin-arm64
+          - name: macOS x64
+            # macos-13 is retired in the current hosted-runner pool; this label is Intel x64.
+            os: macos-15-intel
+            shell: bash
+            asset: agentop-darwin-x64
+            # Long runner queue: advisory only, never blocks a release.
+            optional: true
+          - name: Ubuntu x64
+            os: ubuntu-latest
+            shell: bash
+            asset: agentop
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    continue-on-error: ${{ matrix.optional == true }}
+    env:
+      API_PORT: 49191
+      WEB_PORT: 49192
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: install-e2e-assets
+          path: e2e-assets
+      - name: Install shell dependencies
+        run: |
+          if command -v brew >/dev/null 2>&1; then brew install jq tmux || true; fi
+          command -v jq >/dev/null
+          command -v curl >/dev/null
+      - name: Exercise sh, bash, and zsh installers
+        timeout-minutes: 8
+        env:
+          AGENTOP_INSTALL_BASE_URL: http://127.0.0.1:49193
+          AGENTOP_INSTALL_START: yes
+          AGENTOP_INSTALL_AUTOSTART: no
+          AGENTOP_INSTALL_TTY: /dev/null
+          AGENTOP_INSTALL_PORT: 49192
+          PORT: 49191
+          WEB_PORT: 49192
+        run: |
+          chmod +x "e2e-assets/${{ matrix.asset }}"
+          if [ "${{ matrix.asset }}" != agentop ]; then cp "e2e-assets/${{ matrix.asset }}" e2e-assets/agentop; fi
+          python3 -m http.server 49193 --directory e2e-assets >/tmp/install-e2e-http.log 2>&1 &
+          HTTP_PID=$!
+          trap 'kill "$HTTP_PID" 2>/dev/null || true' EXIT
+          sleep 2
+          rm -rf "$HOME/.local/bin" "$HOME/.agentistics" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc"
+          mkdir -p "$HOME/.local/bin"
+          installer_shell=
+          for shell in sh bash zsh; do
+            if command -v "$shell" >/dev/null 2>&1; then installer_shell=$shell; break; fi
+          done
+          test -n "$installer_shell"
+          curl --fail --silent --show-error --retry 5 --retry-delay 1 "$AGENTOP_INSTALL_BASE_URL/install.sh" | "$installer_shell"
+          test -x "$HOME/.local/bin/agentop"
+          for shell in sh bash zsh; do
+            if ! command -v "$shell" >/dev/null 2>&1; then continue; fi
+            PATH="$HOME/.local/bin:$PATH" "$shell" -lc 'command -v agentop >/dev/null'
+            ready=
+            for _ in $(seq 1 60); do
+              if curl --fail --silent "http://127.0.0.1:${API_PORT}/api/health" >/dev/null 2>&1; then
+                ready=1
+                break
+              fi
+              sleep 1
+            done
+            test "$ready" = 1
+            web_status=$(curl --silent --show-error --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${WEB_PORT}/")
+            echo "web status: $web_status"
+            test "$web_status" != 000
+            roots=$(curl --silent --show-error "http://127.0.0.1:${API_PORT}/api/accounts/roots")
+            echo "roots response: $roots"
+            test "$(printf '%s' "$roots" | jq -r '.roots | type')" = array
+            accounts=$(curl --silent --show-error "http://127.0.0.1:${API_PORT}/api/accounts")
+            echo "accounts response: $accounts"
+            # A fresh machine has one non-login sentinel (`default`, id=""); it must not
+            # be mistaken for an authenticated account. Any real identity/root is forbidden here.
+            printf '%s' "$accounts" | jq -e 'all(.accounts[]; .id == "" and .key == "default" and .root == null)' >/dev/null
+          done
+      - name: Verify macOS keychain probe
+        if: runner.os == 'macOS'
+        run: |
+          command -v security
+          security find-generic-password -s com.apple.accountsd 2>/dev/null || test $? -eq 44
+      - name: Install Claude CLI
+        timeout-minutes: 5
+        run: |
+          for attempt in 1 2 3; do
+            if npm install --global @anthropic-ai/claude-code@2.1.312; then exit 0; fi
+            echo "npm install failed (attempt $attempt/3)" >&2
+            sleep $((attempt * 10))
+          done
+          exit 1
+      - name: Exercise OAuth URL and invalid-code failure
+        id: oauth
+        # Depends on Anthropic's network: advisory, reported in the job summary, never blocks a release.
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          AGENTOP_INSTALL_BASE_URL: http://127.0.0.1:49193
+          PORT: 49191
+          WEB_PORT: 49192
+        run: |
+          roots_status=''
+          roots=$(curl --silent --show-error --max-time 30 -o /tmp/login-root-response \
+            -w '%{http_code}' -X POST "http://127.0.0.1:${API_PORT}/api/accounts/roots" \
+            -H 'content-type: application/json' --data '{"harness":"claude"}' || true)
+          roots_status="$roots"
+          roots=$(cat /tmp/login-root-response)
+          echo "login-root HTTP status: $roots_status"
+          echo "login-root response: $roots"
+          printf '%s' "$roots" | jq -e '.pendingId and .url' >/dev/null
+          pending=$(printf '%s' "$roots" | jq -r '.pendingId')
+          test "$(printf '%s' "$roots" | jq -r '.url' | sed -n '1p')" != null
+          invalid_status=$(curl --silent --show-error --max-time 10 -o /tmp/invalid-code-response \
+            -w '%{http_code}' -X POST "http://127.0.0.1:${API_PORT}/api/accounts/roots/${pending}/code" \
+            -H 'content-type: application/json' --data '{"code":"definitely-invalid-e2e-code"}' || true)
+          echo "invalid-code HTTP status: $invalid_status"
+          test "$invalid_status" != 000
+          for _ in $(seq 1 60); do
+            roots_state=$(curl --silent --show-error --max-time 10 "http://127.0.0.1:${API_PORT}/api/accounts/roots" || true)
+            state=$(printf '%s' "$roots_state" | jq -r --arg id "$pending" '.roots[] | select(.pendingId == $id) | (.login.error // .error // empty)' 2>/dev/null || true)
+            # The CLI owns the refusal wording/reason. Accept any non-empty error published
+            # after the process receives the code; do not pin a vendor message or error name.
+            if [ -n "$state" ]; then exit 0; fi
+            sleep 1
+          done
+          echo 'The login process did not report a refusal within 60 seconds.' >&2
+          exit 1
+      - name: Report advisory failures
+        if: always()
+        run: |
+          if [ "${{ steps.oauth.outcome }}" = failure ]; then
+            echo "::warning title=OAuth login check failed (non-blocking)::Depends on Anthropic network; see the step log."
+            echo "> **Warning:** OAuth URL / invalid-code check failed on ${{ matrix.name }} (non-blocking)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "${{ matrix.optional }}" = true ] && [ "${{ job.status }}" = failure ]; then
+            echo "::warning title=${{ matrix.name }} failed (non-blocking)::Advisory target."
+            echo "> **Warning:** ${{ matrix.name }} failed (non-blocking target)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload failure diagnostics
+        if: failure()
+        run: tmux -L agentistics capture-pane -p -S -200 > /tmp/login-pane.txt 2>/dev/null || true
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-e2e-${{ matrix.name }}-diagnostics
+          path: |
+            /home/runner/.agentistics/server.log
+            /Users/runner/.agentistics/server.log
+            /github/home/.agentistics/server.log
+            /tmp/install-e2e-http.log
+            /tmp/login-pane.txt
+          if-no-files-found: ignore
+
+  alpine:
+    name: Install on Alpine (musl)
+    needs: build-assets
+    runs-on: ubuntu-latest
+    container: alpine:3.21
+    timeout-minutes: 15
+    env:
+      API_PORT: 49191
+      WEB_PORT: 49192
+    steps:
+      - name: Install Alpine dependencies
+        run: apk add --no-cache bash zsh curl jq python3 nodejs npm tmux git
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: install-e2e-assets
+          path: e2e-assets
+      - name: Exercise musl install and login flow
+        timeout-minutes: 8
+        env:
+          AGENTOP_INSTALL_BASE_URL: http://127.0.0.1:49193
+          AGENTOP_INSTALL_START: yes
+          AGENTOP_INSTALL_AUTOSTART: no
+          AGENTOP_INSTALL_TTY: /dev/null
+          AGENTOP_INSTALL_PORT: 49192
+          PORT: 49191
+          WEB_PORT: 49192
+        run: |
+          cp e2e-assets/agentop-musl e2e-assets/agentop
+          chmod +x e2e-assets/agentop
+          python3 -m http.server 49193 --directory e2e-assets >/tmp/install-e2e-http.log 2>&1 &
+          HTTP_PID=$!
+          trap 'kill "$HTTP_PID" 2>/dev/null || true' EXIT
+          sleep 2
+          curl --fail --silent --show-error --retry 5 --retry-delay 1 "$AGENTOP_INSTALL_BASE_URL/install.sh" | sh
+          command -v agentop >/dev/null
+          PATH="/usr/local/bin:$HOME/.local/bin:$PATH" sh -lc 'command -v agentop >/dev/null'
+          ready=
+          for _ in $(seq 1 60); do
+            if curl --fail --silent "http://127.0.0.1:${API_PORT}/api/health" >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = 1
+          web_status=$(curl --silent --show-error --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${WEB_PORT}/")
+          echo "web status: $web_status"
+          test "$web_status" != 000
+          roots=$(curl --silent --show-error "http://127.0.0.1:${API_PORT}/api/accounts/roots")
+          echo "roots response: $roots"
+          printf '%s' "$roots" | jq -e '.roots | type == "array"' >/dev/null
+          accounts=$(curl --silent --show-error "http://127.0.0.1:${API_PORT}/api/accounts")
+          echo "accounts response: $accounts"
+          printf '%s' "$accounts" | jq -e 'all(.accounts[]; .id == "" and .key == "default" and .root == null)' >/dev/null
+      - name: Upload Alpine diagnostics
+        if: failure()
+        run: tmux -L agentistics capture-pane -p -S -200 > /tmp/login-pane.txt 2>/dev/null || true
+      - name: Upload Alpine failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-e2e-alpine-diagnostics
+          path: |
+            /home/runner/.agentistics/server.log
+            /Users/runner/.agentistics/server.log
+            /github/home/.agentistics/server.log
+            /tmp/install-e2e-http.log
+            /tmp/login-pane.txt
+          if-no-files-found: ignore
+
+  gate:
+    name: Gate result
+    if: always()
+    needs: [build-assets, install, alpine]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require build, Ubuntu, macOS arm64 and Alpine
+        run: |
+          echo "build-assets=${{ needs.build-assets.result }} install=${{ needs.install.result }} alpine=${{ needs.alpine.result }}"
+          test "${{ needs.build-assets.result }}" = success
+          test "${{ needs.install.result }}" = success
+          test "${{ needs.alpine.result }}" = success

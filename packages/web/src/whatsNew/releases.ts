@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.161.8': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O quadro "Uso dos planos" abre centrado logo acima do próprio botão, sem sair da tela, com a setinha apontando para ele.',
+        en: 'The "Plan usage" panel opens centred right above its own button, inside the screen, with its arrow pointing at it.',
+      },
+    ],
+  },
   '2.161.7': {
     features: [],
     fixes: [
