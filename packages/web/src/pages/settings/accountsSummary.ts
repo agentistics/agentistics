@@ -19,6 +19,8 @@ export interface AccountRowData {
   root: string | null
   available: boolean
   retired?: boolean
+  /** The harness answered that it has no login here (never stored; see the server's `signedOut`). */
+  signedOut?: true
 }
 
 /** The literal the server stores when a harness cannot say whose account a folder holds. */

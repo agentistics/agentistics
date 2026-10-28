@@ -58,6 +58,7 @@ const REFUSALS: Record<string, { pt: string; en: string }> = {
   login_unavailable: { pt: 'Não foi possível abrir o login deste assistente. Veja se ele está instalado.', en: 'Could not open this assistant\'s sign-in. Check that it is installed.' },
   disabled: { pt: 'Várias contas está desligada neste computador.', en: 'Multiple accounts is turned off on this computer.' },
   unknown_harness: { pt: 'Assistente desconhecido.', en: 'Unknown assistant.' },
+  capability_disabled: { pt: 'Este computador não permite iniciar logins por esta tela (o perfil de exposição desliga o acesso local). Abra o agentistics no próprio computador ou ligue o acesso local nas configurações do servidor.', en: 'This computer does not allow starting sign-ins from this screen (its exposure profile turns local access off). Open agentistics on the computer itself, or turn local access on in the server settings.' },
   not_found: { pt: 'Esta conta já não existe.', en: 'This account no longer exists.' },
 }
 

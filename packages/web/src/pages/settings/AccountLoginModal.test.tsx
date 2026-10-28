@@ -37,8 +37,9 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
         expect(html).toContain('text-align:left')
         expect(html).toContain(`data-login-step="${paste ? 'paste' : 'device'}"`)
         if (paste) {
-          expect(html).toContain('type="password"')
-          expect(html).toContain('autoComplete="off"')
+          // CONTAS.LOGIN: a one-time code, never a password field (Chrome offered "Update password?").
+          expect(html).not.toContain('type="password"')
+          expect(html).toContain('autoComplete="one-time-code"')
           expect(html).toContain(t.submit)
           expect(html).toContain(t.awaitingCode)
           expect(html).not.toContain(t.submitted)
@@ -62,7 +63,7 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
       const html = render({ harness: 'gemini', error, login: { kind: 'paste', url: 'https://accounts.google.com/auth?state=NEW_FAKE_STATE', expiresAt: Date.now() + 300000 } })
       expect(html).toContain('state=NEW_FAKE_STATE')
       expect(html).toContain(error)
-      expect(html).toContain('type="password"')
+      expect(html).toContain('type="text"')
       expect(html).not.toMatch(/<input[^>]*disabled/)
       expect(html).toContain(t.submit)
     })
