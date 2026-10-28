@@ -1,7 +1,7 @@
 import { appendFile, access, constants } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { HarnessId } from '@agentistics/core'
+import { redactSecrets, type HarnessId } from '@agentistics/core'
 import { getChatDriver } from '../chat-drivers'
 import { forgetHarnessVersion } from './harness-version'
 import { resetHarnessAvailability } from './harness-available'
@@ -156,7 +156,7 @@ export async function handleHarnessInstallRoute(
   }
 
   async function* events(): AsyncGenerator<Event> {
-    const log = async (message: string) => { await appendFile(LOG, `${new Date().toISOString()} ${id} ${operation} ${message}\n`).catch(() => {}) }
+    const log = async (message: string) => { await appendFile(LOG, `${new Date().toISOString()} ${id} ${operation} ${redactSecrets(message)}\n`).catch(() => {}) }
     // Lines arrive from a callback; the generator drains them as they come, so the modal moves
     // while the installer runs instead of after it.
     const queue: string[] = []
