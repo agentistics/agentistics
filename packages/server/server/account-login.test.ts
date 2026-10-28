@@ -405,7 +405,7 @@ describe('CONTAS.LOGIN r3: a finished sign-in the probe cannot see says why (mac
     await handle.submit('FAKE_CODE')
     cli.exit(0)
     await new Promise(r => setTimeout(r, 50))
-    expect(failures).toEqual(['keychain_unreadable'])
+    expect(failures).toEqual(['login_unreadable'])
   })
 })
 

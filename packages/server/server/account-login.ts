@@ -8,7 +8,7 @@ import type { HarnessId } from '@agentistics/core'
 import { isSessionGoneError, SHELL_SOCKET } from './sessions/tmux-cli'
 
 export type LoginKind = 'paste' | 'device'
-export type LoginError = 'login_unavailable' | 'login_timeout' | 'login_failed' | 'plaintext_refused' | 'invalid_code' | 'keychain_unreadable' | 'login_not_saved'
+export type LoginError = 'login_unavailable' | 'login_timeout' | 'login_failed' | 'plaintext_refused' | 'invalid_code' | 'keychain_unreadable' | 'login_not_saved' | 'login_unreadable'
 export interface LoginInfo { kind: LoginKind; url: string; code?: string; expiresAt: number; error?: 'invalid_code' }
 interface LoginAdapter { argv: string[]; kind: LoginKind; pty: boolean; hosts: readonly string[]; path: RegExp }
 // @harness-adapters-only: login protocols are facts of each vendor CLI, not a preferred assistant.
@@ -29,6 +29,7 @@ export const LOGIN_MESSAGES: Record<LoginError, string> = {
   invalid_code: 'Enter the authorization code shown by the sign-in page.',
   keychain_unreadable: 'macOS did not let agentistics read the Claude login it just saved. Open Keychain Access, find the "Claude Code-credentials" item for this account and allow access, or sign in again and choose "Always Allow" when macOS asks.',
   login_not_saved: 'The sign-in finished, but the login was not saved on this computer. Try again; if it repeats, sign in once in a terminal with `claude auth login`.',
+  login_unreadable: 'Claude signed in, but agentistics could not read the login on this Mac. Verify again; no new code is needed.',
 }
 export class LoginFailure extends Error {
   constructor(readonly reason: LoginError, readonly detail?: string) { super(LOGIN_MESSAGES[reason]) }
@@ -145,9 +146,13 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
   }
   const fail = async (reason: LoginError, why?: string, diagnosable = false) => {
     if (stopped) return
-    if (diagnosable && hasSubmitted) reason = await (opts.diagnose ?? diagnoseLogin)(req).catch(() => undefined) ?? reason
+    let diagnosis: LoginError | undefined
+    if (diagnosable && hasSubmitted) diagnosis = await (opts.diagnose ?? diagnoseLogin)(req).catch(() => undefined)
+    if (diagnosis) reason = diagnosis === 'login_not_saved' || diagnosis === 'keychain_unreadable' ? 'login_unreadable' : diagnosis
     if (stopped) return
-    const detail = hasSubmitted ? loginScreenSaid(lastScreen, secrets) : undefined
+    const detail = hasSubmitted
+      ? [diagnosis === 'login_not_saved' ? 'the Claude keychain item was absent' : diagnosis === 'keychain_unreadable' ? 'the Claude keychain item was present but unreadable' : undefined, loginScreenSaid(lastScreen, secrets)].filter(Boolean).join('; ') || undefined
+      : undefined
     if (hasSubmitted) log(`[account-login] ${req.harness} sign-in ${why ?? reason}; the CLI screen said: ${detail ?? '(nothing)'}`)
     try { await stop(reason); await onFailure(reason, detail) } finally { rejectReady(new LoginFailure(reason, detail)) }
   }

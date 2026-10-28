@@ -105,6 +105,8 @@ const CREDENTIAL_NAME = /cred|token|auth|oauth|secret|api[-_.]?key|\.pem$|\.key$
 export const looksLikeCredential = (name: string): boolean => CREDENTIAL_NAME.test(name)
 
 const say = (en: string) => en
+/** Keep an unreadable Claude root alive for Verify again, but never indefinitely. */
+export const LOGIN_UNREADABLE_RETENTION_MS = 10 * 60_000
 
 export type RootRefusal = 'disabled' | 'unsupported' | 'unknown_harness' | 'login_unavailable' | 'unsafe_path' | LoginError
 export interface RootCreated {
@@ -129,6 +131,8 @@ export interface RootRow {
   error?: LoginError
   /** What the assistant's CLI said when the attempt failed after a code — masked, no code, no link. */
   detail?: string
+  /** A Claude login that completed but could not be read is retained for a bounded re-probe. */
+  retainedUntil?: number
   login?: LoginInfo
   /**
    * A pending folder with no sign-in process behind it in THIS server (it restarted, or the attempt
@@ -258,6 +262,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
       let names: string[]
       try { names = await readdir(join(base(), harness)) } catch { continue }
       for (const pendingId of names) {
+        if (failures.has(pendingId)) continue
         const root = join(base(), harness, pendingId)
         try { if (!(await lstat(root)).isDirectory()) continue } catch { continue }
         out.push({ pendingId, harness, root, ...(logins.get(pendingId)?.info() ? { login: logins.get(pendingId)!.info() } : {}) })
@@ -280,6 +285,10 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
       })
     }
     for (const [id, row] of failures) {
+      if (row.error === 'login_unreadable' && row.retainedUntil !== undefined && Date.now() >= row.retainedUntil) {
+        if (isRootPath(row.root) && !(await hasSymlinkPart(row.root))) await rm(row.root, { recursive: true, force: true })
+        delete row.retainedUntil
+      }
       if (Date.now() - row.failedAt > 900_000) failures.delete(id)
       else { const { failedAt, ...publicRow } = row; rows.push(publicRow) }
     }
@@ -320,6 +329,13 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   async function discardPendingUnlocked(harness: HarnessId, pendingId: string, root: string, error: LoginError, detail?: string) {
     // A timeout racing a successful bind must never remove a bound account's credentials.
     if ((await listAccounts()).accounts.some(a => a.root && resolve(a.root) === resolve(root))) return
+    if (error === 'login_unreadable') {
+      const retainedUntil = Date.now() + LOGIN_UNREADABLE_RETENTION_MS
+      failures.set(pendingId, { harness, pendingId, root, status: 'failed', error, retainedUntil, ...(detail ? { detail } : {}), failedAt: Date.now() })
+      log(`[account-roots] pending ${harness} root ${pendingId}: retaining root for Verify again until ${new Date(retainedUntil).toISOString()}`)
+      logins.delete(pendingId)
+      return
+    }
     failures.set(pendingId, { harness, pendingId, root, status: 'failed', error, ...(detail ? { detail } : {}), failedAt: Date.now() })
     logins.delete(pendingId)
     if (isRootPath(root) && !(await hasSymlinkPart(root))) await rm(root, { recursive: true, force: true })
@@ -365,6 +381,23 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
       const reason = error instanceof LoginFailure ? error.reason : 'login_failed'
       return { ok: false as const, reason, message: LOGIN_MESSAGES[reason] }
     }
+  }
+
+  /** Re-read a completed Claude login without asking for another authorization code. */
+  async function verifyPending(id: string) {
+    const row = failures.get(id)
+    if (!row || row.error !== 'login_unreadable') return { ok: false as const, reason: 'not_found', message: 'This sign-in is no longer available.' }
+    if ((row.retainedUntil ?? 0) <= Date.now()) {
+      failures.delete(id)
+      if (isRootPath(row.root) && !(await hasSymlinkPart(row.root))) await rm(row.root, { recursive: true, force: true })
+      return { ok: false as const, reason: 'login_timeout', message: LOGIN_MESSAGES.login_timeout }
+    }
+    const identity = await probe(row.harness, row.root).catch(() => null)
+    if (!identity || identity.key === 'default') return { ok: false as const, reason: 'login_unreadable', message: LOGIN_MESSAGES.login_unreadable }
+    const { account } = await bind(row.root, { harness: row.harness, ...identity })
+    failures.delete(id)
+    auditLater({ action: 'account.update', ip: 'local', targetId: account.id, meta: { op: 'root_login', harness: row.harness } })
+    return { ok: true as const, accountId: account.id }
   }
 
   /** One pass: probe each pending root; a confirmed identity mints or adopts the account. */
@@ -430,7 +463,12 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     { ok: true; retired: boolean; removedDir: boolean; root: string; confirmWith?: string }
     | { ok: false; status: 404 | 409 | 400; reason: string; message: string }
   > {
-    if (failures.delete(id)) return { ok: true, retired: false, removedDir: true, root: '' }
+    const failed = failures.get(id)
+    if (failed) {
+      failures.delete(id)
+      if (isRootPath(failed.root) && !(await hasSymlinkPart(failed.root))) await rm(failed.root, { recursive: true, force: true })
+      return { ok: true, retired: false, removedDir: true, root: failed.root }
+    }
     let account = await getAccount(id)
     const dir = (await listDirs()).find(d => d.pendingId === id
       || (account?.root ? resolve(d.root) === resolve(account.root) : false))
@@ -479,7 +517,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
 
   const removeRoot = (id: string, body: { confirm?: unknown } = {}) => serialized(() => removeRootUnlocked(id, body))
 
-  return { createRoot, startLogin, addRoot, submitCode, list, pollPending, ensurePoller, stopPoller, removeRoot, reregisterMcp, flagOn }
+  return { createRoot, startLogin, addRoot, submitCode, verifyPending, list, pollPending, ensurePoller, stopPoller, removeRoot, reregisterMcp, flagOn }
 }
 
 export interface McpChild { exited: Promise<number>; kill: (signal?: string) => void }

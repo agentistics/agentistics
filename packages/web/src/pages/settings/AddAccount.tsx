@@ -10,7 +10,7 @@ import { AccountLoginModal, PendingLoginCard } from './AccountLoginModal'
 import { accountSignInStore } from '../../lib/accountSignIn'
 import { ADD_COPY, addAccountView, addErrorText, alreadyGone, failureText, anyResolved, attemptIsOver, pendingRoots, refusalCode, type Lang, type LoginInfoView, type RootRowView } from './addAccountLogic'
 
-interface ActiveLogin { harness: HarnessId; pendingId?: string; login?: LoginInfoView; bound?: RootRowView }
+interface ActiveLogin { harness: HarnessId; pendingId?: string; login?: LoginInfoView; bound?: RootRowView; errorCode?: string }
 export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailable }: {
   lang: Lang; harnesses: readonly HarnessId[]; onBound: () => void
   /** An "Entrar" this dialog cannot serve (multiple accounts off, or the assistant keeps one login). */
@@ -19,7 +19,7 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
   const pt = lang === 'pt', t = ADD_COPY(pt), mobile = useIsMobile()
   const [flagOn, setFlagOn] = useState<boolean | null>(null), [roots, setRoots] = useState<RootRowView[]>([])
   const [active, setActive] = useState<ActiveLogin | null>(null), [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null), [submitted, setSubmitted] = useState(false)
+  const [error, setError] = useState<string | null>(null), [errorCode, setErrorCode] = useState<string | undefined>(), [submitted, setSubmitted] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null), [expired, setExpired] = useState(false)
   const [cancelling, setCancelling] = useState<ReadonlySet<string>>(new Set())
   const rootsRef = useRef<RootRowView[]>([]), generation = useRef(0), activeRef = useRef<ActiveLogin | null>(null)
@@ -61,13 +61,14 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
       if (!current?.pendingId || sending.current) return
       const row = next.find(r => r.pendingId === current.pendingId)
       if (row?.status === 'bound') {
-        const value = { ...current, bound: row }; activeRef.current = value; setActive(value); setError(null)
+        const value = { ...current, bound: row, errorCode: undefined }; activeRef.current = value; setActive(value); setError(null); setErrorCode(undefined)
       } else if (row?.status === 'failed') {
-        setExpired(true); setError(failureText(row, pt))
-      } else if (!row || row.stale) { setExpired(true); setError(addErrorText({ error: 'login_timeout' }, pt)) }
+        const unreadable = row.error === 'login_unreadable'
+        setExpired(!unreadable); setErrorCode(row.error); setError(failureText(row, pt))
+      } else if (!row || row.stale) { setExpired(true); setErrorCode('login_timeout'); setError(addErrorText({ error: 'login_timeout' }, pt)) }
       else if (row.login) {
-        if (row.login.error === 'invalid_code') { setSubmitted(false); setError(addErrorText({ error: 'invalid_code' }, pt)) }
-        const value = { ...current, login: row.login }; activeRef.current = value; setActive(value)
+        if (row.login.error === 'invalid_code') { setSubmitted(false); setErrorCode('invalid_code'); setError(addErrorText({ error: 'invalid_code' }, pt)) }
+        const value = { ...current, login: row.login, errorCode: row.login.error }; activeRef.current = value; setActive(value)
       }
     } catch { /* Retry on the next poll; a network failure is not proof of a failed login. */ }
   }, [onBound, pt])
@@ -82,7 +83,7 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
   const begin = async (harness: HarnessId) => {
     const version = ++generation.current
     const controller = new AbortController(); creating.current = controller
-    updateActive({ harness }); setBusy(true); setError(null); setSubmitted(false); setExpired(false); setCancelError(null)
+    updateActive({ harness }); setBusy(true); setError(null); setErrorCode(undefined); setSubmitted(false); setExpired(false); setCancelError(null)
     try {
       const res = await fetch('/api/accounts/roots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ harness }), signal: controller.signal })
       const body = await res.json().catch(() => null)
@@ -90,7 +91,7 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
         if (res.ok && body?.pendingId) await remove(body.pendingId)
         return
       }
-      if (!res.ok) { setError(addErrorText(body, pt)); return }
+      if (!res.ok) { setErrorCode(refusalCode(body)); setError(addErrorText(body, pt)); return }
       updateActive({ harness, pendingId: body.pendingId, login: { kind: body.kind, url: body.url, code: body.code, expiresAt: body.expiresAt } })
       await refresh()
     } catch { if (generation.current === version) setError(addErrorText(null, pt)) }
@@ -101,7 +102,7 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
     if (!current) return
     // Invalidate polling and creation callbacks before awaiting process/root cleanup.
     generation.current++; creating.current?.abort(); creating.current = null; sending.current = false
-    updateActive(null); setError(null); setBusy(false); setSubmitted(false); setExpired(false)
+    updateActive(null); setError(null); setErrorCode(undefined); setBusy(false); setSubmitted(false); setExpired(false)
     if (current.pendingId && !current.bound) {
       try { await remove(current.pendingId); setCancelError(null) }
       catch (body) { setCancelError(addErrorText(body, pt)) }
@@ -120,11 +121,25 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
       sending.current = false
       if (!res.ok) {
         const body = await res.json().catch(() => null)
-        setSubmitted(false); setError(addErrorText(body, pt)); if (attemptIsOver(refusalCode(body))) setExpired(true)
+        setSubmitted(false); setErrorCode(refusalCode(body)); setError(addErrorText(body, pt)); if (attemptIsOver(refusalCode(body))) setExpired(true)
       }
       else await refresh()
     } catch { if (generation.current === version) { setSubmitted(false); setError(addErrorText(null, pt)) } }
     finally { if (generation.current === version) { sending.current = false; setBusy(false) } }
+  }
+  const verify = async () => {
+    const current = activeRef.current
+    if (!current?.pendingId || busy) return
+    const version = ++generation.current; setBusy(true); setError(null)
+    try {
+      const res = await fetch(`/api/accounts/roots/${encodeURIComponent(current.pendingId)}/verify`, { method: 'POST' })
+      if (generation.current !== version) return
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        setErrorCode(refusalCode(body)); setError(addErrorText(body, pt)); if (refusalCode(body) === 'login_timeout') setExpired(true)
+      } else await refresh()
+    } catch { if (generation.current === version) setError(addErrorText(null, pt)) }
+    finally { if (generation.current === version) setBusy(false) }
   }
   const cancelPending = async (row: RootRowView) => {
     const id = row.pendingId
@@ -143,8 +158,8 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
     await begin(harness)
   }
   const resume = (row: RootRowView) => {
-    generation.current++; updateActive({ harness: row.harness, pendingId: row.pendingId, login: row.login })
-    setError(null); setBusy(false); setSubmitted(false); setExpired(false)
+    generation.current++; updateActive({ harness: row.harness, pendingId: row.pendingId, login: row.login, errorCode: row.error })
+    setError(null); setErrorCode(undefined); setBusy(false); setSubmitted(false); setExpired(false)
   }
   // "Entrar" anywhere in the app lands here: open this same dialog, never a session.
   const signInRequest = useSyncExternalStore(accountSignInStore.subscribe, accountSignInStore.get, accountSignInStore.get)
@@ -174,6 +189,6 @@ export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailab
     {view.unsupported.length > 0 && <MetricNote>{t.noSecond(view.unsupported.map(label).join(', '))}</MetricNote>}
     {active && <AccountLoginModal key={`${active.harness}:${active.pendingId ?? 'starting'}`} harness={active.harness} lang={lang} login={active.login} bound={active.bound}
       busy={busy} submitted={submitted} error={error} expired={expired} onSubmit={code => { void submit(code) }} onCancel={() => { void close() }}
-      onRetry={() => { void retry(active.harness) }} />}
+      onRetry={() => { void retry(active.harness) }} onVerify={() => { void verify() }} errorCode={errorCode ?? active.errorCode} />}
   </div>
 }

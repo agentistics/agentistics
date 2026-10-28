@@ -23,6 +23,7 @@ export interface RootRowView {
   error?: string
   /** What the assistant's CLI said when the attempt failed (masked by the server: no code, no link). */
   detail?: string
+  retainedUntil?: number
   /** Pending, but no sign-in process is behind it any more (server restarted): only "start again" works. */
   stale?: boolean
 }
@@ -76,6 +77,7 @@ const REFUSALS: Record<string, { pt: string; en: string }> = {
   invalid_code: { pt: 'O código não foi aceito. Abra o link atual e cole um novo código de autorização.', en: 'The code was not accepted. Open the current link and paste a new authorization code.' },
   keychain_unreadable: { pt: 'O macOS não deixou o agentistics ler o login do Claude que acabou de ser salvo. Abra o Acesso às Chaves, procure o item “Claude Code-credentials” desta conta e permita o acesso — ou entre de novo e escolha “Permitir sempre” quando o macOS perguntar.', en: 'macOS did not let agentistics read the Claude login it just saved. Open Keychain Access, find the “Claude Code-credentials” item for this account and allow access — or sign in again and choose “Always Allow” when macOS asks.' },
   login_not_saved: { pt: 'O login terminou, mas não foi salvo neste computador. Tente de novo; se repetir, entre uma vez num terminal com `claude auth login`.', en: 'The sign-in finished, but the login was not saved on this computer. Try again; if it repeats, sign in once in a terminal with `claude auth login`.' },
+  login_unreadable: { pt: 'O Claude entrou, mas o agentistics não conseguiu ler o login neste Mac. Verifique de novo — não é preciso pedir outro código.', en: 'Claude signed in, but agentistics could not read the login on this Mac. Verify again; no new code is needed.' },
   root_in_use: { pt: 'Ainda há uma sessão aberta nesta conta. Encerre-a primeiro.', en: 'A session is still running in this account. End it first.' },
   unsupported: { pt: 'Este assistente mantém um só login por computador, então não dá para separar uma segunda conta.', en: 'This assistant keeps a single login per computer, so a second account cannot be kept apart.' },
   unsafe_path: { pt: 'A pasta de contas contém um atalho, então foi deixada como está.', en: 'The accounts folder contains a link, so it was left alone.' },
@@ -142,6 +144,7 @@ export const ADD_COPY = (pt: boolean) => ({
   workingNote: pt ? 'Iniciando o assistente e aguardando o link de login…' : 'Starting the assistant and waiting for its sign-in link…',
   cancelling: pt ? 'Cancelando…' : 'Cancelling…',
   waiting: pt ? 'Aguardando login' : 'Waiting for sign-in',
+  verifyAgain: pt ? 'Verificar de novo' : 'Verify again',
   openLogin: pt ? 'Abrir login' : 'Open login',
   cancelPending: pt ? 'Cancelar' : 'Cancel',
   cancelAria: (label: string) => (pt ? `Cancelar login do ${label}` : `Cancel ${label} sign-in`),
