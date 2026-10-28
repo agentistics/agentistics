@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.160.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Clicar em "Sessões" no menu volta a abrir a lista de sessões, em vez de levar para a página de Uso.',
+        en: 'Clicking "Sessions" in the menu opens the sessions list again instead of taking you to the Usage page.',
+      },
+      {
+        pt: 'As sessões de exemplo do modo demonstração não mostram mais os caminhos reais das suas pastas.',
+        en: 'The sample sessions in demo mode no longer show the real paths of your folders.',
+      },
+    ],
+  },
   '2.160.1': {
     features: [],
     fixes: [
