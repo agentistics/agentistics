@@ -21,6 +21,8 @@ export type ThrowawayState = {
   reservationPaths?: string[]
   // Kept for states written by older versions.
   reservationPath?: string
+  /** Short per-run TMPDIR/TMUX_TMPDIR (see `shortRunTmp`); removed with the run. */
+  tmp?: string
   pid?: number
   unit?: string
   startedAt: string
@@ -29,7 +31,22 @@ export type ThrowawayState = {
 
 type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[] }
 
-export function buildThrowawayEnv(home: string, name: string, apiPort: number, webPort: number, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+/** A Unix socket path (sun_path) holds 108 bytes including the NUL; Chrome/tmux sockets live under TMPDIR. */
+export const SOCKET_PATH_MAX = 107
+
+/**
+ * Per-run scratch dir: `/tmp/agr-<6 hex>`. The old `<home>/tmp` sat under the throwaway home
+ * (`~/.cache/agentistics-throwaway/<name>-XXXXXX/tmp`, easily 90+ chars), so a socket such as
+ * Chrome's `org.chromium.Chromium.XXXXXX/SingletonSocket` passed 108 bytes and Playwright's Chrome
+ * died with SIGTRAP at launch. The id is a hash of the run's unique home so it stays short, unique
+ * and stable for stop/cleanup; /tmp is used on purpose (not os.tmpdir(), which may itself be long).
+ */
+export function shortRunTmp(home: string): string {
+  return join('/tmp', `agr-${new Bun.CryptoHasher('sha1').update(home).digest('hex').slice(0, 6)}`)
+}
+
+export function buildThrowawayEnv(home: string, name: string, apiPort: number, webPort: number, source: NodeJS.ProcessEnv = process.env, opts: { tmp?: string; heavyHeld?: boolean } = {}): NodeJS.ProcessEnv {
+  const tmp = opts.tmp ?? shortRunTmp(home)
   // Volta shims locate their toolchains relative to HOME unless VOLTA_HOME is set.
   // Capture the original installation before isolating HOME, or a shim may resolve itself.
   const voltaHome = source.VOLTA_HOME || join(source.HOME || source.USERPROFILE || homedir(), '.volta')
@@ -39,7 +56,10 @@ export function buildThrowawayEnv(home: string, name: string, apiPort: number, w
     HOME: home, USERPROFILE: home, AGENTISTICS_DIR: join(home, '.agentistics'),
     PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1',
     AGENTISTICS_SERVER_FOREGROUND: '1', AGENTISTICS_EXPERIMENTAL: '0',
-    TMUX_TMPDIR: join(home, 'tmp'), TMPDIR: join(home, 'tmp'), AGENTISTICS_THROWAWAY: name,
+    TMUX_TMPDIR: tmp, TMPDIR: tmp, AGENTISTICS_THROWAWAY: name,
+    // The run already holds (or inherits) the machine heavy lock: children must not take it again
+    // (`insideHeavyLock` reads this, so a nested `agentop heavy`/`agentop run` does not deadlock).
+    ...(opts.heavyHeld ? { AGENTISTICS_HEAVY_JOB: '1' } : {}),
   }
 }
 
@@ -201,6 +221,7 @@ async function stopState(state: ThrowawayState): Promise<void> {
     try { process.kill(-state.pid, 'SIGTERM') } catch { try { process.kill(state.pid, 'SIGTERM') } catch {} }
   }
   rmSync(state.home, { recursive: true, force: true })
+  if (state.tmp) rmSync(state.tmp, { recursive: true, force: true })
   releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
   rmSync(statePath(state.name), { force: true })
   console.log(`removed ${state.home}`)
@@ -283,13 +304,16 @@ async function startRun(options: RunOptions): Promise<number> {
   const { apiPort, webPort, reservationPaths } = ports
   const state: ThrowawayState = { name: options.name, home, apiPort, webPort, reservationPaths, startedAt: new Date().toISOString(), command: options.command }
   const script = process.argv[1]
+  const inside = insideHeavyLock(process.env, ancestorCmdlines())
   const heavyPrefix = shouldWrapHeavy({
     hasCommand: options.command.length > 0, linux: process.platform === 'linux', hasFlock: !!Bun.which('flock'),
-    inside: insideHeavyLock(process.env, ancestorCmdlines()),
+    inside,
   }) ? (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'heavy', '--'] : [process.execPath, 'heavy', '--']) : []
   const argv = options.command.length ? [...heavyPrefix, ...options.command] : (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'server'] : [process.execPath, 'server'])
-  const env = buildThrowawayEnv(home, options.name, apiPort, webPort)
-  mkdirSync(env.TMPDIR!, { recursive: true, mode: 0o700 })
+  const tmp = shortRunTmp(home)
+  state.tmp = tmp
+  const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0 })
+  mkdirSync(tmp, { recursive: true, mode: 0o700 })
   const unit = `agentistics-throwaway-${options.name}.scope`
   const systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
   const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv

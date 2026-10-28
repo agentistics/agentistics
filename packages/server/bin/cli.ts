@@ -106,7 +106,10 @@ Commands:
                 'agentop heavy -- <cmd>' waits its turn, shows its queue position, runs, exits with
                 the command's code. Slot 1 is /tmp/agentistics-heavy.lock (the manual flock)
   run           Run a command or throwaway server with isolated HOME, ports and process scope
-                ('run --rm'; 'run ls' and 'run stop <name>' manage active throwaways)
+                ('run --rm'; 'run ls' and 'run stop <name>' manage active throwaways).
+                TMPDIR is a short /tmp/agr-<id> (sockets stay under 108 bytes). A command run holds
+                the heavy slot and sets AGENTISTICS_HEAVY_JOB=1: nested 'agentop heavy' is a no-op,
+                but a raw 'flock /tmp/agentistics-heavy.lock' inside would block — skip it there
   resources     Print the agentop processes on this machine, what each costs, and the alerts
   session       Start / list / attach assistant sessions (tmux-backed; --bg detaches);
                 'session ls' prints the cockpit's table of what is running

@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer } from 'node:net'
-import { buildThrowawayEnv, isRealAgentopPort, releaseThrowawayPorts, reserveThrowawayPorts, runRun } from './cli-run'
+import { buildThrowawayEnv, isRealAgentopPort, releaseThrowawayPorts, reserveThrowawayPorts, runRun, shortRunTmp, SOCKET_PATH_MAX } from './cli-run'
+import { insideHeavyLock } from './resources/mem-guard'
 
 const testHome = mkdtempSync(join(tmpdir(), 'agentop-run-ports-'))
 const originalHome = process.env.HOME
@@ -50,6 +51,22 @@ function runCli(home: string, args: string[]) {
 }
 
 describe('agentop run --rm', () => {
+  test('TMPDIR is short enough for a Unix socket even under a long throwaway home', () => {
+    const home = join('/home/mithrandir/.cache/agentistics-throwaway', 'qa-codex-galeria-with-a-long-name-abcdef12-XXXXXX')
+    const env = buildThrowawayEnv(home, 'x', 48100, 48101, { HOME: '/h' })
+    expect(env.TMPDIR).toMatch(/^\/tmp\/agr-[0-9a-f]{6}$/)
+    expect(env.TMUX_TMPDIR).toBe(env.TMPDIR)
+    expect(Buffer.byteLength(`${env.TMPDIR}/org.chromium.Chromium.AbCdEf/SingletonSocket`)).toBeLessThanOrEqual(SOCKET_PATH_MAX)
+    expect(shortRunTmp(home)).toBe(shortRunTmp(home))
+    expect(shortRunTmp(home + '2')).not.toBe(shortRunTmp(home))
+  })
+
+  test('children of a run that holds the heavy lock are told so', () => {
+    expect(buildThrowawayEnv('/t', 'x', 1, 2, {}, { heavyHeld: true }).AGENTISTICS_HEAVY_JOB).toBe('1')
+    expect(buildThrowawayEnv('/t', 'x', 1, 2, {}).AGENTISTICS_HEAVY_JOB).toBeUndefined()
+    expect(insideHeavyLock(buildThrowawayEnv('/t', 'x', 1, 2, {}, { heavyHeld: true }), [])).toBe(true)
+  })
+
   test('pins the original Volta installation while isolating HOME and run state', () => {
     const sourceHome = join(testHome, 'volta-owner')
     mkdirSync(join(sourceHome, '.volta'), { recursive: true })
@@ -59,7 +76,7 @@ describe('agentop run --rm', () => {
     expect(env.HOME).toBe('/throwaway')
     expect(env.USERPROFILE).toBe('/throwaway')
     expect(env.AGENTISTICS_DIR).toBe('/throwaway/.agentistics')
-    expect(env.TMPDIR).toBe('/throwaway/tmp')
+    expect(env.TMPDIR).toBe(shortRunTmp('/throwaway'))
     expect(env.TMUX_TMPDIR).toBe(env.TMPDIR)
     expect(env.PORT).toBe('48100')
     expect(env.WEB_PORT).toBe('48101')
