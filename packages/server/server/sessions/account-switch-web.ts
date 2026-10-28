@@ -61,6 +61,8 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
       listSwitchTargets({ harness, ...(accountId ? { accountId } : {}), agentCaller: false }),
       accountLabel(harness, accountId),
       row.conversationId
+        // WHERE the transcript is (the row's own record, absent = default home) — see the host's
+        // `location`; WHO it runs as is `accountId` above.
         ? readLimitState({ harness, conversationId: row.conversationId, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }).catch(() => null)
         : Promise.resolve(null),
       accountPlan(accountId),
@@ -92,7 +94,8 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
     const { verifySessionIdentity } = await import('./session-identity')
     const callerVerified = await markCallerVerified({ session: body?.session }, verifySessionIdentity)
     // The MCP passes whatever reference it holds: a managed id, or the conversation id of a live row.
-    const target = (await readRegistry()).find(m => m.id === id) ?? (await readRegistry()).find(m => m.conversationId === id && !m.endedAt)
+    // CONTA.IDENTIDADE: the same row the GET resolved — exact id, else the live, newest of the conversation.
+    const target = sessionAccountRow(await readRegistry(), { id, conversationId: id })
     const host = await hostForFleet(fleetLang(url.searchParams.get('lang')))
     if (!host.switchSessionAccount) return json({ ok: false, message: 'unavailable' }, 501)
     const out = await host.switchSessionAccount({ id: target?.id ?? id, accountId, ...(harness ? { harness } : {}), resendPending: body?.resendPending === true, ...(callerVerified ? { callerVerified: true } : {}) })

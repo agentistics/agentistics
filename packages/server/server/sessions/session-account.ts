@@ -14,13 +14,23 @@
  *      and the newer `createdAt` beats the older — a restart in another account is the newest row;
  *   3. the row's own `accountId` (through the registry's aliases) is the answer;
  *   4. a row with none runs in the harness's DEFAULT home, whose account is the one bound to it
- *      (`fallbackSessionAccount`) — never a guess between two visible accounts.
+ *      (`defaultHomeAccount`) — the same answer `currentAccountOf` / `accountLabel` give on the
+ *      switch path, and never a guess between visible accounts (a binding that names a retired
+ *      account says nothing about who is signed in there now: no answer).
  */
 import type { HarnessId } from '@agentistics/core'
 import type { AccountsFile } from '../harness-accounts'
 
-/** The part of the account registry this rule reads. */
-export type AccountRegistryView = Pick<AccountsFile, 'accounts' | 'bindings'> & Partial<Pick<AccountsFile, 'aliases'>>
+/**
+ * The part of the account registry this rule reads: the accounts (id, harness, retired), the
+ * bindings (root -> account; the DEFAULT home is the `<harness>:` key) and the merge aliases.
+ * Structural, so the switch host can hand it its `SpawnAccountRow`s (`registryOfSpawnRows`).
+ */
+export interface AccountRegistryView {
+  accounts: readonly { id: string; harness: string; retired?: boolean }[]
+  bindings: Readonly<Record<string, string>>
+  aliases?: Readonly<Record<string, string>>
+}
 
 export interface SessionAccountRow {
   id: string
@@ -64,7 +74,7 @@ export function sessionAccountRow<T extends SessionAccountRow>(rows: readonly T[
 }
 
 /** Follows the registry's merged-login aliases to the surviving id. */
-export function canonicalId(registry: Partial<Pick<AccountsFile, 'aliases'>> | undefined, id: string): string {
+export function canonicalId(registry: { aliases?: Readonly<Record<string, string>> } | undefined, id: string): string {
   let cur = id
   for (let i = 0; i < 8 && registry?.aliases?.[cur]; i++) cur = registry.aliases[cur]!
   return cur
@@ -97,8 +107,24 @@ export function resolveSessionAccount(
   if (!row) return undefined
   if (row.accountId) return registry ? canonicalId(registry, row.accountId) : row.accountId
   if (!registry || !row.harness) return undefined
-  const harness = row.harness as HarnessId
-  const visible = registry.accounts.filter(a => a.harness === harness && a.available && !a.retired).map(a => a.id)
-  const id = fallbackSessionAccount(harness, registry, visible)
+  const id = defaultHomeAccount(row.harness, registry)
   return id ? canonicalId(registry, id) : undefined
+}
+
+/** The account bound to `harness`'s default home, unless it is retired (rule 4). */
+export function defaultHomeAccount(harness: string, registry: AccountRegistryView): string | undefined {
+  const bound = registry.bindings[`${harness}:`]
+  if (!bound) return undefined
+  const account = registry.accounts.find(a => a.id === bound)
+  return account && account.harness === harness && !account.retired ? bound : undefined
+}
+
+/**
+ * The switch host's view of the registry (`SpawnAccountContext.accounts`): a bound row with no root
+ * IS the default home's binding. Lets the switch resolve through rule 4 without a second read.
+ */
+export function registryOfSpawnRows(rows: readonly { id: string; harness: string; root: string | null; bound: boolean; retired?: boolean }[]): AccountRegistryView {
+  const bindings: Record<string, string> = {}
+  for (const r of rows) if (r.bound) bindings[`${r.harness}:${r.root ?? ''}`] ??= r.id
+  return { accounts: rows, bindings }
 }

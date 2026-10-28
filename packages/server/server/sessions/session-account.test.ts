@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveSessionAccount, sessionAccountRow, type AccountRegistryView, type SessionAccountRow } from './session-account'
+import { defaultHomeAccount, registryOfSpawnRows, resolveSessionAccount, sessionAccountRow, type AccountRegistryView, type SessionAccountRow } from './session-account'
 
 // CONTA.IDENTIDADE: a session started on account A, then restarted (or switched) onto account B,
 // leaves an ENDED row on A and a LIVE row on B for the same conversation. Every surface must say B.
@@ -9,10 +9,10 @@ const rowB: SessionAccountRow = { id: 'rowB', harness: 'claude', conversationId:
 
 const registry: AccountRegistryView = {
   accounts: [
-    { id: 'acc_A', harness: 'claude', key: 'a', label: 'A', plan: 'max', available: true, firstSeen: 0, lastSeen: 0 },
-    { id: 'acc_B', harness: 'claude', key: 'b', label: 'B', plan: 'max', available: true, firstSeen: 0, lastSeen: 0 },
-    { id: 'acc_P', harness: 'claude', key: 'p', label: 'P', plan: 'pro', available: false, firstSeen: 0, lastSeen: 0 },
-  ] as AccountRegistryView['accounts'],
+    { id: 'acc_A', harness: 'claude' },
+    { id: 'acc_B', harness: 'claude' },
+    { id: 'acc_P', harness: 'claude' },
+  ],
   bindings: { 'claude:': 'acc_A' },
 }
 
@@ -62,5 +62,27 @@ describe('resolveSessionAccount', () => {
 
   test('no managed row: undefined (an external process is attributed by path elsewhere)', () => {
     expect(resolveSessionAccount([], { id: 'x', conversationId: 'x' }, registry)).toBeUndefined()
+  })
+})
+
+describe('defaultHomeAccount / registryOfSpawnRows', () => {
+  test('a default binding naming a retired account answers nothing (no guess)', () => {
+    const retired = { ...registry, accounts: registry.accounts.map(a => a.id === 'acc_A' ? { ...a, retired: true } : a) }
+    expect(defaultHomeAccount('claude', retired)).toBeUndefined()
+    expect(resolveSessionAccount([{ id: 'plain', harness: 'claude' }], { id: 'plain' }, retired)).toBeUndefined()
+  })
+
+  test("a binding of another harness's account is not this harness's default home", () => {
+    expect(defaultHomeAccount('codex', { accounts: registry.accounts, bindings: { 'codex:': 'acc_A' } })).toBeUndefined()
+  })
+
+  test('the switch host view: a bound row with no root is the default home', () => {
+    const view = registryOfSpawnRows([
+      { id: 'acc_a', harness: 'claude', root: null, bound: true },
+      { id: 'acc_b', harness: 'claude', root: '/r/b', bound: true },
+      { id: 'acc_c', harness: 'claude', root: null, bound: false },
+    ])
+    expect(view.bindings).toEqual({ 'claude:': 'acc_a', 'claude:/r/b': 'acc_b' })
+    expect(resolveSessionAccount([{ id: 'plain', harness: 'claude' }], { id: 'plain' }, view)).toBe('acc_a')
   })
 })

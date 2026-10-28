@@ -551,7 +551,16 @@ export async function rolloutRoot(harness: HarnessId, path: string): Promise<str
 type ManagedLookup = () => Promise<readonly { id: string; harness?: string; conversationId?: string; accountId?: string; endedAt?: string; createdAt?: string }[]>
 let managedLookup: ManagedLookup = async () => (await import('./sessions/registry')).readRegistry()
 
-/** The account a managed session runs on (`ManagedSession.accountId`), when it carries one. */
+/**
+ * The account a managed session runs on (`ManagedSession.accountId`), when it carries one — the
+ * shared resolver's rules 1-3 (`session-account.ts`), deliberately WITHOUT the registry. Every caller
+ * hands the answer to `ingestFromRoot` / `ingestPlanLimits`, which already do the other two steps at
+ * the place the reading lands: an absent account is attributed by the ROOT the reading came from
+ * (`attributeReading` — for the default home that is the default binding, rule 4; for a codex rollout
+ * the root its file sits under, which is more exact than rule 4), and `ingestPlanLimits` follows the
+ * merge aliases before storing. Resolving here too would answer "default binding" for a rollout that
+ * provably sits under another root.
+ */
 export async function managedAccountOf(by: { id?: string; conversationId?: string }): Promise<string | undefined> {
   try {
     // CONTA.IDENTIDADE: the row of the process running now — not the first (oldest, ended) row
