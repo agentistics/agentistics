@@ -103,6 +103,7 @@ export function SplitPaneHeader(p: SplitPaneHeaderProps) {
           {...(s.task ? { task: s.task } : {})}
           onOpenTask={p.onOpenTask}
           rowId={s.id}
+          {...(s.accountId ? { accountId: s.accountId } : {})}
           onOpenLive={p.onOpenLive}
           {...(p.onOpenFull ? { onOpenFull: p.onOpenFull } : {})}
           {...(s.model ? { startedModel: s.model } : {})}

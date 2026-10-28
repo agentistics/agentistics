@@ -8,6 +8,7 @@
  * no frame to read and no backend to ask. Rendering a state for them would be inventing one.
  */
 
+import { resolveSessionAccount, type AccountRegistryView } from './session-account'
 import type { ConversationLinkReason, HarnessId, SessionMode } from '@agentistics/core'
 import { closedRowId } from './row-conversation'
 import { capClosedConversations } from './closed-cap'
@@ -163,6 +164,12 @@ export interface SessionView {
   note?: string
   model?: string
   effort?: string
+  /**
+   * CONTA.IDENTIDADE — the account this managed session's process runs on NOW
+   * (`resolveSessionAccount`): the row's own account, else the one bound to the harness's default
+   * home. Absent when it cannot be established; a surface then names no plan rather than guessing.
+   */
+  accountId?: string
   /** The piece of work this session belongs to, when the user said. Groups the list. */
   task?: string
   /**
@@ -516,6 +523,8 @@ export function buildSessionViews(o: {
   dialogUnreadable?: ReadonlyMap<string, DialogUnreadable>
   /** The ids `crash-group.ts` decided fell together. A set, because the question is about a set. */
   fell?: ReadonlySet<string>
+  /** The account registry, so each managed row can name the account it runs on (CONTA.IDENTIDADE). */
+  accounts?: AccountRegistryView
   /**
    * What each harness records about its OWN live sessions, indexed by the two exact keys — the tmux
    * session a managed row runs in, and the pid of a process found on the host.
@@ -693,6 +702,10 @@ export function buildSessionViews(o: {
       ...(r.managed?.note ? { note: r.managed.note } : {}),
       ...(r.managed?.model ? { model: r.managed.model } : {}),
       ...(r.managed?.effort ? { effort: r.managed.effort } : {}),
+      ...(() => {
+        const accountId = r.managed ? resolveSessionAccount([r.managed], { id: r.managed.id }, o.accounts) : undefined
+        return accountId ? { accountId } : {}
+      })(),
       ...(r.managed?.task ? { task: r.managed.task } : {}),
       ...(r.managed?.taskId ? { taskId: r.managed.taskId } : {}),
       ...(r.managed?.parentSessionId ? { parentSessionId: r.managed.parentSessionId } : {}),

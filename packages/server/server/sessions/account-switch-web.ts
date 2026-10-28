@@ -14,6 +14,7 @@ import { featureOn, type HarnessId } from '@agentistics/core'
 import { readJsonLimited } from '../limits'
 import { readRegistry } from './registry'
 import { readAccounts } from '../harness-accounts'
+import { resolveSessionAccount, sessionAccountRow } from './session-account'
 import { accountLabel, listSwitchTargets, readLimitState } from './account-switch-io'
 import type { SwitchUnavailableReason } from './account-switch'
 import { fleetLang, hostForFleet, kickFleet } from './fleet-web'
@@ -48,21 +49,26 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
     const id = url.searchParams.get('id') ?? ''
     const none: SwitchInfo = { ok: true, supported: false, options: [], unavailable: [], limit: null }
     if (!featureOn('multi-account') || !id) return json(none)
-    const row = (await readRegistry()).find(m => m.id === id || (m.conversationId === id && !m.endedAt))
-    if (!row || row.endedAt) return json(none)
+    // CONTA.IDENTIDADE: the same rule the composer chip and plan_limits read (`session-account.ts`).
+    const registry = await readRegistry()
+    const found = sessionAccountRow(registry, { id, conversationId: id })
+    if (!found || found.endedAt) return json(none)
+    const accounts = await readAccounts().catch(() => null)
+    const accountId = resolveSessionAccount(registry, { id: found.id }, accounts ?? undefined)
+    const row = found
     const harness = row.harness as HarnessId
     const [{ options, unavailable }, label, limit, plan] = await Promise.all([
-      listSwitchTargets({ harness, ...(row.accountId ? { accountId: row.accountId } : {}), agentCaller: false }),
-      accountLabel(harness, row.accountId),
+      listSwitchTargets({ harness, ...(accountId ? { accountId } : {}), agentCaller: false }),
+      accountLabel(harness, accountId),
       row.conversationId
         ? readLimitState({ harness, conversationId: row.conversationId, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }).catch(() => null)
         : Promise.resolve(null),
-      accountPlan(row.accountId),
+      accountPlan(accountId),
     ])
     const info: SwitchInfo = {
       ok: true,
       supported: true,
-      current: { harness, ...(row.accountId ? { id: row.accountId } : {}), ...(label ? { label } : {}), ...(plan ? { plan } : {}) },
+      current: { harness, ...(accountId ? { id: accountId } : {}), ...(label ? { label } : {}), ...(plan ? { plan } : {}) },
       options,
       unavailable,
       limit: limit

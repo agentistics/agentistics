@@ -1264,3 +1264,33 @@ describe('a `default` meter beside identified accounts (BILLING.SIMPLE §7)', ()
     expect(body.registered).toEqual([])
   })
 })
+
+// CONTA.IDENTIDADE: a conversation restarted onto another account keeps its ENDED row on the old
+// account. Attribution must follow the live row, whatever order the registry lists them in.
+describe('CONTA.IDENTIDADE: restarted onto another account', () => {
+  const conv = '11230b34-0c8b-46d0-b2c5-a0c7f44fd5b7'
+  const live = { id: 'rowB', harness: 'claude', conversationId: conv, accountId: 'acc_B', createdAt: '2026-10-28T04:33:15.025Z' }
+  const ended = { id: 'rowA', harness: 'claude', conversationId: conv, accountId: 'acc_A', createdAt: '2026-10-27T17:42:09.950Z', endedAt: '2026-10-28T04:33:17.749Z' }
+
+  test('managedAccountOf / sessionAccountOf answer B by conversation and by row id', async () => {
+    const { managedAccountOf } = await import('./plan-limits')
+    for (const rows of [[ended, live], [live, ended]]) {
+      __setManagedLookupForTest(async () => rows)
+      expect(await managedAccountOf({ conversationId: conv })).toBe('acc_B')
+      expect(await sessionAccountOf(conv)()).toBe('acc_B')
+      expect(await managedAccountOf({ id: 'rowA' })).toBe('acc_A')
+    }
+  })
+
+  test('liveSessions (plan_limits) attribute the live session to B', async () => {
+    for (const rows of [[ended, live], [live, ended]]) {
+      __resetPlanLimitsForTest()
+      __setManagedLookupForTest(async () => rows)
+      const sessions = (tokens: number) => [{ session_id: conv, harness: 'claude', input_tokens: tokens }]
+      const burn = { 'claude:acc_A': 9, 'claude:acc_B': 3 }
+      await sampleLivePlanSessions(sessions(100), [conv], 0, burn)
+      const out = await sampleLivePlanSessions(sessions(101), [conv], 60_000, burn)
+      expect(out.map(s => [s.account, s.burnPctPerHour])).toEqual([['acc_B', 3]])
+    }
+  })
+})

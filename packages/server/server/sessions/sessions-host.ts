@@ -38,6 +38,7 @@ import { HEARTBEAT_MS, planCrashGroup, type CrashGroup } from './crash-group'
 import { emptyHarnessSessionIndex, resolveManagedIds, type HarnessSessionIndex } from './harness-sessions'
 import { chosenName } from './harness-session-file'
 import { reconcileSessions } from './session-ref'
+import type { AccountRegistryView } from './session-account'
 import {
   attentionCount, bellTransitions, buildSessionViews, type SessionView,
 } from './session-view'
@@ -284,6 +285,11 @@ export function createSessionsPoller(o: {
    */
   loadHarnessSessions?: () => Promise<HarnessSessionIndex>
   /**
+   * CONTA.IDENTIDADE — the account registry, so each managed row names the account it runs on.
+   * Injected and optional like `loadConversations`; without it a row carries only its own `accountId`.
+   */
+  readAccountRegistry?: () => Promise<AccountRegistryView>
+  /**
    * Which recorded conversation ids, absent from the store, the harness's own transcript reader can
    * find on disk — `reopen-link.ts`'s `exactLinksOnDisk`. Injected and optional for the same reason
    * as the two above; without it a row whose conversation the store lacks offers no reopen.
@@ -471,6 +477,7 @@ export function createSessionsPoller(o: {
         timed('listPanePids', o.backend.listPanePids?.().catch(() => undefined) ?? Promise.resolve(undefined)),
       ])
       const harnessSessions = resolveManagedIds(harnessSessionsRaw, panePidsRead)
+      const accountRegistry = o.readAccountRegistry ? await o.readAccountRegistry().catch(() => undefined) : undefined
       markFleetPhase('poll: gather (registry/backend.list/scanProcesses/conversations/harnessSessions)', gatherStart)
 
       const exited = new Set(backendSessions.filter(b => !b.alive).map(b => b.id))
@@ -1138,6 +1145,7 @@ export function createSessionsPoller(o: {
         harnessSessions,
         sessionHardware,
         ...(fell ? { fell: new Set(fell.entries.map(e => e.id)) } : {}),
+        ...(accountRegistry ? { accounts: accountRegistry } : {}),
       })
       const rang = bellTransitions(prevActivity, sessions)
 

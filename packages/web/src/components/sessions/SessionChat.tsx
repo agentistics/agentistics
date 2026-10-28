@@ -3573,6 +3573,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     {...(metrics.onOpenLive ? { onOpenLive: metrics.onOpenLive } : {})}
                     {...(metrics.onOpenFull ? { onOpenFull: metrics.onOpenFull } : {})}
                     rowId={session.id}
+                    {...(session.accountId ? { accountId: session.accountId } : {})}
                     {...(session.model ? { startedModel: session.model } : {})}
                     {...(session.effort ? { startedEffort: session.effort } : {})}
                   />
