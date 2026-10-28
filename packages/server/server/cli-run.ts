@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
@@ -35,18 +35,33 @@ type RunOptions = { name: string; ttl: string; portOffset: number | null; remove
 export const SOCKET_PATH_MAX = 107
 
 /**
- * Per-run scratch dir: `/tmp/agr-<6 hex>`. The old `<home>/tmp` sat under the throwaway home
+ * Per-run scratch dir: `/tmp/agr-XXXXXX`. The old `<home>/tmp` sat under the throwaway home
  * (`~/.cache/agentistics-throwaway/<name>-XXXXXX/tmp`, easily 90+ chars), so a socket such as
  * Chrome's `org.chromium.Chromium.XXXXXX/SingletonSocket` passed 108 bytes and Playwright's Chrome
- * died with SIGTRAP at launch. The id is a hash of the run's unique home so it stays short, unique
- * and stable for stop/cleanup; /tmp is used on purpose (not os.tmpdir(), which may itself be long).
+ * died with SIGTRAP at launch. /tmp is used on purpose (not os.tmpdir(), which may itself be long).
+ * `mkdtemp` creates it atomically, mode 0700, with an unpredictable name: it fails instead of
+ * reusing a directory or following a symlink another user planted at a guessable name.
  */
-export function shortRunTmp(home: string): string {
-  return join('/tmp', `agr-${new Bun.CryptoHasher('sha1').update(home).digest('hex').slice(0, 6)}`)
+export const RUN_TMP_PREFIX = '/tmp/agr-'
+
+export function createRunTmp(): string {
+  return mkdtempSync(RUN_TMP_PREFIX)
+}
+
+/** Placeholder for the pure env builder when the caller has no created dir; never created. */
+const UNSET_RUN_TMP = `${RUN_TMP_PREFIX}unset`
+
+/** Remove a dir this run created. Never follows a symlink (a link is unlinked, its target kept); refuses foreign paths. */
+export function removeRunTmp(path: string | undefined): void {
+  if (!path || !path.startsWith(RUN_TMP_PREFIX) || path.includes('..') || path.includes('/', RUN_TMP_PREFIX.length)) return
+  try {
+    if (lstatSync(path).isSymbolicLink()) unlinkSync(path)
+    else rmSync(path, { recursive: true, force: true })
+  } catch {}
 }
 
 export function buildThrowawayEnv(home: string, name: string, apiPort: number, webPort: number, source: NodeJS.ProcessEnv = process.env, opts: { tmp?: string; heavyHeld?: boolean } = {}): NodeJS.ProcessEnv {
-  const tmp = opts.tmp ?? shortRunTmp(home)
+  const tmp = opts.tmp ?? UNSET_RUN_TMP
   // Volta shims locate their toolchains relative to HOME unless VOLTA_HOME is set.
   // Capture the original installation before isolating HOME, or a shim may resolve itself.
   const voltaHome = source.VOLTA_HOME || join(source.HOME || source.USERPROFILE || homedir(), '.volta')
@@ -221,7 +236,7 @@ async function stopState(state: ThrowawayState): Promise<void> {
     try { process.kill(-state.pid, 'SIGTERM') } catch { try { process.kill(state.pid, 'SIGTERM') } catch {} }
   }
   rmSync(state.home, { recursive: true, force: true })
-  if (state.tmp) rmSync(state.tmp, { recursive: true, force: true })
+  removeRunTmp(state.tmp)
   releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
   rmSync(statePath(state.name), { force: true })
   console.log(`removed ${state.home}`)
@@ -310,17 +325,23 @@ async function startRun(options: RunOptions): Promise<number> {
     inside,
   }) ? (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'heavy', '--'] : [process.execPath, 'heavy', '--']) : []
   const argv = options.command.length ? [...heavyPrefix, ...options.command] : (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'server'] : [process.execPath, 'server'])
-  const tmp = shortRunTmp(home)
+  const tmp = createRunTmp()
   state.tmp = tmp
-  const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0 })
-  mkdirSync(tmp, { recursive: true, mode: 0o700 })
+  let child: ReturnType<typeof spawn>
+  let systemd = false
   const unit = `agentistics-throwaway-${options.name}.scope`
-  const systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
-  const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv
-  const child = spawn(systemd ? 'systemd-run' : argv[0]!, systemd ? childArgs : argv.slice(1), { env, stdio: 'inherit', detached: !systemd })
-  state.pid = child.pid
-  if (systemd) state.unit = unit
-  writeFileSync(statePath(options.name), JSON.stringify(state, null, 2), { mode: 0o600 })
+  try {
+    const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0 })
+    systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
+    const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv
+    child = spawn(systemd ? 'systemd-run' : argv[0]!, systemd ? childArgs : argv.slice(1), { env, stdio: 'inherit', detached: !systemd })
+    state.pid = child.pid
+    if (systemd) state.unit = unit
+    writeFileSync(statePath(options.name), JSON.stringify(state, null, 2), { mode: 0o600 })
+  } catch (error) {
+    removeRunTmp(tmp)
+    throw error
+  }
   console.log(`throwaway ${options.name}`)
   console.log(`  api:  http://localhost:${apiPort}`)
   console.log(`  web:  http://localhost:${webPort}`)
