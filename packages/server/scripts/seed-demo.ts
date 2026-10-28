@@ -178,6 +178,8 @@ function scrubSession(real: SessionMeta): SessionMeta {
   }
 
   if (real.current_cwd !== undefined) out.current_cwd = demoPath(real.current_cwd)
+  // Gemini keys a chat by `<project>/<file>`, i.e. by the real project directory name.
+  if (real.native_session_id !== undefined) out.native_session_id = demoId(real.native_session_id)
   if (real.title !== undefined) out.title = real.title ? pick(PROMPTS, key, 'title') : real.title
   if (real.git_remote !== undefined) out.git_remote = demoRemote(real.git_remote, real.project_path)
   if (real.user !== undefined) out.user = demoUser(real.user, real.user)
@@ -204,6 +206,20 @@ function scrubSession(real: SessionMeta): SessionMeta {
   }
 
   return out
+}
+
+/** Scrubs every real session and fills in the harnesses with no local history.
+ *  The synthetic sessions are cloned from the ALREADY scrubbed Claude sessions, so
+ *  nothing real can reach them, and every session goes through the same scrub —
+ *  a harness id is never a reason to skip it (kimi/antigravity used to be). */
+export function buildDemoStore(real: Map<HarnessId, SessionMeta[]>): Map<HarnessId, SessionMeta[]> {
+  const scrubbed = new Map<HarnessId, SessionMeta[]>()
+  for (const [harness, sessions] of real) scrubbed.set(harness, sessions.map(scrubSession))
+  const claude = scrubbed.get('claude') ?? []
+  for (const [harness, count] of [['kimi', 9], ['antigravity', 7]] as const) {
+    if (!(scrubbed.get(harness)?.length)) scrubbed.set(harness, synthesize(harness, count, claude))
+  }
+  return scrubbed
 }
 
 /* ------------------------------- synthetic sessions for unused harnesses */
@@ -378,18 +394,9 @@ async function run(): Promise<void> {
     )
   }
 
-  const claude = real.get('claude') ?? []
-  for (const [harness, count] of [['kimi', 9], ['antigravity', 7]] as const) {
-    if (!(real.get(harness)?.length)) real.set(harness, synthesize(harness, count, claude))
-  }
-
   // Scrub once, up front, so every home is written from the same pseudonymized
   // set — a session must not land on two machines under two different names.
-  const scrubbed = new Map<HarnessId, SessionMeta[]>()
-  for (const [harness, sessions] of real) {
-    const isSynthetic = harness === 'kimi' || harness === 'antigravity'
-    scrubbed.set(harness, sessions.map(s => (isSynthetic && !s.agentMetrics ? s : scrubSession(s))))
-  }
+  const scrubbed = buildDemoStore(real)
 
   const statsRaw = await readFile(REAL_STATS, 'utf8').catch(() => null)
 
@@ -412,4 +419,4 @@ async function run(): Promise<void> {
   )
 }
 
-await run()
+if (import.meta.main) await run()
