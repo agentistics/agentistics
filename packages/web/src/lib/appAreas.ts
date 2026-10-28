@@ -134,9 +134,10 @@ export function searchAreas(query: string, _lang: 'pt' | 'en'): { area: Area; pa
 /**
  * Areas whose HEADER always lands on one fixed page instead of the last page visited in them.
  * Sessões used to resume the last open conversation, which dropped people into a screen rather than a
- * listing; its header now opens the Usage charts. The List subpage still opens the workspace.
+ * listing; its header now opens the sessions list. It must NEVER land on another area's page (it briefly
+ * pointed at /usage, which read as "Sessions throws me to Usage").
  */
-export const AREA_HEADER_PATH: Partial<Record<AreaId, string>> = { sessions: '/usage' }
+export const AREA_HEADER_PATH: Partial<Record<AreaId, string>> = { sessions: '/sessions' }
 
 /** Where clicking an area's header goes: its fixed landing page when it has one, else `firstPath`. */
 export function areaHeaderPath(area: Area, remembered?: string | null): string {
