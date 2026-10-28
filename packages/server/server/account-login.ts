@@ -1,5 +1,6 @@
 /** Headless account login. Output and pasted authorization codes never enter logs or files. */
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
@@ -235,12 +236,24 @@ export function claudeKeychainService(env: Record<string, string | undefined>): 
  * CODE alone — no `-w`, stdout and stderr discarded — so no secret is ever read. Found while the
  * probe sees no login → macOS refused agentistics access; absent → the login was never saved.
  */
-export async function diagnoseLogin(req: LoginRequest, platform = process.platform, run: (argv: string[]) => Promise<number> = runQuiet): Promise<LoginError | undefined> {
+export async function diagnoseLogin(req: LoginRequest, platform = process.platform, run?: (argv: string[]) => Promise<number>): Promise<LoginError | undefined> {
   if (platform !== 'darwin' || req.harness !== 'claude') return undefined
   const service = claudeKeychainService({ ...req.env })
-  const code = await run(['security', 'find-generic-password', '-s', service, '-a', keychainAccount()])
-  loginLog(`[account-login] claude keychain item "${service}" ${code === 0 ? 'exists' : 'is absent'} after the sign-in`)
-  return code === 0 ? 'keychain_unreadable' : 'login_not_saved'
+  const account = keychainAccount()
+  // Do not constrain the lookup by account: Claude can derive `acct` differently when USER is
+  // absent in env -i, while the service suffix still identifies this isolated root. No -w/-g means
+  // the command never reads a credential value.
+  const argv = ['security', 'find-generic-password', '-s', service]
+  const listedArgv = ['security', 'dump-keychain']
+  const found = run
+    ? { code: await run(argv), stdout: '' }
+    : await runClaudeInLoginContext(req.root, argv)
+  const listed = run
+    ? { code: 127, stdout: '' }
+    : await runClaudeInLoginContext(req.root, listedArgv)
+  const listable = listed.code === 0 && listed.stdout.includes(service)
+  loginLog(`[account-login] claude keychain item "${service}" account "${account}" ${found.code === 0 ? 'exists' : 'is absent'} after the sign-in (same login context; listable=${listable ? 'yes' : 'no'})`)
+  return found.code === 0 ? 'keychain_unreadable' : 'login_not_saved'
 }
 /** Mirrors the CLI's keychain account: $USER, else the OS user name, else its fixed fallback. */
 function keychainAccount(): string {
@@ -295,16 +308,21 @@ export const loginLog = (line: string) => console.warn(line)
 const quote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'"
 /** Only runtime executables enter PATH. In particular xdg-open/open/browser launchers are absent. */
 async function loginEnvironment(req: LoginRequest) {
-  const bin = join(req.root, '.login-bin')
+  return makeLoginEnvironment(req.root, req.env)
+}
+async function makeLoginEnvironment(root: string, extra: Record<string, string> = {}, binName = '.login-bin') {
+  const bin = join(root, binName)
   await mkdir(bin, { mode: 0o700 })
   // `security` is macOS's keychain tool: claude stores its login there, and without it on PATH the
   // CLI cannot save the credential it just exchanged (absent on Linux, so nothing is linked there).
-  for (const name of ['node', 'bun', 'python3', 'python', 'sh', 'bash', 'env', 'dirname', 'readlink', 'security']) {
+  for (const name of ['node', 'bun', 'python3', 'python', 'sh', 'bash', 'env', 'cat', 'dirname', 'readlink', 'security']) {
     const path = Bun.which(name)
     if (path) await symlink(path, join(bin, name))
   }
   // No inherited API keys, access tokens, agent variables, display or browser environment.
-  const env: Record<string, string> = { HOME: homedir(), PATH: bin, TERM: 'xterm-256color', LANG: process.env.LANG ?? 'en_US.UTF-8', BROWSER: '/bin/true', NO_BROWSER: 'true', ...req.env }
+  // USER is explicit because LaunchAgent and the tmux server can inherit different values; Claude
+  // uses it as the keychain account selector when no account flag is supplied.
+  const env: Record<string, string> = { HOME: homedir(), USER: keychainAccount(), PATH: bin, TERM: 'xterm-256color', LANG: process.env.LANG ?? 'en_US.UTF-8', BROWSER: '/bin/true', NO_BROWSER: 'true', ...extra }
   return { bin, env }
 }
 async function tmux(args: string[], input?: string, missingOkay = false) {
@@ -314,6 +332,46 @@ async function tmux(args: string[], input?: string, missingOkay = false) {
   const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   if (code !== 0 && !(missingOkay && isSessionGoneError(err))) throw new LoginFailure('login_failed')
   return out
+}
+
+/**
+ * Run a non-interactive Claude command in the same clean tmux/socket boundary as login.
+ * macOS keychain visibility is tied to that process/session boundary, so a direct child of the
+ * LaunchAgent is not an equivalent probe. Output stays in memory and is never logged.
+ */
+export async function runClaudeInLoginContext(root: string, argv: string[]): Promise<{ stdout: string; code: number }> {
+  const executable = await resolveExecutable(argv[0]!)
+  if (!executable) return { stdout: '', code: 127 }
+  const name = `account-probe-${randomBytes(6).toString('hex')}`
+  const { bin, env } = await makeLoginEnvironment(root, { CLAUDE_CONFIG_DIR: root }, `.${name}-bin`)
+  // Keep the pane alive briefly after the command exits. A very fast fake/real CLI can disappear
+  // between new-session and set-option; preserving the original exit status keeps diagnosis exact.
+  const invoked = [executable, ...argv.slice(1)].map(quote).join(' ')
+  const command = ['/usr/bin/env', '-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), '/bin/sh', '-c', `${invoked}; code=$?; /bin/sleep 0.2; exit $code`].map(quote).join(' ')
+  try {
+    await tmux(['new-session', '-d', '-s', name, '-x', '240', '-y', '80', '-c', root, command])
+    await tmux(['set-option', '-t', name, 'remain-on-exit', 'on']).catch(() => {})
+    const deadline = Date.now() + 15_000
+    while (Date.now() < deadline) {
+      const dead = parsePaneDead(await tmux(['display-message', '-p', '-t', name, '#{pane_dead} #{pane_dead_status}']))
+      if (dead !== null) return { stdout: await tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-100']).catch(() => ''), code: dead }
+      await new Promise<void>(resolve => setTimeout(resolve, 20))
+    }
+    return { stdout: await tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-100']).catch(() => ''), code: 124 }
+  } catch {
+    return { stdout: '', code: 127 }
+  } finally {
+    await tmux(['kill-session', '-t', name], undefined, true).catch(() => {})
+    await rm(bin, { recursive: true, force: true }).catch(() => {})
+  }
+}
+async function resolveExecutable(name: string): Promise<string | undefined> {
+  if (name.includes('/')) return await Bun.file(name).exists() ? name : undefined
+  for (const dir of (process.env.PATH ?? '').split(':').filter(Boolean)) {
+    const candidate = join(dir, name)
+    if (await Bun.file(candidate).exists()) return candidate
+  }
+  return Bun.which(name) ?? undefined
 }
 /** Hidden PTYs use the existing utility socket: no registry, fleet row, transcript or terminal link. */
 export async function launchLoginProcess(req: LoginRequest): Promise<LoginProcess> {
