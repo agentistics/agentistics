@@ -25,7 +25,7 @@ function open(route: string, h: Partial<EngineSocketHandlers> & { got?: unknown[
 }
 
 describe('the handshake gates in front of an engine socket', () => {
-  const list = buildHostAllowlist({ hostname: 'h', interfaceAddresses: ['127.0.0.1'], ports: [47291, 47292], allowedOrigins: [], secureOrigin: undefined })
+  const list = buildHostAllowlist({ hostname: 'h', interfaceAddresses: ['127.0.0.1'], ports: [47291, 47292], allowedOrigins: [], secureOrigin: null })
   const local = capabilitiesFor('local', { central: false, exposure: undefined, allowLocalShell: false, tls: false })
   const exposed = capabilitiesFor('public', { central: true, exposure: 'public', allowLocalShell: false, tls: true })
 

@@ -10,7 +10,7 @@
  */
 
 /** Where the host may draw a surface's button. */
-export const SURFACE_PLACEMENTS = ['session-header', 'nay-dock'] as const
+export const SURFACE_PLACEMENTS = ['session-header', 'nay-dock', 'app-bar'] as const
 export type SurfacePlacement = (typeof SURFACE_PLACEMENTS)[number]
 
 /** The only path a surface module (and every engine asset) may live under — same origin, host-served. */
@@ -28,13 +28,26 @@ export interface EngineSurface {
   experimental?: string
 }
 
+/**
+ * How the host frames a mounted surface: `full` is a modal overlay over the page, `side` a panel docked
+ * to the edge that leaves the page usable. The surface switches between them without being unmounted.
+ */
+export type SurfaceLayout = 'full' | 'side'
+
 /** What the host passes a surface's `mount`. */
 export interface SurfaceMountContext {
-  /** The session the surface was opened from; `null` outside a session. */
+  /** The session the surface was opened from; `null` where there is none (e.g. `app-bar`). */
   sessionId: string | null
   lang: 'pt' | 'en'
   reducedMotion: boolean
-  /** Asks the host to close the overlay (which then calls `unmount`). */
+  /** The layout it opened in (always `full`). */
+  layout: SurfaceLayout
+  /** Switches the host frame between `full` and `side`; the module stays mounted. */
+  setLayout(layout: SurfaceLayout): void
+  /**
+   * Asks the host to close the surface (which then calls `unmount`). A mounted surface stays mounted
+   * while the person navigates between screens; only this, the close button or Esc (in `full`) ends it.
+   */
   close(): void
 }
 

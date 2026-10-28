@@ -140,8 +140,8 @@
  * `localShell`): a route there may also serve static assets and accept a WebSocket (`EngineRoute.upgrade`,
  * only after the guard, auth, Host allowlist and origin check; the host owns the frame cap, the
  * connection limits and the closing, `ENGINE_SOCKET_LIMITS`). `manifest.surfaces` announces buttons the
- * host draws (`session-header`, `nay-dock`) whose `module` — a same-origin path under `/api/engine/x/` —
- * the host imports on click and mounts into an overlay it owns. All optional: a 1.14 engine still loads,
+ * host draws (`session-header`, `nay-dock`, `app-bar`) whose `module` — a same-origin path under `/api/engine/x/` —
+ * the host imports on click and mounts into a frame it owns (`full` or `side`, switchable by the surface, kept mounted across navigation). All optional: a 1.14 engine still loads,
  * and a 1.15 engine on an older host is refused at load (an unreserved prefix), so it runs as community.
  */
 export const ENGINE_API_VERSION = '1.15.0'

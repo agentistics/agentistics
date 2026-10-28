@@ -46,48 +46,86 @@ describe('pure', () => {
   })
 })
 
-describe('EngineSurfaceButtons', () => {
+describe('EngineSurfaceButtons + EngineSurfaceHost', () => {
+  const esc = () => act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+
   test('community build: no button', async () => {
     status = { present: false, reason: 'community-build' }
     const { host } = await mount(createElement(mod.EngineSurfaceButtons, { placement: 'session-header', sessionId: 's1', lang: 'en' }))
     expect(host.querySelector('button')).toBeNull()
   })
 
-  test('engine surface: button → mount with the context → Esc unmounts and returns focus', async () => {
+  test('app-bar surface: button → mount → side/full without unmount → survives navigation → explicit close', async () => {
+    const hostMod = await import('./EngineSurfaceHost')
+    const { invalidateEngineCaps } = await import('../lib/engineCapsBus')
     const calls: string[] = []
-    let ctx: { sessionId: string | null; lang: string; reducedMotion: boolean } | null = null
+    let ctx: { sessionId: string | null; lang: string; reducedMotion: boolean; layout: string; setLayout(l: 'full' | 'side'): void; close(): void } | null = null
+    let node: HTMLElement | null = null
     const load = async () => ({
-      mount(el: HTMLElement, c: typeof ctx) { calls.push('mount'); ctx = c; el.textContent = 'hello' },
+      mount(el: HTMLElement, c: NonNullable<typeof ctx>) { calls.push('mount'); ctx = c; node = el; el.textContent = 'hello' },
       unmount(el: HTMLElement) { calls.push('unmount'); el.textContent = '' },
     })
-    // Fresh module state: the hook caches /api/engine per page load.
-    const { invalidateEngineCaps } = await import('../lib/engineCapsBus')
-    status = { present: true, surfaces: [surface] }
+    status = { present: true, surfaces: [{ ...surface, placement: 'app-bar' }] }
     invalidateEngineCaps()
-    const { host } = await mount(createElement(mod.EngineSurfaceButtons, { placement: 'session-header', sessionId: 's1', lang: 'pt', load }))
-    const btn = host.querySelector('button[data-engine-surface="demo"]') as HTMLButtonElement
-    expect(btn?.textContent).toBe('Demo PT')
+    const buttons = await mount(createElement(mod.EngineSurfaceButtons, { placement: 'app-bar', sessionId: null, lang: 'pt' }))
+    await mount(createElement(hostMod.EngineSurfaceHost, { load }))
+    const btn = buttons.host.querySelector('button[data-engine-surface="demo"]') as HTMLButtonElement
+    expect(btn.textContent).toBe('Demo PT')
     btn.focus()
     await act(async () => { btn.click() })
     await settle()
-    const overlay = document.querySelector('[data-engine-overlay="demo"]')!
-    expect(overlay.getAttribute('role')).toBe('dialog')
-    expect(overlay.textContent).toContain('hello')
-    expect(ctx).toMatchObject({ sessionId: 's1', lang: 'pt', reducedMotion: false })
-    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+    const overlay = () => document.querySelector('[data-engine-overlay="demo"]') as HTMLElement
+    expect(overlay().getAttribute('role')).toBe('dialog')
+    expect(overlay().textContent).toContain('hello')
+    expect(ctx).toMatchObject({ sessionId: null, lang: 'pt', reducedMotion: false, layout: 'full' })
+
+    // The surface flips the frame to a side panel: same container, still mounted, page usable.
+    const before = node
+    await act(async () => { ctx!.setLayout('side') })
+    expect(overlay().dataset.layout).toBe('side')
+    expect(overlay().getAttribute('role')).toBe('complementary')
+    expect(node).toBe(before)
+    expect(calls).toEqual(['mount'])
+    await esc() // Esc is a modal's key: it does not end a side panel
+    expect(overlay()).not.toBeNull()
+
+    // Navigating away unmounts the screen's button; the surface stays.
+    await act(async () => { buttons.root.unmount() })
+    expect(overlay()).not.toBeNull()
+    expect(calls).toEqual(['mount'])
+
+    await act(async () => { ctx!.setLayout('full') })
+    expect(overlay().dataset.layout).toBe('full')
+    await act(async () => { ctx!.close() })
     await settle()
     expect(document.querySelector('[data-engine-overlay]')).toBeNull()
     expect(calls).toEqual(['mount', 'unmount'])
-    expect(document.activeElement).toBe(btn)
+  })
+
+  test('Esc closes a full surface and unmounts it', async () => {
+    const hostMod = await import('./EngineSurfaceHost')
+    const { openEngineSurface, resetEngineSurfaceHostForTests } = await import('../lib/engineSurfaceHost')
+    resetEngineSurfaceHostForTests()
+    const calls: string[] = []
+    await mount(createElement(hostMod.EngineSurfaceHost, { load: async () => ({ mount() { calls.push('mount') }, unmount() { calls.push('unmount') } }) }))
+    const trigger = document.body.appendChild(document.createElement('button'))
+    await act(async () => { openEngineSurface({ ...surface, placement: 'session-header' } as never, { sessionId: 's1', lang: 'en', trigger }) })
+    await settle()
+    await esc()
+    await settle()
+    expect(document.querySelector('[data-engine-overlay]')).toBeNull()
+    expect(calls).toEqual(['mount', 'unmount'])
+    expect(document.activeElement).toBe(trigger)
   })
 
   test('a module without mount shows the failure and never throws', async () => {
-    const { invalidateEngineCaps } = await import('../lib/engineCapsBus')
-    status = { present: true, surfaces: [surface] }
-    invalidateEngineCaps()
-    const { host } = await mount(createElement(mod.EngineSurfaceButtons, { placement: 'session-header', sessionId: null, lang: 'en', load: async () => ({}) }))
-    await act(async () => { (host.querySelector('button[data-engine-surface]') as HTMLButtonElement).click() })
+    const hostMod = await import('./EngineSurfaceHost')
+    const { openEngineSurface, closeEngineSurface, resetEngineSurfaceHostForTests } = await import('../lib/engineSurfaceHost')
+    resetEngineSurfaceHostForTests()
+    await mount(createElement(hostMod.EngineSurfaceHost, { load: async () => ({}) }))
+    await act(async () => { openEngineSurface({ ...surface, placement: 'session-header' } as never, { sessionId: null, lang: 'en' }) })
     await settle()
     expect(document.querySelector('[data-engine-overlay] [role="alert"]')).not.toBeNull()
+    await act(async () => { closeEngineSurface() })
   })
 })

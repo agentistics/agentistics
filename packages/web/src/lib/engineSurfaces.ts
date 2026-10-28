@@ -7,7 +7,8 @@
  * it ever reaches `import()`: same-origin, under `/api/engine/x/`, no dot-segments. A community build
  * answers no `surfaces`, so there is no button at all.
  */
-export type SurfacePlacement = 'session-header' | 'nay-dock'
+export type SurfacePlacement = 'session-header' | 'nay-dock' | 'app-bar'
+export type SurfaceLayout = 'full' | 'side'
 
 export interface EngineSurfaceInfo {
   id: string
@@ -20,6 +21,8 @@ export interface SurfaceMountContext {
   sessionId: string | null
   lang: 'pt' | 'en'
   reducedMotion: boolean
+  layout: SurfaceLayout
+  setLayout(layout: SurfaceLayout): void
   close(): void
 }
 

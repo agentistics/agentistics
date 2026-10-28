@@ -41,6 +41,9 @@ describe('1.15', () => {
   it('a host that does not reserve the prefix refuses the route', () => {
     expect(checkEngine({ manifest: manifest(), routes: [route], commands: [] }, ENGINE_API_VERSION, () => null)[0]!.kind).toBe('route-capability')
   })
+  it('accepts the app-bar placement', () => {
+    expect(surfaceRefusals([surface({ placement: 'app-bar' })])).toEqual([])
+  })
   it('frame cap only narrows', () => {
     expect(frameCap(undefined)).toBe(ENGINE_SOCKET_LIMITS.maxFrameBytes)
     expect(frameCap(10)).toBe(10)
