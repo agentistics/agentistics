@@ -103,10 +103,15 @@ describe('firstPath', () => {
 
 describe('area header landing', () => {
   const area = (id: string) => APP_AREAS.find(a => a.id === id)!
-  test('Sessões always lands on Usage charts, even with a conversation remembered', () => {
-    expect(areaHeaderPath(area('sessions'), '/sessions/abc123')).toBe('/usage')
-    expect(areaHeaderPath(area('sessions'))).toBe('/usage')
-    expect(AREA_HEADER_PATH.sessions).toBe('/usage')
+  test('Sessões always lands on the sessions list, even with a conversation remembered', () => {
+    expect(areaHeaderPath(area('sessions'), '/sessions/abc123')).toBe('/sessions')
+    expect(areaHeaderPath(area('sessions'))).toBe('/sessions')
+    expect(AREA_HEADER_PATH.sessions).toBe('/sessions')
+  })
+  test('a fresh machine (nothing remembered) clicking Sessões stays inside the Sessões area', () => {
+    const to = areaHeaderPath(area('sessions'), null)
+    expect(areaOfPath(to)?.area.id).toBe('sessions')
+    expect(isSessionsWorkspace(to)).toBe(true)
   })
   test('other areas keep resuming the last page visited', () => {
     expect(areaHeaderPath(area('metrics'), '/costs')).toBe('/costs')
