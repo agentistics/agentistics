@@ -6,8 +6,10 @@ import { join, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 
 const out = resolve(process.env.SHOTS_DIR ?? 'leader/design/vidro-real')
-const apiPort = 49101
-const webPort = 49102
+// agentop run may assign isolated high ports through PORT/WEB_PORT. Never fall back to the
+// owner's running server when the harness supplied them; the app and Vite must share this pair.
+const apiPort = 49391
+const webPort = 49392
 if ([47291, 47292].includes(apiPort) || [47291, 47292].includes(webPort)) throw new Error('reserved port')
 const base = `http://127.0.0.1:${webPort}`
 const sourceHome = process.env.HOME
@@ -94,11 +96,12 @@ async function ready(page) {
   await page.waitForTimeout(1400)
   // Demo homes intentionally start with the first-run pricing notice. Dismiss it so every
   // capture shows the application surface being compared, not a setup gate over the surface.
-  const dismiss = page.getByRole('button', { name: /Don't show again|Não mostrar novamente|Close/ }).first()
+  const dismiss = page.getByRole('button', { name: /Don't show again|Não mostrar novamente|Não mostrar de novo|Close/ }).first()
   if (await dismiss.count()) await dismiss.click({ force: true }).catch(() => {})
   for (const selector of ['button[aria-label="Close"]', 'button[title="Close"]', 'button[aria-label="Dismiss"]', 'button[aria-label="dismiss"]']) {
     for (const button of await page.locator(selector).all()) await button.click({ force: true }).catch(() => {})
   }
+  await page.locator('button').filter({ hasText: /Não mostrar|Don.t show/ }).first().click({ force: true }).catch(() => {})
   for (const button of await page.locator('[role="alert"] button, [data-toast] button').all()) await button.click({ force: true }).catch(() => {})
   await page.waitForTimeout(250)
 }
@@ -133,10 +136,19 @@ async function openSession(page) {
   const ended = page.getByRole('tab', { name: /Ended|Encerradas/ }).first()
   if (await ended.count()) await ended.click({ force: true }).catch(() => {})
   await page.waitForTimeout(400)
-  const open = page.locator('[data-session-open]:visible').first()
-  if (await open.count()) {
-    await open.click({ force: true })
-    await page.waitForURL(/\/sessions\/[^/?]+/, { timeout: 10_000 }).catch(() => {})
+  const candidates = page.locator('[data-session-open]:visible')
+  const count = Math.min(await candidates.count(), 12)
+  for (let i = 0; i < count; i++) {
+    await candidates.nth(i).click({ force: true }).catch(() => {})
+    await page.waitForURL(/\/sessions\/[^/?]+/, { timeout: 3000 }).catch(() => {})
+    if (/\/sessions\/[^/?]+/.test(new URL(page.url()).pathname)) {
+      const composer = page.locator('button[aria-label="Mais opções"], button[aria-label="More options"]').first()
+      if (await composer.count() && await composer.isVisible()) break
+    }
+    await page.goto(`${base}/sessions`, { waitUntil: 'domcontentloaded' }); await ready(page)
+    const again = page.getByRole('tab', { name: /Ended|Encerradas/ }).first()
+    if (await again.count()) await again.click({ force: true }).catch(() => {})
+    await page.waitForTimeout(300)
   }
   await page.waitForTimeout(1600)
   const more = page.locator('button[aria-label="Mais opções"], button[aria-label="More options"]').first()
