@@ -122,6 +122,7 @@ export const ADD_COPY = (pt: boolean) => ({
   deviceStep: pt ? 'Na página, digite este código' : 'Enter this code on the page',
   kimiStep: pt ? 'O link já leva o código; confira se a página mostra este' : 'The link includes the code; check that the page shows this one',
   submit: pt ? 'Confirmar' : 'Confirm',
+  signInNeedsFlag: pt ? 'Para entrar por aqui, ligue “Várias contas” em Ajustes → Experimental. Ou entre uma vez num terminal com `claude auth login`.' : 'To sign in from here, turn on “Multiple accounts” in Settings → Experimental. Or sign in once in a terminal with `claude auth login`.',
   awaitingCode: pt ? 'Cole o código mostrado pela página para continuar.' : 'Paste the code shown by the page to continue.',
   submitted: pt ? 'Esperando você entrar…' : 'Waiting for you to sign in…',
   expires: (minutes: number) => pt ? `O código vale por mais ${minutes} min.` : `The code expires in ${minutes} min.`,

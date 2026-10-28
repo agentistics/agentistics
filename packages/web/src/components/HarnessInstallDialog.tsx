@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { ConfirmModal } from '../pages/settings/primitives'
-import { fetchHarnessStatus, installHarness, loginHarness } from '../hooks/useChatHarnesses'
+import { fetchHarnessStatus, installHarness } from '../hooks/useChatHarnesses'
+import { useOpenAccountSignIn } from '../lib/accountSignIn'
 
 export interface HarnessInstallTarget {
   id: string
@@ -19,19 +20,20 @@ const MAX_LINES = 8
  * what will run, asks, then streams the official installer's progress inside the app's own
  * ConfirmModal. Nothing starts before the confirm button.
  */
-export function HarnessInstallDialog({ target, pt, onClose, onDone, onSignedIn }: {
+export function HarnessInstallDialog({ target, pt, onClose, onDone, onSignIn }: {
   target: HarnessInstallTarget | null
   pt: boolean
   onClose: () => void
   onDone: (version?: string) => void
-  /** The sign-in session was opened (same call as Settings → Assistants' "Sign in"); the host decides where to go. */
-  onSignedIn?: (sessionId: string) => void
+  /** "Sign in now" was pressed: the app is going to Usage → Accounts' sign-in dialog; the host closes what it holds. */
+  onSignIn?: () => void
 }) {
   const [phase, setPhase] = useState<Phase>('confirm')
   const [lines, setLines] = useState<string[]>([])
   const [failure, setFailure] = useState('')
   const [loginError, setLoginError] = useState('')
-  const [signingIn, setSigningIn] = useState(false)
+  const signingIn = false
+  const openSignIn = useOpenAccountSignIn()
   const withNode = useRef(false)
 
   // The state is per-open: a target change starts a clean confirm.
@@ -70,13 +72,11 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone, onSignedIn }
     setPhase('failed')
   }
 
-  const signIn = async () => {
-    if (!target || signingIn) return
-    setSigningIn(true); setLoginError('')
-    const out = await loginHarness(target.id, pt ? 'pt' : 'en')
-    setSigningIn(false)
-    if (out.ok && out.id) { onSignedIn?.(out.id); onClose(); return }
-    setLoginError(out.message || (pt ? 'Não consegui abrir o login agora. Tente de novo.' : 'Could not open the sign-in right now. Try again.'))
+  // The one in-app login is the "Add account" dialog (paste the code); a session at the assistant's
+  // own login could end at once with nothing on screen (CONTAS.LOGIN r4), so it is never opened.
+  const signIn = () => {
+    if (!target) return
+    openSignIn(target.id); onSignIn?.(); onClose()
   }
 
   const message = (() => {
