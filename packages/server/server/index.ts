@@ -802,7 +802,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           .flatMap(s => [s.id, ...(s.conversationId ? [s.conversationId] : []), ...(s.conversationStoreId ? [s.conversationStoreId] : [])]))
         liveSessions = await sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByAccount, working)
       }
-      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, freeSlotsByAccount: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
+      const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, freeSlotsByAccount: {}, unassignedLive: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {

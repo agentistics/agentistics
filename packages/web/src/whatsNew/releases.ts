@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.161.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Cada sessão é contada na mesma conta em todas as telas e cálculos de uso, mesmo quando ela foi aberta sem escolher uma conta.',
+        en: 'Each session is counted against the same account on every usage screen and calculation, even when it was started without choosing an account.',
+      },
+      {
+        pt: 'O cálculo de quantas sessões ainda cabem em cada plano agora conta também as sessões sem conta definida, usando o gasto médio do assistente, em vez de prometer vagas que não existem.',
+        en: 'The count of how many more sessions fit in each plan now includes sessions with no account set, using the assistant\'s average burn, instead of promising room that is not there.',
+      },
+      {
+        pt: 'Pedir para trocar uma sessão para a conta em que ela já está não abre mais uma troca desnecessária.',
+        en: 'Asking to switch a session to the account it is already on no longer starts a needless switch.',
+      },
+    ],
+  },
   '2.161.3': {
     features: [],
     fixes: [
