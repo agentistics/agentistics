@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.160.2': {
+    features: [
+      {
+        pt: 'Várias contas agora vem ligado: numa instalação nova já dá para entrar em outra conta de um assistente pela tela de contas.',
+        en: 'Multiple accounts is now on by default: a fresh install can sign in to another account of an assistant from the accounts screen.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Todo plano cadastrado pode ser removido pelo lápis da conta, inclusive um que começa depois ou um "Não sei agora"; planos de contas que saíram da lista aparecem para remover.',
+        en: 'Every registered plan can be removed from the account’s pencil, including one that starts later or a "Not sure yet" one; plans of accounts that left the list show up so you can remove them.',
+      },
+      {
+        pt: 'A aba Cobrança saiu das Configurações: o plano de cada conta fica no lápis da linha, em Uso → Contas.',
+        en: 'The Billing tab left Settings: each account’s plan is on its row’s pencil in Usage → Accounts.',
+      },
+    ],
+  },
   '2.160.1': {
     features: [],
     fixes: [

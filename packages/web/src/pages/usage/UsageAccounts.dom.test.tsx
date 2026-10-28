@@ -45,10 +45,10 @@ afterEach(() => { act(() => root?.unmount()); root = undefined; document.body.in
 
 const flush = async () => { for (let i = 0; i < 5; i++) await act(async () => { await new Promise(r => setTimeout(r, 0)) }) }
 
-function mount(at: string, saves: unknown[] = []) {
+function mount(at: string, saves: unknown[] = [], billing: unknown = { profiles: {} }) {
   const { MemoryRouter, Routes, Route, Outlet, useLocation } = Router
   const ctx = {
-    lang: 'en', billing: { profiles: {} }, data: { harnesses: ['claude'] }, isCentral: false,
+    lang: 'en', billing, data: { harnesses: ['claude'] }, isCentral: false,
     saveBilling: async (next: unknown) => { saves.push(next) },
   }
   const Where = () => { const l = useLocation(); return h('output', { 'data-where': `${l.pathname}${l.hash}` }) }
@@ -83,7 +83,7 @@ describe('the account row and its editor', () => {
     expect(el.querySelector('#contas')).not.toBeNull()
     expect(el.querySelector('[role=switch][aria-label="Agents · me@example.test"]')).not.toBeNull()
     expect(el.querySelector('button[aria-label="Set plan · me@example.test"] .lucide-pencil')).not.toBeNull()
-    expect(el.textContent).toContain('Billing')
+    expect(el.textContent).toContain('Plans and cost')
   })
 
   test('the pencil opens the editor; the nickname and agent use save through PATCH /api/accounts/:id', async () => {
@@ -161,5 +161,70 @@ describe('the Agentes switch is a 44px target on a phone (QA P2-2)', () => {
       await flush()
       expect(patches).toEqual([{ url: '/api/accounts/c1', body: { available: false } }])
     } finally { (window as { innerWidth: number }).innerWidth = prev }
+  })
+})
+
+describe('removing a plan (CONTAS.MAC.NOVO)', () => {
+  const click = (label: string) => {
+    const b = Array.from(document.querySelectorAll('button')).find(x => x.textContent === label) as HTMLButtonElement | undefined
+    expect(b).toBeDefined()
+    act(() => b!.click())
+  }
+  test('the plan in force is removed from its own editor and the account goes back to no plan', async () => {
+    const saves: unknown[] = []
+    const billing = { profiles: {}, accountProfiles: { 'claude:c1': { periods: [{ id: 'p1', mode: 'subscription', planId: 'claude-max-5x', label: 'Max 5x', price: { amount: 100, currency: 'USD' }, from: '2026-01-01' }] } } }
+    const el = mount('/usage', saves, billing)
+    await flush()
+    act(() => (el.querySelector('button[aria-label="Edit · me@example.test"]') as HTMLButtonElement).click())
+    await flush()
+    click('Remove this plan')
+    await flush()
+    click('Remove')
+    await flush()
+    expect(saves.length).toBe(1)
+    expect((saves[0] as (b: unknown) => unknown)(billing)).toEqual({ profiles: {} })
+  })
+})
+
+describe('removing a plan in the edge cases (CONTAS.MAC.NOVO)', () => {
+  const click = (label: string) => {
+    const b = Array.from(document.querySelectorAll('button')).find(x => x.textContent === label) as HTMLButtonElement | undefined
+    expect(b).toBeDefined()
+    act(() => b!.click())
+  }
+  const future = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10)
+  test('fresh machine, no account listed, a plan that starts later: the row says when, and the pencil removes it', async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => String(input) === '/api/accounts' ? Response.json({ accounts: [] }) : Response.json({})) as typeof fetch
+    const saves: unknown[] = []
+    const billing = { profiles: { claude: { periods: [{ id: 'f1', mode: 'subscription', planId: 'claude-pro', price: { amount: 20, currency: 'USD' }, from: future }] } } }
+    const el = mount('/usage', saves, billing)
+    await flush()
+    expect(el.textContent).toContain('Plan starts')
+    expect(el.textContent).not.toContain('No plan')
+    act(() => (el.querySelector('button[aria-label="Edit · Claude Code"]') as HTMLButtonElement).click())
+    await flush()
+    expect(document.querySelector('[data-account-default]')).not.toBeNull()
+    click('Remove this plan'); await flush(); click('Remove'); await flush()
+    expect((saves[0] as (b: unknown) => unknown)(billing)).toEqual({ profiles: {} })
+  })
+  test('a "not sure yet" plan can be removed', async () => {
+    const saves: unknown[] = []
+    const billing = { profiles: {}, accountProfiles: { 'claude:c1': { periods: [{ id: 'u1', mode: 'unknown', from: '2026-01-01' }] } } }
+    const el = mount('/usage', saves, billing)
+    await flush()
+    act(() => (el.querySelector('button[aria-label="Edit · me@example.test"]') as HTMLButtonElement).click())
+    await flush()
+    click('Remove this plan'); await flush(); click('Remove'); await flush()
+    expect((saves[0] as (b: unknown) => unknown)(billing)).toEqual({ profiles: {} })
+  })
+  test('the plan of an account that left the list is listed and removable', async () => {
+    const saves: unknown[] = []
+    const billing = { profiles: {}, accountProfiles: { 'claude:gone': { periods: [{ id: 'g1', mode: 'unknown', from: '2026-01-01' }] } } }
+    const el = mount('/usage', saves, billing)
+    await flush()
+    const del = el.querySelector('[data-orphan-plan="claude:gone"] button') as HTMLButtonElement
+    expect(del).not.toBeNull()
+    act(() => del.click()); await flush(); click('Remove'); await flush()
+    expect((saves[0] as (b: unknown) => unknown)(billing)).toEqual({ profiles: {} })
   })
 })

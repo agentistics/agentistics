@@ -54,10 +54,11 @@ import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
 import { BillingAccountList, type BillingRowView } from './AccountRow'
 import {
   accountsNeedingPlan, billingRows, closeBefore, defaultStart, limitsForRow, planOptionsFor, matchDetectedPlan, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
-  unknownPeriod, withScopePeriods, type BillingAccount, type SaveError,
+  orphanTimelines, unknownPeriod, upcomingPeriod, withScopePeriods, withoutOrphan, type BillingAccount, type OrphanTimeline, type SaveError,
 } from './accountBilling'
 import { createAccountMutator } from './accountMutations'
 import AddAccount from './AddAccount'
+import { addErrorText } from './addAccountLogic'
 import { accountLabelKey, fmtWhen, usePlanLimits } from '../../lib/planLimits'
 import { hasMeasuredPace } from '../../lib/usagePlan'
 import { PlanLimitBars } from '../../components/PlanLimitMeter'
@@ -162,13 +163,26 @@ export function BillingAccountsPanel() {
   const rows: BillingRowView[] = useMemo(() => billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt, accountLabels).map(r => {
     const periods = scopePeriods(ctx.billing, r.scope)
     const cur = splitTimeline(sortPeriods(periods), today()).current
+    const next = cur ? null : upcomingPeriod(periods, today())
     return {
       ...r,
       plan: cur ? { name: periodName(cur, ctx.lang) || modeLabel(cur.mode, pt ? 'pt' : 'en'), price: priceText(cur, pt), mode: cur.mode } : null,
+      starts: next ? fmtDay(next.from) : null,
       problem: validateTimeline({ periods }).size > 0,
       limits: limitsForRow(planLimits, r),
     }
   }), [accounts, ctx.billing, harnesses, pt, planLimits, accountLabels])
+
+  const orphans = useMemo(() => orphanTimelines(ctx.billing, rows), [ctx.billing, rows])
+  /** An orphan in words: whose it was, and the plan it holds (in force, else the latest). */
+  const orphanText = (o: OrphanTimeline): string => {
+    const sorted = sortPeriods(o.periods)
+    const p = splitTimeline(sorted, today()).current ?? sorted[sorted.length - 1]
+    const plan = p ? periodName(p, ctx.lang) || modeLabel(p.mode, pt ? 'pt' : 'en') : ''
+    const who = o.harness ? (HARNESS_LABELS[o.harness] ?? o.harness) : (pt ? 'Conta' : 'Account')
+    const which = o.kind === 'default' ? (pt ? 'padrão' : 'default') : (pt ? 'conta removida' : 'removed account')
+    return `${who} (${which})${plan ? ` · ${plan}` : ''}`
+  }
 
   const toggleAccount = async (a: BillingAccount) => {
     if (mutator.has(a.id)) return
@@ -196,6 +210,9 @@ export function BillingAccountsPanel() {
   const [showErrors, setShowErrors] = useState(false)
   const [saveError, setSaveError] = useState<SaveError | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<BillingPeriod | null>(null)
+  const [confirmOrphan, setConfirmOrphan] = useState<OrphanTimeline | null>(null)
+  const [confirmRemoveAccount, setConfirmRemoveAccount] = useState<BillingAccount | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
   const [detections, setDetections] = useState<BillingDetection[]>([])
   const [planPrices, setPlanPrices] = useState<ScrapedPlanPrice[]>([])
   /**
@@ -246,6 +263,9 @@ export function BillingAccountsPanel() {
     setEditKey(r.key)
     setSeededFrom(null)
     if (cur) { openDraft(draftFromPeriod(cur), r.account?.nickname ?? ''); return }
+    // A plan that starts later is still the plan: open IT (where it can be edited or removed), not a blank one.
+    const next = upcomingPeriod(own, today())
+    if (next) { openDraft(draftFromPeriod(next), r.account?.nickname ?? ''); return }
     // Nothing in force: pre-select what the assistant reported, else what detection found.
     const detection = detections.find(d => d.harness === r.harness && d.source !== 'none' && d.mode !== 'unknown')
     const planId = (r.account ? matchDetectedPlan(r.harness, r.account.plan) : '') || detection?.planId || ''
@@ -344,6 +364,7 @@ export function BillingAccountsPanel() {
   const selectedEntry = draft?.planId ? findPlan(draft.planId) : undefined
   const errPlace = saveErrorPlace(saveError, noticeState, draft !== null)
   const editingPast = draft !== null && draft.id !== '' && draft.id !== current?.id
+  const editedPeriod = draft && draft.id !== '' ? periods.find(p => p.id === draft.id) ?? null : null
   const L = { fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 } as const
 
   // The one useful part of the old "Plan" page, kept per account: the sustainable parallel count.
@@ -355,9 +376,35 @@ export function BillingAccountsPanel() {
       <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
         selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow} />
       <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
+      {removeError && <div role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--accent-red)' }}>{removeError}</div>}
+
+      {/* Accounts that load late must not list every account timeline as stray for a moment. */}
+      {accountsSettled && orphans.length > 0 && (
+        <div data-orphan-plans style={{ marginTop: 6, marginBottom: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+            {pt ? 'Planos de contas que não aparecem mais' : 'Plans of accounts no longer listed'}
+          </div>
+          <p style={{ margin: '0 0 8px', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+            {pt
+              ? 'Ficaram guardados de uma conta que saiu da lista (removida, desconectada ou que o assistente não identifica mais). Nenhuma linha acima os edita; remova o que não vale mais.'
+              : 'Kept from an account that left the list (removed, signed out, or no longer identified by the assistant). No row above edits them; remove what no longer applies.'}
+          </p>
+          <div role="list" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+            {orphans.map((o, i) => (
+              <div role="listitem" key={o.key} data-orphan-plan={o.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px 8px 14px', borderTop: i ? '1px solid var(--border)' : undefined, minHeight: isMobile ? 44 : undefined }}>
+                {o.harness && <HarnessMark harness={o.harness} size={18} />}
+                <span style={{ minWidth: 0, flex: 1, fontSize: 12, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{orphanText(o)}</span>
+                <button type="button" onClick={() => setConfirmOrphan(o)} style={{ ...iconBtn, color: 'var(--accent-red)' }}
+                  title={pt ? 'Remover' : 'Remove'} aria-label={`${pt ? 'Remover' : 'Remove'} · ${orphanText(o)}`}><Trash2 size={14} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div data-usage-billing style={{ marginTop: 24 }}>
-        <SectionHeader label={pt ? 'Cobrança' : 'Billing'} />
+        {/* An explanation, not a place: there is no Billing tab any more, so the heading says what it explains. */}
+        <SectionHeader label={pt ? 'Planos e custo' : 'Plans and cost'} />
         <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)', lineHeight: 1.55, margin: '0 0 14px' }}>
           {pt
             ? 'Todo custo no app é uma estimativa a preço de API até você cadastrar o plano de cada conta (no lápis da linha) — aí ele passa a refletir o que você realmente paga. Os agentes só usam as contas com “Agentes” ligado. Tudo fica nesta máquina.'
@@ -419,7 +466,9 @@ export function BillingAccountsPanel() {
             )}
             {editingPast && (
               <div style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 10px' }}>
-                {pt ? 'Editando um plano anterior.' : 'Editing an earlier plan.'}{' '}
+                {editedPeriod && editedPeriod.from > today()
+                  ? (pt ? `Este plano começa em ${fmtDay(editedPeriod.from)}.` : `This plan starts ${fmtDay(editedPeriod.from)}.`)
+                  : (pt ? 'Editando um plano anterior.' : 'Editing an earlier plan.')}{' '}
                 <button type="button" style={linkBtn} onClick={() => current ? openDraft(draftFromPeriod(current), nick) : openRow(row)}>
                   {pt ? 'voltar ao plano atual' : 'back to the current plan'}
                 </button>
@@ -495,10 +544,26 @@ export function BillingAccountsPanel() {
             </div>
             <FieldError text={errorFor(['overlap'])} />
 
-            {current && draft.id === current.id && (
-              <button type="button" style={{ ...linkBtn, color: 'var(--accent-red)' }} onClick={() => setConfirmDelete(current)}>
+            {/* Every STORED period can be removed from where it is open — the one in force, one that starts
+                later, an earlier one, a "not sure yet" one. Only a draft that was never saved has nothing to remove. */}
+            {editedPeriod && (
+              <button type="button" style={{ ...linkBtn, color: 'var(--accent-red)' }} onClick={() => setConfirmDelete(editedPeriod)}>
                 {pt ? 'Remover este plano' : 'Remove this plan'}
               </button>
+            )}
+
+            {row.account?.root ? (
+              <div data-account-remove style={{ marginTop: 14, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                <button type="button" style={{ ...linkBtn, color: 'var(--accent-red)' }} onClick={() => setConfirmRemoveAccount(row.account)}>
+                  {pt ? 'Remover esta conta' : 'Remove this account'}
+                </button>
+              </div>
+            ) : (
+              <p data-account-default style={{ margin: '14px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+                {pt
+                  ? 'Esta é a conta padrão do assistente neste computador (o login dele na sua pasta pessoal): ela sempre aparece aqui. O plano dela pode ser removido; para trocar de conta, saia dela no próprio assistente.'
+                  : 'This is the assistant’s default account on this computer (its login in your home folder): it is always listed. Its plan can be removed; to change accounts, sign out in the assistant itself.'}
+              </p>
             )}
 
             {history.length > 0 && (
@@ -544,6 +609,50 @@ export function BillingAccountsPanel() {
           if (ok && draft?.id === gone.id) close()
         }}
         onCancel={() => setConfirmDelete(null)}
+      />
+
+      <ConfirmModal
+        open={confirmOrphan !== null}
+        title={pt ? 'Remover plano' : 'Remove plan'}
+        message={pt
+          ? `Remover ${confirmOrphan ? orphanText(confirmOrphan) : ''}? Ele não pertence a nenhuma conta listada.`
+          : `Remove ${confirmOrphan ? orphanText(confirmOrphan) : ''}? It belongs to no listed account.`}
+        confirmLabel={pt ? 'Remover' : 'Remove'}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        onConfirm={async () => {
+          const gone = confirmOrphan
+          setConfirmOrphan(null)
+          if (!gone) return
+          setRemoveError(null)
+          await ctx.saveBilling(cur => withoutOrphan(cur, gone)).catch(() => {
+            setRemoveError(pt ? 'Não foi possível remover o plano. Tente de novo.' : 'Could not remove the plan. Try again.')
+          })
+        }}
+        onCancel={() => setConfirmOrphan(null)}
+      />
+
+      <ConfirmModal
+        open={confirmRemoveAccount !== null}
+        title={pt ? 'Remover conta' : 'Remove account'}
+        message={pt
+          ? `Remover “${row?.title ?? ''}” da lista? O login guardado neste computador fica na pasta dele; o plano, se houver, aparece em “Planos de contas que não aparecem mais” para você remover.`
+          : `Remove “${row?.title ?? ''}” from the list? The login stays in its folder on this computer; its plan, if any, moves to “Plans of accounts no longer listed” for you to remove.`}
+        confirmLabel={pt ? 'Remover' : 'Remove'}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        onConfirm={async () => {
+          const gone = confirmRemoveAccount
+          setConfirmRemoveAccount(null)
+          if (!gone) return
+          setRemoveError(null)
+          const res = await fetch(`/api/accounts/roots/${encodeURIComponent(gone.id)}`, { method: 'DELETE' }).catch(() => null)
+          if (!res?.ok) {
+            setRemoveError(addErrorText(res ? await res.json().catch(() => null) : null, pt))
+            return
+          }
+          close()
+          reloadAccounts()
+        }}
+        onCancel={() => setConfirmRemoveAccount(null)}
       />
     </div>
   )
