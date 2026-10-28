@@ -85,4 +85,13 @@ describe('defaultHomeAccount / registryOfSpawnRows', () => {
     expect(view.bindings).toEqual({ 'claude:': 'acc_a', 'claude:/r/b': 'acc_b' })
     expect(resolveSessionAccount([{ id: 'plain', harness: 'claude' }], { id: 'plain' }, view)).toBe('acc_a')
   })
+
+  test('preserves a default-home binding when the same account also owns a secondary root', () => {
+    const view = registryOfSpawnRows([
+      { id: 'acc_a', harness: 'claude', root: '/r/a', bound: true, defaultRoot: true },
+      { id: 'acc_b', harness: 'claude', root: '/r/b', bound: true },
+    ])
+    expect(view.bindings).toEqual({ 'claude:': 'acc_a', 'claude:/r/a': 'acc_a', 'claude:/r/b': 'acc_b' })
+    expect(resolveSessionAccount([{ id: 'plain', harness: 'claude' }], { id: 'plain' }, view)).toBe('acc_a')
+  })
 })

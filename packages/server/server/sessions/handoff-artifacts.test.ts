@@ -88,9 +88,11 @@ describe('native handoff quota calibration', () => {
     } finally { await rm(root, { recursive: true, force: true }) }
   })
   it('never borrows another metered account when the bound one has no reading', () => {
-    const accounts: AccountsFile = { version: 2, accounts: [], segments: {}, bindings: { 'claude:': 'first' } }
+    const accounts = { version: 2, accounts: [{ id: 'first', harness: 'claude' }, { id: 'second', harness: 'claude' }], segments: {}, bindings: { 'claude:': 'first' } } as unknown as AccountsFile
     expect(handoffSessionLimit('claude', { accountId: 'second' }, accounts, [meter('claude', 'first')])).toBeUndefined()
-    expect(handoffSessionLimit('claude', {}, accounts, [meter('claude', 'first'), meter('claude', 'second')])?.account).toBe('first')
+    expect(handoffSessionLimit('claude', {}, accounts, [meter('claude', 'first'), meter('claude', 'second')])).toBeUndefined()
+    expect(handoffSessionLimit('claude', { id: 'home', conversationId: 'home' }, accounts,
+      [meter('claude', 'first'), meter('claude', 'second')])?.account).toBe('first')
     expect(handoffSessionLimit('claude', {}, { ...accounts, bindings: {} }, [meter('claude', 'first'), meter('claude', 'second')])).toBeUndefined()
   })
   it('uses Claude final usage once, preserves its first timestamp and cache TTL pricing', () => {
