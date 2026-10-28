@@ -1,5 +1,5 @@
 /** Pure installer table. It describes official commands; it never executes them. */
-import type { HarnessId } from '@agentistics/core'
+import { redactSecrets, type HarnessId } from '@agentistics/core'
 
 export type HarnessInstallPlatform = 'linux' | 'darwin' | 'unsupported'
 export type HarnessInstallReason = 'ok' | 'unsupported-platform' | 'node-required'
@@ -28,6 +28,43 @@ export function withUserBin(path: string | undefined, home: string): string {
   return [...dirs, ...rest].join(':')
 }
 
+/**
+ * The shell every installer script runs under, by ABSOLUTE path. `Bun.spawn` resolves a bare `sh`
+ * against the child's PATH and THROWS when it is not there ("Executable not found in $PATH") — a
+ * server launched from a macOS GUI/launcher can carry a PATH with no `/bin` at all. `/bin/sh` exists
+ * on every Linux and macOS.
+ */
+export const INSTALL_SHELL = '/bin/sh'
+
+/**
+ * System directories the installers' own tools live in (`curl`, `bash`, `tar`, `shasum`, `uname`).
+ * APPENDED to the user's PATH when missing — the user's order still decides which binary wins.
+ * `/opt/homebrew/bin` is macOS Homebrew's prefix (npm/node installed by brew live there).
+ */
+export const INSTALL_SYSTEM_DIRS = ['/usr/local/bin', '/opt/homebrew/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']
+
+/** The PATH an installer runs with: the given one, plus every system directory it lacks. */
+export function installSearchPath(path: string | undefined): string {
+  const have = (path ?? '').split(':').filter(Boolean)
+  const missing = INSTALL_SYSTEM_DIRS.filter(d => !have.includes(d))
+  return [...have, ...missing].join(':')
+}
+
+/** What went wrong, short and bounded, for the dialog and the log. Never empty. */
+export function installFailureDetail(
+  outcome: { code: number | null; spawnError?: string; stderrTail?: string[] }, lang: 'pt' | 'en',
+): string {
+  const pt = lang === 'pt'
+  if (outcome.spawnError) {
+    return redactSecrets(`${pt ? 'O instalador não iniciou' : 'The installer did not start'}: ${cleanInstallLine(outcome.spawnError)}`)
+  }
+  const code = outcome.code === null ? '?' : String(outcome.code)
+  const head = pt ? `O instalador saiu com código ${code}` : `The installer exited with code ${code}`
+  const tail = (outcome.stderrTail ?? []).map(cleanInstallLine).filter(Boolean).slice(-3).join(' · ')
+  const body = tail || (pt ? 'sem nenhuma mensagem' : 'without any message')
+  return redactSecrets(`${head} (${body.slice(0, 300)}).`)
+}
+
 /** Strips ANSI escapes and bounds a line so a noisy installer cannot flood the modal. */
 export function cleanInstallLine(raw: string): string {
   // eslint-disable-next-line no-control-regex
@@ -51,7 +88,7 @@ export function planNodeInstall(facts: HarnessInstallFacts): { reason: HarnessIn
     `curl -fsSL "https://nodejs.org/dist/v${NODE_LTS_VERSION}/${name}.tar.gz" | tar -xz -C "${dest}"`,
     `for b in node npm npx; do ln -sf "${dest}/${name}/bin/$b" "${facts.home}/.local/bin/$b"; done`,
   ].join(' && ')
-  return { reason: 'ok', command: ['sh', '-c', script] }
+  return { reason: 'ok', command: [INSTALL_SHELL, '-c', script] }
 }
 
 export interface HarnessInstallPlan {
@@ -66,7 +103,7 @@ type HarnessPlanEntry = { package?: string; command: (facts: HarnessInstallFacts
 
 /** One source of truth for the official installers used by the UI and the server. */
 export const HARNESS_INSTALLERS: Record<HarnessInstallPlan['harness'], HarnessPlanEntry> = {
-  claude: { command: () => ['sh', '-c', 'curl -fsSL https://claude.ai/install.sh | bash'] },
+  claude: { command: () => [INSTALL_SHELL, '-c', 'curl -fsSL https://claude.ai/install.sh | bash'] },
   codex: { package: '@openai/codex', command: f => npmCommand('@openai/codex', f) },
   gemini: { package: '@google/gemini-cli', command: f => npmCommand('@google/gemini-cli', f) },
   copilot: { package: '@github/copilot', command: f => npmCommand('@github/copilot', f) },

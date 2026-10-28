@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { handleHarnessInstallRoute, handleHarnessLoginRoute, type Runner } from './harness-install'
+import { defaultRunner, handleHarnessInstallRoute, handleHarnessLoginRoute, installEnv, type Runner } from './harness-install'
 import type { HarnessInstallFacts } from './harness-install-plan'
 
 const facts = (over: Partial<HarnessInstallFacts> = {}) => async (): Promise<HarnessInstallFacts> => ({
@@ -106,6 +106,51 @@ describe('harness install route', () => {
   test('unsupported platform is refused', async () => {
     const res = await handleHarnessInstallRoute(post(ok), 'claude', 'install', { runner: fake(), facts: facts({ platform: 'win32' }) })
     expect(await res.json()).toEqual({ error: 'unsupported-platform' })
+  })
+})
+
+describe('harness install failures are never silent (macOS report, 2.159.3)', () => {
+  test('a runner that throws (spawn failed) puts the reason in the dialog message', async () => {
+    const runner: Runner = async () => { throw new Error('Executable not found in $PATH: "sh"') }
+    const text = await (await handleHarnessInstallRoute(post(ok), 'claude', 'install', { runner, facts: facts({ platform: 'darwin' }) })).text()
+    expect(text).toContain('Não consegui terminar')
+    expect(text).toContain('O instalador não iniciou: Executable not found')
+  })
+
+  test('a non-zero exit with no output still says the code', async () => {
+    const text = await (await handleHarnessInstallRoute(post({ ...ok, lang: 'en' }), 'claude', 'install', { runner: fake({ code: 3 }), facts: facts() })).text()
+    expect(text).toContain('It did not finish')
+    expect(text).toContain('exited with code 3 (without any message)')
+  })
+
+  test('the last stderr lines explain the failure', async () => {
+    const runner: Runner = async (argv, onLine) => { onLine('Setting up', 'stdout'); onLine('curl: (6) Could not resolve host', 'stderr'); return 6 }
+    const text = await (await handleHarnessInstallRoute(post(ok), 'claude', 'install', { runner, facts: facts() })).text()
+    expect(text).toContain('código 6 (curl: (6) Could not resolve host)')
+  })
+
+  test('a silent installer keeps the stream alive with SSE comments (Bun idleTimeout would cut it)', async () => {
+    const runner: Runner = async (argv, onLine) => {
+      if (argv.includes('--version')) { onLine('2.1.0 (Claude Code)'); return 0 }
+      await new Promise(r => setTimeout(r, 80)); return 0
+    }
+    const res = await handleHarnessInstallRoute(post(ok), 'claude', 'install', { runner, facts: facts(), keepaliveMs: 10 })
+    const text = await res.text()
+    expect(text).toContain(': keepalive')
+    expect(text).toContain('"type":"done"')
+  })
+
+  test('the real runner reaches /bin/sh even when the server PATH has no system dirs', async () => {
+    const saved = process.env.PATH
+    process.env.PATH = '/nonexistent'
+    try {
+      expect(installEnv().PATH!.split(':')).toContain('/bin')
+      const lines: Array<[string, string | undefined]> = []
+      const code = await defaultRunner(['/bin/sh', '-c', 'echo out; echo boom >&2; exit 4'], (l, s) => lines.push([l, s]), 5000)
+      expect(code).toBe(4)
+      expect(lines).toContainEqual(['out', 'stdout'])
+      expect(lines).toContainEqual(['boom', 'stderr'])
+    } finally { process.env.PATH = saved }
   })
 })
 
