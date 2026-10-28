@@ -290,3 +290,64 @@ describe('CONTAS.LOGIN r4: "Entrar" on the not-signed-in notice opens THIS dialo
     expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
 })
+
+describe('HARNESS.LOGIN.TODOS: a CLI installed a moment ago opens its sign-in', () => {
+  let installedNow: string[]
+  const wire = () => {
+    const inner = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === '/api/accounts/roots' && (init?.method ?? 'GET') === 'GET' ? json({ roots: rows, installed: installedNow }) : inner(input, init)) as typeof fetch
+  }
+  const mount = async (harnesses: string[]) => {
+    await act(async () => { resize(1440); root.render(<AddAccount lang="pt" harnesses={harnesses as never} onBound={() => {}} />) })
+    await act(async () => { await new Promise(r => setTimeout(r, 10)) })
+  }
+  test('Codex has no sessions and no account, yet it is offered and "Entrar" opens the dialog', async () => {
+    const { accountSignInStore } = await import('../../lib/accountSignIn')
+    installedNow = ['codex']; wire()
+    await mount(['claude'])
+    expect(host.querySelector(`[aria-label="${ADD_COPY(true).addTo('Codex CLI')}"]`)).not.toBeNull()
+    await act(async () => { accountSignInStore.request('codex'); await new Promise(r => setTimeout(r, 20)) })
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    expect(host.querySelector('[data-sign-in-notice]')).toBeNull()
+  })
+  test('an install that finished after the page loaded is found by the click itself (fresh look)', async () => {
+    const { accountSignInStore } = await import('../../lib/accountSignIn')
+    installedNow = []; wire()
+    await mount(['claude'])
+    expect(host.querySelector(`[aria-label="${ADD_COPY(true).addTo('Codex CLI')}"]`)).toBeNull()
+    installedNow = ['codex'] // installed meanwhile
+    await act(async () => { accountSignInStore.request('codex'); await new Promise(r => setTimeout(r, 30)) })
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  })
+  test('not found: the message is on the panel itself, with "Procurar de novo", which then succeeds', async () => {
+    const { accountSignInStore } = await import('../../lib/accountSignIn')
+    installedNow = []; wire()
+    await mount(['claude'])
+    await act(async () => { accountSignInStore.request('codex'); await new Promise(r => setTimeout(r, 30)) })
+    const note = host.querySelector('[data-sign-in-notice="codex"]')!
+    expect(note.getAttribute('role')).toBe('alert')
+    expect(note.textContent).toContain(ADD_COPY(true).notFound('Codex CLI'))
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    installedNow = ['codex']
+    await act(async () => { button(ADD_COPY(true).rescan, note).click(); await new Promise(r => setTimeout(r, 30)) })
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+    expect(host.querySelector('[data-sign-in-notice]')).toBeNull()
+  })
+  test('antigravity: says how to sign in by hand instead of doing nothing', async () => {
+    const { accountSignInStore } = await import('../../lib/accountSignIn')
+    installedNow = []; wire()
+    await mount(['antigravity'])
+    await act(async () => { accountSignInStore.request('antigravity'); await new Promise(r => setTimeout(r, 30)) })
+    expect(host.querySelector('[data-sign-in-notice="antigravity"]')!.textContent).toContain('agy')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+  })
+  test('multiple accounts off: the notice is on the panel too, even with no row for that assistant', async () => {
+    const { accountSignInStore } = await import('../../lib/accountSignIn')
+    const inner = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => String(input) === '/api/experimental' ? json({ features: [] }) : inner(input, init)) as typeof fetch
+    await mount(['claude'])
+    await act(async () => { accountSignInStore.request('codex'); await new Promise(r => setTimeout(r, 20)) })
+    expect(host.querySelector('[data-sign-in-notice="codex"]')!.textContent).toContain(ADD_COPY(true).signInNeedsFlag)
+  })
+})
