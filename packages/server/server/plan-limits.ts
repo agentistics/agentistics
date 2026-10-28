@@ -27,7 +27,7 @@ import {
 } from './harness-accounts'
 import { allHistory, dropHistory, moveHistory, pointOf, recordHistory, type HistoryPoint, __resetPlanHistoryForTest } from './plan-history'
 import { withFileLock } from './sessions/file-lock'
-import { fallbackSessionAccount, resolveSessionAccount } from './sessions/session-account'
+import { defaultHomeAccount, resolveSessionAccount } from './sessions/session-account'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
 
@@ -54,9 +54,6 @@ const sessionHomes: Record<HarnessId, string> = {
   claude: CLAUDE_DIR, codex: CODEX_DIR, gemini: GEMINI_DIR, copilot: COPILOT_DIR,
   kimi: KIMI_DIR, antigravity: ANTIGRAVITY_DIR, opencode: OPENCODE_DIR,
 }
-
-/** Explicit managed ids and transcript roots win over the default/only-visible fallback. */
-export { fallbackSessionAccount }
 
 type LiveSessionRef = { session_id: string; harness: string; native_session_id?: string; project_path?: string }
 export const resolveLiveTranscriptPath = async (s: LiveSessionRef, bindings: Record<string, string>): Promise<string | null> => {
@@ -142,10 +139,14 @@ export async function sampleLivePlanSessions(
         account = hit?.account
         if (hit) pathAccounts.set(s.session_id, { harness: s.harness, account: hit.account, viaDefault: hit.viaDefault })
       }
-      const visible = registry.accounts.filter(a => a.harness === s.harness && a.available && !a.retired).map(a => a.id)
-      const metered = Object.keys(burnByAccount).filter(k => k.startsWith(`${s.harness}:`)).map(k => k.slice(s.harness.length + 1))
-        .filter(id => !registry.accounts.some(a => a.harness === s.harness && a.id === id && (!a.available || a.retired)))
-      account ??= fallbackSessionAccount(s.harness, registry, [...new Set([...visible, ...metered])])
+      // A managed row and an explicit transcript root were exhausted above. The only remaining
+      // identity this session can have is the harness's default home binding; never guess from
+      // whichever visible account happens to have a meter.
+      // `default` is the pre-accounts meter key, not a guess among visible accounts. Preserve it
+      // only when the registry has no account identity at all; once accounts exist, rule 4 is binding-only.
+      account ??= defaultHomeAccount(s.harness, registry)
+      if (!account && registry.accounts.length === 0 && registry.bindings[`${s.harness}:`] === undefined
+        && burnByAccount[planAccountKey(s.harness, 'default')] !== undefined) account = 'default'
     }
     const tokens = (s.input_tokens ?? 0) + (s.output_tokens ?? 0) + (s.cache_read_input_tokens ?? 0) + (s.cache_creation_input_tokens ?? 0)
     const previous = liveUsage.get(s.session_id)
@@ -708,7 +709,7 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
   }
 }
 
-export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string }
+export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string; unassignedLive: number }
 
 export interface PlanLimitsPayload {
   /** Which harnesses can be spawned here; a harness hidden from agents is absent. */
@@ -724,6 +725,8 @@ export interface PlanLimitsPayload {
   freeSlots: number
   freeSlotsByHarness: Partial<Record<HarnessId, number>>
   freeSlotsByAccount: Record<string, number>
+  /** Live sessions of a harness whose account could not be resolved; each is counted conservatively in every budget of that harness. */
+  unassignedLive: Partial<Record<HarnessId, number>>
   liveSessions: Omit<LivePlanSession, 'harness' | 'account'>[]
   pauseUntil?: number
   now: number
@@ -807,11 +810,8 @@ export async function planLimitsPayload(
   const spawnability = harnessSpawnabilities(nowMs)
   const resolvedSessions = liveSessions.map(s => {
     if (s.account || !s.harness) return s
-    const visible = [...new Set([
-      ...accounts.filter(a => a.id && a.harness === s.harness && a.available && !a.retired).map(accountId),
-      ...limits.filter(l => l.harness === s.harness && !acct(l.harness, l.account)).map(l => l.account),
-    ])]
-    const account = fallbackSessionAccount(s.harness, registry, visible)
+    const account = defaultHomeAccount(s.harness, registry)
+      ?? (accounts.length === 0 && limits.some(l => l.harness === s.harness && l.account === 'default') ? 'default' : undefined)
     return account ? { ...s, account } : s
   })
   const sessionVisible = (s: LivePlanSession) => {
@@ -824,7 +824,15 @@ export async function planLimitsPayload(
     const budget = planBudget(l, nowMs)
     // Only measured sessions enter planSlots' per-session average. Working sessions with no
     // billed tokens remain in the public live summary, without diluting the measured burn.
-    const planSessions = resolvedSessions.filter(s => s.burnPctPerHour > 0 && belongsTo(s, l))
+    const attributed = resolvedSessions.filter(s => s.burnPctPerHour > 0 && belongsTo(s, l))
+    // A live session with no resolvable account may be running on any account of its harness, so it
+    // is charged to every one of them: it takes a slot and carries the average measured burn of the
+    // harness's measured sessions here (0 when nothing is measured, which keeps the cadence fallback
+    // and still subtracts the slot). An unbilled one therefore never dilutes the measured average.
+    const unassigned = resolvedSessions.filter(s => !s.account && s.harness === l.harness)
+    const measured = resolvedSessions.filter(s => s.harness === l.harness && s.burnPctPerHour > 0)
+    const avgBurn = measured.length ? measured.reduce((n, s) => n + s.burnPctPerHour, 0) / measured.length : 0
+    const planSessions = [...attributed, ...unassigned.map(s => ({ ...s, burnPctPerHour: avgBurn }))]
     const availability = spawnability[l.harness]!
     const past = history.get(meterKey.get(l) ?? keyOf(l)) ?? []
     // A record with model groups: the top-level row is the TIGHTEST group (never better than the worst),
@@ -845,7 +853,7 @@ export async function planLimitsPayload(
     return { ...budget, ...planPace(l, nowMs, past, planSessions, segmentOf(l.account)), ...availability,
       ...(!availability.spawnable ? { freeSlots: 0, suggestedParallel: 0 } : {}),
       ...(scopes ? { scopes } : {}),
-      account: l.account, accountLabel: labelOf(l.harness, l.account),
+      account: l.account, accountLabel: labelOf(l.harness, l.account), unassignedLive: unassigned.length,
     }
   })
   // Several rows of one harness must be told apart: the bare harness name (a meter of no known
@@ -921,6 +929,8 @@ export async function planLimitsPayload(
   const open = aggregates.filter(a => spawnability[a.harness]?.spawnable !== false && a.status !== 'hold')
   const freeSlots = open.length ? Math.max(...open.map(a => a.freeSlots)) : 0
   const pauseUntil = budgets.map(b => b.pauseUntil).filter((v): v is number => v !== undefined).sort((a, b) => a - b)[0]
+  const unassignedLive: Partial<Record<HarnessId, number>> = {}
+  for (const s of resolvedSessions) if (!s.account && s.harness) unassignedLive[s.harness] = (unassignedLive[s.harness] ?? 0) + 1
   const publicLiveSessions = resolvedSessions
     .filter(sessionVisible)
     .map(({ harness: _harness, account: _account, ...s }) => s)
@@ -934,7 +944,7 @@ export async function planLimitsPayload(
     return live.length > 0 && live.every(a => !a.available)
   }
   const publicHarnesses = Object.fromEntries(Object.entries(spawnability).filter(([h]) => !hiddenOutright(h as HarnessId))) as Partial<Record<HarnessId, HarnessSpawnability>>
-  return { harnesses: publicHarnesses, limits, registered, budgets, hiddenFromAgents, readings, freeSlots, freeSlotsByHarness, freeSlotsByAccount, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
+  return { harnesses: publicHarnesses, limits, registered, budgets, hiddenFromAgents, readings, freeSlots, freeSlotsByHarness, freeSlotsByAccount, unassignedLive, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }
 
 /** Tests only. */

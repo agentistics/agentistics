@@ -37,6 +37,8 @@ export interface SpawnAccountRow {
   root: string | null
   /** A binding names this account: it is signed in at `root`. False = signed out everywhere. */
   bound: boolean
+  /** The account is also bound to the harness's default home (its own root may win `root`). */
+  defaultRoot?: boolean
   available: boolean
   retired?: boolean
   firstSeen?: number

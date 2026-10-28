@@ -283,6 +283,15 @@ describe('switchSessionAccountImpl — CONTA.IDENTIDADE', () => {
     expect(w.killed).toEqual([])
   })
 
+  test('a default-home row is same_account when that login also has its own root', async () => {
+    const w = defaultHome()
+    w.deps.io!.context = async () => ({ enabled: true, accounts: [
+      acc({ id: 'acc_a', root: '/r/a', defaultRoot: true }), acc({ id: 'acc_b', root: '/r/b' }),
+    ] })
+    expect(await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_a' }, w.deps)).toMatchObject({ ok: false, code: 'same_account' })
+    expect(w.killed).toEqual([])
+  })
+
   test('a default-home row still copies FROM the default home and reads its limit there (no account root)', async () => {
     const w = defaultHome()
     const out = await switchSessionAccountImpl({ id: 'm1', accountId: 'acc_b', resendPending: true }, w.deps)

@@ -6,6 +6,7 @@ import { parseCodexRollout } from '../adapters/codex-parse'
 import { toConversation } from './conversations'
 import type { ManagedSession } from './types'
 import { CLAUDE_DIR, CODEX_DIR } from '../config'
+import type { AccountsFile } from '../harness-accounts'
 
 const now = Date.parse('2026-10-20T16:00:00Z')
 const five = 5 * 3600_000, week = 7 * 24 * 3600_000
@@ -17,16 +18,19 @@ const reply = (harness: HarnessId, costUSD: number | null, at = now - 1000, acco
 describe('account history calibration', () => {
   for (const harness of ['claude', 'codex'] as const) it(`${harness}: resolves the same account for panel lookup and sampler peers`, () => {
     const first = limit(harness, 'first'), second = limit(harness, 'second')
-    const accounts = { version: 2 as const, accounts: [], segments: {}, aliases: { legacy: 'second' }, bindings: { [`${harness}:`]: 'first' } }
+    const accounts = { version: 2 as const, accounts: [
+      { id: 'first', harness }, { id: 'second', harness },
+    ], segments: {}, aliases: { legacy: 'second' }, bindings: { [`${harness}:`]: 'first' } } as unknown as AccountsFile
     const meters = [limit('gemini', 'second'), first, second]
     const sessions = [{ accountId: 'legacy' }, { accountId: 'second' }, {}, { accountId: 'unmetered' }]
     // fleet-web uses object identity here to keep the sampler population on the panel's account.
     expect(handoffSessionLimit(harness, sessions[0]!, accounts, meters)).toBe(second)
     expect(sessions.filter(s => handoffSessionLimit(harness, s, accounts, meters) === second)).toEqual(sessions.slice(0, 2))
-    expect(handoffSessionLimit(harness, {}, accounts, meters)).toBe(first)
+    expect(handoffSessionLimit(harness, {}, accounts, meters)).toBeUndefined()
     expect(handoffSessionLimit(harness, { accountId: 'legacy' }, accounts, [first])).toBeUndefined()
     expect(handoffSessionLimit(harness, {}, { ...accounts, bindings: {} }, meters)).toBeUndefined()
-    expect(handoffSessionLimit(harness, {}, { ...accounts, bindings: {} }, [second])).toBe(second)
+    expect(handoffSessionLimit(harness, {}, { ...accounts, bindings: {} }, [second])).toBeUndefined()
+    expect(handoffSessionLimit(harness, { id: 'home', conversationId: 'home' }, accounts, meters)).toBe(first)
   })
   for (const harness of ['claude', 'codex'] as const) it(`${harness}: calibrates immediately from all conversations in each meter window`, () => {
     const l = limit(harness)

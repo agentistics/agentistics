@@ -229,16 +229,16 @@ test('waiting fleet payload has no live sessions and uses plan burn alone for sl
   expect(body.budgets[0]?.burnPctPerHour).toBe(2)
   expect(body.freeSlotsByHarness.codex).toBe(2)
 
-  const measured = [{ id: 'measured', harness: 'codex' as const, model: 'unknown', burnPctPerHour: 2 }]
+  const measured = [{ id: 'measured', harness: 'codex' as const, account: 'default', model: 'unknown', burnPctPerHour: 2 }]
   const baseline = await planLimitsPayload(undefined, now, measured)
   const withUnbilled = await planLimitsPayload(undefined, now, [
-    ...measured, { id: 'unbilled', harness: 'codex', model: 'unknown', burnPctPerHour: 0 },
+    ...measured, { id: 'unbilled', harness: 'codex', account: 'default', model: 'unknown', burnPctPerHour: 0 },
   ])
   expect(withUnbilled.freeSlotsByHarness).toEqual(baseline.freeSlotsByHarness)
   expect(withUnbilled.budgets[0]?.liveSessions).toEqual(baseline.budgets[0]?.liveSessions)
   expect(withUnbilled.liveSessions.map(s => s.id)).toEqual(['measured', 'unbilled'])
   const onlyUnbilled = await planLimitsPayload(undefined, now, [
-    { id: 'unbilled', harness: 'codex', model: 'unknown', burnPctPerHour: 0 },
+    { id: 'unbilled', harness: 'codex', account: 'default', model: 'unknown', burnPctPerHour: 0 },
   ])
   expect(onlyUnbilled.freeSlotsByHarness).toEqual(body.freeSlotsByHarness)
 })
@@ -272,8 +272,8 @@ test('pacing pools are per harness: Claude over does not remove Codex slots', as
   await record('codex', 10, now - hour)
   await record('codex', 10.1, now)
   const body = await planLimitsPayload(undefined, now, [
-    { id: 'c1', harness: 'claude', model: 'opus', burnPctPerHour: 1 },
-    { id: 'x1', harness: 'codex', model: 'sonnet', burnPctPerHour: 2 },
+    { id: 'c1', harness: 'claude', account: 'default', model: 'opus', burnPctPerHour: 1 },
+    { id: 'x1', harness: 'codex', account: 'default', model: 'sonnet', burnPctPerHour: 2 },
   ])
   expect(body.freeSlotsByHarness.claude).toBe(0)
   expect(body.freeSlotsByHarness.codex).toBe(1)
@@ -836,11 +836,21 @@ for (const harness of HARNESS_ORDER) {
       await sampleLivePlanSessions(sessions(100), ids, now - 60_000, burn)
       const live = await sampleLivePlanSessions(sessions(101), ids, now, burn, new Set(ids))
       expect(reads).toBe(2) // one registry read per call, independent of session count
-      expect(live.map(s => [s.account, s.burnPctPerHour])).toEqual([[hidden.id, 5], [hidden.id, 5], [visible.id, 1], [visible.id, 1]])
+      // Once the default binding is absent/retired, an external session is not guessed into the
+      // only visible account. Rooted/managed sessions keep their accounts; the unknown one stays unattributed.
+      const byId = new Map(live.map(s => [s.id, s]))
+      expect(byId.get('linked-hidden')?.account).toBe(hidden.id)
+      expect(byId.get('path-hidden')?.account).toBe(hidden.id)
+      expect(byId.get('path-visible')?.account).toBe(visible.id)
+      expect(byId.get('external')?.account).toBeUndefined()
       const body = await planLimitsPayload(undefined, now, live)
       expect(body.liveSessions.map(s => s.id)).toEqual(['path-visible', 'external'])
+      // An unattributed external session is charged conservatively to every budget of its harness
+      // (it may be running on any of them) and reported in `unassignedLive`.
       expect(body.budgets[0]!.liveSessions.map(s => s.id)).toEqual(['path-visible', 'external'])
-      expect(body.hiddenFromAgents[0]!.liveSessions.map(s => s.id)).toEqual(['linked-hidden', 'path-hidden'])
+      expect(body.budgets[0]!.unassignedLive).toBe(1)
+      expect(body.unassignedLive[harness]).toBe(1)
+      expect(body.hiddenFromAgents[0]!.liveSessions.map(s => s.id)).toEqual(['linked-hidden', 'path-hidden', 'external'])
       const out = JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))
       for (const value of [hidden.id, 'linked-hidden', 'path-hidden', '@']) expect(out).not.toContain(value)
       // Direct payload callers also retain unknown sessions despite old hidden roots.
@@ -939,7 +949,59 @@ test('C2 LOW L2: an attributed session resolves its transcript once, not on ever
   expect(live[0]!.account).toBe(account.id)
 })
 
-test('C2 LOW L3: a default binding on a retired account yields to the only visible one', async () => {
+test('CF1: live sessions with no resolvable account still take slots in every budget of the harness', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const { account: a } = await store.bind(join(dir, 'r1'), { harness: 'codex', key: 'a', label: 'A' })
+  const { account: b } = await store.bind(join(dir, 'r2'), { harness: 'codex', key: 'b', label: 'B' })
+  const now = Date.parse('2026-11-10T20:00:00Z')
+  const hour = 3_600_000
+  const record = (account: string, used: number, at: number) => ingestPlanLimits({
+    harness: 'codex', account, plan: 'Plus',
+    windows: [
+      { kind: '5h', usedPct: used, resetsAt: now + 4 * hour },
+      { kind: 'week', usedPct: used, resetsAt: now + 20 * hour },
+    ], updatedAt: at, source: 'codex-rollout',
+  })
+  for (const acc of [a, b]) { await record(acc.id, 10, now - hour); await record(acc.id, 10.1, now) }
+  const none = await planLimitsPayload(undefined, now, [])
+  const live = [1, 2, 3].map(i => ({ id: `u${i}`, harness: 'codex' as const, model: 'unknown', burnPctPerHour: 0 }))
+  const body = await planLimitsPayload(undefined, now, live)
+  expect(body.unassignedLive.codex).toBe(3)
+  const rows = body.budgets.filter(r => r.harness === 'codex')
+  expect(rows.length).toBe(2)
+  for (const r of rows) {
+    expect(r.unassignedLive).toBe(3)
+    expect(r.liveSessions.map(s => s.id)).toEqual(['u1', 'u2', 'u3'])
+    const before = none.budgets.find(x => x.account === r.account)!
+    expect(r.freeSlots).toBeLessThanOrEqual(Math.max(0, before.freeSlots - 3))
+  }
+})
+
+test('CF2: an unassigned session uses the harness average measured across another account', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const { account: a } = await store.bind(join(dir, 'r1'), { harness: 'codex', key: 'a', label: 'A' })
+  const { account: b } = await store.bind(join(dir, 'r2'), { harness: 'codex', key: 'b', label: 'B' })
+  const now = Date.parse('2026-11-10T20:00:00Z')
+  const hour = 3_600_000
+  const record = (account: string, used: number, at: number) => ingestPlanLimits({
+    harness: 'codex', account, plan: 'Plus',
+    windows: [
+      { kind: '5h', usedPct: used, resetsAt: now + 4 * hour },
+      { kind: 'week', usedPct: used, resetsAt: now + 20 * hour },
+    ], updatedAt: at, source: 'codex-rollout',
+  })
+  for (const acc of [a, b]) { await record(acc.id, 10, now - hour); await record(acc.id, 10.1, now) }
+  const measuredA = { id: 'measured-a', account: a.id, harness: 'codex' as const, model: 'unknown', burnPctPerHour: 10 }
+  const baseline = await planLimitsPayload(undefined, now, [measuredA, { id: 'assigned', account: b.id, harness: 'codex', model: 'unknown', burnPctPerHour: 10 }])
+  const unassigned = await planLimitsPayload(undefined, now, [measuredA, { id: 'unassigned', harness: 'codex', model: 'unknown', burnPctPerHour: 0 }])
+  const baselineB = baseline.budgets.find(row => row.account === b.id)!
+  const unassignedB = unassigned.budgets.find(row => row.account === b.id)!
+  expect(unassignedB.freeSlots).toBe(baselineB.freeSlots)
+})
+
+test('C2 LOW L3: a default binding on a retired account yields to no guessed account', async () => {
   const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
   __setHarnessAccountsForTest(store)
   const { account: old } = await store.bind(null, { harness: 'codex', key: 'old', label: 'Old' })
@@ -949,10 +1011,10 @@ test('C2 LOW L3: a default binding on a retired account yields to the only visib
   const s = { session_id: 'd', harness: 'codex', input_tokens: 1 }
   await sampleLivePlanSessions([s], ['d'], 0, {})
   const live = await sampleLivePlanSessions([{ ...s, input_tokens: 2 }], ['d'], 1000, {}, new Set(['d']))
-  expect(live[0]!.account).toBe(current.id)
+  expect(live[0]!.account).toBeUndefined()
 })
 
-test('C2 LOW L3b: a transcript RESOLVED under the default home, whose binding is a retired account, yields to the only visible one', async () => {
+test('C2 LOW L3b: a transcript under a retired default binding stays unattributed', async () => {
   const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
   __setHarnessAccountsForTest(store)
   const { account: old } = await store.bind(null, { harness: 'codex', key: 'old', label: 'Old' })
@@ -965,10 +1027,10 @@ test('C2 LOW L3b: a transcript RESOLVED under the default home, whose binding is
   await sampleLivePlanSessions([s], ['dh'], 0, {})
   const live = await sampleLivePlanSessions([{ ...s, input_tokens: 2 }], ['dh'], 1000, {}, new Set(['dh']))
   expect(live).toHaveLength(1)
-  expect(live[0]!.account).toBe(current.id)
+  expect(live[0]!.account).toBeUndefined()
 })
 
-test('C2 R7: a default-home attribution CACHED while the account was active yields once that account retires', async () => {
+test('C2 R7: a cached default-home attribution is dropped once that account retires', async () => {
   const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
   __setHarnessAccountsForTest(store)
   const { account: old } = await store.bind(null, { harness: 'codex', key: 'old', label: 'Old' })
@@ -982,7 +1044,7 @@ test('C2 R7: a default-home attribution CACHED while the account was active yiel
   writeFileSync(join(dir, 'accounts.json'), JSON.stringify({ ...doc, accounts: doc.accounts.map(a => a.id === old.id ? { ...a, retired: true } : a) }))
   const after = await sampleLivePlanSessions([{ ...s, input_tokens: 3 }], ['dhc'], 2000, {}, new Set(['dhc']))
   expect(after).toHaveLength(1)
-  expect(after[0]!.account).toBe(current.id)
+  expect(after[0]!.account).toBeUndefined()
 })
 
 test('C2 LOW L4: default-home transcripts take the default binding; several visible accounts and no binding stay unattributed', async () => {
