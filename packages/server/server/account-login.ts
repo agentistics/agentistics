@@ -1,7 +1,7 @@
 /** Headless account login. Output and pasted authorization codes never enter logs or files. */
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
@@ -249,7 +249,10 @@ export async function diagnoseLogin(req: LoginRequest, platform = process.platfo
   // absent in env -i, while the service suffix still identifies this isolated root. No -w/-g means
   // the command never reads a credential value.
   const argv = ['security', 'find-generic-password', '-s', service]
-  const listedArgv = ['security', 'dump-keychain']
+  // Filter inside the same context before tmux capture: dump-keychain can exceed the pane's
+  // 100-line window, which would otherwise make a real item look absent. Only the matching
+  // service line crosses the boundary; no credential value is requested.
+  const listedArgv = ['/bin/sh', '-c', `security dump-keychain | /usr/bin/grep -F -- ${quote(service)}`]
   const found = run
     ? { code: await run(argv), stdout: '' }
     : await runClaudeInLoginContext(req.root, argv)
@@ -257,7 +260,8 @@ export async function diagnoseLogin(req: LoginRequest, platform = process.platfo
     ? { code: 127, stdout: '' }
     : await runClaudeInLoginContext(req.root, listedArgv)
   const listable = listed.code === 0 && listed.stdout.includes(service)
-  loginLog(`[account-login] claude keychain item "${service}" account "${account}" ${found.code === 0 ? 'exists' : 'is absent'} after the sign-in (same login context; listable=${listable ? 'yes' : 'no'})`)
+  const credentialsFile = await stat(join(req.root, '.credentials.json')).then(() => true, () => false)
+  loginLog(`[account-login] claude keychain item "${service}" account "${account}" ${found.code === 0 ? 'exists' : 'is absent'} after the sign-in (same login context; listable=${listable ? 'yes' : 'no'}; .credentials.json=${credentialsFile ? 'yes' : 'no'})`)
   return found.code === 0 ? 'keychain_unreadable' : 'login_not_saved'
 }
 /** Mirrors the CLI's keychain account: $USER, else the OS user name, else its fixed fallback. */
