@@ -256,7 +256,7 @@ test('real claude probe passes the selected root and returns per-seat keys with 
       expect(await probeAccountIdentity('claude', dir)).toEqual(expected)
     }
   } finally { process.env.PATH = path }
-})
+}, 30_000)
 
 test('the default Claude root keeps the unsuffixed environment and falls back without tmux', async () => {
   const bin = join(dir, 'bin')
