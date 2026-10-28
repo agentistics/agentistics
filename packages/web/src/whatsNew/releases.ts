@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.160.0': {
+    features: [
+      {
+        pt: 'Depois de instalar um assistente, a própria janela de instalação oferece "Entrar agora" quando ainda falta entrar na conta dele, sem precisar ir até Configurações.',
+        en: 'After installing an assistant, the install dialog itself offers "Sign in now" when you still need to sign in to it, without going to Settings.',
+      },
+    ],
+    fixes: [],
+  },
   '2.159.5': {
     features: [],
     fixes: [

@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { ConfirmModal } from '../pages/settings/primitives'
-import { installHarness } from '../hooks/useChatHarnesses'
+import { fetchHarnessStatus, installHarness, loginHarness } from '../hooks/useChatHarnesses'
 
 export interface HarnessInstallTarget {
   id: string
@@ -9,7 +9,7 @@ export interface HarnessInstallTarget {
   installed?: boolean
 }
 
-type Phase = 'confirm' | 'running' | 'failed' | 'needs-node' | 'success'
+type Phase = 'confirm' | 'running' | 'failed' | 'needs-node' | 'success' | 'login-offer'
 
 const VENDOR: Record<string, string> = { claude: 'Anthropic', codex: 'OpenAI', gemini: 'Google', copilot: 'GitHub' }
 const MAX_LINES = 8
@@ -19,15 +19,19 @@ const MAX_LINES = 8
  * what will run, asks, then streams the official installer's progress inside the app's own
  * ConfirmModal. Nothing starts before the confirm button.
  */
-export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
+export function HarnessInstallDialog({ target, pt, onClose, onDone, onSignedIn }: {
   target: HarnessInstallTarget | null
   pt: boolean
   onClose: () => void
   onDone: (version?: string) => void
+  /** The sign-in session was opened (same call as Settings → Assistants' "Sign in"); the host decides where to go. */
+  onSignedIn?: (sessionId: string) => void
 }) {
   const [phase, setPhase] = useState<Phase>('confirm')
   const [lines, setLines] = useState<string[]>([])
   const [failure, setFailure] = useState('')
+  const [loginError, setLoginError] = useState('')
+  const [signingIn, setSigningIn] = useState(false)
   const withNode = useRef(false)
 
   // The state is per-open: a target change starts a clean confirm.
@@ -37,6 +41,7 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
     if (phase !== 'confirm') setPhase('confirm')
     if (lines.length) setLines([])
     if (failure) setFailure('')
+    if (loginError) setLoginError('')
     withNode.current = false
   }
 
@@ -48,7 +53,14 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
     if (!target) return
     setPhase('running'); setLines([]); setFailure('')  // clears the previous failure
     const result = await installHarness(target.id, update, line => setLines(prev => [...prev, line].slice(-MAX_LINES)), { installNode: withNode.current, lang: pt ? 'pt' : 'en' })
-    if (result.ok) { onDone(result.version); setPhase('success'); return }
+    if (result.ok) {
+      onDone(result.version)
+      // Re-read the status: only an installed assistant that still has no login gets the offer.
+      const status = await fetchHarnessStatus(target.id)
+      setLoginError('')
+      setPhase(status && status.installed && !status.authReady ? 'login-offer' : 'success')
+      return
+    }
     if (result.code === 'node-required') { setPhase('needs-node'); return }
     setFailure(
       result.code === 'unsupported-platform' ? (pt ? 'Por enquanto a instalação automática funciona no Linux e no macOS.' : 'Automatic install currently works on Linux and macOS.')
@@ -56,6 +68,15 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
         : (result.error ?? (pt ? 'Não consegui terminar. Verifique a internet e tente de novo.' : 'It did not finish. Check your internet connection and try again.')),
     )
     setPhase('failed')
+  }
+
+  const signIn = async () => {
+    if (!target || signingIn) return
+    setSigningIn(true); setLoginError('')
+    const out = await loginHarness(target.id, pt ? 'pt' : 'en')
+    setSigningIn(false)
+    if (out.ok && out.id) { onSignedIn?.(out.id); onClose(); return }
+    setLoginError(out.message || (pt ? 'Não consegui abrir o login agora. Tente de novo.' : 'Could not open the sign-in right now. Try again.'))
   }
 
   const message = (() => {
@@ -66,6 +87,10 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
         : `${name} needs Node.js, which is not on this computer. I can install Node.js for your user only (official installer from nodejs.org, no sudo), then ${name}.`
     }
     if (phase === 'failed') return failure
+    if (phase === 'login-offer') {
+      const base = pt ? `${name} foi ${update ? 'atualizado' : 'instalado'}, mas ainda falta entrar na sua conta. Quer entrar agora?` : `${name} was ${update ? 'updated' : 'installed'}, but you still need to sign in. Sign in now?`
+      return loginError ? `${base}\n${loginError}` : base
+    }
     if (phase === 'success') return pt ? `Pronto! O ${name} está disponível para usar.` : `Done! ${name} is ready to use.`
     if (phase === 'running') return pt ? `${update ? 'Atualizando' : 'Instalando'} ${name}… pode levar alguns minutos.` : `${update ? 'Updating' : 'Installing'} ${name}… this can take a few minutes.`
     const from = vendor ? (pt ? `, da ${vendor},` : ` from ${vendor}`) : ''
@@ -75,7 +100,8 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
   })()
 
   const confirmLabel =
-    phase === 'success' ? (pt ? 'Fechar' : 'Close')
+    phase === 'login-offer' ? (signingIn ? (pt ? 'Abrindo…' : 'Opening…') : (pt ? 'Entrar agora' : 'Sign in now'))
+    : phase === 'success' ? (pt ? 'Fechar' : 'Close')
     : phase === 'running' ? (pt ? 'Instalando…' : 'Installing…')
     : phase === 'failed' ? (pt ? 'Tentar de novo' : 'Try again')
     : phase === 'needs-node' ? (pt ? 'Instalar Node.js e continuar' : 'Install Node.js and continue')
@@ -84,15 +110,16 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone }: {
   return (
     <ConfirmModal
       open={target !== null}
-      title={target ? phase === 'success' ? (pt ? 'Tudo certo' : 'All set') : `${update ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')} ${name}?` : ''}
+      title={target ? phase === 'success' || phase === 'login-offer' ? (pt ? 'Tudo certo' : 'All set') : `${update ? (pt ? 'Atualizar' : 'Update') : (pt ? 'Instalar' : 'Install')} ${name}?` : ''}
       message={message}
       confirmLabel={confirmLabel}
-      cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+      cancelLabel={phase === 'login-offer' ? (pt ? 'Depois' : 'Later') : (pt ? 'Cancelar' : 'Cancel')}
       focusCancel
       tone="default"
       onCancel={() => { if (phase !== 'running') onClose() }}
       onConfirm={() => {
         if (phase === 'running') return
+        if (phase === 'login-offer') { void signIn(); return }
         if (phase === 'success') { onClose(); return }
         if (phase === 'needs-node') withNode.current = true
         void run()
