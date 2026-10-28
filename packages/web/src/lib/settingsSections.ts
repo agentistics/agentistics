@@ -1,6 +1,6 @@
 /** Which settings sections a viewer can see. UX-only gate — the server enforces real authz. */
 export type SettingsSectionId =
-  | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'billing' | 'install' | 'whatsnew' | 'connection'
+  | 'preferences' | 'accessibility' | 'sessions' | 'data-sources' | 'harnesses' | 'pricing' | 'install' | 'whatsnew' | 'connection'
   | 'chat' | 'providers' | 'memory' | 'notifications' | 'backup'
   | 'users' | 'teams' | 'machines' | 'repositories'
 
@@ -21,6 +21,8 @@ export interface SettingsViewer {
   nativeRuntime?: boolean
 }
 
+// No `billing` section: plans are registered on each account's pencil in Usage → Accounts. The old
+// `/settings/billing` route stays only as a redirect there, so bookmarks still land.
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'preferences', labelEn: 'Preferences', labelPt: 'Preferências', group: 'personal' },
   // Visible in BOTH modes: the magnifiers are stored per account on a central and per machine
@@ -32,7 +34,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'backup', labelEn: 'Backup', labelPt: 'Backup', group: 'personal' },
   { id: 'harnesses', labelEn: 'Harnesses', labelPt: 'Harnesses', group: 'personal' },
   { id: 'pricing', labelEn: 'Pricing', labelPt: 'Preços', group: 'personal' },
-  { id: 'billing', labelEn: 'Billing', labelPt: 'Cobrança', group: 'personal' },
   { id: 'install', labelEn: 'Install', labelPt: 'Instalação', group: 'personal' },
   { id: 'whatsnew', labelEn: "What's new", labelPt: 'Novidades', group: 'personal' },
   { id: 'chat', labelEn: 'Chat', labelPt: 'Chat', group: 'personal' },
@@ -63,7 +64,6 @@ export function visibleSettingsSections(v: SettingsViewer): SettingsSection[] {
       // Billing describes how ONE machine is paid for. A central aggregates many, and pricing a
       // whole fleet from its operator's own timeline would be a fabricated number — so the plan
       // cost basis does not exist there and neither does the screen that configures it.
-      case 'billing': return !v.central
       // Runtime providers are credentials for THIS machine's own local runtime — a central has no
       // local runtime to spawn assistants with, the same reason `chat`/`connection` hide.
       // And only where the native runtime may be shown: an engine that provides it AND the experimental

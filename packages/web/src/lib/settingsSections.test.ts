@@ -4,7 +4,7 @@ import { visibleSettingsSections, SETTINGS_SECTIONS } from './settingsSections'
 const ids = (v: Parameters<typeof visibleSettingsSections>[0]) => visibleSettingsSections(v).map(s => s.id)
 
 test('solo/member: personal sections, no governance or live controls', () => {
-  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'billing', 'install', 'whatsnew', 'chat'])
+  expect(ids({ central: false })).toEqual(['preferences', 'accessibility', 'notifications', 'sessions', 'data-sources', 'backup', 'harnesses', 'pricing', 'install', 'whatsnew', 'chat'])
 })
 
 test('central owner: personal (no live) + all governance sections', () => {
@@ -26,10 +26,9 @@ test('every section has a group', () => {
   }
 })
 
-test('billing is a machine section — a central cannot price a fleet from one timeline', () => {
-  expect(ids({ central: false })).toContain('billing')
-  expect(ids({ central: true, role: 'owner' })).not.toContain('billing')
-  expect(ids({ central: true, role: 'member', isManager: true })).not.toContain('billing')
+test('there is no Billing section: plans live on each account in Usage → Accounts (CONTAS.MAC.NOVO)', () => {
+  expect(SETTINGS_SECTIONS.map(s => s.id as string)).not.toContain('billing')
+  for (const v of [{ central: false }, { central: true, role: 'owner' as const }]) expect(ids(v)).not.toContain('billing')
 })
 
 test('backup is a machine section — a central has no local harness directories to back up', () => {
