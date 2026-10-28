@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.161.7': {
+    features: [],
+    fixes: [
+      {
+        pt: '"Adicionar conta" agora oferece todo assistente instalado no computador, mesmo um que você ainda nunca usou pelo agentistics — no Mac, o Codex instalado pelo Homebrew passa a aparecer.',
+        en: '"Add account" now offers every assistant installed on the computer, even one you have never used through agentistics — on a Mac, a Codex installed with Homebrew now shows up.',
+      },
+      {
+        pt: 'Quando um assistente não pode ser conectado, a tela diz o motivo e oferece "Procurar de novo", em vez de simplesmente não mostrar a opção.',
+        en: 'When an assistant cannot be signed in, the screen says why and offers "Look again", instead of just not showing the option.',
+      },
+    ],
+  },
   '2.161.6': {
     features: [],
     fixes: [
