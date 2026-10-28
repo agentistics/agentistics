@@ -978,6 +978,29 @@ test('CF1: live sessions with no resolvable account still take slots in every bu
   }
 })
 
+test('CF2: an unassigned session uses the harness average measured across another account', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const { account: a } = await store.bind(join(dir, 'r1'), { harness: 'codex', key: 'a', label: 'A' })
+  const { account: b } = await store.bind(join(dir, 'r2'), { harness: 'codex', key: 'b', label: 'B' })
+  const now = Date.parse('2026-11-10T20:00:00Z')
+  const hour = 3_600_000
+  const record = (account: string, used: number, at: number) => ingestPlanLimits({
+    harness: 'codex', account, plan: 'Plus',
+    windows: [
+      { kind: '5h', usedPct: used, resetsAt: now + 4 * hour },
+      { kind: 'week', usedPct: used, resetsAt: now + 20 * hour },
+    ], updatedAt: at, source: 'codex-rollout',
+  })
+  for (const acc of [a, b]) { await record(acc.id, 10, now - hour); await record(acc.id, 10.1, now) }
+  const measuredA = { id: 'measured-a', account: a.id, harness: 'codex' as const, model: 'unknown', burnPctPerHour: 10 }
+  const baseline = await planLimitsPayload(undefined, now, [measuredA, { id: 'assigned', account: b.id, harness: 'codex', model: 'unknown', burnPctPerHour: 10 }])
+  const unassigned = await planLimitsPayload(undefined, now, [measuredA, { id: 'unassigned', harness: 'codex', model: 'unknown', burnPctPerHour: 0 }])
+  const baselineB = baseline.budgets.find(row => row.account === b.id)!
+  const unassignedB = unassigned.budgets.find(row => row.account === b.id)!
+  expect(unassignedB.freeSlots).toBe(baselineB.freeSlots)
+})
+
 test('C2 LOW L3: a default binding on a retired account yields to no guessed account', async () => {
   const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
   __setHarnessAccountsForTest(store)

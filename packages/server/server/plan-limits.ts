@@ -830,9 +830,9 @@ export async function planLimitsPayload(
     // harness's measured sessions here (0 when nothing is measured, which keeps the cadence fallback
     // and still subtracts the slot). An unbilled one therefore never dilutes the measured average.
     const unassigned = resolvedSessions.filter(s => !s.account && s.harness === l.harness)
-    const measured = [...attributed, ...unassigned.filter(s => s.burnPctPerHour > 0)]
+    const measured = resolvedSessions.filter(s => s.harness === l.harness && s.burnPctPerHour > 0)
     const avgBurn = measured.length ? measured.reduce((n, s) => n + s.burnPctPerHour, 0) / measured.length : 0
-    const planSessions = [...attributed, ...unassigned.map(s => s.burnPctPerHour > 0 ? s : { ...s, burnPctPerHour: avgBurn })]
+    const planSessions = [...attributed, ...unassigned.map(s => ({ ...s, burnPctPerHour: avgBurn }))]
     const availability = spawnability[l.harness]!
     const past = history.get(meterKey.get(l) ?? keyOf(l)) ?? []
     // A record with model groups: the top-level row is the TIGHTEST group (never better than the worst),
