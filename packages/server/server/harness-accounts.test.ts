@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readdir } from 'node:fs/promises'
 import { claudeSignedOut, SignedOutError, CLAUDE_PROBE_TIMEOUT_MS, codexIdentity, createHarnessAccounts, probeAccountIdentity, sameLogin, __setHarnessAccountsForTest, IDENTITY_PROBES, ISOLATION_ENV } from './harness-accounts'
+import { runClaudeInLoginContext } from './account-login'
 import { handleAccountsRequest } from './accounts-web'
 import { routeCapability } from './capability-guard'
 
@@ -255,6 +256,25 @@ test('real claude probe passes the selected root and returns per-seat keys with 
       expect(await probeAccountIdentity('claude', dir)).toEqual(expected)
     }
   } finally { process.env.PATH = path }
+})
+
+test('the default Claude root keeps the unsuffixed environment and falls back without tmux', async () => {
+  const bin = join(dir, 'bin')
+  await mkdir(bin)
+  await writeFile(join(bin, 'claude'), '#!/bin/sh\nif [ -n "${CLAUDE_CONFIG_DIR+x}" ]; then exit 42; fi\nprintf \'{"loggedIn":false}\'\n')
+  await chmod(join(bin, 'claude'), 0o700)
+  const oldPath = process.env.PATH, oldConfig = process.env.CLAUDE_CONFIG_DIR
+  process.env.PATH = bin
+  delete process.env.CLAUDE_CONFIG_DIR
+  try {
+    const result = await runClaudeInLoginContext(null, ['claude', 'auth', 'status', '--json'])
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain('{"loggedIn":false}')
+  } finally {
+    process.env.PATH = oldPath
+    if (oldConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = oldConfig
+  }
 })
 
 test('PATCH by id updates availability and nickname while retaining legacy PATCH support', async () => {

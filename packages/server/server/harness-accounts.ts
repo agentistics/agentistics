@@ -125,10 +125,20 @@ export function claudeProbeEnv(root: string, env: NodeJS.ProcessEnv = process.en
   const { CLAUDE_SECURESTORAGE_CONFIG_DIR: _, ...rest } = env
   return { ...rest, CLAUDE_CONFIG_DIR: root }
 }
+const CLAUDE_PROBE_CONCURRENCY = 3
+let activeClaudeProbes = 0
+const claudeProbeWaiters: Array<() => void> = []
+async function withClaudeProbeSlot<T>(run: () => Promise<T>): Promise<T> {
+  if (activeClaudeProbes >= CLAUDE_PROBE_CONCURRENCY) await new Promise<void>(resolve => claudeProbeWaiters.push(resolve))
+  activeClaudeProbes++
+  try { return await run() } finally {
+    activeClaudeProbes--
+    claudeProbeWaiters.shift()?.()
+  }
+}
 export const IDENTITY_PROBES: Record<HarnessId, ((root: string | null) => Promise<AccountIdentity>) | null> = {
-  claude: async root => {
-    const selected = root ?? DEFAULT_ROOTS.claude()
-    const result = await runClaudeInLoginContext(selected, ['claude', 'auth', 'status', '--json'])
+  claude: root => withClaudeProbeSlot(async () => {
+    const result = await runClaudeInLoginContext(root, ['claude', 'auth', 'status', '--json'])
     const stdout = result.stdout
     const jsonStart = stdout.indexOf('{')
     const jsonEnd = stdout.lastIndexOf('}') + 1
@@ -144,7 +154,7 @@ export const IDENTITY_PROBES: Record<HarnessId, ((root: string | null) => Promis
     const key = org && email ? `${org}:${email}` : email ?? org
     const plan = text(raw.subscriptionType)
     return key ? { key, label: email ?? key, ...(plan ? { plan } : {}) } : fallback()
-  },
+  }),
   codex: root => readCodexIdentity(join(root ?? DEFAULT_ROOTS.codex(), 'auth.json')),
   copilot: root => readCopilotIdentity(join(root ?? DEFAULT_ROOTS.copilot(), 'config.json')),
   gemini: null,

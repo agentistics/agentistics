@@ -1,8 +1,8 @@
 /** Headless account login. Output and pasted authorization codes never enter logs or files. */
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
-import { homedir, userInfo } from 'node:os'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { isSessionGoneError, SHELL_SOCKET } from './sessions/tmux-cli'
@@ -348,17 +348,19 @@ async function tmux(args: string[], input?: string, missingOkay = false) {
  * macOS keychain visibility is tied to that process/session boundary, so a direct child of the
  * LaunchAgent is not an equivalent probe. Output stays in memory and is never logged.
  */
-export async function runClaudeInLoginContext(root: string, argv: string[]): Promise<{ stdout: string; code: number }> {
+export async function runClaudeInLoginContext(root: string | null, argv: string[]): Promise<{ stdout: string; code: number }> {
   const executable = await resolveExecutable(argv[0]!)
   if (!executable) return { stdout: '', code: 127 }
   const name = `account-probe-${randomBytes(6).toString('hex')}`
-  const { bin, env } = await makeLoginEnvironment(root, { CLAUDE_CONFIG_DIR: root }, `.${name}-bin`)
+  const probeRoot = root ?? await mkdtemp(join(tmpdir(), 'agentistics-claude-probe-'))
+  const configDir = root ?? process.env.CLAUDE_CONFIG_DIR
+  const { bin, env } = await makeLoginEnvironment(probeRoot, configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}, `.${name}-bin`)
   // Keep the pane alive briefly after the command exits. A very fast fake/real CLI can disappear
   // between new-session and set-option; preserving the original exit status keeps diagnosis exact.
   const invoked = [executable, ...argv.slice(1)].map(quote).join(' ')
   const command = ['/usr/bin/env', '-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), '/bin/sh', '-c', `${invoked}; code=$?; /bin/sleep 0.2; exit $code`].map(quote).join(' ')
   try {
-    await tmux(['new-session', '-d', '-s', name, '-x', '240', '-y', '80', '-c', root, command])
+    await tmux(['new-session', '-d', '-s', name, '-x', '240', '-y', '80', '-c', probeRoot, command])
     await tmux(['set-option', '-t', name, 'remain-on-exit', 'on']).catch(() => {})
     const deadline = Date.now() + 15_000
     while (Date.now() < deadline) {
@@ -368,11 +370,18 @@ export async function runClaudeInLoginContext(root: string, argv: string[]): Pro
     }
     return { stdout: await tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-100']).catch(() => ''), code: 124 }
   } catch {
-    return { stdout: '', code: 127 }
+    return await runClaudeDirect(executable, argv, env)
   } finally {
     await tmux(['kill-session', '-t', name], undefined, true).catch(() => {})
     await rm(bin, { recursive: true, force: true }).catch(() => {})
+    if (root === null) await rm(probeRoot, { recursive: true, force: true }).catch(() => {})
   }
+}
+async function runClaudeDirect(executable: string, argv: string[], env: Record<string, string>): Promise<{ stdout: string; code: number }> {
+  return await new Promise(resolve => execFile(executable, argv.slice(1), { env, timeout: 15_000, maxBuffer: 64 * 1024 }, (error, stdout) => {
+    const status = error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : error ? 127 : 0
+    resolve({ stdout, code: status })
+  }))
 }
 async function resolveExecutable(name: string): Promise<string | undefined> {
   if (name.includes('/')) return await Bun.file(name).exists() ? name : undefined
