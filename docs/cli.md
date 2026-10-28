@@ -8,7 +8,7 @@ Get the binary from the [install instructions](../README.md#install) (`install.s
 `npm i -g @agentistics/agentop`, the Windows installer, or `bun run build:binary` from
 source). The one-liner `curl -fsSL https://agentop.openvibes.tech/cli | sh` works with
 `sh`, `bash` or `zsh`; unprivileged installs go to `~/.local/bin` and the PATH line is added
-to your login shell's rc file (idempotent). From a checkout you can also run it directly with
+to your login shell's rc file (idempotent). The installer then offers to start agentistics now and on login/boot (Enter = yes; `AGENTOP_INSTALL_START` / `AGENTOP_INSTALL_AUTOSTART` = `yes|no` skip the questions; no terminal = nothing started). `agentop setup --defaults` applies the recommended first-run settings (archive mode `consolidate`) non-interactively, never overriding an existing choice. From a checkout you can also run it directly with
 `bun run packages/server/bin/cli.ts <command>`.
 
 ```bash

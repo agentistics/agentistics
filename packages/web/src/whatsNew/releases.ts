@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.160.4': {
+    features: [
+      {
+        pt: 'No fim da instalação pelo terminal, o instalador pergunta se você quer iniciar o agentistics agora e se ele deve iniciar sozinho quando o computador ligar (sim é o padrão nas duas), já com as configurações recomendadas.',
+        en: 'At the end of the terminal install, the installer asks whether to start agentistics now and whether it should start by itself when the computer starts (yes is the default for both), already with the recommended settings.',
+      },
+    ],
+    fixes: [],
+  },
   '2.160.3': {
     features: [
       {
