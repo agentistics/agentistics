@@ -12,6 +12,21 @@ import { LimitLevelIcon, PlanUsageSummary } from './PlanLimitMeter'
 const POP_W = 344
 const CARET = 10
 const GRACE_MS = 100
+const EDGE = 8
+
+/**
+ * PURE. Where the upward popover sits for a button at `btn`: centred on the button, never past either
+ * viewport edge, with the caret under the button's centre. It used to be pinned to `left: 8` (the
+ * aside's edge), which left it far from a button at the right end of a wide footer, the caret
+ * clamped short of the button.
+ */
+export function anchorAbove(btn: { left: number; width: number }, viewportW: number): { left: number; width: number; caretLeft: number } {
+  const width = Math.max(0, Math.min(POP_W + 20, viewportW - 2 * EDGE))
+  const centre = btn.left + btn.width / 2
+  const left = Math.min(Math.max(EDGE, centre - width / 2), Math.max(EDGE, viewportW - EDGE - width))
+  const caretLeft = Math.min(Math.max(12, centre - left - CARET / 2), Math.max(12, width - 12 - CARET))
+  return { left, width, caretLeft }
+}
 
 /**
  * The sidebar footer's "Uso" button: hover or keyboard focus opens the plan-usage summary in a
@@ -81,21 +96,21 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: {
   if (rect) {
     const common: CSSProperties = { position: 'fixed', zIndex: 600, background: 'var(--bg-card)', border: '1px solid var(--ag-tint-4)', borderRadius: 12, boxShadow: 'var(--ag-shadow-menu)' }
     const caret: CSSProperties = { position: 'absolute', width: CARET, height: CARET, background: 'var(--bg-card)', transform: 'rotate(45deg)' }
+    const { left: popLeft, width: popW, caretLeft } = anchorAbove(rect, window.innerWidth)
     const style: CSSProperties = collapsed
       // Collapsed rail: opens to the RIGHT, caret on the left edge at the button's vertical middle.
-      ? { ...common, left: rect.right + CARET + 4, bottom: Math.max(8, window.innerHeight - rect.bottom - 8) }
-      // Expanded: opens UPWARD, left-aligned to the aside, caret under the button's centre.
-      : { ...common, left: 8, bottom: window.innerHeight - rect.top + CARET + 2 }
-    const caretLeft = rect.left + rect.width / 2 - (collapsed ? 0 : 8) - CARET / 2
+      ? { ...common, left: rect.right + CARET + 4, bottom: Math.max(8, window.innerHeight - rect.bottom - 8), maxWidth: POP_W + 20 }
+      // Expanded: opens UPWARD, centred on the button and kept inside the viewport, caret under the button's centre.
+      : { ...common, left: popLeft, width: popW, bottom: window.innerHeight - rect.top + CARET + 2 }
     pop = createPortal(
-      <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={{ ...style, maxWidth: POP_W + 20 }} onMouseEnter={open} onMouseLeave={closeSoon} onFocus={open} onBlur={closeSoon} onKeyDown={onPopKey}>
+      <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={style} onMouseEnter={open} onMouseLeave={closeSoon} onFocus={open} onBlur={closeSoon} onKeyDown={onPopKey}>
         <PlanUsageSummary onOpen={openModal} limits={snap.limits} registered={snap.registered} accountLabels={snap.accountLabels} now={snap.now} lang={lang} />
         <PlanUsageSessionSwitch lang={lang} session={openSession && { ...openSession, onSwitch: () => {
           btnRef.current?.focus(); skipReturnFocus.current = true; close(); openSession.onSwitch()
         } }} />
         {collapsed
           ? <span aria-hidden style={{ ...caret, left: -CARET / 2 - 1, bottom: Math.max(4, rect.height / 2 + 8 - CARET / 2 - 8), borderLeft: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />
-          : <span aria-hidden style={{ ...caret, bottom: -CARET / 2 - 1, left: Math.min(POP_W - 20, Math.max(8, caretLeft)), borderRight: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />}
+          : <span aria-hidden style={{ ...caret, bottom: -CARET / 2 - 1, left: caretLeft, borderRight: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />}
       </div>,
       document.body,
     )

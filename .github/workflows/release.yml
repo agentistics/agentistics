@@ -24,6 +24,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  install-e2e:
+    name: Clean install E2E gate
+    uses: ./.github/workflows/install-e2e.yml
+
   build:
     name: Build binary (Linux x64)
     runs-on: ubuntu-latest
@@ -387,6 +391,24 @@ jobs:
           } > /tmp/release-notes.md
 
           cat /tmp/release-notes.md
+
+      # The clean-install gate runs in parallel with this job; only publishing waits for it.
+      - name: Wait for clean-install E2E gate
+        if: github.ref == 'refs/heads/main' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        timeout-minutes: 20
+        run: |
+          while true; do
+            conclusion=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}/jobs" --paginate \
+              --jq '.jobs[] | select(.name | endswith("Gate result")) | .conclusion // "pending"' | head -1)
+            echo "install-e2e gate: ${conclusion:-not started}"
+            case "$conclusion" in
+              success) exit 0 ;;
+              failure|cancelled|timed_out|skipped) echo "Clean-install E2E failed; not publishing." >&2; exit 1 ;;
+            esac
+            sleep 20
+          done
 
       - name: Commit version bump and create tag
         if: github.ref == 'refs/heads/main' && steps.skip_check.outputs.skip != 'true' && steps.version.outputs.skip != 'true'
