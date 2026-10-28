@@ -7,7 +7,7 @@ import { HarnessMark } from '../../components/sessions/HarnessMark'
 import { MetricNote } from '../../components/MetricNote'
 import { dialogButtonStyle } from './primitives'
 import { AccountLoginModal, PendingLoginCard } from './AccountLoginModal'
-import { ADD_COPY, addAccountView, addErrorText, alreadyGone, anyResolved, attemptIsOver, pendingRoots, refusalCode, type Lang, type LoginInfoView, type RootRowView } from './addAccountLogic'
+import { ADD_COPY, addAccountView, addErrorText, alreadyGone, failureText, anyResolved, attemptIsOver, pendingRoots, refusalCode, type Lang, type LoginInfoView, type RootRowView } from './addAccountLogic'
 
 interface ActiveLogin { harness: HarnessId; pendingId?: string; login?: LoginInfoView; bound?: RootRowView }
 export default function AddAccount({ lang, harnesses, onBound }: {
@@ -60,7 +60,7 @@ export default function AddAccount({ lang, harnesses, onBound }: {
       if (row?.status === 'bound') {
         const value = { ...current, bound: row }; activeRef.current = value; setActive(value); setError(null)
       } else if (row?.status === 'failed') {
-        setExpired(true); setError(addErrorText({ error: row.error }, pt))
+        setExpired(true); setError(failureText(row, pt))
       } else if (!row || row.stale) { setExpired(true); setError(addErrorText({ error: 'login_timeout' }, pt)) }
       else if (row.login) {
         if (row.login.error === 'invalid_code') { setSubmitted(false); setError(addErrorText({ error: 'invalid_code' }, pt)) }

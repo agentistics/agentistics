@@ -116,16 +116,21 @@ export const defaultHarnessRoot = (harness: HarnessId): string => DEFAULT_ROOTS[
 export function claudeSignedOut(stdout: string): boolean {
   try { return (JSON.parse(stdout) as { loggedIn?: unknown } | null)?.loggedIn === false } catch { return false }
 }
-const withoutSecureStorageDir = (env: NodeJS.ProcessEnv) => { const { CLAUDE_SECURESTORAGE_CONFIG_DIR: _, ...rest } = env; return rest }
+/**
+ * The env `claude auth status` runs under for a root. The macOS keychain item is named after
+ * sha256(CLAUDE_CONFIG_DIR) unless CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the login runs without
+ * it (`env -i`), so an inherited one would make the probe read a different item than the login wrote.
+ */
+export function claudeProbeEnv(root: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const { CLAUDE_SECURESTORAGE_CONFIG_DIR: _, ...rest } = env
+  return { ...rest, CLAUDE_CONFIG_DIR: root }
+}
 export const IDENTITY_PROBES: Record<HarnessId, ((root: string | null) => Promise<AccountIdentity>) | null> = {
   claude: async root => {
     const stdout = await new Promise<string>((resolve, reject) => {
       execFile('claude', ['auth', 'status', '--json'], {
         timeout: CLAUDE_PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 64 * 1024,
-        // The macOS keychain item is named after sha256(CLAUDE_CONFIG_DIR) unless
-        // CLAUDE_SECURESTORAGE_CONFIG_DIR is set; the login runs without it (`env -i`), so an
-        // inherited one would make the probe read a different item than the login wrote.
-        ...(root === null ? {} : { env: { ...withoutSecureStorageDir(process.env), CLAUDE_CONFIG_DIR: root } }),
+        ...(root === null ? {} : { env: claudeProbeEnv(root) }),
       }, (error, stdout) => {
         // Logged out, claude prints `{"loggedIn": false, …}` AND exits 1: read the answer first.
         if (claudeSignedOut(stdout)) reject(new SignedOutError())

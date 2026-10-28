@@ -32,7 +32,7 @@ import {
 } from './harness-accounts'
 import { agentisticsMcpLaunch, rootMcpRegistration } from './mcp-launch'
 import { reportAuditFailure, writeAudit } from './audit'
-import { LOGIN_ADAPTERS, LOGIN_MESSAGES, LoginFailure, startAccountLogin, type LoginError, type LoginHandle, type LoginInfo, type LoginOptions } from './account-login'
+import { claudeKeychainService, loginLog, LOGIN_ADAPTERS, LOGIN_MESSAGES, LoginFailure, startAccountLogin, type LoginError, type LoginHandle, type LoginInfo, type LoginOptions } from './account-login'
 import { applyAccountToPlan } from './sessions/account-plan'
 
 export { applyAccountToPlan }
@@ -156,6 +156,8 @@ export interface AccountRootsDeps {
   getAccount?: typeof byId
   listAccounts?: typeof readAccounts
   audit?: typeof writeAudit
+  /** Where the pending-login probe's outcome is recorded (facts only: no output, no token). */
+  log?: (line: string) => void
   /** Told when an audit write fails (op + target only, never the sink's diagnostic). */
   onAuditFailure?: (op: unknown, targetId: string | undefined) => void
 }
@@ -202,6 +204,15 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     void Promise.resolve().then(() => audit(input, reportFailure)).catch(reportFailure)
   }
   const logins = new Map<string, LoginHandle>()
+  const log = deps.log ?? loginLog
+  /** The last probe outcome logged per pending root: a line per CHANGE, not per 2 s poll. */
+  const probeNotes = new Map<string, string>()
+  const noteProbe = (dir: PendingRoot, note: string) => {
+    if (probeNotes.get(dir.pendingId) === note) return
+    probeNotes.set(dir.pendingId, note)
+    const item = dir.harness === 'claude' ? ` (keychain item "${claudeKeychainService(rootEnv(dir.harness, dir.root))}")` : ''
+    log(`[account-roots] pending ${dir.harness} root ${dir.pendingId}${item}: probe ${note}`)
+  }
   const failures = new Map<string, RootRow & { failedAt: number }>()
   /** Pending ids between folder creation and the login handle existing: not stale yet. */
   const starting = new Set<string>()
@@ -369,6 +380,8 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
         if (IDENTITY_PROBES[dir.harness]) {
           const found = await probe(dir.harness, dir.root).catch(() => null)
           if (found && found.key !== 'default') identity = found
+          // Only once a code went in: before that "no login" is the expected answer.
+          if (logins.get(dir.pendingId)?.submitted?.()) noteProbe(dir, !found ? 'failed' : identity ? 'found the login' : 'sees no login')
         } else {
           // No probe: only the harness's own marker on disk shows a login, and the fallback key is never an identity.
           if (await hasLoginMarker(dir.harness, dir.root)) {

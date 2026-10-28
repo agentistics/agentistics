@@ -1,13 +1,13 @@
 /** Headless account login. Output and pasted authorization codes never enter logs or files. */
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { isSessionGoneError, SHELL_SOCKET } from './sessions/tmux-cli'
 
 export type LoginKind = 'paste' | 'device'
-export type LoginError = 'login_unavailable' | 'login_timeout' | 'login_failed' | 'plaintext_refused' | 'invalid_code'
+export type LoginError = 'login_unavailable' | 'login_timeout' | 'login_failed' | 'plaintext_refused' | 'invalid_code' | 'keychain_unreadable' | 'login_not_saved'
 export interface LoginInfo { kind: LoginKind; url: string; code?: string; expiresAt: number; error?: 'invalid_code' }
 interface LoginAdapter { argv: string[]; kind: LoginKind; pty: boolean; hosts: readonly string[]; path: RegExp }
 // @harness-adapters-only: login protocols are facts of each vendor CLI, not a preferred assistant.
@@ -26,6 +26,8 @@ export const LOGIN_MESSAGES: Record<LoginError, string> = {
   login_failed: 'Sign-in did not finish. Start again.',
   plaintext_refused: 'The system keychain is unavailable. Copilot could not save the login securely; storing the token in plain text was refused.',
   invalid_code: 'Enter the authorization code shown by the sign-in page.',
+  keychain_unreadable: 'macOS did not let agentistics read the Claude login it just saved. Open Keychain Access, find the "Claude Code-credentials" item for this account and allow access, or sign in again and choose "Always Allow" when macOS asks.',
+  login_not_saved: 'The sign-in finished, but the login was not saved on this computer. Try again; if it repeats, sign in once in a terminal with `claude auth login`.',
 }
 export class LoginFailure extends Error {
   constructor(readonly reason: LoginError, readonly detail?: string) { super(LOGIN_MESSAGES[reason]) }
@@ -98,6 +100,8 @@ export interface LoginHandle {
   info: () => LoginInfo | undefined
   submit: (code: unknown) => Promise<void>
   stop: () => Promise<void>
+  /** Has a code been typed into this sign-in? */
+  submitted?: () => boolean
 }
 export interface LoginOptions {
   launch?: (req: LoginRequest) => Promise<LoginProcess>
@@ -107,6 +111,11 @@ export interface LoginOptions {
   bindGraceMs?: number
   /** After a pasted code, how long the CLI may stay alive with no account bound before it is a failure. */
   submitTimeoutMs?: number
+  /**
+   * When a sign-in that got a code ends with no account bound and no CLI error, say WHY when it can
+   * be known (macOS: is the keychain item there?). `undefined` keeps `login_failed`.
+   */
+  diagnose?: (req: LoginRequest) => Promise<LoginError | undefined>
   /** Where a failed sign-in's (masked) CLI screen is recorded. */
   log?: (line: string) => void
   now?: () => number
@@ -133,7 +142,9 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
     try { await proc.stop() } catch { stopped = false; throw new LoginFailure('login_failed') }
     if (!failure) rejectReady(new LoginFailure('login_failed'))
   }
-  const fail = async (reason: LoginError, why?: string) => {
+  const fail = async (reason: LoginError, why?: string, diagnosable = false) => {
+    if (stopped) return
+    if (diagnosable && hasSubmitted) reason = await (opts.diagnose ?? diagnoseLogin)(req).catch(() => undefined) ?? reason
     if (stopped) return
     const detail = hasSubmitted ? loginScreenSaid(lastScreen, secrets) : undefined
     if (hasSubmitted) log(`[account-login] ${req.harness} sign-in ${why ?? reason}; the CLI screen said: ${detail ?? '(nothing)'}`)
@@ -178,13 +189,13 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
       // screen must SAY (the binding stops this handle first, which makes `fail` a no-op).
       else if (!stopped && hasSubmitted) {
         clearTimeout(submitTimer)
-        const grace = setTimeout(() => { void fail('login_failed', 'ended with no login saved').catch(() => {}) }, opts.bindGraceMs ?? 30_000)
+        const grace = setTimeout(() => { void fail('login_failed', 'ended with no login saved', true).catch(() => {}) }, opts.bindGraceMs ?? 30_000)
         grace.unref?.()
       }
     } catch { await fail('login_failed').catch(() => {}) }
   })()
   return {
-    ready, info: () => info, stop,
+    ready, info: () => info, stop, submitted: () => hasSubmitted,
     async submit(code) {
       if (stopped || !info || info.kind !== 'paste' || submitted) throw new LoginFailure('login_failed')
       if (typeof code !== 'string' || !code.trim() || code.length > 8192 || /[\x00-\x20\x7f]/.test(code.trim())) throw new LoginFailure('invalid_code')
@@ -193,11 +204,46 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
       // A CLI that stays alive after the code without a login bound must not leave the screen
       // "waiting" forever: past this, the attempt fails with what the CLI is showing.
       clearTimeout(submitTimer)
-      submitTimer = setTimeout(() => { void fail('login_failed', 'still waiting after the code').catch(() => {}) }, opts.submitTimeoutMs ?? 30_000)
+      submitTimer = setTimeout(() => { void fail('login_failed', 'still waiting after the code', true).catch(() => {}) }, opts.submitTimeoutMs ?? 30_000)
       submitTimer.unref?.()
       try { await proc.write(code.trim()) } catch { await fail('login_failed', 'could not type the code'); throw new LoginFailure('login_failed') }
     },
   }
+}
+
+/**
+ * PURE. The macOS keychain item Claude Code keeps a login in, for the env it runs under — mirrored
+ * from the CLI (2.1.310): `Claude Code-credentials` plus `-<sha256(dir)[:8]>` when CLAUDE_CONFIG_DIR
+ * (or CLAUDE_SECURESTORAGE_CONFIG_DIR, which wins) is set; the dir is used as written, NFC-normalized.
+ * The login and the probe must name the SAME item, or a login that worked is never seen.
+ */
+export function claudeKeychainService(env: Record<string, string | undefined>): string {
+  const secure = env.CLAUDE_SECURESTORAGE_CONFIG_DIR
+  const dir = secure !== undefined ? secure : env.CLAUDE_CONFIG_DIR
+  if (!dir) return 'Claude Code-credentials'
+  return `Claude Code-credentials-${new Bun.CryptoHasher('sha256').update(dir.normalize('NFC')).digest('hex').slice(0, 8)}`
+}
+
+/**
+ * macOS only, claude only: does the keychain hold the item this root's login writes? Asked by EXIT
+ * CODE alone — no `-w`, stdout and stderr discarded — so no secret is ever read. Found while the
+ * probe sees no login → macOS refused agentistics access; absent → the login was never saved.
+ */
+export async function diagnoseLogin(req: LoginRequest, platform = process.platform, run: (argv: string[]) => Promise<number> = runQuiet): Promise<LoginError | undefined> {
+  if (platform !== 'darwin' || req.harness !== 'claude') return undefined
+  const service = claudeKeychainService({ ...req.env })
+  const code = await run(['security', 'find-generic-password', '-s', service, '-a', keychainAccount()])
+  loginLog(`[account-login] claude keychain item "${service}" ${code === 0 ? 'exists' : 'is absent'} after the sign-in`)
+  return code === 0 ? 'keychain_unreadable' : 'login_not_saved'
+}
+/** Mirrors the CLI's keychain account: $USER, else the OS user name, else its fixed fallback. */
+function keychainAccount(): string {
+  let name: string
+  try { name = process.env.USER || userInfo().username } catch { name = 'claude-code-user' }
+  return /^[a-zA-Z0-9._-]+$/.test(name) ? name : 'claude-code-user'
+}
+async function runQuiet(argv: string[]): Promise<number> {
+  try { return await Bun.spawn(argv, { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' }).exited } catch { return 127 }
 }
 
 /** PURE. `#{pane_dead} #{pane_dead_status}` -> the exit status of a dead pane, or null while alive. */
@@ -227,7 +273,7 @@ export async function submitPasted(t: PasteTarget, opts: { settleMs?: number; co
 }
 
 /** The ONE log sink of this module. Callers pass only masked text (`maskLoginText`) or fixed facts. */
-const loginLog = (line: string) => console.warn(line)
+export const loginLog = (line: string) => console.warn(line)
 const quote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'"
 /** Only runtime executables enter PATH. In particular xdg-open/open/browser launchers are absent. */
 async function loginEnvironment(req: LoginRequest) {
@@ -281,7 +327,7 @@ export async function launchLoginProcess(req: LoginRequest): Promise<LoginProces
       // Keep the pane after the CLI exits: its last words ("Login failed: …") and its exit status
       // are the only account of why a sign-in did not finish.
       await tmux(['set-option', '-t', name, 'remain-on-exit', 'on']).catch(() => {})
-      loginLog(`[account-login] ${req.harness} sign-in runs in tmux -L ${SHELL_SOCKET} session ${name}`)
+      loginLog(`[account-login] ${req.harness} sign-in runs in tmux -L ${SHELL_SOCKET} session ${name}${req.harness === 'claude' ? ` (keychain item "${claudeKeychainService(env)}")` : ''}`)
     } catch { await clean(); throw new LoginFailure('login_unavailable') }
     const capture = () => tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-100'])
     return {

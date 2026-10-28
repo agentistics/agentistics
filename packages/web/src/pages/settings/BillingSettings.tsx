@@ -8,8 +8,11 @@
  * actually prices on (its own, or the assistant default it inherits — `rowScope`), so what the row
  * says and what the editor changes can never be two different plans.
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, useLocation, useOutletContext } from 'react-router-dom'
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Navigate, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
+import { signedOutHiddenStore } from '../../lib/appFlags'
+import { loginHarness } from '../../hooks/useChatHarnesses'
+import { sessionPath } from '../../lib/sessionRoute'
 import { Pencil, Trash2, AlertTriangle, Sparkles } from 'lucide-react'
 import {
   findPlan,
@@ -95,6 +98,23 @@ export function BillingAccountsPanel() {
   const isMobile = useIsMobile()
   const { hash, key: locationKey } = useLocation()
   const anchorRef = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
+  const hiddenList = useSyncExternalStore(signedOutHiddenStore.subscribe, signedOutHiddenStore.get)
+  const hiddenSignedOut = useMemo(() => new Set(hiddenList), [hiddenList])
+  const [signingIn, setSigningIn] = useState<string | null>(null)
+  const [signInError, setSignInError] = useState<{ harness: string; message: string } | null>(null)
+  // The same flow as the install dialog's "Sign in now": a session at the assistant's own login.
+  const signIn = async (harness: string) => {
+    if (signingIn) return
+    setSigningIn(harness); setSignInError(null)
+    const out = await loginHarness(harness, pt ? 'pt' : 'en')
+    setSigningIn(null)
+    if (out.ok && out.id) { navigate(sessionPath(out.id)); return }
+    setSignInError({ harness, message: out.message || (pt ? 'Não consegui abrir o login agora. Tente de novo.' : 'Could not open the sign-in right now. Try again.') })
+  }
+  const hideSignedOut = (harness: string) => {
+    if (!hiddenList.includes(harness)) signedOutHiddenStore.set([...hiddenList, harness])
+  }
 
   const { limits: planLimits, now: limitsNow, accountLabels, budgets } = usePlanLimits()
   const [accounts, setAccounts] = useState<BillingAccount[]>([])
@@ -374,7 +394,9 @@ export function BillingAccountsPanel() {
     <div id={ACCOUNTS_ANCHOR} ref={anchorRef} data-usage-accounts style={{ scrollMarginTop: 72 }}>
       <SectionHeader label={pt ? 'Contas' : 'Accounts'} />
       <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
-        selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow} />
+        selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow}
+        onSignIn={h => { void signIn(h) }} signingIn={signingIn} signInError={signInError}
+        hiddenSignedOut={hiddenSignedOut} onHideSignedOut={hideSignedOut} />
       <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
       {removeError && <div role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--accent-red)' }}>{removeError}</div>}
 
