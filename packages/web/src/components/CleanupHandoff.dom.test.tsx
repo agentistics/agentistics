@@ -26,7 +26,9 @@ afterAll(async () => { globalThis.fetch = realFetch; (globalThis as any).IS_REAC
 for (const width of [1280, 390]) for (const lang of ['pt', 'en'] as const) test(`filters and confirmation preserve selected total (${width}, ${lang})`, async () => {
   (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height: 900 })
   window.matchMedia = ((q: string) => ({ matches: q.includes('max-width') && width < 768, addEventListener() {}, removeEventListener() {} })) as never
-  globalThis.fetch = (async (url: string) => Response.json(url.endsWith('/scan') ? null : plan)) as typeof fetch
+  // Only `/plan` answers with the plan: a stray `/background` or `/scan` from another file's store
+  // must not land the plan as the scan state.
+  globalThis.fetch = (async (url: string) => Response.json(url.endsWith('/plan') ? plan : null)) as typeof fetch
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host)
   const button = (label: string) => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === label)!
   try {
@@ -85,7 +87,7 @@ for (const pt of [true, false]) test(`handoff explanation occurs once; confirmat
 for (const lang of ['pt', 'en'] as const) for (const skippedCount of [0, 2]) test(`done counts final-check skips separately from protected scan rows (${lang}, ${skippedCount})`, async () => {
   const skipped = Array.from({ length: skippedCount }, (_, i) => ({ path: `/repo/skipped-${i}`, reason: 'dirty' }))
   const job = { id: 'done', state: 'done', progress: 100, result: { freedBytes: 1024, worktrees: 1, removedWorktrees: 1, nodeModules: 0, pruned: 0, skipped, errors: [], elapsedMs: 100, diskFreeBefore: null, diskFreeAfter: null, removed: [] } }
-  globalThis.fetch = (async (url: string) => Response.json(url.endsWith('/scan') ? null : url.endsWith('/apply') || url.endsWith('/job') ? job : plan)) as typeof fetch
+  globalThis.fetch = (async (url: string) => Response.json(url.endsWith('/apply') || url.endsWith('/job') ? job : url.endsWith('/plan') ? plan : null)) as typeof fetch
   const host = document.createElement('div'); document.body.appendChild(host); const root = createRoot(host)
   try {
     await act(async () => root.render(<CleanDialog lang={lang} open onClose={() => {}} />))
