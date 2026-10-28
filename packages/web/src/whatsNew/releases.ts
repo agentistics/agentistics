@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.159.5': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O menu da lista de abas de sessão ficou mais estreito e ganhou um fundo de vidro fosco, na mesma cor de antes.',
+        en: 'The session tabs list menu is narrower and now has a frosted-glass background in the same colour as before.',
+      },
+      {
+        pt: 'Clicar de novo no botão da lista de abas com o menu aberto agora fecha o menu, em vez de abri-lo outra vez.',
+        en: 'Clicking the tabs list button again while its menu is open now closes the menu instead of reopening it.',
+      },
+    ],
+  },
   '2.159.4': {
     features: [],
     fixes: [
