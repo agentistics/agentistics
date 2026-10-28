@@ -69,6 +69,8 @@ export function refusalLine(r: EngineRefusal): string {
     case 'route-not-reserved': return `the engine offered a route under ${r.prefix}, which is not a reserved prefix`
     case 'route-capability': return `the engine declared ${r.declared} for ${r.prefix}; the host's guard holds ${r.expected ?? 'nothing'} there`
     case 'duplicate-command': return `the engine offered the verb ${r.verb} twice`
+    case 'surface': return `the engine announced a surface (${r.id || 'no id'}) the host cannot place: ${r.reason}`
+    case 'surface-no-route': return `the engine announced surfaces but serves no route under /api/engine/x`
   }
 }
 
