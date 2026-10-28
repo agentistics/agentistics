@@ -300,6 +300,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
   }, [order, activeKey, goTo])
 
   // ── scroll + edge fade, the active tab kept on screen (the mobile panel switcher's own pattern) ─
+  const listMenuButtonRef = useRef<HTMLButtonElement>(null)
   const stripRef = useRef<HTMLDivElement | null>(null)
   const tabEls = useRef<Map<string, HTMLDivElement>>(new Map())
   const [edges, setEdges] = useState({ left: false, right: false })
@@ -381,8 +382,9 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
     <div data-session-tabs style={{ position: 'relative', flexShrink: 0, minWidth: 0, boxSizing: 'border-box', ...(mobile ? { borderBottom: '1px solid var(--border-subtle)' } : { height: TAB_STRIP_H, background: 'var(--bg-base)' }) }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, padding: 0, ...(mobile ? null : { height: TAB_STRIP_H }) }}>
       <button
-        type="button" aria-haspopup="menu" aria-label={pt ? 'Abas abertas e dormindo' : 'Open and sleeping tabs'}
-        onClick={e => listMenu(e.currentTarget)}
+        ref={listMenuButtonRef}
+        type="button" aria-haspopup="menu" aria-expanded={Boolean(menu?.below)} aria-label={pt ? 'Abas abertas e dormindo' : 'Open and sleeping tabs'}
+        onClick={e => { if (menu?.below) setMenu(null); else listMenu(e.currentTarget) }}
         style={{
           display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0, height: mobile ? 44 : 30, minWidth: mobile ? 44 : 0, justifyContent: 'center',
           padding: '0 8px', marginLeft: 6, marginTop: mobile ? 0 : TABLIST_TOP_PAD, boxSizing: 'border-box', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-tertiary)',
@@ -429,7 +431,7 @@ export function SessionTabStrip({ lang, rows, fleetReady, active, onGo, onReopen
         ))}
       </div>
       {menu !== null && (
-        <SessionRowMenu sessionList={menu.below} below={menu.below} x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
+        <SessionRowMenu triggerRef={menu.below ? listMenuButtonRef : undefined} sessionList={menu.below} below={menu.below} x={menu.x} y={menu.y} entries={menu.entries} onPick={menu.pick} onClose={() => setMenu(null)} />
       )}
     </div>
     {notice !== null && !onNoticeChange && <ActionNotice message={notice} lang={lang} onDismiss={() => setNotice(null)} />}

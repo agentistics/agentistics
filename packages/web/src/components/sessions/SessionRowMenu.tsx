@@ -8,7 +8,7 @@
  */
 
 import { useEscapeOwner } from '../../lib/overlayStack'
-import { Fragment, useEffect, useRef } from 'react'
+import { Fragment, useEffect, useRef, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Pin } from 'lucide-react'
 import { isInsidePortalledMenu, menuMaxHeight, type MenuEntry } from '../../lib/rowMenu'
@@ -26,6 +26,8 @@ export interface SessionRowMenuProps {
   /** Dropdowns stay below their trigger and scroll in the available space. */
   below?: boolean
   sessionList?: boolean
+  /** The dropdown trigger handles its own toggle, rather than counting as an outside press. */
+  triggerRef?: RefObject<HTMLElement | null>
 }
 
 /**
@@ -36,7 +38,7 @@ export interface SessionRowMenuProps {
  */
 const TASK_ENTRIES = new Set<string>(['link-task', 'unlink-task'])
 
-export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, sessionList = false }: SessionRowMenuProps) {
+export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, sessionList = false, triggerRef }: SessionRowMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   // 44px of finger on a phone, and nowhere else. This menu is reached by a LONG PRESS on touch,
   // so every one of its entries is a touch target by construction.
@@ -44,15 +46,15 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, 
 
   useEscapeOwner(true, onClose)
   useEffect(() => {
-    const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node) && !isInsidePortalledMenu(e.target)) onClose() }
+    const away = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node) && !triggerRef?.current?.contains(e.target as Node) && !isInsidePortalledMenu(e.target)) onClose() }
     document.addEventListener('mousedown', away)
     return () => {
       document.removeEventListener('mousedown', away)
     }
-  }, [onClose])
+  }, [onClose, triggerRef])
 
   // Flipped rather than clamped: a menu pinned to the viewport edge covers the row it belongs to.
-  const w = Math.min(sessionList ? 640 : 210, window.innerWidth - 16)
+  const w = Math.min(sessionList ? 380 : 210, window.innerWidth - 16)
   const rowH = isMobile ? 44 : 34
   const left = Math.max(8, Math.min(x, window.innerWidth - w - 8))
   // Capped to the viewport and scrollable: a long list (the tab strip's "all tabs") must never put
@@ -60,6 +62,11 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, 
   const maxH = below ? Math.max(0, window.innerHeight - y - 4) : menuMaxHeight(window.innerHeight)
   const h = Math.min(entries.length * rowH + 12, maxH)
   const top = below ? y : y + h > window.innerHeight ? Math.max(4, y - h) : y
+
+  // Keep the opaque card surface unless both the tint and a blur implementation are supported.
+  const glass = (window.CSS?.supports('backdrop-filter', 'blur(16px)')
+    || window.CSS?.supports('-webkit-backdrop-filter', 'blur(16px)'))
+    && window.CSS?.supports('background', 'color-mix(in srgb, var(--bg-card) 72%, transparent)')
 
   return createPortal(
     <div
@@ -69,7 +76,9 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, 
       style={{
         position: 'fixed', top, left, width: w, boxSizing: 'border-box', zIndex: SESSION_ROW_MENU_Z,
         maxHeight: maxH, overflowY: 'auto', overscrollBehavior: 'contain',
-        background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10,
+        background: glass ? 'color-mix(in srgb, var(--bg-card) 72%, transparent)' : 'var(--bg-card)',
+        ...(glass ? { backdropFilter: 'blur(16px) saturate(140%)', WebkitBackdropFilter: 'blur(16px) saturate(140%)' } : {}),
+        border: '1px solid var(--border)', borderRadius: 10,
         padding: 4, boxShadow: 'var(--ag-shadow-pop)',
       }}
     >
