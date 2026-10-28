@@ -99,7 +99,7 @@ export function AccountLoginModal({ harness, lang, login, bound, busy, submitted
           {paste ? <div onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && canSend) { e.preventDefault(); send() } }}
             style={{ display: 'flex', gap: 8, alignItems: mobile ? 'stretch' : 'center', flexDirection: mobile ? 'column' : 'row' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <FieldInput label={t.pasteStep} hideLabel value={code} onChange={setCode} type="text" mono maxLength={8192} autoComplete="one-time-code" spellCheck={false} minHeight={mobile ? 44 : 36} disabled={submitted || busy} />
+              <FieldInput label={t.pasteStep} hideLabel value={code} onChange={setCode} type="text" masked mono maxLength={8192} autoComplete="one-time-code" spellCheck={false} minHeight={mobile ? 44 : 36} disabled={submitted || busy} />
             </div>
             <button type="button" disabled={!canSend} style={{ ...button(step2 === 'active' ? 'primary' : 'secondary', !canSend), minHeight: mobile ? 44 : 36 }} onClick={send}>{t.submit}</button>
           </div> : <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>

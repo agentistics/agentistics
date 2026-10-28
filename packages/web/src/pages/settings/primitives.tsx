@@ -626,7 +626,7 @@ export function StatusDot({ state, size = 8 }: {
  * included — adding an inline 16px here would be dead code that reads like a live requirement.
  */
 export function FieldInput({
-  label, sub, value, onChange, min, step, invalid, describedBy, unit, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false, minHeight, hideReveal,
+  label, sub, value, onChange, min, step, invalid, describedBy, unit, type = 'text', placeholder, disabled, autoComplete, maxLength, autoFocus, mono, inputMode, spellCheck, hideLabel, isMobile = false, minHeight, hideReveal, masked,
 }: {
   label: string
   minHeight?: number
@@ -652,6 +652,12 @@ export function FieldInput({
   spellCheck?: boolean
   /** Keep the label for screen readers only (the field already carries it as `aria-label`). */
   hideLabel?: boolean
+  /**
+   * Hide the value like a password WITHOUT being one: a `type="password"` field makes the browser
+   * offer to save a one-time code as a password. The field stays `type="text"`, the glyphs are
+   * discs, and password managers are told to keep out.
+   */
+  masked?: boolean
 }) {
   // A hidden field the user cannot proof-read is where a mistyped token or password becomes a
   // failure somewhere else entirely; the reveal is the same control every other form here uses.
@@ -663,6 +669,7 @@ export function FieldInput({
       <div style={{ position: 'relative', display: 'flex', flexDirection: 'column' }}>
       <input
         type={type === 'password' && shown ? 'text' : type}
+        {...(masked ? { 'data-masked': shown ? 'shown' : 'hidden', 'data-1p-ignore': '', 'data-lpignore': 'true', 'data-bwignore': '', 'data-form-type': 'other', autoCapitalize: 'off', autoCorrect: 'off' } : {})}
         value={value}
         min={min}
         step={step}
@@ -681,7 +688,8 @@ export function FieldInput({
         style={{
           width: '100%', boxSizing: 'border-box', minHeight: minHeight ?? (isMobile ? 44 : undefined),
           padding: '7px 10px',
-          ...(type === 'password' && !hideReveal ? { paddingRight: REVEAL_PAD } : unit ? { paddingRight: 76 } : null),
+          ...((type === 'password' || masked) && !hideReveal ? { paddingRight: REVEAL_PAD } : unit ? { paddingRight: 76 } : null),
+          ...(masked && !shown ? { WebkitTextSecurity: 'disc' } as React.CSSProperties : null),
           background: 'var(--bg-elevated)',
           border: '1px solid var(--border)',
           borderRadius: 7,
@@ -696,7 +704,7 @@ export function FieldInput({
         onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
       />
       {unit && <span aria-hidden="true" style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', fontSize: 13, pointerEvents: 'none' }}>{unit}</span>}
-      {type === 'password' && !hideReveal && <RevealButton shown={shown} onToggle={() => setShown(v => !v)} />}
+      {(type === 'password' || masked) && !hideReveal && <RevealButton shown={shown} onToggle={() => setShown(v => !v)} />}
       </div>
     </div>
   )

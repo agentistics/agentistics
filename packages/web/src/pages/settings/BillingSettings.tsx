@@ -9,10 +9,9 @@
  * says and what the editor changes can never be two different plans.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { Navigate, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
+import { Navigate, useLocation, useOutletContext } from 'react-router-dom'
 import { signedOutHiddenStore } from '../../lib/appFlags'
-import { loginHarness } from '../../hooks/useChatHarnesses'
-import { sessionPath } from '../../lib/sessionRoute'
+import { accountSignInStore } from '../../lib/accountSignIn'
 import { Pencil, Trash2, AlertTriangle, Sparkles } from 'lucide-react'
 import {
   findPlan,
@@ -98,20 +97,11 @@ export function BillingAccountsPanel() {
   const isMobile = useIsMobile()
   const { hash, key: locationKey } = useLocation()
   const anchorRef = useRef<HTMLDivElement>(null)
-  const navigate = useNavigate()
   const hiddenList = useSyncExternalStore(signedOutHiddenStore.subscribe, signedOutHiddenStore.get)
   const hiddenSignedOut = useMemo(() => new Set(hiddenList), [hiddenList])
-  const [signingIn, setSigningIn] = useState<string | null>(null)
   const [signInError, setSignInError] = useState<{ harness: string; message: string } | null>(null)
-  // The same flow as the install dialog's "Sign in now": a session at the assistant's own login.
-  const signIn = async (harness: string) => {
-    if (signingIn) return
-    setSigningIn(harness); setSignInError(null)
-    const out = await loginHarness(harness, pt ? 'pt' : 'en')
-    setSigningIn(null)
-    if (out.ok && out.id) { navigate(sessionPath(out.id)); return }
-    setSignInError({ harness, message: out.message || (pt ? 'Não consegui abrir o login agora. Tente de novo.' : 'Could not open the sign-in right now. Try again.') })
-  }
+  // "Entrar" opens the same "Add account" dialog below — the one in-app login. Never a session.
+  const signIn = (harness: string) => { setSignInError(null); accountSignInStore.request(harness) }
   const hideSignedOut = (harness: string) => {
     if (!hiddenList.includes(harness)) signedOutHiddenStore.set([...hiddenList, harness])
   }
@@ -395,9 +385,9 @@ export function BillingAccountsPanel() {
       <SectionHeader label={pt ? 'Contas' : 'Accounts'} />
       <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
         selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow}
-        onSignIn={h => { void signIn(h) }} signingIn={signingIn} signInError={signInError}
+        onSignIn={signIn} signingIn={null} signInError={signInError}
         hiddenSignedOut={hiddenSignedOut} onHideSignedOut={hideSignedOut} />
-      <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
+      <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} onSignInUnavailable={(harness, message) => setSignInError({ harness, message })} />
       {removeError && <div role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--accent-red)' }}>{removeError}</div>}
 
       {/* Accounts that load late must not list every account timeline as stray for a moment. */}

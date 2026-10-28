@@ -869,7 +869,7 @@ export function NewSessionModal({
             pt={pt}
             onClose={() => setInstalling(null)}
             onDone={() => retry()}
-            onSignedIn={id => onStarted(id, { harness: installing ?? '', label: harnesses?.find(h => h.id === installing)?.label ?? '' })}
+            onSignIn={() => closeProp()}
           />
 
           {isNative && (

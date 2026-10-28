@@ -1,5 +1,5 @@
 /** Settings → Billing: headless link/code login; account binding remains the source of truth. */
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { HarnessId } from '@agentistics/core'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -7,11 +7,14 @@ import { HarnessMark } from '../../components/sessions/HarnessMark'
 import { MetricNote } from '../../components/MetricNote'
 import { dialogButtonStyle } from './primitives'
 import { AccountLoginModal, PendingLoginCard } from './AccountLoginModal'
+import { accountSignInStore } from '../../lib/accountSignIn'
 import { ADD_COPY, addAccountView, addErrorText, alreadyGone, failureText, anyResolved, attemptIsOver, pendingRoots, refusalCode, type Lang, type LoginInfoView, type RootRowView } from './addAccountLogic'
 
 interface ActiveLogin { harness: HarnessId; pendingId?: string; login?: LoginInfoView; bound?: RootRowView }
-export default function AddAccount({ lang, harnesses, onBound }: {
+export default function AddAccount({ lang, harnesses, onBound, onSignInUnavailable }: {
   lang: Lang; harnesses: readonly HarnessId[]; onBound: () => void
+  /** An "Entrar" this dialog cannot serve (multiple accounts off, or the assistant keeps one login). */
+  onSignInUnavailable?: (harness: string, message: string) => void
 }) {
   const pt = lang === 'pt', t = ADD_COPY(pt), mobile = useIsMobile()
   const [flagOn, setFlagOn] = useState<boolean | null>(null), [roots, setRoots] = useState<RootRowView[]>([])
@@ -143,6 +146,17 @@ export default function AddAccount({ lang, harnesses, onBound }: {
     generation.current++; updateActive({ harness: row.harness, pendingId: row.pendingId, login: row.login })
     setError(null); setBusy(false); setSubmitted(false); setExpired(false)
   }
+  // "Entrar" anywhere in the app lands here: open this same dialog, never a session.
+  const signInRequest = useSyncExternalStore(accountSignInStore.subscribe, accountSignInStore.get, accountSignInStore.get)
+  useEffect(() => {
+    if (!signInRequest || flagOn === null) return
+    accountSignInStore.take(signInRequest.nonce)
+    const h = signInRequest.harness as HarnessId
+    const view = addAccountView(flagOn, harnesses)
+    if (view.kind === 'on' && view.addable.includes(h)) { if (!activeRef.current) void begin(h); return }
+    onSignInUnavailable?.(h, view.kind === 'off' ? t.signInNeedsFlag : t.noSecond(HARNESS_LABELS[h] ?? h))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signInRequest, flagOn, harnesses])
   if (flagOn === null) return null
   const view = addAccountView(flagOn, harnesses)
   if (view.kind === 'off') return <MetricNote>{t.flagOff}</MetricNote>
