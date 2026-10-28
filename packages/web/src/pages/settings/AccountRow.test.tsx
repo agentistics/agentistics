@@ -213,3 +213,18 @@ describe('CONTAS.LOGIN r3: an assistant with no login is a closable notice, not 
     expect(h).not.toContain('role="list"')
   })
 })
+
+describe('CONTA.SEM.PLANO — a detected, unsaved plan', () => {
+  test('the row says the plan was detected and asks to confirm, never a bare "No plan"', () => {
+    for (const lang of ['pt', 'en'] as const) {
+      const v = view([acc('c1')], ['claude'], () => ({ plan: null, detected: 'Claude Max 5x' }))
+      const h = renderToStaticMarkup(<BillingAccountList {...v} lang={lang} />)
+      expect(text(h)).toContain(lang === 'pt' ? 'Detectado: Claude Max 5x · confirme' : 'Detected: Claude Max 5x · confirm')
+      expect(text(h)).not.toContain(lang === 'pt' ? 'Sem plano' : 'No plan')
+    }
+  })
+  test('with nothing detected the row still says "No plan"', () => {
+    const h = renderToStaticMarkup(<BillingAccountList {...view([acc('c1')], ['claude'], () => ({ plan: null }))} />)
+    expect(text(h)).toContain('No plan')
+  })
+})

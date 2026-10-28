@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.161.6': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O plano de uma conta nova é gravado ao clicar em Salvar, mesmo quando ele veio preenchido sozinho e você não mexeu em nada.',
+        en: 'A new account\'s plan is saved when you click Save, even when it was filled in for you and you changed nothing.',
+      },
+      {
+        pt: 'Uma conta com o plano detectado mas ainda não confirmado mostra "Detectado: … · confirme" e um botão "Confirmar plano", em vez de "Sem plano".',
+        en: 'An account whose plan was detected but not yet confirmed shows "Detected: … · confirm" and a "Confirm plan" button, instead of "No plan".',
+      },
+    ],
+  },
   '2.161.5': {
     features: [],
     fixes: [
