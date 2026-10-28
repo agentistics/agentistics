@@ -21,7 +21,7 @@ export type ThrowawayState = {
   reservationPaths?: string[]
   // Kept for states written by older versions.
   reservationPath?: string
-  /** Short per-run TMPDIR/TMUX_TMPDIR (see `shortRunTmp`); removed with the run. */
+  /** Short per-run TMPDIR/TMUX_TMPDIR (see `createRunTmp`); removed with the run. */
   tmp?: string
   pid?: number
   unit?: string
