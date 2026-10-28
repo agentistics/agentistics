@@ -160,6 +160,7 @@ export function toControlSession(
     project,
     ...(v.model ? { model: v.model } : {}),
     ...(v.effort ? { effort: v.effort } : {}),
+    ...(v.accountId ? { accountId: v.accountId } : {}),
     ...(v.mode ? { mode: v.mode } : {}),
     ...(v.modeChoices ? { modeChoices: v.modeChoices } : {}),
     ...(v.structured ? { structured: true as const } : {}),

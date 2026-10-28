@@ -31,6 +31,7 @@ import { useArtifactLive } from '../../lib/artifactsStore'
 import { scrollIsOutside } from '../../lib/popoverScroll'
 import { modelDisplay } from '../../lib/modelDisplay'
 import { usePlanLimits } from '../../lib/planLimits'
+import { sessionPlan } from '../../lib/accountPicker'
 import { PlanSessionBlock } from '../PlanLimitMeter'
 import { HarnessMark } from './HarnessMark'
 
@@ -201,6 +202,12 @@ export interface SessionStatsMenuProps {
    */
   rowId?: string
   /**
+   * CONTA.IDENTIDADE — the account this session's process runs on now, as the server resolved it
+   * (`FleetRow.accountId`). The plan shown is THAT account's; absent, only an unambiguous reading
+   * (the harness's single legacy meter) is shown, never the first account of the harness.
+   */
+  accountId?: string
+  /**
    * THE CARD, DRAWN IN PLACE — no trigger, no popover, no close button, always open. The phone's
    * session panel shows this card as one of its own groups; a button there that opened a second
    * floating card over the panel would be a menu inside a menu. The content is the same code.
@@ -211,13 +218,16 @@ export interface SessionStatsMenuProps {
 export function SessionStatsMenu({
   harness, sessionId, meta, stats, lang, currency, brlRate, startedModel, startedEffort, touch = false,
   variant = 'button', panelMaxWidth, costBasis = 'api', planFactor = null, onOpenFull, task, onOpenTask, onOpenLive, rowId,
-  inline = false,
+  inline = false, accountId,
 }: SessionStatsMenuProps) {
   const pt = lang === 'pt'
   // PLAN.LIMITS: this harness's plan windows, when it reported any (none → nothing drawn).
   const planSnap = usePlanLimits()
-  const plan = planSnap.limits?.find(l => l.harness === harness)
-  const planName = plan ? (plan.plan ?? plan.sourcePlan) : planSnap.registered.find(r => r.harness === harness)?.plan
+  // CONTA.IDENTIDADE: this SESSION's account, never the harness's first one (which named Nayara's
+  // "Pro" on a session running on another account).
+  const resolvedPlan = sessionPlan(planSnap.limits, planSnap.registered, harness, accountId)
+  const plan = resolvedPlan.limits ?? undefined
+  const planName = resolvedPlan.name
   const [open, setOpen] = useState(inline)
 
   /**

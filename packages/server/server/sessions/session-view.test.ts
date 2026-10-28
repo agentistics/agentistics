@@ -853,3 +853,32 @@ it('carries the registry handoff successor on an ended session view', () => {
   })
   expect(v!.handoffTo).toBe('target')
 })
+
+// CONTA.IDENTIDADE: the row the browser draws names the account its process runs on NOW — the
+// composer chip reads exactly this, and the switch dialog resolves through the same rule.
+describe('buildSessionViews · accountId', () => {
+  const accounts = {
+    accounts: [
+      { id: 'acc_A', harness: 'claude', available: true },
+      { id: 'acc_B', harness: 'claude', available: true },
+    ],
+    bindings: { 'claude:': 'acc_A' },
+  } as unknown as import('./session-account').AccountRegistryView
+  const conv = 'c0000000-0000-4000-8000-000000000001'
+
+  it('a session restarted from account A onto B carries B (the retired A row is collapsed away)', () => {
+    const reconciled = [
+      row('old', { status: 'exited', managed: managed('old', { conversationId: conv, accountId: 'acc_A', endedAt: '2026-10-28T04:33:17.749Z' }) }),
+      row('new', { managed: managed('new', { conversationId: conv, accountId: 'acc_B', createdAt: '2026-10-28T04:33:15.025Z' }) }),
+    ]
+    const views = buildSessionViews({ reconciled, activity: new Map(), processes: [], accounts })
+    const ofConv = views.filter(v => v.conversationId === conv || v.id === 'old' || v.id === 'new')
+    expect(ofConv.map(v => [v.id, v.accountId])).toEqual([['new', 'acc_B']])
+  })
+
+  it('a session with no account of its own names the default home binding; no registry, nothing', () => {
+    const reconciled = [row('plain')]
+    expect(buildSessionViews({ reconciled, activity: new Map(), processes: [], accounts })[0]?.accountId).toBe('acc_A')
+    expect(buildSessionViews({ reconciled, activity: new Map(), processes: [] })[0]?.accountId).toBeUndefined()
+  })
+})

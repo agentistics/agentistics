@@ -27,6 +27,7 @@ import {
 } from './harness-accounts'
 import { allHistory, dropHistory, moveHistory, pointOf, recordHistory, type HistoryPoint, __resetPlanHistoryForTest } from './plan-history'
 import { withFileLock } from './sessions/file-lock'
+import { fallbackSessionAccount, resolveSessionAccount } from './sessions/session-account'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
 
@@ -55,14 +56,7 @@ const sessionHomes: Record<HarnessId, string> = {
 }
 
 /** Explicit managed ids and transcript roots win over the default/only-visible fallback. */
-export function fallbackSessionAccount(harness: HarnessId, registry: AccountsFile, visible: readonly string[]): string | undefined {
-  const bound = registry.bindings[`${harness}:`]
-  // A default binding that points at a hidden or retired account must not swallow default-home
-  // sessions while exactly one other account is the visible one.
-  const boundGone = bound !== undefined && registry.accounts.some(a => a.id === bound && (!a.available || a.retired))
-  if (bound && !(boundGone && visible.length === 1)) return bound
-  return visible.length === 1 ? visible[0] : undefined
-}
+export { fallbackSessionAccount }
 
 type LiveSessionRef = { session_id: string; harness: string; native_session_id?: string; project_path?: string }
 export const resolveLiveTranscriptPath = async (s: LiveSessionRef, bindings: Record<string, string>): Promise<string | null> => {
@@ -121,11 +115,12 @@ export async function sampleLivePlanSessions(
 ): Promise<LivePlanSession[]> {
   const registry = await readAccounts().catch((): AccountsFile => ({ version: 2, accounts: [], bindings: {}, segments: {} }))
   const managed = await managedLookup().catch(() => [])
-  const managedAccounts = new Map<string, string>()
-  for (const row of managed) if (row.accountId) {
-    const accountId = canonicalAccountId(registry, row.accountId)
-    managedAccounts.set(row.id, accountId)
-    if (row.conversationId) managedAccounts.set(row.conversationId, accountId)
+  // CONTA.IDENTIDADE: one conversation has a row per restart/switch; the account in force is the
+  // live, newest one (`resolveSessionAccount`), never whichever row the file happens to list last.
+  // A row with no account of its own falls through to the transcript-path attribution below.
+  const managedAccountOfRef = (ref: string): string | undefined => {
+    const own = resolveSessionAccount(managed, { id: ref, conversationId: ref })
+    return own ? canonicalAccountId(registry, own) : undefined
   }
   const wanted = new Set(liveIds)
   for (const id of liveUsage.keys()) if (!wanted.has(id)) liveUsage.delete(id)
@@ -134,7 +129,7 @@ export async function sampleLivePlanSessions(
   for (const s of sessions) {
     if (!isHarnessId(s.harness)) continue
     if (!wanted.has(s.session_id)) continue
-    let account = managedAccounts.get(s.session_id) ?? (s.native_session_id ? managedAccounts.get(s.native_session_id) : undefined)
+    let account = managedAccountOfRef(s.session_id) ?? (s.native_session_id ? managedAccountOfRef(s.native_session_id) : undefined)
     if (!account) {
       const retiredIds = new Set(registry.accounts.filter(a => a.retired).map(a => a.id))
       let known = pathAccounts.get(s.session_id)
@@ -553,15 +548,24 @@ export async function rolloutRoot(harness: HarnessId, path: string): Promise<str
   return under(spec.home()) ? null : undefined
 }
 
-type ManagedLookup = () => Promise<readonly { id: string; conversationId?: string; accountId?: string }[]>
+type ManagedLookup = () => Promise<readonly { id: string; harness?: string; conversationId?: string; accountId?: string; endedAt?: string; createdAt?: string }[]>
 let managedLookup: ManagedLookup = async () => (await import('./sessions/registry')).readRegistry()
 
-/** The account a managed session runs on (`ManagedSession.accountId`), when it carries one. */
+/**
+ * The account a managed session runs on (`ManagedSession.accountId`), when it carries one — the
+ * shared resolver's rules 1-3 (`session-account.ts`), deliberately WITHOUT the registry. Every caller
+ * hands the answer to `ingestFromRoot` / `ingestPlanLimits`, which already do the other two steps at
+ * the place the reading lands: an absent account is attributed by the ROOT the reading came from
+ * (`attributeReading` — for the default home that is the default binding, rule 4; for a codex rollout
+ * the root its file sits under, which is more exact than rule 4), and `ingestPlanLimits` follows the
+ * merge aliases before storing. Resolving here too would answer "default binding" for a rollout that
+ * provably sits under another root.
+ */
 export async function managedAccountOf(by: { id?: string; conversationId?: string }): Promise<string | undefined> {
   try {
-    const rows = await managedLookup()
-    const hit = rows.find(r => (by.id && r.id === by.id) || (by.conversationId && r.conversationId === by.conversationId))
-    return hit?.accountId || undefined
+    // CONTA.IDENTIDADE: the row of the process running now — not the first (oldest, ended) row
+    // that happens to share the conversation id.
+    return resolveSessionAccount(await managedLookup(), by) || undefined
   } catch { return undefined }
 }
 

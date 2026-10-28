@@ -1165,6 +1165,7 @@ async function pollFleet(backend: SessionBackend): Promise<SessionSnapshot> {
   const poller = createSessionsPoller({
     backend, readRegistry, scanProcesses, loadConversations, loadHarnessSessions,
     findExactLinks: exactLinksOnDisk,
+    readAccountRegistry: async () => (await import('../harness-accounts')).readAccounts(),
   })
   // Poll TWICE, and return the second. The cockpit debounces the noisy per-frame reading by
   // confirming a `waiting` state across two polls (`attention-confirm.ts`), but a one-shot command

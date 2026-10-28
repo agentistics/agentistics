@@ -226,6 +226,8 @@ export interface FleetRow {
   model?: string
   /** The reasoning effort this session was started with — see `ControlSession.effort`. */
   effort?: string
+  /** The account this session runs on now — see `ControlSession.accountId`. Not relayed to a central. */
+  accountId?: string
   /** The harness mode, in the harness's own words — see `mode-spec.ts`. */
   mode?: SessionMode
   /** F4.D — the modes this STRUCTURED row can be set to directly (`setMode`); absent: cycle with `cycleMode`. */
@@ -349,6 +351,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.note ? { note: row.note } : {}),
     ...(row.model ? { model: row.model } : {}),
     ...(row.effort ? { effort: row.effort } : {}),
+    ...(row.accountId ? { accountId: row.accountId } : {}),
     ...(row.mode ? { mode: row.mode } : {}),
     ...(row.modeChoices ? { modes: row.modeChoices } : {}),
     ...(row.handoffTo ? { handoffTo: row.handoffTo } : {}),

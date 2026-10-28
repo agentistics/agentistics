@@ -26,6 +26,15 @@ import { spawnAccountContext } from './spawn-account-io'
 import { spawnAccountMessage } from './spawn-account'
 import { killAndRetireSession, readRegistry } from './registry'
 import type { ManagedSession, SessionBackend } from './types'
+import { registryOfSpawnRows, resolveSessionAccount } from './session-account'
+
+/**
+ * WHERE a row's conversation files are, for the readers that resolve a ROOT (`readLimitState`): the
+ * row's own recorded account, absent = the default home. Deliberately not the resolved identity: a
+ * row with no recorded account runs in the default home even if the account bound there also has a
+ * root of its own, and reading that root would read another directory.
+ */
+const location = (row: Pick<ManagedSession, 'accountId'>): { accountId?: string } => row.accountId ? { accountId: row.accountId } : {}
 
 export interface SwitchHostDeps {
   lang: 'en' | 'pt'
@@ -89,17 +98,22 @@ function refuse(reason: SwitchRefusal, detail: string, lang: 'en' | 'pt'): Switc
 export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: SwitchHostDeps): Promise<SwitchResult> {
   const { lang } = deps
   const io: SwitchIo = { ...REAL_IO, ...deps.io }
-  const row = (await io.readRows()).find(m => m.id === req.id)
+  const rows = await io.readRows()
+  const row = rows.find(m => m.id === req.id)
   if (!row) return refuse('not_running_here', '', lang)
   const harness = row.harness as HarnessId
-  if (req.harness && req.harness !== harness) return crossHarnessSwitch(row, req, deps, io)
+  if (req.harness && req.harness !== harness) return crossHarnessSwitch(row, rows, req, deps, io)
   const conversationId = row.conversationId
   const context = await io.context([harness])
+  // CONTA.IDENTIDADE: WHO the session runs as is the shared resolver's answer (the GET dialog shows
+  // the same one); WHERE its files are stays the row's own record (`sourceAccountId`, `location`).
+  const current = resolveSessionAccount(rows, { id: row.id }, registryOfSpawnRows(context.accounts))
   const decided = decideSwitch({
     harness,
     ...(conversationId ? { conversationId } : {}),
     running: true,
-    ...(row.accountId ? { currentAccountId: row.accountId } : {}),
+    ...(current ? { currentAccountId: current } : {}),
+    sourceAccountId: row.accountId,
     requested: req.accountId,
     agentCaller: req.callerVerified === true,
     context,
@@ -114,7 +128,7 @@ export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: 
   if (!copies) return refuse('no_transcript', '', lang)
   // Read BEFORE the process ends: the prompt the limit refused is the last thing the person said.
   const pending = req.resendPending
-    ? (await io.limit({ harness, conversationId: conv, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }).catch(() => null))?.pendingPrompt
+    ? (await io.limit({ harness, conversationId: conv, cwd: row.cwd, ...location(row) }).catch(() => null))?.pendingPrompt
     : undefined
 
   return deps.withLock(conv, async () => {
@@ -175,7 +189,7 @@ export async function switchSessionAccountImpl(req: SwitchAccountRequest, deps: 
  * path: the old session is ended only AFTER the new one is confirmed running; any failure before
  * that leaves the old one exactly as it was.
  */
-async function crossHarnessSwitch(row: ManagedSession, req: SwitchAccountRequest, deps: SwitchHostDeps, io: SwitchIo): Promise<SwitchResult> {
+async function crossHarnessSwitch(row: ManagedSession, rows: readonly ManagedSession[], req: SwitchAccountRequest, deps: SwitchHostDeps, io: SwitchIo): Promise<SwitchResult> {
   const { lang } = deps
   const pt = lang === 'pt'
   const harness = row.harness as HarnessId
@@ -191,10 +205,13 @@ async function crossHarnessSwitch(row: ManagedSession, req: SwitchAccountRequest
   if (!decided.ok) return refuse(decided.reason, decided.detail, lang)
   const conv = row.conversationId
   const pending = req.resendPending && conv
-    ? (await io.limit({ harness, conversationId: conv, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }).catch(() => null))?.pendingPrompt
+    ? (await io.limit({ harness, conversationId: conv, cwd: row.cwd, ...location(row) }).catch(() => null))?.pendingPrompt
     : undefined
   const turns = await io.turns(row).catch(e => ({ unavailable: e instanceof Error ? e.message : String(e) }))
-  const fromAccount = await io.label(harness, row.accountId).catch(() => undefined)
+  // The account the session runs as (CONTA.IDENTIDADE), named from the source harness's own accounts.
+  const sourceContext = await io.context([harness]).catch(() => null)
+  const fromId = resolveSessionAccount(rows, { id: row.id }, sourceContext ? registryOfSpawnRows(sourceContext.accounts) : undefined)
+  const fromAccount = await io.label(harness, fromId).catch(() => undefined)
   const prompt = crossSwitchPrompt({
     lang, fromHarness: HARNESS_LABELS[harness] ?? harness, fromHarnessId: harness, ...(fromAccount ? { fromAccount } : {}),
     turns: 'unavailable' in turns ? turns : turns.turns, ...(pending ? { pending } : {}),
