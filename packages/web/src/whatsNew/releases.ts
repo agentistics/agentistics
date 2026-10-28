@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.159.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Instalar o Claude Code (e os outros assistentes) pelo agentistics não falha mais no meio do download no macOS: a conexão não cai mais quando o instalador fica um tempo sem escrever nada.',
+        en: 'Installing Claude Code (and the other assistants) from agentistics no longer fails mid-download on macOS: the connection no longer drops while the installer is quiet.',
+      },
+      {
+        pt: 'Quando uma instalação falha, a janela mostra o motivo real (por exemplo, o erro do instalador) em vez de sempre pedir para verificar a internet.',
+        en: 'When an install fails, the dialog shows the real reason (for example, the installer error) instead of always asking you to check your internet.',
+      },
+    ],
+  },
   '2.159.3': {
     features: [],
     fixes: [
