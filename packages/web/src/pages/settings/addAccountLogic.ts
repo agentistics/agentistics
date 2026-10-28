@@ -2,6 +2,7 @@
  * Pure logic for Settings → Billing's "Add account": which assistants offer it, what a refusal
  * says, and which login roots are still waiting. No IO, so every branch is testable.
  */
+// @harness-adapters-only: login recipes are per adapter, so "Add account" walks the adapter list
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 
 export type Lang = 'pt' | 'en'
