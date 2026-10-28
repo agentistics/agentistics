@@ -4,7 +4,7 @@ import { createAccountMutator } from './accountMutations'
 import {
   saveThenClose, saveErrorPlace, planCoverageText,
   ownPeriods, REPORTS_LIMITS, accountsNeedingPlan, answerNotice, billableAccounts, billingRows, closeBefore, defaultStart, foldUnnamed, planOptionsFor, rowScope, scopePeriods, withScopePeriods, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
-  limitsForRow,
+  limitsForRow, planDraftWrites, detectedPlanId,
   type BillingAccount,
 } from './accountBilling'
 
@@ -378,5 +378,29 @@ describe('a meter filed under a folded sign-in is the row\'s meter', () => {
     const lim = { harness: 'antigravity', account: 'acc_ghost', updatedAt: 1, windows: [] } as never
     expect(limitsForRow([lim], rows[0]!)).toBe(lim)
     expect(limitsForRow([{ ...(lim as object), harness: 'claude' } as never], rows[0]!)).toBeNull()
+  })
+})
+
+describe('CONTA.SEM.PLANO — a prefilled plan is saved, and the row says it was detected', () => {
+  const prefilled = { id: '', planId: 'anthropic-max-5x', label: '', amount: '100', currency: 'USD' as const, from: '2026-10-28', to: '', ongoing: true }
+  test('Save on an untouched drawer prefilled from detection WRITES the plan', () => {
+    // The drawer remembers what it opened with; a prefilled new period equals it, and Save used to close without writing.
+    expect(planDraftWrites(prefilled, prefilled)).toBe(true)
+  })
+  test('a blank new period the user did not touch writes nothing (a nickname-only save stays possible)', () => {
+    const blank = { ...prefilled, planId: '', amount: '' }
+    expect(planDraftWrites(blank, blank)).toBe(false)
+  })
+  test('a stored period opened and left untouched writes nothing; an edited one does', () => {
+    const stored = { ...prefilled, id: 'bp_1' }
+    expect(planDraftWrites(stored, stored)).toBe(false)
+    expect(planDraftWrites({ ...stored, amount: '200' }, stored)).toBe(true)
+  })
+  test('detectedPlanId: the account\'s own reported plan first, then a harness detection', () => {
+    const a = { id: 'c1', harness: 'claude' as const, key: 'c1', label: 'x', root: null, available: true, plan: 'max_5x' }
+    expect(detectedPlanId('claude', a, [])).toBe(matchDetectedPlan('claude', 'max_5x'))
+    const det = [{ harness: 'claude' as const, mode: 'subscription' as const, planId: 'anthropic-pro', source: 'credentials' as const, evidenceEn: '', evidencePt: '', confidence: 'exact' as const, proposalOnly: true as const }]
+    expect(detectedPlanId('claude', { ...a, plan: undefined }, det)).toBe('anthropic-pro')
+    expect(detectedPlanId('claude', null, [{ ...det[0]!, source: 'none' as const }])).toBe('')
   })
 })
