@@ -103,6 +103,32 @@ describe('headless login adapters', () => {
       } finally { await handle.stop() }
     })
   }
+  test('CONTAS.LOGIN: a CLI that ends after the pasted code with no account bound is a visible failure, not an endless wait', async () => {
+    const cli = fakeCli([samples.claude])
+    const failures: string[] = []
+    const handle = await startAccountLogin(request('claude'), async r => { failures.push(r) }, { launch: async () => cli.proc, bindGraceMs: 20 })
+    try {
+      await handle.ready
+      await handle.submit('FAKE_CODE')
+      cli.exit(0)
+      await tick()
+      expect(failures).toEqual([])
+      await new Promise(r => setTimeout(r, 40))
+      expect(failures).toEqual(['login_failed'])
+    } finally { await handle.stop() }
+  })
+  test('CONTAS.LOGIN: a binding that stops the handle inside the grace never reports a failure', async () => {
+    const cli = fakeCli([samples.claude])
+    const failures: string[] = []
+    const handle = await startAccountLogin(request('claude'), async r => { failures.push(r) }, { launch: async () => cli.proc, bindGraceMs: 20 })
+    await handle.ready
+    await handle.submit('FAKE_CODE')
+    cli.exit(0)
+    await tick()
+    await handle.stop()
+    await new Promise(r => setTimeout(r, 40))
+    expect(failures).toEqual([])
+  })
   test('PTY redraws replace the pane rather than duplicating prompt counters', async () => {
     const cli = fakeCli([samples.claude, samples.claude + '\n'])
     cli.proc.snapshot = true

@@ -176,3 +176,17 @@ test('accounts without limit readings use neutral markers instead of an unrelate
     expect(marker).toContain('background:#94a3b8')
   } finally { __setPlanLimitsForTest(null) }
 })
+
+describe('CONTAS.LOGIN: an assistant with no login on this computer', () => {
+  for (const lang of ['en', 'pt'] as const) test(`says "not connected" (${lang}), never a placeholder account`, () => {
+    const signedOut: BillingAccount = { id: '', harness: 'claude', key: 'default', label: 'Conta padrão', root: null, available: true, signedOut: true }
+    const rows = billingRows([signedOut], { profiles: {} }, ['claude'] as never, L as never, lang === 'pt')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.signedOut).toBe(true)
+    const h = renderToStaticMarkup(<BillingAccountList {...{ ...view([signedOut]), lang }} rows={rows.map(r => ({ ...r, plan: null, problem: false, limits: null }))} />)
+    expect(text(h)).toContain(lang === 'pt' ? 'Não conectado' : 'Not connected')
+    expect(text(h)).not.toContain(lang === 'pt' ? 'Sem plano' : 'No plan')
+    expect(text(h)).not.toContain(lang === 'pt' ? 'Sem leitura ainda' : 'No reading yet')
+    expect(h).toContain('data-signed-out')
+  })
+})

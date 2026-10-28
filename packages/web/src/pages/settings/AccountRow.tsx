@@ -35,6 +35,8 @@ const T = (pt: boolean) => ({
   problem: pt ? 'Períodos com problema' : 'Periods need fixing',
   noMeter: pt ? 'Não informado' : 'Not reported',
   noMeterYet: pt ? 'Sem leitura ainda' : 'No reading yet',
+  signedOut: pt ? 'Não conectado' : 'Not connected',
+  signIn: pt ? 'Entre no assistente neste computador ou use “Adicionar conta” abaixo.' : 'Sign in to the assistant on this computer, or use “Add account” below.',
   saveFailed: (n: string) => (pt ? `Não foi possível salvar a conta “${n}”. Tente de novo.` : `Could not save the account “${n}”. Try again.`),
 })
 
@@ -67,6 +69,7 @@ const cellText: React.CSSProperties = { display: 'block', whiteSpace: 'normal', 
 
 /** The plan half of the muted line: the plan's name, or the state that stands in for one. */
 function PlanCell({ r, t }: { r: BillingRowView; t: ReturnType<typeof T> }) {
+  if (r.signedOut) return <Pill tone="neutral" nowrap>{t.signedOut}</Pill>
   if (r.problem) return <Pill tone="error" nowrap>{t.problem}</Pill>
   if (!r.plan && r.starts) return <Pill tone="neutral" nowrap>{t.starts(r.starts)}</Pill>
   if (!r.plan) return <Pill tone="warn" nowrap>{t.noPlan}</Pill>
@@ -84,6 +87,7 @@ export function rowWindows(limits: PlanLimits): PlanLimitWindow[] {
 }
 
 function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: number; lang: Lang; t: ReturnType<typeof T>; ready?: boolean }) {
+  if (r.signedOut) return <span data-signed-out style={{ fontSize: 11.5, color: 'var(--text-tertiary)', maxWidth: 260 }}>{t.signIn}</span>
   if (r.limits) return (
     <span data-billing-usage data-plan-limits={r.limits.harness} style={{ display: 'inline-flex', gap: 10 }}>
       {rowWindows(r.limits).map(w => {
