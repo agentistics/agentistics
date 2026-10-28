@@ -99,13 +99,17 @@ async function shot(page, name, theme, glass) {
   await themeAndGlass(page, theme, glass)
   await page.screenshot({ path: join(out, `${name}-${theme}-${page.viewportSize().width}-${glass}.png`) })
 }
+async function showEnded(page) {
+  await page.getByText(/^(Ended|Encerradas)$/).first().click({ force: true }).catch(() => console.log('[ended] tab not found'))
+  await page.waitForTimeout(700)
+}
 async function openAreas(page, mobile) {
   if (mobile) {
+    await showEnded(page)
     const more = page.locator('.mobile-bottom-nav').getByRole('button', { name: /^(More|Mais)$/ }).first()
     if (await more.count()) await more.click({ force: true })
   } else {
-    await page.getByRole('button', { name: /^(Ended|Encerradas)$/ }).first().click({ force: true }).catch(() => {})
-    await page.waitForTimeout(500)
+    await showEnded(page)
     const rail = page.locator('[data-area-rail]').first()
     if (await rail.count()) await rail.hover({ force: true })
   }
@@ -141,6 +145,8 @@ await waitFor(`http://127.0.0.1:${apiPort}/api/version`)
 await waitFor(`http://127.0.0.1:${webPort}/`)
 const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE })
 const metrics = []
+const only = process.env.SCREENS ? new Set(process.env.SCREENS.split(',')) : null
+const want = k => !only || only.has(k)
 try {
   for (const width of [1440, 390]) {
     for (const theme of ['dark', 'light']) {
@@ -153,6 +159,7 @@ try {
       }, { t: theme })
       const page = await context.newPage()
 
+if (want('a')) {
       // (a) Sessions list with the real areas menu open.
       await page.goto(`${base}/sessions`, { waitUntil: 'domcontentloaded' }); await ready(page); await openAreas(page, mobile)
       for (const glass of ['off', 'on']) await shot(page, 'a-sessions-menu', theme, glass)
@@ -161,6 +168,9 @@ try {
         for (const glass of ['off', 'on']) { await themeAndGlass(page, theme, glass); metrics.push({ screen: 'a', theme, width, glass, ...await frameMeasure(page) }) }
       }
 
+}
+
+      if (want('b')) {
       // (b) A real session route with its composer/menu. Seed data has no owner transcript;
       // the empty state is retained rather than injecting fabricated conversation text.
       await openSession(page, theme)
@@ -170,16 +180,46 @@ try {
         for (const glass of ['off', 'on']) { await themeAndGlass(page, theme, glass); metrics.push({ screen: 'b', theme, width, glass, ...await frameMeasure(page) }) }
       }
 
+}
+
+      if (want('c')) {
       // (c) Agentask with its real create modal.
       await page.goto(`${base}/tasks`, { waitUntil: 'domcontentloaded' }); await ready(page)
       const create = page.getByRole('button', { name: /New task/ }).first(); if (await create.count()) await create.click({ force: true })
       await page.waitForTimeout(400)
       for (const glass of ['off', 'on']) await shot(page, 'c-agentask-modal', theme, glass)
 
+}
+
+      if (want('d')) {
       // (d) Real phone bar over the dashboard content.
       await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' }); await ready(page)
       await page.evaluate(() => window.scrollTo(0, 500)); await page.waitForTimeout(400)
       for (const glass of ['off', 'on']) await shot(page, 'd-mobile-bottom-bar', theme, glass)
+}
+
+            // (e) Plan-usage popover (opens on hover/focus of the gauge button in the sessions aside).
+      if (want('e')) {
+        await page.goto(`${base}/sessions`, { waitUntil: 'domcontentloaded' }); await ready(page)
+        await showEnded(page); await page.waitForFunction(() => !/Nothing ended/.test(document.body.innerText), undefined, { timeout: 20_000 }).catch(() => console.log('[e] ended list stayed empty')); await page.waitForTimeout(1500)
+        const gauge = page.locator('button[aria-haspopup="dialog"]:visible').first()
+        if (await gauge.count()) { await gauge.hover({ force: true }); await page.locator('[data-plan-usage-popover]').first().waitFor({ timeout: 5000 }).catch(() => {}) }
+        else console.log(`[e] gauge button not visible at ${width}px`)
+        await page.waitForTimeout(500)
+        for (const glass of ['off', 'on']) await shot(page, 'e-plan-usage-popover', theme, glass)
+      }
+
+      // (f) Nay notification card, raised by the real "Test a notification" button in Settings.
+      if (want('f')) {
+        await page.goto(`${base}/settings/notifications`, { waitUntil: 'domcontentloaded' }); await ready(page)
+        const test = page.getByRole('button', { name: /Test a notification|Testar uma notificação/ }).first()
+        if (await test.count()) { await test.click({ force: true }); await page.locator('[data-nay-notice]').first().waitFor({ timeout: 8000 }).catch(() => console.log(`[f] card did not appear at ${width}px`)) }
+        else console.log(`[f] test button not found at ${width}px`)
+        // Client-side navigation keeps the card (it lives in the global dock) and puts it over real content.
+        await page.evaluate(() => { history.pushState({}, '', '/'); dispatchEvent(new PopStateEvent('popstate')) })
+        await page.waitForTimeout(1500)
+        for (const glass of ['off', 'on']) await shot(page, 'f-nay-notice', theme, glass)
+      }
       await context.close()
     }
   }
@@ -188,5 +228,5 @@ try {
   server.kill('SIGTERM'); vite.kill('SIGTERM')
   await rm(demoHome, { recursive: true, force: true })
 }
-await writeFile(join(out, 'metrics.json'), JSON.stringify(metrics, null, 2))
+await writeFile(join(out, only ? 'metrics-extra.json' : 'metrics.json'), JSON.stringify(metrics, null, 2))
 console.log(JSON.stringify({ out, metrics, seed: seed.stdout.trim().split('\n').slice(-3).join('\n') }, null, 2))

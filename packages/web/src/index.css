@@ -1054,14 +1054,48 @@ button:focus-within .ag-row-pin,
   -webkit-backdrop-filter: blur(18px) saturate(150%);
   backdrop-filter: blur(18px) saturate(150%);
 }
-[data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"] {
+[data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] {
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
-[data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"] > div {
+[data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] > div {
   background: color-mix(in srgb, var(--bg-elevated) 78%, transparent) !important;
   -webkit-backdrop-filter: blur(20px) saturate(150%);
   backdrop-filter: blur(20px) saturate(150%);
+}
+
+/* Plan-usage popover (with its caret) and the Nay notification card. Both are inline-styled, so
+   the switch needs !important; the caret is a rotated square that pokes out of the popover's box,
+   so it gets its own tint + blur instead of relying on the parent's. */
+[data-glass="on"] [data-plan-usage-popover],
+[data-glass="on"] [data-nay-notice] {
+  background: color-mix(in srgb, var(--bg-card) 74%, transparent) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+[data-glass="on"] [data-plan-usage-popover] > span[aria-hidden] {
+  background: color-mix(in srgb, var(--bg-card) 74%, transparent) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+
+/* Phone bottom sheet (the "More" areas sheet, filters, ...): scrim blur + translucent panel. */
+[data-glass="on"] div[role="dialog"][aria-modal="true"] {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+[data-glass="on"] div[role="dialog"][aria-modal="true"] > div {
+  background: color-mix(in srgb, var(--bg-surface) 76%, transparent) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-glass="on"] div[role="dialog"][aria-modal="true"] > div { background: var(--bg-surface) !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-glass="on"] div[role="dialog"][aria-modal="true"],
+  [data-glass="on"] div[role="dialog"][aria-modal="true"] > div { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  [data-glass="on"] div[role="dialog"][aria-modal="true"] > div { background: var(--bg-surface) !important; }
 }
 
 /* Lightweight acrylic for repeated content surfaces. Do not blur these: session/task/account
@@ -1093,8 +1127,12 @@ button:focus-within .ag-row-pin,
   [data-glass="on"] [data-session-tabs],
   [data-glass="on"] .mobile-bottom-nav,
   [data-glass="on"] [data-panel-rail],
-  [data-glass="on"] [role="menu"][data-portalled-menu] {
-    background: var(--bg-surface) !important;
+  [data-glass="on"] [role="menu"][data-portalled-menu],
+  [data-glass="on"] [data-area-rail][data-open="true"],
+  [data-glass="on"] [data-plan-usage-popover],
+  [data-glass="on"] [data-plan-usage-popover] > span[aria-hidden],
+  [data-glass="on"] [data-nay-notice] {
+    background: var(--bg-card) !important;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -1105,11 +1143,26 @@ button:focus-within .ag-row-pin,
   [data-glass="on"] [data-session-tabs],
   [data-glass="on"] .mobile-bottom-nav,
   [data-glass="on"] [data-panel-rail],
-  [data-glass="on"] [role="menu"][data-portalled-menu] {
-    background: var(--bg-surface) !important;
+  [data-glass="on"] [role="menu"][data-portalled-menu],
+  [data-glass="on"] [data-area-rail][data-open="true"],
+  [data-glass="on"] [data-plan-usage-popover],
+  [data-glass="on"] [data-plan-usage-popover] > span[aria-hidden],
+  [data-glass="on"] [data-nay-notice] {
+    background: var(--bg-card) !important;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] > div { background: var(--bg-elevated) !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"],
+  [data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] > div {
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  [data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] > div { background: var(--bg-elevated) !important; }
 }
 
 /* The Shell X's indeterminate progress bar (`ShellCloseStatus.tsx`). */
