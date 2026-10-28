@@ -333,6 +333,9 @@ async function makeLoginEnvironment(root: string, extra: Record<string, string> 
   // USER is explicit because LaunchAgent and the tmux server can inherit different values; Claude
   // uses it as the keychain account selector when no account flag is supplied.
   const env: Record<string, string> = { HOME: homedir(), USER: keychainAccount(), PATH: bin, TERM: 'xterm-256color', LANG: process.env.LANG ?? 'en_US.UTF-8', BROWSER: '/bin/true', NO_BROWSER: 'true', ...extra }
+  // A Volta shim (e.g. copilot installed through Volta) finds its toolchain through VOLTA_HOME, and
+  // falls back to $HOME/.volta — wrong whenever HOME was swapped. Pass the real one through.
+  if (process.env.VOLTA_HOME && !env.VOLTA_HOME) env.VOLTA_HOME = process.env.VOLTA_HOME
   return { bin, env }
 }
 async function tmux(args: string[], input?: string, missingOkay = false) {
