@@ -88,8 +88,13 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
   {
     id: 'multi-account',
     env: 'AGENTISTICS_MULTI_ACCOUNT',
-    // Opt-in: only '1'. Absent reads as OFF; the account-root routes answer 404 until it is on.
-    isOn: raw => raw === '1',
+    // ON by default since 2026-10-28 (owner report: a fresh Mac could not add a second login and the
+    // screen only said the feature was off). Same reversal as adapter-chat/shell/editor: the SECURITY
+    // gate is unchanged — the login routes sit behind `localShell` in capability-guard.ts — so this
+    // switch only NARROWS it: `AGENTISTICS_MULTI_ACCOUNT=0` or `preferences.experimental === false`.
+    isOn: onUnlessOff,
+    defaultOn: true,
+    offByPreference: true,
     description: {
       en: 'Several accounts per harness at the same time: separate login folders, signed in from the app.',
       pt: 'Várias contas por harness ao mesmo tempo: pastas de login separadas, com a entrada feita pelo app.',

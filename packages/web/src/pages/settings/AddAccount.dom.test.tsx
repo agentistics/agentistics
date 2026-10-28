@@ -126,3 +126,16 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
     })
   })
 }
+
+describe('a fresh machine (no preference, no variable) can add an account (CONTAS.MAC.NOVO)', () => {
+  test('the server report for a fresh machine turns the button on and drops the "turned off" line', async () => {
+    const { resolveExperimental } = await import('@agentistics/core')
+    const inner = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === '/api/experimental' ? json({ features: resolveExperimental(undefined, {}) }) : inner(input, init)) as typeof fetch
+    await render(1440, 'pt')
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect(host.querySelector(`[aria-label="${ADD_COPY(true).addTo('Gemini CLI')}"]`)).not.toBeNull()
+    expect(host.textContent).not.toContain(ADD_COPY(true).flagOff)
+  })
+})

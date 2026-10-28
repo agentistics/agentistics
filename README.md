@@ -74,11 +74,13 @@ A metric a harness genuinely cannot produce renders as **N/A**, never as a confi
 
 <a name="install"></a>
 
-### Linux / WSL — one line
+### Linux / macOS / WSL — one line
 
 ```bash
-curl -fsSL https://agentop.openvibes.tech/cli | bash
+curl -fsSL https://agentop.openvibes.tech/cli | sh
 ```
+
+The installer is POSIX `sh`, so `| sh`, `| bash` and `| zsh` behave the same (including macOS's bash 3.2). Without root it installs to `~/.local/bin` and adds that directory to your PATH in the rc file of your login shell (`.zshrc`, `.bashrc`/`.bash_profile`, fish's `conf.d`, or `.profile`) — once; re-running does not duplicate the line.
 
 Or via npm — same binary, downloaded by `postinstall` from the same GitHub Release:
 
