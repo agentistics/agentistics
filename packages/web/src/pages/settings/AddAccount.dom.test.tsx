@@ -124,6 +124,31 @@ for (const width of [390, 1440]) for (const lang of ['pt', 'en'] as const) {
       expect(input.disabled).toBe(false)
       expect(input.value).toBe('')
     })
+    test('CONTAS.LOGIN: a refused code (403) is said in words, and Enter sends the code', async () => {
+      const inner = globalThis.fetch
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith('/code')) {
+          codes.push(JSON.parse(String(init?.body)).code)
+          return Response.json({ error: 'capability_disabled', capability: 'localShell' }, { status: 403 })
+        }
+        return inner(input, init)
+      }) as typeof fetch
+      await render(width, lang); await open(lang)
+      const input = document.querySelector<HTMLInputElement>('[role="dialog"] input')!
+      expect(input.type).toBe('text')
+      expect(input.getAttribute('autocomplete')).toBe('one-time-code')
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+        setter.call(input, 'qa-fake-403')
+        input.dispatchEvent(new window.Event('input', { bubbles: true }))
+        input.dispatchEvent(new window.Event('change', { bubbles: true }))
+      })
+      await act(async () => { input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await new Promise(r => setTimeout(r, 0)) })
+      expect(codes).toEqual(['qa-fake-403'])
+      expect(document.querySelector('[role="alert"]')!.textContent).toBe(addErrorText({ error: 'capability_disabled' }, lang === 'pt'))
+      expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain(t.submitted)
+      expect(input.disabled).toBe(false)
+    })
   })
 }
 
