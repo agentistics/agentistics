@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.160.4': {
+  '2.161.0': {
     features: [
       {
         pt: 'No fim da instalação pelo terminal, o instalador pergunta se você quer iniciar o agentistics agora e se ele deve iniciar sozinho quando o computador ligar (sim é o padrão nas duas), já com as configurações recomendadas.',
