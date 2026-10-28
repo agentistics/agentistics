@@ -17,15 +17,17 @@ import {
  */
 export function spawnRowsOf(file: Pick<AccountsFile, 'accounts' | 'bindings'>): SpawnAccountRow[] {
   const boundAt = new Map<string, string | null>()
+  const defaultBound = new Set<string>()
   for (const [key, id] of Object.entries(file.bindings)) {
     const account = file.accounts.find(a => a.id === id)
     if (!account || !key.startsWith(`${account.harness}:`)) continue
     const root = key.slice(account.harness.length + 1) || null
+    if (root === null) defaultBound.add(id)
     // Two bindings for one account (a stale one): the account's own recorded root wins.
     if (!boundAt.has(id) || root === account.root) boundAt.set(id, root)
   }
   return file.accounts.map(a => ({
-    id: a.id, harness: a.harness, root: boundAt.get(a.id) ?? null, bound: boundAt.has(a.id), available: a.available,
+    id: a.id, harness: a.harness, root: boundAt.get(a.id) ?? null, bound: boundAt.has(a.id), ...(defaultBound.has(a.id) ? { defaultRoot: true } : {}), available: a.available,
     ...(a.retired ? { retired: true } : {}), firstSeen: a.firstSeen,
   }))
 }

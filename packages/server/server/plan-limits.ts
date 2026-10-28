@@ -27,7 +27,7 @@ import {
 } from './harness-accounts'
 import { allHistory, dropHistory, moveHistory, pointOf, recordHistory, type HistoryPoint, __resetPlanHistoryForTest } from './plan-history'
 import { withFileLock } from './sessions/file-lock'
-import { fallbackSessionAccount, resolveSessionAccount } from './sessions/session-account'
+import { defaultHomeAccount, fallbackSessionAccount, resolveSessionAccount } from './sessions/session-account'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
 
@@ -142,10 +142,14 @@ export async function sampleLivePlanSessions(
         account = hit?.account
         if (hit) pathAccounts.set(s.session_id, { harness: s.harness, account: hit.account, viaDefault: hit.viaDefault })
       }
-      const visible = registry.accounts.filter(a => a.harness === s.harness && a.available && !a.retired).map(a => a.id)
-      const metered = Object.keys(burnByAccount).filter(k => k.startsWith(`${s.harness}:`)).map(k => k.slice(s.harness.length + 1))
-        .filter(id => !registry.accounts.some(a => a.harness === s.harness && a.id === id && (!a.available || a.retired)))
-      account ??= fallbackSessionAccount(s.harness, registry, [...new Set([...visible, ...metered])])
+      // A managed row and an explicit transcript root were exhausted above. The only remaining
+      // identity this session can have is the harness's default home binding; never guess from
+      // whichever visible account happens to have a meter.
+      // `default` is the pre-accounts meter key, not a guess among visible accounts. Preserve it
+      // only when the registry has no account identity at all; once accounts exist, rule 4 is binding-only.
+      account ??= defaultHomeAccount(s.harness, registry)
+      if (!account && registry.accounts.length === 0 && registry.bindings[`${s.harness}:`] === undefined
+        && burnByAccount[planAccountKey(s.harness, 'default')] !== undefined) account = 'default'
     }
     const tokens = (s.input_tokens ?? 0) + (s.output_tokens ?? 0) + (s.cache_read_input_tokens ?? 0) + (s.cache_creation_input_tokens ?? 0)
     const previous = liveUsage.get(s.session_id)
@@ -807,11 +811,8 @@ export async function planLimitsPayload(
   const spawnability = harnessSpawnabilities(nowMs)
   const resolvedSessions = liveSessions.map(s => {
     if (s.account || !s.harness) return s
-    const visible = [...new Set([
-      ...accounts.filter(a => a.id && a.harness === s.harness && a.available && !a.retired).map(accountId),
-      ...limits.filter(l => l.harness === s.harness && !acct(l.harness, l.account)).map(l => l.account),
-    ])]
-    const account = fallbackSessionAccount(s.harness, registry, visible)
+    const account = defaultHomeAccount(s.harness, registry)
+      ?? (accounts.length === 0 && limits.some(l => l.harness === s.harness && l.account === 'default') ? 'default' : undefined)
     return account ? { ...s, account } : s
   })
   const sessionVisible = (s: LivePlanSession) => {

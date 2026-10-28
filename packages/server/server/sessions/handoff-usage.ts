@@ -8,7 +8,8 @@ import { AGENTISTICS_DATA_DIR, JOURNAL_PATH } from '../config'
 import { decodeRow, rowToEvent, type JournalRow, type StoredRow } from '../journal/journal-plan'
 import { IMPORT_STORE_SOURCE_ID } from '../journal/import-store'
 import { emptyCostCell, foldCostResponse, priceCell, pricingModelOf } from '../projections/kit'
-import { accountAtPath, fallbackSessionAccount, resolveLiveTranscriptPath } from '../plan-limits'
+import { accountAtPath, resolveLiveTranscriptPath } from '../plan-limits'
+import { resolveSessionAccount } from './session-account'
 import { canonicalAccountId, type AccountsFile } from '../harness-accounts'
 import type { ManagedSession } from './types'
 import type { IntegrationRegistry } from '@agentistics/engine-api'
@@ -19,23 +20,29 @@ export interface BilledReply { harness: HarnessId; conversationId: string; accou
 export const replyKey = (harness: string, id: string) => `${harness}:${id}`
 export function accountForReply(harness: HarnessId, conversationId: string, path: string | undefined,
   accounts: AccountsFile, managed: readonly ManagedSession[], limits: readonly PlanLimits[]): string | undefined {
-  const explicit = managed.find(m => m.harness === harness && (m.conversationId === conversationId || m.id === conversationId))?.accountId
   const retired = new Set(accounts.accounts.filter(a => a.retired).map(a => a.id))
   // A registered transcript root records its source login, even after a session switches.
   // The default-home login is only a fallback and must not override a managed binding.
   const { [`${harness}:`]: _default, ...roots } = accounts.bindings
   const source = path?.replace(/:\d+$/, '')
-  const at = (source ? accountAtPath(harness, source, roots, retired) : undefined) ?? explicit
+  const resolved = resolveSessionAccount(managed, { conversationId }, accounts)
+  const at = (source ? accountAtPath(harness, source, roots, retired) : undefined) ?? resolved
     ?? (source ? accountAtPath(harness, source, accounts.bindings, retired) : undefined)
-    ?? fallbackSessionAccount(harness, accounts, limits.filter(l => l.harness === harness).map(l => l.account))
   return at ? canonicalAccountId(accounts, at) : undefined
 }
 
 /** A managed binding is authoritative, including an alias of an account merged later. */
-export function handoffSessionLimit(harness: HarnessId, session: Pick<ManagedSession, 'accountId'>,
+export function handoffSessionLimit(harness: HarnessId, session: Pick<ManagedSession, 'accountId'> & Partial<Pick<ManagedSession, 'id' | 'conversationId'>>,
   accounts: AccountsFile, limits: readonly PlanLimits[]): PlanLimits | undefined {
   const mine = limits.filter(l => l.harness === harness)
-  const id = session.accountId ?? fallbackSessionAccount(harness, accounts, mine.map(l => l.account))
+  if (!session.id && !session.conversationId && !session.accountId) return undefined
+  const rowId = session.id ?? session.conversationId ?? 'handoff'
+  const id = resolveSessionAccount([{
+    id: rowId,
+    harness,
+    ...(session.conversationId ? { conversationId: session.conversationId } : {}),
+    ...(session.accountId ? { accountId: session.accountId } : {}),
+  }], { id: rowId, ...(session.conversationId ? { conversationId: session.conversationId } : {}) }, accounts)
   return id ? mine.find(l => canonicalAccountId(accounts, l.account) === canonicalAccountId(accounts, id)) : undefined
 }
 

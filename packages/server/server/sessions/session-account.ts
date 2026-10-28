@@ -123,8 +123,11 @@ export function defaultHomeAccount(harness: string, registry: AccountRegistryVie
  * The switch host's view of the registry (`SpawnAccountContext.accounts`): a bound row with no root
  * IS the default home's binding. Lets the switch resolve through rule 4 without a second read.
  */
-export function registryOfSpawnRows(rows: readonly { id: string; harness: string; root: string | null; bound: boolean; retired?: boolean }[]): AccountRegistryView {
+export function registryOfSpawnRows(rows: readonly { id: string; harness: string; root: string | null; bound: boolean; defaultRoot?: boolean; retired?: boolean }[]): AccountRegistryView {
   const bindings: Record<string, string> = {}
-  for (const r of rows) if (r.bound) bindings[`${r.harness}:${r.root ?? ''}`] ??= r.id
+  for (const r of rows) if (r.bound) {
+    if (r.defaultRoot || r.root === null) bindings[`${r.harness}:`] ??= r.id
+    if (r.root !== null) bindings[`${r.harness}:${r.root}`] ??= r.id
+  }
   return { accounts: rows, bindings }
 }
