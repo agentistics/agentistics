@@ -176,7 +176,7 @@ export default function HarnessesSettings() {
         </>
       )}
       {notice && <div role="alert" style={{ marginTop: 10, fontSize: 12, color: 'var(--text-secondary)' }}>{notice}</div>}
-      <HarnessInstallDialog target={target} pt={pt} onClose={() => setTarget(null)} onDone={() => reload()} />
+      <HarnessInstallDialog target={target} pt={pt} onClose={() => setTarget(null)} onDone={() => reload()} onSignedIn={id => navigate(sessionPath(id))} />
     </div>
   )
 }
