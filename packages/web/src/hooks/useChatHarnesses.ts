@@ -160,6 +160,14 @@ export async function loginHarness(id: string, lang: 'pt' | 'en'): Promise<{ ok:
   }
 }
 
+/** One harness's current status (fresh GET), or null when it is not listed (e.g. the native one) or the read fails. */
+export async function fetchHarnessStatus(id: string): Promise<HarnessChatStatus | null> {
+  try {
+    const data = await (await fetch('/api/chat-harnesses')).json() as HarnessChatStatus[]
+    return Array.isArray(data) ? data.find(h => h.id === id) ?? null : null
+  } catch { return null }
+}
+
 /** Returns the ids of harnesses that are ready (installed + authed). */
 export function getReadyHarnessIds(harnesses: HarnessChatStatus[]): string[] {
   return harnesses.filter(h => h.ready).map(h => h.id)
