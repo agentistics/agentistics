@@ -43,12 +43,12 @@ export function shouldWaitForMemory(availableBytes: number | null, minBytes = RU
 }
 
 /**
- * Is this process already under the heavy lock? True with `AGENTISTICS_HEAVY_JOB` (set by `agentop
+ * Is this process already under the heavy lock? True with `AGENTISTICS_HEAVY_JOB=1` exactly (set by `agentop
  * heavy`) or when an ancestor is a `flock … agentistics-heavy*.lock` (the manual form the briefs use).
  * Wrapping again would block on a lock this very tree holds — a deadlock, not a queue.
  */
 export function insideHeavyLock(env: Record<string, string | undefined>, ancestorCmdlines: readonly string[]): boolean {
-  if (env.AGENTISTICS_HEAVY_JOB) return true
+  if (env.AGENTISTICS_HEAVY_JOB === '1') return true
   return ancestorCmdlines.some(c => /\bflock\b/.test(c) && /agentistics-heavy[^ ]*\.lock/.test(c))
 }
 
