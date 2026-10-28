@@ -7,7 +7,7 @@ import codexCapture from './fixtures/account-login/codex.json'
 import copilotCapture from './fixtures/account-login/copilot.json'
 import geminiPreamble from './fixtures/account-login/gemini.json'
 import geminiRetryCapture from './fixtures/account-login/gemini-url-invalid.json'
-import { LOGIN_ADAPTERS, stripLoginAnsi, loginRefusal, LoginFailure, parseLoginOutput, startAccountLogin, type LoginProcess, type LoginRequest } from './account-login'
+import { LOGIN_ADAPTERS, stripLoginAnsi, loginRefusal, LoginFailure, maskLoginText, loginScreenSaid, parseLoginOutput, parsePaneDead, startAccountLogin, submitPasted, type LoginProcess, type LoginRequest } from './account-login'
 import { createAccountRoots } from './account-roots'
 import { createHarnessAccounts } from './harness-accounts'
 
@@ -173,7 +173,9 @@ describe('headless login adapters', () => {
 
   test('the login boundary never logs raw output or input', async () => {
     const src = await Bun.file(join(import.meta.dir, 'account-login.ts')).text()
-    expect(/console\.(?:log|info|warn|error|debug|trace)/.test(src)).toBe(false)
+    // One sink, fed only masked screens (see the r3 masking tests) and fixed facts.
+    expect(src.match(/console\.(?:log|info|warn|error|debug|trace)/g)).toEqual(['console.warn'])
+    expect(src).toContain('const loginLog = (line: string) => console.warn(line)')
     expect(src).toContain("tmux(['load-buffer', '-b', buffer, '-'], code)")
   })
   test('device CLI argv cannot fall back to a localhost/browser flow', () => {
@@ -294,5 +296,70 @@ describe('login lifecycle with private roots', () => {
       expect((await roots.list())[0]!.error).toBe('login_timeout')
       expect((await roots.list())[0]!.status).toBe('failed')
     } finally { roots.stopPoller(); await rm(base, { recursive: true, force: true }) }
+  })
+})
+
+describe('CONTAS.LOGIN r3: the code is submitted, and a stuck or failed sign-in says what the CLI said', () => {
+  test('the Enter is sent apart from the paste, after a wait, and pressed once more when the screen did not move', async () => {
+    const events: string[] = []
+    let screen = 'Paste code here if prompted > '
+    await submitPasted({
+      paste: async () => { events.push('paste') },
+      enter: async () => { events.push('enter') },
+      screen: async () => screen,
+    }, { sleep: async ms => { events.push(`sleep ${ms}`) } })
+    expect(events).toEqual(['paste', 'sleep 500', 'enter', 'sleep 1500', 'enter'])
+    events.length = 0
+    await submitPasted({
+      paste: async () => { events.push('paste') },
+      enter: async () => { events.push('enter'); screen = 'Login successful' },
+      screen: async () => screen,
+    }, { sleep: async ms => { events.push(`sleep ${ms}`) } })
+    expect(events).toEqual(['paste', 'sleep 500', 'enter', 'sleep 1500'])
+  })
+  test('a dead pane reports its real exit status', () => {
+    expect(parsePaneDead('0 \n')).toBeNull()
+    expect(parsePaneDead('1 1\n')).toBe(1)
+    expect(parsePaneDead('1 0')).toBe(0)
+  })
+  test('a CLI still alive after the code fails with what its screen says, never waits forever', async () => {
+    const cli = fakeCli([samples.claude])
+    cli.proc.snapshot = true
+    const failures: { reason: string; detail?: string }[] = [], logs: string[] = []
+    const code = 'SECRETCODEabcdefghij0123456789#STATEPARTxyz'
+    const handle = await startAccountLogin(request('claude'), async (reason, detail) => { failures.push({ reason, detail }) },
+      { launch: async () => cli.proc, submitTimeoutMs: 30, log: l => logs.push(l) })
+    await handle.ready
+    await handle.submit(code)
+    cli.output(`${samples.claude}\nPaste code here if prompted > ${code}\nOAuth error: Invalid code`)
+    await new Promise(r => setTimeout(r, 80))
+    expect(failures).toHaveLength(1)
+    expect(failures[0]!.reason).toBe('login_failed')
+    expect(failures[0]!.detail).toContain('OAuth error: Invalid code')
+    for (const text of [failures[0]!.detail!, ...logs]) {
+      expect(text).not.toContain('SECRETCODE')
+      expect(text).not.toContain('STATEPART')
+      expect(text).not.toContain('https://')
+    }
+    expect(logs.join('\n')).toContain('OAuth error: Invalid code')
+  })
+  test('a CLI that exits non-zero after the code fails at once with its last words', async () => {
+    const cli = fakeCli([samples.claude])
+    cli.proc.snapshot = true
+    const failures: { reason: string; detail?: string }[] = []
+    const handle = await startAccountLogin(request('claude'), async (reason, detail) => { failures.push({ reason, detail }) },
+      { launch: async () => cli.proc, log: () => {} })
+    await handle.ready
+    await handle.submit('FAKECODE123#abc')
+    cli.output(`${samples.claude}\nPaste code here if prompted > Login failed: Request failed with status code 400`)
+    await tick()
+    cli.exit(1)
+    await tick(); await tick()
+    expect(failures).toEqual([{ reason: 'login_failed', detail: 'Login failed: Request failed with status code 400' }])
+  })
+  test('masking removes the code, its halves, links and long tokens', () => {
+    const out = maskLoginText('pasted ABCD1234#WXYZ9876 at https://claude.com/x?state=s and tok_' + 'q'.repeat(30), ['ABCD1234#WXYZ9876', 'ABCD1234', 'WXYZ9876'])
+    expect(out).not.toContain('ABCD1234'); expect(out).not.toContain('WXYZ9876'); expect(out).not.toContain('claude.com'); expect(out).not.toContain('qqqq')
+    expect(loginScreenSaid('header\nPaste code here if prompted > Login successful\nPane is dead (status 0)')).toBe('Login successful')
   })
 })

@@ -28,7 +28,30 @@ export const LOGIN_MESSAGES: Record<LoginError, string> = {
   invalid_code: 'Enter the authorization code shown by the sign-in page.',
 }
 export class LoginFailure extends Error {
-  constructor(readonly reason: LoginError) { super(LOGIN_MESSAGES[reason]) }
+  constructor(readonly reason: LoginError, readonly detail?: string) { super(LOGIN_MESSAGES[reason]) }
+}
+
+/**
+ * PURE. Mask what a login screen may carry that is not for a log or a screen: the pasted code
+ * itself, URLs (their query holds the PKCE state) and any long token-shaped run.
+ */
+export function maskLoginText(text: string, secrets: readonly string[] = []): string {
+  let out = stripLoginAnsi(text)
+  for (const secret of secrets) if (secret.length >= 4) out = out.split(secret).join('•••')
+  return out.replace(/https?:\/\/\S+/g, '<link>').replace(/[A-Za-z0-9_\-#.~]{24,}/g, '•••')
+}
+/**
+ * PURE. What the CLI said after the code: the text after the last paste prompt, else the last
+ * non-empty lines. Masked and bounded, so it can be shown and logged.
+ */
+export function loginScreenSaid(screen: string, secrets: readonly string[] = []): string | undefined {
+  const text = maskLoginText(screen, secrets)
+  const prompt = /Paste code here(?: if prompted)?\s*>?|Enter the authorization code\s*:?/gi
+  let cut = -1
+  for (const m of text.matchAll(prompt)) cut = m.index! + m[0].length
+  const tail = cut >= 0 ? text.slice(cut) : text.split('\n').filter(l => l.trim()).slice(-3).join('\n')
+  const said = tail.split('\n').map(l => l.trim()).filter(l => l && !/^Pane is dead/i.test(l)).join(' ').replace(/\s+/g, ' ').trim()
+  return said ? said.slice(0, 300) : undefined
 }
 
 export const stripLoginAnsi = (s: string) => s.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\r/g, '')
@@ -82,10 +105,14 @@ export interface LoginOptions {
   overallTimeoutMs?: number
   /** After a pasted code, how long the CLI may be gone with no account bound before it is a failure. */
   bindGraceMs?: number
+  /** After a pasted code, how long the CLI may stay alive with no account bound before it is a failure. */
+  submitTimeoutMs?: number
+  /** Where a failed sign-in's (masked) CLI screen is recorded. */
+  log?: (line: string) => void
   now?: () => number
 }
 /** The controller holds only public link/device metadata. Pasted codes are written once and discarded. */
-export async function startAccountLogin(req: LoginRequest, onFailure: (reason: LoginError) => Promise<void>, opts: LoginOptions = {}): Promise<LoginHandle> {
+export async function startAccountLogin(req: LoginRequest, onFailure: (reason: LoginError, detail?: string) => Promise<void>, opts: LoginOptions = {}): Promise<LoginHandle> {
   const proc = await (opts.launch ?? launchLoginProcess)(req).catch(() => { throw new LoginFailure('login_unavailable') })
   let info: LoginInfo | undefined, stopped = false, submitted = false, hasSubmitted = false, buffer = ''
   let resolveReady!: (info: LoginInfo) => void, rejectReady!: (e: LoginFailure) => void
@@ -96,15 +123,21 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
   const deadline = now() + (opts.overallTimeoutMs ?? 900_000)
   let linkAt: number | undefined
   let invalidCount = 0, invalidAtSubmit = 0, promptCount = 0, promptsAtSubmit = 0
+  // The last screen after a code, MASKED: never the code itself. Read when the attempt fails.
+  let lastScreen = '', submitTimer: ReturnType<typeof setTimeout> | undefined
+  const secrets: string[] = []
+  const log = opts.log ?? loginLog
   const stop = async (failure?: LoginError) => {
     if (stopped) return
-    stopped = true; buffer = ''; clearTimeout(readyTimer); clearTimeout(expiryTimer)
+    stopped = true; buffer = ''; secrets.length = 0; clearTimeout(readyTimer); clearTimeout(expiryTimer); clearTimeout(submitTimer)
     try { await proc.stop() } catch { stopped = false; throw new LoginFailure('login_failed') }
     if (!failure) rejectReady(new LoginFailure('login_failed'))
   }
-  const fail = async (reason: LoginError) => {
+  const fail = async (reason: LoginError, why?: string) => {
     if (stopped) return
-    try { await stop(reason); await onFailure(reason) } finally { rejectReady(new LoginFailure(reason)) }
+    const detail = hasSubmitted ? loginScreenSaid(lastScreen, secrets) : undefined
+    if (hasSubmitted) log(`[account-login] ${req.harness} sign-in ${why ?? reason}; the CLI screen said: ${detail ?? '(nothing)'}`)
+    try { await stop(reason); await onFailure(reason, detail) } finally { rejectReady(new LoginFailure(reason, detail)) }
   }
   const readyTimer = setTimeout(() => { void fail('login_timeout').catch(() => {}) }, opts.readyTimeoutMs ?? 30_000)
   let expiryTimer = setTimeout(() => { void fail('login_timeout').catch(() => {}) }, opts.overallTimeoutMs ?? 900_000)
@@ -118,6 +151,7 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
         // metadata, never a pasted code's echo or raw diagnostics between reads.
         if (!hasSubmitted) buffer = (proc.snapshot ? chunk : buffer + chunk).slice(-65536)
         const output = hasSubmitted ? chunk : buffer
+        if (hasSubmitted) lastScreen = maskLoginText(chunk, secrets)
         const text = stripLoginAnsi(output)
         invalidCount = (text.match(/invalid_grant|invalid (?:authorization )?code|(?:authorization |authentication )?code (?:is |was )?(?:invalid|expired)|authentication failed/gi) ?? []).length
         promptCount = (text.match(/Paste code here|Enter the authorization code/gi) ?? []).length
@@ -138,12 +172,13 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
         }
       }
       const exit = await proc.exited
-      if (!stopped && (exit !== 0 || !info)) await fail('login_failed')
+      if (!stopped && (exit !== 0 || !info)) await fail('login_failed', `ended with status ${exit}`)
       // A successful CLI exit is not proof of identity. Root polling must still bind the account —
       // but not forever: a CLI that ended after the code and left no login behind is a failure the
       // screen must SAY (the binding stops this handle first, which makes `fail` a no-op).
       else if (!stopped && hasSubmitted) {
-        const grace = setTimeout(() => { void fail('login_failed').catch(() => {}) }, opts.bindGraceMs ?? 60_000)
+        clearTimeout(submitTimer)
+        const grace = setTimeout(() => { void fail('login_failed', 'ended with no login saved').catch(() => {}) }, opts.bindGraceMs ?? 30_000)
         grace.unref?.()
       }
     } catch { await fail('login_failed').catch(() => {}) }
@@ -154,11 +189,45 @@ export async function startAccountLogin(req: LoginRequest, onFailure: (reason: L
       if (stopped || !info || info.kind !== 'paste' || submitted) throw new LoginFailure('login_failed')
       if (typeof code !== 'string' || !code.trim() || code.length > 8192 || /[\x00-\x20\x7f]/.test(code.trim())) throw new LoginFailure('invalid_code')
       submitted = true; hasSubmitted = true; invalidAtSubmit = invalidCount; promptsAtSubmit = promptCount; buffer = ''; info = { ...info, error: undefined }
-      try { await proc.write(code.trim()) } catch { await fail('login_failed'); throw new LoginFailure('login_failed') }
+      secrets.push(code.trim(), ...code.trim().split('#').filter(p => p.length >= 4))
+      // A CLI that stays alive after the code without a login bound must not leave the screen
+      // "waiting" forever: past this, the attempt fails with what the CLI is showing.
+      clearTimeout(submitTimer)
+      submitTimer = setTimeout(() => { void fail('login_failed', 'still waiting after the code').catch(() => {}) }, opts.submitTimeoutMs ?? 30_000)
+      submitTimer.unref?.()
+      try { await proc.write(code.trim()) } catch { await fail('login_failed', 'could not type the code'); throw new LoginFailure('login_failed') }
     },
   }
 }
 
+/** PURE. `#{pane_dead} #{pane_dead_status}` -> the exit status of a dead pane, or null while alive. */
+export function parsePaneDead(out: string): number | null {
+  const [dead, status] = out.trim().split(/\s+/)
+  if (dead !== '1') return null
+  const n = Number(status)
+  return Number.isInteger(n) ? n : 1
+}
+
+export interface PasteTarget { paste: () => Promise<void>; enter: () => Promise<void>; screen: () => Promise<string> }
+/**
+ * Paste, WAIT, then Enter — never in one burst. A TUI reads a fast burst as one paste and can take
+ * the Enter inside it as text, leaving the code in the field. If the screen has not moved after the
+ * Enter, press it once more: a second Enter on an emptied prompt does nothing, a missing one strands
+ * the code until somebody opens the terminal.
+ */
+export async function submitPasted(t: PasteTarget, opts: { settleMs?: number; confirmMs?: number; sleep?: (ms: number) => Promise<void> } = {}): Promise<void> {
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)))
+  await t.paste()
+  await sleep(opts.settleMs ?? 500)
+  const before = await t.screen().catch(() => '')
+  await t.enter()
+  await sleep(opts.confirmMs ?? 1500)
+  const after = await t.screen().catch(() => null)
+  if (after !== null && after === before) await t.enter()
+}
+
+/** The ONE log sink of this module. Callers pass only masked text (`maskLoginText`) or fixed facts. */
+const loginLog = (line: string) => console.warn(line)
 const quote = (s: string) => "'" + s.replace(/'/g, "'\\''") + "'"
 /** Only runtime executables enter PATH. In particular xdg-open/open/browser launchers are absent. */
 async function loginEnvironment(req: LoginRequest) {
@@ -209,16 +278,23 @@ export async function launchLoginProcess(req: LoginRequest): Promise<LoginProces
       // `env -i` also clears variables inherited from a long-lived tmux server.
       const command = ['/usr/bin/env', '-i', ...Object.entries(env).map(([k,v]) => `${k}=${v}`), executable, ...adapter.argv.slice(1)].map(quote).join(' ')
       await tmux(['new-session', '-d', '-s', name, '-x', '240', '-y', '80', '-c', req.root, command])
+      // Keep the pane after the CLI exits: its last words ("Login failed: …") and its exit status
+      // are the only account of why a sign-in did not finish.
+      await tmux(['set-option', '-t', name, 'remain-on-exit', 'on']).catch(() => {})
+      loginLog(`[account-login] ${req.harness} sign-in runs in tmux -L ${SHELL_SOCKET} session ${name}`)
     } catch { await clean(); throw new LoginFailure('login_unavailable') }
+    const capture = () => tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-100'])
     return {
       exited, snapshot: true,
       async read() {
         while (!ended) {
           try {
+            const dead = parsePaneDead(await tmux(['display-message', '-p', '-t', name, '#{pane_dead} #{pane_dead_status}']))
             // -J rejoins soft-wrapped authorization URLs. Nothing is written to disk.
-            const out = await tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-100'])
+            const out = await capture()
             const digest = new Bun.CryptoHasher('sha256').update(out).digest('hex')
             if (digest !== last) { last = digest; return out }
+            if (dead !== null) { ended = true; resolveExit(dead); return null }
           } catch { ended = true; resolveExit(0); return null }
           await new Promise<void>(r => { const t = setTimeout(r, 200); wake = () => { clearTimeout(t); r() } })
         }
@@ -229,8 +305,11 @@ export async function launchLoginProcess(req: LoginRequest): Promise<LoginProces
         const buffer = `login-${req.pendingId}`
         await tmux(['load-buffer', '-b', buffer, '-'], code)
         try {
-          await tmux(['paste-buffer', '-d', '-r', '-b', buffer, '-t', name])
-          await tmux(['send-keys', '-t', name, 'Enter'])
+          await submitPasted({
+            paste: () => tmux(['paste-buffer', '-d', '-r', '-b', buffer, '-t', name]).then(() => {}),
+            enter: () => tmux(['send-keys', '-t', name, 'C-m']).then(() => {}),
+            screen: capture,
+          })
         } finally { await tmux(['delete-buffer', '-b', buffer]).catch(() => {}) }
       },
       async stop() {

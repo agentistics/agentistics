@@ -127,6 +127,8 @@ export interface RootRow {
   label?: string
   plan?: string
   error?: LoginError
+  /** What the assistant's CLI said when the attempt failed after a code — masked, no code, no link. */
+  detail?: string
   login?: LoginInfo
   /**
    * A pending folder with no sign-in process behind it in THIS server (it restarted, or the attempt
@@ -304,17 +306,17 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     return { ok: true, pendingId, root, env: rootEnv(harness, root), linked }
   }
 
-  async function discardPendingUnlocked(harness: HarnessId, pendingId: string, root: string, error: LoginError) {
+  async function discardPendingUnlocked(harness: HarnessId, pendingId: string, root: string, error: LoginError, detail?: string) {
     // A timeout racing a successful bind must never remove a bound account's credentials.
     if ((await listAccounts()).accounts.some(a => a.root && resolve(a.root) === resolve(root))) return
-    failures.set(pendingId, { harness, pendingId, root, status: 'failed', error, failedAt: Date.now() })
+    failures.set(pendingId, { harness, pendingId, root, status: 'failed', error, ...(detail ? { detail } : {}), failedAt: Date.now() })
     logins.delete(pendingId)
     if (isRootPath(root) && !(await hasSymlinkPart(root))) await rm(root, { recursive: true, force: true })
   }
 
   async function startLogin(harness: HarnessId, pendingId: string, root: string, signal?: AbortSignal): Promise<LoginInfo> {
     const handle = await login({ harness, pendingId, root, env: rootEnv(harness, root) },
-      reason => serialized(() => discardPendingUnlocked(harness, pendingId, root, reason)), deps.loginOptions)
+      (reason, detail) => serialized(() => discardPendingUnlocked(harness, pendingId, root, reason, detail)), deps.loginOptions)
     logins.set(pendingId, handle)
     if (signal?.aborted) await handle.stop()
     try { return await handle.ready } catch (error) { await handle.stop(); logins.delete(pendingId); throw error }
