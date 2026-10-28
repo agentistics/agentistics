@@ -137,7 +137,14 @@ export async function installHarness(
       if (event.message) onProgress?.(event.message)
     }
   }
-  return { ok: false, code: 'failed' }
+  // The stream ended with neither `done` nor `error`: the CONNECTION dropped, not the installer —
+  // which may well still be running. Saying "check your internet" here blamed the wrong thing.
+  return {
+    ok: false, code: 'failed',
+    error: (opts.lang ?? 'pt') === 'pt'
+      ? 'A conexão com o agentistics caiu durante a instalação, que pode ter continuado. Feche, aguarde um pouco e confira se o assistente aparece; se não, tente de novo (detalhes em ~/.agentistics/harness-install.log).'
+      : 'The connection to agentistics dropped during the install, which may have kept going. Close, wait a moment and check whether the assistant shows up; if not, try again (details in ~/.agentistics/harness-install.log).',
+  }
 }
 
 /** "Entrar": starts the harness (its own login prompt) in an ordinary session; resolves to its id. */

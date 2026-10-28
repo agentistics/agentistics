@@ -1,24 +1,36 @@
 import { appendFile, access, constants } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { HarnessId } from '@agentistics/core'
+import { redactSecrets, type HarnessId } from '@agentistics/core'
 import { getChatDriver } from '../chat-drivers'
 import { forgetHarnessVersion } from './harness-version'
 import { resetHarnessAvailability } from './harness-available'
 import { userSearchPath } from './user-path'
 import {
-  cleanInstallLine, HARNESS_INSTALLERS, planHarnessInstall, planNodeInstall, parseHarnessVersion,
+  cleanInstallLine, HARNESS_INSTALLERS, installFailureDetail, installSearchPath, planHarnessInstall, planNodeInstall, parseHarnessVersion,
   type HarnessInstallFacts, type HarnessInstallPlan,
 } from './harness-install-plan'
 
 type Harness = Extract<HarnessId, 'claude' | 'codex' | 'gemini' | 'copilot'>
 type Event = { type: 'progress' | 'done' | 'error'; message: string; version?: string }
-export type Runner = (argv: string[], onLine: (line: string) => void, timeoutMs: number) => Promise<number>
+export type Runner = (argv: string[], onLine: (line: string, stream?: 'stdout' | 'stderr') => void, timeoutMs: number) => Promise<number>
 export interface InstallDeps {
   runner: Runner
   /** Reads the machine facts the plan depends on. Injected so tests never look at the real PATH. */
   facts: () => Promise<HarnessInstallFacts>
+  /** SSE comment interval. Injected so a test can watch one without waiting 15 s. */
+  keepaliveMs?: number
 }
+
+/**
+ * A comment line on the install stream while the installer is silent. `install.sh` downloads the
+ * Claude Code binary with `curl -fsSL` — NO output for as long as the download takes — and
+ * `Bun.serve`'s `idleTimeout` (60 s) closes a response that sends nothing for that long. On a
+ * modest connection the stream was cut mid-download, the browser's read failed, and the dialog fell
+ * back to "check your internet" with the route's own "Installing…" as the only line (reported on
+ * macOS, 2.159.3). An SSE comment (`: …`) is ignored by the client and keeps the socket alive.
+ */
+export const INSTALL_KEEPALIVE_MS = 15_000
 
 const LOG = join(homedir(), '.agentistics', 'harness-install.log')
 let busy = false
@@ -37,7 +49,7 @@ async function npmPrefixWritable(env: Record<string, string | undefined>): Promi
 }
 
 export function installEnv(): Record<string, string | undefined> {
-  return { ...process.env, PATH: userSearchPath() }
+  return { ...process.env, PATH: installSearchPath(userSearchPath()) }
 }
 
 async function realFacts(): Promise<HarnessInstallFacts> {
@@ -57,9 +69,9 @@ export async function harnessInstallPlan(id: Harness, input?: HarnessInstallFact
   return planHarnessInstall(id, input ?? await realFacts())
 }
 
-async function defaultRunner(argv: string[], onLine: (line: string) => void, timeoutMs: number): Promise<number> {
+export async function defaultRunner(argv: string[], onLine: (line: string, stream?: 'stdout' | 'stderr') => void, timeoutMs: number): Promise<number> {
   const proc = Bun.spawn(argv, { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore', env: installEnv() })
-  const read = async (stream: ReadableStream<Uint8Array> | null) => {
+  const read = async (stream: ReadableStream<Uint8Array> | null, tag: 'stdout' | 'stderr') => {
     if (!stream) return
     const reader = stream.getReader()
     const decoder = new TextDecoder()
@@ -70,26 +82,30 @@ async function defaultRunner(argv: string[], onLine: (line: string) => void, tim
       pending += decoder.decode(next.value, { stream: true })
       const lines = pending.split(/\r?\n|\r/)
       pending = lines.pop() ?? ''
-      for (const line of lines) if (line.trim()) onLine(line)
+      for (const line of lines) if (line.trim()) onLine(line, tag)
     }
-    if (pending.trim()) onLine(pending)
+    if (pending.trim()) onLine(pending, tag)
   }
   const timer = setTimeout(() => proc.kill(), timeoutMs)
   try {
-    await Promise.all([read(proc.stdout), read(proc.stderr)])
+    await Promise.all([read(proc.stdout, 'stdout'), read(proc.stderr, 'stderr')])
     return await proc.exited
   } finally {
     clearTimeout(timer)
   }
 }
 
-function sse(events: AsyncGenerator<Event>): ReadableStream<Uint8Array> {
+function sse(events: AsyncGenerator<Event>, keepaliveMs: number): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
+  let timer: ReturnType<typeof setInterval> | null = null
+  const stop = () => { if (timer !== null) { clearInterval(timer); timer = null } }
   return new ReadableStream({
     async start(controller) {
+      timer = setInterval(() => { try { controller.enqueue(encoder.encode(': keepalive\n\n')) } catch { stop() } }, keepaliveMs)
       try { for await (const event of events) controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`)) }
-      finally { controller.close() }
+      finally { stop(); controller.close() }
     },
+    cancel() { stop() },
   })
 }
 
@@ -113,7 +129,7 @@ export async function handleHarnessInstallRoute(
 ): Promise<Response> {
   const resolved: InstallDeps = typeof deps === 'function'
     ? { runner: deps, facts: realFacts }
-    : { runner: deps.runner ?? defaultRunner, facts: deps.facts ?? realFacts }
+    : { runner: deps.runner ?? defaultRunner, facts: deps.facts ?? realFacts, keepaliveMs: deps.keepaliveMs }
   const { runner } = resolved
   const driver = Object.hasOwn(HARNESS_INSTALLERS, id) ? getChatDriver(id as Harness) : null
   if (!driver) return json(404, { error: 'unknown_harness' })
@@ -125,7 +141,8 @@ export async function handleHarnessInstallRoute(
   let facts: HarnessInstallFacts
   let plan: HarnessInstallPlan
   const wantsNode = body.installNode === true
-  const say = SAY[body.lang === 'en' ? 'en' : 'pt']
+  const lang = body.lang === 'en' ? 'en' : 'pt'
+  const say = SAY[lang]
   try {
     facts = await resolved.facts()
     plan = planHarnessInstall(id as Harness, facts)
@@ -139,39 +156,52 @@ export async function handleHarnessInstallRoute(
   }
 
   async function* events(): AsyncGenerator<Event> {
-    const log = async (message: string) => { await appendFile(LOG, `${new Date().toISOString()} ${id} ${operation} ${message}\n`).catch(() => {}) }
+    const log = async (message: string) => { await appendFile(LOG, `${new Date().toISOString()} ${id} ${operation} ${redactSecrets(message)}\n`).catch(() => {}) }
     // Lines arrive from a callback; the generator drains them as they come, so the modal moves
     // while the installer runs instead of after it.
     const queue: string[] = []
     let wake: (() => void) | null = null
-    const push = (raw: string) => {
+    // The last lines the installer wrote to stderr: what a failure is explained with.
+    let stderrTail: string[] = []
+    let spawnError: string | undefined
+    const push = (raw: string, stream?: 'stdout' | 'stderr') => {
       const line = cleanInstallLine(raw)
       if (!line) return
+      if (stream === 'stderr') stderrTail = [...stderrTail, line].slice(-3)
       void log(line); queue.push(line); wake?.()
     }
     async function* run(argv: string[], timeoutMs: number): AsyncGenerator<Event, number> {
       let code: number | null = null
-      const done = runner(argv, push, timeoutMs).then(c => { code = c; wake?.() }, () => { code = 1; wake?.() })
+      stderrTail = []; spawnError = undefined
+      // A runner that THROWS (spawn failed: no such executable, a PATH without /bin) is a failure
+      // with a reason, never a silent `1` — that swallow is how the macOS report showed nothing.
+      const done = runner(argv, push, timeoutMs).then(
+        c => { code = c; wake?.() },
+        (err: unknown) => { spawnError = err instanceof Error ? err.message : String(err); code = 1; wake?.() },
+      )
       while (code === null || queue.length > 0) {
         const next = queue.shift()
         if (next !== undefined) { yield { type: 'progress', message: next }; continue }
         await new Promise<void>(resolve => { wake = resolve; if (code !== null || queue.length > 0) resolve() })
       }
       await done
+      await log(spawnError ? `spawn failed: ${cleanInstallLine(spawnError)}` : `exit code ${code}`)
       return code!
     }
+    const failed = (base: string, code: number) =>
+      ({ type: 'error' as const, message: `${base} ${installFailureDetail({ code, spawnError, stderrTail }, lang)}` })
     try {
       await log('started')
       let current = plan
       if (plan.reason === 'node-required') {
         yield { type: 'progress', message: say.node }
         const code = yield* run(planNodeInstall(facts).command!, 10 * 60_000)
-        if (code !== 0) { yield { type: 'error', message: say.nodeFail }; return }
+        if (code !== 0) { yield failed(say.nodeFail, code); return }
         current = planHarnessInstall(id as Harness, { ...facts, nodePresent: true, npmGlobalWritable: false })
       }
       yield { type: 'progress', message: operation === 'update' ? say.updating : say.installing }
       const code = yield* run(current.command!, 10 * 60_000)
-      if (code !== 0) { yield { type: 'error', message: say.fail }; return }
+      if (code !== 0) { yield failed(say.fail, code); return }
       yield { type: 'progress', message: say.verifying }
       let output = ''
       const verifyCode = await runner(current.verify, line => { output += `${line}\n` }, 30_000).catch(() => 1)
@@ -183,7 +213,7 @@ export async function handleHarnessInstallRoute(
       yield { type: 'done', message: say.done, version }
     } finally { busy = false }
   }
-  return new Response(sse(events()), { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } })
+  return new Response(sse(events(), resolved.keepaliveMs ?? INSTALL_KEEPALIVE_MS), { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } })
 }
 
 /** POST /api/fleet/harness-login — the harness's own login runs in an ordinary managed session. */
