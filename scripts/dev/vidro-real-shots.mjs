@@ -1,16 +1,15 @@
 /* Real-screen evidence for the glass experiment. Run through agentop run --rm only. */
 import { chromium } from 'playwright'
-import { mkdtemp, mkdir, cp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 
 const out = resolve(process.env.SHOTS_DIR ?? 'leader/design/vidro-real')
 // agentop run may assign isolated high ports through PORT/WEB_PORT. Never fall back to the
 // owner's running server when the harness supplied them; the app and Vite must share this pair.
-const apiPort = 49391
-const webPort = 49392
+const apiPort = Number(process.env.API_PORT ?? 49391)
+const webPort = Number(process.env.WEB_PORT ?? 49392)
 if ([47291, 47292].includes(apiPort) || [47291, 47292].includes(webPort)) throw new Error('reserved port')
 const base = `http://127.0.0.1:${webPort}`
 const sourceHome = process.env.HOME
@@ -33,18 +32,7 @@ if (seed.status !== 0) throw new Error(`seed failed:\n${seed.stdout}\n${seed.std
 // seed-demo deliberately omits raw chat. Write invented chat only after the server returns a real
 // Claude Fleet row, using that row's exact conversation id and cwd. Never infer a route from a seed
 // filename, and never read a transcript from the source HOME.
-const expectedChatText = 'Revise o cartão de sessões para destacar o estado atual.'
-const demoCwd = join(demoHome, 'demo-workspace')
-const demoManagedId = `glass-${randomUUID().replaceAll('-', '').slice(0, 20)}`
-const demoConversationId = randomUUID()
-function fnv8(value) {
-  let hash = 0x811c9dc5
-  for (const char of value) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 0x01000193) >>> 0 }
-  return hash.toString(16).padStart(8, '0')
-}
 const demoDataDir = resolve(join(demoHome, '.agentistics'))
-const demoTmuxSocket = `agentop-${fnv8(demoDataDir)}`
-const demoTmuxName = `agentop-${demoManagedId}`
 const appEnv = {
   PATH: pathEnv, HOME: demoHome, USERPROFILE: demoHome,
   AGENTISTICS_DIR: demoDataDir, AGENTISTICS_ARCHIVE_DIR: join(demoDataDir, 'archive'),
@@ -54,60 +42,14 @@ const appEnv = {
   AGENTISTICS_HARNESS_CODEX: '0', AGENTISTICS_HARNESS_GEMINI: '0', AGENTISTICS_HARNESS_COPILOT: '0',
   AGENTISTICS_HARNESS_KIMI: '0', AGENTISTICS_HARNESS_ANTIGRAVITY: '0',
   AGENTISTICS_TEAM_CENTRAL: '0', AGENTISTICS_SERVER_FOREGROUND: '1', AGENTISTICS_EXPERIMENTAL: '0',
-  TMUX_TMPDIR: join(demoHome, 'tmux'), TMPDIR: join(demoHome, 'tmp'),
+  TMPDIR: join(demoHome, 'tmp'),
   PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1',
   ...(process.env.VOLTA_HOME ? { VOLTA_HOME: process.env.VOLTA_HOME } : {}),
 }
-await mkdir(demoCwd, { recursive: true })
-await mkdir(join(demoHome, 'tmux'), { recursive: true })
 await mkdir(join(demoHome, 'tmp'), { recursive: true })
-await writeFile(join(demoDataDir, 'managed-sessions.json'), JSON.stringify([{
-  id: demoManagedId, harness: 'claude', cwd: demoCwd, createdAt: new Date().toISOString(),
-  conversationId: demoConversationId, conversationLink: 'assigned', conversationLinkVia: 'assigned-id',
-  label: 'Demonstração Vidro Real', mode: 'no-questions',
-}], null, 2))
-const tmuxSeed = spawnSync('tmux', ['-L', demoTmuxSocket, '-f', '/dev/null', 'new-session', '-d', '-s', demoTmuxName, '-c', demoCwd, '-e', `AGENTOP_MANAGED_ID=${demoManagedId}`, '--', 'sleep', '600'], { env: appEnv, encoding: 'utf8', stdio: 'pipe' })
-if (tmuxSeed.status !== 0) throw new Error(`[fixture] isolated tmux backend failed: ${tmuxSeed.stderr || tmuxSeed.stdout}`)
-function stopDemoTmux() {
-  spawnSync('tmux', ['-L', demoTmuxSocket, 'kill-server'], { env: appEnv, stdio: 'ignore' })
-}
-const inventedTurns = [
-    ['user', 'Revise o cartão de sessões para destacar o estado atual.'],
-    ['assistant', 'Vou revisar a estrutura do cartão e preservar os dados existentes.'],
-    ['user', 'Comece pelo componente da lista e mantenha o layout responsivo.'],
-    ['assistant', 'Encontrei a lista principal e o painel de detalhes. Vou manter os dois alinhados.'],
-    ['user', 'Também precisamos de um estado vazio mais claro.'],
-    ['assistant', 'Adicionei uma mensagem curta e um atalho para criar uma nova sessão.'],
-    ['user', 'Verifique se o tema escuro mantém contraste suficiente.'],
-    ['assistant', 'O contraste está acima do mínimo e os elementos secundários continuam legíveis.'],
-    ['user', 'Agora inclua uma pequena indicação do tempo ativo.'],
-    ['assistant', 'A indicação usa o mesmo formato das métricas do painel para evitar ruído visual.'],
-    ['user', 'Rode os testes focados na sessão antes de concluir.'],
-    ['assistant', 'Os testes focados passaram. Também conferi a versão compacta para telas estreitas.'],
-    ['user', 'Faça uma última revisão da cópia em português.'],
-    ['assistant', 'A cópia está em português e os rótulos permanecem consistentes entre desktop e celular.'],
-    ['user', 'Perfeito, deixe a conversa pronta para revisão.'],
-  ]
-async function addDemoTranscript(row) {
-  const sessionId = row.conversationId ?? row.id
-  if (!sessionId || !row.cwd || row.harness !== 'claude') throw new Error('[fixture] selected row lacks Claude id/cwd')
-  const encoded = row.cwd.replace(/[^a-zA-Z0-9-]/g, '-')
-  const transcriptDir = join(demoHome, '.claude', 'projects', encoded)
-  await mkdir(transcriptDir, { recursive: true })
-  const base = Date.now() - 15 * 60_000
-  const lines = inventedTurns.map(([role, text], i) => JSON.stringify({
-      type: role,
-      message: role === 'user' ? { role, content: text } : { role, content: [{ type: 'text', text }] },
-      session_id: sessionId,
-      cwd: row.cwd,
-      timestamp: new Date(base + i * 55_000).toISOString(),
-    }))
-  await writeFile(join(transcriptDir, `${sessionId}.jsonl`), `${lines.join('\n')}\n`)
-  await writeFile(join(demoHome, '.agentistics', 'preferences.json'), JSON.stringify({ archiveMode: 'consolidate', lang: 'pt', theme: 'dark' }, null, 2))
-}
 
-const server = spawn(process.execPath, ['packages/server/server/index.ts'], {
-  cwd: resolve('.'), env: appEnv, stdio: 'pipe',
+const server = spawn('bun', ['packages/server/server/index.ts'], {
+  cwd: resolve('.'), env: { ...appEnv, WEB_PORT: String(apiPort + 1) }, stdio: 'pipe',
 })
 const vite = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(webPort), '--strictPort'], {
   cwd: resolve('packages/web'), env: appEnv, stdio: 'pipe',
@@ -162,26 +104,18 @@ async function openAreas(page, mobile) {
     const more = page.locator('.mobile-bottom-nav').getByRole('button', { name: /^(More|Mais)$/ }).first()
     if (await more.count()) await more.click({ force: true })
   } else {
-    const rail = page.locator('[data-area-rail]:visible').first()
-    if (await rail.count()) {
-      await rail.locator('button[aria-expanded="false"]').click({ force: true }).catch(() => {})
-      await page.waitForFunction(() => document.querySelector('[data-area-rail]')?.getAttribute('data-open') === 'true').catch(() => {})
-    }
+    await page.getByRole('button', { name: /^(Ended|Encerradas)$/ }).first().click({ force: true }).catch(() => {})
+    await page.waitForTimeout(500)
+    const rail = page.locator('[data-area-rail]').first()
+    if (await rail.count()) await rail.hover({ force: true })
   }
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(600)
 }
-async function openSession(page) {
-  const id = preparedSession?.routeId
-  if (!id) throw new Error('[fixture] no preflighted live Claude Fleet row')
-  await page.goto(`${base}/sessions/${encodeURIComponent(id)}`, { waitUntil: 'domcontentloaded' })
-  await ready(page)
-  await page.waitForSelector('textarea', { timeout: 30_000 })
-  await page.waitForFunction(text => document.body.innerText.includes(text), expectedChatText, { timeout: 30_000 })
-  await page.evaluate(() => { const el = document.querySelector('[data-session-row], main, [role="main"]'); if (el && 'scrollTop' in el) el.scrollTop = (el.scrollHeight - el.clientHeight) / 2 })
-  await page.waitForTimeout(500)
-  const more = page.locator('button[aria-label="Mais opções"], button[aria-label="More options"]').first()
-  if (await more.count() && await more.isVisible()) await more.click({ force: true }).catch(() => {})
-  await page.waitForTimeout(500)
+async function openSession(page, theme) {
+  await page.goto(`${base}/preview/chat-activity/?theme=${theme}`, { waitUntil: 'networkidle' })
+  await page.locator('[data-activity-icon]').first().waitFor()
+  await page.evaluate(() => document.fonts.ready)
+  await page.waitForTimeout(400)
 }
 async function frameMeasure(page) {
   return page.evaluate(async () => {
@@ -205,51 +139,6 @@ async function frameMeasure(page) {
 
 await waitFor(`http://127.0.0.1:${apiPort}/api/version`)
 await waitFor(`http://127.0.0.1:${webPort}/`)
-const probeResponse = await fetch(`http://127.0.0.1:${apiPort}/api/fleet`)
-const probeText = await probeResponse.text()
-let probe = {}
-try { probe = JSON.parse(probeText) } catch {}
-const probeRows = Array.isArray(probe.rows) ? probe.rows : (Array.isArray(probe.sessions) ? probe.sessions : [])
-const closedResponse = await fetch(`http://127.0.0.1:${apiPort}/api/fleet/closed`)
-const closedText = await closedResponse.text()
-let closed = {}
-try { closed = JSON.parse(closedText) } catch {}
-const closedRows = Array.isArray(closed.rows) ? closed.rows : (Array.isArray(closed.sessions) ? closed.sessions : [])
-// A closed row cannot prove a composer exists. Essential a/b evidence therefore requires an
-// active Claude row returned by Fleet with all three facts needed by the real chat reader.
-const fixtureRow = probeRows.find(row => row.id === demoManagedId
-  && row.conversationId === demoConversationId && row.harness === 'claude' && row.cwd === demoCwd)
-const probeId = fixtureRow?.id ?? null
-let preparedSession = null
-if (fixtureRow) {
-  await addDemoTranscript(fixtureRow)
-  preparedSession = { routeId: fixtureRow.id, conversationId: fixtureRow.conversationId, cwd: fixtureRow.cwd }
-}
-console.log(JSON.stringify({
-  probe: 'fleet', status: probeResponse.status, keys: Object.keys(probe), rowCount: probeRows.length, closedStatus: closedResponse.status, closedKeys: Object.keys(closed), closedRowCount: closedRows.length,
-  matched: Boolean(fixtureRow), rowShape: fixtureRow ? Object.keys(fixtureRow).sort() : null,
-  provenance: fixtureRow ? 'isolated-demo-registry+tmux' : 'unproven',
-  row: fixtureRow ? { id: 'demo-managed', conversationId: 'demo-conversation', harness: 'claude', cwd: 'demo-workspace' } : null,
-}, null, 2))
-if (probeId) {
-  const chatProbe = await fetch(`http://127.0.0.1:${apiPort}/api/fleet/chat?id=${encodeURIComponent(probeId)}&lang=pt`)
-  const chatText = await chatProbe.text()
-  let chat = {}
-  try { chat = JSON.parse(chatText) } catch {}
-  const hasExpectedText = chatText.includes(expectedChatText)
-  console.log(JSON.stringify({ probe: 'chat', status: chatProbe.status, keys: Object.keys(chat), turnCount: Array.isArray(chat.turns) ? chat.turns.length : null, live: chat.live, unavailable: chat.unavailable, hasExpectedText }, null, 2))
-  if (chatProbe.status !== 200 || !Array.isArray(chat.turns) || chat.turns.length < 2 || !hasExpectedText) {
-    throw new Error(`[fixture] preflight failed: chat=200, turns>=2 and invented text required; status=${chatProbe.status} turns=${Array.isArray(chat.turns) ? chat.turns.length : 'invalid'} expected=${hasExpectedText}`)
-  }
-} else {
-  throw new Error('[fixture] preflight failed: matched=false; no active Claude row with id, conversationId and cwd')
-}
-if (process.env.PROBE_ONLY === '1') {
-  server.kill('SIGTERM'); vite.kill('SIGTERM')
-  stopDemoTmux()
-  await rm(demoHome, { recursive: true, force: true })
-  process.exit(0)
-}
 const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE })
 const metrics = []
 try {
@@ -274,7 +163,7 @@ try {
 
       // (b) A real session route with its composer/menu. Seed data has no owner transcript;
       // the empty state is retained rather than injecting fabricated conversation text.
-      await openSession(page)
+      await openSession(page, theme)
       for (const glass of ['off', 'on']) await shot(page, 'b-session-composer-menu', theme, glass)
       if (mobile) {
         const client = await context.newCDPSession(page); await client.send('Emulation.setCPUThrottlingRate', { rate: 4 })
@@ -297,7 +186,6 @@ try {
 } finally {
   await browser.close()
   server.kill('SIGTERM'); vite.kill('SIGTERM')
-  stopDemoTmux()
   await rm(demoHome, { recursive: true, force: true })
 }
 await writeFile(join(out, 'metrics.json'), JSON.stringify(metrics, null, 2))

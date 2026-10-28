@@ -1046,6 +1046,24 @@ button:focus-within .ag-row-pin,
   border-color: color-mix(in srgb, var(--border) 82%, transparent);
 }
 
+/* Area menu (opens on hover/focus of the rail) and portalled modals.  Modals are inline-styled
+   fixed overlays mounted straight under <body>; they carry no class, so the switch matches the
+   shape (fixed + inset 0) and the dialog is the overlay's first child. */
+[data-glass="on"] [data-area-rail][data-open="true"] {
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+[data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"] {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+[data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"] > div {
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+}
+
 /* Lightweight acrylic for repeated content surfaces. Do not blur these: session/task/account
    lists can contain hundreds of rows and should remain cheap on a throttled mobile CPU. */
 [data-glass="on"] .ag-stat-card,
