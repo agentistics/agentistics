@@ -55,8 +55,8 @@ import {
 import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
 import { BillingAccountList, type BillingRowView } from './AccountRow'
 import {
-  accountsNeedingPlan, billingRows, closeBefore, defaultStart, limitsForRow, planOptionsFor, matchDetectedPlan, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
-  orphanTimelines, unknownPeriod, upcomingPeriod, withScopePeriods, withoutOrphan, type BillingAccount, type OrphanTimeline, type SaveError,
+  accountsNeedingPlan, billingRows, closeBefore, defaultStart, limitsForRow, planOptionsFor, detectedPlanId, planDraftWrites, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
+  orphanTimelines, unknownPeriod, upcomingPeriod, withScopePeriods, withoutOrphan, type BillingAccount, type BillingRow, type OrphanTimeline, type SaveError,
 } from './accountBilling'
 import { createAccountMutator } from './accountMutations'
 import AddAccount from './AddAccount'
@@ -170,6 +170,13 @@ export function BillingAccountsPanel() {
     if (accountsLoaded) billingNotices.prune(new Set(needPlan.map(a => accountLabelKey(a.harness, a.id))))
   }, [accountsLoaded, needPlan])
 
+  const [detections, setDetections] = useState<BillingDetection[]>([])
+  /** The plan the editor would be prefilled with, named — so a row says "detected, confirm", never a bare "No plan". */
+  const detectedName = useCallback((r: BillingRow): string | null => {
+    const entry = r.signedOut ? undefined : findPlan(detectedPlanId(r.harness, r.account, detections))
+    return entry ? catalogPlanName(entry, pt ? 'pt' : 'en') : null
+  }, [detections, pt])
+
   const rows: BillingRowView[] = useMemo(() => billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt, accountLabels).map(r => {
     const periods = scopePeriods(ctx.billing, r.scope)
     const cur = splitTimeline(sortPeriods(periods), today()).current
@@ -178,10 +185,11 @@ export function BillingAccountsPanel() {
       ...r,
       plan: cur ? { name: periodName(cur, ctx.lang) || modeLabel(cur.mode, pt ? 'pt' : 'en'), price: priceText(cur, pt), mode: cur.mode } : null,
       starts: next ? fmtDay(next.from) : null,
+      detected: cur || next ? null : detectedName(r),
       problem: validateTimeline({ periods }).size > 0,
       limits: limitsForRow(planLimits, r),
     }
-  }), [accounts, ctx.billing, harnesses, pt, planLimits, accountLabels])
+  }), [accounts, ctx.billing, harnesses, pt, planLimits, accountLabels, detectedName])
 
   const orphans = useMemo(() => orphanTimelines(ctx.billing, rows), [ctx.billing, rows])
   /** An orphan in words: whose it was, and the plan it holds (in force, else the latest). */
@@ -223,7 +231,6 @@ export function BillingAccountsPanel() {
   const [confirmOrphan, setConfirmOrphan] = useState<OrphanTimeline | null>(null)
   const [confirmRemoveAccount, setConfirmRemoveAccount] = useState<BillingAccount | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
-  const [detections, setDetections] = useState<BillingDetection[]>([])
   const [planPrices, setPlanPrices] = useState<ScrapedPlanPrice[]>([])
   /**
    * "I changed plan", folded into the plan picker: choosing ANOTHER plan while the one in force is
@@ -278,7 +285,7 @@ export function BillingAccountsPanel() {
     if (next) { openDraft(draftFromPeriod(next), r.account?.nickname ?? ''); return }
     // Nothing in force: pre-select what the assistant reported, else what detection found.
     const detection = detections.find(d => d.harness === r.harness && d.source !== 'none' && d.mode !== 'unknown')
-    const planId = (r.account ? matchDetectedPlan(r.harness, r.account.plan) : '') || detection?.planId || ''
+    const planId = detectedPlanId(r.harness, r.account, detections)
     const entry = planId ? findPlan(planId) : undefined
     const start = { ...emptyDraft(), from: defaultStart(own, today()), ongoing: true }
     openDraft(entry ? applyPlan(start, withLive(entry)) : start, r.account?.nickname ?? '')
@@ -349,7 +356,7 @@ export function BillingAccountsPanel() {
 
   const save = async () => {
     if (!draft || !row) return
-    const planChanged = JSON.stringify(draft) !== JSON.stringify((JSON.parse(origin || '[null]') as [PeriodDraft | null])[0])
+    const planChanged = planDraftWrites(draft, (JSON.parse(origin || '[null]') as [PeriodDraft | null])[0])
     // The button is never disabled: pressing it reveals what is missing instead.
     if (planChanged && draftErrors.length > 0) { setShowErrors(true); return }
     if (!(await saveNickname())) return
