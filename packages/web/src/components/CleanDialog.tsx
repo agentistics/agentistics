@@ -29,7 +29,7 @@ export function CleanScanView({ scan, lang }: { scan: CleanScanState | null; lan
         <time className="clean-muted">{time(line.at, lang)}</time><span className="clean-log-name" title={line.name}>{line.state === 'queued' ? (pt ? 'na fila: ' : 'queued: ') : line.state === 'running' ? (pt ? 'medindo ' : 'measuring ') : ''}{line.name}</span>
         {line.state === 'done' && (line.bytes !== undefined || line.unknown) && <span className="clean-muted">{cleanLogSize(line, lang)}</span>}
       </div>)}
-      {!scan?.log.length && <span className="clean-muted">{pt ? 'Localizando as pastas dos seus projetos' : 'Finding your project folders'}</span>}
+      {!scan?.log?.length && <span className="clean-muted">{pt ? 'Localizando as pastas dos seus projetos' : 'Finding your project folders'}</span>}
     </div></div>
   </div>
 }
