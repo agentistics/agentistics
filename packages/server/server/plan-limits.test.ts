@@ -229,16 +229,16 @@ test('waiting fleet payload has no live sessions and uses plan burn alone for sl
   expect(body.budgets[0]?.burnPctPerHour).toBe(2)
   expect(body.freeSlotsByHarness.codex).toBe(2)
 
-  const measured = [{ id: 'measured', harness: 'codex' as const, model: 'unknown', burnPctPerHour: 2 }]
+  const measured = [{ id: 'measured', harness: 'codex' as const, account: 'default', model: 'unknown', burnPctPerHour: 2 }]
   const baseline = await planLimitsPayload(undefined, now, measured)
   const withUnbilled = await planLimitsPayload(undefined, now, [
-    ...measured, { id: 'unbilled', harness: 'codex', model: 'unknown', burnPctPerHour: 0 },
+    ...measured, { id: 'unbilled', harness: 'codex', account: 'default', model: 'unknown', burnPctPerHour: 0 },
   ])
   expect(withUnbilled.freeSlotsByHarness).toEqual(baseline.freeSlotsByHarness)
   expect(withUnbilled.budgets[0]?.liveSessions).toEqual(baseline.budgets[0]?.liveSessions)
   expect(withUnbilled.liveSessions.map(s => s.id)).toEqual(['measured', 'unbilled'])
   const onlyUnbilled = await planLimitsPayload(undefined, now, [
-    { id: 'unbilled', harness: 'codex', model: 'unknown', burnPctPerHour: 0 },
+    { id: 'unbilled', harness: 'codex', account: 'default', model: 'unknown', burnPctPerHour: 0 },
   ])
   expect(onlyUnbilled.freeSlotsByHarness).toEqual(body.freeSlotsByHarness)
 })
@@ -845,14 +845,17 @@ for (const harness of HARNESS_ORDER) {
       expect(byId.get('external')?.account).toBeUndefined()
       const body = await planLimitsPayload(undefined, now, live)
       expect(body.liveSessions.map(s => s.id)).toEqual(['path-visible', 'external'])
-      // An unattributed external session remains public, but cannot be assigned to a budget.
-      expect(body.budgets[0]!.liveSessions.map(s => s.id)).toEqual(['path-visible'])
-      expect(body.hiddenFromAgents[0]!.liveSessions.map(s => s.id)).toEqual(['linked-hidden', 'path-hidden'])
+      // An unattributed external session is charged conservatively to every budget of its harness
+      // (it may be running on any of them) and reported in `unassignedLive`.
+      expect(body.budgets[0]!.liveSessions.map(s => s.id)).toEqual(['path-visible', 'external'])
+      expect(body.budgets[0]!.unassignedLive).toBe(1)
+      expect(body.unassignedLive[harness]).toBe(1)
+      expect(body.hiddenFromAgents[0]!.liveSessions.map(s => s.id)).toEqual(['linked-hidden', 'path-hidden', 'external'])
       const out = JSON.stringify(planLimitsTool({ kind: 'spec-impl' }, body))
       for (const value of [hidden.id, 'linked-hidden', 'path-hidden', '@']) expect(out).not.toContain(value)
       // Direct payload callers also retain unknown sessions despite old hidden roots.
       const direct = await planLimitsPayload(undefined, now, [{ id: 'direct', harness, model: 'unknown', burnPctPerHour: 2 }])
-      expect(direct.budgets[0]!.liveSessions).toEqual([])
+      expect(direct.budgets[0]!.liveSessions.map(s => s.id)).toEqual(['direct'])
     })
   }
 
@@ -944,6 +947,35 @@ test('C2 LOW L2: an attributed session resolves its transcript once, not on ever
   expect(lookups).toBe(1)
   const live = await sampleLivePlanSessions([s], ['s'], 4000, {}, new Set(['s']))
   expect(live[0]!.account).toBe(account.id)
+})
+
+test('CF1: live sessions with no resolvable account still take slots in every budget of the harness', async () => {
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+  __setHarnessAccountsForTest(store)
+  const { account: a } = await store.bind(join(dir, 'r1'), { harness: 'codex', key: 'a', label: 'A' })
+  const { account: b } = await store.bind(join(dir, 'r2'), { harness: 'codex', key: 'b', label: 'B' })
+  const now = Date.parse('2026-11-10T20:00:00Z')
+  const hour = 3_600_000
+  const record = (account: string, used: number, at: number) => ingestPlanLimits({
+    harness: 'codex', account, plan: 'Plus',
+    windows: [
+      { kind: '5h', usedPct: used, resetsAt: now + 4 * hour },
+      { kind: 'week', usedPct: used, resetsAt: now + 20 * hour },
+    ], updatedAt: at, source: 'codex-rollout',
+  })
+  for (const acc of [a, b]) { await record(acc.id, 10, now - hour); await record(acc.id, 10.1, now) }
+  const none = await planLimitsPayload(undefined, now, [])
+  const live = [1, 2, 3].map(i => ({ id: `u${i}`, harness: 'codex' as const, model: 'unknown', burnPctPerHour: 0 }))
+  const body = await planLimitsPayload(undefined, now, live)
+  expect(body.unassignedLive.codex).toBe(3)
+  const rows = body.budgets.filter(r => r.harness === 'codex')
+  expect(rows.length).toBe(2)
+  for (const r of rows) {
+    expect(r.unassignedLive).toBe(3)
+    expect(r.liveSessions.map(s => s.id)).toEqual(['u1', 'u2', 'u3'])
+    const before = none.budgets.find(x => x.account === r.account)!
+    expect(r.freeSlots).toBeLessThanOrEqual(Math.max(0, before.freeSlots - 3))
+  }
 })
 
 test('C2 LOW L3: a default binding on a retired account yields to no guessed account', async () => {
