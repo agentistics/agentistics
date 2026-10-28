@@ -1023,6 +1023,77 @@ button:focus-within .ag-row-pin,
 .ag-menu-row:hover, .ag-menu-row:focus-visible { background: var(--bg-hover, rgba(127, 127, 127, 0.08)); }
 @media (prefers-reduced-motion: reduce) { [role="menu"][aria-label] { animation: none !important; } }
 
+/* ---------------------------------------------------------------------------
+   Experimental glass surfaces — real application surfaces, one switch.
+
+   The owner needs before/after captures of the same build.  The capture runner sets
+   `document.documentElement.dataset.glass` to `off` or `on`; keeping the switch on <html>
+   also covers portalled menus and dialogs that are mounted directly under <body>.  No component
+   has to invent its own preference, and a missing attribute keeps the current shipped look.
+
+   Glass is deliberately limited to surfaces where content is visible behind it.  Cards and
+   inputs get only the acrylic tint: blur on every card creates a large compositing cost on phones.
+*/
+[data-glass="on"] .ag-mobile-shell-header,
+[data-glass="on"] [data-session-tabs],
+[data-glass="on"] .mobile-bottom-nav,
+[data-glass="on"] [data-panel-rail],
+[data-glass="on"] [role="menu"][data-portalled-menu],
+[data-glass="on"] .ag-menu-row[role="menuitem"] {
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  border-color: color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+/* Lightweight acrylic for repeated content surfaces. Do not blur these: session/task/account
+   lists can contain hundreds of rows and should remain cheap on a throttled mobile CPU. */
+[data-glass="on"] .ag-stat-card,
+[data-glass="on"] .hl-card,
+[data-glass="on"] [data-session-row],
+[data-glass="on"] [data-account-row],
+[data-glass="on"] .ag-md-editor {
+  background: color-mix(in srgb, var(--bg-card) 88%, transparent) !important;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent);
+}
+
+/* The composer has a dedicated fade layer above. Disable it completely for the before capture,
+   and make reduced-transparency users safe even when an old browser ignores the media query. */
+[data-glass="off"] .ag-composer-ground::before {
+  top: 0;
+  background: var(--ag-composer-ground, var(--bg-base));
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ag-composer-ground::before { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-glass="on"] .ag-mobile-shell-header,
+  [data-glass="on"] [data-session-tabs],
+  [data-glass="on"] .mobile-bottom-nav,
+  [data-glass="on"] [data-panel-rail],
+  [data-glass="on"] [role="menu"][data-portalled-menu] {
+    background: var(--bg-surface) !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-glass="on"] .ag-mobile-shell-header,
+  [data-glass="on"] [data-session-tabs],
+  [data-glass="on"] .mobile-bottom-nav,
+  [data-glass="on"] [data-panel-rail],
+  [data-glass="on"] [role="menu"][data-portalled-menu] {
+    background: var(--bg-surface) !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
 /* The Shell X's indeterminate progress bar (`ShellCloseStatus.tsx`). */
 @keyframes ag-close-progress { 0% { left: -40%; } 100% { left: 100%; } }
 .ag-close-progress { animation: ag-close-progress 1.1s ease-in-out infinite; }
