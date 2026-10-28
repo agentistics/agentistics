@@ -25,18 +25,38 @@ export async function ensureArchiveModeChosen(): Promise<void> {
   process.stdout.write(`\n  ${D}archive mode set to ${mode}.${R}\n`)
 }
 
-export const SETUP_USAGE = `Usage: agentop setup
+/**
+ * The recommended first-run choices, applied without asking (the installer's path). Only fills in
+ * what the person never chose: an existing `archiveMode` — including an explicit `off` — is left
+ * alone, so a reinstall or update never overrides their configuration. A backup schedule is
+ * deliberately NOT part of it: an absent schedule reads as OFF (backup/schedule.ts).
+ */
+export async function applyRecommendedDefaults(): Promise<string> {
+  const prefs = await readPreferencesOrExit()
+  const current = resolveArchiveMode(prefs)
+  if (current !== undefined) return `archive mode already set to ${current} — left unchanged.`
+  await writePreferences({ archiveMode: 'consolidate' })
+  return 'archive mode set to consolidate (recommended).'
+}
+
+export const SETUP_USAGE = `Usage: agentop setup [--defaults]
 
 Interactive first-run wizard: history consent, start on boot, Claude Code hooks hint.
 Needs an interactive terminal.
 
 Options:
+  --defaults   Non-interactive: apply the recommended first-run choices (archive mode
+               'consolidate') only where you have not chosen yet, then exit. Used by install.sh.
   -h, --help   Show this help
 `
 
 export async function runSetup(args: string[] = []): Promise<number> {
   if (args.includes('--help') || args.includes('-h')) {
     process.stdout.write(SETUP_USAGE)
+    return 0
+  }
+  if (args.includes('--defaults')) {
+    process.stdout.write(`${await applyRecommendedDefaults()}\n`)
     return 0
   }
   if (!process.stdin.isTTY) {

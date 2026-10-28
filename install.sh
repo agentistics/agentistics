@@ -206,6 +206,98 @@ case ":${PATH}:" in
     ;;
 esac
 
+# --- Offer to start agentistics now, and on login/boot --------------------------------------
+# Under `curl | sh` stdin is this script, so answers come from the controlling terminal. With no
+# usable terminal (CI, Docker) nothing is asked and nothing is started; the env vars
+# AGENTOP_INSTALL_START / AGENTOP_INSTALL_AUTOSTART (yes|no) answer for automation.
+BIN="${INSTALL_DIR}/${BINARY}"
+TTY_DEV="${AGENTOP_INSTALL_TTY:-/dev/tty}"
+HAVE_TTY=0
+if [ -r "$TTY_DEV" ] && (: < "$TTY_DEV") 2>/dev/null; then
+  HAVE_TTY=1
+  exec 3< "$TTY_DEV"
+fi
+
+# ask "question" -> 0 for yes (Enter = yes), 1 for no.
+ask() {
+  printf '%s [Y/n] ' "$1"
+  ANSWER=""
+  read -r ANSWER <&3 || ANSWER=""
+  case "$ANSWER" in
+    n|N|no|NO|No) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# decide VAR "question": env var wins, else ask on the terminal, else "unset".
+decide() {
+  case "$1" in
+    yes|YES|y|1|true) return 0 ;;
+    no|NO|n|0|false) return 1 ;;
+  esac
+  if [ "$HAVE_TTY" -eq 1 ]; then
+    ask "$2"
+    return $?
+  fi
+  return 2
+}
+
+WANT_START=1
+WANT_BOOT=1
+decide "${AGENTOP_INSTALL_START:-}" "Start agentistics now?" && WANT_START=0 || WANT_START=$?
+if [ "$WANT_START" -eq 2 ] && [ "${AGENTOP_INSTALL_AUTOSTART:-}" = "yes" ]; then
+  WANT_START=0
+fi
+
+START_LOG="${HOME}/.agentistics/server.log"
+WEB_PORT="${AGENTOP_INSTALL_PORT:-47292}"
+STARTED=0
+
+start_in_background() {
+  if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:${WEB_PORT}/" 2>/dev/null; then
+    echo "agentistics is already running — not starting another."
+    STARTED=1
+    return 0
+  fi
+  mkdir -p "${HOME}/.agentistics"
+  nohup "$BIN" server > "$START_LOG" 2>&1 < /dev/null &
+  echo "agentistics started in the background (log: ${START_LOG}; it stops at reboot)."
+  STARTED=1
+}
+
+if [ "$WANT_START" -eq 0 ]; then
+  echo ""
+  "$BIN" setup --defaults || true
+  if [ "$IS_ROOT" -eq 1 ]; then
+    echo "Running as root: start-on-login is a per-user service, so it is not offered. Run the installer as your own user for that."
+    start_in_background
+  else
+    decide "${AGENTOP_INSTALL_AUTOSTART:-}" "Start agentistics automatically when you log in / boot?" && WANT_BOOT=0 || WANT_BOOT=$?
+    if [ "$WANT_BOOT" -eq 0 ]; then
+      if "$BIN" autostart server enable; then
+        STARTED=1
+      else
+        echo "Could not register start-on-login — starting it just this once instead."
+        start_in_background
+      fi
+    else
+      start_in_background
+    fi
+  fi
+  if [ "$STARTED" -eq 1 ]; then
+    echo ""
+    echo "Open http://localhost:${WEB_PORT} in your browser."
+    if [ "$OS" = "Darwin" ] && command -v open >/dev/null 2>&1; then
+      open "http://localhost:${WEB_PORT}" >/dev/null 2>&1 || true
+    fi
+  fi
+elif [ "$WANT_START" -eq 2 ]; then
+  echo ""
+  echo "No terminal to ask on, so nothing was started. To start it:"
+  echo "  ${BIN} setup --defaults          # recommended first-run settings"
+  echo "  ${BIN} autostart server enable   # start now and on every login/boot"
+fi
+
 echo ""
 echo "Usage:"
 echo "  ${BINARY} server       # web dashboard + daemon"
