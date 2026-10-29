@@ -19,7 +19,7 @@
  * - **Loading is lazy and happens once.** A process that never asks never loads one, and `bin/cli.ts`
  *   imports the slot for every command — so every heavy import sits behind a call.
  */
-import { closeAllEngineSockets } from './engine-sockets'
+import { closeAllEngineSockets, installSocketSessions } from './engine-sockets'
 import {
   ENGINE_API_VERSION,
   checkEngine,
@@ -41,6 +41,7 @@ import { hostEngineBoard } from './engine-board'
 import { hostDelegateMembers } from './engine-delegate'
 import { nativeVaultRefs } from '../vault/grants'
 import { flowHostOps } from '../flows/host-ops'
+import { createStructuredSessions } from './structured-handle'
 
 export type HostEngine = Engine<AgentisticsEvent>
 export type HostIntegrations = IntegrationRegistry<AgentisticsEvent>
@@ -271,6 +272,12 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
   const readers = await buildReuseSurface()
   const { fleetHub } = await import('./fleet-hub')
 
+  const structuredSessionsHost = createStructuredSessions({
+    backend: async () => (await import('../sessions')).resolveBackend(),
+    alive: async id => (await import('../sessions/input-web')).inputSessionLive(id),
+  })
+  installSocketSessions(structuredSessionsHost)
+
   let journal: import('../journal/types').Journal | null = null
   return {
     paths: {
@@ -337,6 +344,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
           : process.env.AGENTISTICS_INGEST === '1'
     ),
     flows: { ops: flowHostOps() },
+    // 1.17: the engine's own sessions here; a surface reaches ITS session through its socket (structured-handle.ts).
+    structuredSessions: structuredSessionsHost.engine,
     audit: e => {
       // 1.5: `vault.*` events go to the machine's own vault/audit.jsonl, never to Mongo.
       if (routeEngineVaultAudit(e)) return

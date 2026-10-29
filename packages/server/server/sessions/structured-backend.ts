@@ -572,6 +572,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     modesOf(id) { const l = structuredOnly(id); return l ? (l.s.modes ? [...l.s.modes()] : undefined) : base.modesOf?.(id) },
     async setMode(id, modeId) { const l = structuredOnly(id); return l ? (l.s.setMode?.(modeId) ?? false) : (base.setMode?.(id, modeId) ?? false) },
     async answer(id, a: StructuredAnswer) { const l = structuredOnly(id); return l ? l.s.answer(a) : (base.answer?.(id, a) ?? false) },
+    cancelTurn(id) { const l = structuredOnly(id); if (!l) return false; l.s.cancel(); return true },
     chatOf(id) {
       const l = structuredOnly(id)
       if (!l) return base.chatOf?.(id)
