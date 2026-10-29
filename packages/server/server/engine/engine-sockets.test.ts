@@ -7,7 +7,7 @@ import { hostGate, buildHostAllowlist } from '../host-allow'
 import { AUTH_PUBLIC } from '../index-routes'
 import {
   CLOSE, admit, closeAllEngineSockets, closeEngineSocket, engineSocketCount, onEngineSocketMessage, openEngineSocket,
-  planEngineUpgrade, resetEngineSocketsForTests, surfaceSockets, sweepEndedSessions, type EngineSocketState, type RawSocket,
+  planEngineUpgrade, resetEngineSocketsForTests, sweepEndedSessions, type EngineSocketState, type RawSocket,
 } from './engine-sockets'
 
 afterEach(() => resetEngineSocketsForTests())
@@ -99,17 +99,5 @@ describe('closing', () => {
     closeAllEngineSockets('engine-shutdown')
     expect(a.r.closed[0]![0]).toBe(CLOSE.going)
     expect(b.r.closed[0]![0]).toBe(CLOSE.going)
-  })
-})
-
-describe('surfaceSockets: which surfaces are mounted for a session', () => {
-  it('lists only open sockets that declared that session', () => {
-    const a = open('/api/engine/x/ws/a', { sessionId: 's1' })
-    open('/api/engine/x/ws/a', { sessionId: 's2' })
-    open('/api/engine/x/ws/a')
-    expect(surfaceSockets('s1').length).toBe(1)
-    expect(surfaceSockets('s3')).toEqual([])
-    closeEngineSocket(a.st, 1000, '')
-    expect(surfaceSockets('s1')).toEqual([])
   })
 })

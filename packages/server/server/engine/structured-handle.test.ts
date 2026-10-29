@@ -1,21 +1,24 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { parseInjectedHeader } from '@agentistics/core'
 import { isOwnerTurn } from '../sessions/handoff-relay'
-import { createStructuredSessions, markEngineOpened, resetEngineOpenedForTests, SURFACE_TURN_HEADER } from './structured-handle'
+import {
+  closeEngineSocket, installSocketSessions, openEngineSocket, resetEngineSocketsForTests, type EngineSocketState, type RawSocket,
+} from './engine-sockets'
+import { createStructuredSessions, markEngineOpened, MAX_SURFACE_TURN_BYTES, resetEngineOpenedForTests, SURFACE_TURN_HEADER } from './structured-handle'
 
 function rig() {
   const sent: string[] = []
   const cancelled: string[] = []
-  const state = { alive: true, activity: 'working', attention: null as unknown, structured: true }
+  const state = { alive: true, activity: 'working', attention: null as unknown, structured: true, sendThrows: false }
   const followed: string[] = []
   const backend = {
     isStructured: () => state.structured,
     attentionOf: () => state.attention as never,
     activityOf: () => state.activity as never,
-    sendText: async (_id: string, t: string) => { sent.push(t); return true },
+    sendText: async (_id: string, t: string) => { if (state.sendThrows) throw new Error('boom'); sent.push(t); return true },
     cancelTurn: (id: string) => { cancelled.push(id); return true },
-    chatOf: () => ({
-      conversationId: 'c1',
+    chatOf: (id: string) => ({
+      conversationId: 'c-' + id,
       chat: {
         declares: {} as never,
         resolve: async () => ({ harness: 'claude', conversationId: 'c1', sourceRef: 'x' }) as never,
@@ -23,58 +26,58 @@ function rig() {
       },
     }),
   }
-  const surfaces: Record<string, { closed: boolean }[]> = {}
-  const api = createStructuredSessions({
-    backend: async () => backend as never,
-    alive: async () => state.alive,
-    surfaces: id => surfaces[id] ?? [],
-  })
-  return { api, state, sent, cancelled, followed, surfaces }
+  const host = createStructuredSessions({ backend: async () => backend as never, alive: async () => state.alive })
+  installSocketSessions(host)
+  const sockets: { st: EngineSocketState; api: ReturnType<typeof apiOf> }[] = []
+  function apiOf(st: EngineSocketState) { return st.entry!.api }
+  const raw = (): RawSocket => ({ send() {}, close() {} })
+  const mount = (sessionId?: string) => {
+    const st: EngineSocketState = { route: '/api/engine/x/ws/a', handlers: { ...(sessionId ? { sessionId } : {}), message() {} }, entry: null }
+    openEngineSocket(st, raw())
+    sockets.push({ st, api: apiOf(st) })
+    return { st, api: apiOf(st), unmount: () => closeEngineSocket(st, 1000, '') }
+  }
+  return { host, state, sent, cancelled, followed, mount }
 }
 const tick = () => new Promise(r => setTimeout(r, 5))
 
 beforeEach(() => resetEngineOpenedForTests())
+afterEach(() => { resetEngineSocketsForTests(); installSocketSessions(null) })
 
-describe('structuredSessions.get', () => {
-  test('1. null for any id but the one the surface was opened from; never enumerates', () => {
+describe('the handle a socket hands out', () => {
+  test('1. a surface reaches only the session ITS handshake declared; two surfaces never cross', async () => {
     const r = rig()
-    r.surfaces['s1'] = [{ closed: false }]
-    expect(r.api.get('s1')).not.toBeNull()
-    expect(r.api.get('s2')).toBeNull()
-    expect(r.api.get('')).toBeNull()
-    expect(r.api.get('../s1')).toBeNull()
-    expect(Object.keys(r.api)).toEqual(['get'])
+    const a = r.mount('sA'), b = r.mount('sB')
+    const ha = a.api.structured!()!, hb = b.api.structured!()!
+    await ha.send('to A'); await hb.send('to B')
+    expect(r.sent).toEqual([`${SURFACE_TURN_HEADER}\nto A`, `${SURFACE_TURN_HEADER}\nto B`])
+    // the host id travels in the backend call, not from anything the engine passes
+    expect(Object.keys(ha).sort()).toEqual(['cancel', 'follow', 'live', 'send'])
+    expect(r.mount().api.structured!()).toBeNull() // a socket that declared no session
   })
-
-  test('1b. a session the engine opened itself resolves without a surface', () => {
+  test('1b. host.structuredSessions.get answers only sessions the engine started: a surface session id is null', () => {
     const r = rig()
-    expect(r.api.get('e1')).toBeNull()
+    r.mount('sA')
+    expect(r.host.engine.get('sA')).toBeNull()
+    expect(r.host.engine.get('')).toBeNull()
     markEngineOpened('e1')
-    expect(r.api.get('e1')).not.toBeNull()
-    expect(r.api.get('other')).toBeNull()
+    expect(r.host.engine.get('e1')).not.toBeNull()
+    expect(r.host.engine.get('other')).toBeNull()
+    expect(Object.keys(r.host.engine)).toEqual(['get'])
   })
-
-  test('the handle exposes follow, send, cancel (and a live flag) only', () => {
-    const r = rig()
-    r.surfaces['s1'] = [{ closed: false }]
-    expect(Object.keys(r.api.get('s1')!).sort()).toEqual(['cancel', 'follow', 'live', 'send'])
-  })
-
   test('2. send is typed with an injected header and is never the owner', async () => {
     const r = rig()
-    r.surfaces['s1'] = [{ closed: false }]
-    expect(await r.api.get('s1')!.send('hello there')).toBe(true)
-    expect(r.sent).toEqual([`${SURFACE_TURN_HEADER}\nhello there`])
-    const h = parseInjectedHeader(r.sent[0]!)
-    expect(h).toMatchObject({ origin: 'agentistics', kind: 'surface', body: 'hello there' })
+    const h = r.mount('s1').api.structured!()!
+    expect(await h.send('hello there')).toBe(true)
+    const h2 = parseInjectedHeader(r.sent[0]!)
+    expect(h2).toMatchObject({ origin: 'agentistics', kind: 'surface', body: 'hello there' })
     expect(isOwnerTurn({ role: 'user', text: r.sent[0]! })).toBe(false)
   })
-
-  test('send refuses empty text, an open request, and a non-structured session', async () => {
+  test('send refuses empty, oversized, an open request, and a non-structured session', async () => {
     const r = rig()
-    r.surfaces['s1'] = [{ closed: false }]
-    const h = r.api.get('s1')!
+    const h = r.mount('s1').api.structured!()!
     expect(await h.send('   ')).toBe(false)
+    expect(await h.send('x'.repeat(MAX_SURFACE_TURN_BYTES + 1))).toBe(false)
     r.state.attention = { open: true }
     expect(await h.send('x')).toBe(false)
     r.state.attention = null
@@ -82,59 +85,62 @@ describe('structuredSessions.get', () => {
     expect(await h.send('x')).toBe(false)
     expect(r.sent).toEqual([])
   })
-
   test('3. cancel cancels only a turn in flight', async () => {
     const r = rig()
-    r.surfaces['s1'] = [{ closed: false }]
-    const h = r.api.get('s1')!
+    const h = r.mount('s1').api.structured!()!
     expect(await h.cancel()).toBe(true)
     expect(r.cancelled).toEqual(['s1'])
     r.state.activity = 'waiting'
     expect(await h.cancel()).toBe(false)
     expect(r.cancelled).toEqual(['s1'])
   })
-
-  test('4. the handle dies when the surface unmounts, and stays dead', async () => {
+  test('4. the handle dies with ITS socket; a second surface on the same session does not keep it alive', async () => {
     const r = rig()
-    const sock = { closed: false }
-    r.surfaces['s1'] = [sock]
-    const h = r.api.get('s1')!
+    const a = r.mount('s1'), b = r.mount('s1')
+    const ha = a.api.structured!()!, hb = b.api.structured!()!
     const got: unknown[] = []
-    h.follow(10, d => got.push(d))
+    ha.follow(10, d => got.push(d))
     await tick()
     expect(got.length).toBe(1)
-    sock.closed = true
-    expect(h.live).toBe(false)
-    expect(await h.send('late')).toBe(false)
-    expect(await h.cancel()).toBe(false)
-    const off = h.follow(10, d => got.push(d))
-    await tick()
-    expect(got.length).toBe(1)
-    off()
-    // a surface mounted again does not revive the old handle
-    r.surfaces['s1'] = [{ closed: false }]
-    expect(h.live).toBe(false)
-    expect(r.api.get('s1')!.live).toBe(true)
+    a.unmount()
+    expect(ha.live).toBe(false)
+    expect(hb.live).toBe(true)
+    expect(await ha.send('late')).toBe(false)
+    expect(await ha.cancel()).toBe(false)
+    expect(r.followed).toEqual(['max=10', 'off']) // the subscription was released at the unmount
     expect(r.sent).toEqual([])
+    expect(await hb.send('still')).toBe(true)
+    // a surface mounted again gets a new handle; the old one stays dead
+    const c = r.mount('s1')
+    expect(c.api.structured!()!.live).toBe(true)
+    expect(ha.live).toBe(false)
   })
-
-  test('4b. the handle dies when the session ends', async () => {
+  test('4b. the handle dies when the session ends, and stays dead', async () => {
     const r = rig()
-    r.surfaces['s1'] = [{ closed: false }]
-    const h = r.api.get('s1')!
+    const h = r.mount('s1').api.structured!()!
     r.state.alive = false
     expect(await h.send('x')).toBe(false)
     expect(h.live).toBe(false)
     r.state.alive = true
     expect(await h.send('x')).toBe(false)
   })
-
-  test('follow stops delivering after the unsubscribe', async () => {
+  test('4c. an engine-started session leaves the set when it ends', async () => {
     const r = rig()
-    r.surfaces['s1'] = [{ closed: false }]
-    const off = r.api.get('s1')!.follow(500, () => {})
-    await tick()
-    off()
-    expect(r.followed).toEqual(['max=200', 'off'])
+    markEngineOpened('e1')
+    const h = r.host.engine.get('e1')!
+    r.state.alive = false
+    expect(await h.send('x')).toBe(false)
+    expect(r.host.engine.get('e1')).toBeNull()
+  })
+  test('methods never throw: a failing backend resolves false', async () => {
+    const r = rig()
+    const h = r.mount('s1').api.structured!()!
+    r.state.sendThrows = true
+    expect(await h.send('x')).toBe(false)
+  })
+  test('without installed sessions a socket offers no structured door', () => {
+    const r = rig()
+    installSocketSessions(null)
+    expect(r.mount('s1').api.structured).toBeUndefined()
   })
 })

@@ -53,23 +53,29 @@ being unmounted, and it stays mounted while the person navigates; `unmount(el)` 
 
 ## Acting on the session (engine-api 1.17)
 
-`host.structuredSessions.get(id)` gives a surface a handle on the session it was opened from. It
-returns `null` for every other id — unknown and somebody else's are indistinguishable — except a session
-this engine started itself; there is no way to list sessions through it. The host decides which session a
-surface belongs to from the WebSocket handshake it accepted for a declared, live session, never from the
-engine's word alone.
+A surface reaches the session it was opened from through its own socket: `socket.structured()` returns a
+handle on the session the handshake declared (the host accepted that socket only for a session that existed
+and was live), bound to THAT socket. An id the engine supplies never selects the session, and the handle
+exists only on a machine that serves `/api/engine/x` at all — a `localShell` route, refused on a central and
+on any exposed profile.
 
-The handle has three verbs and no others:
+`host.structuredSessions.get(id)` is the other door and it is narrower still: it resolves only a session this
+engine started itself (`fleet.delegateSpawn`) and answers `null` for every other id, indistinguishably;
+nothing here can enumerate sessions.
+
+The handle has three verbs and no others, and every one is total (it never throws):
 
 - `follow(max, on)` — the session's chat seam (a `window` of turns, then deltas);
 - `send(text)` — adds a turn typed with an `[from agentistics · surface]` header, so the conversation
-  never shows it as something the owner wrote. Refused while a request is open or on a session that is
-  not structured;
+  never shows it as something the owner wrote. Refused for empty text, for text over 64 KiB, while a
+  request is open, and on a session that is not structured;
 - `cancel()` — cancels the turn in flight and nothing else.
 
-A handle is invalidated when the surface unmounts (its sockets close) or the session ends, and a dead
-handle stays dead; a surface mounted later gets a new one through `get`. A community build has no engine,
-so none of this exists there.
+A handle dies when its socket closes (another surface on the same session does not keep it alive) or the
+session ends; it then releases its subscriptions and stays dead. A surface mounted later gets a new one,
+so code that outlives a socket (a call resumed on a new connection) asks the current socket each time.
+`live` reflects the socket and what the handle has seen; it learns of a session's end on the next use or
+when the host closes the socket.
 
 ## Versioning
 

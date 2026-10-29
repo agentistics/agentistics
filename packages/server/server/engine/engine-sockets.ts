@@ -35,6 +35,17 @@ export interface EngineSocketEntry {
 
 const open = new Set<EngineSocketEntry>()
 
+/**
+ * The host's per-socket session handles (`structured-handle.ts`), installed once when the engine's host
+ * services are built. Without it a socket offers no `structured` (the engine then has no session door).
+ */
+export interface SocketSessions {
+  forSocket(entry: Pick<EngineSocketEntry, 'sessionId' | 'closed'>): () => import('@agentistics/engine-api').StructuredSessionHandle | null
+  socketClosed(entry: object): void
+}
+let socketSessions: SocketSessions | null = null
+export function installSocketSessions(s: SocketSessions | null): void { socketSessions = s }
+
 export type Admission = { ok: true } | { ok: false; reason: 'route-full' | 'session-full' }
 
 /** PURE-ish. Would one more connection on `route` for `sessionId` be within the ceilings? */
@@ -90,6 +101,7 @@ export function openEngineSocket(state: EngineSocketState, raw: RawSocket): void
     },
     closed: false,
   }
+  if (socketSessions) (entry.api as { structured?: unknown }).structured = socketSessions.forSocket(entry)
   state.entry = entry
   open.add(entry)
   try { state.handlers.open?.(entry.api) } catch { raw.close(1011, 'engine error') }
@@ -130,15 +142,6 @@ export async function sweepEndedSessions(alive: (sessionId: string) => Promise<b
     for (const e of [...open]) if (e.sessionId === id) { e.raw.close(CLOSE.sessionEnded, 'session ended'); n++ }
   }
   return n
-}
-
-/**
- * The open sockets that declared `sessionId`: the surfaces mounted for that session right now. The host
- * validated the id when it accepted the handshake, so this is the one authenticated statement of "which
- * session this surface was opened from".
- */
-export function surfaceSockets(sessionId: string): EngineSocketEntry[] {
-  return [...open].filter(e => e.sessionId === sessionId && !e.closed)
 }
 
 export function engineSocketCount(): number { return open.size }

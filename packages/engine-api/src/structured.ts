@@ -434,9 +434,10 @@ export interface StructuredSessionHandle {
 /** `EngineHostServices.structuredSessions` (1.17, optional). */
 export interface EngineStructuredSessions {
   /**
-   * A handle for `id`, or `null`. Only two ids ever resolve: the session the calling surface was opened
-   * from, and a session this engine itself started. Anything else — an unknown id, another session —
-   * answers `null`, indistinguishably. There is no way to enumerate sessions through this.
+   * A handle for a session THIS ENGINE started itself (`fleet.delegateSpawn`), or `null`. Any other id —
+   * unknown, or somebody else's — answers `null`, indistinguishably. There is no way to enumerate sessions
+   * through this. The session a surface was opened from is reached through that surface's own socket
+   * (`EngineSocket.structured`), never through an id the engine supplies.
    */
   get(id: string): StructuredSessionHandle | null
 }

@@ -107,8 +107,17 @@ export function surfaceRefusals(
   return out
 }
 
+import type { StructuredSessionHandle } from './structured'
+
 /** The socket an upgraded route talks through. The host owns the real one. */
 export interface EngineSocket {
+  /**
+   * 1.17, optional: a handle on the session this socket's handshake declared — judged by the host (the
+   * session existed and was live when it accepted the socket), bound to THIS socket and dead once it
+   * closes. `null` when the socket declared no session or the session has ended. The only way a surface
+   * reaches the session it was opened from; absent on a host older than 1.17.
+   */
+  structured?(): StructuredSessionHandle | null
   send(data: string | Uint8Array): void
   close(code?: number, reason?: string): void
 }
