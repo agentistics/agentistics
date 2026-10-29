@@ -40,6 +40,7 @@ export function BottomSheet({ open, onClose, title, lang, footer, children }: {
     <div
       ref={dialog}
       role="dialog"
+      data-bottom-sheet
       tabIndex={-1}
       onKeyDown={trapFocus}
       aria-modal="true"
