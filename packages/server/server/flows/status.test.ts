@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, test } from 'bun:test'
 import { flowStatusResponse } from './status'
-import { flowStatusPath } from '../../../mcp/flow-status'
+import { flowStatusRunId } from '../../../mcp/flow-status'
 
 test('HTTP rejects traversal and malformed IDs with 400 before engine status', async () => {
   for (const id of ['../../x', '..\\x', 'bad', '%', '00000000-0000-0000-0000-00000000000z']) {
@@ -9,14 +9,14 @@ test('HTTP rejects traversal and malformed IDs with 400 before engine status', a
     const out = await flowStatusResponse(encodeURIComponent(id), async () => { calls++; return null })
     expect(out.status).toBe(400)
     expect(calls).toBe(0)
-    expect(() => flowStatusPath(id)).toThrow('invalid flow run id')
+    expect(() => flowStatusRunId(id)).toThrow('invalid flow run id')
   }
   expect((await flowStatusResponse('%', async () => null)).status).toBe(400)
 })
 
 test('HTTP and MCP accept a minted UUID and distinguish missing runs', async () => {
   const id = crypto.randomUUID()
-  expect(flowStatusPath(id)).toBe(`/api/flows/status/${id}`)
+  expect(flowStatusRunId(id)).toBe(id)
   expect((await flowStatusResponse(id, async () => null)).status).toBe(404)
   const record = { runId: id, status: 'refused' }
   expect(await flowStatusResponse(id, async runId => { expect(runId).toBe(id); return record })).toEqual({ body: record, status: 200 })
