@@ -57,7 +57,16 @@ export interface PersonAsker {
  * — `AGENTISTICS_JOURNAL` AND `AGENTISTICS_JOURNAL_LIVE`. A host older than 1.4 does not know the
  * name, so an engine asks it only of a host whose `apiVersion` says 1.4 or later.
  */
-export type EngineFlag = 'provider' | 'ingest' | 'live'
+export type EngineFlag = 'provider' | 'ingest' | 'live' | 'flows'
+
+/** A deterministic host operation exposed to the experimental flow runtime (1.16). */
+export interface EngineFlowOpContext {
+  step: string
+  flow?: string
+  runId?: string
+  signal?: AbortSignal
+}
+export type EngineFlowOp = (input: unknown, context: EngineFlowOpContext) => unknown | Promise<unknown>
 
 /** What the screen showed when a session started waiting on a person (1.4). Counts and kinds, NO text. */
 export interface FleetDialog {
@@ -500,6 +509,8 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   /** A central never runs the runtime. */
   isCentral(): boolean
   flag(name: EngineFlag): boolean
+  /** Optional experimental flows surface. Absent on hosts before contract 1.16. */
+  flows?: { ops: Readonly<Record<string, EngineFlowOp>> }
   audit(event: EngineAuditEvent): void
   readJsonLimited: ReadJsonLimited
   safeError: SafeError

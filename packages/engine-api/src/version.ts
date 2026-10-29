@@ -144,7 +144,7 @@
  * the host imports on click and mounts into a frame it owns (`full` or `side`, switchable by the surface, kept mounted across navigation). All optional: a 1.14 engine still loads,
  * and a 1.15 engine on an older host is refused at load (an unreserved prefix), so it runs as community.
  */
-export const ENGINE_API_VERSION = '1.15.0'
+export const ENGINE_API_VERSION = '1.16.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

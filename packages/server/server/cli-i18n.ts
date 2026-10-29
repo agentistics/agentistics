@@ -42,22 +42,25 @@ const ENGINE_VERB_WHAT: Record<CliLang, Record<EngineVerb, string>> = {
     code: 'runs the native harness',
     provider: "manages the native harness's provider keys",
     ingest: 'feeds live events from your harnesses into the journal',
+    flow: 'runs deterministic experimental flows',
   },
   pt: {
     code: 'roda o harness nativo',
     provider: 'gerencia as chaves de provedor do harness nativo',
     ingest: 'alimenta o journal com eventos ao vivo dos seus harnesses',
+    flow: 'roda fluxos determinísticos experimentais',
   },
 }
 
 /** The engine verbs every build recognises, in the order the help lists them. */
-export const ENGINE_VERBS: readonly EngineVerb[] = ['code', 'provider', 'ingest']
+export const ENGINE_VERBS: readonly EngineVerb[] = ['code', 'provider', 'ingest', 'flow']
 
 /** English one-liners for `agentop --help`, used when this build's engine does not provide a verb. */
 export const ENGINE_VERB_HELP: Record<EngineVerb, string> = {
   code: 'Run the native harness',
   provider: 'Manage a provider API key for the native harness',
   ingest: 'Feed live events from your harnesses into the journal',
+  flow: 'Run deterministic experimental flows',
 }
 
 /** A subject that opens a sentence (`the server on :47291` → `The server on :47291`). */

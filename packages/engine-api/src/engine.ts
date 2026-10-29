@@ -28,6 +28,8 @@ export interface EngineManifest {
      *  Optional: an engine built against 1.8 does not say, and then serves none. */
     chat?: HarnessId[]
     providers: ProviderId[]
+    /** 1.16 — deterministic experimental flows, when the host also enables `flows`. */
+    flows?: boolean
   }
   /** 1.15 — UI surfaces the host may draw a button for (`surfaces.ts`). Absent: none. */
   surfaces?: EngineSurface[]
@@ -87,7 +89,7 @@ export interface CommandIO {
 }
 
 export interface EngineCommand {
-  verb: 'code' | 'provider' | 'ingest'
+  verb: 'code' | 'provider' | 'ingest' | 'flow'
   /** Help text in both languages; the host prints it in `agentop --help`. */
   summary: Record<'en' | 'pt', string>
   /** Exit code. */
@@ -149,6 +151,12 @@ export interface Engine<E extends EngineEvent = EngineEvent> {
   acp?: EngineAcp
   /** 1.10 — STRUCTURED sessions: one backend, a driver per protocol (`structured.ts`). Absent: `acp` / tmux. */
   structured?: EngineStructured
+  /** 1.16 — built-in deterministic flow definitions and durable run status. */
+  flows?: {
+    list(): readonly string[]
+    run(name: string, inputs?: Record<string, unknown>): Promise<unknown>
+    status(runId: string): Promise<unknown>
+  }
   /** Health checks the engine contributes. */
   health?: () => Promise<EngineHealthIssue[]>
   dispose(): Promise<void>

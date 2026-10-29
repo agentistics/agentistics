@@ -8,10 +8,11 @@
  */
 import type { EngineCommand, EngineStatus } from '@agentistics/engine-api'
 import { cliStrings, ENGINE_VERB_HELP, ENGINE_VERBS, type CliLang, type EngineVerb } from '../cli-i18n'
-import { EXPERIMENTAL_SENTENCE, nativeExperimentalOn } from '../native-gate'
+import { EXPERIMENTAL_SENTENCE, flowsExperimentalOn, nativeExperimentalOn } from '../native-gate'
 
 /** The verbs that belong to the native harness and the providers — experimental. */
 export const NATIVE_VERBS: readonly EngineVerb[] = ['code', 'provider']
+export const FLOW_VERBS: readonly EngineVerb[] = ['flow']
 
 /** Exit code of a verb this build cannot run. Not 1 (a failure of the verb) — it never ran. */
 export const ENGINE_ABSENT_EXIT = 2
@@ -28,11 +29,16 @@ export function resolveEngineVerb(
   lang: CliLang,
   /** The native harness and providers may be used here (`native-gate.ts`, the experimental flag). */
   nativeOn = true,
+  flowsOn = true,
 ): { run: EngineCommand } | { refuse: string } {
   const s = cliStrings(lang)
   // `code` and `provider` ARE the native harness and the providers: experimental (owner decision
   // 2026-10-03), refused in one sentence naming the command that turns them on. `ingest` is not.
   if (!nativeOn && NATIVE_VERBS.includes(verb)) return { refuse: EXPERIMENTAL_SENTENCE[lang] }
+  if (!flowsOn && FLOW_VERBS.includes(verb)) return { refuse: lang === 'pt' ? 'experimental desligado: AGENTISTICS_FLOWS' : 'experimental disabled: AGENTISTICS_FLOWS' }
+  if (!status.present && FLOW_VERBS.includes(verb) && status.reason === 'community-build') {
+    return { refuse: lang === 'pt' ? 'fluxos exigem o build oficial' : 'flows require the official build' }
+  }
   if (!status.present) return { refuse: s.engineVerbAbsent(verb, status.reason) }
   const cmd = commands.find(c => c.verb === verb)
   return cmd ? { run: cmd } : { refuse: s.engineVerbNotProvided(verb) }
@@ -42,7 +48,7 @@ export function resolveEngineVerb(
 export async function runEngineVerb(verb: EngineVerb, args: string[], lang: CliLang): Promise<number> {
   const { engine, engineStatus, loadEngine } = await import('./load')
   await loadEngine()
-  const decided = resolveEngineVerb(verb, engineStatus(), engine()?.commands ?? [], lang, nativeExperimentalOn())
+  const decided = resolveEngineVerb(verb, engineStatus(), engine()?.commands ?? [], lang, nativeExperimentalOn(), flowsExperimentalOn())
   if ('refuse' in decided) {
     console.error(decided.refuse)
     return ENGINE_ABSENT_EXIT
@@ -75,12 +81,13 @@ function wrap(text: string, first: string, indent: string): string[] {
  * verb, else a one-liner marked `(official build)` — hiding the verbs would make the docs lie to a
  * community user. The native verbs are the exception: hidden while the experimental flag is off.
  */
-export function engineHelpLines(commands: readonly EngineCommand[] | null, nativeOn = true): string[] {
+export function engineHelpLines(commands: readonly EngineCommand[] | null, nativeOn = true, flowsOn = true): string[] {
   const lines: string[] = []
   for (const verb of ENGINE_VERBS) {
     // `code` and `provider` are the experimental native harness: with the flag off they are not
     // documented here at all, exactly as before v2.103 (the verb still answers, in its sentence).
     if (!nativeOn && NATIVE_VERBS.includes(verb)) continue
+    if (!flowsOn && FLOW_VERBS.includes(verb)) continue
     const cmd = commands?.find(c => c.verb === verb)
     const text = cmd ? cmd.summary.en : `${ENGINE_VERB_HELP[verb]} (official build)`
     lines.push(...wrap(text, `  ${verb.padEnd(NAME_COL - 2)}`, ' '.repeat(NAME_COL)))
@@ -92,5 +99,5 @@ export function engineHelpLines(commands: readonly EngineCommand[] | null, nativ
 export async function engineHelpSection(): Promise<string> {
   const { engine, loadEngine } = await import('./load')
   await loadEngine({ log: () => {} })
-  return engineHelpLines(engine()?.commands ?? null, nativeExperimentalOn()).join('\n')
+  return engineHelpLines(engine()?.commands ?? null, nativeExperimentalOn(), flowsExperimentalOn()).join('\n')
 }
