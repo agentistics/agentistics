@@ -41,7 +41,10 @@ for k, t in NAMES.items():
                 x0, y0, x1, y1 = max(0, xs.min() - 24), max(0, ys.min() - 24), min(W, xs.max() + 24), min(H, ys.max() + 24)
             else:
                 x0, y0, x1, y1 = 0, 0, W, H; src = 'tela inteira'
-            crop = diff[y0:y1, x0:x1]
+            if r:  # the criterion is the difference INSIDE the surface itself, without the visual margin
+                crop = diff[max(0, int(r['y'])):min(H, int(r['y'] + r['h'])), max(0, int(r['x'])):min(W, int(r['x'] + r['w']))]
+            else:
+                crop = diff[y0:y1, x0:x1]
             pct = round(100 * crop.mean(), 2) if crop.size else 0.0
             full = round(100 * diff.mean(), 2)
             res[b] = {'contrast_on': contrast(B[y0:y1, x0:x1]), 'crop_pct': pct, 'full_pct': full, 'crop_src': src, 'crop': [int(x0), int(y0), int(x1), int(y1)]}

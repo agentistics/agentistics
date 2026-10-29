@@ -329,8 +329,9 @@ if (want('a')) {
         await page.goto(`${base}/sessions`, { waitUntil: 'domcontentloaded' }); await ready(page)
         await showEnded(page); await page.waitForFunction(() => document.querySelectorAll('[data-session-row]').length >= 5, undefined, { timeout: 60_000 }).catch(() => console.log('[e] fewer than 5 rows')); await page.waitForTimeout(1000)
         const gauge = page.locator('button[aria-haspopup="dialog"]:visible').first()
-        if (await gauge.count()) { if (mobile) await gauge.focus(); else await gauge.hover({ force: true }); await page.locator('[data-plan-usage-popover]').first().waitFor({ timeout: 5000 }).catch(() => {}) }
+        if (await gauge.count()) { if (mobile) { await gauge.tap(); await page.waitForTimeout(400) } else await gauge.hover({ force: true }); await page.locator('[data-plan-usage-popover]').first().waitFor({ timeout: 5000 }).catch(() => {}) }
         else console.log(`[e] gauge button not visible at ${width}px`)
+        if (!(await page.locator('[data-plan-usage-popover]').count())) console.log(`[e] popover did not open at ${width}px (modal: ${await page.locator('[role=dialog]').count()})`)
         await page.waitForTimeout(500)
         for (const glass of ['off', 'on']) await shot(page, 'e-plan-usage-popover', theme, glass, '[data-plan-usage-popover]')
       }
