@@ -46,6 +46,18 @@ async function nativeVisibleNow(): Promise<boolean> {
   }
 }
 
+/** Flow tools are offered only when both the official engine and its opt-in flag are visible. */
+async function flowsVisibleNow(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API}/api/engine`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return false;
+    const body = await res.json() as { flowsExperimental?: unknown; flows?: unknown };
+    return body.flowsExperimental === true && body.flows === true;
+  } catch {
+    return false;
+  }
+}
+
 // Static mirror of src/lib/componentCatalog.tsx — keep in sync when adding components
 const CATALOG = [
   // KPI cards
@@ -914,7 +926,11 @@ const TOOLS: Tool[] = [
 /** Exported for the session-context parity test; the live list remains the single MCP registry. */
 export const MCP_TOOL_NAMES = TOOLS.map(tool => tool.name)
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolsForGate(TOOLS, await nativeVisibleNow()) }));
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  const [nativeOn, flowsOn] = await Promise.all([nativeVisibleNow(), flowsVisibleNow()]);
+  const tools = toolsForGate(TOOLS, nativeOn);
+  return { tools: flowsOn ? tools : tools.filter(tool => !tool.name.startsWith("agentistics_flow_")) };
+});
 
 // The local agent audit (spec §4.6, P1.2): every W/D call is one line, R calls are counted per
 // hour. It records ids and outcome codes only — never an argument value — and a failed write never
