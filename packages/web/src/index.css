@@ -1107,7 +1107,7 @@ button:focus-within .ag-row-pin,
    so what is behind reads as colour smeared, a 1px inner highlight on the top edge, a soft shadow.
    Text keeps AA: the tint is still dark/light enough and the README records measured contrast. */
 [data-glass="on"] { --ag-glass-mix: 50%; --ag-glass-hi: rgba(255, 255, 255, 0.16); --ag-glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.32); }
-[data-glass="on"][data-theme="light"] { --ag-glass-mix: 58%; --ag-glass-hi: rgba(255, 255, 255, 0.7); --ag-glass-shadow: 0 10px 30px rgba(20, 20, 40, 0.16); }
+[data-glass="on"][data-theme="light"] { --ag-glass-mix: 46%; --ag-glass-hi: rgba(255, 255, 255, 0.78); --ag-glass-shadow: 0 10px 30px rgba(20, 20, 40, 0.16); }
 [data-glass="on"] [data-plan-usage-popover],
 [data-glass="on"] [data-nay-notice],
 [data-glass="on"] [data-composer-menu],
