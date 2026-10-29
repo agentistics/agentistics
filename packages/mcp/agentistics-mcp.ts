@@ -927,8 +927,8 @@ const TOOLS: Tool[] = [
 export const MCP_TOOL_NAMES = TOOLS.map(tool => tool.name)
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const [nativeOn, flowsOn] = await Promise.all([nativeVisibleNow(), flowsVisibleNow()]);
-  const tools = toolsForGate(TOOLS, nativeOn);
+  const tools = toolsForGate(TOOLS, await nativeVisibleNow());
+  const flowsOn = await flowsVisibleNow();
   return { tools: flowsOn ? tools : tools.filter(tool => !tool.name.startsWith("agentistics_flow_")) };
 });
 
