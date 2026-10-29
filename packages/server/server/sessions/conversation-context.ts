@@ -2,7 +2,7 @@
  * The consolidated history alone can be missing (or frozen before an account switch).
  */
 import { basename } from 'node:path'
-import { resolveContextWindow, type HarnessId } from '@agentistics/core'
+import { HARNESS_CAPABILITIES, resolveContextWindow, type HarnessId } from '@agentistics/core'
 import { claudeTranscriptState } from '../transcript-state'
 import { createFileMemo, versionOf } from '../adapters/file-memo'
 import { transcriptReaderFor } from './harness-transcript'
@@ -73,7 +73,7 @@ export async function refreshConversationContexts(
   const seen = new Set<string>()
   for (const row of rows) {
     const id = row.conversationId
-    if (!id || row.endedAt || !['claude', 'codex', 'gemini', 'kimi'].includes(row.harness)) continue
+    if (!id || row.endedAt || !HARNESS_CAPABILITIES[row.harness]?.contextWindow) continue
     const key = `${row.harness}:${id}`
     if (seen.has(key)) continue
     seen.add(key)
