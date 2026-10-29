@@ -1127,6 +1127,61 @@ button:focus-within .ag-row-pin,
   box-shadow: none !important;
 }
 
+/* Full scope: sticky top bars, toasts, the bell panel, the Nay panel, selects/dropdowns, and the
+   message field as a glass pill over the conversation. Same recipe, same fallbacks. */
+[data-glass="on"] header,
+[data-glass="on"] [data-bell-sticky-header],
+[data-glass="on"] [data-testid="notification-toast"],
+[data-glass="on"] [data-bell-panel],
+[data-glass="on"] [data-nay-panel],
+[data-glass="on"] [role="listbox"],
+[data-glass="on"] .ag-composer-ground textarea {
+  background: linear-gradient(135deg, var(--ag-glass-hi), transparent 55%), color-mix(in srgb, var(--bg-card) var(--ag-glass-mix), transparent) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+  border-color: color-mix(in srgb, var(--ag-glass-hi) 60%, var(--border)) !important;
+}
+[data-glass="on"] [data-testid="notification-toast"],
+[data-glass="on"] [data-bell-panel],
+[data-glass="on"] [data-nay-panel],
+[data-glass="on"] [role="listbox"],
+[data-glass="on"] .ag-composer-ground textarea {
+  box-shadow: inset 0 1px 0 var(--ag-glass-hi), var(--ag-glass-shadow) !important;
+}
+[data-glass="on"] .ag-composer-ground textarea { border-radius: 22px !important; padding-left: 18px; padding-right: 18px; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-glass="on"] header,
+  [data-glass="on"] [data-bell-sticky-header],
+  [data-glass="on"] [data-testid="notification-toast"],
+  [data-glass="on"] [data-bell-panel],
+  [data-glass="on"] [data-nay-panel],
+  [data-glass="on"] [role="listbox"],
+  [data-glass="on"] .ag-composer-ground textarea { background: var(--bg-card) !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-glass="on"] header,
+  [data-glass="on"] [data-bell-sticky-header],
+  [data-glass="on"] [data-testid="notification-toast"],
+  [data-glass="on"] [data-bell-panel],
+  [data-glass="on"] [data-nay-panel],
+  [data-glass="on"] [role="listbox"],
+  [data-glass="on"] .ag-composer-ground textarea {
+    background: var(--bg-card) !important; -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+}
+@media (pointer: coarse), (max-width: 640px) {
+  [data-glass="on"] header,
+  [data-glass="on"] [data-bell-sticky-header],
+  [data-glass="on"] [data-testid="notification-toast"],
+  [data-glass="on"] [data-bell-panel],
+  [data-glass="on"] [data-nay-panel],
+  [data-glass="on"] [role="listbox"],
+  [data-glass="on"] .ag-composer-ground textarea {
+    -webkit-backdrop-filter: blur(10px) saturate(150%);
+    backdrop-filter: blur(10px) saturate(150%);
+  }
+}
+
 /* Phones: a lighter blur. 20px over a long list costs real frame time on a 4x-throttled CPU. */
 @media (pointer: coarse), (max-width: 640px) {
   [data-glass="on"] [data-area-rail][data-open="true"],

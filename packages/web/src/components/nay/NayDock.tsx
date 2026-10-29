@@ -484,7 +484,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   useEffect(() => { setVisibleSessions(visibleKey ? visibleKey.split('\n') : []) }, [visibleKey])
   const [noticeHost, setNoticeHost] = useState<HTMLDivElement | null>(null)
   const panel = dock.open && (
-    <div
+    <div data-nay-panel
       ref={panelRef}
       className="ag-nay-dock"
       role="dialog"
