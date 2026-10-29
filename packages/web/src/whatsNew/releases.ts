@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.163.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Sessões que rodam com o login de outra conta agora mostram quanto do contexto já usaram.',
+        en: "Sessions running on another account's sign-in now show their context usage.",
+      },
+    ],
+  },
   '2.163.0': {
     features: [
       {
