@@ -458,7 +458,7 @@ if (command === 'restore') {
 
 // The engine's verbs — recognised by every build, run by the engine when it offers them, and
 // answered in a sentence (exit 2) when it does not (`engine/cli.ts`).
-if (command === 'code' || command === 'provider' || command === 'ingest') {
+if (command === 'code' || command === 'provider' || command === 'ingest' || command === 'flow') {
   // `agentop code` on a terminal opens the control center on its `code` tab (ES.6h) when the engine offers a typed
   // code host; everything else — a pipe, `ls`, `--help`, an engine without one — is the engine's line mode.
   if (command === 'code') {

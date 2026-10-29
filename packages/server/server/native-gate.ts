@@ -22,6 +22,10 @@ export function nativeExperimentalOn(env: Record<string, string | undefined> = p
   return providerFlagOn(env)
 }
 
+export function flowsExperimentalOn(env: Record<string, string | undefined> = process.env): boolean {
+  return env.AGENTISTICS_FLOWS === '1'
+}
+
 export const EXPERIMENTAL_SENTENCE = {
   en: 'The native Agentistics harness is still in development and is not available in this version.',
   pt: 'O harness nativo do Agentistics ainda está em desenvolvimento e não está disponível nesta versão.',

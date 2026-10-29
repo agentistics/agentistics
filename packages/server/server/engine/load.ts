@@ -40,6 +40,7 @@ import { engineSecrets, routeEngineVaultAudit } from '../vault/engine-secrets'
 import { hostEngineBoard } from './engine-board'
 import { hostDelegateMembers } from './engine-delegate'
 import { nativeVaultRefs } from '../vault/grants'
+import { flowHostOps } from '../flows/host-ops'
 
 export type HostEngine = Engine<AgentisticsEvent>
 export type HostIntegrations = IntegrationRegistry<AgentisticsEvent>
@@ -332,8 +333,10 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     flag: name => (
       name === 'provider' ? config.providerFlagOn()
         : name === 'live' ? config.JOURNAL_LIVE_ENABLED
+          : name === 'flows' ? process.env.AGENTISTICS_FLOWS === '1'
           : process.env.AGENTISTICS_INGEST === '1'
     ),
+    flows: { ops: flowHostOps() },
     audit: e => {
       // 1.5: `vault.*` events go to the machine's own vault/audit.jsonl, never to Mongo.
       if (routeEngineVaultAudit(e)) return
