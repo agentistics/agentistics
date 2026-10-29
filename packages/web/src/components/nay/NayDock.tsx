@@ -17,6 +17,7 @@
  * in `lib/nayDock.ts`), so the same session is never on screen twice.
  */
 
+import { EngineSurfaceButtons } from '../EngineSurfaceButtons'
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { requestPlanUsageModal } from '../../lib/planUsageModalRequests'
 import { subscribeNayRequests } from '../../lib/nayDockRequests'
@@ -571,6 +572,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           </div>
         </>)}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <EngineSurfaceButtons placement="nay-dock" sessionId={dock.panelSession} lang={pt ? 'pt' : 'en'} />
           <DockSettings pt={pt} isMobile={isMobile} open={settingsOpen} onToggle={() => setSettingsOpen(o => !o)} />
           <IconButton label={pt ? 'Fechar' : 'Close'} onClick={() => setDock(d => ({ ...d, open: false }))} isMobile={isMobile}>
             <X size={15} />
