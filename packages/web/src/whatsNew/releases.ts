@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.163.0': {
+    features: [
+      {
+        pt: 'Motores podem adicionar os próprios botões e painéis ao app (engine-api 1.15).',
+        en: 'Engines can add their own buttons and panels to the app (engine-api 1.15).',
+      },
+    ],
+    fixes: [],
+  },
   '2.162.0': {
     features: [
       {

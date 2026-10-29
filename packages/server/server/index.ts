@@ -38,7 +38,13 @@ import { getEnabledAdapters } from './adapters/types'
 import { handleLogout, handleSession, getPrincipal, getPrincipalSession, makePrincipalSessionCookieHeader, SESSION_REFRESH_MS, isAuthed } from './auth'
 import { routeCapability, capabilityDenied } from './capability-guard'
 import { RESERVED_PREFIXES } from '@agentistics/engine-api'
-import { engine, engineStatus, loadEngine } from './engine/load'
+import { disposeEngine, reservedPrefixMiss, engine, engineStatus, loadEngine } from './engine/load'
+import { applyAssetVerdict } from './engine/engine-assets'
+import {
+  admit as admitEngineSocket, closeEngineSocket, planEngineUpgrade, onEngineSocketMessage, openEngineSocket,
+  startEngineSocketSweep, type EngineSocketState,
+} from './engine/engine-sockets'
+import { engineSurfacesFor } from './engine/engine-surfaces'
 import { hostGate, currentHostAllowlist, startHostAllowlistRefresh, badRequestTarget } from './host-allow'
 
 /**
@@ -101,7 +107,7 @@ import type { FleetSpawnBody } from './sessions/fleet-spawn'
 // never opens this page. The handlers must be reachable synchronously from the shared `_wsHandlers`.
 import {
   openInputSocket, onInputMessage, closeInputSocket,
-  createInputState, inputSessionExists, inputAtCapacity, type FleetInputState,
+  createInputState, inputSessionExists, inputSessionLive, inputAtCapacity, type FleetInputState,
 } from './sessions/input-web'
 // The utility shell's own WS write channel. Its graph is the shell store plus the two pure input
 // modules — no registry, no session-view — so it is statically importable for the same reason
@@ -218,8 +224,14 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
   console.log(`[boot] +${Math.round(performance.now())} ms data dir claimed`)
   const release = () => { lock.releaseSync() }
   process.on('exit', release)
-  process.on('SIGINT', () => { release(); process.exit(130) })
-  process.on('SIGTERM', () => { release(); process.exit(143) })
+  // The engine is disposed on the way out (its sockets close 1001), bounded so a stuck dispose
+  // cannot hold the stop.
+  const stop = (code: number) => {
+    release()
+    void Promise.race([disposeEngine(), new Promise<void>(r => setTimeout(r, 2000))]).finally(() => process.exit(code))
+  }
+  process.on('SIGINT', () => stop(130))
+  process.on('SIGTERM', () => stop(143))
 }
 
 // Preserve history before Claude's next cleanup (transcripts > cleanupPeriodDays,
@@ -477,6 +489,8 @@ type WSData = {
   user: string; memberId: string; isAgent?: boolean
   fleetInput?: FleetInputState
   shellInput?: ShellInputState
+  /** An engine route's accepted socket (`engine/engine-sockets.ts`) — a fourth, disjoint kind. */
+  engineSocket?: EngineSocketState
 }
 
 // Shared WS + request handlers, so the binary can bind the SAME logic to two ports below:
@@ -485,17 +499,20 @@ const _wsHandlers = {
   open(ws: ServerWebSocket<WSData>) {
     if (ws.data.fleetInput) { openInputSocket(ws); return }
     if (ws.data.shellInput) { openShellInputSocket(ws); return }
+    if (ws.data.engineSocket) { openEngineSocket(ws.data.engineSocket, ws); return }
     if (!ws.data.isAgent) return; registerAgent(ws)
   },
   message(ws: ServerWebSocket<WSData>, msg: string | Buffer) {
     if (ws.data.fleetInput) { onInputMessage(ws, msg); return }
     if (ws.data.shellInput) { onShellInputMessage(ws, msg); return }
+    if (ws.data.engineSocket) { onEngineSocketMessage(ws.data.engineSocket, msg); return }
     if (!ws.data.isAgent) return; onAgentMessage(ws, msg)
   },
   pong(ws: ServerWebSocket<WSData>) { if (!ws.data.isAgent) return; onAgentPong(ws) },
-  close(ws: ServerWebSocket<WSData>) {
+  close(ws: ServerWebSocket<WSData>, code?: number, reason?: string) {
     if (ws.data.fleetInput) { closeInputSocket(ws); return }
     if (ws.data.shellInput) { closeShellInputSocket(ws); return }
+    if (ws.data.engineSocket) { closeEngineSocket(ws.data.engineSocket, code ?? 1005, reason ?? ''); return }
     if (!ws.data.isAgent) return; unregisterAgent(ws)
   },
 }
@@ -2067,15 +2084,39 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         if (live) {
           for (const route of live.routes) {
             if (url.pathname !== route.prefix && !url.pathname.startsWith(route.prefix + '/')) continue
-            const res = await route.handle(req, url, { clientIp, transport: 'tcp' })
-            if (res === null) continue
+            // A WebSocket handshake on an engine route. The capability guard, the auth gate and the
+            // Host allowlist have all run above; the ORIGIN check is the same one the fleet's write
+            // socket applies. The host — not the engine — owns the limits and the closing.
+            if (req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+              const originOk = wsInputOriginOk({ origin: req.headers.get('origin'), host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })
+              if (!originOk) void writeAudit({ action: 'fleet.input.denied', ip: clientIp, meta: { route: route.prefix, reason: 'origin' } })
+              // The engine is asked only once the origin is good: a hostile page learns nothing from it.
+              const handlers = route.upgrade && originOk ? await route.upgrade(req, url, { clientIp, transport: 'tcp' }) : null
+              const refusal = planEngineUpgrade({
+                routeCanUpgrade: !!route.upgrade,
+                originOk,
+                handlers,
+                sessionExists: handlers?.sessionId === undefined ? true : await inputSessionLive(handlers.sessionId),
+                admission: admitEngineSocket(route.prefix, handlers?.sessionId),
+              })
+              if (refusal) { const { status, ...body } = refusal; return json(body, status) }
+              startEngineSocketSweep(inputSessionLive)
+              const engineSocket: EngineSocketState = { route: route.prefix, handlers: handlers!, entry: null }
+              if (server.upgrade(req, { data: { user: '', memberId: '', engineSocket } })) return
+              return json({ error: 'upgrade_failed' }, 500)
+            }
+            const res0 = await route.handle(req, url, { clientIp, transport: 'tcp' })
+            if (res0 === null) continue
+            const res = applyAssetVerdict(url.pathname, res0)
             const headers = new Headers(res.headers)
             for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
             return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
           }
-          return json({ error: 'not_found' }, 404)
+          const miss = reservedPrefixMiss(true, engineStatus())
+          return json(miss.body, miss.status)
         }
-        return json({ error: 'engine-absent', engine: engineStatus() }, 404)
+        const absent = reservedPrefixMiss(false, engineStatus())
+        return json(absent.body, absent.status)
       }
     }
 
@@ -2087,7 +2128,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       // `nativeExperimental`: whether the native harness and the providers may be SHOWN here — the
       // experimental flag (`native-gate.ts`). An engine that provides them is not enough.
       const { nativeExperimentalOn } = await import('./native-gate')
-      return json({ ...engineStatus(), nativeExperimental: nativeExperimentalOn() })
+      return json({ ...engineStatus(), nativeExperimental: nativeExperimentalOn(), surfaces: engineSurfacesFor(engine()?.manifest.surfaces, process.env) })
     }
 
     // PER-SESSION NOTIFICATIONS — the door the MCP tool and the CLI use (`sessions/session-notify-web.ts`).
