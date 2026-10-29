@@ -6,6 +6,7 @@ import type { AppContext, PrefsDraft } from '../../lib/app-context'
 import { SectionHeader, Divider, TabSelect, PrefRow, Toggle, Checkbox } from './primitives'
 import { DEFAULT_CARD_ORDER, type CardId } from '../../lib/cardOrder'
 import ProjectDisksSection from './ProjectDisksSection'
+import { setGlass, useGlass } from '../../lib/glass'
 import { chatActivityStore, sessionTabsStore } from '../../lib/appFlags'
 
 /** One label per `CardId`. Typed as the Record so the build fails if a card is added and this is
@@ -108,6 +109,7 @@ export default function PreferencesSettings() {
   }
   const [draft, setDraft] = useState<PrefsDraft>(() => seedDraft(ctx))
   const pt = draft.lang === 'pt'
+  const glass = useGlass()
 
   function set<K extends keyof PrefsDraft>(k: K, v: PrefsDraft[K]) {
     setDraft(d => ({ ...d, [k]: v }))
@@ -240,6 +242,12 @@ export default function PreferencesSettings() {
             />
           </div>
         </div>
+        <PrefRow
+          label={pt ? 'Vidro (experimental)' : 'Glass (experimental)'}
+          sub={pt ? 'Menus, barras, janelas e avisos translúcidos com desfoque. Vale só neste dispositivo; desligue se o celular ficar lento.' : 'Translucent, blurred menus, bars, dialogs and notices. Applies to this device only; turn it off if a phone feels slow.'}
+        >
+          <Checkbox checked={glass} onChange={setGlass} label={pt ? 'Ligado' : 'On'} />
+        </PrefRow>
       </div>
 
       <Divider />

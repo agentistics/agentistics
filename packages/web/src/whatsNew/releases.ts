@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.161.10': {
+    features: [
+      {
+        pt: 'Vidro: menus, popovers, janelas, avisos, o sino, o painel da Nay, as barras fixas e o campo de mensagem ganham um vidro fosco que deixa ver, desfocado, o que passa por trás.',
+        en: 'Glass: menus, popovers, dialogs, toasts, the bell, the Nay panel, the sticky bars and the message box get a frosted glass that shows what passes behind them, blurred.',
+      },
+      {
+        pt: 'Campos de texto e os cards de sessões, tarefas e contas ganham um acabamento acrílico leve, sem pesar no celular.',
+        en: 'Text fields and the session, task and account cards get a light acrylic finish that stays light on phones.',
+      },
+      {
+        pt: 'Dá para ligar e desligar em Configurações → Preferências → Exibição → "Vidro (experimental)"; vale para cada aparelho.',
+        en: 'Turn it on or off in Settings → Preferences → Display → "Glass (experimental)"; the choice is per device.',
+      },
+    ],
+    fixes: [],
+  },
   '2.161.9': {
     features: [],
     fixes: [
