@@ -1090,12 +1090,41 @@ button:focus-within .ag-row-pin,
   backdrop-filter: blur(20px) saturate(150%);
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-glass="on"] [data-composer-menu],
+  [data-glass="on"] body > div[style*="position: fixed"][style*="background"]:not([style*="inset: 0"]),
   [data-glass="on"] div[role="dialog"][aria-modal="true"] > div { background: var(--bg-surface) !important; }
 }
 @media (prefers-reduced-transparency: reduce) {
+  [data-glass="on"] [data-composer-menu],
+  [data-glass="on"] body > div[style*="position: fixed"][style*="background"]:not([style*="inset: 0"]) { background: var(--bg-card) !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
   [data-glass="on"] div[role="dialog"][aria-modal="true"],
   [data-glass="on"] div[role="dialog"][aria-modal="true"] > div { -webkit-backdrop-filter: none; backdrop-filter: none; }
   [data-glass="on"] div[role="dialog"][aria-modal="true"] > div { background: var(--bg-surface) !important; }
+}
+
+/* === Glass material (owner review: it must be VISIBLE). One recipe for every blurred surface:
+   a clearly translucent tint (alpha ~60% dark / ~66% light), a 20px blur with a boosted saturate
+   so what is behind reads as colour smeared, a 1px inner highlight on the top edge, a soft shadow.
+   Text keeps AA: the tint is still dark/light enough and the README records measured contrast. */
+[data-glass="on"] { --ag-glass-mix: 60%; --ag-glass-hi: rgba(255, 255, 255, 0.16); --ag-glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.32); }
+[data-glass="on"][data-theme="light"] { --ag-glass-mix: 66%; --ag-glass-hi: rgba(255, 255, 255, 0.7); --ag-glass-shadow: 0 10px 30px rgba(20, 20, 40, 0.16); }
+[data-glass="on"] [data-plan-usage-popover],
+[data-glass="on"] [data-nay-notice],
+[data-glass="on"] [data-composer-menu],
+[data-glass="on"] [data-area-rail][data-open="true"],
+[data-glass="on"] [role="menu"][data-portalled-menu],
+[data-glass="on"] body > div[style*="position: fixed"][style*="background"]:not([style*="inset: 0"]),
+[data-glass="on"] div[role="dialog"][aria-modal="true"] > div,
+[data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] > div {
+  background: color-mix(in srgb, var(--bg-card) var(--ag-glass-mix), transparent) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+  box-shadow: inset 0 1px 0 var(--ag-glass-hi), var(--ag-glass-shadow) !important;
+  border-color: color-mix(in srgb, var(--ag-glass-hi) 60%, var(--border)) !important;
+}
+[data-glass="on"] [data-plan-usage-popover] > span[aria-hidden] {
+  background: color-mix(in srgb, var(--bg-card) var(--ag-glass-mix), transparent) !important;
+  box-shadow: none !important;
 }
 
 /* Lightweight acrylic for repeated content surfaces. Do not blur these: session/task/account

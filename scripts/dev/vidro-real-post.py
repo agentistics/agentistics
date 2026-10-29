@@ -11,6 +11,15 @@ NAMES = {'a-sessions-menu': 'Lista de sessões com o menu de áreas', 'b-session
          'c-agentask-modal': 'Agentask com modal "Nova tarefa"', 'd-mobile-bottom-bar': 'Barra de baixo do celular',
          'e-plan-usage-popover': 'Popover "Uso dos planos"', 'f-nay-notice': 'Card de notificação da Nay'}
 res = {}
+def lum(c):
+    c = np.asarray(c, float) / 255
+    c = np.where(c <= 0.03928, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * c[..., 0] + 0.7152 * c[..., 1] + 0.0722 * c[..., 2]
+def contrast(img):
+    # Estimated: background = median colour of the crop, text = the pixel farthest from it in luminance.
+    px = img.reshape(-1, 3); bg = np.median(px, axis=0); lb = lum(bg); lp = lum(px)
+    i = np.argmax(np.abs(lp - lb)); hi, lo = max(lp[i], lb), min(lp[i], lb)
+    return round(float((hi + .05) / (lo + .05)), 1)
 html = ['<!doctype html><meta charset=utf-8><title>VIDRO.REAL</title><style>body{font:14px system-ui;background:#111;color:#eee;margin:20px}h2{margin-top:36px}.r{display:flex;gap:10px;margin:6px 0}figure{margin:0;flex:1;min-width:0}img{max-width:100%;border:1px solid #444}figcaption{color:#aaa;margin:3px 0}</style><h1>VIDRO.REAL — antes | depois, com recorte 2× da superfície de vidro</h1>']
 for k, t in NAMES.items():
     html.append(f'<h2>{k[0]}) {t}</h2>')
@@ -35,7 +44,7 @@ for k, t in NAMES.items():
             crop = diff[y0:y1, x0:x1]
             pct = round(100 * crop.mean(), 2) if crop.size else 0.0
             full = round(100 * diff.mean(), 2)
-            res[b] = {'crop_pct': pct, 'full_pct': full, 'crop_src': src, 'crop': [int(x0), int(y0), int(x1), int(y1)]}
+            res[b] = {'contrast_on': contrast(B[y0:y1, x0:x1]), 'crop_pct': pct, 'full_pct': full, 'crop_src': src, 'crop': [int(x0), int(y0), int(x1), int(y1)]}
             for g in ('off', 'on'):
                 im = Image.open(f'{b}-{g}.png').convert('RGB').crop((x0, y0, x1, y1))
                 im = im.resize((im.width * 2, im.height * 2), Image.LANCZOS)

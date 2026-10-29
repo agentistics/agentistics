@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 /* Real-screen evidence for the glass experiment. Run through agentop run --rm only. */
 import { chromium } from 'playwright'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
@@ -285,7 +285,7 @@ if (want('a')) {
       for (const glass of ['off', 'on']) await shot(page, 'a-sessions-menu', theme, glass, '[data-area-rail][data-open=\"true\"], div[role=\"dialog\"][aria-modal=\"true\"] > div')
       if (mobile) {
         const client = await context.newCDPSession(page); await client.send('Emulation.setCPUThrottlingRate', { rate: 4 })
-        for (const glass of ['off', 'on']) { await themeAndGlass(page, theme, glass); metrics.push({ screen: 'a', theme, width, glass, ...await frameMeasure(page) }) }
+        for (let round = 1; round <= 3; round++) for (const glass of ['off', 'on']) { await themeAndGlass(page, theme, glass); metrics.push({ screen: 'a', theme, width, glass, round, ...await frameMeasure(page) }) }
       }
 
 }
@@ -294,10 +294,10 @@ if (want('a')) {
       // (b) A real session route with its composer/menu. Seed data has no owner transcript;
       // the empty state is retained rather than injecting fabricated conversation text.
       await openSession(page, theme)
-      for (const glass of ['off', 'on']) await shot(page, 'b-session-composer-menu', theme, glass, '.ag-composer-ground, [role=\"menu\"]')
+      for (const glass of ['off', 'on']) await shot(page, 'b-session-composer-menu', theme, glass, '[data-composer-menu]')
       if (mobile) {
         const client = await context.newCDPSession(page); await client.send('Emulation.setCPUThrottlingRate', { rate: 4 })
-        for (const glass of ['off', 'on']) { await themeAndGlass(page, theme, glass); metrics.push({ screen: 'b', theme, width, glass, ...await frameMeasure(page) }) }
+        for (let round = 1; round <= 3; round++) for (const glass of ['off', 'on']) { await themeAndGlass(page, theme, glass); metrics.push({ screen: 'b', theme, width, glass, round, ...await frameMeasure(page) }) }
       }
 
 }
@@ -349,6 +349,8 @@ if (want('a')) {
   stopDemoTmux()
   await rm(demoHome, { recursive: true, force: true })
 }
-await writeFile(join(out, 'rects.json'), JSON.stringify(rects, null, 2))
+let prevRects = {}
+try { prevRects = JSON.parse(await readFile(join(out, 'rects.json'), 'utf8')) } catch {}
+await writeFile(join(out, 'rects.json'), JSON.stringify({ ...prevRects, ...rects }, null, 2))
 await writeFile(join(out, only ? 'metrics-extra.json' : 'metrics.json'), JSON.stringify(metrics, null, 2))
 console.log(JSON.stringify({ out, metrics, seed: seed.stdout.trim().split('\n').slice(-3).join('\n') }, null, 2))

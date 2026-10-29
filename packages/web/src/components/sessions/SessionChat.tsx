@@ -3814,7 +3814,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                   </button>
 
                   {moreOpen && (
-                    <div style={{
+                    <div data-composer-menu style={{
                       // Anchored on its RIGHT edge: the button now sits at the end of the row, and
                       // a menu opening rightwards from there would leave the screen.
                       position: 'absolute', bottom: 40, right: 0, zIndex: 50,
