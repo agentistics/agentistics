@@ -32,13 +32,13 @@ export function resolveEngineVerb(
   flowsOn = true,
 ): { run: EngineCommand } | { refuse: string } {
   const s = cliStrings(lang)
+  if (!status.present && FLOW_VERBS.includes(verb) && status.reason === 'community-build') {
+    return { refuse: lang === 'pt' ? 'fluxos exigem o build oficial' : 'flows require the official build' }
+  }
   // `code` and `provider` ARE the native harness and the providers: experimental (owner decision
   // 2026-10-03), refused in one sentence naming the command that turns them on. `ingest` is not.
   if (!nativeOn && NATIVE_VERBS.includes(verb)) return { refuse: EXPERIMENTAL_SENTENCE[lang] }
   if (!flowsOn && FLOW_VERBS.includes(verb)) return { refuse: lang === 'pt' ? 'experimental desligado: AGENTISTICS_FLOWS' : 'experimental disabled: AGENTISTICS_FLOWS' }
-  if (!status.present && FLOW_VERBS.includes(verb) && status.reason === 'community-build') {
-    return { refuse: lang === 'pt' ? 'fluxos exigem o build oficial' : 'flows require the official build' }
-  }
   if (!status.present) return { refuse: s.engineVerbAbsent(verb, status.reason) }
   const cmd = commands.find(c => c.verb === verb)
   return cmd ? { run: cmd } : { refuse: s.engineVerbNotProvided(verb) }
