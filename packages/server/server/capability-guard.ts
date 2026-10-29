@@ -173,6 +173,9 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // B6.6: the native runtime's memory — facts derived from this person's sessions; forgetting writes
   // the journal. Host state, the native sessions' own capability.
   ['/api/memory', 'localShell'],
+  // 1.15: an engine's own routes, sockets and static assets. Host power by default: whatever it
+  // serves there is reached through the same guard, auth gate and Host allowlist as the rest.
+  ['/api/engine/x', 'localShell'],
   ['/api/ingest', 'localTranscripts'],
   ['/v1/logs', 'localTranscripts'],
   ['/v1/metrics', 'localTranscripts'],

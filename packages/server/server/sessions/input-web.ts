@@ -63,6 +63,16 @@ export async function inputSessionExists(id: string): Promise<boolean> {
   return (await readRegistry()).some(m => m.id === id)
 }
 
+/**
+ * Liveness, not scope: the row exists AND has not been ended. A kill keeps the row (it only stamps
+ * `endedAt`, so the session can be reopened), which makes `inputSessionExists` true for a dead
+ * session. Engine sockets use this one, both at the handshake and in the periodic sweep.
+ */
+export async function inputSessionLive(id: string): Promise<boolean> {
+  const row = (await readRegistry()).find(m => m.id === id)
+  return !!row && !row.endedAt
+}
+
 /** True when the process is already at its write-socket ceiling — the route answers 503. */
 export function inputAtCapacity(): boolean {
   return openSockets >= MAX_INPUT_SOCKETS

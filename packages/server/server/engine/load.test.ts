@@ -104,6 +104,20 @@ describe('loadEngine — the community build and the official one', () => {
     expect(await loadEngine({ ...quiet, create })).toEqual({ present: false, reason: 'load-failed' })
   })
 
+  it('an engine announcing a surface outside /api/engine/x/ is refused at load; a good one loads', async () => {
+    const surface = { id: 'demo', placement: 'nay-dock' as const, label: { pt: 'Demo', en: 'Demo' }, module: '/api/engine/x/demo/mount.js' }
+    const route = { prefix: '/api/engine/x', capability: 'localShell' as const, handle: async () => null }
+    const withSurface = (module: string): CreateEngine<AgentisticsEvent> => async h => {
+      const e = await fake()(h)
+      return { ...e, routes: [...e.routes, route], manifest: { ...e.manifest, surfaces: [{ ...surface, module }] } }
+    }
+    expect(await loadEngine({ ...quiet, create: withSurface('https://evil.example/a.js') })).toEqual({ present: false, reason: 'load-failed' })
+    resetEngineForTests()
+    const st = await loadEngine({ ...quiet, create: withSurface(surface.module) })
+    expect(st.present).toBe(true)
+    expect(engine()?.manifest.surfaces?.[0]?.id).toBe('demo')
+  })
+
   it('loads once: a second caller gets the first answer', async () => {
     await loadEngine({ ...quiet, create: null })
     expect(await loadEngine({ ...quiet, create: fake() })).toEqual({ present: false, reason: 'community-build' })
@@ -112,6 +126,8 @@ describe('loadEngine — the community build and the official one', () => {
   it('every refusal has its own sentence', () => {
     expect(refusalLine({ kind: 'route-not-reserved', prefix: '/api/exec' })).toContain('/api/exec')
     expect(refusalLine({ kind: 'duplicate-command', verb: 'code' })).toContain('code')
+    expect(refusalLine({ kind: 'surface', id: 'demo', reason: 'bad-module' })).toContain('bad-module')
+    expect(refusalLine({ kind: 'surface-no-route' })).toContain('/api/engine/x')
     expect(refusalLine({ kind: 'route-capability', prefix: '/api/provider', declared: 'localChat', expected: 'localShell' }))
       .toContain('localShell')
   })

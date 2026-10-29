@@ -135,7 +135,16 @@
  * no type changes: a 1.13 engine never relaunches, and a 1.13 host broke a relaunching driver (its
  * second child was never read), so an engine that relaunches needs a 1.14 host.
  */
-export const ENGINE_API_VERSION = '1.14.0'
+/**
+ * 1.15.0 — ENGINE.EXT: engine-owned surfaces. `/api/engine/x` joins `RESERVED_PREFIXES` (guarded
+ * `localShell`): a route there may also serve static assets and accept a WebSocket (`EngineRoute.upgrade`,
+ * only after the guard, auth, Host allowlist and origin check; the host owns the frame cap, the
+ * connection limits and the closing, `ENGINE_SOCKET_LIMITS`). `manifest.surfaces` announces buttons the
+ * host draws (`session-header`, `nay-dock`, `app-bar`) whose `module` — a same-origin path under `/api/engine/x/` —
+ * the host imports on click and mounts into a frame it owns (`full` or `side`, switchable by the surface, kept mounted across navigation). All optional: a 1.14 engine still loads,
+ * and a 1.15 engine on an older host is refused at load (an unreserved prefix), so it runs as community.
+ */
+export const ENGINE_API_VERSION = '1.15.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

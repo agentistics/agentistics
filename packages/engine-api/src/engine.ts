@@ -11,6 +11,7 @@ import type { IntegrationRegistry } from './integration'
 import type { EngineStructured } from './structured'
 import type { EngineHostServices, PersonAsker } from './host'
 import { apiCompatible } from './version'
+import { surfaceRefusals, type EngineSurface, type EngineSocketHandlers, type SurfaceRefusalReason } from './surfaces'
 
 export interface EngineManifest {
   name: 'agentistics-engine'
@@ -28,6 +29,8 @@ export interface EngineManifest {
     chat?: HarnessId[]
     providers: ProviderId[]
   }
+  /** 1.15 — UI surfaces the host may draw a button for (`surfaces.ts`). Absent: none. */
+  surfaces?: EngineSurface[]
 }
 
 /** What the host knows about a request that the `Request` itself does not carry. */
@@ -54,6 +57,13 @@ export interface EngineRoute {
    * that says so is reachable there; the host binds the socket only when some route does.
    */
   localSocket?: boolean
+  /**
+   * 1.15 (optional): accept a WebSocket on this route. Called ONLY after the capability guard, the auth
+   * gate, the Host allowlist and the origin check have passed; `null` = not a socket of mine (the host
+   * answers 404). The host owns the frame cap, the connection limits and the closing (when the declared
+   * session ends, and when the engine is disposed) — see `ENGINE_SOCKET_LIMITS`.
+   */
+  upgrade?(req: Request, url: URL, ctx?: EngineRequestContext): Promise<EngineSocketHandlers | null> | EngineSocketHandlers | null
 }
 
 /** The only prefixes an engine route may live under. There is no field for a public route. */
@@ -65,6 +75,8 @@ export const RESERVED_PREFIXES = [
   '/v1/metrics',
   /** 1.7 (A5.2): OTLP spans — a harness's traces reach the engine's receiver like its logs. */
   '/v1/traces',
+  /** 1.15: an engine's own routes, sockets and static assets (its surfaces' modules live here). */
+  '/api/engine/x',
 ] as const
 
 export type ReservedPrefix = (typeof RESERVED_PREFIXES)[number]
@@ -162,6 +174,8 @@ export type EngineRefusal =
   | { kind: 'route-not-reserved'; prefix: string }
   | { kind: 'route-capability'; prefix: string; declared: CapabilityName; expected: CapabilityName | null }
   | { kind: 'duplicate-command'; verb: EngineCommand['verb'] }
+  | { kind: 'surface'; id: string; reason: SurfaceRefusalReason }
+  | { kind: 'surface-no-route' }
 
 /**
  * PURE. The host's load-time judgement of an engine: the contract version, and every route and
@@ -187,6 +201,10 @@ export function checkEngine(
     if (expected !== r.capability) {
       refusals.push({ kind: 'route-capability', prefix: r.prefix, declared: r.capability, expected })
     }
+  }
+  for (const f of surfaceRefusals(engine.manifest.surfaces)) refusals.push({ kind: 'surface', ...f })
+  if ((engine.manifest.surfaces?.length ?? 0) > 0 && !engine.routes.some(r => r.prefix === '/api/engine/x')) {
+    refusals.push({ kind: 'surface-no-route' })
   }
   const seen = new Set<string>()
   for (const c of engine.commands) {
