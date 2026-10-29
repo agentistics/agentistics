@@ -2,12 +2,17 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { readRawFleetSnapshot } from '../cli-start'
 
-const run = promisify(execFile)
+const exec = promisify(execFile)
+/** Bound every git probe and suppress index refreshes, fsmonitor hooks and credential prompts. */
+const git = (cwd: string, args: string[]) => exec('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, ...args], {
+  timeout: 15_000,
+  env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+})
 type Input = Record<string, unknown>
 type Refusal = { refused: true; reason: string; missing: string[] }
 const refuse = (reason: string, missing: string[] = []): Refusal => ({ refused: true, reason, missing })
 const inputOf = (v: unknown): Input => v && typeof v === 'object' ? v as Input : {}
-const cwdOf = (v: unknown): string | null => typeof inputOf(v).cwd === 'string' ? inputOf(v).cwd as string : null
+const cwdOf = (v: unknown): string | null => typeof inputOf(v).cwd === 'string' && (inputOf(v).cwd as string).length > 0 ? inputOf(v).cwd as string : null
 const sessionOf = (v: unknown): string | null => {
   const i = inputOf(v)
   return typeof i.sessionId === 'string' ? i.sessionId : typeof i.session === 'string' ? i.session : null
@@ -36,7 +41,7 @@ export function flowHostOps() {
       const cwd = cwdOf(value)
       if (!cwd) return refuse('repository cwd is required', ['cwd'])
       try {
-        const { stdout } = await run('git', ['-C', cwd, 'status', '--porcelain'])
+        const { stdout } = await git(cwd, ['status', '--porcelain'])
         return stdout.trim() ? refuse('working tree is dirty', stdout.trim().split('\n')) : { ok: true, cwd }
       } catch (error) { return refuse(`could not inspect working tree: ${String(error)}`, ['readable git worktree']) }
     },
@@ -44,12 +49,12 @@ export function flowHostOps() {
       const cwd = cwdOf(value)
       if (!cwd) return refuse('repository cwd is required', ['cwd'])
       try {
-        const { stdout: branchOut } = await run('git', ['-C', cwd, 'branch', '--show-current'])
+        const { stdout: branchOut } = await git(cwd, ['branch', '--show-current'])
         const branch = branchOut.trim()
         if (!branch) return refuse('current branch could not be determined', ['branch'])
-        const { stdout: headOut } = await run('git', ['-C', cwd, 'rev-parse', 'HEAD'])
+        const { stdout: headOut } = await git(cwd, ['rev-parse', 'HEAD'])
         const head = headOut.trim()
-        const { stdout: remoteOut } = await run('git', ['-C', cwd, 'ls-remote', 'origin', `refs/heads/${branch}`])
+        const { stdout: remoteOut } = await git(cwd, ['ls-remote', 'origin', `refs/heads/${branch}`])
         const remote = remoteOut.trim().split(/\s+/)[0]
         return remote === head ? { ok: true, branch, head, evidence: 'ls-remote' } : refuse('local HEAD is not saved on origin', [`push ${branch}`])
       } catch (error) { return refuse(`could not verify remote save: ${String(error)}`, ['reachable origin']) }
@@ -62,7 +67,7 @@ export function flowHostOps() {
     'limpeza-dry-run': async (value: unknown) => {
       const cwd = cwdOf(value) ?? process.cwd()
       try {
-        const { stdout } = await run('git', ['-C', cwd, 'worktree', 'list', '--porcelain'])
+        const { stdout } = await git(cwd, ['worktree', 'list', '--porcelain'])
         const paths = stdout.split(/\n(?=worktree )/).map(x => x.match(/^worktree (.+)$/m)?.[1]).filter((x): x is string => Boolean(x))
         return { ok: true, dryRun: true, cwd, worktrees: paths.map(path => ({ path, wouldRemove: false, why: 'deletion is disabled in v1' })) }
       } catch (error) { return refuse(`could not list worktrees: ${String(error)}`, ['readable git worktree']) }
