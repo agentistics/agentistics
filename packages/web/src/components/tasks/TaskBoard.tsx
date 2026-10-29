@@ -481,6 +481,7 @@ export function BoardView(p: BoardViewProps) {
                     : col.rows.map((r, i) => (
                       <div
                         key={r.task.id}
+                        data-task-card
                         draggable
                         onDragStart={() => { setDrag(r.task.id); setRefused(null) }}
                         onDragEnd={() => { setDrag(null); setOver(null) }}
