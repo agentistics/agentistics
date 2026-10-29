@@ -1,3 +1,4 @@
+import { flowStatusPath } from './flow-status'
 #!/usr/bin/env node
 import { sessionRoleBody } from "./session-role-args";
 import "./orphan-guard-boot";
@@ -982,7 +983,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
       case "agentistics_flow_status": {
         const runId = String((args as any)?.runId ?? "");
-        const body = await apiGet(`/api/flows/status/${encodeURIComponent(runId)}`);
+        const body = await apiGet(flowStatusPath(runId));
         return text(body);
       }
       case "agentistics_task_create": {

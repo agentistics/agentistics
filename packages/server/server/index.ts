@@ -1384,9 +1384,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         catch (error) { return json({ error: 'flow_failed', sentence: String(error) }, 400) }
       }
       if (url.pathname.startsWith('/api/flows/status/') && req.method === 'GET') {
-        const runId = decodeURIComponent(url.pathname.slice('/api/flows/status/'.length))
-        const status = await flowApi.status(runId)
-        return status ? json(status) : json({ error: 'not_found' }, 404)
+        const { flowStatusResponse } = await import('./flows/status')
+        const result = await flowStatusResponse(url.pathname.slice('/api/flows/status/'.length), id => flowApi.status(id))
+        return json(result.body, result.status)
       }
       return json({ error: 'not_found' }, 404)
     }
