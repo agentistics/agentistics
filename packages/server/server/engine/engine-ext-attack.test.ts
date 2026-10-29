@@ -178,7 +178,7 @@ describe('closing', () => {
   })
 
   const realHome = MANAGED_SESSIONS_FILE.startsWith(join(homedir(), '.agentistics')) && !homedir().includes('agentistics-throwaway')
-  (realHome ? it.skip : it)('a socket declaring a session is closed (4001) once that session is KILLED (row kept with endedAt)', async () => {
+  ;(realHome ? it.skip : it)('a socket declaring a session is closed (4001) once that session is KILLED (row kept with endedAt)', async () => {
     const id = `qa-${Date.now().toString(36)}`
     await addSession({ id, harness: 'claude', cwd: '/tmp', createdAt: new Date().toISOString() } as never)
     const closed: number[] = []
@@ -191,7 +191,7 @@ describe('closing', () => {
     expect(closed).toEqual([4001])
   })
 
-  (realHome ? it.skip : it)('a handshake declaring an ENDED session is refused', async () => {
+  ;(realHome ? it.skip : it)('a handshake declaring an ENDED session is refused', async () => {
     const id = `qa-ended-${Date.now().toString(36)}`
     await addSession({ id, harness: 'claude', cwd: '/tmp', createdAt: new Date().toISOString() } as never)
     await retireSession(id)
