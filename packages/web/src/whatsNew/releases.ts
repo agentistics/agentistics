@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.163.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Atualização do motor.',
+        en: 'Engine update.',
+      },
+    ],
+  },
   '2.163.1': {
     features: [],
     fixes: [
