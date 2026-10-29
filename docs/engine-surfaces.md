@@ -73,7 +73,7 @@ The handle has three verbs and no others, and every one is total (it never throw
 
 A handle dies when its socket closes (another surface on the same session does not keep it alive) or the
 session ends; it then releases its subscriptions and stays dead. A surface mounted later gets a new one,
-so code that outlives a socket (a call resumed on a new connection) asks the current socket each time.
+so code that outlives a socket (a surface that reconnects) asks the current socket each time.
 `live` reflects the socket and what the handle has seen; it learns of a session's end on the next use or
 when the host closes the socket.
 

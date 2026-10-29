@@ -51,7 +51,7 @@ const NOOP = () => {}
 interface Binding { id: string; open(): boolean; owned: boolean }
 
 interface Internal { handle: StructuredSessionHandle; kill(): void }
-const bySocket = new WeakMap<object, Set<Internal>>()
+const bySocket = new WeakMap<object, Internal>()
 
 function makeHandle(d: HandleDeps, b: Binding): Internal {
   let ended = false
@@ -68,8 +68,8 @@ function makeHandle(d: HandleDeps, b: Binding): Internal {
   }
   const check = async () => {
     if (!valid()) return false
-    let alive = false
-    try { alive = await d.alive(b.id) } catch { alive = false }
+    let alive: boolean
+    try { alive = await d.alive(b.id) } catch { return false } // unknown: refuse this use, but do not end the handle
     if (!alive) kill()
     return valid()
   }
@@ -146,18 +146,16 @@ export function createStructuredSessions(d: HandleDeps): StructuredSessionsHost 
       return () => {
         const id = entry.sessionId
         if (typeof id !== 'string' || id.length === 0 || entry.closed) return null
-        const h = makeHandle(d, { id, open: () => !entry.closed, owned: false })
-        let set = bySocket.get(entry)
-        if (!set) bySocket.set(entry, (set = new Set()))
-        set.add(h)
+        // one handle per socket: asking again returns it, so repeated calls never pile up
+        let h = bySocket.get(entry)
+        if (!h) bySocket.set(entry, (h = makeHandle(d, { id, open: () => !entry.closed, owned: false })))
         return h.handle
       }
     },
     socketClosed(entry) {
-      const set = bySocket.get(entry)
-      if (!set) return
+      const h = bySocket.get(entry)
       bySocket.delete(entry)
-      for (const h of set) h.kill()
+      h?.kill()
     },
   }
 }

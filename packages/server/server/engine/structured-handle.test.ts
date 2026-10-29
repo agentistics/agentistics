@@ -9,7 +9,7 @@ import { createStructuredSessions, markEngineOpened, MAX_SURFACE_TURN_BYTES, res
 function rig() {
   const sent: string[] = []
   const cancelled: string[] = []
-  const state = { alive: true, activity: 'working', attention: null as unknown, structured: true, sendThrows: false }
+  const state = { alive: true, aliveThrows: false, activity: 'working', attention: null as unknown, structured: true, sendThrows: false }
   const followed: string[] = []
   const backend = {
     isStructured: () => state.structured,
@@ -26,7 +26,7 @@ function rig() {
       },
     }),
   }
-  const host = createStructuredSessions({ backend: async () => backend as never, alive: async () => state.alive })
+  const host = createStructuredSessions({ backend: async () => backend as never, alive: async () => { if (state.aliveThrows) throw new Error('registry'); return state.alive } })
   installSocketSessions(host)
   const sockets: { st: EngineSocketState; api: ReturnType<typeof apiOf> }[] = []
   function apiOf(st: EngineSocketState) { return st.entry!.api }
@@ -137,6 +137,32 @@ describe('the handle a socket hands out', () => {
     const h = r.mount('s1').api.structured!()!
     r.state.sendThrows = true
     expect(await h.send('x')).toBe(false)
+  })
+  test('unmount releases the subscriptions without anybody touching the handle', async () => {
+    const r = rig()
+    const a = r.mount('s1')
+    a.api.structured!()!.follow(10, () => {})
+    await tick()
+    expect(r.followed).toEqual(['max=10'])
+    a.unmount()
+    expect(r.followed).toEqual(['max=10', 'off'])
+  })
+  test('structured() after the close is null, and asking twice returns the same handle', () => {
+    const r = rig()
+    const a = r.mount('s1')
+    expect(a.api.structured!()).toBe(a.api.structured!())
+    a.unmount()
+    expect(a.api.structured!()).toBeNull()
+  })
+  test('a transient registry error refuses the use but does not end an engine-started session', async () => {
+    const r = rig()
+    markEngineOpened('e1')
+    const h = r.host.engine.get('e1')!
+    r.state.aliveThrows = true
+    expect(await h.send('x')).toBe(false)
+    expect(r.host.engine.get('e1')).not.toBeNull()
+    r.state.aliveThrows = false
+    expect(await h.send('x')).toBe(true)
   })
   test('without installed sessions a socket offers no structured door', () => {
     const r = rig()

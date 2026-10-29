@@ -125,6 +125,7 @@ export function closeEngineSocket(state: EngineSocketState, code: number, reason
   if (!entry || entry.closed) return
   entry.closed = true
   open.delete(entry)
+  try { socketSessions?.socketClosed(entry) } catch { /* the handles check `closed` themselves */ }
   try { entry.handlers.close?.(code, reason) } catch { /* the socket is gone either way */ }
 }
 
