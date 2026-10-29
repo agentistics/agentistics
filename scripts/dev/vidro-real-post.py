@@ -91,6 +91,11 @@ O contraste é ESTIMADO no recorte "depois": fundo = cor mediana, texto = pixel 
 |---|---|---|---|---|---|
 {rows}
 
+## Notas
+- **(e) no celular (390)**: no toque, o app abre o MODAL de uso dos planos, não o popover (o popover é só hover/foco no desktop). A foto 390 mostra esse modal;
+  o recorte vem da diferença geral da tela e o contraste ali refere-se ao modal inteiro.
+- (d) a barra de baixo só existe no celular; o 1440 não tem barra.
+
 ## CPU no celular (390 px, 4× mais lenta, mediana de 3 rodadas; média / p95 em ms; alvo p95 ≤ 1,5× do sem vidro)
 | tela | tema | sem vidro | com vidro | p95 com/sem | |
 |---|---|---|---|---|---|
