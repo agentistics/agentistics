@@ -1368,6 +1368,29 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // Experimental deterministic flows. The engine owns execution and durable run records;
+    // this thin host door only applies the flag/build gates and forwards typed requests.
+    if (url.pathname === '/api/flows' || url.pathname.startsWith('/api/flows/')) {
+      const { flowsExperimentalOn } = await import('./native-gate')
+      if (!flowsExperimentalOn()) return json({ error: 'experimental', sentence: 'experimental desligado: AGENTISTICS_FLOWS' }, 403)
+      await loadEngine()
+      const flowApi = engine()?.flows
+      if (!flowApi) return json({ error: 'official_build', sentence: 'fluxos exigem o build oficial' }, 501)
+      if (url.pathname === '/api/flows' && req.method === 'GET') return json({ flows: flowApi.list() })
+      if (url.pathname === '/api/flows/run' && req.method === 'POST') {
+        const body = await req.json().catch(() => ({})) as { name?: unknown; inputs?: unknown }
+        if (typeof body.name !== 'string') return json({ error: 'bad_request', sentence: 'flow name is required' }, 400)
+        try { return json(await flowApi.run(body.name, body.inputs && typeof body.inputs === 'object' ? body.inputs as Record<string, unknown> : {})) }
+        catch (error) { return json({ error: 'flow_failed', sentence: String(error) }, 400) }
+      }
+      if (url.pathname.startsWith('/api/flows/status/') && req.method === 'GET') {
+        const runId = decodeURIComponent(url.pathname.slice('/api/flows/status/'.length))
+        const status = await flowApi.status(runId)
+        return status ? json(status) : json({ error: 'not_found' }, 404)
+      }
+      return json({ error: 'not_found' }, 404)
+    }
+
     // Settings → Vault. `capability-guard.ts` (`/api/vault`, localShell) has already refused these on
     // an exposed profile; a central holds no per-machine vault of its own to show, so it answers 404.
     // The routes live in `vault/http.ts`; each is a door onto `vault/gate.ts`, which decides what an
