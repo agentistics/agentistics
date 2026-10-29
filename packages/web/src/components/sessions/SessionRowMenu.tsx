@@ -64,7 +64,13 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, 
   const top = below ? y : y + h > window.innerHeight ? Math.max(4, y - h) : y
 
   // Keep the opaque card surface unless both the tint and a blur implementation are supported.
-  const glass = (window.CSS?.supports('backdrop-filter', 'blur(16px)')
+  // `data-glass="off"` is the capture switch used by the real-screen gallery. Keep the
+  // historical default when the attribute is absent so existing installs and tests do not
+  // change merely because this experiment was shipped.
+  const reducedTransparency = window.matchMedia?.('(prefers-reduced-transparency: reduce)').matches ?? false
+  const glass = document.documentElement.dataset.glass !== 'off'
+    && !reducedTransparency
+    && (window.CSS?.supports('backdrop-filter', 'blur(16px)')
     || window.CSS?.supports('-webkit-backdrop-filter', 'blur(16px)'))
     && window.CSS?.supports('background', 'color-mix(in srgb, var(--bg-card) 72%, transparent)')
 
