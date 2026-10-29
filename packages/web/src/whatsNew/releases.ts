@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.164.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Quando a conexão de um assistente cai, a sessão só avisa a falha depois que o processo dele parou de verdade.',
+        en: "When an assistant's connection drops, the session reports the failure only after its process has really stopped.",
+      },
+    ],
+  },
   '2.164.0': {
     features: [
       {
