@@ -102,6 +102,9 @@ export const AGENT_TOOL_NAMES = [
   // Tags (2)
   'agentistics_tags',
   'agentistics_tag_detail',
+  // Experimental flows (2)
+  'agentistics_flow_run',
+  'agentistics_flow_status',
 ] as const
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number]
@@ -208,6 +211,9 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   // ------------------------------------------------------------------ Tags
   agentistics_tags: { ...DATA, risk: 'R', routes: ['GET /api/tags'], reason: 'reads aggregate-only tag cards' },
   agentistics_tag_detail: { ...DATA, risk: 'R', routes: ['GET /api/tags', 'GET /api/tags/:id'], reason: 'reads one tag aggregate (counts and sums only)' },
+  // ------------------------------------------------------------------ Experimental flows (read-only host operations)
+  agentistics_flow_run: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['POST /api/flows/run'], reason: 'runs only the built-in deterministic flow gates; it deletes nothing' },
+  agentistics_flow_status: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['GET /api/flows/status/:runId'], reason: 'reads a durable deterministic flow run' },
 }
 
 /**

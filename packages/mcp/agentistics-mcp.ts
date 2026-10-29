@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { flowStatusRunId } from './flow-status'
 import { sessionRoleBody } from "./session-role-args";
 import "./orphan-guard-boot";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -41,6 +42,18 @@ async function nativeVisibleNow(): Promise<boolean> {
   try {
     const res = await fetch(`${API}/api/engine`, { signal: AbortSignal.timeout(2000) });
     return res.ok ? nativeVisibleFrom(await res.json()) : false;
+  } catch {
+    return false;
+  }
+}
+
+/** Flow tools are offered only when both the official engine and its opt-in flag are visible. */
+async function flowsVisibleNow(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API}/api/engine`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) return false;
+    const body = await res.json() as { flowsExperimental?: unknown; flows?: unknown };
+    return body.flowsExperimental === true && body.flows === true;
   } catch {
     return false;
   }
@@ -888,12 +901,37 @@ const TOOLS: Tool[] = [
       "List repositories, grouped by normalized git remote (independent of local path or which machine produced the session), with session/message/token/cost totals and last-active date. Sessions with no linked repository are grouped under 'unlinked'. Optionally scope to a single harness. Rows tagged source \"projections\" (read from the journal) carry personTurns (the person's turns); there `messages` is a deprecated alias of personTurns, and subagent spend is reported apart (subagentTokens, subagentCostUSD).",
     inputSchema: { type: "object", properties: { harness: HARNESS_PARAM }, required: [] },
   },
+  {
+    name: "agentistics_flow_run",
+    description: "Run an official deterministic flow. Flows are experimental and read-only host operations; the server refuses when AGENTISTICS_FLOWS is off or the official engine is absent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Built-in flow name, for example worker-checar or limpeza." },
+        inputs: { type: "object", description: "Optional flow inputs." },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "agentistics_flow_status",
+    description: "Read the durable status of an official deterministic flow run.",
+    inputSchema: {
+      type: "object",
+      properties: { runId: { type: "string", description: "Flow run id returned by agentistics_flow_run." } },
+      required: ["runId"],
+    },
+  },
 ];
 
 /** Exported for the session-context parity test; the live list remains the single MCP registry. */
 export const MCP_TOOL_NAMES = TOOLS.map(tool => tool.name)
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolsForGate(TOOLS, await nativeVisibleNow()) }));
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  const tools = toolsForGate(TOOLS, await nativeVisibleNow());
+  const flowsOn = await flowsVisibleNow();
+  return { tools: flowsOn ? tools : tools.filter(tool => !tool.name.startsWith("agentistics_flow_")) };
+});
 
 // The local agent audit (spec §4.6, P1.2): every W/D call is one line, R calls are counted per
 // hour. It records ids and outcome codes only — never an argument value — and a failed write never
@@ -934,6 +972,19 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const ref = String((args as any)?.ref ?? "");
         const body = await apiGet(`/api/tasks/${encodeURIComponent(ref)}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_flow_run": {
+        const a = args as any;
+        const body = await apiSend("POST", "/api/flows/run", {
+          name: a?.name,
+          ...(a?.inputs && typeof a.inputs === "object" ? { inputs: a.inputs } : {}),
+        });
+        return text(body);
+      }
+      case "agentistics_flow_status": {
+        const runId = String((args as any)?.runId ?? "");
+        const body = await apiGet(`/api/flows/status/${flowStatusRunId(runId)}`);
+        return text(body);
       }
       case "agentistics_task_create": {
         const a = args as any;

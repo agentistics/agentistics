@@ -100,6 +100,16 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
       pt: 'Várias contas por harness ao mesmo tempo: pastas de login separadas, com a entrada feita pelo app.',
     },
   },
+  {
+    id: 'flows',
+    env: 'AGENTISTICS_FLOWS',
+    // Deterministic flows are deliberately opt-in, even when the global experimental preference is on.
+    isOn: raw => raw === '1',
+    description: {
+      en: 'Experimental deterministic flows for checking workers and previewing safe cleanup.',
+      pt: 'Fluxos determinísticos experimentais para conferir workers e simular uma limpeza segura.',
+    },
+  },
 ]
 
 export type ExperimentalSource =
