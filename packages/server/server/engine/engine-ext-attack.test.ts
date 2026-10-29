@@ -1,13 +1,10 @@
 /**
  * Adversarial QA for engine-api 1.15 (engine-owned surfaces, sockets and assets).
  *
- * Tests named `GAP:` document a finding: they assert the behaviour the contract PROMISES, so they fail
- * against the current code, and are declared `it.failing` so the suite stays green while the gap exists;
- * once it is fixed the test turns red, and `.failing` must be dropped in the same change.
- * Tests without the prefix pin a defence that holds.
+ * Each test pins a defence that must hold; the closing tests cover session end and engine dispose.
  */
 import { afterEach, describe, expect, it } from 'bun:test'
-import { surfaceModuleOk, ENGINE_SOCKET_LIMITS, type EngineSocketHandlers } from '@agentistics/engine-api'
+import { RESERVED_PREFIXES, surfaceModuleOk, ENGINE_SOCKET_LIMITS, type EngineSocketHandlers } from '@agentistics/engine-api'
 import { surfaceModulePathOk } from '../../../web/src/lib/engineSurfaces'
 import { assetVerdict, applyAssetVerdict } from './engine-assets'
 import { wsInputOriginOk } from '../sessions/input-protocol'
@@ -15,8 +12,8 @@ import {
   admit, closeEngineSocket, engineSocketCount, onEngineSocketMessage, openEngineSocket, planEngineUpgrade,
   resetEngineSocketsForTests, sweepEndedSessions, type EngineSocketState,
 } from './engine-sockets'
-import { resetEngineForTests } from './load'
-import { inputSessionExists } from '../sessions/input-web'
+import { engineStatus, reservedPrefixMiss, resetEngineForTests } from './load'
+import { inputSessionLive } from '../sessions/input-web'
 import { addSession, retireSession } from '../sessions/registry'
 import { MANAGED_SESSIONS_FILE } from '../config'
 import { applyBaselineHeaders } from '../response-policy'
@@ -160,14 +157,14 @@ describe('connection ceilings under concurrency', () => {
 })
 
 describe('closing', () => {
-  it.failing('GAP: disposing the engine closes every engine socket (docs: "closed (1001) when the engine is disposed")', async () => {
+  it('disposing the engine closes every engine socket (docs: "closed (1001) when the engine is disposed")', async () => {
     // disposeEngine() is the host's one dispose path; with or without an engine it must take the sockets down.
     const src = readFileSync(join(import.meta.dir, 'load.ts'), 'utf8')
     const body = src.slice(src.indexOf('export async function disposeEngine'), src.indexOf('/** Tests only. */'))
     expect(body).toContain('closeAllEngineSockets')
   })
 
-  it.failing('GAP: no production code calls closeAllEngineSockets or disposeEngine', () => {
+  it('production code calls code calls closeAllEngineSockets or disposeEngine', () => {
     const glob = new Bun.Glob('**/*.ts')
     const root = join(import.meta.dir, '..', '..')
     const callers: string[] = []
@@ -181,7 +178,7 @@ describe('closing', () => {
   })
 
   const realHome = MANAGED_SESSIONS_FILE.startsWith(join(homedir(), '.agentistics')) && !homedir().includes('agentistics-throwaway')
-  (realHome ? it.skip : it.failing)('GAP: a socket declaring a session is closed (4001) once that session is KILLED (row kept with endedAt)', async () => {
+  (realHome ? it.skip : it)('a socket declaring a session is closed (4001) once that session is KILLED (row kept with endedAt)', async () => {
     const id = `qa-${Date.now().toString(36)}`
     await addSession({ id, harness: 'claude', cwd: '/tmp', createdAt: new Date().toISOString() } as never)
     const closed: number[] = []
@@ -189,18 +186,18 @@ describe('closing', () => {
     expect(await inputSessionExists(id)).toBe(true)
     openEngineSocket(st, { send() {}, close(c?: number) { closed.push(c ?? 0) } })
     await retireSession(id) // what a kill does: the row stays, stamped endedAt
-    const n = await sweepEndedSessions(inputSessionExists) // the liveness test index.ts wires
-    console.log(`[attack] after kill: inputSessionExists=${await inputSessionExists(id)} swept=${n}`)
+    const n = await sweepEndedSessions(inputSessionLive) // the liveness test index.ts wires
+    console.log(`[attack] after kill: live=${await inputSessionLive(id)} swept=${n}`)
     expect(closed).toEqual([4001])
   })
 
-  (realHome ? it.skip : it.failing)('GAP: a handshake declaring an ENDED session is refused', async () => {
+  (realHome ? it.skip : it)('a handshake declaring an ENDED session is refused', async () => {
     const id = `qa-ended-${Date.now().toString(36)}`
     await addSession({ id, harness: 'claude', cwd: '/tmp', createdAt: new Date().toISOString() } as never)
     await retireSession(id)
     const refusal = planEngineUpgrade({
       routeCanUpgrade: true, originOk: true, handlers: { sessionId: id, message() {} },
-      sessionExists: await inputSessionExists(id), admission: admit('/api/engine/x', id),
+      sessionExists: await inputSessionLive(id), admission: admit('/api/engine/x', id),
     })
     expect(refusal).not.toBeNull()
   })
@@ -222,5 +219,23 @@ describe('assets', () => {
       expect(csp).not.toContain('unsafe-eval')
       expect(csp).toContain("frame-ancestors 'none'")
     }
+  })
+})
+
+describe('community build', () => {
+  it('a reserved engine prefix answers 404 engine-absent when there is no engine', () => {
+    resetEngineForTests()
+    for (const path of ['/api/engine/x/', '/api/engine/x/a.js']) {
+      const reserved = RESERVED_PREFIXES.find(p => path === p || path.startsWith(p + '/'))
+      expect(reserved).toBe('/api/engine/x')
+    }
+    const miss = reservedPrefixMiss(false, engineStatus())
+    expect(miss.status).toBe(404)
+    expect(miss.body.error).toBe('engine-absent')
+    expect(engineStatus().present).toBe(false)
+  })
+  it('the server wires the reserved-prefix miss through that helper', () => {
+    const src = readFileSync(join(import.meta.dir, '..', 'index.ts'), 'utf8')
+    expect(src).toContain('reservedPrefixMiss(false, engineStatus())')
   })
 })

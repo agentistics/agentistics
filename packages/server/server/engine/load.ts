@@ -19,6 +19,7 @@
  * - **Loading is lazy and happens once.** A process that never asks never loads one, and `bin/cli.ts`
  *   imports the slot for every command — so every heavy import sits behind a call.
  */
+import { closeAllEngineSockets } from './engine-sockets'
 import {
   ENGINE_API_VERSION,
   checkEngine,
@@ -173,7 +174,19 @@ export function buildHasEngine(): boolean {
   return slotEngine !== null
 }
 
+/**
+ * What a request under a RESERVED prefix gets when no engine route answers it. With no engine (a
+ * community build, or one switched off or refused at load) it is `404 engine-absent`, never the
+ * SPA's index.html; with an engine that has no matching route it is a plain `404 not_found`.
+ * PURE, so the community-build answer is testable without booting a server.
+ */
+export function reservedPrefixMiss(live: boolean, status: EngineStatus): { status: 404; body: Record<string, unknown> } {
+  return live ? { status: 404, body: { error: 'not_found' } } : { status: 404, body: { error: 'engine-absent', engine: status } }
+}
+
 export async function disposeEngine(): Promise<void> {
+  // The sockets the host opened for the engine go first (close 1001), engine or not.
+  try { closeAllEngineSockets('engine disposed') } catch { /* never on the way out */ }
   const e = loaded?.engine
   if (!e) return
   try { await e.dispose() } catch { /* never on the way out */ }

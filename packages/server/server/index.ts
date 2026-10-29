@@ -38,7 +38,7 @@ import { getEnabledAdapters } from './adapters/types'
 import { handleLogout, handleSession, getPrincipal, getPrincipalSession, makePrincipalSessionCookieHeader, SESSION_REFRESH_MS, isAuthed } from './auth'
 import { routeCapability, capabilityDenied } from './capability-guard'
 import { RESERVED_PREFIXES } from '@agentistics/engine-api'
-import { engine, engineStatus, loadEngine } from './engine/load'
+import { disposeEngine, reservedPrefixMiss, engine, engineStatus, loadEngine } from './engine/load'
 import { applyAssetVerdict } from './engine/engine-assets'
 import {
   admit as admitEngineSocket, closeEngineSocket, planEngineUpgrade, onEngineSocketMessage, openEngineSocket,
@@ -107,7 +107,7 @@ import type { FleetSpawnBody } from './sessions/fleet-spawn'
 // never opens this page. The handlers must be reachable synchronously from the shared `_wsHandlers`.
 import {
   openInputSocket, onInputMessage, closeInputSocket,
-  createInputState, inputSessionExists, inputAtCapacity, type FleetInputState,
+  createInputState, inputSessionExists, inputSessionLive, inputAtCapacity, type FleetInputState,
 } from './sessions/input-web'
 // The utility shell's own WS write channel. Its graph is the shell store plus the two pure input
 // modules — no registry, no session-view — so it is statically importable for the same reason
@@ -224,8 +224,14 @@ const serverProcStatsMap = new Map<number, ProcStatSample>()
   console.log(`[boot] +${Math.round(performance.now())} ms data dir claimed`)
   const release = () => { lock.releaseSync() }
   process.on('exit', release)
-  process.on('SIGINT', () => { release(); process.exit(130) })
-  process.on('SIGTERM', () => { release(); process.exit(143) })
+  // The engine is disposed on the way out (its sockets close 1001), bounded so a stuck dispose
+  // cannot hold the stop.
+  const stop = (code: number) => {
+    release()
+    void Promise.race([disposeEngine(), new Promise<void>(r => setTimeout(r, 2000))]).finally(() => process.exit(code))
+  }
+  process.on('SIGINT', () => stop(130))
+  process.on('SIGTERM', () => stop(143))
 }
 
 // Preserve history before Claude's next cleanup (transcripts > cleanupPeriodDays,
@@ -2090,11 +2096,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
                 routeCanUpgrade: !!route.upgrade,
                 originOk,
                 handlers,
-                sessionExists: handlers?.sessionId === undefined ? true : await inputSessionExists(handlers.sessionId),
+                sessionExists: handlers?.sessionId === undefined ? true : await inputSessionLive(handlers.sessionId),
                 admission: admitEngineSocket(route.prefix, handlers?.sessionId),
               })
               if (refusal) { const { status, ...body } = refusal; return json(body, status) }
-              startEngineSocketSweep(inputSessionExists)
+              startEngineSocketSweep(inputSessionLive)
               const engineSocket: EngineSocketState = { route: route.prefix, handlers: handlers!, entry: null }
               if (server.upgrade(req, { data: { user: '', memberId: '', engineSocket } })) return
               return json({ error: 'upgrade_failed' }, 500)
@@ -2106,9 +2112,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
             for (const [k, v] of Object.entries(CORS_HEADERS)) headers.set(k, v)
             return new Response(res.body, { status: res.status, statusText: res.statusText, headers })
           }
-          return json({ error: 'not_found' }, 404)
+          const miss = reservedPrefixMiss(true, engineStatus())
+          return json(miss.body, miss.status)
         }
-        return json({ error: 'engine-absent', engine: engineStatus() }, 404)
+        const absent = reservedPrefixMiss(false, engineStatus())
+        return json(absent.body, absent.status)
       }
     }
 
