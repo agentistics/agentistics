@@ -134,6 +134,7 @@ export function Drawer({ open, title, onClose, children, footer, dirty = false, 
         ref={panelRef}
         role="dialog"
         aria-modal="true"
+        data-drawer-side={left ? 'left' : 'right'}
         tabIndex={-1}
         onClick={e => e.stopPropagation()}
         onTransitionEnd={e => { if (e.target === e.currentTarget) setPhase(drawerAfterTransition) }}

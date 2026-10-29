@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.165.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O vidro voltou ao visual fosco original e só aparece em menus, dropdowns, gavetas laterais e no campo de mensagem; cabeçalhos, cards e campos voltam ao sólido.',
+        en: 'Glass is back to the original frosted look and only on menus, dropdowns, side drawers and the message box.',
+      },
+    ],
+  },
   '2.165.0': {
     features: [
       {
