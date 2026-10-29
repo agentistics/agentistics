@@ -164,7 +164,7 @@ describe('closing', () => {
     expect(body).toContain('closeAllEngineSockets')
   })
 
-  it('production code calls code calls closeAllEngineSockets or disposeEngine', () => {
+  it('production code calls closeAllEngineSockets or disposeEngine', () => {
     const glob = new Bun.Glob('**/*.ts')
     const root = join(import.meta.dir, '..', '..')
     const callers: string[] = []
@@ -183,7 +183,7 @@ describe('closing', () => {
     await addSession({ id, harness: 'claude', cwd: '/tmp', createdAt: new Date().toISOString() } as never)
     const closed: number[] = []
     const st: EngineSocketState = { route: '/api/engine/x', handlers: { sessionId: id, message() {} }, entry: null }
-    expect(await inputSessionExists(id)).toBe(true)
+    expect(await inputSessionLive(id)).toBe(true)
     openEngineSocket(st, { send() {}, close(c?: number) { closed.push(c ?? 0) } })
     await retireSession(id) // what a kill does: the row stays, stamped endedAt
     const n = await sweepEndedSessions(inputSessionLive) // the liveness test index.ts wires
