@@ -406,3 +406,38 @@ export function answerFits(open: StructuredAttention | null, a: StructuredAnswer
   if (a.text !== undefined && !option.freeText) return { ok: false, why: 'text-not-accepted' }
   return { ok: true, option }
 }
+
+/**
+ * 1.17 — the narrow door an engine surface uses to act on ONE session. It can follow the conversation,
+ * add a turn and cancel the turn in flight; it cannot answer a request, change a mode, list anything or
+ * reach any other session. Every method is total: it never throws, and once the handle is no longer
+ * valid (`live` is false) it does nothing.
+ */
+export interface StructuredSessionHandle {
+  /** False once the surface that asked was unmounted, or the session ended. A dead handle stays dead. */
+  readonly live: boolean
+  /**
+   * The chat seam for this session: first a `window` of the last `max` turns, then deltas. Returns the
+   * unsubscribe; an invalid handle returns a no-op and never calls `on`.
+   */
+  follow(max: number, on: (d: HarnessChatDelta) => void): () => void
+  /**
+   * Adds a turn. The host types it with an `[from agentistics · surface]` header, so the conversation
+   * never shows it as something the owner wrote. False when the handle is invalid, the session cannot
+   * take input, or a request is open.
+   */
+  send(text: string): Promise<boolean>
+  /** Cancels the turn in flight, and nothing else. False when the handle is invalid or nothing was running. */
+  cancel(): Promise<boolean>
+}
+
+/** `EngineHostServices.structuredSessions` (1.17, optional). */
+export interface EngineStructuredSessions {
+  /**
+   * A handle for a session THIS ENGINE started itself (`fleet.delegateSpawn`), or `null`. Any other id —
+   * unknown, or somebody else's — answers `null`, indistinguishably. There is no way to enumerate sessions
+   * through this. The session a surface was opened from is reached through that surface's own socket
+   * (`EngineSocket.structured`), never through an id the engine supplies.
+   */
+  get(id: string): StructuredSessionHandle | null
+}

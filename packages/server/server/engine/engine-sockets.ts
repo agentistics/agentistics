@@ -35,6 +35,17 @@ export interface EngineSocketEntry {
 
 const open = new Set<EngineSocketEntry>()
 
+/**
+ * The host's per-socket session handles (`structured-handle.ts`), installed once when the engine's host
+ * services are built. Without it a socket offers no `structured` (the engine then has no session door).
+ */
+export interface SocketSessions {
+  forSocket(entry: Pick<EngineSocketEntry, 'sessionId' | 'closed'>): () => import('@agentistics/engine-api').StructuredSessionHandle | null
+  socketClosed(entry: object): void
+}
+let socketSessions: SocketSessions | null = null
+export function installSocketSessions(s: SocketSessions | null): void { socketSessions = s }
+
 export type Admission = { ok: true } | { ok: false; reason: 'route-full' | 'session-full' }
 
 /** PURE-ish. Would one more connection on `route` for `sessionId` be within the ceilings? */
@@ -90,6 +101,7 @@ export function openEngineSocket(state: EngineSocketState, raw: RawSocket): void
     },
     closed: false,
   }
+  if (socketSessions) (entry.api as { structured?: unknown }).structured = socketSessions.forSocket(entry)
   state.entry = entry
   open.add(entry)
   try { state.handlers.open?.(entry.api) } catch { raw.close(1011, 'engine error') }
@@ -113,6 +125,7 @@ export function closeEngineSocket(state: EngineSocketState, code: number, reason
   if (!entry || entry.closed) return
   entry.closed = true
   open.delete(entry)
+  try { socketSessions?.socketClosed(entry) } catch { /* the handles check `closed` themselves */ }
   try { entry.handlers.close?.(code, reason) } catch { /* the socket is gone either way */ }
 }
 
