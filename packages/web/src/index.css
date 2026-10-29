@@ -1127,6 +1127,19 @@ button:focus-within .ag-row-pin,
   box-shadow: none !important;
 }
 
+/* Phones: a lighter blur. 20px over a long list costs real frame time on a 4x-throttled CPU. */
+@media (pointer: coarse), (max-width: 640px) {
+  [data-glass="on"] [data-area-rail][data-open="true"],
+  [data-glass="on"] div[role="dialog"][aria-modal="true"] > div,
+  [data-glass="on"] [data-composer-menu],
+  [data-glass="on"] [data-plan-usage-popover],
+  [data-glass="on"] [data-nay-notice],
+  [data-glass="on"] body > div[style*="position: fixed"][style*="background"]:not([style*="inset: 0"]) {
+    -webkit-backdrop-filter: blur(10px) saturate(150%);
+    backdrop-filter: blur(10px) saturate(150%);
+  }
+}
+
 /* Lightweight acrylic for repeated content surfaces. Do not blur these: session/task/account
    lists can contain hundreds of rows and should remain cheap on a throttled mobile CPU. */
 [data-glass="on"] .ag-stat-card,

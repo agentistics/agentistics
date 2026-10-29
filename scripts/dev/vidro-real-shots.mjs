@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 /* Real-screen evidence for the glass experiment. Run through agentop run --rm only. */
 import { chromium } from 'playwright'
-import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile, readFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
@@ -65,7 +65,12 @@ await writeFile(join(demoDataDir, 'managed-sessions.json'), JSON.stringify([{
   conversationId: demoConversationId, conversationLink: 'assigned', conversationLinkVia: 'assigned-id',
   label: 'Demonstração Vidro Real', mode: 'no-questions',
 }], null, 2))
-const tmuxSeed = spawnSync('tmux', ['-L', demoTmuxSocket, '-f', '/dev/null', 'new-session', '-d', '-s', demoTmuxName, '-c', demoCwd, '-e', `AGENTOP_MANAGED_ID=${demoManagedId}`, '--', 'sleep', '600'], { env: appEnv, encoding: 'utf8', stdio: 'pipe' })
+// A process named `claude` (a symlink to sleep): live-session detection matches on the process name, so the
+// row is a running harness session that accepts prompts, and the composer menu opens by a real click.
+await mkdir(join(demoHome, 'bin'), { recursive: true })
+const fakeClaude = join(demoHome, 'bin', 'claude')
+await symlink(spawnSync('which', ['sleep'], { encoding: 'utf8' }).stdout.trim() || '/bin/sleep', fakeClaude)
+const tmuxSeed = spawnSync('tmux', ['-L', demoTmuxSocket, '-f', '/dev/null', 'new-session', '-d', '-s', demoTmuxName, '-c', demoCwd, '-e', `AGENTOP_MANAGED_ID=${demoManagedId}`, '--', fakeClaude, '600'], { env: appEnv, encoding: 'utf8', stdio: 'pipe' })
 if (tmuxSeed.status !== 0) throw new Error(`[fixture] isolated tmux backend failed: ${tmuxSeed.stderr || tmuxSeed.stdout}`)
 function stopDemoTmux() {
   spawnSync('tmux', ['-L', demoTmuxSocket, 'kill-server'], { env: appEnv, stdio: 'ignore' })
@@ -187,8 +192,9 @@ async function openSession(page, theme) {
     await page.waitForFunction(text => document.body.innerText.includes(text), expectedChatText, { timeout: 30_000 })
     await page.waitForTimeout(600)
     const more = page.locator('button[aria-label="Mais opções"], button[aria-label="More options"], button[aria-haspopup="menu"]').last()
-    if (await more.count()) await more.click({ force: true }).catch(() => {})
+    if (await more.count()) await more.click().catch(error => console.log('[b] real click on the composer menu failed:', String(error).slice(0, 160)))
     await page.waitForTimeout(600)
+    if (!(await page.locator('[data-composer-menu]').count())) console.log('[b] composer menu did not open')
     return 'live'
   }
   await page.goto(`${base}/preview/chat-activity/?theme=${theme}`, { waitUntil: 'networkidle' })
@@ -323,7 +329,7 @@ if (want('a')) {
         await page.goto(`${base}/sessions`, { waitUntil: 'domcontentloaded' }); await ready(page)
         await showEnded(page); await page.waitForFunction(() => document.querySelectorAll('[data-session-row]').length >= 5, undefined, { timeout: 60_000 }).catch(() => console.log('[e] fewer than 5 rows')); await page.waitForTimeout(1000)
         const gauge = page.locator('button[aria-haspopup="dialog"]:visible').first()
-        if (await gauge.count()) { await gauge.hover({ force: true }); await page.locator('[data-plan-usage-popover]').first().waitFor({ timeout: 5000 }).catch(() => {}) }
+        if (await gauge.count()) { if (mobile) await gauge.focus(); else await gauge.hover({ force: true }); await page.locator('[data-plan-usage-popover]').first().waitFor({ timeout: 5000 }).catch(() => {}) }
         else console.log(`[e] gauge button not visible at ${width}px`)
         await page.waitForTimeout(500)
         for (const glass of ['off', 'on']) await shot(page, 'e-plan-usage-popover', theme, glass, '[data-plan-usage-popover]')

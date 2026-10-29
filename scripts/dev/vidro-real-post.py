@@ -56,3 +56,40 @@ for k, t in NAMES.items():
 open('index.html', 'w').write(''.join(html))
 json.dump(res, open('diffs.json', 'w'), indent=1)
 for b, v in res.items(): print(f"{v['crop_pct']:6.2f}% crop ({v['crop_src']}) / {v['full_pct']:5.2f}% full  {b}")
+
+
+# README: pixel difference, estimated contrast, CPU medians.
+import statistics as st
+from collections import defaultdict
+rows = '\n'.join(f"| {k} | {v['crop_pct']}% | {v['full_pct']}% | {v['contrast_on']}:1 {'AA' if v['contrast_on'] >= 4.5 else 'ABAIXO DE AA'} | {v['crop_src']} | {'OK' if v['crop_pct'] >= 3 else 'LACUNA'} |" for k, v in res.items())
+cpu = ''
+if os.path.exists('metrics.json'):
+    g = defaultdict(list)
+    for x in json.load(open('metrics.json')): g[(x['screen'], x['theme'], x['glass'])].append((x['averageMs'], x['p95Ms']))
+    lines = []
+    for scr in 'ab':
+        for th in ('dark', 'light'):
+            off, on = g.get((scr, th, 'off')), g.get((scr, th, 'on'))
+            if not off or not on: continue
+            po, pn = st.median(b for _, b in off), st.median(b for _, b in on)
+            lines.append(f"| {scr} | {th} | {st.median(a for a, _ in off):.1f} / {po:.1f} | {st.median(a for a, _ in on):.1f} / {pn:.1f} | {pn / po:.2f}x | {'OK' if pn <= 1.5 * po else 'ACIMA DE 1,5x'} |")
+    cpu = '\n'.join(lines)
+open('README.md', 'w').write(f"""# VIDRO.REAL — telas reais do app, antes e depois
+
+Imagens do app Agentistics real (mesmo build, fonte, cores, ícones), HOME descartável com seed de demonstração. "antes" = `data-glass="off"`;
+"depois" = `data-glass="on"` (um interruptor no `<html>`). Abra `index.html`: cada par tem a tela inteira e o recorte 2× da superfície.
+
+Material: fundo translúcido (alpha ~60% escuro / ~66% claro), blur 20px (10px no celular) com saturate 150–170%, borda interna de 1px com highlight e sombra suave.
+
+## Diferença de pixels e contraste (recorte = só a superfície de vidro; critério do líder: ≥3%, ≥8% em b/e/f)
+O contraste é ESTIMADO no recorte "depois": fundo = cor mediana, texto = pixel mais distante em luminância (WCAG).
+
+| par | recorte | tela | contraste | recorte vem de | |
+|---|---|---|---|---|---|
+{rows}
+
+## CPU no celular (390 px, 4× mais lenta, mediana de 3 rodadas; média / p95 em ms; alvo p95 ≤ 1,5× do sem vidro)
+| tela | tema | sem vidro | com vidro | p95 com/sem | |
+|---|---|---|---|---|---|
+{cpu}
+""")
