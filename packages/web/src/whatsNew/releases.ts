@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.164.0': {
+    features: [
+      {
+        pt: 'Fluxos (experimental): ligue a opção experimental para conferir uma sessão ou fazer uma limpeza de teste com passos claros, sem apagar nada.',
+        en: 'Flows (experimental): turn on the experimental option to check a session or preview cleanup with clear steps, without deleting anything.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Atualização do motor.',
+        en: 'Engine update.',
+      },
+    ],
+  },
   '2.163.2': {
     features: [],
     fixes: [
