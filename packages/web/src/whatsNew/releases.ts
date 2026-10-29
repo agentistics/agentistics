@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.161.10': {
+  '2.162.0': {
     features: [
       {
         pt: 'Vidro: menus, popovers, janelas, avisos, o sino, o painel da Nay, as barras fixas e o campo de mensagem ganham um vidro fosco que deixa ver, desfocado, o que passa por trás.',
