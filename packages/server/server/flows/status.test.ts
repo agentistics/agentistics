@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { expect, test } from 'bun:test'
 import { flowStatusResponse } from './status'
 import { flowStatusPath } from '../../../mcp/flow-status'
@@ -19,4 +20,9 @@ test('HTTP and MCP accept a minted UUID and distinguish missing runs', async () 
   expect((await flowStatusResponse(id, async () => null)).status).toBe(404)
   const record = { runId: id, status: 'refused' }
   expect(await flowStatusResponse(id, async runId => { expect(runId).toBe(id); return record })).toEqual({ body: record, status: 200 })
+})
+
+test('MCP entrypoint parses with the flow status import', () => {
+  const source = readFileSync(new URL('../../../mcp/agentistics-mcp.ts', import.meta.url), 'utf8')
+  expect(() => new Bun.Transpiler({ loader: 'ts' }).scan(source)).not.toThrow()
 })
