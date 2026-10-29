@@ -18,13 +18,14 @@
  * Dependencies are injected so the rules are testable with a fake host.
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import {
   isSessionRole, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, stripRolePrefix, titleForRole,
   type HarnessId, type RoleLang, type RoleOrigin, type SessionRole,
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
+import { durableWriteFile } from '../durable-write'
 
 export const SESSION_ROLES_FILE = 'session-roles.json'
 
@@ -84,10 +85,7 @@ export async function readRolesDoc(dataDir: string): Promise<RolesDoc> {
 
 export async function writeRolesDoc(dataDir: string, doc: RolesDoc): Promise<void> {
   const file = join(dataDir, SESSION_ROLES_FILE)
-  await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-  const tmp = `${file}.${process.pid}.tmp`
-  await writeFile(tmp, `${JSON.stringify(doc, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 })
-  await rename(tmp, file)
+  await durableWriteFile(file, `${JSON.stringify(doc, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600, dirMode: 0o700 })
 }
 
 /**

@@ -1,10 +1,11 @@
 /** Non-secret identities only. Credential objects never cross the probe boundary. */
 import { createHash, randomBytes } from 'node:crypto'
-import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises'
+import { readFile, mkdir, writeFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
+import { durableWriteFile } from './durable-write'
 import { withFileLock } from './sessions/file-lock'
 import { ISOLATION_ENV } from './account-isolation'
 import { runClaudeInLoginContext } from './account-login'
@@ -398,9 +399,7 @@ export function createHarnessAccounts(options: {
   }
   async function write(data: AccountsFile): Promise<void> {
     await mkdir(dirname(options.file), { recursive: true })
-    const tmp = `${options.file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
-    await writeFile(tmp, JSON.stringify(data), { mode: 0o600 })
-    await rename(tmp, options.file)
+    await durableWriteFile(options.file, JSON.stringify(data), { mode: 0o600 })
   }
   const writeBackup = options.writeBackup ?? ((path: string, raw: string) => writeFile(path, raw, { mode: 0o600, flag: 'wx' }))
   const backedUp = new Set<string>()

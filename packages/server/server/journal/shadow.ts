@@ -46,11 +46,12 @@
  * status file that `agentop journal status`, a different process, can read.
  */
 import { readFileSync, statSync } from 'node:fs'
-import { mkdir, readdir, rename, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { AgentisticsEvent } from '@agentistics/core'
 import { JOURNAL_ENABLED, JOURNAL_PATH, JOURNAL_STATUS_PATH, PROJECTS_DIR } from '../config'
 import { setJournalStatusSource } from '../health'
+import { durableWriteFile } from '../durable-write'
 import type { HarnessReplay, IntegrationRegistry, ReplayCursor } from '@agentistics/engine-api'
 import { createLimiter } from '../utils'
 import { openJournal } from './journal'
@@ -308,9 +309,7 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
     }
     try {
       await mkdir(dirname(statusPath), { recursive: true })
-      const tmp = `${statusPath}.${process.pid}.tmp`
-      await writeFile(tmp, JSON.stringify(file))
-      await rename(tmp, statusPath)
+      await durableWriteFile(statusPath, JSON.stringify(file))
     } catch (e) {
       warn(`[journal] could not write the shadow status file: ${String(e)}`)
     }
@@ -320,9 +319,7 @@ export function createShadow(deps: ShadowDeps = {}): Shadow {
     if (stampsPath === null || identity === null || committed === null) return
     try {
       await mkdir(dirname(stampsPath), { recursive: true })
-      const tmp = `${stampsPath}.${process.pid}.tmp`
-      await writeFile(tmp, JSON.stringify({ v: 1, identity, stamps: Object.fromEntries(committed) }))
-      await rename(tmp, stampsPath)
+      await durableWriteFile(stampsPath, JSON.stringify({ v: 1, identity, stamps: Object.fromEntries(committed) }))
     } catch (e) {
       warn(`[journal] could not write the shadow stamps file: ${String(e)}`)
     }

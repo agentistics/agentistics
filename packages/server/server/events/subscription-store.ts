@@ -12,9 +12,10 @@
  */
 
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
+import { durableWriteFile } from '../durable-write'
 import { EMPTY_STORE, parseStore, type Subscription, type SubscriptionStore } from './subscriptions'
 
 export const SUBSCRIPTIONS_FILE =
@@ -38,7 +39,5 @@ export async function writeSubscriptionStore(
   file = SUBSCRIPTIONS_FILE,
 ): Promise<void> {
   await mkdir(dirname(file), { recursive: true })
-  const tmp = `${file}.agentop-tmp`
-  await writeFile(tmp, `${JSON.stringify(store, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
-  await rename(tmp, file)
+  await durableWriteFile(file, `${JSON.stringify(store, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
 }

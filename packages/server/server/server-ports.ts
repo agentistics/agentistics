@@ -11,8 +11,9 @@
  * Its env cannot be read from `/proc/<pid>/environ`: Bun marks its processes non-dumpable (the same
  * reason `lsof` cannot name their sockets), so the server writes the fact down at boot.
  */
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { durableWriteFile } from './durable-write'
 
 export interface RecordedPorts { pid: number; port: number; webPort: number }
 
@@ -21,9 +22,7 @@ export const SERVER_PORTS_FILE = join('run', 'server-ports.json')
 export async function recordServerPorts(dataDir: string, ports: RecordedPorts): Promise<void> {
   const file = join(dataDir, SERVER_PORTS_FILE)
   await mkdir(join(dataDir, 'run'), { recursive: true, mode: 0o700 })
-  const tmp = `${file}.${ports.pid}.tmp`
-  await writeFile(tmp, `${JSON.stringify(ports)}\n`, { encoding: 'utf-8', mode: 0o600 })
-  await rename(tmp, file)
+  await durableWriteFile(file, `${JSON.stringify(ports)}\n`, { encoding: 'utf-8', mode: 0o600 })
 }
 
 export async function readServerPorts(dataDir: string): Promise<RecordedPorts | null> {

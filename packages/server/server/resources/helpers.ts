@@ -10,9 +10,10 @@
  */
 
 import { join } from 'node:path'
-import { readFile, writeFile, rename } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import type { HelperState } from './governor'
+import { durableWriteFile } from '../durable-write'
 
 export const HELPERS_FILE = join(AGENTISTICS_DATA_DIR, 'helpers.json')
 
@@ -83,9 +84,7 @@ export async function readHelpers(file = HELPERS_FILE): Promise<HelperRecord[]> 
 }
 
 export async function writeHelpers(records: HelperRecord[], file = HELPERS_FILE): Promise<void> {
-  const tmp = `${file}.${process.pid}.tmp`
-  await writeFile(tmp, JSON.stringify(records, null, 2), { mode: 0o600 })
-  await rename(tmp, file)
+  await durableWriteFile(file, JSON.stringify(records, null, 2), { mode: 0o600 })
 }
 
 /** Serialises this process's read-modify-writes (the server is the only writer). */

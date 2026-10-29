@@ -22,18 +22,16 @@
  *  - a mutation that changes nothing (`remove` of an id that was never there) does not write at all.
  */
 
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { MANAGED_SESSIONS_FILE } from '../config'
+import { durableWriteFile } from '../durable-write'
 import { CONVERSATION_LINK_REASONS as LINK_REASONS, type ConversationLinkReason } from '@agentistics/core'
 import type { ManagedSession, RetireRequest } from './types'
 import { withFileLock } from './file-lock'
 import { RefusalLog } from './refusal-log'
 import { withIdentityPreferences } from './session-identity-prefs'
-
-/** Distinguishes two writes from the SAME process; the pid distinguishes the processes. */
-let writeSeq = 0
 
 /**
  * A short, lowercase id that is safe as a tmux session name.
@@ -429,16 +427,7 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
     // 6 Sep. With a unique path each writer publishes a COMPLETE list by an atomic rename, so the
     // worst case degrades from a destroyed registry to one lost update — which the lock already
     // makes rare, and which the next poll repairs.
-    const tmp = `${file}.tmp.${process.pid}.${(writeSeq += 1)}`
-    try {
-      await writeFile(tmp, `${JSON.stringify(list, null, 2)}\n`, 'utf-8')
-      await rename(tmp, file)
-    } catch (err) {
-      // Never leave the scratch file behind: it is named after this process and nothing would ever
-      // come back for it.
-      await rm(tmp, { force: true }).catch(() => {})
-      throw err
-    }
+    await durableWriteFile(file, `${JSON.stringify(list, null, 2)}\n`, { encoding: 'utf-8' })
   }
 
   // Chains `fn` behind whatever is already queued, so its read and write run as one atomic step

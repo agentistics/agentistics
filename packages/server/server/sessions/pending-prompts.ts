@@ -29,9 +29,10 @@
 
 import { pendingEchoes } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readFileSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { durableWriteFileSync } from '../durable-write'
 
 export interface PendingPrompt {
   /** Exactly what was handed to the session. */
@@ -92,10 +93,7 @@ function load(): void {
 
 function persist(): void {
   try {
-    mkdirSync(dirname(storeFile), { recursive: true, mode: 0o700 })
-    const tmp = `${storeFile}.tmp-${process.pid}`
-    writeFileSync(tmp, JSON.stringify(Object.fromEntries(byConversation)), { mode: 0o600 })
-    renameSync(tmp, storeFile)
+    durableWriteFileSync(storeFile, JSON.stringify(Object.fromEntries(byConversation)), { mode: 0o600, dirMode: 0o700 })
   } catch { /* a display queue must never make a successful prompt fail */ }
 }
 

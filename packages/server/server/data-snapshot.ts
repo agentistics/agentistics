@@ -24,7 +24,8 @@
  * store beside it. Never on a central: its data lives in Mongo and is scoped per principal.
  */
 import { join } from 'node:path'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
+import { durableWriteFile } from './durable-write'
 
 export const SNAPSHOT_FORMAT = 1
 export const SNAPSHOT_MIN_INTERVAL_MS = 5 * 60_000
@@ -67,8 +68,5 @@ export async function readSnapshotFile(path: string): Promise<string | null> {
 }
 
 export async function writeSnapshotFile(path: string, text: string): Promise<void> {
-  await mkdir(join(path, '..'), { recursive: true, mode: 0o700 })
-  const tmp = `${path}.${process.pid}.tmp`
-  await writeFile(tmp, text, { mode: 0o600 })
-  await rename(tmp, path)
+  await durableWriteFile(path, text, { mode: 0o600, dirMode: 0o700 })
 }

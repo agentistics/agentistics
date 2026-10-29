@@ -14,11 +14,12 @@
  * REFUSED rather than repaired, and running it twice changes nothing.
  */
 import { existsSync } from 'node:fs'
-import { readFile, rename, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { KIMI_DIR } from './config'
 import { agentisticsMcpLaunch, sameMcpLaunch, CANONICAL_MCP_NAME, type McpLaunch } from './mcp-launch'
 import { mayRegisterHarnessMcp } from './mcp-registration'
+import { durableWriteFile } from './durable-write'
 
 export type KimiMcpPlan =
   | { action: 'noop' }
@@ -57,9 +58,7 @@ export async function writeKimiMcp(file: string, port: number): Promise<'written
   const plan = planKimiMcp(existing, agentisticsMcpLaunch(), `http://localhost:${port}`)
   if (plan.action === 'noop') return 'unchanged'
   if (plan.action === 'refuse') { console.warn(`[mcp] kimi: left ${file} alone — ${plan.reason}`); return 'refused' }
-  const tmp = `${file}.agentop-${process.pid}.tmp`
-  await writeFile(tmp, plan.text, { mode: 0o600 })
-  await rename(tmp, file)
+  await durableWriteFile(file, plan.text, { mode: 0o600 })
   return 'written'
 }
 

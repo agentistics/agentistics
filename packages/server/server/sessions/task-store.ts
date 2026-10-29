@@ -18,10 +18,13 @@
  * merges with whatever the other process wrote in between.
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { constants as fsConstants } from 'node:fs'
+import { copyFile, link, readFile, readdir, stat, unlink } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { basename, dirname, join } from 'node:path'
 import { isValidStatusColor, normalizeStagedSession, sanitizeCommentAttachments, type TaskStatusDef, type TaskTypeDef } from '@agentistics/core'
 import { withFileLock } from './file-lock'
+import { durableWriteFile } from '../durable-write'
 import { historicalLinkId, migratePriority, migrateStatus, nativeLinkId, subtaskDone } from './task-model'
 import { heldByOther } from './task-next'
 import { sanitizeNativeUsage } from './task-native'
@@ -31,6 +34,11 @@ import type {
   TaskEvent, TaskFile, TaskLink, TaskPriority, TaskStatus, TaskThread,
 } from './task-model'
 import { isCommentKind, type ThreadDelivery, type ThreadParticipant } from '@agentistics/core'
+
+let taskStoreNotifierForTest: ((code: string, meta: Record<string, unknown>) => void) | null = null
+export function __setTaskStoreNotifierForTest(fn: ((code: string, meta: Record<string, unknown>) => void) | null): void {
+  taskStoreNotifierForTest = fn
+}
 
 export interface TaskPatch {
   title?: string
@@ -531,6 +539,47 @@ function sanitizeNative(raw: unknown): NativeSessionLink | null {
   }
 }
 
+/** Parse and sanitize a board exactly as a normal read does. Null means the bytes are unusable. */
+function parseBook(text: string): TaskBook | null {
+  try {
+    const raw = JSON.parse(text) as Record<string, unknown>
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const arr = (v: unknown) => (Array.isArray(v) ? v : [])
+    return {
+      tasks: arr(raw.tasks).map(sanitizeTask).filter((t): t is Task => t !== null),
+      attempts: arr(raw.attempts).map(sanitizeAttempt).filter((a): a is Attempt => a !== null),
+      comments: arr(raw.comments).map(sanitizeComment).filter((c): c is TaskComment => c !== null),
+      threads: arr(raw.threads).map(sanitizeThread).filter((t): t is TaskThread => t !== null),
+      subtasks: arr(raw.subtasks).map(sanitizeSubtask).filter((t): t is Subtask => t !== null),
+      files: arr(raw.files).map(sanitizeFile).filter((f): f is TaskFile => f !== null),
+      historicalSessions: [
+        ...new Map(
+          arr(raw.historicalSessions)
+            .map(sanitizeHistorical)
+            .filter((h): h is HistoricalSession => h !== null)
+            .map(h => [h.id, h] as const),
+        ).values(),
+      ],
+      nativeSessions: [
+        ...new Map(
+          arr(raw.nativeSessions)
+            .map(sanitizeNative)
+            .filter((n): n is NativeSessionLink => n !== null)
+            .map(n => [n.id, n] as const),
+        ).values(),
+      ],
+      tombstones: arr(raw.tombstones).filter((v): v is string => typeof v === 'string'),
+      events: arr(raw.events).map(sanitizeEvent).filter((e): e is TaskEvent => e !== null),
+      statuses: arr(raw.statuses).map(sanitizeStatusDef).filter((s): s is TaskStatusDef => s !== null),
+      types: arr(raw.types).map(sanitizeTypeDef).filter((s): s is TaskTypeDef => s !== null),
+      ...(raw.typesSeeded === true || arr(raw.types).length > 0 ? { typesSeeded: true } : {}),
+      ...(raw.inReviewSeeded === true ? { inReviewSeeded: true } : {}),
+    }
+  } catch {
+    return null
+  }
+}
+
 function sanitizeFile(raw: unknown): TaskFile | null {
   if (!raw || typeof raw !== 'object') return null
   const f = raw as Record<string, unknown>
@@ -551,77 +600,146 @@ export function createTaskStore(file: string): TaskStore {
   // One in-process writer. Each mutation appends to this chain, so read-modify-write sequences run
   // strictly one after another even when several land at once.
   let queue: Promise<unknown> = Promise.resolve()
-  // Set when a read failed to parse. The bad bytes are still on disk at that point; they are moved
-  // aside (not overwritten) by the next write, so the empty book a corrupt file produces can never
-  // become permanent data loss.
-  let corrupt = false
+  // A read that fails to parse never touches the file itself: `recoverLocked` re-reads it under the
+  // cross-process lock, moves the bad bytes aside (`.corrupt-*`, never overwritten; if that cannot be
+  // done it throws rather than continue) and restores the newest valid `.bak.*`.
+  let recoveryNoticeSent = false
 
-  async function read(): Promise<TaskBook> {
+  async function announceRecovery(code: 'tasks.store_restored' | 'tasks.store_reseeded', when?: string): Promise<void> {
+    if (recoveryNoticeSent) return
+    recoveryNoticeSent = true
+    if (taskStoreNotifierForTest) {
+      taskStoreNotifierForTest(code, when ? { when } : {})
+      return
+    }
+    // Literal codes, so notificationCoverage.test sees both and requires their text.
+    const notice = code === 'tasks.store_restored'
+      ? { type: 'warning' as const, code: 'tasks.store_restored', meta: { when } }
+      : { type: 'warning' as const, code: 'tasks.store_reseeded', meta: {} }
+    void import('../sse').then(({ broadcastNotification }) => broadcastNotification(notice)).catch(() => {})
+  }
+
+  async function restoreBackup(): Promise<{ raw: string; book: TaskBook; when: string } | null> {
+    const dir = dirname(file)
+    const base = basename(file)
+    const names = await readdir(dir).catch(() => [])
+    const candidates: Array<{ raw: string; book: TaskBook; order: number; when: string }> = []
+    for (const name of names) {
+      const bakPrefix = `${base}.bak.`
+      const fallbackPrefix = name.startsWith(`${base}.backup-`) ? `${base}.backup-` : name.startsWith(`${base}.snapshot-`) ? `${base}.snapshot-` : null
+      if (!name.startsWith(bakPrefix) && !fallbackPrefix) continue
+      const path = join(dir, name)
+      try {
+        const raw = await readFile(path, 'utf8')
+        const book = parseBook(raw)
+        if (!book) continue
+        const statResult = await stat(path)
+        const suffix = name.slice(bakPrefix.length)
+        const epoch = name.startsWith(bakPrefix) ? Number(suffix) : NaN
+        const order = Number.isFinite(epoch) ? epoch : statResult.mtimeMs
+        const when = new Date(Number.isFinite(epoch) ? epoch : statResult.mtimeMs).toISOString()
+        candidates.push({ raw, book, order, when })
+      } catch { /* invalid or disappearing backups are not recovery candidates */ }
+    }
+    candidates.sort((a, b) => b.order - a.order)
+    return candidates[0] ?? null
+  }
+
+  /** Called only from `write()`, i.e. inside a locked mutation: the bytes copied are the file as it is
+   *  on disk right now, re-validated here, never state shared with unlocked readers. */
+  async function rotateBackup(): Promise<void> {
+    const slash = Math.max(file.lastIndexOf('/'), file.lastIndexOf('\\'))
+    const dir = file.slice(0, slash)
+    const base = file.slice(slash + 1)
+    const names = await readdir(dir || '.').catch(() => [])
+    const backups: Array<{ path: string; stamp: number }> = []
+    for (const name of names) {
+      if (!name.startsWith(`${base}.bak.`)) continue
+      const stamp = Number(name.slice(`${base}.bak.`.length))
+      if (Number.isFinite(stamp)) backups.push({ path: `${dir}/${name}`, stamp })
+    }
+    backups.sort((a, b) => b.stamp - a.stamp)
+    if (backups[0] && Date.now() - backups[0].stamp < 60 * 60_000) {
+      for (const old of backups.slice(3)) await unlink(old.path).catch(() => {})
+      return
+    }
+    let current: string
+    try { current = await readFile(file, 'utf8') } catch { return }
+    if (!parseBook(current)) return
+    await durableWriteFile(`${file}.bak.${Date.now()}`, current, { encoding: 'utf8' })
+    for (const old of backups.slice(2)) await unlink(old.path).catch(() => {})
+  }
+
+  async function readCurrent(): Promise<TaskBook | null> {
     let text: string
     try {
       text = await readFile(file, 'utf8')
     } catch {
-      corrupt = false
       return EMPTY_BOOK()
     }
+    const book = parseBook(text)
+    if (!book) {
+      return null
+    }
+    return rememberGood(book)
+  }
+
+  function rememberGood(book: TaskBook, resetNotice = true): TaskBook {
+    if (resetNotice) recoveryNoticeSent = false
+    return book
+  }
+
+  /** Move the unreadable file aside. Fails CLOSED: unless the bad bytes are verifiably out of the way
+   *  (hard-linked or copied to a fresh `.corrupt-*` name, or already gone), it throws, so neither a
+   *  restore nor a mutation on the reseeded book can publish over the only copy of them. `link` and
+   *  `COPYFILE_EXCL` never replace an existing file, so an earlier quarantine is never overwritten
+   *  either (a plain `rename` would replace one with the same name). */
+  async function quarantine(): Promise<void> {
+    const aside = `${file}.corrupt-${Date.now()}-${randomBytes(4).toString('hex')}`
     try {
-      const raw = JSON.parse(text) as Record<string, unknown>
-      corrupt = false
-      const arr = (v: unknown) => (Array.isArray(v) ? v : [])
-      return {
-        tasks: arr(raw.tasks).map(sanitizeTask).filter((t): t is Task => t !== null),
-        attempts: arr(raw.attempts).map(sanitizeAttempt).filter((a): a is Attempt => a !== null),
-        // Absent on a book written before these existed, which is why every read goes through
-        // `arr` rather than trusting the field to be there.
-        comments: arr(raw.comments).map(sanitizeComment).filter((c): c is TaskComment => c !== null),
-        threads: arr(raw.threads).map(sanitizeThread).filter((t): t is TaskThread => t !== null),
-        subtasks: arr(raw.subtasks).map(sanitizeSubtask).filter((t): t is Subtask => t !== null),
-        files: arr(raw.files).map(sanitizeFile).filter((f): f is TaskFile => f !== null),
-        // Absent on a book written before historical links existed. This whitelist is what a value
-        // survives the next `read()` through — `sanitizeSubtask` dropped `blockedBy` for exactly this
-        // reason — so the collection is carried here explicitly, and `task-store.test.ts` round-trips it.
-        historicalSessions: [
-          ...new Map(
-            arr(raw.historicalSessions)
-              .map(sanitizeHistorical)
-              .filter((h): h is HistoricalSession => h !== null)
-              .map(h => [h.id, h] as const),
-          ).values(),
-        ],
-        // Same whitelist rule: the engine's links survive every read-modify-write of the board
-        // (engine-interface spec §4.6 — a community build must not delete them either).
-        nativeSessions: [
-          ...new Map(
-            arr(raw.nativeSessions)
-              .map(sanitizeNative)
-              .filter((n): n is NativeSessionLink => n !== null)
-              .map(n => [n.id, n] as const),
-          ).values(),
-        ],
-        tombstones: arr(raw.tombstones).filter((v): v is string => typeof v === 'string'),
-        events: arr(raw.events).map(sanitizeEvent).filter((e): e is TaskEvent => e !== null),
-        // Absent on a book written before this feature existed — same reason every field above goes
-        // through `arr` rather than trusting it to be there.
-        statuses: arr(raw.statuses).map(sanitizeStatusDef).filter((s): s is TaskStatusDef => s !== null),
-        types: arr(raw.types).map(sanitizeTypeDef).filter((s): s is TaskTypeDef => s !== null),
-        ...(raw.typesSeeded === true || arr(raw.types).length > 0 ? { typesSeeded: true } : {}),
-        ...(raw.inReviewSeeded === true ? { inReviewSeeded: true } : {}),
-      }
-    } catch {
-      corrupt = true
-      return EMPTY_BOOK()
+      await link(file, aside)
+      await unlink(file).catch(() => { /* the bytes are safe aside; the restore replaces this name */ })
+      return
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
     }
+    await copyFile(file, aside, fsConstants.COPYFILE_EXCL)
+  }
+
+  async function recoverLocked(): Promise<TaskBook> {
+    const current = await readCurrent()
+    if (current !== null) return current
+    await quarantine()
+    const backup = await restoreBackup()
+    if (backup) {
+      try {
+        await durableWriteFile(file, backup.raw, { encoding: 'utf8' })
+        const restored = parseBook(backup.raw)
+        if (restored) {
+          rememberGood(restored, false)
+          await announceRecovery('tasks.store_restored', backup.when)
+          return restored
+        }
+      } catch { /* fall through to an empty book; never retry the same backup */ }
+    }
+    await announceRecovery('tasks.store_reseeded')
+    return EMPTY_BOOK()
+  }
+
+  async function read(locked = false): Promise<TaskBook> {
+    const current = await readCurrent()
+    if (current !== null) return current
+    return locked ? recoverLocked() : withFileLock(file, () => recoverLocked())
   }
 
   async function write(book: TaskBook): Promise<void> {
-    await mkdir(dirname(file), { recursive: true })
-    if (corrupt) {
-      await rename(file, `${file}.corrupt-${Date.now()}`).catch(() => {})
-      corrupt = false
-    }
-    const tmp = `${file}.tmp`
-    await writeFile(tmp, JSON.stringify(book, null, 2), 'utf8')
-    await rename(tmp, file)
+    // An unreadable file never reaches here: `read(true)` ran `recoverLocked`, which either moved it
+    // aside or threw, under the same lock.
+    await rotateBackup()
+    await durableWriteFile(file, JSON.stringify(book, null, 2), { encoding: 'utf8' })
+    // A successful publish closes the corruption event; a later unreadable file must announce
+    // independently even when this store instance has already recovered once.
+    recoveryNoticeSent = false
   }
 
   /** One mutation, under the cross-process lock, re-run once when the lock was contended. */
@@ -644,13 +762,13 @@ export function createTaskStore(file: string): TaskStore {
     read,
     upsertTask(task) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         await write({ ...book, tasks: [...book.tasks.filter(t => t.id !== task.id), task] })
       })
     },
     upsertAttempt(attempt) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         await write({
           ...book,
           attempts: [...book.attempts.filter(a => a.id !== attempt.id), attempt],
@@ -659,10 +777,9 @@ export function createTaskStore(file: string): TaskStore {
     },
     patchTask(id, patch) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const target = book.tasks.find(t => t.id === id)
-        // Nothing to change: writing anyway would touch the file, and pointlessly clear a pending
-        // corrupt-quarantine, for a no-op.
+        // Nothing to change: writing anyway would touch the file for a no-op.
         if (!target) return false
         const next = { ...target, ...patch }
         await write({ ...book, tasks: book.tasks.map(t => (t.id === id ? next : t)) })
@@ -671,13 +788,13 @@ export function createTaskStore(file: string): TaskStore {
     },
     addComment(c) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         await write({ ...book, comments: [...book.comments, c] })
       })
     },
     editComment(id, body) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const target = book.comments.find(c => c.id === id)
         if (!target) return false
         const next = { ...target, body }
@@ -687,7 +804,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     removeComment(id) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         if (!book.comments.some(c => c.id === id)) return false
         await write({ ...book, comments: book.comments.filter(c => c.id !== id) })
         return true
@@ -695,13 +812,13 @@ export function createTaskStore(file: string): TaskStore {
     },
     upsertThread(t) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         await write({ ...book, threads: [...book.threads.filter(x => x.id !== t.id), t] })
       })
     },
     updateThread(id, fn) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const target = book.threads.find(t => t.id === id)
         if (!target) return false
         const next = fn(target)
@@ -711,7 +828,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     updateComment(id, fn) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const target = book.comments.find(c => c.id === id)
         if (!target) return false
         const next = fn(target)
@@ -721,13 +838,13 @@ export function createTaskStore(file: string): TaskStore {
     },
     upsertSubtask(t) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         await write({ ...book, subtasks: [...book.subtasks.filter(x => x.id !== t.id), t] })
       })
     },
     removeSubtask(id) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         if (!book.subtasks.some(t => t.id === id)) return false
         // A GROUP's former MEMBERS become ordinary loose subtasks again — the natural fallback,
         // since a member without a group is exactly what a loose subtask is (§F.1). Done in the
@@ -776,13 +893,13 @@ export function createTaskStore(file: string): TaskStore {
     },
     addFile(f) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         await write({ ...book, files: [...book.files, f] })
       })
     },
     removeFile(id) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         if (!book.files.some(f => f.id === id)) return false
         await write({ ...book, files: book.files.filter(f => f.id !== id) })
         return true
@@ -790,7 +907,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     removeTask(id) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         if (!book.tasks.some(t => t.id === id)) return false
         await write({
           tasks: book.tasks.filter(t => t.id !== id),
@@ -820,14 +937,14 @@ export function createTaskStore(file: string): TaskStore {
     },
     clearTombstone(id) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         if (!book.tombstones.includes(id)) return
         await write({ ...book, tombstones: book.tombstones.filter(t => t !== id) })
       })
     },
     patchAttempt(id, patch) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const target = book.attempts.find(a => a.id === id)
         if (!target) return false
         const next = { ...target, ...patch }
@@ -837,7 +954,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     claimTask(o) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const target = book.tasks.find(t => t.id === o.id)
         if (!target) return { ok: false as const, reason: 'missing' as const }
         // The decision happens HERE, inside the lock: two agents asking in the same millisecond
@@ -860,7 +977,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     releaseTask(o) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const target = book.tasks.find(t => t.id === o.id)
         if (!target) return { ok: false as const, reason: 'missing' as const }
         if (target.claim && target.claim.by !== o.by && !o.force) {
@@ -875,7 +992,7 @@ export function createTaskStore(file: string): TaskStore {
     setRanks(ranks) {
       return enqueue(async () => {
         if (ranks.length === 0) return
-        const book = await read()
+        const book = await read(true)
         const by = new Map(ranks.map(r => [r.id, r.rank]))
         await write({
           ...book,
@@ -886,7 +1003,7 @@ export function createTaskStore(file: string): TaskStore {
     logEvents(events) {
       return enqueue(async () => {
         if (events.length === 0) return
-        const book = await read()
+        const book = await read(true)
         const all = [...book.events, ...events]
         // Oldest go first once the cap is reached — the question the log answers is about the
         // recent end, and the durable record lives on the tasks themselves.
@@ -895,7 +1012,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     seedStatuses(list) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         // Re-checked HERE, under the lock, against the freshest read — not the caller's own
         // (possibly now-stale) read that decided a migration was needed. Two processes racing to
         // open the same brand-new book must not both win: the second one through the lock sees the
@@ -906,7 +1023,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     seedInReview(def) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         if (book.inReviewSeeded) return
         const add = def && !book.statuses.some(s => s.id === def.id) ? [def] : []
         await write({ ...book, statuses: [...book.statuses, ...add], inReviewSeeded: true })
@@ -914,7 +1031,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     upsertStatus(def) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         await write({
           ...book,
           statuses: [...book.statuses.filter(s => s.id !== def.id), def],
@@ -923,13 +1040,13 @@ export function createTaskStore(file: string): TaskStore {
     },
     reorderStatuses(ids) {
       return enqueue(async () => {
-        const book = await read(); const rank = new Map(ids.map((id, i) => [id, i]))
+        const book = await read(true); const rank = new Map(ids.map((id, i) => [id, i]))
         await write({ ...book, statuses: book.statuses.map(s => ({ ...s, order: rank.get(s.id) ?? s.order })).sort((a, b) => a.order - b.order) })
       })
     },
     fileHistorical(link) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const replaced = book.historicalSessions.find(h => h.id === link.id)
         await write({
           ...book,
@@ -940,7 +1057,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     unfileHistorical(ref) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const found = book.historicalSessions.find(h => h.id === ref || h.conversationId === ref)
         if (!found) return null
         await write({
@@ -952,7 +1069,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     fileNative(link) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const replaced = book.nativeSessions.find(n => n.id === link.id)
         const usage = link.usage ?? replaced?.usage
         await write({
@@ -964,7 +1081,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     unfileNative(ref) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const found = book.nativeSessions.find(n => n.id === ref || n.sessionId === ref)
         if (!found) return null
         await write({ ...book, nativeSessions: book.nativeSessions.filter(n => n.id !== found.id) })
@@ -973,7 +1090,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     reportNativeUsage(sessionId, usage) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         const found = book.nativeSessions.find(n => n.sessionId === sessionId)
         if (!found) return false
         if (found.usage && Date.parse(found.usage.updatedAt) > Date.parse(usage.updatedAt)) return true
@@ -986,26 +1103,26 @@ export function createTaskStore(file: string): TaskStore {
     },
     seedTypes(list) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         if (book.typesSeeded || book.types.length > 0) return
         await write({ ...book, types: [...list], typesSeeded: true })
       })
     },
     upsertType(def) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         await write({ ...book, types: [...book.types.filter(s => s.id !== def.id), def] })
       })
     },
     reorderTypes(ids) {
       return enqueue(async () => {
-        const book = await read(); const rank = new Map(ids.map((id, i) => [id, i]))
+        const book = await read(true); const rank = new Map(ids.map((id, i) => [id, i]))
         await write({ ...book, types: book.types.map(t => ({ ...t, order: rank.get(t.id) ?? t.order })).sort((a, b) => a.order - b.order) })
       })
     },
     removeType(id) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         if (!book.types.some(s => s.id === id)) return false
         await write({ ...book, types: book.types.filter(s => s.id !== id) })
         return true
@@ -1013,7 +1130,7 @@ export function createTaskStore(file: string): TaskStore {
     },
     removeStatus(id) {
       return enqueue(async () => {
-        const book = await read()
+        const book = await read(true)
         if (!book.statuses.some(s => s.id === id)) return false
         await write({ ...book, statuses: book.statuses.filter(s => s.id !== id) })
         return true

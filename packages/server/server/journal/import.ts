@@ -23,11 +23,12 @@
  *   read-only, to say how many events would be new.
  */
 import { readFileSync, statSync } from 'node:fs'
-import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { CAPABILITY_STATES, normalizeSessionTimes, type AgentisticsEvent, type HarnessId, type SessionMeta } from '@agentistics/core'
 import { CONSOLIDATED_DIR, JOURNAL_IMPORT_STATE_PATH, JOURNAL_PATH } from '../config'
 import { hasReplay, type HarnessReplay } from '@agentistics/engine-api'
+import { durableWriteFile } from '../durable-write'
 import { createLimiter } from '../utils'
 import { openJournal } from './journal'
 import { openJournalIndex, type JournalIndex } from './import-journal-index'
@@ -134,10 +135,7 @@ function fileIdentity(path: string): string | null {
 }
 
 async function saveState(path: string, state: ImportState): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  const tmp = `${path}.${process.pid}.tmp`
-  await writeFile(tmp, JSON.stringify(state))
-  await rename(tmp, path)
+  await durableWriteFile(path, JSON.stringify(state))
 }
 
 /** Every store file of the selected harnesses, as summaries. Subdir first, legacy flat files (claude)

@@ -1,10 +1,11 @@
 /** Read-only, timestamped billing facts. Never open the journal's writer or run a backfill. */
 import { existsSync } from 'node:fs'
-import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { calcCost, hasModelPrice, type AgentisticsEvent, type HarnessId, type PlanLimits } from '@agentistics/core'
 import { parseCodexRollout } from '../adapters/codex-parse'
 import { AGENTISTICS_DATA_DIR, JOURNAL_PATH } from '../config'
+import { durableWriteFile } from '../durable-write'
 import { decodeRow, rowToEvent, type JournalRow, type StoredRow } from '../journal/journal-plan'
 import { IMPORT_STORE_SOURCE_ID } from '../journal/import-store'
 import { emptyCostCell, foldCostResponse, priceCell, pricingModelOf } from '../projections/kit'
@@ -215,10 +216,7 @@ export async function readQuotaRates(path = RATE_PATH): Promise<Record<string, H
   } catch { return {} }
 }
 export async function saveQuotaRates(rates: Record<string, HandoffQuotaRate>): Promise<void> {
-  await mkdir(AGENTISTICS_DATA_DIR, { recursive: true })
-  const tmp = `${RATE_PATH}.${process.pid}.tmp`
-  await writeFile(tmp, JSON.stringify(rates))
-  await rename(tmp, RATE_PATH)
+  await durableWriteFile(RATE_PATH, JSON.stringify(rates))
 }
 export function countBilledReplies(replies: readonly BilledReply[]): Map<string, number> {
   const counts = new Map<string, number>()

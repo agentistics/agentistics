@@ -6,8 +6,9 @@
  * small file under the data dir (0600, written by rename so a crash leaves the old file whole).
  * An empty note removes the key. A missing or unreadable file reads as no notes, never a throw.
  */
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { durableWriteFile } from '../durable-write'
 
 export const NATIVE_NOTES_FILE = 'native-session-notes.json'
 
@@ -27,10 +28,7 @@ export async function writeNativeNote(dataDir: string, id: string, note: string)
   if (text === '') delete notes[id]
   else notes[id] = text
   const file = join(dataDir, NATIVE_NOTES_FILE)
-  await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-  const tmp = `${file}.${process.pid}.tmp`
-  await writeFile(tmp, `${JSON.stringify(notes, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 })
-  await rename(tmp, file)
+  await durableWriteFile(file, `${JSON.stringify(notes, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600, dirMode: 0o700 })
 }
 
 /** The rows with their notes: a note the row already carries is never overwritten. */

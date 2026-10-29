@@ -15,9 +15,10 @@
  */
 
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
+import { durableWriteFile } from '../durable-write'
 
 export const PRODUCER_STATUS_FILE =
   process.env.AGENTISTICS_EVENT_PRODUCER_FILE ?? join(AGENTISTICS_DATA_DIR, 'events-producer.json')
@@ -107,9 +108,7 @@ export function createHeartbeatWriter(o: {
       }
       try {
         await mkdir(dirname(file), { recursive: true })
-        const tmp = `${file}.agentop-tmp`
-        await writeFile(tmp, `${JSON.stringify(doc, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
-        await rename(tmp, file)
+        await durableWriteFile(file, `${JSON.stringify(doc, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
       } catch { /* a heartbeat that cannot be written costs `status` a line, never the producer */ }
     },
     async clear() {

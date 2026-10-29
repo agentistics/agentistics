@@ -7,8 +7,9 @@
 import { createCipheriv, createECDH, createHmac, createPrivateKey, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
 import { AGENTISTICS_DATA_DIR } from '../config'
+import { durableWriteFile } from '../durable-write'
 import { sealMachineBoundVapid, withMachineBoundVapid, withSecret } from '../vault/service'
 import type { SessionEvent } from './event-types'
 import { redactSecrets } from '@agentistics/core'
@@ -61,9 +62,7 @@ export async function readMobileSubscriptions(file = MOBILE_SUBSCRIPTIONS_FILE):
 
 export async function writeMobileSubscriptions(subscriptions: readonly MobileSubscription[], file = MOBILE_SUBSCRIPTIONS_FILE): Promise<void> {
   await mkdir(dirname(file), { recursive: true })
-  const tmp = `${file}.agentop-tmp`
-  await writeFile(tmp, `${JSON.stringify({ subscriptions }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
-  await rename(tmp, file)
+  await durableWriteFile(file, `${JSON.stringify({ subscriptions }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
 }
 
 export function upsertMobileSubscription(store: MobileSubscriptionStore, sub: MobileSubscription): MobileSubscriptionStore {

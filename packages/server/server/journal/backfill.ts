@@ -24,11 +24,11 @@
  * `projections_backfilling` and every surface falls back, item by item, to `/api/data`.
  */
 import { readFileSync } from 'node:fs'
-import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { LEGACY_RECORD_VERSION } from './import-plan'
 import { fileIdentity } from './shadow'
 import { RESERVED_BYTES, SWAP_ALARM_FRACTION, type MemorySample } from '../sessions/memory-budget'
+import { durableWriteFile } from '../durable-write'
 
 export interface BackfillProgress {
   v: 1
@@ -58,9 +58,7 @@ export function readBackfillProgress(path: string): BackfillProgress | null {
 }
 
 export async function writeBackfillProgress(path: string, p: BackfillProgress): Promise<void> {
-  const tmp = `${path}.${process.pid}.tmp`
-  await writeFile(tmp, JSON.stringify(p), { mode: 0o600 })
-  await rename(tmp, path)
+  await durableWriteFile(path, JSON.stringify(p), { mode: 0o600 })
 }
 
 /** Complete for THIS journal: a progress record that completed, written about the same file. */

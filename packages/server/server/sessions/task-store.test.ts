@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtemp, readdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createTaskStore } from './task-store'
+import { createTaskStore, __setTaskStoreNotifierForTest } from './task-store'
 import type { Subtask, Task } from './task-model'
 
 const task = (id: string, over: Partial<Task> = {}): Task => ({
@@ -123,6 +123,103 @@ describe('createTaskStore', () => {
     // The bad bytes still exist: a parse failure must never become permanent data loss.
     const names = await readdir(dirname(file))
     expect(names.some(n => n.includes('corrupt'))).toBe(true)
+  })
+
+  it('restores the newest valid task backup after an unreadable board', async () => {
+    const { file, s } = await store()
+    await writeFile(`${file}.corrupt-input`, Buffer.alloc(32), 'utf8')
+    await writeFile(file, Buffer.alloc(32))
+    await writeFile(`${file}.bak.older`, JSON.stringify({ tasks: [task('old')] }))
+    await writeFile(`${file}.bak.newer`, JSON.stringify({ tasks: [task('restored')] }))
+    const book = await s.read()
+    expect(book.tasks.map(t => t.id)).toEqual(['restored'])
+    expect((await readdir(dirname(file))).some(n => n.startsWith('tasks.json.corrupt-'))).toBe(true)
+  })
+
+  it('re-seeds when the only task backup is corrupt and announces exactly once', async () => {
+    const { file, s } = await store()
+    const notices: string[] = []
+    __setTaskStoreNotifierForTest(code => notices.push(code))
+    try {
+      await writeFile(file, Buffer.alloc(32))
+      await writeFile(`${file}.bak.${Date.now()}`, '{not json')
+      expect((await s.read()).tasks).toEqual([])
+      await s.upsertTask(task('seeded'))
+      expect((await s.read()).tasks.map(t => t.id)).toEqual(['seeded'])
+      expect(notices).toEqual(['tasks.store_reseeded'])
+    } finally { __setTaskStoreNotifierForTest(null) }
+  })
+
+  it('rotates a durable backup after an hour and retains only the newest three', async () => {
+    const { file, s } = await store()
+    await s.upsertTask(task('first'))
+    for (let i = 0; i < 4; i++) {
+      await writeFile(`${file}.bak.${Date.now() - (2 * 60 * 60_000) - i}`, JSON.stringify({ tasks: [task(`old-${i}`)] }))
+    }
+    await s.upsertTask(task('second'))
+    const backups = (await readdir(dirname(file))).filter(n => n.startsWith('tasks.json.bak.'))
+    expect(backups).toHaveLength(3)
+  })
+
+  it('backs up the bytes on disk at write time, not what an earlier read of this store saw', async () => {
+    const { file, s } = await store()
+    await s.upsertTask(task('first'))
+    await writeFile(`${file}.bak.${Date.now() - (2 * 60 * 60_000)}`, JSON.stringify({ tasks: [task('ancient')] }))
+    await s.read()
+    // Another process publishes newer bytes after this store's (unlocked) read.
+    await writeFile(file, JSON.stringify({ tasks: [task('first'), task('from-other')] }))
+    await s.upsertTask(task('second'))
+    const names = (await readdir(dirname(file))).filter(n => n.startsWith('tasks.json.bak.')).sort()
+    const newest = JSON.parse(await readFile(join(dirname(file), names[names.length - 1]!), 'utf8')) as { tasks: Task[] }
+    expect(newest.tasks.map(t => t.id).sort()).toEqual(['first', 'from-other'])
+  })
+
+  it('never backs up bytes that do not parse', async () => {
+    const { file, s } = await store()
+    await writeFile(file, 'null')
+    await s.upsertTask(task('fresh'))
+    for (const name of (await readdir(dirname(file))).filter(n => n.startsWith('tasks.json.bak.'))) {
+      expect(await readFile(join(dirname(file), name), 'utf8')).not.toBe('null')
+    }
+  })
+
+  it('restores a backup whose bad records are dropped, once, without looping', async () => {
+    const { file, s } = await store()
+    const notices: string[] = []
+    __setTaskStoreNotifierForTest(code => notices.push(code))
+    try {
+      await writeFile(file, Buffer.alloc(32))
+      // Parses, but carries a record the sanitizer drops: restored as the remaining (empty) book.
+      await writeFile(`${file}.bak.${Date.now()}`, JSON.stringify({ tasks: [], attempts: [null] }))
+      expect((await s.read()).tasks).toEqual([])
+      expect((await s.read()).tasks).toEqual([])
+      expect(notices).toEqual(['tasks.store_restored'])
+    } finally { __setTaskStoreNotifierForTest(null) }
+  })
+
+  it('never overwrites an earlier quarantine', async () => {
+    const { file, s } = await store()
+    await writeFile(file, 'first bad bytes')
+    await s.read()
+    await writeFile(file, 'second bad bytes')
+    await s.read()
+    const aside = (await readdir(dirname(file))).filter(n => n.startsWith('tasks.json.corrupt-'))
+    const bodies = await Promise.all(aside.map(n => readFile(join(dirname(file), n), 'utf8')))
+    expect(bodies.sort()).toEqual(['first bad bytes', 'second bad bytes'])
+  })
+
+  it('fails closed when the corrupt file cannot be moved aside', async () => {
+    if (process.platform === 'win32' || process.getuid?.() === 0) return
+    const { file, s } = await store()
+    const bad = Buffer.from('{"tasks": [ truncated')
+    await writeFile(file, bad)
+    await chmod(dirname(file), 0o500)
+    try {
+      await expect(s.upsertTask(task('fresh'))).rejects.toThrow()
+    } finally {
+      await chmod(dirname(file), 0o700)
+    }
+    expect(Buffer.compare(await readFile(file), bad)).toBe(0)
   })
 
   it('drops a malformed record and keeps the file usable', async () => {

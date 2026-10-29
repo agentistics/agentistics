@@ -1,10 +1,11 @@
 import { join, dirname } from 'path'
-import { mkdir, rename, writeFile, open, unlink, stat, readFile, utimes, chmod } from 'node:fs/promises'
+import { mkdir, open, unlink, stat, readFile, utimes, chmod, rename } from 'node:fs/promises'
 import { AGENTISTICS_DATA_DIR, DEFAULT_AGENTISTICS_DATA_DIR, CLAUDE_DIR } from './config'
 import type { AccessibilityPrefs, AwayState, BillingSettings, SavedComparison, SessionPreset, TeamConfig } from '@agentistics/core'
 import { migrateTeamConfig } from '@agentistics/core'
 import { injectSealedTokens, plaintextTokenCount, stripAndSealTokens, withoutTokenFields } from './vault/prefs-tokens'
 import { registerVaultMigrator, sentence as vaultSentence, type MigrationReport } from './vault/service'
+import { durableWriteFile } from './durable-write'
 // TYPE-only, and the allowed direction: `server -> tui`. The arrangements are declared once, in
 // `session-dimensions.ts`, and this file stores whichever one was chosen.
 import type { SessionGroupingId } from '@agentistics/tui/control'
@@ -576,25 +577,15 @@ export async function readPreferencesOrExit(): Promise<Preferences> {
   }
 }
 
-/** Monotonic per-process counter mixed into every tmp filename so concurrent `writeFileAtomic`
- *  calls to the SAME target never pick the same tmp path — `${pid}` alone is unique per
- *  process, not per call, and two calls racing on the identical tmp name would interleave their
- *  writes before either `rename()` fires. */
-let _tmpSeq = 0
-
 /** tmp + rename. `Bun.write` truncates in place, so a concurrent reader can observe a
- *  half-written file; rename on the same filesystem is atomic. The tmp name is unique per
- *  CALL (pid + monotonic counter + random suffix), not just per process.
+ *  half-written file; the durable writer uses a unique temp name and fsyncs before publishing.
  *
  *  Mode 0600, set on the tmp file at creation AND re-applied after the rename: this file used to be
  *  written with no mode at all, so it took the umask's — 0664 on the reference machine, readable by
  *  every account on it, while it carried live central tokens. It no longer carries any (they are
  *  sealed, see `writePrefsFile`), and it is still private. */
 async function writeFileAtomic(path: string, text: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  const tmp = `${path}.tmp-${process.pid}-${++_tmpSeq}-${Math.random().toString(36).slice(2, 8)}`
-  await writeFile(tmp, text, { encoding: 'utf-8', mode: 0o600 })
-  await rename(tmp, path)
+  await durableWriteFile(path, text, { encoding: 'utf-8', mode: 0o600 })
   await chmod(path, 0o600).catch(() => { /* a filesystem that refuses chmod (DrvFs) keeps its own mode */ })
 }
 

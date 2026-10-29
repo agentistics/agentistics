@@ -27,11 +27,12 @@
  *    requests cannot interleave read-modify-write and lose a tag.
  */
 import { randomBytes } from 'node:crypto'
-import { rename, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { rename, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from './config'
 import type { TagDoc } from './tags-store'
 import { toBsonDate } from './mongo-dates'
+import { durableWriteFile } from './durable-write'
 import type { TagSource, TagWindow } from './tags-resolve'
 
 export const LOCAL_TAGS_FILE = join(AGENTISTICS_DATA_DIR, 'tags.json')
@@ -166,10 +167,7 @@ export function createLocalTagStore(file: string): TagStore {
 
   async function writeAll(tags: TagDoc[]): Promise<void> {
     await quarantineCorrupt()
-    await mkdir(dirname(file), { recursive: true })
-    const tmp = `${file}.tmp`
-    await writeFile(tmp, JSON.stringify({ version: 1, tags } satisfies TagsFile, null, 2))
-    await rename(tmp, file)
+    await durableWriteFile(file, JSON.stringify({ version: 1, tags } satisfies TagsFile, null, 2))
   }
 
   /** Serialise a read-modify-write against the file. `changed: false` means the callback decided

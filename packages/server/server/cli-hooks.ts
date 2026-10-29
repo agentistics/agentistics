@@ -21,10 +21,11 @@
  */
 
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, rename, rm, rmdir, writeFile } from 'node:fs/promises'
+import { readFile, readdir, rename, rm, rmdir } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { HOME_DIR } from './config'
+import { durableWriteFile } from './durable-write'
 import {
   HOOK_SPECS,
   HOOK_VERSION,
@@ -104,10 +105,7 @@ function invocation(): string {
 /** Write through a temp file and rename, so a crash mid-write leaves the old file or the new one —
  *  never a truncated `settings.json`, which Claude Code would then refuse to start with. */
 async function writeAtomic(file: string, text: string): Promise<void> {
-  await mkdir(dirname(file), { recursive: true })
-  const tmp = `${file}.agentop-tmp`
-  await writeFile(tmp, text, 'utf8')
-  await rename(tmp, file)
+  await durableWriteFile(file, text, { encoding: 'utf8' })
 }
 
 /** `null` when the file is absent; throws only when it is unreadable or not JSON — which the caller

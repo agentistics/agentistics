@@ -1,9 +1,10 @@
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import type { SessionMeta } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
 import { CURRENT_VERSION } from './version'
+import { durableWriteFile } from './durable-write'
 
 export const TELEMETRY_URL = process.env.AGENTISTICS_TELEMETRY_URL ?? 'https://telemetry.agentistics.com.br/v1/ping'
 export const TELEMETRY_STATE_FILE = join(AGENTISTICS_DATA_DIR, 'telemetry.json')
@@ -52,7 +53,7 @@ export function activeHarnesses(sessions: readonly SessionMeta[], now: number): 
   return [...active].sort()
 }
 async function readState(path: string): Promise<TelemetryState | null> { try { const p = JSON.parse(await readFile(path, 'utf8')) as Partial<TelemetryState>; return typeof p.id === 'string' ? { id: p.id, lastSentDay: typeof p.lastSentDay === 'string' ? p.lastSentDay : undefined } : null } catch { return null } }
-async function saveState(path: string, state: TelemetryState): Promise<void> { await mkdir(join(path, '..'), { recursive: true }); const tmp = `${path}.tmp-${process.pid}`; await writeFile(tmp, JSON.stringify(state), { mode: 0o600 }); await rename(tmp, path) }
+async function saveState(path: string, state: TelemetryState): Promise<void> { await durableWriteFile(path, JSON.stringify(state), { mode: 0o600 }) }
 export async function ensureTelemetryId(path = TELEMETRY_STATE_FILE): Promise<TelemetryState> { const old = await readState(path); if (old) return old; const state = { id: crypto.randomUUID() }; await saveState(path, state); return state }
 function runningCompiledBinary(): boolean {
   return /^\/\$bunfs\//.test(Bun.main) || /^B:\/~BUN\//i.test(Bun.main)

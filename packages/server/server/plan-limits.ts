@@ -12,7 +12,7 @@
  * - codex: the tail of a rollout file the session-directory watcher saw change (`sse.ts`).
  * At boot the newest few of each are read once, so a restart does not forget the last value.
  */
-import { readFile, readdir, stat, writeFile, rename, mkdir } from 'node:fs/promises'
+import { readFile, readdir, stat, mkdir } from 'node:fs/promises'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { watch as fsWatch } from 'node:fs'
 import {
@@ -27,6 +27,7 @@ import {
 } from './harness-accounts'
 import { allHistory, dropHistory, moveHistory, pointOf, recordHistory, type HistoryPoint, __resetPlanHistoryForTest } from './plan-history'
 import { withFileLock } from './sessions/file-lock'
+import { durableWriteFile, __setDurableWriteHooksForTest } from './durable-write'
 import { defaultHomeAccount, resolveSessionAccount } from './sessions/session-account'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
@@ -294,9 +295,10 @@ let persistFailures = 0
 const PERSIST_BASE_MS = 500
 const PERSIST_MAX_MS = 30_000
 /** Test seams: the lock, the file operations and the base delay (production uses the real ones). */
-const persistHooks = { lock: withFileLock, write: writeFile, rename, baseMs: PERSIST_BASE_MS }
+const persistHooks = { lock: withFileLock, write: durableWriteFile, rename: undefined as ((a: string, b: string) => Promise<void>) | undefined, baseMs: PERSIST_BASE_MS }
 export function __setPersistHooksForTest(h: Partial<typeof persistHooks> | null): void {
-  Object.assign(persistHooks, { lock: withFileLock, write: writeFile, rename, baseMs: PERSIST_BASE_MS }, h ?? {})
+  Object.assign(persistHooks, { lock: withFileLock, write: durableWriteFile, rename: undefined, baseMs: PERSIST_BASE_MS }, h ?? {})
+  __setDurableWriteHooksForTest(h?.rename ? { rename: h.rename } : null)
 }
 function persistSoon(): void {
   persistDirty = true
@@ -323,10 +325,7 @@ function persistSoon(): void {
           for (const [k, l] of Object.entries(state.limits)) limits[k] = newerLimits(limits[k], l)
           foldAliasedLimits(limits, migratedAway, registry)
           const out: Persisted = { limits, notices: sink ? state.notices : (disk?.notices ?? state.notices) }
-          const tmp = `${FILE()}.${process.pid}.tmp`
-          await mkdir(dirname(FILE()), { recursive: true })
-          await persistHooks.write(tmp, JSON.stringify(out), { mode: 0o600 })
-          await persistHooks.rename(tmp, FILE())
+          await persistHooks.write(FILE(), JSON.stringify(out), { mode: 0o600 })
           try { fileMtime = (await stat(FILE())).mtimeMs } catch { /* raced */ }
           return true
         })

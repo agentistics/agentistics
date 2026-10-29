@@ -1,10 +1,11 @@
 /** Resumable, low-priority crawler for user-selected whole-disk roots. */
 import { createHash } from 'node:crypto'
 import type { Dirent } from 'node:fs'
-import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { classifyGitFile, shouldPruneDirectory, type ScannedDir } from './dir-scan'
+import { durableWriteFile } from '../durable-write'
 
 export const DISK_INDEX_SLICE_MS = 100
 export const DISK_INDEX_TICK_MS = 2_000
@@ -69,10 +70,7 @@ async function loadState(file: string, root: string): Promise<DiskState> {
 }
 
 async function persist(file: string, state: DiskState): Promise<void> {
-  await mkdir(dirname(file), { recursive: true })
-  const tmp = `${file}.${process.pid}.tmp`
-  await writeFile(tmp, `${JSON.stringify(state)}\n`, { mode: 0o600 })
-  await rename(tmp, file).catch(async () => { await writeFile(file, `${JSON.stringify(state)}\n`, { mode: 0o600 }) })
+  await durableWriteFile(file, `${JSON.stringify(state)}\n`, { mode: 0o600 })
 }
 
 function baseName(path: string): string {

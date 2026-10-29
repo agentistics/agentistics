@@ -172,6 +172,14 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Backup salvo, envio falhou', message: 'O arquivo está no disco desta máquina e restaura normalmente — só a cópia no GitHub não foi feita. Motivo: {reason}' },
     en: { title: 'Backup saved, upload failed', message: 'The archive is on this machine and restores normally — only the GitHub copy was not made. Reason: {reason}' },
   },
+  'tasks.store_restored': {
+    pt: { title: 'Quadro de tarefas restaurado', message: 'O arquivo do quadro estava corrompido; restaurei a cópia de {when}. O arquivo estragado ficou guardado ao lado.' },
+    en: { title: 'Task board restored', message: 'The board file was corrupt; I restored the copy from {when}. The damaged file was kept beside it.' },
+  },
+  'tasks.store_reseeded': {
+    pt: { title: 'Quadro de tarefas recriado', message: 'O arquivo do quadro estava corrompido e não havia cópia válida; o quadro recomeçou e o arquivo estragado ficou guardado ao lado.' },
+    en: { title: 'Task board reseeded', message: 'The board file was corrupt and no valid copy existed; the board was reseeded and the damaged file was kept beside it.' },
+  },
   // RES.1 — the process governor (resources/governor.ts). A stop is said once; an alert once per
   // (process, reason) for as long as it holds. {label} is `agentop mcp`, a helper's name, …
   'hardware.orphan_stopped': {
