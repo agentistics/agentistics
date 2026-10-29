@@ -7,6 +7,7 @@ import { claudeSignedOut, SignedOutError, CLAUDE_PROBE_TIMEOUT_MS, codexIdentity
 import { runClaudeInLoginContext } from './account-login'
 import { handleAccountsRequest } from './accounts-web'
 import { routeCapability } from './capability-guard'
+import { SHELL_SOCKET } from './sessions/tmux-cli'
 
 let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'accounts-test-')) })
@@ -243,6 +244,13 @@ test('real claude probe passes the selected root and returns per-seat keys with 
   await writeFile(executable, '#!/bin/sh\ncat "$CLAUDE_CONFIG_DIR/status.json"\n')
   await chmod(executable, 0o700)
   const path = process.env.PATH
+  // The probe runs inside tmux on the shared utility socket. A server another test file (or an engine
+  // CI job's earlier step) left on that socket carries ITS environment and default shell, so the pane
+  // need not run what this test staged. Give the probe a tmux server of its own, born under this PATH.
+  const tmuxDir = await mkdtemp(join(tmpdir(), 'probe-tmux-'))
+  const oldTmuxDir = process.env.TMUX_TMPDIR, oldTmux = process.env.TMUX
+  process.env.TMUX_TMPDIR = tmuxDir
+  delete process.env.TMUX
   process.env.PATH = `${bin}:${path}`
   try {
     for (const [fields, expected] of [
@@ -255,7 +263,13 @@ test('real claude probe passes the selected root and returns per-seat keys with 
       await writeFile(join(dir, 'status.json'), JSON.stringify({ ...fields, access_token: 'FAKE_TOKEN' }))
       expect(await probeAccountIdentity('claude', dir)).toEqual(expected)
     }
-  } finally { process.env.PATH = path }
+  } finally {
+    process.env.PATH = path
+    Bun.spawnSync(['tmux', '-L', SHELL_SOCKET, 'kill-server'], { env: process.env as Record<string, string> })
+    if (oldTmuxDir === undefined) delete process.env.TMUX_TMPDIR; else process.env.TMUX_TMPDIR = oldTmuxDir
+    if (oldTmux !== undefined) process.env.TMUX = oldTmux
+    await rm(tmuxDir, { recursive: true, force: true })
+  }
 }, 30_000)
 
 test('the default Claude root keeps the unsuffixed environment and falls back without tmux', async () => {
