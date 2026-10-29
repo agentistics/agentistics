@@ -2150,8 +2150,14 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       await loadEngine()
       // `nativeExperimental`: whether the native harness and the providers may be SHOWN here — the
       // experimental flag (`native-gate.ts`). An engine that provides them is not enough.
-      const { nativeExperimentalOn } = await import('./native-gate')
-      return json({ ...engineStatus(), nativeExperimental: nativeExperimentalOn(), surfaces: engineSurfacesFor(engine()?.manifest.surfaces, process.env) })
+      const { nativeExperimentalOn, flowsExperimentalOn } = await import('./native-gate')
+      return json({
+        ...engineStatus(),
+        nativeExperimental: nativeExperimentalOn(),
+        flowsExperimental: flowsExperimentalOn(),
+        flows: Boolean(engine()?.flows),
+        surfaces: engineSurfacesFor(engine()?.manifest.surfaces, process.env),
+      })
     }
 
     // PER-SESSION NOTIFICATIONS — the door the MCP tool and the CLI use (`sessions/session-notify-web.ts`).
