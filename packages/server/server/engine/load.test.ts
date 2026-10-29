@@ -181,12 +181,12 @@ describe('the engine verbs at the command line', () => {
 
   it('the help lists every engine verb, marking the ones this build lacks', async () => {
     const none = engineHelpLines(null).join('\n')
-    for (const v of ['code', 'provider', 'ingest']) expect(none).toContain(`  ${v}`)
-    expect(none.match(/\(official build\)/g)?.length).toBe(3)
+    for (const v of ['code', 'provider', 'ingest', 'flow']) expect(none).toContain(`  ${v}`)
+    expect(none.match(/\(official build\)/g)?.length).toBe(4)
     const e = await fake()(host())
     const some = engineHelpLines(e.commands).join('\n')
     expect(some).toContain('fake provider command')
-    expect(some.match(/\(official build\)/g)?.length).toBe(2)
+    expect(some.match(/\(official build\)/g)?.length).toBe(3)
   })
 
   it('the help leaves the native verbs out while the experimental flag is off (the v2.103 leak)', () => {
