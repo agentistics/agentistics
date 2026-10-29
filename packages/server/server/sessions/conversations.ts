@@ -15,6 +15,8 @@ import { resolveContextWindow, sessionCostUSD, sessionLabel } from '@agentistics
 import { loadConsolidated } from '../consolidate'
 import { sessionAtCwd } from '../live-sessions'
 import { SPAWN_SPECS } from './spawn-spec'
+import { readRegistry } from './registry'
+import { refreshConversationContexts } from './conversation-context'
 
 /** One conversation, as the fleet screen needs it. */
 export interface Conversation {
@@ -165,7 +167,9 @@ export function toConversation(s: SessionMeta): Conversation {
  *  a screen with no history, not a screen that fails to open. */
 export async function loadConversations(): Promise<Conversation[]> {
   const now = Date.now()
-  if (cache && now - cache.at < CACHE_TTL_MS) return cache.list
+  if (cache && now - cache.at < CACHE_TTL_MS) {
+    return refreshConversationContexts(cache.list, await readRegistry())
+  }
   let list: Conversation[]
   try {
     list = [...(await loadConsolidated()).values()]
@@ -176,7 +180,7 @@ export async function loadConversations(): Promise<Conversation[]> {
     list = []
   }
   cache = { at: now, list }
-  return list
+  return refreshConversationContexts(list, await readRegistry())
 }
 
 /** Drop the cache, so a session started seconds ago is findable without waiting out the TTL. */

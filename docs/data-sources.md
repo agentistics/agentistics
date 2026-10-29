@@ -201,6 +201,19 @@ produce, applied to one row.
 - **Skills** (`/commit`, `/review-pr`, etc.) do not produce individual `tool_use` events in JSONL — only a `skill_listing` attachment appears. Skill invocations can only be inferred indirectly from subsequent tool calls.
 - **Tasks** (`TaskCreate` / `TaskUpdate`) have subject/description/status but no token or duration breakdown.
 
+## Live session context
+
+The composer's context ring and the leader hand-off hint use the same live reading. For an exactly
+linked conversation, the host resolves its transcript through the chat reader: the default store
+and all registered account roots, with the newest copy winning. This also works when a session
+inherited an account config directory but its registry row has no `accountId`. A workspace directory
+alone never selects a conversation.
+
+Live readings refresh independently of the consolidated history cache. Claude shares the incremental
+transcript walk; Codex, Gemini and Kimi reuse their adapters' context arithmetic over a bounded,
+widening tail, cached by file version. An unavailable reading leaves the consolidated value intact.
+Harnesses without a measured context gauge remain without one.
+
 ## Git data
 
 Git stats are computed by running:
