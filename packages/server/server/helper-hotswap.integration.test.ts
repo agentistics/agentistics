@@ -57,14 +57,22 @@ test('compiled MCP changes worker at idle without a host handshake; bad binary k
     install(dir, 'v2')
     await until(() => existsSync(join(dir, 'initialized-v2')))
     expect((await c.wait(m => m.id === 2)).result).toEqual({ version: 'v1', initialized: true })
-    c.send({ jsonrpc: '2.0', id: 3, method: 'tools/call' })
-    expect((await c.wait(m => m.id === 3)).result).toEqual({ version: 'v2', initialized: true })
+    // v2 writes its marker when it initializes, BEFORE routing switches to it at the next idle point,
+    // so a call sent right after v1 answered may still be v1's. Ask until v2 answers (bounded).
+    let id = 3, answer: any
+    for (; id < 200; id++) {
+      c.send({ jsonrpc: '2.0', id, method: 'tools/call' })
+      answer = (await c.wait(m => m.id === id)).result
+      if (answer.version === 'v2') break
+      await sleep(25)
+    }
+    expect(answer).toEqual({ version: 'v2', initialized: true })
     // There was exactly one externally visible initialize response.
     expect(c.messages.filter(m => m.result?.serverInfo)).toHaveLength(1)
     writeFileSync(`${bin}.new`, '#!/bin/sh\nexit 1\n'); chmodSync(`${bin}.new`, 0o755); renameSync(`${bin}.new`, bin)
     await until(() => diagnostics.includes('hot-swap failed'))
-    c.send({ jsonrpc: '2.0', id: 4, method: 'tools/call' })
-    expect((await c.wait(m => m.id === 4)).result.version).toBe('v2')
+    c.send({ jsonrpc: '2.0', id: 500, method: 'tools/call' })
+    expect((await c.wait(m => m.id === 500)).result.version).toBe('v2')
     expect(child.exitCode).toBeNull()
   } finally { child.kill(); await new Promise<void>(resolve => child.once('close', () => resolve())) }
 }, 15_000)

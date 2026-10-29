@@ -19,7 +19,7 @@ export function ComposerShell({ hidden, dimmed, children }: {
   children: ReactNode
 }) {
   return (
-    <div style={{
+    <div data-composer-field style={{
       // NEVER hidden while the field has the caret — the caller decides (`showReopen`).
       display: hidden ? 'none' : 'flex',
       // A COLUMN: the text gets the whole width, the controls sit under it.
