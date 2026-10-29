@@ -1023,6 +1023,280 @@ button:focus-within .ag-row-pin,
 .ag-menu-row:hover, .ag-menu-row:focus-visible { background: var(--bg-hover, rgba(127, 127, 127, 0.08)); }
 @media (prefers-reduced-motion: reduce) { [role="menu"][aria-label] { animation: none !important; } }
 
+/* ---------------------------------------------------------------------------
+   Experimental glass surfaces — real application surfaces, one switch.
+
+   The owner needs before/after captures of the same build.  The capture runner sets
+   `document.documentElement.dataset.glass` to `off` or `on`; keeping the switch on <html>
+   also covers portalled menus and dialogs that are mounted directly under <body>.  No component
+   has to invent its own preference, and a missing attribute keeps the current shipped look.
+
+   Glass is deliberately limited to surfaces where content is visible behind it.  Cards and
+   inputs get only the acrylic tint: blur on every card creates a large compositing cost on phones.
+*/
+[data-glass="on"] .ag-mobile-shell-header,
+[data-glass="on"] [data-session-tabs],
+[data-glass="on"] .mobile-bottom-nav,
+[data-glass="on"] [data-panel-rail],
+[data-glass="on"] [role="menu"][data-portalled-menu],
+[data-glass="on"] .ag-menu-row[role="menuitem"] {
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  border-color: color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+/* Area menu (opens on hover/focus of the rail) and portalled modals.  Modals are inline-styled
+   fixed overlays mounted straight under <body>; they carry no class, so the switch matches the
+   shape (fixed + inset 0) and the dialog is the overlay's first child. */
+[data-glass="on"] [data-area-rail][data-open="true"] {
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+[data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+[data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] > div {
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+}
+
+/* Plan-usage popover (with its caret) and the Nay notification card. Both are inline-styled, so
+   the switch needs !important; the caret is a rotated square that pokes out of the popover's box,
+   so it gets its own tint + blur instead of relying on the parent's. */
+[data-glass="on"] [data-plan-usage-popover],
+[data-glass="on"] [data-nay-notice] {
+  background: color-mix(in srgb, var(--bg-card) 74%, transparent) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+[data-glass="on"] [data-plan-usage-popover] > span[aria-hidden] {
+  background: color-mix(in srgb, var(--bg-card) 74%, transparent) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+
+/* Phone bottom sheet (the "More" areas sheet, filters, ...): scrim blur + translucent panel. */
+[data-glass="on"] div[role="dialog"][aria-modal="true"] {
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+[data-glass="on"] div[role="dialog"][aria-modal="true"] > div {
+  background: color-mix(in srgb, var(--bg-surface) 76%, transparent) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-glass="on"] [data-composer-menu],
+  [data-glass="on"] body > div[style*="position: fixed"][style*="background"]:not([style*="inset: 0"]),
+  [data-glass="on"] div[role="dialog"][aria-modal="true"] > div { background: var(--bg-surface) !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-glass="on"] [data-composer-menu],
+  [data-glass="on"] body > div[style*="position: fixed"][style*="background"]:not([style*="inset: 0"]) { background: var(--bg-card) !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  [data-glass="on"] div[role="dialog"][aria-modal="true"],
+  [data-glass="on"] div[role="dialog"][aria-modal="true"] > div { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  [data-glass="on"] div[role="dialog"][aria-modal="true"] > div { background: var(--bg-surface) !important; }
+}
+
+/* === Glass material (owner review: it must be VISIBLE). One recipe for every blurred surface:
+   a clearly translucent tint (alpha ~60% dark / ~66% light), a 20px blur with a boosted saturate
+   so what is behind reads as colour smeared, a 1px inner highlight on the top edge, a soft shadow.
+   Text keeps AA: the tint is still dark/light enough and the README records measured contrast. */
+[data-glass="on"] { --ag-glass-mix: 50%; --ag-glass-hi: rgba(255, 255, 255, 0.16); --ag-glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.32); }
+[data-glass="on"][data-theme="light"] { --ag-glass-mix: 46%; --ag-glass-hi: rgba(255, 255, 255, 0.78); --ag-glass-shadow: 0 10px 30px rgba(20, 20, 40, 0.16); }
+[data-glass="on"] [data-plan-usage-popover],
+[data-glass="on"] [data-nay-notice],
+[data-glass="on"] [data-composer-menu],
+[data-glass="on"] [data-area-rail][data-open="true"],
+[data-glass="on"] [role="menu"][data-portalled-menu],
+[data-glass="on"] body > div[style*="position: fixed"][style*="background"]:not([style*="inset: 0"]),
+[data-glass="on"] div[role="dialog"][aria-modal="true"] > div,
+[data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] > div {
+  background: linear-gradient(135deg, var(--ag-glass-hi), transparent 55%), color-mix(in srgb, var(--bg-card) var(--ag-glass-mix), transparent) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+  box-shadow: inset 0 1px 0 var(--ag-glass-hi), var(--ag-glass-shadow) !important;
+  border-color: color-mix(in srgb, var(--ag-glass-hi) 60%, var(--border)) !important;
+}
+[data-glass="on"] [data-plan-usage-popover] > span[aria-hidden] {
+  background: color-mix(in srgb, var(--bg-card) var(--ag-glass-mix), transparent) !important;
+  box-shadow: none !important;
+}
+
+/* Full scope: sticky top bars, toasts, the bell panel, the Nay panel, selects/dropdowns, and the
+   message field as a glass pill over the conversation. Same recipe, same fallbacks. */
+[data-glass="on"] header,
+[data-glass="on"] [data-bell-sticky-header],
+[data-glass="on"] [data-testid="notification-toast"],
+[data-glass="on"] [data-bell-panel],
+[data-glass="on"] [data-nay-panel],
+[data-glass="on"] [role="listbox"],
+[data-glass="on"] .ag-composer-ground textarea {
+  background: linear-gradient(135deg, var(--ag-glass-hi), transparent 55%), color-mix(in srgb, var(--bg-card) var(--ag-glass-mix), transparent) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(180%);
+  border-color: color-mix(in srgb, var(--ag-glass-hi) 60%, var(--border)) !important;
+}
+[data-glass="on"] [data-testid="notification-toast"],
+[data-glass="on"] [data-bell-panel],
+[data-glass="on"] [data-nay-panel],
+[data-glass="on"] [role="listbox"],
+[data-glass="on"] .ag-composer-ground textarea {
+  box-shadow: inset 0 1px 0 var(--ag-glass-hi), var(--ag-glass-shadow) !important;
+}
+[data-glass="on"] .ag-composer-ground textarea { border-radius: 22px !important; padding-left: 18px; padding-right: 18px; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-glass="on"] header,
+  [data-glass="on"] [data-bell-sticky-header],
+  [data-glass="on"] [data-testid="notification-toast"],
+  [data-glass="on"] [data-bell-panel],
+  [data-glass="on"] [data-nay-panel],
+  [data-glass="on"] [role="listbox"],
+  [data-glass="on"] .ag-composer-ground textarea { background: var(--bg-card) !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-glass="on"] header,
+  [data-glass="on"] [data-bell-sticky-header],
+  [data-glass="on"] [data-testid="notification-toast"],
+  [data-glass="on"] [data-bell-panel],
+  [data-glass="on"] [data-nay-panel],
+  [data-glass="on"] [role="listbox"],
+  [data-glass="on"] .ag-composer-ground textarea {
+    background: var(--bg-card) !important; -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+}
+@media (pointer: coarse), (max-width: 640px) {
+  [data-glass="on"] header,
+  [data-glass="on"] [data-bell-sticky-header],
+  [data-glass="on"] [data-testid="notification-toast"],
+  [data-glass="on"] [data-bell-panel],
+  [data-glass="on"] [data-nay-panel],
+  [data-glass="on"] [role="listbox"],
+  [data-glass="on"] .ag-composer-ground textarea {
+    -webkit-backdrop-filter: blur(10px) saturate(150%);
+    backdrop-filter: blur(10px) saturate(150%);
+  }
+}
+
+/* Cheap acrylic: NO backdrop-filter. Cards and fields get a translucent gradient tint, a 1px top
+   highlight and a light noise grain, so a list of hundreds costs nothing extra on a phone. */
+[data-glass="on"] {
+  --ag-acrylic-noise: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 .07 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+[data-glass="on"] .ag-stat-card,
+[data-glass="on"] .hl-card,
+[data-glass="on"] [data-session-row],
+[data-glass="on"] [data-account-row],
+[data-glass="on"] [data-task-card],
+[data-glass="on"] .ag-md-editor {
+  background: var(--ag-acrylic-noise), linear-gradient(160deg, var(--ag-glass-hi), transparent 60%), color-mix(in srgb, var(--bg-card) 84%, transparent) !important;
+  box-shadow: inset 0 1px 0 var(--ag-glass-hi), 0 1px 3px rgba(0, 0, 0, 0.12) !important;
+  border-color: color-mix(in srgb, var(--ag-glass-hi) 50%, var(--border)) !important;
+}
+[data-glass="on"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+[data-glass="on"] select,
+[data-glass="on"] textarea {
+  background: linear-gradient(180deg, var(--ag-glass-hi), transparent 45%), color-mix(in srgb, var(--bg-base) 70%, transparent) !important;
+  box-shadow: inset 0 1px 0 var(--ag-glass-hi);
+}
+[data-glass="on"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus-visible,
+[data-glass="on"] select:focus-visible,
+[data-glass="on"] textarea:focus-visible {
+  box-shadow: inset 0 1px 0 var(--ag-glass-hi), 0 0 0 3px color-mix(in srgb, var(--anthropic-orange) 28%, transparent), 0 0 14px color-mix(in srgb, var(--anthropic-orange) 30%, transparent);
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-glass="on"] .ag-stat-card, [data-glass="on"] .hl-card, [data-glass="on"] [data-session-row],
+  [data-glass="on"] [data-account-row], [data-glass="on"] [data-task-card], [data-glass="on"] .ag-md-editor {
+    background: var(--bg-card) !important;
+  }
+  [data-glass="on"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  [data-glass="on"] select, [data-glass="on"] textarea { background: var(--bg-base) !important; }
+}
+
+/* Phones: a lighter blur. 20px over a long list costs real frame time on a 4x-throttled CPU. */
+@media (pointer: coarse), (max-width: 640px) {
+  [data-glass="on"] [data-area-rail][data-open="true"],
+  [data-glass="on"] div[role="dialog"][aria-modal="true"] > div,
+  [data-glass="on"] [data-composer-menu],
+  [data-glass="on"] [data-plan-usage-popover],
+  [data-glass="on"] [data-nay-notice],
+  [data-glass="on"] body > div[style*="position: fixed"][style*="background"]:not([style*="inset: 0"]) {
+    -webkit-backdrop-filter: blur(10px) saturate(150%);
+    backdrop-filter: blur(10px) saturate(150%);
+  }
+}
+
+/* Lightweight acrylic for repeated content surfaces. Do not blur these: session/task/account
+   lists can contain hundreds of rows and should remain cheap on a throttled mobile CPU. */
+[data-glass="on"] .ag-stat-card,
+[data-glass="on"] .hl-card,
+[data-glass="on"] [data-session-row],
+[data-glass="on"] [data-account-row],
+[data-glass="on"] .ag-md-editor {
+  background: color-mix(in srgb, var(--bg-card) 88%, transparent) !important;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent);
+}
+
+/* The composer has a dedicated fade layer above. Disable it completely for the before capture,
+   and make reduced-transparency users safe even when an old browser ignores the media query. */
+[data-glass="off"] .ag-composer-ground::before {
+  top: 0;
+  background: var(--ag-composer-ground, var(--bg-base));
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ag-composer-ground::before { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-glass="on"] .ag-mobile-shell-header,
+  [data-glass="on"] [data-session-tabs],
+  [data-glass="on"] .mobile-bottom-nav,
+  [data-glass="on"] [data-panel-rail],
+  [data-glass="on"] [role="menu"][data-portalled-menu],
+  [data-glass="on"] [data-area-rail][data-open="true"],
+  [data-glass="on"] [data-plan-usage-popover],
+  [data-glass="on"] [data-plan-usage-popover] > span[aria-hidden],
+  [data-glass="on"] [data-nay-notice] {
+    background: var(--bg-card) !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-glass="on"] .ag-mobile-shell-header,
+  [data-glass="on"] [data-session-tabs],
+  [data-glass="on"] .mobile-bottom-nav,
+  [data-glass="on"] [data-panel-rail],
+  [data-glass="on"] [role="menu"][data-portalled-menu],
+  [data-glass="on"] [data-area-rail][data-open="true"],
+  [data-glass="on"] [data-plan-usage-popover],
+  [data-glass="on"] [data-plan-usage-popover] > span[aria-hidden],
+  [data-glass="on"] [data-nay-notice] {
+    background: var(--bg-card) !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] > div { background: var(--bg-elevated) !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"],
+  [data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] > div {
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  [data-glass="on"] body > div[style*="position: fixed"][style*="inset: 0"][style*="z-index: 999"] > div { background: var(--bg-elevated) !important; }
+}
+
 /* The Shell X's indeterminate progress bar (`ShellCloseStatus.tsx`). */
 @keyframes ag-close-progress { 0% { left: -40%; } 100% { left: 100%; } }
 .ag-close-progress { animation: ag-close-progress 1.1s ease-in-out infinite; }

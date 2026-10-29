@@ -171,7 +171,7 @@ export function NotificationBell({ lang, buttonStyle, buttonClassName, label, to
       </button>}
 
       {open && (
-        <div style={{
+        <div data-bell-panel style={{
           position: isMobile ? 'fixed' : 'absolute',
           ...(isMobile
             ? {
