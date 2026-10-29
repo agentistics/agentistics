@@ -47,8 +47,8 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const wrapper: React.CSSProperties = full
-    ? { position: 'fixed', inset: 0, zIndex: 700, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'min(24px, 2vw)' }
-    : { position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 700, width: 'min(420px, 100vw)', display: 'flex', pointerEvents: 'none' }
+    ? { position: 'fixed', inset: 0, zIndex: 700, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'min(24px, calc(2vw / var(--ui-zoom, 1)))' }
+    : { position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 700, width: 'min(420px, calc(100vw / var(--ui-zoom, 1)))', display: 'flex', pointerEvents: 'none' }
   const box: React.CSSProperties = full
     ? { position: 'relative', width: 'min(960px, 100%)', maxHeight: '100%', overflow: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, outline: 'none' }
     : { position: 'relative', width: '100%', height: '100%', overflow: 'auto', background: 'var(--bg-card)', borderLeft: '1px solid var(--border)', padding: 16, outline: 'none', pointerEvents: 'auto' }
