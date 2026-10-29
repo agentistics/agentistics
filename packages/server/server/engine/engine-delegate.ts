@@ -13,6 +13,7 @@
  *
  * The functions are injected (`DelegateDeps`), so the rules are tested without a fleet.
  */
+import { markEngineOpened } from './structured-handle'
 import type { EngineDelegateRefusal, EngineDelegateSpawn, EngineDelegateSpawnResult, EngineFleet, HarnessId } from '@agentistics/engine-api'
 
 export interface DelegateDeps {
@@ -68,6 +69,7 @@ export function createDelegateMembers(d: DelegateDeps): DelegateMembers {
           return refused('filing_failed', `The ${req.harness} session started but could not be filed on ${req.taskId} (${filed.reason ?? 'refused'}), so it was stopped: no session runs off the board.`)
         }
       }
+      markEngineOpened(out.id)
       return { ok: true, managedId: out.id }
     },
     async lastReply(managedId) {

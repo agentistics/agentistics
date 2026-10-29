@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.165.0': {
+    features: [
+      {
+        pt: 'Motores podem agir na sessão em que um painel foi aberto (engine-api 1.17).',
+        en: 'Engines can act on the session a panel was opened from (engine-api 1.17).',
+      },
+    ],
+    fixes: [],
+  },
   '2.164.1': {
     features: [],
     fixes: [

@@ -787,6 +787,8 @@ export interface SessionBackend {
    * stream; `undefined` for any other session.
    */
   chatOf?(id: string): { chat: HarnessChat; conversationId: string } | undefined
+  /** Cancel the turn in flight of a STRUCTURED session through its driver; false for any other session. */
+  cancelTurn?(id: string): boolean
   /**
    * F2.0b — "open in terminal" on a live STRUCTURED session: end its child, then resume the same
    * conversation as a TUI under the same managed id. `not-structured` for every other session.

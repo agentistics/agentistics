@@ -1,4 +1,4 @@
-# Engine surfaces, sockets and assets (engine-api 1.15)
+# Engine surfaces, sockets and assets (engine-api 1.15, 1.17)
 
 An engine can serve its own routes, accept WebSockets and announce UI surfaces under one reserved
 prefix, `/api/engine/x`. Nothing here is specific to any one feature: it is the generic door. A
@@ -51,7 +51,37 @@ owns, at the app root: it keeps focus, closes on Esc while `full`, and has a clo
 may flip the frame between `full` (modal) and `side` (docked panel) with `ctx.setLayout()` without
 being unmounted, and it stays mounted while the person navigates; `unmount(el)` runs on every exit.
 
+## Acting on the session (engine-api 1.17)
+
+A surface reaches the session it was opened from through its own socket: `socket.structured()` returns a
+handle on the session the handshake declared (the host accepted that socket only for a session that existed
+and was live), bound to THAT socket. An id the engine supplies never selects the session, and the handle
+exists only on a machine that serves `/api/engine/x` at all — a `localShell` route, refused on a central and
+on any exposed profile.
+
+`host.structuredSessions.get(id)` is the other door and it is narrower still: it resolves only a session this
+engine started itself (`fleet.delegateSpawn`) and answers `null` for every other id, indistinguishably;
+nothing here can enumerate sessions.
+
+The handle has three verbs and no others, and every one is total (it never throws):
+
+- `follow(max, on)` — the session's chat seam (a `window` of turns, then deltas);
+- `send(text)` — adds a turn typed with an `[from agentistics · surface]` header, so the conversation
+  never shows it as something the owner wrote. Refused for empty text, for text over 64 KiB, while a
+  request is open, and on a session that is not structured;
+- `cancel()` — cancels the turn in flight and nothing else.
+
+A handle dies when its socket closes (another surface on the same session does not keep it alive) or the
+session ends; it then releases its subscriptions and stays dead. A surface mounted later gets a new one,
+so code that outlives a socket (a surface that reconnects) asks the current socket each time.
+`live` reflects the socket and what the handle has seen; it learns of a session's end on the next use or
+when the host closes the socket.
+
 ## Versioning
+
+Contract 1.17 (minor): `structuredSessions` is optional on the host; an engine that needs it refuses to
+load on an older host. It follows 1.16 (flows).
+
 
 Contract 1.15 (minor): everything above is optional. A 1.14 engine still loads; a 1.15 engine on an
 older host is refused at load (unreserved prefix) and the host runs as a community build.
