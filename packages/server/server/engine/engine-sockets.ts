@@ -132,6 +132,15 @@ export async function sweepEndedSessions(alive: (sessionId: string) => Promise<b
   return n
 }
 
+/**
+ * The open sockets that declared `sessionId`: the surfaces mounted for that session right now. The host
+ * validated the id when it accepted the handshake, so this is the one authenticated statement of "which
+ * session this surface was opened from".
+ */
+export function surfaceSockets(sessionId: string): EngineSocketEntry[] {
+  return [...open].filter(e => e.sessionId === sessionId && !e.closed)
+}
+
 export function engineSocketCount(): number { return open.size }
 
 /** Tests only. */

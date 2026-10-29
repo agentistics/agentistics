@@ -41,6 +41,7 @@ import { hostEngineBoard } from './engine-board'
 import { hostDelegateMembers } from './engine-delegate'
 import { nativeVaultRefs } from '../vault/grants'
 import { flowHostOps } from '../flows/host-ops'
+import { createStructuredSessions } from './structured-handle'
 
 export type HostEngine = Engine<AgentisticsEvent>
 export type HostIntegrations = IntegrationRegistry<AgentisticsEvent>
@@ -337,6 +338,11 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
           : process.env.AGENTISTICS_INGEST === '1'
     ),
     flows: { ops: flowHostOps() },
+    // 1.17: a surface acts on the session it was opened from — see structured-handle.ts.
+    structuredSessions: createStructuredSessions({
+      backend: async () => (await import('../sessions')).resolveBackend(),
+      alive: async id => (await import('../sessions/input-web')).inputSessionLive(id),
+    }),
     audit: e => {
       // 1.5: `vault.*` events go to the machine's own vault/audit.jsonl, never to Mongo.
       if (routeEngineVaultAudit(e)) return

@@ -12,6 +12,7 @@
  */
 import type { CapabilityName, EngineEvent, EngineSessionActivity, HarnessId } from './mirrors'
 import type { ReuseSurface } from './reuse'
+import type { EngineStructuredSessions } from './structured'
 
 /** Where an append's answer is read. A host's richer result is assignable to it. */
 export interface ProviderAppendResult {
@@ -511,6 +512,8 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
   flag(name: EngineFlag): boolean
   /** Optional experimental flows surface. Absent on hosts before contract 1.16. */
   flows?: { ops: Readonly<Record<string, EngineFlowOp>> }
+  /** 1.17, optional: act on the session a surface was opened from (`structured.ts`). Absent on an older host. */
+  structuredSessions?: EngineStructuredSessions
   audit(event: EngineAuditEvent): void
   readJsonLimited: ReadJsonLimited
   safeError: SafeError

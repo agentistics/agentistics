@@ -1,4 +1,4 @@
-# Engine surfaces, sockets and assets (engine-api 1.15)
+# Engine surfaces, sockets and assets (engine-api 1.15, 1.17)
 
 An engine can serve its own routes, accept WebSockets and announce UI surfaces under one reserved
 prefix, `/api/engine/x`. Nothing here is specific to any one feature: it is the generic door. A
@@ -51,7 +51,31 @@ owns, at the app root: it keeps focus, closes on Esc while `full`, and has a clo
 may flip the frame between `full` (modal) and `side` (docked panel) with `ctx.setLayout()` without
 being unmounted, and it stays mounted while the person navigates; `unmount(el)` runs on every exit.
 
+## Acting on the session (engine-api 1.17)
+
+`host.structuredSessions.get(id)` gives a surface a handle on the session it was opened from. It
+returns `null` for every other id — unknown and somebody else's are indistinguishable — except a session
+this engine started itself; there is no way to list sessions through it. The host decides which session a
+surface belongs to from the WebSocket handshake it accepted for a declared, live session, never from the
+engine's word alone.
+
+The handle has three verbs and no others:
+
+- `follow(max, on)` — the session's chat seam (a `window` of turns, then deltas);
+- `send(text)` — adds a turn typed with an `[from agentistics · surface]` header, so the conversation
+  never shows it as something the owner wrote. Refused while a request is open or on a session that is
+  not structured;
+- `cancel()` — cancels the turn in flight and nothing else.
+
+A handle is invalidated when the surface unmounts (its sockets close) or the session ends, and a dead
+handle stays dead; a surface mounted later gets a new one through `get`. A community build has no engine,
+so none of this exists there.
+
 ## Versioning
+
+Contract 1.17 (minor): `structuredSessions` is optional on the host; an engine that needs it refuses to
+load on an older host. It follows 1.16 (flows).
+
 
 Contract 1.15 (minor): everything above is optional. A 1.14 engine still loads; a 1.15 engine on an
 older host is refused at load (unreserved prefix) and the host runs as a community build.

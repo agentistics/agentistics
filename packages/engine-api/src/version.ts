@@ -149,7 +149,13 @@
  * operations let an official engine persist and inspect bounded workflow runs. Older hosts omit
  * the surface; an engine built against 1.16 refuses to load there rather than guessing.
  */
-export const ENGINE_API_VERSION = '1.16.0'
+/**
+ * 1.17.0 — `EngineHostServices.structuredSessions.get(id)` (optional): a surface follows, adds a turn to
+ * and cancels the turn of the session it was opened from (or one the engine started), through a handle the
+ * host invalidates when the surface unmounts or the session ends. Older hosts omit it; an engine that needs
+ * it refuses to load there rather than guessing.
+ */
+export const ENGINE_API_VERSION = '1.17.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
