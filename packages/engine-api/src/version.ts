@@ -144,6 +144,11 @@
  * the host imports on click and mounts into a frame it owns (`full` or `side`, switchable by the surface, kept mounted across navigation). All optional: a 1.14 engine still loads,
  * and a 1.15 engine on an older host is refused at load (an unreserved prefix), so it runs as community.
  */
+/**
+ * 1.16.0 — deterministic experimental flows. The optional `flows` host flag and read-only host
+ * operations let an official engine persist and inspect bounded workflow runs. Older hosts omit
+ * the surface; an engine built against 1.16 refuses to load there rather than guessing.
+ */
 export const ENGINE_API_VERSION = '1.16.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
