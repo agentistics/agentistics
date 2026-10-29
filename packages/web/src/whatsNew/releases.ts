@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.161.9': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Mensagens que outra sessão ou um subagente manda para a sua conversa não aparecem mais como se fossem suas: elas saem marcadas como aviso, e só o que você digitou vira mensagem sua.',
+        en: 'Messages another session or a sub-agent sends into your conversation no longer show up as if you wrote them: they are marked as notices, and only what you typed becomes your message.',
+      },
+    ],
+  },
   '2.161.8': {
     features: [],
     fixes: [
