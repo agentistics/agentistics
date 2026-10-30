@@ -288,3 +288,20 @@ reported device expiry (or Gemini's five-minute prompt window) takes precedence.
 refusal stop the helper and remove its unbound directory. A failed row with a fixed reason remains
 in memory for up to 15 minutes so the open dialog can explain what happened. Link metadata and
 failure rows are not persisted; confirmed account bindings keep the existing durable registry.
+
+## Antigravity credential discovery on Linux
+
+The quota reader checks `antigravity-oauth-token` in the configured `ANTIGRAVITY_DIR` first.
+Only a missing file (`ENOENT`) enables the Linux Secret Service fallback for the configured
+default root, using the existing `service=gemini`, `username=antigravity` entry. An empty,
+malformed, expired or unreadable file keeps its existing skip behavior; extra account roots
+never read the shared keyring. Windows and macOS retain file-only credential discovery.
+
+The fallback uses the installed `secret-tool` without a shell or an unlock request. It bounds
+the command's execution time and output size, ignores locked entries, and skips ambiguous
+results with multiple readable credentials. Missing tools and inaccessible keyrings skip
+collection. No new dependency is required. Credentials remain in memory and are never logged,
+refreshed or copied to a file.
+
+Credential discovery does not guarantee that the quota endpoint accepts a request. This fix
+does not change endpoints, request headers, polling, quota windows or their presentation.
