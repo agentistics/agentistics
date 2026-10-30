@@ -20,7 +20,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { attachmentUrl } from '../../lib/attachmentUrl'
 import { appendDictation } from '../../lib/dictation'
 import { attachmentKind, isImageAttachment } from '../../lib/messageAttachments'
-import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle } from '../chat/ComposerShell'
+import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerSendButton, ComposerShell, ComposerToolbar, composerFieldStyle, fitComposerField } from '../chat/ComposerShell'
 import { AttachmentLightbox } from '../sessions/AttachmentLightbox'
 import { MAX_ATTACHMENTS, attachmentRoom, planPaste } from '../../lib/pastePlan'
 import { useDictation } from '../../lib/useDictation'
@@ -140,8 +140,7 @@ export function CommentComposer({ lang, value, onChange, attachments, onAttachme
   useEffect(() => {
     const t = taRef.current
     if (!t) return
-    t.style.height = 'auto'
-    t.style.height = `${Math.min(t.scrollHeight, 220)}px`
+    fitComposerField(t, 220)
   }, [value])
 
   return (

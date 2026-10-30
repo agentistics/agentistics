@@ -1250,6 +1250,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
 
 
   /** The ceiling, re-measured when the window changes size. */
+  const [composerOverflows, setComposerOverflows] = useState(false)
   const [maxComposerH, setMaxComposerH] = useState(() => composerMaxHeight(
     typeof window === 'undefined' ? 0 : window.innerHeight,
   ))
@@ -1274,6 +1275,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, maxComposerH)}px`
+    // The scrollbar only once the draft is past the ceiling. Under the text-size zoom the measured
+    // `scrollHeight` and the height written back can disagree by a pixel, and an always-`auto`
+    // field then showed a scrollbar while EMPTY (owner, 2026-10-30).
+    setComposerOverflows(el.scrollHeight > maxComposerH + 1)
   }, [draft, maxComposerH])
 
   /**
@@ -1548,7 +1553,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
 
   useLayoutEffect(() => {
     syncComposerMirror()
-  }, [draft, maxComposerH, syncComposerMirror])
+  }, [draft, maxComposerH, composerOverflows, syncComposerMirror])
 
   const draftReq = useDraftRequest()
   const draftReqAt = draftReq?.sessionId === session.id ? draftReq.at : undefined
@@ -3490,7 +3495,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     color: needsMirror(cmdToken, mentions) ? 'transparent' : 'var(--text-primary)',
                     caretColor: 'var(--anthropic-orange)',
                     fontFamily: 'inherit', fontSize: 13.5,
-                    lineHeight: 1.5, maxHeight: maxComposerH, overflowY: 'auto', padding: '6px 6px',
+                    lineHeight: 1.5, maxHeight: maxComposerH, overflowY: composerOverflows ? 'auto' : 'hidden', padding: '6px 6px',
                     // Above the mirror.
                     position: 'relative', zIndex: 1,
                     // Native selection and the iOS Copy callout, said explicitly so no ancestor rule
