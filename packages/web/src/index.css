@@ -1049,9 +1049,9 @@ button:focus-within .ag-row-pin,
   border: 1px solid var(--border);
 }
 
-/* Light surfaces need a stronger contrast recipe: white-on-near-white at 64%
-   reads as solid. Keep the underlying content visible without changing the
-   dark theme or the intentionally solid floating chat. */
+/* Light surfaces need a stronger recipe: white-on-near-white at 48% still read as solid. Much
+   lower tint plus a soft shadow and slightly higher saturation so the page shows through.
+   The dark theme and the intentionally solid floating chat are untouched. */
 [data-theme="light"][data-glass="on"] [role="menu"][data-portalled-menu],
 [data-theme="light"][data-glass="on"] [data-composer-menu],
 [data-theme="light"][data-glass="on"] [role="listbox"],
@@ -1062,10 +1062,13 @@ button:focus-within .ag-row-pin,
 [data-theme="light"][data-glass="on"] [data-drawer-side="left"],
 [data-theme="light"][data-glass="on"] .ag-composer-ground [data-composer-field],
 [data-theme="light"][data-glass="on"] [data-bottom-sheet] > div {
-  background: color-mix(in srgb, var(--bg-base) 48%, transparent) !important;
+  background: color-mix(in srgb, var(--bg-base) 24%, transparent) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
 }
 [data-theme="light"][data-glass="on"] [data-plan-usage-popover] > span[aria-hidden] {
-  background: color-mix(in srgb, var(--bg-base) 48%, transparent) !important;
+  background: color-mix(in srgb, var(--bg-base) 24%, transparent) !important;
 }
 /* The caret of the plan-usage popover pokes out of its box: same tint, no blur of its own. */
 [data-glass="on"] [data-plan-usage-popover] > span[aria-hidden] {

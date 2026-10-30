@@ -900,6 +900,9 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
               gap: 5,
               width: isMobile ? '100%' : undefined,
               justifyContent: isMobile ? 'center' : undefined,
+              // Inline: the wrapper may narrow, so the button must narrow with it (clipping its own
+              // content) instead of spilling over the "see active filters" chip beside it.
+              ...(inline ? { minWidth: 0, maxWidth: '100%', overflow: 'hidden' } : {}),
               border: '1px dashed var(--border)',
               background: 'transparent',
               color: 'var(--text-secondary)',
@@ -920,7 +923,7 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
           {/* Dimension menu — lists only the dimensions that apply to this data AND, when `only`
               is given, that the current page can actually react to. */}
           {showAddMenu && !openPicker && (
-            <div style={{
+            <div role="menu" data-portalled-menu style={{
               position: 'absolute', top: 'calc(100% + 4px)', left: 0,
               background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8,
               boxShadow: '0 4px 16px rgba(0,0,0,0.25)', zIndex: 1000,
