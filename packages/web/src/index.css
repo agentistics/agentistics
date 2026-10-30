@@ -1067,6 +1067,8 @@ button:focus-within .ag-row-pin,
    transparência no componente de input"): 56% instead of the menus' 64%. */
 [data-glass="on"] .ag-composer-ground [data-composer-field] {
   background: color-mix(in srgb, var(--bg-card) 56%, transparent) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
 }
 
 /* Light surfaces need a stronger recipe: white-on-near-white at 48% still read as solid. Much
