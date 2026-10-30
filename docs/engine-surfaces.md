@@ -103,6 +103,13 @@ or control characters) or the app cannot navigate. It is only navigation: a surf
 stays mounted. The member is optional, so call it as `ctx.openSession?.(id)` and treat `undefined` as
 "not supported". The host does not check that the session exists; the app shows its usual not-found state.
 
+### What kind of conversation: `ctx.sessionKind` (1.18, optional)
+
+`ctx.sessionKind` is `'nay'` when `ctx.sessionId` names the app's own assistant conversation (which is not
+a fleet row, so asking the fleet about it answers not-found) and `'session'` for any other session. The
+host sets it where it opens a surface from a session's composer; it is absent elsewhere (no session) or on
+a host that does not know, so read it as `ctx.sessionKind === 'nay'` and treat anything else as unknown.
+
 A host older than 1.18 refuses an engine built against 1.18 outright (the minor must not exceed the host's),
 so none of these fields ever reaches it and there is no partial fallback; an engine that must also run
 there ships a 1.17 surface instead.
