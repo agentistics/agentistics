@@ -113,6 +113,22 @@ export function planHandoffReparent(
   }
 }
 
+/**
+ * A REOPEN gives a row a new managed id (and, for an unlinked harness or a fresh conversation, nothing
+ * that matches the old one): every row naming the replaced row moves to the new one, so a leader's
+ * team survives its restart. The reopened row keeps its own parent (unlike a hand-off successor).
+ */
+export function planReopenReparent(
+  rows: readonly TeamRow[],
+  replaced: Pick<TeamRow, 'id' | 'conversationId'>,
+  fresh: Pick<TeamRow, 'id' | 'conversationId'>,
+): { children: string[]; childPatch: ParentPatch } {
+  const children = rows
+    .filter(r => r.id !== fresh.id && r.id !== replaced.id && namesParent(r, replaced) && !namesParent(r, fresh))
+    .map(r => r.id)
+  return { children, childPatch: parentPatchFor(fresh) }
+}
+
 /** A row that becomes a leader leaves its parent's team. `undefined` when it already sits at the root. */
 export function planLeaderRoot(row: TeamRow | undefined): ParentPatch | undefined {
   if (!row || (!row.parentSessionId && !row.parentConversationId)) return undefined

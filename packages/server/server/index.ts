@@ -415,6 +415,8 @@ startAgentClient()
 maybeSpawnWatcher()
 // The engine is judged at boot so a refused or failed one is logged when the server starts, not on
 // the first request that happens to reach a reserved prefix. `loadEngine` never throws.
+// DSL.TIPO-SESSAO: temp files of the role document left by a process killed mid-write (older than 1 h).
+void import('./sessions/session-roles').then(m => m.cleanStaleRoleTmps(AGENTISTICS_DATA_DIR)).catch(() => {})
 void loadEngine().then(st => {
   if (st.present) console.log(`[engine] ${st.manifest.name} ${st.manifest.version} (api ${st.manifest.apiVersion})`)
 })

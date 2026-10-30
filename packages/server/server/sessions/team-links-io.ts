@@ -11,7 +11,7 @@
  */
 
 import { readRegistry, patchSession, patchSessions } from './registry'
-import { currentLeaderId, planHandoffReparent, planLeaderRoot, planTeamMove, type TeamMovePlan, type TeamRow } from './team-links'
+import { currentLeaderId, planHandoffReparent, planLeaderRoot, planReopenReparent, planTeamMove, type TeamMovePlan, type TeamRow } from './team-links'
 import { planRetireRequest } from './retire-plan'
 import type { ManagedSession } from './types'
 import type { CapturedRelay } from './handoff-relay-io'
@@ -62,6 +62,17 @@ export async function completeLeaderHandoff(
     if (req.ok) retireRequested = await d.patch(predecessorId, { retire: req.request }).catch(() => false)
   }
   return { moved, retireRequested }
+}
+
+/** After a reopen replaced `replacedId` with `freshId`: its team follows the new row. Never throws. */
+export async function completeReopenReparent(replacedId: string, freshId: string, deps?: HandoffDeps): Promise<number> {
+  const d = deps ?? await defaultHandoffDeps()
+  const rows = await d.read().catch(() => [] as ManagedSession[])
+  const replaced = rows.find(r => r.id === replacedId)
+  const fresh = rows.find(r => r.id === freshId)
+  if (!replaced || !fresh || replacedId === freshId) return 0
+  const plan = planReopenReparent(rows, replaced, fresh)
+  return plan.children.length ? await d.patchMany(plan.children, plan.childPatch).catch(() => 0) : 0
 }
 
 /** Ask the server to retire `predecessorId` once it goes quiet, on behalf of a leader that replaces it. Never throws. */
