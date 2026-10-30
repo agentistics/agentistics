@@ -28,7 +28,7 @@ export function spawnRowsOf(file: Pick<AccountsFile, 'accounts' | 'bindings'>): 
   }
   return file.accounts.map(a => ({
     id: a.id, harness: a.harness, root: boundAt.get(a.id) ?? null, bound: boundAt.has(a.id), ...(defaultBound.has(a.id) ? { defaultRoot: true } : {}), available: a.available,
-    ...(a.retired ? { retired: true } : {}), firstSeen: a.firstSeen,
+    ...(a.retired ? { retired: true } : {}), ...(a.loginExpiredAt !== undefined ? { expired: true as const } : {}), firstSeen: a.firstSeen,
   }))
 }
 

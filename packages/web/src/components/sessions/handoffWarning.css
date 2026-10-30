@@ -75,4 +75,16 @@
 
 .handoff-successor { color:var(--handoff-tone); font-size:12px; flex-shrink:0; text-decoration:underline; }
 .handoff-progress-track { display:flex; margin-top:4px; }
+.handoff-progress-status { --handoff-tone:var(--anthropic-orange); display:flex; flex-direction:column; gap:4px; padding:10px 12px; border:1px solid color-mix(in srgb, var(--anthropic-orange) 45%, transparent); border-radius:10px; margin-bottom:12px; }
+.handoff-progress-status strong { color:var(--anthropic-orange); }
+.handoff-progress-status p { margin:4px 0 0; font-size:12px; }
 @media(max-width:768px) { .handoff-successor { display:inline-flex; align-items:center; min-height:44px; } }
+
+/* HOTFIX.LOGIN-EXPIRADO — the login bar on a phone: the words take the row, the buttons the next one,
+   each a 44px target. Scoped to this bar so the limit/hand-off bands keep their own layout. */
+@media (max-width: 767px) {
+  [data-account-login-band] .handoff-band { flex-wrap:wrap; }
+  [data-account-login-band] .handoff-band-copy { flex-basis:100%; }
+  [data-account-login-band] .handoff-actions { width:100%; }
+  [data-account-login-band] .handoff-actions button { flex:1; min-height:44px; }
+}

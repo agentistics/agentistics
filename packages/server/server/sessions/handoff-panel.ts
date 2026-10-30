@@ -79,6 +79,15 @@ export function computeHandoffPanel(row: HandoffHintRow, configIn: unknown, quot
   }
 }
 
+/**
+ * A hand-off with a LIVE successor (opened, taken over or closing the leader) — the stages after `preparing`.
+ * The request itself may still be repeated while only `preparing`: that is how a leader that ignored it is asked again.
+ */
+export function handoffRunning(lifecycle: HandoffLifecycle, now: number): boolean {
+  const stage = handoffProgress(lifecycle, now)?.stage
+  return stage !== undefined && stage !== 'preparing'
+}
+
 export interface QuotaObservation {
   at: number; totalUSD: number; population: string
   fiveHour?: { usedPct: number; resetsAt: number }

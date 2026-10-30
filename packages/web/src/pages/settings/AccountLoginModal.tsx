@@ -35,14 +35,16 @@ function Step({ n, state, title, note, last, children }: {
 
 const Spin = ({ size = 15 }: { size?: number }) => <Loader2 size={size} aria-hidden style={{ animation: 'ag-working-spin 1s linear infinite', flexShrink: 0 }} />
 
-export function AccountLoginModal({ harness, lang, login, bound, busy, submitted, error, expired = false, onSubmit, onCancel, onRetry, onVerify, errorCode }: {
+export function AccountLoginModal({ harness, lang, login, bound, busy, submitted, error, expired = false, onSubmit, onCancel, onRetry, onVerify, errorCode, wording }: {
   harness: HarnessId; lang: Lang; login?: LoginInfoView; bound?: RootRowView
   busy: boolean; submitted: boolean; error: string | null
   /** The attempt is over (timed out, failed, or the server dropped it): only "Try again" moves on. */
   expired?: boolean
   onSubmit: (code: string) => void; onCancel: () => void; onRetry?: () => void; onVerify?: () => void; errorCode?: string
+  /** Wording for a sign-in AGAIN of an existing account (HOTFIX.LOGIN-EXPIRADO): same steps, other words. */
+  wording?: { title?: string; stepOpenNote?: string; done?: string; doneNote?: string }
 }) {
-  const t = ADD_COPY(lang === 'pt'), mobile = useIsMobile(), name = HARNESS_LABELS[harness] ?? harness
+  const t = { ...ADD_COPY(lang === 'pt'), ...(wording?.stepOpenNote ? { stepOpenNote: wording.stepOpenNote } : {}), ...(wording?.done ? { done: wording.done } : {}), ...(wording?.doneNote ? { doneNote: wording.doneNote } : {}) }, mobile = useIsMobile(), name = HARNESS_LABELS[harness] ?? harness
   const [code, setCode] = useState(''), [copied, setCopied] = useState(false), [opened, setOpened] = useState(false), [now, setNow] = useState(Date.now())
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer) }, [])
   useEffect(() => { if (!copied) return; const timer = setTimeout(() => setCopied(false), 1600); return () => clearTimeout(timer) }, [copied])
@@ -72,7 +74,7 @@ export function AccountLoginModal({ harness, lang, login, bound, busy, submitted
       {icon && <span style={{ display: 'inline-flex', marginTop: 1 }}>{icon}</span>}<span>{text}</span>
     </div>
   return <ConfirmModal open tone="default" maxWidth={520} closeLabel={t.close}
-    title={t.title(name)} message="" icon={<HarnessMark harness={harness} size={22} />}
+    title={wording?.title ?? t.title(name)} message="" icon={<HarnessMark harness={harness} size={22} />}
     confirmLabel={t.submit} cancelLabel={t.cancelPending} onConfirm={() => {}} onCancel={onCancel} footer={footer}>
     {bound ? <div role="status" data-login-step="done" style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '4px 0' }}>
       <span aria-hidden style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--anthropic-orange)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Check size={18} strokeWidth={3} /></span>

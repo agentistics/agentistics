@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.170.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Quando o login de uma conta expira, aparece um aviso acima do campo de mensagem com "Refazer login" e "Trocar de conta"; ele só some quando você entra de novo ou troca de conta.',
+        en: 'When an account\'s login expires, a notice above the message box offers "Sign in again" and "Switch account"; it only goes away once you sign in again or switch accounts.',
+      },
+      {
+        pt: 'Refazer login mantém a mesma conta (apelido, plano e histórico), sem precisar remover e adicionar de novo; em Uso → Contas a conta mostra "Login expirado" com o botão.',
+        en: 'Signing in again keeps the same account (nickname, plan and history), with no need to remove and re-add it; Usage → Accounts marks it "Login expired" with the button.',
+      },
+      {
+        pt: 'Uma conta com login expirado nunca é escolhida para abrir sessão, trocar de conta ou na troca automática.',
+        en: 'An account whose login expired is never picked to open a session, to switch to, or by the automatic switch.',
+      },
+      {
+        pt: 'O botão de passar a liderança volta a responder: "Pedir de novo" e "Lembrar" funcionam sem leitura de uso, e durante a passagem o painel mostra só "Passagem em andamento".',
+        en: 'The hand-off button responds again: "Ask again" and "Remind me" work without a usage reading, and during a hand-off the panel shows only "Hand-off in progress".',
+      },
+    ],
+  },
   '2.170.1': {
     features: [],
     fixes: [
