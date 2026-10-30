@@ -32,3 +32,16 @@ Hover or keyboard focus opens it; leaving schedules a 150 ms close, cancelled wh
 the toggle button. The expanded rail is positioned over the page while its host stays 60 px wide.
 
 On phones the account’s Agents switch is itself at least 44 × 44 px; its text belongs to the button.
+
+Before the first `/api/plan-limits` answer, only limit charts show the Agentistics loader; message
+charts and the heatmap continue to use session timestamps. All account rows show “…” during this
+wait, including assistants without an identified account. A request times out after 10 seconds;
+transient failures say the server has not answered yet and retry with 1/2/4/8/15-second backoff.
+401 asks the reader to sign in again; 403/404 report that limits are unavailable on this computer
+and stop automatic retries. A successful empty answer is the point at which “no history” is shown.
+
+The limits route reads stored plans and history independently of the dashboard build. Its optional
+live-session sample uses only an already completed build or the previous startup snapshot, with a
+250 ms deadline for the entire sample; when unavailable, `liveSessions` is empty. Response fields
+stay the same. This deadline does not cancel background I/O and does not bound reads of the plan
+records themselves.

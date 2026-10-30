@@ -177,6 +177,8 @@ export function optionLabel(label: string, lang: 'pt' | 'en'): string {
     return lang === 'pt' ? `Permitir nesta sessão${suffix ? `: ${suffix}` : ''}` : `Allow for this session${suffix ? `: ${suffix}` : ''}`
   }
   if (compact === 'acceptalways' || compact === 'allowalways' || compact.includes('acceptwithexecpolicyamendment') || compact.includes('allowwithexecpolicyamendment')) return lang === 'pt' ? 'Permitir sempre este comando' : 'Always allow this command'
+  // OpenCode (ACP) words it "Always allow", and it covers edits as well as commands.
+  if (compact === 'alwaysallow') return lang === 'pt' ? 'Sempre permitir' : 'Always allow'
   if (compact === 'rejectalways' || compact === 'denyalways') return lang === 'pt' ? 'Recusar sempre' : 'Always reject'
   if (compact === 'rejectonce' || compact === 'reject' || compact === 'deny' || compact === 'decline' || compact === 'cancel') return lang === 'pt' ? 'Recusar' : 'Reject'
   if (lang !== 'pt') return label

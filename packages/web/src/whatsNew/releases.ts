@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.171.0': {
+    features: [
+      {
+        pt: 'OpenCode no app: abra sessões do OpenCode como as dos outros assistentes, com o chat ao vivo, aprovações, cancelar, reabrir a mesma conversa e o modo plano.',
+        en: 'OpenCode in the app: open OpenCode sessions like the other assistants, with live chat, approvals, cancel, reopening the same conversation and plan mode.',
+      },
+      {
+        pt: 'O OpenCode usa a sua própria configuração, inclusive provedores e chaves de API próprios definidos no opencode.json.',
+        en: 'OpenCode uses your own configuration, including custom providers and API keys set in opencode.json.',
+      },
+      {
+        pt: 'Com uma versão antiga do OpenCode, o app explica em palavras simples o que atualizar.',
+        en: 'With an old OpenCode version, the app explains in plain words what to update.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Uso → Agora mostra "Carregando" enquanto o app ainda está subindo, em vez de dizer que não há histórico, e tenta de novo sozinho se a leitura falhar.',
+        en: 'Usage → Now shows "Loading" while the app is still starting instead of saying there is no history, and retries on its own if the read fails.',
+      },
+    ],
+  },
   '2.170.3': {
     features: [],
     fixes: [

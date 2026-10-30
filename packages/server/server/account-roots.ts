@@ -20,6 +20,7 @@
  * - Nothing here logs an identity. The probes return whitelisted strings and stay in
  *   `harness-accounts.ts`.
  */
+import { opencodePaths } from './opencode-paths'
 import { randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readdir, rm, stat, symlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -97,7 +98,7 @@ const DEFAULT_CONFIG_DIR: Record<HarnessId, () => string> = {
   gemini: () => join(process.env.GEMINI_CLI_HOME ?? homedir(), '.gemini'),
   kimi: () => process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code'),
   antigravity: () => join(homedir(), '.gemini', 'antigravity-cli'),
-  opencode: () => process.env.OPENCODE_DIR ?? join(homedir(), '.local', 'share', 'opencode'),
+  opencode: () => opencodePaths(process.env, homedir()).dir,
 }
 
 /** Second, independent refusal: a name that reads like a credential is never linked, table or not. */

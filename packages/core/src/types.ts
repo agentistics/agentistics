@@ -68,7 +68,7 @@ export const HARNESS_LABELS: Record<SurfaceHarnessId, string> = {
   copilot: 'Copilot CLI',
   antigravity: 'Antigravity',
   kimi: 'Kimi Code',
-  opencode: 'opencode',
+  opencode: 'OpenCode',
   agentistics: 'Agentistics',
 }
 

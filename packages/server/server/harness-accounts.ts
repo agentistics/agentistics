@@ -1,4 +1,5 @@
 /** Non-secret identities only. Credential objects never cross the probe boundary. */
+import { opencodePaths } from './opencode-paths'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -120,7 +121,7 @@ const DEFAULT_ROOTS: Record<HarnessId, () => string> = {
   gemini: () => process.env.GEMINI_CLI_HOME ?? join(homedir(), '.gemini'),
   kimi: () => process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code'),
   antigravity: () => join(homedir(), '.gemini', 'antigravity-cli'),
-  opencode: () => process.env.OPENCODE_DIR ?? join(homedir(), '.local', 'share', 'opencode'),
+  opencode: () => opencodePaths(process.env, homedir()).dir,
 }
 /** The login root a harness uses when no account root is set (its own env override, else its home dir). */
 export const defaultHarnessRoot = (harness: HarnessId): string => DEFAULT_ROOTS[harness]()

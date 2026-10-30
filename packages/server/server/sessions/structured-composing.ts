@@ -57,7 +57,7 @@ export const COMPOSING_RULES: Record<HarnessId, ComposingRule | string> = {
   copilot: `copilot ACP: ${NOT_MEASURED}`,
   kimi: `kimi ACP: ${NOT_MEASURED}`,
   antigravity: 'agy print mode has no question events at all (docs/f2-structured-backend.md)',
-  opencode: 'opencode has no structured driver here',
+  opencode: `opencode ACP: ${NOT_MEASURED}`,
 }
 
 /** PURE. The composing value after one raw stdout line. */
