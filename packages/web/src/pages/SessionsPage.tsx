@@ -394,6 +394,7 @@ interface SessionsPageBodyProps {
 function mobilePanelTabStyle(on: boolean, hot: boolean): CSSProperties {
   return {
     display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+    // @touch-intentional: drawn only in the PHONE panel switcher (never on the desktop), a tab row of 44px paint.
     minHeight: 44, padding: '0 14px', scrollSnapAlign: 'center',
     borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
     fontSize: 11.5, fontWeight: (on || hot) ? 700 : 500, whiteSpace: 'nowrap',

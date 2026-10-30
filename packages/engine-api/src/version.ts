@@ -164,6 +164,9 @@
  * top bar on every screen, judged by the pure `surfaceIndicatorRefusals`) and `onIndicatorEnd`, plus the optional `openSession(sessionId)` (navigate the app to a session without a
  * reload; `false` for an invalid id). An engine
  * built against 1.18 is refused by an older host, like every minor bump.
+ * Also (OpenCode in the app, optional): `StructuredSpawn.forkOf` (open a FORK of a conversation),
+ * `StructuredDeclaration.fork`, and `StructuredStart`'s `blocked` (a refusal the harness's own version causes,
+ * which the host tells the person instead of falling back). An engine built against 1.17 never sets them.
  */
 export const ENGINE_API_VERSION = '1.18.0'
 

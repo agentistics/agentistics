@@ -65,6 +65,8 @@ export interface StructuredDeclaration {
   questions: StructuredFeature
   /** Cancel the turn in flight. */
   cancel: StructuredFeature
+  /** 1.18 (optional) — `StructuredSpawn.forkOf`: how the protocol forks a conversation, or why it cannot. Absent = the driver says nothing (no fork offered). */
+  fork?: StructuredFeature
   /**
    * Token usage the PROTOCOL states per turn (F2.1, additive and optional: a driver that says nothing
    * leaves the files / the harness's own store as the source of tokens, exactly as before).
@@ -147,6 +149,12 @@ export interface StructuredSpawn {
   conversationId?: string
   /** Resume this conversation instead of starting a fresh one. */
   resumeId?: string
+  /**
+   * 1.18 — FORK this conversation: the session that opens is a NEW conversation carrying `forkOf`'s history
+   * (ACP `session/fork`), and its id is the one the driver states. Only a driver whose declaration offers it
+   * (`forks`) takes it; any other refuses in a sentence. Beside `resumeId`, the fork wins.
+   */
+  forkOf?: string
   /** The first prompt, sent once the session is open. */
   initialPrompt?: string
   /**
@@ -315,7 +323,14 @@ export interface StructuredSession {
   dispose(): void
 }
 
-export type StructuredStart = { ok: true; session: StructuredSession } | { ok: false; reason: string }
+/**
+ * 1.18 — why a start was REFUSED when the harness itself is the blocker and no other route will do better
+ * (the TUI hits the same wall): the host tells the person in plain words instead of falling back silently.
+ * `harness-version`: the installed build is older than `need` (and is `found`, when it said so).
+ */
+export type StructuredBlocked = { kind: 'harness-version'; need: string; found?: string }
+
+export type StructuredStart = { ok: true; session: StructuredSession } | { ok: false; reason: string; blocked?: StructuredBlocked }
 
 /** One protocol, for the harnesses it serves. */
 export interface StructuredDriver {
