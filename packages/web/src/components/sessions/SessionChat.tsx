@@ -653,6 +653,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // A menu label that is only the raw id ("haiku") gives way to the harness catalogue's ("Haiku 4.5").
     : currentModelLabel !== currentModelId ? currentModelLabel : modelLabel(session.harness, currentModelId)
   const statusEffort = sourceControls?.effort?.value ?? session.effort ?? null
+  /** The composer menu opened from the status band is `fixed` to the viewport — but the glass field
+   *  has a backdrop-filter, which makes it the containing block of every fixed descendant, so in place
+   *  the menu was positioned against the field and fell off-screen. Rendered into the body instead. */
+  const placeComposerMenu = (node: React.ReactNode) =>
+    moreMenuPos && typeof document !== 'undefined' ? createPortal(node, document.body) : node
   const toggleMenuGroup = useCallback((id: ComposerMenuGroupId) => {
     setFoldedMenuGroups(previous => {
       const next = new Set(previous)
@@ -3715,7 +3720,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     changing the model does not change what the dialog does with the line it is
                     waiting for. Dictation stays, because it only puts words in the field, and the
                     field is the one thing this mode is FOR. */}
-                {moreOpen && (
+                {moreOpen && placeComposerMenu(
                     <div ref={moreMenuRef} data-composer-menu style={{
                       // Anchored on its RIGHT edge: the button now sits at the end of the row, and
                       // a menu opening rightwards from there would leave the screen.
@@ -3726,13 +3731,19 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         right: 'auto',
                         bottom: 'auto',
                         transform: 'translateY(-100%)',
+                        // never taller than the room above the band: the rest scrolls
+                        maxHeight: Math.max(160, moreMenuPos.top - 12),
+                        overflowY: 'auto',
                       } : { bottom: 40, right: 0 }),
-                      zIndex: 50,
+                      // Portaled (see placeComposerMenu): above the page, below the Nay dock (410).
+                      zIndex: moreMenuPos ? 300 : 50,
                       minWidth: 210, maxWidth: 260, padding: 4, borderRadius: 10,
                       background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                       boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
-                      maxHeight: isMobile ? 'calc(60vh / var(--ui-zoom, 1))' : undefined,
-                      overflowY: isMobile ? 'auto' : undefined,
+                      ...(moreMenuPos ? {} : {
+                        maxHeight: isMobile ? 'calc(60vh / var(--ui-zoom, 1))' : undefined,
+                        overflowY: isMobile ? 'auto' as const : undefined,
+                      }),
                     }}>
                       {menuGroups.includes('message') && (
                         <>
