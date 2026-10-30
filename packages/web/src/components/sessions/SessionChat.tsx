@@ -641,6 +641,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [row?.harness, modelReason, pt, sourceControls?.model])
   const menuModels = sourceControls?.model ? sourceControls.model.options : models
   const menuFreeText = sourceControls?.model ? sourceControls.model.freeText : modelFreeText
+  const currentModelId = sourceControls?.model?.current ?? session.model ?? ''
+  const currentModelLabel = menuModels.find(model => model.id === currentModelId)?.label ?? currentModelId
   const toggleMenuGroup = useCallback((id: ComposerMenuGroupId) => {
     setFoldedMenuGroups(previous => {
       const next = new Set(previous)
@@ -3557,6 +3559,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     renders NOTHING when the session's context cannot be measured — see its own
                     `variant === 'gauge'` branch. */}
                 {!isMobile && metrics && (
+                  <span className="ag-composer-context-in-field">
                   <SessionStatsMenu
                     variant="gauge"
                     harness={session.harness}
@@ -3577,6 +3580,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     {...(session.model ? { startedModel: session.model } : {})}
                     {...(session.effort ? { startedEffort: session.effort } : {})}
                   />
+                  </span>
                 )}
 
                 {/* Mode · Stop · Recall · Send · More, held together at the far end, in that
@@ -3599,6 +3603,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     and it gives way before the buttons do when the row runs out of width. */}
                 {countLabel && (
                   <span
+                    className="ag-composer-count-in-field"
                     aria-hidden
                     style={{
                       marginLeft: 'auto', minWidth: 0, overflow: 'hidden',
@@ -3631,7 +3636,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 {row?.mode && !answeringNow && (
                   <button
                     ref={modeButtonRef}
-                    className="ag-tap-icon"
+                    className="ag-tap-icon ag-composer-mode-in-field"
                     onClick={() => {
                       const rect = modeButtonRef.current?.getBoundingClientRect()
                       // Wider and taller when a menu carries the "no questions" warning.
@@ -3725,6 +3730,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     about the next TURN, and this is an answer to a dialog already open. */}
                 {promptList.length > 0 && !answeringNow && !isMobile && (
                   <button
+                    className="ag-composer-history-in-field"
                     ref={historyBtnRef}
                     onClick={() => setPromptsOpen(true)}
                     aria-label={pt ? 'Suas mensagens' : 'Your messages'}
@@ -3797,6 +3803,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 {!answeringNow && (
                 <div ref={moreMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
                   <button
+                    className="ag-composer-more-in-field"
                     ref={moreButtonRef}
                     onClick={() => setMoreOpen(v => !v)}
                     disabled={!canPrompt || sending}
@@ -4035,6 +4042,99 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 </div>
                 </ComposerToolbar>
               </ComposerShell>
+              {!answeringNow && (
+                <div className="ag-composer-status" data-composer-status>
+                  <div className="ag-composer-status-left">
+                    {(currentModelLabel || menuModels.length > 0 || menuFreeText || modelReason) && (
+                      <button
+                        type="button"
+                        className="ag-composer-status-button ag-composer-model-button"
+                        aria-haspopup="menu"
+                        aria-expanded={moreOpen}
+                        disabled={!canPrompt || sending}
+                        onClick={() => setMoreOpen(value => !value)}
+                        title={pt ? 'Trocar modelo e esforço' : 'Change model and effort'}
+                      >
+                        <span className="ag-composer-status-button-label">
+                          {currentModelLabel || (pt ? 'Modelo' : 'Model')}
+                        </span>
+                        {sourceControls?.effort && <span aria-hidden>·</span>}
+                        {sourceControls?.effort?.value && <span>{sourceControls.effort.value}</span>}
+                      </button>
+                    )}
+                    {row?.mode && (
+                      <button
+                        type="button"
+                        className="ag-composer-status-button ag-composer-mode-button"
+                        onClick={() => {
+                          const rect = modeButtonRef.current?.getBoundingClientRect()
+                          const warns = modeOptions.some(m => 'canonical' in m && m.canonical === 'no-questions')
+                          if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight, warns ? 270 : 190, warns ? 320 : 220))
+                          setModeMenuOpen(value => !value)
+                        }}
+                        disabled={!canPrompt}
+                        aria-haspopup="menu"
+                        aria-expanded={modeMenuOpen}
+                        aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}
+                        style={{
+                          borderColor: modeStyle(row.mode).border,
+                          background: modeStyle(row.mode).bg,
+                          color: modeStyle(row.mode).fg,
+                        }}
+                      >
+                        <SlidersHorizontal size={13} />
+                        <span className="ag-composer-status-button-label">{modeLabel(row.mode, pt ? 'pt' : 'en')}</span>
+                      </button>
+                    )}
+                    {!isMobile && metrics && (
+                      <SessionStatsMenu
+                        variant="gauge"
+                        harness={session.harness}
+                        sessionId={session.conversationId ?? session.id}
+                        meta={metrics.meta}
+                        {...(metrics.stats ? { stats: metrics.stats } : {})}
+                        lang={lang}
+                        currency={metrics.currency}
+                        brlRate={metrics.brlRate}
+                        costBasis={metrics.costBasis}
+                        planFactor={metrics.planFactor}
+                        {...(session.task ? { task: session.task } : {})}
+                        {...(metrics.onOpenTask ? { onOpenTask: metrics.onOpenTask } : {})}
+                        {...(metrics.onOpenLive ? { onOpenLive: metrics.onOpenLive } : {})}
+                        {...(metrics.onOpenFull ? { onOpenFull: metrics.onOpenFull } : {})}
+                        rowId={session.id}
+                        {...(session.accountId ? { accountId: session.accountId } : {})}
+                        {...(session.model ? { startedModel: session.model } : {})}
+                        {...(session.effort ? { startedEffort: session.effort } : {})}
+                      />
+                    )}
+                  </div>
+                  <div className="ag-composer-status-right">
+                    {countLabel && <span className="ag-composer-status-count">{countLabel}</span>}
+                    {promptList.length > 0 && (
+                      <button
+                        ref={historyBtnRef}
+                        onClick={() => setPromptsOpen(true)}
+                        aria-label={pt ? 'Suas mensagens' : 'Your messages'}
+                        aria-haspopup="dialog"
+                        title={pt ? 'Suas mensagens' : 'Your messages'}
+                        className="ag-composer-status-icon"
+                      ><History size={15} /></button>
+                    )}
+                    {menuGroups.some(group => group !== 'model') && (
+                      <button
+                        type="button"
+                        ref={moreButtonRef}
+                        onClick={() => setMoreOpen(value => !value)}
+                        disabled={!canPrompt || sending}
+                        aria-label={pt ? 'Mais opções' : 'More options'}
+                        aria-expanded={moreOpen}
+                        className="ag-composer-status-icon ag-composer-more-status"
+                      ><ChevronUp size={15} style={{ transform: moreOpen ? 'rotate(180deg)' : 'none' }} /></button>
+                    )}
+                  </div>
+                </div>
+              )}
               {(notice ?? source?.notice) && (
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                   {notice ?? source?.notice}
