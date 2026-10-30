@@ -46,6 +46,7 @@ import {
   followFleet, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type ConversationLinkReason, type HarnessId,
   CANONICAL_MODES, type CanonicalMode, CANONICAL_MODE_TEXT, canonicalOfTuiMode,
+  hasRolePrefix,
 } from '@agentistics/core'
 import type {
   ActionResult,
@@ -139,8 +140,8 @@ import { agentisticsMcpLaunch } from './mcp-launch'
 import { applyAccountToPlan } from './sessions/account-plan'
 import { prependContext } from './sessions/agentistics-context'
 import { rootIfLeader } from './sessions/team-links'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, withOwnerRequests, writeContextFile } from './sessions/spawn-context'
-import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './sessions/spawn-context'
+import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor, storedRoleFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -2021,6 +2022,11 @@ function queuedSentence(position: number, lang: CliLang): string {
     : `No room right now — the session is queued (position ${position}) and starts by itself when memory frees; cancel it in Hardware → Resources.`
 }
 
+/** The row as written, with the row it replaces (QA F8). */
+function withSupersedes<T extends object>(row: T, replaced: string | undefined): T {
+  return replaced ? { ...row, supersedes: replaced } : row
+}
+
 export async function spawnManaged(req: {
   harness: HarnessId
   cwd: string
@@ -2055,6 +2061,10 @@ export async function spawnManaged(req: {
   parentConversationId?: string
   handoff?: boolean
   role?: 'leader' | 'worker'
+  /** DSL.TIPO-SESSAO — an agent's delegation through the engine (`engine-delegate.ts`): gate door `engine`. */
+  spawnDoor?: 'engine'
+  gateTaskId?: string
+  gateSubtaskId?: string
   /** Per-session away mode: on, off, or inherit a verified away parent's (absent = inherit). */
   away?: boolean | 'inherit'
   attemptId?: string
@@ -2121,6 +2131,30 @@ export async function spawnManaged(req: {
     accountRoot = decided.account?.root
   }
 
+  // DSL.TIPO-SESSAO — the spawn gate FIRST, before the memory admission and its queue (QA F7): a request it refuses is
+  // never queued. It decides the role BEFORE anything is written: a web spawn without a parent stays
+  // unassigned (the owner's), a parent makes a worker, a hand-off a leader; a session asking with no decidable or a
+  // contradictory role is refused in plain words and nothing is created.
+  const { spawnGate } = await import('./sessions/spawn-gate')
+  // The role the resumed/reopened conversation already has: an explicit role that contradicts it is refused NOW, before
+  // any spawn, instead of a healthy session being stopped after it (QA F6).
+  const inheritedRole = (req.inherit || req.resumeId) ? await storedRoleFor([req.resumeId, req.inherit?.conversationId, req.inherit?.id]).catch(() => undefined) : undefined
+  const gate = await spawnGate({
+    door: req.spawnDoor === 'engine' ? 'engine' : req.handoff ? 'handoff' : req.inherit ? 'reopen' : 'fleet-spawn',
+    // The engine is an in-process caller (an agent's delegation): never the owner.
+    // A session only when PROVEN (`parentVerified`); an unproven parent link is the owner filing a worker under it (QA F4).
+    requestedBy: req.spawnDoor === 'engine' ? { kind: 'engine' } : req.parentSessionId && req.parentVerified ? { kind: 'session', id: req.parentSessionId } : { kind: 'owner' },
+    harness: req.harness,
+    ...(req.role ? { role: req.role } : {}),
+    ...(req.label && hasRolePrefix(req.label) ? { leaderPrefix: true } : {}),
+    ...(req.parentSessionId ? { parentId: req.parentSessionId } : {}),
+    ...((req.gateTaskId ?? req.taskId) ? { taskId: (req.gateTaskId ?? req.taskId)! } : {}),
+    ...((req.gateSubtaskId ?? req.contextSubtaskId) ? { subtaskId: (req.gateSubtaskId ?? req.contextSubtaskId)! } : {}),
+    ...(req.label ? { title: req.label } : {}),
+    ...(inheritedRole ? { inheritedRole } : {}),
+  })
+  if (!gate.ok) return { ok: false, message: gate.reason }
+
   // THE GATE — before anything is spawned or written to the registry. A session that has already
   // been started cannot be un-started, so this has to run first, not merely early.
   let admittedWith: string | null = null
@@ -2161,13 +2195,9 @@ export async function spawnManaged(req: {
   // Minted BEFORE the plan: the agentistics context tells the harness its own session id.
   const id = newSessionId()
   const offeredConversationId = randomUUID()
-  // A web spawn without a parent is intentionally unassigned; only an explicit role or a
-  // verified parent-child relationship may create a stored role.
-  const role = req.role
-    ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.role, undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true))
-    : req.parentSessionId
-      ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker', undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true))
-      : undefined
+  const role = gate.role
+    ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], gate.role, undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true))
+    : undefined
   // The parent's conversation id, read from the registry at spawn: stable across the parent's reopens.
   // A hand-off names its predecessor exactly; every other spawn follows a predecessor's hand-off to its successor.
   const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId, { followHandoff: !req.handoff }) : {}
@@ -2186,7 +2216,7 @@ export async function spawnManaged(req: {
   const relay = handoffParentRow
     ? await import('./sessions/handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
-  const ctx = buildSpawnContext(await withOwnerRequests({
+  const ctx = buildSpawnContext(await withPassagem(await withOwnerRequests({
       ...(relay ? { handoffRelay: relay.section } : {}),
       ...(req.handoff ? { handoffTakeover: true } : {}),
       ...(await resolveContextAway(away)),
@@ -2197,7 +2227,7 @@ export async function spawnManaged(req: {
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
       ...storedContextRole,
-    }))
+    }), !!req.handoff))
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const planned = planSpawn({
     harness: req.harness,
@@ -2240,11 +2270,12 @@ export async function spawnManaged(req: {
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
   // TEAM LINK (`team-links.ts`): a leader — explicit, a hand-off successor, a reopened leader — is born
   // at the root; everyone else is the (current) caller's child.
-  await addSession(rootIfLeader(await spawnRow({ id, spawnedAt, req: {
+  // QA F8 — `supersedes` is part of the row as it is written (a reopen with a new managed id keeps its team), never a later patch.
+  await addSession(withSupersedes(rootIfLeader(await spawnRow({ id, spawnedAt, req: {
     ...req, ...(mode ? { mode } : {}),
     ...(parentLink.parentSessionId ? { parentSessionId: parentLink.parentSessionId } : {}),
     ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
-  }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }), req.handoff ? 'leader' : storedContextRole.role))
+  }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }), req.handoff ? 'leader' : storedContextRole.role), req.inherit && req.inherit.id !== id ? req.inherit.id : undefined))
   // A worker must be filed before its process can receive the first prompt.
   if (req.contextTaskId) {
     const { configureSpawn } = await import('./sessions/spawn-configuration')
@@ -2319,6 +2350,18 @@ export async function spawnManaged(req: {
     return { ok: false, message }
   }
   if (storedContextRole.role) await markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)
+  // DSL.TIPO-SESSAO — the row is born with the gate's role or the spawn is undone (never a session without its role).
+  if (gate.role) {
+    const { verifyBornRole } = await import('./sessions/spawn-gate')
+    const born = await verifyBornRole([planned.plan.conversationId, offeredConversationId, id], gate.role, {
+      stored: storedRoleFor, ensure: async (k, r) => ensureSpawnRole(k, r, undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true)),
+    })
+    if (!born) {
+      await backend.kill(id).catch(() => {})
+      await abandon()
+      return { ok: false, message: `The session started but its role (${gate.role}) could not be recorded, so it was stopped — try again.` }
+    }
+  }
   if (handoffParentRow) {
     // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
     await import('./sessions/team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
@@ -4929,6 +4972,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.account ? { account: req.account } : {}),
         ...(chosen.accountId ? { accountId: chosen.accountId } : {}),
         ...(req.callerVerified ? { callerVerified: true } : {}),
+        ...(req.spawnDoor ? { spawnDoor: req.spawnDoor } : {}),
+        ...(req.gateTaskId ? { gateTaskId: req.gateTaskId } : {}),
+        ...(req.gateSubtaskId ? { gateSubtaskId: req.gateSubtaskId } : {}),
       }, S(), lang).then(afterStart)
     },
   }

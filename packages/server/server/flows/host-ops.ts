@@ -1,12 +1,17 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { gitEnv } from '../backup/repo-probe'
 import { readRawFleetSnapshot } from '../cli-start'
+import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
 
 const exec = promisify(execFile)
-/** Bound every git probe and suppress index refreshes, fsmonitor hooks and credential prompts. */
+/**
+ * Bound every git probe and suppress index refreshes, fsmonitor hooks and credential prompts. The environment drops the
+ * repository-location variables (GIT_DIR, GIT_INDEX_FILE…) a parent git exports, so a probe always reads `cwd`'s repo.
+ */
 const git = (cwd: string, args: string[]) => exec('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, ...args], {
   timeout: 15_000,
-  env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+  env: gitEnv(),
 })
 type Input = Record<string, unknown>
 type Refusal = { refused: true; reason: string; missing: string[] }
@@ -57,6 +62,40 @@ export function defaultTriggerHostDeps(): TriggerHostDeps {
   }
 }
 
+/**
+ * ORQ.H4 — what the plan allows right now, for the engine's "does a worker fit?" (`encaixe.ts`): the cadence
+ * (`parallel`) and the 5-hour window of the ASKING LEADER's own account, from the same source as
+ * `GET /api/plan-limits` / `agentistics_plan_limits`. Only a FRESH reading of that account counts (QA F4): a stale row
+ * describes a meter nobody read, another account's row describes someone else's room — either way the capacity is
+ * UNKNOWN → refused, and the engine queues (an unknown capacity never fits). No `rows[0]` fallback.
+ */
+export async function workerCapacity(
+  budgets: () => Promise<readonly import('@agentistics/core').PlanBudget[]>,
+  leader: () => Promise<{ harness: string; account: string } | null> = async () => null,
+): Promise<{ parallel: number; fiveHourPct: number } | Refusal> {
+  const rows = await budgets().catch(() => [] as readonly import('@agentistics/core').PlanBudget[])
+  if (!rows.length) return refuse('no plan-limits reading', ['plan-limits reading'])
+  const who = await leader().catch(() => null)
+  if (!who) return refuse('the asking leader (and so its account) is not known', ['leader session'])
+  const accountOf = (b: import('@agentistics/core').PlanBudget) => (b as { account?: string }).account ?? 'default'
+  const row = rows.find(b => !b.stale && b.harness === who.harness && accountOf(b) === who.account)
+  if (!row) return refuse(`no fresh plan-limits reading of the leader's account (${who.harness}:${who.account})`, ['fresh reading of the leader account'])
+  const { routeRecommendation } = await import('@agentistics/core')
+  return { parallel: routeRecommendation([row], 'spec-impl').cadence.parallel, fiveHourPct: row.fiveHourPct }
+}
+
+/** The harness and account of a managed session (the leader asking for capacity), from the registry. */
+export async function sessionAccount(sessionId: string | undefined): Promise<{ harness: string; account: string } | null> {
+  if (!sessionId) return null
+  const row = (await (await import('../sessions/registry')).readRegistry()).find(m => m.id === sessionId)
+  return row ? { harness: row.harness, account: row.accountId ?? 'default' } : null
+}
+
+const defaultBudgets = async () => {
+  const [{ planLimitsPayload }, { readPreferences }] = await Promise.all([import('../plan-limits'), import('../preferences')])
+  return (await planLimitsPayload((await readPreferences()).billing, Date.now())).budgets
+}
+
 /** The host ops the trigger layer calls: the managed-session universe and a nudge into a live session. */
 export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps()) {
   return {
@@ -98,6 +137,10 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps())
 /** The host operation registry: the v1 read-only gates plus the trigger layer's two host ops. */
 export function flowHostOps(triggerDeps?: TriggerHostDeps) {
   return {
+    // DSL.TIPO-SESSAO op 1, called by the engine's `portao-de-spawn` flow — the same decision the host applies without it.
+    'sessao-com-papel': sessaoComPapelHostOp(),
+    // ORQ.H4: what the plan allows now (op 3 of the spawn gate and the encaixe-do-pedido flow).
+    'capacidade-de-workers': async (value: unknown) => workerCapacity(defaultBudgets, () => sessionAccount(sessionOf(value) ?? undefined)),
     ...triggerHostOps(triggerDeps),
     'sessao-parada': async (value: unknown) => {
       const id = sessionOf(value)

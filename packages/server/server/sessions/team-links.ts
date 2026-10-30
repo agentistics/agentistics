@@ -23,6 +23,8 @@ export interface TeamRow {
   parentConversationId?: string | undefined
   endedAt?: string | undefined
   handoffTo?: string | undefined
+  /** DSL.TIPO-SESSAO — the row a reopen replaced (see `ManagedSession.supersedes`). */
+  supersedes?: string | undefined
 }
 
 /** The registry patch that sets (or, with `null`, clears) a row's team link. */
@@ -68,6 +70,9 @@ export function currentLeaderId(rows: readonly TeamRow[], id: string): string {
   const seen = new Set<string>([id])
   let cur = id
   for (let i = 0; i < 16; i++) {
+    // A leader REOPENED with a new managed id: the row that supersedes it leads now (a live one first).
+    const reopened = rows.filter(r => r.supersedes === cur && !seen.has(r.id)).sort((a, b) => (b.endedAt ? 0 : 1) - (a.endedAt ? 0 : 1))[0]
+    if (reopened) { seen.add(reopened.id); cur = reopened.id; continue }
     const row = rows.find(r => r.id === cur)
     const next = row?.handoffTo
     if (!next || seen.has(next)) return cur
