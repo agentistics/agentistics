@@ -1142,7 +1142,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     // A side surface being shown opens the aside even while the Studio sits minimized in it.
     open: engineAsideWantsOpen({ panelOpen: slotLayout.right !== null, studioMinimized: rightIsStudio && !slotLayout.rightOpen, engineShown: engineTabShown })
       && selected !== undefined
-      && !dedicatedRightRedundant,
+      // A redundant right pane stays closed, unless a side surface lives in this aside: it opens on
+      // the surface tab instead of leaving the surface held off screen with nothing pointing to it.
+      && (!dedicatedRightRedundant || engineTabShown),
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
     isMobile,
     // Phase B ships without the reversal control; the split-rail default is what the plan measured.
@@ -3609,7 +3611,12 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         // A FLOATING Studio minimizes into the bottom band's strip (owner, 2026-09-29), keeping its
         // window's place and size for the click that restores it.
         onMinimizeRight: studioFloating ? () => minimizeFloatingPanel('studio')
-          : rightIsStudio ? () => setRightOpen(false) : undefined,
+          : rightIsStudio ? () => {
+            // A side surface living in this aside takes over the tab: minimizing the Studio must not
+            // leave the aside closed with the surface parked off screen.
+            if (engineOwned) setEngineTabOn(true)
+            setRightOpen(false)
+          } : undefined,
         // PIN = FLOAT (`lib/floatingPanels.ts`) — pressed on the docked Studio it floats it, pressed
         // on the floating window it docks it back. Nothing floats on a phone.
         // AT THE BOTTOM the pin leads the band's own tab row (`StudioBand`), so the toolbar has none.
