@@ -50,6 +50,13 @@ export interface SurfaceMountContext {
   keepAlive(on: boolean): void
   setIndicator(indicator: SurfaceIndicator | null): void
   onIndicatorEnd(fn: () => void): () => void
+  /** 1.18, optional. Navigates the app to `/sessions/<id>` without a reload; `false` for an invalid id or when it cannot. */
+  openSession?(sessionId: string): boolean
+}
+
+/** PURE. A session id `openSession` accepts: a short string with no `/`, `\\`, `?`, `#`, whitespace or control characters. */
+export function isValidSessionId(id: unknown): id is string {
+  return typeof id === 'string' && id.length >= 1 && id.length <= 128 && id !== '.' && id !== '..' && !/[\/\\?#\s\u0000-\u001f\u007f]/.test(id)
 }
 
 const INDICATOR_MAX = 40

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useEscapeOwner } from '../lib/overlayStack'
 import {
-  closeEngineSurface, effectiveSurfaceLayout, endEngineSurface, leaveEngineSurfacePage, onEngineSurfaceIndicatorEnd, openEngineSurface,
+  closeEngineSurface, effectiveSurfaceLayout, endEngineSurface, leaveEngineSurfacePage, onEngineSurfaceIndicatorEnd, openEngineSurface, openEngineSurfaceSession,
   registerEngineInlineSlot, registerEnginePageSlot, resolveInlineSlot, setEngineSurfaceIndicator, setEngineSurfaceKeepAlive,
   reconcileEngineSurfaces, setEngineSurfaceLayout, useEngineInlineSlot, useEnginePageSlot, useMountedEngineSurfaces, useOpenEngineSurface, type OpenSurface,
 } from '../lib/engineSurfaceHost'
@@ -169,6 +169,7 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
         setEngineSurfaceIndicator(nonce, asSurfaceIndicator(ind))
       },
       onIndicatorEnd: fn => (typeof fn === 'function' ? onEngineSurfaceIndicatorEnd(nonce, fn) : () => {}),
+      openSession: id => openEngineSurfaceSession(id),
     }
     mountSurface(surface, el, ctx, load)
       .then(h => {

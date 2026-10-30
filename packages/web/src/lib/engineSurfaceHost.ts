@@ -8,7 +8,7 @@
  * session composer / `page` on its own route) is host state the surface flips through its context.
  */
 import { useSyncExternalStore } from 'react'
-import type { EngineSurfaceInfo, SurfaceIndicator, SurfaceLayout } from './engineSurfaces'
+import { isValidSessionId, type EngineSurfaceInfo, type SurfaceIndicator, type SurfaceLayout } from './engineSurfaces'
 
 export interface OpenSurface {
   surface: EngineSurfaceInfo
@@ -147,6 +147,19 @@ export function onEngineSurfaceIndicatorEnd(n: number, fn: () => void): () => vo
   return () => { if (endHandlers.get(n) === fn) endHandlers.delete(n) }
 }
 
+/** The app's router navigator, registered by a component inside the router (the top-bar indicators). */
+let navigator: ((path: string) => void) | null = null
+export function registerEngineSurfaceNavigator(fn: ((path: string) => void) | null, own?: ((path: string) => void) | null): void {
+  if (fn) { navigator = fn; return }
+  if (!own || navigator === own) navigator = null
+}
+/** `ctx.openSession`: validates the id and navigates with the app's router (no reload); `false` when it cannot. */
+export function openEngineSurfaceSession(sessionId: unknown): boolean {
+  if (!isValidSessionId(sessionId) || !navigator) return false
+  navigator(`/sessions/${encodeURIComponent(sessionId)}`)
+  return true
+}
+
 /** The indicator's secondary button. A throwing callback is the surface's problem, never the host's. */
 export function endEngineSurfaceIndicator(n: number): void {
   const fn = endHandlers.get(n)
@@ -216,4 +229,4 @@ export function useMountedEngineSurfaces(): OpenSurface[] {
 export function mountedEngineSurfaces(): OpenSurface[] { return mounted }
 
 /** Tests only. */
-export function resetEngineSurfaceHostForTests(): void { returnFocus = null; slots.clear(); pageSlots.clear(); endHandlers.clear(); commit([]) }
+export function resetEngineSurfaceHostForTests(): void { returnFocus = null; slots.clear(); pageSlots.clear(); endHandlers.clear(); navigator = null; commit([]) }

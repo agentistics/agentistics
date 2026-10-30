@@ -154,6 +154,13 @@ export interface SurfaceMountContext {
   setIndicator(indicator: SurfaceIndicator | null): void
   /** 1.18. The callback the indicator's secondary button calls; returns the function that removes it. */
   onIndicatorEnd(fn: () => void): () => void
+  /**
+   * 1.18, optional (a host may omit it). Navigates the app to the session (`/sessions/<id>`) with the
+   * app's own router, without reloading the page, and returns `true`. Returns `false`, doing nothing, when
+   * the id is not a short string without `/` (1 to 128 characters, no `/`, `\\`, `?`, `#`, whitespace or
+   * control characters) or the app cannot navigate. It is only navigation: a surface kept alive off screen stays mounted.
+   */
+  openSession?(sessionId: string): boolean
 }
 
 /** The module's contract: `import(module)` must expose `mount`, and may expose `unmount`. */

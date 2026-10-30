@@ -161,7 +161,8 @@
  * `frameless` flag, and an active state (`activeIcon`, `activeLabel`, `activeTone`). Also the `rail` placement (an
  * icon entry in the app's navigation that opens the surface as a `page`, on its own route), and three mount
  * context members: `keepAlive` (stay mounted off screen instead of unmounting), `setIndicator` (a pill in the
- * top bar on every screen, judged by the pure `surfaceIndicatorRefusals`) and `onIndicatorEnd`. An engine
+ * top bar on every screen, judged by the pure `surfaceIndicatorRefusals`) and `onIndicatorEnd`, plus the optional `openSession(sessionId)` (navigate the app to a session without a
+ * reload; `false` for an invalid id). An engine
  * built against 1.18 is refused by an older host, like every minor bump.
  */
 export const ENGINE_API_VERSION = '1.18.0'

@@ -94,6 +94,15 @@ calls the callback registered with `ctx.onIndicatorEnd(fn)` (which returns a fun
 On a phone the pill is compact (icon and timer; the label stays its accessible name), sits in the top
 bar, and never covers the bottom navigation.
 
+### Opening a session: `ctx.openSession` (1.18, optional)
+
+`ctx.openSession?.(sessionId)` navigates the app to `/sessions/<id>` with the app's own router (the same
+navigation the indicator pill uses), without reloading the page, and returns `true`. It returns `false`,
+doing nothing, when the id is not a short string (1 to 128 characters, no `/`, `\`, `?`, `#`, whitespace
+or control characters) or the app cannot navigate. It is only navigation: a surface kept alive and parked
+stays mounted. The member is optional, so call it as `ctx.openSession?.(id)` and treat `undefined` as
+"not supported". The host does not check that the session exists; the app shows its usual not-found state.
+
 A host older than 1.18 refuses an engine built against 1.18 outright (the minor must not exceed the host's),
 so none of these fields ever reaches it and there is no partial fallback; an engine that must also run
 there ships a 1.17 surface instead.

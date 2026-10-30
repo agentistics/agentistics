@@ -338,4 +338,50 @@ describe('rail page, keepAlive and indicator', () => {
     await act(async () => { surfaceHost.root.unmount(); view.root.unmount() })
     state.resetEngineSurfaceHostForTests()
   })
+  test('ctx.openSession navigates without remounting the app; a keepAlive surface stays mounted', async () => {
+    state.resetEngineSurfaceHostForTests()
+    status = { present: false }
+    caps.invalidateEngineCaps()
+    const calls: string[] = []
+    let ctx: SurfaceMountContext | null = null
+    let node: HTMLElement | null = null
+    const go = { nav: null as NavigateFunction | null, path: '' }
+    const view = await mount(app(go))
+    const marker = view.host.querySelector('header')!
+    const surfaceHost = await mount(h(hostMod.EngineSurfaceHost, {
+      load: async () => ({
+        mount(el: HTMLElement, c: SurfaceMountContext) { calls.push('mount'); ctx = c; node = el; el.textContent = 'body' },
+        unmount() { calls.push('unmount') },
+      }),
+    }))
+    const info = { id: 'talk', placement: 'composer', icon: 'phone', label: { pt: 'T', en: 'T' }, module: '/api/engine/x/t/m.js', layout: 'side' } as never
+    await act(async () => { state.openEngineSurface(info, { sessionId: 's1', lang: 'en' }) })
+    await settle()
+    await act(async () => { ctx!.keepAlive(true) })
+    const before = node!
+    await act(async () => { (document.querySelector('[data-engine-overlay="talk"] button') as HTMLButtonElement).click() })
+    await settle()
+    expect(document.querySelector('[data-engine-parked="talk"]')!.contains(before)).toBe(true)
+
+    let ok = false
+    await act(async () => { ok = ctx!.openSession!('abc-123') })
+    await settle()
+    expect(ok).toBe(true)
+    expect(go.path).toBe('/sessions/abc-123')
+    // The app was not remounted (same header node) and the parked surface is still the same mounted element.
+    expect(view.host.querySelector('header')).toBe(marker)
+    expect(document.querySelector('[data-engine-parked="talk"]')!.contains(before)).toBe(true)
+    expect(calls).toEqual(['mount'])
+
+    for (const bad of ['', 'a/b', '/x', '..', 'a?b', 'a b', 'x'.repeat(129), 42 as never, null as never]) {
+      let r = true
+      await act(async () => { r = ctx!.openSession!(bad) })
+      expect(r).toBe(false)
+    }
+    expect(go.path).toBe('/sessions/abc-123')
+    await act(async () => { ctx!.close() })
+    await act(async () => { surfaceHost.root.unmount(); view.root.unmount() })
+    state.resetEngineSurfaceHostForTests()
+  })
+
 })
