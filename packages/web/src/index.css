@@ -996,11 +996,6 @@ button:focus-within .ag-row-pin,
 }
 .ag-composer-status-icon:hover,
 .ag-composer-status-icon:focus-visible { background: var(--bg-hover, rgba(127,127,127,.08)); }
-.ag-composer-context-in-field,
-.ag-composer-count-in-field,
-.ag-composer-history-in-field,
-.ag-composer-more-in-field,
-.ag-composer-ground .ag-composer-mode-in-field { display: none !important; }
 @media (max-width: 520px) {
   .ag-composer-status { min-height: 42px; gap: 4px; }
   .ag-composer-status-left, .ag-composer-status-right { gap: 3px; }

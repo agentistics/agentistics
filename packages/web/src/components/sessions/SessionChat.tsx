@@ -570,7 +570,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const close = (e: MouseEvent) => {
       // A click INSIDE the menu (picking a model) must not be eaten by this — that path closes the
       // menu itself, and closing here first would cancel the pick.
-      if (moreMenuRef.current?.contains(e.target as Node)) return
+      if (moreMenuRef.current?.contains(e.target as Node) || moreButtonRef.current?.contains(e.target as Node)) return
       setMoreOpen(false)
     }
     document.addEventListener('mousedown', close)
@@ -3558,31 +3558,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     forgot to wire it up silent rather than crashing), and the component itself
                     renders NOTHING when the session's context cannot be measured — see its own
                     `variant === 'gauge'` branch. */}
-                {!isMobile && metrics && (
-                  <span className="ag-composer-context-in-field">
-                  <SessionStatsMenu
-                    variant="gauge"
-                    harness={session.harness}
-                    sessionId={session.conversationId ?? session.id}
-                    meta={metrics.meta}
-                    {...(metrics.stats ? { stats: metrics.stats } : {})}
-                    lang={lang}
-                    currency={metrics.currency}
-                    brlRate={metrics.brlRate}
-                    costBasis={metrics.costBasis}
-                    planFactor={metrics.planFactor}
-                    {...(session.task ? { task: session.task } : {})}
-                    {...(metrics.onOpenTask ? { onOpenTask: metrics.onOpenTask } : {})}
-                    {...(metrics.onOpenLive ? { onOpenLive: metrics.onOpenLive } : {})}
-                    {...(metrics.onOpenFull ? { onOpenFull: metrics.onOpenFull } : {})}
-                    rowId={session.id}
-                    {...(session.accountId ? { accountId: session.accountId } : {})}
-                    {...(session.model ? { startedModel: session.model } : {})}
-                    {...(session.effort ? { startedEffort: session.effort } : {})}
-                  />
-                  </span>
-                )}
-
                 {/* Mode · Stop · Recall · Send · More, held together at the far end, in that
                     order: the two that act on the RUNNING TURN, then the two about the message you
                     are writing, then the menu. `marginLeft: auto` on the GROUP rather than on send,
@@ -3601,21 +3576,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     thing a counter beside a text box may not do.
                     `pointerEvents: none` so it can never take a tap meant for a control beside it,
                     and it gives way before the buttons do when the row runs out of width. */}
-                {countLabel && (
-                  <span
-                    className="ag-composer-count-in-field"
-                    aria-hidden
-                    style={{
-                      marginLeft: 'auto', minWidth: 0, overflow: 'hidden',
-                      textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none',
-                      fontSize: 10.5, lineHeight: 1, color: 'var(--text-tertiary)',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
-                  >
-                    {countLabel}
-                  </span>
-                )}
-
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: countLabel ? 6 : 'auto' }}>
                 {/* THE HARNESS MODE, and the one control that changes it.
                     Asked for: "nao consigo alternar entre os modos que os harnesses possuem (auto
@@ -3633,43 +3593,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     prompt come off the row for as long as the composer is an answer field. They are
                     about the next TURN, and this is not one — cycling the harness's mode with a
                     dialog open sends a keystroke into that dialog. */}
-                {row?.mode && !answeringNow && (
-                  <button
-                    ref={modeButtonRef}
-                    className="ag-tap-icon ag-composer-mode-in-field"
-                    onClick={() => {
-                      const rect = modeButtonRef.current?.getBoundingClientRect()
-                      // Wider and taller when a menu carries the "no questions" warning.
-                      const warns = modeOptions.some(m => 'canonical' in m && m.canonical === 'no-questions')
-                      if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight, warns ? 270 : 190, warns ? 320 : 220))
-                      setModeMenuOpen(value => !value)
-                    }}
-                    disabled={!canPrompt}
-                    aria-haspopup="menu"
-                    aria-expanded={modeMenuOpen}
-                    aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}
-                    title={modeTitle(row.mode, pt ? 'pt' : 'en')}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                      height: 30, padding: '0 9px',
-                      borderRadius: 9, flexShrink: 0, maxWidth: 150,
-                      // The colour IS the mode — see `modeStyle.ts`. Ordered by how much the
-                      // session proceeds without asking. Only "no questions" is red (MODE.NOQ):
-                      // `auto` is how this product is normally used and stays green.
-                      border: `1px solid ${modeStyle(row.mode).border}`,
-                      background: modeStyle(row.mode).bg,
-                      color: modeStyle(row.mode).fg,
-                      fontFamily: 'inherit', fontSize: 11.5,
-                      cursor: canPrompt ? 'pointer' : 'default',
-                      opacity: canPrompt ? 1 : 0.55,
-                    }}
-                  >
-                    <SlidersHorizontal size={13} style={{ flexShrink: 0 }} />
-                    {!isMobile && <span style={{
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>{modeLabel(row.mode, pt ? 'pt' : 'en')}</span>}
-                  </button>
-                )}
                 {modeMenuOpen && row?.mode && modeOptions.length > 0 && modeMenuPos && createPortal(
                   <div
                     data-mode-menu
@@ -3728,24 +3651,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     you have already sent, not about composing.
                     NOT WHILE ANSWERING A QUESTION, with the mode chip and the model: all three are
                     about the next TURN, and this is an answer to a dialog already open. */}
-                {promptList.length > 0 && !answeringNow && !isMobile && (
-                  <button
-                    className="ag-composer-history-in-field"
-                    ref={historyBtnRef}
-                    onClick={() => setPromptsOpen(true)}
-                    aria-label={pt ? 'Suas mensagens' : 'Your messages'}
-                    aria-haspopup="dialog"
-                    title={pt ? 'Suas mensagens' : 'Your messages'}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      width: 34, height: 34, borderRadius: 9, border: 'none', flexShrink: 0,
-                      background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer',
-                    }}
-                  >
-                    <History size={15} />
-                  </button>
-                )}
-
                 {/* ONE SLOT: STOP WHILE IT WORKS, SEND WHEN IT DOES NOT.
                     A stop on an idle session would send Escape into its prompt, which is the row's
                     own gate on `interrupt`.
@@ -3800,26 +3705,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     changing the model does not change what the dialog does with the line it is
                     waiting for. Dictation stays, because it only puts words in the field, and the
                     field is the one thing this mode is FOR. */}
-                {!answeringNow && (
                 <div ref={moreMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
-                  <button
-                    className="ag-composer-more-in-field"
-                    ref={moreButtonRef}
-                    onClick={() => setMoreOpen(v => !v)}
-                    disabled={!canPrompt || sending}
-                    aria-label={pt ? 'Mais opções' : 'More options'}
-                    aria-expanded={moreOpen}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      width: 34, height: 34, borderRadius: 9, border: 'none',
-                      background: moreOpen ? 'var(--bg-surface)' : 'transparent',
-                      color: 'var(--text-tertiary)',
-                      cursor: canPrompt ? 'pointer' : 'default',
-                    }}
-                  >
-                    <ChevronUp size={15} style={{ transform: moreOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
-                  </button>
-
                   {moreOpen && (
                     <div data-composer-menu style={{
                       // Anchored on its RIGHT edge: the button now sits at the end of the row, and
@@ -3956,7 +3842,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         {pt ? 'Modelo' : 'Model'}
                       </button>
                       <div id="composer-menu-model-region" style={{ display: foldedMenuGroups.has('model') ? 'none' : 'block' }}>
-                      {answeringNow ? null : modelReason ? (
+                      {modelReason ? (
                         <p style={{ margin: 0, padding: '6px 8px', fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
                           {modelReason}
                         </p>
@@ -3996,7 +3882,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       {/* A SOURCE's own settings (the native runtime): reasoning effort on the same
                           EffortPicker the new-session dialog uses, the gated browser and the extra
                           folders — what the session's own page drew before UI.UNIFY. */}
-                      {!answeringNow && sourceControls && (
+                      {sourceControls && (
                         <SourceSettings controls={sourceControls} pt={pt} onRefused={setNotice} />
                       )}
                       </div>
@@ -4037,18 +3923,25 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     </div>
                   )}
                 </div>
-                )}
-
                 </div>
                 </ComposerToolbar>
               </ComposerShell>
-              {!answeringNow && (
-                <div className="ag-composer-status" data-composer-status>
+              {
+                <div
+                  className="ag-composer-status"
+                  data-composer-status
+                  style={{
+                    width: `calc(100% + ${40 + chatGutterPx}px)`,
+                    marginLeft: -20,
+                    padding: `5px ${20 + chatGutterPx}px 0 20px`,
+                  }}
+                >
                   <div className="ag-composer-status-left">
-                    {(currentModelLabel || menuModels.length > 0 || menuFreeText || modelReason) && (
+                    {!answeringNow && (currentModelLabel || menuModels.length > 0 || menuFreeText || modelReason) && (
                       <button
                         type="button"
                         className="ag-composer-status-button ag-composer-model-button"
+                        ref={moreButtonRef}
                         aria-haspopup="menu"
                         aria-expanded={moreOpen}
                         disabled={!canPrompt || sending}
@@ -4062,9 +3955,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         {sourceControls?.effort?.value && <span>{sourceControls.effort.value}</span>}
                       </button>
                     )}
-                    {row?.mode && (
+                    {row?.mode && !answeringNow && (
                       <button
                         type="button"
+                        ref={modeButtonRef}
                         className="ag-composer-status-button ag-composer-mode-button"
                         onClick={() => {
                           const rect = modeButtonRef.current?.getBoundingClientRect()
@@ -4124,7 +4018,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     {menuGroups.some(group => group !== 'model') && (
                       <button
                         type="button"
-                        ref={moreButtonRef}
                         onClick={() => setMoreOpen(value => !value)}
                         disabled={!canPrompt || sending}
                         aria-label={pt ? 'Mais opções' : 'More options'}
@@ -4134,7 +4027,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     )}
                   </div>
                 </div>
-              )}
+              }
               {(notice ?? source?.notice) && (
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                   {notice ?? source?.notice}
