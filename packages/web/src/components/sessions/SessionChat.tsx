@@ -81,7 +81,7 @@ import {
   composeQuoted, locateExcerpt,
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
-import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
+import { modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
@@ -646,6 +646,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const menuFreeText = sourceControls?.model ? sourceControls.model.freeText : modelFreeText
   const currentModelId = sourceControls?.model?.current ?? session.model ?? ''
   const currentModelLabel = menuModels.find(model => model.id === currentModelId)?.label ?? currentModelId
+  /** M3 status band: the model button always names a model — the live control's, else the one the
+   *  session was started on — and the effort when one is known. Never a bare "Modelo". */
+  const statusModelLabel = currentModelLabel
+    || (session.model ? modelLabel(session.harness, session.model) : (pt ? 'Modelo' : 'Model'))
+  const statusEffort = sourceControls?.effort?.value ?? session.effort ?? null
   const toggleMenuGroup = useCallback((id: ComposerMenuGroupId) => {
     setFoldedMenuGroups(previous => {
       const next = new Set(previous)
@@ -3937,7 +3942,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               </ComposerShell>
               <div className="ag-composer-status" data-composer-status>
                   <div className="ag-composer-status-left">
-                    {!answeringNow && (currentModelLabel || menuModels.length > 0 || menuFreeText || modelReason) && (
+                    {!answeringNow && (currentModelLabel || session.model || menuGroups.length > 0) && (
                       <button
                         type="button"
                         className="ag-composer-status-button ag-composer-model-button"
@@ -3954,10 +3959,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         title={pt ? 'Trocar modelo e esforço' : 'Change model and effort'}
                       >
                         <span className="ag-composer-status-button-label">
-                          {currentModelLabel || (pt ? 'Modelo' : 'Model')}
+                          {statusModelLabel}
                         </span>
-                        {sourceControls?.effort && <span aria-hidden>·</span>}
-                        {sourceControls?.effort?.value && <span>{sourceControls.effort.value}</span>}
+                        {statusEffort && <span aria-hidden>·</span>}
+                        {statusEffort && <span>{statusEffort}</span>}
                       </button>
                     )}
                     {row?.mode && !answeringNow && (
@@ -4009,7 +4014,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     )}
                   </div>
                   <div className="ag-composer-status-right">
-                    {countLabel && <span className="ag-composer-status-count">{countLabel}</span>}
+                    <span className="ag-composer-status-count">{countLabel ?? (pt ? '0 caracteres' : '0 characters')}</span>
                     {promptList.length > 0 && !answeringNow && (
                       <button
                         ref={historyBtnRef}
@@ -4019,22 +4024,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         title={pt ? 'Suas mensagens' : 'Your messages'}
                         className="ag-composer-status-icon"
                       ><History size={15} /></button>
-                    )}
-                    {menuGroups.some(group => group !== 'model') && (
-                      <button
-                        type="button"
-                        data-composer-menu-trigger
-                        ref={moreStatusButtonRef}
-                        onClick={e => {
-                          const rect = e.currentTarget.getBoundingClientRect()
-                          setMoreMenuPos({ top: rect.top - 8, left: rect.right, side: 'right' })
-                          setMoreOpen(value => !value)
-                        }}
-                        disabled={!canPrompt || sending}
-                        aria-label={pt ? 'Mais opções' : 'More options'}
-                        aria-expanded={moreOpen}
-                        className="ag-composer-status-icon ag-composer-more-status"
-                      ><ChevronUp size={15} style={{ transform: moreOpen ? 'rotate(180deg)' : 'none' }} /></button>
                     )}
               </div>
               </div>

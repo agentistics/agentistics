@@ -939,7 +939,8 @@ button:focus-within .ag-row-pin,
   width: 100%;
   background: var(--ag-composer-ground, var(--bg-base));
   box-shadow: 0 0 0 100vmax var(--ag-composer-ground, var(--bg-base));
-  clip-path: inset(0 -100vmax);
+  /* sideways to the pane edges AND down to the bottom: the ground's bottom padding is covered too */
+  clip-path: inset(0 -100vmax -100vmax);
   color: var(--text-secondary);
 }
 .ag-composer-status-left,
