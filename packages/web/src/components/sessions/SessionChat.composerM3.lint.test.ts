@@ -36,7 +36,7 @@ describe('M3 composer status controls', () => {
 
   test('uses a full-width status surface with an aligned inner column', () => {
     expect(source).toContain('className="ag-composer-status" data-composer-status')
-    expect(css).toContain('box-shadow: 0 0 0 100vmax var(--ag-composer-ground, var(--bg-base));')
-    expect(css).toContain('clip-path: inset(0 -100vmax -100vmax)')
+    expect(css).toContain('box-shadow: 0 0 0 calc(100vmax / var(--ui-zoom, 1)) var(--ag-composer-ground, var(--bg-base));')
+    expect(css).toContain('clip-path: inset(0 calc(-100vmax / var(--ui-zoom, 1)) calc(-100vmax / var(--ui-zoom, 1)))')
   })
 })
