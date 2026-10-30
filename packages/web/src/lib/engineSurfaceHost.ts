@@ -243,6 +243,16 @@ export function resolveSideSlot(): HTMLElement | null {
   for (const v of sideSlots.values()) if (v.sessionId === current.sessionId) return v.el
   return null
 }
+/** Id of the aside `resolveSideSlot` picks, or `null`. */
+export function resolveSideSlotId(): string | null {
+  const current = visible
+  if (!drawnSide(current)) return null
+  for (const [id, v] of sideSlots) if (v.sessionId === current.sessionId) return id
+  return null
+}
+export function useEngineSideSlotId(): string | null {
+  return useSyncExternalStore(subscribe, resolveSideSlotId, () => null)
+}
 export function useEngineSideSlot(): HTMLElement | null {
   return useSyncExternalStore(subscribe, resolveSideSlot, () => null)
 }
