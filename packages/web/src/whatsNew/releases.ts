@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.166.0': {
+    features: [
+      {
+        pt: 'As instruções que cada sessão recebe agora seguem o estado: no modo ausente somem os "pergunte antes", workers não recebem blocos de líder, e um teste impede que duas regras se contradigam.',
+        en: 'The instructions each session receives now follow the state: in away mode the "ask first" lines go away, workers get no leader blocks, and a test keeps two rules from contradicting each other.',
+      },
+      {
+        pt: 'A passagem de liderança chega ao sucessor como aviso do sistema, curta e com as ordens vigentes do dono no topo.',
+        en: 'A leader hand-off reaches the successor as a system notice, short and with the owner\'s standing orders on top.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O vidro ficou visível também no tema claro e um pouco mais transparente no escuro; o chat flutuante da Nay continua sólido.',
+        en: 'Glass is now visible in the light theme too and a little more see-through in the dark one; the Nay floating chat stays solid.',
+      },
+      {
+        pt: 'Passagens de bastão, relays entre sessões e instruções carregadas pelo Codex aparecem como avisos do sistema, e não mais como mensagens suas.',
+        en: 'Leader hand-offs, relays between sessions and Codex-loaded instructions now appear as system notices instead of looking like messages you wrote.',
+      },
+      {
+        pt: 'O rodapé da lista ficou mais limpo, sem o botão Ajustes repetido.',
+        en: 'The list footer is cleaner, without the repeated Settings button.',
+      },
+    ],
+  },
   '2.165.2': {
     features: [],
     fixes: [

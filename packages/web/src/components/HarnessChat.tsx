@@ -47,6 +47,7 @@ export type TranscriptMessage = {
   content: string
   timestamp?: number
   tools?: string[]
+  system?: string
 }
 
 /** How many messages a Claude conversation opens with (its END); older pages load on demand. */
@@ -87,7 +88,7 @@ function ToolsBlock({ tools, pt }: { tools: string[]; pt: boolean }) {
 export function MessageBubble({ msg, harness, pt }: { msg: TranscriptMessage; harness: HarnessId; pt: boolean }) {
   const isUser = msg.role === 'user'
   // A prompt agentistics injected (another session's handback, away, check-in) is not the person's.
-  const event = isUser ? parseSystemEvent(msg.content) : null
+  const event = isUser ? (msg.system ? { kind: 'notice' as const, label: msg.system, body: msg.system } : parseSystemEvent(msg.content)) : null
   if (event) return <FleetSystemEventRow event={event} lang={pt ? 'pt' : 'en'} at={msg.timestamp} />
   const color = HARNESS_COLORS[harness]
   return (

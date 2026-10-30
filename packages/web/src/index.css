@@ -969,6 +969,13 @@ button:focus-within .ag-row-pin,
   mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
 }
 
+/* With glass on, NO ground at all behind or above the message box (owner, 2026-10-30: "a sombra
+   tirou completamente a transparência do input, vamos precisar tirar a sombra, deixa sem"). The
+   field's own glass is the only surface; the conversation shows through it untouched. */
+[data-glass="on"] .ag-composer-ground::before {
+  content: none;
+}
+
 /*
  * Where the effect cannot run, it degrades to TODAY'S behaviour — a solid ground — and never to
  * unreadable text over a live conversation.
@@ -1030,7 +1037,7 @@ button:focus-within .ag-row-pin,
    closed selects, toasts, centred modals and chat messages. When in doubt, solid.
    `data-glass` on <html> is the switch (`lib/glass.ts`); `off` keeps every surface solid.
 
-   Allowed: tint 72% of --bg-card, blur(16px) saturate(140%), the app's normal border.
+   Allowed: tint 64% of --bg-card (owner, 2026-10-29: a touch more see-through than 2.159.5's 72%), blur(16px) saturate(140%), the app's normal border.
    Never: white gradients, a white inset line, a border mixed with white, noise, saturate > 140%.
 --------------------------------------------------------------------------- */
 [data-glass="on"] [role="menu"][data-portalled-menu],
@@ -1038,52 +1045,80 @@ button:focus-within .ag-row-pin,
 [data-glass="on"] [role="listbox"],
 [data-glass="on"] [data-plan-usage-popover],
 [data-glass="on"] [data-bell-panel],
-[data-glass="on"] [data-nay-panel],
 [data-glass="on"] [data-nay-notice],
 [data-glass="on"] [data-area-rail][data-open="true"],
 [data-glass="on"] [data-drawer-side="left"],
 [data-glass="on"] .ag-composer-ground [data-composer-field],
 [data-glass="on"] [data-bottom-sheet] > div {
-  background: color-mix(in srgb, var(--bg-card) 72%, transparent) !important;
+  background: color-mix(in srgb, var(--bg-card) 64%, transparent) !important;
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--border);
 }
+
+/* The message box alone goes a touch further (owner, 2026-10-30: "um pouquinho a mais de
+   transparência no componente de input"): 56% instead of the menus' 64%. */
+[data-glass="on"] .ag-composer-ground [data-composer-field] {
+  background: color-mix(in srgb, var(--bg-card) 56%, transparent) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+}
+
+/* Light surfaces need a stronger recipe: white-on-near-white at 48% still read as solid. Much
+   lower tint plus a soft shadow and slightly higher saturation so the page shows through.
+   The dark theme and the intentionally solid floating chat are untouched. */
+[data-theme="light"][data-glass="on"] [role="menu"][data-portalled-menu],
+[data-theme="light"][data-glass="on"] [data-composer-menu],
+[data-theme="light"][data-glass="on"] [role="listbox"],
+[data-theme="light"][data-glass="on"] [data-plan-usage-popover],
+[data-theme="light"][data-glass="on"] [data-bell-panel],
+[data-theme="light"][data-glass="on"] [data-nay-notice],
+[data-theme="light"][data-glass="on"] [data-area-rail][data-open="true"],
+[data-theme="light"][data-glass="on"] [data-drawer-side="left"],
+[data-theme="light"][data-glass="on"] .ag-composer-ground [data-composer-field],
+[data-theme="light"][data-glass="on"] [data-bottom-sheet] > div {
+  background: color-mix(in srgb, var(--bg-base) 24%, transparent) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+}
+[data-theme="light"][data-glass="on"] [data-plan-usage-popover] > span[aria-hidden] {
+  background: color-mix(in srgb, var(--bg-base) 24%, transparent) !important;
+}
 /* The caret of the plan-usage popover pokes out of its box: same tint, no blur of its own. */
 [data-glass="on"] [data-plan-usage-popover] > span[aria-hidden] {
-  background: color-mix(in srgb, var(--bg-card) 72%, transparent) !important;
+  background: color-mix(in srgb, var(--bg-card) 64%, transparent) !important;
 }
 /* The message box is glass as a whole; the field inside it is transparent, no border, no glow. */
 [data-glass="on"] .ag-composer-ground [data-composer-field] textarea {
   background: transparent !important; border: none !important; box-shadow: none !important;
 }
+/* `:root` lifts the fallbacks to the light-theme recipe's specificity, so they still win there. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  [data-glass="on"] [role="menu"][data-portalled-menu],
-  [data-glass="on"] [data-composer-menu],
-  [data-glass="on"] [role="listbox"],
-  [data-glass="on"] [data-plan-usage-popover],
-  [data-glass="on"] [data-plan-usage-popover] > span[aria-hidden],
-  [data-glass="on"] [data-bell-panel],
-  [data-glass="on"] [data-nay-panel],
-  [data-glass="on"] [data-nay-notice],
-  [data-glass="on"] [data-area-rail][data-open="true"],
-  [data-glass="on"] [data-drawer-side="left"],
-  [data-glass="on"] .ag-composer-ground [data-composer-field],
-  [data-glass="on"] [data-bottom-sheet] > div { background: var(--bg-card) !important; }
+  :root[data-glass="on"] [role="menu"][data-portalled-menu],
+  :root[data-glass="on"] [data-composer-menu],
+  :root[data-glass="on"] [role="listbox"],
+  :root[data-glass="on"] [data-plan-usage-popover],
+  :root[data-glass="on"] [data-plan-usage-popover] > span[aria-hidden],
+  :root[data-glass="on"] [data-bell-panel],
+  :root[data-glass="on"] [data-nay-notice],
+  :root[data-glass="on"] [data-area-rail][data-open="true"],
+  :root[data-glass="on"] [data-drawer-side="left"],
+  :root[data-glass="on"] .ag-composer-ground [data-composer-field],
+  :root[data-glass="on"] [data-bottom-sheet] > div { background: var(--bg-card) !important; }
 }
 @media (prefers-reduced-transparency: reduce) {
-  [data-glass="on"] [role="menu"][data-portalled-menu],
-  [data-glass="on"] [data-composer-menu],
-  [data-glass="on"] [role="listbox"],
-  [data-glass="on"] [data-plan-usage-popover],
-  [data-glass="on"] [data-plan-usage-popover] > span[aria-hidden],
-  [data-glass="on"] [data-bell-panel],
-  [data-glass="on"] [data-nay-panel],
-  [data-glass="on"] [data-nay-notice],
-  [data-glass="on"] [data-area-rail][data-open="true"],
-  [data-glass="on"] [data-drawer-side="left"],
-  [data-glass="on"] .ag-composer-ground [data-composer-field],
-  [data-glass="on"] [data-bottom-sheet] > div {
+  :root[data-glass="on"] [role="menu"][data-portalled-menu],
+  :root[data-glass="on"] [data-composer-menu],
+  :root[data-glass="on"] [role="listbox"],
+  :root[data-glass="on"] [data-plan-usage-popover],
+  :root[data-glass="on"] [data-plan-usage-popover] > span[aria-hidden],
+  :root[data-glass="on"] [data-bell-panel],
+  :root[data-glass="on"] [data-nay-notice],
+  :root[data-glass="on"] [data-area-rail][data-open="true"],
+  :root[data-glass="on"] [data-drawer-side="left"],
+  :root[data-glass="on"] .ag-composer-ground [data-composer-field],
+  :root[data-glass="on"] [data-bottom-sheet] > div {
     background: var(--bg-card) !important; -webkit-backdrop-filter: none; backdrop-filter: none;
   }
 }

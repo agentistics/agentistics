@@ -5,7 +5,7 @@ import { HandoffMeter } from './components/sessions/HandoffWarning'
 import { PageRouteFrame } from './components/PageRouteFrame'
 import { useEscapeOwner } from './lib/overlayStack'
 import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback, useSyncExternalStore, useDeferredValue } from 'react'
-import { Outlet, NavLink, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { version } from '../../../package.json'
 import {
@@ -723,7 +723,7 @@ function SideNav({
       {/* Thin divider between account and actions */}
       {principal && <div style={{ height: 1, background: 'var(--border)', marginBottom: 10 }} />}
 
-      {/* Row B — config actions (theme · language · export · settings), evenly spaced */}
+      {/* Row B — config actions (theme · language · export · usage), evenly spaced. Settings lives in the area tree. */}
       <div style={{ display: 'flex', flexDirection: collapsed ? 'column' : 'row', alignItems: 'center', gap: 6 }}>
         <CollapsedTip label={pt ? 'Tema' : 'Theme'} show={collapsed}>
           <button onClick={onToggleTheme} aria-label={pt ? 'Tema' : 'Theme'} title={collapsed ? undefined : (theme === 'dark' ? (pt ? 'Tema claro' : 'Light theme') : (pt ? 'Tema escuro' : 'Dark theme'))} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1 }}
@@ -745,14 +745,6 @@ function SideNav({
             <FileDown size={15} />{!collapsed && <span style={{ fontSize: 11, marginLeft: 4 }}>PDF</span>}
           </button>
         </CollapsedTip>
-        {/* The tree carries Ajustes (A1); this shortcut remains only where there is no tree yet. */}
-        {mode === 'sessions' && <CollapsedTip label={pt ? 'Configurações' : 'Settings'} show={collapsed}>
-          <NavLink to="/settings" aria-label={pt ? 'Configurações' : 'Settings'} title={collapsed ? undefined : (pt ? 'Configurações' : 'Settings')} style={{ ...footBtn, width: collapsed ? 34 : 'auto', flex: collapsed ? undefined : 1, textDecoration: 'none' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-primary)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.color = 'var(--text-secondary)' }}>
-            <SlidersHorizontal size={15} />
-          </NavLink>
-        </CollapsedTip>}
         {!isCentral && <PlanUsageFootButton lang={pt ? 'pt' : 'en'} collapsed={collapsed} footBtn={footBtn} openSession={openSession} />}
       </div>
     </div>
