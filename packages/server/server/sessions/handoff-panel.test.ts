@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { handoffProgress, computeHandoffPanel, createHandoffQuotaSampler, handoffMetrics, quotaRate, type QuotaObservation } from './handoff-panel'
+import { handoffProgress, handoffRunning, computeHandoffPanel, createHandoffQuotaSampler, handoffMetrics, quotaRate, type QuotaObservation } from './handoff-panel'
 import { toConversation } from './conversations'
 import type { HarnessId, SessionMeta } from '@agentistics/core'
 import { parseGeminiChat } from '../adapters/gemini-parse'
@@ -204,5 +204,20 @@ describe('handoff lifecycle progress', () => {
     const panel = computeHandoffPanel(leader, null, undefined, now, { session: { retire }, successor })
     expect(panel.handoff?.stage).toBe('taken-over')
     expect(computeHandoffPanel(leader, null, undefined, now, { session: { retire: { ...retire, expiredAt: requestedAt } }, successor }).handoff).toBeUndefined()
+  })
+})
+
+describe('handoffRunning — a hand-off with a live successor', () => {
+  const now = Date.parse('2026-10-30T12:00:00Z')
+  const requestedAt = new Date(now - 60_000).toISOString()
+  it('preparing is not running: the request may be repeated', () => {
+    expect(handoffRunning({ session: { handoffRequestedAt: requestedAt } }, now)).toBe(false)
+  })
+  it('a live successor is running; an ended or gone one is not; nothing requested is not', () => {
+    const session = { handoffRequestedAt: requestedAt, handoffTo: 'succ' }
+    expect(handoffRunning({ session, successor: { id: 'succ' } }, now)).toBe(true)
+    expect(handoffRunning({ session, successor: { id: 'succ', endedAt: requestedAt } }, now)).toBe(false)
+    expect(handoffRunning({ session, successor: { id: 'succ' }, successorGone: true }, now)).toBe(false)
+    expect(handoffRunning({ session: {} }, now)).toBe(false)
   })
 })

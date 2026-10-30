@@ -32,6 +32,7 @@ export interface PickerRow {
 const REASON: Record<SwitchUnavailableReason, { pt: string; en: string }> = {
   not_agentic: { pt: 'Não liberada para uso por agentes', en: 'Not available for agent use' },
   signed_out: { pt: 'Sem login nesta máquina', en: 'Not signed in on this machine' },
+  login_expired: { pt: 'Login expirado — refaça o login em Uso → Contas', en: 'Login expired — sign in again in Usage → Accounts' },
   cant_carry: { pt: 'Este assistente não leva a conversa para outra conta', en: "This assistant can't carry the conversation to another account" },
   harness_unavailable: { pt: 'Não encontrado neste computador', en: 'Not found on this computer' },
   unavailable: { pt: 'Indisponível agora', en: 'Unavailable right now' },
