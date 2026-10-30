@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { endEngineSurfaceIndicator, resumeEngineSurface, useMountedEngineSurfaces, type OpenSurface } from '../lib/engineSurfaceHost'
+import { endEngineSurfaceIndicator, registerEngineSurfaceNavigator, resumeEngineSurface, useMountedEngineSurfaces, type OpenSurface } from '../lib/engineSurfaceHost'
 import { formatIndicatorElapsed, surfacePagePath } from '../lib/engineSurfaces'
 import { surfaceGlyph } from './EngineSurfaceButtons'
 
@@ -13,6 +13,13 @@ import { surfaceGlyph } from './EngineSurfaceButtons'
  * the label kept as its accessible name) so it never crowds the bar or covers the navigation.
  */
 export function EngineSurfaceIndicators({ lang, tickMs = 1000 }: { lang: 'pt' | 'en'; tickMs?: number }) {
+  const navigate = useNavigate()
+  // The one router-bound navigator `ctx.openSession` uses, the same one the pills use.
+  useEffect(() => {
+    const go = (path: string) => { navigate(path) }
+    registerEngineSurfaceNavigator(go)
+    return () => registerEngineSurfaceNavigator(null, go)
+  }, [navigate])
   const list = useMountedEngineSurfaces().filter(s => s.indicator)
   if (list.length === 0) return null
   return <>{list.map(s => <Pill key={s.nonce} open={s} lang={lang} tickMs={tickMs} />)}</>
