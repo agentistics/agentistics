@@ -67,6 +67,7 @@ export function parseSystemEvent(raw: string): SystemEvent | null {
   }
   const { kind: what, body } = h
   if (h.origin === 'agentistics') {
+    if (what === 'surface' && agentBody === null) return null
     if (what === 'role') return { kind: 'role', body }
     if (what === 'check-in') return { kind: 'checkin', body }
     if (what === 'away') return { kind: /away mode is now OFF/i.test(body) ? 'away-off' : 'away', body }
@@ -116,4 +117,21 @@ export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): stri
       if (e.label === 'agent') return pt ? 'Mensagem de outro agente' : 'Message from another agent'
       return (pt ? `Mensagem de uma sessão (${e.label ?? 'mensagem'})` : `Message from a session (${e.label ?? 'message'})`) + suffix
   }
+}
+
+/** A surface submits the person's text with optional leading bracketed instructions. */
+export function surfaceTurnText(raw: string): string | null {
+  const h = parseInjectedHeader(raw)
+  if (h?.origin !== 'agentistics' || h.kind !== 'surface') return null
+  let body = h.body.trim()
+  while (body.startsWith('[')) {
+    let depth = 0, end = -1
+    for (let i = 0; i < body.length; i++) {
+      if (body[i] === '[') depth++
+      if (body[i] === ']' && --depth === 0) { end = i; break }
+    }
+    if (end < 0) break
+    body = body.slice(end + 1).trimStart()
+  }
+  return body
 }

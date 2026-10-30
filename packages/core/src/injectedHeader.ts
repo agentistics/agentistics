@@ -1,8 +1,8 @@
 /**
  * injectedHeader.ts — PURE: the `[from agentistics · <kind>]` / `[from session <id> · <kind>]` header
  * every message agentistics (or another session) types into a conversation opens with. One parser for
- * both the chat (web) and the hand-off relay (server), so "who said this" has ONE answer: a message
- * carrying such a header is never the owner's, whatever its kind.
+ * both the chat (web) and the hand-off relay (server). The header records transport provenance;
+ * renderers treat the `surface` kind as the person's submitted text and other kinds as system events.
  *
  * The harness may wrap a typed-in block as `<pasted_content id="…">…</pasted_content id="…">`; ONE
  * wrapper spanning the whole message is unwrapped before matching.

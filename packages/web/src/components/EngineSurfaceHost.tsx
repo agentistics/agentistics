@@ -1,10 +1,12 @@
+import { NayWindowFrame } from './nay/NayWindowFrame'
+import { type NayWindow, placeWindow } from '../lib/nayDock'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useEscapeOwner } from '../lib/overlayStack'
 import {
-  closeEngineSurface, effectiveSurfaceLayout, endEngineSurface, leaveEngineSurfacePage, onEngineSurfaceIndicatorEnd, openEngineSurface, openEngineSurfaceSession,
-  registerEngineInlineSlot, registerEnginePageSlot, registerEngineSideSlot, resolveInlineSlot, resolveSideSlot, setEngineSurfaceIndicator, setEngineSurfaceKeepAlive,
+  minimizeEngineSurface, registerEngineNaySlot, useEngineNaySlot, closeEngineSurface, effectiveSurfaceLayout, endEngineSurface, leaveEngineSurfacePage, onEngineSurfaceIndicatorEnd, openEngineSurface, openEngineSurfaceSession,
+  registerEngineSessionView, registerEngineInlineSlot, registerEnginePageSlot, registerEngineSideSlot, resolveInlineSlot, resolveSideSlot, setEngineSurfaceIndicator, setEngineSurfaceKeepAlive,
   mountedEngineSurfaces, reconcileEngineSurfaces, setEngineSurfaceLayout, useEngineInlineSlot, useEngineSideAsideId, useEnginePageSlot, useEngineSideSlot, useMountedEngineSurfaces, useOpenEngineSurface, type OpenSurface,
 } from '../lib/engineSurfaceHost'
 import { readEngineStatus, useEngineSurfaceList } from '../hooks/useEngineSurfaces'
@@ -89,6 +91,10 @@ export function EngineSurfacePage({ surfaceId, lang }: { surfaceId: string; lang
  * composer around it stay fully usable.
  */
 export function EngineSurfaceInlineSlot({ sessionId, slotId }: { sessionId: string; slotId: string }) {
+  useEffect(() => {
+    registerEngineSessionView(slotId, sessionId)
+    return () => registerEngineSessionView(slotId, null)
+  }, [slotId, sessionId])
   const open = useOpenEngineSurface()
   const own = useRef<HTMLElement | null>(null)
   const ref = useCallback((el: HTMLDivElement | null) => {
@@ -127,13 +133,15 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   const pageSlot = useEnginePageSlot()
   const sideSlot = useEngineSideSlot()
   const slot = open.parked ? null : inlineSlot
+  const naySlot = useEngineNaySlot(surface.id)
+  const nayTab = surface.placement === 'nay-tab'
   const page = open.layout === 'page'
   // A page whose route is not on screen is held off screen like a parked surface.
   // A session surface drawn as `side` whose session is shown in a Sessions pane never uses the fixed
   // panel: with no aside holding it yet it stays mounted, hidden, until one takes it or it is closed.
   const asideWanted = useEngineSideAsideId() !== null
   const heldForAside = !open.parked && !page && effectiveSurfaceLayout(open.layout, !!slot) === 'side' && !sideSlot && asideWanted
-  const offscreen = open.parked || (page && !pageSlot) || heldForAside
+  const offscreen = open.parked || (nayTab && !naySlot) || (page && !pageSlot) || heldForAside
   // Parked, it reports the layout it had (and will come back in), not a fallback computed without a slot.
   const layout = open.parked ? open.layout : effectiveSurfaceLayout(open.layout, !!slot)
   const inline = layout === 'inline'
@@ -145,6 +153,7 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   const park = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
   const [error, setError] = useState(false)
+  const [win, setWin] = useState<NayWindow>(() => ({ id: surface.id, x: Math.max(0, window.innerWidth - 440), y: 60, w: Math.min(420, window.innerWidth), h: Math.min(540, window.innerHeight - 60), minimized: false, z: 290 }))
   const pt = lang === 'pt'
   const full = layout === 'full'
   const bare = surface.frameless === true
@@ -152,18 +161,18 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   // layout switch never remounts it.
   const el = useMemo(() => document.createElement('div'), [])
   const hostClose = useCallback(() => closeEngineSurface(nonce), [nonce])
-  useEscapeOwner(full && !offscreen, hostClose)
+  useEscapeOwner(full && !nayTab && !offscreen, hostClose)
   useLayoutEffect(() => {
-    const target = offscreen ? park.current : page ? pageSlot : inline ? slot : aside ? sideSlot : host.current
+    const target = offscreen ? park.current : nayTab ? naySlot : page ? pageSlot : inline ? slot : aside ? sideSlot : host.current
     if (target && el.parentElement !== target) target.appendChild(el)
     // On its page, in an aside and in a frameless frame the surface fills its box (so a surface sized
     // `height: 100%`, or positioned `absolute; inset: 0`, gets a real box); inline, and inside a framed
     // card, its container sizes to its content.
-    const fill = !offscreen && !inline && (page || aside || bare)
+    const fill = !offscreen && !inline && (page || aside || bare || nayTab || layout === 'float')
     el.style.flex = fill ? '1' : ''
     el.style.minHeight = fill ? '0' : ''
     el.style.position = fill ? 'relative' : ''
-  }, [offscreen, page, pageSlot, inline, slot, aside, sideSlot, bare, el])
+  }, [offscreen, page, pageSlot, inline, slot, aside, sideSlot, bare, nayTab, naySlot, layout, el])
   // Coming back from off screen moves focus exactly as the first mount did: into the frame (a `full`
   // dialog is modal), or onto the surface itself inline or on its page.
   const wasParked = useRef(offscreen)
@@ -188,7 +197,7 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
         setEngineSurfaceLayout(l, nonce)
         // `full` and `side` are always honoured, so `ctx.layout` reports them at once rather than after
         // the next render (`inline` depends on a slot being on screen and is settled by the render).
-        if ((l === 'full' || l === 'side') && mountedEngineSurfaces().some(s => s.nonce === nonce && s.layout === l)) drawn.current = l
+        if ((l === 'full' || l === 'side' || l === 'float') && mountedEngineSurfaces().some(s => s.nonce === nonce && s.layout === l)) drawn.current = l
       },
       close: () => endEngineSurface(nonce),
       keepAlive: on => setEngineSurfaceKeepAlive(nonce, on === true),
@@ -213,8 +222,17 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   if (offscreen) return <div ref={park} data-engine-parked={surface.id} aria-hidden="true" inert style={PARKED} />
+  if (nayTab) return null
   if (page) return error && pageSlot ? createPortal(<p role="alert" style={{ color: 'var(--text-secondary)', margin: 0, padding: 16 }}>{pt ? 'Não foi possível carregar esta interface.' : 'This interface could not be loaded.'}</p>, pageSlot) : null
   if (inline || aside) return null
+  if (layout === 'float') return <div data-engine-overlay={surface.id} data-layout="float">
+    <NayWindowFrame responsive frameRef={frame} win={win} lang={lang} title={surface.label[lang]} onFocus={() => {}}
+      onMove={next => setWin(w => placeWindow({ open: false, panelSession: null, windows: [w] }, w.id, next, { w: window.innerWidth, h: window.innerHeight }).windows[0]!)}
+      onMinimize={() => minimizeEngineSurface(nonce)} onClose={hostClose}>
+      {error && <p role="alert">{pt ? 'Não foi possível carregar esta interface.' : 'This interface could not be loaded.'}</p>}
+      <div ref={host} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'auto' }} />
+    </NayWindowFrame>
+  </div>
   const wrapper: React.CSSProperties = full
     ? { position: 'fixed', inset: 0, zIndex: 700, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: bare ? 0 : 'min(24px, calc(2vw / var(--ui-zoom, 1)))' }
     : { position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 700, width: 'min(420px, calc(100vw / var(--ui-zoom, 1)))', display: 'flex', pointerEvents: 'none' }
@@ -245,4 +263,14 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
       </div>
     </div>
   )
+}
+
+/** The active extra tab's slot. Its surface remains mounted in the root host when this disappears. */
+export function EngineSurfaceNaySlot({ surfaceId }: { surfaceId: string }) {
+  const own = useRef<HTMLElement | null>(null)
+  const ref = useCallback((el: HTMLDivElement | null) => {
+    if (el) { own.current = el; registerEngineNaySlot(surfaceId, el) }
+    else { registerEngineNaySlot(surfaceId, null, own.current); own.current = null }
+  }, [surfaceId])
+  return <div ref={ref} data-engine-nay-tab={surfaceId} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'auto' }} />
 }

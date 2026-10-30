@@ -20,3 +20,9 @@ describe('engineSurfacesFor', () => {
     expect(engineSurfacesFor([s(), s({ id: 'bad', module: 'https://evil.example/a.js' })], {})).toEqual([])
   })
 })
+
+it('gates float and nay-tab with the existing experimental flag', () => {
+  const entries = [s({ id: 'floating', layout: 'float', floatOnLeave: true, experimental: 'DEMO_FLAG' }), s({ id: 'extra-tab', placement: 'nay-tab', experimental: 'DEMO_FLAG' })]
+  expect(engineSurfacesFor(entries, {})).toEqual([])
+  expect(engineSurfacesFor(entries, { DEMO_FLAG: '1' })).toEqual(entries)
+})

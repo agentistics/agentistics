@@ -1,3 +1,8 @@
+import { EngineSurfaceNayBadge } from '../EngineSurfaceNayBadge'
+import { useEngineSurfaces } from '../../hooks/useEngineSurfaces'
+import { openEngineSurface, resumeEngineSurface, useMountedEngineSurfaces } from '../../lib/engineSurfaceHost'
+import { EngineSurfaceNaySlot } from '../EngineSurfaceHost'
+import { NayWindowFrame, IconButton, LabelButton } from './NayWindowFrame'
 /**
  * NayDock — the floating chat, rebuilt around REAL sessions.
  *
@@ -21,7 +26,7 @@ import { EngineSurfaceButtons } from '../EngineSurfaceButtons'
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { requestPlanUsageModal } from '../../lib/planUsageModalRequests'
 import { subscribeNayRequests } from '../../lib/nayDockRequests'
-import { ArrowDownToLine, ArrowLeft, Loader2, Minus, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
+import { ArrowLeft, Loader2, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
 import { isNayCwd, nayPlacementRows, planNayPlacement, sessionIdentityKey, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
@@ -47,7 +52,7 @@ import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { LINK_TASK, NAY_COPY_ID, NAY_GO_TO, UNLINK_TASK, nayRowMenuEntries, type RowVerb } from '../../lib/rowMenu'
 import {
   clampPanelSize, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
-  placeWindow, pruneDock, anchorDock, resizeAnchored, PANEL_DEFAULT, dockZIndex, windowZIndex, type DockState, type NayWindow, type Size,
+  placeWindow, pruneDock, anchorDock, resizeAnchored, PANEL_DEFAULT, dockZIndex, type DockState, type NayWindow, type Size,
 } from '../../lib/nayDock'
 import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionChat'
 import { SessionsAside } from '../nav/SessionsAside'
@@ -80,7 +85,7 @@ import { NAY_UNDOCK_SESSION } from '../../lib/nayDockBridge'
 const QuickVaultBody = lazy(() => import('../../pages/VaultPage').then(m => ({ default: m.QuickVaultBody })))
 
 type Lang = 'pt' | 'en'
-type Tab = 'nay' | 'sessions' | 'vault' | 'limits'
+type Tab = 'nay' | 'sessions' | 'vault' | 'limits' | `engine:${string}`
 const DOCK_TABS: readonly Tab[] = ['nay', 'sessions', 'vault', 'limits']
 
 const ORANGE = 'var(--anthropic-orange)'
@@ -140,6 +145,9 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   const [dock, setDock] = useState<DockState>(() => ({
     open: false, panelSession: null, ...parseDockState(windowsStore.get()),
   }))
+  const engineTabs = useEngineSurfaces('nay-tab')
+  const mountedSurfaces = useMountedEngineSurfaces()
+  const minimizedSurfaces = mountedSurfaces.filter(s => s.parked && s.layout === 'float')
   const [tab, setTab] = useState<Tab>(() => tabStore.get())
   useEffect(() => subscribeNayRequests(requested => {
     if (requested === 'limits') { setTab('limits'); setDock(d => ({ ...d, open: true, panelSession: null })) }
@@ -172,7 +180,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
     setOpenSession(id || null)
   }, [pathname, inSession])
   const shownInSession = useNayFabShownInSession()
-  const fabVisible = nayFabVisible({ isMobile, inSession, shownInSession })
+  const fabVisible = minimizedSurfaces.length > 0 || nayFabVisible({ isMobile, inSession, shownInSession })
   // The button's place and its three motion choices live in a shared store: Settings → Chat edits
   // them too, and two copies of one setting disagree the moment either changes.
   const fabPrefs = useNayFabPrefs()
@@ -184,7 +192,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   useEffect(() => { setSettingsOpen(false) }, [dock.panelSession, dock.open])
   const setFabPrefs = setNayFabPrefs
   const dockStyle = dockStyleOf(fabPrefs)
-  useEffect(() => { tabStore.set(tab) }, [tab])
+  useEffect(() => { if (!tab.startsWith('engine:')) tabStore.set(tab) }, [tab])
   useEffect(() => { writeStored(SIZE_KEY, size) }, [size])
   useEffect(() => {
     const onResize = () => setSize(s => clampPanelSize(s, viewport()))
@@ -549,11 +557,11 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           {/* The dock's own underline tabs (owner, 2026-10-05: restored — no pill behind them; the selected
               tab is orange text over an orange bar, exactly as before the shared strip replaced them). */}
           <div role="tablist" aria-label={pt ? 'Painel da Nay' : 'Nay panel'} style={{ display: 'flex', flexWrap: 'wrap', flex: '1 1 100%', order: 1, minWidth: 0 }}>
-            {DOCK_TABS.map(id => {
+            {[...DOCK_TABS, ...engineTabs.map(s => `engine:${s.id}` as Tab)].map(id => {
               const on = tab === id && !panelSession
               return (
                 <button key={id} type="button" role="tab" aria-selected={on} data-dock-tab={id}
-                  onClick={() => { setTab(id); setDock(d => ({ ...d, panelSession: null })) }}
+                  onClick={() => { setTab(id); setDock(d => ({ ...d, panelSession: null })); const surface = engineTabs.find(s => `engine:${s.id}` === id); if (surface) openEngineSurface(surface, { sessionId: null, lang }) }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '1 0 auto', gap: 5, minWidth: 44,
                     padding: '6px 10px', minHeight: 44,
@@ -564,7 +572,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                 >
                   {id === 'vault' && <VaultGlyph size={13} />}
                   <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
-                    {id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : id === 'limits' ? (pt ? 'Limites' : 'Limits') : (pt ? 'Sessões' : 'Sessions')}
+                    {id.startsWith('engine:') ? engineTabs.find(s => `engine:${s.id}` === id)?.label[lang] : id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : id === 'limits' ? (pt ? 'Limites' : 'Limits') : (pt ? 'Sessões' : 'Sessions')}
                   </span>
                 </button>
               )
@@ -592,6 +600,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           />
         ) : panelSession
           ? renderSession(panelSession, next => setDock(d => ({ ...d, panelSession: next })))
+          : tab.startsWith('engine:') && engineTabs.some(s => `engine:${s.id}` === tab)
+            ? <EngineSurfaceNaySlot surfaceId={tab.slice(7)} />
           : tab === 'nay'
             ? (<>
               <NayList
@@ -685,7 +695,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
       ))}
 
       {/* THE chat button — always this one, whatever is detached. */}
-      {!(isMobile && dock.open) && fabVisible && (
+      {(!(isMobile && dock.open) || minimizedSurfaces.length > 0) && fabVisible && (
         <NayFab prefs={fabPrefs} onPrefs={setFabPrefs} isMobile={isMobile} routeKey={inSession ? 'session' : 'app'}>
           {fab => (
             // Right-click / long-press / Shift+F10 on the button pops the vault icon above it (owner 2026-10-03).
@@ -705,9 +715,9 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                   onPointerMove={fab.onPointerMove}
                   onPointerUp={fab.onPointerUp}
                   onPointerCancel={fab.onPointerCancel}
-                  onClickCapture={e => { fab.onClickCapture(e); if (!e.isPropagationStopped()) onClickCapture(e) }}
-                  onKeyDown={onKeyDown}
-                  onClick={() => setDock(d => ({ ...d, open: !d.open }))}
+                  onClickCapture={e => { fab.onClickCapture(e); if (!e.isPropagationStopped() && minimizedSurfaces.length === 0) onClickCapture(e) }}
+                  onKeyDown={minimizedSurfaces.length === 0 ? onKeyDown : undefined}
+                  onClick={() => { const surface = minimizedSurfaces[0]; if (surface) resumeEngineSurface(surface.nonce); else setDock(d => ({ ...d, open: !d.open })) }}
                   data-nay-fab
                   aria-label={pt ? 'Abrir o chat da Nay' : 'Open the Nay chat'}
                   aria-expanded={dock.open}
@@ -720,6 +730,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                     position: 'relative',
                   }}
                 >
+                  <EngineSurfaceNayBadge surfaces={minimizedSurfaces} lang={lang} />
                   {dock.open
                     ? <X size={20} color="var(--bg-surface)" />
                     : <img src={versionedAsset('/minimalistLogo.png')} alt="" draggable={false} style={{ width: 30, height: 30, borderRadius: 8, pointerEvents: 'none' }} />}
@@ -735,30 +746,6 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
 }
 
 // ---------------------------------------------------------------------------------------------
-
-/** A small icon control. On a phone its 44px target is PROJECTED (`.ag-tap-icon`), never painted. */
-function IconButton({ label, onClick, isMobile, children }: { label: string; onClick: () => void; isMobile: boolean; children: ReactNode }) {
-  return (
-    <button onClick={onClick} aria-label={label} title={label} className={isMobile ? 'ag-tap-icon' : undefined} style={{
-      width: 30, height: 30, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      border: 'none', borderRadius: 7, background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer',
-    }}>{children}</button>
-  )
-}
-
-/** A control whose action must be unmistakable: an icon AND a word, orange-outlined (red to end). */
-function LabelButton({ icon, label, title, onClick, danger }: { icon: ReactNode; label: string; title: string; onClick: () => void; danger?: boolean }) {
-  const tone = danger ? 'var(--accent-red, #ef4444)' : ORANGE
-  return (
-    <button onClick={onClick} title={title} style={{
-      display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, padding: '4px 9px', borderRadius: 7,
-      border: `1px solid ${tone}`, background: danger ? 'rgba(239, 68, 68, 0.1)' : ORANGE_DIM, color: tone, cursor: 'pointer',
-      fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600, whiteSpace: 'nowrap',
-    }}>
-      {icon}{label}
-    </button>
-  )
-}
 
 /**
  * The inline "end it?" question. Ending a conversation stops its session, so it ASKS — inline, in
@@ -997,84 +984,6 @@ function NayList({ lang, isMobile, sections, windows, starting, notice, unsuppor
           })}
         />
       )}
-    </div>
-  )
-}
-
-function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGoTo, onMinimize, onClose, children }: {
-  win: NayWindow
-  lang: Lang
-  title: string
-  onFocus: () => void
-  onMove: (next: Partial<Pick<NayWindow, 'x' | 'y' | 'w' | 'h'>>) => void
-  onDock: () => void
-  /** Open this session in the Sessions workspace; the window stays as it is. */
-  onGoTo: () => void
-  onMinimize: () => void
-  onClose: () => void
-  children: ReactNode
-}) {
-  const pt = lang === 'pt'
-  const dragRef = useRef<{ x: number; y: number; wx: number; wy: number } | null>(null)
-
-  const startDrag = (e: ReactPointerEvent) => {
-    if ((e.target as HTMLElement).closest('button')) return
-    e.preventDefault()
-    onFocus()
-    dragRef.current = { x: e.clientX, y: e.clientY, wx: win.x, wy: win.y }
-    const move = (ev: PointerEvent) => {
-      const d = dragRef.current
-      if (d) onMove({ x: d.wx + ev.clientX - d.x, y: d.wy + ev.clientY - d.y })
-    }
-    const up = () => { dragRef.current = null; window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-
-  const startResize = (e: ReactPointerEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const start = { x: e.clientX, y: e.clientY, w: win.w, h: win.h }
-    const move = (ev: PointerEvent) => onMove({ w: start.w + ev.clientX - start.x, h: start.h + ev.clientY - start.y })
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-
-  return (
-    <div
-      onPointerDownCapture={onFocus}
-      style={{
-        position: 'fixed', left: win.x, top: win.y, width: win.w, height: win.h, zIndex: windowZIndex(win),
-        // THE SAME DISCREET FRAME the terminal's floating windows wear (`FloatingPanelLayer`) — a
-        // hairline border, a 10px radius and their shadow. It was a loud orange outline, which read
-        // as an alert rather than as a window (owner, 2026-09-29). Their drag bar is NOT borrowed:
-        // this window's own header row below is where it is dragged from.
-        background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 10,
-        boxShadow: '0 14px 36px rgba(0, 0, 0, 0.34), 0 2px 6px rgba(0, 0, 0, 0.18)',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }}
-    >
-      <header onPointerDown={startDrag} style={{
-        display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', cursor: 'move', userSelect: 'none',
-        borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated, var(--bg-surface))', flexShrink: 0,
-      }}>
-        <PictureInPicture2 size={13} color="var(--text-tertiary)" style={{ flexShrink: 0 }} />
-        <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-        <LabelButton icon={<ArrowDownToLine size={13} />} label={pt ? 'Acoplar' : 'Dock'}
-          title={pt ? 'Voltar esta sessão para o painel do chat' : 'Put this session back in the chat panel'} onClick={onDock} />
-        <LabelButton icon={<SquareArrowOutUpRight size={13} />} label={pt ? 'Ir para a sessão' : 'Go to session'}
-          title={pt ? 'Abrir esta sessão na tela de Sessões' : 'Open this session in the Sessions workspace'} onClick={onGoTo} />
-        <IconButton label={pt ? 'Minimizar' : 'Minimize'} onClick={onMinimize} isMobile={false}><Minus size={14} /></IconButton>
-        <IconButton label={pt ? 'Fechar a janela' : 'Close the window'} onClick={onClose} isMobile={false}><X size={14} /></IconButton>
-      </header>
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {children}
-      </div>
-      <div onPointerDown={startResize} title={pt ? 'Arraste para redimensionar' : 'Drag to resize'} style={{
-        position: 'absolute', right: 0, bottom: 0, width: 14, height: 14, cursor: 'nwse-resize',
-        background: 'linear-gradient(135deg, transparent 50%, var(--border) 50%)',
-      }} />
     </div>
   )
 }

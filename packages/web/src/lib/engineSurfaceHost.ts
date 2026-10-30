@@ -96,6 +96,23 @@ export function closeEngineSurface(n?: number): void {
   hide(s)
 }
 
+/** Minimize a floating window without ending it, even before keepAlive was requested. */
+export function minimizeEngineSurface(n: number): void {
+  const s = mounted.find(x => x.nonce === n)
+  if (s?.layout === 'float') patch(n, { parked: true })
+}
+
+/** Leaving a session floats its kept-alive inline/side surface unless explicitly opted out. */
+function floatAfterLeave(sessionId: string): void {
+  queueMicrotask(() => {
+    if ([...sessionViews.values()].includes(sessionId) || [...sideWants.values()].includes(sessionId) || [...slots.values()].some(v => v.sessionId === sessionId)) return
+    for (const s of mounted) {
+      if (s.sessionId === sessionId && !s.parked && s.keepAlive && s.surface.floatOnLeave !== false
+        && (s.layout === 'inline' || s.layout === 'side')) patch(s.nonce, { layout: 'float' })
+    }
+  })
+}
+
 /** Ends a surface whatever it asked (`ctx.close()`). */
 export function endEngineSurface(n: number): void { remove(n) }
 
@@ -177,10 +194,20 @@ export function endEngineSurfaceIndicator(n: number): void {
  * slot of the composer whose button opened it; if that one is gone, to another live slot of the same
  * session; with none, it is drawn as a `side` panel.
  */
+// SessionChat registers even when no inline surface is drawn, covering the Nay panel and detached
+// sessions as well as workspace panes. Leaving one of several views does not float a surface.
+const sessionViews = new Map<string, string>()
+export function registerEngineSessionView(id: string, sessionId: string | null): void {
+  const previous = sessionViews.get(id)
+  if (sessionId === null) sessionViews.delete(id)
+  else sessionViews.set(id, sessionId)
+  if (previous && previous !== sessionId) floatAfterLeave(previous)
+}
+
 const slots = new Map<string, { el: HTMLElement; sessionId: string }>()
 export function registerEngineInlineSlot(id: string, sessionId: string, el: HTMLElement | null, own?: HTMLElement | null): void {
   if (el) { if (slots.get(id)?.el === el) return; slots.set(id, { el, sessionId }); emit(); return }
-  if (own && slots.get(id)?.el === own) { slots.delete(id); emit() }
+  if (own && slots.get(id)?.el === own) { slots.delete(id); emit(); floatAfterLeave(sessionId) }
 }
 /** The slot the visible surface should occupy right now, or `null`. */
 export function resolveInlineSlot(): HTMLElement | null {
@@ -259,9 +286,11 @@ export function resolveSideSlotId(): string | null {
  */
 const sideWants = new Map<string, string>()
 export function registerEngineSideWant(id: string, sessionId: string | null): void {
-  if (sessionId === null) { if (sideWants.delete(id)) emit(); return }
+  if (sessionId === null) { const previous = sideWants.get(id); if (sideWants.delete(id)) emit(); if (previous) floatAfterLeave(previous); return }
   if (sideWants.get(id) === sessionId) return
+  const previous = sideWants.get(id)
   sideWants.set(id, sessionId); emit()
+  if (previous) floatAfterLeave(previous)
 }
 /**
  * The aside that should hold the visible side surface: the first one that already has its slot, else
@@ -309,5 +338,14 @@ export function useMountedEngineSurfaces(): OpenSurface[] {
 }
 export function mountedEngineSurfaces(): OpenSurface[] { return mounted }
 
+const naySlots = new Map<string, HTMLElement>()
+export function registerEngineNaySlot(id: string, el: HTMLElement | null, own?: HTMLElement | null): void {
+  if (el) { if (naySlots.get(id) === el) return; naySlots.set(id, el); emit() }
+  else if (own && naySlots.get(id) === own) { naySlots.delete(id); emit() }
+}
+export function useEngineNaySlot(id: string): HTMLElement | null {
+  return useSyncExternalStore(subscribe, () => naySlots.get(id) ?? null, () => null)
+}
+
 /** Tests only. */
-export function resetEngineSurfaceHostForTests(): void { returnFocus = null; slots.clear(); pageSlots.clear(); sideSlots.clear(); sideWants.clear(); endHandlers.clear(); navigator = null; commit([]) }
+export function resetEngineSurfaceHostForTests(): void { returnFocus = null; naySlots.clear(); sessionViews.clear(); slots.clear(); pageSlots.clear(); sideSlots.clear(); sideWants.clear(); endHandlers.clear(); navigator = null; commit([]) }

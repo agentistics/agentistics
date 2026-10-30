@@ -1,3 +1,4 @@
+import { SurfaceTurnBadge } from '../SurfaceTurnBadge'
 /**
  * ChatBubble — one turn of a session's conversation.
  *
@@ -31,7 +32,7 @@ import remarkBreaks from 'remark-breaks'
 import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { loadClosedFleet, useFleet } from '../../lib/fleet'
-import { parseSystemEvent, systemEventLine, systemEventTitle, systemEventSender, type SystemEvent } from '../../lib/systemEvent'
+import { surfaceTurnText, parseSystemEvent, systemEventLine, systemEventTitle, systemEventSender, type SystemEvent } from '../../lib/systemEvent'
 import type { ChatTaskEnd } from '@agentistics/core'
 import { chatNote, type ChatNoteTab } from '../../lib/chatNote'
 import { openArtifacts } from '../../lib/artifactsStore'
@@ -393,7 +394,7 @@ function SystemNote({ note, noteRef, pt, sessionId }: { note: string; noteRef?: 
   )
 }
 
-const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant }: ChatBubbleProps) {
+const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, sessionId, provisional, awaiting, awaitingWorking, awaitingSinceMs, onReply, onReplyExcerpt, onQuoteClick, anchorId, attachmentSends, attachmentMessages, markerSinceMs, onForward, onSelectStart, selectMode, selected, onToggleSelect, vaultGrant, surfaceSubmitted }: ChatBubbleProps & { surfaceSubmitted?: boolean }) {
   const isMobile = useIsMobile()
   const pt = lang === 'pt'
   const mine = turn.role === 'user'
@@ -702,6 +703,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
             own before this change, so the icon is the whole of it. */}
         {mine && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 5 }}>
+            {surfaceSubmitted && <SurfaceTurnBadge pt={pt} />}
             {vaultGrant && (
               <button
                 type="button"
@@ -1320,5 +1322,7 @@ export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
   if (event) return event.sender
     ? <FleetSystemEventRow event={event} lang={props.lang} at={props.turn.at} />
     : <SystemEventRow event={event} pt={props.lang === 'pt'} sessionId={props.sessionId} />
+  const surfaceText = props.turn.role === 'user' ? surfaceTurnText(props.turn.text) : null
+  if (surfaceText !== null) return <ChatBubbleInner {...props} surfaceSubmitted turn={{ ...props.turn, text: surfaceText }} />
   return <ChatBubbleInner {...props} />
 })

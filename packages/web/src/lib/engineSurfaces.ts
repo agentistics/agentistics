@@ -7,11 +7,11 @@
  * it ever reaches `import()`: same-origin, under `/api/engine/x/`, no dot-segments. A community build
  * answers no `surfaces`, so there is no button at all.
  */
-export type SurfacePlacement = 'session-header' | 'nay-dock' | 'app-bar' | 'composer' | 'rail'
+export type SurfacePlacement = 'session-header' | 'nay-dock' | 'app-bar' | 'composer' | 'rail' | 'nay-tab'
 export type SurfaceIcon = 'phone' | 'phone-off' | 'sparkles' | 'panel'
 export type SurfaceActiveTone = 'accent' | 'danger'
 const ICONS: readonly string[] = ['phone', 'phone-off', 'sparkles', 'panel']
-export type SurfaceLayout = 'full' | 'side' | 'inline' | 'page'
+export type SurfaceLayout = 'full' | 'side' | 'inline' | 'page' | 'float'
 
 export interface EngineSurfaceInfo {
   id: string
@@ -27,6 +27,8 @@ export interface EngineSurfaceInfo {
   layout?: SurfaceLayout
   /** No host padding, title bar or close button in `full` / `side`; the surface draws its own. */
   frameless?: boolean
+  /** 1.19: kept-alive inline/side surfaces float when their session leaves; false opts out. */
+  floatOnLeave?: boolean
 }
 
 /** A pill in the top bar on every screen while it is set (`ctx.setIndicator`). */
@@ -126,10 +128,10 @@ export function surfacesFrom(status: unknown, placement: SurfacePlacement): Engi
     const activeLabel = typeof al?.pt === 'string' && typeof al?.en === 'string' ? { pt: al.pt, en: al.en } : undefined
     const activeTone = s.activeTone === 'danger' || s.activeTone === 'accent' ? s.activeTone : undefined
     const layout = placement === 'rail' ? 'page'
-      : s.layout === 'full' || s.layout === 'side' || (s.layout === 'inline' && placement === 'composer') ? s.layout : undefined
+      : s.layout === 'full' || s.layout === 'float' || s.layout === 'side' || (s.layout === 'inline' && placement === 'composer') ? s.layout : undefined
     out.push({
       id: s.id, placement, label: { pt: label.pt, en: label.en }, module: s.module,
-      ...(icon ? { icon } : {}), ...(activeIcon ? { activeIcon } : {}), ...(activeLabel ? { activeLabel } : {}),
+      ...(typeof s.floatOnLeave === 'boolean' ? { floatOnLeave: s.floatOnLeave } : {}), ...(icon ? { icon } : {}), ...(activeIcon ? { activeIcon } : {}), ...(activeLabel ? { activeLabel } : {}),
       ...(activeTone ? { activeTone } : {}), ...(layout ? { layout } : {}), ...(s.frameless === true ? { frameless: true } : {}),
     })
   }
@@ -142,7 +144,7 @@ export function surfacesFrom(status: unknown, placement: SurfacePlacement): Engi
  */
 export function stillAnnounced(status: unknown): ((s: Pick<EngineSurfaceInfo, 'id' | 'placement'>) => boolean) | null {
   if (!status || typeof status !== 'object') return null
-  const placements: SurfacePlacement[] = ['session-header', 'nay-dock', 'app-bar', 'composer', 'rail']
+  const placements: SurfacePlacement[] = ['session-header', 'nay-dock', 'app-bar', 'composer', 'rail', 'nay-tab']
   const keys = new Set(placements.flatMap(p => surfacesFrom(status, p).map(s => `${p}:${s.id}`)))
   return s => keys.has(`${s.placement}:${s.id}`)
 }

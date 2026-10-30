@@ -10,10 +10,11 @@
  */
 
 /**
+ * 1.19 adds `nay-tab`, an extra tab in the floating Nay panel.
  * Where the host may draw a surface's button. 1.18 adds `composer` (an icon button in the shared composer)
  * and `rail` (an icon entry in the app's navigation, beside the pages, that opens the surface AS a page).
  */
-export const SURFACE_PLACEMENTS = ['session-header', 'nay-dock', 'app-bar', 'composer', 'rail'] as const
+export const SURFACE_PLACEMENTS = ['session-header', 'nay-dock', 'app-bar', 'composer', 'rail', 'nay-tab'] as const
 export type SurfacePlacement = (typeof SURFACE_PLACEMENTS)[number]
 
 /** Generic icon names understood by the host; engines never choose a library glyph directly. */
@@ -61,9 +62,12 @@ export interface EngineSurface {
    * in `full` and `side`; the surface draws its own chrome and ends itself with `ctx.close()`.
    */
   frameless?: boolean
+  /** 1.19: kept-alive inline/side surfaces float when their session leaves; false opts out. */
+  floatOnLeave?: boolean
 }
 
 /**
+ * 1.19 adds `float`: the shared draggable detached window, minimized onto the Nay button without unmounting.
  * How the host frames a mounted surface: `full` is a modal overlay over the page, `side` a panel docked
  * to the edge that leaves the page usable, and (1.18) `inline` mounts it directly above the session
  * composer, inside the session view, leaving the conversation and the composer usable. `inline` exists
@@ -72,8 +76,8 @@ export interface EngineSurface {
  * only for (and is the only layout of) the `rail` placement. The surface switches between layouts
  * without being unmounted (the host re-parents the same element).
  */
-export type SurfaceLayout = 'full' | 'side' | 'inline' | 'page'
-export const SURFACE_LAYOUTS = ['full', 'side', 'inline', 'page'] as const
+export type SurfaceLayout = 'full' | 'side' | 'inline' | 'page' | 'float'
+export const SURFACE_LAYOUTS = ['full', 'side', 'inline', 'page', 'float'] as const
 
 /**
  * 1.18: what a surface asks the host to show in the app's top bar, on every screen, while it is set
@@ -133,7 +137,7 @@ export interface SurfaceMountContext {
    */
   layout: SurfaceLayout
   /**
-   * Switches the host frame between `full`, `side` and (1.18, `composer` placement only) `inline`; the
+   * Switches the host frame between `full`, `side`, (1.19) `float` and (1.18, `composer` placement only) `inline`; the
    * module stays mounted. A `rail` surface is always `page`: the host ignores any other layout for it,
    * and `page` for any other placement.
    */
@@ -186,6 +190,7 @@ export type SurfaceRefusalReason =
   | 'bad-flag'
   | 'bad-layout'
   | 'bad-frameless'
+  | 'bad-float-on-leave'
   | 'bad-active'
 
 const ID = /^[a-z][a-z0-9-]{0,39}$/
@@ -235,6 +240,7 @@ export function surfaceRefusals(
     if ((s.activeIcon !== undefined && !(SURFACE_ICONS as readonly string[]).includes(s.activeIcon))
       || (s.activeTone !== undefined && !(SURFACE_ACTIVE_TONES as readonly string[]).includes(s.activeTone))
       || (s.activeLabel !== undefined && !(al && labelOk(al.pt) && labelOk(al.en)))) out.push({ id, reason: 'bad-active' })
+    if (s.floatOnLeave !== undefined && typeof s.floatOnLeave !== 'boolean') out.push({ id, reason: 'bad-float-on-leave' })
     if (s.frameless !== undefined && typeof s.frameless !== 'boolean') out.push({ id, reason: 'bad-frameless' })
   }
   return out
