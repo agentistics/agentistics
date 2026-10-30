@@ -90,6 +90,56 @@ describe('side slot store', () => {
   })
 })
 
+describe('a closed aside is asked to open', () => {
+  test('with no slot yet, the pane that shows the session is chosen; once a slot exists it wins', async () => {
+    state.resetEngineSurfaceHostForTests()
+    await open('s1')
+    expect(state.resolveSideAsideId()).toBeNull()
+    await act(async () => { state.registerEngineSideWant('aside-split', 's1'); state.registerEngineSideWant('aside-other', 's2') })
+    expect(state.resolveSideAsideId()).toBe('aside-split')
+    await act(async () => { state.registerEngineSideWant('aside-main', 's1') })
+    expect(state.resolveSideAsideId()).toBe('aside-main')
+    // The fixed panel is still what resolveSideSlot says until the aside has mounted its slot.
+    expect(state.resolveSideSlot()).toBeNull()
+    const el = document.createElement('div')
+    await act(async () => { state.registerEngineSideSlot('aside-split', 's1', el) })
+    expect(state.resolveSideAsideId()).toBe('aside-split')
+    expect(state.resolveSideSlot()).toBe(el)
+    await act(async () => { state.registerEngineSideWant('aside-split', null) })
+    state.resetEngineSurfaceHostForTests()
+  })
+
+  test('from a closed aside: the pane asks, the aside opens, the surface is drawn inside it', async () => {
+    state.resetEngineSurfaceHostForTests()
+    const hostMod = await import('./EngineSurfaceHost')
+    // A minimal pane: closed until the store names it, as SessionsPage does with engineOwned.
+    function Pane() {
+      const sid = 's1'
+      const side = state.useEngineSideSurface(sid)
+      const id = state.useEngineSideAsideId()
+      useEffect(() => { state.registerEngineSideWant('aside-main', side ? sid : null); return () => state.registerEngineSideWant('aside-main', null) }, [side])
+      const owned = side !== null && id === 'aside-main'
+      return owned
+        ? h(asideMod.EngineSurfaceAside, { engine: { sessionId: sid, slotId: 'aside-main', label: 'Side', owned }, shown: true, panelsLabel: 'Panels', onPickEngine() {}, onPickPanels() {}, showStrip: true }, h('i'))
+        : h('div', { 'data-closed': '' })
+    }
+    const mounts: HTMLElement[] = []
+    const pane = await mount(h(Pane))
+    const fixed = await mount(h(hostMod.EngineSurfaceHost, { load: async () => ({ mount(el: HTMLElement) { mounts.push(el); el.setAttribute('data-surface', '') } }) }))
+    expect(pane.host.querySelector('[data-closed]')).not.toBeNull()
+    await open('s1')
+    await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+    expect(pane.host.querySelector('[data-closed]')).toBeNull()
+    const slot = pane.host.querySelector('[data-engine-side-slot="aside-main"]')!
+    expect(slot).not.toBeNull()
+    expect(mounts.length).toBe(1)
+    expect(slot.contains(mounts[0]!)).toBe(true)
+    fixed.root.unmount()
+    pane.root.unmount()
+    state.resetEngineSurfaceHostForTests()
+  })
+})
+
 describe('reopen', () => {
   test('asking again for the mounted surface bumps reopen on the same nonce', async () => {
     state.resetEngineSurfaceHostForTests()

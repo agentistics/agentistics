@@ -252,6 +252,37 @@ export function resolveSideSlotId(): string | null {
   for (const [id, v] of sideSlots) if (v.sessionId === current.sessionId) return id
   return null
 }
+/**
+ * Panes that SHOW a session a side surface is drawn for, and so may be asked to open their aside: the
+ * slot only exists inside an open aside, so without this a closed aside could never receive the
+ * surface (it would fall back to the fixed panel). Registered by the pane, removed by the same pane.
+ */
+const sideWants = new Map<string, string>()
+export function registerEngineSideWant(id: string, sessionId: string | null): void {
+  if (sessionId === null) { if (sideWants.delete(id)) emit(); return }
+  if (sideWants.get(id) === sessionId) return
+  sideWants.set(id, sessionId); emit()
+}
+/**
+ * The aside that should hold the visible side surface: the first one that already has its slot, else
+ * the one pane asked to open (`aside-main` preferred). `null` when no Sessions pane shows its session.
+ */
+export function resolveSideAsideId(): string | null {
+  const current = visible
+  if (!drawnSide(current)) return null
+  const mounted = resolveSideSlotId()
+  if (mounted !== null) return mounted
+  let first: string | null = null
+  for (const [id, sid] of sideWants) {
+    if (sid !== current.sessionId) continue
+    if (id === 'aside-main') return id
+    first ??= id
+  }
+  return first
+}
+export function useEngineSideAsideId(): string | null {
+  return useSyncExternalStore(subscribe, resolveSideAsideId, () => null)
+}
 export function useEngineSideSlotId(): string | null {
   return useSyncExternalStore(subscribe, resolveSideSlotId, () => null)
 }
@@ -279,4 +310,4 @@ export function useMountedEngineSurfaces(): OpenSurface[] {
 export function mountedEngineSurfaces(): OpenSurface[] { return mounted }
 
 /** Tests only. */
-export function resetEngineSurfaceHostForTests(): void { returnFocus = null; slots.clear(); pageSlots.clear(); sideSlots.clear(); endHandlers.clear(); navigator = null; commit([]) }
+export function resetEngineSurfaceHostForTests(): void { returnFocus = null; slots.clear(); pageSlots.clear(); sideSlots.clear(); sideWants.clear(); endHandlers.clear(); navigator = null; commit([]) }

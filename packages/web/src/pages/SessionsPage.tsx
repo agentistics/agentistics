@@ -114,7 +114,7 @@ import {
 } from '../lib/artifactsStore'
 import { studioMenuRow } from '../lib/studioMenuRow'
 import { EngineSurfaceAside, engineAsideWantsOpen } from '../components/EngineSurfaceAside'
-import { useEngineSideSlotId, useEngineSideSurface } from '../lib/engineSurfaceHost'
+import { registerEngineSideWant, useEngineSideAsideId, useEngineSideSurface } from '../lib/engineSurfaceHost'
 import { closedRightEdge, restingLeftEdge, setRightAsideEdge, useRightAsideEdge } from '../lib/rightAsideEdge'
 import { PaneScope, paneDomId, setActivePane, type PaneId } from '../lib/paneScope'
 import { closePane, readSplitRoute, replaceInPane, splitHref, SPLIT_VIEW_PARAM, type SplitRoute } from '../lib/splitRoute'
@@ -990,8 +990,15 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   }, [slotLayout.right, engineActive])
   const engineSlotId = `aside-${pane}`
   // Two panes on one session: only the aside whose slot the surface was mounted into shows the section.
-  const engineSideSlotId = useEngineSideSlotId()
-  const engineOwned = engineActive && engineSideSlotId === engineSlotId
+  // The slot only exists inside an open aside, so a pane showing the session ASKS for the surface (the
+  // store picks one pane) and that pane's aside opens; the slot then registers and the surface mounts.
+  const engineSessionId = engineSide?.sessionId ?? null
+  useLayoutEffect(() => {
+    registerEngineSideWant(engineSlotId, engineSessionId)
+    return () => registerEngineSideWant(engineSlotId, null)
+  }, [engineSlotId, engineSessionId])
+  const engineAsideId = useEngineSideAsideId()
+  const engineOwned = engineActive && engineAsideId === engineSlotId
   const engineTabShown = engineOwned && (engineTabOn || slotLayout.right === null)
   /** A person picking a panel from the rail or the phone's tabs: that panel is what they want to see. */
   const openSlotPanelPicked = useCallback((id: PanelId) => { setEngineTabOn(false); openSlotPanel(id) }, [openSlotPanel])
