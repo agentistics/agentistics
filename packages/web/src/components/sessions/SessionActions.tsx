@@ -247,7 +247,8 @@ export function SessionActions({
               navigating away from the page. */}
           {!inline && <div onClick={() => { setOpen(false); setAsking(null); setConfirming(false) }}
                style={{ position: 'fixed', inset: 0, zIndex: 20 }} />}
-          <div style={inline ? { display: 'flex', flexDirection: 'column' } : {
+          {/* `role="menu"` + `data-portalled-menu` put the popover under the shared glass rule (index.css). */}
+          <div {...(inline ? {} : { role: 'menu', 'data-portalled-menu': '' })} style={inline ? { display: 'flex', flexDirection: 'column' } : {
             position: 'absolute', top: '100%', right: 0, zIndex: 21, marginTop: 6,
             minWidth: 240, maxWidth: 320,
             background: 'var(--bg-surface)', border: '1px solid var(--border)',
