@@ -65,14 +65,15 @@ describe('1.15', () => {
     expect(surfaceRefusals([surface({ activeTone: 'pink' as never })])[0]!.reason).toBe('bad-active')
     expect(surfaceRefusals([surface({ activeLabel: { pt: '', en: 'x' } })])[0]!.reason).toBe('bad-active')
   })
-  it('accepts rail and Nay dock pages, with icons where required', () => {
+  it('accepts page only for rail and nay-sessions, with icons where required', () => {
     expect(surfaceRefusals([surface({ placement: 'rail', icon: 'sparkles' })])).toEqual([])
     expect(surfaceRefusals([surface({ placement: 'rail', icon: 'sparkles', layout: 'page' })])).toEqual([])
     expect(surfaceRefusals([surface({ placement: 'rail' })])[0]!.reason).toBe('bad-icon')
     expect(surfaceRefusals([surface({ placement: 'rail', icon: 'panel', layout: 'side' })])[0]!.reason).toBe('bad-layout')
     expect(surfaceRefusals([surface({ placement: 'composer', icon: 'phone', layout: 'page' })])[0]!.reason).toBe('bad-layout')
     expect(surfaceRefusals([surface({ placement: 'app-bar', layout: 'page' })])[0]!.reason).toBe('bad-layout')
-    expect(surfaceRefusals([surface({ id: 'voice-calls-nay', placement: 'nay-dock', layout: 'page' })])).toEqual([])
+    expect(surfaceRefusals([surface({ placement: 'nay-dock', layout: 'page' })])[0]!.reason).toBe('bad-layout')
+    expect(surfaceRefusals([surface({ placement: 'nay-sessions', icon: 'phone', layout: 'page' })])).toEqual([])
   })
   it('judges an indicator: label, since, tone, icon and end label', () => {
     const ind = { label: { pt: 'Em curso', en: 'Running' } }
