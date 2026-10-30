@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.173.0': {
+  '2.172.0': {
     features: [
       {
         pt: 'Interfaces de motores podem acompanhar você em uma janela flutuante ao sair da sessão. Minimize no botão da Nay e retome sem interromper o que está rodando.',
