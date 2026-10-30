@@ -776,7 +776,7 @@ export async function batch(
     for (const spec of cmd.specs) {
       const p = await planSpawnFilingSafe({
         liveIds,
-        role: spawnRole({ leaderPrefix: !!spec.name && hasRolePrefix(spec.name), hasParent: !!callerId }),
+        role: spawnRole({ explicit: spec.role, leaderPrefix: !!spec.name && hasRolePrefix(spec.name), hasParent: !!callerId }),
         taskRef, subtaskRef: cmd.subtask, folderRef: spec.folder, cwd: spec.cwd, sharedCwd: cmd.sharedCwd,
         callerSessionId: verifiedCaller, harness: spec.harness,
         // Earlier specs of this batch already occupy their directories.
@@ -832,7 +832,7 @@ export async function batch(
     const id = newSessionId()
     const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
-    const batchRole = spec.name && hasRolePrefix(spec.name) ? 'leader' as const : parentSessionId ? 'worker' as const : undefined
+    const batchRole = spec.role ?? (spec.name && hasRolePrefix(spec.name) ? 'leader' as const : parentSessionId ? 'worker' as const : undefined)
     const role = batchRole ? await ensureSpawnRole([offeredConversationId, id], batchRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
     const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: spec.harness, lang, ...(await folderCtxFor(filing.folderId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(filing.taskId, filing.subtaskId, cmd.task)) })
     const account = decideSpawnAccount({
