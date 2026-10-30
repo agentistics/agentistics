@@ -5,7 +5,7 @@ import { useEscapeOwner } from '../lib/overlayStack'
 import {
   closeEngineSurface, effectiveSurfaceLayout, endEngineSurface, leaveEngineSurfacePage, onEngineSurfaceIndicatorEnd, openEngineSurface, openEngineSurfaceSession,
   registerEngineInlineSlot, registerEnginePageSlot, registerEngineSideSlot, resolveInlineSlot, resolveSideSlot, setEngineSurfaceIndicator, setEngineSurfaceKeepAlive,
-  mountedEngineSurfaces, reconcileEngineSurfaces, setEngineSurfaceLayout, useEngineInlineSlot, useEnginePageSlot, useEngineSideSlot, useMountedEngineSurfaces, useOpenEngineSurface, type OpenSurface,
+  mountedEngineSurfaces, reconcileEngineSurfaces, setEngineSurfaceLayout, useEngineInlineSlot, useEngineSideAsideId, useEnginePageSlot, useEngineSideSlot, useMountedEngineSurfaces, useOpenEngineSurface, type OpenSurface,
 } from '../lib/engineSurfaceHost'
 import { readEngineStatus, useEngineSurfaceList } from '../hooks/useEngineSurfaces'
 import { onEngineCapsInvalidated } from '../lib/engineCapsBus'
@@ -129,7 +129,11 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   const slot = open.parked ? null : inlineSlot
   const page = open.layout === 'page'
   // A page whose route is not on screen is held off screen like a parked surface.
-  const offscreen = open.parked || (page && !pageSlot)
+  // A session surface drawn as `side` whose session is shown in a Sessions pane never uses the fixed
+  // panel: with no aside holding it yet it stays mounted, hidden, until one takes it or it is closed.
+  const asideWanted = useEngineSideAsideId() !== null
+  const heldForAside = !open.parked && !page && effectiveSurfaceLayout(open.layout, !!slot) === 'side' && !sideSlot && asideWanted
+  const offscreen = open.parked || (page && !pageSlot) || heldForAside
   // Parked, it reports the layout it had (and will come back in), not a fallback computed without a slot.
   const layout = open.parked ? open.layout : effectiveSurfaceLayout(open.layout, !!slot)
   const inline = layout === 'inline'

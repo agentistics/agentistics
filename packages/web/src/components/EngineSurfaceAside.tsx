@@ -64,3 +64,13 @@ export function engineAsideWantsOpen({ panelOpen, studioMinimized, engineShown }
 }): boolean {
   return (panelOpen && !studioMinimized) || engineShown
 }
+
+/**
+ * What "Panels" does on the aside's strip: with no panel in the aside, open one; with the Studio
+ * minimized in it, restore the Studio (closing the aside would throw the surface out); else just
+ * switch to the panel that is there.
+ */
+export function panelsPickAction({ panelOpen, studioMinimized }: { panelOpen: boolean; studioMinimized: boolean }): 'open-live' | 'restore-studio' | 'show' {
+  if (!panelOpen) return 'open-live'
+  return studioMinimized ? 'restore-studio' : 'show'
+}
