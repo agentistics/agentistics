@@ -38,6 +38,7 @@ import { AttentionMarkLine, RecordedBlock } from './AttentionMarks'
 import { placeAttention, type ChatAttentionMark, type ChatRecorded } from '../../lib/sessionRecorded'
 import type { FleetActionId, FleetRow } from '../../lib/fleet'
 import { modeStyle } from '../../lib/modeStyle'
+import { NO_QUESTIONS_WARNING } from '@agentistics/core'
 import { NoQuestionsWarning } from './ModePicker'
 import { modeLabel, modeTitle, onlyModeNote } from '../../lib/modeLabel'
 import { modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
@@ -1905,12 +1906,16 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // row has only the harness's cycle key, so its menu is the measured table and a choice is N cycles.
   const directModes = row?.modes && row.modes.length > 0 ? row.modes : null
   const modeOptions = useMemo(() => directModes ?? modeMenuFor(row?.harness), [directModes, row?.harness])
-  const chooseMode = useCallback(async (target: string) => {
+  // "No questions" is dangerous: choosing it only ASKS (a confirm modal explains the mode); the real
+  // switch runs from the modal's confirm. `noQuestionsAsk` holds the pending target id.
+  const [noQuestionsAsk, setNoQuestionsAsk] = useState<string | null>(null)
+  const switchMode = useCallback(async (target: string) => {
     if (!row?.mode || !canPrompt) return
     if (directModes) {
       setModeMenuOpen(false)
       const out = await act({ id: session.id, action: 'setMode', text: target })
-      setNotice(out.ok ? (modeOptions.find(mode => mode.id === target)?.label ?? target) : out.message)
+      // Success is silent: the band's mode button already shows the new mode. Only a failure speaks.
+      if (!out.ok) setNotice(out.message)
       if (out.ok) nudgeFleet()
       return
     }
@@ -1919,9 +1924,18 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // MODE.NOQ — the SERVER presses and reads until the footer names the target: whether a mode is in the
     // cycle depends on how the session was started, so a count computed here could land on the wrong one.
     const out = await act({ id: session.id, action: 'cycleMode', text: target })
-    setNotice(out.ok ? (modeOptions.find(mode => mode.id === target)?.label ?? target) : out.message)
+    if (!out.ok) setNotice(out.message)
     if (out.ok) nudgeFleet()
-  }, [act, canPrompt, directModes, modeOptions, row?.mode, session.id])
+  }, [act, canPrompt, directModes, row?.mode, session.id])
+  const chooseMode = useCallback(async (target: string) => {
+    const opt = modeOptions.find(mode => mode.id === target)
+    if (opt && 'canonical' in opt && opt.canonical === 'no-questions' && row?.mode?.id !== target) {
+      setModeMenuOpen(false)
+      setNoQuestionsAsk(target)
+      return
+    }
+    await switchMode(target)
+  }, [modeOptions, row?.mode?.id, switchMode])
   /** EXT.OPEN: the one question before a write continues an external session here. */
   const [continueAsk, setContinueAsk] = useState<{ message: string; text: string } | null>(null)
   const [continuing, setContinuing] = useState(false)
@@ -4107,6 +4121,18 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
           }}
         />
       )}
+
+      {/* "No questions" confirm: explains the mode (it is dangerous); only the confirm switches. */}
+      <ConfirmModal
+        open={noQuestionsAsk !== null}
+        title={pt ? 'Ativar o modo sem perguntas?' : 'Turn on no-questions mode?'}
+        message={NO_QUESTIONS_WARNING[pt ? 'pt' : 'en']}
+        confirmLabel={pt ? 'Ativar sem perguntas' : 'Turn on no questions'}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        tone="danger"
+        onConfirm={() => { const target = noQuestionsAsk; setNoQuestionsAsk(null); if (target) void switchMode(target) }}
+        onCancel={() => setNoQuestionsAsk(null)}
+      />
 
       {/* EXT.OPEN — asked ONCE, before a write ends an external process (`external-continue.ts`). */}
       <ConfirmModal

@@ -3231,9 +3231,9 @@ export default function AppLayout() {
       // is the left edge, which is the one the eye follows down the page.
       width: '100%', padding: `0 ${PAGE_INSET}px`, boxSizing: 'border-box',
       height: '100%', background: tabsRowOn ? 'var(--bg-card)' : undefined,
-      // The header is the card the active tab fuses into; the strip's left button (never a tab) sits
-      // above its top-left corner, so that corner is free to round like every other panel corner.
-      borderTopLeftRadius: tabsRowOn ? PANEL_RADIUS : undefined,
+      // The header is its own floating card (the active tab fuses into its top edge, never a corner:
+      // the strip's left button is never a tab), so all four corners round like every other panel.
+      borderRadius: tabsRowOn ? PANEL_RADIUS : undefined,
       display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, position: 'relative',
     }}>
       {/* A conversation in SELECTION MODE turns this strip into "N selected · Forward · Copy ·
