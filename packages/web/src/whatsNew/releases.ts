@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.166.0': {
+    features: [
+      {
+        pt: 'Motores podem colocar um botão de ícone no campo de mensagem, ao lado do microfone (engine-api 1.18).',
+        en: 'Engines can add an icon button to the message box, next to the microphone (engine-api 1.18).',
+      },
+      {
+        pt: 'Interfaces de motores podem abrir embutidas logo acima do campo de mensagem, sem moldura do app, e alternar entre embutida, lateral e tela cheia (engine-api 1.18).',
+        en: 'Engine interfaces can open inline right above the message box, without the app frame, and switch between inline, side and full screen (engine-api 1.18).',
+      },
+      {
+        pt: 'O botão de ícone de uma interface de motor no campo de mensagem agora mostra um estado ativo enquanto ela está aberta, e clicar nele a fecha (engine-api 1.18).',
+        en: 'An engine interface\'s icon button in the message box now shows an active state while it is open, and clicking it closes it (engine-api 1.18).',
+      },
+    ],
+    fixes: [],
+  },
   '2.165.2': {
     features: [],
     fixes: [

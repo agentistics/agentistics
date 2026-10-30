@@ -23,7 +23,7 @@ import { AccountLimitBand } from './AccountSwitch'
 
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { flushSync } from 'react-dom'
 import { GROW_AT_PX, GROW_TURNS, INITIAL_TURNS, shownToInclude, windowStart } from '../../lib/turnWindow'
@@ -86,6 +86,8 @@ import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
+import { EngineSurfaceButtons } from '../EngineSurfaceButtons'
+import { EngineSurfaceInlineSlot } from '../EngineSurfaceHost'
 
 import {
   applyDraftRequest, consumeDraftRequest, getDraftRequest, useDraftRequest,
@@ -1067,6 +1069,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * received "quote, quote, quote, all my text". Read through a ref so the bubble callbacks stay
    * stable for `ChatBubble`'s memo.
    */
+  /** This composer's own identity for engine surfaces: its button opens into its own inline slot. */
+  const engineSlotId = useId()
   const composerNow = useRef({ replyTo, draft, caret })
   composerNow.current = { replyTo, draft, caret }
   /** The reply fields ABOVE each quote, by quote index. The main field is `textareaRef`. */
@@ -3161,6 +3165,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               {/* Loose on the composer's own surface — no second card behind it. It used to sit in
                   its own `--bg-base` box with a border, which read as a field floating inside the
                   field that holds it; dropping both leaves it the same colour as its container. */}
+              {/* An engine surface asked to sit inline mounts here, directly above the composer. */}
+              <EngineSurfaceInlineSlot sessionId={session.id} slotId={engineSlotId} />
               <ComposerShell hidden={showReopen} dimmed={!canPrompt}>
                 <input
                   ref={fileRef}
@@ -3545,6 +3551,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     listening={listening}
                     label={listening ? (pt ? 'Parar de ouvir' : 'Stop listening') : (pt ? 'Ditar' : 'Dictate')}
                   />
+                )}
+
+                {!answeringNow && (
+                  <EngineSurfaceButtons placement="composer" sessionId={session.id} slotId={engineSlotId} lang={pt ? 'pt' : 'en'} />
                 )}
 
                 {/* THE CONTEXT GAUGE (design item 3, owner 2026-09-27) — right after the

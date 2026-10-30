@@ -155,7 +155,13 @@
  * host invalidates when the surface unmounts or the session ends. Older hosts omit it; an engine that needs
  * it refuses to load there rather than guessing.
  */
-export const ENGINE_API_VERSION = '1.17.0'
+/**
+ * 1.18.0 — surfaces may be announced in the shared composer (an icon-only button; `icon` required) and may
+ * carry host-mapped icon names, a `layout` (`full`, `side` or `inline` above the session composer), a
+ * `frameless` flag, and an active state (`activeIcon`, `activeLabel`, `activeTone`). An engine built against
+ * 1.18 is refused by an older host, like every minor bump.
+ */
+export const ENGINE_API_VERSION = '1.18.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

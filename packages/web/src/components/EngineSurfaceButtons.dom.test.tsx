@@ -55,6 +55,157 @@ describe('EngineSurfaceButtons + EngineSurfaceHost', () => {
     expect(host.querySelector('button')).toBeNull()
   })
 
+  test('composer surface is an icon button and opens with its composer session', async () => {
+    const hostMod = await import('./EngineSurfaceHost')
+    const { invalidateEngineCaps } = await import('../lib/engineCapsBus')
+    const { resetEngineSurfaceHostForTests } = await import('../lib/engineSurfaceHost')
+    resetEngineSurfaceHostForTests()
+    invalidateEngineCaps()
+    const calls: Array<string | null> = []
+    const buttons = await mount(createElement(mod.EngineSurfaceButtons, { placement: 'composer', sessionId: 'composer-session', lang: 'pt' }))
+    status = { present: true, surfaces: [{ ...surface, placement: 'composer', icon: 'phone' }] }
+    invalidateEngineCaps()
+    await settle()
+    const surfaceHost = await mount(createElement(hostMod.EngineSurfaceHost, { load: async () => ({ mount(_: HTMLElement, ctx: { sessionId: string | null }) { calls.push(ctx.sessionId) } }) }))
+    const btn = buttons.host.querySelector('button[data-engine-surface="demo"]') as HTMLButtonElement
+    expect(btn.getAttribute('aria-label')).toBe('Demo PT')
+    expect(btn.textContent).toBe('')
+    await act(async () => { btn.click() })
+    await settle()
+    expect(calls).toEqual(['composer-session'])
+    surfaceHost.root.unmount()
+    resetEngineSurfaceHostForTests()
+  })
+
+  test('inline composer surface mounts above the composer, keeps it usable, and re-parents on setLayout', async () => {
+    const hostMod = await import('./EngineSurfaceHost')
+    const hostState = await import('../lib/engineSurfaceHost')
+    hostState.resetEngineSurfaceHostForTests()
+    const calls: string[] = []
+    let ctx: { layout: string; setLayout(l: 'full' | 'side' | 'inline'): void; close(): void } | null = null
+    let node: HTMLElement | null = null
+    const load = async () => ({
+      mount(el: HTMLElement, c: NonNullable<typeof ctx>) { calls.push('mount'); ctx = c; node = el; el.textContent = 'inline-body' },
+      unmount() { calls.push('unmount') },
+    })
+    const view = await mount(createElement('div', { 'data-testid': 'session' },
+      createElement(hostMod.EngineSurfaceInlineSlot, { sessionId: 's9', slotId: 'a' }),
+      createElement('textarea', { 'data-testid': 'composer' }),
+    ))
+    const surfaceHost = await mount(createElement(hostMod.EngineSurfaceHost, { load }))
+    const info = { ...surface, placement: 'composer', layout: 'inline' } as never
+    await act(async () => { hostState.openEngineSurface(info, { sessionId: 's9', lang: 'en' }) })
+    await settle()
+    const slot = view.host.querySelector('[data-engine-inline="demo"]') as HTMLElement
+    expect(slot.textContent).toBe('inline-body')
+    expect(ctx!.layout).toBe('inline')
+    expect(document.querySelector('[data-engine-overlay]')).toBeNull()
+    expect(document.activeElement).toBe(node)
+    const composer = view.host.querySelector('[data-testid="composer"]')!
+    expect(slot.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(composer.isConnected).toBe(true)
+
+    const before = node
+    await act(async () => { ctx!.setLayout('side') })
+    expect(document.querySelector('[data-engine-overlay="demo"]')!.textContent).toContain('inline-body')
+    expect(node).toBe(before)
+    await act(async () => { ctx!.setLayout('inline') })
+    expect(view.host.querySelector('[data-engine-inline="demo"]')!.contains(before)).toBe(true)
+    expect(calls).toEqual(['mount'])
+    await act(async () => { ctx!.close() })
+    await settle()
+    expect(calls).toEqual(['mount', 'unmount'])
+    expect(view.host.querySelector('[data-engine-inline]')).toBeNull()
+    // Unmount every root this test made: a leftover EngineSurfaceHost would mount the next test's surface too.
+    await act(async () => { surfaceHost.root.unmount(); view.root.unmount() })
+    hostState.resetEngineSurfaceHostForTests()
+  })
+
+  test('two views of one session: the opener\'s slot wins; when it unmounts the other takes over; none falls back to side', async () => {
+    const hostMod = await import('./EngineSurfaceHost')
+    const hostState = await import('../lib/engineSurfaceHost')
+    hostState.resetEngineSurfaceHostForTests()
+    let ctx: { layout: string } | null = null
+    let node: HTMLElement | null = null
+    const load = async () => ({ mount(el: HTMLElement, c: NonNullable<typeof ctx>) { ctx = c; node = el; el.textContent = 'body' } })
+    const slot = (id: string) => createElement(hostMod.EngineSurfaceInlineSlot, { sessionId: 's1', slotId: id })
+    const viewA = await mount(slot('a'))
+    const viewB = await mount(slot('b'))
+    const surfaceHost = await mount(createElement(hostMod.EngineSurfaceHost, { load }))
+    await act(async () => { hostState.openEngineSurface({ ...surface, placement: 'composer', layout: 'inline' } as never, { sessionId: 's1', lang: 'en', slotId: 'b' }) })
+    await settle()
+    expect(viewB.host.contains(node)).toBe(true)
+    expect(viewA.host.contains(node)).toBe(false)
+    // The view that does NOT own the surface unmounting must not unregister the owner's slot.
+    await act(async () => { viewA.root.unmount() })
+    expect(viewB.host.contains(node)).toBe(true)
+    expect(ctx!.layout).toBe('inline')
+    // The owner goes away: no other live slot, so it is drawn as a side panel (and reported so).
+    await act(async () => { viewB.root.unmount() })
+    expect(document.querySelector('[data-engine-overlay="demo"]')!.getAttribute('data-layout')).toBe('side')
+    expect(ctx!.layout).toBe('side')
+    // A live slot of the same session appearing again takes it back.
+    const viewC = await mount(slot('c'))
+    expect(viewC.host.contains(node)).toBe(true)
+    expect(ctx!.layout).toBe('inline')
+    await act(async () => { surfaceHost.root.unmount(); viewC.root.unmount() })
+    hostState.resetEngineSurfaceHostForTests()
+  })
+
+  test('frameless surface: no host close button or padding; non-composer cannot go inline', async () => {
+    const hostMod = await import('./EngineSurfaceHost')
+    const hostState = await import('../lib/engineSurfaceHost')
+    hostState.resetEngineSurfaceHostForTests()
+    let ctx: { setLayout(l: 'full' | 'side' | 'inline'): void; close(): void } | null = null
+    const load = async () => ({ mount(_: HTMLElement, c: NonNullable<typeof ctx>) { ctx = c } })
+    const surfaceHost = await mount(createElement(hostMod.EngineSurfaceHost, { load }))
+    await act(async () => { hostState.openEngineSurface({ ...surface, frameless: true } as never, { sessionId: null, lang: 'en' }) })
+    await settle()
+    const overlay = document.querySelector('[data-engine-overlay="demo"]') as HTMLElement
+    expect(overlay.dataset.frameless).toBe('true')
+    expect(overlay.querySelector('button')).toBeNull()
+    expect(overlay.style.padding).toBe('0px')
+    await act(async () => { ctx!.setLayout('inline') })
+    expect(hostState.currentEngineSurface()!.layout).toBe('full')
+    await act(async () => { ctx!.close() })
+    await act(async () => { surfaceHost.root.unmount() })
+    hostState.resetEngineSurfaceHostForTests()
+  })
+
+  test('composer surface active state: icon, tone, label; click closes and restores', async () => {
+    const hostMod = await import('./EngineSurfaceHost')
+    const { invalidateEngineCaps } = await import('../lib/engineCapsBus')
+    const hostState = await import('../lib/engineSurfaceHost')
+    hostState.resetEngineSurfaceHostForTests()
+    const calls: string[] = []
+    status = { present: false }
+    invalidateEngineCaps()
+    const buttons = await mount(createElement(mod.EngineSurfaceButtons, { placement: 'composer', sessionId: 'c1', lang: 'en' }))
+    status = { present: true, surfaces: [{ ...surface, placement: 'composer', icon: 'phone', activeIcon: 'phone-off', activeTone: 'danger', activeLabel: { pt: 'Fim', en: 'End it' } }] }
+    invalidateEngineCaps()
+    await settle()
+    const surfaceHost = await mount(createElement(hostMod.EngineSurfaceHost, { load: async () => ({ mount() { calls.push('mount') }, unmount() { calls.push('unmount') } }) }))
+    const btn = () => buttons.host.querySelector('button[data-engine-surface="demo"]') as HTMLButtonElement
+    const idleIcon = btn().innerHTML
+    expect(btn().getAttribute('aria-label')).toBe('Demo')
+    await act(async () => { btn().click() })
+    await settle()
+    expect(btn().getAttribute('aria-pressed')).toBeNull()
+    expect(btn().dataset.active).toBe('true')
+    expect(btn().getAttribute('aria-label')).toBe('End it')
+    expect(btn().dataset.tone).toBe('danger')
+    expect(btn().style.background).toBe('var(--accent-red)')
+    expect(btn().innerHTML).not.toBe(idleIcon)
+    await act(async () => { btn().click() })
+    await settle()
+    expect(document.querySelector('[data-engine-overlay]')).toBeNull()
+    expect(calls).toEqual(['mount', 'unmount'])
+    expect(btn().getAttribute('aria-label')).toBe('Demo')
+    expect(btn().innerHTML).toBe(idleIcon)
+    await act(async () => { surfaceHost.root.unmount(); buttons.root.unmount() })
+    hostState.resetEngineSurfaceHostForTests()
+  })
+
   test('app-bar surface: button → mount → side/full without unmount → survives navigation → explicit close', async () => {
     const hostMod = await import('./EngineSurfaceHost')
     const { invalidateEngineCaps } = await import('../lib/engineCapsBus')

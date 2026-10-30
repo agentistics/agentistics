@@ -10,8 +10,15 @@
  */
 
 /** Where the host may draw a surface's button. */
-export const SURFACE_PLACEMENTS = ['session-header', 'nay-dock', 'app-bar'] as const
+export const SURFACE_PLACEMENTS = ['session-header', 'nay-dock', 'app-bar', 'composer'] as const
 export type SurfacePlacement = (typeof SURFACE_PLACEMENTS)[number]
+
+/** Generic icon names understood by the host; engines never choose a library glyph directly. */
+export const SURFACE_ICONS = ['phone', 'phone-off', 'sparkles', 'panel'] as const
+export type SurfaceIcon = (typeof SURFACE_ICONS)[number]
+
+export const SURFACE_ACTIVE_TONES = ['accent', 'danger'] as const
+export type SurfaceActiveTone = (typeof SURFACE_ACTIVE_TONES)[number]
 
 /** The only path a surface module (and every engine asset) may live under — same origin, host-served. */
 export const ENGINE_ASSET_PREFIX = '/api/engine/x/'
@@ -22,17 +29,43 @@ export interface EngineSurface {
   placement: SurfacePlacement
   /** The button's text. */
   label: { pt: string; en: string }
+  /** Host-mapped icon; REQUIRED for the `composer` placement (an icon-only button). The label remains the accessible name and tooltip. */
+  icon?: SurfaceIcon
+  /**
+   * 1.18, optional, `composer` placement: while this surface is open (any layout) the host's button
+   * shows this icon (from the same closed set), the `activeLabel` and the
+   * `activeTone` fill; clicking it closes the surface. Same spot and size as the idle button.
+   */
+  activeIcon?: SurfaceIcon
+  /** The accessible name and tooltip while active; falls back to `label`. */
+  activeLabel?: { pt: string; en: string }
+  /** The filled style while active (default `accent`); `danger` is the destructive red. */
+  activeTone?: SurfaceActiveTone
   /** A same-origin path under `ENGINE_ASSET_PREFIX`, ending `.js` or `.mjs`. */
   module: string
   /** An environment variable name (`[A-Z][A-Z0-9_]*`): the surface is offered only while it is `1`. */
   experimental?: string
+  /**
+   * 1.18, optional: the layout the surface opens in (default `full`). `inline` is only valid for the
+   * `composer` placement.
+   */
+  layout?: SurfaceLayout
+  /**
+   * 1.18, optional: when `true` the host draws NO padding, title bar or close button around the surface
+   * in `full` and `side`; the surface draws its own chrome and ends itself with `ctx.close()`.
+   */
+  frameless?: boolean
 }
 
 /**
  * How the host frames a mounted surface: `full` is a modal overlay over the page, `side` a panel docked
- * to the edge that leaves the page usable. The surface switches between them without being unmounted.
+ * to the edge that leaves the page usable, and (1.18) `inline` mounts it directly above the session
+ * composer, inside the session view, leaving the conversation and the composer usable. `inline` exists
+ * only for a surface of the `composer` placement; elsewhere the host ignores it. The surface switches
+ * between layouts without being unmounted (the host re-parents the same element).
  */
-export type SurfaceLayout = 'full' | 'side'
+export type SurfaceLayout = 'full' | 'side' | 'inline'
+export const SURFACE_LAYOUTS = ['full', 'side', 'inline'] as const
 
 /** What the host passes a surface's `mount`. */
 export interface SurfaceMountContext {
@@ -40,9 +73,12 @@ export interface SurfaceMountContext {
   sessionId: string | null
   lang: 'pt' | 'en'
   reducedMotion: boolean
-  /** The layout it opened in (always `full`). */
+  /**
+   * The layout actually drawn right now (live): the declared `layout` (else `full`), except that an
+   * `inline` surface reports `side` while no session composer is on screen to hold it.
+   */
   layout: SurfaceLayout
-  /** Switches the host frame between `full` and `side`; the module stays mounted. */
+  /** Switches the host frame between `full`, `side` and (1.18, `composer` placement only) `inline`; the module stays mounted. */
   setLayout(layout: SurfaceLayout): void
   /**
    * Asks the host to close the surface (which then calls `unmount`). A mounted surface stays mounted
@@ -62,8 +98,12 @@ export type SurfaceRefusalReason =
   | 'duplicate-id'
   | 'bad-placement'
   | 'bad-label'
+  | 'bad-icon'
   | 'bad-module'
   | 'bad-flag'
+  | 'bad-layout'
+  | 'bad-frameless'
+  | 'bad-active'
 
 const ID = /^[a-z][a-z0-9-]{0,39}$/
 const FLAG = /^[A-Z][A-Z0-9_]{0,63}$/
@@ -99,10 +139,19 @@ export function surfaceRefusals(
     const l = s.label as { pt?: unknown; en?: unknown } | undefined
     const labelOk = (v: unknown) => typeof v === 'string' && v.trim().length > 0 && v.length <= 60
     if (!l || !labelOk(l.pt) || !labelOk(l.en)) out.push({ id, reason: 'bad-label' })
+    if (s.icon !== undefined && !(SURFACE_ICONS as readonly string[]).includes(s.icon)) out.push({ id, reason: 'bad-icon' })
+    if (s.placement === 'composer' && s.icon === undefined) out.push({ id, reason: 'bad-icon' })
     if (!surfaceModuleOk(s.module)) out.push({ id, reason: 'bad-module' })
     if (s.experimental !== undefined && !(typeof s.experimental === 'string' && FLAG.test(s.experimental))) {
       out.push({ id, reason: 'bad-flag' })
     }
+    if (s.layout !== undefined && !((SURFACE_LAYOUTS as readonly string[]).includes(s.layout)
+      && (s.layout !== 'inline' || s.placement === 'composer'))) out.push({ id, reason: 'bad-layout' })
+    const al = s.activeLabel as { pt?: unknown; en?: unknown } | undefined
+    if ((s.activeIcon !== undefined && !(SURFACE_ICONS as readonly string[]).includes(s.activeIcon))
+      || (s.activeTone !== undefined && !(SURFACE_ACTIVE_TONES as readonly string[]).includes(s.activeTone))
+      || (s.activeLabel !== undefined && !(al && labelOk(al.pt) && labelOk(al.en)))) out.push({ id, reason: 'bad-active' })
+    if (s.frameless !== undefined && typeof s.frameless !== 'boolean') out.push({ id, reason: 'bad-frameless' })
   }
   return out
 }

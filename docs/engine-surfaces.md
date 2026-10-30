@@ -1,4 +1,36 @@
-# Engine surfaces, sockets and assets (engine-api 1.15, 1.17)
+# Engine surfaces, sockets and assets (engine-api 1.15, 1.17, 1.18)
+
+In 1.18 a surface may use the shared `composer` placement. The host renders it as a generic icon
+button beside the microphone; the required bilingual `label` remains its accessible name and tooltip.
+The `icon` is one of `phone`, `phone-off`, `sparkles` or `panel`, mapped by the host. A `composer` surface MUST declare an `icon` (the button is icon-only); without one it is refused with `bad-icon`. An engine built against
+1.18 is refused by an older host (the minor must not exceed the host's), so it never needs the older
+placements as a fallback.
+
+Also in 1.18, a surface declaration may carry two more optional fields, validated by `surfaceRefusals`
+(`bad-layout`, `bad-frameless`):
+
+- `layout?: 'full' | 'side' | 'inline'` is the layout the surface opens in (default `full`). `inline`
+  is valid only for the `composer` placement: the host mounts the surface directly ABOVE the session
+  composer, inside the session view, while the conversation and the composer (text and attachments)
+  stay usable. The module context's `layout` reports it, and `setLayout('full' | 'side' | 'inline')`
+  moves a live surface between the three. The host re-parents the same element, so the module is not
+  remounted and keeps its DOM state. `setLayout('inline')` from a non-`composer` surface is ignored, and
+  if the session view is not on screen an `inline` surface is drawn as `side` until it returns.
+- `frameless?: boolean`: when `true` the host draws no padding, title bar or close button around the
+  surface in `full` and `side`. The surface draws its own chrome and ends itself with `ctx.close()`
+  (always present in the mount context; Esc still closes a `full` surface).
+
+For the `composer` placement, while the surface is open (any layout) the host's button shows an active
+state, in the same spot and size as the idle one: the label switches to `activeLabel`, the background is
+filled, and clicking
+it closes the surface (as `ctx.close()` does). Optional fields, validated as `bad-active`:
+`activeIcon` (from the closed icon set, which now includes `phone-off`), `activeLabel` (`{ pt, en }`,
+the accessible name while active, falling back to `label`) and `activeTone` (`'accent'` by default, or
+`'danger'` for the destructive red).
+
+A host older than 1.18 refuses an engine built against 1.18 outright (the minor must not exceed the host's),
+so none of these fields ever reaches it and there is no partial fallback; an engine that must also run
+there ships a 1.17 surface instead.
 
 An engine can serve its own routes, accept WebSockets and announce UI surfaces under one reserved
 prefix, `/api/engine/x`. Nothing here is specific to any one feature: it is the generic door. A
