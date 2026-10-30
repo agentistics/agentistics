@@ -35,6 +35,7 @@ describe('HANDOFF.RELAY — who is the owner', () => {
     expect(isOwnerTurn(CASE[1]!)).toBe(true)
     expect(isOwnerTurn(CASE[4]!)).toBe(false)
     expect(isOwnerTurn(CASE[6]!)).toBe(false)
+    expect(isOwnerTurn({ role: 'user', text: 'Another Claude session sent a message:\n<agent-message from="x">report' })).toBe(false)
     expect(isOwnerTurn(t('user', '<task-notification>x</task-notification>', 1))).toBe(false)
     expect(isOwnerTurn(t('user', '<agentistics-context>\n…', 1))).toBe(false)
     expect(isOwnerTurn(t('assistant', 'hi', 1))).toBe(false)

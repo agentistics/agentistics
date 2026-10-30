@@ -163,6 +163,9 @@ describe('relay and unknown headers fail closed', () => {
   test('a person merely mentioning the tag mid-prose is still the person', () => {
     expect(parseSystemEvent('olha isso: <agent-message> aparece no chat')).toBeNull()
   })
+  test('a closed wrapper followed by the person\'s own prose stays the person', () => {
+    expect(parseSystemEvent('<agent-message from="x">a</agent-message> e aqui é texto meu')).toBeNull()
+  })
 
   test('a handoff context block is a system notice, never the owner\'s prompt', () => {
     const event = parseSystemEvent('<agentistics-context>handoff from predecessor\nsummary</agentistics-context>')!
