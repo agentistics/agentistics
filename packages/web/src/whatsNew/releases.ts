@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.166.0': {
+  '2.167.0': {
     features: [
       {
         pt: 'O campo de mensagem ganhou uma barra embaixo: o modelo (clique para trocar modelo e esforço), o modo da sessão, o contexto, o contador de caracteres e o histórico. O texto da conversa não aparece mais abaixo do campo.',
@@ -23,6 +23,15 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'The "Continue on another account" window no longer hides behind the sidebar; the Nay chat stays on top.',
       },
     ],
+  },
+  '2.166.0': {
+    features: [
+      {
+        pt: 'A lista de sessões carrega muito mais leve no VS Code e nas ferramentas dos assistentes (MCP), que ainda pediam a versão completa.',
+        en: 'The session list loads much lighter in VS Code and in the assistants\' tools (MCP), which still asked for the full version.',
+      },
+    ],
+    fixes: [],
   },
   '2.165.3': {
     features: [

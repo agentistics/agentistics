@@ -15,7 +15,7 @@ import {
   sessionHarness,
   sessionMessages,
   sessionTokens,
-  startedByIndex,
+  startedByFleetPayload,
   harnessParam,
   toolsForGate,
 } from "./session-tokens.js";
@@ -1305,7 +1305,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const data = await apiGet("/api/data");
         // Who started each session — read off the fleet (best effort: a central, or a server with no
         // host power, has no fleet and the field is simply absent).
-        const startedBy = await apiGet("/api/fleet").then((f: any) => startedByIndex(f?.rows ?? [])).catch(() => new Map<string, { id: string; title?: string }>());
+        const startedBy = await apiGet("/api/fleet?format=links-v1").then((f: any) => startedByFleetPayload(f ?? {})).catch(() => new Map<string, { id: string; title?: string }>());
         const rows = filterSessions((data.sessions ?? []) as AnySession[], harness)
           .slice(0, limit)
           .map((s: any) => {

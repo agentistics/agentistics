@@ -337,6 +337,24 @@ export function snapshotBody(seq: number, frame: FleetFrame): Record<string, unk
   return result
 }
 
+/**
+ * PURE. The body of the opt-in compact GET: the snapshot plus every row the frame's VIEW names. An
+ * arrangement may name rows outside the recency window — a NAMED exited/lost row survives `onlyActive` —
+ * and a client that never receives them drops them silently. `closed.sent` keeps counting the recency
+ * window alone: it is where a client's paging of `/api/fleet/closed` starts.
+ */
+export function compactGetBody(frame: FleetFrame): Record<string, unknown> {
+  const view = frame.metaValues.view as { groups?: Array<{ ids?: string[] }> } | undefined
+  const extra: FleetFrame['window'] = (view?.groups ?? []).flatMap(g => g.ids ?? []).flatMap(id => {
+    const o = frame.outside.get(id)
+    return o ? [{ id, session: o.session, row: o.row, base: '', gauges: { cpu: o.row.cpuPercent, rss: o.row.rssBytes } }] : []
+  })
+  if (extra.length === 0) return snapshotBody(1, frame)
+  const body = snapshotBody(1, { ...frame, window: [...frame.window, ...extra] })
+  body.closed = { total: frame.closedTotal, sent: frame.window.filter(w => isHistoricalRow(w.row)).length }
+  return body
+}
+
 /** PURE. The `delta` event body. */
 export function deltaBody(seq: number, frame: FleetFrame, d: FleetDelta): Record<string, unknown> {
   const pick = new Set(d.upsert)

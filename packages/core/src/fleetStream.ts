@@ -90,6 +90,61 @@ export function expandFleetView(wire: FleetWire): FleetWire {
   return { ...wire, view: { ...view, groups: view.groups.map(({ ids, ...group }) => ({ ...group, rows: (ids ?? []).flatMap(id => rows.has(id) ? [rows.get(id)!] : []) })) } }
 }
 
+class FleetHistoryChanged extends Error {}
+
+/**
+ * Normalize an opt-in GET, retaining legacy servers and optionally restoring all history.
+ * If the closed set changes while paging, the read is retried once from a fresh body; if it still
+ * changes, the live rows are published with `previous` ended rows kept, never a mixed history.
+ */
+export async function readCompactFleetResponse(raw: unknown, pageUrl: (offset: number) => string, history: boolean, verifyUrl?: string, previous: FleetWire['sessions'] = []): Promise<FleetWire> {
+  let body = raw as FleetWire & { closed?: { total?: number; sent?: number } }
+  if (!Array.isArray(body.verbCatalog)) return body
+  for (let attempt = 0; ; attempt++) {
+    try { return await readCompactOnce(body, pageUrl, history, verifyUrl) } catch (err) {
+      if (!(err instanceof FleetHistoryChanged)) throw err
+      if (attempt === 0 && verifyUrl) {
+        const res = await fetch(verifyUrl)
+        const fresh = res.ok ? await res.json() as typeof body : null
+        if (fresh && Array.isArray(fresh.verbCatalog)) { body = fresh; continue }
+      }
+      const live = applyFleetWire(null, 'snapshot', { ...body, seq: 1 })
+      const have = new Set(live.sessions.map(r => r.id))
+      live.sessions.push(...previous.filter(r => historicalWireRow(r as { id: string; state?: unknown }) && !have.has(r.id)))
+      live.rows = live.sessions
+      return expandFleetView(live)
+    }
+  }
+}
+
+async function readCompactOnce(body: FleetWire & { closed?: { total?: number; sent?: number } }, pageUrl: (offset: number) => string, history: boolean, verifyUrl?: string): Promise<FleetWire> {
+  const wire = applyFleetWire(null, 'snapshot', { ...body, seq: 1 })
+  if (history) {
+    const total = body.closed?.total ?? 0
+    let offset = body.closed?.sent ?? 0
+    // A view may already have pulled closed rows outside the recency window; a page repeats them.
+    const have = new Set(wire.sessions.map(r => r.id))
+    while (offset < total) {
+      const res = await fetch(pageUrl(offset))
+      if (!res.ok) throw new Error('Fleet history unavailable')
+      const page = await res.json() as { sessions?: FleetWire['sessions']; rows?: FleetWire['rows']; verbCatalog?: FleetWire['verbCatalog']; total?: number }
+      if (page.total !== total) throw new FleetHistoryChanged('Fleet history changed during paging')
+      const rows = page.sessions ?? page.rows
+      if (!Array.isArray(rows) || rows.length === 0) throw new FleetHistoryChanged('Incomplete fleet history')
+      for (const r of expandRows(rows, page.verbCatalog)) if (!have.has(r.id)) { have.add(r.id); wire.sessions.push(r) }
+      offset += rows.length
+    }
+    if (verifyUrl && total > 0) {
+      const check = await fetch(verifyUrl)
+      if (!check.ok) throw new Error('Fleet history verification unavailable')
+      const latest = await check.json() as { closedVersion?: string; closed?: { total?: number } }
+      if (latest.closedVersion !== body.closedVersion || latest.closed?.total !== total) throw new FleetHistoryChanged('Fleet history changed during paging')
+    }
+    wire.rows = wire.sessions
+  }
+  return expandFleetView(wire)
+}
+
 /** Fetch-based SSE for hosts without EventSource (Node extension host and Bun cockpit).
  * A silent or incomplete connection expires; callers then use their existing poll fallback.
  */

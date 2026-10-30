@@ -161,3 +161,10 @@ test("startedByIndex follows a reopened parent through its conversation id", () 
   ]);
   expect(m.get("c")).toEqual({ id: "p2", title: "Leader" });
 });
+
+import { startedByFleetPayload } from './session-tokens'
+test('narrow and legacy fleet identity graphs resolve ended children alike', () => {
+  const rows = [{ id: 'parent', title: 'Leader' }, { id: 'ended', conversationId: 'conv', parentSessionId: 'parent' }]
+  expect(startedByFleetPayload({ rows }).get('conv')).toEqual({ id: 'parent', title: 'Leader' })
+  expect(startedByFleetPayload({})).toEqual(new Map())
+})
