@@ -81,8 +81,7 @@ import {
   composeQuoted, locateExcerpt,
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
-import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
-import { prettyModelLabel } from '../../lib/prettyModelLabel'
+import { modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
@@ -649,13 +648,15 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const currentModelLabel = menuModels.find(model => model.id === currentModelId)?.label ?? currentModelId
   /** M3 status band: the model button always names a model — the live control's, else the one the
    *  session was started on — and the effort when one is known. Never a bare "Modelo". */
-  // Where the model is known at all: the live control, the started model, the fleet row's own
-  // reading, else the transcript's dominant model. A session without the first two (an adopted or
-  // external one) used to show a bare "Modelo" (owner, 2026-10-30: "tá aparecendo só 'modelo'").
-  const statusModelId = currentModelId || row?.model || metrics?.meta?.model || ''
-  const statusModelLabel = !statusModelId
+  // The SAME reading the stats card shows (`modelDisplay`): the model the transcript says answered
+  // wins ("Opus 5.5"); what the session was started or switched with ("opus", an alias the catalogue
+  // pins to an older version) is only the fallback. Owner, 2026-10-30: the card said "Opus 5.5" while
+  // the band said "Opus 5", and an adopted session showed a bare "Modelo".
+  const startedOrSwitched = currentModelId || row?.model || ''
+  const statusModelText = modelDisplay(session.harness, metrics?.stats?.model ?? metrics?.meta?.model, startedOrSwitched)
+  const statusModelLabel = !statusModelText
     ? (pt ? 'Modelo' : 'Model')
-    : prettyModelLabel(session.harness, statusModelId, menuModels.find(model => model.id === statusModelId)?.label)
+    : statusModelText === startedOrSwitched ? modelLabel(session.harness, startedOrSwitched) : statusModelText
   const statusEffort = sourceControls?.effort?.value ?? session.effort ?? null
   /** The composer menu opened from the status band is `fixed` to the viewport — but the glass field
    *  has a backdrop-filter, which makes it the containing block of every fixed descendant, so in place
