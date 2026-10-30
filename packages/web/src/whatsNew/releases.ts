@@ -34,6 +34,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'O rodapé da lista ficou mais limpo, sem o botão Ajustes repetido.',
         en: 'The list footer is cleaner, without the repeated Settings button.',
       },
+      {
+        pt: 'A lista de sessões carrega muito mais leve no VS Code e nas ferramentas dos assistentes (MCP), que ainda pediam a versão completa.',
+        en: 'The session list loads much lighter in VS Code and in the assistants\' tools (MCP), which still asked for the full version.',
+      },
     ],
   },
   '2.165.2': {
