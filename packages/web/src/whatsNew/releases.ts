@@ -22,6 +22,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'A janela "Continuar em outra conta" não fica mais escondida atrás da barra lateral; o chat da Nay continua por cima.',
         en: 'The "Continue on another account" window no longer hides behind the sidebar; the Nay chat stays on top.',
       },
+      {
+        pt: 'O painel de informações da sessão (o "i" no topo) também ganhou o vidro.',
+        en: 'The session info panel (the "i" at the top) gets the glass too.',
+      },
     ],
   },
   '2.166.0': {
