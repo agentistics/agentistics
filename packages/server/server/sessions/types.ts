@@ -261,6 +261,8 @@ export interface StructuredIntent {
   /** The id offered for assignment (fresh sessions). */
   conversationId?: string
   resumeId?: string
+  /** V-OPENCODE.2 — open a FORK of this conversation (a driver that declares `fork`); a fork carries no opening context. */
+  forkOf?: string
   /** MODE.EVERYWHERE — the canonical mode to start in (the driver honours only its `startModes`). */
   mode?: CanonicalMode
   /** The person's first prompt alone — the context travels in `instructions`, never prepended here. */

@@ -155,7 +155,13 @@
  * host invalidates when the surface unmounts or the session ends. Older hosts omit it; an engine that needs
  * it refuses to load there rather than guessing.
  */
-export const ENGINE_API_VERSION = '1.17.0'
+/**
+ * 1.18.0 — OpenCode in the app: `StructuredSpawn.forkOf` (open a FORK of a conversation) and
+ * `StructuredStart`'s `blocked` (a refusal the harness's own version causes, which the host tells the person
+ * instead of falling back). Both optional: an engine built against 1.17 never sets them, a host that does not
+ * read them behaves as before.
+ */
+export const ENGINE_API_VERSION = '1.18.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

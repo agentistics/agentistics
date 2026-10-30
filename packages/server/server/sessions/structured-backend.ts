@@ -28,6 +28,7 @@ import type {
 } from '@agentistics/engine-api'
 import { answerFits } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
+import { forkUnavailableNotice, harnessBlockedNotice } from './harness-notice'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
 import { modeNeedsProtocolSentence, routableDriver, routeSpawn, structuredOrigin, type SpawnRoute } from './structured-route'
 import type { BackendSession, BackendSpawn, SessionActivity, SessionBackend, TerminalCapture } from './types'
@@ -225,11 +226,12 @@ export function structuredSpawnOf(req: BackendSpawn, harness: HarnessId): Struct
     id: req.id, harness, cwd: req.cwd,
     ...(i?.model ? { model: i.model } : {}),
     ...(i?.effort ? { effort: i.effort } : {}),
-    ...(i?.conversationId && !i.resumeId ? { conversationId: i.conversationId } : {}),
+    ...(i?.conversationId && !i.resumeId && !i.forkOf ? { conversationId: i.conversationId } : {}),
     ...(i?.resumeId ? { resumeId: i.resumeId } : {}),
+    ...(i?.forkOf ? { forkOf: i.forkOf } : {}),
     ...(i?.mode ? { mode: i.mode } : {}),
     ...(prompt ? { initialPrompt: prompt } : {}),
-    ...(i?.instructions && !i.resumeId ? { instructions: i.instructions } : {}),
+    ...(i?.instructions && !i.resumeId && !i.forkOf ? { instructions: i.instructions } : {}),
     ...(i?.mcp?.length ? { mcp: i.mcp } : {}),
     env: { [STRUCTURED_SESSION_ENV]: req.id, ...(req.env ?? {}) },
   }
@@ -384,6 +386,8 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     if (!r.ok) {
       // A relay may have started before the refusal: end it, and leave nothing on disk.
       if (transport && durable) { durable.markEnding(req.id, 'refused'); await durable.terminate(req.id).catch(() => false); durable.remove(req.id) }
+      // The harness's own build is the wall: a TUI would meet the same one, so tell the person instead of falling back.
+      if (r.blocked) throw harnessBlockedNotice(harness, r.blocked)
       return false
     }
     const session = transport ? recordingSession(r.session, transport) : r.session
@@ -492,6 +496,16 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
         ...(mode ? { mode } : {}),
         ...(startModes ? { startModes } : {}),
       })
+      // A FORK is never "the same request, the usual way": the TUI spawn knows nothing of it and would open a fresh
+      // conversation. It goes only to a structured driver whose declaration offers `fork`; every other road — no such
+      // route, an engine older than 1.18 (its declaration has no `fork`), a refused start — is a notice, not a fallback.
+      const forkOf = req.structured?.forkOf
+      if (forkOf) {
+        if (!harness) throw forkUnavailableNotice(null)
+        if (route !== 'structured' || !reg || !reg.declares(harness)?.fork?.via) throw forkUnavailableNotice(harness)
+        if (await startVia(req, route, harness, reg, acp)) return {}
+        throw forkUnavailableNotice(harness)
+      }
       if (route !== 'tmux' && harness) {
         if (await startVia(req, route, harness, reg ?? acpAsStructured(acp!), acp)) return {}
         // A refused structured start: the same request, the usual way.

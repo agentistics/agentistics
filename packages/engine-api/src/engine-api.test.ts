@@ -1,4 +1,5 @@
 import { describe, expect, it, test } from 'bun:test'
+import { structuredRegistry, type StructuredDriver, type StructuredSpawn } from './structured'
 import {
   ENGINE_API_VERSION,
   asCodePort,
@@ -141,7 +142,7 @@ describe('ES.6h — the typed code host (1.8)', () => {
     answer: () => ({ ok: false as const, sentence: 'x' }), cancel: () => ({ ok: false as const, sentence: 'x' }), end: async () => {},
   })
   test('the engine-api is 1.9 (1.8 + the chat channel) and a 1.7 engine\'s opaque handle still satisfies CodeHost but is not a port', () => {
-    expect(ENGINE_API_VERSION).toBe('1.17.0')
+    expect(ENGINE_API_VERSION).toBe('1.18.0')
     const opaque: CodeHost = { kind: 'code-host', dispose: async () => {} }
     expect(asCodePort(opaque)).toBeNull()
     expect(asCodePort(null)).toBeNull()
@@ -154,5 +155,22 @@ describe('ES.6h — the typed code host (1.8)', () => {
   test('apiCompatible: an engine built against 1.7 loads on a 1.8 host, and the reverse is refused', () => {
     expect(apiCompatible('1.8.0', '1.7.0')).toBe(true)
     expect(apiCompatible('1.7.0', '1.8.0')).toBe(false)
+  })
+})
+
+describe('1.18 — forkOf and a blocked start ride the structured registry untouched', () => {
+  const driver = (seen: StructuredSpawn[]): StructuredDriver => ({
+    id: 'acp', status: 'ready', harnesses: ['opencode'], note: 't',
+    declares: () => { throw new Error('unused') },
+    start: async req => { seen.push(req); return req.forkOf === 'ses_old' ? { ok: false, reason: 'opencode ≥1.18.0 is needed', blocked: { kind: 'harness-version', need: '1.18.0', found: '1.17.9' } } : { ok: false, reason: 'plain refusal' } },
+  })
+  test('the driver receives forkOf as sent; a blocked refusal keeps its `blocked`, a plain one has none', async () => {
+    const seen: StructuredSpawn[] = []
+    const reg = structuredRegistry([driver(seen)])
+    const blocked = await reg.start({ id: 'a', harness: 'opencode', cwd: '/w', forkOf: 'ses_old' })
+    expect(seen[0]!.forkOf).toBe('ses_old')
+    expect(blocked).toEqual({ ok: false, reason: 'opencode ≥1.18.0 is needed', blocked: { kind: 'harness-version', need: '1.18.0', found: '1.17.9' } })
+    const plain = await reg.start({ id: 'b', harness: 'opencode', cwd: '/w' })
+    expect(plain).toEqual({ ok: false, reason: 'plain refusal' })
   })
 })
