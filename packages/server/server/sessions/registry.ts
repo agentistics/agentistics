@@ -526,6 +526,10 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
         const next = { ...list[idx]!, ...patch } as Record<string, unknown>
         for (const [k, v] of Object.entries(patch)) if (v === null) delete next[k]
         list[idx] = next as unknown as ManagedSession
+        // A child started before this row had a conversation (codex, gemini, kimi, antigravity claim it
+        // on the first message) holds only the managed id, which a reopen replaces: give it the
+        // conversation link that survives one, in the same locked write (`backfillParentConversation`).
+        backfillParentConversation(list, id, patch.conversationId)
         await write(list)
         return { ok: true }
       })
@@ -578,6 +582,18 @@ export const patchSession = (
   id: string,
   patch: SessionPatch,
 ): Promise<boolean> => defaultRegistry.patch(id, patch)
+/** PURE (mutates `list`). Children naming `parentId` by managed id only get `parentConversationId`. */
+export function backfillParentConversation(list: ManagedSession[], parentId: string, conversationId: string): number {
+  let n = 0
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i]!
+    if (row.id !== parentId && row.parentSessionId === parentId && !row.parentConversationId) {
+      list[i] = { ...row, parentConversationId: conversationId }
+      n++
+    }
+  }
+  return n
+}
 /** Link a row to a conversation, refused when another row owns it — see `conversationOwnedElsewhere`. */
 export const linkConversation = (
   id: string,

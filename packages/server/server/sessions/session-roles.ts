@@ -18,13 +18,15 @@
  * Dependencies are injected so the rules are testable with a fake host.
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   isSessionRole, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, stripRolePrefix, titleForRole,
   type HarnessId, type RoleLang, type RoleOrigin, type SessionRole,
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
+import { withFileLock } from './file-lock'
 
 export const SESSION_ROLES_FILE = 'session-roles.json'
 
@@ -82,12 +84,41 @@ export async function readRolesDoc(dataDir: string): Promise<RolesDoc> {
   }
 }
 
+/**
+ * Atomic and durable: a temp file unique to this write, fsync'd, renamed over the document, then the
+ * directory fsync'd. A failed write removes its own temp file — a crash cannot leave a half document,
+ * and no `<pid>.tmp` is left behind by an error (`cleanStaleRoleTmps` sweeps what a kill leaves).
+ */
 export async function writeRolesDoc(dataDir: string, doc: RolesDoc): Promise<void> {
   const file = join(dataDir, SESSION_ROLES_FILE)
   await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-  const tmp = `${file}.${process.pid}.tmp`
-  await writeFile(tmp, `${JSON.stringify(doc, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 })
-  await rename(tmp, file)
+  const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  try {
+    const fh = await open(tmp, 'w', 0o600)
+    try { await fh.writeFile(`${JSON.stringify(doc, null, 2)}\n`, 'utf-8'); await fh.sync() } finally { await fh.close() }
+    await rename(tmp, file)
+  } catch (e) {
+    await rm(tmp, { force: true }).catch(() => {})
+    throw e
+  }
+  try { const d = await open(dirname(file), 'r'); try { await d.sync() } finally { await d.close() } } catch { /* no directory fsync here */ }
+}
+
+/** `session-roles.json.<pid>[.<rand>].tmp` left by a process killed mid-write. */
+const ROLE_TMP = /^session-roles\.json\.\d+(?:\.[0-9a-f]+)?\.tmp$/
+
+/** Server start: remove role-document temp files older than `maxAgeMs` (a live write is milliseconds). Never throws. */
+export async function cleanStaleRoleTmps(dataDir: string, maxAgeMs = 60 * 60 * 1000, now = Date.now()): Promise<number> {
+  let removed = 0
+  const names = await readdir(dataDir).catch(() => [] as string[])
+  for (const name of names) {
+    if (!ROLE_TMP.test(name)) continue
+    const path = join(dataDir, name)
+    const st = await stat(path).catch(() => null)
+    if (!st?.isFile() || now - st.mtimeMs < maxAgeMs) continue
+    if (await rm(path, { force: true }).then(() => true, () => false)) removed++
+  }
+  return removed
 }
 
 /**
@@ -176,9 +207,18 @@ export async function loadRoles(deps: Pick<RoleDeps, 'dataDir' | 'legacyPref'>):
 }
 
 /** Serialise writes inside this process: read-modify-write of one small file. */
+/**
+ * Every read-modify-write of the role document, serialised in this process AND across processes. The
+ * spawning CLI (`ensureSpawnRole`) and the server (`roleOp`, `markRoleDelivered`, `rekeyStoredRole`, …)
+ * all write this file; a promise chain alone is per process, so two of them overlapping erased the
+ * role one had just written (measured 30/10: a worker spawned 1 min after its leader's promotion had no
+ * stored role at all). The cross-process half is the registry's own `withFileLock`; each `fn` re-reads
+ * the document INSIDE the lock. NOT reentrant: never call `serial` from inside a `serial` body.
+ */
 let chain: Promise<unknown> = Promise.resolve()
-const serial = <T>(fn: () => Promise<T>): Promise<T> => {
-  const run = chain.then(fn, fn)
+const serial = <T>(dataDir: string | Promise<string>, fn: () => Promise<T>): Promise<T> => {
+  const locked = async () => withFileLock(join(await dataDir, SESSION_ROLES_FILE), () => fn())
+  const run = chain.then(locked, locked)
   chain = run.catch(() => {})
   return run
 }
@@ -214,7 +254,7 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     // Who is asking decides the origin: no verified sender = the person (browser/CLI), the session
     // itself = auto, a verified other session = that leader.
     const origin: RoleOrigin = senderId === null ? 'manual' : own ? 'auto' : { leader: senderId }
-    const state = await serial(async () => {
+    const state = await serial(deps.dataDir, async () => {
       const doc = await loadRoles(deps)
       const current = roleOfRow(doc.roles, resolved)
       const base = { key, id: resolved.id, title: resolved.title }
@@ -259,7 +299,7 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     const renamed = wanted !== resolved.title && wanted !== '' ? (await deps.rename(resolved.id, wanted).catch(() => ({ ok: false }))).ok : false
     const notified = changed && !own ? (await deps.prompt(resolved.id, roleChangeNote(next)).catch(() => ({ ok: false }))).ok : false
     if (notified || own) {
-      await serial(async () => {
+      await serial(deps.dataDir, async () => {
         const latest = await loadRoles(deps)
         const delivered = { ...(latest.lastDeliveredRole ?? {}) }
         if (next) delivered[key] = next
@@ -438,8 +478,9 @@ export async function ensureSpawnRole(
   providedDeps?: RoleDeps,
   origin: RoleOrigin = 'manual',
 ): Promise<SessionRole> {
-  return serial(async () => {
-    const deps = providedDeps ?? await defaultRoleDeps()
+  const depsP = providedDeps ? Promise.resolve(providedDeps) : defaultRoleDeps()
+  return serial(depsP.then(d => d.dataDir), async () => {
+    const deps = await depsP
     const doc = await loadRoles(deps)
     const existing = keys.map(k => k ? doc.roles[k] : undefined).find((r): r is SessionRole => !!r)
     if (existing) return existing
@@ -463,8 +504,9 @@ export async function markRoleDelivered(
   role: SessionRole,
   providedDeps?: Pick<RoleDeps, 'dataDir' | 'legacyPref'>,
 ): Promise<void> {
-  return serial(async () => {
-    const deps = providedDeps ?? await defaultRoleDeps()
+  const depsP = providedDeps ? Promise.resolve(providedDeps) : defaultRoleDeps()
+  return serial(depsP.then(d => d.dataDir), async () => {
+    const deps = await depsP
     const doc = await loadRoles(deps)
     const delivered = { ...(doc.lastDeliveredRole ?? {}) }
     for (const key of keys) if (key) delivered[key] = role
@@ -478,8 +520,9 @@ export async function rekeyStoredRole(
   toKeys: readonly (string | undefined)[],
   providedDeps?: Pick<RoleDeps, 'dataDir' | 'legacyPref'>,
 ): Promise<void> {
-  return serial(async () => {
-    const deps = providedDeps ?? await defaultRoleDeps()
+  const depsP = providedDeps ? Promise.resolve(providedDeps) : defaultRoleDeps()
+  return serial(depsP.then(d => d.dataDir), async () => {
+    const deps = await depsP
     const doc = await loadRoles(deps)
     const from = [...new Set(fromKeys.filter((k): k is string => !!k))]
     const to = [...new Set(toKeys.filter((k): k is string => !!k))]
@@ -554,8 +597,9 @@ export async function deliverStoredRole(
   conversationId?: string,
   providedDeps?: RoleDeps,
 ): Promise<boolean> {
-  const initial = await serial(async () => {
-    const deps = providedDeps ?? await defaultRoleDeps()
+  const depsP = providedDeps ? Promise.resolve(providedDeps) : defaultRoleDeps()
+  const initial = await serial(depsP.then(d => d.dataDir), async () => {
+    const deps = await depsP
     const doc = await loadRoles(deps)
     const key = conversationId ?? rowId
     const role = doc.roles[key] ?? doc.roles[rowId]
@@ -570,7 +614,7 @@ export async function deliverStoredRole(
   const sent = (await initial.deps.prompt(rowId, roleChangeNote(initial.role)).catch(() => ({ ok: false }))).ok
   if (!sent) return false
 
-  return serial(async () => {
+  return serial(initial.deps.dataDir, async () => {
     const latest = await loadRoles(initial.deps)
     const current = latest.roles[initial.key] ?? latest.roles[rowId]
     const delivered = latest.lastDeliveredRole?.[initial.key] ?? latest.lastDeliveredRole?.[rowId]

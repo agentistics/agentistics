@@ -2323,6 +2323,10 @@ export async function spawnManaged(req: {
     // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
     await import('./sessions/team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
   }
+  // A reopen (new managed id for the same session) keeps its team: children follow the new row.
+  if (req.inherit && req.inherit.id !== id && !handoffParentRow) {
+    await import('./sessions/team-links-io').then(m => m.completeReopenReparent(req.inherit!.id, id)).catch(() => {})
+  }
 
   // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a
   // first-message context left pending for the TUI must not be prepended to its first prompt again.
