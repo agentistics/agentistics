@@ -10,8 +10,17 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.165.3': {
-    features: [],
+  '2.166.0': {
+    features: [
+      {
+        pt: 'As instruções que cada sessão recebe agora seguem o estado: no modo ausente somem os "pergunte antes", workers não recebem blocos de líder, e um teste impede que duas regras se contradigam.',
+        en: 'The instructions each session receives now follow the state: in away mode the "ask first" lines go away, workers get no leader blocks, and a test keeps two rules from contradicting each other.',
+      },
+      {
+        pt: 'A passagem de liderança chega ao sucessor como aviso do sistema, curta e com as ordens vigentes do dono no topo.',
+        en: 'A leader hand-off reaches the successor as a system notice, short and with the owner\'s standing orders on top.',
+      },
+    ],
     fixes: [
       {
         pt: 'O vidro ficou visível também no tema claro e um pouco mais transparente no escuro; o chat flutuante da Nay continua sólido.',
