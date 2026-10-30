@@ -152,6 +152,18 @@ describe('relay and unknown headers fail closed', () => {
     expect(event.body).toContain('worker report')
   })
 
+  test('Claude Code\'s own lead-in and a missing closing tag still make a peer report, never the owner', () => {
+    const msg = 'Another Claude session sent a message:\n<agent-message from="a055f643708b4b3a8">\n[Subagent hand-back] The text below is the final report.\nOs três itens estão feitos.'
+    const event = parseSystemEvent(msg)!
+    expect(event.kind).toBe('session-note')
+    expect(event.body).toContain('Os três itens estão feitos.')
+    const closed = parseSystemEvent('Another Claude session sent a message:\n<agent-message from="x">report</agent-message>')!
+    expect(closed.body).toBe('report')
+  })
+  test('a person merely mentioning the tag mid-prose is still the person', () => {
+    expect(parseSystemEvent('olha isso: <agent-message> aparece no chat')).toBeNull()
+  })
+
   test('a handoff context block is a system notice, never the owner\'s prompt', () => {
     const event = parseSystemEvent('<agentistics-context>handoff from predecessor\nsummary</agentistics-context>')!
     expect(event).toEqual({ kind: 'notice', label: 'handoff', body: '' })
