@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.168.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O botão de enviar não pula mais para a esquerda quando você começa a digitar.',
+        en: 'The send button no longer jumps to the left when you start typing.',
+      },
+    ],
+  },
   '2.168.0': {
     features: [
       {

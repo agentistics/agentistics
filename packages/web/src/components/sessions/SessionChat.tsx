@@ -3593,7 +3593,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     thing a counter beside a text box may not do.
                     `pointerEvents: none` so it can never take a tap meant for a control beside it,
                     and it gives way before the buttons do when the row runs out of width. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: countLabel ? 6 : 'auto' }}>
+                {/* Always `auto` now: the character count moved to the M3 status band, so nothing sits between
+                    attach and this group any more — the old `countLabel ? 6 : 'auto'` made send jump
+                    to the left the moment you typed (owner, 2026-10-30). */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
                 {/* THE HARNESS MODE, and the one control that changes it.
                     Asked for: "nao consigo alternar entre os modos que os harnesses possuem (auto
                     mode, plan mode etc)", to sit left of the recent-message button.
