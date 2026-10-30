@@ -32,7 +32,7 @@ const splitBodyMax = (mobileSheet: boolean) => `calc(${dialogMaxHeight(mobileShe
 // ConfirmModal
 // Centered confirmation dialog for destructive actions (delete/revoke/remove). Renders nothing
 // when `open` is false. Backdrop click + Escape = cancel. The confirm button is red (danger).
-export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction, closeLabel, aside, splitFrom = 900, lockCancel = false }: {
+export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, onConfirm, onCancel, requireText, requireTextHint, focusCancel, focusPanel = false, children, footer, tone = 'danger', icon, busy, maxWidth = 420, mobileSheet = false, className, headerAction, closeLabel, aside, splitFrom = 900, lockCancel = false, layer }: {
   /** Optional wider content and phone bottom-sheet presentation; defaults preserve confirmations. */
   maxWidth?: number
   mobileSheet?: boolean
@@ -46,6 +46,12 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
   splitFrom?: number
   /** The confirmed action cannot be aborted once sent: while true, Cancel is disabled and Esc/backdrop do nothing. */
   lockCancel?: boolean
+  /** Render into `document.body` at this z-index instead of in place at 2000. For a dialog opened from
+   *  inside a panel whose stacking context sits UNDER the sidebar (z 200): in place, its `fixed`
+   *  backdrop is trapped in that context and the sidebar covers its left edge. A value between the
+   *  sidebar (200) and the Nay dock (`WINDOW_Z_BASE` 410) keeps the Nay chat above it, as it is meant
+   *  to be over everything. */
+  layer?: number
   open: boolean
   title: string
   message: string
@@ -122,9 +128,9 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
     }
   }, [open, focusPanel])
   if (!open) return null
-  return (
+  const dialog = (
     <div className={className ? `${className}-backdrop` : undefined} onClick={cancel} style={{
-      position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: mobileSheet && isMobile ? 'flex-end' : 'center', justifyContent: 'center',
+      position: 'fixed', inset: 0, zIndex: layer ?? 2000, display: 'flex', alignItems: mobileSheet && isMobile ? 'flex-end' : 'center', justifyContent: 'center',
       background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(3px)', padding: mobileSheet && isMobile ? 0 : 16,
     }}>
       <div className={className} ref={panelRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
@@ -186,6 +192,7 @@ export function ConfirmModal({ open, title, message, confirmLabel, cancelLabel, 
       </div>
     </div>
   )
+  return layer !== undefined && typeof document !== 'undefined' ? createPortal(dialog, document.body) : dialog
 }
 
 // RecordCard
