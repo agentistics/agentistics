@@ -10,11 +10,11 @@
  */
 
 /**
- * 1.19 adds `nay-tab`, an extra tab in the floating Nay panel.
+ * 1.19 adds `nay-sessions`, a section inside the floating Nay panel's Sessions tab.
  * Where the host may draw a surface's button. 1.18 adds `composer` (an icon button in the shared composer)
  * and `rail` (an icon entry in the app's navigation, beside the pages, that opens the surface AS a page).
  */
-export const SURFACE_PLACEMENTS = ['session-header', 'nay-dock', 'app-bar', 'composer', 'rail', 'nay-tab'] as const
+export const SURFACE_PLACEMENTS = ['session-header', 'nay-dock', 'app-bar', 'composer', 'rail', 'nay-sessions'] as const
 export type SurfacePlacement = (typeof SURFACE_PLACEMENTS)[number]
 
 /** Generic icon names understood by the host; engines never choose a library glyph directly. */

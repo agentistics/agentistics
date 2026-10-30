@@ -134,7 +134,7 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   const sideSlot = useEngineSideSlot()
   const slot = open.parked ? null : inlineSlot
   const naySlot = useEngineNaySlot(surface.id)
-  const nayTab = surface.placement === 'nay-tab'
+  const nayTab = surface.placement === 'nay-sessions'
   const page = open.layout === 'page'
   // A page whose route is not on screen is held off screen like a parked surface.
   // A session surface drawn as `side` whose session is shown in a Sessions pane never uses the fixed
@@ -265,12 +265,12 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   )
 }
 
-/** The active extra tab's slot. Its surface remains mounted in the root host when this disappears. */
+/** The active section inside Nay's Sessions tab. Its surface remains mounted in the root host when this disappears. */
 export function EngineSurfaceNaySlot({ surfaceId }: { surfaceId: string }) {
   const own = useRef<HTMLElement | null>(null)
   const ref = useCallback((el: HTMLDivElement | null) => {
     if (el) { own.current = el; registerEngineNaySlot(surfaceId, el) }
     else { registerEngineNaySlot(surfaceId, null, own.current); own.current = null }
   }, [surfaceId])
-  return <div ref={ref} data-engine-nay-tab={surfaceId} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'auto' }} />
+  return <div ref={ref} data-engine-nay-sessions={surfaceId} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'auto' }} />
 }

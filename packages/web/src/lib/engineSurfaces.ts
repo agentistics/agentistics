@@ -7,7 +7,7 @@
  * it ever reaches `import()`: same-origin, under `/api/engine/x/`, no dot-segments. A community build
  * answers no `surfaces`, so there is no button at all.
  */
-export type SurfacePlacement = 'session-header' | 'nay-dock' | 'app-bar' | 'composer' | 'rail' | 'nay-tab'
+export type SurfacePlacement = 'session-header' | 'nay-dock' | 'app-bar' | 'composer' | 'rail' | 'nay-sessions'
 export type SurfaceIcon = 'phone' | 'phone-off' | 'sparkles' | 'panel'
 export type SurfaceActiveTone = 'accent' | 'danger'
 const ICONS: readonly string[] = ['phone', 'phone-off', 'sparkles', 'panel']
@@ -144,7 +144,7 @@ export function surfacesFrom(status: unknown, placement: SurfacePlacement): Engi
  */
 export function stillAnnounced(status: unknown): ((s: Pick<EngineSurfaceInfo, 'id' | 'placement'>) => boolean) | null {
   if (!status || typeof status !== 'object') return null
-  const placements: SurfacePlacement[] = ['session-header', 'nay-dock', 'app-bar', 'composer', 'rail', 'nay-tab']
+  const placements: SurfacePlacement[] = ['session-header', 'nay-dock', 'app-bar', 'composer', 'rail', 'nay-sessions']
   const keys = new Set(placements.flatMap(p => surfacesFrom(status, p).map(s => `${p}:${s.id}`)))
   return s => keys.has(`${s.placement}:${s.id}`)
 }

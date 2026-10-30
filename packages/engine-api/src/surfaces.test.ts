@@ -99,9 +99,10 @@ describe('1.15', () => {
 })
 
 describe('1.19', () => {
-  it('accepts float and nay-tab while retaining placement constraints', () => {
+  it('accepts float and nay-sessions while retaining placement constraints', () => {
     expect(surfaceRefusals([surface({ layout: 'float', floatOnLeave: true })])).toEqual([])
-    expect(surfaceRefusals([surface({ placement: 'nay-tab' })])).toEqual([])
+    expect(surfaceRefusals([surface({ placement: 'nay-sessions' })])).toEqual([])
+    expect(surfaceRefusals([surface({ placement: 'nay-tab' as never })])).toContainEqual({ id: 'demo', reason: 'bad-placement' })
     expect(surfaceRefusals([surface({ placement: 'rail', icon: 'panel', layout: 'float' })])).toContainEqual({ id: 'demo', reason: 'bad-layout' })
     expect(surfaceRefusals([surface({ floatOnLeave: 'yes' as never })])).toContainEqual({ id: 'demo', reason: 'bad-float-on-leave' })
     expect(surfaceRefusals([surface({ floatOnLeave: false })])).toEqual([])

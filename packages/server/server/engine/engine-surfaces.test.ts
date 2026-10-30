@@ -21,8 +21,8 @@ describe('engineSurfacesFor', () => {
   })
 })
 
-it('gates float and nay-tab with the existing experimental flag', () => {
-  const entries = [s({ id: 'floating', layout: 'float', floatOnLeave: true, experimental: 'DEMO_FLAG' }), s({ id: 'extra-tab', placement: 'nay-tab', experimental: 'DEMO_FLAG' })]
+it('gates float and nay-sessions with the existing experimental flag', () => {
+  const entries = [s({ id: 'floating', layout: 'float', floatOnLeave: true, experimental: 'DEMO_FLAG' }), s({ id: 'extra-tab', placement: 'nay-sessions', experimental: 'DEMO_FLAG' })]
   expect(engineSurfacesFor(entries, {})).toEqual([])
   expect(engineSurfacesFor(entries, { DEMO_FLAG: '1' })).toEqual(entries)
 })

@@ -24,6 +24,14 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Com uma versão antiga do OpenCode, o app explica em palavras simples o que atualizar.',
         en: 'With an old OpenCode version, the app explains in plain words what to update.',
       },
+      {
+        pt: 'Interfaces de motores podem acompanhar você em uma janela flutuante ao sair da sessão. Minimize no botão da Nay e retome sem interromper o que está rodando.',
+        en: 'Engine interfaces can follow you in a floating window when you leave a session. Minimize onto the Nay button and restore without interrupting what is running.',
+      },
+      {
+        pt: 'A aba Sessões do painel flutuante da Nay pode receber seções de motores habilitados.',
+        en: 'The Sessions tab of the floating Nay panel can show sections from enabled engines.',
+      },
     ],
     fixes: [
       {

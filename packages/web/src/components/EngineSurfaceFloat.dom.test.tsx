@@ -73,13 +73,13 @@ test('leaving a session floats kept-alive inline and side layouts, with opt-out 
   state.resetEngineSurfaceHostForTests()
 })
 
-test('a Nay tab moves the same mounted element off screen when its panel closes and restores it', async () => {
+test('a Nay sessions section moves the same mounted element off screen when its panel closes and restores it', async () => {
   state.resetEngineSurfaceHostForTests()
   let mounts = 0, element: HTMLElement | undefined
   let ctx: SurfaceMountContext | undefined
   const view = await render(h(host.EngineSurfaceHost, { load: async () => ({ mount(el: HTMLElement, context: SurfaceMountContext) { mounts++; element = el; ctx = context } }) }))
   const tab = await render(h(host.EngineSurfaceNaySlot, { surfaceId: surface.id }))
-  await act(async () => { state.openEngineSurface({ ...surface, placement: 'nay-tab', layout: undefined }, { sessionId: null, lang: 'en' }) })
+  await act(async () => { state.openEngineSurface({ ...surface, placement: 'nay-sessions', layout: undefined }, { sessionId: null, lang: 'en' }) })
   const stable = element!
   expect(tab.el.contains(stable)).toBe(true)
   expect(document.querySelector('[data-engine-overlay]')).toBeNull()

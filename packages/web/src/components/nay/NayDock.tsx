@@ -85,7 +85,7 @@ import { NAY_UNDOCK_SESSION } from '../../lib/nayDockBridge'
 const QuickVaultBody = lazy(() => import('../../pages/VaultPage').then(m => ({ default: m.QuickVaultBody })))
 
 type Lang = 'pt' | 'en'
-type Tab = 'nay' | 'sessions' | 'vault' | 'limits' | `engine:${string}`
+type Tab = 'nay' | 'sessions' | 'vault' | 'limits'
 const DOCK_TABS: readonly Tab[] = ['nay', 'sessions', 'vault', 'limits']
 
 const ORANGE = 'var(--anthropic-orange)'
@@ -145,7 +145,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   const [dock, setDock] = useState<DockState>(() => ({
     open: false, panelSession: null, ...parseDockState(windowsStore.get()),
   }))
-  const engineTabs = useEngineSurfaces('nay-tab')
+  const engineTabs = useEngineSurfaces('nay-sessions')
   const mountedSurfaces = useMountedEngineSurfaces()
   const minimizedSurfaces = mountedSurfaces.filter(s => s.parked && s.layout === 'float')
   const [tab, setTab] = useState<Tab>(() => tabStore.get())
@@ -192,7 +192,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   useEffect(() => { setSettingsOpen(false) }, [dock.panelSession, dock.open])
   const setFabPrefs = setNayFabPrefs
   const dockStyle = dockStyleOf(fabPrefs)
-  useEffect(() => { if (!tab.startsWith('engine:')) tabStore.set(tab) }, [tab])
+  useEffect(() => { tabStore.set(tab) }, [tab])
   useEffect(() => { writeStored(SIZE_KEY, size) }, [size])
   useEffect(() => {
     const onResize = () => setSize(s => clampPanelSize(s, viewport()))
@@ -557,11 +557,11 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           {/* The dock's own underline tabs (owner, 2026-10-05: restored — no pill behind them; the selected
               tab is orange text over an orange bar, exactly as before the shared strip replaced them). */}
           <div role="tablist" aria-label={pt ? 'Painel da Nay' : 'Nay panel'} style={{ display: 'flex', flexWrap: 'wrap', flex: '1 1 100%', order: 1, minWidth: 0 }}>
-            {[...DOCK_TABS, ...engineTabs.map(s => `engine:${s.id}` as Tab)].map(id => {
+            {DOCK_TABS.map(id => {
               const on = tab === id && !panelSession
               return (
                 <button key={id} type="button" role="tab" aria-selected={on} data-dock-tab={id}
-                  onClick={() => { setTab(id); setDock(d => ({ ...d, panelSession: null })); const surface = engineTabs.find(s => `engine:${s.id}` === id); if (surface) openEngineSurface(surface, { sessionId: null, lang }) }}
+                  onClick={() => { setTab(id); setDock(d => ({ ...d, panelSession: null })) }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '1 0 auto', gap: 5, minWidth: 44,
                     padding: '6px 10px', minHeight: 44,
@@ -572,7 +572,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                 >
                   {id === 'vault' && <VaultGlyph size={13} />}
                   <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
-                    {id.startsWith('engine:') ? engineTabs.find(s => `engine:${s.id}` === id)?.label[lang] : id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : id === 'limits' ? (pt ? 'Limites' : 'Limits') : (pt ? 'Sessões' : 'Sessions')}
+                    {id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : id === 'limits' ? (pt ? 'Limites' : 'Limits') : (pt ? 'Sessões' : 'Sessions')}
                   </span>
                 </button>
               )
@@ -600,8 +600,6 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           />
         ) : panelSession
           ? renderSession(panelSession, next => setDock(d => ({ ...d, panelSession: next })))
-          : tab.startsWith('engine:') && engineTabs.some(s => `engine:${s.id}` === tab)
-            ? <EngineSurfaceNaySlot surfaceId={tab.slice(7)} />
           : tab === 'nay'
             ? (<>
               <NayList
@@ -629,8 +627,13 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
             )
             : (
               // Inner gutter, so the aside's cards and search do not run into the panel's edges.
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px' }}>
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px', display: engineTabs.length ? 'flex' : undefined, flexDirection: engineTabs.length ? 'column' : undefined }}>
                 <SessionsAside
+                  extraTabs={engineTabs.map(surface => ({
+                    id: `engine:${surface.id}`, label: surface.label[lang],
+                    onSelect: () => openEngineSurface(surface, { sessionId: null, lang }),
+                    content: <EngineSurfaceNaySlot surfaceId={surface.id} />,
+                  }))}
                   lang={lang}
                   rows={fleet.rows}
                   finishedTasks={fleet.finishedTasks}
