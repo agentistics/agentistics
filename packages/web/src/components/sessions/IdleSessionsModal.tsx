@@ -1,3 +1,4 @@
+import { fleetLiveRows, fleetLiveUrl } from '../../lib/fleetLiveGet'
 /**
  * IdleSessionsModal — the review the bell/banner opens onto: file each idle session into a group and
  * end it, only end it, or keep it a while longer.
@@ -168,10 +169,10 @@ export function IdleSessionsModal({ lang, candidates, rows, underPressure, onClo
       }
     } catch { /* fall through to the direct read below */ }
     try {
-      const res = await fetch(`/api/fleet?lang=${lang}`)
+      const res = await fetch(fleetLiveUrl(lang))
       if (!res.ok) return null
-      const json = await res.json() as { rows?: ControlSession[] }
-      return Array.isArray(json.rows) ? json.rows : []
+      const json = await res.json() as { rows?: ControlSession[]; sessions?: ControlSession[] }
+      return fleetLiveRows(json)
     } catch {
       return null
     }

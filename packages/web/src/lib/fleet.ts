@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { followFleet, type Baseline, type FleetWire, type SessionMode } from '@agentistics/core'
+import { followFleet, readCompactFleetResponse, type Baseline, type FleetWire, type SessionMode } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { fleetSeedNotice, fleetStaleNotice, stillLoadingAfterPoll } from './fleetStale'
 import { cacheIsUsable, stripVolatile } from './fleetCache'
@@ -469,7 +469,7 @@ async function pollOnce(): Promise<void> {
     // header's counter, search — lists them as ordinary rows. Never rejects: a failed native read is
     // an empty native half, never a failed fleet poll.
     const nativeP = readNativeFleet(pollLang)
-    const res = await fetch(`/api/fleet?lang=${pollLang}`)
+    const res = await fetch(`/api/fleet?lang=${pollLang}&format=compact-v1`)
     if (res.status === 403 || res.status === 404) {
       // Not an empty fleet: this machine may not be asked. The two must stay distinguishable, and
       // a refusal is a complete ANSWER — it clears the failure count rather than reading as
@@ -481,7 +481,7 @@ async function pollOnce(): Promise<void> {
     // poll left a minutes-old list on screen looking live — a stale list is worse than an empty
     // one, because an empty one is obviously wrong.
     if (!res.ok) { snapFailures++; return }
-    const json = withNativeSessions(normalizeFleetPayload(await res.json() as FleetPayload), await nativeP)
+    const json = withNativeSessions(normalizeFleetPayload(await readCompactFleetResponse(await res.json(), offset => `/api/fleet/closed?lang=${pollLang}&offset=${offset}&limit=100`, true, `/api/fleet?lang=${pollLang}&format=compact-v1`, snapshot.rows as never) as unknown as FleetPayload), await nativeP)
     if (epoch !== fleetEpoch) return
     snapUnsupported = false
     snapshot = json
