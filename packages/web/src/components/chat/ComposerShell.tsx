@@ -224,6 +224,20 @@ export const composerFieldStyle = {
 }
 
 /**
+ * Grow a composer field with its text up to `max`, and show its scrollbar ONLY past `max`.
+ * `scrollHeight` is rounded, so a field left at `overflowY: auto` can be a fraction of a pixel
+ * short of its content and draw a scrollbar while empty (owner, 2026-10-30). Written straight to the
+ * element: the style objects keep `overflowY: 'auto'` as a constant, which React never rewrites.
+ */
+export function fitComposerField(el: HTMLTextAreaElement, max: number): boolean {
+  el.style.height = 'auto'
+  el.style.height = `${Math.min(el.scrollHeight, max)}px`
+  const overflows = el.scrollHeight > max + 1
+  el.style.overflowY = overflows ? 'auto' : 'hidden'
+  return overflows
+}
+
+/**
  * A REPLY FIELD between two quotes — the composer's own field, smaller in nothing: same typography,
  * same padding, and it grows with what is written up to `maxHeight`, then scrolls. A reply to
  * several passages is `[quote 1] reply 1 [quote 2] reply 2 …`, and each reply is one of these.
@@ -237,8 +251,7 @@ export const ComposerSegmentField = forwardRef<HTMLTextAreaElement, TextareaHTML
   useLayoutEffect(() => {
     const el = own.current
     if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
+    fitComposerField(el, maxHeight)
   }, [value, maxHeight])
   return (
     <textarea
