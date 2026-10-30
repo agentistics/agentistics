@@ -49,6 +49,7 @@ const MemorySettings = lazy(() => import('./pages/settings/MemorySettings'))
 const TeamsSettings = lazy(() => import('./pages/settings/TeamsSettings'))
 const PricingSettings = lazy(() => import('./pages/settings/PricingSettings'))
 const BillingSettings = lazy(() => import('./pages/settings/BillingSettings'))
+const EngineSurfacePageRoute = lazy(() => import('./pages/EngineSurfacePageRoute'))
 
 /**
  * A route's lazy chunk is on its way. During the BOOT this is the first route of the app, and the
@@ -114,6 +115,8 @@ export default function AppRouter() {
           <Route path="hardware" element={<Navigate to="/" replace />} />
           <Route path="compare" element={<Suspense fallback={<PageFallback />}><ComparePage /></Suspense>} />
           <Route path="export" element={<Suspense fallback={<PageFallback />}><ExportPage /></Suspense>} />
+          {/* An engine surface announced for the `rail` placement, mounted as a page (engine-api 1.18). */}
+          <Route path="x/:surfaceId" element={<Suspense fallback={<PageFallback />}><EngineSurfacePageRoute /></Suspense>} />
           <Route path="settings" element={<Suspense fallback={<PageFallback />}><SettingsPage /></Suspense>}>
             <Route index element={<Navigate to="preferences" replace />} />
             <Route path="preferences" element={<Suspense fallback={<PageFallback />}><PreferencesSettings /></Suspense>} />

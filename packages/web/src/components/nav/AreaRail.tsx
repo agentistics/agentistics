@@ -15,6 +15,9 @@ import { APP_AREAS, areaOfPath, pageLabel, type AreaId } from '../../lib/appArea
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { SOLID_COUNT } from './countBadge'
 import { AREA_ICON, AreaTree, Tip, areaEntryPath, rememberAreaPath } from './AreaTree'
+import { useEngineSurfaces } from '../../hooks/useEngineSurfaces'
+import { surfacePagePath } from '../../lib/engineSurfaces'
+import { surfaceGlyph } from '../EngineSurfaceButtons'
 
 export const AREA_RAIL_W = 60
 /** The width the same bar takes when opened: icons plus their labels and sections. */
@@ -55,6 +58,8 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
   }
   useEffect(() => () => cancelClose(), [])
   const current = areaOfPath(pathname)?.area.id
+  // Engine surfaces for the `rail` placement: icon entries after the areas, each opening a page.
+  const railSurfaces = useEngineSurfaces('rail')
   // Navigating anywhere closes the tree panel: it answered "where to", and the answer was given.
   useEffect(() => { setTreeOpen(false) }, [pathname])
   useEscapeOwner(treeOpen, () => setTreeOpen(false))
@@ -131,6 +136,24 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       }}>{n}</span>
                     ) : null}
+                  </a>
+                </Tip>
+              )
+            })}
+            {railSurfaces.map(s => {
+              const to = surfacePagePath(s.id)
+              const active = pathname === to
+              const Glyph = surfaceGlyph(s.icon)
+              return (
+                <Tip key={s.id} label={s.label[lang]} show>
+                  <a href={to} data-engine-rail={s.id} aria-label={s.label[lang]} aria-current={active ? 'page' : undefined}
+                    onClick={e => { e.preventDefault(); (onNavigate ?? navigate)(to) }}
+                    style={{
+                      ...icon,
+                      color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
+                      background: active ? 'var(--anthropic-orange-dim)' : 'transparent',
+                    }}>
+                    {Glyph && <Glyph size={18} aria-hidden />}
                   </a>
                 </Tip>
               )
