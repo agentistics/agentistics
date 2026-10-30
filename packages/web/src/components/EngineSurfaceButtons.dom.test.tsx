@@ -81,6 +81,26 @@ describe('EngineSurfaceButtons + EngineSurfaceHost', () => {
     resetEngineSurfaceHostForTests()
   })
 
+  test('the composer button hands the surface its sessionKind, and omits it when unknown', async () => {
+    const hostMod = await import('./EngineSurfaceHost')
+    const { invalidateEngineCaps } = await import('../lib/engineCapsBus')
+    const hostState = await import('../lib/engineSurfaceHost')
+    const kinds: Array<string | undefined> = []
+    for (const kind of ['nay', 'session', undefined] as const) {
+      hostState.resetEngineSurfaceHostForTests()
+      status = { present: true, surfaces: [{ ...surface, placement: 'composer', icon: 'phone' }] }
+      invalidateEngineCaps()
+      const buttons = await mount(createElement(mod.EngineSurfaceButtons, { placement: 'composer', sessionId: 'k1', ...(kind ? { sessionKind: kind } : {}), lang: 'en' }))
+      await settle()
+      const host = await mount(createElement(hostMod.EngineSurfaceHost, { load: async () => ({ mount(_: HTMLElement, ctx: { sessionKind?: string }) { kinds.push(ctx.sessionKind) } }) }))
+      await act(async () => { (buttons.host.querySelector('button[data-engine-surface="demo"]') as HTMLButtonElement).click() })
+      await settle()
+      host.root.unmount()
+      hostState.resetEngineSurfaceHostForTests()
+    }
+    expect(kinds).toEqual(['nay', 'session', undefined])
+  })
+
   test('inline composer surface mounts above the composer, keeps it usable, and re-parents on setLayout', async () => {
     const hostMod = await import('./EngineSurfaceHost')
     const hostState = await import('../lib/engineSurfaceHost')

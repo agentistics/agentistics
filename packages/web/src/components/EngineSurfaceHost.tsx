@@ -121,7 +121,7 @@ export function EngineSurfaceSideSlot({ sessionId, slotId }: { sessionId: string
 const PARKED: React.CSSProperties = { position: 'fixed', left: -100000, top: 0, width: 'calc(100vw / var(--ui-zoom, 1))', height: 'calc(100vh / var(--ui-zoom, 1))', overflow: 'hidden', pointerEvents: 'none' }
 
 function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
-  const { surface, sessionId, lang, nonce } = open
+  const { surface, sessionId, sessionKind, lang, nonce } = open
   // The slots answer for the surface ON SCREEN; a parked one never takes them.
   const inlineSlot = useEngineInlineSlot()
   const pageSlot = useEnginePageSlot()
@@ -178,7 +178,7 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
     drawn.current = effectiveSurfaceLayout(open.layout, resolveInlineSlot() !== null)
     // Every verb is bound to THIS surface, so a parked one can never move the one on screen.
     const ctx: SurfaceMountContext = {
-      sessionId, lang, reducedMotion,
+      sessionId, ...(sessionKind ? { sessionKind } : {}), lang, reducedMotion,
       get layout() { return drawn.current },
       setLayout: l => {
         setEngineSurfaceLayout(l, nonce)

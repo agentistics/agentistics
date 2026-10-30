@@ -15,7 +15,7 @@ export function surfaceGlyph(icon: SurfaceIcon | undefined): LucideIcon | null {
  * app-level `EngineSurfaceHost` to open the surface; the buttons own no overlay of their own, so a
  * surface outlives the screen (and the button) it was opened from.
  */
-export function EngineSurfaceButtons({ placement, sessionId, lang, slotId }: { placement: SurfacePlacement; sessionId: string | null; lang: 'pt' | 'en'; slotId?: string }) {
+export function EngineSurfaceButtons({ placement, sessionId, sessionKind, lang, slotId }: { placement: SurfacePlacement; sessionId: string | null; sessionKind?: 'nay' | 'session'; lang: 'pt' | 'en'; slotId?: string }) {
   const surfaces = useEngineSurfaces(placement)
   const mobile = useIsMobile()
   const mounted = useMountedEngineSurfaces()
@@ -40,7 +40,7 @@ export function EngineSurfaceButtons({ placement, sessionId, lang, slotId }: { p
             aria-label={name} title={name}
             data-active={active ? 'true' : undefined} data-tone={active ? (s.activeTone ?? 'accent') : undefined}
             data-parked={parked ? 'true' : undefined}
-            onClick={e => active && entry ? closeEngineSurface(entry.nonce) : openEngineSurface(s, { sessionId, lang, trigger: e.currentTarget, slotId })}
+            onClick={e => active && entry ? closeEngineSurface(entry.nonce) : openEngineSurface(s, { sessionId, ...(sessionKind ? { sessionKind } : {}), lang, trigger: e.currentTarget, slotId })}
             style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer',
               border: '1px solid var(--border)', borderRadius: 6, background: 'transparent', color: 'var(--text-secondary)',

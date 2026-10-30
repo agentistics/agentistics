@@ -118,6 +118,13 @@ export function surfaceIndicatorRefusals(ind: unknown): SurfaceIndicatorRefusalR
 export interface SurfaceMountContext {
   /** The session the surface was opened from; `null` where there is none (e.g. `app-bar`). */
   sessionId: string | null
+  /**
+   * 1.18, optional: what kind of conversation `sessionId` names. `nay` when it is the app's own assistant
+   * conversation (which is not a fleet row), `session` for any other; absent where the host does not know
+   * (no session, or an older host). Lets a surface pick the right target for `sessionId` without asking the
+   * fleet about it.
+   */
+  sessionKind?: 'nay' | 'session'
   lang: 'pt' | 'en'
   reducedMotion: boolean
   /**

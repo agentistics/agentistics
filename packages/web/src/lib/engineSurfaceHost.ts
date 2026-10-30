@@ -13,6 +13,8 @@ import { isValidSessionId, type EngineSurfaceInfo, type SurfaceIndicator, type S
 export interface OpenSurface {
   surface: EngineSurfaceInfo
   sessionId: string | null
+  /** 1.18: what kind of conversation `sessionId` is, when the opener knew. */
+  sessionKind?: 'nay' | 'session'
   lang: 'pt' | 'en'
   /** Increments per opening, so reopening the same surface remounts it; also the surface's handle. */
   nonce: number
@@ -66,20 +68,20 @@ function hide(s: OpenSurface): void {
   } else remove(s.nonce)
 }
 
-export function openEngineSurface(surface: EngineSurfaceInfo, opts: { sessionId: string | null; lang: 'pt' | 'en'; trigger?: HTMLElement | null; slotId?: string }): void {
+export function openEngineSurface(surface: EngineSurfaceInfo, opts: { sessionId: string | null; sessionKind?: 'nay' | 'session'; lang: 'pt' | 'en'; trigger?: HTMLElement | null; slotId?: string }): void {
   // Asking for a surface that is already mounted keeps it (and its state) rather than restarting it, and
   // brings it back on screen if it was parked.
   const have = mounted.find(s => s.surface.id === surface.id)
   if (visible && visible !== have) hide(visible)
   if (have) {
     const now = mounted.find(s => s.nonce === have.nonce)
-    if (now) patch(now.nonce, { sessionId: opts.sessionId, lang: opts.lang, slotId: opts.slotId, parked: false })
+    if (now) patch(now.nonce, { sessionId: opts.sessionId, sessionKind: opts.sessionKind, lang: opts.lang, slotId: opts.slotId, parked: false })
     return
   }
   const n = ++nonce
   if (opts.trigger) returnFocus = { nonce: n, el: opts.trigger }
   const layout: SurfaceLayout = surface.placement === 'rail' ? 'page' : surface.layout === 'page' ? 'full' : surface.layout ?? 'full'
-  commit([...mounted, { surface, sessionId: opts.sessionId, lang: opts.lang, nonce: n, layout, slotId: opts.slotId, parked: false, keepAlive: false, indicator: null }])
+  commit([...mounted, { surface, sessionId: opts.sessionId, ...(opts.sessionKind ? { sessionKind: opts.sessionKind } : {}), lang: opts.lang, nonce: n, layout, slotId: opts.slotId, parked: false, keepAlive: false, indicator: null }])
 }
 
 /**

@@ -81,7 +81,7 @@ import {
   composeQuoted, locateExcerpt,
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
-import { modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
+import { isNayCwd, modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
@@ -3573,7 +3573,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                 )}
 
                 {!answeringNow && (
-                  <EngineSurfaceButtons placement="composer" sessionId={session.id} slotId={engineSlotId} lang={pt ? 'pt' : 'en'} />
+                  <EngineSurfaceButtons placement="composer" sessionId={session.id} sessionKind={isNayCwd(session.cwd) ? 'nay' : 'session'} slotId={engineSlotId} lang={pt ? 'pt' : 'en'} />
                 )}
 
                 {/* THE CONTEXT GAUGE (design item 3, owner 2026-09-27) — right after the
