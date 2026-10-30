@@ -1,5 +1,6 @@
 import { EngineSurfaceButtons } from './components/EngineSurfaceButtons'
 import { EngineSurfaceHost } from './components/EngineSurfaceHost'
+import { EngineSurfaceIndicators } from './components/EngineSurfaceIndicator'
 import { ActionNotice } from './components/sessions/ActionNotice'
 import { HandoffMeter } from './components/sessions/HandoffWarning'
 import { PageRouteFrame } from './components/PageRouteFrame'
@@ -3290,6 +3291,7 @@ export default function AppLayout() {
         <MagnifierButton ctx={appCtx} />
         <HideLensesButton ctx={appCtx} />
         <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
+        <EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} />
         <EngineSurfaceButtons placement="app-bar" sessionId={null} lang={lang === 'pt' ? 'pt' : 'en'} />
         <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
         <NotificationBell lang={lang} buttonStyle={{
@@ -3689,6 +3691,7 @@ export default function AppLayout() {
           <Cpu size={14} />
         </button>
         <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
+        <EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} />
         <EngineSurfaceButtons placement="app-bar" sessionId={null} lang={lang === 'pt' ? 'pt' : 'en'} />
         <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
         <NotificationBell lang={lang} buttonStyle={{
@@ -4172,6 +4175,7 @@ export default function AppLayout() {
                 <HealthWarnings issues={data.healthIssues} lang={lang} />
               )}
               <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
+        <EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} />
         <EngineSurfaceButtons placement="app-bar" sessionId={null} lang={lang === 'pt' ? 'pt' : 'en'} />
         <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
               <NotificationBell lang={lang} buttonStyle={{
@@ -4603,6 +4607,15 @@ export default function AppLayout() {
       <CheckinModalHost lang={lang === 'pt' ? 'pt' : 'en'} />
       <AwayDialogHost />
       <EngineSurfaceHost />
+      {/* The sessions workspace on a phone has no app header (the session draws its own bar), so an engine
+          surface's indicator floats at the top there, compact, clear of the bottom navigation. It keeps
+          to the bar's middle — the back arrow and the bar's own buttons stay reachable at the sides —
+          and several pills wrap inside that band instead of running past it. */}
+      {isMobile && inSessionsWorkspace && (
+        <div style={{ position: 'fixed', top: 'calc(var(--safe-top, 0px) + 6px)', left: 56, right: 96, zIndex: 650, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+          <span style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 4, maxWidth: '100%', minWidth: 0, pointerEvents: 'auto' }}><EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} /></span>
+        </div>
+      )}
 
       {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this
           computer — the phones waiting for approval. A central has no vault of its own here. */}

@@ -9,8 +9,11 @@
  * way it judges routes: a surface it cannot place safely is refused, never half-drawn.
  */
 
-/** Where the host may draw a surface's button. */
-export const SURFACE_PLACEMENTS = ['session-header', 'nay-dock', 'app-bar', 'composer'] as const
+/**
+ * Where the host may draw a surface's button. 1.18 adds `composer` (an icon button in the shared composer)
+ * and `rail` (an icon entry in the app's navigation, beside the pages, that opens the surface AS a page).
+ */
+export const SURFACE_PLACEMENTS = ['session-header', 'nay-dock', 'app-bar', 'composer', 'rail'] as const
 export type SurfacePlacement = (typeof SURFACE_PLACEMENTS)[number]
 
 /** Generic icon names understood by the host; engines never choose a library glyph directly. */
@@ -29,7 +32,10 @@ export interface EngineSurface {
   placement: SurfacePlacement
   /** The button's text. */
   label: { pt: string; en: string }
-  /** Host-mapped icon; REQUIRED for the `composer` placement (an icon-only button). The label remains the accessible name and tooltip. */
+  /**
+   * Host-mapped icon; REQUIRED for the `composer` and `rail` placements (icon-only entries). The label
+   * remains the accessible name and tooltip.
+   */
   icon?: SurfaceIcon
   /**
    * 1.18, optional, `composer` placement: while this surface is open (any layout) the host's button
@@ -46,8 +52,8 @@ export interface EngineSurface {
   /** An environment variable name (`[A-Z][A-Z0-9_]*`): the surface is offered only while it is `1`. */
   experimental?: string
   /**
-   * 1.18, optional: the layout the surface opens in (default `full`). `inline` is only valid for the
-   * `composer` placement.
+   * 1.18, optional: the layout the surface opens in (default `full`; `page` for `rail`). `inline` is only
+   * valid for the `composer` placement, `page` only for `rail` (which accepts no other layout).
    */
   layout?: SurfaceLayout
   /**
@@ -61,11 +67,52 @@ export interface EngineSurface {
  * How the host frames a mounted surface: `full` is a modal overlay over the page, `side` a panel docked
  * to the edge that leaves the page usable, and (1.18) `inline` mounts it directly above the session
  * composer, inside the session view, leaving the conversation and the composer usable. `inline` exists
- * only for a surface of the `composer` placement; elsewhere the host ignores it. The surface switches
- * between layouts without being unmounted (the host re-parents the same element).
+ * only for a surface of the `composer` placement; elsewhere the host ignores it. (1.18) `page` mounts it
+ * as a page of the app, in the main area, with no host frame, on its own route (`/x/<id>`); it exists
+ * only for (and is the only layout of) the `rail` placement. The surface switches between layouts
+ * without being unmounted (the host re-parents the same element).
  */
-export type SurfaceLayout = 'full' | 'side' | 'inline'
-export const SURFACE_LAYOUTS = ['full', 'side', 'inline'] as const
+export type SurfaceLayout = 'full' | 'side' | 'inline' | 'page'
+export const SURFACE_LAYOUTS = ['full', 'side', 'inline', 'page'] as const
+
+/**
+ * 1.18: what a surface asks the host to show in the app's top bar, on every screen, while it is set
+ * (`ctx.setIndicator`). The host draws a pill with the icon, the label and, given `since`, a live
+ * `mm:ss` timer; clicking it brings the surface back (a `rail` page: its route; a session surface: the
+ * session that owns it, in the layout it had). With `endLabel` the pill carries a secondary button
+ * that calls the callback registered with `ctx.onIndicatorEnd`.
+ */
+export interface SurfaceIndicator {
+  /** 1–40 characters each, after trimming. */
+  label: { pt: string; en: string }
+  /** Epoch milliseconds; the host shows the time elapsed since then, counting up. */
+  since?: number
+  /** `accent` by default; `danger` is the destructive red. */
+  tone?: SurfaceActiveTone
+  icon?: SurfaceIcon
+  /** The secondary button's text (1–40 characters each); absent means no secondary button. */
+  endLabel?: { pt: string; en: string }
+}
+
+export type SurfaceIndicatorRefusalReason = 'bad-indicator' | 'bad-label' | 'bad-since' | 'bad-tone' | 'bad-icon' | 'bad-end-label'
+
+/** The longest indicator label (and end label) the host draws. */
+export const SURFACE_INDICATOR_LABEL_MAX = 40
+
+/** PURE. Why the host would refuse this indicator; empty means it may be shown. */
+export function surfaceIndicatorRefusals(ind: unknown): SurfaceIndicatorRefusalReason[] {
+  if (!ind || typeof ind !== 'object' || Array.isArray(ind)) return ['bad-indicator']
+  const i = ind as Record<string, unknown>
+  const out: SurfaceIndicatorRefusalReason[] = []
+  const text = (v: unknown) => typeof v === 'string' && v.trim().length > 0 && v.trim().length <= SURFACE_INDICATOR_LABEL_MAX
+  const pair = (v: unknown) => !!v && typeof v === 'object' && text((v as { pt?: unknown }).pt) && text((v as { en?: unknown }).en)
+  if (!pair(i.label)) out.push('bad-label')
+  if (i.since !== undefined && !(typeof i.since === 'number' && Number.isFinite(i.since) && i.since >= 0)) out.push('bad-since')
+  if (i.tone !== undefined && !(SURFACE_ACTIVE_TONES as readonly unknown[]).includes(i.tone)) out.push('bad-tone')
+  if (i.icon !== undefined && !(SURFACE_ICONS as readonly unknown[]).includes(i.icon)) out.push('bad-icon')
+  if (i.endLabel !== undefined && !pair(i.endLabel)) out.push('bad-end-label')
+  return out
+}
 
 /** What the host passes a surface's `mount`. */
 export interface SurfaceMountContext {
@@ -78,13 +125,35 @@ export interface SurfaceMountContext {
    * `inline` surface reports `side` while no session composer is on screen to hold it.
    */
   layout: SurfaceLayout
-  /** Switches the host frame between `full`, `side` and (1.18, `composer` placement only) `inline`; the module stays mounted. */
+  /**
+   * Switches the host frame between `full`, `side` and (1.18, `composer` placement only) `inline`; the
+   * module stays mounted. A `rail` surface is always `page`: the host ignores any other layout for it,
+   * and `page` for any other placement.
+   */
   setLayout(layout: SurfaceLayout): void
   /**
-   * Asks the host to close the surface (which then calls `unmount`). A mounted surface stays mounted
-   * while the person navigates between screens; only this, the close button or Esc (in `full`) ends it.
+   * Ends the surface (the host then calls `unmount`), whatever `keepAlive` says. A mounted surface stays
+   * mounted while the person navigates between screens; only this, the close button or Esc (in `full`)
+   * ends it, and (`rail`) leaving its page.
    */
   close(): void
+  /**
+   * 1.18. With `true`, whatever would take the surface off screen (leaving its `rail` page, the close
+   * button, Esc, the active `composer` button) does NOT unmount it: the host moves the same element,
+   * still mounted, off screen, so media, sockets and state carry on, until it is brought back (its entry,
+   * the indicator) or ends (`close()`, or `keepAlive(false)` while off screen, which unmounts it at once).
+   * Only one surface is on screen at a time; opening another one takes a kept-alive surface off screen
+   * rather than ending it.
+   */
+  keepAlive(on: boolean): void
+  /**
+   * 1.18. Shows (or, with `null`, removes) a pill in the app's top bar on every screen while the surface
+   * is mounted; see `SurfaceIndicator`. An indicator `surfaceIndicatorRefusals` refuses throws an Error
+   * naming the reasons and leaves the previous one in place. Unmounting removes it.
+   */
+  setIndicator(indicator: SurfaceIndicator | null): void
+  /** 1.18. The callback the indicator's secondary button calls; returns the function that removes it. */
+  onIndicatorEnd(fn: () => void): () => void
 }
 
 /** The module's contract: `import(module)` must expose `mount`, and may expose `unmount`. */
@@ -140,13 +209,14 @@ export function surfaceRefusals(
     const labelOk = (v: unknown) => typeof v === 'string' && v.trim().length > 0 && v.length <= 60
     if (!l || !labelOk(l.pt) || !labelOk(l.en)) out.push({ id, reason: 'bad-label' })
     if (s.icon !== undefined && !(SURFACE_ICONS as readonly string[]).includes(s.icon)) out.push({ id, reason: 'bad-icon' })
-    if (s.placement === 'composer' && s.icon === undefined) out.push({ id, reason: 'bad-icon' })
+    if ((s.placement === 'composer' || s.placement === 'rail') && s.icon === undefined) out.push({ id, reason: 'bad-icon' })
     if (!surfaceModuleOk(s.module)) out.push({ id, reason: 'bad-module' })
     if (s.experimental !== undefined && !(typeof s.experimental === 'string' && FLAG.test(s.experimental))) {
       out.push({ id, reason: 'bad-flag' })
     }
     if (s.layout !== undefined && !((SURFACE_LAYOUTS as readonly string[]).includes(s.layout)
-      && (s.layout !== 'inline' || s.placement === 'composer'))) out.push({ id, reason: 'bad-layout' })
+      && (s.layout !== 'inline' || s.placement === 'composer')
+      && ((s.layout === 'page') === (s.placement === 'rail')))) out.push({ id, reason: 'bad-layout' })
     const al = s.activeLabel as { pt?: unknown; en?: unknown } | undefined
     if ((s.activeIcon !== undefined && !(SURFACE_ICONS as readonly string[]).includes(s.activeIcon))
       || (s.activeTone !== undefined && !(SURFACE_ACTIVE_TONES as readonly string[]).includes(s.activeTone))

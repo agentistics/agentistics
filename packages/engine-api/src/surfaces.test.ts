@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  ENGINE_API_VERSION, ENGINE_SOCKET_LIMITS, RESERVED_PREFIXES, checkEngine, frameCap, surfaceModuleOk, surfaceRefusals,
+  ENGINE_API_VERSION, ENGINE_SOCKET_LIMITS, RESERVED_PREFIXES, checkEngine, frameCap, surfaceIndicatorRefusals, surfaceModuleOk, surfaceRefusals,
   type EngineManifest, type EngineSurface,
 } from './index'
 
@@ -64,6 +64,31 @@ describe('1.15', () => {
     expect(surfaceRefusals([surface({ activeIcon: 'bell' as never })])[0]!.reason).toBe('bad-active')
     expect(surfaceRefusals([surface({ activeTone: 'pink' as never })])[0]!.reason).toBe('bad-active')
     expect(surfaceRefusals([surface({ activeLabel: { pt: '', en: 'x' } })])[0]!.reason).toBe('bad-active')
+  })
+  it('accepts the rail placement only with an icon, and page only for rail', () => {
+    expect(surfaceRefusals([surface({ placement: 'rail', icon: 'sparkles' })])).toEqual([])
+    expect(surfaceRefusals([surface({ placement: 'rail', icon: 'sparkles', layout: 'page' })])).toEqual([])
+    expect(surfaceRefusals([surface({ placement: 'rail' })])[0]!.reason).toBe('bad-icon')
+    expect(surfaceRefusals([surface({ placement: 'rail', icon: 'panel', layout: 'side' })])[0]!.reason).toBe('bad-layout')
+    expect(surfaceRefusals([surface({ placement: 'composer', icon: 'phone', layout: 'page' })])[0]!.reason).toBe('bad-layout')
+    expect(surfaceRefusals([surface({ layout: 'page' })])[0]!.reason).toBe('bad-layout')
+  })
+  it('judges an indicator: label, since, tone, icon and end label', () => {
+    const ind = { label: { pt: 'Em curso', en: 'Running' } }
+    expect(surfaceIndicatorRefusals(ind)).toEqual([])
+    expect(surfaceIndicatorRefusals({ ...ind, since: 1_700_000_000_000, tone: 'danger', icon: 'phone', endLabel: { pt: 'Parar', en: 'Stop' } })).toEqual([])
+    for (const bad of [null, 'x', 42, []]) expect(surfaceIndicatorRefusals(bad)).toEqual(['bad-indicator'])
+    expect(surfaceIndicatorRefusals({ label: { pt: '', en: 'x' } })).toEqual(['bad-label'])
+    expect(surfaceIndicatorRefusals({ label: { pt: 'x'.repeat(41), en: 'x' } })).toEqual(['bad-label'])
+    expect(surfaceIndicatorRefusals({ label: { pt: 'x'.repeat(40), en: 'x' } })).toEqual([])
+    expect(surfaceIndicatorRefusals({ label: { pt: ` ${'x'.repeat(40)} `, en: 'x' } })).toEqual([])
+    expect(surfaceIndicatorRefusals({ ...ind, since: NaN })).toEqual(['bad-since'])
+    expect(surfaceIndicatorRefusals({ ...ind, since: -1 })).toEqual(['bad-since'])
+    expect(surfaceIndicatorRefusals({ ...ind, since: '1' })).toEqual(['bad-since'])
+    expect(surfaceIndicatorRefusals({ ...ind, tone: 'pink' })).toEqual(['bad-tone'])
+    expect(surfaceIndicatorRefusals({ ...ind, icon: 'bell' })).toEqual(['bad-icon'])
+    expect(surfaceIndicatorRefusals({ ...ind, endLabel: { pt: 'Parar' } })).toEqual(['bad-end-label'])
+    expect(surfaceIndicatorRefusals({ label: 'x', tone: 'pink' })).toEqual(['bad-label', 'bad-tone'])
   })
   it('frame cap only narrows', () => {
     expect(frameCap(undefined)).toBe(ENGINE_SOCKET_LIMITS.maxFrameBytes)

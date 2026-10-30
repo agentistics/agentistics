@@ -1,52 +1,157 @@
 /**
- * engineSurfaceHost — the ONE open engine surface, held outside any screen.
+ * engineSurfaceHost — the mounted engine surfaces, held outside any screen.
  *
  * A surface stays mounted while the person navigates (the host component lives at the app root, not in
- * a page), and only `closeEngineSurface` ends it. Opening another surface replaces the current one.
- * The layout (`full` modal / `side` panel / `inline` above the session composer) is host state the surface flips through its context.
+ * a page). At most ONE is on screen; opening another takes the visible one away — ending it, or, when it
+ * asked to be kept alive (`ctx.keepAlive(true)`), PARKING it: still mounted, its element moved off
+ * screen, until it is brought back or ends. The layout (`full` modal / `side` panel / `inline` above the
+ * session composer / `page` on its own route) is host state the surface flips through its context.
  */
 import { useSyncExternalStore } from 'react'
-import type { EngineSurfaceInfo, SurfaceLayout } from './engineSurfaces'
+import type { EngineSurfaceInfo, SurfaceIndicator, SurfaceLayout } from './engineSurfaces'
 
 export interface OpenSurface {
   surface: EngineSurfaceInfo
   sessionId: string | null
   lang: 'pt' | 'en'
-  /** Increments per opening, so reopening the same surface remounts it. */
+  /** Increments per opening, so reopening the same surface remounts it; also the surface's handle. */
   nonce: number
   layout: SurfaceLayout
   /** The composer instance whose button opened it: its inline slot is preferred. */
   slotId?: string
+  /** Mounted but off screen (kept alive). The `layout` it had is kept, for when it comes back. */
+  parked: boolean
+  /** Asked by the surface: taking it off screen parks it instead of ending it. */
+  keepAlive: boolean
+  /** The top-bar pill it asked for, or `null`. */
+  indicator: SurfaceIndicator | null
 }
 
-let current: OpenSurface | null = null
+let mounted: OpenSurface[] = []
+let visible: OpenSurface | null = null
 let nonce = 0
-let returnFocus: HTMLElement | null = null
+let returnFocus: { nonce: number; el: HTMLElement } | null = null
+const endHandlers = new Map<number, () => void>()
 const listeners = new Set<() => void>()
+const subscribe = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l) } }
+
+function commit(next: OpenSurface[]): void {
+  mounted = next
+  visible = next.find(s => !s.parked) ?? null
+  for (const l of listeners) l()
+}
 const emit = () => { for (const l of listeners) l() }
+const patch = (n: number, p: Partial<OpenSurface>) => commit(mounted.map(s => (s.nonce === n ? { ...s, ...p } : s)))
+
+function remove(n: number): void {
+  if (!mounted.some(s => s.nonce === n)) return
+  endHandlers.delete(n)
+  commit(mounted.filter(s => s.nonce !== n))
+  const back = returnFocus
+  if (back?.nonce === n) {
+    returnFocus = null
+    if (typeof back.el.focus === 'function' && back.el.isConnected) back.el.focus()
+  }
+}
+
+/** Takes the visible surface off screen: parked if it asked to be kept alive, ended otherwise. */
+function hide(s: OpenSurface): void {
+  if (s.keepAlive) {
+    patch(s.nonce, { parked: true })
+    const back = returnFocus
+    if (back?.nonce === s.nonce) {
+      returnFocus = null
+      if (typeof back.el.focus === 'function' && back.el.isConnected) back.el.focus()
+    }
+  } else remove(s.nonce)
+}
 
 export function openEngineSurface(surface: EngineSurfaceInfo, opts: { sessionId: string | null; lang: 'pt' | 'en'; trigger?: HTMLElement | null; slotId?: string }): void {
-  // Asking for the surface that is already open keeps it (and its state) rather than restarting it.
-  if (current && current.surface.id === surface.id) { current = { ...current, sessionId: opts.sessionId, lang: opts.lang, slotId: opts.slotId }; emit(); return }
-  returnFocus = opts.trigger ?? null
-  current = { surface, sessionId: opts.sessionId, lang: opts.lang, nonce: ++nonce, layout: surface.layout ?? 'full', slotId: opts.slotId }
-  emit()
+  // Asking for a surface that is already mounted keeps it (and its state) rather than restarting it, and
+  // brings it back on screen if it was parked.
+  const have = mounted.find(s => s.surface.id === surface.id)
+  if (visible && visible !== have) hide(visible)
+  if (have) {
+    const now = mounted.find(s => s.nonce === have.nonce)
+    if (now) patch(now.nonce, { sessionId: opts.sessionId, lang: opts.lang, slotId: opts.slotId, parked: false })
+    return
+  }
+  const n = ++nonce
+  if (opts.trigger) returnFocus = { nonce: n, el: opts.trigger }
+  const layout: SurfaceLayout = surface.placement === 'rail' ? 'page' : surface.layout === 'page' ? 'full' : surface.layout ?? 'full'
+  commit([...mounted, { surface, sessionId: opts.sessionId, lang: opts.lang, nonce: n, layout, slotId: opts.slotId, parked: false, keepAlive: false, indicator: null }])
 }
 
-export function closeEngineSurface(): void {
-  if (!current) return
-  current = null
-  emit()
-  const back = returnFocus
-  returnFocus = null
-  if (back && typeof back.focus === 'function' && back.isConnected) back.focus()
+/**
+ * The host's own close (the close button, Esc, the backdrop, the active composer button): the visible
+ * surface — or the one named by `n` — goes off screen, parked if it is kept alive, ended otherwise.
+ */
+export function closeEngineSurface(n?: number): void {
+  const s = n === undefined ? visible : mounted.find(x => x.nonce === n)
+  if (!s || s.parked) return
+  hide(s)
 }
 
-export function setEngineSurfaceLayout(layout: SurfaceLayout): void {
-  if (!current || current.layout === layout) return
-  if (layout === 'inline' && current.surface.placement !== 'composer') return
-  current = { ...current, layout }
-  emit()
+/** Ends a surface whatever it asked (`ctx.close()`). */
+export function endEngineSurface(n: number): void { remove(n) }
+
+/** Leaving a `rail` surface's page: parked if kept alive, ended otherwise. */
+export function leaveEngineSurfacePage(id: string): void {
+  const s = mounted.find(x => x.surface.id === id)
+  if (s && !s.parked && s.layout === 'page') hide(s)
+}
+
+/** Brings a parked surface back on screen (the visible one, if another, goes away as usual). */
+export function resumeEngineSurface(n: number): void {
+  const s = mounted.find(x => x.nonce === n)
+  if (!s || !s.parked) return
+  if (visible && visible.nonce !== n) hide(visible)
+  patch(n, { parked: false })
+}
+
+export function setEngineSurfaceLayout(layout: SurfaceLayout, n?: number): void {
+  const s = n === undefined ? visible : mounted.find(x => x.nonce === n)
+  if (!s || s.layout === layout) return
+  if (layout === 'inline' && s.surface.placement !== 'composer') return
+  // A `rail` surface is a page and nothing else; a page belongs to a `rail` surface only.
+  if ((layout === 'page') !== (s.surface.placement === 'rail')) return
+  patch(s.nonce, { layout })
+}
+
+/**
+ * After the engine's announcement changed (caps invalidated): every mounted surface — on screen or kept
+ * alive off it — that is no longer announced ends, and its indicator goes with it.
+ */
+export function reconcileEngineSurfaces(announced: (s: EngineSurfaceInfo) => boolean): void {
+  for (const s of mounted) if (!announced(s.surface)) remove(s.nonce)
+}
+
+/** `ctx.keepAlive`: turning it off while parked ends the surface at once. */
+export function setEngineSurfaceKeepAlive(n: number, on: boolean): void {
+  const s = mounted.find(x => x.nonce === n)
+  if (!s) return
+  if (!on && s.parked) { remove(n); return }
+  if (s.keepAlive !== on) patch(n, { keepAlive: on })
+}
+
+/** `ctx.setIndicator`, after validation. */
+export function setEngineSurfaceIndicator(n: number, indicator: SurfaceIndicator | null): void {
+  if (!mounted.some(x => x.nonce === n)) return
+  patch(n, { indicator })
+}
+
+/** `ctx.onIndicatorEnd`: one callback per surface; the returned function removes it if still current. */
+export function onEngineSurfaceIndicatorEnd(n: number, fn: () => void): () => void {
+  if (!mounted.some(x => x.nonce === n)) return () => {}
+  endHandlers.set(n, fn)
+  return () => { if (endHandlers.get(n) === fn) endHandlers.delete(n) }
+}
+
+/** The indicator's secondary button. A throwing callback is the surface's problem, never the host's. */
+export function endEngineSurfaceIndicator(n: number): void {
+  const fn = endHandlers.get(n)
+  if (!fn) return
+  try { fn() } catch { /* the surface's own error */ }
 }
 
 /**
@@ -60,8 +165,9 @@ export function registerEngineInlineSlot(id: string, sessionId: string, el: HTML
   if (el) { if (slots.get(id)?.el === el) return; slots.set(id, { el, sessionId }); emit(); return }
   if (own && slots.get(id)?.el === own) { slots.delete(id); emit() }
 }
-/** The slot the open surface should occupy right now, or `null`. */
+/** The slot the visible surface should occupy right now, or `null`. */
 export function resolveInlineSlot(): HTMLElement | null {
+  const current = visible
   if (!current || current.layout !== 'inline') return null
   const own = current.slotId ? slots.get(current.slotId) : undefined
   if (own && own.sessionId === current.sessionId) return own.el
@@ -69,7 +175,25 @@ export function resolveInlineSlot(): HTMLElement | null {
   return null
 }
 export function useEngineInlineSlot(): HTMLElement | null {
-  return useSyncExternalStore(l => { listeners.add(l); return () => { listeners.delete(l) } }, resolveInlineSlot, () => null)
+  return useSyncExternalStore(subscribe, resolveInlineSlot, () => null)
+}
+
+/**
+ * The element a `rail` surface's page route renders, one per surface id, registered and removed by that
+ * page. Without it (the page is not on screen) a `page` surface is held off screen.
+ */
+const pageSlots = new Map<string, HTMLElement>()
+export function registerEnginePageSlot(id: string, el: HTMLElement | null, own?: HTMLElement | null): void {
+  if (el) { if (pageSlots.get(id) === el) return; pageSlots.set(id, el); emit(); return }
+  if (own && pageSlots.get(id) === own) { pageSlots.delete(id); emit() }
+}
+export function resolvePageSlot(): HTMLElement | null {
+  const current = visible
+  if (!current || current.layout !== 'page') return null
+  return pageSlots.get(current.surface.id) ?? null
+}
+export function useEnginePageSlot(): HTMLElement | null {
+  return useSyncExternalStore(subscribe, resolvePageSlot, () => null)
 }
 
 /** PURE. The layout actually drawn: `inline` needs a slot, and falls back to `side` without one. */
@@ -77,11 +201,19 @@ export function effectiveSurfaceLayout(layout: SurfaceLayout, hasSlot: boolean):
   return layout === 'inline' && !hasSlot ? 'side' : layout
 }
 
-export function currentEngineSurface(): OpenSurface | null { return current }
+/** The surface on screen, or `null`. */
+export function currentEngineSurface(): OpenSurface | null { return visible }
 
 export function useOpenEngineSurface(): OpenSurface | null {
-  return useSyncExternalStore(l => { listeners.add(l); return () => { listeners.delete(l) } }, () => current, () => null)
+  return useSyncExternalStore(subscribe, () => visible, () => null)
 }
 
+const NONE: OpenSurface[] = []
+/** Every mounted surface, on screen or parked. */
+export function useMountedEngineSurfaces(): OpenSurface[] {
+  return useSyncExternalStore(subscribe, () => mounted, () => NONE)
+}
+export function mountedEngineSurfaces(): OpenSurface[] { return mounted }
+
 /** Tests only. */
-export function resetEngineSurfaceHostForTests(): void { current = null; returnFocus = null; slots.clear(); emit() }
+export function resetEngineSurfaceHostForTests(): void { returnFocus = null; slots.clear(); pageSlots.clear(); endHandlers.clear(); commit([]) }

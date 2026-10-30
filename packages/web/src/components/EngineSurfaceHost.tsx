@@ -2,23 +2,85 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useEscapeOwner } from '../lib/overlayStack'
-import { closeEngineSurface, effectiveSurfaceLayout, registerEngineInlineSlot, resolveInlineSlot, setEngineSurfaceLayout, useEngineInlineSlot, useOpenEngineSurface, type OpenSurface } from '../lib/engineSurfaceHost'
-import { mountSurface, type SurfaceHandle, type SurfaceLayout, type SurfaceMountContext } from '../lib/engineSurfaces'
+import {
+  closeEngineSurface, effectiveSurfaceLayout, endEngineSurface, leaveEngineSurfacePage, onEngineSurfaceIndicatorEnd, openEngineSurface,
+  registerEngineInlineSlot, registerEnginePageSlot, resolveInlineSlot, setEngineSurfaceIndicator, setEngineSurfaceKeepAlive,
+  reconcileEngineSurfaces, setEngineSurfaceLayout, useEngineInlineSlot, useEnginePageSlot, useMountedEngineSurfaces, useOpenEngineSurface, type OpenSurface,
+} from '../lib/engineSurfaceHost'
+import { readEngineStatus, useEngineSurfaceList } from '../hooks/useEngineSurfaces'
+import { onEngineCapsInvalidated } from '../lib/engineCapsBus'
+import {
+  asSurfaceIndicator, mountSurface, stillAnnounced, surfaceIndicatorRefusals, type SurfaceHandle, type SurfaceIndicator, type SurfaceLayout,
+  type SurfaceMountContext,
+} from '../lib/engineSurfaces'
 
 /** Test seam: how the module is imported. */
 type Loader = (path: string) => Promise<unknown>
 
 /**
- * Mounted ONCE, at the app root. Draws the open engine surface in a frame the host owns: `full` is a
+ * Mounted ONCE, at the app root. Draws each mounted engine surface in a frame the host owns: `full` is a
  * modal overlay (focus, Esc, close button), `side` a docked panel that leaves the page usable. The
  * frame is ONE element whose style changes, and the module's own container is a stable child — so
  * switching layout, or navigating to another screen, never unmounts the surface. It ends only on an
- * explicit close (the button, the surface's `ctx.close()`, or Esc while `full`).
+ * explicit close (the button, the surface's `ctx.close()`, or Esc while `full`) — and a surface kept
+ * alive is PARKED by those instead: the same element, still mounted, moved into an off-screen holder.
  */
 export function EngineSurfaceHost({ load }: { load?: Loader }) {
+  const list = useMountedEngineSurfaces()
+  // The engine's announcement can change without a reload (the experimental switch, another engine):
+  // a surface it no longer announces ends, kept alive or not.
+  useEffect(() => onEngineCapsInvalidated(() => {
+    void readEngineStatus().then(status => { const keep = stillAnnounced(status); if (keep) reconcileEngineSurfaces(keep) })
+  }), [])
+  if (list.length === 0 || typeof document === 'undefined') return null
+  return createPortal(<>{list.map(open => <Frame key={open.nonce} open={open} load={load} />)}</>, document.body)
+}
+
+/**
+ * A `rail` surface's page (`/x/<id>`): the main-area element the surface is mounted into, with no host
+ * frame. Arriving opens the surface (or brings back the one kept alive); leaving parks it when it asked
+ * to be kept alive and ends it otherwise.
+ */
+export function EngineSurfacePage({ surfaceId, lang }: { surfaceId: string; lang: 'pt' | 'en' }) {
+  const list = useEngineSurfaceList('rail')
+  const info = list?.find(s => s.id === surfaceId)
   const open = useOpenEngineSurface()
-  if (!open || typeof document === 'undefined') return null
-  return createPortal(<Frame key={open.nonce} open={open} load={load} />, document.body)
+  const [asked, setAsked] = useState(0)
+  // Set once this page has opened its surface: only then does "not on screen" mean it was closed.
+  const [opened, setOpened] = useState(false)
+  const own = useRef<HTMLElement | null>(null)
+  const ref = useCallback((el: HTMLDivElement | null) => {
+    if (el) { own.current = el; registerEnginePageSlot(surfaceId, el) }
+    else { registerEnginePageSlot(surfaceId, null, own.current); own.current = null }
+  }, [surfaceId])
+  const found = !!info
+  useEffect(() => {
+    if (!info) return
+    setOpened(true)
+    openEngineSurface(info, { sessionId: null, lang })
+    return () => leaveEngineSurfacePage(info.id)
+    // Opened once per arrival (or an explicit reopen); the surface object is re-created by every read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surfaceId, found, asked])
+  const pt = lang === 'pt'
+  const note: React.CSSProperties = { color: 'var(--text-secondary)', margin: 0, padding: 16 }
+  if (list === null) return null
+  if (!info) return <p role="status" style={note}>{pt ? 'Esta página não está disponível.' : 'This page is not available.'}</p>
+  const here = open?.surface.id === surfaceId || !opened
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      {!here && (
+        <div role="status" style={{ ...note, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span>{pt ? 'Esta página foi fechada.' : 'This page was closed.'}</span>
+          <button type="button" onClick={() => setAsked(n => n + 1)}
+            style={{ cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 6, background: 'transparent', color: 'var(--text-primary)', fontFamily: 'inherit', padding: '4px 10px', minHeight: 32 }}>
+            {pt ? 'Abrir de novo' : 'Open again'}
+          </button>
+        </div>
+      )}
+      <div ref={ref} data-engine-page={surfaceId} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }} />
+    </div>
+  )
 }
 
 /**
@@ -33,19 +95,33 @@ export function EngineSurfaceInlineSlot({ sessionId, slotId }: { sessionId: stri
     if (el) { own.current = el; registerEngineInlineSlot(slotId, sessionId, el) }
     else { registerEngineInlineSlot(slotId, sessionId, null, own.current); own.current = null }
   }, [slotId, sessionId])
-  const want = !!open && open.layout === 'inline' && open.surface.placement === 'composer' && open.sessionId === sessionId
+  const want = !!open && !open.parked && open.layout === 'inline' && open.surface.placement === 'composer' && open.sessionId === sessionId
   if (!want) return null
   return <div ref={ref} data-engine-inline={open.surface.id} />
 }
 
+/**
+ * Where a parked surface's element waits: in the document (so it keeps running), out of sight and reach,
+ * at the viewport's size rather than a 1px box, so a surface that measures itself is not squeezed.
+ */
+const PARKED: React.CSSProperties = { position: 'fixed', left: -100000, top: 0, width: 'calc(100vw / var(--ui-zoom, 1))', height: 'calc(100vh / var(--ui-zoom, 1))', overflow: 'hidden', pointerEvents: 'none' }
+
 function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
-  const { surface, sessionId, lang } = open
-  const slot = useEngineInlineSlot()
-  const layout = effectiveSurfaceLayout(open.layout, !!slot)
+  const { surface, sessionId, lang, nonce } = open
+  // The slots answer for the surface ON SCREEN; a parked one never takes them.
+  const inlineSlot = useEngineInlineSlot()
+  const pageSlot = useEnginePageSlot()
+  const slot = open.parked ? null : inlineSlot
+  const page = open.layout === 'page'
+  // A page whose route is not on screen is held off screen like a parked surface.
+  const offscreen = open.parked || (page && !pageSlot)
+  // Parked, it reports the layout it had (and will come back in), not a fallback computed without a slot.
+  const layout = open.parked ? open.layout : effectiveSurfaceLayout(open.layout, !!slot)
   const inline = layout === 'inline'
   const drawn = useRef<SurfaceLayout>(layout)
   drawn.current = layout
   const host = useRef<HTMLDivElement>(null)
+  const park = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
   const [error, setError] = useState(false)
   const pt = lang === 'pt'
@@ -54,11 +130,24 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   // The surface's own element: created once, re-parented between the inline slot and the frame, so a
   // layout switch never remounts it.
   const el = useMemo(() => document.createElement('div'), [])
-  useEscapeOwner(full, closeEngineSurface)
+  const hostClose = useCallback(() => closeEngineSurface(nonce), [nonce])
+  useEscapeOwner(full && !offscreen, hostClose)
   useLayoutEffect(() => {
-    const target = inline ? slot : host.current
+    const target = offscreen ? park.current : page ? pageSlot : inline ? slot : host.current
     if (target && el.parentElement !== target) target.appendChild(el)
-  }, [inline, slot, el])
+    // On its page the surface fills the main area; anywhere else its container sizes to its content.
+    el.style.flex = page && !offscreen ? '1' : ''
+    el.style.minHeight = page && !offscreen ? '0' : ''
+  }, [offscreen, page, pageSlot, inline, slot, el])
+  // Coming back from off screen moves focus exactly as the first mount did: into the frame (a `full`
+  // dialog is modal), or onto the surface itself inline or on its page.
+  const wasParked = useRef(offscreen)
+  useEffect(() => {
+    const back = wasParked.current && !offscreen
+    wasParked.current = offscreen
+    if (!back) return
+    if (inline || page) { el.tabIndex = -1; el.focus() } else frame.current?.focus()
+  }, [offscreen, inline, page, el])
   useEffect(() => {
     let handle: SurfaceHandle | null = null
     let dead = false
@@ -66,10 +155,20 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
     if (open.layout !== 'inline') frame.current?.focus()
     // The slot may have been registered in this same commit: read the store, not the first render.
     drawn.current = effectiveSurfaceLayout(open.layout, resolveInlineSlot() !== null)
+    // Every verb is bound to THIS surface, so a parked one can never move the one on screen.
     const ctx: SurfaceMountContext = {
       sessionId, lang, reducedMotion,
       get layout() { return drawn.current },
-      setLayout: setEngineSurfaceLayout, close: closeEngineSurface,
+      setLayout: l => setEngineSurfaceLayout(l, nonce),
+      close: () => endEngineSurface(nonce),
+      keepAlive: on => setEngineSurfaceKeepAlive(nonce, on === true),
+      setIndicator: (ind: SurfaceIndicator | null) => {
+        if (ind === null) { setEngineSurfaceIndicator(nonce, null); return }
+        const refused = surfaceIndicatorRefusals(ind)
+        if (refused.length > 0) throw new Error(`surface-indicator-refused: ${refused.join(', ')}`)
+        setEngineSurfaceIndicator(nonce, asSurfaceIndicator(ind))
+      },
+      onIndicatorEnd: fn => (typeof fn === 'function' ? onEngineSurfaceIndicatorEnd(nonce, fn) : () => {}),
     }
     mountSurface(surface, el, ctx, load)
       .then(h => {
@@ -82,6 +181,8 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
     // Mounted once per opening (the Frame is keyed by it); the context is a snapshot of that moment.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  if (offscreen) return <div ref={park} data-engine-parked={surface.id} aria-hidden="true" inert style={PARKED} />
+  if (page) return error && pageSlot ? createPortal(<p role="alert" style={{ color: 'var(--text-secondary)', margin: 0, padding: 16 }}>{pt ? 'Não foi possível carregar esta interface.' : 'This interface could not be loaded.'}</p>, pageSlot) : null
   if (inline) return null
   const wrapper: React.CSSProperties = full
     ? { position: 'fixed', inset: 0, zIndex: 700, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: bare ? 0 : 'min(24px, calc(2vw / var(--ui-zoom, 1)))' }
@@ -96,10 +197,10 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   return (
     <div role={full ? 'dialog' : 'complementary'} aria-modal={full ? true : undefined} aria-label={surface.label[lang]}
       data-engine-overlay={surface.id} data-layout={layout} data-frameless={bare ? 'true' : undefined}
-      onClick={full ? closeEngineSurface : undefined} style={wrapper}>
+      onClick={full ? hostClose : undefined} style={wrapper}>
       <div ref={frame} tabIndex={-1} onClick={e => e.stopPropagation()} style={box}>
         {!bare && (
-          <button type="button" onClick={closeEngineSurface} aria-label={pt ? 'Fechar' : 'Close'}
+          <button type="button" onClick={hostClose} aria-label={pt ? 'Fechar' : 'Close'}
             style={{ position: 'absolute', top: 8, right: 8, width: 44, height: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: 'none', background: 'transparent', color: 'var(--text-secondary)' }}>
             <X size={18} />
           </button>
