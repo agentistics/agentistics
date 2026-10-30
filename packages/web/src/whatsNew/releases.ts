@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.168.0': {
+    features: [
+      {
+        pt: 'Fluxos automáticos (experimental): trabalho sem commit há mais de 30 minutos gera um aviso na tarefa e segura a passagem de liderança; todo pedido seu vira um item aberto até ser ligado a uma tarefa, e o líder é lembrado se esquecer.',
+        en: 'Automatic flows (experimental): work left uncommitted for over 30 minutes raises a notice on the task and holds the leader hand-off; every request of yours becomes an open item until it is linked to a task, and the leader is reminded if it forgets.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O tipo de uma sessão aberta por um líder (líder ou ajudante) não se perde mais quando várias sessões abrem ao mesmo tempo, e as sessões ajudantes continuam ligadas ao líder quando ele é reaberto.',
+        en: 'The type of a session opened by a leader (leader or worker) is no longer lost when several sessions open at once, and worker sessions stay linked to their leader when it is reopened.',
+      },
+    ],
+  },
   '2.167.0': {
     features: [
       {
