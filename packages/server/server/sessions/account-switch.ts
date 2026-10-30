@@ -404,6 +404,8 @@ export function switchMessage(reason: SwitchRefusal, detail: string, lang: 'en' 
 export interface LimitState {
   /** Epoch ms the account's window resets, when the harness said. */
   resetsAt?: number
+  /** Epoch ms of the transcript entry that recorded the limit, when it carries a timestamp (CONTA.AUTO tells a copied old limit from a new one by it). */
+  at?: number
   /** The sentence the harness wrote. */
   message?: string
   /** The person's prompt that the limit refused, to be re-sent once on the new account. */
@@ -448,7 +450,9 @@ export function detectLimitInTail(harness: HarnessId, lines: readonly string[]):
         const info = (e.apiErrorParams as { rate_limit_info?: { resetsAt?: unknown } } | undefined)?.rate_limit_info
         const content = (e.message as { content?: { text?: unknown }[] } | undefined)?.content
         const message = Array.isArray(content) ? text(content[0]?.text) : undefined
+        const at = Date.parse(String(e.timestamp ?? ''))
         limit = {
+          ...(Number.isFinite(at) ? { at } : {}),
           ...(typeof info?.resetsAt === 'number' ? { resetsAt: info.resetsAt * 1000 } : {}),
           ...(message ? { message } : {}),
           ...(lastPrompt ? { pendingPrompt: lastPrompt } : {}),
@@ -465,7 +469,8 @@ export function detectLimitInTail(harness: HarnessId, lines: readonly string[]):
       if (p?.type === 'task_complete' || p?.type === 'error') {
         if (p.error?.codex_error_info === 'usage_limit_exceeded' || (p.type === 'error' && /usage limit/i.test(String(p.message ?? '')))) {
           const message = text(p.error?.message) ?? text(p.message)
-          limit = { ...(message ? { message } : {}), ...(lastPrompt ? { pendingPrompt: lastPrompt } : {}) }
+          const at = Date.parse(String(e.timestamp ?? ''))
+          limit = { ...(Number.isFinite(at) ? { at } : {}), ...(message ? { message } : {}), ...(lastPrompt ? { pendingPrompt: lastPrompt } : {}) }
         } else if (p.type === 'task_complete') {
           limit = null
         }
