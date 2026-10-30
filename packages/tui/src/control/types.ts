@@ -888,6 +888,8 @@ export interface ControlSession {
   mode?: SessionMode
   /** F4.D — the modes a structured session can be set to directly; absent: only cycling exists. */
   modeChoices?: SessionMode[]
+  /** 1.20 — a structured session's model switch: the protocol's current model and the ones it lists. */
+  modelChoices?: { current: string | null; options: Array<{ id: string; label: string }> }
   /** F2.0b — running over its harness's protocol right now (not a pane): the web offers "open in terminal". */
   structured?: true
   /**
@@ -1280,6 +1282,8 @@ export interface ActionResult {
   ok: boolean
   /** Already-localized one-line outcome, shown in the status line. */
   message: string
+  /** What the surface can OFFER next (1.19: update the harness whose own version refused this). Data, never a command. */
+  action?: { kind: 'update-harness'; harness: string; need: string }
   /** The action is a question and must be explicitly confirmed before it can proceed. */
   confirm?: boolean
   /** A failed pane write classified from the post-write screen. */
@@ -1668,6 +1672,13 @@ export interface ControlHost {
    * only cycles. No keystroke is sent anywhere.
    */
   setSessionMode?(id: string, modeId: string): Promise<ActionResult>
+
+  /**
+   * 1.20 — switch a STRUCTURED session's model THROUGH its protocol (`modelId` is one of the row's
+   * `modelChoices`). Refused in words for a session that is not structured or a model it does not list; a
+   * refusal the harness's own version causes carries `action` (offer the update).
+   */
+  setSessionModel?(id: string, modelId: string): Promise<ActionResult>
 
   /**
    * Type one line into a session and submit it, WITHOUT attaching to it.
@@ -2097,6 +2108,8 @@ export interface SpawnSessionResult {
   ok: boolean
   /** Already-localized outcome for the status line. */
   message: string
+  /** 1.20 — what the surface can OFFER next (the harness's own version refused the start: update it). */
+  action?: { kind: 'update-harness'; harness: string; need: string }
   /**
    * RES.1 — refused by the memory gate and QUEUED instead: it starts by itself when room frees
    * (`spawn-queue.ts`). `ok` stays false — nothing has started yet — and `message` says so.

@@ -120,6 +120,8 @@ export type FleetActionId =
   | 'cycleMode'
   /** F4.D — set a structured session's mode DIRECTLY; `text` is one of the row's `modes` ids. */
   | 'setMode'
+  /** 1.20 — switch a STRUCTURED session's model through its protocol; `text` is one of the row's `models` ids. */
+  | 'setModel'
   /**
    * RESTORE the conversation to the point before one of the person's own prompts (`text` is that
    * prompt, `occurrence` which appearance counting from the latest) — the harness's OWN rewind,
@@ -232,6 +234,8 @@ export interface FleetRow {
   mode?: SessionMode
   /** F4.D — the modes this STRUCTURED row can be set to directly (`setMode`); absent: cycle with `cycleMode`. */
   modes?: SessionMode[]
+  /** 1.20 — the models this STRUCTURED row can switch to through its protocol (`setModel`); absent: no protocol switch. */
+  models?: Array<{ id: string; label: string }>
   conversationId?: string
   /** Exact managed successor recorded by the existing handoff registry. */
   handoffTo?: string
@@ -354,6 +358,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.accountId ? { accountId: row.accountId } : {}),
     ...(row.mode ? { mode: row.mode } : {}),
     ...(row.modeChoices ? { modes: row.modeChoices } : {}),
+    ...(row.modelChoices ? { models: row.modelChoices.options } : {}),
     ...(row.handoffTo ? { handoffTo: row.handoffTo } : {}),
     ...(row.conversationId ? { conversationId: row.conversationId } : {}),
     ...(row.link !== undefined ? { link: row.link } : {}),

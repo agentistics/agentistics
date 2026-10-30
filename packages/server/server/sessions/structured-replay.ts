@@ -28,6 +28,8 @@ export type SessionCall =
   | { op: 'cancel' }
   /** MODE.EVERYWHERE — a mode set through the protocol (it writes to the child, so a replay makes it again). */
   | { op: 'setMode'; id: string }
+  /** 1.20 — a model set through the protocol (it writes to the child, so a replay makes it again). */
+  | { op: 'setModel'; id: string }
 
 /**
  * A call the host made on the session, and when (`g`: the driver's child — its generation — the call
@@ -55,7 +57,7 @@ export const isReplayCall = (v: unknown): v is ReplayCall => {
   if (typeof c.at !== 'number' || typeof c.t !== 'number') return false
   if (c.g !== undefined && !(Number.isInteger(c.g) && c.g >= 0)) return false
   if (c.op === 'prompt') return typeof c.text === 'string'
-  if (c.op === 'setMode') return typeof c.id === 'string'
+  if (c.op === 'setMode' || c.op === 'setModel') return typeof c.id === 'string'
   return c.op === 'answer' || c.op === 'cancel'
 }
 

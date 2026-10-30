@@ -106,6 +106,7 @@ import { goToTurn } from '../../lib/turnScroll'
 import { findTurnIndex, registerChatSearchTarget } from '../../lib/chatSearchBridge'
 import { attachmentName, splitMessage } from '../../lib/messageAttachments'
 import { HARNESS_LABELS } from '../../lib/harness'
+import { HarnessInstallDialog, type HarnessInstallTarget } from '../HarnessInstallDialog'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useViewportWidth } from '../../hooks/useViewportWidth'
 import { modelDisplay } from '../../lib/modelDisplay'
@@ -234,7 +235,7 @@ export interface SessionChatProps {
   row?: FleetRow
   lang: 'pt' | 'en'
   act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; step?: 'next' | 'back'; choices?: number[]; occurrence?: number; confirm?: boolean; handoff?: boolean })
-    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
+    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed'; action?: { kind: 'update-harness'; harness: string; need: string } }>
   /** Switch to the live terminal when a failed write found a blocking prompt. */
   onOpenTerminal?: () => void
   /**
@@ -625,12 +626,18 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const [modelFreeText, setModelFreeText] = useState(false)
   // A SOURCE with its own settings (the native runtime) gives its model list and switch itself.
   const sourceControls = source?.controls
+  // 1.20 — a STRUCTURED row whose protocol lists its models switches through it (opencode's set_config_option):
+  // the list and the current model are the protocol's, not a typed slash command.
+  const protocolModels = row?.models && row.models.length > 0 ? row.models : null
   const modelReason = useMemo(
-    () => (sourceControls?.model ? null : modelSwitchReason(row?.harness ?? '', pt ? 'pt' : 'en')),
-    [row, pt, sourceControls?.model],
+    () => (sourceControls?.model || protocolModels ? null : modelSwitchReason(row?.harness ?? '', pt ? 'pt' : 'en')),
+    [row, pt, sourceControls?.model, protocolModels],
   )
+  /** A switch the harness's own version refused (opencode < 1.18.0 on its free tier): the update dialog it offers. */
+  const [updateOffer, setUpdateOffer] = useState<{ harness: string; need: string } | null>(null)
+  const [updateTarget, setUpdateTarget] = useState<HarnessInstallTarget | null>(null)
   useEffect(() => {
-    if (sourceControls?.model || modelReason || !row?.harness) return
+    if (sourceControls?.model || protocolModels || modelReason || !row?.harness) return
     let alive = true
     fetch(`/api/fleet/new?lang=${pt ? 'pt' : 'en'}`)
       .then(r => (r.ok ? r.json() : null))
@@ -645,9 +652,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       .catch(() => { /* no list, no picker — the control simply does not appear */ })
     return () => { alive = false }
   }, [row?.harness, modelReason, pt, sourceControls?.model])
-  const menuModels = sourceControls?.model ? sourceControls.model.options : models
-  const menuFreeText = sourceControls?.model ? sourceControls.model.freeText : modelFreeText
-  const currentModelId = sourceControls?.model?.current ?? session.model ?? ''
+  const menuModels = sourceControls?.model ? sourceControls.model.options : (protocolModels ?? models)
+  const menuFreeText = sourceControls?.model ? sourceControls.model.freeText : (protocolModels ? false : modelFreeText)
+  const currentModelId = sourceControls?.model?.current ?? (protocolModels ? row?.model : undefined) ?? session.model ?? ''
   const currentModelLabel = menuModels.find(model => model.id === currentModelId)?.label ?? currentModelId
   /** M3 status band: the model button always names a model — the live control's, else the one the
    *  session was started on — and the effort when one is known. Never a bare "Modelo". */
@@ -958,6 +965,14 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     if (sourceControls?.model) {
       const refused = await sourceControls.model.switch(model)
       if (refused) setNotice(refused)
+      return
+    }
+    if (row?.models && row.models.length > 0) {
+      const out = await act({ id: row.id, action: 'setModel', text: model })
+      if (!out.ok) {
+        setNotice(out.message)
+        if (out.action?.kind === 'update-harness') setUpdateOffer({ harness: out.action.harness, need: out.action.need })
+      } else { setUpdateOffer(null); setNotice(null); nudgeFleet() }
       return
     }
     const line = modelSwitchLine(row?.harness ?? '', model)
@@ -3088,6 +3103,21 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             </p>
           ) : (
             <>
+              {/* A model switch the harness's OWN version refused (opencode < 1.18.0 on its free tier): said ABOVE
+                  the field, where the other session notices sit, with the one-click update beside it (QA F1: below the
+                  status band it was laid out but never seen). */}
+              {updateOffer && (
+                <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 8px', padding: '8px 10px', borderRadius: 9, border: '1px solid var(--anthropic-orange)', background: 'color-mix(in srgb, var(--anthropic-orange) 8%, transparent)' }}>
+                  <span style={{ flex: '1 1 220px', fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-primary)' }}>{notice}</span>
+                  <button
+                    type="button"
+                    onClick={() => setUpdateTarget({ id: updateOffer.harness, label: (HARNESS_LABELS as Record<string, string>)[updateOffer.harness] ?? updateOffer.harness, installed: true })}
+                    style={{ border: 0, borderRadius: 8, padding: '6px 10px', minHeight: isMobile ? 44 : undefined, background: 'var(--anthropic-orange)', color: '#fff', fontFamily: 'inherit', fontSize: 11.5, cursor: 'pointer' }}
+                  >
+                    {pt ? `Atualizar o ${(HARNESS_LABELS as Record<string, string>)[updateOffer.harness] ?? updateOffer.harness}` : `Update ${(HARNESS_LABELS as Record<string, string>)[updateOffer.harness] ?? updateOffer.harness}`}
+                  </button>
+                </div>
+              )}
               {blocked && (
                 <p style={{ margin: '0 0 8px', fontSize: 11.5, color: 'var(--anthropic-orange)', lineHeight: 1.5 }}>
                   {pt
@@ -3924,7 +3954,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                             <button
                               key={m.id}
                               disabled={sourceControls?.busy === true}
-                              aria-current={sourceControls?.model?.current === m.id ? 'true' : undefined}
+                              aria-current={(sourceControls?.model?.current ?? (protocolModels ? currentModelId : undefined)) === m.id ? 'true' : undefined}
                               onClick={() => { setMoreOpen(false); void switchModel(m.id) }}
                               style={{
                                 display: 'block', width: '100%', textAlign: 'left',
@@ -3933,14 +3963,14 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                                 fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
                               }}
                             >
-                              {m.label}{sourceControls?.model?.current === m.id ? ' ✓' : ''}
+                              {m.label}{(sourceControls?.model?.current ?? (protocolModels ? currentModelId : undefined)) === m.id ? ' ✓' : ''}
                             </button>
                           ))}
                           {menuFreeText && (
                             <TypedModel lang={pt ? 'pt' : 'en'} onPick={id => { setMoreOpen(false); void switchModel(id) }} />
                           )}
                           <p style={{ margin: '2px 8px 4px', fontSize: 10, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
-                            {sourceControls?.model
+                            {sourceControls?.model || protocolModels
                               ? (pt ? 'Vale para os próximos turnos.' : 'Applies to the next turns.')
                               : (pt ? 'Envia /model para a sessão.' : 'Sends /model to the session.')}
                           </p>
@@ -4080,11 +4110,17 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     )}
               </div>
               </div>
-              {(notice ?? source?.notice) && (
+              {!updateOffer && (notice ?? source?.notice) && (
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                   {notice ?? source?.notice}
                 </p>
               )}
+              <HarnessInstallDialog
+                target={updateTarget}
+                pt={pt}
+                onClose={() => setUpdateTarget(null)}
+                onDone={() => { setUpdateOffer(null); setNotice(pt ? 'Atualizado. Reabra a sessão para usar a versão nova.' : 'Updated. Reopen the session to use the new version.') }}
+              />
               {deliveryFailure && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7, flexWrap: 'wrap' }}>
                   <button

@@ -523,6 +523,8 @@ export function createSessionsPoller(o: {
       /** The harness mode each running session is in — see `mode-spec.ts`. */
       const modes = new Map<string, SessionMode>()
       const modeChoices = new Map<string, SessionMode[]>()
+      /** 1.20 — a structured session's model as its protocol states it, and the ones it can switch to. */
+      const modelChoices = new Map<string, { current: string | null; options: Array<{ id: string; label: string }> }>()
       const dialogOptions = new Map<string, DialogOption[]>()
       const dialogForm = new Map<string, DialogForm>()
       const dialogSelect = new Map<string, 'numbered' | 'marker'>()
@@ -623,6 +625,8 @@ export function createSessionsPoller(o: {
           const choices = o.backend.modesOf?.(r.id)
           if (statedMode) modes.set(r.id, statedMode)
           if (choices && choices.length > 0) modeChoices.set(r.id, choices)
+          const models = o.backend.modelsOf?.(r.id)
+          if (models && models.options.length > 0) modelChoices.set(r.id, models)
         }
 
         const reading = adapter?.reading(r.id)
@@ -1134,6 +1138,7 @@ export function createSessionsPoller(o: {
         approvals,
         modes,
         modeChoices,
+        modelChoices,
         ...(structured.size > 0 ? { structured } : {}),
         dialogOptions,
         dialogForm,

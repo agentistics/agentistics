@@ -28,6 +28,8 @@ export interface FleetActResult {
   /** EXT.OPEN: the write needs a YES first — `message` is the question. */
   confirm?: boolean
   failure?: 'prompt' | 'ended' | 'unconfirmed'
+  /** 1.20 — the update the harness's own version asks for, when that is why it refused. */
+  action?: { kind: 'update-harness'; harness: string; need: string }
 }
 
 /** The sentence for an answer that carried none — a network error, or a body that is not ours. */
@@ -49,7 +51,12 @@ export function parseActResult(json: unknown, lang: 'pt' | 'en'): FleetActResult
     : actFallbackMessage(lang)
   const id = typeof o.id === 'string' && o.id.trim() !== '' ? o.id : undefined
   const failure = o.failure === 'prompt' || o.failure === 'ended' || o.failure === 'unconfirmed' ? o.failure : undefined
-  return { ok: o.ok === true, message, ...(id ? { id } : {}), ...(o.confirm === true ? { confirm: true } : {}), ...(failure ? { failure } : {}) }
+  // 1.20 — what the surface can OFFER next (update the harness whose own version refused this): data, carried on.
+  const act = typeof o.action === 'object' && o.action !== null ? o.action as Record<string, unknown> : null
+  const action = act && act.kind === 'update-harness' && typeof act.harness === 'string' && typeof act.need === 'string'
+    ? { kind: 'update-harness' as const, harness: act.harness, need: act.need }
+    : undefined
+  return { ok: o.ok === true, message, ...(id ? { id } : {}), ...(o.confirm === true ? { confirm: true } : {}), ...(failure ? { failure } : {}), ...(action ? { action } : {}) }
 }
 
 /**

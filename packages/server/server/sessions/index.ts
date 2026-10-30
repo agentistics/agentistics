@@ -67,6 +67,8 @@ export async function resolveBackend(): Promise<SessionBackend> {
       structured: async () => { const m = await import('../engine/load'); await m.loadEngine(); return m.engine()?.structured ?? null },
       acp: async () => (await import('../engine/load')).engine()?.acp ?? null,
       allowed: async () => ((await (await import('../preferences')).readPreferences()).acpHarnesses ?? []),
+      // 1.20 — the screen's language, for the sentences a driver writes into the chat (a stalled turn).
+      lang: async () => { try { return (await (await import('../preferences')).readPreferences()).lang === 'pt' ? 'pt' : 'en' } catch { return 'en' } },
       flagOn: () => featureOn('adapter-chat'),
       async resumeSpawn(req, conversationId) {
         const i = req.structured

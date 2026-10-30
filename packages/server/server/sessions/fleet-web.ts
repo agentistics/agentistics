@@ -805,6 +805,9 @@ async function runFleetActionOnce(
     case 'setMode':
       if (!host.setSessionMode) return { ok: false, message: s.sessionsNoHost }
       return await host.setSessionMode(req.id, text)
+    case 'setModel':
+      if (!host.setSessionModel) return { ok: false, message: s.sessionsNoHost }
+      return await host.setSessionModel(req.id, text)
     case 'rename':
       if (!host.renameSession) return { ok: false, message: s.sessionsNoHost }
       return await host.renameSession(req.id, text)
@@ -1368,6 +1371,8 @@ export interface FleetSpawnResponse {
   ok: boolean
   /** Already localized, and always present. */
   message: string
+  /** 1.20 — the update the harness's own version asks for, when that is why the start was refused. */
+  action?: { kind: 'update-harness'; harness: string; need: string }
   /** RES.1 — refused by the memory gate and queued; it starts by itself when room frees. */
   queued?: { id: string; position: number }
   /** The id of the session that was started, so the caller can attach to the very one it created. */
@@ -1486,6 +1491,8 @@ export function spawnResponse(out: SpawnSessionResult, lang: CliLang): FleetSpaw
     ...(out.accountRefusal ? { code: out.accountRefusal } : {}),
     ...(out.overridden ? { overridden: true as const, note: out.note } : {}),
     ...(out.queued ? { queued: out.queued } : {}),
+    // What the surface can OFFER next (the harness's own version refused the start: update it in one click).
+    ...(!out.ok && out.action ? { action: out.action } : {}),
   }
 }
 

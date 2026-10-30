@@ -185,6 +185,7 @@ import {
   collisionKey, managedProcessLogPath, readManagedConversation, readProcessConversation, readSpawnWindowConversation, resolveProcessLog, type ProcessTranscriptFile,
 } from './sessions/process-conversation'
 import { holderCollisions } from './sessions/process-transcript'
+import { harnessBlockedNotice } from './sessions/harness-notice'
 import { onTranscriptActivity } from './sessions/transcript-activity'
 import { extraServers, isServerCommand } from './idle-servers'
 import { planTaskDelete, taskDeleteIsNoop } from './sessions/task-delete'
@@ -2328,6 +2329,8 @@ export async function spawnManaged(req: {
       // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
       structured: structuredIntentOf({ ...req, ...(mode ? { mode } : {}), origin: spawnOriginOf(req.origin, req.attach) }, {
         model, effort, ctx, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
+        // The language of the screen that asked (the host is built per request language): QA F2.
+        lang: lang === 'pt' ? 'pt' : 'en',
         // The driver applies it only where its declaration says the protocol assigns ids; the row is
         // linked by what the protocol then STATES (`onConversation`), never by this offer.
         conversationId: offeredConversationId,
@@ -2338,7 +2341,7 @@ export async function spawnManaged(req: {
     await abandon()
     // A SessionNotice (a harness too old, a fork that cannot happen) carries its own Portuguese sentence.
     const reason = e instanceof SessionNotice && lang === 'pt' && e.pt ? e.pt : e instanceof Error ? e.message : String(e)
-    return { ok: false, message: s.sessSpawnFailed(reason) }
+    return { ok: false, message: s.sessSpawnFailed(reason), ...(e instanceof SessionNotice && e.action ? { action: e.action } : {}) }
   }
 
   // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
@@ -3936,6 +3939,35 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       if (!choices || !backend.setMode) return { ok: false, message: s.sessModeUnknown(managed.harness) }
       if (!choices.some(m => m.id === modeId)) return { ok: false, message: s.sessModeUnknown(managed.harness) }
       return (await backend.setMode(id, modeId)) ? { ok: true, message: choices.find(m => m.id === modeId)!.label } : { ok: false, message: s.sessSendFailed(id) }
+    },
+
+    /**
+     * 1.20 — switch a structured session's model through its protocol. The id must be one the protocol listed for
+     * THIS session; the driver vets it (opencode's free tier on a build below 1.18.0 is refused, never sent).
+     */
+    async setSessionModel(id: string, modelId: string): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      const blocked = await backend.unavailable()
+      if (blocked) return { ok: false, message: blocked }
+      const managed = (await readRegistry()).find(m => m.id === id)
+      if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      const models = backend.modelsOf?.(id)
+      const pt = lang === 'pt'
+      if (!models || !backend.setModel || !models.options.some(m => m.id === modelId)) {
+        return { ok: false, message: pt ? 'Esta sessão não oferece esse modelo.' : 'This session does not offer that model.' }
+      }
+      const r = await backend.setModel(id, modelId)
+      if (r.ok) {
+        return { ok: true, message: pt ? `Modelo: ${modelId}` : `Model: ${modelId}` }
+      }
+      if (r.blocked) {
+        const n = harnessBlockedNotice(managed.harness, r.blocked)
+        return { ok: false, message: pt && n.pt ? n.pt : n.message, ...(n.action ? { action: n.action } : {}) }
+      }
+      return { ok: false, message: r.reason }
     },
 
     async rewindSession(id: string, prompt: string, occurrence: number): Promise<ActionResult> {

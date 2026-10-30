@@ -144,13 +144,18 @@ export async function readHarnessDefaults(harness: HarnessId): Promise<HarnessDe
     case 'gemini':
     case 'copilot':
       return {}
-    // UNVERIFIED, not "carries no model key": no config file was found at all on the machine this
-    // was written on (opencode's own docs describe one at ~/.config/opencode/opencode.json or
-    // similar), so there was nothing to read a real key from — and this module's own rule ("EVERY
-    // ENTRY NAMES ITS FILE AND KEY, and was verified by reading a real one") forbids guessing one.
-    // Also moot today: opencode has no spawn-spec (CLAUDE.md step 4, skipped by scope), so agentop
-    // never starts one and this default is never asked for in practice.
-    case 'opencode':
+    // Verified 2026-10-30 on the owner's machine (opencode 1.17.9): `~/.config/opencode/opencode.json`, top-level
+    // `model` = `provider/model` (`ollama/qwen-coder`) — and it IS the model `opencode acp`'s session/new states as
+    // `currentValue`, so the wizard's "Default (…)" names what the session will really run. `$XDG_CONFIG_HOME` moves the
+    // directory (opencode follows XDG). A `.jsonc` beside it may carry comments, so a JSON parse of it is a best effort.
+    case 'opencode': {
+      const dir = join(process.env.XDG_CONFIG_HOME || join(HOME_DIR, '.config'), 'opencode')
+      for (const name of ['opencode.json', 'opencode.jsonc']) {
+        const t = await text(join(dir, name))
+        const model = t ? jsonStringKey(t, 'model') : undefined
+        if (model) return { model }
+      }
       return {}
+    }
   }
 }
