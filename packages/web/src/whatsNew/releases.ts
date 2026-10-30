@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.173.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O botão vermelho do composer agora encerra a ligação de verdade, e a ligação volta acima do campo ao retornar à sessão; o botão de ditar se esconde durante a ligação.',
+        en: 'The composer\'s red button now really ends the call, and the call returns above the input when you come back to the session; the dictate button hides during the call.',
+      },
+      {
+        pt: 'A janela flutuante abre compacta, e o botão da Nay mostra um menu com a ligação minimizada (voltar, encerrar) e "Abrir chat da Nay".',
+        en: 'The floating window opens compact, and the Nay button shows a menu with the minimized call (resume, end) and "Open Nay chat".',
+      },
+    ],
+  },
   '2.172.0': {
     features: [
       {

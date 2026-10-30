@@ -323,8 +323,8 @@ describe('rail page, keepAlive and indicator', () => {
     expect(btn().getAttribute('aria-label')).toBe('End')
     await act(async () => { ctx!.keepAlive(true); ctx!.setIndicator({ label: { pt: '  Ativo ', en: ' Active  ' } }) })
     expect(state.currentEngineSurface()!.indicator!.label.en).toBe('Active')
-    // Taking it off screen: the button no longer promises "End" — it is the idle button, marked parked.
-    await act(async () => { btn().click() })
+    // Taking it off screen (the host's close; the active button now ENDS it): the button no longer promises "End" — it is the idle button, marked parked.
+    await act(async () => { state.closeEngineSurface() })
     await settle()
     expect(document.querySelector('[data-engine-parked="talk"]')).not.toBeNull()
     expect(btn().getAttribute('aria-label')).toBe('Talk')
