@@ -130,9 +130,10 @@ describe('fleetRow — an EXTERNAL session takes a write when it can be continue
   it('an exact conversation on a harness that resumes by id: prompt is ENABLED (the first write continues it here)', () => {
     expect(verb(ext({ conversationId: 'c-1' }), 'prompt').enabled).toBe(true)
   })
-  it('no conversation named, or a harness with no resume: prompt keeps its sentence — read-only live', () => {
+  it('no conversation named: prompt keeps its sentence — read-only live', () => {
     expect(verb(ext({}), 'prompt').enabled).toBe(false)
-    expect(verb(ext({ conversationId: 'c-1', harness: 'opencode' }), 'prompt').enabled).toBe(false)
+    // opencode HAS a launcher now (V-OPENCODE.2: `opencode --session <id>`), so a conversation it names continues here too
+    expect(verb(ext({ conversationId: 'c-1', harness: 'opencode' }), 'prompt').enabled).toBe(true)
   })
   it('the destructive verbs are untouched: an external row is never killed from its row', () => {
     expect(verb(ext({ conversationId: 'c-1' }), 'kill').enabled).toBe(false)

@@ -101,6 +101,8 @@ describe('optionLabel / formatDuration', () => {
     const { optionLabel, formatDuration, isDenyOption } = await import('./nativeSession')
     expect(optionLabel('Allow once', 'pt')).toBe('Permitir uma vez')
     expect(optionLabel('Deny', 'pt')).toBe('Negar')
+    expect(optionLabel('Always allow', 'pt')).toBe('Sempre permitir') // opencode (ACP)
+    expect(optionLabel('Always allow', 'en')).toBe('Always allow')
     expect(optionLabel('Allow for this session: commands starting with git status', 'pt')).toBe('Permitir nesta sessão: comandos que começam com git status')
     expect(optionLabel('Allow for this session: file.write in src', 'pt')).toBe('Permitir nesta sessão: file.write in src')
     expect(optionLabel('acceptForSession', 'pt')).toBe('Permitir nesta sessão')

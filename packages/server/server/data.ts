@@ -552,6 +552,11 @@ let _promise: Promise<ApiResponse> | null = null
 let _resolvedAt = 0
 let _revalidating = false
 
+/** Read an already completed build without starting or waiting for a rebuild. */
+export function peekApiResponse(): Promise<ApiResponse | null> {
+  return _status === 'done' && _promise ? _promise : Promise.resolve(null)
+}
+
 export function invalidateCache(): void {
   // Mark the cached result stale rather than dropping it, so the NEXT request serves the (stale)
   // cache immediately and refreshes in the background instead of blocking on a full rebuild. A true

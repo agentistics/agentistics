@@ -338,12 +338,26 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     resume: id => ['--conversation', id], // `--conversation  Resume a previous conversation by ID`
   },
-  // opencode is not spawnable through the session manager — no adapter exists to link a spawned
-  // conversation back into `SessionMeta` at all (CLAUDE.md step 4, skipped by scope), so there is
-  // no point verifying its CLI's own flags for this table. `agentop session new` therefore never
-  // offers it (`Record<HarnessId, SpawnSpec|null>`'s own contract: a harness with no spec is ABSENT
-  // from the wizard, never offered and failing).
-  opencode: null,
+  // `opencode [project]  start opencode tui` — flags read from `opencode --help` 1.17.9 (V-OPENCODE.2, 2026-10-30):
+  // `-m, --model  model to use in the format of provider/model`, `-s, --session  session id to continue`,
+  // `--prompt  prompt to use`, `--agent  agent to use`, `--fork  fork the session when continuing`. The structured
+  // route (`acp-opencode` in the engine) is the primary way a web-born session runs; this entry is what the wizard
+  // offers (`harnessSpawnability`: the binary on PATH) and the TUI the same conversation falls back to.
+  opencode: {
+    bin: 'opencode',
+    prompt: { kind: 'flag', flag: '--prompt' },
+    modelFlag: '--model',
+    // `opencode models [provider]` lists them, but per signed-in account and fetched — a snapshot of one machine, not a
+    // constant (the copilot/agy rule). An empty list makes the picker absent rather than wrong; any `provider/model` works.
+    modelSuggestions: [],
+    // MODE.EVERYWHERE — `--agent <name>` with the built-in `plan` agent ("Plan mode. Disallows all edit tools", the
+    // description `opencode acp` states for its `plan` mode, 1.17.9). `accept-edits` and `no-questions` have no flag: the
+    // permission rules live in the user's opencode.json, and the TUI cannot carry them (the sentence says so).
+    modeArgs: { plan: ['--agent', 'plan'] },
+    // `-s, --session` continues that session; the id is the `ses_…` the ACP server states and `opencode.db` keys by.
+    resume: id => ['--session', id],
+    resumeIdOk: id => /^ses_[A-Za-z0-9]+$/.test(id),
+  },
 }
 
 /**

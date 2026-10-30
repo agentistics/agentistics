@@ -131,7 +131,7 @@ import { resolveLang } from './cli-lang'
 import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
-import { sessionActionError } from './sessions/action-error'
+import { SessionNotice, sessionActionError } from './sessions/action-error'
 import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { spawnCapabilities } from './sessions/codex-capabilities'
 import { readHarnessVersion } from './sessions/harness-version'
@@ -2336,7 +2336,9 @@ export async function spawnManaged(req: {
     })
   } catch (e) {
     await abandon()
-    return { ok: false, message: s.sessSpawnFailed(e instanceof Error ? e.message : String(e)) }
+    // A SessionNotice (a harness too old, a fork that cannot happen) carries its own Portuguese sentence.
+    const reason = e instanceof SessionNotice && lang === 'pt' && e.pt ? e.pt : e instanceof Error ? e.message : String(e)
+    return { ok: false, message: s.sessSpawnFailed(reason) }
   }
 
   // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a

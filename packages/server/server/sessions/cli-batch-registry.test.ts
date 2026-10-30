@@ -15,6 +15,11 @@ import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { addSession, removeSession } from './registry'
 import { start } from './cli-session'
 import type { SessionBackend } from './types'
+import { isolateAgentEnv } from './agent-env.testing'
+
+// A spawn door reads AGENTOP_*/AGENTISTICS_* from the shell it runs in (inside a managed session: the caller's identity and the feature
+// switches): every test starts from a bare agent environment and gets it back.
+isolateAgentEnv()
 
 // A git hook exports GIT_DIR & co.; a temp repo must not resolve to the hooked one.
 for (const k of Object.keys(process.env)) if (k.startsWith('GIT_') && k !== 'GIT_TERMINAL_PROMPT') delete process.env[k]

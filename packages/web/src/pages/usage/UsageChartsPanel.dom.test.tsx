@@ -16,6 +16,8 @@ const readings: PlanReadings[] = [
 
 beforeAll(async () => {
   GlobalRegistrator.register()
+  // This suite checks markup/state; happy-dom animation cancellation rejects finished promises.
+  Object.defineProperty(SVGElement.prototype, 'animate', { configurable: true, value: undefined })
   ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} }
   ;({ createRoot } = await import('react-dom/client'))
   ;({ UsageChartsPanel: Panel } = await import('./UsageChartsPanel'))
@@ -24,13 +26,82 @@ beforeAll(async () => {
 afterEach(() => { act(() => root?.unmount()); root = undefined })
 afterAll(() => { void GlobalRegistrator.unregister() })
 
-function mount() {
+function mount(over: Record<string, unknown> = {}) {
   const el = document.createElement('div'); document.body.append(el)
   root = createRoot(el)
-  act(() => root!.render(createElement(Panel, { budgets: [], readings, sessions: [{ harness: 'gemini', user_message_timestamps: [new Date(NOW - 60_000).toISOString()] }] as SessionMeta[], lang: 'en', now: NOW })))
+  act(() => root!.render(createElement(Panel, { budgets: [], readings: (over.readings as PlanReadings[] | undefined) ?? readings, status: over.status as never, sessions: [{ harness: 'gemini', user_message_timestamps: [new Date(NOW - 60_000).toISOString()] }] as SessionMeta[], lang: (over.lang as 'pt' | 'en' | undefined) ?? 'en', now: NOW })))
   return el
 }
 const tab = (el: HTMLElement, name: string) => Array.from(el.querySelectorAll('[role=tab]')).find(b => b.textContent?.includes(name)) as HTMLElement
+
+describe('UsageChartsPanel loading', () => {
+  test('while the first answer is pending the LIMIT block shows a loader — never "no history" or "no limit readings"', () => {
+    const el = mount({ readings: [], status: 'loading' })
+    expect(el.querySelector('[data-usage-chart="limits"] [data-usage-loading="loading"]')?.textContent).toContain('Loading limit history')
+    const loader = el.querySelector('[data-usage-loading] svg')!
+    expect(Number(loader.getAttribute('width'))).toBeGreaterThanOrEqual(28)
+    expect(el.textContent).not.toContain('No usage history')
+    expect(el.textContent).not.toContain('no limit readings')
+  })
+  test('the message charts do not wait for the limits: they draw while the limits load', () => {
+    const el = mount({ readings: [], status: 'loading' })
+    expect(el.querySelector('[data-usage-chart="hours"]')).not.toBeNull()
+    expect(el.querySelector('svg[aria-label="Messages by weekday and hour, last 14 days"]')).not.toBeNull()
+    expect(el.querySelector('[data-usage-chart="peaks"]')?.textContent).toContain('Hours with the most messages')
+    // Not "without limit readings": nobody knows that yet.
+    expect(el.textContent).not.toContain('Without limit readings')
+    expect(el.textContent).toContain('while the limits have not arrived')
+  })
+  test('a slow server says it is still trying, with the loader', () => {
+    const el = mount({ readings: [], status: 'slow' })
+    const box = el.querySelector('[data-usage-loading="slow"]')!
+    expect(box.textContent).toContain('has not answered with the limits yet')
+    expect(box.getAttribute('role')).toBe('status')
+  })
+  test('a refusal says why, in words, and spins nothing', () => {
+    const forbidden = mount({ readings: [], status: 'unavailable' })
+    const box = forbidden.querySelector('[data-usage-loading="unavailable"]')!
+    expect(box.textContent).toContain('not available on this computer')
+    expect(box.getAttribute('role')).toBe('alert')
+    expect(box.querySelector('svg')).toBeNull()
+    act(() => root?.unmount()); root = undefined
+    const signedOut = mount({ readings: [], status: 'unauthorized', lang: 'pt' })
+    expect(signedOut.textContent).toContain('Sua sessão no agentistics expirou')
+  })
+  for (const [status, lang, message] of [
+    ['unauthorized', 'en', 'Your agentistics session expired'],
+    ['unavailable', 'pt', 'Os limites não estão disponíveis neste computador'],
+  ] as const) test(`${status} message in ${lang}`, () => {
+    const el = mount({ readings: [], status, lang })
+    expect(el.querySelector('[role=alert]')?.textContent).toContain(message)
+    expect(el.querySelector('[data-usage-loading] svg')).toBeNull()
+  })
+  test('pt wording while loading', () => {
+    const el = mount({ readings: [], status: 'loading', lang: 'pt' })
+    expect(el.textContent).toContain('Carregando o histórico de limites…')
+  })
+  test('after a real answer with no readings it says so', () => {
+    const el = mount({ readings: [], status: 'ready' })
+    expect(el.querySelector('[data-usage-loading]')).toBeNull()
+    expect(el.textContent).toContain('No usage history')
+  })
+  test('removing one account leaves the other account\'s series on screen', () => {
+    const el = mount({ readings: [readings[0]!] })
+    expect(el.querySelectorAll('[data-usage-account]')).toHaveLength(1)
+    expect(el.textContent).toContain('Claude Code · a')
+  })
+})
+
+describe('usageLimitsStatus', () => {
+  test('an answer is ready; no answer is loading unless the store said why', async () => {
+    const { usageLimitsStatus } = await import('./UsageChartsPanel')
+    expect(usageLimitsStatus([], null)).toBe('ready')
+    expect(usageLimitsStatus([], 'slow')).toBe('ready')
+    expect(usageLimitsStatus(null, null)).toBe('loading')
+    expect(usageLimitsStatus(null, 'slow')).toBe('slow')
+    expect(usageLimitsStatus(null, 'unavailable')).toBe('unavailable')
+  })
+})
 
 describe('UsageChartsPanel filter', () => {
   test('default account rows and five modes; the account mode shows its picker and the 5 h note names the omitted harness', () => {

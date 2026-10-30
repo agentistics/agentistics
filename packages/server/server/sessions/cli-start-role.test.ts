@@ -4,6 +4,11 @@ import { parseSessionArgs } from './cli-parse'
 import { addSession, readRegistry } from './registry'
 import { loadRoles, defaultRoleDeps } from './session-roles'
 import type { SessionBackend } from './types'
+import { isolateAgentEnv } from './agent-env.testing'
+
+// A spawn door reads AGENTOP_*/AGENTISTICS_* from the shell it runs in (inside a managed session: the caller's identity and the feature
+// switches): every test starts from a bare agent environment and gets it back.
+isolateAgentEnv()
 
 const backend = {
   id: 'tmux', unavailable: async () => undefined, spawn: async () => {}, list: async () => [],

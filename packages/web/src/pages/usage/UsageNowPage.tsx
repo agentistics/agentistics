@@ -6,7 +6,7 @@ import { PageHeader } from '../../components/nav/PageHeader'
 import { usePlanLimits } from '../../lib/planLimits'
 import { usageHeadline } from '../../lib/usagePlan'
 import { BillingAccountsPanel } from '../settings/BillingSettings'
-import { UsageChartsPanel } from './UsageChartsPanel'
+import { UsageChartsPanel, usageLimitsStatus } from './UsageChartsPanel'
 import { orderedBudgets, type Lang } from './usageView'
 
 export default function UsageNowPage() {
@@ -21,11 +21,11 @@ export default function UsageNowPage() {
  */
 export function UsageNowContent({ lang, sessions = [], harnesses = [], accounts = true }: { lang: Lang; sessions?: SessionMeta[]; harnesses?: SurfaceHarnessId[]; accounts?: boolean }) {
   const isMobile = useIsMobile()
-  const { budgets, readings, now } = usePlanLimits()
+  const { budgets, readings, now, limits, failure } = usePlanLimits()
   const rows = orderedBudgets(budgets)
   return <div style={{ minWidth: 0 }}>
     <PageHeader lang={lang} areaId="usage" pageId="now" isMobile={isMobile} status={usageHeadline(rows, now, lang) ?? undefined} />
-    <div style={{ marginBottom: 20 }}><UsageChartsPanel budgets={rows} readings={readings} sessions={sessions} harnesses={harnesses} lang={lang} now={now} /></div>
+    <div style={{ marginBottom: 20 }}><UsageChartsPanel budgets={rows} readings={readings} status={usageLimitsStatus(limits, failure)} sessions={sessions} harnesses={harnesses} lang={lang} now={now} /></div>
     {accounts && <BillingAccountsPanel />}
   </div>
 }

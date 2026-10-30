@@ -9,7 +9,11 @@ import { featureOn } from '@agentistics/core'
 import { structuredRegistry } from '@agentistics/engine-api'
 import { acpLegacyDeclaration, withStructured } from './structured-backend'
 import type { ManagedSession, SessionBackend, StructuredIntent } from './types'
+import { isolateAgentEnv } from './agent-env.testing'
 
+// A spawn door reads AGENTOP_MANAGED_ID, AGENTISTICS_FLOWS and the other switches of whatever shell runs it (inside a managed
+// session: the caller's identity and the feature flags): every test starts from a bare agent environment.
+isolateAgentEnv()
 const savedCaller = process.env.AGENTOP_MANAGED_ID
 afterEach(() => {
   __setSessionBackendForTest(null)
