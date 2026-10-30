@@ -937,8 +937,9 @@ button:focus-within .ag-row-pin,
   gap: 8px;
   min-height: 44px;
   width: 100%;
-  padding: 5px 0 0;
   background: var(--ag-composer-ground, var(--bg-base));
+  box-shadow: 0 0 0 100vmax var(--ag-composer-ground, var(--bg-base));
+  clip-path: inset(0 -100vmax);
   color: var(--text-secondary);
 }
 .ag-composer-status-left,

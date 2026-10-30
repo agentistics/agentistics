@@ -468,10 +468,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   )
   /** The composer's "more options" menu — dictation and the model live in it. */
   const [moreOpen, setMoreOpen] = useState(false)
+  const [moreMenuPos, setMoreMenuPos] = useState<{ top: number; left: number; side: 'left' | 'right' } | null>(null)
   const [foldedMenuGroups, setFoldedMenuGroups] = useState<Set<ComposerMenuGroupId>>(() => readComposerMenuFolded())
   /** The menu AND its button, so an outside-click handler can tell "inside" from "outside". */
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
   const moreButtonRef = useRef<HTMLButtonElement | null>(null)
+  const moreStatusButtonRef = useRef<HTMLButtonElement | null>(null)
   const modeButtonRef = useRef<HTMLButtonElement | null>(null)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [modeMenuPos, setModeMenuPos] = useState<MenuPlacement | null>(null)
@@ -570,7 +572,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const close = (e: MouseEvent) => {
       // A click INSIDE the menu (picking a model) must not be eaten by this — that path closes the
       // menu itself, and closing here first would cancel the pick.
-      if (moreMenuRef.current?.contains(e.target as Node) || moreButtonRef.current?.contains(e.target as Node)) return
+      const target = e.target as Element
+      if (moreMenuRef.current?.contains(target) || target.closest?.('[data-composer-menu-trigger]')) return
       setMoreOpen(false)
     }
     document.addEventListener('mousedown', close)
@@ -1935,7 +1938,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const closePrompts = useCallback(() => {
     setPromptsOpen(false)
     // Back to the control that opened the panel, once the dialog has unmounted.
-    requestAnimationFrame(() => (isMobile ? moreButtonRef.current : historyBtnRef.current)?.focus())
+    requestAnimationFrame(() => (isMobile ? (moreStatusButtonRef.current ?? moreButtonRef.current) : historyBtnRef.current)?.focus())
   }, [isMobile])
 
   /**
@@ -3705,12 +3708,19 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     changing the model does not change what the dialog does with the line it is
                     waiting for. Dictation stays, because it only puts words in the field, and the
                     field is the one thing this mode is FOR. */}
-                <div ref={moreMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
-                  {moreOpen && (
-                    <div data-composer-menu style={{
+                {moreOpen && (
+                    <div ref={moreMenuRef} data-composer-menu style={{
                       // Anchored on its RIGHT edge: the button now sits at the end of the row, and
                       // a menu opening rightwards from there would leave the screen.
-                      position: 'absolute', bottom: 40, right: 0, zIndex: 50,
+                      position: moreMenuPos ? 'fixed' : 'absolute',
+                      ...(moreMenuPos ? {
+                        top: moreMenuPos.top,
+                        left: moreMenuPos.side === 'left' ? moreMenuPos.left : moreMenuPos.left - 260,
+                        right: 'auto',
+                        bottom: 'auto',
+                        transform: 'translateY(-100%)',
+                      } : { bottom: 40, right: 0 }),
+                      zIndex: 50,
                       minWidth: 210, maxWidth: 260, padding: 4, borderRadius: 10,
                       background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                       boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
@@ -3923,29 +3933,24 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     </div>
                   )}
                 </div>
-                </div>
                 </ComposerToolbar>
               </ComposerShell>
-              {
-                <div
-                  className="ag-composer-status"
-                  data-composer-status
-                  style={{
-                    width: `calc(100% + ${40 + chatGutterPx}px)`,
-                    marginLeft: -20,
-                    padding: `5px ${20 + chatGutterPx}px 0 20px`,
-                  }}
-                >
+              <div className="ag-composer-status" data-composer-status>
                   <div className="ag-composer-status-left">
                     {!answeringNow && (currentModelLabel || menuModels.length > 0 || menuFreeText || modelReason) && (
                       <button
                         type="button"
                         className="ag-composer-status-button ag-composer-model-button"
                         ref={moreButtonRef}
+                        data-composer-menu-trigger
                         aria-haspopup="menu"
                         aria-expanded={moreOpen}
                         disabled={!canPrompt || sending}
-                        onClick={() => setMoreOpen(value => !value)}
+                        onClick={e => {
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setMoreMenuPos({ top: rect.top - 8, left: rect.left, side: 'left' })
+                          setMoreOpen(value => !value)
+                        }}
                         title={pt ? 'Trocar modelo e esforço' : 'Change model and effort'}
                       >
                         <span className="ag-composer-status-button-label">
@@ -4005,7 +4010,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                   </div>
                   <div className="ag-composer-status-right">
                     {countLabel && <span className="ag-composer-status-count">{countLabel}</span>}
-                    {promptList.length > 0 && (
+                    {promptList.length > 0 && !answeringNow && (
                       <button
                         ref={historyBtnRef}
                         onClick={() => setPromptsOpen(true)}
@@ -4018,16 +4023,21 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     {menuGroups.some(group => group !== 'model') && (
                       <button
                         type="button"
-                        onClick={() => setMoreOpen(value => !value)}
+                        data-composer-menu-trigger
+                        ref={moreStatusButtonRef}
+                        onClick={e => {
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setMoreMenuPos({ top: rect.top - 8, left: rect.right, side: 'right' })
+                          setMoreOpen(value => !value)
+                        }}
                         disabled={!canPrompt || sending}
                         aria-label={pt ? 'Mais opções' : 'More options'}
                         aria-expanded={moreOpen}
                         className="ag-composer-status-icon ag-composer-more-status"
                       ><ChevronUp size={15} style={{ transform: moreOpen ? 'rotate(180deg)' : 'none' }} /></button>
                     )}
-                  </div>
-                </div>
-              }
+              </div>
+              </div>
               {(notice ?? source?.notice) && (
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                   {notice ?? source?.notice}
