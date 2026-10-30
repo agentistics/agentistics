@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.170.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O cabeçalho da sessão, logo abaixo das abas, fica arredondado só nos dois cantos da esquerda; os da direita voltam a ser retos.',
+        en: 'The session header, just below the tabs, rounds only its two left corners; the right ones are square again.',
+      },
+      {
+        pt: "'Continuar em outra conta' volta a funcionar para um líder registrado numa subtarefa; antes a nova sessão era recusada e nada começava.",
+        en: "'Continue on another account' works again for a leader filed on a subtask; before, the new session was refused and nothing started.",
+      },
+    ],
+  },
   '2.170.1': {
     features: [],
     fixes: [
