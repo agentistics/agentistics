@@ -969,18 +969,11 @@ button:focus-within .ag-row-pin,
   mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
 }
 
-/* Dark theme: the fade reads as a SHADOW, so it darkens toward black instead of greying the
-   lines passing behind it (owner, 2026-10-30: "a sombra em cima do input ... é branca, deveria ser
-   black"). The light theme keeps fading into its own ground. */
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  :root:not([data-theme="light"]) .ag-composer-ground::before {
-    background: linear-gradient(
-      to bottom,
-      transparent 0%,
-      color-mix(in srgb, var(--ag-composer-ground, var(--bg-base)) 45%, black) 45%,
-      color-mix(in srgb, var(--ag-composer-ground, var(--bg-base)) 30%, black) 100%
-    );
-  }
+/* With glass on, NO ground at all behind or above the message box (owner, 2026-10-30: "a sombra
+   tirou completamente a transparência do input, vamos precisar tirar a sombra, deixa sem"). The
+   field's own glass is the only surface; the conversation shows through it untouched. */
+[data-glass="on"] .ag-composer-ground::before {
+  content: none;
 }
 
 /*
