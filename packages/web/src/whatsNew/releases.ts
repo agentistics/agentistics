@@ -42,6 +42,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Os campos de mensagem, de resposta e de comentário não mostram mais uma barra de rolagem quando estão vazios ou com pouco texto; ela só aparece quando o texto passa da altura máxima.',
         en: 'The message, reply and comment fields no longer show a scrollbar when empty or short; it only appears once the text is taller than the field\'s limit.',
       },
+      {
+        pt: 'O canto de cima à esquerda do cabeçalho da sessão, logo abaixo das abas, voltou a ser arredondado.',
+        en: 'The top-left corner of the session header, just below the tabs, is rounded again.',
+      },
     ],
   },
   '2.168.2': {
