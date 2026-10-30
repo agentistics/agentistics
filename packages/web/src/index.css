@@ -969,6 +969,20 @@ button:focus-within .ag-row-pin,
   mask-image: linear-gradient(to bottom, transparent 0%, black 45%);
 }
 
+/* Dark theme: the fade reads as a SHADOW, so it darkens toward black instead of greying the
+   lines passing behind it (owner, 2026-10-30: "a sombra em cima do input ... é branca, deveria ser
+   black"). The light theme keeps fading into its own ground. */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root:not([data-theme="light"]) .ag-composer-ground::before {
+    background: linear-gradient(
+      to bottom,
+      transparent 0%,
+      color-mix(in srgb, var(--ag-composer-ground, var(--bg-base)) 45%, black) 45%,
+      color-mix(in srgb, var(--ag-composer-ground, var(--bg-base)) 30%, black) 100%
+    );
+  }
+}
+
 /*
  * Where the effect cannot run, it degrades to TODAY'S behaviour — a solid ground — and never to
  * unreadable text over a live conversation.
@@ -1047,6 +1061,12 @@ button:focus-within .ag-row-pin,
   -webkit-backdrop-filter: blur(16px) saturate(140%);
   backdrop-filter: blur(16px) saturate(140%);
   border: 1px solid var(--border);
+}
+
+/* The message box alone goes a touch further (owner, 2026-10-30: "um pouquinho a mais de
+   transparência no componente de input"): 56% instead of the menus' 64%. */
+[data-glass="on"] .ag-composer-ground [data-composer-field] {
+  background: color-mix(in srgb, var(--bg-card) 56%, transparent) !important;
 }
 
 /* Light surfaces need a stronger recipe: white-on-near-white at 48% still read as solid. Much
