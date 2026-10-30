@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  buildFleetFrame, closedPage, compactFleetSession, SEARCH_PROMPT_MAX, compactView, deltaBody, EMPTY_SENT, fleetEventsResponse, GAUGE_CPU_POINTS,
+  buildFleetFrame, closedPage, compactGetBody, compactFleetSession, SEARCH_PROMPT_MAX, compactView, deltaBody, EMPTY_SENT, fleetEventsResponse, GAUGE_CPU_POINTS,
   GAUGE_RSS_BYTES, gaugesMoved, planFleetDelta,
   readClosedLimit, snapshotBody, windowOf, type FleetFrame, type FleetFramePayload,
 } from './fleet-events'
@@ -312,4 +312,48 @@ test('handoff successors survive the compact SSE snapshot and delta wire', () =>
   const { delta } = planFleetDelta(planFleetDelta(EMPTY_SENT, initial).next, frame)
   const updated = applyFleetWire(snapshot, 'delta', deltaBody(2, frame, delta))
   expect((updated.sessions.find(r => r.id === 'source') as { handoffTo?: string }).handoffTo).toBe('target')
+})
+
+test('compact row retains overlapping FleetRow and ControlSession facts', () => {
+  for (const state of ['working', 'waiting', 'exited', 'lost', 'closed'] as const) {
+    const control = row(`id-${state}`, { state, project: 'project', task: 'task', note: 'note', model: 'model', conversationId: 'conversation', actionable: true, stateLabel: state, approvalLines: ['approval'], dialogOptions: [{ number: 1, label: 'yes', selected: true }] } as never)
+    const shaped = fleetRow(control, controlStrings('en'))
+    const compact = compactFleetSession(shaped, control)
+    for (const key of Object.keys(shaped)) {
+      if (key in control) expect((compact as any)[key]).toEqual((shaped as any)[key])
+    }
+  }
+})
+
+test('compact first frame contains live rows, historical totals, catalog and version', () => {
+  const rows = [row('live'), ...Array.from({ length: 100 }, (_, i) => row(`ended-${i}`, { state: i % 2 ? 'lost' : 'exited' }))]
+  const body = JSON.parse(JSON.stringify(snapshotBody(1, buildFleetFrame(payload(rows), 0))))
+  expect(body.sessions.map((r: {id: string}) => r.id)).toEqual(['live'])
+  expect(body.closed).toEqual({ total: 100, sent: 0 })
+  expect(body.closedVersion).toBeString()
+  expect(body.verbCatalog).toBeArray()
+  expect(body.rows).toBeUndefined()
+  expect(JSON.stringify(body).length).toBeLessThan(JSON.stringify(payload(rows)).length / 10)
+})
+
+test('compact GET with a view carries every row the view names, so the sidebar equals the legacy list (onlyActive + named lost)', async () => {
+  const { readCompactFleetResponse } = await import('@agentistics/core')
+  const s = controlStrings('en')
+  const rows = [row('live', { state: 'working' }), row('named-lost', { state: 'lost', endedAt: 5 }), row('plain-lost', { state: 'lost', endedAt: 4 }), row('closed:1', { state: 'closed', endedAt: 3 })]
+  const sessions = rows.map(r => fleetRow(r, s))
+  // What `arrangeFleet({onlyActive})` yields: the running row and the NAMED one; the others are history.
+  const arranged = { groups: [{ key: 'p', label: 'p', rows: [sessions[0]!, sessions[1]!] }], shown: 2, total: 4 } as never
+  const p = { sessions, rows, attention: 0, tasks: [], finishedTasks: [], view: arranged } as unknown as FleetFramePayload
+  const frame = buildFleetFrame(p, 0)
+  const body = JSON.parse(JSON.stringify(compactGetBody(frame)))
+  expect(body.closed).toEqual({ total: 3, sent: 0 })
+  const wire = await readCompactFleetResponse(body, () => '', false)
+  const view = wire.view as { groups: Array<{ rows: Array<{ id: string; verbs?: unknown; attachCommand?: string }> }> }
+  const legacy = (arranged as { groups: Array<{ rows: FleetRow[] }> }).groups.flatMap(g => g.rows)
+  const got = view.groups.flatMap(g => g.rows)
+  expect(got.map(r => r.id)).toEqual(legacy.map(r => r.id))
+  expect(got.map(r => r.verbs)).toEqual(legacy.map(r => r.verbs))
+  // Without the server-side union the named row was dropped (the F1 defect):
+  const bare = await readCompactFleetResponse(JSON.parse(JSON.stringify(snapshotBody(1, frame))), () => '', false)
+  expect((bare.view as { groups: Array<{ rows: unknown[] }> }).groups[0]!.rows.length).toBe(1)
 })

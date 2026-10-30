@@ -125,3 +125,8 @@ export function startedByIndex(
   }
   return out;
 }
+
+/** Accept both the narrow identity graph and a legacy server that ignored the format. */
+export function startedByFleetPayload(payload: { rows?: Parameters<typeof startedByIndex>[0] }): ReturnType<typeof startedByIndex> {
+  return startedByIndex(Array.isArray(payload.rows) ? payload.rows : [])
+}

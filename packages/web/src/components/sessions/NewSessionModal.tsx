@@ -1,3 +1,4 @@
+import { fleetLiveRows, fleetLiveUrl } from '../../lib/fleetLiveGet'
 import { AgentisticsLoader } from '../../components/AgentisticsLoader'
 /**
  * NewSessionModal — starting a session from the dashboard, as a FOUR-STEP WIZARD.
@@ -384,10 +385,10 @@ export function NewSessionModal({
     const deadline = Date.now() + budgetMs
     while (Date.now() < deadline) {
       try {
-        const r = await fetch(`/api/fleet?lang=${lang}`)
+        const r = await fetch(fleetLiveUrl(lang))
         if (r.ok) {
-          const f = await r.json() as { rows?: { id?: string }[] }
-          if (f.rows?.some(x => x.id === id)) return
+          const f = await r.json() as { rows?: { id?: string }[]; sessions?: { id?: string }[] }
+          if (fleetLiveRows(f).some(x => x.id === id)) return
         }
       } catch { /* the poll that matters is the workspace's; this one is a courtesy */ }
       await new Promise(res => setTimeout(res, 400))

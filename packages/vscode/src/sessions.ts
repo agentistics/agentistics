@@ -196,7 +196,7 @@ export class SessionsHub implements vscode.Disposable {
 
   private async poll(): Promise<void> {
     const epoch = this.fleetEpoch
-    const { link, payload } = await this.deps.client().fleet(this.arrangement())
+    const { link, payload } = await this.deps.client().fleet(this.arrangement(), this.fleet.sessions)
     if (epoch !== this.fleetEpoch) return
     this.link = link
     // A failed poll keeps the PREVIOUS fleet, exactly as the cockpit's poller does: the last known

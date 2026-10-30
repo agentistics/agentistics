@@ -13,6 +13,15 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.166.0': {
     features: [
       {
+        pt: 'A lista de sessões carrega muito mais leve no VS Code e nas ferramentas dos assistentes (MCP), que ainda pediam a versão completa.',
+        en: 'The session list loads much lighter in VS Code and in the assistants\' tools (MCP), which still asked for the full version.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.165.3': {
+    features: [
+      {
         pt: 'As instruções que cada sessão recebe agora seguem o estado: no modo ausente somem os "pergunte antes", workers não recebem blocos de líder, e um teste impede que duas regras se contradigam.',
         en: 'The instructions each session receives now follow the state: in away mode the "ask first" lines go away, workers get no leader blocks, and a test keeps two rules from contradicting each other.',
       },
