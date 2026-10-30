@@ -113,8 +113,8 @@ import {
   openArtifacts, setArtifactCount, setArtifactLive, useArtifactLive, usePanelFocusRequest,
 } from '../lib/artifactsStore'
 import { studioMenuRow } from '../lib/studioMenuRow'
-import { EngineSurfaceSideSlot } from '../components/EngineSurfaceHost'
-import { useEngineSideSurface } from '../lib/engineSurfaceHost'
+import { EngineSurfaceAside } from '../components/EngineSurfaceAside'
+import { useEngineSideSlotId, useEngineSideSurface } from '../lib/engineSurfaceHost'
 import { closedRightEdge, restingLeftEdge, setRightAsideEdge, useRightAsideEdge } from '../lib/rightAsideEdge'
 import { PaneScope, paneDomId, setActivePane, type PaneId } from '../lib/paneScope'
 import { closePane, readSplitRoute, replaceInPane, splitHref, SPLIT_VIEW_PARAM, type SplitRoute } from '../lib/splitRoute'
@@ -967,11 +967,17 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const [engineTabOn, setEngineTabOn] = useState(true)
   useLayoutEffect(() => { if (engineNonce !== undefined) setEngineTabOn(true) }, [engineNonce])
   const lastRight = useRef(slotLayout.right)
+  const engineActive = engineSide !== null
   useLayoutEffect(() => {
-    if (lastRight.current !== slotLayout.right && slotLayout.right !== null) setEngineTabOn(false)
+    // Only with an engine section on screen: with none, this never sets state (no extra render).
+    if (engineActive && lastRight.current !== slotLayout.right && slotLayout.right !== null) setEngineTabOn(false)
     lastRight.current = slotLayout.right
-  }, [slotLayout.right])
-  const engineTabShown = engineSide !== null && (engineTabOn || slotLayout.right === null)
+  }, [slotLayout.right, engineActive])
+  const engineSlotId = `aside-${pane}`
+  // Two panes on one session: only the aside whose slot the surface was mounted into shows the section.
+  const engineSideSlotId = useEngineSideSlotId()
+  const engineOwned = engineActive && engineSideSlotId === engineSlotId
+  const engineTabShown = engineOwned && (engineTabOn || slotLayout.right === null)
   /** A person picking a panel from the rail or the phone's tabs: that panel is what they want to see. */
   const openSlotPanelPicked = useCallback((id: PanelId) => { setEngineTabOn(false); openSlotPanel(id) }, [openSlotPanel])
   const [rightSlotEl, setRightSlotEl] = useState<HTMLDivElement | null>(null)
@@ -1983,27 +1989,20 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   /** The engine surface's section of this aside: its slot is mounted whenever the surface is drawn as
    *  `side` for this session, and shown while its tab is the selected one; the panel it sits beside stays
    *  mounted, hidden. Absent entirely without such a surface, so the aside is unchanged. */
-  const rightSlotContentWithEngine = engineSide === null ? rightSlotContentRaw : (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
-      <div role="tablist" style={{ display: 'flex', gap: 4, padding: '6px 8px', flexShrink: 0 }}>
-        {[
-          { id: 'engine', on: engineTabShown, label: pt ? engineSide.surface.label.pt : engineSide.surface.label.en, go: () => setEngineTabOn(true) },
-          { id: 'panels', on: !engineTabShown, label: pt ? 'Painéis' : 'Panels', go: () => { setEngineTabOn(false); if (slotLayout.right === null) openSlotPanelPicked('live') } },
-        ].map(t => (
-          <button key={t.id} role="tab" aria-selected={t.on} onClick={t.go} style={{
-            padding: '4px 10px', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5,
-            fontWeight: t.on ? 700 : 500, background: t.on ? 'var(--bg-elevated)' : 'transparent',
-            color: t.on ? 'var(--text-primary)' : 'var(--text-secondary)',
-          }}>{t.label}</button>
-        ))}
-      </div>
-      <div style={{ display: engineTabShown ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
-        <EngineSurfaceSideSlot sessionId={engineSide.sessionId!} slotId={`aside-${pane}`} />
-      </div>
-      <div style={{ display: engineTabShown ? 'none' : 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
-        {rightSlotContentRaw}
-      </div>
-    </div>
+  const rightSlotContentWithEngine = (
+    <EngineSurfaceAside
+      engine={engineSide === null ? null : {
+        sessionId: engineSide.sessionId!, slotId: engineSlotId, owned: engineOwned,
+        label: pt ? engineSide.surface.label.pt : engineSide.surface.label.en,
+      }}
+      shown={engineTabShown}
+      panelsLabel={pt ? 'Painéis' : 'Panels'}
+      onPickEngine={() => setEngineTabOn(true)}
+      onPickPanels={() => { setEngineTabOn(false); if (slotLayout.right === null) openSlotPanelPicked('live') }}
+      showStrip={!isMobile}
+    >
+      {rightSlotContentRaw}
+    </EngineSurfaceAside>
   )
   const rightSlotContent = rightSlotFullscreen ? (
     <div style={{
