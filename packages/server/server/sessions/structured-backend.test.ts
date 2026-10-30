@@ -758,3 +758,72 @@ describe('MODE.EVERYWHERE — the durable relay\'s session forwards the mode and
     expect(r.setMode).toBeUndefined()
   })
 })
+
+describe('OPENCODE.CORREÇÕES — model switch and a turn that can never finish', () => {
+  test('setModel is recorded before it writes (a re-attach makes it again); models/model/stalled forward; absent stays absent', async () => {
+    const base = fakeSession({ id: 'm', harness: 'opencode', cwd: '/w' }) as unknown as Record<string, unknown>
+    let model = 'ollama/qwen-coder'
+    const s = {
+      ...base,
+      models: () => [{ id: 'ollama/qwen-coder', label: 'Ollama' }, { id: 'mock/m', label: 'Mock' }],
+      model: () => model,
+      setModel: async (id: string) => { model = id; return { ok: true as const } },
+      stalled: () => 'Cannot connect to API',
+    } as unknown as StructuredSession
+    const recorded: unknown[] = []
+    const r = recordingSession(s, { record: c => { recorded.push(c) } })
+    expect(r.models!().map(m => m.id)).toEqual(['ollama/qwen-coder', 'mock/m'])
+    expect(await r.setModel!('mock/m')).toEqual({ ok: true })
+    expect(r.model!()).toBe('mock/m')
+    expect(r.stalled!()).toBe('Cannot connect to API')
+    expect(recorded).toEqual([{ op: 'setModel', id: 'mock/m' }])
+    expect(isReplayCall({ op: 'setModel', id: 'mock/m', at: 3, t: 1 })).toBe(true)
+    const bare = recordingSession(base as unknown as StructuredSession, { record: () => {} })
+    expect(bare.setModel).toBeUndefined()
+    expect(bare.stalled).toBeUndefined()
+  })
+
+  test('sweepStalled cancels ONLY a working structured turn whose driver says it cannot finish', async () => {
+    const eng = fakeEngine({ harnesses: ['opencode', 'gemini'] })
+    const b = withStructured(fakeBase(), provider(eng.reg))
+    await b.spawn(web('opencode', { id: 'oc' }))
+    await b.spawn(web('gemini', { id: 'ge' }))
+    const [oc, ge] = eng.sessions as unknown as Array<FakeSession & { stalled?: () => string | null }>
+    let why: string | null = null
+    oc!.stalled = () => why
+    ge!.stalled = () => 'never asked: not working'
+    oc!.prompt('x')
+    expect(b.sweepStalled()).toEqual([]) // working, nothing stalled yet
+    why = 'Cannot connect to API'
+    expect(b.sweepStalled()).toEqual(['oc'])
+    expect(oc!.cancelled).toBe(1)
+    expect(ge!.cancelled).toBe(0) // waiting, so never swept
+    expect(b.sweepStalled()).toEqual([]) // the cancel moved it out of working
+  })
+
+  test('setModel and modelsOf go through the backend; a session with no switch says so', async () => {
+    const eng = fakeEngine({ harnesses: ['opencode'] })
+    const b = withStructured(fakeBase(), provider(eng.reg))
+    await b.spawn(web('opencode', { id: 'oc' }))
+    expect(b.modelsOf!('oc')).toBeUndefined() // the fake declares no switch
+    expect(await b.setModel!('oc', 'x')).toEqual({ ok: false, reason: 'this session has no model switch' })
+  })
+})
+
+describe('QA F2 — the driver speaks the language of the screen that ASKED', () => {
+  test('structuredIntentOf carries the request language and structuredSpawnOf hands it to the driver', () => {
+    const i = structuredIntentOf({ harness: 'opencode', origin: 'web', prompt: 'oi' }, { lang: 'pt' })
+    expect(i.lang).toBe('pt')
+    expect(structuredSpawnOf({ id: 'x', cwd: '/w', argv: [], structured: i }, 'opencode').lang).toBe('pt')
+    expect(structuredSpawnOf({ id: 'x', cwd: '/w', argv: [], structured: structuredIntentOf({ harness: 'opencode' }, {}) }, 'opencode').lang).toBeUndefined()
+  })
+  test('the request language outranks the stored preference', async () => {
+    const eng = fakeEngine({ harnesses: ['opencode'] })
+    const b = withStructured(fakeBase(), provider(eng.reg, { lang: async () => 'en' }))
+    await b.spawn(web('opencode', { id: 'a', structured: { ...web('opencode').structured!, lang: 'pt' } }))
+    expect(eng.started[0]!.lang).toBe('pt')
+    const c = withStructured(fakeBase(), provider(eng.reg, { lang: async () => 'pt' }))
+    await c.spawn(web('opencode', { id: 'b' }))
+    expect(eng.started[1]!.lang).toBe('pt') // no request language: the stored preference
+  })
+})

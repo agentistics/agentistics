@@ -10,6 +10,44 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.173.0': {
+    features: [
+      {
+        pt: 'OpenCode: troque de modelo no meio da conversa pelo menu Modelo, com a lista do próprio OpenCode (inclusive os gratuitos); o rodapé mostra o modelo que está rodando de verdade.',
+        en: 'OpenCode: switch models mid-conversation from the Model menu, with OpenCode\'s own list (free models included); the footer shows the model really running.',
+      },
+      {
+        pt: 'OpenCode com os quatro modos: Padrão, Aceitar edições, Plano e Sem perguntas.',
+        en: 'OpenCode with all four modes: Default, Accept edits, Plan and No questions.',
+      },
+      {
+        pt: 'Quando o OpenCode precisa de uma versão mais nova (os modelos gratuitos pedem a 1.18.0), um botão "Atualizar o OpenCode" faz a atualização em um clique.',
+        en: 'When OpenCode needs a newer version (free models need 1.18.0), an "Update OpenCode" button updates it in one click.',
+      },
+      {
+        pt: 'O OpenCode aparece com o próprio logo em todo o app.',
+        en: 'OpenCode shows its own logo across the app.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Uma sessão do OpenCode não fica mais "trabalhando" para sempre quando o modelo não responde (por exemplo, um Ollama desligado): o app para a tentativa e explica o que fazer.',
+        en: 'An OpenCode session no longer stays "working" forever when its model does not answer (for example, Ollama turned off): the app stops the attempt and explains what to do.',
+      },
+      {
+        pt: 'Uma resposta recusada pelo modelo aparece no chat com o motivo, em vez de não aparecer nada.',
+        en: 'A reply the model refused now shows in the chat with the reason, instead of nothing.',
+      },
+      {
+        pt: 'O cartão "Iniciando…" de uma sessão nova não fica mais girando depois que a sessão já abriu.',
+        en: 'The "Starting…" card of a new session no longer keeps spinning after the session has opened.',
+      },
+      {
+        pt: 'O OpenCode instalado pelo instalador oficial é encontrado mesmo quando o app roda como serviço.',
+        en: 'OpenCode installed by its official installer is found even when the app runs as a service.',
+      },
+    ],
+  },
   '2.172.0': {
     features: [
       {

@@ -106,6 +106,8 @@ export interface SessionView {
   mode?: SessionMode
   /** F4.D — the modes a STRUCTURED session can be set to directly (its protocol's list); absent: cycle only. */
   modeChoices?: SessionMode[]
+  /** 1.20 — a STRUCTURED session's model switch: the protocol's current model and its list. */
+  modelChoices?: { current: string | null; options: Array<{ id: string; label: string }> }
   /** F2.0b — running over its harness's protocol right now: the web offers "open in terminal". */
   structured?: true
   /**
@@ -509,6 +511,8 @@ export function buildSessionViews(o: {
   modes?: ReadonlyMap<string, SessionMode>
   /** F4.D — the modes a structured session can be set to, keyed by row id. */
   modeChoices?: ReadonlyMap<string, SessionMode[]>
+  /** 1.20 — keyed by row id, see `SessionView.modelChoices`. */
+  modelChoices?: ReadonlyMap<string, { current: string | null; options: Array<{ id: string; label: string }> }>
   /** The ids running structured right now (`SessionBackend.isStructured`) — see `SessionView.structured`. */
   structured?: ReadonlySet<string>
   /** The options that dialog offers, keyed by session id. Absent where they could not be read. */
@@ -693,6 +697,7 @@ export function buildSessionViews(o: {
       // one, which `modeOf` already answers.
       ...(o.modes?.get(r.id) ? { mode: o.modes.get(r.id)! } : {}),
       ...(o.modeChoices?.get(r.id) ? { modeChoices: o.modeChoices.get(r.id)! } : {}),
+      ...(o.modelChoices?.get(r.id) ? { modelChoices: o.modelChoices.get(r.id)! } : {}),
       ...(!finished && r.status === 'running' && o.structured?.has(r.id) ? { structured: true as const } : {}),
       ...(o.fell?.has(r.id) ? { fell: true as const } : {}),
       ...(r.managed?.label ? { label: r.managed.label } : {}),
@@ -700,7 +705,9 @@ export function buildSessionViews(o: {
       ...(ownName ? { harnessName: ownName } : {}),
       ...(ownName && ownNameSince !== undefined ? { harnessNameSince: ownNameSince } : {}),
       ...(r.managed?.note ? { note: r.managed.note } : {}),
-      ...(r.managed?.model ? { model: r.managed.model } : {}),
+      // What the PROTOCOL says the session runs outranks what it was started with (a mid-conversation switch,
+      // or no model asked for at all — the harness's own default, which only the protocol can name).
+      ...((o.modelChoices?.get(r.id)?.current ?? r.managed?.model) ? { model: (o.modelChoices?.get(r.id)?.current ?? r.managed?.model)! } : {}),
       ...(r.managed?.effort ? { effort: r.managed.effort } : {}),
       ...(() => {
         const accountId = r.managed ? resolveSessionAccount([r.managed], { id: r.managed.id }, o.accounts) : undefined

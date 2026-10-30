@@ -10,7 +10,8 @@ import { installSearchPath, withUserBin } from './harness-install-plan'
  * process's own PATH keeps deciding which binary wins, these only fill a gap. Only directories that
  * exist are added, so an isolated HOME gets nothing it cannot use.
  */
-export const USER_FALLBACK_BIN_DIRS = ['.bun/bin', '.volta/bin', '.kimi-code/bin']
+// `.opencode/bin`: opencode's official installer (opencode.ai/install) — measured on the owner's machine, 2026-10-30.
+export const USER_FALLBACK_BIN_DIRS = ['.bun/bin', '.volta/bin', '.kimi-code/bin', '.opencode/bin']
 
 /**
  * THE one PATH every harness lookup shares — install, version check, availability, spawn.

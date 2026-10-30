@@ -125,7 +125,9 @@ export function HarnessInstallDialog({ target, pt, onClose, onDone, onSignIn }: 
         void run()
       }}
     >
-      {lines.length > 0 && (
+      {/* The installer's progress is for while it RUNS (or to explain a failure): kept after a success it left
+          "Checking the version…" standing beside "Done" (QA F4). */}
+      {lines.length > 0 && phase !== 'success' && phase !== 'login-offer' && (
         <div
           role="log" aria-live="polite" data-testid="harness-install-progress"
           style={{

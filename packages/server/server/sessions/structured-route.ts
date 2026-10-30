@@ -117,6 +117,8 @@ export function structuredIntentOf(
     conversationId?: string
     ctx?: { text: string; block: string }
     mcp?: { command: string; args: readonly string[]; env?: Readonly<Record<string, string>> }
+    /** 1.20 — the asking screen's language (QA F2: the server's stored preference can say nothing, or the wrong thing). */
+    lang?: 'en' | 'pt'
   },
 ): StructuredIntent {
   return {
@@ -131,6 +133,7 @@ export function structuredIntentOf(
     ...(req.prompt ? { prompt: req.prompt } : {}),
     ...(o.ctx && !req.resumeId && !req.forkOf ? { instructions: { text: o.ctx.text, block: o.ctx.block } } : {}),
     ...(o.mcp ? { mcp: [{ name: 'agentistics', command: o.mcp.command, args: [...o.mcp.args], ...(o.mcp.env ? { env: o.mcp.env } : {}) }] } : {}),
+    ...(o.lang ? { lang: o.lang } : {}),
   }
 }
 

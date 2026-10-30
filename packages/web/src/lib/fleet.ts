@@ -43,6 +43,8 @@ export type FleetActionId =
   | 'cycleMode'
   /** F4.D — set a structured row's mode directly; `text` is one of its `modes` ids. */
   | 'setMode'
+  /** 1.20 — switch a structured row's model through its protocol; `text` is one of its `models` ids. */
+  | 'setModel'
   /**
    * FLEET verbs — they act on a SET, not on the row whose `id` is in the request.
    *
@@ -104,6 +106,8 @@ export interface FleetRow {
   mode?: SessionMode
   /** F4.D — the modes a structured row can be set to directly; absent: only `cycleMode` exists. */
   modes?: SessionMode[]
+  /** 1.20 — the models a structured row can switch to through its protocol (`setModel`); absent: no protocol switch. */
+  models?: Array<{ id: string; label: string }>
   conversationId?: string
   /** Exact managed successor recorded by the existing handoff registry. */
   handoffTo?: string
@@ -257,7 +261,7 @@ export interface FleetState {
     handoff?: boolean
     /** EXT.OPEN: yes to ending an external process so its conversation continues here. */
     confirm?: boolean
-  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
+  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed'; action?: { kind: 'update-harness'; harness: string; need: string } }>
 }
 
 /**

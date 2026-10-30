@@ -27,6 +27,7 @@ const MARK_FILE: Record<string, string> = {
   gemini: '/harness/gemini.svg',
   antigravity: '/harness/antigravity.png',
   kimi: '/harness/kimi.png',
+  opencode: '/harness/opencode.svg',
   // The native harness is this product: its own mark (see SOURCES.md).
   agentistics: '/minimalistLogo.png',
 }

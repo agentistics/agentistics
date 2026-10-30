@@ -8,7 +8,7 @@
 
 import type { CanonicalMode, ConversationLinkReason, HarnessId, SendNowOutcome, SessionMode } from '@agentistics/core'
 import type { RepoFacts } from './repo-facts'
-import type { HarnessChat, StructuredAnswer, StructuredAttention, StructuredMcpServer } from '@agentistics/engine-api'
+import type { HarnessChat, StructuredAnswer, StructuredAttention, StructuredMcpServer, StructuredSetModel } from '@agentistics/engine-api'
 
 /**
  * How a harness accepts an initial prompt while starting an INTERACTIVE session.
@@ -269,6 +269,8 @@ export interface StructuredIntent {
   prompt?: string
   instructions?: { text: string; block: string }
   mcp?: StructuredMcpServer[]
+  /** 1.20 — the language of the screen that asked for this session (the request's own `?lang`), for the driver's chat sentences. */
+  lang?: 'en' | 'pt'
 }
 
 export interface BackendInitialPrompt extends InitialPrompt {
@@ -784,6 +786,13 @@ export interface SessionBackend {
   modesOf?(id: string): SessionMode[] | undefined
   /** F4.D — set a structured session's mode THROUGH its driver, by id, no cycling. False: refused / unknown id. */
   setMode?(id: string, modeId: string): Promise<boolean>
+  /**
+   * 1.20 — a STRUCTURED session's model as its protocol states it, with the models it can switch to
+   * mid-conversation; `undefined` for a session whose driver offers no switch.
+   */
+  modelsOf?(id: string): { current: string | null; options: Array<{ id: string; label: string }> } | undefined
+  /** 1.20 — switch a structured session's model THROUGH its driver. A refusal carries the driver's sentence. */
+  setModel?(id: string, modelId: string): Promise<StructuredSetModel>
   /** F2.0 — answer a structured session's open request through its driver. False: refused / stale. */
   answer?(id: string, a: StructuredAnswer): Promise<boolean>
   /**

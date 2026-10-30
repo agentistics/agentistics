@@ -177,6 +177,8 @@ export interface StructuredSpawn {
    * driver honours only what `declares(h).startModes` lists; the host never sends anything else.
    */
   mode?: CanonicalMode
+  /** 1.20 — the language of the person's screen, for the few sentences a driver writes into the chat itself. Absent = English. */
+  lang?: 'en' | 'pt'
   /**
    * F2.0b — WHERE the child process runs. When present, the driver starts its protocol peer through
    * `transport.launch(...)` instead of spawning it itself, and speaks to it only through the returned
@@ -307,6 +309,21 @@ export interface StructuredSession {
    * whatever the protocol last stated.
    */
   setMode?(id: string): Promise<boolean>
+  /** 1.20 — the models this session can switch to mid-conversation, as the protocol lists them (absent = none stated). */
+  models?(): readonly StructuredModelOption[]
+  /** 1.20 — the model the PROTOCOL says this session runs (or the one just set and acknowledged), or null. */
+  model?(): string | null
+  /**
+   * 1.20 — switches the model through the protocol (never a typed line). A refusal says why in a sentence, and
+   * carries `blocked` when the harness's own version is the wall (opencode < 1.18.0 on its free tier).
+   */
+  setModel?(id: string): Promise<StructuredSetModel>
+  /**
+   * 1.20 — the turn in flight cannot finish on its own (the harness retries a provider that is not answering,
+   * forever), in the harness's own words, or null. A READ: the driver never acts on it (a durable session's
+   * writes must replay exactly) — the HOST cancels the turn through `cancel()`, as the person would.
+   */
+  stalled?(): string | null
   /** Queues a prompt. False when not running or the queue is full. */
   prompt(text: string): boolean
   /** Answers the open request. False when none is open, the id is stale, or the answer does not fit it. */
@@ -331,6 +348,12 @@ export interface StructuredSession {
 export type StructuredBlocked = { kind: 'harness-version'; need: string; found?: string }
 
 export type StructuredStart = { ok: true; session: StructuredSession } | { ok: false; reason: string; blocked?: StructuredBlocked }
+
+/** 1.20 — one model a session can switch to: the id the protocol takes and its own display name. */
+export interface StructuredModelOption { id: string; label: string }
+
+/** 1.20 — what `setModel` answered. */
+export type StructuredSetModel = { ok: true } | { ok: false; reason: string; blocked?: StructuredBlocked }
 
 /** One protocol, for the harnesses it serves. */
 export interface StructuredDriver {

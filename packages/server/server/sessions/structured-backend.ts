@@ -57,6 +57,8 @@ export interface StructuredProvider {
    * reported again on a later `list()`, after `retryMs` when given.
    */
   onConversation?(id: string, conversationId: string): void | Promise<void | { retry: true; retryMs?: number }>
+  /** 1.20 — the person's screen language (`StructuredSpawn.lang`); absent = English. */
+  lang?(): Promise<'en' | 'pt'>
   /** A session is now hosted over its protocol (route `structured` only). */
   onStarted?(id: string, driver: StructuredDriverId): void
   /** Persist a normal end BEFORE its durable/live records disappear. */
@@ -104,6 +106,12 @@ export function recordingSession(s: StructuredSession, t: Pick<DurableTransport,
     // MODE.EVERYWHERE — setting a mode WRITES to the child, so it is recorded (before the write leaves,
     // like every call here) and a re-attach makes it again in the same place.
     ...(s.setMode ? { setMode: (id: string) => { t.record({ op: 'setMode', id }); return s.setMode!(id) } } : {}),
+    ...(s.models ? { models: () => s.models!() } : {}),
+    ...(s.model ? { model: () => s.model!() } : {}),
+    // 1.20 — a model switch WRITES to the child (set_config_option), so it is recorded like setMode.
+    ...(s.setModel ? { setModel: (id: string) => { t.record({ op: 'setModel', id }); return s.setModel!(id) } } : {}),
+    // A read: the host acts on it through `cancel()` below, which is what gets recorded.
+    ...(s.stalled ? { stalled: () => s.stalled!() } : {}),
     prompt(text) { const ok = s.prompt(text); if (ok) t.record({ op: 'prompt', text }); return ok },
     answer(a) {
       const ok = s.answer(a)
@@ -233,6 +241,7 @@ export function structuredSpawnOf(req: BackendSpawn, harness: HarnessId): Struct
     ...(prompt ? { initialPrompt: prompt } : {}),
     ...(i?.instructions && !i.resumeId && !i.forkOf ? { instructions: i.instructions } : {}),
     ...(i?.mcp?.length ? { mcp: i.mcp } : {}),
+    ...(i?.lang ? { lang: i.lang } : {}),
     env: { [STRUCTURED_SESSION_ENV]: req.id, ...(req.env ?? {}) },
   }
 }
@@ -288,12 +297,33 @@ export type StructuredBackend = SessionBackend & {
    * this process does not drive is ended through its relay). A web reopen later runs structured again.
    */
   toTerminal(id: string): Promise<ToTerminalOutcome>
+  /**
+   * 1.20 — cancel every structured turn its driver says can never finish by itself (`StructuredSession.stalled`:
+   * opencode retrying a provider that does not answer, forever). The cancel goes through the RECORDED session, as
+   * the person's Stop would; the driver then writes why into the chat. Runs on a timer; returns the ids it cancelled.
+   */
+  sweepStalled(): string[]
 }
+
+/** 1.20 — how often `sweepStalled` runs. opencode's back-off reaches its third attempt in ~14 s. */
+export const STALL_SWEEP_MS = 10_000
 
 export function withStructured(base: SessionBackend, provider: StructuredProvider): StructuredBackend {
   const live = new Map<string, Live>()
   const of = (id: string) => live.get(id)?.s
   const structuredOnly = (id: string) => { const l = live.get(id); return l && l.route === 'structured' ? l : undefined }
+  const sweepStalled = (): string[] => {
+    const out: string[] = []
+    for (const [id, l] of live) {
+      if (l.route !== 'structured' || !l.s.stalled || l.s.activity() !== 'working') continue
+      let why: string | null = null
+      try { why = l.s.stalled() } catch { why = null }
+      if (why) { l.s.cancel(); out.push(id) }
+    }
+    return out
+  }
+  const sweepTimer = setInterval(() => { if (live.size > 0) sweepStalled() }, STALL_SWEEP_MS) as { unref?: () => void }
+  sweepTimer.unref?.()
 
   const report = (id: string, l: Live) => {
     if (l.reported) return
@@ -374,7 +404,9 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
   async function startVia(req: BackendSpawn, route: Exclude<SpawnRoute, 'tmux'>, harness: HarnessId, reg: EngineStructured, acp: EngineAcp | null): Promise<boolean> {
     if (route === 'structured') await provider.prepare?.().catch(() => {})
     // F2.0b — a structured child is launched through a relay that outlives this process.
-    const sspawn = route === 'structured' ? structuredSpawnOf(req, harness) : null
+    // The asking screen's language wins (QA F2); the server's stored preference is only the fallback.
+    const lang = route === 'structured' && !req.structured?.lang && provider.lang ? await provider.lang().catch(() => 'en' as const) : undefined
+    const sspawn = route === 'structured' ? { ...structuredSpawnOf(req, harness), ...(lang === 'pt' ? { lang } : {}) } : null
     const transport: DurableTransport | null = sspawn && durable
       ? durable.create(req.id, savedOf(req, harness, sspawn))
       : null
@@ -435,6 +467,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     ...base,
     id: base.id,
     structuredSessions: () => [...live].map(([id, l]) => ({ id, route: l.route, driver: l.s.driver })),
+    sweepStalled,
     reattach() {
       if (!durable) return Promise.resolve()
       reattaching ??= (async () => {
@@ -585,6 +618,18 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     modeOf(id) { const l = structuredOnly(id); return l ? (l.s.mode?.() ?? null) : base.modeOf?.(id) },
     modesOf(id) { const l = structuredOnly(id); return l ? (l.s.modes ? [...l.s.modes()] : undefined) : base.modesOf?.(id) },
     async setMode(id, modeId) { const l = structuredOnly(id); return l ? (l.s.setMode?.(modeId) ?? false) : (base.setMode?.(id, modeId) ?? false) },
+    modelsOf(id) {
+      const l = structuredOnly(id)
+      if (!l) return base.modelsOf?.(id)
+      if (!l.s.models || !l.s.setModel) return undefined
+      return { current: l.s.model?.() ?? null, options: l.s.models().map(m => ({ id: m.id, label: m.label })) }
+    },
+    async setModel(id, modelId) {
+      const l = structuredOnly(id)
+      if (!l) return base.setModel ? base.setModel(id, modelId) : { ok: false, reason: 'this session has no model switch' }
+      if (!l.s.setModel) return { ok: false, reason: 'this session has no model switch' }
+      return l.s.setModel(modelId).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : 'set model failed' }))
+    },
     async answer(id, a: StructuredAnswer) { const l = structuredOnly(id); return l ? l.s.answer(a) : (base.answer?.(id, a) ?? false) },
     cancelTurn(id) { const l = structuredOnly(id); if (!l) return false; l.s.cancel(); return true },
     chatOf(id) {
