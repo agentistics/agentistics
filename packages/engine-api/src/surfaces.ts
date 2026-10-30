@@ -53,8 +53,9 @@ export interface EngineSurface {
   /** An environment variable name (`[A-Z][A-Z0-9_]*`): the surface is offered only while it is `1`. */
   experimental?: string
   /**
-   * 1.18, optional: the layout the surface opens in (default `full`; `page` for `rail`). `inline` is only
-   * valid for the `composer` placement, `page` only for `rail` (which accepts no other layout).
+   * 1.18, optional: the layout the surface opens in (default `full`; `page` for `rail` and `nay-dock`).
+   * `inline` is only valid for the `composer` placement, and `page` is only valid for `rail` or
+   * `nay-dock` (which accepts no other layout).
    */
   layout?: SurfaceLayout
   /**
@@ -235,7 +236,8 @@ export function surfaceRefusals(
     }
     if (s.layout !== undefined && !((SURFACE_LAYOUTS as readonly string[]).includes(s.layout)
       && (s.layout !== 'inline' || s.placement === 'composer')
-      && ((s.layout === 'page') === (s.placement === 'rail')))) out.push({ id, reason: 'bad-layout' })
+      && (((s.layout === 'page') === (s.placement === 'rail'))
+        || (s.layout === 'page' && s.placement === 'nay-dock')))) out.push({ id, reason: 'bad-layout' })
     const al = s.activeLabel as { pt?: unknown; en?: unknown } | undefined
     if ((s.activeIcon !== undefined && !(SURFACE_ICONS as readonly string[]).includes(s.activeIcon))
       || (s.activeTone !== undefined && !(SURFACE_ACTIVE_TONES as readonly string[]).includes(s.activeTone))

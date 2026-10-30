@@ -19,6 +19,10 @@ describe('engineSurfacesFor', () => {
   it('offers nothing when any surface is invalid', () => {
     expect(engineSurfacesFor([s(), s({ id: 'bad', module: 'https://evil.example/a.js' })], {})).toEqual([])
   })
+  it('accepts the official Nay voice-call page surface contract', () => {
+    const voiceCall = s({ id: 'voice-calls-nay', placement: 'nay-dock', layout: 'page' })
+    expect(engineSurfacesFor([voiceCall], {})).toEqual([voiceCall])
+  })
 })
 
 it('gates float and nay-sessions with the existing experimental flag', () => {
