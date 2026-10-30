@@ -648,8 +648,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const currentModelLabel = menuModels.find(model => model.id === currentModelId)?.label ?? currentModelId
   /** M3 status band: the model button always names a model — the live control's, else the one the
    *  session was started on — and the effort when one is known. Never a bare "Modelo". */
-  const statusModelLabel = currentModelLabel
-    || (session.model ? modelLabel(session.harness, session.model) : (pt ? 'Modelo' : 'Model'))
+  const statusModelLabel = !currentModelId
+    ? (pt ? 'Modelo' : 'Model')
+    // A menu label that is only the raw id ("haiku") gives way to the harness catalogue's ("Haiku 4.5").
+    : currentModelLabel !== currentModelId ? currentModelLabel : modelLabel(session.harness, currentModelId)
   const statusEffort = sourceControls?.effort?.value ?? session.effort ?? null
   const toggleMenuGroup = useCallback((id: ComposerMenuGroupId) => {
     setFoldedMenuGroups(previous => {
