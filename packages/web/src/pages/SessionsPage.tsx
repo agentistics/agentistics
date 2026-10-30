@@ -113,7 +113,7 @@ import {
   openArtifacts, setArtifactCount, setArtifactLive, useArtifactLive, usePanelFocusRequest,
 } from '../lib/artifactsStore'
 import { studioMenuRow } from '../lib/studioMenuRow'
-import { EngineSurfaceAside, engineAsideWantsOpen } from '../components/EngineSurfaceAside'
+import { EngineSurfaceAside, engineAsideWantsOpen, panelsPickAction } from '../components/EngineSurfaceAside'
 import { registerEngineSideWant, useEngineSideAsideId, useEngineSideSurface } from '../lib/engineSurfaceHost'
 import { closedRightEdge, restingLeftEdge, setRightAsideEdge, useRightAsideEdge } from '../lib/rightAsideEdge'
 import { PaneScope, paneDomId, setActivePane, type PaneId } from '../lib/paneScope'
@@ -2019,7 +2019,12 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       shown={engineTabShown}
       panelsLabel={pt ? 'Painéis' : 'Panels'}
       onPickEngine={() => setEngineTabOn(true)}
-      onPickPanels={() => { setEngineTabOn(false); if (slotLayout.right === null) openSlotPanelPicked('live') }}
+      onPickPanels={() => {
+        setEngineTabOn(false)
+        const action = panelsPickAction({ panelOpen: slotLayout.right !== null, studioMinimized: rightIsStudio && !slotLayout.rightOpen })
+        if (action === 'open-live') openSlotPanelPicked('live')
+        else if (action === 'restore-studio') setRightOpen(true)
+      }}
       showStrip={!isMobile}
     >
       {rightSlotContentRaw}

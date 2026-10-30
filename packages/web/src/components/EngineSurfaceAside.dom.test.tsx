@@ -209,3 +209,31 @@ describe('engineAsideWantsOpen', () => {
     expect(f({ panelOpen: false, studioMinimized: false, engineShown: true })).toBe(true)
   })
 })
+
+describe('panelsPickAction', () => {
+  test('a minimized Studio is restored, never left to close the aside', () => {
+    const f = asideMod.panelsPickAction
+    expect(f({ panelOpen: true, studioMinimized: true })).toBe('restore-studio')
+    expect(f({ panelOpen: false, studioMinimized: false })).toBe('open-live')
+    expect(f({ panelOpen: true, studioMinimized: false })).toBe('show')
+  })
+})
+
+describe('the fixed panel is never used for a session an aside may take', () => {
+  test('wanted but no aside holds it: mounted and parked off screen; unwanted: in the frame', async () => {
+    const hostMod = await import('./EngineSurfaceHost')
+    for (const wanted of [true, false]) {
+      state.resetEngineSurfaceHostForTests()
+      if (wanted) state.registerEngineSideWant('aside-main', 's1')
+      const mounts: HTMLElement[] = []
+      const host = await mount(h(hostMod.EngineSurfaceHost, { load: async () => ({ mount(el: HTMLElement) { mounts.push(el) } }) }))
+      await open('s1')
+      await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+      expect(mounts.length).toBe(1)
+      const parkedOff = mounts[0]!.parentElement!.parentElement?.style.left === '-100000px' || mounts[0]!.parentElement!.style.left === '-100000px'
+      expect(parkedOff).toBe(wanted)
+      host.root.unmount()
+      state.resetEngineSurfaceHostForTests()
+    }
+  })
+})
