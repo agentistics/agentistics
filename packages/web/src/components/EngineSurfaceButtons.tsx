@@ -1,6 +1,6 @@
 import { useEngineSurfaces } from '../hooks/useEngineSurfaces'
 import { useIsMobile } from '../hooks/useIsMobile'
-import { closeEngineSurface, openEngineSurface, useMountedEngineSurfaces } from '../lib/engineSurfaceHost'
+import { closeEngineSurface, endEngineSurfaceFromHost, openEngineSurface, useMountedEngineSurfaces } from '../lib/engineSurfaceHost'
 import type { SurfaceIcon, SurfacePlacement } from '../lib/engineSurfaces'
 import { PanelTop, Phone, PhoneOff, Sparkles, type LucideIcon } from 'lucide-react'
 
@@ -24,7 +24,8 @@ export function EngineSurfaceButtons({ placement, sessionId, sessionKind, lang, 
     <>
       {surfaces.map(s => {
         // Active only while ON SCREEN from this session: its label, icon and fill promise what a click
-        // does (take it off screen). Kept alive off screen, it shows the idle face again — and a click
+        // does: END it when the surface declared `activeLabel`/`activeIcon` (its own end handler, else removal),
+        // otherwise take it off screen. Kept alive off screen, it shows the idle face again — and a click
         // brings it back, which is what the idle button means — marked `data-parked`.
         const entry = mounted.find(m => m.surface.id === s.id)
         const mine = placement === 'composer' && !!entry && entry.sessionId === sessionId
@@ -40,7 +41,7 @@ export function EngineSurfaceButtons({ placement, sessionId, sessionKind, lang, 
             aria-label={name} title={name}
             data-active={active ? 'true' : undefined} data-tone={active ? (s.activeTone ?? 'accent') : undefined}
             data-parked={parked ? 'true' : undefined}
-            onClick={e => active && entry ? closeEngineSurface(entry.nonce) : openEngineSurface(s, { sessionId, ...(sessionKind ? { sessionKind } : {}), lang, trigger: e.currentTarget, slotId })}
+            onClick={e => active && entry ? (s.activeLabel || s.activeIcon ? endEngineSurfaceFromHost(entry.nonce) : closeEngineSurface(entry.nonce)) : openEngineSurface(s, { sessionId, ...(sessionKind ? { sessionKind } : {}), lang, trigger: e.currentTarget, slotId })}
             style={{
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, cursor: 'pointer',
               border: '1px solid var(--border)', borderRadius: 6, background: 'transparent', color: 'var(--text-secondary)',

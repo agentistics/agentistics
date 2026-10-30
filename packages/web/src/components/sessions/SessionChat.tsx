@@ -89,6 +89,7 @@ import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
 import { EngineSurfaceButtons } from '../EngineSurfaceButtons'
 import { EngineSurfaceInlineSlot } from '../EngineSurfaceHost'
+import { useHasActiveComposerSurface } from '../../lib/engineSurfaceHost'
 
 import {
   applyDraftRequest, consumeDraftRequest, getDraftRequest, useDraftRequest,
@@ -492,6 +493,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * still what the user chose to send, exactly as if they had typed it. No audio leaves the
    * browser — the recognition is the browser's own, and this product uploads nothing.
    */
+  /** A composer surface with an active face is up for this session: it owns the microphone, so dictation steps aside. */
+  const engineSurfaceActive = useHasActiveComposerSurface(session.id)
   const toggleDictation = useCallback(() => {
     if (listening) { recognitionRef.current?.stop(); return }
     const w = window as unknown as { SpeechRecognition?: new () => never; webkitSpeechRecognition?: new () => never }
@@ -3618,7 +3621,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     desktop's — the microphone was the whole of the difference. Where it cannot
                     work it is still in the menu, on a phone exactly as anywhere else, because there
                     is the only place the reason fits. */}
-                {dictation.state === 'ready' && (
+                {dictation.state === 'ready' && !engineSurfaceActive && (
                   <ComposerMicButton
                     onClick={toggleDictation}
                     disabled={!canPrompt}
@@ -3833,7 +3836,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                             </button>
                           )}
                           <div id="composer-menu-message-region" style={{ display: foldedMenuGroups.has('message') ? 'none' : 'block' }}>
-                      {dictation.state === 'ready' && (
+                      {dictation.state === 'ready' && !engineSurfaceActive && (
                         <button
                           type="button"
                           onClick={toggleDictation}

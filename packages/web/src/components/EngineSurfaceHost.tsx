@@ -6,7 +6,7 @@ import { X } from 'lucide-react'
 import { useEscapeOwner } from '../lib/overlayStack'
 import {
   minimizeEngineSurface, registerEngineNaySlot, useEngineNaySlot, closeEngineSurface, effectiveSurfaceLayout, endEngineSurface, leaveEngineSurfacePage, onEngineSurfaceIndicatorEnd, openEngineSurface, openEngineSurfaceSession,
-  registerEngineSessionView, registerEngineInlineSlot, registerEnginePageSlot, registerEngineSideSlot, resolveInlineSlot, resolveSideSlot, setEngineSurfaceIndicator, setEngineSurfaceKeepAlive,
+  registerEngineSessionView, resumeParkedInlineSurfaces, registerEngineInlineSlot, registerEnginePageSlot, registerEngineSideSlot, resolveInlineSlot, resolveSideSlot, setEngineSurfaceIndicator, setEngineSurfaceKeepAlive,
   mountedEngineSurfaces, reconcileEngineSurfaces, setEngineSurfaceLayout, useEngineInlineSlot, useEngineSideAsideId, useEnginePageSlot, useEngineSideSlot, useMountedEngineSurfaces, useOpenEngineSurface, type OpenSurface,
 } from '../lib/engineSurfaceHost'
 import { readEngineStatus, useEngineSurfaceList } from '../hooks/useEngineSurfaces'
@@ -90,9 +90,18 @@ export function EngineSurfacePage({ surfaceId, lang }: { surfaceId: string; lang
  * only while a `composer` surface opened from THAT session is `inline`; the conversation and the
  * composer around it stay fully usable.
  */
+/** A floating surface opens card-sized (≈360×480), bottom-right, inside the viewport and clear of a phone's navigation. */
+export function compactFloatBox(vw = window.innerWidth, vh = window.innerHeight): Pick<NayWindow, 'x' | 'y' | 'w' | 'h'> {
+  const margin = 12, nav = vw < 640 ? 72 : 0
+  const w = Math.max(240, Math.min(360, vw - margin * 2))
+  const h = Math.max(240, Math.min(480, vh - 60 - nav - margin))
+  return { w, h, x: Math.max(0, vw - w - margin), y: Math.max(48, vh - h - nav - margin) }
+}
+
 export function EngineSurfaceInlineSlot({ sessionId, slotId }: { sessionId: string; slotId: string }) {
   useEffect(() => {
     registerEngineSessionView(slotId, sessionId)
+    resumeParkedInlineSurfaces(sessionId)
     return () => registerEngineSessionView(slotId, null)
   }, [slotId, sessionId])
   const open = useOpenEngineSurface()
@@ -153,7 +162,7 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   const park = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
   const [error, setError] = useState(false)
-  const [win, setWin] = useState<NayWindow>(() => ({ id: surface.id, x: Math.max(0, window.innerWidth - 440), y: 60, w: Math.min(420, window.innerWidth), h: Math.min(540, window.innerHeight - 60), minimized: false, z: 290 }))
+  const [win, setWin] = useState<NayWindow>(() => ({ id: surface.id, ...compactFloatBox(), minimized: false, z: 290 }))
   const pt = lang === 'pt'
   const full = layout === 'full'
   const bare = surface.frameless === true

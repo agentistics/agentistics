@@ -23,7 +23,13 @@ Also in 1.18, a surface declaration may carry two more optional fields, validate
 For the `composer` placement, while the surface is open (any layout) the host's button shows an active
 state, in the same spot and size as the idle one: the label switches to `activeLabel`, the background is
 filled, and clicking
-it closes the surface (as `ctx.close()` does). Optional fields, validated as `bad-active`:
+it ENDS the surface when it declared `activeLabel`/`activeIcon`: its `onIndicatorEnd` handler runs (it ends
+itself with `ctx.close()`), or, with none, the host removes it, indicator included. Without an active face
+a click just takes it off screen (parked if kept alive). While a composer surface with an `activeLabel` is
+mounted for a session, that session's composer hides the dictate button. A kept-alive composer surface that
+left its session (floated, or parked by another surface) returns to the composer when the session view
+returns. A floating surface opens card-sized (about 360×480), and the Nay button lists minimized surfaces
+(resume / end / "Open Nay chat") instead of opening the chat straight away. Optional fields, validated as `bad-active`:
 `activeIcon` (from the closed icon set, which now includes `phone-off`), `activeLabel` (`{ pt, en }`,
 the accessible name while active, falling back to `label`) and `activeTone` (`'accent'` by default, or
 `'danger'` for the destructive red).

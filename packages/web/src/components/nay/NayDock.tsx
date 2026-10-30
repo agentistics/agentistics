@@ -1,6 +1,6 @@
 import { EngineSurfaceNayBadge } from '../EngineSurfaceNayBadge'
 import { useEngineSurfaces } from '../../hooks/useEngineSurfaces'
-import { openEngineSurface, resumeEngineSurface, useMountedEngineSurfaces } from '../../lib/engineSurfaceHost'
+import { endEngineSurfaceFromHost, openEngineSurface, resumeEngineSurface, useMountedEngineSurfaces } from '../../lib/engineSurfaceHost'
 import { EngineSurfaceNaySlot } from '../EngineSurfaceHost'
 import { NayWindowFrame, IconButton, LabelButton } from './NayWindowFrame'
 /**
@@ -709,9 +709,17 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
               items={minimized.map(w => ({ id: w.id, row: findSession(w.id) }))}
               onRestore={id => setDock(d => openSession(d, id))}
               onClose={id => setDock(d => closeWindow(d, id))}
+              surfaceItems={minimizedSurfaces.map(s => ({
+                id: String(s.nonce),
+                label: s.indicator?.label[lang] ?? s.surface.label[lang],
+                since: s.indicator?.since,
+                onResume: () => resumeEngineSurface(s.nonce),
+                ...(s.surface.activeLabel ? { endLabel: s.indicator?.endLabel?.[lang] ?? s.surface.activeLabel[lang], onEnd: () => endEngineSurfaceFromHost(s.nonce) } : {}),
+              }))}
+              onOpenChat={() => setDock(d => ({ ...d, open: true }))}
               anchorStyle={{ position: 'relative', width: '100%', height: '100%' }}
               suppressed={fab.dragging}
-              renderButton={({ onClickCapture, onKeyDown }) => (
+              renderButton={({ onClickCapture, onKeyDown, toggle }) => (
                 <button
                   ref={fab.bodyRef}
                   onPointerDown={fab.onPointerDown}
@@ -720,7 +728,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                   onPointerCancel={fab.onPointerCancel}
                   onClickCapture={e => { fab.onClickCapture(e); if (!e.isPropagationStopped() && minimizedSurfaces.length === 0) onClickCapture(e) }}
                   onKeyDown={minimizedSurfaces.length === 0 ? onKeyDown : undefined}
-                  onClick={() => { const surface = minimizedSurfaces[0]; if (surface) resumeEngineSurface(surface.nonce); else setDock(d => ({ ...d, open: !d.open })) }}
+                  onClick={() => { if (minimizedSurfaces.length > 0) toggle(); else setDock(d => ({ ...d, open: !d.open })) }}
                   data-nay-fab
                   aria-label={pt ? 'Abrir o chat da Nay' : 'Open the Nay chat'}
                   aria-expanded={dock.open}
