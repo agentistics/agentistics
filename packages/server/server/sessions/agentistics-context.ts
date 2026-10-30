@@ -11,7 +11,8 @@
 
 import { flowLines } from '../briefing-flow'
 export { flowLines }
-import { awayBriefingLines, roleLine, type AwayState } from '@agentistics/core'
+import { awayActive, awayBriefingLines, roleLine, type AwayState } from '@agentistics/core'
+import { HANDOFF_TAKEOVER_LINE } from './handoff-template'
 import { briefingText, PLAN_LIMITS_TOOL } from '../briefing'
 
 export type ContextLang = 'en' | 'pt'
@@ -47,7 +48,16 @@ export interface ContextInput {
   /** HANDOFF.RELAY: a leader hand-off's successor is told what the owner said to its predecessor and
    *  the predecessor's last reply (`handoff-relay.ts`'s `relaySection`). */
   handoffRelay?: string
+  /** A brief/spec/plan exists for this session (a worker started by a leader always has one). Defaults to `!!parentId`. */
+  hasBrief?: boolean
+  /** This session is a leader hand-off's successor: the takeover instruction travels in the system context. */
+  handoffTakeover?: boolean
+  /** The owner's saved usage rules exist, so the model is not told to ask for them. */
+  usageRulesSaved?: boolean
 }
+
+/** One line, stated once: who wins when two instructions disagree. */
+export const PRECEDENCE_LINE = 'Precedence when instructions disagree: the owner\'s direct word > away-mode authorisations > the brief you were given > CLAUDE.md/AGENTS.md > memory > this generic briefing and skills.'
 
 /** The block is fenced so the chat UI can recognise it and render it collapsed. */
 export const CONTEXT_OPEN = '<agentistics-context>'
@@ -90,28 +100,41 @@ export const CONTEXT_TOOL_NAMES = Object.values(TOOL_GROUPS).flat()
  * absent is omitted, never printed empty.
  */
 export function contextText(i: ContextInput): string {
+  const now = i.now ?? Date.now()
+  const away = awayActive(i.away, now)
+  const worker = i.role === 'worker'
+  // A brief exists when the person gave one or a leader started this session (it passes the spec in the prompt).
+  const hasBrief = i.hasBrief ?? !!i.parentId
+  const planLimits = i.toolNames?.includes(PLAN_LIMITS_TOOL) === true
   const lines = [
     CONTEXT_HEADER,
     `You are running inside agentistics, an app that manages and measures coding-assistant sessions. Session: ${i.sessionId}. Project folder: ${i.cwd}.`,
+    PRECEDENCE_LINE,
     'Tools — the "agentistics" MCP server gives you:',
     `- Tasks (Agentask): ${TOOL_GROUPS.Tasks.join(', ')} — plan, claim, edit, link, comment, coordinate, and close work.`,
     `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, organise sidebar folders, and read or (leaders) set away mode.`,
     METRICS_DASHBOARDS_LINE,
-    briefingText(i.lang ?? 'en', { planLimitsAvailable: i.toolNames?.includes(PLAN_LIMITS_TOOL) }),
-  ]
-  lines.push(
+    briefingText(i.lang ?? 'en', { planLimitsAvailable: planLimits && !worker, away }),
     roleLine(i.role),
-    ...awayBriefingLines(i.away, i.role, i.now ?? Date.now(), { planLimitsInBriefing: i.toolNames?.includes(PLAN_LIMITS_TOOL) === true }),
+    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits }),
     ...flowLines(i.lang ?? 'en', i.role, !!i.taskId),
-    'Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title. If you replace another live leader on your task, pass its id as `retirePredecessor` so the server closes it when it goes quiet.' ,
-    'Open other sessions only after the user explicitly approves: `agentop session <harness> --bg --cwd <dir> --name "<title>" --folder "<folder>" -p "<request>"` or `agentop session batch --task "<task>" --folder "<folder>" …` (`agentop session folders` lists them; omitted task, folder and approval mode inherit from a verified parent). Workers inherit the parent task, folder and approval mode, but need their own subtask when applicable. For leader succession run `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` from inside the old leader; a leader prefix alone does not transfer its state. File each opened session on its subtask and in the task\'s folder.',
-    'Model/harness balance: use the strongest model for design, coordination, and hard bugs; a mid model for clearly scoped implementation; a light model for probes/screenshots; QA must use a different model from the author. Respect the user\'s usage rules. No usage rules are saved yet: before proposing sessions, ask the user once what plans, quotas, and preferences they allow.',
-    'Specification skill rule: if you are a leader, or a worker facing a complex implementation, ASK the user in this session whether to use a specification skill (SDD, such as superpowers). Use it only after a yes; never make it automatic. If none is installed for this harness, you may suggest installing one, but install only after the user\'s OK. Never start every session with it.',
-    'Do NOT suggest or ask about a specification skill when a brief, specification, or plan already exists — for example, a worker started by a leader with one, or when the user already gave one. A leader starting a worker must pass the specification path or text in the worker prompt; that worker never asks about specification skills in that case.',
-    'For tests, servers, previews, and QA use `agentop run --rm -- <command>` so the run has its own HOME, ports, terminal, and memory cap. Never test in the user\'s real environment; stop processes only by the PID you saved, never by name.',
-    'This session runs the real harness in a terminal the user can open. When something needs an interactive step (OAuth login of an MCP via `/mcp`, a login prompt, or a TUI menu), tell the user to open this session\'s "Terminal" tab in agentistics and do it there — for example, type `/mcp`, pick the server, and choose Authenticate; the browser opens for the login. Never say the session is not interactive and never send the user to an outside terminal.',
-    'Commit at every green milestone — only commits survive a reboot.',
-  )
+  ]
+  if (i.role !== 'worker') {
+    lines.push('Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title. If you replace another live leader on your task, pass its id as `retirePredecessor` so the server closes it when it goes quiet.')
+    const how = '`agentop session <harness> --bg --cwd <dir> --name "<title>" --folder "<folder>" -p "<request>"` or `agentop session batch --task "<task>" --folder "<folder>" …` (`agentop session folders` lists them; omitted task, folder and approval mode inherit from a verified parent). Workers inherit the parent task, folder and approval mode, but need their own subtask when applicable. For leader succession run `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` from inside the old leader; a leader prefix alone does not transfer its state. File each opened session on its subtask and in the task\'s folder.'
+    lines.push(away
+      ? `Opening workers is pre-authorised within the away limits above (no per-session approval): ${how}`
+      : `Open other sessions only after the user explicitly approves: ${how}`)
+    lines.push(`Model/harness balance: use the strongest model for design, coordination, and hard bugs; a mid model for clearly scoped implementation; a light model for probes/screenshots; QA must use a different model from the author. ${away || i.usageRulesSaved ? "Respect the user's saved usage rules." : "No usage rules are saved yet: before proposing sessions, ask the user once what plans, quotas, and preferences they allow."}`)
+  }
+  if (away || hasBrief) {
+    lines.push('Specification skills: do not ask about or start one; follow the brief and decide within it (a leader starting a worker passes the specification path or text in the prompt).')
+  } else {
+    lines.push('Specification skill rule: if you are a leader, or facing a complex implementation with no brief, ASK the user whether to use a specification skill (SDD, such as superpowers). Use it only after a yes; never make it automatic; install one only after the user\'s OK. Never start every session with it. A leader starting a worker must pass the specification path or text in the worker prompt; that worker never asks about specification skills.')
+  }
+  lines.push('For tests, servers, previews, and QA use `agentop run --rm -- <command>` so the run has its own HOME, ports, terminal, and memory cap. Never test in the user\'s real environment; stop processes only by the PID you saved, never by name.')
+  if (!away) lines.push('This session runs the real harness in a terminal the user can open. When something needs an interactive step (OAuth login of an MCP via `/mcp`, a login prompt, or a TUI menu), tell the user to open this session\'s "Terminal" tab in agentistics and do it there — for example, type `/mcp`, pick the server, and choose Authenticate; the browser opens for the login. Never say the session is not interactive and never send the user to an outside terminal.')
+  lines.push('Commit at every green milestone — only commits survive a reboot.')
   if (i.taskId) {
     const sub = i.subtaskId ? `, subtask ${i.subtaskId}${i.subtaskTitle ? ` "${i.subtaskTitle}"` : ''}` : ''
     lines.push(
@@ -121,26 +144,35 @@ export function contextText(i: ContextInput): string {
   } else {
     lines.push('This session is not linked to a task. Follow flow step "Task" above unless this is a quick question.')
   }
-  if (i.folder) lines.push(`Your sidebar folder: ${i.folder.path}${i.folder.siblings.length > 0 ? `. ${i.folder.top ? 'Sub-folders' : 'Sibling folders'}: ${i.folder.siblings.join(', ')}` : ''}. Workers you open go in the matching folder.`)
+  if (i.folder && !worker) lines.push(`Your sidebar folder: ${i.folder.path}${i.folder.siblings.length > 0 ? `. ${i.folder.top ? 'Sub-folders' : 'Sibling folders'}: ${i.folder.siblings.join(', ')}` : ''}. Workers you open go in the matching folder.`)
+  else if (i.folder) lines.push(`Your sidebar folder: ${i.folder.path}.`)
   if (i.parentId) {
     lines.push(
       `You were started by session ${i.parentId}${i.parentTitle ? ` ("${i.parentTitle}")` : ''}. When you finish, get blocked or need a decision, report to it with agentistics_session_message (kind: handback | block | question) — not to the user — and keep working only on what it asked.`,
     )
   }
+  if (i.handoffTakeover || i.handoffRelay) lines.push(HANDOFF_TAKEOVER_LINE)
   if (i.handoffRelay) lines.push(i.handoffRelay)
   if (i.harnesses && i.harnesses.length > 0) lines.push(`Harnesses installed on this machine: ${i.harnesses.join(', ')}.`)
   if (i.specSkills && i.specSkills.length > 0) lines.push(`Specification skills installed for this harness: ${i.specSkills.join(', ')}`)
   lines.push(
     'Rules:',
-    '- Never start, delegate to or orchestrate another session or harness on your own. You may SUGGEST it (which harness, why, what it would do); start it only after the user explicitly approves in this conversation.',
+    ...(worker
+      ? ['- Never start, delegate to or orchestrate another session or harness.']
+      : away
+        ? ['- Start sessions only inside the away authorisations and limits above; anything outside them waits in the hand-off file.']
+        : ['- Never start, delegate to or orchestrate another session or harness on your own. You may SUGGEST it (which harness, why, what it would do); start it only after the user explicitly approves in this conversation.']),
     '- Secrets come from the vault: use vault://name references. Never ask the user to paste a key and never print a secret.',
     '- Ports 47291 and 47292 belong to agentistics: never start, stop or bind anything there; never run `agentop upgrade`; never restart the agentistics service.',
     '- Never open public tunnels (ngrok, cloudflared, etc.) to this machine.',
     `- Do not delete, move or rewrite files outside ${i.cwd} without asking.`,
-    "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
-    "- Keep the user's sidebar organised: sessions you create with approval go into their task's folder.",
-    '- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.',
   )
+  if (!worker) lines.push(
+    "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
+  )
+  lines.push(away
+    ? '- Decisions are yours within the authorisations: record them, never wait on a question.'
+    : '- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.')
   return lines.join('\n')
 }
 

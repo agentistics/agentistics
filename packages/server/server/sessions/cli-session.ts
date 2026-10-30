@@ -521,7 +521,7 @@ export async function start(
   const relay = handoffParentRow
     ? await import('./handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
-  const ctx = buildSpawnContext({ ...(relay ? { handoffRelay: relay.section } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
+  const ctx = buildSpawnContext({ ...(relay ? { handoffRelay: relay.section } : {}), ...(cmd.handoff ? { handoffTakeover: true } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
   // PLAN.ACCOUNTS D3 — one decision for every door (`spawn-account.ts`). An agent is asking when
   // this command runs inside a pane that can prove its identity.
   const account = decideSpawnAccount({
