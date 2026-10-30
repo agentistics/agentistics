@@ -26,6 +26,7 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       },
     ],
     fixes: [],
+  },
   '2.169.1': {
     features: [],
     fixes: [
