@@ -10,6 +10,31 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.169.0': {
+    features: [
+      {
+        pt: 'Motores podem colocar um botão de ícone no campo de mensagem, ao lado do microfone (engine-api 1.18).',
+        en: 'Engines can add an icon button to the message box, next to the microphone (engine-api 1.18).',
+      },
+      {
+        pt: 'Interfaces de motores podem abrir embutidas logo acima do campo de mensagem, sem moldura do app, e alternar entre embutida, lateral e tela cheia (engine-api 1.18).',
+        en: 'Engine interfaces can open inline right above the message box, without the app frame, and switch between inline, side and full screen (engine-api 1.18).',
+      },
+      {
+        pt: 'O botão de ícone de uma interface de motor no campo de mensagem agora mostra um estado ativo enquanto ela está aberta, e clicar nele a fecha (engine-api 1.18).',
+        en: 'An engine interface\'s icon button in the message box now shows an active state while it is open, and clicking it closes it (engine-api 1.18).',
+      },
+      {
+        pt: 'Motores podem pôr um ícone na barra de navegação, junto das páginas, que abre a interface deles como uma página do app, com endereço próprio (no celular, no menu Mais) (engine-api 1.18).',
+        en: 'Engines can add an icon to the navigation bar, next to the pages, that opens their interface as a page of the app with its own address (on a phone, in the More menu) (engine-api 1.18).',
+      },
+      {
+        pt: 'Uma interface de motor pode continuar rodando fora da tela quando você sai dela, e mostrar uma pílula com cronômetro na barra do topo, em qualquer tela, que leva de volta a ela (engine-api 1.18).',
+        en: 'An engine interface can keep running off screen when you leave it, and show a pill with a timer in the top bar, on any screen, that takes you back to it (engine-api 1.18).',
+      },
+    ],
+    fixes: [],
+  },
   '2.168.2': {
     features: [],
     fixes: [

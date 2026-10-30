@@ -155,7 +155,20 @@
  * host invalidates when the surface unmounts or the session ends. Older hosts omit it; an engine that needs
  * it refuses to load there rather than guessing.
  */
-export const ENGINE_API_VERSION = '1.17.0'
+/**
+ * 1.18.0 — surfaces may be announced in the shared composer (an icon-only button; `icon` required) and may
+ * carry host-mapped icon names, a `layout` (`full`, `side` or `inline` above the session composer), a
+ * `frameless` flag, and an active state (`activeIcon`, `activeLabel`, `activeTone`). Also the `rail` placement (an
+ * icon entry in the app's navigation that opens the surface as a `page`, on its own route), and three mount
+ * context members: `keepAlive` (stay mounted off screen instead of unmounting), `setIndicator` (a pill in the
+ * top bar on every screen, judged by the pure `surfaceIndicatorRefusals`) and `onIndicatorEnd`, plus the optional `openSession(sessionId)` (navigate the app to a session without a
+ * reload; `false` for an invalid id). An engine
+ * built against 1.18 is refused by an older host, like every minor bump.
+ * Also (OpenCode in the app, optional): `StructuredSpawn.forkOf` (open a FORK of a conversation),
+ * `StructuredDeclaration.fork`, and `StructuredStart`'s `blocked` (a refusal the harness's own version causes,
+ * which the host tells the person instead of falling back). An engine built against 1.17 never sets them.
+ */
+export const ENGINE_API_VERSION = '1.18.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

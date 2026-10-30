@@ -32,6 +32,8 @@ test('every harness shell tool lands in the same bucket', () => {
   expect(canonicalTool('codex', 'exec_command')).toBe('Bash')
   expect(canonicalTool('codex', 'local_shell_call')).toBe('Bash')
   expect(canonicalTool('copilot', 'bash')).toBe('Bash')
+  expect(canonicalTool('opencode', 'edit')).toBe('Edit')
+  expect(canonicalTool('opencode', 'write')).toBe('Write')
   expect(canonicalTool('gemini', 'run_shell_command')).toBe('Bash')
   expect(canonicalTool('antigravity', 'RUN_COMMAND')).toBe('Bash')
 })

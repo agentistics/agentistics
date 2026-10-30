@@ -1,4 +1,118 @@
-# Engine surfaces, sockets and assets (engine-api 1.15, 1.17)
+# Engine surfaces, sockets and assets (engine-api 1.15, 1.17, 1.18)
+
+In 1.18 a surface may use the shared `composer` placement. The host renders it as a generic icon
+button beside the microphone; the required bilingual `label` remains its accessible name and tooltip.
+The `icon` is one of `phone`, `phone-off`, `sparkles` or `panel`, mapped by the host. A `composer` surface MUST declare an `icon` (the button is icon-only); without one it is refused with `bad-icon`. An engine built against
+1.18 is refused by an older host (the minor must not exceed the host's), so it never needs the older
+placements as a fallback.
+
+Also in 1.18, a surface declaration may carry two more optional fields, validated by `surfaceRefusals`
+(`bad-layout`, `bad-frameless`):
+
+- `layout?: 'full' | 'side' | 'inline'` is the layout the surface opens in (default `full`). `inline`
+  is valid only for the `composer` placement: the host mounts the surface directly ABOVE the session
+  composer, inside the session view, while the conversation and the composer (text and attachments)
+  stay usable. The module context's `layout` reports it, and `setLayout('full' | 'side' | 'inline')`
+  moves a live surface between the three. The host re-parents the same element, so the module is not
+  remounted and keeps its DOM state. `setLayout('inline')` from a non-`composer` surface is ignored, and
+  if the session view is not on screen an `inline` surface is drawn as `side` until it returns.
+- `frameless?: boolean`: when `true` the host draws no padding, title bar or close button around the
+  surface in `full` and `side`. The surface draws its own chrome and ends itself with `ctx.close()`
+  (always present in the mount context; Esc still closes a `full` surface).
+
+For the `composer` placement, while the surface is open (any layout) the host's button shows an active
+state, in the same spot and size as the idle one: the label switches to `activeLabel`, the background is
+filled, and clicking
+it closes the surface (as `ctx.close()` does). Optional fields, validated as `bad-active`:
+`activeIcon` (from the closed icon set, which now includes `phone-off`), `activeLabel` (`{ pt, en }`,
+the accessible name while active, falling back to `label`) and `activeTone` (`'accent'` by default, or
+`'danger'` for the destructive red).
+
+### The `rail` placement and the `page` layout (1.18)
+
+A `rail` surface is an entry in the app's navigation, beside the pages: an icon-only link (the `icon`
+is REQUIRED, refused with `bad-icon` otherwise; the `label` is its accessible name and tooltip). It is
+drawn in the desktop area rail and the area tree, and on a phone in the "More" sheet, like the other
+pages. Opening it navigates to the surface's own route, `/x/<id>`, where the host mounts the surface
+AS A PAGE in the main area, with no frame, padding, title bar or close button (`layout: 'page'`). The
+entry is marked as the current page while the route is on screen.
+
+`page` is valid only for `rail`, and `rail` accepts no other layout: `layout: 'page'` elsewhere, or any
+other layout on a `rail` surface, is refused with `bad-layout`; `setLayout` ignores both. Leaving the
+route ends the surface (it is unmounted), unless it is kept alive (below). An unknown id on the route
+says the page is not available; a page whose surface ended itself (`ctx.close()`) offers to open it
+again.
+
+### Staying mounted off screen: `ctx.keepAlive` (1.18)
+
+`ctx.keepAlive(true)` changes what taking the surface off screen means. Leaving its `rail` page, the
+close button, Esc on a `full` frame and the active `composer` button no longer unmount it: the host
+moves the SAME element, still mounted (no `unmount`, no second `mount`), into an off-screen holder in
+the document, so media, sockets, timers and DOM state carry on. Its entry brings it back (navigating to
+its route, or clicking its composer button, which stays active meanwhile), and so does the indicator
+below; it comes back in the layout it had. `ctx.close()` always ends it. `ctx.keepAlive(false)` returns
+to the normal behaviour, and while the surface is off screen it unmounts it at once.
+
+While it is off screen its composer button shows the idle face again (label, icon, no fill; marked
+`data-parked`), because a click then brings it back rather than taking it away. Coming back moves focus
+as the first mount did (into the frame, a `full` one being modal; onto the surface inline or on its
+page), and `ctx.layout` keeps reporting the layout it had while parked. If the engine stops announcing
+the surface (the announcement is re-read when the engine's capabilities change), it ends, parked or
+not, and its indicator goes away.
+
+Limitations: the off-screen holder has the viewport's size, out of sight, so a surface that measures
+itself does not see a 1px box, but it is not laid out where it was. Moving the element in and out of
+the holder detaches it from the document for an instant inside one synchronous commit: media elements,
+sockets and timers carry on, but an `<iframe>` inside the surface RELOADS on every move (browsers reload
+a frame whose element is re-inserted), so a kept-alive surface should not depend on iframe state.
+
+Only one surface is ON SCREEN at a time. Opening another takes the visible one away: a kept-alive one
+is parked, any other is ended. Each surface's context is bound to that surface, so a parked one never
+moves the one on screen.
+
+### The top-bar indicator: `ctx.setIndicator` (1.18)
+
+`ctx.setIndicator(ind | null)` shows (or removes) a pill in the app's top bar, on every screen, for as
+long as the surface is mounted (on screen or parked); unmounting removes it.
+
+```ts
+interface SurfaceIndicator {
+  label: { pt: string; en: string }       // 1–40 characters each
+  since?: number                          // epoch ms: the pill shows a live mm:ss elapsed timer
+  tone?: 'accent' | 'danger'              // default accent
+  icon?: SurfaceIcon                      // the same closed set
+  endLabel?: { pt: string; en: string }   // 1–40 characters each: a secondary button
+}
+```
+
+The pure `surfaceIndicatorRefusals(ind)` judges it (`bad-indicator`, `bad-label`, `bad-since`,
+`bad-tone`, `bad-icon`, `bad-end-label`); a refused indicator makes `setIndicator` throw an Error naming
+the reasons and leaves the previous one in place. Clicking the pill brings the surface back: a `rail`
+page by navigating to its route, a session surface (`composer`, `session-header`, …) by opening the
+session that owns it, in the layout it had. With `endLabel` the pill carries a secondary button that
+calls the callback registered with `ctx.onIndicatorEnd(fn)` (which returns a function that removes it).
+On a phone the pill is compact (icon and timer; the label stays its accessible name), sits in the top
+bar, and never covers the bottom navigation.
+
+### Opening a session: `ctx.openSession` (1.18, optional)
+
+`ctx.openSession?.(sessionId)` navigates the app to `/sessions/<id>` with the app's own router (the same
+navigation the indicator pill uses), without reloading the page, and returns `true`. It returns `false`,
+doing nothing, when the id is not a short string (1 to 128 characters, no `/`, `\`, `?`, `#`, whitespace
+or control characters) or the app cannot navigate. It is only navigation: a surface kept alive and parked
+stays mounted. The member is optional, so call it as `ctx.openSession?.(id)` and treat `undefined` as
+"not supported". The host does not check that the session exists; the app shows its usual not-found state.
+
+### What kind of conversation: `ctx.sessionKind` (1.18, optional)
+
+`ctx.sessionKind` is `'nay'` when `ctx.sessionId` names the app's own assistant conversation (which is not
+a fleet row, so asking the fleet about it answers not-found) and `'session'` for any other session. The
+host sets it where it opens a surface from a session's composer; it is absent elsewhere (no session) or on
+a host that does not know, so read it as `ctx.sessionKind === 'nay'` and treat anything else as unknown.
+
+A host older than 1.18 refuses an engine built against 1.18 outright (the minor must not exceed the host's),
+so none of these fields ever reaches it and there is no partial fallback; an engine that must also run
+there ships a 1.17 surface instead.
 
 An engine can serve its own routes, accept WebSockets and announce UI surfaces under one reserved
 prefix, `/api/engine/x`. Nothing here is specific to any one feature: it is the generic door. A
@@ -39,14 +153,14 @@ untouched).
 | field | meaning |
 |---|---|
 | `id` | `[a-z][a-z0-9-]{0,39}`, unique |
-| `placement` | `session-header`, `nay-dock` or `app-bar` (global, no session) |
+| `placement` | `session-header`, `nay-dock`, `app-bar` (global, no session), `composer` or `rail` (1.18) |
 | `label` | `{ pt, en }` text of the generic button |
 | `module` | same-origin path under `/api/engine/x/`, ending `.js`/`.mjs` — anything else is refused at load |
 | `experimental` | optional environment variable name; the surface is listed only while it is `1` |
 
 `GET /api/engine` returns the surfaces the web may draw (experimental ones filtered by their flag);
 a community build returns none. On click the web `import()`s the module and calls
-`mount(el, { sessionId, lang, reducedMotion, layout, setLayout, close })` inside a frame the host
+`mount(el, { sessionId, lang, reducedMotion, layout, setLayout, close, keepAlive, setIndicator, onIndicatorEnd })` inside a frame the host
 owns, at the app root: it keeps focus, closes on Esc while `full`, and has a close button. The surface
 may flip the frame between `full` (modal) and `side` (docked panel) with `ctx.setLayout()` without
 being unmounted, and it stays mounted while the person navigates; `unmount(el)` runs on every exit.
