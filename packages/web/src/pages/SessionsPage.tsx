@@ -113,6 +113,8 @@ import {
   openArtifacts, setArtifactCount, setArtifactLive, useArtifactLive, usePanelFocusRequest,
 } from '../lib/artifactsStore'
 import { studioMenuRow } from '../lib/studioMenuRow'
+import { EngineSurfaceSideSlot } from '../components/EngineSurfaceHost'
+import { useEngineSideSurface } from '../lib/engineSurfaceHost'
 import { closedRightEdge, restingLeftEdge, setRightAsideEdge, useRightAsideEdge } from '../lib/rightAsideEdge'
 import { PaneScope, paneDomId, setActivePane, type PaneId } from '../lib/paneScope'
 import { closePane, readSplitRoute, replaceInPane, splitHref, SPLIT_VIEW_PARAM, type SplitRoute } from '../lib/splitRoute'
@@ -951,6 +953,27 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   const bottomIsStudio = slotLayout.bottom === 'studio'
   const bottomIsTab = slotLayout.bottom !== null && isTabPanelId(slotLayout.bottom)
   const bottomIsHardware = slotLayout.bottom === 'hardware'
+  /**
+   * AN ENGINE SURFACE OF THIS SESSION, DRAWN AS `side`, LIVES IN THIS ASIDE — as its own section,
+   * selected when it arrives, instead of the host's separate fixed panel (owner: "se for uma sessao
+   * aberta no painel de gerenciamento de sessoes deve abrir na barra lateral que ja existe"). The host
+   * re-parents the SAME element into `EngineSurfaceSideSlot`, so nothing remounts. Picking a panel
+   * (the rail, the phone's tabs, any opener that changes `slotLayout.right`) shows that panel and keeps
+   * the surface mounted, hidden, behind its own tab; with no panel open the surface is what shows.
+   * The section goes away when the surface leaves `side` (inline, full, closed, parked).
+   */
+  const engineSide = useEngineSideSurface(selected?.id ?? null)
+  const engineNonce = engineSide?.nonce
+  const [engineTabOn, setEngineTabOn] = useState(true)
+  useLayoutEffect(() => { if (engineNonce !== undefined) setEngineTabOn(true) }, [engineNonce])
+  const lastRight = useRef(slotLayout.right)
+  useLayoutEffect(() => {
+    if (lastRight.current !== slotLayout.right && slotLayout.right !== null) setEngineTabOn(false)
+    lastRight.current = slotLayout.right
+  }, [slotLayout.right])
+  const engineTabShown = engineSide !== null && (engineTabOn || slotLayout.right === null)
+  /** A person picking a panel from the rail or the phone's tabs: that panel is what they want to see. */
+  const openSlotPanelPicked = useCallback((id: PanelId) => { setEngineTabOn(false); openSlotPanel(id) }, [openSlotPanel])
   const [rightSlotEl, setRightSlotEl] = useState<HTMLDivElement | null>(null)
   const [bottomStudioEl, setBottomStudioEl] = useState<HTMLDivElement | null>(null)
   /** The floating window's box, when the Studio floats — a third place `StudioHost` can move its
@@ -1088,7 +1111,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     // (`panelMenu.ts`'s own `panelMinimizeAction`), which already reads as "not occupying the slot"
     // through the flags above, so `slotLayout.rightOpen` only ever narrows the ONE case those flags
     // cannot already see: the Studio still assigned to the slot, parked rather than shown.
-    open: slotLayout.right !== null
+    open: (slotLayout.right !== null || engineTabShown)
       && (!rightIsStudio || slotLayout.rightOpen) && selected !== undefined
       && !dedicatedRightRedundant,
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
@@ -1644,7 +1667,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               }}
               role="tab"
               aria-selected={on}
-              onClick={() => openSlotPanel(id)}
+              onClick={() => openSlotPanelPicked(id)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
                 minHeight: 44, padding: '0 14px', scrollSnapAlign: 'center',
@@ -1699,7 +1722,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           at={mobileHiddenAt}
           label={pt ? `${gatedHiddenPanels.length} ocultos` : `${gatedHiddenPanels.length} hidden`}
           tiles={gatedHiddenPanels.map(id => panelTile(id, pt, selected.harness, pt ? 'Restaurar' : 'Restore'))}
-          onPick={id => revealSlotPanel(id as PanelId)}
+          onPick={id => { setEngineTabOn(false); revealSlotPanel(id as PanelId) }}
           onClose={() => setMobileHiddenAt(null)}
         />
       )}
@@ -1957,6 +1980,31 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    *  when there is no aside on screen (see `rightAsideEdge.ts`'s own header) — the junction has
    *  nothing to sit beside then and is withheld, same as the plain vertical gap a few lines below. */
   const rightAsideEdgeNow = useRightAsideEdge()
+  /** The engine surface's section of this aside: its slot is mounted whenever the surface is drawn as
+   *  `side` for this session, and shown while its tab is the selected one; the panel it sits beside stays
+   *  mounted, hidden. Absent entirely without such a surface, so the aside is unchanged. */
+  const rightSlotContentWithEngine = engineSide === null ? rightSlotContentRaw : (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
+      <div role="tablist" style={{ display: 'flex', gap: 4, padding: '6px 8px', flexShrink: 0 }}>
+        {[
+          { id: 'engine', on: engineTabShown, label: pt ? engineSide.surface.label.pt : engineSide.surface.label.en, go: () => setEngineTabOn(true) },
+          { id: 'panels', on: !engineTabShown, label: pt ? 'Painéis' : 'Panels', go: () => { setEngineTabOn(false); if (slotLayout.right === null) openSlotPanelPicked('live') } },
+        ].map(t => (
+          <button key={t.id} role="tab" aria-selected={t.on} onClick={t.go} style={{
+            padding: '4px 10px', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5,
+            fontWeight: t.on ? 700 : 500, background: t.on ? 'var(--bg-elevated)' : 'transparent',
+            color: t.on ? 'var(--text-primary)' : 'var(--text-secondary)',
+          }}>{t.label}</button>
+        ))}
+      </div>
+      <div style={{ display: engineTabShown ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
+        <EngineSurfaceSideSlot sessionId={engineSide.sessionId!} slotId={`aside-${pane}`} />
+      </div>
+      <div style={{ display: engineTabShown ? 'none' : 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 }}>
+        {rightSlotContentRaw}
+      </div>
+    </div>
+  )
   const rightSlotContent = rightSlotFullscreen ? (
     <div style={{
       position: 'fixed', top: 0, left: isMobile ? 0 : leftAsideEdge, bottom: 0,
@@ -1964,9 +2012,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       zIndex: PANEL_FULLSCREEN_Z,
       display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)',
     }}>
-      {rightSlotContentRaw}
+      {rightSlotContentWithEngine}
     </div>
-  ) : rightSlotContentRaw
+  ) : rightSlotContentWithEngine
 
   /**
    * THE QUESTION BEFORE A NAVIGATION DROPS THE STUDIO — asked at THIS level because this is where
@@ -3459,7 +3507,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
           onResizeWidth={setRailWidth}
           lang={pt ? 'pt' : 'en'}
           {...(selected.harness ? { harness: selected.harness } : {})}
-          onOpen={openSlotPanel}
+          onOpen={openSlotPanelPicked}
           // `panelMinimizeAction` decides WHAT minimize means for THIS panel in the rail slot — see
           // `PanelRail`'s own `onMinimize` doc comment for the bug this replaced: `rightOpen` alone
           // only ever gates the Studio (`collapse-right-park`); every other panel needs the genuine
