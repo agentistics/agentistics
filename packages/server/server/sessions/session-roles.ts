@@ -163,6 +163,11 @@ export interface RoleDeps {
   leaveTeam?: (rowId: string) => Promise<boolean>
   /** Write a retire request on the predecessor (`retire-runner.ts` carries it out). Absent = not wired. */
   requestRetire?: (predecessorId: string, successorId: string) => Promise<boolean>
+  /**
+   * ORQ.H3 `passagem-sem-sujo`: may the task's leadership change hands, given its worktrees? Absent, or
+   * flows off, = passes. A refusal names each dirty worktree and how to release it.
+   */
+  handoffGate?: (taskId: string) => Promise<{ ok: true } | { ok: false; reason: string; blocking: string[]; runId?: string }>
 }
 
 export interface RoleRequest {
@@ -178,6 +183,7 @@ export interface RoleRequest {
 export type RetireOutcome =
   | { ok: true; id: string; title: string }
   | { ok: false; code: 'not_own' | 'not_leader_target' | 'different_task' | 'not_live' | 'no_task' | 'self' | 'no_such_session' | 'not_wired' }
+  | { ok: false; code: 'dirty_worktrees'; reason: string; blocking: string[]; runId?: string }
 
 export type RoleReply =
   | { ok: true; key: string; id?: string; title?: string; role: SessionRole | 'auto'; changed: boolean; renamed: boolean; notified: boolean; origin?: RoleOrigin; warning?: string; retire?: RetireOutcome; line: string; message: string }
@@ -313,7 +319,9 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
       ok: true, ...base, role: next ?? 'auto', changed, renamed, notified, ...(next ? { origin } : {}), line: roleLine(next),
       message: (changed
         ? `Role set to ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}${notified ? '; the session was told' : ''}.`
-        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (retire?.ok ? ` ${retire.title} will be closed when it goes quiet.` : '') + (warning ? ` ${warning}` : ''),
+        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (retire?.ok ? ` ${retire.title} will be closed when it goes quiet.` : '')
+        + (retire && !retire.ok && retire.code === 'dirty_worktrees' ? ` The predecessor was NOT retired — ${retire.reason}: ${retire.blocking.join('; ')}.` : '')
+        + (warning ? ` ${warning}` : ''),
     }
   })()
 }
@@ -333,6 +341,11 @@ async function planPredecessorRetire(
   const mine = await c.deps.taskOf?.(c.resolved.id).catch(() => undefined)
   if (!mine) return { ok: false, code: 'no_task' }
   if ((await c.deps.taskOf?.(pred.id).catch(() => undefined)) !== mine) return { ok: false, code: 'different_task' }
+  // FAIL CLOSED: a gate that throws keeps the predecessor (its work could not be shown saved).
+  const gate: HandoffGateAnswer = c.deps.handoffGate
+    ? await c.deps.handoffGate(mine).catch((e: unknown): HandoffGateAnswer => ({ ok: false, reason: `the hand-off gate failed: ${e instanceof Error ? e.message : String(e)}`, blocking: [] }))
+    : { ok: true }
+  if (!gate.ok) return { ok: false, code: 'dirty_worktrees', reason: gate.reason, blocking: gate.blocking, ...(gate.runId ? { runId: gate.runId } : {}) }
   if (!c.deps.requestRetire || !(await c.deps.requestRetire(pred.id, c.resolved.id).catch(() => false))) return { ok: false, code: 'not_wired' }
   return { ok: true, id: pred.id, title: pred.title }
 }
@@ -456,7 +469,55 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
     parentOf: async rowId => (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.parentSessionId,
     leaveTeam: async rowId => (await import('./team-links-io')).leaveTeamAsLeader(rowId),
     requestRetire: async (predecessorId, successorId) => (await import('./team-links-io')).requestRetire(predecessorId, successorId),
+    handoffGate: handoffGateFor,
   }
+}
+
+/** The hand-off gate through the engine's `passagem-sem-sujo` flow; flows off or absent = passes. */
+export async function handoffGateFor(taskId: string): Promise<HandoffGateAnswer> {
+  const { flowsExperimentalOn } = await import('../native-gate')
+  if (!flowsExperimentalOn()) return { ok: true }
+  const load = await import('../engine/load')
+  await load.loadEngine({ log: () => {} })
+  const flows = load.engine()?.flows
+  if (!flows || !flows.list().includes('passagem-sem-sujo')) return { ok: true }
+  return gateAnswerOf(await flows.run('passagem-sem-sujo', { taskId }))
+}
+
+/** PURE. Only a `success` run passes: `refused` lists the blockers; `failed`, `interrupted` or anything unreadable REFUSES. */
+export function gateAnswerOf(raw: unknown): HandoffGateAnswer {
+  const run = (raw && typeof raw === 'object' ? raw : {}) as { runId?: string; status?: string; output?: unknown; refusal?: { reason?: string; missing?: string[] } }
+  const id = run.runId ? { runId: run.runId } : {}
+  if (run.status === 'success') return { ok: true }
+  if (run.status === 'refused') return { ok: false, reason: run.refusal?.reason ?? 'hand-off refused', blocking: run.refusal?.missing ?? [], ...id }
+  return { ok: false, reason: `the hand-off gate did not finish (${run.status ?? 'no status'}), so uncommitted work could not be ruled out`, blocking: [], ...id }
+}
+
+export type HandoffGateAnswer = { ok: true } | { ok: false; reason: string; blocking: string[]; runId?: string }
+
+/**
+ * The same gate for a CLI `--handoff`, asked of the SERVER (`POST /api/flows/run`): the server's flag and
+ * engine decide, never this process's environment (`AGENTISTICS_FLOWS=0 agentop …` must not skip it).
+ * The server saying flows are off, or that it has no engine/gate, passes; a server that cannot be asked,
+ * or an answer that cannot be read, REFUSES.
+ */
+export async function handoffGateViaServer(taskId: string, o: { fetch?: typeof fetch; port?: number } = {}): Promise<HandoffGateAnswer> {
+  const port = o.port ?? (await import('../config')).PORT
+  const cannot = (why: string): HandoffGateAnswer => ({ ok: false, reason: `could not check the task's uncommitted work with the agentistics server (${why}); start it, or ask the owner to force the hand-off`, blocking: [] })
+  let res: Response
+  try {
+    res = await (o.fetch ?? fetch)(`http://127.0.0.1:${port}/api/flows/run`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'passagem-sem-sujo', inputs: { taskId } }),
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch (e) { return cannot(e instanceof Error ? e.message : String(e)) }
+  const body = await res.json().catch(() => null) as { error?: string; sentence?: string; status?: string; runId?: string; refusal?: { reason?: string; missing?: string[] } } | null
+  if (res.status === 403 && body?.error === 'experimental') return { ok: true }
+  if (res.status === 501 && body?.error === 'official_build') return { ok: true }
+  if (res.status === 400 && body?.error === 'flow_failed' && /fluxo desconhecido/.test(body.sentence ?? '')) return { ok: true }
+  if (!res.ok || !body || typeof body.status !== 'string') return cannot(`HTTP ${res.status}`)
+  return gateAnswerOf(body)
 }
 
 /** The stored role for a managed id/conversation id at spawn time — undefined when none. */

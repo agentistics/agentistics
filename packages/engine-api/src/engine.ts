@@ -156,6 +156,15 @@ export interface Engine<E extends EngineEvent = EngineEvent> {
     list(): readonly string[]
     run(name: string, inputs?: Record<string, unknown>): Promise<unknown>
     status(runId: string): Promise<unknown>
+    /**
+     * Optional, ENGINE-provided (an engine without it still loads): start the event-triggered flows'
+     * timers. The host calls it once, from its long-running server process only — never from a CLI.
+     */
+    start?(): void
+    /** Optional, ENGINE-provided: one host event into the flows' bus (`{ type, id, payload }`; `id` dedupes). */
+    emit?(event: { type: string; id: string; payload: Record<string, unknown> }): Promise<unknown>
+    /** Optional, ENGINE-provided: a read-only view a host renders (`pedidos` for the leader briefing); `null` when flows are off. */
+    read?(kind: string, query?: Record<string, unknown>): Promise<unknown>
   }
   /** Health checks the engine contributes. */
   health?: () => Promise<EngineHealthIssue[]>
