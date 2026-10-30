@@ -18,13 +18,15 @@
  * Dependencies are injected so the rules are testable with a fake host.
  */
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   isSessionRole, isSessionRoleRequest, parseRoleOrigin, resolveSessionForGroup, roleChangeNote, roleLine, sessionIdentityKey, stripRolePrefix, titleForRole,
   type HarnessId, type RoleLang, type RoleOrigin, type SessionRole,
 } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
+import { withFileLock } from './file-lock'
 
 export const SESSION_ROLES_FILE = 'session-roles.json'
 
@@ -82,12 +84,41 @@ export async function readRolesDoc(dataDir: string): Promise<RolesDoc> {
   }
 }
 
+/**
+ * Atomic and durable: a temp file unique to this write, fsync'd, renamed over the document, then the
+ * directory fsync'd. A failed write removes its own temp file — a crash cannot leave a half document,
+ * and no `<pid>.tmp` is left behind by an error (`cleanStaleRoleTmps` sweeps what a kill leaves).
+ */
 export async function writeRolesDoc(dataDir: string, doc: RolesDoc): Promise<void> {
   const file = join(dataDir, SESSION_ROLES_FILE)
   await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-  const tmp = `${file}.${process.pid}.tmp`
-  await writeFile(tmp, `${JSON.stringify(doc, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 })
-  await rename(tmp, file)
+  const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  try {
+    const fh = await open(tmp, 'w', 0o600)
+    try { await fh.writeFile(`${JSON.stringify(doc, null, 2)}\n`, 'utf-8'); await fh.sync() } finally { await fh.close() }
+    await rename(tmp, file)
+  } catch (e) {
+    await rm(tmp, { force: true }).catch(() => {})
+    throw e
+  }
+  try { const d = await open(dirname(file), 'r'); try { await d.sync() } finally { await d.close() } } catch { /* no directory fsync here */ }
+}
+
+/** `session-roles.json.<pid>[.<rand>].tmp` left by a process killed mid-write. */
+const ROLE_TMP = /^session-roles\.json\.\d+(?:\.[0-9a-f]+)?\.tmp$/
+
+/** Server start: remove role-document temp files older than `maxAgeMs` (a live write is milliseconds). Never throws. */
+export async function cleanStaleRoleTmps(dataDir: string, maxAgeMs = 60 * 60 * 1000, now = Date.now()): Promise<number> {
+  let removed = 0
+  const names = await readdir(dataDir).catch(() => [] as string[])
+  for (const name of names) {
+    if (!ROLE_TMP.test(name)) continue
+    const path = join(dataDir, name)
+    const st = await stat(path).catch(() => null)
+    if (!st?.isFile() || now - st.mtimeMs < maxAgeMs) continue
+    if (await rm(path, { force: true }).then(() => true, () => false)) removed++
+  }
+  return removed
 }
 
 /**
@@ -132,6 +163,11 @@ export interface RoleDeps {
   leaveTeam?: (rowId: string) => Promise<boolean>
   /** Write a retire request on the predecessor (`retire-runner.ts` carries it out). Absent = not wired. */
   requestRetire?: (predecessorId: string, successorId: string) => Promise<boolean>
+  /**
+   * ORQ.H3 `passagem-sem-sujo`: may the task's leadership change hands, given its worktrees? Absent, or
+   * flows off, = passes. A refusal names each dirty worktree and how to release it.
+   */
+  handoffGate?: (taskId: string) => Promise<{ ok: true } | { ok: false; reason: string; blocking: string[]; runId?: string }>
 }
 
 export interface RoleRequest {
@@ -147,6 +183,7 @@ export interface RoleRequest {
 export type RetireOutcome =
   | { ok: true; id: string; title: string }
   | { ok: false; code: 'not_own' | 'not_leader_target' | 'different_task' | 'not_live' | 'no_task' | 'self' | 'no_such_session' | 'not_wired' }
+  | { ok: false; code: 'dirty_worktrees'; reason: string; blocking: string[]; runId?: string }
 
 export type RoleReply =
   | { ok: true; key: string; id?: string; title?: string; role: SessionRole | 'auto'; changed: boolean; renamed: boolean; notified: boolean; origin?: RoleOrigin; warning?: string; retire?: RetireOutcome; line: string; message: string }
@@ -176,9 +213,18 @@ export async function loadRoles(deps: Pick<RoleDeps, 'dataDir' | 'legacyPref'>):
 }
 
 /** Serialise writes inside this process: read-modify-write of one small file. */
+/**
+ * Every read-modify-write of the role document, serialised in this process AND across processes. The
+ * spawning CLI (`ensureSpawnRole`) and the server (`roleOp`, `markRoleDelivered`, `rekeyStoredRole`, …)
+ * all write this file; a promise chain alone is per process, so two of them overlapping erased the
+ * role one had just written (measured 30/10: a worker spawned 1 min after its leader's promotion had no
+ * stored role at all). The cross-process half is the registry's own `withFileLock`; each `fn` re-reads
+ * the document INSIDE the lock. NOT reentrant: never call `serial` from inside a `serial` body.
+ */
 let chain: Promise<unknown> = Promise.resolve()
-const serial = <T>(fn: () => Promise<T>): Promise<T> => {
-  const run = chain.then(fn, fn)
+const serial = <T>(dataDir: string | Promise<string>, fn: () => Promise<T>): Promise<T> => {
+  const locked = async () => withFileLock(join(await dataDir, SESSION_ROLES_FILE), () => fn())
+  const run = chain.then(locked, locked)
   chain = run.catch(() => {})
   return run
 }
@@ -214,7 +260,7 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     // Who is asking decides the origin: no verified sender = the person (browser/CLI), the session
     // itself = auto, a verified other session = that leader.
     const origin: RoleOrigin = senderId === null ? 'manual' : own ? 'auto' : { leader: senderId }
-    const state = await serial(async () => {
+    const state = await serial(deps.dataDir, async () => {
       const doc = await loadRoles(deps)
       const current = roleOfRow(doc.roles, resolved)
       const base = { key, id: resolved.id, title: resolved.title }
@@ -259,7 +305,7 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
     const renamed = wanted !== resolved.title && wanted !== '' ? (await deps.rename(resolved.id, wanted).catch(() => ({ ok: false }))).ok : false
     const notified = changed && !own ? (await deps.prompt(resolved.id, roleChangeNote(next)).catch(() => ({ ok: false }))).ok : false
     if (notified || own) {
-      await serial(async () => {
+      await serial(deps.dataDir, async () => {
         const latest = await loadRoles(deps)
         const delivered = { ...(latest.lastDeliveredRole ?? {}) }
         if (next) delivered[key] = next
@@ -273,7 +319,9 @@ export function roleOp(senderId: string | null, req: RoleRequest, deps: RoleDeps
       ok: true, ...base, role: next ?? 'auto', changed, renamed, notified, ...(next ? { origin } : {}), line: roleLine(next),
       message: (changed
         ? `Role set to ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}${notified ? '; the session was told' : ''}.`
-        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (retire?.ok ? ` ${retire.title} will be closed when it goes quiet.` : '') + (warning ? ` ${warning}` : ''),
+        : `Role is already ${next ?? 'auto'}${renamed ? '; the title was updated' : ''}.`) + (retire?.ok ? ` ${retire.title} will be closed when it goes quiet.` : '')
+        + (retire && !retire.ok && retire.code === 'dirty_worktrees' ? ` The predecessor was NOT retired — ${retire.reason}: ${retire.blocking.join('; ')}.` : '')
+        + (warning ? ` ${warning}` : ''),
     }
   })()
 }
@@ -293,6 +341,11 @@ async function planPredecessorRetire(
   const mine = await c.deps.taskOf?.(c.resolved.id).catch(() => undefined)
   if (!mine) return { ok: false, code: 'no_task' }
   if ((await c.deps.taskOf?.(pred.id).catch(() => undefined)) !== mine) return { ok: false, code: 'different_task' }
+  // FAIL CLOSED: a gate that throws keeps the predecessor (its work could not be shown saved).
+  const gate: HandoffGateAnswer = c.deps.handoffGate
+    ? await c.deps.handoffGate(mine).catch((e: unknown): HandoffGateAnswer => ({ ok: false, reason: `the hand-off gate failed: ${e instanceof Error ? e.message : String(e)}`, blocking: [] }))
+    : { ok: true }
+  if (!gate.ok) return { ok: false, code: 'dirty_worktrees', reason: gate.reason, blocking: gate.blocking, ...(gate.runId ? { runId: gate.runId } : {}) }
   if (!c.deps.requestRetire || !(await c.deps.requestRetire(pred.id, c.resolved.id).catch(() => false))) return { ok: false, code: 'not_wired' }
   return { ok: true, id: pred.id, title: pred.title }
 }
@@ -416,7 +469,55 @@ export async function defaultRoleDeps(): Promise<RoleDeps> {
     parentOf: async rowId => (await (await import('./registry')).readRegistry()).find(m => m.id === rowId)?.parentSessionId,
     leaveTeam: async rowId => (await import('./team-links-io')).leaveTeamAsLeader(rowId),
     requestRetire: async (predecessorId, successorId) => (await import('./team-links-io')).requestRetire(predecessorId, successorId),
+    handoffGate: handoffGateFor,
   }
+}
+
+/** The hand-off gate through the engine's `passagem-sem-sujo` flow; flows off or absent = passes. */
+export async function handoffGateFor(taskId: string): Promise<HandoffGateAnswer> {
+  const { flowsExperimentalOn } = await import('../native-gate')
+  if (!flowsExperimentalOn()) return { ok: true }
+  const load = await import('../engine/load')
+  await load.loadEngine({ log: () => {} })
+  const flows = load.engine()?.flows
+  if (!flows || !flows.list().includes('passagem-sem-sujo')) return { ok: true }
+  return gateAnswerOf(await flows.run('passagem-sem-sujo', { taskId }))
+}
+
+/** PURE. Only a `success` run passes: `refused` lists the blockers; `failed`, `interrupted` or anything unreadable REFUSES. */
+export function gateAnswerOf(raw: unknown): HandoffGateAnswer {
+  const run = (raw && typeof raw === 'object' ? raw : {}) as { runId?: string; status?: string; output?: unknown; refusal?: { reason?: string; missing?: string[] } }
+  const id = run.runId ? { runId: run.runId } : {}
+  if (run.status === 'success') return { ok: true }
+  if (run.status === 'refused') return { ok: false, reason: run.refusal?.reason ?? 'hand-off refused', blocking: run.refusal?.missing ?? [], ...id }
+  return { ok: false, reason: `the hand-off gate did not finish (${run.status ?? 'no status'}), so uncommitted work could not be ruled out`, blocking: [], ...id }
+}
+
+export type HandoffGateAnswer = { ok: true } | { ok: false; reason: string; blocking: string[]; runId?: string }
+
+/**
+ * The same gate for a CLI `--handoff`, asked of the SERVER (`POST /api/flows/run`): the server's flag and
+ * engine decide, never this process's environment (`AGENTISTICS_FLOWS=0 agentop …` must not skip it).
+ * The server saying flows are off, or that it has no engine/gate, passes; a server that cannot be asked,
+ * or an answer that cannot be read, REFUSES.
+ */
+export async function handoffGateViaServer(taskId: string, o: { fetch?: typeof fetch; port?: number } = {}): Promise<HandoffGateAnswer> {
+  const port = o.port ?? (await import('../config')).PORT
+  const cannot = (why: string): HandoffGateAnswer => ({ ok: false, reason: `could not check the task's uncommitted work with the agentistics server (${why}); start it, or ask the owner to force the hand-off`, blocking: [] })
+  let res: Response
+  try {
+    res = await (o.fetch ?? fetch)(`http://127.0.0.1:${port}/api/flows/run`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'passagem-sem-sujo', inputs: { taskId } }),
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch (e) { return cannot(e instanceof Error ? e.message : String(e)) }
+  const body = await res.json().catch(() => null) as { error?: string; sentence?: string; status?: string; runId?: string; refusal?: { reason?: string; missing?: string[] } } | null
+  if (res.status === 403 && body?.error === 'experimental') return { ok: true }
+  if (res.status === 501 && body?.error === 'official_build') return { ok: true }
+  if (res.status === 400 && body?.error === 'flow_failed' && /fluxo desconhecido/.test(body.sentence ?? '')) return { ok: true }
+  if (!res.ok || !body || typeof body.status !== 'string') return cannot(`HTTP ${res.status}`)
+  return gateAnswerOf(body)
 }
 
 /** The stored role for a managed id/conversation id at spawn time — undefined when none. */
@@ -438,8 +539,9 @@ export async function ensureSpawnRole(
   providedDeps?: RoleDeps,
   origin: RoleOrigin = 'manual',
 ): Promise<SessionRole> {
-  return serial(async () => {
-    const deps = providedDeps ?? await defaultRoleDeps()
+  const depsP = providedDeps ? Promise.resolve(providedDeps) : defaultRoleDeps()
+  return serial(depsP.then(d => d.dataDir), async () => {
+    const deps = await depsP
     const doc = await loadRoles(deps)
     const existing = keys.map(k => k ? doc.roles[k] : undefined).find((r): r is SessionRole => !!r)
     if (existing) return existing
@@ -463,8 +565,9 @@ export async function markRoleDelivered(
   role: SessionRole,
   providedDeps?: Pick<RoleDeps, 'dataDir' | 'legacyPref'>,
 ): Promise<void> {
-  return serial(async () => {
-    const deps = providedDeps ?? await defaultRoleDeps()
+  const depsP = providedDeps ? Promise.resolve(providedDeps) : defaultRoleDeps()
+  return serial(depsP.then(d => d.dataDir), async () => {
+    const deps = await depsP
     const doc = await loadRoles(deps)
     const delivered = { ...(doc.lastDeliveredRole ?? {}) }
     for (const key of keys) if (key) delivered[key] = role
@@ -478,8 +581,9 @@ export async function rekeyStoredRole(
   toKeys: readonly (string | undefined)[],
   providedDeps?: Pick<RoleDeps, 'dataDir' | 'legacyPref'>,
 ): Promise<void> {
-  return serial(async () => {
-    const deps = providedDeps ?? await defaultRoleDeps()
+  const depsP = providedDeps ? Promise.resolve(providedDeps) : defaultRoleDeps()
+  return serial(depsP.then(d => d.dataDir), async () => {
+    const deps = await depsP
     const doc = await loadRoles(deps)
     const from = [...new Set(fromKeys.filter((k): k is string => !!k))]
     const to = [...new Set(toKeys.filter((k): k is string => !!k))]
@@ -554,8 +658,9 @@ export async function deliverStoredRole(
   conversationId?: string,
   providedDeps?: RoleDeps,
 ): Promise<boolean> {
-  const initial = await serial(async () => {
-    const deps = providedDeps ?? await defaultRoleDeps()
+  const depsP = providedDeps ? Promise.resolve(providedDeps) : defaultRoleDeps()
+  const initial = await serial(depsP.then(d => d.dataDir), async () => {
+    const deps = await depsP
     const doc = await loadRoles(deps)
     const key = conversationId ?? rowId
     const role = doc.roles[key] ?? doc.roles[rowId]
@@ -570,7 +675,7 @@ export async function deliverStoredRole(
   const sent = (await initial.deps.prompt(rowId, roleChangeNote(initial.role)).catch(() => ({ ok: false }))).ok
   if (!sent) return false
 
-  return serial(async () => {
+  return serial(initial.deps.dataDir, async () => {
     const latest = await loadRoles(initial.deps)
     const current = latest.roles[initial.key] ?? latest.roles[rowId]
     const delivered = latest.lastDeliveredRole?.[initial.key] ?? latest.lastDeliveredRole?.[rowId]
