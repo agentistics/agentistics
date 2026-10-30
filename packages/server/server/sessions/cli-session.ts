@@ -35,7 +35,7 @@ import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 import { spawnCapabilities } from './codex-capabilities'
 import { readHarnessVersion } from './harness-version'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveSpawnAwayFor, writeContextFile } from './spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveSpawnAwayFor, withOwnerRequests, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
@@ -452,6 +452,8 @@ export async function start(
   backend: SessionBackend,
   deps: {
     provesCaller?: (id: string) => Promise<boolean>
+    /** ORQ.H3 hand-off gate; tests inject it. Default: ask the server (`handoffGateViaServer`). */
+    handoffGate?: (taskId: string) => Promise<import('./session-roles').HandoffGateAnswer>
     /** How long a healthy spawn is watched before it counts as up (`SETTLE_MS`). Tests shorten it. */
     settleMs?: number
   } = {},
@@ -491,6 +493,14 @@ export async function start(
     cwd: cmd.cwd, sharedCwd: cmd.sharedCwd, callerSessionId: verifiedCaller,
   })
   if (!filing.ok) { reportFilingRefusal(filing, cmd.json ?? false); return 1 }
+  // ORQ.H3 `passagem-sem-sujo`: a leader hand-off waits for the task's uncommitted work to be saved.
+  if (cmd.handoff && filing.taskId) {
+    const gate = await (deps.handoffGate ?? (await import('./session-roles')).handoffGateViaServer)(filing.taskId)
+    if (!gate.ok) {
+      console.error(`--handoff refused: ${gate.reason}\n${gate.blocking.map(b => `  - ${b}`).join('\n')}${gate.runId ? `\n(flow run ${gate.runId}; release it by committing, or by a committed patch + reconhecer-trabalho, or --motivo descartavel — an owner override needs the owner credential (SECRETS.4), not available yet)` : ''}`)
+      return 1
+    }
+  }
   for (const w of filing.warnings) if (w !== 'no_folder') console.error(WARNING_TEXT[w])
   const cwd = filing.cwd
   const folderId = filing.folderId
@@ -521,7 +531,7 @@ export async function start(
   const relay = handoffParentRow
     ? await import('./handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
-  const ctx = buildSpawnContext({ ...(relay ? { handoffRelay: relay.section } : {}), ...(cmd.handoff ? { handoffTakeover: true } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) })
+  const ctx = buildSpawnContext(await withOwnerRequests({ ...(relay ? { handoffRelay: relay.section } : {}), ...(cmd.handoff ? { handoffTakeover: true } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) }))
   // PLAN.ACCOUNTS D3 — one decision for every door (`spawn-account.ts`). An agent is asking when
   // this command runs inside a pane that can prove its identity.
   const account = decideSpawnAccount({
@@ -776,7 +786,7 @@ export async function batch(
     for (const spec of cmd.specs) {
       const p = await planSpawnFilingSafe({
         liveIds,
-        role: spawnRole({ leaderPrefix: !!spec.name && hasRolePrefix(spec.name), hasParent: !!callerId }),
+        role: spawnRole({ explicit: spec.role, leaderPrefix: !!spec.name && hasRolePrefix(spec.name), hasParent: !!callerId }),
         taskRef, subtaskRef: cmd.subtask, folderRef: spec.folder, cwd: spec.cwd, sharedCwd: cmd.sharedCwd,
         callerSessionId: verifiedCaller, harness: spec.harness,
         // Earlier specs of this batch already occupy their directories.
@@ -832,7 +842,7 @@ export async function batch(
     const id = newSessionId()
     const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
-    const batchRole = spec.name && hasRolePrefix(spec.name) ? 'leader' as const : parentSessionId ? 'worker' as const : undefined
+    const batchRole = spec.role ?? (spec.name && hasRolePrefix(spec.name) ? 'leader' as const : parentSessionId ? 'worker' as const : undefined)
     const role = batchRole ? await ensureSpawnRole([offeredConversationId, id], batchRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
     const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: spec.harness, lang, ...(await folderCtxFor(filing.folderId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(filing.taskId, filing.subtaskId, cmd.task)) })
     const account = decideSpawnAccount({

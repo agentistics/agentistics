@@ -20,9 +20,85 @@ const sessionOf = (v: unknown): string | null => {
 
 const streaks = new Map<string, { at: number; count: number }>()
 
-/** The read-only host operation registry for the v1 built-ins. */
-export function flowHostOps() {
+const LIVE_STATES = new Set(['working', 'waiting', 'waiting-approval'])
+
+/** What the event-triggered flows need from the host, injected so the mapping is tested without a fleet. */
+export interface TriggerHostDeps {
+  registry(): Promise<ReadonlyArray<{ id: string; cwd: string; createdAt?: string; endedAt?: string; taskId?: string; subtaskId?: string; leader?: boolean; conversationId?: string }>>
+  rows(): Promise<ReadonlyArray<{ id: string; conversationId?: string | undefined; state?: string }>>
+  /** The stored roles, read FRESH for each universe snapshot (a promotion or demotion counts at once). */
+  roles(): Promise<(row: { id: string; conversationId?: string | undefined }) => string | undefined>
+  /** Type a line into a live session through the composer's send path. */
+  prompt(rowId: string, text: string): Promise<{ ok: boolean; message?: string }>
+  /** The owner-facing away notice (bell, Nay toast, phone push) — `away.notice`. */
+  awayNotice(text: string): Promise<boolean>
+}
+
+export function defaultTriggerHostDeps(): TriggerHostDeps {
   return {
+    registry: async () => (await import('../sessions/registry')).readRegistry(),
+    rows: async () => (await (await import('../sessions/fleet-web')).readFleet('en')).rows,
+    roles: async () => {
+      const [{ readRolesDoc, roleOfRow }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('../sessions/session-roles'), import('../config')])
+      const doc = await readRolesDoc(AGENTISTICS_DATA_DIR)
+      return row => roleOfRow(doc.roles, row)
+    },
+    prompt: async (rowId, text) => {
+      const { runFleetAction } = await import('../sessions/fleet-web')
+      const out = await runFleetAction('en', { action: 'prompt', id: rowId, text })
+      return { ok: out.ok, ...(out.message ? { message: out.message } : {}) }
+    },
+    awayNotice: async text => {
+      const notify = (await (await import('../away')).defaultAwayDeps()).notify
+      if (!notify) return false
+      notify(text, 'flow:pedido-do-dono')
+      return true
+    },
+  }
+}
+
+/** The host ops the trigger layer calls: the managed-session universe and a nudge into a live session. */
+export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps()) {
+  return {
+    'aviso-ao-dono': async (value: unknown) => {
+      const text = typeof inputOf(value).text === 'string' ? (inputOf(value).text as string).trim() : ''
+      if (!text) return refuse('an away notice needs text', ['text'])
+      return (await deps.awayNotice(text)) ? { ok: true } : refuse('the away notice could not be raised', ['owner notification'])
+    },
+    'sessoes-gerenciadas': async () => {
+      const [registry, rows, roleOf] = await Promise.all([deps.registry(), deps.rows().catch(() => []), deps.roles().catch(() => () => undefined)])
+      const live = new Set(rows.filter(r => LIVE_STATES.has(r.state ?? '')).map(r => r.id))
+      const stateOf = new Map(rows.map(r => [r.id, r.state]))
+      const sessions = registry.map(m => ({
+        id: m.id,
+        cwd: m.cwd,
+        alive: !m.endedAt && live.has(m.id),
+        ...(stateOf.get(m.id) ? { state: stateOf.get(m.id) } : {}),
+        ...(m.createdAt ? { createdAt: m.createdAt } : {}),
+        ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+        ...(m.taskId ? { taskId: m.taskId } : {}),
+        ...(m.subtaskId ? { subtaskId: m.subtaskId } : {}),
+        // The stored role wins (a demotion counts); the spawn-time flag only fills in when none is stored.
+        ...((roleOf({ id: m.id, conversationId: m.conversationId }) ?? (m.leader ? 'leader' : undefined)) === 'leader' ? { role: 'leader' } : {}),
+      }))
+      return { sessions }
+    },
+    'cutucar-sessao': async (value: unknown) => {
+      const i = inputOf(value)
+      const to = typeof i.to === 'string' ? i.to : ''
+      const body = typeof i.body === 'string' ? i.body.trim() : ''
+      if (!to || !body) return refuse('a nudge needs to and body', ['to', 'body'])
+      const flow = typeof i.flow === 'string' && /^[a-z0-9-]+$/.test(i.flow) ? i.flow : 'dsl'
+      const sent = await deps.prompt(to, `[from flow ${flow} · nudge]\n${body}`)
+      return sent.ok ? { ok: true, to } : refuse(sent.message ?? 'the nudge was not delivered', ['live session'])
+    },
+  }
+}
+
+/** The host operation registry: the v1 read-only gates plus the trigger layer's two host ops. */
+export function flowHostOps(triggerDeps?: TriggerHostDeps) {
+  return {
+    ...triggerHostOps(triggerDeps),
     'sessao-parada': async (value: unknown) => {
       const id = sessionOf(value)
       if (!id) return refuse('session id is required', ['sessionId'])

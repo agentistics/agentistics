@@ -139,7 +139,7 @@ import { agentisticsMcpLaunch } from './mcp-launch'
 import { applyAccountToPlan } from './sessions/account-plan'
 import { prependContext } from './sessions/agentistics-context'
 import { rootIfLeader } from './sessions/team-links'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, withOwnerRequests, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
@@ -2186,7 +2186,7 @@ export async function spawnManaged(req: {
   const relay = handoffParentRow
     ? await import('./sessions/handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
-  const ctx = buildSpawnContext({
+  const ctx = buildSpawnContext(await withOwnerRequests({
       ...(relay ? { handoffRelay: relay.section } : {}),
       ...(req.handoff ? { handoffTakeover: true } : {}),
       ...(await resolveContextAway(away)),
@@ -2197,7 +2197,7 @@ export async function spawnManaged(req: {
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
       ...storedContextRole,
-    })
+    }))
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const planned = planSpawn({
     harness: req.harness,
@@ -2322,6 +2322,10 @@ export async function spawnManaged(req: {
   if (handoffParentRow) {
     // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
     await import('./sessions/team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
+  }
+  // A reopen (new managed id for the same session) keeps its team: children follow the new row.
+  if (req.inherit && req.inherit.id !== id && !handoffParentRow) {
+    await import('./sessions/team-links-io').then(m => m.completeReopenReparent(req.inherit!.id, id)).catch(() => {})
   }
 
   // F2.0 — a STRUCTURED session got the opening context from its driver (its declared channel), so a
