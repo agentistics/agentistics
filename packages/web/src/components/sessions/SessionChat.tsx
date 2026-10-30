@@ -2722,7 +2722,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         // currently tall enough to scroll. Longhand rather than the shorthand this used to be,
         // because the shorthand cannot express "20px, but only the right side also carries a
         // variable" without repeating the other three sides by hand anyway.
-        paddingTop: 10, paddingRight: 20 + chatGutterPx, paddingBottom: 16, paddingLeft: 20,
+        // paddingBottom 0: the M3 status band sits ON the panel's bottom edge (owner, 2026-10-30: the
+        // bar "também tá flutuando" with a 16px gap under it).
+        paddingTop: 10, paddingRight: 20 + chatGutterPx, paddingBottom: 0, paddingLeft: 20,
         background: 'transparent',
         // ITS OWN STACKING CONTEXT. `.ag-composer-ground::before` (the blur-and-fade) sits at
         // `z-index: -1`, and without a context here that `-1` resolved against the PANEL — so the
