@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.166.0': {
+  '2.165.3': {
     features: [
       {
         pt: 'As instruções que cada sessão recebe agora seguem o estado: no modo ausente somem os "pergunte antes", workers não recebem blocos de líder, e um teste impede que duas regras se contradigam.',
