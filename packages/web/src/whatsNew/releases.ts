@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.170.0': {
+    features: [
+      {
+        pt: 'Uma sessão que para no limite de uso passa sozinha para outra conta com folga, continua a mesma conversa e reenvia a mensagem recusada; se nenhuma conta tiver folga, ela continua sozinha quando o limite renovar. Cada troca deixa um aviso e um comentário na tarefa. Dá para desligar em Configurações → Sessões.',
+        en: 'A session stopped on a usage limit moves on its own to another account with room, keeps the same conversation and re-sends the refused message; when no account has room, it carries on by itself once the limit resets. Each move leaves a notice and a comment on the task. You can turn it off in Settings → Sessions.',
+      },
+      {
+        pt: 'A passagem de líder abre o sucessor numa conta com folga, nunca na conta que já bateu no limite.',
+        en: 'A leader hand-off opens the successor on an account with room, never on the one that already hit its limit.',
+      },
+      {
+        pt: 'Fluxos (experimental): toda abertura de worker passa por um portão que explica em palavras simples quando recusa; a passagem de líder ganha um documento gerado do quadro e dos seus pedidos abertos; um pedido novo seu com o líder ocupado entra em paralelo, na fila ou agora, sem trocar o trabalho em andamento.',
+        en: 'Flows (experimental): every worker spawn goes through a gate that says in plain words why it refuses; a leader hand-off gets a document generated from the board and your open requests; a new request of yours with a busy leader goes in parallel, to the queue or now, without replacing work in progress.',
+      },
+    ],
+    fixes: [],
+  },
   '2.169.0': {
     features: [
       {

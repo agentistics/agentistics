@@ -143,6 +143,55 @@ export async function withOwnerRequests<T extends { role?: string; taskId?: stri
   } catch { return i }
 }
 
+export interface WithPassagemDeps {
+  /** The manual hand-off file the leader cited (`--handoff-file`), only to say it went unchecked. */
+  handoffFile?: string
+  /** Where the one-line notices go (the CLI's stderr by default). */
+  log?: (line: string) => void
+  flowsOn?: () => boolean | Promise<boolean>
+  read?: (taskId: string) => Promise<{ text?: unknown } | null | undefined>
+}
+
+/**
+ * ORQ.H2: a leader HAND-OFF successor is briefed with the hand-off the spawn gate just generated from the board
+ * (`flows.read('passagem')`). Not a hand-off or no task: unchanged. Flows off, no document or a failed read: unchanged
+ * too, but SAID in one logged line (QA F8) — never swallowed. Never throws.
+ */
+export async function withPassagem<T extends { taskId?: string }>(i: T, handoff: boolean, deps: WithPassagemDeps = {}): Promise<T & { passagem?: string }> {
+  if (!handoff) return i
+  const log = deps.log ?? ((line: string) => console.error(line))
+  try {
+    const on = deps.flowsOn ? await deps.flowsOn() : (await import('../native-gate')).flowsExperimentalOn()
+    // QA R4: the flows-off / unchecked-file notice comes BEFORE the no-task return — a taskless hand-off is told too.
+    if (!on) {
+      // QA ORQ.H2 F8: flows off → no generated document and no pedido check; say so instead of looking verified.
+      log(deps.handoffFile
+        ? `Flows are off: the hand-off file ${deps.handoffFile} was NOT checked against the owner's open requests, and no hand-off was generated from the board.`
+        : 'Flows are off: no hand-off was generated from the board; the successor gets only what you wrote.')
+      return i
+    }
+    if (!i.taskId) {
+      log(deps.handoffFile
+        ? `This hand-off is filed on no task: the hand-off file ${deps.handoffFile} was NOT checked against the owner's open requests, and no hand-off was generated from the board.`
+        : 'This hand-off is filed on no task: no hand-off was generated from the board; the successor gets only what you wrote.')
+      return i
+    }
+    const taskId = i.taskId
+    const read = deps.read ?? (async (taskId: string) => {
+      const load = await import('../engine/load')
+      await load.loadEngine({ log: () => {} })
+      return await load.engine()?.flows?.read?.('passagem', { taskId }) as { text?: unknown } | null | undefined
+    })
+    const view = await read(taskId)
+    if (typeof view?.text === 'string' && view.text) return { ...i, passagem: view.text }
+    log(`No generated hand-off was found for task ${taskId}; the successor gets only what you wrote.`)
+    return i
+  } catch (e) {
+    log(`The generated hand-off could not be read (${e instanceof Error ? e.message : String(e)}); the successor gets only what you wrote.`)
+    return i
+  }
+}
+
 export function buildSpawnContext(i: Omit<ContextInput, 'harnesses' | 'specSkills'> & { harnesses?: readonly string[]; specSkills?: readonly string[]; harness?: string }): NonNullable<SpawnRequest['context']> {
   const full: ContextInput = {
     ...i,
