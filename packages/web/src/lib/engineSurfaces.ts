@@ -7,14 +7,26 @@
  * it ever reaches `import()`: same-origin, under `/api/engine/x/`, no dot-segments. A community build
  * answers no `surfaces`, so there is no button at all.
  */
-export type SurfacePlacement = 'session-header' | 'nay-dock' | 'app-bar'
-export type SurfaceLayout = 'full' | 'side'
+export type SurfacePlacement = 'session-header' | 'nay-dock' | 'app-bar' | 'composer'
+export type SurfaceIcon = 'phone' | 'phone-off' | 'sparkles' | 'panel'
+export type SurfaceActiveTone = 'accent' | 'danger'
+const ICONS: readonly string[] = ['phone', 'phone-off', 'sparkles', 'panel']
+export type SurfaceLayout = 'full' | 'side' | 'inline'
 
 export interface EngineSurfaceInfo {
   id: string
   placement: SurfacePlacement
   label: { pt: string; en: string }
+  icon?: SurfaceIcon
+  /** While open (composer placement): icon, label and fill of the pressed button. */
+  activeIcon?: SurfaceIcon
+  activeLabel?: { pt: string; en: string }
+  activeTone?: SurfaceActiveTone
   module: string
+  /** The layout it opens in (default `full`); `inline` only for the `composer` placement. */
+  layout?: SurfaceLayout
+  /** No host padding, title bar or close button in `full` / `side`; the surface draws its own. */
+  frameless?: boolean
 }
 
 export interface SurfaceMountContext {
@@ -50,7 +62,17 @@ export function surfacesFrom(status: unknown, placement: SurfacePlacement): Engi
     const label = s?.label as { pt?: unknown; en?: unknown } | undefined
     if (s?.placement !== placement || typeof s.id !== 'string' || !surfaceModulePathOk(s.module)) continue
     if (typeof label?.pt !== 'string' || typeof label?.en !== 'string') continue
-    out.push({ id: s.id, placement, label: { pt: label.pt, en: label.en }, module: s.module })
+    const icon = typeof s.icon === 'string' && ICONS.includes(s.icon) ? s.icon as SurfaceIcon : undefined
+    const activeIcon = typeof s.activeIcon === 'string' && ICONS.includes(s.activeIcon) ? s.activeIcon as SurfaceIcon : undefined
+    const al = s.activeLabel as { pt?: unknown; en?: unknown } | undefined
+    const activeLabel = typeof al?.pt === 'string' && typeof al?.en === 'string' ? { pt: al.pt, en: al.en } : undefined
+    const activeTone = s.activeTone === 'danger' || s.activeTone === 'accent' ? s.activeTone : undefined
+    const layout = s.layout === 'full' || s.layout === 'side' || (s.layout === 'inline' && placement === 'composer') ? s.layout : undefined
+    out.push({
+      id: s.id, placement, label: { pt: label.pt, en: label.en }, module: s.module,
+      ...(icon ? { icon } : {}), ...(activeIcon ? { activeIcon } : {}), ...(activeLabel ? { activeLabel } : {}),
+      ...(activeTone ? { activeTone } : {}), ...(layout ? { layout } : {}), ...(s.frameless === true ? { frameless: true } : {}),
+    })
   }
   return out
 }

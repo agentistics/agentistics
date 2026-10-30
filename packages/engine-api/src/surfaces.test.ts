@@ -44,6 +44,27 @@ describe('1.15', () => {
   it('accepts the app-bar placement', () => {
     expect(surfaceRefusals([surface({ placement: 'app-bar' })])).toEqual([])
   })
+  it('accepts the composer placement and closed icon set, refusing unknown icons', () => {
+    expect(surfaceRefusals([surface({ placement: 'composer', icon: 'phone' })])).toEqual([])
+    expect(surfaceRefusals([surface({ placement: 'composer', icon: 'bell' as never })])[0]!.reason).toBe('bad-icon')
+  })
+  it('accepts the layouts and frameless, refusing anything else', () => {
+    expect(surfaceRefusals([surface({ layout: 'side', frameless: true })])).toEqual([])
+    expect(surfaceRefusals([surface({ placement: 'composer', icon: 'phone', layout: 'inline' })])).toEqual([])
+    expect(surfaceRefusals([surface({ placement: 'nay-dock', layout: 'inline' })])[0]!.reason).toBe('bad-layout')
+    expect(surfaceRefusals([surface({ layout: 'floating' as never })])[0]!.reason).toBe('bad-layout')
+    expect(surfaceRefusals([surface({ frameless: 'yes' as never })])[0]!.reason).toBe('bad-frameless')
+  })
+  it('requires an icon for the composer placement', () => {
+    expect(surfaceRefusals([surface({ placement: 'composer' })])[0]!.reason).toBe('bad-icon')
+    expect(surfaceRefusals([surface({ placement: 'nay-dock' })])).toEqual([])
+  })
+  it('validates the active state fields', () => {
+    expect(surfaceRefusals([surface({ placement: 'composer', icon: 'phone', activeIcon: 'phone-off', activeTone: 'danger', activeLabel: { pt: 'Fim', en: 'End' } })])).toEqual([])
+    expect(surfaceRefusals([surface({ activeIcon: 'bell' as never })])[0]!.reason).toBe('bad-active')
+    expect(surfaceRefusals([surface({ activeTone: 'pink' as never })])[0]!.reason).toBe('bad-active')
+    expect(surfaceRefusals([surface({ activeLabel: { pt: '', en: 'x' } })])[0]!.reason).toBe('bad-active')
+  })
   it('frame cap only narrows', () => {
     expect(frameCap(undefined)).toBe(ENGINE_SOCKET_LIMITS.maxFrameBytes)
     expect(frameCap(10)).toBe(10)
