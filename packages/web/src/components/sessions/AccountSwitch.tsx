@@ -247,6 +247,9 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
       maxWidth={920}
       aside={<AccountPicker flow={flow} lang={lang} />}
       focusPanel
+      // Opened from inside the session pane, which sits under the sidebar: lift it to the page,
+      // above the sidebar (200) and below the Nay dock (410), which stays on top of everything.
+      layer={300}
     >
       <div data-account-switch style={{ display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0 }}>
         <SwitchExtras flow={flow} lang={lang} />

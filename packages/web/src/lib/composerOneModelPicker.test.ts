@@ -9,8 +9,9 @@ describe('composer has ONE model picker', () => {
     expect(src).not.toContain('data-model-chip')
     expect(src).not.toContain('composerModelChip')
   })
-  test('the model list still lives behind the Send chevron menu', () => {
+  test('the model list lives behind the status band model button (M3: no chevron)', () => {
     expect(src).toContain('<TypedModel')
-    expect(src).toContain("'Mais opções' : 'More options'")
+    expect(src).toContain('ag-composer-model-button')
+    expect(src).not.toContain('ag-composer-more-status')
   })
 })
