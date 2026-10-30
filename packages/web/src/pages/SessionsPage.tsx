@@ -113,7 +113,7 @@ import {
   openArtifacts, setArtifactCount, setArtifactLive, useArtifactLive, usePanelFocusRequest,
 } from '../lib/artifactsStore'
 import { studioMenuRow } from '../lib/studioMenuRow'
-import { EngineSurfaceAside } from '../components/EngineSurfaceAside'
+import { EngineSurfaceAside, engineAsideWantsOpen } from '../components/EngineSurfaceAside'
 import { useEngineSideSlotId, useEngineSideSurface } from '../lib/engineSurfaceHost'
 import { closedRightEdge, restingLeftEdge, setRightAsideEdge, useRightAsideEdge } from '../lib/rightAsideEdge'
 import { PaneScope, paneDomId, setActivePane, type PaneId } from '../lib/paneScope'
@@ -388,6 +388,20 @@ interface SessionsPageBodyProps {
   splitRoute: SplitRoute | null
   /** Only the RIGHTMOST pane reports the right edge the App's Filtros tab anchors to. */
   publishesRightEdge: boolean
+}
+
+/** One tab of the phone's panel switcher (the panels, and the engine section when it is on screen). */
+function mobilePanelTabStyle(on: boolean, hot: boolean): CSSProperties {
+  return {
+    display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+    minHeight: 44, padding: '0 14px', scrollSnapAlign: 'center',
+    borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+    fontSize: 11.5, fontWeight: (on || hot) ? 700 : 500, whiteSpace: 'nowrap',
+    background: on ? 'var(--bg-elevated)' : 'transparent',
+    // Inactive tabs read as TAPPABLE (owner: they were faded to the point of looking disabled) —
+    // `--text-secondary`, never the fainter `--text-tertiary`.
+    color: hot ? 'var(--accent-red)' : (on ? 'var(--text-primary)' : 'var(--text-secondary)'),
+  }
 }
 
 function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: SessionsPageBodyProps) {
@@ -963,7 +977,8 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
    * The section goes away when the surface leaves `side` (inline, full, closed, parked).
    */
   const engineSide = useEngineSideSurface(selected?.id ?? null)
-  const engineNonce = engineSide?.nonce
+  // A new opening (nonce) or a repeat request for the one already mounted (reopen) selects its tab.
+  const engineNonce = engineSide ? engineSide.nonce * 1000 + engineSide.reopen : undefined
   const [engineTabOn, setEngineTabOn] = useState(true)
   useLayoutEffect(() => { if (engineNonce !== undefined) setEngineTabOn(true) }, [engineNonce])
   const lastRight = useRef(slotLayout.right)
@@ -1117,8 +1132,9 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
     // (`panelMenu.ts`'s own `panelMinimizeAction`), which already reads as "not occupying the slot"
     // through the flags above, so `slotLayout.rightOpen` only ever narrows the ONE case those flags
     // cannot already see: the Studio still assigned to the slot, parked rather than shown.
-    open: (slotLayout.right !== null || engineTabShown)
-      && (!rightIsStudio || slotLayout.rightOpen) && selected !== undefined
+    // A side surface being shown opens the aside even while the Studio sits minimized in it.
+    open: engineAsideWantsOpen({ panelOpen: slotLayout.right !== null, studioMinimized: rightIsStudio && !slotLayout.rightOpen, engineShown: engineTabShown })
+      && selected !== undefined
       && !dedicatedRightRedundant,
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
     isMobile,
@@ -1656,8 +1672,16 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             : null),
         }}
       >
+        {engineOwned && engineSide !== null && (
+          <button
+            role="tab"
+            aria-selected={engineTabShown}
+            onClick={() => setEngineTabOn(true)}
+            style={mobilePanelTabStyle(engineTabShown, false)}
+          >{pt ? engineSide.surface.label.pt : engineSide.surface.label.en}</button>
+        )}
         {gatedMobilePanels.map(id => {
-          const on = isPanelShown(slotLayout, id)
+          const on = isPanelShown(slotLayout, id) && !engineTabShown
           // THE HARDWARE TAB'S OWN RED (addendum item 6, carried to the phone) — the rail's icon
           // recolors and its tooltip states "sob pressão"/"under pressure" in words; a phone has
           // neither a rail nor a hover tooltip, so the WORDS move onto the tab's own visible label
@@ -1674,17 +1698,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
               role="tab"
               aria-selected={on}
               onClick={() => openSlotPanelPicked(id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
-                minHeight: 44, padding: '0 14px', scrollSnapAlign: 'center',
-                borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                fontSize: 11.5, fontWeight: (on || hot) ? 700 : 500, whiteSpace: 'nowrap',
-                background: on ? 'var(--bg-elevated)' : 'transparent',
-                // Inactive tabs read as TAPPABLE (owner: they were faded to the point of looking
-                // disabled) — `--text-secondary`, the same token `RepoDetailPage`'s own scrolling tab
-                // strip already uses for its inactive tabs, never the fainter `--text-tertiary`.
-                color: hot ? 'var(--accent-red)' : (on ? 'var(--text-primary)' : 'var(--text-secondary)'),
-              }}
+              style={mobilePanelTabStyle(on, hot)}
             >{panelIconFor(id, 12, selected.harness)}{panelTitle(id, pt)}{hot ? ` — ${pt ? 'sob pressão' : 'under pressure'}` : ''}</button>
           )
         })}

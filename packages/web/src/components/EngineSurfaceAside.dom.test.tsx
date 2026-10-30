@@ -90,6 +90,20 @@ describe('side slot store', () => {
   })
 })
 
+describe('reopen', () => {
+  test('asking again for the mounted surface bumps reopen on the same nonce', async () => {
+    state.resetEngineSurfaceHostForTests()
+    await open('s1')
+    const first = state.currentEngineSurface()!
+    expect(first.reopen).toBe(0)
+    await open('s1')
+    const again = state.currentEngineSurface()!
+    expect(again.nonce).toBe(first.nonce)
+    expect(again.reopen).toBe(1)
+    state.resetEngineSurfaceHostForTests()
+  })
+})
+
 describe('EngineSurfaceAside', () => {
   const noop = () => {}
   function Held({ log }: { log: string[] }) {
@@ -132,5 +146,16 @@ describe('EngineSurfaceAside', () => {
     expect(host.querySelector('[role="tablist"]')).toBeNull()
     await act(async () => { root.render(render(log, { ...section, owned: true })) })
     expect(host.querySelectorAll('[role="tab"]').length).toBe(2)
+  })
+})
+
+describe('engineAsideWantsOpen', () => {
+  test('a shown side surface opens the aside even over a minimized Studio; otherwise unchanged', () => {
+    const f = asideMod.engineAsideWantsOpen
+    expect(f({ panelOpen: true, studioMinimized: true, engineShown: true })).toBe(true)
+    expect(f({ panelOpen: true, studioMinimized: true, engineShown: false })).toBe(false)
+    expect(f({ panelOpen: true, studioMinimized: false, engineShown: false })).toBe(true)
+    expect(f({ panelOpen: false, studioMinimized: false, engineShown: false })).toBe(false)
+    expect(f({ panelOpen: false, studioMinimized: false, engineShown: true })).toBe(true)
   })
 })
