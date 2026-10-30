@@ -13,7 +13,7 @@
  */
 
 import { nativeRowsFrom, nativeVisible, type NativeRow } from './native'
-import { followFleet, type SessionMeta } from '@agentistics/core'
+import { followFleet, readCompactFleetResponse, type SessionMeta } from '@agentistics/core'
 import type {
   Arrangement, FleetActionId, FleetPayload, LinkStatus, NewOptions, SpawnRequest,
 } from './protocol'
@@ -74,16 +74,16 @@ export class AgentopClient {
    * never allowed to look. And a request that TIMED OUT is neither of those, nor a dead server —
    * see `slow` on `LinkState`.
    */
-  async fleet(view?: Arrangement): Promise<{ link: LinkStatus; payload?: FleetPayload }> {
+  async fleet(view?: Arrangement, previous: FleetPayload['sessions'] = []): Promise<{ link: LinkStatus; payload?: FleetPayload }> {
     try {
-      const res = await fetch(this.url('/api/fleet', viewParams(view)), {
+      const res = await fetch(this.url('/api/fleet', { ...viewParams(view), format: 'compact-v1' }), {
         signal: AbortSignal.timeout(FLEET_TIMEOUT_MS),
       })
       if (res.status === 403 || res.status === 404) {
         return { link: { state: 'refused', url: this.api } }
       }
       if (!res.ok) return { link: { state: 'down', url: this.api } }
-      return { link: { state: 'ok', url: this.api }, payload: await res.json() as FleetPayload }
+      return { link: { state: 'ok', url: this.api }, payload: await readCompactFleetResponse(await res.json(), offset => this.url('/api/fleet/closed', { offset: String(offset), limit: '100' }), !view?.onlyActive, this.url('/api/fleet', { ...viewParams(view), format: 'compact-v1' }), previous as never) as unknown as FleetPayload }
     } catch (err) {
       return { link: { state: isTimeout(err) ? 'slow' : 'down', url: this.api } }
     }

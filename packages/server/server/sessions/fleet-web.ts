@@ -44,7 +44,7 @@ import { markFleetPhase, timeFleetPhase } from './fleet-profile'
 import { processSessionHub, type SessionHub } from './session-hub'
 import { forceRowScreen } from './adapter-state-host'
 import {
-  buildFleetFrame, closedPage, compactFleetRows, compactFleetSession, fleetEventsResponse, type FleetFrame,
+  buildFleetFrame, closedPage, compactFleetRows, compactFleetSession, compactGetBody, fleetEventsResponse, type FleetFrame,
 } from './fleet-events'
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
@@ -604,6 +604,17 @@ function fleetFrame(lang: CliLang, view: FleetViewRequest | undefined, closedLim
   FRAMES.set(key, entry)
   void frame.then(() => { entry.snap = lastHubSnapshot() }, () => { if (FRAMES.get(key) === entry) FRAMES.delete(key) })
   return frame
+}
+
+/** Opt-in compact GET shares the exact frame and version with the stream. */
+export async function readCompactFleet(lang: CliLang, view: FleetViewRequest | undefined, closedLimit: number): Promise<Record<string, unknown>> {
+  return compactGetBody(await fleetFrame(lang, view, closedLimit))
+}
+
+/** Minimal full-fleet identity graph for MCP parent resolution. */
+export async function readFleetLinks(lang: CliLang): Promise<Record<string, unknown>> {
+  const { rows } = await readFleet(lang)
+  return { format: 'links-v1', rows: rows.map(r => ({ id: r.id, conversationId: r.conversationId, title: r.title, parentSessionId: r.parentSessionId, parentConversationId: r.parentConversationId })) }
 }
 
 /**
