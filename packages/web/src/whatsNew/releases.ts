@@ -35,12 +35,12 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [],
   },
-  '2.168.3': {
+  '2.169.1': {
     features: [],
     fixes: [
       {
-        pt: 'O campo de mensagem não mostra mais uma barra de rolagem quando está vazio ou com pouco texto; ela só aparece quando o texto passa da altura máxima.',
-        en: 'The message field no longer shows a scrollbar when it is empty or short; it only appears once the text is taller than the field\'s limit.',
+        pt: 'Os campos de mensagem, de resposta e de comentário não mostram mais uma barra de rolagem quando estão vazios ou com pouco texto; ela só aparece quando o texto passa da altura máxima.',
+        en: 'The message, reply and comment fields no longer show a scrollbar when empty or short; it only appears once the text is taller than the field\'s limit.',
       },
     ],
   },

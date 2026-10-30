@@ -1553,7 +1553,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
 
   useLayoutEffect(() => {
     syncComposerMirror()
-  }, [draft, maxComposerH, syncComposerMirror])
+  }, [draft, maxComposerH, composerOverflows, syncComposerMirror])
 
   const draftReq = useDraftRequest()
   const draftReqAt = draftReq?.sessionId === session.id ? draftReq.at : undefined
