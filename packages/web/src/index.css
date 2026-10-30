@@ -968,8 +968,23 @@ button:focus-within .ag-row-pin,
   cursor: pointer;
   flex-shrink: 0;
 }
-.ag-composer-model-button { background: var(--bg-surface); }
+/* T3 (owner, 2026-10-30): model and mode read as TEXT — no border, no fill — with a small leading
+   icon and a small chevron, both centred on the text's line box so the chevron sits level with it. */
+.ag-composer-status-button {
+  border: 0;
+  background: transparent;
+  height: 30px;
+  padding: 0 6px;
+  gap: 5px;
+  line-height: 1;
+}
+.ag-composer-status-button:hover:not(:disabled),
+.ag-composer-status-button[aria-expanded="true"] { color: var(--text-primary); background: transparent; }
+.ag-composer-model-button { background: transparent; padding-left: 0; } /* icon sits on the field's left edge */
 .ag-composer-mode-button { opacity: 1; }
+.ag-composer-status-icon-lead,
+.ag-composer-status-chevron { flex-shrink: 0; display: block; align-self: center; }
+.ag-composer-status-chevron { opacity: .6; }
 .ag-composer-status-button:disabled { opacity: .55; cursor: default; }
 .ag-composer-status-button-label {
   min-width: 0;

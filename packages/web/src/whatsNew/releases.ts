@@ -18,6 +18,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'The send button no longer jumps to the left when you start typing.',
       },
       {
+        pt: 'Na barra embaixo do campo, o modelo e o modo viraram texto com um ícone pequeno, sem os botões grandes.',
+        en: 'In the bar below the field, the model and the mode are now text with a small icon instead of big buttons.',
+      },
+      {
         pt: 'A barra embaixo do campo mostra o modelo de verdade da sessão (o mesmo do cartão de detalhes), e não "Modelo" nem uma versão antiga.',
         en: 'The bar below the field shows the session\'s real model (the same as the details card), not "Model" or an older version.',
       },

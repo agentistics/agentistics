@@ -31,7 +31,7 @@ import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerS
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
-import { AlertTriangle, ArrowDown, Bell, BellOff, ChevronDown, ChevronRight, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Bell, BellOff, ChevronDown, ChevronRight, ChevronUp, CornerUpLeft, Cpu, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
 import { hasSomethingToSend, stopShown as isStopShown } from '../../lib/composerAction'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { AttentionMarkLine, RecordedBlock } from './AttentionMarks'
@@ -3981,11 +3981,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         }}
                         title={pt ? 'Trocar modelo e esforço' : 'Change model and effort'}
                       >
+                        <Cpu size={13} aria-hidden className="ag-composer-status-icon-lead" />
                         <span className="ag-composer-status-button-label">
                           {statusModelLabel}
                         </span>
                         {statusEffort && <span aria-hidden>·</span>}
                         {statusEffort && <span>{statusEffort}</span>}
+                        <ChevronDown size={12} aria-hidden className="ag-composer-status-chevron" />
                       </button>
                     )}
                     {row?.mode && !answeringNow && (
@@ -4003,14 +4005,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         aria-haspopup="menu"
                         aria-expanded={modeMenuOpen}
                         aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}
-                        style={{
-                          borderColor: modeStyle(row.mode).border,
-                          background: modeStyle(row.mode).bg,
-                          color: modeStyle(row.mode).fg,
-                        }}
+                        // T3 (owner, 2026-10-30): text, not a chip — the mode keeps only its colour.
+                        style={{ color: modeStyle(row.mode).fg }}
                       >
-                        <SlidersHorizontal size={13} />
+                        <SlidersHorizontal size={13} aria-hidden className="ag-composer-status-icon-lead" />
                         <span className="ag-composer-status-button-label">{modeLabel(row.mode, pt ? 'pt' : 'en')}</span>
+                        <ChevronDown size={12} aria-hidden className="ag-composer-status-chevron" />
                       </button>
                     )}
                     {!isMobile && metrics && (
