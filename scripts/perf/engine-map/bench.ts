@@ -7,6 +7,8 @@
  *      and a python append), so the spawn gate's real-assistant memory estimate (spawn-admission.ts) would
  *      refuse a mixed fleet of 10 on a 7 GB, 2-core CI runner for a reason that has nothing to do with what
  *      is being measured. run.sh passes it; without the flag the request is byte for byte the engine's.
+ *   3. the simulated web client polls GET /api/fleet with `&format=compact-v1`, as the web client does since
+ *      FLEET.SLIM (the plain GET is the legacy 6 MB shape the real client no longer asks for).
  * Everything else — the simulated web client, the probes, the soak, the tables — is byte for byte.
  */
 /**
@@ -172,7 +174,7 @@ function startClient(sessionId: string | null, stats: ClientStats): () => void {
     t = setTimeout(loop, Math.random() * ms)
     closers.push(() => { if (t) clearTimeout(t) })
   }
-  every(5000, async () => { stats.fleet.push(await timedGet('/api/fleet?lang=pt')) })
+  every(5000, async () => { stats.fleet.push(await timedGet('/api/fleet?lang=pt&format=compact-v1')) })
   every(30_000, fetchData)
   every(2000, async () => { stats.health.push(await timedGet('/api/health')) })
   closers.push(sse('/api/events', ev => { if (ev === 'change') { stats.changes++; void fetchData() } }, n => { stats.sseBytes += n }))
