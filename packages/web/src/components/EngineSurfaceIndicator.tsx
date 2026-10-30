@@ -25,6 +25,17 @@ export function EngineSurfaceIndicators({ lang, tickMs = 1000 }: { lang: 'pt' | 
   return <>{list.map(s => <Pill key={s.nonce} open={s} lang={lang} tickMs={tickMs} />)}</>
 }
 
+/** In-flow mobile workspace band: reserve height instead of covering the session title. */
+export function EngineSurfaceIndicatorRow({ lang }: { lang: 'pt' | 'en' }) {
+  const active = useMountedEngineSurfaces().some(s => s.indicator)
+  if (!active) return null
+  return <div data-engine-indicator-row style={{
+    display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 4,
+    flexShrink: 0, minWidth: 0, padding: '4px 10px',
+    borderBottom: '1px solid var(--border)', background: 'var(--bg-surface)',
+  }}><EngineSurfaceIndicators lang={lang} /></div>
+}
+
 function Pill({ open, lang, tickMs }: { open: OpenSurface; lang: 'pt' | 'en'; tickMs: number }) {
   const navigate = useNavigate()
   const mobile = useIsMobile()

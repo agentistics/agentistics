@@ -92,7 +92,9 @@ page by navigating to its route, a session surface (`composer`, `session-header`
 session that owns it, in the layout it had. With `endLabel` the pill carries a secondary button that
 calls the callback registered with `ctx.onIndicatorEnd(fn)` (which returns a function that removes it).
 On a phone the pill is compact (icon and timer; the label stays its accessible name), sits in the top
-bar, and never covers the bottom navigation.
+bar, and never covers the bottom navigation. In the mobile Sessions workspace, indicators reserve a
+wrapping row below its own header, so they cannot overlap the session title. The row disappears when
+no mounted surface has an indicator.
 
 ### Opening a session: `ctx.openSession` (1.18, optional)
 
