@@ -18,6 +18,8 @@ export interface OpenSurface {
   lang: 'pt' | 'en'
   /** Increments per opening, so reopening the same surface remounts it; also the surface's handle. */
   nonce: number
+  /** Bumped each time the already-mounted surface is asked for again (same nonce), so a view can re-select it. */
+  reopen: number
   layout: SurfaceLayout
   /** The composer instance whose button opened it: its inline slot is preferred. */
   slotId?: string
@@ -75,13 +77,13 @@ export function openEngineSurface(surface: EngineSurfaceInfo, opts: { sessionId:
   if (visible && visible !== have) hide(visible)
   if (have) {
     const now = mounted.find(s => s.nonce === have.nonce)
-    if (now) patch(now.nonce, { sessionId: opts.sessionId, sessionKind: opts.sessionKind, lang: opts.lang, slotId: opts.slotId, parked: false })
+    if (now) patch(now.nonce, { reopen: now.reopen + 1, sessionId: opts.sessionId, sessionKind: opts.sessionKind, lang: opts.lang, slotId: opts.slotId, parked: false })
     return
   }
   const n = ++nonce
   if (opts.trigger) returnFocus = { nonce: n, el: opts.trigger }
   const layout: SurfaceLayout = surface.placement === 'rail' ? 'page' : surface.layout === 'page' ? 'full' : surface.layout ?? 'full'
-  commit([...mounted, { surface, sessionId: opts.sessionId, ...(opts.sessionKind ? { sessionKind: opts.sessionKind } : {}), lang: opts.lang, nonce: n, layout, slotId: opts.slotId, parked: false, keepAlive: false, indicator: null }])
+  commit([...mounted, { surface, sessionId: opts.sessionId, ...(opts.sessionKind ? { sessionKind: opts.sessionKind } : {}), lang: opts.lang, nonce: n, reopen: 0, layout, slotId: opts.slotId, parked: false, keepAlive: false, indicator: null }])
 }
 
 /**

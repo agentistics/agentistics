@@ -52,3 +52,15 @@ export function EngineSurfaceAside({ engine, shown, panelsLabel, onPickEngine, o
     </div>
   )
 }
+
+/**
+ * Does the aside want to be open? A panel in it counts unless that panel is the Studio minimized; a
+ * side surface that is being shown opens it regardless (it must never land in a closed aside).
+ */
+export function engineAsideWantsOpen({ panelOpen, studioMinimized, engineShown }: {
+  panelOpen: boolean
+  studioMinimized: boolean
+  engineShown: boolean
+}): boolean {
+  return (panelOpen && !studioMinimized) || engineShown
+}
