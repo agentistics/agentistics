@@ -21,7 +21,10 @@ beforeAll(async () => {
   createRoot = (await import('react-dom/client')).createRoot
   mod = await import('./EngineSurfaceButtons')
 })
-afterAll(async () => { globalThis.fetch = originalFetch; await GlobalRegistrator.unregister() })
+// Every root this file mounted is unmounted before the DOM goes: a surface host left subscribed to the
+// shared host store would keep mounting the next file's surfaces with THIS file's loaders.
+const roots: Array<{ unmount(): void }> = []
+afterAll(async () => { await act(async () => { for (const r of roots) r.unmount() }); globalThis.fetch = originalFetch; await GlobalRegistrator.unregister() })
 
 const surface = { id: 'demo', placement: 'session-header', label: { pt: 'Demo PT', en: 'Demo' }, module: '/api/engine/x/demo/mount.js' }
 const settle = () => act(async () => { await new Promise(r => setTimeout(r, 20)) })
@@ -30,6 +33,7 @@ async function mount(el: ReturnType<typeof createElement>) {
   const host = document.createElement('div')
   document.body.appendChild(host)
   const root = createRoot(host)
+  roots.push(root)
   await act(async () => { root.render(el) })
   await settle()
   return { host, root }

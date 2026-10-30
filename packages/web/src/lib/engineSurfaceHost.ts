@@ -209,6 +209,42 @@ export function useEnginePageSlot(): HTMLElement | null {
   return useSyncExternalStore(subscribe, resolvePageSlot, () => null)
 }
 
+/**
+ * The right asides of the sessions workspace, one per pane, each showing ONE session. A session
+ * surface drawn as `side` (asked for, or `inline` with no inline slot on screen) whose session has an
+ * aside on screen is mounted INSIDE that aside, as its own selected section, instead of the host's
+ * fixed side panel. Each slot is registered by, and removed only by, its own aside. Without one (the
+ * Nay panel, any other screen) the fixed panel is drawn as before.
+ */
+const sideSlots = new Map<string, { el: HTMLElement; sessionId: string }>()
+export function registerEngineSideSlot(id: string, sessionId: string, el: HTMLElement | null, own?: HTMLElement | null): void {
+  if (el) { const had = sideSlots.get(id); if (had?.el === el && had.sessionId === sessionId) return; sideSlots.set(id, { el, sessionId }); emit(); return }
+  if (own && sideSlots.get(id)?.el === own) { sideSlots.delete(id); emit() }
+}
+/** PURE over the store: is `s` a session surface on screen that is drawn as `side`? */
+function drawnSide(s: OpenSurface | null): s is OpenSurface {
+  if (!s || s.parked || s.sessionId === null || s.surface.placement === 'rail') return false
+  return effectiveSurfaceLayout(s.layout, resolveInlineSlot() !== null) === 'side'
+}
+/** The visible surface, when it is a session surface drawn as `side` for `sessionId`; else `null`. */
+export function sideEngineSurfaceFor(sessionId: string | null): OpenSurface | null {
+  const current = visible
+  return sessionId !== null && drawnSide(current) && current.sessionId === sessionId ? current : null
+}
+export function useEngineSideSurface(sessionId: string | null): OpenSurface | null {
+  return useSyncExternalStore(subscribe, () => sideEngineSurfaceFor(sessionId), () => null)
+}
+/** The aside the visible surface should be drawn in right now, or `null` (then the fixed side panel). */
+export function resolveSideSlot(): HTMLElement | null {
+  const current = visible
+  if (!drawnSide(current)) return null
+  for (const v of sideSlots.values()) if (v.sessionId === current.sessionId) return v.el
+  return null
+}
+export function useEngineSideSlot(): HTMLElement | null {
+  return useSyncExternalStore(subscribe, resolveSideSlot, () => null)
+}
+
 /** PURE. The layout actually drawn: `inline` needs a slot, and falls back to `side` without one. */
 export function effectiveSurfaceLayout(layout: SurfaceLayout, hasSlot: boolean): SurfaceLayout {
   return layout === 'inline' && !hasSlot ? 'side' : layout
@@ -229,4 +265,4 @@ export function useMountedEngineSurfaces(): OpenSurface[] {
 export function mountedEngineSurfaces(): OpenSurface[] { return mounted }
 
 /** Tests only. */
-export function resetEngineSurfaceHostForTests(): void { returnFocus = null; slots.clear(); pageSlots.clear(); endHandlers.clear(); navigator = null; commit([]) }
+export function resetEngineSurfaceHostForTests(): void { returnFocus = null; slots.clear(); pageSlots.clear(); sideSlots.clear(); endHandlers.clear(); navigator = null; commit([]) }

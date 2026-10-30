@@ -4,8 +4,8 @@ import { X } from 'lucide-react'
 import { useEscapeOwner } from '../lib/overlayStack'
 import {
   closeEngineSurface, effectiveSurfaceLayout, endEngineSurface, leaveEngineSurfacePage, onEngineSurfaceIndicatorEnd, openEngineSurface, openEngineSurfaceSession,
-  registerEngineInlineSlot, registerEnginePageSlot, resolveInlineSlot, setEngineSurfaceIndicator, setEngineSurfaceKeepAlive,
-  reconcileEngineSurfaces, setEngineSurfaceLayout, useEngineInlineSlot, useEnginePageSlot, useMountedEngineSurfaces, useOpenEngineSurface, type OpenSurface,
+  registerEngineInlineSlot, registerEnginePageSlot, registerEngineSideSlot, resolveInlineSlot, resolveSideSlot, setEngineSurfaceIndicator, setEngineSurfaceKeepAlive,
+  mountedEngineSurfaces, reconcileEngineSurfaces, setEngineSurfaceLayout, useEngineInlineSlot, useEnginePageSlot, useEngineSideSlot, useMountedEngineSurfaces, useOpenEngineSurface, type OpenSurface,
 } from '../lib/engineSurfaceHost'
 import { readEngineStatus, useEngineSurfaceList } from '../hooks/useEngineSurfaces'
 import { onEngineCapsInvalidated } from '../lib/engineCapsBus'
@@ -101,6 +101,20 @@ export function EngineSurfaceInlineSlot({ sessionId, slotId }: { sessionId: stri
 }
 
 /**
+ * The section of a session's right aside (the sessions workspace) a `side` surface of THAT session is
+ * mounted into, instead of the host's fixed side panel. Rendered by the aside only while such a
+ * surface is drawn as `side`; it fills the aside's height, so a surface sized `height: 100%` gets it.
+ */
+export function EngineSurfaceSideSlot({ sessionId, slotId }: { sessionId: string; slotId: string }) {
+  const own = useRef<HTMLElement | null>(null)
+  const ref = useCallback((el: HTMLDivElement | null) => {
+    if (el) { own.current = el; registerEngineSideSlot(slotId, sessionId, el) }
+    else { registerEngineSideSlot(slotId, sessionId, null, own.current); own.current = null }
+  }, [slotId, sessionId])
+  return <div ref={ref} data-engine-side-slot={slotId} style={{ position: 'relative', flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }} />
+}
+
+/**
  * Where a parked surface's element waits: in the document (so it keeps running), out of sight and reach,
  * at the viewport's size rather than a 1px box, so a surface that measures itself is not squeezed.
  */
@@ -111,6 +125,7 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   // The slots answer for the surface ON SCREEN; a parked one never takes them.
   const inlineSlot = useEngineInlineSlot()
   const pageSlot = useEnginePageSlot()
+  const sideSlot = useEngineSideSlot()
   const slot = open.parked ? null : inlineSlot
   const page = open.layout === 'page'
   // A page whose route is not on screen is held off screen like a parked surface.
@@ -118,6 +133,8 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   // Parked, it reports the layout it had (and will come back in), not a fallback computed without a slot.
   const layout = open.parked ? open.layout : effectiveSurfaceLayout(open.layout, !!slot)
   const inline = layout === 'inline'
+  // A session surface drawn as `side` whose session has its aside on screen lives inside that aside.
+  const aside = !offscreen && layout === 'side' && !!sideSlot
   const drawn = useRef<SurfaceLayout>(layout)
   drawn.current = layout
   const host = useRef<HTMLDivElement>(null)
@@ -133,12 +150,16 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   const hostClose = useCallback(() => closeEngineSurface(nonce), [nonce])
   useEscapeOwner(full && !offscreen, hostClose)
   useLayoutEffect(() => {
-    const target = offscreen ? park.current : page ? pageSlot : inline ? slot : host.current
+    const target = offscreen ? park.current : page ? pageSlot : inline ? slot : aside ? sideSlot : host.current
     if (target && el.parentElement !== target) target.appendChild(el)
-    // On its page the surface fills the main area; anywhere else its container sizes to its content.
-    el.style.flex = page && !offscreen ? '1' : ''
-    el.style.minHeight = page && !offscreen ? '0' : ''
-  }, [offscreen, page, pageSlot, inline, slot, el])
+    // On its page, in an aside and in a frameless frame the surface fills its box (so a surface sized
+    // `height: 100%`, or positioned `absolute; inset: 0`, gets a real box); inline, and inside a framed
+    // card, its container sizes to its content.
+    const fill = !offscreen && !inline && (page || aside || bare)
+    el.style.flex = fill ? '1' : ''
+    el.style.minHeight = fill ? '0' : ''
+    el.style.position = fill ? 'relative' : ''
+  }, [offscreen, page, pageSlot, inline, slot, aside, sideSlot, bare, el])
   // Coming back from off screen moves focus exactly as the first mount did: into the frame (a `full`
   // dialog is modal), or onto the surface itself inline or on its page.
   const wasParked = useRef(offscreen)
@@ -146,8 +167,8 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
     const back = wasParked.current && !offscreen
     wasParked.current = offscreen
     if (!back) return
-    if (inline || page) { el.tabIndex = -1; el.focus() } else frame.current?.focus()
-  }, [offscreen, inline, page, el])
+    if (inline || page || aside) { el.tabIndex = -1; el.focus() } else frame.current?.focus()
+  }, [offscreen, inline, page, aside, el])
   useEffect(() => {
     let handle: SurfaceHandle | null = null
     let dead = false
@@ -159,7 +180,12 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
     const ctx: SurfaceMountContext = {
       sessionId, lang, reducedMotion,
       get layout() { return drawn.current },
-      setLayout: l => setEngineSurfaceLayout(l, nonce),
+      setLayout: l => {
+        setEngineSurfaceLayout(l, nonce)
+        // `full` and `side` are always honoured, so `ctx.layout` reports them at once rather than after
+        // the next render (`inline` depends on a slot being on screen and is settled by the render).
+        if ((l === 'full' || l === 'side') && mountedEngineSurfaces().some(s => s.nonce === nonce && s.layout === l)) drawn.current = l
+      },
       close: () => endEngineSurface(nonce),
       keepAlive: on => setEngineSurfaceKeepAlive(nonce, on === true),
       setIndicator: (ind: SurfaceIndicator | null) => {
@@ -175,7 +201,7 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
       .then(h => {
         if (dead) { void h.unmount(); return }
         handle = h
-        if (drawn.current === 'inline') { el.tabIndex = -1; el.focus() }
+        if (drawn.current === 'inline' || el.parentElement === resolveSideSlot()) { el.tabIndex = -1; el.focus() }
       })
       .catch(() => { if (!dead) setError(true) })
     return () => { dead = true; if (handle) void handle.unmount() }
@@ -184,14 +210,18 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   }, [])
   if (offscreen) return <div ref={park} data-engine-parked={surface.id} aria-hidden="true" inert style={PARKED} />
   if (page) return error && pageSlot ? createPortal(<p role="alert" style={{ color: 'var(--text-secondary)', margin: 0, padding: 16 }}>{pt ? 'Não foi possível carregar esta interface.' : 'This interface could not be loaded.'}</p>, pageSlot) : null
-  if (inline) return null
+  if (inline || aside) return null
   const wrapper: React.CSSProperties = full
     ? { position: 'fixed', inset: 0, zIndex: 700, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: bare ? 0 : 'min(24px, calc(2vw / var(--ui-zoom, 1)))' }
     : { position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 700, width: 'min(420px, calc(100vw / var(--ui-zoom, 1)))', display: 'flex', pointerEvents: 'none' }
   const box: React.CSSProperties = bare
+    // Frameless, the frame IS the surface's box: `full` covers the whole viewport and `side` the whole
+    // panel, both as flex columns, so the surface's element (and anything in it sized `height: 100%` or
+    // positioned `absolute; inset: 0`) has a real size. A box sized only by its content collapsed to
+    // 0px around such a surface and the overlay drew nothing but its backdrop.
     ? (full
-      ? { position: 'relative', width: 'min(960px, 100%)', maxHeight: '100%', overflow: 'auto', outline: 'none' }
-      : { position: 'relative', width: '100%', height: '100%', overflow: 'auto', outline: 'none', pointerEvents: 'auto' })
+      ? { position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'auto', outline: 'none' }
+      : { position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'auto', outline: 'none', pointerEvents: 'auto' })
     : full
       ? { position: 'relative', width: 'min(960px, 100%)', maxHeight: '100%', overflow: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, outline: 'none' }
       : { position: 'relative', width: '100%', height: '100%', overflow: 'auto', background: 'var(--bg-card)', borderLeft: '1px solid var(--border)', padding: 16, outline: 'none', pointerEvents: 'auto' }
@@ -207,7 +237,7 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
           </button>
         )}
         {error && <p role="alert" style={{ color: 'var(--text-secondary)', margin: 0 }}>{pt ? 'Não foi possível carregar esta interface.' : 'This interface could not be loaded.'}</p>}
-        <div ref={host} />
+        <div ref={host} style={bare ? { position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : undefined} />
       </div>
     </div>
   )
