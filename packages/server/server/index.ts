@@ -5380,6 +5380,21 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
     })().catch(err => console.error('[agentask] queued thread replies:', err instanceof Error ? err.message : String(err)))
       .finally(() => { flushing = false })
   }, 30_000).unref()
+  // CONTA.AUTO — a session stopped at its account's usage limit moves, once per limit episode, to another account of the
+  // same harness that has room (`sessions/auto-switch.ts`). Off with the Settings switch or without multiple accounts;
+  // a tick does nothing when no session is limit-blocked (one registry read + the tail of each live transcript).
+  let autoSwitching = false
+  setInterval(() => {
+    if (autoSwitching) return
+    autoSwitching = true
+    void (async () => {
+      const [{ runAutoSwitchTick, defaultAutoSwitchDeps }, { readPreferences }] = await Promise.all([import('./sessions/auto-switch-io'), import('./preferences')])
+      const prefs = await readPreferences().catch(() => ({} as { lang?: string }))
+      const r = await runAutoSwitchTick(await defaultAutoSwitchDeps((prefs as { lang?: string }).lang === 'pt' ? 'pt' : 'en'))
+      if (r.moved.length) console.log(`[auto-switch] moved ${r.moved.length} limit-blocked session(s) to an account with room`)
+    })().catch(err => console.error('[auto-switch]', err instanceof Error ? err.message : String(err)))
+      .finally(() => { autoSwitching = false })
+  }, 60_000).unref()
 }
 } catch (err: unknown) {
   const { isAddressInUse, EXIT_INSTANCE_HELD } = await import('./service-exit')

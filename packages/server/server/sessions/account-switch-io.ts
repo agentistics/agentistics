@@ -80,13 +80,42 @@ export async function rootOfAccount(harness: HarnessId, accountId: string | unde
 
 /** Is this conversation stopped on a usage limit? Read from the transcript's last 256 KiB. */
 export async function readLimitState(o: { harness: HarnessId; conversationId: string; cwd: string; accountId?: string }): Promise<LimitState | null> {
-  if (!SWITCH_LAYOUT[o.harness]) return null
-  const root = await rootOfAccount(o.harness, o.accountId)
-  const files = await findSourceFiles(o.harness, root, o.conversationId, o.cwd)
-  if (!files.transcript) return null
-  const tail = await readTailBytes(files.transcript, 256 * 1024)
-  if (!tail) return null
-  return detectLimitInTail(o.harness, windowLines(tail))
+  const r = await readLimitProbe(o)
+  return r.kind === 'limited' ? r.state : null
+}
+
+/**
+ * The same read, with the THREE answers a caller that acts on it needs: `limited`, `clear` (a transcript was read and its
+ * last turn is not a limit — a positive answer) and `unread` (no transcript found / unreadable: it proves nothing).
+ * `cache` (CONTA.AUTO's 60 s tick): the transcript path is remembered per conversation (no directory walk after the
+ * first) and the tail is re-read only when the file's mtime changed.
+ */
+export type LimitProbe = { kind: 'limited'; state: LimitState } | { kind: 'clear' } | { kind: 'unread' }
+export interface LimitProbeCache { entries: Map<string, { path: string; mtimeMs: number; result: LimitProbe }> }
+export const newLimitProbeCache = (): LimitProbeCache => ({ entries: new Map() })
+
+export async function readLimitProbe(o: { harness: HarnessId; conversationId: string; cwd: string; accountId?: string }, cache?: LimitProbeCache): Promise<LimitProbe> {
+  if (!SWITCH_LAYOUT[o.harness]) return { kind: 'unread' }
+  const key = `${o.harness}:${o.accountId ?? ''}:${o.conversationId}`
+  const hit = cache?.entries.get(key)
+  let path = hit?.path
+  if (path) {
+    const st = await stat(path).catch(() => null)
+    if (!st) { cache!.entries.delete(key); path = undefined }
+    else if (hit && st.mtimeMs === hit.mtimeMs) return hit.result
+  }
+  if (!path) {
+    const root = await rootOfAccount(o.harness, o.accountId)
+    path = (await findSourceFiles(o.harness, root, o.conversationId, o.cwd)).transcript
+  }
+  if (!path) return { kind: 'unread' }
+  const st = await stat(path).catch(() => null)
+  const tail = await readTailBytes(path, 256 * 1024)
+  if (!st || !tail) return { kind: 'unread' }
+  const state = detectLimitInTail(o.harness, windowLines(tail))
+  const result: LimitProbe = state ? { kind: 'limited', state } : { kind: 'clear' }
+  cache?.entries.set(key, { path, mtimeMs: st.mtimeMs, result })
+  return result
 }
 
 /** The harnesses a hand-off could start here: spec'd and on PATH. A blind PATH offers none. */
