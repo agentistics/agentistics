@@ -92,6 +92,48 @@ describe('pure', () => {
   })
 })
 
+test('390px sessions indicator reserves a wrapping row below the title, with icon, timer and end', async () => {
+  state.resetEngineSurfaceHostForTests()
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+  setSystemTime(new Date(1_800_000_005_000))
+  const view = await mount(h(router.MemoryRouter, null,
+    h('div', { style: { display: 'flex', flexDirection: 'column', width: 390 } },
+      h('header', { 'data-session-title': true }, 'A long session title that must remain readable'),
+      h(indicatorMod.EngineSurfaceIndicatorRow, { lang: 'en' }))))
+  try {
+    expect(view.host.querySelector('[data-engine-indicator-row]')).toBeNull()
+    await act(async () => {
+      state.openEngineSurface(rail as never, { sessionId: null, lang: 'en' })
+      state.setEngineSurfaceIndicator(state.currentEngineSurface()!.nonce, {
+        label: { pt: 'Em andamento', en: 'Running surface' }, icon: 'phone',
+        since: 1_800_000_000_000, endLabel: { pt: 'Encerrar', en: 'End' },
+      })
+    })
+    const row = view.host.querySelector<HTMLElement>('[data-engine-indicator-row]')!
+    const title = view.host.querySelector<HTMLElement>('[data-session-title]')!
+    // The header and indicator are separate flex rows; no positioned overlay can cover the title.
+    expect(title.nextElementSibling).toBe(row)
+    expect(row.style.position).toBe('')
+    expect(row.style.flexShrink).toBe('0')
+    expect(row.style.flexWrap).toBe('wrap')
+    const pill = row.querySelector<HTMLElement>('[data-engine-indicator]')!
+    expect(pill.textContent).toBe('00:05End')
+    expect(pill.querySelector('svg')).not.toBeNull()
+    expect(pill.querySelector('button')!.getAttribute('aria-label')).toBe('Running surface, 00:05')
+    let ended = 0
+    state.onEngineSurfaceIndicatorEnd(state.currentEngineSurface()!.nonce, () => { ended++ })
+    await act(async () => { pill.querySelector<HTMLButtonElement>('[data-engine-indicator-end]')!.click() })
+    expect(ended).toBe(1)
+    await act(async () => { state.setEngineSurfaceIndicator(state.currentEngineSurface()!.nonce, null) })
+    expect(view.host.querySelector('[data-engine-indicator-row]')).toBeNull()
+  } finally {
+    await act(async () => { view.root.unmount(); state.resetEngineSurfaceHostForTests() })
+    view.host.remove()
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 })
+    setSystemTime()
+  }
+})
+
 describe('rail page, keepAlive and indicator', () => {
   test('rail entry → page mount → leaving without keepAlive unmounts', async () => {
     state.resetEngineSurfaceHostForTests()

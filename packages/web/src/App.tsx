@@ -43,7 +43,7 @@ import type { TagDef } from './lib/tagMatch'
 import { canCreateTagFromFilters, filtersToTagDraft } from './lib/filtersToTag'
 import type { BillingSettings, CostBasis, Filters, SurfaceHarnessId, HealthIssue, SavedComparison, TeamConfig } from '@agentistics/core'
 import type { Lang, Theme } from '@agentistics/core'
-import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, fmt, totalTokens, totalTokensExplained } from '@agentistics/core'
+import { isAdapterHarness, billingReadiness, monthlyCommitment, normalizeBillingSettings, normalizeComparisons, planAllocation, formatProjectName, MODEL_PRICING, distinctUsers, distinctHarnesses, filterByUsers, fmtCost, surfaceHarnesses, NATIVE_HARNESS_ID, fmt, totalTokens, totalTokensExplained, isNayCwd } from '@agentistics/core'
 import { StatCard } from './components/StatCard'
 import { StreakBreakdownButton } from './components/StreakBreakdownButton'
 import { ActivityHeatmap } from './components/ActivityHeatmap'
@@ -3251,7 +3251,8 @@ export default function AppLayout() {
             {headerSession.title}
           </span>
           {headerSession.actionable && <AwayChip id={headerSession.id} away={headerSession.away === true} pt={lang === 'pt'} />}
-          <EngineSurfaceButtons placement="session-header" sessionId={headerSession.id} lang={lang === 'pt' ? 'pt' : 'en'} />
+          <EngineSurfaceButtons placement="session-header" sessionId={headerSession.id}
+            sessionKind={isNayCwd(headerSession.cwd) ? 'nay' : 'session'} lang={lang === 'pt' ? 'pt' : 'en'} />
           {headerMuted && (
             <span role="img" aria-label={mutedTooltip(lang === 'pt')} title={mutedTooltip(lang === 'pt')}
               style={{ display: 'inline-flex', alignItems: 'center', flexShrink: 0, color: 'var(--text-tertiary)' }}>
@@ -4611,15 +4612,6 @@ export default function AppLayout() {
       <CheckinModalHost lang={lang === 'pt' ? 'pt' : 'en'} />
       <AwayDialogHost />
       <EngineSurfaceHost />
-      {/* The sessions workspace on a phone has no app header (the session draws its own bar), so an engine
-          surface's indicator floats at the top there, compact, clear of the bottom navigation. It keeps
-          to the bar's middle — the back arrow and the bar's own buttons stay reachable at the sides —
-          and several pills wrap inside that band instead of running past it. */}
-      {isMobile && inSessionsWorkspace && (
-        <div style={{ position: 'fixed', top: 'calc(var(--safe-top, 0px) + 6px)', left: 56, right: 96, zIndex: 650, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-          <span style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 4, maxWidth: '100%', minWidth: 0, pointerEvents: 'auto' }}><EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} /></span>
-        </div>
-      )}
 
       {/* VAULT.PERSONAL §10: the one unlock any screen can ask for (ensureVaultOpen), and — on this
           computer — the phones waiting for approval. A central has no vault of its own here. */}

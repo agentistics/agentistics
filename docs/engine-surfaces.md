@@ -92,7 +92,9 @@ page by navigating to its route, a session surface (`composer`, `session-header`
 session that owns it, in the layout it had. With `endLabel` the pill carries a secondary button that
 calls the callback registered with `ctx.onIndicatorEnd(fn)` (which returns a function that removes it).
 On a phone the pill is compact (icon and timer; the label stays its accessible name), sits in the top
-bar, and never covers the bottom navigation.
+bar, and never covers the bottom navigation. In the mobile Sessions workspace, indicators reserve a
+wrapping row below its own header, so they cannot overlap the session title. The row disappears when
+no mounted surface has an indicator.
 
 ### Opening a session: `ctx.openSession` (1.18, optional)
 
@@ -199,3 +201,23 @@ load on an older host. It follows 1.16 (flows).
 
 Contract 1.15 (minor): everything above is optional. A 1.14 engine still loads; a 1.15 engine on an
 older host is refused at load (unreserved prefix) and the host runs as a community build.
+
+## Floating windows and Nay sessions sections (engine-api 1.19)
+
+`layout: 'float'` uses the same draggable, resizable window as detached sessions. Minimize keeps the
+same mounted element running off screen and adds a live badge to the Nay button; clicking the button
+restores the window. Closing follows `keepAlive`; `ctx.close()` always ends the surface.
+
+A kept-alive `inline` or `side` surface automatically becomes `float` when its session leaves the
+screen. It does not open an aside on the next screen. Set `floatOnLeave: false` to retain the previous
+fallback behavior. Full-screen and rail-page surfaces keep their existing behavior.
+
+`placement: 'nay-sessions'` adds a section labelled with the surface's localized `label` INSIDE the
+Nay panel's Sessions tab, alongside Active, Groups and Ended in the existing segmented control. It
+does not add a top-level Nay panel tab. Selecting the section loads the module there. Switching
+sections or closing the panel keeps the mounted surface off screen. All new placements and layouts obey the existing manifest `experimental` flag:
+when disabled, no tab, button, window or module request appears.
+
+Turns submitted through the structured surface handle show the person's text as a user bubble with a
+microphone chip. The transport header and any leading bracketed instruction paragraphs are removed
+from the display. Peer reports continue to use the system-event renderer.

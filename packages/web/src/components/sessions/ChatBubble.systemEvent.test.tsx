@@ -231,3 +231,14 @@ test('expanded long unbroken URLs inherit wrapping within the notice body', () =
   expect(html).toContain('min-width:0')
   expect(html).toContain('word-break:break-word')
 })
+
+test('surface turns render the person bubble and mic chip without the transport header or instructions', () => {
+  const html = renderToStaticMarkup(<ChatBubble turn={{ role: 'user', text: '[from agentistics · surface]\n[Internal transport instructions.]\n\nShow my current tasks.' }} lang="en" harness="claude" />)
+  expect(html).toContain('Show my current tasks.')
+  expect(html).toContain('lucide-user')
+  expect(html).toContain('data-surface-turn')
+  expect(html).toContain('lucide-mic')
+  expect(html).not.toContain('Internal transport')
+  expect(html).not.toContain('from agentistics')
+  expect(html).not.toContain('aria-expanded="false"')
+})

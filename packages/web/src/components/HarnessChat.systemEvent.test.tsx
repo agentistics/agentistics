@@ -18,3 +18,12 @@ describe('MessageBubble', () => {
     expect(html).toContain('Você')
   })
 })
+
+test('surface turns show the person text and mic marker in the harness transcript', () => {
+  const html = renderToStaticMarkup(<MessageBubble msg={{ role: 'user', content: '[from agentistics · surface]\n[Internal instructions.]\n\nShow my tasks.' } as never} harness="claude" pt={false} />)
+  expect(html).toContain('Show my tasks.')
+  expect(html).toContain('You')
+  expect(html).toContain('data-surface-turn')
+  expect(html).not.toContain('Internal instructions')
+  expect(html).not.toContain('from agentistics')
+})

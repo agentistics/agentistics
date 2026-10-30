@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.172.0': {
+    features: [
+      {
+        pt: 'Interfaces de motores podem acompanhar você em uma janela flutuante ao sair da sessão. Minimize no botão da Nay e retome sem interromper o que está rodando.',
+        en: 'Engine interfaces can follow you in a floating window when you leave a session. Minimize onto the Nay button and restore without interrupting what is running.',
+      },
+      {
+        pt: 'A aba Sessões do painel flutuante da Nay pode receber seções de motores habilitados.',
+        en: 'The Sessions tab of the floating Nay panel can show sections from enabled engines.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Mensagens suas enviadas por uma interface agora aparecem na conversa, sem as instruções internas.',
+        en: 'Your messages sent through an interface now appear in the conversation, without internal instructions.',
+      },
+    ],
+  },
   '2.171.0': {
     features: [
       {

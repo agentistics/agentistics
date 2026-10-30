@@ -168,7 +168,8 @@
  * `StructuredDeclaration.fork`, and `StructuredStart`'s `blocked` (a refusal the harness's own version causes,
  * which the host tells the person instead of falling back). An engine built against 1.17 never sets them.
  */
-export const ENGINE_API_VERSION = '1.18.0'
+/** 1.19.0 — floating surfaces, floatOnLeave, and engine sections inside the Nay panel's Sessions tab. */
+export const ENGINE_API_VERSION = '1.19.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

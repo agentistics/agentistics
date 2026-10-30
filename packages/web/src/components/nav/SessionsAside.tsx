@@ -19,7 +19,7 @@ import { TEAM_MOVE, TEAM_UNLINK, commonProjectOf, leaderPickerEntries, looseFact
  */
 
 import { applySummaryFilter, capacityText, summaryCounts, summaryParts, toggleSummaryPart, type SummaryPart } from '../../lib/asideSummary'
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { blurAfterDrag } from '../../lib/dragCleanup'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -117,7 +117,16 @@ const SLEEPING_PINS = 'pinned:sleeping'
 const PIN_TOGGLE = '__pin_toggle__'
 const ROOT_ENDED_FOLDERS = 'folders:root-ended'
 
+export interface SessionsAsideExtraTab {
+  id: string
+  label: string
+  onSelect(): void
+  content: ReactNode
+}
+
 export interface SessionsAsideProps {
+  /** Optional sections of this sessions group, using its existing sub-navigation. */
+  extraTabs?: readonly SessionsAsideExtraTab[]
   lang: 'pt' | 'en'
   /** THE CAPACITY HOOK: when a source of "N/M vagas" exists it is passed here; absent draws nothing. */
   capacity?: { used: number; max: number } | null
@@ -280,7 +289,7 @@ function roleExtras(row: ControlSession | undefined, pt: boolean): MenuEntry[] {
 export function SessionsAside({
   lang, capacity, rows, loading, closedTotal = 0, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
-  onCreated, selectedId, onGoToSession,
+  onCreated, selectedId, onGoToSession, extraTabs,
 }: SessionsAsideProps) {
   const pt = lang === 'pt'
   const mutedKeys = useMutedKeys()
@@ -851,6 +860,9 @@ export function SessionsAside({
    * session belongs to which team and which section; this component only draws.
    */
   const tab = useAsideTab()
+  const [extraId, setExtraId] = useState<string | null>(null)
+  const extra = extraTabs?.find(t => t.id === extraId)
+  useEffect(() => { if (extraId && !extraTabs?.some(t => t.id === extraId)) setExtraId(null) }, [extraId, extraTabs])
   const setTab = (t: AsideTab) => writeAsideGroupPrefs({ tab: t })
   const foldedTeams = useFoldedTeams()
   const now = Date.now()
@@ -1565,19 +1577,24 @@ export function SessionsAside({
       </div>
 
       {/* THE TABS — the shared segmented control (`SegmentedTabs`), not a second one. */}
-      <div style={{ padding: '0 2px' }}>
-        <SegmentedTabs<AsideTab>
+      <div style={{ padding: '0 2px', overflowX: extraTabs?.length ? 'auto' : undefined }}>
+        <SegmentedTabs<string>
           ariaLabel={pt ? 'Sessões' : 'Sessions'}
           containerName="aside-tabs"
           className="ag-aside-tabs"
-          value={tab}
-          onChange={setTab}
+          value={extra?.id ?? tab}
+          onChange={id => {
+            const section = extraTabs?.find(t => t.id === id)
+            if (section) { setExtraId(id); section.onSelect() }
+            else if (id === 'active' || id === 'groups' || id === 'ended') { setExtraId(null); setTab(id) }
+          }}
           tabs={[
             { id: 'active', label: pt ? 'Ativas' : 'Active', badge: liveCount, badgeTone: 'quiet',
               badgeLabel: pt ? `${liveCount} ativas` : `${liveCount} active` },
             { id: 'groups', label: pt ? 'Grupos' : 'Groups' },
             { id: 'ended', label: pt ? 'Encerradas' : 'Ended', badge: fellCount, badgeTone: 'alert',
               badgeLabel: pt ? (fellCount === 1 ? '1 caiu' : `${fellCount} caíram`) : `${fellCount} fell` },
+            ...(extraTabs ?? []).map(t => ({ id: t.id, label: t.label })),
           ]}
         />
       </div>
@@ -1799,7 +1816,7 @@ export function SessionsAside({
         ref={asideScrollRef}
         data-mobile-sessions-scroll={isMobile || undefined}
         className="ag-noscroll"
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', display: extra ? 'flex' : undefined, flexDirection: extra ? 'column' : undefined }}
         onDragOverCapture={autoScrollDuringDrag}
         // LEAVING A FOLDER: a nested folder dragged by its body and dropped ANYWHERE that is not a
         // folder (blank space, a heading, the pinned band, the automatic sections) comes back out
@@ -1822,6 +1839,7 @@ export function SessionsAside({
           setDraggingGroupId(null)
         }}
       >
+        {extra ? extra.content : <>
         {tab === 'active' && (
           <div data-tab-body="active" style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: '100%', padding: '2px 0 4px' }}>
             {shownTeams.map(t => {
@@ -2034,6 +2052,7 @@ export function SessionsAside({
             )}
           </div>
         )}
+        </>}
       </div>
 
       {linking && (

@@ -113,6 +113,7 @@ import {
   openArtifacts, setArtifactCount, setArtifactLive, useArtifactLive, usePanelFocusRequest,
 } from '../lib/artifactsStore'
 import { studioMenuRow } from '../lib/studioMenuRow'
+import { EngineSurfaceIndicatorRow } from '../components/EngineSurfaceIndicator'
 import { EngineSurfaceAside, engineAsideWantsOpen, panelsPickAction } from '../components/EngineSurfaceAside'
 import { registerEngineSideWant, useEngineSideAsideId, useEngineSideSurface } from '../lib/engineSurfaceHost'
 import { closedRightEdge, restingLeftEdge, setRightAsideEdge, useRightAsideEdge } from '../lib/rightAsideEdge'
@@ -2738,6 +2739,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             </div>
           </div>
         </div>
+        {isMobile && <EngineSurfaceIndicatorRow lang={pt ? 'pt' : 'en'} />}
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8, padding: 10 }}>
           {/* A link to `?pane=shell` on a machine that serves no shell must not quietly draw the
               ASSISTANT's pane under a shell's name. There is no selector here to say so any more
@@ -2799,6 +2801,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0,
         paddingTop: 'var(--safe-top)',
       }}>
+        <EngineSurfaceIndicatorRow lang={pt ? 'pt' : 'en'} />
         <SessionCreating
           lang={pt ? 'pt' : 'en'}
           ready={finishing}
@@ -2921,6 +2924,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         <HandoffMeter id={selected.id} pt={pt} act={act} />
         {selected.actionable && <AwayChip id={selected.id} away={selected.away === true} pt={pt} compact />}
       </div>
+      <EngineSurfaceIndicatorRow lang={tPt} />
       {tabNoticeEl}
       {/* `display: flex` is the load-bearing part, not `flex: 1`.
           This div had `flex: 1, minHeight: 0` and no display, so it was a BLOCK. Its child —
@@ -3134,6 +3138,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
         {filterButton}
         {magnifierButton}
       </div>
+      <EngineSurfaceIndicatorRow lang={pt ? 'pt' : 'en'} />
       {/* `display: flex` again, and for the third time in this file's history the SAME rule:
           `flex: 1` on a child means nothing until its PARENT is a flex container. This div had
           `flex: 1, minHeight: 0` and no display, so `SessionsAside`'s own `flex: 1 1 0%` column
