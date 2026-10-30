@@ -17,6 +17,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'O botão de enviar não pula mais para a esquerda quando você começa a digitar.',
         en: 'The send button no longer jumps to the left when you start typing.',
       },
+      {
+        pt: 'A barra embaixo do campo mostra o modelo de verdade da sessão, e não só "Modelo".',
+        en: 'The bar below the field shows the session\'s real model instead of just "Model".',
+      },
     ],
   },
   '2.168.0': {

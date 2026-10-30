@@ -81,7 +81,8 @@ import {
   composeQuoted, locateExcerpt,
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
-import { modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
+import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
+import { prettyModelLabel } from '../../lib/prettyModelLabel'
 import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
@@ -648,10 +649,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const currentModelLabel = menuModels.find(model => model.id === currentModelId)?.label ?? currentModelId
   /** M3 status band: the model button always names a model — the live control's, else the one the
    *  session was started on — and the effort when one is known. Never a bare "Modelo". */
-  const statusModelLabel = !currentModelId
+  // Where the model is known at all: the live control, the started model, the fleet row's own
+  // reading, else the transcript's dominant model. A session without the first two (an adopted or
+  // external one) used to show a bare "Modelo" (owner, 2026-10-30: "tá aparecendo só 'modelo'").
+  const statusModelId = currentModelId || row?.model || metrics?.meta?.model || ''
+  const statusModelLabel = !statusModelId
     ? (pt ? 'Modelo' : 'Model')
-    // A menu label that is only the raw id ("haiku") gives way to the harness catalogue's ("Haiku 4.5").
-    : currentModelLabel !== currentModelId ? currentModelLabel : modelLabel(session.harness, currentModelId)
+    : prettyModelLabel(session.harness, statusModelId, menuModels.find(model => model.id === statusModelId)?.label)
   const statusEffort = sourceControls?.effort?.value ?? session.effort ?? null
   /** The composer menu opened from the status band is `fixed` to the viewport — but the glass field
    *  has a backdrop-filter, which makes it the containing block of every fixed descendant, so in place
@@ -4206,3 +4210,4 @@ function excerptRange(root: HTMLElement, excerpt: string): Range | null {
   r.setEnd(b[0], b[1])
   return r
 }
+
