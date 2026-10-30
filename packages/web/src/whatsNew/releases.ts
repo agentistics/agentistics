@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.165.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O vidro ficou visível também no tema claro e um pouco mais transparente no escuro; o chat flutuante da Nay continua sólido.',
+        en: 'Glass is now visible in the light theme too and a little more see-through in the dark one; the Nay floating chat stays solid.',
+      },
+      {
+        pt: 'Passagens de bastão, relays entre sessões e instruções carregadas pelo Codex aparecem como avisos do sistema, e não mais como mensagens suas.',
+        en: 'Leader hand-offs, relays between sessions and Codex-loaded instructions now appear as system notices instead of looking like messages you wrote.',
+      },
+      {
+        pt: 'O rodapé da lista ficou mais limpo, sem o botão Ajustes repetido.',
+        en: 'The list footer is cleaner, without the repeated Settings button.',
+      },
+    ],
+  },
   '2.165.2': {
     features: [],
     fixes: [

@@ -25,22 +25,38 @@ export interface SystemEvent {
   label?: string
 }
 
+/** Agentistics' relay channel may fence a peer report in this wrapper before it reaches a CLI. */
+const AGENT_MESSAGE = /^\s*<agent-message(?:\s+[^>]*)?>([\s\S]*?)<\/agent-message>\s*$/i
+const CONTEXT_BLOCK = /^\s*<agentistics-context>[\s\S]*<\/agentistics-context>\s*$/i
+
+function unwrapAgentMessage(text: string): string | null {
+  const match = AGENT_MESSAGE.exec(text)
+  return match ? match[1]!.trim() : null
+}
+
 // Before the producer added a header, these prompts were stored as ordinary user turns.
 const LEGACY_CHECKIN = /^\s*(?:Faça o check-in da liderança agora\.|Run the leadership check-in now\.)/
 
 export function parseSystemEvent(raw: string): SystemEvent | null {
   const text = unwrapAllPasted(raw)
-  const h = parseInjectedHeader(raw)
+  if (CONTEXT_BLOCK.test(text)) {
+    const handoff = /handoff|passagem|predecessor|successor/i.test(text)
+    return { kind: 'notice', label: handoff ? 'handoff' : 'context', body: '' }
+  }
+  const agentBody = unwrapAgentMessage(text)
+  const normalized = agentBody ?? text
+  const h = parseInjectedHeader(agentBody ?? raw)
   if (!h) {
-    const invocation = slashInvocation(text)
+    if (agentBody !== null) return { kind: 'session-note', label: 'agent', body: agentBody }
+    const invocation = slashInvocation(normalized)
     if (invocation?.command === '/rename' && invocation.args && !/[\r\n]/.test(invocation.args)) {
       return { kind: 'rename', body: invocation.args }
     }
     // Match the entire historical producer output, never a mention of its marker in typed prose.
     if ((['leader', 'worker', null] as const).some(role =>
-      text.trim() === `[agentistics] your role is now ${role ? role.toUpperCase() : 'AUTO'} — ${roleLine(role)}`,
-    )) return { kind: 'role', body: text.trim() }
-    return LEGACY_CHECKIN.test(text) ? { kind: 'checkin', body: text } : null
+      normalized.trim() === `[agentistics] your role is now ${role ? role.toUpperCase() : 'AUTO'} — ${roleLine(role)}`,
+    )) return { kind: 'role', body: normalized.trim() }
+    return LEGACY_CHECKIN.test(normalized) ? { kind: 'checkin', body: normalized } : null
   }
   const { kind: what, body } = h
   if (h.origin === 'agentistics') {
@@ -85,7 +101,12 @@ export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): stri
     case 'block': return (pt ? 'Sessão bloqueada' : 'Session blocked') + suffix
     case 'session-question': return (pt ? 'Pergunta de uma sessão' : 'Question from a session') + suffix
     case 'relay': return pt ? 'Mensagem encaminhada da sessão anterior' : 'Forwarded from the previous session'
-    case 'notice': return pt ? `Aviso do agentistics (${e.label ?? 'aviso'})` : `agentistics notice (${e.label ?? 'notice'})`
-    case 'session-note': return (pt ? `Mensagem de uma sessão (${e.label ?? 'mensagem'})` : `Message from a session (${e.label ?? 'message'})`) + suffix
+    case 'notice':
+      if (e.label === 'handoff') return pt ? 'Passagem de bastão · sistema' : 'Handoff context · system'
+      if (e.label === 'context') return pt ? 'Contexto do agentistics · sistema' : 'agentistics context · system'
+      return pt ? `Aviso do agentistics (${e.label ?? 'aviso'})` : `agentistics notice (${e.label ?? 'notice'})`
+    case 'session-note':
+      if (e.label === 'agent') return pt ? 'Mensagem de outro agente' : 'Message from another agent'
+      return (pt ? `Mensagem de uma sessão (${e.label ?? 'mensagem'})` : `Message from a session (${e.label ?? 'message'})`) + suffix
   }
 }

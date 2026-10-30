@@ -187,12 +187,33 @@ describe('parseCodexChat', () => {
     // the opening line is the only signal. 11 of the 32 untagged user messages measured were these.
     const turns = parseCodexChat([
       msg('user', '# AGENTS.md instructions for /home/me/embark\n\n<INSTRUCTIONS>\n…a whole file…'),
+      msg('user', '# AGENTS.md instructions\n\n<INSTRUCTIONS>\n…current project file…'),
       msg('user', '# Context from my IDE setup:\n…'),
     ])
     expect(turns.map(t => t.system))
-      .toEqual(['project instructions were loaded', 'context from the editor'])
+      .toEqual(['project instructions were loaded', 'project instructions were loaded', 'context from the editor'])
     // Never the body: an AGENTS.md dump is a whole file.
     expect(turns[0]!.text).toBe('project instructions were loaded')
+  })
+
+  it('the AGENTS.md header only counts as the OPENING line, never quoted mid-message', () => {
+    const text = 'why did this load?\n# AGENTS.md instructions\nplease check'
+    const [turn] = parseCodexChat([msg('user', text)])
+    expect(turn).toEqual({ role: 'user', text, at: AT })
+  })
+
+  it('an agent-message relay is a note, never the owner\'s prompt', () => {
+    const [turn] = parseCodexChat([
+      msg('user', '<agent-message>worker report\n- tests pass\n</agent-message>'),
+    ])
+    expect(turn).toMatchObject({ role: 'user', text: 'a message from another agent', system: 'a message from another agent' })
+  })
+
+  it('a handoff context block is a note, never the owner\'s prompt', () => {
+    const [turn] = parseCodexChat([
+      msg('user', '<agentistics-context>handoff from predecessor\nsummary</agentistics-context>'),
+    ])
+    expect(turn).toMatchObject({ role: 'user', text: 'handoff context from agentistics', system: 'handoff context from agentistics' })
   })
 
   it('a message merely STARTING with # is the person’s — the table is not a prefix guess', () => {

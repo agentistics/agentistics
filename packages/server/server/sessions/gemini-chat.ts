@@ -46,7 +46,7 @@ import { commandSummary } from './shell-writes'
 /** The bootstrap block gemini writes under the user role on startup. Not a person talking. */
 const SESSION_CONTEXT = /^<session_context>/
 /** Entries the harness or agentistics typed under the user role: notes, never the person (HANDOFF.RELAY). */
-const INJECTED = /^(?:<system-reminder>|<task-notification>|<local-command|<agentistics-context>|\[from agentistics\b)/
+const INJECTED = /^(?:<system-reminder>|<task-notification>|<local-command|<agentistics-context>|<agent-message(?:\s|>)|\[from agentistics\b)/i
 
 /** Gemini's own message types, mapped onto the two roles a turn can have. `null` = not a turn. */
 function roleOf(type: unknown): ChatTurn['role'] | null {

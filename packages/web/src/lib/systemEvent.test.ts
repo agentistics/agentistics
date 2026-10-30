@@ -144,6 +144,19 @@ describe('relay and unknown headers fail closed', () => {
     expect(s.kind).toBe('session-note')
     expect(systemEventLine(s, true)).toBe('Mensagem de uma sessão (fyi)')
   })
+
+  test('agent-message relay wrappers are system events, never the owner', () => {
+    const event = parseSystemEvent('<agent-message>worker report\n- tests pass\n</agent-message>')!
+    expect(event.kind).toBe('session-note')
+    expect(event.label).toBe('agent')
+    expect(event.body).toContain('worker report')
+  })
+
+  test('a handoff context block is a system notice, never the owner\'s prompt', () => {
+    const event = parseSystemEvent('<agentistics-context>handoff from predecessor\nsummary</agentistics-context>')!
+    expect(event).toEqual({ kind: 'notice', label: 'handoff', body: '' })
+    expect(systemEventLine(event, true)).toBe('Passagem de bastão · sistema')
+  })
   test('every producer header in the codebase is recognised', async () => {
     const { Glob } = await import('bun')
     const found = new Set<string>()
