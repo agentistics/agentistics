@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.170.1': {
+    features: [],
+    fixes: [
+      {
+        pt: "Trocar para 'Sem perguntas' agora abre uma confirmação explicando o risco; nada mais aparece embaixo da barra ao trocar de modo.",
+        en: "Switching to 'No questions' now opens a confirmation explaining the risk; nothing else shows under the bar when you change mode.",
+      },
+      {
+        pt: 'O cabeçalho da sessão, logo abaixo das abas, agora tem os quatro cantos arredondados, como os outros painéis.',
+        en: 'The session header, just below the tabs, now has all four corners rounded, like the other panels.',
+      },
+    ],
+  },
   '2.170.0': {
     features: [
       {
