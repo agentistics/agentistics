@@ -1,4 +1,9 @@
-import { beforeAll, describe, expect, test } from 'bun:test'
+import { beforeAll, describe, expect, test, beforeEach, afterEach } from 'bun:test'
+
+// Hermetic: a batch run here is the owner's unless a test sets a caller itself (never the runner's own session).
+const runnerId = process.env.AGENTOP_MANAGED_ID
+beforeEach(() => { delete process.env.AGENTOP_MANAGED_ID })
+afterEach(() => { if (runnerId === undefined) delete process.env.AGENTOP_MANAGED_ID; else process.env.AGENTOP_MANAGED_ID = runnerId })
 import { batch } from './cli-session'
 import { readRegistry } from './registry'
 import { createTaskStore } from './task-store'
