@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.168.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Mensagens que uma sessão manda para outra (inclusive o relatório de um ajudante) não aparecem mais no chat como se fossem pedidos seus.',
+        en: 'Messages one session sends to another (including a helper\'s report) no longer show up in the chat as if they were your own requests.',
+      },
+    ],
+  },
   '2.168.1': {
     features: [],
     fixes: [

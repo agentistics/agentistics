@@ -25,13 +25,20 @@ export interface SystemEvent {
   label?: string
 }
 
-/** Agentistics' relay channel may fence a peer report in this wrapper before it reaches a CLI. */
-const AGENT_MESSAGE = /^\s*<agent-message(?:\s+[^>]*)?>([\s\S]*?)<\/agent-message>\s*$/i
+/** Agentistics' relay channel may fence a peer report in this wrapper before it reaches a CLI. Claude
+ *  Code delivers it with its own lead-in line ("Another Claude session sent a message:") and, for a
+ *  subagent hand-back, sometimes without the closing tag — both still a peer report, never the person
+ *  (owner, 2026-10-30: "sua correção das mensagens chegando como prompt não vão sair???"). */
+const AGENT_MESSAGE = /^\s*(?:Another (?:Claude )?session sent a message:\s*)?<agent-message(?:\s+[^>]*)?>([\s\S]*?)(?:<\/agent-message>\s*)?$/i
 const CONTEXT_BLOCK = /^\s*<agentistics-context>[\s\S]*<\/agentistics-context>\s*$/i
 
 function unwrapAgentMessage(text: string): string | null {
   const match = AGENT_MESSAGE.exec(text)
-  return match ? match[1]!.trim() : null
+  if (!match) return null
+  // Unclosed is only a hand-back when no closing tag exists at all: a closed wrapper followed by more
+  // text is the person quoting a relay, and stays theirs.
+  if (/<\/agent-message>/i.test(match[1]!)) return null
+  return match[1]!.trim()
 }
 
 // Before the producer added a header, these prompts were stored as ordinary user turns.

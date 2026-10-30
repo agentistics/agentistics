@@ -25,7 +25,7 @@ export const RELAY_MAX_OWNER_MESSAGES = 10
 export const RELAY_MAX_CHARS = 2_000
 export const RELAY_MAX_REPLY_CHARS = 6_000
 
-const NOT_OWNER = /^(?:\[from session\b|\[from agentistics\b|\[from flow\b|<agentistics-context>|<agent-message(?:\s|>)|<task-notification>|<system-reminder>|<local-command|<command-name>|<session_context>|<scheduled-task|<cron\b|<user-prompt-submit-hook|CRON\s+\d{1,2}h\d{2}\b|\[(?:cron|scheduled)\b|\[SCHEDULED\b)/i
+const NOT_OWNER = /^(?:\[from session\b|\[from agentistics\b|\[from flow\b|<agentistics-context>|<agent-message(?:\s|>)|Another (?:Claude )?session sent a message:|<task-notification>|<system-reminder>|<local-command|<command-name>|<session_context>|<scheduled-task|<cron\b|<user-prompt-submit-hook|CRON\s+\d{1,2}h\d{2}\b|\[(?:cron|scheduled)\b|\[SCHEDULED\b)/i
 
 export function isOwnerTurn(turn: Pick<ChatTurn, 'role' | 'text' | 'system'>): boolean {
   if (turn.role !== 'user' || turn.system) return false
