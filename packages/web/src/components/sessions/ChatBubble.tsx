@@ -777,6 +777,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
         {menuAt && hasMenu && !selectMode && (
           <div
             role="menu"
+            data-portalled-menu
             onMouseDown={e => e.stopPropagation()}
             style={{
               position: 'absolute', top: menuAt.y, left: menuAt.x, zIndex: 40,

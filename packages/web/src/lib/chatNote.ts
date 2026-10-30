@@ -161,6 +161,16 @@ export const CHAT_NOTES: Record<string, ChatNote> = {
     'This turn was stopped before it finished — usually you pressed escape.',
     'Este turno foi parado antes de terminar — normalmente você apertou esc.',
   ),
+  'a message from another agent': n(
+    'mensagem de outro agente',
+    'Another session or agent relayed this into the chat; you did not type it.',
+    'Outra sessão ou agente repassou isto para o chat; não foi você que digitou.',
+  ),
+  'handoff context from agentistics': n(
+    'contexto de passagem do agentistics',
+    'agentistics handed the previous leader’s state to this session.',
+    'O agentistics entregou a esta sessão o estado do líder anterior.',
+  ),
   'context from the editor': n(
     'contexto vindo do editor',
     'The editor told the assistant what file you had open.',

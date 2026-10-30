@@ -93,7 +93,7 @@ const DEVELOPER_NOTES: Record<string, string> = {
  * indistinguishable in SHAPE from a message somebody typed — so the text is the only signal there
  * is. This is `chat-envelope.ts`'s `META_KINDS` applied to a different harness, and it is a matched
  * pair with a measurement: over the 40 largest rollouts, 32 user messages carried no envelope tag
- * and **11 of them were these two** (`# AGENTS.md instructions for <path>` nine times, `# Context
+ * and **11 of them were these two** (`# AGENTS.md instructions` with an optional `<path>` nine times, `# Context
  * from my IDE setup:` twice) — a third of the reader's own bubble was the harness loading a file.
  *
  * The NOTE never carries the body, for the reason `chat-envelope.ts` gives: an AGENTS.md dump is a
@@ -101,7 +101,11 @@ const DEVELOPER_NOTES: Record<string, string> = {
  * hides real messages, which is the expensive direction.
  */
 const INJECTED: Array<{ test: RegExp; note: string }> = [
-  { test: /^# AGENTS\.md instructions for /, note: 'project instructions were loaded' },
+  { test: /^<agent-message(?:\s+[^>]*)?>[\s\S]*<\/agent-message>\s*$/i, note: 'a message from another agent' },
+  { test: /^<agentistics-context>[\s\S]*<\/agentistics-context>\s*$/i, note: 'handoff context from agentistics' },
+  // Codex emits the path on some versions, but the current client omits it. Both are the
+  // harness loading AGENTS.md, never a prompt the person typed.
+  { test: /^# AGENTS\.md instructions(?: for [^\n]+)?\s*(?:\n|$)/, note: 'project instructions were loaded' },
   { test: /^# Context from my IDE setup:/, note: 'context from the editor' },
 ]
 
