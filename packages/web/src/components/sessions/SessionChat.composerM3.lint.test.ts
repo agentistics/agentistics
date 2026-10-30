@@ -40,3 +40,12 @@ describe('M3 composer status controls', () => {
     expect(css).toContain('clip-path: inset(0 calc(-100vmax / var(--ui-zoom, 1)) calc(-100vmax / var(--ui-zoom, 1)))')
   })
 })
+
+test('send stays at the far right while typing: the acting group is always pushed by margin auto', () => {
+  expect(source).not.toContain("marginLeft: countLabel ? 6 : 'auto'")
+  expect(source).toContain("gap: 6, marginLeft: 'auto' }}>")
+})
+
+test('the band names the model the way the stats card does (observed model first, alias only as fallback)', () => {
+  expect(source).toContain('modelDisplay(session.harness, metrics?.stats?.model ?? metrics?.meta?.model, startedOrSwitched)')
+})

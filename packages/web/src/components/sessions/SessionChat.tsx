@@ -31,7 +31,7 @@ import { ComposerAttachButton, ComposerAttachments, ComposerMicButton, ComposerS
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { markDictated, stripDictatedMark } from '../../lib/dictationMark'
-import { AlertTriangle, ArrowDown, Bell, BellOff, ChevronDown, ChevronRight, ChevronUp, CornerUpLeft, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Bell, BellOff, ChevronDown, ChevronRight, ChevronUp, CornerUpLeft, Cpu, History, Loader, Mic, Paperclip, RotateCcw, Send, SlidersHorizontal, Square, X } from 'lucide-react'
 import { hasSomethingToSend, stopShown as isStopShown } from '../../lib/composerAction'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { AttentionMarkLine, RecordedBlock } from './AttentionMarks'
@@ -650,10 +650,15 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const currentModelLabel = menuModels.find(model => model.id === currentModelId)?.label ?? currentModelId
   /** M3 status band: the model button always names a model — the live control's, else the one the
    *  session was started on — and the effort when one is known. Never a bare "Modelo". */
-  const statusModelLabel = !currentModelId
+  // The SAME reading the stats card shows (`modelDisplay`): the model the transcript says answered
+  // wins ("Opus 5.5"); what the session was started or switched with ("opus", an alias the catalogue
+  // pins to an older version) is only the fallback. Owner, 2026-10-30: the card said "Opus 5.5" while
+  // the band said "Opus 5", and an adopted session showed a bare "Modelo".
+  const startedOrSwitched = currentModelId || row?.model || ''
+  const statusModelText = modelDisplay(session.harness, metrics?.stats?.model ?? metrics?.meta?.model, startedOrSwitched)
+  const statusModelLabel = !statusModelText
     ? (pt ? 'Modelo' : 'Model')
-    // A menu label that is only the raw id ("haiku") gives way to the harness catalogue's ("Haiku 4.5").
-    : currentModelLabel !== currentModelId ? currentModelLabel : modelLabel(session.harness, currentModelId)
+    : statusModelText === startedOrSwitched ? modelLabel(session.harness, startedOrSwitched) : statusModelText
   const statusEffort = sourceControls?.effort?.value ?? session.effort ?? null
   /** The composer menu opened from the status band is `fixed` to the viewport — but the glass field
    *  has a backdrop-filter, which makes it the containing block of every fixed descendant, so in place
@@ -3603,7 +3608,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     thing a counter beside a text box may not do.
                     `pointerEvents: none` so it can never take a tap meant for a control beside it,
                     and it gives way before the buttons do when the row runs out of width. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: countLabel ? 6 : 'auto' }}>
+                {/* Always `auto` now: the character count moved to the M3 status band, so nothing sits between
+                    attach and this group any more — the old `countLabel ? 6 : 'auto'` made send jump
+                    to the left the moment you typed (owner, 2026-10-30). */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
                 {/* THE HARNESS MODE, and the one control that changes it.
                     Asked for: "nao consigo alternar entre os modos que os harnesses possuem (auto
                     mode, plan mode etc)", to sit left of the recent-message button.
@@ -3983,11 +3991,13 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         }}
                         title={pt ? 'Trocar modelo e esforço' : 'Change model and effort'}
                       >
+                        <Cpu size={13} aria-hidden className="ag-composer-status-icon-lead" />
                         <span className="ag-composer-status-button-label">
                           {statusModelLabel}
                         </span>
                         {statusEffort && <span aria-hidden>·</span>}
                         {statusEffort && <span>{statusEffort}</span>}
+                        <ChevronDown size={12} aria-hidden className="ag-composer-status-chevron" />
                       </button>
                     )}
                     {row?.mode && !answeringNow && (
@@ -4005,14 +4015,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         aria-haspopup="menu"
                         aria-expanded={modeMenuOpen}
                         aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}
-                        style={{
-                          borderColor: modeStyle(row.mode).border,
-                          background: modeStyle(row.mode).bg,
-                          color: modeStyle(row.mode).fg,
-                        }}
+                        // T3 (owner, 2026-10-30): text, not a chip — the mode keeps only its colour.
+                        style={{ color: modeStyle(row.mode).fg }}
                       >
-                        <SlidersHorizontal size={13} />
+                        <SlidersHorizontal size={13} aria-hidden className="ag-composer-status-icon-lead" />
                         <span className="ag-composer-status-button-label">{modeLabel(row.mode, pt ? 'pt' : 'en')}</span>
+                        <ChevronDown size={12} aria-hidden className="ag-composer-status-chevron" />
                       </button>
                     )}
                     {!isMobile && metrics && (
@@ -4213,3 +4221,4 @@ function excerptRange(root: HTMLElement, excerpt: string): Range | null {
   r.setEnd(b[0], b[1])
   return r
 }
+
