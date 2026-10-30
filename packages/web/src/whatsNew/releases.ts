@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.167.0': {
+    features: [
+      {
+        pt: 'O campo de mensagem ganhou uma barra embaixo: o modelo (clique para trocar modelo e esforço), o modo da sessão, o contexto, o contador de caracteres e o histórico. O texto da conversa não aparece mais abaixo do campo.',
+        en: 'The message field has a bar below it: the model (click to change model and effort), the session mode, the context, the character count and the history. Conversation text no longer shows below the field.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'A janela "Continuar em outra conta" não fica mais escondida atrás da barra lateral; o chat da Nay continua por cima.',
+        en: 'The "Continue on another account" window no longer hides behind the sidebar; the Nay chat stays on top.',
+      },
+      {
+        pt: 'O painel de informações da sessão (o "i" no topo) também ganhou o vidro.',
+        en: 'The session info panel (the "i" at the top) gets the glass too.',
+      },
+    ],
+  },
   '2.166.0': {
     features: [
       {

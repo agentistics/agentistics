@@ -351,7 +351,7 @@ export function SessionLinkInfo({ session, links, lang, onGo, isMobile = false }
         onMouseLeave={e => { e.currentTarget.style.color = open ? 'var(--text-secondary)' : 'var(--text-tertiary)' }}
       ><Info size={14} /></button>
       {open && pos && createPortal(
-        <div ref={panelRef} role="dialog" aria-label={label} style={{
+        <div ref={panelRef} role="dialog" aria-label={label} data-session-info-popover style={{
           position: 'fixed', top: pos.top, left: pos.left, width: Math.min(320, window.innerWidth - 24), zIndex: 1200,
           maxHeight: 'calc(60vh / var(--ui-zoom, 1))', overflowY: 'auto', padding: '4px 10px 10px', borderRadius: 10,
           background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.25)',

@@ -81,7 +81,7 @@ import {
   composeQuoted, locateExcerpt,
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
-import { pendingEchoes, sessionIdentityKey } from '@agentistics/core'
+import { modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
@@ -468,10 +468,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   )
   /** The composer's "more options" menu — dictation and the model live in it. */
   const [moreOpen, setMoreOpen] = useState(false)
+  const [moreMenuPos, setMoreMenuPos] = useState<{ top: number; left: number; side: 'left' | 'right' } | null>(null)
   const [foldedMenuGroups, setFoldedMenuGroups] = useState<Set<ComposerMenuGroupId>>(() => readComposerMenuFolded())
   /** The menu AND its button, so an outside-click handler can tell "inside" from "outside". */
   const moreMenuRef = useRef<HTMLDivElement | null>(null)
   const moreButtonRef = useRef<HTMLButtonElement | null>(null)
+  const moreStatusButtonRef = useRef<HTMLButtonElement | null>(null)
   const modeButtonRef = useRef<HTMLButtonElement | null>(null)
   const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [modeMenuPos, setModeMenuPos] = useState<MenuPlacement | null>(null)
@@ -570,7 +572,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const close = (e: MouseEvent) => {
       // A click INSIDE the menu (picking a model) must not be eaten by this — that path closes the
       // menu itself, and closing here first would cancel the pick.
-      if (moreMenuRef.current?.contains(e.target as Node)) return
+      const target = e.target as Element
+      if (moreMenuRef.current?.contains(target) || target.closest?.('[data-composer-menu-trigger]')) return
       setMoreOpen(false)
     }
     document.addEventListener('mousedown', close)
@@ -641,6 +644,20 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [row?.harness, modelReason, pt, sourceControls?.model])
   const menuModels = sourceControls?.model ? sourceControls.model.options : models
   const menuFreeText = sourceControls?.model ? sourceControls.model.freeText : modelFreeText
+  const currentModelId = sourceControls?.model?.current ?? session.model ?? ''
+  const currentModelLabel = menuModels.find(model => model.id === currentModelId)?.label ?? currentModelId
+  /** M3 status band: the model button always names a model — the live control's, else the one the
+   *  session was started on — and the effort when one is known. Never a bare "Modelo". */
+  const statusModelLabel = !currentModelId
+    ? (pt ? 'Modelo' : 'Model')
+    // A menu label that is only the raw id ("haiku") gives way to the harness catalogue's ("Haiku 4.5").
+    : currentModelLabel !== currentModelId ? currentModelLabel : modelLabel(session.harness, currentModelId)
+  const statusEffort = sourceControls?.effort?.value ?? session.effort ?? null
+  /** The composer menu opened from the status band is `fixed` to the viewport — but the glass field
+   *  has a backdrop-filter, which makes it the containing block of every fixed descendant, so in place
+   *  the menu was positioned against the field and fell off-screen. Rendered into the body instead. */
+  const placeComposerMenu = (node: React.ReactNode) =>
+    moreMenuPos && typeof document !== 'undefined' ? createPortal(node, document.body) : node
   const toggleMenuGroup = useCallback((id: ComposerMenuGroupId) => {
     setFoldedMenuGroups(previous => {
       const next = new Set(previous)
@@ -1933,7 +1950,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const closePrompts = useCallback(() => {
     setPromptsOpen(false)
     // Back to the control that opened the panel, once the dialog has unmounted.
-    requestAnimationFrame(() => (isMobile ? moreButtonRef.current : historyBtnRef.current)?.focus())
+    requestAnimationFrame(() => (isMobile ? (moreStatusButtonRef.current ?? moreButtonRef.current) : historyBtnRef.current)?.focus())
   }, [isMobile])
 
   /**
@@ -2705,7 +2722,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
         // currently tall enough to scroll. Longhand rather than the shorthand this used to be,
         // because the shorthand cannot express "20px, but only the right side also carries a
         // variable" without repeating the other three sides by hand anyway.
-        paddingTop: 10, paddingRight: 20 + chatGutterPx, paddingBottom: 16, paddingLeft: 20,
+        // paddingBottom 0: the M3 status band sits ON the panel's bottom edge (owner, 2026-10-30: the
+        // bar "também tá flutuando" with a 16px gap under it).
+        paddingTop: 10, paddingRight: 20 + chatGutterPx, paddingBottom: 0, paddingLeft: 20,
         background: 'transparent',
         // ITS OWN STACKING CONTEXT. `.ag-composer-ground::before` (the blur-and-fade) sits at
         // `z-index: -1`, and without a context here that `-1` resolved against the PANEL — so the
@@ -3556,29 +3575,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     forgot to wire it up silent rather than crashing), and the component itself
                     renders NOTHING when the session's context cannot be measured — see its own
                     `variant === 'gauge'` branch. */}
-                {!isMobile && metrics && (
-                  <SessionStatsMenu
-                    variant="gauge"
-                    harness={session.harness}
-                    sessionId={session.conversationId ?? session.id}
-                    meta={metrics.meta}
-                    {...(metrics.stats ? { stats: metrics.stats } : {})}
-                    lang={lang}
-                    currency={metrics.currency}
-                    brlRate={metrics.brlRate}
-                    costBasis={metrics.costBasis}
-                    planFactor={metrics.planFactor}
-                    {...(session.task ? { task: session.task } : {})}
-                    {...(metrics.onOpenTask ? { onOpenTask: metrics.onOpenTask } : {})}
-                    {...(metrics.onOpenLive ? { onOpenLive: metrics.onOpenLive } : {})}
-                    {...(metrics.onOpenFull ? { onOpenFull: metrics.onOpenFull } : {})}
-                    rowId={session.id}
-                    {...(session.accountId ? { accountId: session.accountId } : {})}
-                    {...(session.model ? { startedModel: session.model } : {})}
-                    {...(session.effort ? { startedEffort: session.effort } : {})}
-                  />
-                )}
-
                 {/* Mode · Stop · Recall · Send · More, held together at the far end, in that
                     order: the two that act on the RUNNING TURN, then the two about the message you
                     are writing, then the menu. `marginLeft: auto` on the GROUP rather than on send,
@@ -3597,20 +3593,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     thing a counter beside a text box may not do.
                     `pointerEvents: none` so it can never take a tap meant for a control beside it,
                     and it gives way before the buttons do when the row runs out of width. */}
-                {countLabel && (
-                  <span
-                    aria-hidden
-                    style={{
-                      marginLeft: 'auto', minWidth: 0, overflow: 'hidden',
-                      textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none',
-                      fontSize: 10.5, lineHeight: 1, color: 'var(--text-tertiary)',
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
-                  >
-                    {countLabel}
-                  </span>
-                )}
-
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: countLabel ? 6 : 'auto' }}>
                 {/* THE HARNESS MODE, and the one control that changes it.
                     Asked for: "nao consigo alternar entre os modos que os harnesses possuem (auto
@@ -3628,43 +3610,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     prompt come off the row for as long as the composer is an answer field. They are
                     about the next TURN, and this is not one — cycling the harness's mode with a
                     dialog open sends a keystroke into that dialog. */}
-                {row?.mode && !answeringNow && (
-                  <button
-                    ref={modeButtonRef}
-                    className="ag-tap-icon"
-                    onClick={() => {
-                      const rect = modeButtonRef.current?.getBoundingClientRect()
-                      // Wider and taller when a menu carries the "no questions" warning.
-                      const warns = modeOptions.some(m => 'canonical' in m && m.canonical === 'no-questions')
-                      if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight, warns ? 270 : 190, warns ? 320 : 220))
-                      setModeMenuOpen(value => !value)
-                    }}
-                    disabled={!canPrompt}
-                    aria-haspopup="menu"
-                    aria-expanded={modeMenuOpen}
-                    aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}
-                    title={modeTitle(row.mode, pt ? 'pt' : 'en')}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                      height: 30, padding: '0 9px',
-                      borderRadius: 9, flexShrink: 0, maxWidth: 150,
-                      // The colour IS the mode — see `modeStyle.ts`. Ordered by how much the
-                      // session proceeds without asking. Only "no questions" is red (MODE.NOQ):
-                      // `auto` is how this product is normally used and stays green.
-                      border: `1px solid ${modeStyle(row.mode).border}`,
-                      background: modeStyle(row.mode).bg,
-                      color: modeStyle(row.mode).fg,
-                      fontFamily: 'inherit', fontSize: 11.5,
-                      cursor: canPrompt ? 'pointer' : 'default',
-                      opacity: canPrompt ? 1 : 0.55,
-                    }}
-                  >
-                    <SlidersHorizontal size={13} style={{ flexShrink: 0 }} />
-                    {!isMobile && <span style={{
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>{modeLabel(row.mode, pt ? 'pt' : 'en')}</span>}
-                  </button>
-                )}
                 {modeMenuOpen && row?.mode && modeOptions.length > 0 && modeMenuPos && createPortal(
                   <div
                     data-mode-menu
@@ -3723,23 +3668,6 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     you have already sent, not about composing.
                     NOT WHILE ANSWERING A QUESTION, with the mode chip and the model: all three are
                     about the next TURN, and this is an answer to a dialog already open. */}
-                {promptList.length > 0 && !answeringNow && !isMobile && (
-                  <button
-                    ref={historyBtnRef}
-                    onClick={() => setPromptsOpen(true)}
-                    aria-label={pt ? 'Suas mensagens' : 'Your messages'}
-                    aria-haspopup="dialog"
-                    title={pt ? 'Suas mensagens' : 'Your messages'}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      width: 34, height: 34, borderRadius: 9, border: 'none', flexShrink: 0,
-                      background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer',
-                    }}
-                  >
-                    <History size={15} />
-                  </button>
-                )}
-
                 {/* ONE SLOT: STOP WHILE IT WORKS, SEND WHEN IT DOES NOT.
                     A stop on an idle session would send Escape into its prompt, which is the row's
                     own gate on `interrupt`.
@@ -3794,35 +3722,30 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     changing the model does not change what the dialog does with the line it is
                     waiting for. Dictation stays, because it only puts words in the field, and the
                     field is the one thing this mode is FOR. */}
-                {!answeringNow && (
-                <div ref={moreMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
-                  <button
-                    ref={moreButtonRef}
-                    onClick={() => setMoreOpen(v => !v)}
-                    disabled={!canPrompt || sending}
-                    aria-label={pt ? 'Mais opções' : 'More options'}
-                    aria-expanded={moreOpen}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      width: 34, height: 34, borderRadius: 9, border: 'none',
-                      background: moreOpen ? 'var(--bg-surface)' : 'transparent',
-                      color: 'var(--text-tertiary)',
-                      cursor: canPrompt ? 'pointer' : 'default',
-                    }}
-                  >
-                    <ChevronUp size={15} style={{ transform: moreOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
-                  </button>
-
-                  {moreOpen && (
-                    <div data-composer-menu style={{
+                {moreOpen && placeComposerMenu(
+                    <div ref={moreMenuRef} data-composer-menu style={{
                       // Anchored on its RIGHT edge: the button now sits at the end of the row, and
                       // a menu opening rightwards from there would leave the screen.
-                      position: 'absolute', bottom: 40, right: 0, zIndex: 50,
+                      position: moreMenuPos ? 'fixed' : 'absolute',
+                      ...(moreMenuPos ? {
+                        top: moreMenuPos.top,
+                        left: moreMenuPos.side === 'left' ? moreMenuPos.left : moreMenuPos.left - 260,
+                        right: 'auto',
+                        bottom: 'auto',
+                        transform: 'translateY(-100%)',
+                        // never taller than the room above the band: the rest scrolls
+                        maxHeight: Math.max(160, moreMenuPos.top - 12),
+                        overflowY: 'auto',
+                      } : { bottom: 40, right: 0 }),
+                      // Portaled (see placeComposerMenu): above the page, below the Nay dock (410).
+                      zIndex: moreMenuPos ? 300 : 50,
                       minWidth: 210, maxWidth: 260, padding: 4, borderRadius: 10,
                       background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                       boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
-                      maxHeight: isMobile ? 'calc(60vh / var(--ui-zoom, 1))' : undefined,
-                      overflowY: isMobile ? 'auto' : undefined,
+                      ...(moreMenuPos ? {} : {
+                        maxHeight: isMobile ? 'calc(60vh / var(--ui-zoom, 1))' : undefined,
+                        overflowY: isMobile ? 'auto' as const : undefined,
+                      }),
                     }}>
                       {menuGroups.includes('message') && (
                         <>
@@ -3949,7 +3872,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         {pt ? 'Modelo' : 'Model'}
                       </button>
                       <div id="composer-menu-model-region" style={{ display: foldedMenuGroups.has('model') ? 'none' : 'block' }}>
-                      {answeringNow ? null : modelReason ? (
+                      {modelReason ? (
                         <p style={{ margin: 0, padding: '6px 8px', fontSize: 10.5, lineHeight: 1.45, color: 'var(--text-tertiary)' }}>
                           {modelReason}
                         </p>
@@ -3989,7 +3912,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       {/* A SOURCE's own settings (the native runtime): reasoning effort on the same
                           EffortPicker the new-session dialog uses, the gated browser and the extra
                           folders — what the session's own page drew before UI.UNIFY. */}
-                      {!answeringNow && sourceControls && (
+                      {sourceControls && (
                         <SourceSettings controls={sourceControls} pt={pt} onRefused={setNotice} />
                       )}
                       </div>
@@ -4030,11 +3953,95 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     </div>
                   )}
                 </div>
-                )}
-
-                </div>
                 </ComposerToolbar>
               </ComposerShell>
+              <div className="ag-composer-status" data-composer-status>
+                  <div className="ag-composer-status-left">
+                    {!answeringNow && (currentModelLabel || session.model || menuGroups.length > 0) && (
+                      <button
+                        type="button"
+                        className="ag-composer-status-button ag-composer-model-button"
+                        ref={moreButtonRef}
+                        data-composer-menu-trigger
+                        aria-haspopup="menu"
+                        aria-expanded={moreOpen}
+                        disabled={!canPrompt || sending}
+                        onClick={e => {
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          setMoreMenuPos({ top: rect.top - 8, left: rect.left, side: 'left' })
+                          setMoreOpen(value => !value)
+                        }}
+                        title={pt ? 'Trocar modelo e esforço' : 'Change model and effort'}
+                      >
+                        <span className="ag-composer-status-button-label">
+                          {statusModelLabel}
+                        </span>
+                        {statusEffort && <span aria-hidden>·</span>}
+                        {statusEffort && <span>{statusEffort}</span>}
+                      </button>
+                    )}
+                    {row?.mode && !answeringNow && (
+                      <button
+                        type="button"
+                        ref={modeButtonRef}
+                        className="ag-composer-status-button ag-composer-mode-button"
+                        onClick={() => {
+                          const rect = modeButtonRef.current?.getBoundingClientRect()
+                          const warns = modeOptions.some(m => 'canonical' in m && m.canonical === 'no-questions')
+                          if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight, warns ? 270 : 190, warns ? 320 : 220))
+                          setModeMenuOpen(value => !value)
+                        }}
+                        disabled={!canPrompt}
+                        aria-haspopup="menu"
+                        aria-expanded={modeMenuOpen}
+                        aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}
+                        style={{
+                          borderColor: modeStyle(row.mode).border,
+                          background: modeStyle(row.mode).bg,
+                          color: modeStyle(row.mode).fg,
+                        }}
+                      >
+                        <SlidersHorizontal size={13} />
+                        <span className="ag-composer-status-button-label">{modeLabel(row.mode, pt ? 'pt' : 'en')}</span>
+                      </button>
+                    )}
+                    {!isMobile && metrics && (
+                      <SessionStatsMenu
+                        variant="gauge"
+                        harness={session.harness}
+                        sessionId={session.conversationId ?? session.id}
+                        meta={metrics.meta}
+                        {...(metrics.stats ? { stats: metrics.stats } : {})}
+                        lang={lang}
+                        currency={metrics.currency}
+                        brlRate={metrics.brlRate}
+                        costBasis={metrics.costBasis}
+                        planFactor={metrics.planFactor}
+                        {...(session.task ? { task: session.task } : {})}
+                        {...(metrics.onOpenTask ? { onOpenTask: metrics.onOpenTask } : {})}
+                        {...(metrics.onOpenLive ? { onOpenLive: metrics.onOpenLive } : {})}
+                        {...(metrics.onOpenFull ? { onOpenFull: metrics.onOpenFull } : {})}
+                        rowId={session.id}
+                        {...(session.accountId ? { accountId: session.accountId } : {})}
+                        {...(session.model ? { startedModel: session.model } : {})}
+                        {...(session.effort ? { startedEffort: session.effort } : {})}
+                      />
+                    )}
+                  </div>
+                  <div className="ag-composer-status-right">
+                    <span className="ag-composer-status-count">{countLabel ?? (pt ? '0 caracteres' : '0 characters')}</span>
+                    {promptList.length > 0 && !answeringNow && (
+                      <button
+                        ref={historyBtnRef}
+                        onClick={() => setPromptsOpen(true)}
+                        aria-label={pt ? 'Suas mensagens' : 'Your messages'}
+                        aria-haspopup="dialog"
+                        title={pt ? 'Suas mensagens' : 'Your messages'}
+                        className="ag-composer-status-icon"
+                      ><History size={15} /></button>
+                    )}
+              </div>
+              </div>
               {(notice ?? source?.notice) && (
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                   {notice ?? source?.notice}

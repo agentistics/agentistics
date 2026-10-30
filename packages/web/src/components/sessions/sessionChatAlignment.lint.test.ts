@@ -50,7 +50,7 @@ describe('the message list and the composer resolve to the same column width', (
 
   test('the scan still sees the pre-fix bare-constant padding reintroduced', () => {
     const planted = SRC.replace(
-      'paddingTop: 10, paddingRight: 20 + chatGutterPx, paddingBottom: 16, paddingLeft: 20,',
+      'paddingTop: 10, paddingRight: 20 + chatGutterPx, paddingBottom: 0, paddingLeft: 20,',
       "padding: '10px 20px 16px',",
     )
     expect(planted).not.toContain('paddingRight: 20 + chatGutterPx,')
