@@ -148,6 +148,9 @@ export interface Preferences {
    *  rides; see `sessions/editor-gate.ts`. Separate from `shellEnabled`: wanting a shell is not
    *  the same ask as wanting a file editor. */
   editorEnabled?: boolean
+  /** CONTA.AUTO — a session that stops at its account's usage limit moves by itself to another account of the same harness
+   *  that has room. Absent = ON while several accounts are on; only an explicit `false` turns it off. */
+  autoSwitchAccounts?: boolean
   /** Opt-in autosave inside the repository explorer's editor. Absent reads as OFF — autosave adds
    *  no real performance cost but does raise the window in which this editor's write could race
    *  an agent's own write to the same file, so a person opts in deliberately. Meaningless while

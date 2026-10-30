@@ -1408,6 +1408,25 @@ export async function runFleetSpawn(
   // PLAN.ACCOUNTS D3 — the registry/flag/router context, read once (the router only when the asked
   // harness has several accounts and none was named).
   const { spawnAccountContext } = await import('./spawn-account-io')
+  // CONTA.AUTO (B) — a leader hand-off that names no account takes the router's account with room, never the predecessor's
+  // while it is limit-blocked (`spawn-account-io.ts` `handoffAccountChoice`); an explicit account wins.
+  if (body.handoff === true && body.account === undefined && typeof body.parent === 'string' && body.parent && typeof body.harness === 'string') {
+    const { handoffAccountChoice } = await import('./spawn-account-io')
+    const { readRegistry } = await import('./registry')
+    const predecessor = (await readRegistry().catch(() => [])).find(r => r.id === body.parent)
+    const pick = await handoffAccountChoice({ harness: body.harness as HarnessId, ...(predecessor ? { predecessor } : {}), agentCaller: body.callerVerified === true })
+    if (pick) {
+      body = { ...body, account: pick.id }
+      if (!pick.room) {
+        const { broadcastNotification } = await import('../sse')
+        broadcastNotification({
+          type: 'warning', code: 'account.handoff_no_room', meta: { id: String(body.parent) },
+          title: lang === 'pt' ? 'Passagem sem conta com folga' : 'Hand-off with no account that has room',
+          message: lang === 'pt' ? 'Nenhuma conta tem folga agora: a passagem do líder abriu na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.' : 'No account has room right now: the leader hand-off opened on the account whose window reopens first, never on the predecessor\'s limit-blocked one.',
+        })
+      }
+    }
+  }
   const asked = HARNESS_ORDER.filter(h => h === body.harness && body.account === undefined)
   const decision = planFleetSpawn(body, await host.startableHarnesses(), await spawnAccountContext(asked))
   // A harness refused as unknown because the host's PATH reaches NO assistant at all is the PATH's

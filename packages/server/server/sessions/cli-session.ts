@@ -47,7 +47,7 @@ import { addSession, newSessionId, patchSession, readRegistry, removeSession, re
 import { callerHoldsIdentity, callerProof, callerSessionFromTree, type CallerProof } from './session-identity'
 import { spawnParentLink } from './team-links'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
-import { newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
+import { handoffAccountChoice, newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
 import { liveIdsOf, planReopenCwd, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
@@ -534,10 +534,22 @@ export async function start(
   const ctx = buildSpawnContext(await withOwnerRequests({ ...(relay ? { handoffRelay: relay.section } : {}), ...(cmd.handoff ? { handoffTakeover: true } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) }))
   // PLAN.ACCOUNTS D3 — one decision for every door (`spawn-account.ts`). An agent is asking when
   // this command runs inside a pane that can prove its identity.
+  const agentCaller = await callerHoldsIdentity(callerSessionId())
+  // CONTA.AUTO (B) — a hand-off with no `--account` takes the router's account with room, never the predecessor's while it is
+  // limit-blocked; an explicit `--account` still wins.
+  const handoffPick = cmd.handoff && !cmd.account
+    ? await handoffAccountChoice({ harness: cmd.harness, ...(handoffParentRow ? { predecessor: handoffParentRow } : {}), agentCaller })
+    : undefined
+  if (handoffPick && !handoffPick.room) {
+    console.error(lang === 'pt'
+      ? 'Nenhuma conta tem folga agora: o sucessor abre na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.'
+      : 'No account has room right now: the successor opens on the account whose window reopens first, never on the predecessor\'s limit-blocked one.')
+  }
+  const asked = cmd.account ?? handoffPick?.id
   const account = decideSpawnAccount({
-    harness: cmd.harness, ...(cmd.account ? { requested: cmd.account } : {}),
-    agentCaller: await callerHoldsIdentity(callerSessionId()),
-    context: await spawnAccountContext(cmd.account ? [] : [cmd.harness]),
+    harness: cmd.harness, ...(asked ? { requested: asked } : {}),
+    agentCaller,
+    context: await spawnAccountContext(asked ? [] : [cmd.harness]),
   })
   if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en')); return 1 }
   const planned = planSpawn({
