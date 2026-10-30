@@ -20,6 +20,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'A passagem de liderança chega ao sucessor como aviso do sistema, curta e com as ordens vigentes do dono no topo.',
         en: 'A leader hand-off reaches the successor as a system notice, short and with the owner\'s standing orders on top.',
       },
+      {
+        pt: 'O campo de mensagem ganhou uma barra de status embaixo, com modelo clicável para trocar modelo e esforço, e o texto da conversa não aparece mais abaixo do campo.',
+        en: 'The message field now has a status bar below it, with a clickable model control for changing model and effort, and conversation text no longer appears below the field.',
+      },
     ],
     fixes: [
       {

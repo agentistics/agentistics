@@ -928,6 +928,85 @@ button:focus-within .ag-row-pin,
 .ag-composer-ground {
   position: relative;
 }
+
+/* M3: the field remains glass, while session controls live in an opaque status band below it. */
+.ag-composer-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  width: 100%;
+  padding: 5px 0 0;
+  background: var(--ag-composer-ground, var(--bg-base));
+  color: var(--text-secondary);
+}
+.ag-composer-status-left,
+.ag-composer-status-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ag-composer-status-right { margin-left: auto; }
+.ag-composer-status-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 34px;
+  min-width: 40px;
+  max-width: 220px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ag-composer-model-button { background: var(--bg-surface); }
+.ag-composer-mode-button { opacity: 1; }
+.ag-composer-status-button:disabled { opacity: .55; cursor: default; }
+.ag-composer-status-button-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ag-composer-status-count {
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ag-composer-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.ag-composer-status-icon:hover,
+.ag-composer-status-icon:focus-visible { background: var(--bg-hover, rgba(127,127,127,.08)); }
+.ag-composer-context-in-field,
+.ag-composer-count-in-field,
+.ag-composer-history-in-field,
+.ag-composer-more-in-field,
+.ag-composer-ground .ag-composer-mode-in-field { display: none !important; }
+@media (max-width: 520px) {
+  .ag-composer-status { min-height: 42px; gap: 4px; }
+  .ag-composer-status-left, .ag-composer-status-right { gap: 3px; }
+  .ag-composer-status-button { max-width: 145px; padding: 0 8px; }
+  .ag-composer-status-count { max-width: 58px; overflow: hidden; text-overflow: ellipsis; }
+}
 .ag-composer-ground::before {
   content: '';
   position: absolute;
