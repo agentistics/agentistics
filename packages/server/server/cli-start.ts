@@ -2188,6 +2188,7 @@ export async function spawnManaged(req: {
     : undefined
   const ctx = buildSpawnContext({
       ...(relay ? { handoffRelay: relay.section } : {}),
+      ...(req.handoff ? { handoffTakeover: true } : {}),
       ...(await resolveContextAway(away)),
       sessionId: id,
       cwd: req.cwd,

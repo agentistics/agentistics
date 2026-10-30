@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { flowBriefing } from './briefing-flow'
 import type { HarnessId } from '@agentistics/core'
 
-export const BRIEFING_VERSION = 2
+export const BRIEFING_VERSION = 3
 export const MANAGED_OPEN = '<!-- agentistics-managed-briefing: v'
 export const MANAGED_CLOSE = '<!-- /agentistics-managed-briefing -->'
 export const PLAN_LIMITS_TOOL = 'agentistics_plan_limits'
@@ -37,8 +37,8 @@ the work to fit the current vocabulary. Never leave a running worker outside the
 Keep secrets out of prompts and commits; never ask for, print, or confirm a secret value.
 Ask the person in the conversation when a decision is needed. At a hand-off, write state, running sessions,
 queue, and decisions to the durable hand-off file, then tell the successor to close the old leader
-after taking over. When a leader receives a hand-off hint after 150k tokens or 35% of its window, do
-that immediately; then once per +50k.
+after taking over. When agentistics sends a hand-off hint (it states the threshold), do it
+immediately.
 `
 
 export const BRIEFING_PT = `
@@ -58,8 +58,8 @@ Crie status, tipo, pasta ou subtarefa que falte; não rebaixe o trabalho para ca
 Mantenha segredos fora dos prompts e commits; use referências \`vault://nome\` e nunca peça, imprima
 ou confirme o valor de um segredo. Pergunte à pessoa na conversa quando uma decisão for necessária.
 No hand-off, escreva estado, sessões ativas, fila e decisões no arquivo durável e diga ao sucessor
-para fechar o líder antigo depois de assumir. Ao receber uma dica de hand-off após 150 mil tokens ou
-35% da janela, faça isso imediatamente; depois, a cada 50 mil.
+para fechar o líder antigo depois de assumir. Ao receber uma dica de hand-off do agentistics (ela diz
+o limite), faça isso imediatamente.
 `
 
 export const BRIEFING_SKILL_NAMES = [
@@ -70,8 +70,14 @@ export const BRIEFING_SKILL_NAMES = [
   'agentistics-qa-releases',
 ] as const
 
-export function briefingText(lang: 'en' | 'pt' = 'en', o: { planLimitsAvailable?: boolean } = {}): string {
-  const text = lang === 'pt' ? BRIEFING_PT : common
+export function briefingText(lang: 'en' | 'pt' = 'en', o: { planLimitsAvailable?: boolean; away?: boolean } = {}): string {
+  let text = lang === 'pt' ? BRIEFING_PT : common
+  // Away mode overrides "ask the person": the owner is not there to answer.
+  if (o.away) {
+    text = lang === 'pt'
+      ? text.replace('Pergunte à pessoa na conversa quando uma decisão for necessária.', 'O dono está ausente: decisões vão para a sessão que iniciou esta ou para o registro da tarefa, não para o dono.')
+      : text.replace('Ask the person in the conversation when a decision is needed.', 'The owner is away: decisions go to the session that started you or to the task record, not to the owner.')
+  }
   const limits = o.planLimitsAvailable
     ? lang === 'pt'
       ? '\nAntes de abrir sessões, leia agentistics_plan_limits e siga sua recomendação: mantenha em execução a quantidade de workers indicada por cadence.parallel; se paceStatus estiver under, puxe trabalho da fila. Só faça uma pausa quando a janela de 5 horas estiver em pelo menos 85% (pausa curta até a renovação); a cota semanal não é um freio, a menos que esteja em pelo menos 95%.\n'
@@ -95,7 +101,7 @@ const skills: readonly BriefingSkill[] = [
   {
     name: 'agentistics-sessions-hand-offs',
     description: 'Use when starting workers, coordinating parent and child sessions, or handing work over.',
-    body: '# Sessions and hand-offs\nOpen other sessions only after explicit approval. Give each worker a complete prompt, task, subtask, done criteria, and files it must not touch. A worker reports with agentistics_session_message(kind=handback|block|question); the product moves a filed subtask to review on handback. A leader hand-off started from the CLI uses `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` (from inside the old leader): the successor inherits folder, pin, title, check-in, role, away and approval mode. Workers inherit the verified parent task, folder and approval mode; pass their own subtask.',
+    body: '# Sessions and hand-offs\nOpen other sessions only after explicit approval, unless away mode pre-authorises it. Give each worker a complete prompt, task, subtask, done criteria, and files it must not touch. A worker reports with agentistics_session_message(kind=handback|block|question); the product moves a filed subtask to review on handback. A leader hand-off started from the CLI uses `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` (from inside the old leader): the successor inherits folder, pin, title, check-in, role, away and approval mode. Workers inherit the verified parent task, folder and approval mode; pass their own subtask.',
   },
   {
     name: 'agentistics-vault',
