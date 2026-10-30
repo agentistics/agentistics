@@ -111,3 +111,16 @@ describe('spawnGate fail-closed edges (QA F5) and the resumed role (QA F6)', () 
     expect(decideSessionRole({ door: 'fleet-spawn', requestedBy: { kind: 'owner' }, harness: 'claude', parentId: 'lead' })).toMatchObject({ ok: true, role: 'worker', origin: 'owner' })
   })
 })
+
+describe('an account/harness switch keeps the filing it had (owner, 2026-10-30)', () => {
+  test('cli-start judges a `switchFrom` spawn at door reopen, so a leader filed on a subtask is not refused', async () => {
+    const src = await Bun.file(new URL('../cli-start.ts', import.meta.url)).text()
+    expect(src).toContain("(req.inherit || req.switchFrom) ? 'reopen'")
+    // spawnSession forwards it to spawnManaged, where the gate runs (QA: without this the door never changed).
+    expect(src).toContain("...(req.switchFrom ? { switchFrom: req.switchFrom } : {}),")
+    expect(decideSessionRole({ door: 'reopen', requestedBy: { kind: 'owner' }, harness: 'claude', role: 'leader', taskId: 't-1', subtaskId: 's-1' }))
+      .toMatchObject({ ok: true, role: 'leader' })
+    expect(decideSessionRole({ door: 'fleet-spawn', requestedBy: { kind: 'owner' }, harness: 'claude', role: 'leader', taskId: 't-1', subtaskId: 's-1' }))
+      .toMatchObject({ ok: false, code: 'leader_on_subtask' })
+  })
+})

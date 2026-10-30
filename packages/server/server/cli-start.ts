@@ -2060,6 +2060,8 @@ export async function spawnManaged(req: {
   parentVerified?: boolean
   parentConversationId?: string
   handoff?: boolean
+  /** CONTA.TROCA — the row an account/harness switch replaces: the gate judges it as a reopen (same work, same filing). */
+  switchFrom?: string
   role?: 'leader' | 'worker'
   /** DSL.TIPO-SESSAO — an agent's delegation through the engine (`engine-delegate.ts`): gate door `engine`. */
   spawnDoor?: 'engine'
@@ -2140,7 +2142,9 @@ export async function spawnManaged(req: {
   // any spawn, instead of a healthy session being stopped after it (QA F6).
   const inheritedRole = (req.inherit || req.resumeId) ? await storedRoleFor([req.resumeId, req.inherit?.conversationId, req.inherit?.id]).catch(() => undefined) : undefined
   const gate = await spawnGate({
-    door: req.spawnDoor === 'engine' ? 'engine' : req.handoff ? 'handoff' : req.inherit ? 'reopen' : 'fleet-spawn',
+    // An account/harness switch (`switchFrom`) is the SAME piece of work moving on, like a reopen: it keeps the filing
+    // the row had, so a leader filed on a subtask is not refused as `leader_on_subtask` (owner, 2026-10-30).
+    door: req.spawnDoor === 'engine' ? 'engine' : req.handoff ? 'handoff' : (req.inherit || req.switchFrom) ? 'reopen' : 'fleet-spawn',
     // The engine is an in-process caller (an agent's delegation): never the owner.
     // A session only when PROVEN (`parentVerified`); an unproven parent link is the owner filing a worker under it (QA F4).
     requestedBy: req.spawnDoor === 'engine' ? { kind: 'engine' } : req.parentSessionId && req.parentVerified ? { kind: 'session', id: req.parentSessionId } : { kind: 'owner' },
@@ -4965,6 +4969,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.parentSessionId && req.parentVerified ? { parentVerified: true } : {}),
         ...(req.handoff ? { handoff: true } : {}),
+        ...(req.switchFrom ? { switchFrom: req.switchFrom } : {}),
         ...(filing.role ? { role: filing.role } : {}),
         ...(req.away !== undefined ? { away: req.away } : {}),
         ...(req.force ? { force: true } : {}),
