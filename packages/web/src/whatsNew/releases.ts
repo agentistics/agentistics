@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.172.0': {
+    features: [
+      {
+        pt: 'Interfaces de motores podem acompanhar você em uma janela flutuante ao sair da sessão. Minimize no botão da Nay e retome sem interromper o que está rodando.',
+        en: 'Engine interfaces can follow you in a floating window when you leave a session. Minimize onto the Nay button and restore without interrupting what is running.',
+      },
+      {
+        pt: 'A aba Sessões do painel flutuante da Nay pode receber seções de motores habilitados.',
+        en: 'The Sessions tab of the floating Nay panel can show sections from enabled engines.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Mensagens suas enviadas por uma interface agora aparecem na conversa, sem as instruções internas.',
+        en: 'Your messages sent through an interface now appear in the conversation, without internal instructions.',
+      },
+    ],
+  },
   '2.171.0': {
     features: [
       {
@@ -23,14 +41,6 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       {
         pt: 'Com uma versão antiga do OpenCode, o app explica em palavras simples o que atualizar.',
         en: 'With an old OpenCode version, the app explains in plain words what to update.',
-      },
-      {
-        pt: 'Interfaces de motores podem acompanhar você em uma janela flutuante ao sair da sessão. Minimize no botão da Nay e retome sem interromper o que está rodando.',
-        en: 'Engine interfaces can follow you in a floating window when you leave a session. Minimize onto the Nay button and restore without interrupting what is running.',
-      },
-      {
-        pt: 'A aba Sessões do painel flutuante da Nay pode receber seções de motores habilitados.',
-        en: 'The Sessions tab of the floating Nay panel can show sections from enabled engines.',
       },
     ],
     fixes: [
@@ -101,21 +111,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Fluxos (experimental): toda abertura de worker passa por um portão que explica em palavras simples quando recusa; a passagem de líder ganha um documento gerado do quadro e dos seus pedidos abertos; um pedido novo seu com o líder ocupado entra em paralelo, na fila ou agora, sem trocar o trabalho em andamento.',
         en: 'Flows (experimental): every worker spawn goes through a gate that says in plain words why it refuses; a leader hand-off gets a document generated from the board and your open requests; a new request of yours with a busy leader goes in parallel, to the queue or now, without replacing work in progress.',
       },
-      {
-        pt: 'Interfaces de motores podem acompanhar você em uma janela flutuante ao sair da sessão. Minimize no botão da Nay e retome sem interromper o que está rodando.',
-        en: 'Engine interfaces can follow you in a floating window when you leave a session. Minimize onto the Nay button and restore without interrupting what is running.',
-      },
-      {
-        pt: 'O painel flutuante da Nay pode receber novas abas de motores habilitados.',
-        en: 'The floating Nay panel can show extra tabs from enabled engines.',
-      },
     ],
-    fixes: [
-      {
-        pt: 'Mensagens suas enviadas por uma interface agora aparecem na conversa, sem as instruções internas.',
-        en: 'Your messages sent through an interface now appear in the conversation, without internal instructions.',
-      },
-    ],
+    fixes: [],
   },
   '2.169.1': {
     features: [],
