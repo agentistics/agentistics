@@ -342,6 +342,9 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
   /** Ended ON PURPOSE (a kill, "open in terminal" — from any process): its exit is not a failure. */
   const endedOnPurpose = (id: string) => !!durable && (durable.ending(id) !== null || durable.saved(id) === null)
 
+  /** The canonical mode a session was last SET to from the chip: a relaunch after an unplanned exit resumes in it, not in the start mode. */
+  const modeSetTo = new Map<string, NonNullable<NonNullable<BackendSpawn['structured']>['mode']>>()
+
   /** Structured relaunches per id, so a child that dies at once every time ends in tmux, not in a loop. */
   const relaunches = new Map<string, number[]>()
   const RELAUNCH_MAX = 3
@@ -362,6 +365,8 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     const reg = await provider.structured().catch(() => null)
     if (!reg || reg.driverFor(i.harness) === null) return false
     const { prompt: _p, instructions: _i, conversationId: _c, ...rest } = i
+    const kept = modeSetTo.get(id)
+    if (kept) rest.mode = kept
     const { initialPrompt: _ip, ...bare } = req
     return startVia({ ...bare, structured: { ...rest, resumeId: conv } }, 'structured', i.harness, reg, null).catch(() => false)
   }
@@ -617,7 +622,14 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     attentionOf(id) { const l = structuredOnly(id); return l ? l.s.attention() : base.attentionOf?.(id) },
     modeOf(id) { const l = structuredOnly(id); return l ? (l.s.mode?.() ?? null) : base.modeOf?.(id) },
     modesOf(id) { const l = structuredOnly(id); return l ? (l.s.modes ? [...l.s.modes()] : undefined) : base.modesOf?.(id) },
-    async setMode(id, modeId) { const l = structuredOnly(id); return l ? (l.s.setMode?.(modeId) ?? false) : (base.setMode?.(id, modeId) ?? false) },
+    async setMode(id, modeId) {
+      const l = structuredOnly(id)
+      if (!l) return base.setMode?.(id, modeId) ?? false
+      const ok = (await l.s.setMode?.(modeId)) ?? false
+      const now = ok ? l.s.mode?.()?.canonical : undefined
+      if (now) modeSetTo.set(id, now)
+      return ok
+    },
     modelsOf(id) {
       const l = structuredOnly(id)
       if (!l) return base.modelsOf?.(id)
