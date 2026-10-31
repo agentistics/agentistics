@@ -126,8 +126,10 @@ export const LIMIT_RULES: Record<HarnessId, LimitRule | null> = {
     probed: 'opencode 1.19.5, 2026-10-31 (strings read from the binary)',
     banner: [
       /Free\s+usage\s+exceeded/i,
-      /Free\s+limit\s+reached/i,
-      /Go\s+limit\s+reached/i,
+      // `Free usage limit reached. Free models work in OpenCode …` — the ACP/log wording (measured live on
+      // 1.19.5, 2026-10-31): the words are not adjacent to the toast's `Free limit reached`.
+      /Free\s+(?:usage\s+)?limit\s+reached/i,
+      /Go\s+(?:usage\s+)?limit\s+reached/i,
       /Quota\s+exceeded\.\s+Check\s+your\s+plan\s+and\s+billing/i,
       /^\s*(?:Error:\s*)?Rate\s+limit\s+exceeded\b/i,
     ],

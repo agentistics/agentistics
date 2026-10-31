@@ -183,6 +183,11 @@ export interface FleetActionRequest {
    * Without it a `prompt` to an external row answers `confirm` and changes nothing.
    */
   confirm?: boolean
+  /**
+   * For `resume`: the person confirmed "reopen anyway" after the memory gate refused (`memoryBudget`
+   * on the answer). Read as `force === true` only — the same override `/api/fleet/new` takes.
+   */
+  force?: boolean
   /** PLAN.ACCOUNTS D3: an agent's session proof; the server reads it into `callerVerified`. */
   session?: { id?: unknown; token?: unknown }
   /** Server-set (`markCallerVerified`), never trusted from the wire: a verified agent is asking. */

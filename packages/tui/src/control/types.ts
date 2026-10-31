@@ -2086,9 +2086,9 @@ export interface ResumeSessionRequest {
    */
   switchToAccount?: string
   /**
-   * CONTA.TROCA — skip the memory admission. Set only by the account switch, which has just ENDED
-   * the process this resume replaces, so the net memory cost is ~zero; refusing there would leave
-   * the person with no session at all.
+   * Skip the memory admission. Set by the account switch (CONTA.TROCA), which has just ENDED the
+   * process this resume replaces, so the net memory cost is ~zero; and by the browser's "reopen
+   * anyway", which the person confirmed after the gate refused (`/api/fleet/act` `force`).
    */
   force?: boolean
 }

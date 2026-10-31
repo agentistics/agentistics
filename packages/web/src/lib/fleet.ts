@@ -261,6 +261,8 @@ export interface FleetState {
     ids?: readonly string[]
     /** This prompt requests a leader handoff; record only confirmed delivery. */
     handoff?: boolean
+    /** `resume` only: "reopen anyway", confirmed by the person after the memory gate refused. */
+    force?: boolean
     /** EXT.OPEN: yes to ending an external process so its conversation continues here. */
     confirm?: boolean
   }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed'; action?: { kind: 'update-harness'; harness: string; need: string } }>

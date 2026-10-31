@@ -71,7 +71,8 @@ describe('opencode limit banner (strings measured in opencode 1.19.5)', () => {
   const rule = LIMIT_RULES.opencode!
   const hit = (line: string) => detectLimit({ tail: [line], rule, nowMs: 0 })
   it('recognises the free, Go and quota errors it prints', () => {
-    for (const l of ['Free usage exceeded, subscribe to Go', 'Free limit reached', 'Go limit reached', 'Quota exceeded. Check your plan and billing details.', 'Error: Rate limit exceeded'])
+    for (const l of ['Free usage exceeded, subscribe to Go', 'Free limit reached', 'Go limit reached',
+      'AI_APICallError: Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go', 'Quota exceeded. Check your plan and billing details.', 'Error: Rate limit exceeded'])
       expect(hit(l)?.raw).toBe(l)
   })
   it('does not treat a line merely quoting "rate limit" as blocked, and states no reset', () => {

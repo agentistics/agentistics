@@ -147,6 +147,11 @@ export interface FleetActionResponse {
    * continuation); `index.ts` answers it with `spawnAccountStatus` (403/409/422).
    */
   code?: SpawnAccountRefusal
+  /**
+   * `resume` refused by the MEMORY GATE: the browser offers "reopen anyway" (re-sent with `force: true`,
+   * after a confirmation). Kept apart from `code` — that one maps to an HTTP status for the account rule.
+   */
+  memoryBudget?: true
   /** A group reopen's partial result (opened / already running / every refused row with its code). */
   fell?: { opened: string[]; already: string[]; refused: { id: string; reason: SpawnAccountRefusal; message: string }[] }
 }
@@ -952,12 +957,17 @@ async function runFleetActionOnce(
         attach: false,
         // PLAN.ACCOUNTS D3: a verified agent may not reopen a row whose account is off for agents.
         ...(req.callerVerified === true ? { callerVerified: true } : {}),
+        // "Reopen anyway", confirmed by the person after the memory gate refused (`memoryBudget` below).
+        ...(req.force === true ? { force: true } : {}),
       })
       if (!out) throw new Error('resumeSession returned no result')
       // THE NEW ID TRAVELS. A reopen mints a new managed row and retires the old one, so a caller
       // that stays on the id it asked about is looking at a dead session — which is exactly how
       // "reopen does nothing" was reported, on an action the server had performed correctly.
-      return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}) }
+      return {
+        ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}),
+        ...(!out.ok && out.admission ? { memoryBudget: true as const } : {}),
+      }
     }
     default:
       // The body is untrusted JSON, even though TypeScript names a closed action union.
