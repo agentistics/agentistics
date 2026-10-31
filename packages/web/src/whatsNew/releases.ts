@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.173.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A ligação na janela flutuante pequena ganhou um layout próprio: o globo aparece inteiro, o status e os avisos ficam numa linha própria e nada mais fica sobreposto ao campo de escrever.',
+        en: 'The call in the small floating window has its own layout: the globe shows whole, status and notices sit on their own line, and nothing overlaps the input anymore.',
+      },
+    ],
+  },
   '2.173.0': {
     features: [],
     fixes: [
