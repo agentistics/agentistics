@@ -130,3 +130,21 @@ export function startedByIndex(
 export function startedByFleetPayload(payload: { rows?: Parameters<typeof startedByIndex>[0] }): ReturnType<typeof startedByIndex> {
   return startedByIndex(Array.isArray(payload.rows) ? payload.rows : [])
 }
+
+/**
+ * SESSÕES.FECHAR — `/api/flows/delivered-open` keyed by the ids a session row carries (its conversation id, and the
+ * managed id as a fallback): what `agentistics_sessions` adds as `deliveredStillOpen`.
+ */
+export function deliveredOpenByConversation(payload: unknown): Map<string, Record<string, unknown>> {
+  const out = new Map<string, Record<string, unknown>>()
+  const list = payload && typeof payload === 'object' && Array.isArray((payload as { sessions?: unknown }).sessions) ? (payload as { sessions: unknown[] }).sessions : []
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object') continue
+    const d = raw as Record<string, unknown>
+    if (typeof d.sessionId !== 'string' || typeof d.handbackAt !== 'string') continue
+    const entry = { managedId: d.sessionId, handbackAt: d.handbackAt, ...(d.lastRun && typeof d.lastRun === 'object' ? { lastRun: d.lastRun } : {}) }
+    if (typeof d.conversationId === 'string') out.set(d.conversationId, entry)
+    out.set(d.sessionId, entry)
+  }
+  return out
+}

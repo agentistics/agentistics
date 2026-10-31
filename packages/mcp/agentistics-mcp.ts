@@ -16,6 +16,7 @@ import {
   sessionMessages,
   sessionTokens,
   startedByFleetPayload,
+  deliveredOpenByConversation,
   harnessParam,
   toolsForGate,
 } from "./session-tokens.js";
@@ -712,7 +713,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_sessions",
     description:
-      "Get the most recent sessions with harness, project path, duration, message count, token usage, and model. Optionally scope to a single harness.",
+      "Get the most recent sessions with harness, project path, duration, message count, token usage, and model. Optionally scope to a single harness. With AGENTISTICS_FLOWS on, a worker that handed back and is still open carries `deliveredStillOpen` ({managedId, handbackAt, lastRun?}): close it with agentistics_flow_run name=fechar-entregue {sessionId: managedId}, which only closes it when stopped, clean and saved.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1306,6 +1307,8 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         // Who started each session — read off the fleet (best effort: a central, or a server with no
         // host power, has no fleet and the field is simply absent).
         const startedBy = await apiGet("/api/fleet?format=links-v1").then((f: any) => startedByFleetPayload(f ?? {})).catch(() => new Map<string, { id: string; title?: string }>());
+        // SESSÕES.FECHAR: delivered workers still open (flows off / older server = none).
+        const delivered = await apiGet("/api/flows/delivered-open").then((d: any) => deliveredOpenByConversation(d)).catch(() => new Map<string, Record<string, unknown>>());
         const rows = filterSessions((data.sessions ?? []) as AnySession[], harness)
           .slice(0, limit)
           .map((s: any) => {
@@ -1329,6 +1332,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
               ...(unpriced > 0 ? { unpricedTokens: unpriced } : {}),
               model: s.model ?? null,
               ...(startedBy.get(s.session_id) ? { startedBy: startedBy.get(s.session_id) } : {}),
+              ...(delivered.get(s.session_id) ? { deliveredStillOpen: delivered.get(s.session_id) } : {}),
             };
           });
         return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };

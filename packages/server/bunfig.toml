@@ -1,0 +1,3 @@
+[test]
+# Same as the root bunfig.toml, for a `bun test` started from this package.
+preload = ["../../scripts/test-preload.ts"]

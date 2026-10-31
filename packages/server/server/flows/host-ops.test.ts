@@ -52,7 +52,7 @@ test('trigger host ops: the managed-session universe and a nudge through the com
   const notices: string[] = []
   const ops = triggerHostOps({
     registry: async () => [
-      { id: 'live', cwd: '/w/a', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', subtaskId: 's-1' },
+      { id: 'live', cwd: '/w/a', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', subtaskId: 's-1', parentSessionId: 'lead' },
       { id: 'gone', cwd: '/w/b', createdAt: '2026-10-28T00:00:00.000Z', endedAt: '2026-10-29T01:00:00.000Z', taskId: 't-1' },
       { id: 'lead', cwd: '/w', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', conversationId: 'conv-l' },
     ],
@@ -60,11 +60,12 @@ test('trigger host ops: the managed-session universe and a nudge through the com
     roles: async () => row => (row.conversationId === 'conv-l' ? 'leader' : undefined),
     prompt: async (id, text) => { prompts.push([id, text]); return id === 'live' ? { ok: true } : { ok: false, message: 'ended' } },
     awayNotice: async text => { notices.push(text); return true },
+    kill: async () => ({ ok: true }),
   })
   expect(await ops['sessoes-gerenciadas']()).toEqual({ sessions: [
-    { id: 'live', cwd: '/w/a', alive: true, state: 'working', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', subtaskId: 's-1' },
+    { id: 'live', cwd: '/w/a', alive: true, state: 'working', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', subtaskId: 's-1', parentSessionId: 'lead' },
     { id: 'gone', cwd: '/w/b', alive: false, state: 'working', createdAt: '2026-10-28T00:00:00.000Z', endedAt: '2026-10-29T01:00:00.000Z', taskId: 't-1' },
-    { id: 'lead', cwd: '/w', alive: true, state: 'waiting', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', role: 'leader' },
+    { id: 'lead', cwd: '/w', alive: true, state: 'waiting', createdAt: '2026-10-29T00:00:00.000Z', taskId: 't-1', conversationId: 'conv-l', role: 'leader' },
   ] })
   expect(await ops['cutucar-sessao']({ to: 'live', body: 'commit it', flow: 'trabalho-sem-commit' })).toEqual({ ok: true, to: 'live' })
   expect(prompts[0]).toEqual(['live', '[from flow trabalho-sem-commit · nudge]\ncommit it'])
@@ -80,7 +81,7 @@ test('QA10: roles are re-read for every universe snapshot — a promotion and a 
     registry: async () => [{ id: 'a', cwd: '/w', createdAt: 'x' }, { id: 'b', cwd: '/w', createdAt: 'x', leader: true }],
     rows: async () => [{ id: 'a', state: 'waiting' }, { id: 'b', state: 'waiting' }],
     roles: async () => { const snap = { ...stored }; return row => snap[row.id] },
-    prompt: async () => ({ ok: true }), awayNotice: async () => true,
+    prompt: async () => ({ ok: true }), awayNotice: async () => true, kill: async () => ({ ok: true }),
   })
   const roleOf = async (id: string) => (await ops['sessoes-gerenciadas']()).sessions.find(s => s.id === id)?.role
   expect(await roleOf('a')).toBeUndefined()
@@ -92,11 +93,24 @@ test('QA10: roles are re-read for every universe snapshot — a promotion and a 
 
 test('LEADER-1: no owner-proof op exists; the HTTP door refuses any override with the SECRETS.4 sentence', async () => {
   const { flowRunInputs, OWNER_CREDENTIAL_REQUIRED } = await import('./status')
-  expect(Object.keys(triggerHostOps({ registry: async () => [], rows: async () => [], roles: async () => () => undefined, prompt: async () => ({ ok: true }), awayNotice: async () => true }))).not.toContain('origem-do-dono')
+  expect(Object.keys(triggerHostOps({ registry: async () => [], rows: async () => [], roles: async () => () => undefined, prompt: async () => ({ ok: true }), awayNotice: async () => true, kill: async () => ({ ok: true }) }))).not.toContain('origem-do-dono')
   for (const bad of [{ taskId: 't', overrideBy: 'owner' }, { taskId: 't', override: { by: 'owner' } }, { taskId: 't', overrideReason: 'x' }]) {
     expect(flowRunInputs(bad)).toEqual({ ok: false, sentence: OWNER_CREDENTIAL_REQUIRED })
   }
   expect(OWNER_CREDENTIAL_REQUIRED).toBe('owner override needs the owner credential (SECRETS.4), not available yet')
   expect(flowRunInputs({ taskId: 't' })).toEqual({ ok: true, inputs: { taskId: 't' } })
   expect(flowRunInputs(null)).toEqual({ ok: true, inputs: {} })
+})
+
+test('SESSÕES.FECHAR: encerrar-sessao ends the named session through the kill verb, and refuses in words otherwise', async () => {
+  const kills: string[] = []
+  const ops = triggerHostOps({
+    registry: async () => [], rows: async () => [], roles: async () => () => undefined,
+    prompt: async () => ({ ok: true }), awayNotice: async () => true,
+    kill: async id => { kills.push(id); return id === 'wk' ? { ok: true, message: 'ended' } : { ok: false, message: 'Session not found.' } },
+  })
+  expect(await ops['encerrar-sessao']({ sessionId: 'wk' })).toEqual({ ok: true, sessionId: 'wk', message: 'ended' })
+  expect(await ops['encerrar-sessao']({ sessionId: 'nope' })).toEqual({ refused: true, reason: 'Session not found.', missing: ['session end'] })
+  expect(await ops['encerrar-sessao']({})).toMatchObject({ refused: true, missing: ['sessionId'] })
+  expect(kills).toEqual(['wk', 'nope'])
 })
