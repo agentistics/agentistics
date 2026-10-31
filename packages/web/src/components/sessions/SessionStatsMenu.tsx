@@ -21,6 +21,7 @@ import { sessionOpened, sessionTime } from '../../lib/sessionTime'
 import { asideCache, asideKey } from '../../lib/asideCache'
 import { Activity, BarChart3, ChevronDown, ChevronRight, ChevronUp, ListChecks, PanelRight, X } from 'lucide-react'
 import { fmt, fmtCost, type CostBasis, type HarnessId, type SessionMeta } from '@agentistics/core'
+import { planAbsentText } from '../../pages/settings/accountBilling'
 import { HARNESS_LABELS } from '../../lib/harness'
 import { sessionStats, statReason, type SessionStats } from '../../lib/sessionStats'
 import { replyCost, replyCostExceeds } from '../../lib/replyCost'
@@ -544,9 +545,7 @@ export function SessionStatsMenu({
 
           <Block title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><HarnessMark harness={harness} size={13} />{planName ? `${pt ? 'Plano' : 'Plan'} · ${planName}` : (pt ? 'Plano' : 'Plan')}</span>}>
             {plan ? <PlanSessionBlock limits={plan} now={planSnap.now} lang={lang} /> : (
-              <div style={{ border: '1px dashed var(--border)', borderRadius: 8, padding: '8px 10px' }}><Absent text={pt
-                ? `${(HARNESS_LABELS as Record<string, string>)[harness] ?? harness} ainda não informou os limites do plano — eles aparecem aqui assim que informar.`
-                : `${(HARNESS_LABELS as Record<string, string>)[harness] ?? harness} has not reported plan limits yet — they will appear here when available.`} /></div>
+              <div style={{ border: '1px dashed var(--border)', borderRadius: 8, padding: '8px 10px' }}><Absent text={planAbsentText(harness, (HARNESS_LABELS as Record<string, string>)[harness] ?? harness, pt)} /></div>
             )}
           </Block>
 
