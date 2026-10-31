@@ -6,7 +6,7 @@ describe('MODEL_SWITCH', () => {
     // A guessed slash command does not fail loudly — it types a line of nonsense into a live
     // session. Each null here is a finding, not an omission.
     expect(MODEL_SWITCH.claude).toEqual({ line: '/model {model}' })
-    for (const h of ['codex', 'gemini', 'copilot', 'antigravity', 'kimi']) {
+    for (const h of ['codex', 'gemini', 'copilot', 'antigravity', 'kimi', 'opencode']) {
       expect(h in MODEL_SWITCH).toBe(true)
       expect(MODEL_SWITCH[h]).toBeNull()
     }
@@ -51,5 +51,13 @@ describe('modelSwitchReason', () => {
       expect(modelSwitchReason('codex', lang)!.length).toBeGreaterThan(10)
     }
     expect(modelSwitchReason('codex', 'pt')).not.toBe(modelSwitchReason('codex', 'en'))
+  })
+})
+
+describe('opencode', () => {
+  it('has no typed line and says why, in both languages', () => {
+    expect(modelSwitchLine('opencode', 'x/y')).toBeNull()
+    expect(modelSwitchReason('opencode', 'en')).toContain('OpenCode')
+    expect(modelSwitchReason('opencode', 'pt')).toContain('OpenCode')
   })
 })

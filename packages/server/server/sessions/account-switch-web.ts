@@ -22,6 +22,7 @@ import type { AuthState } from './account-switch'
 import { reloginSupported } from '../account-roots'
 import type { SwitchUnavailableReason } from './account-switch'
 import { fleetLang, hostForFleet, kickFleet } from './fleet-web'
+import { readOpencodeLimit } from './opencode-limit'
 
 
 /** The GET's answer. `limit` is `null` unless the conversation's last turn was refused by a limit. */
@@ -32,7 +33,9 @@ export interface SwitchInfo {
   options: { id: string; harness: string; label: string; plan?: string; recommended?: boolean }[]
   /** Every other live account, NOT a target, with the reason in a code the browser words (CONTA.LIMITES). */
   unavailable: { id: string; harness: string; label: string; plan?: string; reason: SwitchUnavailableReason }[]
-  limit: { resetsAt?: number; message?: string; pendingPreview?: string } | null
+  limit: { resetsAt?: number; at?: number; message?: string; pendingPreview?: string } | null
+  /** The harness cannot switch accounts but its limit is read (OpenCode): the panel keeps polling and states it. */
+  limitWatch?: boolean
   /**
    * HOTFIX.LOGIN-EXPIRADO: the session's account cannot work — its harness refused the login in this
    * conversation's last turn, or the registry holds it expired / signed out. `null` otherwise. `relogin`
@@ -90,11 +93,18 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
   if (req.method === 'GET') {
     const id = url.searchParams.get('id') ?? ''
     const none: SwitchInfo = { ok: true, supported: false, options: [], unavailable: [], limit: null, auth: null }
-    if (!featureOn('multi-account') || !id) return json(none)
+    if (!id) return json(none)
     // CONTA.IDENTIDADE: the same rule the composer chip and plan_limits read (`session-account.ts`).
     const registry = await readRegistry()
     const found = sessionAccountRow(registry, { id, conversationId: id })
     if (!found || found.endedAt) return json(none)
+    // OpenCode has no account to switch to, but its limit is still a fact the session panel states (QA
+    // OPENCODE.COMPLETO): read from opencode's own log, with or without the multi-account flag.
+    if (found.harness === 'opencode') {
+      const hit = found.conversationId ? readOpencodeLimit(found.conversationId) : null
+      return json({ ...none, limitWatch: true, limit: hit ? { at: hit.at, message: hit.message } : null })
+    }
+    if (!featureOn('multi-account')) return json(none)
     const accounts = await readAccounts().catch(() => null)
     const accountId = resolveSessionAccount(registry, { id: found.id }, accounts ?? undefined)
     const row = found

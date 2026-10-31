@@ -41,7 +41,7 @@ import { modeStyle } from '../../lib/modeStyle'
 import { NO_QUESTIONS_WARNING } from '@agentistics/core'
 import { NoQuestionsWarning } from './ModePicker'
 import { modeLabel, modeTitle, onlyModeNote } from '../../lib/modeLabel'
-import { modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
+import { modeChipState, modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
 import { ApprovalCard } from './ApprovalCard'
 import { composerAnswerRequest } from '../../lib/dialogAnswer'
 import { TypedModel } from './ModelSelect'
@@ -235,8 +235,8 @@ export interface SessionChatProps {
   /** The shaped row, which carries the parsed dialog and what may be done about it. */
   row?: FleetRow
   lang: 'pt' | 'en'
-  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; step?: 'next' | 'back'; choices?: number[]; occurrence?: number; confirm?: boolean; handoff?: boolean })
-    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed'; action?: { kind: 'update-harness'; harness: string; need: string } }>
+  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; step?: 'next' | 'back'; choices?: number[]; occurrence?: number; confirm?: boolean; handoff?: boolean; force?: boolean })
+    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed'; action?: { kind: 'update-harness'; harness: string; need: string }; memoryBudget?: true }>
   /** Switch to the live terminal when a failed write found a blocking prompt. */
   onOpenTerminal?: () => void
   /**
@@ -1928,11 +1928,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // row has only the harness's cycle key, so its menu is the measured table and a choice is N cycles.
   const directModes = row?.modes && row.modes.length > 0 ? row.modes : null
   const modeOptions = useMemo(() => directModes ?? modeMenuFor(row?.harness), [directModes, row?.harness])
+  const modeChip = modeChipState({ hasMode: !!row?.mode, loading, live: payload?.live !== false, canPrompt, blocked, answering: answeringNow, direct: directModes !== null })
   // "No questions" is dangerous: choosing it only ASKS (a confirm modal explains the mode); the real
   // switch runs from the modal's confirm. `noQuestionsAsk` holds the pending target id.
   const [noQuestionsAsk, setNoQuestionsAsk] = useState<string | null>(null)
   const switchMode = useCallback(async (target: string) => {
-    if (!row?.mode || !canPrompt) return
+    if (!row?.mode || !modeChip.enabled) return
     if (directModes) {
       setModeMenuOpen(false)
       const out = await act({ id: session.id, action: 'setMode', text: target })
@@ -1948,7 +1949,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const out = await act({ id: session.id, action: 'cycleMode', text: target })
     if (!out.ok) setNotice(out.message)
     if (out.ok) nudgeFleet()
-  }, [act, canPrompt, directModes, row?.mode, session.id])
+  }, [act, modeChip.enabled, directModes, row?.mode, session.id])
   const chooseMode = useCallback(async (target: string) => {
     const opt = modeOptions.find(mode => mode.id === target)
     if (opt && 'canonical' in opt && opt.canonical === 'no-questions' && row?.mode?.id !== target) {
@@ -2207,12 +2208,17 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     if (!out.ok) setNotice(out.message)
   }
 
-  async function reopenNow() {
+  /** The memory gate refused the last Reopen: "Reabrir mesmo assim" is offered, behind a confirmation. */
+  const [reopenForceable, setReopenForceable] = useState(false)
+  const [confirmReopenForce, setConfirmReopenForce] = useState(false)
+  async function reopenNow(force = false) {
     if (!reopen?.enabled || reopening) return
     setReopening(true)
-    const out = await withReopening([session.id], () => act({ id: session.id, action: 'resume' }))
+    setReopenForceable(false)
+    const out = await withReopening([session.id], () => act({ id: session.id, action: 'resume', ...(force ? { force: true } : {}) }))
     setReopening(false)
     setNotice(out.message)
+    setReopenForceable(!out.ok && (out as { memoryBudget?: true }).memoryBudget === true)
     // THE NEW ID IS REPORTED UP. The server hands it back precisely so a caller does not stay on
     // the row it just retired; see `onReopened` for what used to happen instead. Navigating is
     // still not this component's decision — it says what happened and hands over the id.
@@ -3194,6 +3200,40 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       {reopen.reason}
                     </span>
                   )}
+                  {/* What the last Reopen answered. The composer's own notice line is hidden with the
+                      composer while this block stands in for it, so a refusal (the memory gate's
+                      sentence) used to come back and be shown nowhere (QA OPENCODE.COMPLETO). */}
+                  {notice && !reopening && (
+                    <span role="status" data-reopen-notice style={{ width: '100%', order: 4, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-primary)' }}>
+                      {notice}
+                    </span>
+                  )}
+                  {reopenForceable && !reopening && (
+                    <button
+                      type="button"
+                      data-reopen-anyway
+                      onClick={() => setConfirmReopenForce(true)}
+                      style={{
+                        order: 5, padding: '7px 12px', borderRadius: 9, cursor: 'pointer',
+                        border: '1px solid var(--accent-red)', background: 'transparent',
+                        color: 'var(--accent-red)', fontFamily: 'inherit', fontSize: 12.5,
+                      }}
+                    >
+                      {pt ? 'Reabrir mesmo assim' : 'Reopen anyway'}
+                    </button>
+                  )}
+                  <ConfirmModal
+                    open={confirmReopenForce}
+                    title={pt ? 'Reabrir mesmo assim?' : 'Reopen anyway?'}
+                    message={pt
+                      ? 'Esta máquina está com pouca memória. Reabrir agora ignora a verificação de memória — a máquina pode ficar lenta ou fechar outros programas.'
+                      : 'This machine is low on memory. Reopening now overrides the memory check — the machine may slow down or close other programs.'}
+                    cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+                    confirmLabel={pt ? 'Reabrir mesmo assim' : 'Reopen anyway'}
+                    onCancel={() => setConfirmReopenForce(false)}
+                    onConfirm={() => { setConfirmReopenForce(false); void reopenNow(true) }}
+                    focusCancel
+                  />
                 </div>
               )}
 
@@ -4053,7 +4093,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         <ChevronDown size={12} aria-hidden className="ag-composer-status-chevron" />
                       </button>
                     )}
-                    {row?.mode && !answeringNow && (
+                    {row?.mode && modeChip.shown && (
                       <button
                         type="button"
                         ref={modeButtonRef}
@@ -4064,7 +4104,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                           if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight, warns ? 270 : 190, warns ? 320 : 220))
                           setModeMenuOpen(value => !value)
                         }}
-                        disabled={!canPrompt}
+                        disabled={!modeChip.enabled}
                         aria-haspopup="menu"
                         aria-expanded={modeMenuOpen}
                         aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}

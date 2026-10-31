@@ -17,9 +17,6 @@ export const HARNESS_COLORS: Record<SurfaceHarnessId, string> = {
   antigravity: '#8b5cf6',
   // Rose — the last hue left that stays legible on both surfaces without colliding with the others.
   kimi: '#e11d48',
-  // Cyan — distinct from every hue above and legible on both surfaces. opencode has no adapter and
-  // never contributes a real session (see HARNESS_INFO.opencode below), so this colour has no chart
-  // to appear in today; it exists because the Record requires an entry.
   opencode: '#06b6d4',
   // Agentistics' own brand amber-orange, a step off Claude's amber so the two never read as one series.
   agentistics: '#f97316',
@@ -362,33 +359,29 @@ export const HARNESS_INFO: Record<SurfaceHarnessId, HarnessInfo> = {
   },
   opencode: {
     blurb: {
-      en: 'No local adapter yet — opencode sessions never appear in this dashboard. Its own SQLite store carries real tokens, cost, model and tool data; a replay integration reads it for the canonical event journal, but nothing today projects it into a session you can see here.',
-      pt: 'Ainda sem adaptador local — sessões do opencode nunca aparecem neste painel. O banco SQLite próprio do opencode guarda tokens, custo, modelo e ferramentas reais; uma integração de replay já os lê para o diário canônico de eventos, mas nada hoje projeta isso em uma sessão visível aqui.',
+      en: 'Local sessions, tokens and models from OpenCode’s SQLite store. API cost estimates use the shared pricing table; unknown routes remain unpriced.',
+      pt: 'Sessões locais, tokens e modelos do banco SQLite do OpenCode. Estimativas de custo de API usam a tabela compartilhada; rotas desconhecidas ficam sem preço.',
     },
     format: {
-      en: 'A single SQLite database (~/.local/share/opencode/opencode.db): a session row per conversation with pre-summed totals, one message row per turn, one part row per tool call or usage step.',
-      pt: 'Um único banco SQLite (~/.local/share/opencode/opencode.db): uma linha de sessão por conversa com totais já somados, uma linha de mensagem por turno, uma linha de "part" por chamada de ferramenta ou etapa de uso.',
+      en: 'Read-only SQLite: session metadata and per-message usage. Reasoning is included in output; cache reads and writes are separate.',
+      pt: 'SQLite somente leitura: metadados da sessão e uso por mensagem. Raciocínio é incluído na saída; leitura e escrita de cache são separadas.',
     },
     retention: {
-      en: 'Unknown — no cleanup behavior has been observed or documented for this store.',
-      pt: 'Desconhecido — nenhum comportamento de limpeza foi observado ou documentado para esse banco.',
+      en: 'History retained by OpenCode; no cleanup policy is assumed.',
+      pt: 'Histórico mantido pelo OpenCode; nenhuma política de limpeza é presumida.',
     },
-    source: [
-      '~/.local/share/opencode/opencode.db (session/message/part tables)',
+    source: ['$OPENCODE_DB or $XDG_DATA_HOME/opencode/opencode.db (default ~/.local/share/opencode/opencode.db)'],
+    contains: [
+      { en: 'Input, output, cache tokens and per-model usage', pt: 'Tokens de entrada, saída, cache e uso por modelo' },
+      { en: 'Last prompt context; model window from the local models catalog when available', pt: 'Contexto do último prompt; janela do modelo pelo catálogo local quando disponível' },
     ],
-    contains: [],
-    missing: [
-      {
-        item: { en: 'Everything — no adapter', pt: 'Tudo — sem adaptador' },
-        why: {
-          en: 'There is no adapters/opencode.ts / opencode-parse.ts. opencode never contributes a SessionMeta, so it never appears in AppData.harnesses, the harness selector, the Compare page, or any dashboard total — deliberately, until a legacy adapter is built (see CLAUDE.md "Adding a harness" step 4).',
-          pt: 'Não existe adapters/opencode.ts / opencode-parse.ts. O opencode nunca gera um SessionMeta, então nunca aparece em AppData.harnesses, no seletor de harness, na página Compare ou em nenhum total do painel — deliberadamente, até que um adaptador legado seja construído (ver CLAUDE.md, passo 4 de "Adding a harness").',
-        },
-      },
-    ],
+    missing: [{
+      item: { en: 'Tool and file activity', pt: 'Atividade de ferramentas e arquivos' },
+      why: { en: 'This metrics adapter does not count tool parts or file diffs.', pt: 'Este adaptador de métricas não conta partes de ferramentas nem diferenças de arquivos.' },
+    }],
     note: {
-      en: 'A separate opencode-local.db file exists on some machines (a per-project store from an earlier opencode version); this integration reads only the current global opencode.db and does not merge the two.',
-      pt: 'Em algumas máquinas existe também um opencode-local.db separado (um banco por projeto de uma versão anterior do opencode); esta integração lê apenas o opencode.db global atual e não mescla os dois.',
+      en: 'Session totals and step-finish parts duplicate message usage and are never summed again. Missing context limits stay unknown.',
+      pt: 'Totais da sessão e partes step-finish repetem o uso das mensagens e nunca são somados novamente. Limites de contexto ausentes ficam desconhecidos.',
     },
   },
   agentistics: {

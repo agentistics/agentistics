@@ -12,13 +12,41 @@
  * harness-and-directory guess may never be admitted here.
  */
 
-import { scanProcesses } from '../live-sessions'
+import { scanProcesses, type HarnessProcess } from '../live-sessions'
 import { conversationsInUse, type ClaimingSession, type ConversationHolder } from './conversation-claim'
 import { emptyHarnessSessionIndex, loadHarnessSessions } from './harness-sessions'
 import { readRegistry } from './registry'
 import { externalId } from './session-view'
 import { readHarnessAgents } from './harness-agents-io'
 import type { ManagedSession, SessionBackend } from './types'
+
+/**
+ * The claims of processes agentop did not start — PURE. A process holds the conversation the harness's
+ * own record names for its pid (claude's `<pid>.json`), else the one the scan itself read for it: argv
+ * (`--resume`, `-s`), an open session file, opencode's own log. Reading only the first made every OTHER
+ * harness's external process invisible here, so a write to it was planned as `free` and a second process
+ * was started on a conversation the first was still writing — measured with opencode 1.19.5 on
+ * 2026-10-31: both TUIs alive on one `ses_…` after "continue here".
+ */
+export function processClaims(
+  procs: readonly HarnessProcess[],
+  recordOf: (pid: number) => string | undefined,
+): ClaimingSession[] {
+  const out: ClaimingSession[] = []
+  for (const p of procs) {
+    const conversationId = (p.pid !== undefined ? recordOf(p.pid) : undefined) ?? p.sessionId
+    if (!conversationId) continue
+    out.push({
+      id: externalId(p),
+      kind: 'process',
+      ...(p.pid !== undefined ? { pid: p.pid } : {}),
+      alive: true,
+      conversationId,
+      label: p.cwd,
+    })
+  }
+  return out
+}
 
 /**
  * Conversation id → the live session driving it.
@@ -66,20 +94,7 @@ export async function liveConversationHolders(
   // An assistant running BESIDE agentop holds its conversation just as hard as one we started, and
   // it is the case the registry is blind to by construction. `/proc` only reports processes that
   // exist, so these are alive by definition.
-  for (const p of procs) {
-    const conversationId = p.pid !== undefined
-      ? harnessSessions.byPid.get(p.pid)?.sessionId
-      : undefined
-    if (!conversationId) continue
-    claims.push({
-      id: externalId(p),
-      kind: 'process',
-      ...(p.pid !== undefined ? { pid: p.pid } : {}),
-      alive: true,
-      conversationId,
-      label: p.cwd,
-    })
-  }
+  claims.push(...processClaims(procs, pid => harnessSessions.byPid.get(pid)?.sessionId))
   // The harness's OWN list of live sessions — the only source that sees a BACKGROUND agent, which
   // has no tty, no tmux and nothing in the registry.
   //

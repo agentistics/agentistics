@@ -126,7 +126,7 @@ export interface SessionView {
    * Carried rather than re-derived downstream, because the two need different capabilities of the
    * harness and a surface that assumes "numbered" offers a digit the dialog never printed.
    */
-  dialogSelect?: 'numbered' | 'marker'
+  dialogSelect?: 'numbered' | 'marker' | 'inline'
   /**
    * The dialog's options were STATED by the session's protocol (a structured session, F2.0) rather than
    * read off a screen — so they are answered through its driver by NUMBER whatever the harness's
@@ -520,7 +520,7 @@ export function buildSessionViews(o: {
   /** The form around that dialog, keyed by session id. */
   dialogForm?: ReadonlyMap<string, DialogForm>
   /** How those options are picked, keyed by session id — see `SessionView.dialogSelect`. */
-  dialogSelect?: ReadonlyMap<string, 'numbered' | 'marker'>
+  dialogSelect?: ReadonlyMap<string, 'numbered' | 'marker' | 'inline'>
   /** The ids whose dialog the protocol STATED — see `SessionView.dialogStated`. */
   dialogStated?: ReadonlySet<string>
   /** Why the dialog could not be read, keyed by session id — see `SessionView.dialogUnreadable`. */
@@ -824,6 +824,13 @@ export function buildSessionViews(o: {
   const covered = (p: HarnessProcess): boolean => {
     const exact = managedIdOfProcess(p, o.harnessSessions)
     if (exact !== undefined) return managed.some(m => m.id === exact)
+    // opencode keeps every session in one shared `opencode.db`, so a folder says nothing about WHICH
+    // conversation a process is driving: a TUI started by hand beside a managed (ACP) session in the
+    // same repository is another conversation, and the directory guess hid it as "closed". Cover it
+    // only by the exact `ses_…` id both sides state.
+    if (p.harness === 'opencode') {
+      return p.sessionId !== undefined && managed.some(m => m.harness === 'opencode' && m.conversationId === p.sessionId)
+    }
     return managed.some(m =>
       m.harness === p.harness &&
       (m.status === 'running' || m.status === 'unregistered') &&

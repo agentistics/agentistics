@@ -316,6 +316,7 @@ export interface ControlStrings {
   sessionsInterrupt: string
   /** The web's "open in terminal" on a session running over its harness's protocol. */
   sessionsOpenTerminal: string
+  sessionsFork: string
   /** Why it is off: nothing is running to stop. */
   sessionsInterruptIdle: string
   /** Why a verb is off on a row agentop does not host. */
@@ -1069,6 +1070,7 @@ const EN: ControlStrings = {
     `Stop the ${n} selected session${n === 1 ? '' : 's'}? The assistant running in each is ended.`,
   sessionsInterrupt: 'Stop what it is doing',
   sessionsOpenTerminal: 'Open in terminal',
+  sessionsFork: 'Fork this conversation',
   sessionsInterruptIdle: 'Nothing is running right now, so there is nothing to stop.',
   sessionsExternalRow: 'This session was started outside agentop, so nothing here can act on it.',
   sessionsUnknownHarness: 'harness unknown',
@@ -1697,6 +1699,7 @@ const PT: ControlStrings = {
       : `Encerrar as ${n} sessões selecionadas? O assistente que roda em cada uma é finalizado.`),
   sessionsInterrupt: 'Parar o que está fazendo',
   sessionsOpenTerminal: 'Abrir no terminal',
+  sessionsFork: 'Ramificar esta conversa',
   sessionsInterruptIdle: 'Nada está rodando agora, então não há o que parar.',
   sessionsExternalRow: 'Esta sessão foi iniciada fora do agentop, então nada aqui age sobre ela.',
   sessionsUnknownHarness: 'harness desconhecido',

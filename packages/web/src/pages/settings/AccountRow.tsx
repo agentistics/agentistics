@@ -37,6 +37,7 @@ const T = (pt: boolean) => ({
   starts: (day: string) => (pt ? `Plano começa em ${day}` : `Plan starts ${day}`),
   problem: pt ? 'Períodos com problema' : 'Periods need fixing',
   noMeter: pt ? 'Não informado' : 'Not reported',
+  noQuotaOpencode: pt ? 'Sem cota de plano no OpenCode' : 'No plan quota for OpenCode',
   noMeterYet: pt ? 'Sem leitura ainda' : 'No reading yet',
   signedOut: pt ? 'Não conectado' : 'Not connected',
   signIn: pt ? 'Entre no assistente neste computador ou use “Adicionar conta” abaixo.' : 'Sign in to the assistant on this computer, or use “Add account” below.',
@@ -128,6 +129,8 @@ function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: numb
   )
   // Before the first answer EVERY row waits — an assistant row with no identified account included: saying
   // "No reading yet" then is a claim nobody could make yet. A refusal is final: "not reported" here.
+  // OpenCode has no quota endpoint at all: a stated fact at any moment, not a "waiting" and not a percentage.
+  if (r.harness === 'opencode') return <span data-no-quota style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{t.noQuotaOpencode}</span>
   if (!ready && (failure === 'unauthorized' || failure === 'unavailable')) return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{t.noMeter}</span>
   if (!ready) return <span aria-busy="true" data-usage-waiting style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>…</span>
   return <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{REPORTS_LIMITS.has(r.harness) ? t.noMeterYet : t.noMeter}</span>

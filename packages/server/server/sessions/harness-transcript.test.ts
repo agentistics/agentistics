@@ -27,7 +27,7 @@ describe('the reader registry', () => {
     // `planFirstSightingClaims` includes gemini deliberately and claims the SYNTHETIC id the store
     // is already keyed on, which names the chat file directly — so the entry stopped being
     // unreachable code and became a reader. A null here is now a gap, not a finding.
-    for (const h of ['claude', 'codex', 'copilot', 'kimi', 'antigravity', 'gemini'] as const) {
+    for (const h of ['claude', 'codex', 'copilot', 'kimi', 'antigravity', 'gemini', 'opencode'] as const) {
       expect(transcriptReaderFor(h), h).not.toBeNull()
     }
   })

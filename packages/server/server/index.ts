@@ -446,6 +446,9 @@ void (async () => {
   // Kimi has no chat driver (its chat is a real session), so it is not in ALL_DRIVERS — P-20.
   await import('./kimi-mcp').then(m => m.ensureKimiMcp(PORT)).catch(err =>
     console.warn('[mcp] could not register for kimi:', err instanceof Error ? err.message : String(err)))
+  // OpenCode's TUI route reads `mcp` from its own opencode.json (format measured on 1.17.9).
+  await import('./opencode-mcp').then(m => m.ensureOpencodeMcp(PORT)).catch(err =>
+    console.warn('[mcp] could not register for opencode:', err instanceof Error ? err.message : String(err)))
   // Antigravity has no chat driver but has an MCP config of its own (`agy mcp add`, ENGINE.MAP P-20).
   const { ensureAgyMcp } = await import('./agy-mcp')
   await ensureAgyMcp(PORT).then(r => { if (r.action === 'refuse') console.warn(`[mcp] agy left alone: ${r.reason}`) }, err =>

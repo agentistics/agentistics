@@ -10,6 +10,40 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.174.0': {
+    features: [
+      {
+        pt: 'OpenCode: os quatro modos (Padrão, Aceitar edições, Plano, Sem perguntas) funcionam dentro da sessão, sem reiniciar; o chat mostra "Permitido pelo modo" quando o modo libera uma ação.',
+        en: 'OpenCode: all four modes (Default, Accept edits, Plan, No questions) work inside the session without restarting; the chat shows "Allowed by the mode" when the mode lets an action through.',
+      },
+      {
+        pt: 'OpenCode: sessões abertas no terminal aparecem no app com histórico, e "Continuar aqui" assume a conversa.',
+        en: 'OpenCode: sessions opened in the terminal show up in the app with their history, and "Continue here" takes the conversation over.',
+      },
+      {
+        pt: 'OpenCode: o rodapé mostra tokens, contexto e custo; o OpenCode entra em Comparar, no filtro de assistentes e em Uso, e a busca no histórico acha as conversas dele.',
+        en: 'OpenCode: the footer shows tokens, context and cost; OpenCode is in Compare, the assistant filter and Usage, and history search finds its conversations.',
+      },
+      {
+        pt: 'OpenCode: "Ramificar esta conversa" no menu da sessão, e o comando para retomar a conversa direto no OpenCode nas sessões encerradas.',
+        en: 'OpenCode: "Fork this conversation" in the session menu, and the command to resume the conversation in OpenCode itself on ended sessions.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'OpenCode: quando o limite do modelo gratuito acaba, a sessão para e o chat avisa, em vez de ficar "trabalhando" para sempre.',
+        en: 'OpenCode: when the free model\'s limit runs out, the session stops and the chat says so, instead of "working" forever.',
+      },
+      {
+        pt: 'Reabrir uma sessão volta no mesmo modo em que ela estava; quando falta memória, reabrir e iniciar dizem o motivo e oferecem "mesmo assim".',
+        en: 'Reopening a session brings it back in the mode it was in; when memory is short, reopen and start say why and offer "anyway".',
+      },
+      {
+        pt: 'No celular, o contador de caracteres do rodapé aparece inteiro.',
+        en: 'On the phone, the footer\'s character counter shows whole.',
+      },
+    ],
+  },
   '2.173.1': {
     features: [],
     fixes: [

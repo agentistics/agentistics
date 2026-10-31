@@ -49,7 +49,7 @@ import {
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
 import { readHarnessSkills, skillsReason, type HarnessSkill } from './harness-skills'
-import { HARNESS_ORDER, type ModelOption, type Baseline } from '@agentistics/core'
+import { HARNESS_CAPABILITIES, HARNESS_LABELS, HARNESS_ORDER, type ModelOption, type Baseline } from '@agentistics/core'
 import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
@@ -147,6 +147,13 @@ export interface FleetActionResponse {
    * continuation); `index.ts` answers it with `spawnAccountStatus` (403/409/422).
    */
   code?: SpawnAccountRefusal
+  /**
+   * `resume` refused by the MEMORY GATE: the browser offers "reopen anyway" (re-sent with `force: true`,
+   * after a confirmation). Kept apart from `code` — that one maps to an HTTP status for the account rule.
+   */
+  memoryBudget?: true
+  /** A refused fork's queue entry (`/api/resources/queue/:id`): "start anyway" cancels it first so no twin starts later. */
+  queuedId?: string
   /** A group reopen's partial result (opened / already running / every refused row with its code). */
   fell?: { opened: string[]; already: string[]; refused: { id: string; reason: SpawnAccountRefusal; message: string }[] }
 }
@@ -863,6 +870,13 @@ async function runFleetActionOnce(
     case 'terminal':
       if (!host.openInTerminal) return { ok: false, message: s.sessionsNoHost }
       return await host.openInTerminal(req.id)
+    case 'fork':
+      if (!host.forkSession) return { ok: false, message: s.sessionsNoHost }
+      {
+        const out = await host.forkSession(req.id, req.callerVerified === true, req.force === true)
+        // The memory gate refused: the browser offers "start anyway" (re-sent with `force: true`), taking the queue entry off first.
+        return out.memoryRefusal ? { ...out, memoryBudget: true as const, ...(out.memoryRefusal.queuedId ? { queuedId: out.memoryRefusal.queuedId } : {}) } : out
+      }
     case 'structured':
       if (!host.backToStructured) return { ok: false, message: s.sessionsNoHost }
       return await host.backToStructured(req.id)
@@ -949,12 +963,17 @@ async function runFleetActionOnce(
         attach: false,
         // PLAN.ACCOUNTS D3: a verified agent may not reopen a row whose account is off for agents.
         ...(req.callerVerified === true ? { callerVerified: true } : {}),
+        // "Reopen anyway", confirmed by the person after the memory gate refused (`memoryBudget` below).
+        ...(req.force === true ? { force: true } : {}),
       })
       if (!out) throw new Error('resumeSession returned no result')
       // THE NEW ID TRAVELS. A reopen mints a new managed row and retires the old one, so a caller
       // that stays on the id it asked about is looking at a dead session — which is exactly how
       // "reopen does nothing" was reported, on an action the server had performed correctly.
-      return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}) }
+      return {
+        ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}),
+        ...(!out.ok && out.admission ? { memoryBudget: true as const } : {}),
+      }
     }
     default:
       // The body is untrusted JSON, even though TypeScript names a closed action union.
@@ -1121,6 +1140,12 @@ export async function readFleetSkillBody(
  * linked conversation, a transcript not on this machine, a file that would not read. The card says
  * which; a confident `0` would read as a conversation that has never been compacted.
  */
+/** PURE. The card's sentence for a harness that records no compactions (`HARNESS_CAPABILITIES.compaction` false). */
+export function compactionAbsent(harness: string, pt: boolean): string {
+  const name = (HARNESS_LABELS as Record<string, string>)[harness] ?? harness
+  return pt ? `${name} não registra compactações da conversa.` : `${name} does not record conversation compactions.`
+}
+
 export async function readConversationFacts(
   lang: CliLang, id: string,
 ): Promise<{ compactions?: number; unavailable?: string }> {
@@ -1135,6 +1160,14 @@ export async function readConversationFacts(
         ? 'Esta sessão ainda não tem uma conversa vinculada.'
         : 'This session has no linked conversation yet.'),
     }
+  }
+  // Only a harness that RECORDS compactions has a count to read (`HARNESS_CAPABILITIES.compaction`:
+  // Claude alone). Every other one used to fall into the Claude transcript lookup below and answer
+  // "the transcript was not found on this machine" — false of an OpenCode session, whose conversation
+  // is right there in opencode.db (QA OPENCODE.COMPLETO item 4).
+  const capability = (HARNESS_CAPABILITIES as Record<string, { compaction?: boolean } | undefined>)[row.harness ?? '']
+  if (capability && !capability.compaction) {
+    return { unavailable: compactionAbsent(row.harness ?? '', pt) }
   }
   const { countCompactions, resolveClaudeTranscriptAnyAccount } = await import('./chat-tail')
   const path = await resolveClaudeTranscriptAnyAccount(row.cwd, row.conversationId).catch(() => null)

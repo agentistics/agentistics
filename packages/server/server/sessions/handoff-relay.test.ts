@@ -113,8 +113,10 @@ describe('HANDOFF.RELAY — IO with injected reader', () => {
     const got = await captureHandoffRelay(row({}), async () => ({ turns: CASE }))
     expect(got.section).toContain('v2.136.1')
     expect(got.cursor).toBe(CASE[6]!.at)
-    const none = await captureHandoffRelay(row({ harness: 'opencode' }))
-    expect(none.section).toContain('opencode')
+    // Every harness has a reader now (opencode's arrived with OPENCODE.WP-A), so the missing one is a
+    // harness id from a newer build — the case `transcriptReaderFor` answers `null` for.
+    const none = await captureHandoffRelay(row({ harness: 'a-harness-from-a-newer-build' as never }))
+    expect(none.section).toContain('a-harness-from-a-newer-build')
   })
 
   it('a failed forward is owed (kill refused); a delivered one moves the cursor', async () => {

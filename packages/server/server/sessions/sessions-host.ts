@@ -52,6 +52,10 @@ import { tailActivity, tailSkipsScreen, tailStateOf, type TailReading, type Tail
 import { linkDecision, liveLinks, moveAllowed } from './relink-policy'
 import { foreignConversations } from './row-conversation'
 
+/** Harnesses whose managed row is linked from the `sessionId` `scanProcesses` reports for its pane process
+ *  (opencode — see the block in the poll that reads it). */
+const SCAN_LINKED: ReadonlySet<HarnessId> = new Set<HarnessId>(['opencode'])
+
 function statQuiet(path: string): { size: number; mtimeMs: number } | null {
   try { const st = statSync(path); return { size: st.size, mtimeMs: st.mtimeMs } } catch { return null }
 }
@@ -527,7 +531,7 @@ export function createSessionsPoller(o: {
       const modelChoices = new Map<string, { current: string | null; options: Array<{ id: string; label: string }> }>()
       const dialogOptions = new Map<string, DialogOption[]>()
       const dialogForm = new Map<string, DialogForm>()
-      const dialogSelect = new Map<string, 'numbered' | 'marker'>()
+      const dialogSelect = new Map<string, 'numbered' | 'marker' | 'inline'>()
       const dialogStated = new Set<string>()
       /*
        * WHY THE REFUSAL IS CARRIED AND NOT JUST THE OPTIONS.
@@ -948,6 +952,29 @@ export function createSessionsPoller(o: {
             recordConversation: o.recordConversation,
           })
           if (linked) procLinkWrites++
+        }
+      }
+      // opencode's link: one `opencode.db` for every session leaves no open file that names one, so
+      // `scanProcesses` reads opencode's own log instead (`opencode-run-link.ts`: the run that started in
+      // this pane's cwd at this process's start time, refusing every ambiguity) and stamps the process's
+      // `sessionId`. A managed row takes the id its PANE process reports. It is the harness's own
+      // statement about the session it is driving, so it is recorded like the process-log route
+      // (`assigned`, `process-log`), follows `/new` the same way, and never moves a row onto a
+      // conversation another live row drives.
+      if (o.recordConversation) {
+        const scanned = new Map<number, string>()
+        for (const p of processes) if (SCAN_LINKED.has(p.harness) && p.sessionId && p.pid !== undefined) scanned.set(p.pid, p.sessionId)
+        for (const m of registry) {
+          if (!SCAN_LINKED.has(m.harness)) continue
+          const pid = panePids?.get(m.id)
+          const found = pid === undefined ? undefined : scanned.get(pid)
+          if (!found || found === m.conversationId) continue
+          if (m.conversationId && !moveAllowed(m.id, found, live)) continue
+          try {
+            await o.recordConversation(m.id, found, 'assigned', 'process-log')
+            await o.rekeyRole?.(m.id, found)
+            procLinkWrites++
+          } catch { /* retry next poll */ }
         }
       }
       markFleetPhase(`poll: processConversation x${procLinkWrites}`, procLinkStart)

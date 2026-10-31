@@ -1,0 +1,40 @@
+
+  ┃
+  ┃  $ ls -la
+  ┃
+  ┃  total 16
+  ┃  drwxrwxr-x  3 user user 4096 Oct 30 22:33 .
+  ┃  drwx------ 14 user user 4096 Oct 30 22:33 ..
+  ┃  drwxrwxr-x  6 user user 4096 Oct 30 22:33 .git
+  ┃  -rw-rw-r--  1 user user    3 Oct 30 22:33 a.txt
+  ┃
+
+     drwxrwxr-x  3 user user 4096 Oct 30 22:33 .
+     drwx------ 14 user user 4096 Oct 30 22:33 ..
+     drwxrwxr-x  6 user user 4096 Oct 30 22:33 .git
+     -rw-rw-r--  1 user user    3 Oct 30 22:33 a.txt
+
+     ▣  Build · GLM-5.3-Flash Free · 18.7s
+
+  ┃
+  ┃  Use your question tool to ask me which color I prefer, with options red, green and blue. Do not do anything else.
+  ┃
+
+     → Asked 1 question
+
+     ▣  Build · GLM-5.3-Flash Free
+
+  ┃
+  ┃  Which color do you prefer?
+  ┃
+  ┃  1. Red
+  ┃     The color of passion and energy
+  ┃  2. Green
+  ┃     The color of nature and growth
+  ┃  3. Blue
+  ┃     The color of calm and stability
+  ┃  4. Type your own answer
+  ┃
+  ┃  ↑↓ select  enter submit  esc dismiss
+  ┃
+

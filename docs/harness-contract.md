@@ -310,19 +310,25 @@ See `CLAUDE.md`'s "Adding a harness — the complete checklist" for exactly whic
 rules lives in, and `docs/superpowers/specs/2026-09-19-runtime-p2-adapters-import.md` for how wave 1
 (A3) applied them across all six harnesses.
 
-**A harness can have a replay integration with NO legacy adapter at all** — opencode (A3.8) is the
-first: it has no `adapters/opencode.ts`/`opencode-parse.ts` (CLAUDE.md step 4 was deliberately
-skipped), so it never produces a `SessionMeta` and never appears on a surface, but it still has a
-full `integrations/opencode/` replay and its own parity differential
-(`projections/differential-opencode.ts`). In that shape there is no `parseXRollout` to read as "the
-legacy side" — both sides of the differential are built inside that one module, from the same raw
-store rows, sharing no function with the replay's own fold; see its header. `HARNESS_CAPABILITIES`
-for such a harness is honestly ALL-false (no surface can ever receive its data), while
-`CAPABILITY_REFINEMENTS` in the canonical vocabulary can still upgrade the metrics the replay
-genuinely produces to `partial` — the two tables answer different questions ("what can today's
-surfaces show" vs "what can the canonical model produce"), and this is the case that shows they can
-disagree in this specific direction.
+**OpenCode has both a replay integration and a local SQLite metrics adapter.**
+`adapters/opencode.ts` opens the global database read-only, taking a short deferred snapshot that
+includes committed WAL writes. `opencode-parse.ts` counts assistant message usage once: neither
+session totals nor `step-finish` parts are added again. Reasoning is additive to output. Each model
+keeps its own usage bucket; known providers use the shared price table, local runtimes and explicitly
+free OpenCode variants cost zero, and unknown provider routes remain unpriced. The adapter does not
+read credential tables or archive the database.
 
+The context gauge uses the latest settled assistant response's input plus cache read/write counters.
+[OpenCode 1.17.9’s `Session.getUsage`](https://github.com/anomalyco/opencode/blob/v1.17.9/packages/opencode/src/session/session.ts) subtracts both cache counters from normalized input before storing
+it; their sum reconstructs its `contextTokens` value. Output is excluded. The optional local
+models.dev cache (`$XDG_CACHE_HOME/opencode/models.json`, default `~/.cache/opencode/models.json`)
+supplies the exact provider/model context window when present; otherwise the existing verified-window
+table applies, and unknown windows remain unknown. Live fleet refreshes read exact `ses_…` IDs through
+the adapter, including footer tokens/cost, rather than trying to resolve a nonexistent transcript.
+The database and WAL sidecar trigger dashboard rebuilds; unchanged versions reuse parsed sessions.
+
+Replay parity still uses its independent recount of raw rows. The replay capability vocabulary and
+`HARNESS_CAPABILITIES` describe separate data paths and need not change together.
 
 ### Chat tool result status
 

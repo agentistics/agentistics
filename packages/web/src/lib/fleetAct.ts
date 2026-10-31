@@ -30,6 +30,10 @@ export interface FleetActResult {
   failure?: 'prompt' | 'ended' | 'unconfirmed'
   /** 1.20 — the update the harness's own version asks for, when that is why it refused. */
   action?: { kind: 'update-harness'; harness: string; need: string }
+  /** A `resume` the memory gate refused: the surface may offer "reopen anyway" (re-sent with `force: true`). */
+  memoryBudget?: true
+  /** A refused fork's memory-queue entry: "start anyway" takes it off the queue first, so no twin starts later. */
+  queuedId?: string
 }
 
 /** The sentence for an answer that carried none — a network error, or a body that is not ours. */
@@ -56,7 +60,11 @@ export function parseActResult(json: unknown, lang: 'pt' | 'en'): FleetActResult
   const action = act && act.kind === 'update-harness' && typeof act.harness === 'string' && typeof act.need === 'string'
     ? { kind: 'update-harness' as const, harness: act.harness, need: act.need }
     : undefined
-  return { ok: o.ok === true, message, ...(id ? { id } : {}), ...(o.confirm === true ? { confirm: true } : {}), ...(failure ? { failure } : {}), ...(action ? { action } : {}) }
+  return {
+    ok: o.ok === true, message, ...(id ? { id } : {}), ...(o.confirm === true ? { confirm: true } : {}), ...(failure ? { failure } : {}), ...(action ? { action } : {}),
+    ...(o.ok !== true && o.memoryBudget === true ? { memoryBudget: true as const } : {}),
+    ...(o.ok !== true && o.memoryBudget === true && typeof o.queuedId === 'string' && o.queuedId !== '' ? { queuedId: o.queuedId } : {}),
+  }
 }
 
 /**

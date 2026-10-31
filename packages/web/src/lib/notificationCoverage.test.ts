@@ -41,7 +41,7 @@ const emitted = (): Set<string> => {
   for (const file of walk(SERVER)) {
     const source = readFileSync(file, 'utf8')
     // The retire runner passes its code as notify's fourth argument. Cover that emitter too.
-    for (const pattern of [/code: '([a-z][a-z_.]*)'/g, /\bnotify\([^,\n]+,[^,\n]+,[^,\n]+,\s*'([a-z][a-z_.]*)'/g]) {
+    for (const pattern of [/\bcode: '([a-z][a-z_.]*)'/g, /\bnotify\([^,\n]+,[^,\n]+,[^,\n]+,\s*'([a-z][a-z_.]*)'/g]) {
       for (const m of source.matchAll(pattern)) {
         if (!FIXTURES.has(m[1]!) && !PLAN_CODES.has(m[1]!)) found.add(m[1]!)
       }

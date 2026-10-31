@@ -142,6 +142,20 @@ export function toggleAvailability<A>(
 export const REPORTS_LIMITS: ReadonlySet<HarnessId> = new Set<HarnessId>(['claude', 'codex', 'antigravity'])
 
 /**
+ * Why a session's stats card has no plan limits to draw, in words that agree with this screen. "Has
+ * not reported yet — they will appear" is only true of a harness that DOES report them; said of
+ * OpenCode, which has no plan quota at all, it contradicted "No plan quota for OpenCode" (QA
+ * OPENCODE.COMPLETO item 4).
+ */
+export function planAbsentText(harness: string, label: string, pt: boolean): string {
+  if (harness === 'opencode') return pt ? 'Sem cota de plano no OpenCode — não há limites de plano a mostrar.' : 'No plan quota for OpenCode — there are no plan limits to show.'
+  if (!REPORTS_LIMITS.has(harness as HarnessId)) return pt ? `${label} não informa os limites do plano.` : `${label} does not report plan limits.`
+  return pt
+    ? `${label} ainda não informou os limites do plano — eles aparecem aqui assim que informar.`
+    : `${label} has not reported plan limits yet — they will appear here when available.`
+}
+
+/**
  * The notices on screen: every account still needing a plan, plus the ones whose answer is being
  * saved (or failed to save). An answer is never "gone" before it is stored — the notice stays, with
  * its state, until the write is confirmed and the account no longer needs a plan.

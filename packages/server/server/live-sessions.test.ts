@@ -523,3 +523,27 @@ describe('management subcommands are not sessions', () => {
     expect(isHarnessInfrastructure('antigravity', ['agy', 'login'])).toBe(false)
   })
 })
+
+describe('opencode (1.19.5, measured 2026-10-31 under tmux)', () => {
+  const EXE = '/home/u/.opencode/bin/opencode'
+  test('the native binary at ~/.opencode/bin is identified, a stub named opencode elsewhere is not', () => {
+    expect(harnessOfProcess('opencode', EXE, ['opencode', '--model', 'opencode/glm-5.3-flash-free'])).toBe('opencode')
+    expect(harnessOfProcess('opencode', '/tmp/x/opencode', ['opencode'])).toBeUndefined()
+    expect(installedHarnessAt('/home/u/.local/bin/opencode')).toBe('opencode')
+    expect(installedHarnessAt('/usr/lib/node_modules/opencode-ai/bin/opencode')).toBe('opencode')
+  })
+  test('management subcommands are not sessions; the TUI, attach and pr are', () => {
+    for (const verb of ['acp', 'serve', 'mcp', 'models', 'stats', 'export', 'session', 'db', 'upgrade', 'providers']) {
+      expect(harnessOfProcess('opencode', EXE, ['opencode', verb])).toBeUndefined()
+    }
+    expect(harnessOfProcess('opencode', EXE, ['opencode', 'attach', 'http://127.0.0.1:4096'])).toBe('opencode')
+    expect(harnessOfProcess('opencode', EXE, ['opencode', '/home/u/proj'])).toBe('opencode')
+  })
+  test('`-s` / `--session` name a `ses_…` session; `-s` with any other value names nothing', () => {
+    const SES = 'ses_e70797397ffeSYPpraVLuN7l9J'
+    expect(sessionIdFromArgv(['opencode', '-s', SES])).toBe(SES)
+    expect(sessionIdFromArgv(['opencode', `--session=${SES}`])).toBe(SES)
+    expect(sessionIdFromArgv(['codex', '-s', 'workspace-write'])).toBeUndefined()
+    expect(sessionIdFromArgv(['opencode', '-s', 'ses_short'])).toBeUndefined()
+  })
+})

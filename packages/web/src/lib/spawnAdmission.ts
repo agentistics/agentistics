@@ -97,3 +97,18 @@ export function forcedNote(json: unknown): string | null {
   const j = json as Record<string, unknown>
   return j.overridden === true && typeof j.note === 'string' ? j.note : null
 }
+
+/**
+ * Whether a refused `/api/fleet/new` answer offers "start anyway", and the queue entry to cancel first.
+ *
+ * RES.1 — a refusal the memory gate QUEUED (`queued: {id, position}`, `ok: false`) carries the gate's own
+ * sentence, which names "start anyway"; offering no button there was a dead instruction (QA
+ * OPENCODE.COMPLETO). It is offered, and the caller cancels `queuedId` before the forced re-post, so the
+ * queued copy cannot start a second session later. Any other refusal offers it only when it is the exact
+ * memory-budget refusal (`isAdmissionRefusal`).
+ */
+export function forceOfferOf(json: unknown): { offer: boolean; queuedId: string | null } {
+  const j = (json && typeof json === 'object' ? json : {}) as { ok?: unknown; queued?: { id?: unknown } }
+  const queuedId = j.ok === false && typeof j.queued?.id === 'string' && j.queued.id !== '' ? j.queued.id : null
+  return { offer: queuedId !== null || isAdmissionRefusal(json), queuedId }
+}

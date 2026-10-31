@@ -131,6 +131,7 @@ import { resolveLang } from './cli-lang'
 import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
+import { recordChipMode } from './sessions/chip-mode-record'
 import { SessionNotice, sessionActionError } from './sessions/action-error'
 import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { spawnCapabilities } from './sessions/codex-capabilities'
@@ -206,6 +207,7 @@ import {
 import { createSessionHub, setProcessSessionHub, type SessionHub } from './sessions/session-hub'
 import { hostAdapterState, hostTailState, onAdapterStateChange } from './sessions/adapter-state-host'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
+import { inlineSteps, readInlineSelected } from './sessions/inline-select'
 import { cycleToMode, modeOf, modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
 import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
@@ -2038,6 +2040,8 @@ export async function spawnManaged(req: {
    */
   origin?: 'web' | 'terminal' | 'background'
   resumeId?: string
+  /** V-OPENCODE.2 — open a FORK of this conversation (structured drivers that declare `fork`). */
+  forkOf?: string
   prompt?: string
   model?: string
   effort?: string
@@ -3890,7 +3894,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         const now = backend.modeOf?.(id)?.id
         const at = choices.findIndex(m => m.id === now)
         const next = choices[(at + 1) % choices.length]!
-        return (await backend.setMode(id, next.id)) ? { ok: true, message: s.sessModeCycled } : { ok: false, message: s.sessSendFailed(id) }
+        return (await backend.setMode(id, next.id)) && (await recordChipMode(id, backend), true) ? { ok: true, message: s.sessModeCycled } : { ok: false, message: s.sessSendFailed(id) }
       }
       const spec = modeSpecFor(managed.harness)
       if (!spec) return { ok: false, message: s.sessModeUnknown(managed.harness) }
@@ -3938,7 +3942,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const choices = backend.modesOf?.(id)
       if (!choices || !backend.setMode) return { ok: false, message: s.sessModeUnknown(managed.harness) }
       if (!choices.some(m => m.id === modeId)) return { ok: false, message: s.sessModeUnknown(managed.harness) }
-      return (await backend.setMode(id, modeId)) ? { ok: true, message: choices.find(m => m.id === modeId)!.label } : { ok: false, message: s.sessSendFailed(id) }
+      return (await backend.setMode(id, modeId)) && (await recordChipMode(id, backend), true) ? { ok: true, message: choices.find(m => m.id === modeId)!.label } : { ok: false, message: s.sessSendFailed(id) }
     },
 
     /**
@@ -4065,6 +4069,30 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       return nowStructured
         ? { ok: true, message: pt ? 'Sessão de volta ao modo novo (a mesma conversa, retomada).' : 'Session back in the new mode (the same conversation, resumed).' }
         : { ok: true, message: pt ? 'A conversa foi retomada, mas o modo novo não subiu; ela segue no terminal.' : 'The conversation was resumed, but the new mode did not start; it continues in the terminal.' }
+    },
+
+    async forkSession(id: string, callerVerified = false, force = false): Promise<ActionResult> {
+      const pt = lang === 'pt'
+      const backend = await resolveBackend()
+      const row = (await readRegistry()).find(m => m.id === id)
+      if (!row) return { ok: false, message: S().sessNoRegistryEntry }
+      if (!backend.isStructured?.(id) || !row.conversationId) {
+        return { ok: false, message: pt ? 'Só uma sessão em andamento no modo novo, com conversa vinculada, pode ser ramificada.' : 'Only a running session in the new mode, with a linked conversation, can be forked.' }
+      }
+      // The fork is a NEW row beside the original: it files under the same task and carries the same
+      // name with a suffix, and the original is left exactly as it was.
+      const out = await this.spawnSession!({
+        harness: row.harness, cwd: row.cwd, attach: false, origin: 'web', forkOf: row.conversationId,
+        label: `${row.label ?? row.harness} (fork)`,
+        ...(row.task ? { task: row.task } : {}),
+        ...(callerVerified ? { callerVerified: true } : {}),
+        // "Start anyway", confirmed by the person after the memory gate refused: the SAME request, past the gate.
+        ...(force ? { force: true } : {}),
+      }).catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }) as SpawnSessionResult)
+      return {
+        ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}),
+        ...(!out.ok && out.admission ? { memoryRefusal: { ...(out.queued?.id ? { queuedId: out.queued.id } : {}) } } : {}),
+      }
     },
 
     async interruptSession(id: string): Promise<ActionResult> {
@@ -4674,6 +4702,36 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
        * HIGHLIGHTED row. The highlighted row is `No, exit`. Reported by a user who could only quit
        * from the web and had to open the terminal to say yes.
        */
+      /*
+       * A SIDE-BY-SIDE row whose highlight is colour only (opencode's permission prompt — see
+       * `inline-select.ts`). Nothing in the plain frame says which option is highlighted, so it is read
+       * off an ANSI capture, the ring is walked with `next`, and the highlight is LOOKED AT again before
+       * the confirm — a miscount costs a refusal, never the wrong answer.
+       */
+      if (read.select === 'inline' && needsChoice(options)) {
+        if (choice === undefined) return { ok: false, message: s.sessNeedsChoice(options.length) }
+        const picked = options.find(o => o.number === choice)
+        if (!picked) return { ok: false, message: s.sessChoiceGone }
+        const inline = spec.inlineSelect
+        if (!inline) return { ok: false, message: s.sessChooseUnknown(managed.harness) }
+        const labels = options.map(o => o.label)
+        const highlighted = async (): Promise<number | null> => {
+          const cap = await backend.captureTerminal(id, SEND_CAPTURE_LINES).catch(() => null)
+          return cap ? readInlineSelected(cap.lines, inline, labels) : null
+        }
+        const from = await highlighted()
+        if (from === null) return { ok: false, message: s.sessChoiceGone }
+        const target = picked.number - 1
+        for (let i = 0; i < inlineSteps(from, target, labels.length); i++) {
+          if (!await backend.sendKey(id, inline.next)) return { ok: false, message: s.sessSendFailed(id) }
+          await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+        }
+        if (await highlighted() !== target) return { ok: false, message: s.sessChoiceGone }
+        return await backend.sendKey(id, spec.key)
+          ? { ok: true, message: s.sessAnswered(picked.label) }
+          : { ok: false, message: s.sessSendFailed(id) }
+      }
+
       if (read.select === 'marker' && needsChoice(options)) {
         if (choice === undefined) return { ok: false, message: s.sessNeedsChoice(options.length) }
         const picked = options.find(o => o.number === choice)
@@ -5008,6 +5066,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.away !== undefined ? { away: req.away } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
+        ...(req.forkOf ? { forkOf: req.forkOf } : {}),
         ...(req.account ? { account: req.account } : {}),
         ...(chosen.accountId ? { accountId: chosen.accountId } : {}),
         ...(req.callerVerified ? { callerVerified: true } : {}),

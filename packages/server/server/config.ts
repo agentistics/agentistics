@@ -478,8 +478,7 @@ export interface HarnessRoot {
 }
 
 /** Each harness's default root. `null` = the harness is not read through account roots at all:
- *  antigravity has no isolation variable and keeps its own single-directory reader, and opencode has
- *  no adapter. Keyed by `HarnessId`, so a new harness does not compile until it is decided here. */
+ *  antigravity has no isolation variable and keeps its own single-directory reader, and opencode reads its explicitly resolved SQLite database directly. Keyed by `HarnessId`, so a new harness does not compile until it is decided here. */
 export const DEFAULT_HARNESS_DIRS: Record<HarnessId, string | null> = {
   claude: CLAUDE_DIR, codex: CODEX_DIR, gemini: GEMINI_DIR, copilot: COPILOT_DIR, kimi: KIMI_DIR,
   antigravity: null, opencode: null,

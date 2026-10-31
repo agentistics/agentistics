@@ -1290,6 +1290,8 @@ export interface ActionResult {
   failure?: 'prompt' | 'ended' | 'unconfirmed'
   /** PLAN.ACCOUNTS D3: refused by the account rule — the server maps it to an HTTP status. */
   accountRefusal?: AccountRefusalCode
+  /** The memory gate refused (a fork); `queuedId` is the queue entry it filed, so "start anyway" can cancel it first. */
+  memoryRefusal?: { queuedId?: string }
   /** A group reopen's explicit partial result: rows opened, rows already running, and EVERY refused row. */
   fell?: { opened: string[]; already: string[]; refused: { id: string; reason: AccountRefusalCode; message: string }[] }
 }
@@ -1639,6 +1641,12 @@ export interface ControlHost {
    * conversation over the harness's protocol (the reopen machinery; row identity inherited).
    */
   backToStructured?(id: string): Promise<ActionResult>
+  /**
+   * V-OPENCODE.2 — FORK a structured row's conversation into a NEW session through its protocol. The original
+   * keeps running untouched; the answer carries the new row's `id`. Refused in a sentence where the driver
+   * offers no fork — never a fresh empty conversation in its place.
+   */
+  forkSession?(id: string, callerVerified?: boolean, force?: boolean): Promise<ActionResult>
 
   /**
    * Restore a session's conversation to the point BEFORE one of the person's own prompts, using the
@@ -1992,6 +2000,8 @@ export interface SpawnSessionRequest {
   /** MODE.EVERYWHERE — the permission mode to start in (absent = the harness's own configuration). */
   mode?: CanonicalMode
   label?: string
+  /** V-OPENCODE.2 — open a FORK of this conversation (the harness's own id) instead of a fresh one; structured drivers that declare `fork` only. */
+  forkOf?: string
   /** Take the terminal now, versus start detached and stay here. */
   attach: boolean
   /**
@@ -2078,9 +2088,9 @@ export interface ResumeSessionRequest {
    */
   switchToAccount?: string
   /**
-   * CONTA.TROCA — skip the memory admission. Set only by the account switch, which has just ENDED
-   * the process this resume replaces, so the net memory cost is ~zero; refusing there would leave
-   * the person with no session at all.
+   * Skip the memory admission. Set by the account switch (CONTA.TROCA), which has just ENDED the
+   * process this resume replaces, so the net memory cost is ~zero; and by the browser's "reopen
+   * anyway", which the person confirmed after the gate refused (`/api/fleet/act` `force`).
    */
   force?: boolean
 }
