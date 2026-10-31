@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.173.0': {
+  '2.172.1': {
     features: [
       {
         pt: 'OpenCode: troque de modelo no meio da conversa pelo menu Modelo, com a lista do próprio OpenCode (inclusive os gratuitos); o rodapé mostra o modelo que está rodando de verdade.',
