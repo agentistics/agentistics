@@ -40,3 +40,9 @@ test('without project_path the command runs in place, with no cd', () => {
   const agy = { session_id: 'y', project_path: '', harness: 'antigravity' } as SessionMeta
   expect(resumeCommand(agy)).toBe('agy --conversation y')
 })
+
+test('opencode resumes with -s, and only for a ses_ id', () => {
+  const o = (id: string) => ({ session_id: id, project_path: '/home/u/proj', harness: 'opencode' } as SessionMeta)
+  expect(resumeCommand(o('ses_1a2b3c'))).toBe("cd '/home/u/proj' && opencode -s ses_1a2b3c")
+  expect(resumeCommand(o('abc-123'))).toBeNull()
+})

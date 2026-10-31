@@ -6,6 +6,8 @@ import type { SurfaceHarnessId, SessionMeta } from '@agentistics/core'
  *   codex   → `codex resume <SESSION_ID>`    (positional; UUIDs take precedence)
  *   copilot → `copilot --resume <id>`        ("optionally specify existing session ID")
  *   kimi    → `kimi -S <id>`                 ("Resume a session. With ID: resume that session")
+ *   opencode → `opencode -s <ses_…>`        (`-s, --session`: "session id to continue", 1.17.9; only a `ses_…` id
+ *                                              is accepted — anything else names no opencode session)
  *
  *   gemini  → `gemini --resume <uuid>`       (documented as "latest | index"; the CLI's own refusal text
  *                                              lists `--resume {uuid}` and it was verified on 0.63.0 — an index
@@ -23,6 +25,7 @@ const RESUME_BY_HARNESS: Partial<Record<SurfaceHarnessId, (id: string) => string
   kimi: id => `kimi -S ${id.startsWith('session_') ? id : `session_${id}`}`,
   // Gemini's store key is the synthetic `<project>/<file>`; the CLI takes the chat header's UUID.
   gemini: id => `gemini --resume ${id}`,
+  opencode: id => (/^ses_[A-Za-z0-9]+$/.test(id) ? `opencode -s ${id}` : ''),
 }
 
 /** Copy-ready shell command to resume a session, or null when the harness has no way to do it. */
@@ -34,5 +37,6 @@ export function resumeCommand(s: SessionMeta): string | null {
   const id = s.harness === 'gemini' ? s.native_session_id : s.session_id
   if (!build || !id) return null
   const resume = build(id)
+  if (!resume) return null
   return s.project_path ? `cd '${s.project_path}' && ${resume}` : resume
 }

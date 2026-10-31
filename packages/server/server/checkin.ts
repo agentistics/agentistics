@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto'
 import { isClosedRow } from './sessions/fleet-events'
 import { kimiMcpPath } from './kimi-mcp'
 import { AGY_MCP_CONFIG } from './agy-mcp'
+import { opencodeMcpPath } from './opencode-mcp'
 
 export interface CheckinDeps {
   readPreferences: typeof realReadPreferences
@@ -110,6 +111,7 @@ const defaultDeps: CheckinDeps = {
       ['copilot', join(HOME_DIR, '.copilot', 'mcp-config.json')],
       ['antigravity', AGY_MCP_CONFIG],
       ['kimi', kimiMcpPath()],
+      ['opencode', opencodeMcpPath()],
     ]
     const configs = await Promise.all(files.filter(([h]) => harnessEnabled(h)).map(async ([harness, file]) => {
       try { return { harness, file, digest: createHash('sha256').update(await readFile(file)).digest('hex') } }

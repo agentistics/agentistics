@@ -61,10 +61,18 @@ export const HARNESS_SKILLS: Record<HarnessId, SkillSource | null> = {
   gemini: null,
   copilot: null,
   kimi: null,
-  // opencode DOES have a `skill` tool part naming the skill by `input.name` (measured on the real
-  // store), but this table is about ON-DISK skill directories agentop can list, not about a tool
-  // call it read — unverified/unprobed, so `null` rather than a guessed directory layout.
-  opencode: null,
+  // MEASURED 2026-10-30, opencode 1.17.9, `opencode debug skill` in a throwaway HOME: it lists SKILL.md
+  // directories from ~/.config/opencode/{skills,skill}, ~/.opencode/skills, ~/.claude/skills and
+  // ~/.agents/skills, and per project from .opencode/skills and .claude/skills (+ the built-in
+  // `customize-opencode`). There is NO slash command per skill: the model calls its `skill` tool by
+  // name, so the line is a plain request. That the request makes a model load it was not driven
+  // end to end (no provider credentials in a throwaway) — the listing is what is verified.
+  opencode: {
+    userDirs: ['.config/opencode/skills', '.opencode/skills', '.claude/skills', '.agents/skills'],
+    pluginRoots: [],
+    projectDirs: ['.opencode/skills', '.claude/skills'],
+    line: 'Use the {name} skill.',
+  },
 }
 
 /** Why the picker is absent, so the menu says it instead of leaving a hole. */
