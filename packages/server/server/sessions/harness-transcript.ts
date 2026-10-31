@@ -25,13 +25,14 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
-import { ANTIGRAVITY_BRAIN_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, KIMI_DIR } from '../config'
+import { ANTIGRAVITY_BRAIN_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, KIMI_DIR, OPENCODE_DB_PATH } from '../config'
 import { UUID_RE } from '../git'
 import { parseAntigravityChat } from './antigravity-chat'
 import { parseCodexChat } from './codex-chat'
 import { parseCopilotChat } from './copilot-chat'
 import { parseGeminiChatTurns } from './gemini-chat'
 import { parseKimiChat } from './kimi-chat'
+import { readOpencodeChat, resolveOpencodeChat } from './opencode-chat-io'
 import type { ChatTurn } from '@agentistics/core'
 import { readChatWindow, readRecentChatTurns, resolveChatTranscriptPath } from './chat-tail'
 import { readTailWindow } from './transcript-window'
@@ -493,6 +494,18 @@ async function orAccountRoots(
   return newestTranscript(harness, found, at)
 }
 
+const OPENCODE: HarnessTranscript = {
+  resolve: ref => resolveOpencodeChat(OPENCODE_DB_PATH, ref.conversationId),
+  async read(path, max) {
+    const all = await readOpencodeChat(path)
+    return windowed(all ?? [], max)
+  },
+  async readRecent(path, max) {
+    const all = await readOpencodeChat(path)
+    return (all ?? []).slice(-max)
+  },
+}
+
 const CLAUDE: HarnessTranscript = {
   // The linked file, then wherever the conversation went on from it (`/login`, `/resume` write a NEW
   // file in the same directory while the process stays) — see `transcript-fork.ts`. Other harnesses
@@ -548,11 +561,10 @@ export const HARNESS_TRANSCRIPTS: Record<HarnessId, HarnessTranscript | null> = 
   copilot: COPILOT,
   kimi: KIMI,
   gemini: GEMINI,
-  // No legacy adapter (CLAUDE.md step 4, skipped by scope) and therefore no ManagedSession can ever
-  // carry an opencode conversationId — the LINK half this table's own header distinguishes from the
-  // format half. A `null` reader here is refused IN WORDS by the caller, naming the harness, exactly
-  // as this file's own rule requires.
-  opencode: null,
+  // opencode keeps every session in ONE SQLite store, so its "path" is `<opencode.db>#<ses_…>` — see
+  // `opencode-chat-io.ts`. The LINK half: a TUI row gets its `ses_…` from argv (`-s`) or from opencode's own
+  // log (`opencode-run-link.ts`), never from the folder.
+  opencode: OPENCODE,
 }
 
 /**

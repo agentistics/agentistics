@@ -176,9 +176,8 @@ describe('workChildren — the harness chain (M3)', () => {
 describe('HELPER_PROCESSES', () => {
   it('decides every harness (the build forces it) — measured ones are arrays, the rest null', () => {
     for (const h of HARNESS_ORDER) expect(h in HELPER_PROCESSES).toBe(true)
-    for (const h of ['claude', 'codex', 'gemini', 'copilot', 'kimi'] as const) expect(Array.isArray(HELPER_PROCESSES[h])).toBe(true)
+    for (const h of ['claude', 'codex', 'gemini', 'copilot', 'kimi', 'opencode'] as const) expect(Array.isArray(HELPER_PROCESSES[h])).toBe(true)
     expect(HELPER_PROCESSES.antigravity).toBeNull()
-    expect(HELPER_PROCESSES.opencode).toBeNull()
   })
 })
 

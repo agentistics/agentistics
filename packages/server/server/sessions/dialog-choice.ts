@@ -48,6 +48,8 @@
  * Verified against three real claude 2.1.232 dialogs on 2026-08-14 (a Bash permission prompt, a
  * Write permission prompt and an `AskUserQuestion`), all captured from live sessions.
  */
+import { readInlineRow, type InlineSelectSpec } from './inline-select'
+
 
 /** One option a dialog is offering. */
 export interface DialogOption {
@@ -206,7 +208,7 @@ export interface DialogRead {
    *
    * `null` whenever `kind` is not `options`.
    */
-  select: 'numbered' | 'marker' | null
+  select: 'numbered' | 'marker' | 'inline' | null
   /** Present only on `unreadable`. */
   reason?: DialogUnreadable
   /** Index of the TOPMOST option row reached, `-1` when none was. Feeds the preview's window. */
@@ -224,8 +226,16 @@ export interface DialogRead {
  * stay 1:1 with the frame.
  */
 const BOXED = /^\s*│(.*)│\s*$/
+/**
+ * opencode draws every block of its TUI — messages and dialogs alike — behind a LEFT bar only, a heavy
+ * vertical `┃` (U+2503), never a closed box (opencode 1.19.5, 2026-10-31: `  ┃  1. Red`). No other
+ * harness draws that glyph, so a line led by it is unwrapped too; a `┃` anywhere else in the line is
+ * left alone.
+ */
+const LEFT_BAR = /^\s*┃(.*)$/
 function unbox(line: string): string {
-  let l = line
+  const bar = LEFT_BAR.exec(line)
+  let l = bar ? bar[1]! : line
   for (let i = 0; i < 3; i++) {
     const m = BOXED.exec(l)
     if (!m) break
@@ -325,7 +335,19 @@ export function readDialog(
   // Nothing numbered at the bottom at all. It may still be a menu — claude's trust prompt prints
   // none — so the marker shape gets its turn. This is the ONLY place it runs: a frame whose numbers
   // were found and then refused keeps that refusal, or a `gap` would be re-read as two loose rows.
-  if (found.length === 0) return opts.marker ? readMarkerSelect(frame, opts) : { kind: 'none', options: [], select: null, top: -1 }
+  if (found.length === 0) {
+    // opencode's permission row: options side by side, highlight in colour only — see `inline-select.ts`.
+    // Read only for a harness whose spec names that row (`ApprovalSpec.inlineSelect`).
+    const inline = opts.inline ? readInlineRow(frame, opts.inline) : null
+    if (inline) {
+      return {
+        kind: 'options', select: 'inline', top: inline.at,
+        // `selected` is unknowable from a plain frame; the answer reads it off an ANSI capture.
+        options: inline.labels.map((label, n) => ({ number: n + 1, label, selected: false })),
+      }
+    }
+    return opts.marker ? readMarkerSelect(frame, opts) : { kind: 'none', options: [], select: null, top: -1 }
+  }
   // Rows were found and `1.` never was. The block is real and its top is out of reach.
   if (!anchored) return { kind: 'unreadable', reason: 'no-anchor', options: [], select: null, top }
 
@@ -335,7 +357,7 @@ export function readDialog(
   // whole subsequent turn does. See `MAX_TRAILING_GAP`.
   let contentEnd = frame.length
   // A box's own closing edge and empty boxed rows are chrome, like the blank padding.
-  while (contentEnd > bottom + 1 && /^[\s│╰╯─]*$/.test(frame[contentEnd - 1] ?? '')) contentEnd--
+  while (contentEnd > bottom + 1 && /^[\s│┃╰╯─]*$/.test(frame[contentEnd - 1] ?? '')) contentEnd--
   if (contentEnd - 1 - bottom > MAX_TRAILING_GAP) {
     return { kind: 'none', options: [], select: null, top: -1 }
   }
@@ -375,6 +397,8 @@ const MARKER = /^(\s*)❯ (\S.*?)\s*$/
  */
 export interface MarkerOpts {
   marker?: boolean
+  /** A side-by-side, colour-highlighted option row (opencode) — see `inline-select.ts`. */
+  inline?: InlineSelectSpec
   /** The cursor glyph, when it is not `❯`. Requires `footer`. */
   glyph?: string
   /** The footer the harness's select draws; matched in the last lines only. */
