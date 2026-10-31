@@ -42,6 +42,29 @@ describe('handback moves the sender\'s subtask', () => {
   })
 })
 
+describe('SESSÕES.FECHAR: a delivered handback becomes the session.handback flows event', () => {
+  test('handback → one event naming the sender, the target and the sender\'s task', async () => {
+    const events: unknown[] = []
+    const f = fake({ senderTask: async () => ({ taskId: 't1', subtaskId: 's1' }), handbackEvent: async e => { events.push(e) } })
+    await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'done' }, f.deps)
+    expect(events).toEqual([{
+      type: 'session.handback', id: `session.handback:child-1:${new Date(1_000_000).toISOString()}`,
+      payload: { sessionId: 'child-1', to: 'parent-1', at: new Date(1_000_000).toISOString(), taskId: 't1', subtaskId: 's1' },
+    }])
+  })
+  test('block / question / an undelivered handback emit nothing; a failing emitter never fails the send', async () => {
+    const events: unknown[] = []
+    const handbackEvent = async (e: unknown) => { events.push(e) }
+    await sendSessionMessage('child-1', { to: 'parent-1', kind: 'block', body: 'x' }, fake({ handbackEvent }).deps)
+    resetMessageRateLimit()
+    await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, fake({ handbackEvent, prompt: async () => ({ ok: false, message: 'gone' }) }).deps)
+    expect(events).toEqual([])
+    resetMessageRateLimit()
+    const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, fake({ handbackEvent: async () => { throw new Error('engine down') } }).deps)
+    expect(out.ok).toBe(true)
+  })
+})
+
 describe('agentistics_session_message', () => {
   test('delivers into the target with the header, through the prompt path', async () => {
     const f = fake()

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { planBudget, planPace, type PlanLimits } from '@agentistics/core'
 import {
-  checkinAccountLimits, checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
+  checkinAccountLimits, checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, deliveredOpenLine, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   runNow, checkinTick, resetCheckinSweep, type CheckinAction, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
 
@@ -316,6 +316,17 @@ describe('check-in agenda', () => {
     expect(state?.last).toEqual({ state: 'resolved', summary: 'Handled', needs, actions })
     expect(JSON.parse(frames.at(-1)!.split('data: ')[1]!.trim()).last.needs).toEqual(needs)
     expect(activity.at(-1).detail).toContain('"needs"')
+  })
+
+  test('SESSÕES.FECHAR: delivered-but-open workers are listed in the leader prompt', async () => {
+    expect(deliveredOpenLine([])).toBe('')
+    const line = deliveredOpenLine([{ sessionId: 'wk-1', handbackAt: 'x' }, { sessionId: 'wk-2', handbackAt: 'y', lastRun: { status: 'refused', reason: 'working tree is dirty' } }])
+    expect(line).toContain('wk-1; wk-2 (working tree is dirty)')
+    expect(line).toContain('fechar-entregue')
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    setCheckinDeps({ ...testDeps, readDeliveredOpen: async () => [{ sessionId: 'wk-1', handbackAt: 'x' }] })
+    expect(await runNow(leader.conversationId, 1_000)).toBe(true)
+    expect(prompts[0].text).toBe(promptFor(defaultConfig()) + deliveredOpenLine([{ sessionId: 'wk-1', handbackAt: 'x' }]))
   })
 
   test('away mode adds a no-owner line to the leader prompt', async () => {

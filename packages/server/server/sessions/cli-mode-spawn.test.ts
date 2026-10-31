@@ -107,4 +107,4 @@ test('ORQ.FORA CLI session open sends a background structured resume and keeps i
   expect(seen[0]!.structured).toMatchObject({ origin: 'background', resumeId: 'orq-open-conversation', mode: 'no-questions' })
   expect(seen[0]!.structured?.instructions).toBeUndefined()
   expect(routeSpawn({ flagOn: true, harness: 'claude', driver: 'claude-stream-json', origin: seen[0]!.structured?.origin, mode: 'no-questions', startModes: ['no-questions'], acpDriven: false, acpOptIn: [] })).toBe('structured')
-})
+}, 20_000) // `session open` runs the real resolver + spawn admission: ~2 s alone, past 5 s inside the full suite on a loaded machine

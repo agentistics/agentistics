@@ -45,7 +45,25 @@ export interface MessageDeps {
   comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind } }) => Promise<{ ok: boolean }>
   /** `handback` from a session filed on a subtask: move that subtask in_progress → in_review. */
   handbackSubtask?: (subtaskId: string) => Promise<void>
+  /**
+   * SESSÕES.FECHAR — a DELIVERED handback, as the `session.handback` event of the engine's flows bus (the engine records
+   * it as the worker's handback evidence and, when `fechar-entregue` is enabled, closes the worker once it is stopped,
+   * clean and saved). Best effort, never on the delivery path; absent / flows off = nothing.
+   */
+  handbackEvent?: (event: HandbackEvent) => Promise<unknown>
   now: () => number
+}
+
+export interface HandbackEvent { type: 'session.handback'; id: string; payload: { sessionId: string; to: string; at: string; taskId?: string; subtaskId?: string } }
+
+/** PURE. The flows event for a handback `senderId` delivered to `to` at `at` (ms). */
+export function handbackFlowEvent(senderId: string, to: string, at: number, filed: SenderTask): HandbackEvent {
+  const iso = new Date(at).toISOString()
+  return {
+    type: 'session.handback',
+    id: `session.handback:${senderId}:${iso}`,
+    payload: { sessionId: senderId, to, at: iso, ...(filed.taskId ? { taskId: filed.taskId } : {}), ...(filed.subtaskId ? { subtaskId: filed.subtaskId } : {}) },
+  }
 }
 
 export type MessageReply =
@@ -127,6 +145,7 @@ export async function sendSessionMessage(
     mirrored = res.ok
     if (kind === 'handback' && filed.subtaskId && deps.handbackSubtask) await deps.handbackSubtask(filed.subtaskId).catch(() => {})
   }
+  if (kind === 'handback' && deps.handbackEvent) void deps.handbackEvent(handbackFlowEvent(senderId, target.id, t, filed)).catch(() => {})
   return { ok: true, to: target.id, kind, delivered: true, message: sent.message ?? 'Delivered.', mirrored }
 }
 
@@ -168,6 +187,12 @@ export async function defaultMessageDeps(): Promise<MessageDeps> {
       const sub = w.book.subtasks.find(s => s.id === subtaskId)
       const next = sub ? statusAfterHandback(sub.status) : null
       if (next) await tw.patchSubtask(subtaskId, { status: next })
+    },
+    handbackEvent: async event => {
+      const { flowsExperimentalOn } = await import('../native-gate')
+      if (!flowsExperimentalOn()) return
+      const { engine } = await import('../engine/load')
+      return engine()?.flows?.emit?.(event)
     },
     now: () => Date.now(),
   }
