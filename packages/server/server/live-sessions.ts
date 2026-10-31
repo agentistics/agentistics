@@ -81,6 +81,9 @@ const PROCESS_HARNESS: Record<string, HarnessId> = {
   gemini: 'gemini',
   copilot: 'copilot',
   kimi: 'kimi',
+  // opencode 1.19.5 (measured 2026-10-31, `readlink -f $(command -v opencode)`): ONE native binary at
+  // `~/.opencode/bin/opencode`, comm `opencode`, the TUI and its worker threads in that one process.
+  opencode: 'opencode',
 }
 
 /** `comm` is not always the tool's name: `gh copilot` runs its binary with the thread name
@@ -125,8 +128,7 @@ const VERSIONED_INSTALL: Record<HarnessId, RegExp | null> = {
   copilot: null,
   antigravity: null,
   kimi: null,
-  // opencode has no legacy adapter (CLAUDE.md step 4, skipped by scope) and is not detected as a
-  // live session at all — see live-sessions.ts's own header for the general rule this satisfies.
+  // A single native binary named after the tool (`~/.opencode/bin/opencode`), never a version.
   opencode: null,
 }
 
@@ -151,13 +153,17 @@ export function installedHarnessAt(exePath: string, harness?: HarnessId): Harnes
     [/\/(?:node_modules\/)?@github\/copilot(?:[-/]|$)/, 'copilot'],
     [/\/(?:node_modules\/)?(?:@moonshotai\/kimi|kimi-code)(?:[-/]|$)/, 'kimi'],
     [/\/(?:antigravity-cli|agy)(?:[-/]|$)/, 'antigravity'],
+    // opencode's own installer (`curl … opencode.ai/install`) puts the binary at `~/.opencode/bin/opencode`;
+    // the npm package `opencode-ai` ships the same binary under `node_modules/opencode-ai/…/bin/opencode`.
+    [/\/\.opencode\/bin\/opencode$/, 'opencode'],
+    [/\/node_modules\/opencode-[^/]+\/(?:.*\/)?bin\/opencode$/, 'opencode'],
     [/\/\.local\/share\/gh\/copilot\/copilot$/, 'copilot'],
-    [/^(?:\/usr\/local|\/opt\/homebrew|\/home\/[^/]+\/\.local)\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi)$/, 'path-bin'],
+    [/^(?:\/usr\/local|\/opt\/homebrew|\/home\/[^/]+\/\.local)\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi|opencode)$/, 'path-bin'],
   ]
   for (const [pattern, id] of known) {
     if (!pattern.test(normal)) continue
     const resolved = id === 'path-bin'
-      ? ({ claude: 'claude', codex: 'codex', gemini: 'gemini', copilot: 'copilot', agy: 'antigravity', antigravity: 'antigravity', kimi: 'kimi' } as const)[base]
+      ? ({ claude: 'claude', codex: 'codex', gemini: 'gemini', copilot: 'copilot', agy: 'antigravity', antigravity: 'antigravity', kimi: 'kimi', opencode: 'opencode' } as const)[base]
       : id
     if (resolved && (!harness || harness === resolved)) return resolved
   }
@@ -217,7 +223,7 @@ export function isNonInteractiveInvocation(_harness: HarnessId, argv: readonly s
  * list this can be read from (its parse yields the program name repeated), and agy prints none at
  * all. Absent means "not known to be management", so they behave exactly as they do today.
  */
-const MANAGEMENT: Record<'claude' | 'codex' | 'copilot' | 'kimi', readonly string[]> = {
+const MANAGEMENT: Record<'claude' | 'codex' | 'copilot' | 'kimi' | 'opencode', readonly string[]> = {
   // `claude --help`, 2.1.261. `attach` is excluded — it opens a session.
   claude: [
     'agents', 'auth', 'auto-mode', 'doctor', 'gateway', 'import', 'install', 'logs', 'mcp',
@@ -237,6 +243,14 @@ const MANAGEMENT: Record<'claude' | 'codex' | 'copilot' | 'kimi', readonly strin
   ],
   // `kimi --help`, 0.38.0.
   kimi: ['export', 'provider', 'acp', 'web', 'server', 'login', 'doctor', 'vis', 'migrate', 'upgrade'],
+  // `opencode --help`, 1.19.5. `attach` (a TUI onto a running server), `pr` (checks out, then runs the
+  // TUI) and the bare `[project]` positional are excluded — they open a conversation. `acp` is the
+  // structured route agentop itself drives (its rows come from the engine, never from /proc); `run`
+  // is caught by `isNonInteractiveInvocation` already and is listed for completeness.
+  opencode: [
+    'completion', 'acp', 'mcp', 'run', 'debug', 'providers', 'auth', 'agent', 'upgrade', 'uninstall',
+    'serve', 'web', 'models', 'stats', 'export', 'import', 'github', 'session', 'plugin', 'plug', 'db',
+  ],
 }
 
 /**
@@ -272,8 +286,7 @@ const NOT_A_SESSION: Record<HarnessId, readonly string[] | null> = {
   copilot: [...MANAGEMENT.copilot],
   antigravity: null,
   kimi: [...MANAGEMENT.kimi],
-  // Not known to be infrastructure — see the header's rule for an absent entry.
-  opencode: null,
+  opencode: [...MANAGEMENT.opencode],
 }
 
 /**
@@ -423,6 +436,25 @@ async function bootTimeSec(procRoot = '/proc'): Promise<number> {
 }
 
 /**
+ * The boot moment as `now − /proc/uptime`, `null` when there is no `uptime` to read. HELD between scans
+ * and moved only when the fresh reading differs by more than `BOOT_DRIFT_SEC`: the value feeds
+ * `startedMs`, which is part of an unlinked external row's id (`externalId`), so it must not jitter by a
+ * millisecond from one poll to the next — only follow a real clock correction.
+ */
+const BOOT_DRIFT_SEC = 2
+const bootEpochs = new Map<string, number>()
+async function bootEpochNowSec(procRoot = '/proc'): Promise<number | null> {
+  const raw = await readFile(`${procRoot}/uptime`, 'utf-8').catch(() => '')
+  const up = Number(raw.split(' ')[0])
+  if (!Number.isFinite(up) || up <= 0) return null
+  const fresh = Date.now() / 1000 - up
+  const held = bootEpochs.get(procRoot)
+  if (held !== undefined && Math.abs(held - fresh) <= BOOT_DRIFT_SEC) return held
+  bootEpochs.set(procRoot, fresh)
+  return fresh
+}
+
+/**
  * Real process start time, in epoch ms.
  *
  * NOT the mtime of /proc/<pid>: that timestamp moves while the process runs (it tracked ~3 minutes
@@ -489,7 +521,12 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const ID_FLAGS = new Set([
   '--resume', '--session-id', '-r', '--conversation', '--conversation-id',
   '--session', '-S', // Kimi Code: `kimi -S <id>` resumes that session
+  '-s', // opencode 1.19.5: `-s, --session  session id to continue` — accepted only for a `ses_…` value
 ])
+
+/** opencode's session id (`ses_` + base62, the key `opencode.db` uses). Never a UUID, so the two shapes
+ *  cannot be confused — and `-s` (codex's `--sandbox`) never carries one. */
+const OPENCODE_SESSION_RE = /^ses_[A-Za-z0-9]{20,40}$/
 
 /** Pull the session id out of a harness argv, in both `--flag=value` and `--flag value` form.
  *  Returns undefined for a fresh session (no id on the command line yet), for a bare `--resume`
@@ -498,6 +535,7 @@ export function sessionIdFromArgv(argv: string[]): string | undefined {
   // kimi 2.1.1 resumes by `session_<uuid>` (the bare uuid is "not found"), while the store keys on the
   // bare uuid — the prefix is the directory name's, not part of the id.
   const idOf = (v: string | undefined): string | undefined => {
+    if (v && OPENCODE_SESSION_RE.test(v)) return v
     const bare = v?.replace(/^session_/, '')
     return bare && UUID_RE.test(bare) ? bare : undefined
   }
@@ -604,7 +642,12 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
     harnessIndex = await loadHarnessSessions()
   } catch { /* best-effort */ }
 
-  const btimeSec = await bootTimeSec(procRoot)
+  // The boot moment as of THIS scan: now − uptime. `btime` from /proc/stat is the same moment as the
+  // kernel saw it at boot, and on WSL2 it moves (measured 2026-10-31: 632 s in 90 min, and the value read
+  // once at server start had drifted 56 s within the hour), so a cached `btime` put every process start
+  // minutes off — enough to break any rule that compares it with a timestamp written by the process
+  // itself (opencode's log, `opencode-run-link.ts`). A fixture root without `uptime` keeps `btime`.
+  const btimeSec = (await bootEpochNowSec(procRoot)) ?? await bootTimeSec(procRoot)
   const hz = 100 // USER_HZ is 100 on every Linux this runs on; only used to scale start ticks.
   const procs: HarnessProcess[] = []
   const numeric = pids.filter(p => /^\d+$/.test(p))
@@ -672,6 +715,19 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
   }))
   // Forget what is gone, so the memo is as large as the process table and no larger.
   for (const k of notHarness) if (!seen.has(k)) notHarness.delete(k)
+  // opencode holds one shared `opencode.db` and names no session in argv unless `-s` was given, so its
+  // link comes from its own log: the run that started in this cwd at this process's start time
+  // (`opencode-run-link.ts`, which refuses every ambiguity). Only on the real /proc — a fixture root has no
+  // matching log — and only when there is an opencode process to link.
+  const unlinked = procs.filter(p => p.harness === 'opencode' && !p.sessionId && p.pid !== undefined)
+  if (procRoot === '/proc' && unlinked.length > 0) {
+    try {
+      const { readOpencodeProcessSessions } = await import('./sessions/opencode-run-log')
+      const all = procs.filter(p => p.harness === 'opencode' && p.pid !== undefined)
+      const linked = await readOpencodeProcessSessions(all.map(p => ({ pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs })))
+      for (const p of unlinked) { const id = linked.get(p.pid!); if (id) p.sessionId = id }
+    } catch { /* best-effort: an unread log is an unlinked row, as before */ }
+  }
   const unavailable = procs.length > 0
     ? null
     : detectionUnavailable({ platform: 'linux', procReadable: true, foreignPids, cwdDenied })

@@ -126,7 +126,7 @@ export interface SessionView {
    * Carried rather than re-derived downstream, because the two need different capabilities of the
    * harness and a surface that assumes "numbered" offers a digit the dialog never printed.
    */
-  dialogSelect?: 'numbered' | 'marker'
+  dialogSelect?: 'numbered' | 'marker' | 'inline'
   /**
    * The dialog's options were STATED by the session's protocol (a structured session, F2.0) rather than
    * read off a screen — so they are answered through its driver by NUMBER whatever the harness's
@@ -520,7 +520,7 @@ export function buildSessionViews(o: {
   /** The form around that dialog, keyed by session id. */
   dialogForm?: ReadonlyMap<string, DialogForm>
   /** How those options are picked, keyed by session id — see `SessionView.dialogSelect`. */
-  dialogSelect?: ReadonlyMap<string, 'numbered' | 'marker'>
+  dialogSelect?: ReadonlyMap<string, 'numbered' | 'marker' | 'inline'>
   /** The ids whose dialog the protocol STATED — see `SessionView.dialogStated`. */
   dialogStated?: ReadonlySet<string>
   /** Why the dialog could not be read, keyed by session id — see `SessionView.dialogUnreadable`. */

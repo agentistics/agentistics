@@ -206,6 +206,7 @@ import {
 import { createSessionHub, setProcessSessionHub, type SessionHub } from './sessions/session-hub'
 import { hostAdapterState, hostTailState, onAdapterStateChange } from './sessions/adapter-state-host'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
+import { inlineSteps, readInlineSelected } from './sessions/inline-select'
 import { cycleToMode, modeOf, modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
 import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
@@ -4674,6 +4675,36 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
        * HIGHLIGHTED row. The highlighted row is `No, exit`. Reported by a user who could only quit
        * from the web and had to open the terminal to say yes.
        */
+      /*
+       * A SIDE-BY-SIDE row whose highlight is colour only (opencode's permission prompt — see
+       * `inline-select.ts`). Nothing in the plain frame says which option is highlighted, so it is read
+       * off an ANSI capture, the ring is walked with `next`, and the highlight is LOOKED AT again before
+       * the confirm — a miscount costs a refusal, never the wrong answer.
+       */
+      if (read.select === 'inline' && needsChoice(options)) {
+        if (choice === undefined) return { ok: false, message: s.sessNeedsChoice(options.length) }
+        const picked = options.find(o => o.number === choice)
+        if (!picked) return { ok: false, message: s.sessChoiceGone }
+        const inline = spec.inlineSelect
+        if (!inline) return { ok: false, message: s.sessChooseUnknown(managed.harness) }
+        const labels = options.map(o => o.label)
+        const highlighted = async (): Promise<number | null> => {
+          const cap = await backend.captureTerminal(id, SEND_CAPTURE_LINES).catch(() => null)
+          return cap ? readInlineSelected(cap.lines, inline, labels) : null
+        }
+        const from = await highlighted()
+        if (from === null) return { ok: false, message: s.sessChoiceGone }
+        const target = picked.number - 1
+        for (let i = 0; i < inlineSteps(from, target, labels.length); i++) {
+          if (!await backend.sendKey(id, inline.next)) return { ok: false, message: s.sessSendFailed(id) }
+          await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+        }
+        if (await highlighted() !== target) return { ok: false, message: s.sessChoiceGone }
+        return await backend.sendKey(id, spec.key)
+          ? { ok: true, message: s.sessAnswered(picked.label) }
+          : { ok: false, message: s.sessSendFailed(id) }
+      }
+
       if (read.select === 'marker' && needsChoice(options)) {
         if (choice === undefined) return { ok: false, message: s.sessNeedsChoice(options.length) }
         const picked = options.find(o => o.number === choice)

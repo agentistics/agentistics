@@ -1,0 +1,40 @@
+  ┃  Use your question tool to ask me which color I prefer, with options red, green and blue. Do not do anything else.
+  ┃
+
+  ┃
+  ┃  # Questions
+  ┃
+  ┃  Which color do you prefer?
+  ┃  Green
+  ┃
+
+     + Thought: 236ms
+
+     You prefer green.
+
+     ▣  Build · GLM-5.3-Flash Free · 17.0s
+
+  ┃
+  ┃  create the file c.txt with content bye
+  ┃
+
+     ← Write c.txt
+
+     ▣  Build · GLM-5.3-Flash Free
+
+  ┃
+  ┃  △ Permission required
+  ┃    → Edit c.txt
+  ┃
+  ┃  1 + bye
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃
+  ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
+  ┃
+
