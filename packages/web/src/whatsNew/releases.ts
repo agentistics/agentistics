@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.175.0': {
+    features: [
+      {
+        pt: 'Experimental: quando uma sessão de trabalho entrega o resultado e o trabalho está salvo, o agentistics pode encerrá-la sozinho (ative com a opção de fluxos e `agentop flow enable fechar-entregue`). Se recusar, o líder recebe o motivo.',
+        en: 'Experimental: when a worker session hands back its result and the work is saved, agentistics can close it by itself (turn it on with the flows option and `agentop flow enable fechar-entregue`). If it refuses, the leader is told why.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Rodar os testes não deixa mais processos em segundo plano consumindo memória.',
+        en: 'Running the tests no longer leaves background processes eating memory.',
+      },
+    ],
+  },
   '2.174.0': {
     features: [
       {
