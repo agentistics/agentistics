@@ -29,7 +29,7 @@ const LIVE_STATES = new Set(['working', 'waiting', 'waiting-approval'])
 
 /** What the event-triggered flows need from the host, injected so the mapping is tested without a fleet. */
 export interface TriggerHostDeps {
-  registry(): Promise<ReadonlyArray<{ id: string; cwd: string; createdAt?: string; endedAt?: string; taskId?: string; subtaskId?: string; leader?: boolean; conversationId?: string }>>
+  registry(): Promise<ReadonlyArray<{ id: string; cwd: string; createdAt?: string; endedAt?: string; taskId?: string; subtaskId?: string; leader?: boolean; conversationId?: string; parentSessionId?: string | null }>>
   rows(): Promise<ReadonlyArray<{ id: string; conversationId?: string | undefined; state?: string }>>
   /** The stored roles, read FRESH for each universe snapshot (a promotion or demotion counts at once). */
   roles(): Promise<(row: { id: string; conversationId?: string | undefined }) => string | undefined>
@@ -37,6 +37,8 @@ export interface TriggerHostDeps {
   prompt(rowId: string, text: string): Promise<{ ok: boolean; message?: string }>
   /** The owner-facing away notice (bell, Nay toast, phone push) — `away.notice`. */
   awayNotice(text: string): Promise<boolean>
+  /** End a managed session — the same kill `agentop session kill` and the fleet's kill verb run. */
+  kill(rowId: string): Promise<{ ok: boolean; message?: string }>
 }
 
 export function defaultTriggerHostDeps(): TriggerHostDeps {
@@ -58,6 +60,11 @@ export function defaultTriggerHostDeps(): TriggerHostDeps {
       if (!notify) return false
       notify(text, 'flow:pedido-do-dono')
       return true
+    },
+    kill: async rowId => {
+      const { runFleetAction } = await import('../sessions/fleet-web')
+      const out = await runFleetAction('en', { action: 'kill', id: rowId })
+      return { ok: out.ok, ...(out.message ? { message: out.message } : {}) }
     },
   }
 }
@@ -117,6 +124,8 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps())
         ...(m.endedAt ? { endedAt: m.endedAt } : {}),
         ...(m.taskId ? { taskId: m.taskId } : {}),
         ...(m.subtaskId ? { subtaskId: m.subtaskId } : {}),
+        ...(m.conversationId ? { conversationId: m.conversationId } : {}),
+        ...(m.parentSessionId ? { parentSessionId: m.parentSessionId } : {}),
         // The stored role wins (a demotion counts); the spawn-time flag only fills in when none is stored.
         ...((roleOf({ id: m.id, conversationId: m.conversationId }) ?? (m.leader ? 'leader' : undefined)) === 'leader' ? { role: 'leader' } : {}),
       }))
@@ -130,6 +139,14 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps())
       const flow = typeof i.flow === 'string' && /^[a-z0-9-]+$/.test(i.flow) ? i.flow : 'dsl'
       const sent = await deps.prompt(to, `[from flow ${flow} · nudge]\n${body}`)
       return sent.ok ? { ok: true, to } : refuse(sent.message ?? 'the nudge was not delivered', ['live session'])
+    },
+    // SESSÕES.FECHAR: the engine's `fechar-entregue` calls this only after every gate passed (handback, stopped on two
+    // reads, clean tree, work saved). The host only ends the session; it decides nothing.
+    'encerrar-sessao': async (value: unknown) => {
+      const id = sessionOf(value)
+      if (!id) return refuse('session id is required', ['sessionId'])
+      const out = await deps.kill(id).catch(error => ({ ok: false, message: String(error) }))
+      return out.ok ? { ok: true, sessionId: id, ...(out.message ? { message: out.message } : {}) } : refuse(out.message ?? 'the session could not be ended', ['session end'])
     },
   }
 }

@@ -1390,6 +1390,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const flowApi = engine()?.flows
       if (!flowApi) return json({ error: 'official_build', sentence: 'fluxos exigem o build oficial' }, 501)
       if (url.pathname === '/api/flows' && req.method === 'GET') return json({ flows: flowApi.list() })
+      // SESSÕES.FECHAR: workers that handed back and are still open (`agentistics_sessions`, the leader's check-in).
+      if (url.pathname === '/api/flows/delivered-open' && req.method === 'GET') {
+        const view = await flowApi.read?.('entregues-abertos', {}).catch(() => null)
+        return json({ sessions: Array.isArray(view) ? view : [] })
+      }
       if (url.pathname === '/api/flows/run' && req.method === 'POST') {
         const body = await req.json().catch(() => ({})) as { name?: unknown; inputs?: unknown }
         if (typeof body.name !== 'string') return json({ error: 'bad_request', sentence: 'flow name is required' }, 400)

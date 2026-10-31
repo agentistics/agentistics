@@ -191,7 +191,7 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_harnesses: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics', 'GET /api/plan-limits'], reason: 'reads computed metrics per harness and whether each can be spawned' },
   agentistics_plan_limits: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/plan-limits'], reason: 'reads subscription windows and routing guidance; does not start work' },
   agentistics_projects: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics per project' },
-  agentistics_sessions: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/fleet'], reason: 'reads session metadata (first_prompt is untrusted text, §4.8)' },
+  agentistics_sessions: { ...DATA, capability: 'localShell', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/fleet', 'GET /api/flows/delivered-open'], reason: 'reads session metadata (first_prompt is untrusted text, §4.8)' },
   agentistics_costs: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed costs' },
   agentistics_repos: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics per repository' },
   // ------------------------------------------------------------------ Layouts (custom page, stored in preferences)
