@@ -49,7 +49,7 @@ import {
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
 import { readHarnessSkills, skillsReason, type HarnessSkill } from './harness-skills'
-import { HARNESS_ORDER, type ModelOption, type Baseline } from '@agentistics/core'
+import { HARNESS_CAPABILITIES, HARNESS_LABELS, HARNESS_ORDER, type ModelOption, type Baseline } from '@agentistics/core'
 import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
@@ -1131,6 +1131,12 @@ export async function readFleetSkillBody(
  * linked conversation, a transcript not on this machine, a file that would not read. The card says
  * which; a confident `0` would read as a conversation that has never been compacted.
  */
+/** PURE. The card's sentence for a harness that records no compactions (`HARNESS_CAPABILITIES.compaction` false). */
+export function compactionAbsent(harness: string, pt: boolean): string {
+  const name = (HARNESS_LABELS as Record<string, string>)[harness] ?? harness
+  return pt ? `${name} não registra compactações da conversa.` : `${name} does not record conversation compactions.`
+}
+
 export async function readConversationFacts(
   lang: CliLang, id: string,
 ): Promise<{ compactions?: number; unavailable?: string }> {
@@ -1145,6 +1151,14 @@ export async function readConversationFacts(
         ? 'Esta sessão ainda não tem uma conversa vinculada.'
         : 'This session has no linked conversation yet.'),
     }
+  }
+  // Only a harness that RECORDS compactions has a count to read (`HARNESS_CAPABILITIES.compaction`:
+  // Claude alone). Every other one used to fall into the Claude transcript lookup below and answer
+  // "the transcript was not found on this machine" — false of an OpenCode session, whose conversation
+  // is right there in opencode.db (QA OPENCODE.COMPLETO item 4).
+  const capability = (HARNESS_CAPABILITIES as Record<string, { compaction?: boolean } | undefined>)[row.harness ?? '']
+  if (capability && !capability.compaction) {
+    return { unavailable: compactionAbsent(row.harness ?? '', pt) }
   }
   const { countCompactions, resolveClaudeTranscriptAnyAccount } = await import('./chat-tail')
   const path = await resolveClaudeTranscriptAnyAccount(row.cwd, row.conversationId).catch(() => null)
