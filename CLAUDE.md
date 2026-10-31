@@ -901,6 +901,7 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   ├── adapters/kimi-parse.ts → pure parser; counts tokens from `usage.record` ONLY (the nested `step.end` events repeat the same usage byte-for-byte), strips the provider prefix from the model alias, folds every agent of a session into it
   ├── adapters/antigravity.ts → Antigravity CLI (agy) reader (brain/<conv>/.system_generated/logs/transcript_full.jsonl + the global history.jsonl + READ-ONLY bun:sqlite reads of conversations/<conv>.db `gen_metadata` and the optional conversation_summaries.db)
   ├── adapters/antigravity-parse.ts → pure parser; skips replayed CONVERSATION_HISTORY steps and dedupes by step_index (no double counting), never treats a slash command as the first prompt, counts ERROR_MESSAGE steps, derives files/lines from the edit payloads, and drops a conversation only when it is a proven invoke_subagent child
+  ├── adapters/opencode.ts / opencode-parse.ts → read-only WAL SQLite session/message metrics; count message usage once, additive reasoning, per-model prices, last-input context, optional model catalog window
   └── adapters/antigravity-protobuf.ts → **pure**, dependency-free protobuf wire reader for the gen_metadata blobs (tokens + model id); never throws — malformed input yields null
 
 packages/web/src/ (React + Vite, port 47292 in dev)
@@ -1063,8 +1064,8 @@ than that the moment a new id joins `HarnessId`, and none of the rest was writte
 adding `'opencode'` with no legacy adapter (CLAUDE.md step 4 skipped by scope) and running
 `tsc --noEmit` over the whole repo: **25 compile errors, in 20 files, none of them named above.**
 Every one wants `null` (or `[]`/`false`, its type's own "nothing here" value) for a harness the
-session manager cannot spawn, attach to or read a transcript for — which is every harness with no
-`adapters/<id>.ts`, opencode included:
+session manager cannot spawn, attach to or read a transcript for — which was the initial OpenCode replay-only integration. OpenCode now has a local metrics adapter;
+its current spawn/transcript support is declared by the individual registries below:
 
 - `packages/core/src/harnessModels.ts` — `HARNESS_MODELS`
 - `packages/server/server/backup/backup-plan.ts` — `HARNESS_SECRETS`, `RAW_DIR` (a REAL decision,

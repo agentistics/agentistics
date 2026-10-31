@@ -140,15 +140,8 @@ export const LEGACY_FALSE_NOTES: LegacyFalseNotes = {
     gitLines: { state: 'not_supported', reason: 'Kimi records the Edit/Write strings but no diff counters.', source: `${TYPES} HARNESS_CAPABILITIES entry comment (kimi)` },
     compaction: COMPACTION,
   },
-  // opencode has NO legacy adapter at all (every HARNESS_CAPABILITIES.opencode cell is false), so
-  // every one of these is a false->false migration UNLESS refined below. `agents`/`gitLines`/
-  // `dynamicWorkflows`/`mcpServers` get a recorded reason because they were checked and found
-  // absent from the real store measured for this integration. `compaction`, `skills` and
-  // `contextWindow` are deliberately left with NO note — each has a real candidate signal in
-  // opencode's schema (`session.time_compacting`; a `skill` tool part naming the skill by
-  // `input.name`; a per-message `tokens.input` that plausibly IS the context size at that call) that
-  // was seen but not independently verified against a second source, so they read as `unknown`
-  // rather than a confident `not_supported` this integration cannot back up.
+  // OpenCode's local metrics adapter exposes usage and context. The notes below still explain
+  // activity not supported by its metrics surface; compaction and skills remain unverified.
   opencode: {
     agents: { state: 'not_supported', reason: "Every real session had parent_id/workspace_id null; the schema's nested-session columns exist but were never observed populated, so every session folds into one main agent with no per-agent breakdown.", source: 'integrations/opencode/index.ts header (measured on the real store, 2 sessions)' },
     gitLines: { state: 'not_supported', reason: 'The session table carries git-shaped summary columns but both real sessions show 0, and no tool part carries a diff field, so this is not wired into the replay.', source: 'integrations/opencode/replay.ts header (measured on the real store)' },
@@ -274,17 +267,14 @@ export const CAPABILITY_REFINEMENTS: CapabilityRefinements = {
     agents: { source: REPLAY('antigravity'), state: { state: 'partial', exactness: 'exact', limit: 'an invoke_subagent child becomes a child Agent under the parent run with its own tokens, cost and tools; linked to its launch only by INVOKE_SUBAGENT content, with no duration or agent type.' } },
     gitLines: { source: `${P2}; ${REPLAY('antigravity')}`, state: { state: 'partial', exactness: 'exact', limit: 'request-time line counts from edit payloads (CodeContent / ReplacementContent vs TargetContent), not git diff; agy stores no git metadata.' } },
   },
-  // opencode: every cell here upgrades a legacy FALSE to `partial`, because the legacy false is not
-  // "opencode cannot produce this" — it is "there is no legacy adapter to carry it to a surface"
-  // (CLAUDE.md step 4, skipped by scope). The canonical replay reads it straight from the SQLite
-  // store and proves it equal, per session, to an independent recount
-  // (`projections/differential-opencode.ts`) — the exact evidence CAPABILITY_REFINEMENTS exists for.
+  // OpenCode's replay keeps its own narrower evidence: per-message harness cost and tool parts.
+  // The local SQLite metrics adapter independently exposes tokens, model and reconstructed time.
   opencode: {
-    tokens: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: 'no legacy adapter surfaces an opencode SessionMeta at all; the canonical counters (input/output/cacheRead/cacheWrite + a separate additive reasoning counter) are real, read from each assistant message\'s own tokens field and proven equal to session.tokens_* by an independent recount.' } },
-    cost: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: "opencode's own per-message cost is carried as costSource: 'harness' (not the shared table) because both real sessions measured used unpriced local/free models (cost 0); no legacy adapter surfaces it on any surface." } },
-    model: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: "the bare model id (message.modelID) is real; no legacy adapter surfaces it on any surface." } },
-    tools: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: 'real tool calls (name, status, timing) from part rows of type "tool"; no legacy adapter surfaces them on any surface, and only the four tool names measured on the real store (bash, write, read, skill) are known to map through canonicalTool.' } },
-    activeTime: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: "turn.started/turn.ended are emitted per user message and per settled assistant reply, closing 'last-line' always (opencode states no whole-turn duration, only per-step timing); no legacy adapter surfaces active_minutes on any surface." } },
+    tokens: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: 'the canonical counters (input/output/cacheRead/cacheWrite + a separate additive reasoning counter) are real, read from each assistant message\'s own tokens field and proven equal to session.tokens_* by an independent recount.' } },
+    cost: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: "opencode's own per-message cost is carried as costSource: 'harness' (not the shared table) because both real sessions measured used unpriced local/free models (cost 0); the local metrics adapter instead estimates API costs through the shared table." } },
+    model: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: "the bare model id (message.modelID) is real; the local metrics adapter also preserves unknown provider routes." } },
+    tools: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: 'real tool calls (name, status, timing) from part rows of type "tool"; the local metrics adapter does not count tool parts, and only the four tool names measured on the real store (bash, write, read, skill) are known to map through canonicalTool.' } },
+    activeTime: { source: REPLAY('opencode'), state: { state: 'partial', exactness: 'exact', limit: "turn.started/turn.ended are emitted per user message and per settled assistant reply, closing 'last-line' always (opencode states no whole-turn duration, only per-step timing); the local metrics adapter also reconstructs active_minutes from message boundaries." } },
   },
 }
 

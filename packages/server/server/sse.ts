@@ -1,11 +1,11 @@
 import { cacheKind, etagMatches, etagOf, staticCacheControl } from './static-cache'
 import { noteCodexRollout } from './plan-limits'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { spawn } from 'child_process'
 import { watch as fsWatch, statSync } from 'fs'
 import { watchedEvent, WATCH_DEPTH } from './watch-filter'
 import chokidar from 'chokidar'
-import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR, KIMI_DIR } from './config'
+import { SESSION_META_DIR, PROJECTS_DIR, STATS_CACHE_FILE, PORT, TEAM_CENTRAL, CODEX_SESSIONS_DIR, GEMINI_DIR, COPILOT_DIR, ANTIGRAVITY_BRAIN_DIR, ANTIGRAVITY_CONVERSATIONS_DIR, KIMI_DIR, OPENCODE_DB_PATH } from './config'
 import { featureOn, HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { harnessOfPath, noteTranscriptActivity } from './sessions/transcript-activity'
 import { centralManifest, centralHtml } from './central-branding'
@@ -127,8 +127,7 @@ const DEFAULT_IGNORED = /(^|[/\\])(\.git|node_modules|plugins|cache|\.tmp|shell_
  * A `Record<HarnessId, …>` so a harness added later has to say, rather than being absent by omission
  * — kimi WAS absent by omission (P-30): its writes refreshed nothing, so its metrics and its
  * first-sighting link waited for some other harness to trigger a rebuild. claude is watched above
- * through its own two directories; opencode has no adapter here and keeps every session in one
- * SQLite file, which this per-directory watch has nothing to say about.
+ * through its own two directories; OpenCode watches only its SQLite file and WAL sidecar.
  */
 const HARNESS_SESSION_DIRS: Record<HarnessId, string | null> = {
   claude: null,
@@ -137,14 +136,14 @@ const HARNESS_SESSION_DIRS: Record<HarnessId, string | null> = {
   copilot: join(COPILOT_DIR, 'session-state'),
   antigravity: ANTIGRAVITY_BRAIN_DIR,
   kimi: join(KIMI_DIR, 'sessions'),
-  opencode: null,
+  opencode: dirname(OPENCODE_DB_PATH),
 }
 
 /** Mirror a new/changed source file into the archive, then tell the rebuild scheduler. */
 function onSourceChange(path: string | undefined, isWrite: boolean): void {
   // Mirror new/changed source files into the archive before notifying clients,
   // so deleted-by-cleanup history is preserved as it is written.
-  if (typeof path === 'string' && isWrite) void mirrorFile(path)
+  if (typeof path === 'string' && isWrite && path !== OPENCODE_DB_PATH && path !== `${OPENCODE_DB_PATH}-wal`) void mirrorFile(path)
   // Tell whoever links conversations that this harness is writing RIGHT NOW: kimi holds its session
   // files open only while it writes, so this is the moment its process can be caught naming its
   // conversation (`transcript-activity.ts`, `process-transcript.ts`).
@@ -182,7 +181,7 @@ function watchNative(dir: string, ignored: RegExp): boolean {
 }
 
 export async function setupFileWatcher(opts: { lateIntervalMs?: number } = {}) {
-  const watch = (dir: string, ignored: RegExp = DEFAULT_IGNORED, native = false) => {
+  const watch = (dir: string, ignored: RegExp = DEFAULT_IGNORED, native = false, allowSqlite = false) => {
     if (native && watchNative(dir, ignored)) return
     const watcher = chokidar.watch(dir, {
       persistent: true,
@@ -192,7 +191,7 @@ export async function setupFileWatcher(opts: { lateIntervalMs?: number } = {}) {
       // contain huge plugin caches, temp git clones, sqlite logs and snapshots that
       // would saturate the watcher (and throw EINVAL) if traversed.
       depth: 6,
-      ignored: (p: string) => ignored.test(p) || /\.sqlite/.test(p),
+      ignored: (p: string) => ignored.test(p) || (!allowSqlite && /\.sqlite/.test(p)),
     })
     watcher.on('all', (event: string, path: string) => onSourceChange(path, event === 'add' || event === 'change'))
     watcher.on('error', (err: unknown) => {
@@ -238,7 +237,12 @@ export async function setupFileWatcher(opts: { lateIntervalMs?: number } = {}) {
       // rule would drop — watch that tree with a narrower filter, on chokidar: its conversation
       // folders can hold whole repositories (`.git`, `node_modules`), and a recursive native watch
       // would add a watch per directory in them, where chokidar never descends into an ignored tree.
-      if (w.dir === ANTIGRAVITY_CONVERSATIONS_DIR) watch(w.dir, /(-wal|-shm|-journal)$/)
+      if (w.label === 'opencode') {
+        // Watch these files only: the same DB can contain OAuth tables and must never be archived.
+        watch(OPENCODE_DB_PATH, /-shm$/, false, true)
+        watch(`${OPENCODE_DB_PATH}-wal`, /-shm$/, false, true)
+      }
+      else if (w.dir === ANTIGRAVITY_CONVERSATIONS_DIR) watch(w.dir, /(-wal|-shm|-journal)$/)
       else if (w.label === 'antigravity') watch(w.dir, ANTIGRAVITY_IGNORED)
       else watch(w.dir, DEFAULT_IGNORED, true)
       if (late) {

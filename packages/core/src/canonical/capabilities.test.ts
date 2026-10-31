@@ -362,15 +362,12 @@ describe('LEGACY_FALSE_NOTES — the classification of every legacy false', () =
     'antigravity.compaction': 'not_supported', 'antigravity.skills': 'unknown', 'antigravity.mcpServers': 'not_supported',
     'kimi.agents': 'not_supported', 'kimi.gitLines': 'not_supported', 'kimi.dynamicWorkflows': 'unknown',
     'kimi.compaction': 'not_supported', 'kimi.skills': 'unknown',
-    // opencode has no legacy adapter at all, so every metric is a legacy false; the four checked
-    // and found absent from the real store are `not_supported`, and the rest — including the ones
-    // CAPABILITY_REFINEMENTS.opencode later upgrades to `partial` in the CANONICAL table — are
-    // `unknown` here because THIS table is the boolean migration alone, before any refinement.
+    // The local SQLite adapter now exposes tokens, cost, model, active time and context.
+    // Activity that it does not parse remains a legacy false, classified below.
     'opencode.agents': 'not_supported', 'opencode.gitLines': 'not_supported',
     'opencode.dynamicWorkflows': 'not_supported', 'opencode.mcpServers': 'not_supported',
-    'opencode.tokens': 'unknown', 'opencode.cost': 'unknown', 'opencode.model': 'unknown',
-    'opencode.tools': 'unknown', 'opencode.activeTime': 'unknown', 'opencode.compaction': 'unknown',
-    'opencode.skills': 'unknown', 'opencode.contextWindow': 'unknown',
+    'opencode.tools': 'unknown', 'opencode.compaction': 'unknown',
+    'opencode.skills': 'unknown',
   }
 
   test('every false cell is classified exactly as recorded, and nothing else is', () => {
@@ -401,7 +398,7 @@ describe('CAPABILITY_REFINEMENTS — what P2 may change, and nothing else', () =
   // TargetContent payloads (A3.5 fixture); the replay emits request-time edit deltas, as P2 §3 says.
   const UPGRADED_FALSES = [
     'antigravity.agents', 'antigravity.gitLines', 'kimi.agents',
-    'opencode.tokens', 'opencode.cost', 'opencode.model', 'opencode.tools', 'opencode.activeTime',
+    'opencode.tools',
   ]
 
   test('every cell not refined is exactly the boolean migration', () => {

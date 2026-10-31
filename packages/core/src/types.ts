@@ -170,19 +170,9 @@ export const HARNESS_CAPABILITIES: Record<SurfaceHarnessId, HarnessCapabilities>
   // Kimi's wire carries `tool.call` with `args`, and its own tool schema declares Bash's
   // `command` — so tools and commits are both real, read from what it actually ran.
   kimi: { tokens: true, cost: true, model: true, tools: true, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true, contextWindow: true, compaction: false, skills: false, mcpServers: true },
-  // opencode has NO legacy adapter (CLAUDE.md "Adding a harness" step 4, skipped by scope) — there
-  // is no `adapters/opencode.ts`/`opencode-parse.ts`, so it never produces a `SessionMeta` and
-  // `AppData.harnesses` never lists it. EVERY cell here is `false` for exactly that reason: this
-  // table gates what today's SURFACES may render, and a surface can never receive an opencode
-  // session to render in the first place — a `true` cell would be a capability claim about a data
-  // path that structurally cannot be exercised, which is the "confident lie" this table exists to
-  // refuse. This is NOT a statement that opencode's own store lacks the data: its SQLite database
-  // (`~/.local/share/opencode/opencode.db`) carries real per-message tokens/cost/model and real tool
-  // calls, verified against the live store and proven equal to an independent recount by
-  // `projections/differential-opencode.ts` — see `CAPABILITY_REFINEMENTS.opencode` in
-  // `canonical/capabilities.ts`, where those same metrics are honestly upgraded to `partial` in the
-  // CANONICAL vocabulary (the one gate that is not tied to a legacy adapter existing).
-  opencode: { tokens: false, cost: false, model: false, tools: false, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: false, contextWindow: false, compaction: false, skills: false, mcpServers: false },
+  // OpenCode message usage feeds the SQLite adapter. Prices use the shared model table;
+  // unknown routes stay unpriced. The last response's input side supplies the context gauge.
+  opencode: { tokens: true, cost: true, model: true, tools: false, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true, contextWindow: true, compaction: false, skills: false, mcpServers: false },
   // The NATIVE Agentistics harness (`agentistics`): its sessions are SYNTHESIZED from the journal's
   // projection facts (`server/native-sessions.ts`), not parsed from a transcript, so a metric is `true`
   // only where the facts carry it. Tokens, cost and model are real (every billed response is a
@@ -1212,6 +1202,10 @@ export function pricingKey(modelId: string): string | null {
  * Sonnet-class price, which invented spending for every new or third-party model.)
  */
 export function getModelPrice(modelId: string): ModelPrice {
+  // OpenCode names free-tier variants with -free; Big Pickle is also explicitly free. Keep the provider prefix:
+  // a paid model with the same base name must never match. Source (2026-10-31):
+  // https://github.com/anomalyco/opencode/blob/v1.17.9/packages/web/src/content/docs/zen.mdx
+  if (modelId === 'opencode/big-pickle' || /^opencode\/[^/]+-free$/.test(modelId)) return LOCAL_MODEL_PRICE
   if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId]
   // A model served off the user's own machine costs nothing — a known fact, not a guess. Checked BEFORE
   // the table so no partial-prefix match can price it. See local-models.ts.
