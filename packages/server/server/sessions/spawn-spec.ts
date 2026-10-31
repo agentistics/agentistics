@@ -354,6 +354,19 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     // description `opencode acp` states for its `plan` mode, 1.17.9). `accept-edits` and `no-questions` have no flag: the
     // permission rules live in the user's opencode.json, and the TUI cannot carry them (the sentence says so).
     modeArgs: { plan: ['--agent', 'plan'] },
+    // OPENCODE.PAPÉIS — the briefing reaches the model from the first moment, prompt or not: a file in the session's
+    // context dir named by `instructions` inside `OPENCODE_CONFIG_CONTENT` (opencode's inline config, the
+    // highest-precedence layer). MEASURED 2026-10-31 on opencode 1.19.5 against a mock OpenAI-compatible
+    // provider that logged each request: the file's text arrives in the system prompt, and an `instructions`
+    // list in the person's own opencode.json is KEPT beside it (the arrays merge). Before this a TUI started with
+    // no first prompt had no briefing until someone typed into the app (`pendingContext`), and a person typing in
+    // the terminal never got one. Stated limit: an `OPENCODE_CONFIG_CONTENT` already in agentop's own environment
+    // is replaced for that session, not merged.
+    context: {
+      kind: 'files',
+      files: (_dir, text) => [{ name: 'AGENTS.md', text }],
+      env: dir => ({ OPENCODE_CONFIG_CONTENT: JSON.stringify({ instructions: [`${dir}/AGENTS.md`] }) }),
+    },
     // `-s, --session` continues that session; the id is the `ses_…` the ACP server states and `opencode.db` keys by.
     resume: id => ['--session', id],
     resumeIdOk: id => /^ses_[A-Za-z0-9]+$/.test(id),
