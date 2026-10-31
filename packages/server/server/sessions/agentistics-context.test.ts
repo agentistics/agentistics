@@ -424,3 +424,19 @@ describe('start flow (any project, any harness)', () => {
     expect(skill.body.length).toBeLessThan(3500)
   })
 })
+
+describe('OPENCODE.PAPÉIS — the session verb is named for every harness', () => {
+  test('a leader is told every harness `agentop session` takes, and never to run a CLI or `agentop code`', () => {
+    for (const role of ['leader', undefined] as const) {
+      const t = contextText({ sessionId: 'c1', cwd: '/w', ...(role ? { role } : {}) })
+      for (const h of HARNESS_ORDER) expect(t).toContain(h)
+      expect(t).toContain(`is any of ${HARNESS_ORDER.join(', ')}`)
+      expect(t).toContain('never with `agentop code`')
+      expect(t).toContain('--handoff --bg')
+      expect(t).toContain('--mode no-questions')
+    }
+  })
+  test('a worker is not taught to open sessions', () => {
+    expect(contextText({ sessionId: 'c1', cwd: '/w', role: 'worker' })).not.toContain('never with `agentop code`')
+  })
+})

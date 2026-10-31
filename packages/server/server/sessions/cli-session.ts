@@ -583,7 +583,7 @@ export async function start(
     ...(account.account ? { account: { root: account.account.root } } : {}),
   }, await spawnCapabilities(cmd.harness))
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
-  if (!cmd.background && planned.plan.modeNeedsProtocol) { console.error(`${cmd.harness} cannot start a terminal in ${planned.plan.modeNeedsProtocol} mode; use a supported mode or a structured session.`); return 1 }
+  if (!cmd.background && planned.plan.modeNeedsProtocol) { console.error(`${cmd.harness} cannot start a terminal in ${planned.plan.modeNeedsProtocol} mode; add --bg to start it as a structured session, or choose another --mode.`); return 1 }
 
   // The memory GATE, before anything is registered or launched — `requested: 1` is this one
   // process. A refusal here means nothing below this point runs: no id is minted, no row is
