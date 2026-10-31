@@ -45,3 +45,11 @@ process.stdin.on('data', (chunk: string) => {
   }
 })
 process.stdin.on('end', () => process.exit(0))
+
+// Test fixture: never outlive the `bun test` that started it (see structured-relay.ts's TEST_RUNNER_PID_ENV).
+const runner = Number(process.env.AGENTISTICS_TEST_RUNNER_PID)
+if (Number.isSafeInteger(runner) && runner > 1) {
+  setInterval(() => {
+    try { process.kill(runner, 0) } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EPERM') process.exit(0) }
+  }, 500).unref()
+}

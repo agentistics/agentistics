@@ -50,6 +50,28 @@ export interface RelayLaunchSpec {
 const KILL_GRACE_MS = 3000
 export const RELAY_DRAIN_GRACE_MS = 1000
 
+/**
+ * TEST RUNS ONLY. `scripts/test-preload.ts` sets this to the `bun test` process's pid; a relay that
+ * finds it ends its child (the ordinary TERM path) once that pid is gone. A relay is detached so it
+ * outlives the SERVER, and under a test the "server" is the runner — so a runner that was interrupted
+ * or OOM-killed left every relay, its child and its worker alive for days (31/10: 4600 tasks, 8.6 GB).
+ * Production never sets it, so a production relay's lifetime is exactly what it was.
+ */
+export const TEST_RUNNER_PID_ENV = 'AGENTISTICS_TEST_RUNNER_PID'
+const RUNNER_POLL_MS = 500
+
+/** The runner pid to watch, or null (unset, junk, or a pid that could never be a test runner). */
+export function testRunnerPid(env: NodeJS.ProcessEnv): number | null {
+  const raw = env[TEST_RUNNER_PID_ENV]
+  if (!raw || !/^\d+$/.test(raw)) return null
+  const pid = Number(raw)
+  return Number.isSafeInteger(pid) && pid > 1 ? pid : null
+}
+
+function pidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
+}
+
 /** TERM must finish even when an escaped descendant holds stdout open forever. */
 export function drainTerminatedRelay(end: number, d: {
   now(): number
@@ -288,6 +310,10 @@ export function runRelay(dir: string, pollMs = 5000): void {
   process.on('SIGHUP', () => {})
   process.on('SIGTERM', endChild)
   process.on('SIGINT', endChild)
+  const runner = testRunnerPid(process.env)
+  if (runner !== null) {
+    const watch = setInterval(() => { if (!pidAlive(runner)) { clearInterval(watch); endChild() } }, RUNNER_POLL_MS)
+  }
   // Published LAST, after the signal handlers exist: whoever reads this file may TERM the relay at once,
   // and a TERM before the handler is the default action — the relay dies and its child, in a process
   // group of its own, is orphaned.
