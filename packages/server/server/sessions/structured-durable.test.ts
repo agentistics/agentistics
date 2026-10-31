@@ -185,7 +185,13 @@ function rig(): Rig {
 
 afterEach(async () => {
   for (const r of rigs.splice(0)) {
-    for (const id of [...r.store.alive(), ...r.store.dead()]) await r.store.terminate(id, 4000)
+    // Ended ON PURPOSE first: a rig's server is still attached, and a child that merely dies reads to
+    // it as a crash — it resumes the conversation STRUCTURED, i.e. a fresh relay after this teardown
+    // (a relay + child + worker leaked by every test here until 31/10). Then end what is running.
+    for (const id of [...r.store.alive(), ...r.store.dead()]) {
+      r.store.markEnding(id, 'test teardown')
+      await r.store.terminate(id, 4000)
+    }
     rmSync(r.root, { recursive: true, force: true })
   }
   // One test spins a rig per structured harness; tearing each down may take up to 4 s.

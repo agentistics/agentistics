@@ -1,0 +1,3 @@
+[test]
+# Marks the run and ends what it leaves running (scripts/test-preload.ts).
+preload = ["./scripts/test-preload.ts"]
