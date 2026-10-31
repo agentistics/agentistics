@@ -50,6 +50,9 @@ export const MODEL_SWITCH: Record<string, ModelSwitchSpec | null> = {
   antigravity: null,
   // Kimi routes per request; there is no session-level switch to type.
   kimi: null,
+  // opencode: structured (ACP) sessions switch through the protocol (`sourceControls`/`protocolModels`);
+  // its TUI `/models` only OPENS a picker, there is no line that sets a model, so a typed line cannot work.
+  opencode: null,
 }
 
 export function modelSwitchLine(harness: string, model: string): string | null {
@@ -62,6 +65,11 @@ export function modelSwitchLine(harness: string, model: string): string | null {
 export function modelSwitchReason(harness: string, lang: 'en' | 'pt'): string | null {
   if (MODEL_SWITCH[harness]) return null
   const pt = lang === 'pt'
+  if (harness === 'opencode') {
+    return pt
+      ? 'No terminal do OpenCode a troca de modelo abre um seletor próprio (sem comando de uma linha); em sessões iniciadas pela web a troca fica no seletor de modelo.'
+      : 'In OpenCode’s terminal the model switch opens its own picker (there is no one-line command); in web-started sessions use the model selector.'
+  }
   return pt
     ? 'Trocar de modelo no meio da conversa só está verificado no Claude Code.'
     : 'Switching model mid-conversation is only verified for Claude Code.'

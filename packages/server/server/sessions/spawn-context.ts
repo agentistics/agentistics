@@ -13,7 +13,7 @@ import { specificationSkillsFor } from './specification-skills'
 import type { SpawnPlan, SpawnRequest } from './types'
 
 const HARNESS_NAMES: Record<string, string> = {
-  claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', copilot: 'Copilot', antigravity: 'Antigravity', kimi: 'Kimi',
+  claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI', copilot: 'Copilot', antigravity: 'Antigravity', kimi: 'Kimi', opencode: 'OpenCode',
 }
 
 /**
