@@ -30,13 +30,17 @@ const RESUME_BY_HARNESS: Partial<Record<SurfaceHarnessId, (id: string) => string
 
 /** Copy-ready shell command to resume a session, or null when the harness has no way to do it. */
 export function resumeCommand(s: SessionMeta): string | null {
-  const build = RESUME_BY_HARNESS[s.harness]
+  return resumeCommandFor(s.harness, s.harness === 'gemini' ? s.native_session_id : s.session_id, s.project_path)
+}
+
+/** The same command from the three facts a fleet row carries (harness, conversation id, folder). */
+export function resumeCommandFor(harness: SurfaceHarnessId, id: string | undefined, cwd?: string): string | null {
+  const build = RESUME_BY_HARNESS[harness]
   // A harness whose store key is not the id its CLI takes names it in `native_session_id`; a
   // session of such a harness without one (gemini, written before the header was read) has no
   // command rather than a wrong one.
-  const id = s.harness === 'gemini' ? s.native_session_id : s.session_id
   if (!build || !id) return null
   const resume = build(id)
   if (!resume) return null
-  return s.project_path ? `cd '${s.project_path}' && ${resume}` : resume
+  return cwd ? `cd '${cwd}' && ${resume}` : resume
 }

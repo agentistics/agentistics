@@ -157,6 +157,21 @@ describe('fleetRow — conversationLinkVia is a flat field, not only link.reason
   })
 })
 
+describe('fleetRow — fork (V-OPENCODE.2)', () => {
+  const has = (r: ReturnType<typeof fleetRow>) => r.verbs.some(v => (v.action as string) === 'fork')
+  it('is offered on a structured, linked opencode row, in the row\'s language', () => {
+    const r = fleetRow(row({ harness: 'opencode', structured: true, conversationId: 'ses_a' }), S)
+    expect(has(r)).toBe(true)
+    expect(verb(fleetRow(row({ harness: 'opencode', structured: true, conversationId: 'ses_a' }), controlStrings('pt')), 'fork' as never).label).toBe('Ramificar esta conversa')
+  })
+  it('is absent without a linked conversation, off the protocol, on a row not hosted, or on a harness whose driver declares no fork', () => {
+    expect(has(fleetRow(row({ harness: 'opencode', structured: true }), S))).toBe(false)
+    expect(has(fleetRow(row({ harness: 'opencode', conversationId: 'ses_a' }), S))).toBe(false)
+    expect(has(fleetRow(row({ harness: 'opencode', structured: true, conversationId: 'ses_a', actionable: false, state: 'unknown' }), S))).toBe(false)
+    expect(has(fleetRow(row({ harness: 'claude', structured: true, conversationId: 'c' }), S))).toBe(false)
+  })
+})
+
 describe('fleetRow — "open in terminal" (F2.0b)', () => {
   it('is offered on a row running over its protocol, in the row\'s language, and enabled', () => {
     const r = fleetRow(row({ structured: true, state: 'waiting' }), S)

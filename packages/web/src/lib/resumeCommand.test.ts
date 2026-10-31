@@ -46,3 +46,10 @@ test('opencode resumes with -s, and only for a ses_ id', () => {
   expect(resumeCommand(o('ses_1a2b3c'))).toBe("cd '/home/u/proj' && opencode -s ses_1a2b3c")
   expect(resumeCommand(o('abc-123'))).toBeNull()
 })
+
+import { resumeCommandFor } from './resumeCommand'
+test('resumeCommandFor builds the opencode command from a ses_ id and the folder, and nothing for another shape', () => {
+  expect(resumeCommandFor('opencode', 'ses_abc123', '/repo/a')).toBe("cd '/repo/a' && opencode -s ses_abc123")
+  expect(resumeCommandFor('opencode', 'not-a-session', '/repo/a')).toBeNull()
+  expect(resumeCommandFor('claude', undefined, '/repo/a')).toBeNull()
+})

@@ -130,4 +130,11 @@ describe('backToStructured', () => {
     expect(await runFleetAction('en', { action: 'structured', id: 'm-1' } as never)).toMatchObject({ ok: true })
     expect(seen).toEqual(['m-1'])
   })
+
+  test('the fleet action `fork` reaches the host and carries the new row id back', async () => {
+    const seen: string[] = []
+    __setFleetHostForTest('en', { async forkSession(id: string) { seen.push(id); return { ok: true, message: 'ok', id: 'm-2' } } } as never)
+    expect(await runFleetAction('en', { action: 'fork', id: 'm-1' } as never)).toMatchObject({ ok: true, id: 'm-2' })
+    expect(seen).toEqual(['m-1'])
+  })
 })

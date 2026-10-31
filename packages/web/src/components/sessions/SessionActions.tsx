@@ -30,6 +30,8 @@ import type { FleetActionId, FleetRow, FleetVerb } from '../../lib/fleet'
 import { withReopening } from '../../lib/reopeningStore'
 import { pushNotification } from '../../lib/notifications'
 import { terminalNeedsConfirm, terminalToast } from '../../lib/terminalSwitch'
+import { resumeCommandFor } from '../../lib/resumeCommand'
+import type { SurfaceHarnessId } from '@agentistics/core'
 
 export interface SessionActionsProps {
   row: FleetRow
@@ -103,7 +105,7 @@ const TEXT_VERBS = new Set<string>(['rename', 'note'])
 // `archive` / `delete` arrive only on a NATIVE row (the server offers them nowhere else), after `kill`
 // because both need the session ended first.
 // `terminal` (F2.0b) is offered by the server only on a row running over its harness's protocol.
-const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'terminal', 'kill', 'forget', 'archive', 'delete']
+const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'terminal', 'fork', 'kill', 'forget', 'archive', 'delete']
 
 /** The verbs that belong to the delivery board rather than to the session itself. */
 const TASK_VERBS = new Set<string>(['task'])
@@ -164,7 +166,7 @@ export function SessionActions({
     // A REOPEN LANDS SOMEWHERE. It mints a NEW row and retires the one it was asked about, so
     // staying put leaves the reader on a dead session with a success message over it — reported as
     // "the reopen did nothing". The server hands back the new id precisely so this can follow it.
-    if (action === 'resume' && out.id) onOpened?.(out.id)
+    if ((action === 'resume' || action === 'fork') && out.id) onOpened?.(out.id)
   }
 
   function pick(v: FleetVerb) {
@@ -186,6 +188,11 @@ export function SessionActions({
   }
 
   const shown = inline || open
+  const ended = row.state === 'closed' || row.state === 'exited' || row.state === 'lost'
+  const resumeId = row.conversationId ?? (row.id.startsWith('closed:') ? row.id.slice('closed:'.length) : undefined)
+  const resumeCmd = ended && row.harness !== 'agentistics' && resumeId
+    ? resumeCommandFor(row.harness as SurfaceHarnessId, resumeId, row.cwd)
+    : null
   // CONTA.TROCA: offered whenever another account (of this or any other harness) can take it — just above `kill`,
   // with the other verbs that act on the session itself.
   const switchItem = canSwitch(switchInfo) ? (
@@ -438,6 +445,29 @@ export function SessionActions({
                     }}
                   >
                     {row.attachCommand}
+                  </code>
+                </div>}
+                {/* An ended conversation can also be picked up straight in the harness's own CLI. Never offered on a
+                    running row: a second process on the same conversation would be a twin. */}
+                {resumeCmd && <div style={{
+                  margin: '5px 5px 3px', display: 'flex', flexDirection: 'column', gap: 4,
+                }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
+                    {pt ? 'Retomar direto na ferramenta:' : 'Resume in the tool itself:'}
+                  </span>
+                  <code
+                    data-resume-command
+                    onClick={() => { void navigator.clipboard?.writeText(resumeCmd) }}
+                    title={pt ? 'Copiar' : 'Copy'}
+                    style={{
+                      display: 'block', padding: '6px 8px', borderRadius: 7, cursor: 'pointer',
+                      background: 'var(--bg-base)', border: '1px solid var(--border-subtle)',
+                      fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace",
+                      fontSize: 10.5, color: 'var(--text-secondary)',
+                      overflowX: 'auto', whiteSpace: 'pre',
+                    }}
+                  >
+                    {resumeCmd}
                   </code>
                 </div>}
               </>

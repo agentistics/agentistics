@@ -148,6 +148,27 @@ describe('buildSessionViews', () => {
     expect(views).toHaveLength(2)
   })
 
+  it('keeps an external opencode TUI in the folder of a managed opencode session (another conversation)', () => {
+    const own = row('o', { managed: managed('o', { harness: 'opencode', conversationId: 'ses_aaa' }) })
+    const views = buildSessionViews({
+      reconciled: [own],
+      activity: new Map([['o', 'working']]),
+      processes: [proc({ cwd: '/repo/a', harness: 'opencode', sessionId: 'ses_bbb', pid: 9 })],
+    })
+    expect(views).toHaveLength(2)
+    expect(views.some(v => v.status === 'external')).toBe(true)
+  })
+
+  it('covers an opencode process by the exact ses_ id both sides state', () => {
+    const own = row('o', { managed: managed('o', { harness: 'opencode', conversationId: 'ses_aaa' }) })
+    const views = buildSessionViews({
+      reconciled: [own],
+      activity: new Map([['o', 'working']]),
+      processes: [proc({ cwd: '/repo/a', harness: 'opencode', sessionId: 'ses_aaa', pid: 9 })],
+    })
+    expect(views).toHaveLength(1)
+  })
+
   it('sorts what needs answering to the top', () => {
     const reconciled = [row('w'), row('k'), row('ap'), row('x', { status: 'exited' })]
     const activity = new Map<string, SessionActivity>([

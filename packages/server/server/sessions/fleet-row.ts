@@ -21,6 +21,7 @@ import type { ControlStrings } from '@agentistics/tui/control/i18n'
 import type { HarnessId } from '@agentistics/core'
 import { isExternalRowId } from './external-continue'
 import { SPAWN_SPECS } from './spawn-spec'
+import { FORK_ACTION_HARNESSES } from './fork-capability'
 
 /**
  * Verbs the WEB cannot perform, whatever the row says.
@@ -107,6 +108,8 @@ export type FleetActionId =
    * when the person asks for it. A session already in a terminal answers so, in a sentence.
    */
   | 'terminal'
+  /** V-OPENCODE.2 — FORK the conversation into a NEW session through the protocol (`forkOf`); the original stays as it is. */
+  | 'fork'
   /** FALLBACK.STRUCTURED — the inverse: a TUI row goes back to the structured (new) mode, same conversation. */
   | 'structured'
   /**
@@ -340,6 +343,9 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
   // key inside an attached pane, so it never needed a listed verb. The browser has no pane.
   verbs.push(interruptVerb(row, s))
   if (row.structured && row.actionable) verbs.push(terminalVerb(s))
+  if (row.structured && row.actionable && row.conversationId && FORK_ACTION_HARNESSES.has(row.harness)) {
+    verbs.push({ action: 'fork' as SessionAction, label: s.sessionsFork, enabled: true })
+  }
   if (isNativeRow(row)) verbs.push(...nativeStoreVerbs(row, s))
   return {
     id: row.id,

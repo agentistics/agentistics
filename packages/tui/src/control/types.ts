@@ -1639,6 +1639,12 @@ export interface ControlHost {
    * conversation over the harness's protocol (the reopen machinery; row identity inherited).
    */
   backToStructured?(id: string): Promise<ActionResult>
+  /**
+   * V-OPENCODE.2 — FORK a structured row's conversation into a NEW session through its protocol. The original
+   * keeps running untouched; the answer carries the new row's `id`. Refused in a sentence where the driver
+   * offers no fork — never a fresh empty conversation in its place.
+   */
+  forkSession?(id: string, callerVerified?: boolean): Promise<ActionResult>
 
   /**
    * Restore a session's conversation to the point BEFORE one of the person's own prompts, using the
@@ -1992,6 +1998,8 @@ export interface SpawnSessionRequest {
   /** MODE.EVERYWHERE — the permission mode to start in (absent = the harness's own configuration). */
   mode?: CanonicalMode
   label?: string
+  /** V-OPENCODE.2 — open a FORK of this conversation (the harness's own id) instead of a fresh one; structured drivers that declare `fork` only. */
+  forkOf?: string
   /** Take the terminal now, versus start detached and stay here. */
   attach: boolean
   /**

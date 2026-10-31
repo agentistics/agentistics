@@ -2039,6 +2039,8 @@ export async function spawnManaged(req: {
    */
   origin?: 'web' | 'terminal' | 'background'
   resumeId?: string
+  /** V-OPENCODE.2 — open a FORK of this conversation (structured drivers that declare `fork`). */
+  forkOf?: string
   prompt?: string
   model?: string
   effort?: string
@@ -4068,6 +4070,25 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         : { ok: true, message: pt ? 'A conversa foi retomada, mas o modo novo não subiu; ela segue no terminal.' : 'The conversation was resumed, but the new mode did not start; it continues in the terminal.' }
     },
 
+    async forkSession(id: string, callerVerified = false): Promise<ActionResult> {
+      const pt = lang === 'pt'
+      const backend = await resolveBackend()
+      const row = (await readRegistry()).find(m => m.id === id)
+      if (!row) return { ok: false, message: S().sessNoRegistryEntry }
+      if (!backend.isStructured?.(id) || !row.conversationId) {
+        return { ok: false, message: pt ? 'Só uma sessão em andamento no modo novo, com conversa vinculada, pode ser ramificada.' : 'Only a running session in the new mode, with a linked conversation, can be forked.' }
+      }
+      // The fork is a NEW row beside the original: it files under the same task and carries the same
+      // name with a suffix, and the original is left exactly as it was.
+      const out = await this.spawnSession!({
+        harness: row.harness, cwd: row.cwd, attach: false, origin: 'web', forkOf: row.conversationId,
+        label: `${row.label ?? row.harness} (fork)`,
+        ...(row.task ? { task: row.task } : {}),
+        ...(callerVerified ? { callerVerified: true } : {}),
+      }).catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }) as SpawnSessionResult)
+      return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}) }
+    },
+
     async interruptSession(id: string): Promise<ActionResult> {
       const s = S()
       const backend = await resolveBackend()
@@ -5039,6 +5060,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.away !== undefined ? { away: req.away } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
+        ...(req.forkOf ? { forkOf: req.forkOf } : {}),
         ...(req.account ? { account: req.account } : {}),
         ...(chosen.accountId ? { accountId: chosen.accountId } : {}),
         ...(req.callerVerified ? { callerVerified: true } : {}),

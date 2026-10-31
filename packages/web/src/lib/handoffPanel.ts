@@ -3,7 +3,7 @@ import { useEffect, useSyncExternalStore } from 'react'
 import type { HandoffPanel } from '@agentistics/core'
 
 type State = { panel: HandoffPanel | null; open: boolean; popover: boolean; collapsed: boolean; dismissAt: number; remindTokens: number | null }
-type Entry = { state: State; listeners: Set<() => void>; users: number; timer?: ReturnType<typeof setInterval>; controller?: AbortController; loading: boolean; extraPercent?: number }
+type Entry = { state: State; listeners: Set<() => void>; users: number; timer?: ReturnType<typeof setInterval>; controller?: AbortController; loading: boolean; extraPercent?: number; absent?: boolean }
 const entries = new Map<string, Entry>()
 function entry(id: string): Entry {
   let e = entries.get(id)
@@ -22,7 +22,8 @@ async function refresh(id: string) {
   const controller = new AbortController(); e.controller = controller
   try {
     const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/handoff-panel${e.extraPercent === undefined ? '' : `?extraPercent=${e.extraPercent}`}`, { signal: controller.signal })
-    if (!res.ok) { if (res.status === 404) patch(id, { panel: null }); return }
+    if (!res.ok) { if (res.status === 404) { e.absent = true; if (e.timer) { clearInterval(e.timer); e.timer = undefined }; patch(id, { panel: null }) }; return }
+    e.absent = false
     const panel = await res.json() as HandoffPanel
     if (controller.signal.aborted) return
     const previous = e.state.panel
@@ -50,7 +51,7 @@ export function useHandoffPanel(id: string) {
   const state = useSyncExternalStore(fn => { const e = entry(id); e.listeners.add(fn); return () => { e.listeners.delete(fn) } }, () => entry(id).state, () => entry(id).state)
   useEffect(() => {
     const e = entry(id); e.users++
-    if (e.users === 1) { void refresh(id); e.timer = setInterval(() => { if (!document.hidden) void refresh(id) }, 5_000) }
+    if (e.users === 1) { e.absent = false; void refresh(id); e.timer = setInterval(() => { if (!document.hidden) void refresh(id) }, 5_000) }
     const update = () => { e.extraPercent = undefined; void refresh(id) }
     window.addEventListener('agentistics:handoff-settings', update)
     return () => {

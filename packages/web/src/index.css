@@ -1017,6 +1017,10 @@ button:focus-within .ag-row-pin,
   .ag-composer-status { min-height: 42px; gap: 4px; }
   .ag-composer-status-left, .ag-composer-status-right { gap: 3px; }
   .ag-composer-status-button { max-width: 145px; padding: 0 8px; }
+  /* The model and mode labels give way (ellipsis) before they can run under the character count. */
+  .ag-composer-status-left { flex: 1 1 0; min-width: 0; overflow: hidden; }
+  .ag-composer-status-left .ag-composer-status-button { flex-shrink: 1; min-width: 0; }
+  .ag-composer-status-right { flex-shrink: 0; }
   .ag-composer-status-count { max-width: 58px; overflow: hidden; text-overflow: ellipsis; }
 }
 .ag-composer-ground::before {

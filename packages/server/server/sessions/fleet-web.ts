@@ -863,6 +863,9 @@ async function runFleetActionOnce(
     case 'terminal':
       if (!host.openInTerminal) return { ok: false, message: s.sessionsNoHost }
       return await host.openInTerminal(req.id)
+    case 'fork':
+      if (!host.forkSession) return { ok: false, message: s.sessionsNoHost }
+      return await host.forkSession(req.id, req.callerVerified === true)
     case 'structured':
       if (!host.backToStructured) return { ok: false, message: s.sessionsNoHost }
       return await host.backToStructured(req.id)

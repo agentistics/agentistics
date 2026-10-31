@@ -42,3 +42,10 @@ export function forkCapabilitySentence(harness: string | undefined, lang: 'pt' |
     ? 'A troca de conta/ramificação desta ferramenta não foi verificada; a conversa não será seguida automaticamente.'
     : 'This tool’s account-switch/fork continuation is not verified; the conversation will not be followed automatically.'
 }
+
+/**
+ * Harnesses whose structured driver declares `fork` (engine-api 1.18 `StructuredSpawn.forkOf`): the ones a row
+ * may OFFER "Fork this conversation" for. Distinct from `follow` above — that is about recognising a
+ * successor, this is about being able to ASK for one. Claude follows forks but its driver declares none.
+ */
+export const FORK_ACTION_HARNESSES: ReadonlySet<string> = new Set(['opencode'])

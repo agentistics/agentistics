@@ -39,6 +39,8 @@ export type FleetActionId =
   | 'interrupt'
   /** F2.0b — "open in terminal" on a structured session (protocol-driven): the same conversation as a TUI. */
   | 'terminal'
+  /** V-OPENCODE.2 — fork the conversation into a new session; the answer carries the new `id`. */
+  | 'fork'
   /** Advance the harness to its NEXT mode. It cycles; there is no key that picks one. */
   | 'cycleMode'
   /** F4.D — set a structured row's mode directly; `text` is one of its `modes` ids. */
