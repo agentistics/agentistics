@@ -131,6 +131,7 @@ import { resolveLang } from './cli-lang'
 import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
 import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
+import { recordChipMode } from './sessions/chip-mode-record'
 import { SessionNotice, sessionActionError } from './sessions/action-error'
 import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { spawnCapabilities } from './sessions/codex-capabilities'
@@ -3893,7 +3894,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         const now = backend.modeOf?.(id)?.id
         const at = choices.findIndex(m => m.id === now)
         const next = choices[(at + 1) % choices.length]!
-        return (await backend.setMode(id, next.id)) ? { ok: true, message: s.sessModeCycled } : { ok: false, message: s.sessSendFailed(id) }
+        return (await backend.setMode(id, next.id)) && (await recordChipMode(id, backend), true) ? { ok: true, message: s.sessModeCycled } : { ok: false, message: s.sessSendFailed(id) }
       }
       const spec = modeSpecFor(managed.harness)
       if (!spec) return { ok: false, message: s.sessModeUnknown(managed.harness) }
@@ -3941,7 +3942,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const choices = backend.modesOf?.(id)
       if (!choices || !backend.setMode) return { ok: false, message: s.sessModeUnknown(managed.harness) }
       if (!choices.some(m => m.id === modeId)) return { ok: false, message: s.sessModeUnknown(managed.harness) }
-      return (await backend.setMode(id, modeId)) ? { ok: true, message: choices.find(m => m.id === modeId)!.label } : { ok: false, message: s.sessSendFailed(id) }
+      return (await backend.setMode(id, modeId)) && (await recordChipMode(id, backend), true) ? { ok: true, message: choices.find(m => m.id === modeId)!.label } : { ok: false, message: s.sessSendFailed(id) }
     },
 
     /**
@@ -4070,7 +4071,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         : { ok: true, message: pt ? 'A conversa foi retomada, mas o modo novo não subiu; ela segue no terminal.' : 'The conversation was resumed, but the new mode did not start; it continues in the terminal.' }
     },
 
-    async forkSession(id: string, callerVerified = false): Promise<ActionResult> {
+    async forkSession(id: string, callerVerified = false, force = false): Promise<ActionResult> {
       const pt = lang === 'pt'
       const backend = await resolveBackend()
       const row = (await readRegistry()).find(m => m.id === id)
@@ -4085,8 +4086,13 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         label: `${row.label ?? row.harness} (fork)`,
         ...(row.task ? { task: row.task } : {}),
         ...(callerVerified ? { callerVerified: true } : {}),
+        // "Start anyway", confirmed by the person after the memory gate refused: the SAME request, past the gate.
+        ...(force ? { force: true } : {}),
       }).catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }) as SpawnSessionResult)
-      return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}) }
+      return {
+        ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}),
+        ...(!out.ok && out.admission ? { memoryRefusal: { ...(out.queued?.id ? { queuedId: out.queued.id } : {}) } } : {}),
+      }
     },
 
     async interruptSession(id: string): Promise<ActionResult> {

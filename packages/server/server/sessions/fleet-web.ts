@@ -152,6 +152,8 @@ export interface FleetActionResponse {
    * after a confirmation). Kept apart from `code` — that one maps to an HTTP status for the account rule.
    */
   memoryBudget?: true
+  /** A refused fork's queue entry (`/api/resources/queue/:id`): "start anyway" cancels it first so no twin starts later. */
+  queuedId?: string
   /** A group reopen's partial result (opened / already running / every refused row with its code). */
   fell?: { opened: string[]; already: string[]; refused: { id: string; reason: SpawnAccountRefusal; message: string }[] }
 }
@@ -870,7 +872,11 @@ async function runFleetActionOnce(
       return await host.openInTerminal(req.id)
     case 'fork':
       if (!host.forkSession) return { ok: false, message: s.sessionsNoHost }
-      return await host.forkSession(req.id, req.callerVerified === true)
+      {
+        const out = await host.forkSession(req.id, req.callerVerified === true, req.force === true)
+        // The memory gate refused: the browser offers "start anyway" (re-sent with `force: true`), taking the queue entry off first.
+        return out.memoryRefusal ? { ...out, memoryBudget: true as const, ...(out.memoryRefusal.queuedId ? { queuedId: out.memoryRefusal.queuedId } : {}) } : out
+      }
     case 'structured':
       if (!host.backToStructured) return { ok: false, message: s.sessionsNoHost }
       return await host.backToStructured(req.id)

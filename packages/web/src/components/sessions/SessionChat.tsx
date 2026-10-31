@@ -41,7 +41,7 @@ import { modeStyle } from '../../lib/modeStyle'
 import { NO_QUESTIONS_WARNING } from '@agentistics/core'
 import { NoQuestionsWarning } from './ModePicker'
 import { modeLabel, modeTitle, onlyModeNote } from '../../lib/modeLabel'
-import { modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
+import { modeChipState, modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
 import { ApprovalCard } from './ApprovalCard'
 import { composerAnswerRequest } from '../../lib/dialogAnswer'
 import { TypedModel } from './ModelSelect'
@@ -1928,11 +1928,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // row has only the harness's cycle key, so its menu is the measured table and a choice is N cycles.
   const directModes = row?.modes && row.modes.length > 0 ? row.modes : null
   const modeOptions = useMemo(() => directModes ?? modeMenuFor(row?.harness), [directModes, row?.harness])
+  const modeChip = modeChipState({ hasMode: !!row?.mode, loading, live: payload?.live !== false, canPrompt, blocked, answering: answeringNow, direct: directModes !== null })
   // "No questions" is dangerous: choosing it only ASKS (a confirm modal explains the mode); the real
   // switch runs from the modal's confirm. `noQuestionsAsk` holds the pending target id.
   const [noQuestionsAsk, setNoQuestionsAsk] = useState<string | null>(null)
   const switchMode = useCallback(async (target: string) => {
-    if (!row?.mode || !canPrompt) return
+    if (!row?.mode || !modeChip.enabled) return
     if (directModes) {
       setModeMenuOpen(false)
       const out = await act({ id: session.id, action: 'setMode', text: target })
@@ -1948,7 +1949,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const out = await act({ id: session.id, action: 'cycleMode', text: target })
     if (!out.ok) setNotice(out.message)
     if (out.ok) nudgeFleet()
-  }, [act, canPrompt, directModes, row?.mode, session.id])
+  }, [act, modeChip.enabled, directModes, row?.mode, session.id])
   const chooseMode = useCallback(async (target: string) => {
     const opt = modeOptions.find(mode => mode.id === target)
     if (opt && 'canonical' in opt && opt.canonical === 'no-questions' && row?.mode?.id !== target) {
@@ -4092,7 +4093,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         <ChevronDown size={12} aria-hidden className="ag-composer-status-chevron" />
                       </button>
                     )}
-                    {row?.mode && !answeringNow && (
+                    {row?.mode && modeChip.shown && (
                       <button
                         type="button"
                         ref={modeButtonRef}
@@ -4103,7 +4104,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                           if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight, warns ? 270 : 190, warns ? 320 : 220))
                           setModeMenuOpen(value => !value)
                         }}
-                        disabled={!canPrompt}
+                        disabled={!modeChip.enabled}
                         aria-haspopup="menu"
                         aria-expanded={modeMenuOpen}
                         aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}

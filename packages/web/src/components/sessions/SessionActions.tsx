@@ -36,8 +36,8 @@ import type { SurfaceHarnessId } from '@agentistics/core'
 export interface SessionActionsProps {
   row: FleetRow
   lang: 'pt' | 'en'
-  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number })
-    => Promise<{ ok: boolean; message: string; id?: string }>
+  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; force?: boolean })
+    => Promise<{ ok: boolean; message: string; id?: string; memoryBudget?: true; queuedId?: string }>
   /** Called after a verb that removes the row, so the panel can step away from it. */
   onGone?: () => void
   /**
@@ -128,6 +128,9 @@ export function SessionActions({
   const [confirmingTerminal, setConfirmingTerminal] = useState(false)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  /** The memory gate refused a fork: "Iniciar mesmo assim" is offered (behind a confirmation), and the queue entry it filed is cancelled first. */
+  const [forkRefused, setForkRefused] = useState<{ queuedId?: string } | null>(null)
+  const [confirmingFork, setConfirmingFork] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   // CONTA.TROCA: asked only while the menu is open, so a list of rows costs nothing.
   const [switching, setSwitching] = useState(false)
@@ -135,7 +138,7 @@ export function SessionActions({
 
   // A different row is a different set of answers: an in-flight rename must not carry across.
   useEffect(() => {
-    setOpen(false); setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingForget(false); setConfirmingTerminal(false); setNotice(null)
+    setOpen(false); setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingForget(false); setConfirmingTerminal(false); setNotice(null); setForkRefused(null); setConfirmingFork(false)
   }, [row.id])
 
   useEffect(() => { if (asking) inputRef.current?.focus() }, [asking])
@@ -144,12 +147,13 @@ export function SessionActions({
     .map(a => row.verbs.find(v => v.action === a))
     .filter((v): v is FleetVerb => v !== undefined)
 
-  async function run(action: FleetActionId, text?: string) {
+  async function run(action: FleetActionId, text?: string, force = false) {
     setBusy(true)
+    if (action === 'fork') setForkRefused(null)
     // ENDING shows its own state on the session view (`SessionEnding`), so the question and the menu
     // step aside at once instead of sitting over it — on a phone that is the drawer covering it.
     if (action === 'kill') { setConfirming(false); setOpen(false) }
-    const call = () => act({ id: row.id, action, ...(text !== undefined ? { text } : {}) })
+    const call = () => act({ id: row.id, action, ...(text !== undefined ? { text } : {}), ...(force ? { force: true } : {}) })
     const out = await (action === 'resume' ? withReopening([row.id], call) : call())
     setBusy(false)
     setNotice(out.message)
@@ -159,6 +163,7 @@ export function SessionActions({
     if (action === 'terminal') pushNotification(terminalToast(out, lang))
     // Each refused attempt needs feedback, even when its text matches a previously seen bell row.
     if (action === 'kill' && !out.ok) pushNotification({ type: 'error', title: pt ? 'Encerrar sessão' : 'End session', message: out.message, meta: { notificationKey: `session-kill-refused:${row.id}:${crypto.randomUUID()}` } })
+    if (action === 'fork' && !out.ok && out.memoryBudget === true) setForkRefused({ ...(out.queuedId ? { queuedId: out.queuedId } : {}) })
     if (!out.ok) { setConfirmingTerminal(false); return }
     setAsking(null); setDraft(''); setConfirming(false); setConfirmingDelete(false); setConfirmingForget(false); setConfirmingTerminal(false); setOpen(false)
     // An archived or deleted session leaves the list exactly as an ended one does.
@@ -185,6 +190,22 @@ export function SessionActions({
     if (v.action === 'delete') { setConfirmingDelete(true); return }
     if (v.action === 'terminal' && terminalNeedsConfirm(row.state)) { setConfirmingTerminal(true); return }
     void run(v.action as FleetActionId)
+  }
+
+  /** The confirmed override: drop the queue entry the refused fork filed (if any), then the same fork with `force: true`. */
+  async function forkAnyway() {
+    setConfirmingFork(false)
+    const queuedId = forkRefused?.queuedId
+    if (queuedId) {
+      const res = await fetch(`/api/resources/queue/${encodeURIComponent(queuedId)}`, { method: 'DELETE' }).catch(() => null)
+      // Already gone (it started, or was cancelled elsewhere): nothing queued is left to duplicate.
+      if (res && !res.ok && res.status !== 404) {
+        setNotice(pt ? 'Não foi possível tirar a ramificação da fila; nada foi iniciado.' : 'Could not take the fork off the queue; nothing was started.')
+        return
+      }
+    }
+    setForkRefused(null)
+    await run('fork', undefined, true)
   }
 
   const shown = inline || open
@@ -475,14 +496,47 @@ export function SessionActions({
 
             {notice && (
               <p role="status" style={{
-                margin: '6px 6px 4px', fontSize: 11, lineHeight: 1.45, color: 'var(--text-tertiary)',
+                margin: '6px 6px 4px', fontSize: forkRefused ? 12 : 11, lineHeight: 1.45,
+                color: forkRefused ? 'var(--text-primary)' : 'var(--text-tertiary)',
               }}>
                 {notice}
               </p>
             )}
+            {forkRefused && !busy && (
+              <button
+                type="button"
+                data-fork-anyway
+                onClick={() => setConfirmingFork(true)}
+                style={{
+                  margin: '2px 6px 6px', padding: '7px 12px', borderRadius: 9, cursor: 'pointer',
+                  minHeight: inline ? 44 : undefined,
+                  border: '1px solid var(--accent-red)', background: 'transparent',
+                  color: 'var(--accent-red)', fontFamily: 'inherit', fontSize: 12.5,
+                }}
+              >
+                {pt ? 'Iniciar mesmo assim' : 'Start anyway'}
+              </button>
+            )}
           </div>
         </>
       )}
+      {confirmingFork && <ConfirmModal
+        open
+        title={pt ? 'Iniciar mesmo assim?' : 'Start anyway?'}
+        message={forkRefused?.queuedId
+          ? (pt
+            ? 'Esta máquina está com pouca memória e a ramificação está na fila. Iniciar agora tira ela da fila e ignora a verificação de memória — a máquina pode ficar lenta ou fechar outros programas.'
+            : 'This machine is low on memory and the fork is queued. Starting now takes it off the queue and overrides the memory check — the machine may slow down or close other programs.')
+          : (pt
+            ? 'Esta máquina está com pouca memória. Iniciar agora ignora a verificação de memória — a máquina pode ficar lenta ou fechar outros programas.'
+            : 'This machine is low on memory. Starting now overrides the memory check — the machine may slow down or close other programs.')}
+        confirmLabel={pt ? 'Iniciar mesmo assim' : 'Start anyway'}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        busy={busy}
+        focusCancel
+        onConfirm={() => { void forkAnyway() }}
+        onCancel={() => setConfirmingFork(false)}
+      />}
       {confirmingForget && <ConfirmModal
         open
         title={pt ? 'Remover da lista?' : 'Remove from list?'}

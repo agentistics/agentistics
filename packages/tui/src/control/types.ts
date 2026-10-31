@@ -1290,6 +1290,8 @@ export interface ActionResult {
   failure?: 'prompt' | 'ended' | 'unconfirmed'
   /** PLAN.ACCOUNTS D3: refused by the account rule — the server maps it to an HTTP status. */
   accountRefusal?: AccountRefusalCode
+  /** The memory gate refused (a fork); `queuedId` is the queue entry it filed, so "start anyway" can cancel it first. */
+  memoryRefusal?: { queuedId?: string }
   /** A group reopen's explicit partial result: rows opened, rows already running, and EVERY refused row. */
   fell?: { opened: string[]; already: string[]; refused: { id: string; reason: AccountRefusalCode; message: string }[] }
 }
@@ -1644,7 +1646,7 @@ export interface ControlHost {
    * keeps running untouched; the answer carries the new row's `id`. Refused in a sentence where the driver
    * offers no fork — never a fresh empty conversation in its place.
    */
-  forkSession?(id: string, callerVerified?: boolean): Promise<ActionResult>
+  forkSession?(id: string, callerVerified?: boolean, force?: boolean): Promise<ActionResult>
 
   /**
    * Restore a session's conversation to the point BEFORE one of the person's own prompts, using the

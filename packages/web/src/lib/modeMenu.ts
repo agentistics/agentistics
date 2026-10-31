@@ -46,3 +46,23 @@ export function modeMenuPlacement(
     : Math.max(margin, viewportHeight - margin - menuHeight)
   return { left, top, width }
 }
+
+/**
+ * Whether the mode chip is drawn and pressable. A session with an approval card open cannot take a PROMPT, but a
+ * STRUCTURED one (its protocol lists its modes: `direct`) can still be SWITCHED — and the engine answers the open
+ * request by the new mode, so the card is a reason to switch, not a reason to lock the chip. A terminal row has
+ * only a cycle key typed into the very dialog, so it stays locked while one is open.
+ */
+export function modeChipState(o: {
+  hasMode: boolean
+  loading: boolean
+  live: boolean
+  canPrompt: boolean
+  blocked: boolean
+  answering: boolean
+  direct: boolean
+}): { shown: boolean; enabled: boolean } {
+  const shown = o.hasMode && (!o.answering || o.direct)
+  const enabled = shown && !o.loading && o.live && (o.canPrompt || (o.blocked && o.direct))
+  return { shown, enabled }
+}

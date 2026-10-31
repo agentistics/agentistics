@@ -184,7 +184,7 @@ export interface FleetActionRequest {
    */
   confirm?: boolean
   /**
-   * For `resume`: the person confirmed "reopen anyway" after the memory gate refused (`memoryBudget`
+   * For `resume` and `fork`: the person confirmed "reopen/start anyway" after the memory gate refused (`memoryBudget`
    * on the answer). Read as `force === true` only — the same override `/api/fleet/new` takes.
    */
   force?: boolean

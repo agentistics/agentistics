@@ -81,3 +81,26 @@ describe('linkOpencodeProcesses', () => {
     expect(linkOpencodeProcesses([{ pid: 7, cwd: DIR, startedMs: START }], fresh).size).toBe(0)
   })
 })
+
+describe('a TUI beside a managed (ACP) session in one folder', () => {
+  const ACP = 'ses_e70900000ffeACPacpACPacp01'
+  const both = parseOpencodeRuns([
+    real,
+    `timestamp=2026-10-31T01:15:20.000Z level=INFO run=ac01 message="creating instance" directory=${DIR}`,
+    `timestamp=2026-10-31T01:15:30.000Z level=INFO run=ac01 message=loop session.id=${ACP} step=0`,
+  ].join('\n'))
+  const procs = [
+    { pid: 7, cwd: DIR, startedMs: START, tty: true },
+    { pid: 8, cwd: DIR, startedMs: START + 6000, tty: false },
+  ]
+
+  test('without the exclusion the two runs are ambiguous and the TUI gets nothing', () => {
+    expect(linkOpencodeProcesses(procs, both).size).toBe(0)
+  })
+
+  test('the session a managed row already drives is not a candidate: the TUI gets its own', () => {
+    const out = linkOpencodeProcesses(procs, both, START_SKEW_MS, new Set([ACP]))
+    expect(out.get(7)).toBe('ses_e70797397ffeSYPpraVLuN7l9J')
+    expect(out.has(8)).toBe(false)
+  })
+})

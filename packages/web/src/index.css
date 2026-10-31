@@ -1021,7 +1021,8 @@ button:focus-within .ag-row-pin,
   .ag-composer-status-left { flex: 1 1 0; min-width: 0; overflow: hidden; }
   .ag-composer-status-left .ag-composer-status-button { flex-shrink: 1; min-width: 0; }
   .ag-composer-status-right { flex-shrink: 0; }
-  .ag-composer-status-count { max-width: 58px; overflow: hidden; text-overflow: ellipsis; }
+  /* The character count is the one thing here that is never cut: a clipped "0 caracte…" reads as a fault. The left group (model and mode) gives way instead. */
+  .ag-composer-status-count { flex-shrink: 0; overflow: visible; text-overflow: clip; }
 }
 .ag-composer-ground::before {
   content: '';

@@ -63,3 +63,9 @@ test('a resume the memory gate refused carries memoryBudget, so the surface can 
   expect(parseActResult({ ok: true, message: 'started', id: 'a1', memoryBudget: true }, 'en').memoryBudget).toBeUndefined()
   expect(parseActResult({ ok: false, message: 'x', memoryBudget: 'yes' }, 'en').memoryBudget).toBeUndefined()
 })
+
+test('a fork the memory gate refused carries the queue entry it filed, so "start anyway" can cancel it first', () => {
+  expect(parseActResult({ ok: false, message: 'low', memoryBudget: true, queuedId: 'q-9' }, 'en')).toEqual({ ok: false, message: 'low', memoryBudget: true, queuedId: 'q-9' })
+  expect(parseActResult({ ok: false, message: 'low', memoryBudget: true }, 'en').queuedId).toBeUndefined()
+  expect(parseActResult({ ok: true, message: 'ok', id: 'a', queuedId: 'q-9' }, 'en').queuedId).toBeUndefined()
+})

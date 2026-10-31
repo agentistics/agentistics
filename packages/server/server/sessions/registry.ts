@@ -115,6 +115,8 @@ export interface SessionPatch {
   /** `null` clears it (registry patch rule). */
   handoffRelayAwaiting?: boolean | null
   handoffBaseTokens?: number
+  /** The permission mode the chip last SET (`chip-mode-record.ts`): a reopen restores it, not the start mode. */
+  mode?: import('@agentistics/core').CanonicalMode
   label?: string
   /** Written alongside `label`, never on its own — see `ManagedSession.labelSince`. */
   labelSince?: number

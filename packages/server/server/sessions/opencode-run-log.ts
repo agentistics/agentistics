@@ -44,8 +44,9 @@ async function runsOf(path: string): Promise<Map<string, OpencodeRun> | null> {
 export async function readOpencodeProcessSessions(
   procs: readonly OpencodeProcessRef[],
   logPath: string = opencodeLogPath(),
+  taken: ReadonlySet<string> = new Set(),
 ): Promise<Map<number, string>> {
   if (procs.length === 0) return new Map()
   const runs = await runsOf(logPath)
-  return runs ? linkOpencodeProcesses(procs, runs) : new Map()
+  return runs ? linkOpencodeProcesses(procs, runs, undefined, taken) : new Map()
 }

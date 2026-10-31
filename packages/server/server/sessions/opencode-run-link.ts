@@ -106,6 +106,8 @@ export interface OpencodeProcessRef {
   cwd: string
   /** The kernel's start time (epoch ms). Without it a process can be paired with nothing. */
   startedMs?: number
+  /** `false` for a process with no terminal (an ACP child): it is never the TUI `taken` exclusion is for. */
+  tty?: boolean
 }
 
 /**
@@ -116,12 +118,19 @@ export function linkOpencodeProcesses(
   procs: readonly OpencodeProcessRef[],
   runs: ReadonlyMap<string, OpencodeRun>,
   skewMs: number = START_SKEW_MS,
+  /**
+   * Sessions a MANAGED row already drives (its ACP child ran in this folder at about the same time). Their runs
+   * are not candidates for anybody else: without this a TUI started by hand beside a managed session in one
+   * folder saw TWO runs in its window, refused as ambiguous, and was listed with no conversation at all.
+   */
+  taken: ReadonlySet<string> = new Set(),
 ): Map<number, string> {
   const candidateOf = new Map<number, OpencodeRun>()
   const claimants = new Map<string, number>()
   for (const p of procs) {
     if (p.startedMs === undefined) continue
-    const hits = [...runs.values()].filter(r => r.directory === p.cwd && Math.abs(r.startMs - p.startedMs!) <= skewMs)
+    const hits = [...runs.values()].filter(r => r.directory === p.cwd && Math.abs(r.startMs - p.startedMs!) <= skewMs
+      && !(p.tty !== false && r.sessionId && taken.has(r.sessionId)))
     if (hits.length !== 1) continue
     const run = hits[0]!
     candidateOf.set(p.pid, run)

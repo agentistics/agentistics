@@ -724,7 +724,13 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
     try {
       const { readOpencodeProcessSessions } = await import('./sessions/opencode-run-log')
       const all = procs.filter(p => p.harness === 'opencode' && p.pid !== undefined)
-      const linked = await readOpencodeProcessSessions(all.map(p => ({ pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs })))
+      // Sessions a managed row already drives are not candidates for a TUI beside it (see `linkOpencodeProcesses`).
+      const taken = new Set<string>()
+      try {
+        const { readRegistry } = await import('./sessions/registry')
+        for (const m of await readRegistry()) if (m.harness === 'opencode' && m.conversationId) taken.add(m.conversationId)
+      } catch { /* no registry: nothing is excluded, as before */ }
+      const linked = await readOpencodeProcessSessions(all.map(p => ({ pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs, ...(p.stdinIsTty !== undefined ? { tty: p.stdinIsTty } : {}) })), undefined, taken)
       for (const p of unlinked) { const id = linked.get(p.pid!); if (id) p.sessionId = id }
     } catch { /* best-effort: an unread log is an unlinked row, as before */ }
   }
