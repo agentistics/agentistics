@@ -27,6 +27,8 @@ export interface OpenSurface {
   parked: boolean
   /** Asked by the surface: taking it off screen parks it instead of ending it. */
   keepAlive: boolean
+  /** Set when leaving its session floated it: the layout to give back when that session view returns. */
+  leftLayout?: SurfaceLayout
   /** The top-bar pill it asked for, or `null`. */
   indicator: SurfaceIndicator | null
 }
@@ -96,6 +98,17 @@ export function closeEngineSurface(n?: number): void {
   hide(s)
 }
 
+/**
+ * The host's END (the active composer button's promise): the surface's own `onIndicatorEnd` handler
+ * when it registered one (it ends at its own pace and calls `ctx.close()`), else the surface is removed
+ * — unmounted, its indicator with it. Unlike `closeEngineSurface` it never just parks a kept-alive one.
+ */
+export function endEngineSurfaceFromHost(n: number): void {
+  if (!mounted.some(x => x.nonce === n)) return
+  if (endHandlers.has(n)) endEngineSurfaceIndicator(n)
+  else remove(n)
+}
+
 /** Minimize a floating window without ending it, even before keepAlive was requested. */
 export function minimizeEngineSurface(n: number): void {
   const s = mounted.find(x => x.nonce === n)
@@ -108,7 +121,7 @@ function floatAfterLeave(sessionId: string): void {
     if ([...sessionViews.values()].includes(sessionId) || [...sideWants.values()].includes(sessionId) || [...slots.values()].some(v => v.sessionId === sessionId)) return
     for (const s of mounted) {
       if (s.sessionId === sessionId && !s.parked && s.keepAlive && s.surface.floatOnLeave !== false
-        && (s.layout === 'inline' || s.layout === 'side')) patch(s.nonce, { layout: 'float' })
+        && (s.layout === 'inline' || s.layout === 'side')) patch(s.nonce, { layout: 'float', leftLayout: s.layout })
     }
   })
 }
@@ -136,7 +149,7 @@ export function setEngineSurfaceLayout(layout: SurfaceLayout, n?: number): void 
   if (layout === 'inline' && s.surface.placement !== 'composer') return
   // A `rail` surface is a page and nothing else; a page belongs to a `rail` surface only.
   if ((layout === 'page') !== (s.surface.placement === 'rail')) return
-  patch(s.nonce, { layout })
+  patch(s.nonce, { layout, leftLayout: undefined })
 }
 
 /**
@@ -202,6 +215,27 @@ export function registerEngineSessionView(id: string, sessionId: string | null):
   if (sessionId === null) sessionViews.delete(id)
   else sessionViews.set(id, sessionId)
   if (previous && previous !== sessionId) floatAfterLeave(previous)
+}
+
+/**
+ * Coming back to a session view: a kept-alive composer surface of THAT session that left it (floated when the
+ * view went away, or parked when another surface or page took the screen) returns to its layout, the composer's slot. Only a view that just
+ * appeared calls this, so a surface the person closed while staying in the session stays parked.
+ */
+export function resumeParkedInlineSurfaces(sessionId: string): void {
+  const s = mounted.find(x => x.keepAlive && x.surface.placement === 'composer' && x.sessionId === sessionId
+    && (x.leftLayout !== undefined || (x.parked && x.layout === 'inline')))
+  if (!s) return
+  if (visible && visible.nonce !== s.nonce) hide(visible)
+  patch(s.nonce, { ...(s.leftLayout !== undefined ? { layout: s.leftLayout } : {}), leftLayout: undefined, parked: false })
+}
+
+/** Is a `composer` surface with an active face (`activeLabel`) mounted for `sessionId` — on screen, floating or parked? */
+export function hasActiveComposerSurface(sessionId: string | null): boolean {
+  return sessionId !== null && mounted.some(x => x.sessionId === sessionId && x.surface.placement === 'composer' && !!x.surface.activeLabel)
+}
+export function useHasActiveComposerSurface(sessionId: string | null): boolean {
+  return useSyncExternalStore(subscribe, () => hasActiveComposerSurface(sessionId), () => false)
 }
 
 const slots = new Map<string, { el: HTMLElement; sessionId: string }>()

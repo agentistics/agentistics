@@ -19,11 +19,12 @@
 
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { PictureInPicture2, X } from 'lucide-react'
+import { MessageCircle, PictureInPicture2, X } from 'lucide-react'
 import type { HarnessId } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
 import { HARNESS_LABELS } from '../../lib/harness'
+import { formatIndicatorElapsed } from '../../lib/engineSurfaces'
 import { minimizedBadge, menuPlacement, type MenuPlacement } from '../../lib/nayDock'
 
 const HOVER_OPEN_MS = 140
@@ -37,11 +38,27 @@ export interface MinimizedItem {
   row: ControlSession | undefined
 }
 
+/** A minimized engine surface (a call kept alive off screen): one row with resume and, when it has one, end. */
+export interface MinimizedSurfaceItem {
+  id: string
+  /** Row text, in the surface's own words (e.g. "Back to the call"). */
+  label: string
+  title?: string
+  /** The indicator's start, ticking as an elapsed timer beside the row text. */
+  since?: number
+  onResume: () => void
+  endLabel?: string
+  onEnd?: () => void
+}
+
 export interface MinimizedMenuProps {
   pt: boolean
   items: MinimizedItem[]
   onRestore: (id: string) => void
   onClose: (id: string) => void
+  /** Minimized engine surfaces: listed first, then "Open the Nay chat". With any, the button opens this menu on click. */
+  surfaceItems?: MinimizedSurfaceItem[]
+  onOpenChat?: () => void
   /** Where the button sits on the screen. The wrapper is positioned by the caller. */
   anchorStyle: CSSProperties
   /** True while the button is being dragged: the list closes and nothing may open it. */
@@ -52,10 +69,10 @@ export interface MinimizedMenuProps {
    */
   longPress?: boolean
   /** The chat button itself; its click is wrapped so a long-press can swallow it. */
-  renderButton: (p: { onClickCapture: (e: ReactMouseEvent) => void; onKeyDown: (e: ReactKeyboardEvent) => void }) => ReactNode
+  renderButton: (p: { onClickCapture: (e: ReactMouseEvent) => void; onKeyDown: (e: ReactKeyboardEvent) => void; toggle: () => void }) => ReactNode
 }
 
-export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, suppressed = false, longPress = true, renderButton }: MinimizedMenuProps) {
+export function MinimizedMenu({ pt, items, onRestore, onClose, surfaceItems = [], onOpenChat, anchorStyle, suppressed = false, longPress = true, renderButton }: MinimizedMenuProps) {
   const [open, setOpen] = useState(false)
   const [place, setPlace] = useState<MenuPlacement>({ vertical: 'above', horizontal: 'right' })
   const anchorRef = useRef<HTMLDivElement>(null)
@@ -64,7 +81,7 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, supp
   const closeTimer = useRef<number | null>(null)
   const press = useRef<{ x: number; y: number; timer: number } | null>(null)
   const swallowClick = useRef(false)
-  const count = items.length
+  const count = items.length + surfaceItems.length
 
   const clearTimers = () => {
     if (openTimer.current !== null) { window.clearTimeout(openTimer.current); openTimer.current = null }
@@ -135,7 +152,7 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, supp
     if (e.key === 'ArrowUp' && count > 0) { e.preventDefault(); show() }
   }
 
-  const badge = minimizedBadge(count)
+  const badge = minimizedBadge(items.length)
   const menuPos: CSSProperties = {
     position: 'absolute', width: MENU_W, maxWidth: 'calc(100vw / var(--ui-zoom, 1) - 24px)',
     ...(place.vertical === 'above' ? { bottom: 'calc(100% + 10px)' } : { top: 'calc(100% + 10px)' }),
@@ -154,7 +171,7 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, supp
       onPointerCancel={cancelPress}
       onContextMenu={e => { if (count > 0) e.preventDefault() }}
     >
-      {renderButton({ onClickCapture, onKeyDown })}
+      {renderButton({ onClickCapture, onKeyDown, toggle: () => { if (open) setOpen(false); else show() } })}
 
       {badge && (
         <button
@@ -194,6 +211,23 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, supp
             <span style={{ fontVariantNumeric: 'tabular-nums' }}>{count}</span>
           </div>
           <div style={{ maxHeight: 'min(360px, calc(60vh / var(--ui-zoom, 1)))', overflowY: 'auto', overscrollBehavior: 'contain' }}>
+            {surfaceItems.map(it => (
+              <div key={`surface:${it.id}`} role="none" style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid var(--border)' }}>
+                <button type="button" role="menuitem" data-surface-resume={it.id} className="ag-menu-row"
+                  onClick={() => { it.onResume(); setOpen(false) }} title={it.label}
+                  style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '9px 6px 9px 12px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontSize: 13, fontWeight: 500 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{it.label}{it.title ? ` · ${it.title}` : ''}</span>
+                  {it.since !== undefined && <Elapsed since={it.since} />}
+                </button>
+                {it.onEnd && it.endLabel && (
+                  <div style={{ display: 'flex', alignItems: 'center', paddingRight: 6 }}>
+                    <button type="button" role="menuitem" data-surface-end={it.id} className="ag-menu-row"
+                      onClick={() => { it.onEnd?.(); setOpen(false) }}
+                      style={{ border: 'none', borderRadius: 7, background: 'transparent', color: 'var(--accent-red)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, padding: '6px 8px', whiteSpace: 'nowrap' }}>{it.endLabel}</button>
+                  </div>
+                )}
+              </div>
+            ))}
             {items.map(({ id, row }) => {
               const title = row?.title ?? 'Nay'
               const color = row ? STATE_COLOR[row.state] : 'var(--text-tertiary)'
@@ -233,11 +267,24 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, anchorStyle, supp
                 </div>
               )
             })}
+            {onOpenChat && (
+              <button type="button" role="menuitem" data-open-nay-chat className="ag-menu-row"
+                onClick={() => { onOpenChat(); setOpen(false) }}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontSize: 13, fontWeight: 500 }}>
+                <MessageCircle size={14} aria-hidden />{pt ? 'Abrir chat da Nay' : 'Open Nay chat'}
+              </button>
+            )}
           </div>
         </div>
       )}
     </div>
   )
+}
+
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
+  return <span data-menu-elapsed style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text-tertiary)', fontSize: 12, flexShrink: 0 }}>{formatIndicatorElapsed(since, now)}</span>
 }
 
 function MenuIcon({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
