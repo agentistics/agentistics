@@ -18,7 +18,7 @@ import { usePlanLimits } from '../../lib/planLimits'
 import { accountDisplayName, defaultPick, pickerRows } from '../../lib/accountPicker'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
-  canSwitch, fetchSwitchInfo, harnessName, noticeTitle, postSwitch, resetPhrase, showLimitNotice, type SwitchInfo,
+  canSwitch, fetchSwitchInfo, harnessName, noticeTitle, postSwitch, resetPhrase, showLimitNotice, showLimitOnly, type SwitchInfo,
 } from '../../lib/accountSwitch'
 import { pushNotification } from '../../lib/notifications'
 import { reopenSession } from '../../lib/reopeningStore'
@@ -47,7 +47,7 @@ export function useSwitchInfo(id: string | undefined, lang: string, enabled = tr
         if (!alive) return
         setInfo(i)
         // Multiple accounts off, or a harness that cannot switch: nothing to watch for on this row.
-        if (i && !i.supported && t) { clearInterval(t); t = undefined }
+        if (i && !i.supported && !i.limitWatch && t) { clearInterval(t); t = undefined }
       })
     }
     read()
@@ -314,7 +314,7 @@ export function AccountLimitBand({ sessionId, lang, onSwitched }: { sessionId: s
   const [open, setOpen] = useState(false)
   // A dismissal holds for THIS limit only: the next one (a new reset time) shows again. It is kept
   // per session in localStorage so a reload or re-entering the session does not bring it back.
-  const key = info?.limit ? `${info.limit.resetsAt ?? ''}:${info.limit.pendingPreview ?? ''}` : ''
+  const key = info?.limit ? `${info.limit.resetsAt ?? ''}:${info.limit.at ?? ''}:${info.limit.pendingPreview ?? ''}` : ''
   const storeKey = `agentistics.accountLimitDismissed.${sessionId}`
   const [dismissed, setDismissedState] = useState<string | null>(() => {
     try { return localStorage.getItem(storeKey) } catch { return null }
@@ -323,18 +323,21 @@ export function AccountLimitBand({ sessionId, lang, onSwitched }: { sessionId: s
     setDismissedState(k)
     try { localStorage.setItem(storeKey, k) } catch { /* private mode: the dismissal lasts this view only */ }
   }
-  const visible = showLimitNotice(info) && dismissed !== key
+  const only = showLimitOnly(info)
+  const visible = (showLimitNotice(info) || only) && dismissed !== key
   return (
     <>
       <div className={`handoff-band-wrap ${visible ? 'visible' : ''}`} inert={!visible} aria-hidden={!visible} data-account-limit-band>
         <div className="handoff-band-clip">
           <div className="handoff-band" role="status" style={{ '--handoff-tone': 'var(--anthropic-orange)' } as CSSProperties}>
             <div className="handoff-band-copy">
-              <strong>{info ? noticeTitle(info, pt) : ''}</strong>
-              <span>{[info?.current?.label, resetPhrase(info?.limit?.resetsAt, pt)].filter(Boolean).join(' · ') || (pt ? 'Escolha a conta e o assistente para continuar.' : 'Choose the account and assistant to carry on.')}</span>
+              <strong>{only ? (pt ? 'Limite de uso atingido' : 'Usage limit reached') : info ? noticeTitle(info, pt) : ''}</strong>
+              <span>{only
+                ? (info?.limit?.message ?? '')
+                : [info?.current?.label, resetPhrase(info?.limit?.resetsAt, pt)].filter(Boolean).join(' · ') || (pt ? 'Escolha a conta e o assistente para continuar.' : 'Choose the account and assistant to carry on.')}</span>
             </div>
             <div className="handoff-actions">
-              <button type="button" className="primary" onClick={() => setOpen(true)}>{pt ? 'Continuar na outra conta' : 'Continue on the other account'}</button>
+              {!only && <button type="button" className="primary" onClick={() => setOpen(true)}>{pt ? 'Continuar na outra conta' : 'Continue on the other account'}</button>}
               <button type="button" className="icon" aria-label={pt ? 'Dispensar' : 'Dismiss'} onClick={() => setDismissed(key)}><X size={16} /></button>
             </div>
           </div>

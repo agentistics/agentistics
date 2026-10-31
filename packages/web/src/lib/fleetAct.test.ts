@@ -56,3 +56,10 @@ test('an update the harness\'s own version asks for is carried on (OPENCODE.CORR
     .toEqual({ ok: false, message: 'm', action: { kind: 'update-harness', harness: 'opencode', need: '1.18.0' } })
   expect(parseActResult({ ok: false, message: 'm', action: { kind: 'rm -rf' } }, 'pt')).toEqual({ ok: false, message: 'm' })
 })
+
+test('a resume the memory gate refused carries memoryBudget, so the surface can offer "reopen anyway"', () => {
+  expect(parseActResult({ ok: false, message: 'Not enough memory…', memoryBudget: true }, 'en')).toEqual({ ok: false, message: 'Not enough memory…', memoryBudget: true })
+  // Never on a success, never from a non-literal.
+  expect(parseActResult({ ok: true, message: 'started', id: 'a1', memoryBudget: true }, 'en').memoryBudget).toBeUndefined()
+  expect(parseActResult({ ok: false, message: 'x', memoryBudget: 'yes' }, 'en').memoryBudget).toBeUndefined()
+})

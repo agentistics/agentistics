@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { forcedNote, isAdmissionRefusal, type AdmissionRefusal } from './spawnAdmission'
+import { forceOfferOf, forcedNote, isAdmissionRefusal, type AdmissionRefusal } from './spawnAdmission'
 
 const VALID_REFUSAL: AdmissionRefusal = {
   reason: 'no-room',
@@ -118,5 +118,20 @@ describe('forcedNote', () => {
     expect(forcedNote(null)).toBeNull()
     expect(forcedNote(undefined)).toBeNull()
     expect(forcedNote('x')).toBeNull()
+  })
+})
+
+describe('forceOfferOf', () => {
+  it('offers start-anyway on a QUEUED refusal and names the entry to cancel first', () => {
+    expect(forceOfferOf({ ok: false, message: 'No room right now — the session is queued (position 1)…', queued: { id: 'q1', position: 1 } }))
+      .toEqual({ offer: true, queuedId: 'q1' })
+  })
+  it('offers it on the exact memory-budget refusal with nothing to cancel', () => {
+    expect(forceOfferOf({ ok: false, code: 'memory_budget', message: 'x', refusal: VALID_REFUSAL })).toEqual({ offer: true, queuedId: null })
+  })
+  it('offers nothing on an ordinary refusal or a success', () => {
+    expect(forceOfferOf({ ok: false, message: 'unknown harness' })).toEqual({ offer: false, queuedId: null })
+    expect(forceOfferOf({ ok: true, id: 'a', queued: { id: 'q1' } })).toEqual({ offer: false, queuedId: null })
+    expect(forceOfferOf(null)).toEqual({ offer: false, queuedId: null })
   })
 })
