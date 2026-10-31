@@ -67,6 +67,19 @@ describe('FIXTURE BYTES', () => {
   })
 })
 
+describe('opencode limit banner (strings measured in opencode 1.19.5)', () => {
+  const rule = LIMIT_RULES.opencode!
+  const hit = (line: string) => detectLimit({ tail: [line], rule, nowMs: 0 })
+  it('recognises the free, Go and quota errors it prints', () => {
+    for (const l of ['Free usage exceeded, subscribe to Go', 'Free limit reached', 'Go limit reached', 'Quota exceeded. Check your plan and billing details.', 'Error: Rate limit exceeded'])
+      expect(hit(l)?.raw).toBe(l)
+  })
+  it('does not treat a line merely quoting "rate limit" as blocked, and states no reset', () => {
+    expect(hit('the retry handler waits on a rate limit then continues')).toBeUndefined()
+    expect(hit('Go limit reached')?.resetsAtText).toBeUndefined()
+  })
+})
+
 describe('LIMIT_RULES', () => {
   it('declares an entry for every harness, so a new one cannot be forgotten', () => {
     for (const h of HARNESS_ORDER) {
@@ -76,7 +89,7 @@ describe('LIMIT_RULES', () => {
 
   it('leaves every unprobed harness null rather than guessing a banner for it', () => {
     for (const h of HARNESS_ORDER) {
-      if (h === 'claude') continue
+      if (h === 'claude' || h === 'opencode') continue
       expect(LIMIT_RULES[h]).toBeNull()
       expect(limitRuleFor(h)).toBeUndefined()
     }
