@@ -321,7 +321,9 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     if (arg === '--json') { cmd.json = true; continue }
     if (arg === '--force') { cmd.force = true; continue }
     if (arg === '--shared-cwd') { cmd.sharedCwd = true; continue }
-    if (arg === '--handoff') { cmd.handoff = true; continue }
+    // A hand-off is asked by a session from its own tool shell, where attaching a terminal would hang that
+    // shell — and a no-questions successor only exists over the protocol — so it always starts detached.
+    if (arg === '--handoff') { cmd.handoff = true; cmd.background = true; continue }
     if (arg === '--away') { cmd.away = true; continue }
     if (arg === '--no-away') { cmd.away = false; continue }
     if (arg === '--task') {
