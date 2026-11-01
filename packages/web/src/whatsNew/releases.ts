@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.176.0': {
+    features: [
+      {
+        pt: 'Experimental, ligação por voz: uma fala longa, com pausas, vira um pedido só, sem te cortar no meio.',
+        en: 'Experimental, voice call: a long message with pauses becomes a single request, without cutting you off.',
+      },
+      {
+        pt: 'Experimental, ligação por voz: diga "para", "não" ou "espera" e a voz pausa na hora; se foi só barulho, ela retoma. Se não der para confirmar, aparecem "Continuar a fala" e "Parar a fala".',
+        en: 'Experimental, voice call: say "stop", "no" or "wait" and the voice pauses at once; if it was just noise, it resumes. If it cannot tell, "Continue speaking" and "Stop speaking" appear.',
+      },
+      {
+        pt: 'Experimental, ligação por voz: perguntas como "tá aí?" ou "travou?" recebem o andamento real da tarefa.',
+        en: 'Experimental, voice call: questions like "are you there?" or "is it stuck?" get the real progress of the task.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ligação por voz: desligar não cancela mais a tarefa em andamento, e depois de uma interrupção a resposta considera só o que você ouviu.',
+        en: 'Voice call: hanging up no longer cancels the running task, and after an interruption the reply only counts what you actually heard.',
+      },
+      {
+        pt: 'Ligação por voz: o globo segue o estado real e só mostra "falando" quando sai som; com pouca memória, a voz carrega num modo leve e avisa.',
+        en: 'Voice call: the globe follows the real state and only shows "speaking" when there is sound; with little memory, the voice loads in a light mode and says so.',
+      },
+    ],
+  },
   '2.175.0': {
     features: [
       {
