@@ -76,7 +76,8 @@ import { reportFreshSpawn } from './spawn-report'
 import { readHarnessAgents } from './harness-agents-io'
 import { planTakeover, type TakeoverRefusal } from './takeover'
 import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor, storedRoleFor } from './session-roles'
-import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
+import { ensureClaudeProjectTrusted } from './claude-trust'
+import type { BackendInitialPrompt, BackendSpawn, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 
 /**
  * The initial-prompt argument for `backend.spawn`, with the harness's screen RULES attached so the
@@ -88,6 +89,13 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
   if (!plan.initialPrompt) return {}
   const rules = rulesFor(harness)
   return { initialPrompt: { ...plan.initialPrompt, ...(rules ? { rules } : {}) } }
+}
+
+async function managedSpawn(backend: SessionBackend, req: BackendSpawn): Promise<{ delivery?: Promise<void> } | void> {
+  const harness = req.structured?.harness
+  const claudeConfigRoot = req.env?.CLAUDE_CONFIG_DIR
+  if (harness === 'claude' && claudeConfigRoot) await ensureClaudeProjectTrusted(claudeConfigRoot, req.cwd)
+  return backend.spawn(req)
 }
 
 /** Derived from the specs, never a second hand-written list — the two could not then disagree. */
@@ -643,8 +651,7 @@ export async function start(
   await writeContextFile(planned.plan)
   try {
     if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}), ...spawnPromptArg(planned.plan, cmd.harness),
-      structured: structuredIntentOf({ harness: cmd.harness, origin: cmd.background ? 'background' : 'terminal', prompt: cmd.prompt, mode: launch.mode }, { ...launch, ctx, conversationId: offeredConversationId, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
+    await managedSpawn(backend, { id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}), structured: structuredIntentOf({ harness: cmd.harness, origin: cmd.background ? 'background' : 'terminal', prompt: cmd.prompt, mode: launch.mode }, { ...launch, ctx, conversationId: offeredConversationId, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }), ...spawnPromptArg(planned.plan, cmd.harness),
       ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
     })
   } catch (e) {
@@ -983,7 +990,7 @@ export async function batch(
     await writeContextFile(planned.plan)
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({
+      await managedSpawn(backend, {
         id, cwd, argv: planned.plan.argv,
         ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
         ...spawnPromptArg(planned.plan, spec.harness),
@@ -1147,7 +1154,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     })
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({ id, cwd: m.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
+      await managedSpawn(backend, { id, cwd: m.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
         structured: structuredIntentOf({ harness: m.harness, origin: 'background', resumeId: row.resumeId, mode: m.mode }, { ...inheritedLaunch(m, m.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
         ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
       })
@@ -1531,7 +1538,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
 
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
+      await managedSpawn(backend, { id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
         structured: structuredIntentOf({ harness: live.harness, origin: 'terminal', resumeId: live.sessionId, mode: previous?.mode }, { ...inheritedLaunch(previous, live.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
       })
     } catch (e) {
