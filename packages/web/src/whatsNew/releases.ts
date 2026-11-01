@@ -13,15 +13,15 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.182.0': {
     features: [
       {
-        pt: 'Você pode corrigir uma mensagem já enviada ou cancelá-la, e o app confirma quando o cancelamento valeu. Conferido ao vivo no Claude, no Copilot e no OpenCode.',
-        en: 'You can correct a message already sent or cancel it, and the app confirms when the cancel took effect. Checked live on Claude, Copilot and OpenCode.',
+        pt: 'Por baixo, o app agora consegue corrigir ou cancelar uma mensagem já enviada a uma sessão e confirmar quando o cancelamento valeu, sem repetir a ação se o app cair no meio. Ainda não há botão para isso: a chamada de voz passa a usar numa próxima versão. Conferido ao vivo no Claude, no Copilot e no OpenCode.',
+        en: 'Under the hood, the app can now correct or cancel a message already sent to a session and confirm when the cancel took effect, without repeating it if the app stops midway. There is no button for it yet: the voice call starts using it in a coming version. Checked live on Claude, Copilot and OpenCode.',
       },
       {
-        pt: 'No Codex, o ajuste foi feito contra uma gravação; a conferência ao vivo ainda está pendente.',
-        en: 'On Codex, the fix was made against a recording; the live check is still pending.',
+        pt: 'No Codex, a correção foi feita a partir de uma gravação; a conferência ao vivo ainda está pendente.',
+        en: 'On Codex, the fix was made from a recording; the live check is still pending.',
       },
       {
-        pt: 'No Gemini, Kimi, Antigravity e no harness nativo, isso foi conferido apenas por testes automáticos, não ao vivo.',
+        pt: 'No Gemini, no Kimi, no Antigravity e no harness nativo, isso foi conferido só por testes automáticos, não ao vivo.',
         en: 'On Gemini, Kimi, Antigravity and the native harness, this was checked only by automated tests, not live.',
       },
     ],
