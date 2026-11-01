@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.182.0': {
+    features: [
+      {
+        pt: 'Por baixo, o app agora consegue corrigir ou cancelar uma mensagem já enviada a uma sessão e confirmar quando o cancelamento valeu, sem repetir a ação se o app cair no meio. Ainda não há botão para isso: a chamada de voz passa a usar numa próxima versão. Conferido ao vivo no Claude, no Copilot e no OpenCode; no OpenCode faltou conferir o cancelamento de uma mensagem já respondida, e a parte de o app cair no meio só passou em testes automáticos.',
+        en: 'Under the hood, the app can now correct or cancel a message already sent to a session and confirm when the cancel took effect, without repeating it if the app stops midway. There is no button for it yet: the voice call starts using it in a coming version. Checked live on Claude, Copilot and OpenCode; on OpenCode, cancelling a message that was already answered is still unchecked, and the app-stops-midway part passed only automated tests.',
+      },
+      {
+        pt: 'No Codex, a correção foi feita a partir de uma gravação; a conferência ao vivo ainda está pendente.',
+        en: 'On Codex, the fix was made from a recording; the live check is still pending.',
+      },
+      {
+        pt: 'No Gemini, no Kimi, no Antigravity e no harness nativo, isso foi conferido só por testes automáticos, não ao vivo.',
+        en: 'On Gemini, Kimi, Antigravity and the native harness, this was checked only by automated tests, not live.',
+      },
+    ],
+    fixes: [],
+  },
   '2.181.0': {
     features: [
       {
