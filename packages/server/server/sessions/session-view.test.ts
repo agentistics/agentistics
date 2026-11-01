@@ -104,6 +104,18 @@ describe('buildSessionViews', () => {
     expect(v!.pid).toBe(4242)
   })
 
+  it('OPENCODE.RESTO: an external process carries the activity its STORE states for its conversation, never counted as an alert', () => {
+    const externalActivity = new Map<string, SessionActivity>([['ses_ext', 'waiting']])
+    const views = buildSessionViews({ reconciled: [], activity: new Map(), externalActivity, processes: [proc({ harness: 'opencode', sessionId: 'ses_ext', pid: 7 })] })
+    expect(views[0]!.status).toBe('external')
+    expect(views[0]!.activity).toBe('waiting')
+    expect(attentionCount(views)).toBe(0)
+    expect(bellTransitions(new Map(), views)).toEqual([])
+    // A process whose conversation the store did not state stays without one.
+    const [other] = buildSessionViews({ reconciled: [], activity: new Map(), externalActivity, processes: [proc({ harness: 'opencode', sessionId: 'ses_other' })] })
+    expect(other!.activity).toBeUndefined()
+  })
+
   it('EXT.OPEN: an external process known only by its directory gets NO conversation link — the guess is never exact', () => {
     const [v] = buildSessionViews({ reconciled: [], activity: new Map(), processes: [proc()] })
     expect(v!.conversationId).toBeUndefined()

@@ -494,6 +494,8 @@ export const DEFAULT_CLOSED_LIMIT = 300
 export function buildSessionViews(o: {
   reconciled: readonly ReconciledSession[]
   activity: ReadonlyMap<string, SessionActivity>
+  /** An EXTERNAL process's activity, by the conversation it names, read exactly from its harness's store (opencode.db). */
+  externalActivity?: ReadonlyMap<string, SessionActivity>
   /**
    * Rows with work running that is NOT their own turn — a background subagent, a watcher.
    *
@@ -891,6 +893,8 @@ export function buildSessionViews(o: {
       harness: p.harness,
       cwd: p.cwd,
       status: 'external' as const,
+      // OPENCODE.RESTO — what the harness's own STORE says the conversation is doing, where one can say it exactly.
+      ...(() => { const c = own?.sessionId ?? p.sessionId; const a = c ? o.externalActivity?.get(c) : undefined; return a ? { activity: a } : {} })(),
       // EXT.OPEN: the conversation the process ITSELF named (its harness record, its argv, its open
       // file) is an EXACT link — so the row reads its chat, artifacts and metrics like any session.
       // The directory guess never becomes one: that would show some other conversation under it.
@@ -1066,7 +1070,8 @@ export function buildSessionViews(o: {
 }
 
 export function attentionCount(views: readonly SessionView[]): number {
-  return views.filter(v => needsAttention(v.activity)).length
+  // An external row's activity is shown, never counted: nobody asked agentop to watch it, so it is no one's alert.
+  return views.filter(v => v.status !== 'external' && needsAttention(v.activity)).length
 }
 
 /**
@@ -1082,7 +1087,7 @@ export function bellTransitions(
 ): string[] {
   const out: string[] = []
   for (const v of next) {
-    if (!needsAttention(v.activity)) continue
+    if (v.status === 'external' || !needsAttention(v.activity)) continue
     const before = prev.get(v.id)
     if (before === v.activity) continue
     out.push(v.id)

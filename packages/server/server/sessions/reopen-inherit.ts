@@ -66,3 +66,20 @@ export function inheritedLaunch(
   if (prev.effort && accepts({ effort: prev.effort })) out.effort = prev.effort
   return out
 }
+
+/**
+ * What a FORK ("Ramificar") starts with: what the original runs NOW — the mode its protocol states (the chip may
+ * have moved it since the start) and the model it answers with (the menu may have switched it) — and otherwise
+ * what its row recorded, as a reopen would. A fork used to start in the harness default, so a branch of a
+ * "No questions" session began asking again.
+ */
+export function forkLaunch(
+  prev: ManagedSession | undefined,
+  harness: HarnessId,
+  now: { mode?: CanonicalMode | undefined; model?: string | null | undefined },
+): { model?: string; effort?: string; mode?: CanonicalMode } {
+  const out = inheritedLaunch(prev, harness)
+  if (now.mode) out.mode = now.mode
+  if (now.model) out.model = now.model
+  return out
+}

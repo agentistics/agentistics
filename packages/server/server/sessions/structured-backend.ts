@@ -30,6 +30,7 @@ import { answerFits } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
 import { forkUnavailableNotice, harnessBlockedNotice } from './harness-notice'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
+import { pidAlive } from './structured-durable'
 import { modeNeedsProtocolSentence, routableDriver, routeSpawn, structuredOrigin, type SpawnRoute } from './structured-route'
 import type { BackendSession, BackendSpawn, SessionActivity, SessionBackend, TerminalCapture } from './types'
 
@@ -252,6 +253,7 @@ export function savedOf(req: BackendSpawn, harness: HarnessId, spawn: Structured
   return {
     v: 1, harness, spawn: rest,
     backend: { id: req.id, cwd: req.cwd, ...(req.env ? { env: req.env } : {}), ...(req.unsetEnv ? { unsetEnv: req.unsetEnv } : {}), ...(req.structured ? { structured: req.structured } : {}) },
+    driverPid: process.pid,
   }
 }
 
@@ -437,6 +439,16 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
 
   /** One recovery at a time; a later CLI spawn can add a relay after boot. `list()` waits on it. */
   let reattaching: Promise<void> | null = null
+  /**
+   * Set by the first `reattach()` — only the SERVER calls it (`reattachStructuredSessions`), so only the server
+   * adopts. A CLI process lists the same relays and must never take one over on its way out.
+   */
+  let adopting = false
+  /** Another LIVE process drives this relay (a CLI still finishing its spawn): not ours to take. */
+  const drivenElsewhere = (id: string): boolean => {
+    const pid = durable?.saved(id)?.driverPid
+    return typeof pid === 'number' && pid !== process.pid && pidAlive(pid)
+  }
 
   async function reattachOne(id: string, reg: EngineStructured | null): Promise<void> {
     if (!durable || live.has(id)) return
@@ -475,6 +487,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     sweepStalled,
     reattach() {
       if (!durable) return Promise.resolve()
+      adopting = true
       reattaching ??= (async () => {
         for (const id of durable.dead()) {
           const endedAt = durable.endedAt?.(id)
@@ -483,7 +496,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
           }
           durable.remove(id)
         }
-        const ids = durable.alive().filter(id => !live.has(id))
+        const ids = durable.alive().filter(id => !live.has(id) && !drivenElsewhere(id))
         if (ids.length === 0) return
         const reg = await provider.structured().catch(() => null)
         await Promise.all(ids.map(id => reattachOne(id, reg).catch(() => {})))
@@ -566,6 +579,9 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       const elsewhere: BackendSession[] = durable
         ? durable.alive().filter(id => !known.has(id)).map(id => ({ id, createdMs: Date.now(), attached: false, alive: true, lastActivityMs: durable.lastActivityMs(id) }))
         : []
+      // A `--bg` CLI spawn's driver ended with the CLI: nobody reads its protocol, so its row had no mode, no
+      // model list, no chat and no state until a prompt happened to recover it. The server adopts it on the poll.
+      if (adopting && !reattaching && elsewhere.some(e => !drivenElsewhere(e.id))) void backend.reattach().catch(() => {})
       return [...rows, ...mine, ...elsewhere]
     },
     async capture(id, lines) { const s = of(id); return s ? s.screen(lines) : base.capture(id, lines) },

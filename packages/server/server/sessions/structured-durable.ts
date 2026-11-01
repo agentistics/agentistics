@@ -53,6 +53,12 @@ export interface SavedSpawn {
   spawn: Omit<StructuredSpawn, 'transport'>
   /** The bits of the host's `BackendSpawn` the fallback needs (`resumeSpawn`). */
   backend: { id: string; cwd: string; env?: Record<string, string>; unsetEnv?: string[]; structured?: unknown }
+  /**
+   * The process that started the relay and drives it until it ends. A `--bg` CLI spawn exits seconds later and
+   * leaves the child to nobody; the server adopts a relay whose driver is gone (`withStructured`'s `list()`).
+   * Absent on a relay written before this field: treated as gone.
+   */
+  driverPid?: number
 }
 
 /** How the relay process is started: a checkout runs the source, a binary runs itself. */
@@ -73,7 +79,7 @@ const CONNECT_STEP_MS = 25
 const immediate = (): Promise<void> => new Promise(r => setImmediate(r))
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 
-function pidAlive(pid: number): boolean {
+export function pidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
 }
 

@@ -250,6 +250,44 @@ describe('a structured session survives a server restart', () => {
       expect(server.base.spawned).toHaveLength(0)
     })
 
+    test(`${harness}: the server ADOPTS a CLI-born relay on its poll, without waiting for a prompt`, async () => {
+      const r = rig()
+      const server = r.server({ harness })
+      await server.b.reattach() // boot
+      const cli = r.server({ harness })
+      await cli.b.spawn(webSpawn(r.root, 'slow-cli-turn', harness))
+      await until(() => cli.b.activityOf!('m-1') === 'working')
+      ;(r.started[0]!.transport as DurableTransport).detach() // the one-shot CLI exits
+
+      // Only the fleet poll — no prompt: the row must gain its driver (mode, models, chat, state) by itself.
+      await server.b.list()
+      await until(() => server.b.chatOf!('m-1') !== undefined, 5000, 'adopted on the poll')
+      expect(r.started).toHaveLength(2)
+      expect(server.base.spawned).toHaveLength(0)
+    })
+
+    test(`${harness}: a relay whose driver is another LIVE process is left to it, and a CLI never adopts`, async () => {
+      const r = rig()
+      const cli = r.server({ harness })
+      await cli.b.spawn(webSpawn(r.root, 'slow-cli-turn', harness))
+      await until(() => cli.b.activityOf!('m-1') === 'working')
+      ;(r.started[0]!.transport as DurableTransport).detach()
+      // A process that never called reattach() (a CLI) lists the relay but does not take it.
+      const other = r.server({ harness })
+      await other.b.list()
+      await sleep(200)
+      expect(other.b.chatOf!('m-1')).toBeUndefined()
+      // The relay names a LIVE driver that is not this process: the server leaves it alone.
+      const saved = path.join(r.store.dirOf('m-1'), 'spawn.json')
+      writeFileSync(saved, JSON.stringify({ ...JSON.parse(readFileSync(saved, 'utf8')), driverPid: process.ppid }))
+      const server = r.server({ harness })
+      await server.b.reattach()
+      await server.b.list()
+      await sleep(200)
+      expect(server.b.chatOf!('m-1')).toBeUndefined()
+      expect(r.started).toHaveLength(1)
+    })
+
     test(`${harness}: input recorded after the replay snapshot is never delivered twice`, async () => {
       const r = rig()
       const cli = r.server({ harness })
