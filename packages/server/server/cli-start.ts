@@ -2399,7 +2399,7 @@ export async function spawnManaged(req: {
       return { ok: false, message: `The session started but its role (${gate.role}) could not be recorded, so it was stopped — try again.` }
     }
   }
-  if (handoffParentRow) {
+  if (handoffParentRow && inheritedRole !== 'worker') {
     // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
     await import('./sessions/team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
   }

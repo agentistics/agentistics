@@ -494,7 +494,8 @@ export async function start(
     }
   }
   const verifiedCaller = parentSessionIdForPlan && (cmd.handoff || await callerHoldsIdentity(parentSessionIdForPlan)) ? parentSessionIdForPlan : undefined
-  const handoffKeepsRole = cmd.handoff && (await storedRoleFor([parentSessionIdForPlan])) === 'worker'
+  const parentRowForRole = cmd.handoff && parentSessionIdForPlan ? (await readRegistry().catch(() => [] as ManagedSession[])).find(m => m.id === parentSessionIdForPlan) : undefined
+  const handoffKeepsRole = cmd.handoff && (await storedRoleFor([parentRowForRole?.conversationId, parentSessionIdForPlan])) === 'worker'
   const filing = await planSpawnFilingSafe({
     harness: cmd.harness,
     liveIds: await liveIdsOf(backend),
@@ -574,7 +575,7 @@ export async function start(
   const agentCaller = await callerHoldsIdentity(callerSessionId())
   // CONTA.AUTO (B) — a hand-off with no `--account` takes the router's account with room, never the predecessor's while it is
   // limit-blocked; an explicit `--account` still wins.
-  const handoffPick = cmd.handoff && !handoffKeepsRole && !cmd.account
+  const handoffPick = cmd.handoff && !cmd.account && !(handoffKeepsRole && handoffParentRow?.accountId)
     ? await handoffAccountChoice({ harness: cmd.harness, ...(handoffParentRow ? { predecessor: handoffParentRow } : {}), agentCaller })
     : undefined
   if (handoffPick && !handoffPick.room) {
@@ -582,7 +583,7 @@ export async function start(
       ? 'Nenhuma conta tem folga agora: o sucessor abre na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.'
       : 'No account has room right now: the successor opens on the account whose window reopens first, never on the predecessor\'s limit-blocked one.')
   }
-  const asked = cmd.account ?? (handoffKeepsRole ? handoffParentRow?.accountId : handoffPick?.id)
+  const asked = cmd.account ?? (handoffKeepsRole && handoffParentRow?.accountId ? handoffParentRow.accountId : handoffPick?.id)
   const account = decideSpawnAccount({
     harness: cmd.harness, ...(asked ? { requested: asked } : {}),
     agentCaller,
