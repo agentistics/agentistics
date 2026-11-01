@@ -10,6 +10,31 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.180.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'OpenCode: os pedidos de permissão mostram o que estão pedindo (arquivo, pasta) e podem ser respondidos.',
+        en: 'OpenCode: permission requests show what they ask for (file, folder) and can be answered.',
+      },
+      {
+        pt: 'Uma sessão que atinge o limite de uso agora avisa isso em vez de esperar para sempre.',
+        en: 'A session that hits its usage limit now says so instead of waiting forever.',
+      },
+      {
+        pt: 'OpenCode: uma sessão aberta fora do agentistics que só está esperando não aparece mais como "precisa de você".',
+        en: 'OpenCode: a session opened outside agentistics that is only waiting no longer shows "needs you".',
+      },
+      {
+        pt: 'O nome dado a uma sessão sucessora é mantido.',
+        en: 'The name given to a successor session is kept.',
+      },
+      {
+        pt: 'O cartão de permissão mostra o caminho do arquivo uma única vez.',
+        en: 'The permission card shows the file path only once.',
+      },
+    ],
+  },
   '2.179.0': {
     features: [
       {
