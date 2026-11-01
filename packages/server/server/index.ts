@@ -14,7 +14,7 @@ import { handleUpgradeRoute, upgradableHint, versionWithRestart } from './upgrad
 import { compressResponse, negotiateEncoding } from './http-compress'
 import { encodedBody, etagMatches, versionOf } from './data-response-cache'
 import { slimApiResponse, slimSerialized } from './data-slim'
-import { buildApiResponse, buildApiResponseForClient, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, serializedData } from './data'
+import { buildApiResponse, buildApiResponseForClient, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, peekApiResponse, serializedData } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
@@ -446,6 +446,9 @@ void (async () => {
   // Kimi has no chat driver (its chat is a real session), so it is not in ALL_DRIVERS — P-20.
   await import('./kimi-mcp').then(m => m.ensureKimiMcp(PORT)).catch(err =>
     console.warn('[mcp] could not register for kimi:', err instanceof Error ? err.message : String(err)))
+  // OpenCode's TUI route reads `mcp` from its own opencode.json (format measured on 1.17.9).
+  await import('./opencode-mcp').then(m => m.ensureOpencodeMcp(PORT)).catch(err =>
+    console.warn('[mcp] could not register for opencode:', err instanceof Error ? err.message : String(err)))
   // Antigravity has no chat driver but has an MCP config of its own (`agy mcp add`, ENGINE.MAP P-20).
   const { ensureAgyMcp } = await import('./agy-mcp')
   await ensureAgyMcp(PORT).then(r => { if (r.action === 'refuse') console.warn(`[mcp] agy left alone: ${r.reason}`) }, err =>
@@ -811,8 +814,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const [{ planLimitsPayload, sampleLivePlanSessions, planAccountKey }, prefs] = await Promise.all([import('./plan-limits'), readPreferences()])
       const now = Date.now()
       let liveSessions: import('@agentistics/core').LivePlanSession[] = []
-      if (!TEAM_CENTRAL) {
-        const data = await buildApiResponse()
+      // USO.CARREGANDO: the data build is only for the live burn sample — never wait for the whole of it.
+      const { PLAN_LIMITS_DATA_WAIT_MS, withinOrNull } = await import('./plan-limits-data')
+      const sampled = TEAM_CENTRAL ? null : await withinOrNull((async () => {
+        const data = await peekApiResponse() ?? await loadDataSnapshot()
+        if (!data) return []
+
         const live = await readLocalLiveSnapshot(data.sessions)
         const latest = await planLimitsPayload(prefs.billing, now)
         const burnByAccount: Record<string, number> = {}
@@ -822,8 +829,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const working = new Set((processSessionHub()?.last()?.sessions ?? [])
           .filter(s => s.activity === 'working')
           .flatMap(s => [s.id, ...(s.conversationId ? [s.conversationId] : []), ...(s.conversationStoreId ? [s.conversationStoreId] : [])]))
-        liveSessions = await sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByAccount, working)
-      }
+        return sampleLivePlanSessions(data.sessions, live.liveSessionIds, now, burnByAccount, working)
+      })(), PLAN_LIMITS_DATA_WAIT_MS)
+      liveSessions = sampled ?? []
       const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, freeSlotsByAccount: {}, unassignedLive: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
     }
@@ -1382,6 +1390,11 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const flowApi = engine()?.flows
       if (!flowApi) return json({ error: 'official_build', sentence: 'fluxos exigem o build oficial' }, 501)
       if (url.pathname === '/api/flows' && req.method === 'GET') return json({ flows: flowApi.list() })
+      // SESSÕES.FECHAR: workers that handed back and are still open (`agentistics_sessions`, the leader's check-in).
+      if (url.pathname === '/api/flows/delivered-open' && req.method === 'GET') {
+        const view = await flowApi.read?.('entregues-abertos', {}).catch(() => null)
+        return json({ sessions: Array.isArray(view) ? view : [] })
+      }
       if (url.pathname === '/api/flows/run' && req.method === 'POST') {
         const body = await req.json().catch(() => ({})) as { name?: unknown; inputs?: unknown }
         if (typeof body.name !== 'string') return json({ error: 'bad_request', sentence: 'flow name is required' }, 400)
@@ -5380,6 +5393,21 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
     })().catch(err => console.error('[agentask] queued thread replies:', err instanceof Error ? err.message : String(err)))
       .finally(() => { flushing = false })
   }, 30_000).unref()
+  // CONTA.AUTO — a session stopped at its account's usage limit moves, once per limit episode, to another account of the
+  // same harness that has room (`sessions/auto-switch.ts`). Off with the Settings switch or without multiple accounts;
+  // a tick does nothing when no session is limit-blocked (one registry read + the tail of each live transcript).
+  let autoSwitching = false
+  setInterval(() => {
+    if (autoSwitching) return
+    autoSwitching = true
+    void (async () => {
+      const [{ runAutoSwitchTick, defaultAutoSwitchDeps }, { readPreferences }] = await Promise.all([import('./sessions/auto-switch-io'), import('./preferences')])
+      const prefs = await readPreferences().catch(() => ({} as { lang?: string }))
+      const r = await runAutoSwitchTick(await defaultAutoSwitchDeps((prefs as { lang?: string }).lang === 'pt' ? 'pt' : 'en'))
+      if (r.moved.length) console.log(`[auto-switch] moved ${r.moved.length} limit-blocked session(s) to an account with room`)
+    })().catch(err => console.error('[auto-switch]', err instanceof Error ? err.message : String(err)))
+      .finally(() => { autoSwitching = false })
+  }, 60_000).unref()
 }
 } catch (err: unknown) {
   const { isAddressInUse, EXIT_INSTANCE_HELD } = await import('./service-exit')

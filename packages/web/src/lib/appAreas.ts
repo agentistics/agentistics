@@ -77,7 +77,7 @@ export const APP_AREAS: readonly Area[] = [
 ]
 
 /** Routes that are deliberately in no area: redirects, the footer's settings, export. */
-export const UNLISTED_ROUTES: readonly string[] = ['projects', 'hardware', 'export']
+export const UNLISTED_ROUTES: readonly string[] = ['projects', 'hardware', 'export', 'x/:surfaceId']
 
 function under(pathname: string, prefix: string): boolean {
   if (prefix === '/') return pathname === '/'

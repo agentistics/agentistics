@@ -458,7 +458,7 @@ describe('the dedicated-terminal branch falls through to centre on desktop (I2)'
 
   test('the redundant-pane guard exists and feeds the aside\'s own open condition', () => {
     expect(has('const dedicatedRightRedundant = dedicatedTerminal')).toBe(true)
-    expect(has('&& !dedicatedRightRedundant,')).toBe(true)
+    expect(has('&& (!dedicatedRightRedundant || engineTabShown),')).toBe(true)
   })
 
   test('the scan still sees an unconditional return reintroduced', () => {
@@ -525,5 +525,16 @@ describe('the narrow-overlay click-outside/Esc effect never touches the bottom b
     const reverted = SRC.replace(`${START}\n`, '')
     expect(reverted).not.toContain(START)
     expect(SRC).toContain(START) // the real file still has it
+  })
+})
+
+describe('a side engine surface in the aside is never left invisible', () => {
+  test('minimizing the Studio switches to the surface tab when the surface is owned here', () => {
+    expect(SRC).toMatch(/rightIsStudio \? \(\) => \{\s*if \(engineOwned\) setEngineTabOn\(true\)\s*setRightOpen\(false\)\s*\}/)
+  })
+
+  test('the dedicated-terminal redundancy rule yields to a shown side surface', () => {
+    expect(SRC).toMatch(/&& \(!dedicatedRightRedundant \|\| engineTabShown\)/)
+    expect(SRC).not.toMatch(/&& !dedicatedRightRedundant,/)
   })
 })

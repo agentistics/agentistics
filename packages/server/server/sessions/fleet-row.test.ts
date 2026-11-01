@@ -130,9 +130,10 @@ describe('fleetRow — an EXTERNAL session takes a write when it can be continue
   it('an exact conversation on a harness that resumes by id: prompt is ENABLED (the first write continues it here)', () => {
     expect(verb(ext({ conversationId: 'c-1' }), 'prompt').enabled).toBe(true)
   })
-  it('no conversation named, or a harness with no resume: prompt keeps its sentence — read-only live', () => {
+  it('no conversation named: prompt keeps its sentence — read-only live', () => {
     expect(verb(ext({}), 'prompt').enabled).toBe(false)
-    expect(verb(ext({ conversationId: 'c-1', harness: 'opencode' }), 'prompt').enabled).toBe(false)
+    // opencode HAS a launcher now (V-OPENCODE.2: `opencode --session <id>`), so a conversation it names continues here too
+    expect(verb(ext({ conversationId: 'c-1', harness: 'opencode' }), 'prompt').enabled).toBe(true)
   })
   it('the destructive verbs are untouched: an external row is never killed from its row', () => {
     expect(verb(ext({ conversationId: 'c-1' }), 'kill').enabled).toBe(false)
@@ -153,6 +154,21 @@ describe('fleetRow — conversationLinkVia is a flat field, not only link.reason
   it('says nothing while there is no id: no-id-route explains an absence, not a way of linking', () => {
     expect(fleetRow(row({ link: link('no-id-route') }), S).conversationLinkVia).toBeUndefined()
     expect(fleetRow(row({ conversationId: 'conv-1' }), S).conversationLinkVia).toBeUndefined()
+  })
+})
+
+describe('fleetRow — fork (V-OPENCODE.2)', () => {
+  const has = (r: ReturnType<typeof fleetRow>) => r.verbs.some(v => (v.action as string) === 'fork')
+  it('is offered on a structured, linked opencode row, in the row\'s language', () => {
+    const r = fleetRow(row({ harness: 'opencode', structured: true, conversationId: 'ses_a' }), S)
+    expect(has(r)).toBe(true)
+    expect(verb(fleetRow(row({ harness: 'opencode', structured: true, conversationId: 'ses_a' }), controlStrings('pt')), 'fork' as never).label).toBe('Ramificar esta conversa')
+  })
+  it('is absent without a linked conversation, off the protocol, on a row not hosted, or on a harness whose driver declares no fork', () => {
+    expect(has(fleetRow(row({ harness: 'opencode', structured: true }), S))).toBe(false)
+    expect(has(fleetRow(row({ harness: 'opencode', conversationId: 'ses_a' }), S))).toBe(false)
+    expect(has(fleetRow(row({ harness: 'opencode', structured: true, conversationId: 'ses_a', actionable: false, state: 'unknown' }), S))).toBe(false)
+    expect(has(fleetRow(row({ harness: 'claude', structured: true, conversationId: 'c' }), S))).toBe(false)
   })
 })
 

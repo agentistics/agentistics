@@ -8,7 +8,7 @@
  * worth of state over the same directory — re-attaches. Relays are stopped by their saved PID only.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type {
@@ -18,7 +18,7 @@ import type {
 import { structuredRegistry } from '@agentistics/engine-api'
 import { withStructured, type StructuredProvider } from './structured-backend'
 import { durableStore, type DurableStore, type DurableTransport } from './structured-durable'
-import { callsAt, parseJsonl, isOutRecord, writeCheck } from './structured-replay'
+import { callByKey, callsAt, isReplayCall, parseJsonl, isOutRecord, writeCheck } from './structured-replay'
 import { structuredIntentOf } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
 import { resumeAccountEnvironment } from './account-plan'
@@ -185,7 +185,13 @@ function rig(): Rig {
 
 afterEach(async () => {
   for (const r of rigs.splice(0)) {
-    for (const id of [...r.store.alive(), ...r.store.dead()]) await r.store.terminate(id, 4000)
+    // Ended ON PURPOSE first: a rig's server is still attached, and a child that merely dies reads to
+    // it as a crash — it resumes the conversation STRUCTURED, i.e. a fresh relay after this teardown
+    // (a relay + child + worker leaked by every test here until 31/10). Then end what is running.
+    for (const id of [...r.store.alive(), ...r.store.dead()]) {
+      r.store.markEnding(id, 'test teardown')
+      await r.store.terminate(id, 4000)
+    }
     rmSync(r.root, { recursive: true, force: true })
   }
   // One test spins a rig per structured harness; tearing each down may take up to 4 s.
@@ -227,6 +233,35 @@ describe('structured-replay (pure)', () => {
   })
 })
 
+describe('calls.jsonl carries the caller\'s idempotency key (ADAPTER.LIMITES A3)', () => {
+  const rec = (o: object) => JSON.stringify({ at: 1, t: 1, ...o })
+  test('a call with a valid key parses and keeps it; one without parses as before; a malformed key is dropped like a torn line', () => {
+    const text = [
+      rec({ op: 'answer', choice: 1, key: 'call1:t2:1' }), rec({ op: 'prompt', text: 'old' }),
+      rec({ op: 'setMode', id: 'plan', key: 'has space' }), rec({ op: 'setModel', id: 'm', key: 7 }), rec({ op: 'cancel', key: 'c.1' }),
+    ].join('\n')
+    const calls = parseJsonl(text, isReplayCall)
+    expect(calls.map(c => c.key)).toEqual(['call1:t2:1', undefined, 'c.1'])
+    expect(calls.map(c => c.op)).toEqual(['answer', 'prompt', 'cancel'])
+  })
+  test('callByKey finds the FIRST call under a key, and nothing for an unknown key', () => {
+    const calls = parseJsonl([rec({ op: 'cancel', key: 'k' }), rec({ op: 'setMode', id: 'x', key: 'k' }), rec({ op: 'prompt', text: 'p' })].join('\n'), isReplayCall)
+    expect(callByKey(calls, 'k')?.op).toBe('cancel')
+    expect(callByKey(calls, 'nope')).toBeUndefined()
+  })
+  test('DurableStore.callByKey reads the session\'s record: found, absent key, absent session', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'dur-key-'))
+    try {
+      const store = durableStore(root)
+      expect(store.callByKey('s1', 'k')).toBeNull()
+      mkdirSync(store.dirOf('s1'), { recursive: true })
+      writeFileSync(path.join(store.dirOf('s1'), 'calls.jsonl'), `${rec({ op: 'answer', choice: 2, key: 'k1' })}\n${rec({ op: 'prompt', text: 'p' })}\n{"torn`)
+      expect(store.callByKey('s1', 'k1')).toMatchObject({ op: 'answer', choice: 2, key: 'k1' })
+      expect(store.callByKey('s1', 'k2')).toBeNull()
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+})
+
 describe('a structured session survives a server restart', () => {
   for (const harness of ['claude', 'codex'] as const) {
     test(`${harness}: a CLI-born busy relay created AFTER boot can be adopted and prompted once`, async () => {
@@ -248,6 +283,57 @@ describe('a structured session survives a server restart', () => {
       await until(() => prompts(r).includes('follow-up'))
       expect(prompts(r)).toEqual(['slow-cli-turn', 'follow-up'])
       expect(server.base.spawned).toHaveLength(0)
+    })
+
+    test(`${harness}: the server ADOPTS a CLI-born relay on its poll, without waiting for a prompt`, async () => {
+      const r = rig()
+      const server = r.server({ harness })
+      await server.b.reattach() // boot
+      const cli = r.server({ harness })
+      await cli.b.spawn(webSpawn(r.root, 'slow-cli-turn', harness))
+      await until(() => cli.b.activityOf!('m-1') === 'working')
+      ;(r.started[0]!.transport as DurableTransport).detach() // the one-shot CLI exits
+
+      // Only the fleet poll — no prompt: the row must gain its driver (mode, models, chat, state) by itself.
+      await server.b.list()
+      await until(() => server.b.chatOf!('m-1') !== undefined, 5000, 'adopted on the poll')
+      expect(r.started).toHaveLength(2)
+      expect(server.base.spawned).toHaveLength(0)
+    })
+
+    test(`${harness}: the server never adopts a relay it is STILL STARTING itself (a fork / reopen in flight)`, async () => {
+      const r = rig()
+      const server = r.server({ harness })
+      await server.b.reattach() // boot: the server adopts from now on
+      let done = false
+      const spawning = server.b.spawn(webSpawn(r.root, 'slow-cli-turn', harness)).finally(() => { done = true })
+      while (!done) { await server.b.list(); await sleep(5) }
+      await spawning
+      await server.b.list()
+      await sleep(200)
+      expect(r.started).toHaveLength(1) // one driver: its own start, no adoption from under it
+    })
+
+    test(`${harness}: a relay whose driver is another LIVE process is left to it, and a CLI never adopts`, async () => {
+      const r = rig()
+      const cli = r.server({ harness })
+      await cli.b.spawn(webSpawn(r.root, 'slow-cli-turn', harness))
+      await until(() => cli.b.activityOf!('m-1') === 'working')
+      ;(r.started[0]!.transport as DurableTransport).detach()
+      // A process that never called reattach() (a CLI) lists the relay but does not take it.
+      const other = r.server({ harness })
+      await other.b.list()
+      await sleep(200)
+      expect(other.b.chatOf!('m-1')).toBeUndefined()
+      // The relay names a LIVE driver that is not this process: the server leaves it alone.
+      const saved = path.join(r.store.dirOf('m-1'), 'spawn.json')
+      writeFileSync(saved, JSON.stringify({ ...JSON.parse(readFileSync(saved, 'utf8')), driverPid: process.ppid }))
+      const server = r.server({ harness })
+      await server.b.reattach()
+      await server.b.list()
+      await sleep(200)
+      expect(server.b.chatOf!('m-1')).toBeUndefined()
+      expect(r.started).toHaveLength(1)
     })
 
     test(`${harness}: input recorded after the replay snapshot is never delivered twice`, async () => {

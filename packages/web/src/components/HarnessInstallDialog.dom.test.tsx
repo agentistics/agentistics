@@ -22,7 +22,7 @@ afterAll(async () => { await new Promise(r => setTimeout(r, 50)); globalThis.fet
 beforeEach(() => {
   loginCalls = []
   globalThis.fetch = (async (url: string, init?: { body?: string }) => {
-    if (url.includes('/install')) return new Response('data: {"type":"done","version":"1.0"}\n\n')
+    if (url.includes('/install')) return new Response('data: {"type":"progress","message":"Verificando a versão…"}\n\ndata: {"type":"done","version":"1.0"}\n\n')
     if (url.startsWith('/api/chat-harnesses')) return Response.json([{ id: 'codex', label: 'Codex', installed: true, authReady, ready: authReady, models: [], defaultModel: '', setup: {} }])
     if (url.startsWith('/api/fleet')) { loginCalls.push(url + (init?.body ?? '')); return Response.json({ ok: true, id: 's1' }) }
     return Response.json(null)
@@ -56,6 +56,8 @@ for (const lang of ['pt', 'en'] as const) {
     const { host, button, cleanup } = await install(lang, [], [])
     expect(button(lang === 'pt' ? 'Entrar agora' : 'Sign in now')).toBeUndefined()
     expect(host.textContent).toContain(lang === 'pt' ? 'Pronto!' : 'Done!')
+    // QA F4 (OPENCODE.CORREÇÕES): the installer's last progress line does not stand beside "Done".
+    expect(host.textContent).not.toContain('Verificando a versão')
     await cleanup()
   })
 }

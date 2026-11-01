@@ -9,7 +9,11 @@ import { featureOn } from '@agentistics/core'
 import { structuredRegistry } from '@agentistics/engine-api'
 import { acpLegacyDeclaration, withStructured } from './structured-backend'
 import type { ManagedSession, SessionBackend, StructuredIntent } from './types'
+import { isolateAgentEnv } from './agent-env.testing'
 
+// A spawn door reads AGENTOP_MANAGED_ID, AGENTISTICS_FLOWS and the other switches of whatever shell runs it (inside a managed
+// session: the caller's identity and the feature flags): every test starts from a bare agent environment.
+isolateAgentEnv()
 const savedCaller = process.env.AGENTOP_MANAGED_ID
 afterEach(() => {
   __setSessionBackendForTest(null)
@@ -103,4 +107,4 @@ test('ORQ.FORA CLI session open sends a background structured resume and keeps i
   expect(seen[0]!.structured).toMatchObject({ origin: 'background', resumeId: 'orq-open-conversation', mode: 'no-questions' })
   expect(seen[0]!.structured?.instructions).toBeUndefined()
   expect(routeSpawn({ flagOn: true, harness: 'claude', driver: 'claude-stream-json', origin: seen[0]!.structured?.origin, mode: 'no-questions', startModes: ['no-questions'], acpDriven: false, acpOptIn: [] })).toBe('structured')
-})
+}, 20_000) // `session open` runs the real resolver + spawn admission: ~2 s alone, past 5 s inside the full suite on a loaded machine

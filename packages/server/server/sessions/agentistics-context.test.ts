@@ -204,7 +204,7 @@ describe('delivery per harness', () => {
   test('a resume carries no context at all', () => {
     for (const h of HARNESS_ORDER) {
       if (!SPAWN_SPECS[h]?.resume) continue
-      const r = plan(h, { resumeId: '04d97770-e53f-4b7d-86d2-63bd12ec32eb', prompt: undefined }); if (!r.ok) throw new Error(h)
+      const r = plan(h, { resumeId: h === 'opencode' ? 'ses_04d97770e53f4b7d' : '04d97770-e53f-4b7d-86d2-63bd12ec32eb', prompt: undefined }); if (!r.ok) throw new Error(h)
       expect(r.plan.contextVia).toBeUndefined(); expect(r.plan.env).toBeUndefined()
     }
   })
@@ -422,5 +422,21 @@ describe('start flow (any project, any harness)', () => {
     expect(skill.body).toContain(flowLines('en').join('\n'))
     expect(skill.body).toContain(flowLines('pt').join('\n'))
     expect(skill.body.length).toBeLessThan(3500)
+  })
+})
+
+describe('OPENCODE.PAPÉIS — the session verb is named for every harness', () => {
+  test('a leader is told every harness `agentop session` takes, and never to run a CLI or `agentop code`', () => {
+    for (const role of ['leader', undefined] as const) {
+      const t = contextText({ sessionId: 'c1', cwd: '/w', ...(role ? { role } : {}) })
+      for (const h of HARNESS_ORDER) expect(t).toContain(h)
+      expect(t).toContain(`is any of ${HARNESS_ORDER.join(', ')}`)
+      expect(t).toContain('never with `agentop code`')
+      expect(t).toContain('--handoff --bg')
+      expect(t).toContain('--mode no-questions')
+    }
+  })
+  test('a worker is not taught to open sessions', () => {
+    expect(contextText({ sessionId: 'c1', cwd: '/w', role: 'worker' })).not.toContain('never with `agentop code`')
   })
 })

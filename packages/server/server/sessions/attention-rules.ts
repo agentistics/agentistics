@@ -166,10 +166,25 @@ export const ATTENTION_RULES: Record<HarnessId, AttentionRules | null> = {
       /enter Submit · esc Back/i,
     ],
   },
-  // Never spawned by agentop (no spawn-spec, CLAUDE.md step 4 skipped by scope), so nobody has
-  // captured a dialog footer for it — `rulesFor` reads this as "never probed" via the `?? undefined`
-  // below, exactly like a harness nobody has looked at.
-  opencode: null,
+  opencode: {
+    probed: 'opencode 1.19.5, 2026-10-31 (TUI under tmux, throwaway HOME; leader/qa/opencode-wp-a-probe/out2)',
+    approval: [
+      // The PERMISSION prompt (`△ Permission required`, a shell command and a file edit both measured):
+      // one row `Allow once   Allow always   Reject` with the footer on that same row —
+      //   `ctrl+f fullscreen  ⇆ select  enter confirm`
+      /⇆ select\s+enter confirm/,
+      // The `question` tool (opencode's AskUserQuestion): numbered options, each with a description
+      // line under it, and `4. Type your own answer` last —
+      //   `↑↓ select  enter submit  esc dismiss`
+      // and its MULTI-select step (out3), with a tab strip above the question —
+      //   `⇆ tab  ↑↓ select  enter toggle  esc dismiss`
+      /↑↓ select\s+enter (?:submit|toggle)\s+esc dismiss/,
+    ],
+    // The status row while a turn runs: `■■■⬝⬝⬝⬝⬝  esc interrupt … ctrl+p commands`; idle it shows the
+    // working directory in that place instead. A dialog replaces the whole input area, so the marker is
+    // absent while one is open (measured on both dialogs above).
+    working: [/esc interrupt/],
+  },
 }
 
 /** The rules for a harness, or `undefined` when it was never probed. */

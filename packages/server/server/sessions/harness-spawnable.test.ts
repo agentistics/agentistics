@@ -58,3 +58,11 @@ for (const failed of [true, false]) {
     expect(harnessSpawnability('codex', STARTUP_FAILURE_TTL_MS + 1, installed).spawnable).toBe(false)
   })
 }
+
+test('opencode has a session launcher (V-OPENCODE.2): spawnable when its binary is on PATH, never "has no session launcher"', () => {
+  expect(harnessSpawnability('opencode', 0, bin => (bin === 'opencode' ? '/test/bin/opencode' : null))).toEqual({ spawnable: true })
+  const missing = harnessSpawnability('opencode', 0, () => null)
+  expect(missing.spawnable).toBe(false)
+  expect(missing.unavailableReason).toBe('opencode is not on PATH: install opencode')
+  expect(JSON.stringify(missing)).not.toContain('no session launcher')
+})

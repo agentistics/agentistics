@@ -28,7 +28,7 @@ export function spawnRowsOf(file: Pick<AccountsFile, 'accounts' | 'bindings'>): 
   }
   return file.accounts.map(a => ({
     id: a.id, harness: a.harness, root: boundAt.get(a.id) ?? null, bound: boundAt.has(a.id), ...(defaultBound.has(a.id) ? { defaultRoot: true } : {}), available: a.available,
-    ...(a.retired ? { retired: true } : {}), firstSeen: a.firstSeen,
+    ...(a.retired ? { retired: true } : {}), ...(a.loginExpiredAt !== undefined ? { expired: true as const } : {}), firstSeen: a.firstSeen,
   }))
 }
 
@@ -104,4 +104,43 @@ export async function hostSpawnAccount(req: {
   })
   if (!decided.ok) return { ok: false, message: spawnAccountMessage(decided.reason, decided.detail, lang), reason: decided.reason }
   return { ok: true, ...(decided.account ? { accountId: decided.account.id } : {}) }
+}
+
+/**
+ * CONTA.AUTO (B) — the account a leader's hand-off successor starts on when no account was named: the plan router's pick
+ * among the accounts of its harness that have room (`handoffAccount`), never the predecessor's own while it is
+ * limit-blocked. `undefined`: no opinion (accounts off, fewer than two, nobody with room, a plan-limits read that failed) —
+ * the ordinary spawn rule then decides, exactly as before. An explicit account never reaches here. With NOBODY having room it
+ * still answers — the usable account whose window reopens soonest, `room: false` — and the caller says so: the default rule would
+ * hand the successor the limit-blocked predecessor account.
+ */
+export async function handoffAccountChoice(o: {
+  harness: HarnessId
+  /** The predecessor's registry row (the leader being replaced), when it is known. */
+  predecessor?: { id: string; conversationId?: string | undefined; cwd: string; accountId?: string | undefined; harness: string; model?: string | undefined } | undefined
+  agentCaller: boolean
+}): Promise<{ id: string; room: boolean; resetsAt?: number } | undefined> {
+  try {
+    if (!featureOn('multi-account')) return undefined
+    const accounts = await spawnAccountRows()
+    const mine = accounts.filter(a => a.harness === o.harness && !a.retired)
+    if (mine.length < 2) return undefined
+    const context: SpawnAccountContext = { enabled: true, accounts }
+    const usable = mine.filter(a => decideSpawnAccount({ harness: o.harness, requested: a.id, agentCaller: o.agentCaller, context }).ok).map(a => a.id)
+    if (usable.length < 1) return undefined
+    const [{ planLimitsPayload }, { readPreferences }, { handoffAccount }] = await Promise.all([import('../plan-limits'), import('../preferences'), import('./auto-switch')])
+    const budgets = (await planLimitsPayload((await readPreferences()).billing, Date.now())).budgets
+    const p = o.predecessor
+    let predecessor: { account?: string; limited: boolean } | undefined
+    if (p && p.harness === o.harness) {
+      const { readLimitState } = await import('./account-switch-io')
+      const { resolveSessionAccount, registryOfSpawnRows } = await import('./session-account')
+      const account = resolveSessionAccount([p as never], { id: p.id }, registryOfSpawnRows(accounts)) ?? p.accountId
+      const limited = p.conversationId
+        ? !!(await readLimitState({ harness: o.harness, conversationId: p.conversationId, cwd: p.cwd, ...(p.accountId ? { accountId: p.accountId } : {}) }).catch(() => null))
+        : false
+      predecessor = { ...(account ? { account } : {}), limited }
+    }
+    return handoffAccount({ harness: o.harness, usable, budgets, ...(predecessor ? { predecessor } : {}), ...(p?.model ? { model: p.model } : {}) })
+  } catch { return undefined }
 }

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { accountHome } from './account-home'
 import { resolveDataDir } from './data-dir'
 import { loadEnvConfig } from './env-config'
+import { opencodePaths } from './opencode-paths'
 import { featureOn, type HarnessId } from '@agentistics/core'
 
 loadEnvConfig()
@@ -295,13 +296,15 @@ export const COPILOT_DIR = process.env.COPILOT_DIR ?? (_selfContributingCentral 
 export const KIMI_DIR = process.env.KIMI_DIR ?? join(HOME_DIR, '.kimi-code')
 
 // ---------------------------------------------------------------------------
-// opencode CLI harness — P2 replay ONLY, no legacy adapter (CLAUDE.md "Adding a harness" step 4,
-// skipped by scope: it never produces a SessionMeta). Override the store path with
-// OPENCODE_DB_PATH. `opencode-local.db` (a SEPARATE, per-project database this integration does not
-// read — see integrations/opencode/index.ts's header) is deliberately not named here.
+// opencode CLI harness. Its store is resolved the way opencode resolves it (`opencode-paths.ts`): OPENCODE_DB,
+// else $XDG_DATA_HOME/opencode, else ~/.local/share/opencode; OPENCODE_DIR is our own override of the directory.
+// (`OPENCODE_DB_PATH`, read here until V-OPENCODE.2, never moved opencode's database.) `opencode-local.db` (a
+// SEPARATE, per-project database the replay does not read — see integrations/opencode/index.ts's header) is
+// deliberately not named here.
 // ---------------------------------------------------------------------------
-export const OPENCODE_DIR = process.env.OPENCODE_DIR ?? join(HOME_DIR, '.local', 'share', 'opencode')
-export const OPENCODE_DB_PATH = process.env.OPENCODE_DB_PATH ?? join(OPENCODE_DIR, 'opencode.db')
+const OPENCODE_PATHS = opencodePaths(process.env, HOME_DIR)
+export const OPENCODE_DIR = OPENCODE_PATHS.dir
+export const OPENCODE_DB_PATH = OPENCODE_PATHS.dbPath
 
 export const ANTIGRAVITY_DIR = process.env.ANTIGRAVITY_DIR ?? join(GEMINI_DIR, 'antigravity-cli')
 export const ANTIGRAVITY_BRAIN_DIR = join(ANTIGRAVITY_DIR, 'brain')
@@ -475,8 +478,7 @@ export interface HarnessRoot {
 }
 
 /** Each harness's default root. `null` = the harness is not read through account roots at all:
- *  antigravity has no isolation variable and keeps its own single-directory reader, and opencode has
- *  no adapter. Keyed by `HarnessId`, so a new harness does not compile until it is decided here. */
+ *  antigravity has no isolation variable and keeps its own single-directory reader, and opencode reads its explicitly resolved SQLite database directly. Keyed by `HarnessId`, so a new harness does not compile until it is decided here. */
 export const DEFAULT_HARNESS_DIRS: Record<HarnessId, string | null> = {
   claude: CLAUDE_DIR, codex: CODEX_DIR, gemini: GEMINI_DIR, copilot: COPILOT_DIR, kimi: KIMI_DIR,
   antigravity: null, opencode: null,

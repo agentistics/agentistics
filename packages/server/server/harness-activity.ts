@@ -93,6 +93,8 @@ const TOOL_ALIASES: Record<string, string> = {
   multi_replace_file_content: 'Edit',
   str_replace: 'Edit',
   edit_file: 'Edit',
+  // opencode's own edit tool (a `kind: "edit"` tool call, probed 1.17.9) — it used to pass through as `edit`
+  edit: 'Edit',
   replace: 'Edit',
   // search
   grep_search: 'Grep',

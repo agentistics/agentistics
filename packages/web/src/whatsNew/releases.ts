@@ -10,6 +10,311 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.182.0': {
+    features: [
+      {
+        pt: 'Por baixo, o app agora consegue corrigir ou cancelar uma mensagem já enviada a uma sessão e confirmar quando o cancelamento valeu, sem repetir a ação se o app cair no meio. Ainda não há botão para isso: a chamada de voz passa a usar numa próxima versão. Conferido ao vivo no Claude, no Copilot e no OpenCode; no OpenCode faltou conferir o cancelamento de uma mensagem já respondida, e a parte de o app cair no meio só passou em testes automáticos.',
+        en: 'Under the hood, the app can now correct or cancel a message already sent to a session and confirm when the cancel took effect, without repeating it if the app stops midway. There is no button for it yet: the voice call starts using it in a coming version. Checked live on Claude, Copilot and OpenCode; on OpenCode, cancelling a message that was already answered is still unchecked, and the app-stops-midway part passed only automated tests.',
+      },
+      {
+        pt: 'No Codex, a correção foi feita a partir de uma gravação; a conferência ao vivo ainda está pendente.',
+        en: 'On Codex, the fix was made from a recording; the live check is still pending.',
+      },
+      {
+        pt: 'No Gemini, no Kimi, no Antigravity e no harness nativo, isso foi conferido só por testes automáticos, não ao vivo.',
+        en: 'On Gemini, Kimi, Antigravity and the native harness, this was checked only by automated tests, not live.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.181.0': {
+    features: [
+      {
+        pt: 'A base para corrigir ou cancelar uma mensagem já enviada está pronta e chega completa na próxima versão.',
+        en: 'The groundwork for correcting or cancelling a message already sent is in place and arrives complete in the next version.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Sessões iniciadas em outra conta do Claude não param mais na pergunta "confiar nesta pasta?".',
+        en: 'Workers started on another Claude account no longer stop at the "trust this folder?" question.',
+      },
+    ],
+  },
+  '2.180.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Ligação por voz: o eco da própria voz e barulhos curtos não são mais tomados como interrupção; dizer "para", "não" ou "espera" continua pausando na hora.',
+        en: 'Voice call: the voice\'s own echo and short noises are no longer taken as an interruption; saying "stop", "no" or "wait" still pauses at once.',
+      },
+    ],
+  },
+  '2.180.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'OpenCode: os pedidos de permissão mostram o que estão pedindo (arquivo, pasta) e podem ser respondidos.',
+        en: 'OpenCode: permission requests show what they ask for (file, folder) and can be answered.',
+      },
+      {
+        pt: 'Uma sessão que atinge o limite de uso agora avisa isso em vez de esperar para sempre.',
+        en: 'A session that hits its usage limit now says so instead of waiting forever.',
+      },
+      {
+        pt: 'OpenCode: uma sessão aberta fora do agentistics que só está esperando não aparece mais como "precisa de você".',
+        en: 'OpenCode: a session opened outside agentistics that is only waiting no longer shows "needs you".',
+      },
+      {
+        pt: 'O nome dado a uma sessão sucessora é mantido.',
+        en: 'The name given to a successor session is kept.',
+      },
+      {
+        pt: 'O cartão de permissão mostra o caminho do arquivo uma única vez.',
+        en: 'The permission card shows the file path only once.',
+      },
+    ],
+  },
+  '2.179.0': {
+    features: [
+      {
+        pt: 'Experimental, ligação por voz: pedir para cancelar ou corrigir um pedido já enviado age sobre esse pedido; quando não dá para confirmar, a voz diz isso em vez de reenviar.',
+        en: 'Experimental, voice call: asking to cancel or correct a request you already sent acts on that request; when it cannot be confirmed, the voice says so instead of sending it again.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ligação por voz: respostas longas não param mais de falar no meio.',
+        en: 'Voice call: long replies no longer stop speaking halfway through.',
+      },
+      {
+        pt: 'Ligação por voz: a transcrição entende melhor termos técnicos e palavras em inglês no meio do português.',
+        en: 'Voice call: transcription understands technical terms and English words within Portuguese better.',
+      },
+      {
+        pt: 'Ligação por voz: os botões "Continuar a fala" e "Parar a fala" seguem o estilo dos botões do app, e o brilho do globo não passa mais da borda do painel nem do cartão.',
+        en: 'Voice call: the "Continue speaking" and "Stop speaking" buttons match the app\'s buttons, and the globe\'s glow no longer spills past the panel or card edge.',
+      },
+    ],
+  },
+  '2.178.0': {
+    features: [
+      {
+        pt: 'OpenCode: uma sessão iniciada pela linha de comando agora mostra o botão de modo e a lista de modelos.',
+        en: 'OpenCode: a session started from the command line now shows the mode button and the model list.',
+      },
+      {
+        pt: 'OpenCode: ao reabrir uma conversa, cada mensagem e os avisos de limite de uso continuam lá.',
+        en: 'OpenCode: when you reopen a chat, each message and the usage-limit notices are still there.',
+      },
+      {
+        pt: 'OpenCode: Ramificar mantém o modo e o modelo da conversa.',
+        en: 'OpenCode: Branch keeps the chat mode and model.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'OpenCode: o nome do modelo se atualiza na hora.',
+        en: 'OpenCode: the model name updates at once.',
+      },
+      {
+        pt: 'OpenCode: uma sessão aberta fora do agentistics mostra se está trabalhando.',
+        en: 'OpenCode: a session opened outside agentistics shows whether it is working.',
+      },
+      {
+        pt: 'OpenCode: uma resposta que só usou ferramentas agora mostra a atividade.',
+        en: 'OpenCode: a reply that only used tools now shows its activity.',
+      },
+    ],
+  },
+  '2.177.0': {
+    features: [
+      {
+        pt: 'Uma sessão do OpenCode agora funciona em qualquer papel — líder, trabalhadora, revisão ou iniciada por outra sessão: recebe as instruções e ferramentas do agentistics, abre sessões, relata a entrega e passa a liderança sem perguntas.',
+        en: 'An OpenCode session now works in any role — leader, worker, review or started by another session: it gets the agentistics instructions and tools, opens sessions, reports its delivery and hands over leadership without questions.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'OpenCode: um arquivo de configuração com comentários não deixa mais a sessão sem ferramentas.',
+        en: 'OpenCode: a config file with comments no longer leaves the session without tools.',
+      },
+    ],
+  },
+  '2.176.0': {
+    features: [
+      {
+        pt: 'Experimental, ligação por voz: uma fala longa, com pausas, vira um pedido só, sem te cortar no meio.',
+        en: 'Experimental, voice call: a long message with pauses becomes a single request, without cutting you off.',
+      },
+      {
+        pt: 'Experimental, ligação por voz: diga "para", "não" ou "espera" e a voz pausa na hora; se foi só barulho, ela retoma. Se não der para confirmar, aparecem "Continuar a fala" e "Parar a fala".',
+        en: 'Experimental, voice call: say "stop", "no" or "wait" and the voice pauses at once; if it was just noise, it resumes. If it cannot tell, "Continue speaking" and "Stop speaking" appear.',
+      },
+      {
+        pt: 'Experimental, ligação por voz: perguntas como "tá aí?" ou "travou?" recebem o andamento real da tarefa.',
+        en: 'Experimental, voice call: questions like "are you there?" or "is it stuck?" get the real progress of the task.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ligação por voz: desligar não cancela mais a tarefa em andamento, e depois de uma interrupção a resposta considera só o que você ouviu.',
+        en: 'Voice call: hanging up no longer cancels the running task, and after an interruption the reply only counts what you actually heard.',
+      },
+      {
+        pt: 'Ligação por voz: o globo segue o estado real e só mostra "falando" quando sai som; com pouca memória, a voz carrega num modo leve e avisa.',
+        en: 'Voice call: the globe follows the real state and only shows "speaking" when there is sound; with little memory, the voice loads in a light mode and says so.',
+      },
+    ],
+  },
+  '2.175.0': {
+    features: [
+      {
+        pt: 'Experimental: quando uma sessão de trabalho entrega o resultado e o trabalho está salvo, o agentistics pode encerrá-la sozinho (ative com a opção de fluxos e `agentop flow enable fechar-entregue`). Se recusar, o líder recebe o motivo.',
+        en: 'Experimental: when a worker session hands back its result and the work is saved, agentistics can close it by itself (turn it on with the flows option and `agentop flow enable fechar-entregue`). If it refuses, the leader is told why.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Rodar os testes não deixa mais processos em segundo plano consumindo memória.',
+        en: 'Running the tests no longer leaves background processes eating memory.',
+      },
+    ],
+  },
+  '2.174.0': {
+    features: [
+      {
+        pt: 'OpenCode: os quatro modos (Padrão, Aceitar edições, Plano, Sem perguntas) funcionam dentro da sessão, sem reiniciar; o chat mostra "Permitido pelo modo" quando o modo libera uma ação.',
+        en: 'OpenCode: all four modes (Default, Accept edits, Plan, No questions) work inside the session without restarting; the chat shows "Allowed by the mode" when the mode lets an action through.',
+      },
+      {
+        pt: 'OpenCode: sessões abertas no terminal aparecem no app com histórico, e "Continuar aqui" assume a conversa.',
+        en: 'OpenCode: sessions opened in the terminal show up in the app with their history, and "Continue here" takes the conversation over.',
+      },
+      {
+        pt: 'OpenCode: o rodapé mostra tokens, contexto e custo; o OpenCode entra em Comparar, no filtro de assistentes e em Uso, e a busca no histórico acha as conversas dele.',
+        en: 'OpenCode: the footer shows tokens, context and cost; OpenCode is in Compare, the assistant filter and Usage, and history search finds its conversations.',
+      },
+      {
+        pt: 'OpenCode: "Ramificar esta conversa" no menu da sessão, e o comando para retomar a conversa direto no OpenCode nas sessões encerradas.',
+        en: 'OpenCode: "Fork this conversation" in the session menu, and the command to resume the conversation in OpenCode itself on ended sessions.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'OpenCode: quando o limite do modelo gratuito acaba, a sessão para e o chat avisa, em vez de ficar "trabalhando" para sempre.',
+        en: 'OpenCode: when the free model\'s limit runs out, the session stops and the chat says so, instead of "working" forever.',
+      },
+      {
+        pt: 'Reabrir uma sessão volta no mesmo modo em que ela estava; quando falta memória, reabrir e iniciar dizem o motivo e oferecem "mesmo assim".',
+        en: 'Reopening a session brings it back in the mode it was in; when memory is short, reopen and start say why and offer "anyway".',
+      },
+      {
+        pt: 'No celular, o contador de caracteres do rodapé aparece inteiro.',
+        en: 'On the phone, the footer\'s character counter shows whole.',
+      },
+    ],
+  },
+  '2.173.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A ligação na janela flutuante pequena ganhou um layout próprio: o globo aparece inteiro, o status e os avisos ficam numa linha própria e nada mais fica sobreposto ao campo de escrever.',
+        en: 'The call in the small floating window has its own layout: the globe shows whole, status and notices sit on their own line, and nothing overlaps the input anymore.',
+      },
+    ],
+  },
+  '2.173.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O botão vermelho do composer agora encerra a ligação de verdade, e a ligação volta acima do campo ao retornar à sessão; o botão de ditar se esconde durante a ligação.',
+        en: 'The composer\'s red button now really ends the call, and the call returns above the input when you come back to the session; the dictate button hides during the call.',
+      },
+      {
+        pt: 'A janela flutuante abre compacta, e o botão da Nay mostra um menu com a ligação minimizada (voltar, encerrar) e "Abrir chat da Nay".',
+        en: 'The floating window opens compact, and the Nay button shows a menu with the minimized call (resume, end) and "Open Nay chat".',
+      },
+    ],
+  },
+  '2.172.1': {
+    features: [
+      {
+        pt: 'OpenCode: troque de modelo no meio da conversa pelo menu Modelo, com a lista do próprio OpenCode (inclusive os gratuitos); o rodapé mostra o modelo que está rodando de verdade.',
+        en: 'OpenCode: switch models mid-conversation from the Model menu, with OpenCode\'s own list (free models included); the footer shows the model really running.',
+      },
+      {
+        pt: 'OpenCode com os quatro modos: Padrão, Aceitar edições, Plano e Sem perguntas.',
+        en: 'OpenCode with all four modes: Default, Accept edits, Plan and No questions.',
+      },
+      {
+        pt: 'Quando o OpenCode precisa de uma versão mais nova (os modelos gratuitos pedem a 1.18.0), um botão "Atualizar o OpenCode" faz a atualização em um clique.',
+        en: 'When OpenCode needs a newer version (free models need 1.18.0), an "Update OpenCode" button updates it in one click.',
+      },
+      {
+        pt: 'O OpenCode aparece com o próprio logo em todo o app.',
+        en: 'OpenCode shows its own logo across the app.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Uma sessão do OpenCode não fica mais "trabalhando" para sempre quando o modelo não responde (por exemplo, um Ollama desligado): o app para a tentativa e explica o que fazer.',
+        en: 'An OpenCode session no longer stays "working" forever when its model does not answer (for example, Ollama turned off): the app stops the attempt and explains what to do.',
+      },
+      {
+        pt: 'Uma resposta recusada pelo modelo aparece no chat com o motivo, em vez de não aparecer nada.',
+        en: 'A reply the model refused now shows in the chat with the reason, instead of nothing.',
+      },
+      {
+        pt: 'O cartão "Iniciando…" de uma sessão nova não fica mais girando depois que a sessão já abriu.',
+        en: 'The "Starting…" card of a new session no longer keeps spinning after the session has opened.',
+      },
+      {
+        pt: 'O OpenCode instalado pelo instalador oficial é encontrado mesmo quando o app roda como serviço.',
+        en: 'OpenCode installed by its official installer is found even when the app runs as a service.',
+      },
+    ],
+  },
+  '2.172.0': {
+    features: [
+      {
+        pt: 'Interfaces de motores podem acompanhar você em uma janela flutuante ao sair da sessão. Minimize no botão da Nay e retome sem interromper o que está rodando.',
+        en: 'Engine interfaces can follow you in a floating window when you leave a session. Minimize onto the Nay button and restore without interrupting what is running.',
+      },
+      {
+        pt: 'A aba Sessões do painel flutuante da Nay pode receber seções de motores habilitados.',
+        en: 'The Sessions tab of the floating Nay panel can show sections from enabled engines.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Mensagens suas enviadas por uma interface agora aparecem na conversa, sem as instruções internas.',
+        en: 'Your messages sent through an interface now appear in the conversation, without internal instructions.',
+      },
+    ],
+  },
+  '2.171.0': {
+    features: [
+      {
+        pt: 'OpenCode no app: abra sessões do OpenCode como as dos outros assistentes, com o chat ao vivo, aprovações, cancelar, reabrir a mesma conversa e o modo plano.',
+        en: 'OpenCode in the app: open OpenCode sessions like the other assistants, with live chat, approvals, cancel, reopening the same conversation and plan mode.',
+      },
+      {
+        pt: 'O OpenCode usa a sua própria configuração, inclusive provedores e chaves de API próprios definidos no opencode.json.',
+        en: 'OpenCode uses your own configuration, including custom providers and API keys set in opencode.json.',
+      },
+      {
+        pt: 'Com uma versão antiga do OpenCode, o app explica em palavras simples o que atualizar.',
+        en: 'With an old OpenCode version, the app explains in plain words what to update.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Uso → Agora mostra "Carregando" enquanto o app ainda está subindo, em vez de dizer que não há histórico, e tenta de novo sozinho se a leitura falhar.',
+        en: 'Usage → Now shows "Loading" while the app is still starting instead of saying there is no history, and retries on its own if the read fails.',
+      },
+    ],
+  },
   '2.170.3': {
     features: [],
     fixes: [
@@ -20,6 +325,27 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       {
         pt: "'Continuar em outra conta' volta a funcionar para um líder registrado numa subtarefa; antes a nova sessão era recusada e nada começava.",
         en: "'Continue on another account' works again for a leader filed on a subtask; before, the new session was refused and nothing started.",
+      },
+    ],
+  },
+  '2.170.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Quando o login de uma conta expira, aparece um aviso acima do campo de mensagem com "Refazer login" e "Trocar de conta"; ele só some quando você entra de novo ou troca de conta.',
+        en: 'When an account\'s login expires, a notice above the message box offers "Sign in again" and "Switch account"; it only goes away once you sign in again or switch accounts.',
+      },
+      {
+        pt: 'Refazer login mantém a mesma conta (apelido, plano e histórico), sem precisar remover e adicionar de novo; em Uso → Contas a conta mostra "Login expirado" com o botão.',
+        en: 'Signing in again keeps the same account (nickname, plan and history), with no need to remove and re-add it; Usage → Accounts marks it "Login expired" with the button.',
+      },
+      {
+        pt: 'Uma conta com login expirado nunca é escolhida para abrir sessão, trocar de conta ou na troca automática.',
+        en: 'An account whose login expired is never picked to open a session, to switch to, or by the automatic switch.',
+      },
+      {
+        pt: 'O botão de passar a liderança volta a responder: "Pedir de novo" e "Lembrar" funcionam sem leitura de uso, e durante a passagem o painel mostra só "Passagem em andamento".',
+        en: 'The hand-off button responds again: "Ask again" and "Remind me" work without a usage reading, and during a hand-off the panel shows only "Hand-off in progress".',
       },
     ],
   },
@@ -36,6 +362,23 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       },
     ],
   },
+  '2.170.0': {
+    features: [
+      {
+        pt: 'Uma sessão que para no limite de uso passa sozinha para outra conta com folga, continua a mesma conversa e reenvia a mensagem recusada; se nenhuma conta tiver folga, ela continua sozinha quando o limite renovar. Cada troca deixa um aviso e um comentário na tarefa. Dá para desligar em Configurações → Sessões.',
+        en: 'A session stopped on a usage limit moves on its own to another account with room, keeps the same conversation and re-sends the refused message; when no account has room, it carries on by itself once the limit resets. Each move leaves a notice and a comment on the task. You can turn it off in Settings → Sessions.',
+      },
+      {
+        pt: 'A passagem de líder abre o sucessor numa conta com folga, nunca na conta que já bateu no limite.',
+        en: 'A leader hand-off opens the successor on an account with room, never on the one that already hit its limit.',
+      },
+      {
+        pt: 'Fluxos (experimental): toda abertura de worker passa por um portão que explica em palavras simples quando recusa; a passagem de líder ganha um documento gerado do quadro e dos seus pedidos abertos; um pedido novo seu com o líder ocupado entra em paralelo, na fila ou agora, sem trocar o trabalho em andamento.',
+        en: 'Flows (experimental): every worker spawn goes through a gate that says in plain words why it refuses; a leader hand-off gets a document generated from the board and your open requests; a new request of yours with a busy leader goes in parallel, to the queue or now, without replacing work in progress.',
+      },
+    ],
+    fixes: [],
+  },
   '2.169.1': {
     features: [],
     fixes: [
@@ -48,6 +391,31 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'The top-left corner of the session header, just below the tabs, is rounded again.',
       },
     ],
+  },
+  '2.169.0': {
+    features: [
+      {
+        pt: 'Motores podem colocar um botão de ícone no campo de mensagem, ao lado do microfone (engine-api 1.18).',
+        en: 'Engines can add an icon button to the message box, next to the microphone (engine-api 1.18).',
+      },
+      {
+        pt: 'Interfaces de motores podem abrir embutidas logo acima do campo de mensagem, sem moldura do app, e alternar entre embutida, lateral e tela cheia (engine-api 1.18).',
+        en: 'Engine interfaces can open inline right above the message box, without the app frame, and switch between inline, side and full screen (engine-api 1.18).',
+      },
+      {
+        pt: 'O botão de ícone de uma interface de motor no campo de mensagem agora mostra um estado ativo enquanto ela está aberta, e clicar nele a fecha (engine-api 1.18).',
+        en: 'An engine interface\'s icon button in the message box now shows an active state while it is open, and clicking it closes it (engine-api 1.18).',
+      },
+      {
+        pt: 'Motores podem pôr um ícone na barra de navegação, junto das páginas, que abre a interface deles como uma página do app, com endereço próprio (no celular, no menu Mais) (engine-api 1.18).',
+        en: 'Engines can add an icon to the navigation bar, next to the pages, that opens their interface as a page of the app with its own address (on a phone, in the More menu) (engine-api 1.18).',
+      },
+      {
+        pt: 'Uma interface de motor pode continuar rodando fora da tela quando você sai dela, e mostrar uma pílula com cronômetro na barra do topo, em qualquer tela, que leva de volta a ela (engine-api 1.18).',
+        en: 'An engine interface can keep running off screen when you leave it, and show a pill with a timer in the top bar, on any screen, that takes you back to it (engine-api 1.18).',
+      },
+    ],
+    fixes: [],
   },
   '2.168.2': {
     features: [],

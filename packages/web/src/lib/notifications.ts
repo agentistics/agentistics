@@ -49,6 +49,22 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão não iniciada', message: 'Não foi possível ler o quadro para arquivar a sessão.' },
     en: { title: 'Session not started', message: 'The board could not be read to file the session.' },
   },
+  'account.auto_switched': {
+    pt: { title: 'Conta trocada', message: 'A sessão {session} parou no limite da conta {from} (volta às {until}) e continua na conta {to}, de onde parou.' },
+    en: { title: 'Account switched', message: 'Session {session} stopped at the limit of account {from} (back at {until}) and carries on with account {to}, where it left off.' },
+  },
+  'account.auto_none': {
+    pt: { title: 'Sessão parada no limite', message: 'A sessão {session} parou no limite da conta {from} e nenhuma outra conta tem folga agora. A janela abre às {until}; um minuto depois o agentistics reenvia a última mensagem, uma única vez.' },
+    en: { title: 'Session stopped at the limit', message: 'Session {session} stopped at the limit of account {from} and no other account has room right now. The window opens at {until}; a minute later agentistics re-sends the last message, once.' },
+  },
+  'account.auto_none_manual': {
+    pt: { title: 'Sessão parada no limite', message: 'A sessão {session} parou no limite da conta {from} e nenhuma outra conta tem folga agora. Não há previsão de quando a conta volta: ela só continua quando você mandar uma mensagem.' },
+    en: { title: 'Session stopped at the limit', message: 'Session {session} stopped at the limit of account {from} and no other account has room right now. There is no sign of when the account comes back: it only carries on when you send it a message.' },
+  },
+  'account.handoff_no_room': {
+    pt: { title: 'Passagem sem conta com folga', message: 'Nenhuma conta tem folga agora: a passagem do líder abriu na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.' },
+    en: { title: 'Hand-off with no account that has room', message: 'No account has room right now: the leader hand-off opened on the account whose window reopens first, never on the predecessor\'s limit-blocked one.' },
+  },
   'retire.done': {
     pt: { title: 'Sessão encerrada', message: 'A sessão {label} ({id}) foi encerrada.' },
     en: { title: 'Session retired', message: 'Session {label} ({id}) was retired.' },

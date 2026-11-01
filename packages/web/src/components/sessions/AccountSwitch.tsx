@@ -10,7 +10,7 @@
  * list's `PlanUsageRowCells`, and the handoff band's notice styling (`handoffWarning.css`).
  */
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
-import { Users, X } from 'lucide-react'
+import { KeyRound, Users, X } from 'lucide-react'
 import type { PlanLimits } from '@agentistics/core'
 import { Checkbox, ConfirmModal, DialogActions, dialogButtonStyle } from '../../pages/settings/primitives'
 import { PLAN_ROW_GRID, PlanUsageRowCells } from '../PlanLimitMeter'
@@ -18,11 +18,14 @@ import { usePlanLimits } from '../../lib/planLimits'
 import { accountDisplayName, defaultPick, pickerRows } from '../../lib/accountPicker'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import {
-  canSwitch, fetchSwitchInfo, harnessName, noticeTitle, postSwitch, resetPhrase, showLimitNotice, type SwitchInfo,
+  canSwitch, fetchSwitchInfo, harnessName, noticeTitle, postSwitch, resetPhrase, showLimitNotice, showLimitOnly, type SwitchInfo,
 } from '../../lib/accountSwitch'
 import { pushNotification } from '../../lib/notifications'
 import { reopenSession } from '../../lib/reopeningStore'
 import { useFleet } from '../../lib/fleet'
+import { AUTH_COPY, authBar } from '../../lib/accountRelogin'
+import { ReloginModal } from '../../pages/settings/ReloginModal'
+import type { HarnessId } from '@agentistics/core'
 import './handoffWarning.css'
 
 /** How often an open session asks whether its last turn hit a limit. A transcript tail read. */
@@ -44,7 +47,7 @@ export function useSwitchInfo(id: string | undefined, lang: string, enabled = tr
         if (!alive) return
         setInfo(i)
         // Multiple accounts off, or a harness that cannot switch: nothing to watch for on this row.
-        if (i && !i.supported && t) { clearInterval(t); t = undefined }
+        if (i && !i.supported && !i.limitWatch && t) { clearInterval(t); t = undefined }
       })
     }
     read()
@@ -311,7 +314,7 @@ export function AccountLimitBand({ sessionId, lang, onSwitched }: { sessionId: s
   const [open, setOpen] = useState(false)
   // A dismissal holds for THIS limit only: the next one (a new reset time) shows again. It is kept
   // per session in localStorage so a reload or re-entering the session does not bring it back.
-  const key = info?.limit ? `${info.limit.resetsAt ?? ''}:${info.limit.pendingPreview ?? ''}` : ''
+  const key = info?.limit ? `${info.limit.resetsAt ?? ''}:${info.limit.at ?? ''}:${info.limit.pendingPreview ?? ''}` : ''
   const storeKey = `agentistics.accountLimitDismissed.${sessionId}`
   const [dismissed, setDismissedState] = useState<string | null>(() => {
     try { return localStorage.getItem(storeKey) } catch { return null }
@@ -320,24 +323,95 @@ export function AccountLimitBand({ sessionId, lang, onSwitched }: { sessionId: s
     setDismissedState(k)
     try { localStorage.setItem(storeKey, k) } catch { /* private mode: the dismissal lasts this view only */ }
   }
-  const visible = showLimitNotice(info) && dismissed !== key
+  const only = showLimitOnly(info)
+  const visible = (showLimitNotice(info) || only) && dismissed !== key
   return (
     <>
       <div className={`handoff-band-wrap ${visible ? 'visible' : ''}`} inert={!visible} aria-hidden={!visible} data-account-limit-band>
         <div className="handoff-band-clip">
           <div className="handoff-band" role="status" style={{ '--handoff-tone': 'var(--anthropic-orange)' } as CSSProperties}>
             <div className="handoff-band-copy">
-              <strong>{info ? noticeTitle(info, pt) : ''}</strong>
-              <span>{[info?.current?.label, resetPhrase(info?.limit?.resetsAt, pt)].filter(Boolean).join(' · ') || (pt ? 'Escolha a conta e o assistente para continuar.' : 'Choose the account and assistant to carry on.')}</span>
+              <strong>{only ? (pt ? 'Limite de uso atingido' : 'Usage limit reached') : info ? noticeTitle(info, pt) : ''}</strong>
+              <span>{only
+                ? (info?.limit?.message ?? '')
+                : [info?.current?.label, resetPhrase(info?.limit?.resetsAt, pt)].filter(Boolean).join(' · ') || (pt ? 'Escolha a conta e o assistente para continuar.' : 'Choose the account and assistant to carry on.')}</span>
             </div>
             <div className="handoff-actions">
-              <button type="button" className="primary" onClick={() => setOpen(true)}>{pt ? 'Continuar na outra conta' : 'Continue on the other account'}</button>
+              {!only && <button type="button" className="primary" onClick={() => setOpen(true)}>{pt ? 'Continuar na outra conta' : 'Continue on the other account'}</button>}
               <button type="button" className="icon" aria-label={pt ? 'Dispensar' : 'Dismiss'} onClick={() => setDismissed(key)}><X size={16} /></button>
             </div>
           </div>
         </div>
       </div>
       {info && <AccountSwitchDialog open={open} sessionId={sessionId} info={info} lang={lang} fromLimit onClose={() => setOpen(false)} onSwitched={onSwitched} />}
+    </>
+  )
+}
+
+/**
+ * HOTFIX.LOGIN-EXPIRADO — the bar above the composer when the session's account cannot work: its
+ * harness refused the login, or the account is signed out. It has NO dismiss: it goes away only when
+ * the account works again (then it offers to re-send the refused message) or the session moves to
+ * another account. "Sign in again" is the Add-account steps for the SAME account (never a terminal);
+ * "Switch account" is the existing switch dialog.
+ */
+export function AccountLoginBand({ sessionId, lang, onSwitched }: { sessionId: string; lang: string; onSwitched: (newId: string) => void }) {
+  const pt = lang === 'pt'
+  const t = AUTH_COPY(pt)
+  const [info, reload] = useSwitchInfo(sessionId, lang)
+  const [relogin, setRelogin] = useState<{ accountId: string; who: string; pending?: string } | null>(null)
+  const [switching, setSwitching] = useState(false)
+  const [renewed, setRenewed] = useState<{ accountId: string; pending?: string } | null>(null)
+  const [resending, setResending] = useState(false)
+  const [resendError, setResendError] = useState(false)
+  const { act } = useFleet(pt ? 'pt' : 'en', false)
+  useEffect(() => { setRenewed(null); setRelogin(null); setSwitching(false) }, [sessionId])
+  const bar = authBar({ auth: info?.auth, currentAccountId: info?.current?.id, renewed })
+  const visible = bar.kind !== 'none'
+  const harness = (info?.current?.harness ?? 'claude') as HarnessId
+  const who = (bar.kind === 'blocked' ? bar.auth.label : undefined) ?? info?.current?.label ?? (pt ? 'desta sessão' : 'of this session')
+  async function resend(text: string) {
+    setResending(true); setResendError(false)
+    const out = await act({ id: sessionId, action: 'prompt', text })
+    setResending(false)
+    if (!out.ok) { setResendError(true); return }
+    setRenewed(null)
+  }
+  return (
+    <>
+      <div className={`handoff-band-wrap ${visible ? 'visible' : ''}`} inert={!visible} aria-hidden={!visible} data-account-login-band={bar.kind}>
+        <div className="handoff-band-clip">
+          <div className="handoff-band" role={bar.kind === 'blocked' ? 'alert' : 'status'}
+            style={{ '--handoff-tone': bar.kind === 'renewed' ? 'var(--accent-green)' : 'var(--accent-red)' } as CSSProperties}>
+            <div className="handoff-band-copy">
+              {bar.kind === 'blocked' && <>
+                <strong><KeyRound size={14} aria-hidden style={{ verticalAlign: '-2px', marginRight: 6 }} />{bar.auth.state === 'expired' ? t.expired(who) : t.signedOut(who)}</strong>
+                <span>{bar.auth.relogin ? t.why : t.whyNoRelogin}</span>
+              </>}
+              {bar.kind === 'renewed' && <>
+                <strong>{t.renewed}</strong>
+                <span>{resendError ? t.resendFailed : t.resendQ}</span>
+              </>}
+            </div>
+            <div className="handoff-actions">
+              {bar.kind === 'blocked' && <>
+                {bar.auth.relogin && <button type="button" className="primary" data-account-relogin onClick={() => setRelogin({ accountId: bar.auth.accountId, who, ...(bar.auth.pending ? { pending: bar.auth.pending } : {}) })}>{t.relogin}</button>}
+                {canSwitch(info ?? null) && <button type="button" data-account-login-switch onClick={() => setSwitching(true)}>{t.switch}</button>}
+              </>}
+              {bar.kind === 'renewed' && <>
+                <button type="button" className="primary" data-account-resend disabled={resending} onClick={() => { void resend(bar.pending) }}>{resending ? t.resending : t.resend}</button>
+                <button type="button" onClick={() => setRenewed(null)}>{t.notNow}</button>
+              </>}
+            </div>
+          </div>
+        </div>
+      </div>
+      {relogin && (
+        <ReloginModal accountId={relogin.accountId} harness={harness} who={relogin.who} lang={pt ? 'pt' : 'en'}
+          onClose={() => { setRelogin(null); reload() }}
+          onDone={r => { if (r.same) setRenewed({ accountId: relogin.accountId, ...(relogin.pending ? { pending: relogin.pending } : {}) }); reload() }} />
+      )}
+      {info && <AccountSwitchDialog open={switching} sessionId={sessionId} info={info} lang={lang} fromLimit={false} onClose={() => setSwitching(false)} onSwitched={onSwitched} />}
     </>
   )
 }

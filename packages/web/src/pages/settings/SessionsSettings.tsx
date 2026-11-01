@@ -82,6 +82,9 @@ export default function SessionsSettings() {
   // repository-shaped on purpose (`repoApi.ts`, `/api/fleet/tree*`, `editorEnabled`): those describe
   // a repository, which is what they read.
   const [editorEnabled, setEditorEnabled] = useState<boolean | null>(null)
+  // CONTA.AUTO — move a session that stopped at its account's limit to another account by itself. Absent reads as ON.
+  const [autoSwitch, setAutoSwitch] = useState<boolean | null>(null)
+  const [autoSwitchSaving, setAutoSwitchSaving] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
   // A CENTRAL CAN NEVER RUN THE STUDIO, and this screen is the one place a user turns it on — so it
   // is the one place a false sentence about it is expensive. `CAPS.localShell` carries no central
@@ -135,7 +138,7 @@ export default function SessionsSettings() {
       .then(r => (r.ok ? r.json() : null))
       .then((p: {
         archiveMode?: ArchiveMode; archiveSessions?: boolean
-        shellEnabled?: boolean; editorEnabled?: boolean; editorAutosave?: boolean
+        shellEnabled?: boolean; editorEnabled?: boolean; editorAutosave?: boolean; autoSwitchAccounts?: boolean
       } | null) => {
         const m: ArchiveMode =
           p?.archiveMode ?? (p?.archiveSessions === true ? 'full' : p?.archiveSessions === false ? 'off' : 'off')
@@ -146,6 +149,7 @@ export default function SessionsSettings() {
         setShellEnabled(p?.shellEnabled !== false)
         // Same reading for the Studio's switch, same reason.
         setEditorEnabled(p?.editorEnabled !== false)
+        setAutoSwitch(p?.autoSwitchAccounts !== false)
         // Autosave is UNTOUCHED by the reversal above — it stays absent = OFF, since widening a
         // save race is a materially different risk than opening a panel that is already gated by
         // `capable` on the two switches above.
@@ -155,7 +159,7 @@ export default function SessionsSettings() {
         // A failed read is not a person answering "off" to either question — it is not knowing,
         // and each switch's own "absent" reading applies exactly as it would to a present-but-empty
         // preferences file. `archiveMode` keeps its own conservative 'off' default; unrelated.
-        setMode('off'); setShellEnabled(true); setEditorEnabled(true); setEditorAutosave(false)
+        setMode('off'); setShellEnabled(true); setEditorEnabled(true); setEditorAutosave(false); setAutoSwitch(true)
       })
   }, [])
 
@@ -172,6 +176,21 @@ export default function SessionsSettings() {
       .then(r => { if (!r.ok) throw new Error('save failed') })
       .catch(() => setShellEnabled(!next))  // put the switch back; nothing was saved
       .finally(() => setShellSaving(false))
+  }
+
+  const toggleAutoSwitch = () => {
+    if (autoSwitch === null || autoSwitchSaving) return
+    const next = !autoSwitch
+    setAutoSwitchSaving(true)
+    setAutoSwitch(next)
+    fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autoSwitchAccounts: next }),
+    })
+      .then(r => { if (!r.ok) throw new Error('save failed') })
+      .catch(() => setAutoSwitch(!next))  // put the switch back; nothing was saved
+      .finally(() => setAutoSwitchSaving(false))
   }
 
   const toggleEditor = () => {
@@ -441,6 +460,18 @@ export default function SessionsSettings() {
               ? 'Seu perfil permite isso, mas você DESLIGOU. Com o Studio desligado nem a entrada aparece, e /api/fleet/tree* responde 403 — o servidor é quem decide.'
               : 'Your profile allows this, but you have turned it OFF. With the Studio off not even the entry appears, and /api/fleet/tree* answers 403 — the server is what decides.')}
       </div>
+
+      <Divider />
+
+      <SectionHeader label={pt ? 'Limite de uso da conta' : 'Account usage limit'} />
+      <PrefRow
+        label={pt ? 'Trocar de conta sozinho' : 'Switch account by itself'}
+        sub={pt
+          ? 'Quando uma sessão para porque a conta bateu o limite e há outra conta da mesma ferramenta com folga, ela continua nessa outra conta, de onde parou. Só vale com várias contas e só para contas liberadas para agentes.'
+          : 'When a session stops because its account hit the limit and another account of the same tool has room, it carries on with that account, where it left off. Only with several accounts, and only to accounts allowed for agents.'}
+      >
+        <Toggle on={autoSwitch === true} onToggle={toggleAutoSwitch} disabled={autoSwitch === null || autoSwitchSaving} />
+      </PrefRow>
 
       <Divider />
 

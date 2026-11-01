@@ -424,7 +424,7 @@ describe('MODE.EVERYWHERE — the TUI starts in the asked mode, by its own flag'
     expect(p.argv.join(' ')).not.toContain('plan')
     expect(tuiStartModes('codex')).toEqual(['default', 'accept-edits', 'no-questions'])
     expect(tuiStartModes('claude')).toEqual(['default', 'accept-edits', 'plan', 'no-questions'])
-    expect(tuiStartModes('opencode')).toEqual([])
+    expect(tuiStartModes('opencode')).toEqual(['default', 'plan'])
   })
   test('an unknown mode is refused in a sentence', () => {
     const r = planSpawn({ harness: 'claude', cwd: '/w', mode: 'yolo' as CanonicalMode })
@@ -595,6 +595,26 @@ const MAIN_PLANS: Partial<Record<HarnessId, { fresh: unknown; resume: unknown }>
         "conversationId": "11111111-2222-3333-4444-555555555555"
       }
     }
+  },
+  "opencode": {
+    "fresh": {
+      "ok": true,
+      "plan": {
+        "argv": [
+          "opencode",
+          "--prompt",
+          "hi"
+        ]
+      }
+    },
+    "resume": {
+      "ok": false,
+      "error": {
+        "code": "resume-id-unusable",
+        "harness": "opencode",
+        "id": "11111111-2222-3333-4444-555555555555"
+      }
+    }
   }
 }
 
@@ -631,4 +651,35 @@ describe('planSpawn — the account root (PLAN.ACCOUNTS D3)', () => {
       expect(out.ok && out.plan.env?.[ISOLATION[h]!]).toBe('/r')
     })
   }
+})
+
+describe('opencode has a launcher (V-OPENCODE.2) — argv read from `opencode --help` 1.17.9', () => {
+  const ID = 'ses_e7526dd53ffelCCMKnFqHAP4Bu'
+  test('a fresh start passes the prompt with --prompt, the model as provider/model, plan as the plan agent', () => {
+    expect(planSpawn({ harness: 'opencode', cwd: '/w', prompt: 'x', model: 'anthropic/claude-sonnet', mode: 'plan' })).toEqual({
+      ok: true, plan: { argv: ['opencode', '--model', 'anthropic/claude-sonnet', '--agent', 'plan', '--prompt', 'x'] },
+    })
+  })
+  test('a reopen is `--session <ses_…>`; a UUID (another harness\'s id) is refused, never passed', () => {
+    expect(planSpawn({ harness: 'opencode', cwd: '/w', resumeId: ID })).toEqual({ ok: true, plan: { argv: ['opencode', '--session', ID], conversationId: ID } })
+    expect(planSpawn({ harness: 'opencode', cwd: '/w', resumeId: '11111111-2222-3333-4444-555555555555' })).toMatchObject({ ok: false, error: { code: 'resume-id-unusable' } })
+  })
+  test('the modes with no flag are said, not dropped; no id can be assigned', () => {
+    expect(planSpawn({ harness: 'opencode', cwd: '/w', mode: 'no-questions' })).toMatchObject({ ok: true, plan: { modeNeedsProtocol: 'no-questions' } })
+    expect(SPAWN_SPECS.opencode!.assignId).toBeUndefined()
+  })
+  test('OPENCODE.PAPÉIS: the briefing is a context file named by OPENCODE_CONFIG_CONTENT "instructions", prompt or not; the prompt stays the person\'s', () => {
+    const context = { text: 'BRIEF', block: '<b>BRIEF</b>', dir: '/data/session-context/s1' }
+    for (const prompt of ['go', undefined]) {
+      const r = planSpawn({ harness: 'opencode', cwd: '/w', ...(prompt ? { prompt } : {}), context })
+      if (!r.ok) throw new Error('plan')
+      expect(r.plan.contextVia).toBe('files')
+      expect(r.plan.contextFile).toEqual({ dir: '/data/session-context/s1', name: 'AGENTS.md', text: 'BRIEF' })
+      expect(JSON.parse(r.plan.env!.OPENCODE_CONFIG_CONTENT!)).toEqual({ instructions: ['/data/session-context/s1/AGENTS.md'] })
+      expect(r.plan.argv.join(' ')).not.toContain('BRIEF')
+      if (prompt) expect(r.plan.argv.slice(-2)).toEqual(['--prompt', 'go'])
+    }
+    // a reopen carries no new briefing (the conversation already has it)
+    expect(planSpawn({ harness: 'opencode', cwd: '/w', resumeId: ID, context })).toEqual({ ok: true, plan: { argv: ['opencode', '--session', ID], conversationId: ID } })
+  })
 })

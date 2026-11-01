@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto'
 import { isClosedRow } from './sessions/fleet-events'
 import { kimiMcpPath } from './kimi-mcp'
 import { AGY_MCP_CONFIG } from './agy-mcp'
+import { opencodeConfigDir } from './opencode-mcp'
 
 export interface CheckinDeps {
   readPreferences: typeof realReadPreferences
@@ -32,6 +33,8 @@ export interface CheckinDeps {
   readCheckinActivity: (since: number, leader: string) => Promise<unknown>
   readCheckinLimits: (now: number) => Promise<unknown>
   readCheckinRelease: () => Promise<unknown>
+  /** SESSÕES.FECHAR: workers that handed back and are still open (engine view `entregues-abertos`); flows off = []. */
+  readDeliveredOpen?: () => Promise<readonly DeliveredOpen[]>
   readCheckinMcpConfigs: (cwd: string) => Promise<unknown>
 }
 
@@ -93,6 +96,13 @@ const defaultDeps: CheckinDeps = {
     const { limits, registered, budgets } = await planLimitsPayload((await deps.readPreferences()).billing, now)
     return { registered, limits: checkinAccountLimits(limits, budgets, now) }
   },
+  readDeliveredOpen: async () => {
+    const { flowsExperimentalOn } = await import('./native-gate')
+    if (!flowsExperimentalOn()) return []
+    const { engine } = await import('./engine/load')
+    const view = await engine()?.flows?.read?.('entregues-abertos', {}).catch(() => null)
+    return Array.isArray(view) ? view as DeliveredOpen[] : []
+  },
   readCheckinRelease: async () => {
     try {
       const { getVersionInfo } = await import('./version')
@@ -110,6 +120,7 @@ const defaultDeps: CheckinDeps = {
       ['copilot', join(HOME_DIR, '.copilot', 'mcp-config.json')],
       ['antigravity', AGY_MCP_CONFIG],
       ['kimi', kimiMcpPath()],
+      ['opencode', join(opencodeConfigDir(), 'opencode.json')], ['opencode', join(opencodeConfigDir(), 'opencode.jsonc')],
     ]
     const configs = await Promise.all(files.filter(([h]) => harnessEnabled(h)).map(async ([harness, file]) => {
       try { return { harness, file, digest: createHash('sha256').update(await readFile(file)).digest('hex') } }
@@ -214,8 +225,15 @@ export function promptFor(c: CheckinConfig): string {
   const items = c.checklist.filter(x => x.enabled).map(x => `- ${labels[x.id]}`).join('\n')
   return `[from agentistics · check-in]\nFaça o check-in da liderança agora.\n${items}\n\n${PLAIN_REPORT}\nQuando terminar, chame agentistics_checkin_report.`
 }
+export interface DeliveredOpen { sessionId: string; handbackAt: string; lastRun?: { status: string; reason?: string } }
+/** PURE. The check-in line naming the workers that delivered but are still open (and why, when a close was refused). */
+export function deliveredOpenLine(list: readonly DeliveredOpen[]): string {
+  if (!list.length) return ''
+  const items = list.map(d => d.lastRun?.reason ? `${d.sessionId} (${d.lastRun.reason})` : d.sessionId).join('; ')
+  return `\nWorkers que entregaram e seguem abertos: ${items}. Feche cada um com agentistics_flow_run name=fechar-entregue {sessionId} — ele só fecha se estiver parado, limpo e salvo; uma recusa diz o que falta.`
+}
 async function promptForLeader(c: CheckinConfig): Promise<string> {
-  const prompt = promptFor(c)
+  const prompt = promptFor(c) + deliveredOpenLine(await (deps.readDeliveredOpen?.() ?? Promise.resolve([])).catch(() => []))
   const away = awayActive(parseAwayState((await deps.readPreferences()).away), Date.now())
   return away ? `${prompt}\nAWAY MODE — decide within the authorisations, record the decision, and never ask the owner; anything urgent goes as an away notice.` : prompt
 }

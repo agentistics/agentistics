@@ -92,14 +92,21 @@ export function planNodeInstall(facts: HarnessInstallFacts): { reason: HarnessIn
 }
 
 export interface HarnessInstallPlan {
-  harness: Extract<HarnessId, 'claude' | 'codex' | 'gemini' | 'copilot'>
+  harness: Extract<HarnessId, 'claude' | 'codex' | 'gemini' | 'copilot' | 'opencode'>
   reason: HarnessInstallReason
   command?: string[]
   verify: string[]
   package?: string
 }
 
-type HarnessPlanEntry = { package?: string; command: (facts: HarnessInstallFacts) => string[] }
+type HarnessPlanEntry = {
+  package?: string
+  command: (facts: HarnessInstallFacts) => string[]
+  /** The harness's OWN updater, when it has one (it knows how it was installed: curl, npm, brew …). Absent = re-run `command`. */
+  update?: () => string[]
+  /** A standalone binary needs no Node.js (absent = the npm installers, which do). */
+  noNode?: true
+}
 
 /** One source of truth for the official installers used by the UI and the server. */
 export const HARNESS_INSTALLERS: Record<HarnessInstallPlan['harness'], HarnessPlanEntry> = {
@@ -107,6 +114,9 @@ export const HARNESS_INSTALLERS: Record<HarnessInstallPlan['harness'], HarnessPl
   codex: { package: '@openai/codex', command: f => npmCommand('@openai/codex', f) },
   gemini: { package: '@google/gemini-cli', command: f => npmCommand('@google/gemini-cli', f) },
   copilot: { package: '@github/copilot', command: f => npmCommand('@github/copilot', f) },
+  // opencode's official installer (opencode.ai/docs) puts a standalone binary in ~/.opencode/bin; `opencode upgrade`
+  // (1.17.9 --help) updates it by whatever method installed it — the one-click answer to "needs 1.18.0" (OPENCODE.CORREÇÕES).
+  opencode: { command: () => [INSTALL_SHELL, '-c', 'curl -fsSL https://opencode.ai/install | bash'], update: () => ['opencode', 'upgrade'], noNode: true },
 }
 
 /**
@@ -122,14 +132,15 @@ export function installPlatform(platform: string): HarnessInstallPlatform {
 }
 
 export function planHarnessInstall(
-  harness: HarnessInstallPlan['harness'], facts: HarnessInstallFacts,
+  harness: HarnessInstallPlan['harness'], facts: HarnessInstallFacts, operation: 'install' | 'update' = 'install',
 ): HarnessInstallPlan {
   const entry = HARNESS_INSTALLERS[harness]
   const platform = installPlatform(facts.platform)
   const base = { harness, verify: [harness === 'claude' ? 'claude' : harness, '--version'] }
   if (platform === 'unsupported') return { ...base, reason: 'unsupported-platform' }
-  if (harness !== 'claude' && !facts.nodePresent) return { ...base, reason: 'node-required' }
-  return { ...base, reason: 'ok', command: entry.command(facts), ...(entry.package ? { package: entry.package } : {}) }
+  if (harness !== 'claude' && !entry.noNode && !facts.nodePresent) return { ...base, reason: 'node-required' }
+  const command = operation === 'update' && entry.update ? entry.update() : entry.command(facts)
+  return { ...base, reason: 'ok', command, ...(entry.package ? { package: entry.package } : {}) }
 }
 
 export function parseHarnessVersion(output: string): string | null {

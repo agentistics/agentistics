@@ -24,11 +24,14 @@
 import type {
   EngineAcp, EngineAcpSession, EngineStructured, HarnessChat, HarnessChatDelta, HarnessId,
   StructuredAnswer, StructuredAttention, StructuredDeclaration, StructuredDriverId, StructuredExit,
-  StructuredSession, StructuredSpawn, StructuredStart,
+  StructuredSession, StructuredSpawn, StructuredStart, StructuredSubmit,
 } from '@agentistics/engine-api'
-import { answerFits } from '@agentistics/engine-api'
+import { answerFits, limitsOf, TUI_LIMITS } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
+import { ensureClaudeProjectTrusted } from './claude-trust'
+import { forkUnavailableNotice, harnessBlockedNotice } from './harness-notice'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
+import { pidAlive } from './structured-durable'
 import { modeNeedsProtocolSentence, routableDriver, routeSpawn, structuredOrigin, type SpawnRoute } from './structured-route'
 import type { BackendSession, BackendSpawn, SessionActivity, SessionBackend, TerminalCapture } from './types'
 
@@ -56,6 +59,8 @@ export interface StructuredProvider {
    * reported again on a later `list()`, after `retryMs` when given.
    */
   onConversation?(id: string, conversationId: string): void | Promise<void | { retry: true; retryMs?: number }>
+  /** 1.20 — the person's screen language (`StructuredSpawn.lang`); absent = English. */
+  lang?(): Promise<'en' | 'pt'>
   /** A session is now hosted over its protocol (route `structured` only). */
   onStarted?(id: string, driver: StructuredDriverId): void
   /** Persist a normal end BEFORE its durable/live records disappear. */
@@ -102,14 +107,28 @@ export function recordingSession(s: StructuredSession, t: Pick<DurableTransport,
     ...(s.mode ? { mode: () => s.mode!() } : {}),
     // MODE.EVERYWHERE — setting a mode WRITES to the child, so it is recorded (before the write leaves,
     // like every call here) and a re-attach makes it again in the same place.
-    ...(s.setMode ? { setMode: (id: string) => { t.record({ op: 'setMode', id }); return s.setMode!(id) } } : {}),
+    ...(s.setMode ? { setMode: (id: string, key?: string) => { t.record({ op: 'setMode', id, ...(key ? { key } : {}) }); return s.setMode!(id, key) } } : {}),
+    ...(s.models ? { models: () => s.models!() } : {}),
+    ...(s.model ? { model: () => s.model!() } : {}),
+    // 1.20 — a model switch WRITES to the child (set_config_option), so it is recorded like setMode.
+    ...(s.setModel ? { setModel: (id: string, key?: string) => { t.record({ op: 'setModel', id, ...(key ? { key } : {}) }); return s.setModel!(id, key) } } : {}),
+    // A read: the host acts on it through `cancel()` below, which is what gets recorded.
+    ...(s.stalled ? { stalled: () => s.stalled!() } : {}),
     prompt(text) { const ok = s.prompt(text); if (ok) t.record({ op: 'prompt', text }); return ok },
-    answer(a) {
-      const ok = s.answer(a)
-      if (ok) t.record({ op: 'answer', ...(a.choice !== undefined ? { choice: a.choice } : {}), ...(a.text !== undefined ? { text: a.text } : {}), ...(a.requestId !== undefined ? { requestId: a.requestId } : {}) })
+    answer(a, key) {
+      const ok = s.answer(a, key)
+      if (ok) t.record({ op: 'answer', ...(key ? { key } : {}), ...(a.choice !== undefined ? { choice: a.choice } : {}), ...(a.text !== undefined ? { text: a.text } : {}), ...(a.requestId !== undefined ? { requestId: a.requestId } : {}) })
       return ok
     },
     cancel() { s.cancel(); t.record({ op: 'cancel' }) },
+    // 1.21 (ADAPTER.LIMITES E7) — the keyed members are NOT recorded here: the driver records each one itself, through
+    // this same transport, after its ledger claimed the key and right before the write (claim → record → write, spec
+    // §4.2). Recording here would put the record BEFORE the claim (E1 open point 1) and a replay would then make writes
+    // for keys nobody claimed. `requestState` is a read.
+    ...(s.submit ? { submit: (r: StructuredSubmit) => s.submit!(r) } : {}),
+    ...(s.amend ? { amend: (requestId: string, text: string, key: string) => s.amend!(requestId, text, key) } : {}),
+    ...(s.cancelRequest ? { cancelRequest: (requestId: string, key: string) => s.cancelRequest!(requestId, key) } : {}),
+    ...(s.requestState ? { requestState: (requestId: string) => s.requestState!(requestId) } : {}),
     follow: (max, on) => s.follow(max, on),
     onExit: cb => s.onExit(cb),
     dispose: () => s.dispose(),
@@ -225,12 +244,14 @@ export function structuredSpawnOf(req: BackendSpawn, harness: HarnessId): Struct
     id: req.id, harness, cwd: req.cwd,
     ...(i?.model ? { model: i.model } : {}),
     ...(i?.effort ? { effort: i.effort } : {}),
-    ...(i?.conversationId && !i.resumeId ? { conversationId: i.conversationId } : {}),
+    ...(i?.conversationId && !i.resumeId && !i.forkOf ? { conversationId: i.conversationId } : {}),
     ...(i?.resumeId ? { resumeId: i.resumeId } : {}),
+    ...(i?.forkOf ? { forkOf: i.forkOf } : {}),
     ...(i?.mode ? { mode: i.mode } : {}),
     ...(prompt ? { initialPrompt: prompt } : {}),
-    ...(i?.instructions && !i.resumeId ? { instructions: i.instructions } : {}),
+    ...(i?.instructions && !i.resumeId && !i.forkOf ? { instructions: i.instructions } : {}),
     ...(i?.mcp?.length ? { mcp: i.mcp } : {}),
+    ...(i?.lang ? { lang: i.lang } : {}),
     env: { [STRUCTURED_SESSION_ENV]: req.id, ...(req.env ?? {}) },
   }
 }
@@ -241,6 +262,7 @@ export function savedOf(req: BackendSpawn, harness: HarnessId, spawn: Structured
   return {
     v: 1, harness, spawn: rest,
     backend: { id: req.id, cwd: req.cwd, ...(req.env ? { env: req.env } : {}), ...(req.unsetEnv ? { unsetEnv: req.unsetEnv } : {}), ...(req.structured ? { structured: req.structured } : {}) },
+    driverPid: process.pid,
   }
 }
 
@@ -286,12 +308,33 @@ export type StructuredBackend = SessionBackend & {
    * this process does not drive is ended through its relay). A web reopen later runs structured again.
    */
   toTerminal(id: string): Promise<ToTerminalOutcome>
+  /**
+   * 1.20 — cancel every structured turn its driver says can never finish by itself (`StructuredSession.stalled`:
+   * opencode retrying a provider that does not answer, forever). The cancel goes through the RECORDED session, as
+   * the person's Stop would; the driver then writes why into the chat. Runs on a timer; returns the ids it cancelled.
+   */
+  sweepStalled(): string[]
 }
+
+/** 1.20 — how often `sweepStalled` runs. opencode's back-off reaches its third attempt in ~14 s. */
+export const STALL_SWEEP_MS = 10_000
 
 export function withStructured(base: SessionBackend, provider: StructuredProvider): StructuredBackend {
   const live = new Map<string, Live>()
   const of = (id: string) => live.get(id)?.s
   const structuredOnly = (id: string) => { const l = live.get(id); return l && l.route === 'structured' ? l : undefined }
+  const sweepStalled = (): string[] => {
+    const out: string[] = []
+    for (const [id, l] of live) {
+      if (l.route !== 'structured' || !l.s.stalled || l.s.activity() !== 'working') continue
+      let why: string | null = null
+      try { why = l.s.stalled() } catch { why = null }
+      if (why) { l.s.cancel(); out.push(id) }
+    }
+    return out
+  }
+  const sweepTimer = setInterval(() => { if (live.size > 0) sweepStalled() }, STALL_SWEEP_MS) as { unref?: () => void }
+  sweepTimer.unref?.()
 
   const report = (id: string, l: Live) => {
     if (l.reported) return
@@ -309,6 +352,9 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
   const durable = provider.durable
   /** Ended ON PURPOSE (a kill, "open in terminal" — from any process): its exit is not a failure. */
   const endedOnPurpose = (id: string) => !!durable && (durable.ending(id) !== null || durable.saved(id) === null)
+
+  /** The canonical mode a session was last SET to from the chip: a relaunch after an unplanned exit resumes in it, not in the start mode. */
+  const modeSetTo = new Map<string, NonNullable<NonNullable<BackendSpawn['structured']>['mode']>>()
 
   /** Structured relaunches per id, so a child that dies at once every time ends in tmux, not in a loop. */
   const relaunches = new Map<string, number[]>()
@@ -330,6 +376,8 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     const reg = await provider.structured().catch(() => null)
     if (!reg || reg.driverFor(i.harness) === null) return false
     const { prompt: _p, instructions: _i, conversationId: _c, ...rest } = i
+    const kept = modeSetTo.get(id)
+    if (kept) rest.mode = kept
     const { initialPrompt: _ip, ...bare } = req
     return startVia({ ...bare, structured: { ...rest, resumeId: conv } }, 'structured', i.harness, reg, null).catch(() => false)
   }
@@ -369,10 +417,20 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     await fallBack(id, l.req, conv, e.reason)
   }
 
+  /** Relays THIS process is starting right now: on disk and alive, not yet `live` — never adopted from under it. */
+  const starting = new Set<string>()
+
   async function startVia(req: BackendSpawn, route: Exclude<SpawnRoute, 'tmux'>, harness: HarnessId, reg: EngineStructured, acp: EngineAcp | null): Promise<boolean> {
+    starting.add(req.id)
+    try { return await startViaNow(req, route, harness, reg, acp) } finally { starting.delete(req.id) }
+  }
+
+  async function startViaNow(req: BackendSpawn, route: Exclude<SpawnRoute, 'tmux'>, harness: HarnessId, reg: EngineStructured, acp: EngineAcp | null): Promise<boolean> {
     if (route === 'structured') await provider.prepare?.().catch(() => {})
     // F2.0b — a structured child is launched through a relay that outlives this process.
-    const sspawn = route === 'structured' ? structuredSpawnOf(req, harness) : null
+    // The asking screen's language wins (QA F2); the server's stored preference is only the fallback.
+    const lang = route === 'structured' && !req.structured?.lang && provider.lang ? await provider.lang().catch(() => 'en' as const) : undefined
+    const sspawn = route === 'structured' ? { ...structuredSpawnOf(req, harness), ...(lang === 'pt' ? { lang } : {}) } : null
     const transport: DurableTransport | null = sspawn && durable
       ? durable.create(req.id, savedOf(req, harness, sspawn))
       : null
@@ -384,6 +442,8 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     if (!r.ok) {
       // A relay may have started before the refusal: end it, and leave nothing on disk.
       if (transport && durable) { durable.markEnding(req.id, 'refused'); await durable.terminate(req.id).catch(() => false); durable.remove(req.id) }
+      // The harness's own build is the wall: a TUI would meet the same one, so tell the person instead of falling back.
+      if (r.blocked) throw harnessBlockedNotice(harness, r.blocked)
       return false
     }
     const session = transport ? recordingSession(r.session, transport) : r.session
@@ -396,6 +456,18 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
 
   /** One recovery at a time; a later CLI spawn can add a relay after boot. `list()` waits on it. */
   let reattaching: Promise<void> | null = null
+  /**
+   * Set by the first `reattach()` — only the SERVER calls it (`reattachStructuredSessions`), so only the server
+   * adopts. A CLI process lists the same relays and must never take one over on its way out.
+   */
+  let adopting = false
+  /** Another LIVE process drives this relay (a CLI still finishing its spawn): not ours to take. */
+  const drivenElsewhere = (id: string): boolean => {
+    // A fork / reopen this very process is still starting: its relay is alive before its session is `live`.
+    if (starting.has(id)) return true
+    const pid = durable?.saved(id)?.driverPid
+    return typeof pid === 'number' && pid !== process.pid && pidAlive(pid)
+  }
 
   async function reattachOne(id: string, reg: EngineStructured | null): Promise<void> {
     if (!durable || live.has(id)) return
@@ -431,8 +503,10 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     ...base,
     id: base.id,
     structuredSessions: () => [...live].map(([id, l]) => ({ id, route: l.route, driver: l.s.driver })),
+    sweepStalled,
     reattach() {
       if (!durable) return Promise.resolve()
+      adopting = true
       reattaching ??= (async () => {
         for (const id of durable.dead()) {
           const endedAt = durable.endedAt?.(id)
@@ -441,7 +515,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
           }
           durable.remove(id)
         }
-        const ids = durable.alive().filter(id => !live.has(id))
+        const ids = durable.alive().filter(id => !live.has(id) && !drivenElsewhere(id))
         if (ids.length === 0) return
         const reg = await provider.structured().catch(() => null)
         await Promise.all(ids.map(id => reattachOne(id, reg).catch(() => {})))
@@ -473,6 +547,8 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     },
     async spawn(req) {
       const harness = req.structured?.harness ?? harnessOfArgv(req.argv)
+      const claudeConfigRoot = req.env?.CLAUDE_CONFIG_DIR
+      if (harness === 'claude' && claudeConfigRoot) await ensureClaudeProjectTrusted(claudeConfigRoot, req.cwd)
       const flagOn = provider.flagOn?.() ?? false
       const origin = req.structured?.origin
       // Only ask what this route needs: flag off and not web → never touch `structured()`.
@@ -492,6 +568,16 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
         ...(mode ? { mode } : {}),
         ...(startModes ? { startModes } : {}),
       })
+      // A FORK is never "the same request, the usual way": the TUI spawn knows nothing of it and would open a fresh
+      // conversation. It goes only to a structured driver whose declaration offers `fork`; every other road — no such
+      // route, an engine older than 1.18 (its declaration has no `fork`), a refused start — is a notice, not a fallback.
+      const forkOf = req.structured?.forkOf
+      if (forkOf) {
+        if (!harness) throw forkUnavailableNotice(null)
+        if (route !== 'structured' || !reg || !reg.declares(harness)?.fork?.via) throw forkUnavailableNotice(harness)
+        if (await startVia(req, route, harness, reg, acp)) return {}
+        throw forkUnavailableNotice(harness)
+      }
       if (route !== 'tmux' && harness) {
         if (await startVia(req, route, harness, reg ?? acpAsStructured(acp!), acp)) return {}
         // A refused structured start: the same request, the usual way.
@@ -514,6 +600,9 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       const elsewhere: BackendSession[] = durable
         ? durable.alive().filter(id => !known.has(id)).map(id => ({ id, createdMs: Date.now(), attached: false, alive: true, lastActivityMs: durable.lastActivityMs(id) }))
         : []
+      // A `--bg` CLI spawn's driver ended with the CLI: nobody reads its protocol, so its row had no mode, no
+      // model list, no chat and no state until a prompt happened to recover it. The server adopts it on the poll.
+      if (adopting && !reattaching && elsewhere.some(e => !drivenElsewhere(e.id))) void backend.reattach().catch(() => {})
       return [...rows, ...mine, ...elsewhere]
     },
     async capture(id, lines) { const s = of(id); return s ? s.screen(lines) : base.capture(id, lines) },
@@ -570,8 +659,38 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     attentionOf(id) { const l = structuredOnly(id); return l ? l.s.attention() : base.attentionOf?.(id) },
     modeOf(id) { const l = structuredOnly(id); return l ? (l.s.mode?.() ?? null) : base.modeOf?.(id) },
     modesOf(id) { const l = structuredOnly(id); return l ? (l.s.modes ? [...l.s.modes()] : undefined) : base.modesOf?.(id) },
-    async setMode(id, modeId) { const l = structuredOnly(id); return l ? (l.s.setMode?.(modeId) ?? false) : (base.setMode?.(id, modeId) ?? false) },
-    async answer(id, a: StructuredAnswer) { const l = structuredOnly(id); return l ? l.s.answer(a) : (base.answer?.(id, a) ?? false) },
+    async setMode(id, modeId, key) {
+      const l = structuredOnly(id)
+      if (!l) return base.setMode?.(id, modeId) ?? false
+      const ok = (await l.s.setMode?.(modeId, key)) ?? false
+      const now = ok ? l.s.mode?.()?.canonical : undefined
+      if (now) modeSetTo.set(id, now)
+      return ok
+    },
+    modelsOf(id) {
+      const l = structuredOnly(id)
+      if (!l) return base.modelsOf?.(id)
+      if (!l.s.models || !l.s.setModel) return undefined
+      return { current: l.s.model?.() ?? null, options: l.s.models().map(m => ({ id: m.id, label: m.label })) }
+    },
+    async setModel(id, modelId, key) {
+      const l = structuredOnly(id)
+      if (!l) return base.setModel ? base.setModel(id, modelId) : { ok: false, reason: 'this session has no model switch' }
+      if (!l.s.setModel) return { ok: false, reason: 'this session has no model switch' }
+      return l.s.setModel(modelId, key).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : 'set model failed' }))
+    },
+    async answer(id, a: StructuredAnswer, key?: string) { const l = structuredOnly(id); return l ? l.s.answer(a, key) : (base.answer?.(id, a) ?? false) },
+    // 1.21 (E7) — the keyed members go to the (recording) session's driver; it claims, records and writes.
+    async submitRequest(id, r) { const s = structuredOnly(id)?.s; return s?.submit ? s.submit(r) : null },
+    async amendRequest(id, requestId, text, key) { const s = structuredOnly(id)?.s; return s?.amend ? s.amend(requestId, text, key) : null },
+    async cancelRequest(id, requestId, key) { const s = structuredOnly(id)?.s; return s?.cancelRequest ? s.cancelRequest(requestId, key) : null },
+    requestStateOf(id, requestId) { const s = structuredOnly(id)?.s; return s?.requestState ? s.requestState(requestId) : null },
+    limitsOf(id) {
+      const l = live.get(id)
+      // A protocol session says what its driver declares (A5.4's ACP handle declares nothing: each member reads absent);
+      // any other — a terminal (tmux) session — what a TUI can.
+      return l ? limitsOf(l.declares, l.s.driver) : TUI_LIMITS
+    },
     cancelTurn(id) { const l = structuredOnly(id); if (!l) return false; l.s.cancel(); return true },
     chatOf(id) {
       const l = structuredOnly(id)

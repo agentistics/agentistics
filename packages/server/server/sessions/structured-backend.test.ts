@@ -12,6 +12,7 @@ import type {
 } from '@agentistics/engine-api'
 import { answerFits, structuredRegistry, stubDriver } from '@agentistics/engine-api'
 import { acpAsStructured, recordingSession, structuredSpawnOf, withStructured, type StructuredProvider } from './structured-backend'
+import { SessionNotice, sessionActionError } from './action-error'
 import { isReplayCall } from './structured-replay'
 import { STRUCTURED_ROUTE_OFF, answerStructured, reopenOrigin, routableDriver, routeSpawn, spawnOriginOf, structuredIntentOf } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
@@ -79,15 +80,15 @@ function fakeSession(req: StructuredSpawn) {
 }
 type FakeSession = ReturnType<typeof fakeSession>
 
-function fakeEngine(o: { harnesses?: HarnessId[]; refuse?: string; refuseAfter?: number } = {}) {
+function fakeEngine(o: { harnesses?: HarnessId[]; fork?: boolean; refuse?: string; refuseAfter?: number; blocked?: { kind: 'harness-version'; need: string; found?: string } } = {}) {
   const started: StructuredSpawn[] = []
   const sessions: FakeSession[] = []
   const reg = structuredRegistry([
     {
-      id: 'acp', status: 'ready', harnesses: o.harnesses ?? ['gemini', 'kimi', 'copilot'], note: 'fake', declares: () => DECL,
+      id: 'acp', status: 'ready', harnesses: o.harnesses ?? ['gemini', 'kimi', 'copilot'], note: 'fake', declares: () => (o.fork ? { ...DECL, fork: { via: 'session/fork' } } : DECL),
       async start(req) {
         started.push(req)
-        if (o.refuse || (o.refuseAfter !== undefined && started.length > o.refuseAfter)) return { ok: false, reason: o.refuse ?? 'refused' }
+        if (o.refuse || (o.refuseAfter !== undefined && started.length > o.refuseAfter)) return { ok: false, reason: o.refuse ?? 'refused', ...(o.blocked ? { blocked: o.blocked } : {}) }
         const s = fakeSession(req)
         sessions.push(s)
         return { ok: true, session: s as unknown as StructuredSession }
@@ -362,6 +363,95 @@ describe('withStructured — fallback', () => {
     expect(eng.started.length).toBe(1)
     expect(base.calls).toEqual([['spawn', req]])
     expect(b.activityOf?.('m-1')).toBeUndefined()
+  })
+
+  test('a start the harness VERSION blocks is told to the person in plain words — never silently run as a TUI that hits the same wall', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine({ harnesses: ['opencode'], refuse: 'opencode ≥1.18.0 is needed for the live free tier (this is 1.17.9)', blocked: { kind: 'harness-version', need: '1.18.0', found: '1.17.9' } })
+    const b = withStructured(base, provider(eng.reg))
+    const err = await b.spawn(web('opencode')).then(() => null, e => e as Error)
+    expect(err).toBeInstanceOf(SessionNotice)
+    expect(base.calls).toEqual([]) // no tmux fallback
+    const n = err as SessionNotice
+    expect(n.message).toBe('OpenCode needs to be updated to version 1.18.0 or newer before it can start a chat (this computer has 1.17.9). Update OpenCode, then start the session again.')
+    expect(n.pt).toBe('O OpenCode precisa ser atualizado para a versão 1.18.0 ou mais nova antes de iniciar uma conversa (este computador tem a 1.17.9). Atualize o OpenCode e inicie a sessão de novo.')
+    expect(n.action).toEqual({ kind: 'update-harness', harness: 'opencode', need: '1.18.0' })
+    // the surface answers in the person's language and carries the action
+    expect(sessionActionError('pt', 'resume', 'm-1', err)).toEqual({ ok: false, message: n.pt!, action: n.action })
+    expect(sessionActionError('en', 'resume', 'm-1', err)).toEqual({ ok: false, message: n.message, action: n.action })
+    for (const m of [n.message, n.pt!]) expect(m).not.toMatch(/\b(run|npm|bun|curl|terminal|command|comando)\b/i)
+  })
+
+  test('a plain refusal (no `blocked`) still falls back to tmux as before', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine({ harnesses: ['opencode'], refuse: 'login needed' })
+    await withStructured(base, provider(eng.reg)).spawn(web('opencode'))
+    expect(base.calls.map(c => c[0])).toEqual(['spawn'])
+  })
+
+  test('forkOf reaches the driver, and a fork carries no opening context (it is a conversation that already has one)', () => {
+    const intent = structuredIntentOf({ harness: 'opencode', origin: 'web', prompt: 'hi', forkOf: 'ses_old' }, { ctx: { text: 'CTX', block: '<ctx>CTX</ctx>' } })
+    const spawn = structuredSpawnOf({ id: 'm-9', cwd: '/w', argv: ['opencode'], structured: intent }, 'opencode')
+    expect(spawn.forkOf).toBe('ses_old')
+    expect(spawn.instructions).toBeUndefined()
+    expect(structuredSpawnOf({ id: 'm-9', cwd: '/w', argv: ['opencode'], structured: structuredIntentOf({ harness: 'opencode', origin: 'web', prompt: 'hi' }, { ctx: { text: 'CTX', block: '<ctx>CTX</ctx>' } }) }, 'opencode').forkOf).toBeUndefined()
+  })
+
+  describe('a fork is never silently a NEW session (QA F1) — one test per road', () => {
+    const forkReq = (extra: Partial<BackendSpawn> = {}, origin: 'web' | 'terminal' | 'background' = 'web'): BackendSpawn => ({
+      id: 'm-f', cwd: '/w', argv: ['/usr/bin/opencode'],
+      structured: structuredIntentOf({ harness: 'opencode', origin, prompt: 'hi', forkOf: 'ses_old' }, {}),
+      ...extra,
+    })
+    const refused = async (b: ReturnType<typeof withStructured>, req: BackendSpawn) => {
+      const err = await b.spawn(req).then(() => null, e => e as Error)
+      expect(err).toBeInstanceOf(SessionNotice)
+      expect((err as SessionNotice).message).toMatch(/cannot be forked here, so nothing was started/)
+      expect((err as SessionNotice).pt).toMatch(/não pode ser ramificada aqui/)
+      return err as SessionNotice
+    }
+
+    test('the driver declares fork: the request reaches it with forkOf, and the session opens', async () => {
+      const base = fakeBase()
+      const eng = fakeEngine({ harnesses: ['opencode'], fork: true })
+      await withStructured(base, provider(eng.reg)).spawn(forkReq())
+      expect(eng.started.map(s => s.forkOf)).toEqual(['ses_old'])
+      expect(base.calls).toEqual([])
+    })
+    test('(a) the driver refuses the start (any reason, not only `blocked`): a notice, never the TUI', async () => {
+      const base = fakeBase()
+      const eng = fakeEngine({ harnesses: ['opencode'], fork: true, refuse: 'the agent did not open an ACP session' })
+      await refused(withStructured(base, provider(eng.reg)), forkReq())
+      expect(base.calls).toEqual([])
+    })
+    test('(b) the spawn does not run structured (flag off / terminal / background-less route): a notice, the driver is never asked', async () => {
+      for (const [flagOn, origin] of [[false, 'web'], [true, 'terminal']] as const) {
+        const base = fakeBase()
+        const eng = fakeEngine({ harnesses: ['opencode'], fork: true })
+        await refused(withStructured(base, provider(eng.reg, { flagOn: () => flagOn })), forkReq({}, origin))
+        expect(base.calls).toEqual([])
+        expect(eng.started).toEqual([])
+      }
+    })
+    test('(c) an engine whose driver declares no fork (older than 1.18): a notice, forkOf is never sent', async () => {
+      const base = fakeBase()
+      const eng = fakeEngine({ harnesses: ['opencode'] }) // DECL has no `fork`
+      await refused(withStructured(base, provider(eng.reg)), forkReq())
+      expect(eng.started).toEqual([])
+      expect(base.calls).toEqual([])
+    })
+    test('a driver whose fork is declared ABSENT is a notice too', async () => {
+      const base = fakeBase()
+      const eng = fakeEngine({ harnesses: ['opencode'] })
+      const reg = { ...eng.reg, declares: () => ({ ...DECL, fork: { absent: 'no fork in this protocol' } }) } as unknown as EngineStructured
+      await refused(withStructured(base, provider(reg)), forkReq())
+      expect(base.calls).toEqual([])
+    })
+    test('a spawn WITHOUT forkOf is untouched: a refusal still falls back to tmux', async () => {
+      const base = fakeBase()
+      await withStructured(base, provider(fakeEngine({ harnesses: ['opencode'], fork: true, refuse: 'x' }).reg)).spawn(web('opencode'))
+      expect(base.calls.map(c => c[0])).toEqual(['spawn'])
+    })
   })
 
   test('a driver failing mid-life comes back STRUCTURED by its conversation id, same managed id, no first prompt again', async () => {
@@ -660,11 +750,97 @@ describe('MODE.EVERYWHERE — the durable relay\'s session forwards the mode and
     expect(isReplayCall({ op: 'setMode', id: 'plan', at: 3, t: 1 })).toBe(true)
     expect(isReplayCall({ op: 'setMode', at: 3, t: 1 })).toBe(false)
   })
+  test('ADAPTER.LIMITES: an idempotency key given to setMode / answer is recorded with the call and handed to the driver', async () => {
+    const base = fakeSession({ id: 'm', harness: 'gemini', cwd: '/w' }) as unknown as Record<string, unknown>
+    const seen: unknown[] = []
+    const s = {
+      ...base,
+      setMode: async (id: string, key?: string) => { seen.push(['setMode', id, key]); return true },
+      answer: (_a: unknown, key?: string) => { seen.push(['answer', key]); return true },
+    } as unknown as StructuredSession
+    const recorded: unknown[] = []
+    const r = recordingSession(s, { record: c => { recorded.push(c) } })
+    await r.setMode!('plan', 'k:1')
+    r.answer({ choice: 2 }, 'k:2')
+    r.answer({ choice: 1 })
+    expect(seen).toEqual([['setMode', 'plan', 'k:1'], ['answer', 'k:2'], ['answer', undefined]])
+    expect(recorded).toEqual([{ op: 'setMode', id: 'plan', key: 'k:1' }, { op: 'answer', key: 'k:2', choice: 2 }, { op: 'answer', choice: 1 }])
+    expect(isReplayCall({ op: 'answer', choice: 2, key: 'k:2', at: 1, t: 1 })).toBe(true)
+  })
   test('a driver with no modes keeps none through the relay (absent stays absent)', () => {
     const s = fakeSession({ id: 'm', harness: 'gemini', cwd: '/w' }) as unknown as Record<string, unknown>
     const bare = { ...s, modes: undefined, mode: undefined, setMode: undefined } as unknown as StructuredSession
     const r = recordingSession(bare, { record: () => {} })
     expect(r.modes).toBeUndefined()
     expect(r.setMode).toBeUndefined()
+  })
+})
+
+describe('OPENCODE.CORREÇÕES — model switch and a turn that can never finish', () => {
+  test('setModel is recorded before it writes (a re-attach makes it again); models/model/stalled forward; absent stays absent', async () => {
+    const base = fakeSession({ id: 'm', harness: 'opencode', cwd: '/w' }) as unknown as Record<string, unknown>
+    let model = 'ollama/qwen-coder'
+    const s = {
+      ...base,
+      models: () => [{ id: 'ollama/qwen-coder', label: 'Ollama' }, { id: 'mock/m', label: 'Mock' }],
+      model: () => model,
+      setModel: async (id: string) => { model = id; return { ok: true as const } },
+      stalled: () => 'Cannot connect to API',
+    } as unknown as StructuredSession
+    const recorded: unknown[] = []
+    const r = recordingSession(s, { record: c => { recorded.push(c) } })
+    expect(r.models!().map(m => m.id)).toEqual(['ollama/qwen-coder', 'mock/m'])
+    expect(await r.setModel!('mock/m')).toEqual({ ok: true })
+    expect(r.model!()).toBe('mock/m')
+    expect(r.stalled!()).toBe('Cannot connect to API')
+    expect(recorded).toEqual([{ op: 'setModel', id: 'mock/m' }])
+    expect(isReplayCall({ op: 'setModel', id: 'mock/m', at: 3, t: 1 })).toBe(true)
+    const bare = recordingSession(base as unknown as StructuredSession, { record: () => {} })
+    expect(bare.setModel).toBeUndefined()
+    expect(bare.stalled).toBeUndefined()
+  })
+
+  test('sweepStalled cancels ONLY a working structured turn whose driver says it cannot finish', async () => {
+    const eng = fakeEngine({ harnesses: ['opencode', 'gemini'] })
+    const b = withStructured(fakeBase(), provider(eng.reg))
+    await b.spawn(web('opencode', { id: 'oc' }))
+    await b.spawn(web('gemini', { id: 'ge' }))
+    const [oc, ge] = eng.sessions as unknown as Array<FakeSession & { stalled?: () => string | null }>
+    let why: string | null = null
+    oc!.stalled = () => why
+    ge!.stalled = () => 'never asked: not working'
+    oc!.prompt('x')
+    expect(b.sweepStalled()).toEqual([]) // working, nothing stalled yet
+    why = 'Cannot connect to API'
+    expect(b.sweepStalled()).toEqual(['oc'])
+    expect(oc!.cancelled).toBe(1)
+    expect(ge!.cancelled).toBe(0) // waiting, so never swept
+    expect(b.sweepStalled()).toEqual([]) // the cancel moved it out of working
+  })
+
+  test('setModel and modelsOf go through the backend; a session with no switch says so', async () => {
+    const eng = fakeEngine({ harnesses: ['opencode'] })
+    const b = withStructured(fakeBase(), provider(eng.reg))
+    await b.spawn(web('opencode', { id: 'oc' }))
+    expect(b.modelsOf!('oc')).toBeUndefined() // the fake declares no switch
+    expect(await b.setModel!('oc', 'x')).toEqual({ ok: false, reason: 'this session has no model switch' })
+  })
+})
+
+describe('QA F2 — the driver speaks the language of the screen that ASKED', () => {
+  test('structuredIntentOf carries the request language and structuredSpawnOf hands it to the driver', () => {
+    const i = structuredIntentOf({ harness: 'opencode', origin: 'web', prompt: 'oi' }, { lang: 'pt' })
+    expect(i.lang).toBe('pt')
+    expect(structuredSpawnOf({ id: 'x', cwd: '/w', argv: [], structured: i }, 'opencode').lang).toBe('pt')
+    expect(structuredSpawnOf({ id: 'x', cwd: '/w', argv: [], structured: structuredIntentOf({ harness: 'opencode' }, {}) }, 'opencode').lang).toBeUndefined()
+  })
+  test('the request language outranks the stored preference', async () => {
+    const eng = fakeEngine({ harnesses: ['opencode'] })
+    const b = withStructured(fakeBase(), provider(eng.reg, { lang: async () => 'en' }))
+    await b.spawn(web('opencode', { id: 'a', structured: { ...web('opencode').structured!, lang: 'pt' } }))
+    expect(eng.started[0]!.lang).toBe('pt')
+    const c = withStructured(fakeBase(), provider(eng.reg, { lang: async () => 'pt' }))
+    await c.spawn(web('opencode', { id: 'b' }))
+    expect(eng.started[1]!.lang).toBe('pt') // no request language: the stored preference
   })
 })

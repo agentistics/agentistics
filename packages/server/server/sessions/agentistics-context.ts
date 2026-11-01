@@ -11,7 +11,7 @@
 
 import { flowLines } from '../briefing-flow'
 export { flowLines }
-import { awayActive, awayBriefingLines, roleLine, type AwayState } from '@agentistics/core'
+import { awayActive, awayBriefingLines, HARNESS_ORDER, roleLine, type AwayState } from '@agentistics/core'
 import { HANDOFF_TAKEOVER_LINE } from './handoff-template'
 import { briefingText, PLAN_LIMITS_TOOL } from '../briefing'
 
@@ -56,6 +56,8 @@ export interface ContextInput {
   usageRulesSaved?: boolean
   /** ORQ.H1: the owner's open requests on this leader's task (`PEDIDOS ABERTOS DO DONO`), always on top. */
   ownerRequests?: string
+  /** ORQ.H2: the hand-off GENERATED from the board for this successor, delivered as a system item. */
+  passagem?: string
 }
 
 /** One line, stated once: who wins when two instructions disagree. */
@@ -93,6 +95,12 @@ const TOOL_GROUPS = {
 /** Metrics and dashboards are NOT listed tool by tool (token economy): one line, the tools stay discoverable via the MCP. */
 export const METRICS_DASHBOARDS_LINE = 'There are also metrics and dashboard/layout tools available if you need them.'
 
+/**
+ * OPENCODE.PAPÉIS — a session (seen: an OpenCode leader) claimed `agentop session` accepts three harnesses and
+ * opened its successor by running the CLI directly, so the row never existed. The list comes from `HARNESS_ORDER`.
+ */
+export const SESSION_VERB_LINE = `\`<harness>\` is any of ${HARNESS_ORDER.join(', ')} — the same verb for every harness, yours included. Only \`agentop session\` creates a session agentistics manages: never start one by running an assistant CLI directly (\`claude\`, \`opencode\`, \`codex\`, …), and never with \`agentop code\` (that is the native engine's own harness, not a session launcher).`
+
 /** The context's tool inventory, kept explicit so the MCP registry parity test can guard it. */
 export const CONTEXT_TOOL_NAMES = Object.values(TOOL_GROUPS).flat()
 
@@ -124,7 +132,7 @@ export function contextText(i: ContextInput): string {
   ]
   if (i.role !== 'worker') {
     lines.push('Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title. If you replace another live leader on your task, pass its id as `retirePredecessor` so the server closes it when it goes quiet.')
-    const how = '`agentop session <harness> --bg --cwd <dir> --name "<title>" --folder "<folder>" -p "<request>"` or `agentop session batch --task "<task>" --folder "<folder>" …` (`agentop session folders` lists them; omitted task, folder and approval mode inherit from a verified parent). Workers inherit the parent task, folder and approval mode, but need their own subtask when applicable. For leader succession run `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` from inside the old leader; a leader prefix alone does not transfer its state. File each opened session on its subtask and in the task\'s folder.'
+    const how = '`agentop session <harness> --bg --cwd <dir> --name "<title>" --folder "<folder>" -p "<request>"` or `agentop session batch --task "<task>" --folder "<folder>" …` (`agentop session folders` lists them; omitted task, folder and approval mode inherit from a verified parent). Workers inherit the parent task, folder and approval mode, but need their own subtask when applicable. For leader succession run `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` from inside the old leader (it keeps your model and approval mode unless you pass `--model`/`--mode`, e.g. `--mode no-questions`); a leader prefix alone does not transfer its state. File each opened session on its subtask and in the task\'s folder. ' + SESSION_VERB_LINE
     lines.push(away
       ? `Opening workers is pre-authorised within the away limits above (no per-session approval): ${how}`
       : `Open other sessions only after the user explicitly approves: ${how}`)
@@ -156,6 +164,8 @@ export function contextText(i: ContextInput): string {
   }
   if (i.handoffTakeover || i.handoffRelay) lines.push(HANDOFF_TAKEOVER_LINE)
   if (i.handoffRelay) lines.push(i.handoffRelay)
+  // ORQ.H2 — a system item (never an owner message: NOT_OWNER skips `[from agentistics`), read FIRST by the successor.
+  if (i.passagem) lines.push(`[from agentistics · passagem]\n${i.passagem}`)
   if (i.harnesses && i.harnesses.length > 0) lines.push(`Harnesses installed on this machine: ${i.harnesses.join(', ')}.`)
   if (i.specSkills && i.specSkills.length > 0) lines.push(`Specification skills installed for this harness: ${i.specSkills.join(', ')}`)
   lines.push(

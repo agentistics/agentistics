@@ -888,6 +888,8 @@ export interface ControlSession {
   mode?: SessionMode
   /** F4.D — the modes a structured session can be set to directly; absent: only cycling exists. */
   modeChoices?: SessionMode[]
+  /** 1.20 — a structured session's model switch: the protocol's current model and the ones it lists. */
+  modelChoices?: { current: string | null; options: Array<{ id: string; label: string }> }
   /** F2.0b — running over its harness's protocol right now (not a pane): the web offers "open in terminal". */
   structured?: true
   /**
@@ -1280,12 +1282,16 @@ export interface ActionResult {
   ok: boolean
   /** Already-localized one-line outcome, shown in the status line. */
   message: string
+  /** What the surface can OFFER next (1.19: update the harness whose own version refused this). Data, never a command. */
+  action?: { kind: 'update-harness'; harness: string; need: string }
   /** The action is a question and must be explicitly confirmed before it can proceed. */
   confirm?: boolean
   /** A failed pane write classified from the post-write screen. */
   failure?: 'prompt' | 'ended' | 'unconfirmed'
   /** PLAN.ACCOUNTS D3: refused by the account rule — the server maps it to an HTTP status. */
   accountRefusal?: AccountRefusalCode
+  /** The memory gate refused (a fork); `queuedId` is the queue entry it filed, so "start anyway" can cancel it first. */
+  memoryRefusal?: { queuedId?: string }
   /** A group reopen's explicit partial result: rows opened, rows already running, and EVERY refused row. */
   fell?: { opened: string[]; already: string[]; refused: { id: string; reason: AccountRefusalCode; message: string }[] }
 }
@@ -1635,6 +1641,12 @@ export interface ControlHost {
    * conversation over the harness's protocol (the reopen machinery; row identity inherited).
    */
   backToStructured?(id: string): Promise<ActionResult>
+  /**
+   * V-OPENCODE.2 — FORK a structured row's conversation into a NEW session through its protocol. The original
+   * keeps running untouched; the answer carries the new row's `id`. Refused in a sentence where the driver
+   * offers no fork — never a fresh empty conversation in its place.
+   */
+  forkSession?(id: string, callerVerified?: boolean, force?: boolean): Promise<ActionResult>
 
   /**
    * Restore a session's conversation to the point BEFORE one of the person's own prompts, using the
@@ -1668,6 +1680,13 @@ export interface ControlHost {
    * only cycles. No keystroke is sent anywhere.
    */
   setSessionMode?(id: string, modeId: string): Promise<ActionResult>
+
+  /**
+   * 1.20 — switch a STRUCTURED session's model THROUGH its protocol (`modelId` is one of the row's
+   * `modelChoices`). Refused in words for a session that is not structured or a model it does not list; a
+   * refusal the harness's own version causes carries `action` (offer the update).
+   */
+  setSessionModel?(id: string, modelId: string): Promise<ActionResult>
 
   /**
    * Type one line into a session and submit it, WITHOUT attaching to it.
@@ -1981,6 +2000,8 @@ export interface SpawnSessionRequest {
   /** MODE.EVERYWHERE — the permission mode to start in (absent = the harness's own configuration). */
   mode?: CanonicalMode
   label?: string
+  /** V-OPENCODE.2 — open a FORK of this conversation (the harness's own id) instead of a fresh one; structured drivers that declare `fork` only. */
+  forkOf?: string
   /** Take the terminal now, versus start detached and stay here. */
   attach: boolean
   /**
@@ -2016,6 +2037,11 @@ export interface SpawnSessionRequest {
   accountDecided?: boolean
   /** PLAN.ACCOUNTS D3: the request carries a VERIFIED session identity — an agent is asking. */
   callerVerified?: boolean
+  /** DSL.TIPO-SESSAO — the spawn door when it is not the person's (`engine`: an agent's delegation through the engine). */
+  spawnDoor?: 'engine'
+  /** The task/subtask the spawn gate judges the spawn for, when the session is filed only after it starts (the delegate). */
+  gateTaskId?: string
+  gateSubtaskId?: string
   /**
    * CONTA.TROCA v2 — the managed id this session REPLACES on another harness. It inherits that row's
    * filing, folder, pin, mute and note exactly as a hand-off successor does (`handoffOf` +
@@ -2062,9 +2088,9 @@ export interface ResumeSessionRequest {
    */
   switchToAccount?: string
   /**
-   * CONTA.TROCA — skip the memory admission. Set only by the account switch, which has just ENDED
-   * the process this resume replaces, so the net memory cost is ~zero; refusing there would leave
-   * the person with no session at all.
+   * Skip the memory admission. Set by the account switch (CONTA.TROCA), which has just ENDED the
+   * process this resume replaces, so the net memory cost is ~zero; and by the browser's "reopen
+   * anyway", which the person confirmed after the gate refused (`/api/fleet/act` `force`).
    */
   force?: boolean
 }
@@ -2092,6 +2118,8 @@ export interface SpawnSessionResult {
   ok: boolean
   /** Already-localized outcome for the status line. */
   message: string
+  /** 1.20 — what the surface can OFFER next (the harness's own version refused the start: update it). */
+  action?: { kind: 'update-harness'; harness: string; need: string }
   /**
    * RES.1 — refused by the memory gate and QUEUED instead: it starts by itself when room frees
    * (`spawn-queue.ts`). `ok` stays false — nothing has started yet — and `message` says so.

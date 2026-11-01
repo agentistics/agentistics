@@ -17,6 +17,7 @@
 import { access } from 'node:fs/promises'
 import type { HarnessId } from '@agentistics/core'
 import { TRANSCRIPT_SOURCES, grepArgv, parseGrepOutput, type TranscriptSource } from './transcript-search'
+import { opencodeDbPath, searchOpencodeDb } from './opencode-store'
 
 export interface TranscriptDeps {
   /** Whether `grep` can be run at all here. */
@@ -24,6 +25,11 @@ export interface TranscriptDeps {
   dirExists: (path: string) => Promise<boolean>
   /** Run one search; resolve with grep's raw NUL-separated stdout. */
   grep: (query: string, root: string, include: string) => Promise<string>
+  /**
+   * OpenCode keeps every session in one SQLite store, so it is searched by a read-only SQL query and
+   * not by `grep` (and needs no `grep` to be covered). Absent = the store is not searched.
+   */
+  opencode?: { exists: () => Promise<boolean>; search: (query: string) => Promise<string[]> }
 }
 
 export type TranscriptUnavailable =
@@ -53,15 +59,25 @@ export async function runTranscriptSearch(
   // An empty query is not a search. Returning early keeps a cleared field from walking 475 MB.
   if (query.trim() === '') return empty()
 
-  if (!await deps.hasGrep()) return { ...empty(), unavailable: 'no-grep' }
+  const result = empty()
+  // The SQL half. A failure here is reported as `failed` like any other harness, never swallowed into
+  // "no match", and it does not need grep.
+  let opencodeCovered = false
+  if (deps.opencode && await deps.opencode.exists()) {
+    try {
+      for (const id of await deps.opencode.search(query)) result.ids.add(id)
+      result.covered.push('opencode'); opencodeCovered = true
+    } catch { result.failed.push('opencode') }
+  }
+
+  if (!await deps.hasGrep()) return opencodeCovered ? result : { ...result, unavailable: 'no-grep' }
 
   const present: Array<[HarnessId, TranscriptSource]> = []
   for (const [id, src] of Object.entries(sources) as Array<[HarnessId, TranscriptSource | null]>) {
     if (src && await deps.dirExists(src.root)) present.push([id, src])
   }
-  if (present.length === 0) return { ...empty(), unavailable: 'no-transcripts' }
+  if (present.length === 0) return opencodeCovered ? result : { ...result, unavailable: 'no-transcripts' }
 
-  const result = empty()
   // Concurrently: the harnesses are independent directories and the slowest one should set the
   // latency, not the sum. `allSettled` because one harness's failure must not lose the rest —
   // an unguarded throw here would turn a permissions error on one directory into no search at all.
@@ -102,6 +118,11 @@ export function liveTranscriptDeps(): TranscriptDeps {
         return await p.exited === 0
       } catch { return false }
     })()),
+
+    opencode: {
+      exists: async () => { try { await access(opencodeDbPath()); return true } catch { return false } },
+      search: async query => searchOpencodeDb(opencodeDbPath(), query),
+    },
 
     dirExists: async path => {
       try { await access(path); return true } catch { return false }

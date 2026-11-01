@@ -47,5 +47,6 @@ test('send stays at the far right while typing: the acting group is always pushe
 })
 
 test('the band names the model the way the stats card does (observed model first, alias only as fallback)', () => {
-  expect(source).toContain('modelDisplay(session.harness, metrics?.stats?.model ?? metrics?.meta?.model, startedOrSwitched)')
+  // OPENCODE.RESTO gap 4: a model the protocol STATES now (a menu switch) outranks both — see `bandModel`.
+  expect(source).toContain('bandModel(session.harness, statedModelId, metrics?.stats?.model ?? metrics?.meta?.model, startedOrSwitched)')
 })

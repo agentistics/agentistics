@@ -15,9 +15,14 @@ import { readJsonLimited } from '../limits'
 import { readRegistry } from './registry'
 import { readAccounts } from '../harness-accounts'
 import { resolveSessionAccount, sessionAccountRow } from './session-account'
-import { accountLabel, listSwitchTargets, readLimitState } from './account-switch-io'
+import { accountLabel, listSwitchTargets, readTailProbe, syncLoginExpiry } from './account-switch-io'
+import { accountLoginState } from '../harness-accounts'
+import { spawnRowsOf } from './spawn-account-io'
+import type { AuthState } from './account-switch'
+import { reloginSupported } from '../account-roots'
 import type { SwitchUnavailableReason } from './account-switch'
 import { fleetLang, hostForFleet, kickFleet } from './fleet-web'
+import { readOpencodeLimit } from './opencode-limit'
 
 
 /** The GET's answer. `limit` is `null` unless the conversation's last turn was refused by a limit. */
@@ -28,13 +33,53 @@ export interface SwitchInfo {
   options: { id: string; harness: string; label: string; plan?: string; recommended?: boolean }[]
   /** Every other live account, NOT a target, with the reason in a code the browser words (CONTA.LIMITES). */
   unavailable: { id: string; harness: string; label: string; plan?: string; reason: SwitchUnavailableReason }[]
-  limit: { resetsAt?: number; message?: string; pendingPreview?: string } | null
+  limit: { resetsAt?: number; at?: number; message?: string; pendingPreview?: string } | null
+  /** The harness cannot switch accounts but its limit is read (OpenCode): the panel keeps polling and states it. */
+  limitWatch?: boolean
+  /**
+   * HOTFIX.LOGIN-EXPIRADO: the session's account cannot work — its harness refused the login in this
+   * conversation's last turn, or the registry holds it expired / signed out. `null` otherwise. `relogin`
+   * says whether "Sign in again" can run from the app for this account (same folder, same id).
+   */
+  auth: {
+    accountId: string
+    label?: string
+    state: 'expired' | 'signed_out'
+    message?: string
+    pendingPreview?: string
+    /** The whole refused prompt (bounded), for the bar's "re-send" once the account works again. */
+    pending?: string
+    relogin: boolean
+  } | null
 }
 
 /** The plan the registry holds for the session's own account, for the picker's "current" row. */
 async function accountPlan(accountId: string | undefined): Promise<string | undefined> {
   if (!accountId) return undefined
   try { return (await readAccounts()).accounts.find(a => a.id === accountId)?.plan } catch { return undefined }
+}
+
+/**
+ * PURE-ish: the bar's state for the session's account. The transcript's refusal wins (it is THIS
+ * conversation's last word); otherwise the registry's state after the sync. Re-read after the sync so
+ * a mark written a moment ago is the one reported.
+ */
+async function authOf(accountId: string | undefined, refused: AuthState | null): Promise<SwitchInfo['auth']> {
+  if (!accountId) return null
+  const file = await readAccounts().catch(() => null)
+  const account = file?.accounts.find(a => a.id === accountId)
+  if (!account || account.retired) return null
+  const bound = spawnRowsOf(file!).find(r => r.id === accountId)?.bound ?? false
+  // A refusal written before the last finished sign-in is the old token's: the login works now.
+  const live = refused && !(account.loginRenewedAt !== undefined && (refused.at ?? 0) <= account.loginRenewedAt) ? refused : null
+  refused = live
+  const state = refused ? 'expired' : accountLoginState(account, bound)
+  if (state !== 'expired' && state !== 'signed_out') return null
+  return {
+    accountId, state, relogin: reloginSupported(account),
+    ...(refused?.message ? { message: refused.message } : {}),
+    ...(refused?.pendingPrompt ? { pendingPreview: preview(refused.pendingPrompt), pending: refused.pendingPrompt.slice(0, 8000) } : {}),
+  }
 }
 
 const PREVIEW = 160
@@ -47,26 +92,36 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
   })
   if (req.method === 'GET') {
     const id = url.searchParams.get('id') ?? ''
-    const none: SwitchInfo = { ok: true, supported: false, options: [], unavailable: [], limit: null }
-    if (!featureOn('multi-account') || !id) return json(none)
+    const none: SwitchInfo = { ok: true, supported: false, options: [], unavailable: [], limit: null, auth: null }
+    if (!id) return json(none)
     // CONTA.IDENTIDADE: the same rule the composer chip and plan_limits read (`session-account.ts`).
     const registry = await readRegistry()
     const found = sessionAccountRow(registry, { id, conversationId: id })
     if (!found || found.endedAt) return json(none)
+    // OpenCode has no account to switch to, but its limit is still a fact the session panel states (QA
+    // OPENCODE.COMPLETO): read from opencode's own log, with or without the multi-account flag.
+    if (found.harness === 'opencode') {
+      const hit = found.conversationId ? readOpencodeLimit(found.conversationId) : null
+      return json({ ...none, limitWatch: true, limit: hit ? { at: hit.at, message: hit.message } : null })
+    }
+    if (!featureOn('multi-account')) return json(none)
     const accounts = await readAccounts().catch(() => null)
     const accountId = resolveSessionAccount(registry, { id: found.id }, accounts ?? undefined)
     const row = found
     const harness = row.harness as HarnessId
-    const [{ options, unavailable }, label, limit, plan] = await Promise.all([
+    const [{ options, unavailable }, label, tail, plan] = await Promise.all([
       listSwitchTargets({ harness, ...(accountId ? { accountId } : {}), agentCaller: false }),
       accountLabel(harness, accountId),
       row.conversationId
         // WHERE the transcript is (the row's own record, absent = default home) — see the host's
         // `location`; WHO it runs as is `accountId` above.
-        ? readLimitState({ harness, conversationId: row.conversationId, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }).catch(() => null)
+        ? readTailProbe({ harness, conversationId: row.conversationId, cwd: row.cwd, ...(row.accountId ? { accountId: row.accountId } : {}) }).catch(() => null)
         : Promise.resolve(null),
       accountPlan(accountId),
     ])
+    const limit = tail?.limit.kind === 'limited' ? tail.limit.state : null
+    if (tail) await syncLoginExpiry(accountId, tail)
+    const auth = await authOf(accountId, tail?.auth ?? null)
     const info: SwitchInfo = {
       ok: true,
       supported: true,
@@ -80,6 +135,7 @@ export async function handleAccountSwitchRoute(req: Request, url: URL, cors: Rec
           ...(limit.pendingPrompt ? { pendingPreview: preview(limit.pendingPrompt) } : {}),
         }
         : null,
+      auth: auth ? { ...auth, ...(label ? { label } : {}) } : null,
     }
     return json(info)
   }

@@ -1,0 +1,239 @@
+/**
+ * The engine `side` slot and the aside frame, in a real DOM (happy-dom): slot registration and ownership,
+ * which aside a surface resolves to, who sees the surface, and that what the aside already holds is never
+ * remounted when a side surface opens or closes.
+ */
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import { act, createElement as h, useEffect } from 'react'
+import type { EngineSurfaceInfo } from '../lib/engineSurfaces'
+
+let createRoot: typeof import('react-dom/client').createRoot
+let state: typeof import('../lib/engineSurfaceHost')
+let asideMod: typeof import('./EngineSurfaceAside')
+
+beforeAll(async () => {
+  GlobalRegistrator.register({ width: 1200, height: 800 })
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  createRoot = (await import('react-dom/client')).createRoot
+  state = await import('../lib/engineSurfaceHost')
+  asideMod = await import('./EngineSurfaceAside')
+})
+const roots: Array<{ unmount(): void }> = []
+afterAll(async () => { await act(async () => { for (const r of roots) r.unmount() }); await GlobalRegistrator.unregister() })
+
+const surface = {
+  id: 'side-demo', placement: 'composer', layout: 'side', label: { pt: 'Lado', en: 'Side' }, module: '/api/engine/x/side/mount.js',
+} as unknown as EngineSurfaceInfo
+const open = (sessionId: string | null) => act(async () => { state.openEngineSurface(surface, { sessionId, lang: 'en' }) })
+const close = () => act(async () => { state.endEngineSurface(state.currentEngineSurface()!.nonce) })
+
+async function mount(el: ReturnType<typeof h>) {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const root = createRoot(host)
+  roots.push(root)
+  await act(async () => { root.render(el) })
+  return { host, root }
+}
+
+describe('side slot store', () => {
+  test('a slot is removed only by its own element; without a slot the fixed panel is used', async () => {
+    state.resetEngineSurfaceHostForTests()
+    const a = document.createElement('div'), b = document.createElement('div')
+    await open('s1')
+    expect(state.resolveSideSlot()).toBeNull()
+    await act(async () => { state.registerEngineSideSlot('aside-main', 's1', a) })
+    expect(state.resolveSideSlot()).toBe(a)
+    expect(state.resolveSideSlotId()).toBe('aside-main')
+    // An older element's late cleanup must not drop the slot that replaced it.
+    await act(async () => { state.registerEngineSideSlot('aside-main', 's1', b) })
+    await act(async () => { state.registerEngineSideSlot('aside-main', 's1', null, a) })
+    expect(state.resolveSideSlot()).toBe(b)
+    await act(async () => { state.registerEngineSideSlot('aside-main', 's1', null, b) })
+    expect(state.resolveSideSlot()).toBeNull()
+    state.resetEngineSurfaceHostForTests()
+  })
+
+  test('a slot of another session never receives the surface; the first slot of its session wins', async () => {
+    state.resetEngineSurfaceHostForTests()
+    const other = document.createElement('div'), first = document.createElement('div'), second = document.createElement('div')
+    await open('s1')
+    await act(async () => {
+      state.registerEngineSideSlot('aside-other', 's2', other)
+      state.registerEngineSideSlot('aside-main', 's1', first)
+      state.registerEngineSideSlot('aside-split', 's1', second)
+    })
+    expect(state.resolveSideSlot()).toBe(first)
+    expect(state.resolveSideSlotId()).toBe('aside-main')
+    state.resetEngineSurfaceHostForTests()
+  })
+
+  test('useEngineSideSurface answers only for the session the visible side surface belongs to', async () => {
+    state.resetEngineSurfaceHostForTests()
+    const seen: Array<string | null> = []
+    function Probe({ sid }: { sid: string | null }) {
+      const s = state.useEngineSideSurface(sid)
+      seen.push(s ? s.surface.id : null)
+      return null
+    }
+    await mount(h(Probe, { sid: 's1' }))
+    expect(seen.at(-1)).toBeNull()
+    await open('s1')
+    expect(seen.at(-1)).toBe('side-demo')
+    const other = await mount(h(Probe, { sid: 's2' }))
+    expect(seen.at(-1)).toBeNull()
+    other.root.unmount()
+    await close()
+    expect(seen.at(-1)).toBeNull()
+    state.resetEngineSurfaceHostForTests()
+  })
+})
+
+describe('a closed aside is asked to open', () => {
+  test('with no slot yet, the pane that shows the session is chosen; once a slot exists it wins', async () => {
+    state.resetEngineSurfaceHostForTests()
+    await open('s1')
+    expect(state.resolveSideAsideId()).toBeNull()
+    await act(async () => { state.registerEngineSideWant('aside-split', 's1'); state.registerEngineSideWant('aside-other', 's2') })
+    expect(state.resolveSideAsideId()).toBe('aside-split')
+    await act(async () => { state.registerEngineSideWant('aside-main', 's1') })
+    expect(state.resolveSideAsideId()).toBe('aside-main')
+    // The fixed panel is still what resolveSideSlot says until the aside has mounted its slot.
+    expect(state.resolveSideSlot()).toBeNull()
+    const el = document.createElement('div')
+    await act(async () => { state.registerEngineSideSlot('aside-split', 's1', el) })
+    expect(state.resolveSideAsideId()).toBe('aside-split')
+    expect(state.resolveSideSlot()).toBe(el)
+    await act(async () => { state.registerEngineSideWant('aside-split', null) })
+    state.resetEngineSurfaceHostForTests()
+  })
+
+  test('from a closed aside: the pane asks, the aside opens, the surface is drawn inside it', async () => {
+    state.resetEngineSurfaceHostForTests()
+    const hostMod = await import('./EngineSurfaceHost')
+    // A minimal pane: closed until the store names it, as SessionsPage does with engineOwned.
+    function Pane() {
+      const sid = 's1'
+      const side = state.useEngineSideSurface(sid)
+      const id = state.useEngineSideAsideId()
+      useEffect(() => { state.registerEngineSideWant('aside-main', side ? sid : null); return () => state.registerEngineSideWant('aside-main', null) }, [side])
+      const owned = side !== null && id === 'aside-main'
+      return owned
+        ? h(asideMod.EngineSurfaceAside, { engine: { sessionId: sid, slotId: 'aside-main', label: 'Side', owned }, shown: true, panelsLabel: 'Panels', onPickEngine() {}, onPickPanels() {}, showStrip: true }, h('i'))
+        : h('div', { 'data-closed': '' })
+    }
+    const mounts: HTMLElement[] = []
+    const pane = await mount(h(Pane))
+    const fixed = await mount(h(hostMod.EngineSurfaceHost, { load: async () => ({ mount(el: HTMLElement) { mounts.push(el); el.setAttribute('data-surface', '') } }) }))
+    expect(pane.host.querySelector('[data-closed]')).not.toBeNull()
+    await open('s1')
+    await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+    expect(pane.host.querySelector('[data-closed]')).toBeNull()
+    const slot = pane.host.querySelector('[data-engine-side-slot="aside-main"]')!
+    expect(slot).not.toBeNull()
+    expect(mounts.length).toBe(1)
+    expect(slot.contains(mounts[0]!)).toBe(true)
+    fixed.root.unmount()
+    pane.root.unmount()
+    state.resetEngineSurfaceHostForTests()
+  })
+})
+
+describe('reopen', () => {
+  test('asking again for the mounted surface bumps reopen on the same nonce', async () => {
+    state.resetEngineSurfaceHostForTests()
+    await open('s1')
+    const first = state.currentEngineSurface()!
+    expect(first.reopen).toBe(0)
+    await open('s1')
+    const again = state.currentEngineSurface()!
+    expect(again.nonce).toBe(first.nonce)
+    expect(again.reopen).toBe(1)
+    state.resetEngineSurfaceHostForTests()
+  })
+})
+
+describe('EngineSurfaceAside', () => {
+  const noop = () => {}
+  function Held({ log }: { log: string[] }) {
+    useEffect(() => { log.push('mount'); return () => { log.push('unmount') } }, [log])
+    return h('span', { 'data-held': '' }, 'held')
+  }
+  const render = (log: string[], engine: Parameters<typeof asideMod.EngineSurfaceAside>[0]['engine'], extra: { shown?: boolean; showStrip?: boolean } = {}) =>
+    h(asideMod.EngineSurfaceAside, {
+      engine, shown: extra.shown ?? true, panelsLabel: 'Panels', onPickEngine: noop, onPickPanels: noop, showStrip: extra.showStrip ?? true,
+    }, h(Held, { log }))
+
+  test('what the aside holds keeps its identity while a side surface opens and closes', async () => {
+    state.resetEngineSurfaceHostForTests()
+    const log: string[] = []
+    const { host, root } = await mount(render(log, null))
+    const node = host.querySelector('[data-held]')
+    expect(log).toEqual(['mount'])
+    expect(host.querySelector('[role="tablist"]')).toBeNull()
+    const section = { sessionId: 's1', slotId: 'aside-main', label: 'Side', owned: true }
+    await act(async () => { root.render(render(log, section)) })
+    expect(host.querySelector('[role="tablist"]')).not.toBeNull()
+    expect(host.querySelector('[data-engine-side-slot="aside-main"]')).not.toBeNull()
+    expect(host.querySelector('[data-held]')).toBe(node)
+    await act(async () => { root.render(render(log, section, { shown: false })) })
+    expect(host.querySelector('[data-held]')).toBe(node)
+    await act(async () => { root.render(render(log, null)) })
+    expect(host.querySelector('[data-held]')).toBe(node)
+    expect(host.querySelector('[data-engine-side-slot]')).toBeNull()
+    expect(host.querySelector('[role="tablist"]')).toBeNull()
+    expect(log).toEqual(['mount'])
+  })
+
+  test('the strip is not drawn on a phone, nor by an aside that does not own the slot', async () => {
+    state.resetEngineSurfaceHostForTests()
+    const log: string[] = []
+    const section = { sessionId: 's1', slotId: 'aside-split', label: 'Side', owned: false }
+    const { host, root } = await mount(render(log, section))
+    expect(host.querySelector('[role="tablist"]')).toBeNull()
+    await act(async () => { root.render(render(log, { ...section, owned: true }, { showStrip: false })) })
+    expect(host.querySelector('[role="tablist"]')).toBeNull()
+    await act(async () => { root.render(render(log, { ...section, owned: true })) })
+    expect(host.querySelectorAll('[role="tab"]').length).toBe(2)
+  })
+})
+
+describe('engineAsideWantsOpen', () => {
+  test('a shown side surface opens the aside even over a minimized Studio; otherwise unchanged', () => {
+    const f = asideMod.engineAsideWantsOpen
+    expect(f({ panelOpen: true, studioMinimized: true, engineShown: true })).toBe(true)
+    expect(f({ panelOpen: true, studioMinimized: true, engineShown: false })).toBe(false)
+    expect(f({ panelOpen: true, studioMinimized: false, engineShown: false })).toBe(true)
+    expect(f({ panelOpen: false, studioMinimized: false, engineShown: false })).toBe(false)
+    expect(f({ panelOpen: false, studioMinimized: false, engineShown: true })).toBe(true)
+  })
+})
+
+describe('panelsPickAction', () => {
+  test('a minimized Studio is restored, never left to close the aside', () => {
+    const f = asideMod.panelsPickAction
+    expect(f({ panelOpen: true, studioMinimized: true })).toBe('restore-studio')
+    expect(f({ panelOpen: false, studioMinimized: false })).toBe('open-live')
+    expect(f({ panelOpen: true, studioMinimized: false })).toBe('show')
+  })
+})
+
+describe('the fixed panel is never used for a session an aside may take', () => {
+  test('wanted but no aside holds it: mounted and parked off screen; unwanted: in the frame', async () => {
+    const hostMod = await import('./EngineSurfaceHost')
+    for (const wanted of [true, false]) {
+      state.resetEngineSurfaceHostForTests()
+      if (wanted) state.registerEngineSideWant('aside-main', 's1')
+      const mounts: HTMLElement[] = []
+      const host = await mount(h(hostMod.EngineSurfaceHost, { load: async () => ({ mount(el: HTMLElement) { mounts.push(el) } }) }))
+      await open('s1')
+      await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+      expect(mounts.length).toBe(1)
+      const parkedOff = mounts[0]!.parentElement!.parentElement?.style.left === '-100000px' || mounts[0]!.parentElement!.style.left === '-100000px'
+      expect(parkedOff).toBe(wanted)
+      host.root.unmount()
+      state.resetEngineSurfaceHostForTests()
+    }
+  })
+})

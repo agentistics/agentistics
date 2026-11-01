@@ -14,7 +14,7 @@ import type { ChatTurn } from './ChatBubble'
 import type { FleetActionId } from '../../lib/fleet'
 
 export type ChatAct = (req: { id: string; action: FleetActionId; text?: string; choice?: number; step?: 'next' | 'back'; choices?: number[]; occurrence?: number; confirm?: boolean })
-  => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
+  => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed'; action?: { kind: 'update-harness'; harness: string; need: string } }>
 
 export interface ChatSource {
   /** The conversation, or null while the first read is in flight (the chat's own loading state). */

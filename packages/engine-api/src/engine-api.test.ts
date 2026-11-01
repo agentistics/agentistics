@@ -1,5 +1,9 @@
 import { describe, expect, it, test } from 'bun:test'
 import {
+  AMEND_REFUSED_REASONS, SUBMIT_REFUSED_REASONS, structuredRegistry, validIdempotencyKey,
+  type StructuredAmendResult, type StructuredCancelReceipt, type StructuredDeclaration, type StructuredDriver, type StructuredSpawn, type StructuredSubmitReceipt,
+} from './structured'
+import {
   ENGINE_API_VERSION,
   asCodePort,
   type CodeHost,
@@ -141,7 +145,7 @@ describe('ES.6h — the typed code host (1.8)', () => {
     answer: () => ({ ok: false as const, sentence: 'x' }), cancel: () => ({ ok: false as const, sentence: 'x' }), end: async () => {},
   })
   test('the engine-api is 1.9 (1.8 + the chat channel) and a 1.7 engine\'s opaque handle still satisfies CodeHost but is not a port', () => {
-    expect(ENGINE_API_VERSION).toBe('1.17.0')
+    expect(ENGINE_API_VERSION).toBe('1.21.0')
     const opaque: CodeHost = { kind: 'code-host', dispose: async () => {} }
     expect(asCodePort(opaque)).toBeNull()
     expect(asCodePort(null)).toBeNull()
@@ -154,5 +158,64 @@ describe('ES.6h — the typed code host (1.8)', () => {
   test('apiCompatible: an engine built against 1.7 loads on a 1.8 host, and the reverse is refused', () => {
     expect(apiCompatible('1.8.0', '1.7.0')).toBe(true)
     expect(apiCompatible('1.7.0', '1.8.0')).toBe(false)
+  })
+})
+
+describe('1.18 — forkOf and a blocked start ride the structured registry untouched', () => {
+  const driver = (seen: StructuredSpawn[]): StructuredDriver => ({
+    id: 'acp', status: 'ready', harnesses: ['opencode'], note: 't',
+    declares: () => { throw new Error('unused') },
+    start: async req => { seen.push(req); return req.forkOf === 'ses_old' ? { ok: false, reason: 'opencode ≥1.18.0 is needed', blocked: { kind: 'harness-version', need: '1.18.0', found: '1.17.9' } } : { ok: false, reason: 'plain refusal' } },
+  })
+  test('the driver receives forkOf as sent; a blocked refusal keeps its `blocked`, a plain one has none', async () => {
+    const seen: StructuredSpawn[] = []
+    const reg = structuredRegistry([driver(seen)])
+    const blocked = await reg.start({ id: 'a', harness: 'opencode', cwd: '/w', forkOf: 'ses_old' })
+    expect(seen[0]!.forkOf).toBe('ses_old')
+    expect(blocked).toEqual({ ok: false, reason: 'opencode ≥1.18.0 is needed', blocked: { kind: 'harness-version', need: '1.18.0', found: '1.17.9' } })
+    const plain = await reg.start({ id: 'b', harness: 'opencode', cwd: '/w' })
+    expect(plain).toEqual({ ok: false, reason: 'plain refusal' })
+  })
+})
+
+describe('1.21 — ADAPTER.LIMITES declarations ride the registry; keys and refusals are closed', () => {
+  const decl = (h: string): StructuredDeclaration => ({
+    assignId: { absent: 'x' }, resume: { absent: 'x' }, model: { absent: 'x' }, effort: { absent: 'x' }, mcp: { absent: 'x' },
+    instructions: { channel: 'first-message', reason: 'x' }, live: { absent: 'x' }, permissions: { absent: 'x' }, questions: { absent: 'x' }, cancel: { via: 'x' },
+    amend: { queued: { via: 'driver queue' }, running: { absent: `${h}: a concurrent prompt aborts the turn` } },
+    cancelReceipt: { via: 'stopReason', confidence: 'inferred', deadlineMs: 10_000 },
+    reconcile: { absent: 'no protocol id' },
+  })
+  const driver: StructuredDriver = { id: 'acp', status: 'ready', harnesses: ['gemini'], note: 't', declares: decl, start: async () => ({ ok: false, reason: 'x' }) }
+  test('structuredRegistry.declares hands the new members through untouched', () => {
+    const d = structuredRegistry([driver]).declares('gemini')!
+    expect(d.amend).toEqual({ queued: { via: 'driver queue' }, running: { absent: 'gemini: a concurrent prompt aborts the turn' } })
+    expect(d.cancelReceipt).toEqual({ via: 'stopReason', confidence: 'inferred', deadlineMs: 10_000 })
+    expect(d.reconcile).toEqual({ absent: 'no protocol id' })
+  })
+  test('a 1.20 declaration (no new members) is still a StructuredDeclaration', () => {
+    const { amend: _a, cancelReceipt: _c, reconcile: _r, ...old } = decl('gemini')
+    const asOld: StructuredDeclaration = old
+    expect(asOld.amend).toBeUndefined()
+  })
+  test('an engine built against 1.20 loads on a 1.21 host; the reverse is refused', () => {
+    expect(apiCompatible('1.21.0', '1.20.0')).toBe(true)
+    expect(apiCompatible('1.20.0', '1.21.0')).toBe(false)
+  })
+  test('validIdempotencyKey: charset and length', () => {
+    expect(validIdempotencyKey('call1:turn2:3')).toBe(true)
+    expect(validIdempotencyKey('a'.repeat(128))).toBe(true)
+    expect(validIdempotencyKey('a'.repeat(129))).toBe(false)
+    for (const bad of ['', 'has space', 'ação', 'a/b', 5, null, undefined]) expect(validIdempotencyKey(bad)).toBe(false)
+  })
+  test('the refusal lists are closed and carry no free text', () => {
+    expect([...SUBMIT_REFUSED_REASONS]).toEqual(['session-ended', 'queue-full', 'attention-open', 'key-conflict', 'empty'])
+    expect([...AMEND_REFUSED_REASONS]).toEqual(['finished', 'unknown-request', 'session-ended', 'key-conflict'])
+  })
+  test('the receipt shapes type-check (compile-time) and discriminate', () => {
+    const r: StructuredCancelReceipt = { state: 'cancelled', requestId: 'r1', at: 't', phase: 'running', confidence: 'exact', scope: 'turn', alsoEnded: ['r2'], effects: 'possible', durable: true }
+    const a: StructuredAmendResult = { result: 'appended', requestId: 'r1', carrierRequestId: 'r3', at: 't', reason: 'running, no steer', durable: false }
+    const u: StructuredSubmitReceipt = { state: 'in-doubt', requestId: 'r1', at: 't', durable: true }
+    expect([r.state, a.result, u.state]).toEqual(['cancelled', 'appended', 'in-doubt'])
   })
 })

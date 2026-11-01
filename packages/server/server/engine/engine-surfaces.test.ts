@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import type { EngineSurface } from '@agentistics/engine-api'
+import { surfaceRefusals, type EngineSurface } from '@agentistics/engine-api'
 import { engineSurfacesFor } from './engine-surfaces'
 
 const s = (o: Partial<EngineSurface> = {}): EngineSurface => ({
@@ -19,4 +19,21 @@ describe('engineSurfacesFor', () => {
   it('offers nothing when any surface is invalid', () => {
     expect(engineSurfacesFor([s(), s({ id: 'bad', module: 'https://evil.example/a.js' })], {})).toEqual([])
   })
+  it('accepts a 1.19 engine manifest with a composer float, a rail page and a nay-sessions page', () => {
+    // the shape the official engine announces on a 1.19 host: one refusal here drops the whole engine to community
+    const list = [
+      s({ id: 'call', placement: 'composer', icon: 'phone', layout: 'inline', frameless: true, floatOnLeave: true,
+        activeIcon: 'phone-off', activeTone: 'danger', activeLabel: { pt: 'Encerrar', en: 'End' }, experimental: 'DEMO_FLAG' }),
+      s({ id: 'calls', placement: 'rail', layout: 'page', frameless: true, icon: 'phone', module: '/api/engine/x/demo/page.js', experimental: 'DEMO_FLAG' }),
+      s({ id: 'calls-nay', placement: 'nay-sessions', layout: 'page', frameless: true, icon: 'phone', module: '/api/engine/x/demo/page.js', experimental: 'DEMO_FLAG' }),
+    ]
+    expect(surfaceRefusals(list)).toEqual([])
+    expect(engineSurfacesFor(list, { DEMO_FLAG: '1' })).toEqual(list)
+  })
+})
+
+it('gates float and nay-sessions with the existing experimental flag', () => {
+  const entries = [s({ id: 'floating', layout: 'float', floatOnLeave: true, experimental: 'DEMO_FLAG' }), s({ id: 'extra-tab', placement: 'nay-sessions', experimental: 'DEMO_FLAG' })]
+  expect(engineSurfacesFor(entries, {})).toEqual([])
+  expect(engineSurfacesFor(entries, { DEMO_FLAG: '1' })).toEqual(entries)
 })

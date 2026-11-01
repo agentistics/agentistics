@@ -118,3 +118,26 @@ describe('reconcileSavedModel', () => {
     expect(reconcileSavedModel('Gemini 3.6 Flash (Medium)', [])).toEqual({ model: 'Gemini 3.6 Flash (Medium)' })
   })
 })
+
+describe('opencode default model (OPENCODE.CORREÇÕES)', () => {
+  it('reads the top-level `model` of opencode.json under $XDG_CONFIG_HOME — the model session/new states', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const dir = mkdtempSync(join(tmpdir(), 'oc-defaults-'))
+    const prev = process.env.XDG_CONFIG_HOME
+    try {
+      mkdirSync(join(dir, 'opencode'))
+      // The owner's real file shape (a custom Ollama provider + its default).
+      writeFileSync(join(dir, 'opencode', 'opencode.json'), JSON.stringify({ $schema: 'https://opencode.ai/config.json', provider: { ollama: { npm: '@ai-sdk/openai-compatible' } }, model: 'ollama/qwen-coder' }))
+      writeFileSync(join(dir, 'opencode', 'opencode.jsonc'), '{ "$schema": "https://opencode.ai/config.json" }')
+      process.env.XDG_CONFIG_HOME = dir
+      expect(await readHarnessDefaults('opencode')).toEqual({ model: 'ollama/qwen-coder' })
+      rmSync(join(dir, 'opencode', 'opencode.json'))
+      expect(await readHarnessDefaults('opencode')).toEqual({})
+    } finally {
+      if (prev === undefined) delete process.env.XDG_CONFIG_HOME
+      else process.env.XDG_CONFIG_HOME = prev
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

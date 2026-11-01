@@ -34,9 +34,13 @@ export function handoffGroupPatch(prefs: Preferences, parent: Ref, child: Ref): 
   return { sessionGroups: planAddToGroup(value, group.id, childKey) }
 }
 
-/** The successor keeps the predecessor's name; the caller's label is only a fallback. */
+/**
+ * `--name` given on the hand-off wins; the successor keeps the predecessor's name only when the
+ * caller did not ask for a new one. The leader-role prefix is applied afterwards by the role logic,
+ * so a bare request stays the file's concern alone.
+ */
 export function handoffTitle(parentLabel: string | undefined, requested: string | undefined): string | undefined {
-  return parentLabel?.trim() ? parentLabel : requested
+  return requested?.trim() ? requested : parentLabel
 }
 
 /** The ⓘ counter: the predecessor's generation plus one (a leader never handed off is generation 1). */

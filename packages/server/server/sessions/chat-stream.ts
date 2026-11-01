@@ -23,6 +23,7 @@
 import { watch, type FSWatcher } from 'node:fs'
 import { chatDelta } from '@agentistics/core'
 import type { ChatPayload } from './chat-web'
+import { splitOpencodeChatPath } from './opencode-chat-io'
 
 export const DEBOUNCE_MS = 25
 export const ROW_TTL_MS = 5_000
@@ -122,8 +123,13 @@ export function acquireChatSlot(): boolean {
 export function releaseChatSlot(): void { open = Math.max(0, open - 1) }
 
 function defaultWatch(path: string, onChange: () => void): { close(): void } {
+  // opencode's chat "path" is `<opencode.db>#<ses_…>` (one store for every session): what moves when the
+  // session is written is the store's WAL, so that file is what is watched — every write there re-reads,
+  // and the read decides whether THIS session changed.
+  const opencode = splitOpencodeChatPath(path)
+  const target = opencode ? `${opencode.dbPath}-wal` : path
   let w: FSWatcher | null = null
-  try { w = watch(path, { persistent: false }, () => onChange()) } catch { /* gone: the safety read re-resolves */ }
+  try { w = watch(target, { persistent: false }, () => onChange()) } catch { /* gone: the safety read re-resolves */ }
   return { close: () => w?.close() }
 }
 

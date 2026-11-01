@@ -36,6 +36,13 @@ export function NayLimitsTab({ lang, isMobile, onNavigate, embedded = false, man
           <RecordCardAction inline label={pt ? 'Gerenciar planos' : 'Manage plans'} onClick={() => { onNavigate?.(); navigate('/usage#contas') }}>{pt ? 'Gerenciar planos' : 'Manage plans'}</RecordCardAction>
         </div>
       </>)}
+      {limits !== null && (
+        <p data-nay-limits-opencode style={{ margin: 0, fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
+          {pt
+            ? 'OpenCode: sem cota de plano — cada modelo cobra do próprio provedor (ou é gratuito), então não há janela para medir.'
+            : 'OpenCode: no plan quota — each model bills its own provider (or is free), so there is no window to measure.'}
+        </p>
+      )}
     </div>
   )
 }

@@ -55,7 +55,7 @@ import { BlockedSubtaskResolve } from '../tasks/BlockedSubtaskResolve'
 import { deliveryHint, suggestDelivery } from '../../lib/taskSuggest'
 import { useFleetNewOptions, type FleetProjectOption } from '../../hooks/useFleetNewOptions'
 import { ConfirmModal } from '../../pages/settings/primitives'
-import { forcedNote, isAdmissionRefusal } from '../../lib/spawnAdmission'
+import { forceOfferOf, forcedNote } from '../../lib/spawnAdmission'
 import { pushNotification } from '../../lib/notifications'
 import { setSessionRole, type SessionRole } from '../../lib/sessionRoles'
 import { usePlanLimits } from '../../lib/planLimits'
@@ -265,6 +265,17 @@ export function NewSessionModal({
    * an edited attempt.
    */
   const [forceable, setForceable] = useState(false)
+  /**
+   * RES.1 — the queue entry the memory gate filed THIS attempt under. "Start anyway" on a queued
+   * attempt first CANCELS that entry (`DELETE /api/resources/queue/:id`), so the forced start never
+   * leaves a queued twin to start a second session later. Cleared with `forceable`.
+   */
+  const [queuedId, setQueuedId] = useState<string | null>(null)
+  /** The confirmation the deliberate override goes through (QA OPENCODE.COMPLETO: the refusal said "start anyway" with no button). */
+  const [confirmForce, setConfirmForce] = useState(false)
+  /** A start refused by the harness's OWN version (opencode < 1.18.0 on its free tier): the update it offers, in one click. */
+  const [updateOffer, setUpdateOffer] = useState<string | null>(null)
+  const [updating, setUpdating] = useState(false)
 
   /** Which question is on screen. The ORDER and the gating are `wizardSteps.ts`'s, not this file's. */
   const [step, setStep] = useState<StepId>(restored?.step ?? 'assistant')
@@ -317,7 +328,7 @@ export function NewSessionModal({
   // into whatever gets submitted next. Runs on mount too, which is harmless: `forceable` starts
   // `false` already, and it is only ever set to `true` inside `start()`, at a render where `draft`
   // itself has not changed.
-  useEffect(() => { setForceable(false) }, [draft])
+  useEffect(() => { setForceable(false); setQueuedId(null) }, [draft])
 
   // What survives a change of assistant: a model or an effort the NEW assistant also names is KEPT,
   // and anything it cannot accept is dropped rather than sent as a flag the CLI rejects at spawn.
@@ -622,6 +633,21 @@ export function NewSessionModal({
     }
   }
 
+  /** The confirmed override: drop this attempt's queue entry (if the gate queued it), then the same request with `force: true`. */
+  async function forceStart() {
+    setConfirmForce(false)
+    if (queuedId) {
+      const res = await fetch(`/api/resources/queue/${encodeURIComponent(queuedId)}`, { method: 'DELETE' }).catch(() => null)
+      // Already gone (it started, or was cancelled elsewhere): nothing queued is left to duplicate.
+      if (res && !res.ok && res.status !== 404) {
+        setNotice(pt ? 'Não foi possível tirar a sessão da fila; nada foi iniciado.' : 'Could not take the session off the queue; nothing was started.')
+        return
+      }
+      setQueuedId(null)
+    }
+    await start(true)
+  }
+
   async function start(force = false) {
     if (!canStart) return
     if (isNative) return startNative()
@@ -656,7 +682,8 @@ export function NewSessionModal({
           ...(force ? { force: true as const } : {}),
         }),
       })
-      const json = await res.json() as { ok: boolean; message: string; id?: string; queued?: { id: string; position: number } }
+      const json = await res.json() as { ok: boolean; message: string; id?: string; queued?: { id: string; position: number }; action?: { kind: string; harness: string } }
+      setUpdateOffer(!json.ok && json.action?.kind === 'update-harness' ? json.action.harness : null)
       if (json.ok) {
         // Forced through despite the budget — surfaced through the persisted notification store
         // (never silently), the same "already-localized sentence, meta-carried" pattern
@@ -702,10 +729,11 @@ export function NewSessionModal({
       }
       setBusy(false)
       setNotice(json.message)
-      const queued = json.queued !== undefined
-      // RES.1 — a QUEUED spawn starts by itself when room frees. "Start anyway" is withheld: it would
-      // start this session now AND leave the queued copy to start a second one later.
-      setForceable(!queued && isAdmissionRefusal(json))
+      // RES.1 — a QUEUED spawn starts by itself when room frees. "Start anyway" stays offered (the
+      // refusal's own sentence names it), but it cancels the queued copy first — see `forceStart`.
+      const offer = forceOfferOf(json)
+      setQueuedId(offer.queuedId)
+      setForceable(offer.offer)
     } catch {
       setBusy(false)
       setNotice(pt ? 'Erro de rede ao falar com esta máquina.' : 'Network error talking to this machine.')
@@ -1218,9 +1246,32 @@ export function NewSessionModal({
               * gets submitted next. Same secondary (bordered) shape the Back button already uses, so
               * "Start session" stays the one button that reads as the ordinary, unconditional action.
               */}
+            {updateOffer && (
+              <button
+                type="button"
+                onClick={() => setUpdating(true)}
+                disabled={busy}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '9px 14px', borderRadius: 9, cursor: busy ? 'default' : 'pointer',
+                  minHeight: isMobile ? 44 : undefined, boxSizing: 'border-box',
+                  border: '1px solid var(--anthropic-orange)', background: 'transparent',
+                  color: 'var(--anthropic-orange)', fontFamily: 'inherit', fontSize: 13,
+                }}
+              >
+                {pt ? `Atualizar o ${(HARNESS_LABELS as Record<string, string>)[updateOffer] ?? updateOffer}` : `Update ${(HARNESS_LABELS as Record<string, string>)[updateOffer] ?? updateOffer}`}
+              </button>
+            )}
+            <HarnessInstallDialog
+              target={updating && updateOffer ? { id: updateOffer, label: (HARNESS_LABELS as Record<string, string>)[updateOffer] ?? updateOffer, installed: true } : null}
+              pt={pt}
+              onClose={() => setUpdating(false)}
+              onDone={() => { setUpdateOffer(null); setNotice(pt ? 'Atualizado. Agora é só iniciar a sessão.' : 'Updated. You can start the session now.'); retry() }}
+            />
             {forceable && (
               <button
-                onClick={() => void start(true)}
+                data-start-anyway
+                onClick={() => setConfirmForce(true)}
                 disabled={busy}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6,
@@ -1253,6 +1304,22 @@ export function NewSessionModal({
           </>)}
         </footer>
       </div>
+      <ConfirmModal
+        open={confirmForce}
+        title={pt ? 'Iniciar mesmo assim?' : 'Start anyway?'}
+        message={queuedId
+          ? (pt
+            ? 'Esta máquina está com pouca memória e a sessão está na fila. Iniciar agora tira ela da fila e ignora a verificação de memória — a máquina pode ficar lenta ou fechar outros programas.'
+            : 'This machine is low on memory and the session is queued. Starting now takes it off the queue and overrides the memory check — the machine may slow down or close other programs.')
+          : (pt
+            ? 'Esta máquina está com pouca memória. Iniciar agora ignora a verificação de memória — a máquina pode ficar lenta ou fechar outros programas.'
+            : 'This machine is low on memory. Starting now overrides the memory check — the machine may slow down or close other programs.')}
+        cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+        confirmLabel={pt ? 'Iniciar mesmo assim' : 'Start anyway'}
+        onCancel={() => setConfirmForce(false)}
+        onConfirm={() => { void forceStart() }}
+        focusCancel
+      />
       <ConfirmModal
         open={confirmClose}
         title={pt ? 'Fechar nova sessão?' : 'Close new session?'}

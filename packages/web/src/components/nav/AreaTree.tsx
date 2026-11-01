@@ -17,6 +17,9 @@ import { BetaTag } from '../BetaTag'
 import { FieldInput } from '../../pages/settings/primitives'
 import { SOLID_COUNT } from './countBadge'
 import { areaOpenStore, isAreaOpen, openedArea, toggledAreaOpen } from '../../lib/areaOpen'
+import { useEngineSurfaces } from '../../hooks/useEngineSurfaces'
+import { surfacePagePath } from '../../lib/engineSurfaces'
+import { surfaceGlyph } from '../EngineSurfaceButtons'
 
 /** The lucide component behind each area icon: the bar's centre button reuses the exact one. */
 export const AREA_LUCIDE: Record<AreaIcon, LucideIcon> = {
@@ -138,6 +141,37 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
     if (map[currentId] === false || Object.entries(map).some(([k, v]) => k !== currentId && v === true)) areaOpenStore.set(openedArea(map, currentId))
   }, [currentId, sheet])
 
+  // Engine surfaces announced for the `rail` placement: one entry each, beside the pages, opening the
+  // surface as a page on its own route (engine-api 1.18). None on a community build.
+  const railSurfaces = useEngineSurfaces('rail')
+  const railRow = (s: (typeof railSurfaces)[number]) => {
+    const label = s.label[lang]
+    const to = surfacePagePath(s.id)
+    const active = pathname === to
+    const Glyph = surfaceGlyph(s.icon)
+    return (
+      <Tip key={s.id} label={label} show={collapsed}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <a href={to} data-engine-rail={s.id}
+            aria-label={collapsed ? label : undefined} title={collapsed ? undefined : label}
+            aria-current={active ? 'page' : undefined}
+            onClick={e => { e.preventDefault(); (onNavigate ?? navigate)(to) }}
+            style={{
+              ...areaRowStyle(sheet),
+              padding: collapsed ? '0' : '0 12px',
+              justifyContent: collapsed ? 'center' : 'flex-start', textDecoration: 'none',
+              fontWeight: active ? 700 : 500,
+              color: active ? 'var(--anthropic-orange)' : 'var(--text-secondary)',
+              background: active ? 'var(--anthropic-orange-dim)' : 'transparent',
+            }}>
+            <span style={{ flexShrink: 0, display: 'flex' }}>{Glyph && <Glyph size={17} aria-hidden />}</span>
+            {!collapsed && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>}
+          </a>
+        </div>
+      </Tip>
+    )
+  }
+
   const areaRow = (area: Area) => {
     const label = pageLabel(area, lang)
     const active = current?.area.id === area.id
@@ -252,6 +286,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
           )}
         </div>
       ))}
+      {railSurfaces.map(railRow)}
     </div>
   )
 

@@ -11,6 +11,8 @@
  * the same defect `liveEmptyNotice` exists to prevent on the dashboard.
  */
 
+import { dedupeRepeatedPrompt } from './prompt-dedupe'
+import { opencodeDbPath, readOpencodeActivity } from './opencode-store'
 import { anyGrant, scrubDeep, scrubTerminalLine } from '../vault/grants'
 import { canonicalOfTuiMode, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
 import { createLimiter } from '../utils'
@@ -51,6 +53,10 @@ import { adapterActivity, planScreen, type AdapterStateFeed } from './adapter-st
 import { tailActivity, tailSkipsScreen, tailStateOf, type TailReading, type TailStateMemo } from './tail-state'
 import { linkDecision, liveLinks, moveAllowed } from './relink-policy'
 import { foreignConversations } from './row-conversation'
+
+/** Harnesses whose managed row is linked from the `sessionId` `scanProcesses` reports for its pane process
+ *  (opencode — see the block in the poll that reads it). */
+const SCAN_LINKED: ReadonlySet<HarnessId> = new Set<HarnessId>(['opencode'])
 
 function statQuiet(path: string): { size: number; mtimeMs: number } | null {
   try { const st = statSync(path); return { size: st.size, mtimeMs: st.mtimeMs } } catch { return null }
@@ -523,9 +529,11 @@ export function createSessionsPoller(o: {
       /** The harness mode each running session is in — see `mode-spec.ts`. */
       const modes = new Map<string, SessionMode>()
       const modeChoices = new Map<string, SessionMode[]>()
+      /** 1.20 — a structured session's model as its protocol states it, and the ones it can switch to. */
+      const modelChoices = new Map<string, { current: string | null; options: Array<{ id: string; label: string }> }>()
       const dialogOptions = new Map<string, DialogOption[]>()
       const dialogForm = new Map<string, DialogForm>()
-      const dialogSelect = new Map<string, 'numbered' | 'marker'>()
+      const dialogSelect = new Map<string, 'numbered' | 'marker' | 'inline'>()
       const dialogStated = new Set<string>()
       /*
        * WHY THE REFUSAL IS CARRIED AND NOT JUST THE OPTIONS.
@@ -623,6 +631,8 @@ export function createSessionsPoller(o: {
           const choices = o.backend.modesOf?.(r.id)
           if (statedMode) modes.set(r.id, statedMode)
           if (choices && choices.length > 0) modeChoices.set(r.id, choices)
+          const models = o.backend.modelsOf?.(r.id)
+          if (models && models.options.length > 0) modelChoices.set(r.id, models)
         }
 
         const reading = adapter?.reading(r.id)
@@ -753,7 +763,8 @@ export function createSessionsPoller(o: {
         if (statedDialog) {
           // The protocol STATES the question: show that, not the screen tail — a structured screen is
           // a log, and its tail still carried the previous question above the new options (live QA).
-          const statedPrompt = o.backend.attentionOf?.(r.id)?.prompt
+          const statedPromptRaw = o.backend.attentionOf?.(r.id)?.prompt
+          const statedPrompt = statedPromptRaw ? dedupeRepeatedPrompt(statedPromptRaw) : statedPromptRaw
           // Drawn in the screen's own shape (the prompt, a blank, the numbered options), so the card
           // reads the prompt as the QUESTION — a lone line was folded away as "the session screen".
           const promptLines = statedPrompt ? [statedPrompt, '', ...statedDialog.map((l, i) => `${i + 1}. ${l}`)] : null
@@ -946,6 +957,29 @@ export function createSessionsPoller(o: {
           if (linked) procLinkWrites++
         }
       }
+      // opencode's link: one `opencode.db` for every session leaves no open file that names one, so
+      // `scanProcesses` reads opencode's own log instead (`opencode-run-link.ts`: the run that started in
+      // this pane's cwd at this process's start time, refusing every ambiguity) and stamps the process's
+      // `sessionId`. A managed row takes the id its PANE process reports. It is the harness's own
+      // statement about the session it is driving, so it is recorded like the process-log route
+      // (`assigned`, `process-log`), follows `/new` the same way, and never moves a row onto a
+      // conversation another live row drives.
+      if (o.recordConversation) {
+        const scanned = new Map<number, string>()
+        for (const p of processes) if (SCAN_LINKED.has(p.harness) && p.sessionId && p.pid !== undefined) scanned.set(p.pid, p.sessionId)
+        for (const m of registry) {
+          if (!SCAN_LINKED.has(m.harness)) continue
+          const pid = panePids?.get(m.id)
+          const found = pid === undefined ? undefined : scanned.get(pid)
+          if (!found || found === m.conversationId) continue
+          if (m.conversationId && !moveAllowed(m.id, found, live)) continue
+          try {
+            await o.recordConversation(m.id, found, 'assigned', 'process-log')
+            await o.rekeyRole?.(m.id, found)
+            procLinkWrites++
+          } catch { /* retry next poll */ }
+        }
+      }
       markFleetPhase(`poll: processConversation x${procLinkWrites}`, procLinkStart)
 
       // THE POST-MORTEM LINK. The block above can only name a conversation while the process is
@@ -1124,8 +1158,18 @@ export function createSessionsPoller(o: {
       const structured = new Set<string>()
       if (o.backend.isStructured) for (const r of reconciled) if (o.backend.isStructured(r.id)) structured.add(r.id)
 
+      // OPENCODE.RESTO — an EXTERNAL opencode (a TUI opened by hand) states its activity from opencode.db: exact, so
+      // its row reads working / waiting before anyone takes it over. Harnesses with no such store reading stay unknown.
+      const externalActivity = new Map<string, SessionActivity>()
+      for (const p of processes) {
+        if (p.harness !== 'opencode' || !p.sessionId || externalActivity.has(p.sessionId)) continue
+        const a = readOpencodeActivity(opencodeDbPath(), p.sessionId)
+        if (a) externalActivity.set(p.sessionId, a)
+      }
+
       const sessions = buildSessionViews({
         reconciled,
+        ...(externalActivity.size > 0 ? { externalActivity } : {}),
         ...(exactLinksOnDisk ? { exactLinksOnDisk } : {}),
         activity: confirmedActivity,
         background,
@@ -1134,6 +1178,7 @@ export function createSessionsPoller(o: {
         approvals,
         modes,
         modeChoices,
+        modelChoices,
         ...(structured.size > 0 ? { structured } : {}),
         dialogOptions,
         dialogForm,

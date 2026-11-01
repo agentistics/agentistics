@@ -1,6 +1,6 @@
 {
   "name": "agentistics",
-  "version": "2.166.0",
+  "version": "2.182.0",
   "description": "Local analytics dashboard for AI coding assistants — tracks tokens, cost, sessions, and activity from ~/.claude/",
   "keywords": [
     "claude",
@@ -48,6 +48,7 @@
     "central:bg": "bun packages/server/bin/cli.ts server --central --bg",
     "stub": "bun run packages/server/scripts/ensure-type-stub.ts",
     "test": "bun test",
+    "typecheck": "bun run stub && tsc --noEmit",
     "prepare": "husky",
     "mcp": "bun run packages/mcp/agentistics-mcp.ts"
   },

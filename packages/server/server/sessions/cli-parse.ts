@@ -49,6 +49,10 @@ export type SessionCommand =
       /** `--handoff`: a LEADER hand-off — the new session is the verified caller's successor and
        *  inherits what the API hand-off inherits (folder, pin, title, check-in, role, away, relay). */
       handoff?: boolean
+      /** ORQ.H2 `--handoff-file <path>`: the leader's manual hand-off; every open owner request must appear in it. */
+      handoffFile?: string
+      /** ORQ.H4 `--pedido <id>`: the owner request this session is started to serve (the spawn gate checks it fits). */
+      pedido?: string
       /** `--account <acc_…>` (flag `multi-account`): the harness account to run on. See `spawn-account.ts`. */
       account?: string
       /** A refusal is machine-readable too — see `admissionRefusalBody`. */
@@ -155,7 +159,7 @@ function notifyValue(v: string): NotifySwitch | null {
 }
 
 const VALUE_FLAGS = new Set([
-  '-p', '--prompt', '--mode', '--model', '--effort', '--cwd', '--name', '--task', '--subtask', '--session', '--attempt', '--notify', '--role', '--folder',
+  '-p', '--prompt', '--mode', '--model', '--effort', '--cwd', '--name', '--task', '--subtask', '--session', '--attempt', '--notify', '--role', '--folder', '--handoff-file', '--pedido',
   '--account',
 ])
 
@@ -317,7 +321,9 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
     if (arg === '--json') { cmd.json = true; continue }
     if (arg === '--force') { cmd.force = true; continue }
     if (arg === '--shared-cwd') { cmd.sharedCwd = true; continue }
-    if (arg === '--handoff') { cmd.handoff = true; continue }
+    // A hand-off is asked by a session from its own tool shell, where attaching a terminal would hang that
+    // shell — and a no-questions successor only exists over the protocol — so it always starts detached.
+    if (arg === '--handoff') { cmd.handoff = true; cmd.background = true; continue }
     if (arg === '--away') { cmd.away = true; continue }
     if (arg === '--no-away') { cmd.away = false; continue }
     if (arg === '--task') {
@@ -351,6 +357,8 @@ export function parseSessionArgs(argv: string[]): SessionCommand {
       cmd.mode = value; continue
     }
     if (arg === '--folder') { cmd.folder = value; continue }
+    if (arg === '--handoff-file') { cmd.handoffFile = value; continue }
+    if (arg === '--pedido') { cmd.pedido = value; continue }
     if (arg === '--account') { cmd.account = value; continue }
     if (arg === '--role') {
       if (value !== 'leader' && value !== 'worker') return { kind: 'error', message: '--role takes "leader" or "worker".' }
