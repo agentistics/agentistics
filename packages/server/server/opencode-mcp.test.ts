@@ -89,6 +89,14 @@ describe('IO in a throwaway directory', () => {
 
 describe('OPENCODE.PAPÉIS — a commented opencode config still gets the agentistics MCP', () => {
   const commented = '{\n  // my provider\n  "$schema": "https://opencode.ai/config.json", /* block */\n  "provider": { "x": { "options": { "baseURL": "http://a//b" } }, },\n}\n'
+  test('stripJsonc drops a trailing comma even when a comment follows it', () => {
+    expect(JSON.parse(stripJsonc('{"a": 1, // note\n}'))).toEqual({ a: 1 })
+    expect(JSON.parse(stripJsonc('{"a": 1 /* c */,\n}'))).toEqual({ a: 1 })
+    expect(JSON.parse(stripJsonc('{"a": [1, 2,\n // last\n],\n // end\n}'))).toEqual({ a: [1, 2] })
+  })
+  test('stripJsonc keeps // in a URL string and a comma inside a string', () => {
+    expect(JSON.parse(stripJsonc('{"u": "http://x/y", // c\n "s": "a,}", }'))).toEqual({ u: 'http://x/y', s: 'a,}' })
+  })
   test('stripJsonc removes comments and trailing commas, never inside a string', () => {
     expect(JSON.parse(stripJsonc(commented))).toEqual({ $schema: 'https://opencode.ai/config.json', provider: { x: { options: { baseURL: 'http://a//b' } } } })
     expect(JSON.parse(stripJsonc('{"a":"x\\" // y", "b": [1,2,],}'))).toEqual({ a: 'x" // y', b: [1, 2] })
