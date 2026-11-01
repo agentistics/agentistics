@@ -266,6 +266,19 @@ describe('a structured session survives a server restart', () => {
       expect(server.base.spawned).toHaveLength(0)
     })
 
+    test(`${harness}: the server never adopts a relay it is STILL STARTING itself (a fork / reopen in flight)`, async () => {
+      const r = rig()
+      const server = r.server({ harness })
+      await server.b.reattach() // boot: the server adopts from now on
+      let done = false
+      const spawning = server.b.spawn(webSpawn(r.root, 'slow-cli-turn', harness)).finally(() => { done = true })
+      while (!done) { await server.b.list(); await sleep(5) }
+      await spawning
+      await server.b.list()
+      await sleep(200)
+      expect(r.started).toHaveLength(1) // one driver: its own start, no adoption from under it
+    })
+
     test(`${harness}: a relay whose driver is another LIVE process is left to it, and a CLI never adopts`, async () => {
       const r = rig()
       const cli = r.server({ harness })
