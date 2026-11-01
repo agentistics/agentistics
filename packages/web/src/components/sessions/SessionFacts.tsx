@@ -13,6 +13,7 @@ import type React from 'react'
 import { sessionNotify, type ControlSession } from '@agentistics/tui/control/session-fleet'
 import { sessionDisplayTitle } from '../../lib/sessionDisplayTitle'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
+import { useSessionWait, waitLineText } from '../../lib/sessionWaits'
 
 /**
  * A model id, shortened for a narrow column.
@@ -49,8 +50,11 @@ export interface SessionFactsProps {
   withEffort?: boolean
 }
 
-export function SessionFacts({ session, selected = false, metaColor, withEffort = false, titleBadge }: SessionFactsProps) {
+export function SessionFacts({ session, selected = false, metaColor, withEffort = false, titleBadge, lang }: SessionFactsProps) {
   const wants = sessionNotify(session)
+  // DSL.ACORDAR: a durable wait is its OWN line — it never changes the state word nor asks for a person.
+  const wait = useSessionWait(session.id)
+  const waitLang = lang ?? (typeof document !== 'undefined' && document.documentElement.lang.startsWith('pt') ? 'pt' : 'en')
   return (
     <span style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
       {/* The DELIVERY's name, read above the title. READ-ONLY on purpose: it used to have a clickable
@@ -95,6 +99,13 @@ export function SessionFacts({ session, selected = false, metaColor, withEffort 
           <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{session.effort}</span>
         )}
       </span>
+      {wait && (
+        <span data-testid="session-wait-line" title={wait.waitId} style={{
+          fontSize: 10.5, color: 'var(--text-tertiary)', minWidth: 0, overflowWrap: 'anywhere',
+        }}>
+          {waitLineText(wait, waitLang)}
+        </span>
+      )}
     </span>
   )
 }

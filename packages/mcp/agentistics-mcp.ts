@@ -614,6 +614,27 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_wait",
+    description:
+      "EXPERIMENTAL (AGENTISTICS_FLOWS) — a DURABLE wait the SERVER keeps for YOU: instead of polling or running a background command, register what you wait for and a deadline; when the condition is met (or the deadline passes, once) the server types a wake message into your own session, headed `[from flow wait · nudge]`, naming the wait id and generation. Conditions are a closed set: `{kind:'handback', from:<session id>, since?:ISO}` (a handback FROM that session), `{kind:'memory', minAvailableMB}` (free memory, two stable readings), `{kind:'time', at:ISO}`, `{kind:'gate', gate:'sessao-parada'|'arvore-limpa'|'trabalho-salvo', sessionId}`. action=register needs `condition` + `deadlineAt` (ISO UTC, ≤30 days; pass `requestId` to make a retry the same wait); action=ack (`waitId`, `generation`) confirms you RECEIVED the wake — without it the wake is sent again (at most 3 times), so ack every wake, and treat a repeated wake for the same id+generation as already handled; action=cancel (`waitId`) before it fires; action=list your open waits; action=handoff (`from`: the previous leader on the same task) moves its waits to you. A wait is never 'working' nor an approval.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["register", "cancel", "ack", "list", "handoff"] },
+        condition: { type: "object", description: "register: the condition (closed set, see the description)." },
+        deadlineAt: { type: "string", description: "register: ISO UTC deadline; the wake fires once when it passes without the condition." },
+        label: { type: "string", description: "register: one short line shown as 'aguardando <label> até <deadline>'." },
+        requestId: { type: "string", description: "register: optional idempotency key; the same key returns the same wait." },
+        reopen: { type: "boolean", description: "register: if you have ended when it fires, may the server reopen you (only when the host supports it)? Otherwise your leader is told." },
+        waitId: { type: "string", description: "cancel/ack: the wait id." },
+        generation: { type: "number", description: "ack: the generation named in the wake message." },
+        from: { type: "string", description: "handoff: the previous leader's session id." },
+        all: { type: "boolean", description: "list: include finished waits." },
+      },
+      required: ["action"],
+    },
+  },
+  {
     name: "agentistics_session_role",
     description:
       "Get or set a session's ROLE (leader | worker | auto). With no `ref` it is YOUR OWN session. Setting `leader` stores the role, renames the session to \"[ LEADER ] - <title>\" (\"[ LÍDER ] - …\" in a Portuguese UI) keeping the user's title, and the briefing then tells the model it is a leader; `worker`/`auto` strip the prefix. Use it to declare yourself leader when the work grows to several fronts — do not rename the session by hand. Setting ANOTHER session's role works only for sessions you started yourself. Idempotent. With no `role` it just reports the current one and the role line.",
@@ -1260,6 +1281,15 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           to: a?.to,
           kind: a?.kind,
           body: a?.body,
+          session: sessionProof(process.env),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_wait": {
+        const a = args as any;
+        const body = await apiSend("POST", "/api/flows/wait", {
+          action: a?.action, condition: a?.condition, deadlineAt: a?.deadlineAt, label: a?.label, requestId: a?.requestId,
+          reopen: a?.reopen, waitId: a?.waitId, generation: a?.generation, from: a?.from, all: a?.all,
           session: sessionProof(process.env),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
