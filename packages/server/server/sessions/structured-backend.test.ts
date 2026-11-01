@@ -750,6 +750,23 @@ describe('MODE.EVERYWHERE — the durable relay\'s session forwards the mode and
     expect(isReplayCall({ op: 'setMode', id: 'plan', at: 3, t: 1 })).toBe(true)
     expect(isReplayCall({ op: 'setMode', at: 3, t: 1 })).toBe(false)
   })
+  test('ADAPTER.LIMITES: an idempotency key given to setMode / answer is recorded with the call and handed to the driver', async () => {
+    const base = fakeSession({ id: 'm', harness: 'gemini', cwd: '/w' }) as unknown as Record<string, unknown>
+    const seen: unknown[] = []
+    const s = {
+      ...base,
+      setMode: async (id: string, key?: string) => { seen.push(['setMode', id, key]); return true },
+      answer: (_a: unknown, key?: string) => { seen.push(['answer', key]); return true },
+    } as unknown as StructuredSession
+    const recorded: unknown[] = []
+    const r = recordingSession(s, { record: c => { recorded.push(c) } })
+    await r.setMode!('plan', 'k:1')
+    r.answer({ choice: 2 }, 'k:2')
+    r.answer({ choice: 1 })
+    expect(seen).toEqual([['setMode', 'plan', 'k:1'], ['answer', 'k:2'], ['answer', undefined]])
+    expect(recorded).toEqual([{ op: 'setMode', id: 'plan', key: 'k:1' }, { op: 'answer', key: 'k:2', choice: 2 }, { op: 'answer', choice: 1 }])
+    expect(isReplayCall({ op: 'answer', choice: 2, key: 'k:2', at: 1, t: 1 })).toBe(true)
+  })
   test('a driver with no modes keeps none through the relay (absent stays absent)', () => {
     const s = fakeSession({ id: 'm', harness: 'gemini', cwd: '/w' }) as unknown as Record<string, unknown>
     const bare = { ...s, modes: undefined, mode: undefined, setMode: undefined } as unknown as StructuredSession

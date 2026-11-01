@@ -18,7 +18,8 @@ describe('TOOL.1 / TOOL.3 vocabulary', () => {
     for (const t of added) expect(EVENT_TYPES).toContain(t as never)
     // Appended: the four are the tail, in order, after every type that existed before them (the native
     // queue's H24/memory/ART.2 types landed in the same release, ahead of them).
-    expect(EVENT_TYPES.slice(-added.length)).toEqual(added as never)
+    // ADAPTER.LIMITES appended its two (`action.*`) after them, so the four end where those begin.
+    expect(EVENT_TYPES.slice(-added.length - 2, -2)).toEqual(added as never)
     expect(EVENT_TYPES.indexOf('turn.ended')).toBeLessThan(EVENT_TYPES.indexOf('structured.attempt' as never))
     expect(new Set(EVENT_TYPES).size).toBe(EVENT_TYPES.length)
   })

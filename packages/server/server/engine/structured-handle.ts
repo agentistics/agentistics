@@ -7,6 +7,9 @@
  * engine supplies never selects the session. The one id-taking door, `host.structuredSessions.get`,
  * resolves only sessions this engine started itself (`markEngineOpened`) and answers `null` for the rest.
  *
+ * 1.21 (ADAPTER.LIMITES E7) adds the keyed members — `submit` / `amend` (typed with the same header), `cancelRequest`,
+ * `requestState`, `limits` — each routed to the session's driver, which runs it exactly-once by its key.
+ *
  * The handle exposes three verbs and nothing else:
  *  - `follow` — the chat seam of that session;
  *  - `send` — a turn typed with an `[from agentistics · surface]` header, so a conversation never shows
@@ -18,7 +21,7 @@
  * Who may open a socket for a session is the host's gate: `/api/engine/x` is `localShell`, refused on a
  * central and on any exposed profile, so a socket exists only for the machine's own, authenticated owner.
  */
-import { ENGINE_SOCKET_LIMITS, type EngineStructuredSessions, type HarnessChat, type HarnessChatDelta, type StructuredSessionHandle } from '@agentistics/engine-api'
+import { ENGINE_SOCKET_LIMITS, validIdempotencyKey, type EngineStructuredSessions, type HarnessChat, type HarnessChatDelta, type StructuredSessionHandle } from '@agentistics/engine-api'
 import type { SessionBackend } from '../sessions/types'
 import type { EngineSocketEntry } from './engine-sockets'
 
@@ -40,7 +43,8 @@ export function forgetEngineOpened(id: string): void { engineOpened.delete(id) }
 export function resetEngineOpenedForTests(): void { engineOpened.clear() }
 
 export interface HandleDeps {
-  backend(): Promise<Pick<SessionBackend, 'chatOf' | 'sendText' | 'cancelTurn' | 'isStructured' | 'attentionOf' | 'activityOf'>>
+  backend(): Promise<Pick<SessionBackend, 'chatOf' | 'sendText' | 'cancelTurn' | 'isStructured' | 'attentionOf' | 'activityOf'
+    | 'submitRequest' | 'amendRequest' | 'cancelRequest' | 'requestStateOf' | 'limitsOf'>>
   /** Is the session still running? Judged against the registry, never the engine's say-so. */
   alive(id: string): Promise<boolean>
 }
@@ -74,6 +78,13 @@ function makeHandle(d: HandleDeps, b: Binding): Internal {
     return valid()
   }
   const backend = async () => { try { return await d.backend() } catch { return null } }
+  const textFits = (text: unknown): text is string => typeof text === 'string' && text.trim().length > 0 && Buffer.byteLength(text) <= MAX_SURFACE_TURN_BYTES
+  /** The backend, when the handle is valid, the session alive and STRUCTURED (a tmux fallback is not this door). */
+  const structuredBackend = async () => {
+    if (!(await check())) return null
+    const be = await backend()
+    return be && valid() && be.isStructured?.(b.id) ? be : null
+  }
 
   const handle: StructuredSessionHandle = {
     get live() { return valid() },
@@ -111,6 +122,43 @@ function makeHandle(d: HandleDeps, b: Binding): Internal {
         if (be.attentionOf?.(b.id)) return false
         return await be.sendText(b.id, `${SURFACE_TURN_HEADER}\n${text}`)
       } catch { return false }
+    },
+    // 1.21 (E7) — keyed members, structured sessions only; null = not possible here (invalid handle, not structured, the
+    // driver has no such member, or a malformed key / text). The driver decides everything else, with its receipt.
+    async submit(r) {
+      try {
+        if (!r || !textFits(r.text) || typeof r.requestId !== 'string' || !validIdempotencyKey(r.idempotencyKey)) return null
+        const be = await structuredBackend()
+        return be?.submitRequest ? await be.submitRequest(b.id, { ...r, text: `${SURFACE_TURN_HEADER}\n${r.text}` }) : null
+      } catch { return null }
+    },
+    async amend(requestId, text, key) {
+      try {
+        if (!textFits(text) || typeof requestId !== 'string' || !validIdempotencyKey(key)) return null
+        const be = await structuredBackend()
+        return be?.amendRequest ? await be.amendRequest(b.id, requestId, `${SURFACE_TURN_HEADER}\n${text}`, key) : null
+      } catch { return null }
+    },
+    async cancelRequest(requestId, key) {
+      try {
+        if (typeof requestId !== 'string' || !validIdempotencyKey(key)) return null
+        const be = await structuredBackend()
+        return be?.cancelRequest ? await be.cancelRequest(b.id, requestId, key) : null
+      } catch { return null }
+    },
+    async requestState(requestId) {
+      try {
+        if (typeof requestId !== 'string') return null
+        const be = await structuredBackend()
+        return be?.requestStateOf ? be.requestStateOf(b.id, requestId) : null
+      } catch { return null }
+    },
+    async limits() {
+      try {
+        if (!(await check())) return null
+        const be = await backend()
+        return be?.limitsOf && valid() ? be.limitsOf(b.id) : null
+      } catch { return null }
     },
     async cancel() {
       try {

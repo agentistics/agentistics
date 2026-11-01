@@ -1,0 +1,103 @@
+import { chmod, mkdir, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises'
+import { join } from 'node:path'
+
+type JsonObject = Record<string, unknown>
+
+function isObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+const LOCK_STALE_MS = 30_000
+const LOCK_RETRY_MS = 25
+const inProcessLocks = new Map<string, Promise<void>>()
+
+async function realConfigFile(file: string): Promise<string> {
+  try {
+    return await realpath(file)
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return file
+    throw error
+  }
+}
+
+async function withConfigLock<T>(file: string, operation: () => Promise<T>): Promise<T> {
+  const previous = inProcessLocks.get(file) ?? Promise.resolve()
+  let release!: () => void
+  const current = new Promise<void>(resolve => { release = resolve })
+  const queued = previous.then(() => current)
+  inProcessLocks.set(file, queued)
+  await previous
+  const lock = `${file}.lock`
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    for (;;) {
+      try {
+        handle = await open(lock, 'wx', 0o600)
+        break
+      } catch (error) {
+        if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) throw error
+        try {
+          if (Date.now() - (await stat(lock)).mtimeMs > LOCK_STALE_MS) await unlink(lock)
+        } catch (statError) {
+          if (!(statError && typeof statError === 'object' && 'code' in statError && statError.code === 'ENOENT')) throw statError
+        }
+        await new Promise(resolve => setTimeout(resolve, LOCK_RETRY_MS))
+      }
+    }
+    return await operation()
+  } finally {
+    await handle?.close().catch(() => {})
+    await unlink(lock).catch(() => {})
+    release()
+    if (inProcessLocks.get(file) === queued) inProcessLocks.delete(file)
+  }
+}
+
+/**
+ * Claude stores folder trust beside the account's config directory. Managed account roots do not
+ * share the default `~/.claude.json`, so seed the same per-project flag before starting the child.
+ */
+export async function ensureClaudeProjectTrusted(configRoot: string, cwd: string): Promise<void> {
+  try {
+    const file = await realConfigFile(join(configRoot, '.claude.json'))
+    await mkdir(configRoot, { recursive: true, mode: 0o700 })
+    await withConfigLock(file, async () => {
+      const readConfig = async (): Promise<JsonObject> => {
+        try {
+          const parsed: unknown = JSON.parse(await readFile(file, 'utf8'))
+          if (!isObject(parsed)) throw new Error('Claude config must contain a JSON object')
+          return parsed
+        } catch (error) {
+          if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return {}
+          throw error
+        }
+      }
+
+      const config = await readConfig()
+      const projects = config.projects
+      if (projects !== undefined && !isObject(projects)) throw new Error('Claude config projects must contain a JSON object')
+      const projectMap = isObject(projects) ? projects : {}
+      const currentProject = projectMap[cwd]
+      if (isObject(currentProject) && currentProject.hasTrustDialogAccepted === true) return
+      projectMap[cwd] = { ...(isObject(currentProject) ? currentProject : {}), hasTrustDialogAccepted: true }
+      config.projects = projectMap
+
+      let mode = 0o600
+      try { mode = (await stat(file)).mode & 0o777 } catch (error) {
+        if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error
+      }
+      const temporary = `${file}.${process.pid}.${crypto.randomUUID()}.tmp`
+      const handle = await open(temporary, 'w', mode)
+      try {
+        await handle.write(`${JSON.stringify(config, null, 2)}\n`)
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
+      await chmod(temporary, mode)
+      await rename(temporary, file)
+    })
+  } catch (error) {
+    console.warn(`[sessions] could not pre-trust Claude folder ${cwd}: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
