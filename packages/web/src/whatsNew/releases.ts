@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.179.0': {
+    features: [
+      {
+        pt: 'Experimental, ligação por voz: pedir para cancelar ou corrigir um pedido já enviado age sobre esse pedido; quando não dá para confirmar, a voz diz isso em vez de reenviar.',
+        en: 'Experimental, voice call: asking to cancel or correct a request you already sent acts on that request; when it cannot be confirmed, the voice says so instead of sending it again.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ligação por voz: respostas longas não param mais de falar no meio.',
+        en: 'Voice call: long replies no longer stop speaking halfway through.',
+      },
+      {
+        pt: 'Ligação por voz: a transcrição entende melhor termos técnicos e palavras em inglês no meio do português.',
+        en: 'Voice call: transcription understands technical terms and English words within Portuguese better.',
+      },
+      {
+        pt: 'Ligação por voz: os botões "Continuar a fala" e "Parar a fala" seguem o estilo dos botões do app, e o brilho do globo não passa mais da borda do painel nem do cartão.',
+        en: 'Voice call: the "Continue speaking" and "Stop speaking" buttons match the app\'s buttons, and the globe\'s glow no longer spills past the panel or card edge.',
+      },
+    ],
+  },
   '2.178.0': {
     features: [
       {
