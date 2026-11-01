@@ -111,3 +111,19 @@ describe('a reopened worker (new managed id, role keyed by conversation) keeps i
     expect(await storedRoleFor([child.conversationId, child.id])).toBe('worker')
   }, 60_000)
 })
+
+describe('a reopened worker handed off through the HOST door', () => {
+  test('reopened worker (role keyed by conversation only) handed off through the HOST door stays a worker, not re-rooted, predecessor not retired', async () => {
+    await addParent('hw-reopen-host', 'leader')
+    // A reopen mints a new managed id: the role lives under the conversation only.
+    await ensureSpawnRole(['conv-hw-reopen-host'], 'worker')
+    const before = new Set((await readRegistry()).map(r => r.id))
+    await viaHost('hw-reopen-host')
+    const rows = await readRegistry()
+    const child = rows.find(r => !before.has(r.id))!
+    expect(child).toBeDefined()
+    expect(child.handoffFrom).toBeUndefined()
+    expect(await storedRoleFor([child.conversationId, child.id])).toBe('worker')
+    expect(rows.find(r => r.id === 'hw-reopen-host')!.retire).toBeUndefined()
+  }, 60_000)
+})

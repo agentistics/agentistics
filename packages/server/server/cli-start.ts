@@ -2146,8 +2146,13 @@ export async function spawnManaged(req: {
   const { spawnGate } = await import('./sessions/spawn-gate')
   // The role the resumed/reopened conversation already has: an explicit role that contradicts it is refused NOW, before
   // any spawn, instead of a healthy session being stopped after it (QA F6).
+  // A reopened worker has a NEW managed id; its role is stored under the conversation, so the parent row is resolved
+  // and both keys are tried (same lookup the host door's `handoffKeepsRole` uses).
   const inheritedRole = req.handoff && req.parentSessionId
-    ? await storedRoleFor([req.parentSessionId]).catch(() => undefined)
+    ? await (async () => {
+        const parentRow = (await readRegistry().catch(() => [])).find(r => r.id === req.parentSessionId)
+        return storedRoleFor([parentRow?.conversationId, req.parentSessionId]).catch(() => undefined)
+      })()
     : (req.inherit || req.resumeId) ? await storedRoleFor([req.resumeId, req.inherit?.conversationId, req.inherit?.id]).catch(() => undefined) : undefined
   const gate = await spawnGate({
     // An account/harness switch (`switchFrom`) is the SAME piece of work moving on, like a reopen: it keeps the filing
