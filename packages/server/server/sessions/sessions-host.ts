@@ -11,6 +11,7 @@
  * the same defect `liveEmptyNotice` exists to prevent on the dashboard.
  */
 
+import { dedupeRepeatedPrompt } from './prompt-dedupe'
 import { opencodeDbPath, readOpencodeActivity } from './opencode-store'
 import { anyGrant, scrubDeep, scrubTerminalLine } from '../vault/grants'
 import { canonicalOfTuiMode, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
@@ -762,7 +763,8 @@ export function createSessionsPoller(o: {
         if (statedDialog) {
           // The protocol STATES the question: show that, not the screen tail — a structured screen is
           // a log, and its tail still carried the previous question above the new options (live QA).
-          const statedPrompt = o.backend.attentionOf?.(r.id)?.prompt
+          const statedPromptRaw = o.backend.attentionOf?.(r.id)?.prompt
+          const statedPrompt = statedPromptRaw ? dedupeRepeatedPrompt(statedPromptRaw) : statedPromptRaw
           // Drawn in the screen's own shape (the prompt, a blank, the numbered options), so the card
           // reads the prompt as the QUESTION — a lone line was folded away as "the session screen".
           const promptLines = statedPrompt ? [statedPrompt, '', ...statedDialog.map((l, i) => `${i + 1}. ${l}`)] : null
