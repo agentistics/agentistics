@@ -1409,6 +1409,29 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const result = await flowStatusResponse(url.pathname.slice('/api/flows/status/'.length), id => flowApi.status(id))
         return json(result.body, result.status)
       }
+      // DSL.ACORDAR: the session rows' "aguardando X até Y" line — every open wait still waiting, one per owner.
+      if (url.pathname === '/api/flows/waits' && req.method === 'GET') {
+        const { waitLines } = await import('./flows/waits')
+        return json({ waits: waitLines(await flowApi.read?.('waits', {}).catch(() => null)) })
+      }
+      // DSL.ACORDAR: `agentistics_wait` — the caller must PROVE it is a session (same proof as session-message).
+      if (url.pathname === '/api/flows/wait' && req.method === 'POST') {
+        const body = await req.json().catch(() => ({})) as Record<string, unknown> & { session?: { id?: unknown; token?: unknown } }
+        const { verifySessionIdentity } = await import('./sessions/session-identity')
+        const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
+        const { waitRequest } = await import('./flows/waits')
+        const out = await waitRequest(sender, body, {
+          emit: async event => flowApi.emit ? flowApi.emit(event) : [],
+          read: async (kind, q) => flowApi.read ? flowApi.read(kind, q) : null,
+          filed: async id => {
+            const { readRegistry } = await import('./sessions/registry')
+            const row = (await readRegistry()).find(m => m.id === id || m.conversationId === id)
+            return { ...(row?.taskId ? { taskId: row.taskId } : {}), ...(row?.subtaskId ? { subtaskId: row.subtaskId } : {}) }
+          },
+          newId: () => crypto.randomUUID(),
+        })
+        return json(out.body, out.status)
+      }
       return json({ error: 'not_found' }, 404)
     }
 

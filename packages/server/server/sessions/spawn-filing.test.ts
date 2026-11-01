@@ -314,11 +314,18 @@ describe('folder', () => {
 describe('hand-off', () => {
   const pred = R('pred', { conversationId: 'cp', cwd: '/home/u/workspace', taskId: 't-1', subtaskId: 's-1', leader: true })
   const groups = { groups: [{ id: 'lead', name: 'Lideres', sessionKeys: ['cp'] }, { id: 'w', name: 'Workers', sessionKeys: ['x'] }] }
-  test('copies the predecessor cwd, filing and folder, and is always a leader', () => {
+  test('copies the predecessor cwd, filing and folder, and promotes a normal hand-off to leader', () => {
     const p = ok(planFiling(base({ role: 'worker', handoffOf: pred, groups, rows: [R('x', { taskId: 't-1', subtaskId: 's-1', createdAt: '2026-12-01T00:00:00Z' })] })))
     expect(p).toMatchObject({
       role: 'leader', cwd: '/home/u/workspace', cwdSource: 'predecessor',
       taskId: 't-1', subtaskId: 's-1', taskTitle: 'Atomic spawn', folderId: 'lead', folderSource: 'predecessor',
+    })
+  })
+  test('a worker hand-off keeps the worker role and the predecessor filing', () => {
+    const p = ok(planFiling(base({ role: 'worker', handoffOf: pred, handoffKeepsRole: true, groups })))
+    expect(p).toMatchObject({
+      role: 'worker', cwd: '/home/u/workspace', cwdSource: 'predecessor',
+      taskId: 't-1', subtaskId: 's-1', folderId: 'lead', folderSource: 'predecessor',
     })
   })
   test('a harness SWITCH inherits the same filing but keeps the role it was given (none stays none)', () => {

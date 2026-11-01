@@ -76,6 +76,7 @@ export const AGENT_TOOL_NAMES = [
   // Session notifications (1)
   'agentistics_session_notify',
   'agentistics_session_message',
+  'agentistics_wait',
   'agentistics_checkin_report',
   'agentistics_session_role',
   'agentistics_session_away',
@@ -169,6 +170,10 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_session_message: {
     ...GROUPS, risk: 'W', routes: ['POST /api/session-message'],
     reason: 'types a message into another session through the composer path; additive, rate-limited, sender verified',
+  },
+  agentistics_wait: {
+    ...GROUPS, risk: 'W', routes: ['POST /api/flows/wait'],
+    reason: 'registers, acknowledges or cancels the calling session\'s OWN durable wait (closed condition set); the wake goes through the composer path; sender verified',
   },
   agentistics_checkin_report: {
     ...GROUPS, risk: 'W', routes: ['POST /api/checkin/report'],
