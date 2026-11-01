@@ -287,3 +287,19 @@ it('carries the exact handoff successor into the control fleet', () => {
   expect(toControlSession(view({ handoffTo: 'target', status: 'exited' }), S, LIVE).handoffTo).toBe('target')
   expect(toControlSession(view(), S, LIVE).handoffTo).toBeUndefined()
 })
+
+describe('an EXTERNAL row in waiting is not actionable', () => {
+  it('wears the neutral waiting word, not "needs you"', () => {
+    const c = toControlSession(view({ harness: 'opencode', status: 'external', activity: 'waiting' }), S, LIVE)
+    expect(c.state).toBe('waiting')
+    expect(c.actionable).toBe(false)
+    expect(c.stateLabel).toBe(S.sessState.waitingExternal)
+    expect(c.stateLabel).not.toBe(S.sessState.waiting)
+  })
+
+  it('a row we HOST waiting on us still says "needs you"', () => {
+    const c = toControlSession(view({ status: 'running', activity: 'waiting' }), S, LIVE)
+    expect(c.actionable).toBe(true)
+    expect(c.stateLabel).toBe(S.sessState.waiting)
+  })
+})
