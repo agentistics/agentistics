@@ -28,6 +28,7 @@ import type {
 } from '@agentistics/engine-api'
 import { answerFits } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
+import { ensureClaudeProjectTrusted } from './claude-trust'
 import { forkUnavailableNotice, harnessBlockedNotice } from './harness-notice'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
 import { pidAlive } from './structured-durable'
@@ -538,6 +539,8 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     },
     async spawn(req) {
       const harness = req.structured?.harness ?? harnessOfArgv(req.argv)
+      const claudeConfigRoot = req.env?.CLAUDE_CONFIG_DIR
+      if (harness === 'claude' && claudeConfigRoot) await ensureClaudeProjectTrusted(claudeConfigRoot, req.cwd)
       const flagOn = provider.flagOn?.() ?? false
       const origin = req.structured?.origin
       // Only ask what this route needs: flag off and not web → never touch `structured()`.

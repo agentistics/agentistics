@@ -139,6 +139,7 @@ import { readHarnessVersion } from './sessions/harness-version'
 import { answerStructured, reopenOrigin, spawnOriginOf, structuredIntentOf } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { applyAccountToPlan } from './sessions/account-plan'
+import { ensureClaudeProjectTrusted } from './sessions/claude-trust'
 import { prependContext } from './sessions/agentistics-context'
 import { rootIfLeader } from './sessions/team-links'
 import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './sessions/spawn-context'
@@ -2255,6 +2256,20 @@ export async function spawnManaged(req: {
   }, await spawnCapabilities(req.harness))
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
   if (req.account) applyAccountToPlan(planned.plan, req.account)
+  const claudeConfigRoot = planned.plan.env?.CLAUDE_CONFIG_DIR
+  if (req.harness === 'claude' && claudeConfigRoot && !req.account?.loginArgv) {
+    try {
+      await ensureClaudeProjectTrusted(claudeConfigRoot, req.cwd)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      return {
+        ok: false,
+        message: lang === 'pt'
+          ? `Não foi possível confiar na pasta do Claude antes de iniciar: ${detail}`
+          : `Could not trust the Claude folder before starting: ${detail}`,
+      }
+    }
+  }
 
   // THE BINARY MUST BE REACHABLE FROM HERE. The pane is spawned with THIS process's PATH (see
   // `newSessionArgs`), so `Bun.which` answers exactly what the pane's exec will find — and a
