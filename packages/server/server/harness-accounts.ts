@@ -372,7 +372,7 @@ export function createHarnessAccounts(options: {
   const now = options.now ?? Date.now
   type Detection = { identity: AccountIdentity; confirmed: boolean; signedOut?: true }
   const unknown = (): Detection => ({ identity: fallback(), confirmed: false })
-  const cache = new Map<string, { at: number; identity: Promise<Detection> }>()
+  const cache = new Map<string, { at: number; identity: Promise<Detection>; settled?: Detection }>()
   let queue: Promise<unknown> = Promise.resolve()
   /** Writers only: a read/modify/write without the cross-process lock is refused. */
   function serial<T>(work: () => Promise<T>): Promise<T> {
@@ -383,7 +383,8 @@ export function createHarnessAccounts(options: {
     queue = result.catch(() => {})
     return result
   }
-  async function identity(harness: HarnessId, root: string | null, force = false): Promise<Detection> {
+  /** Not `async`: callers compare the very promise they were handed against the cache's (see `current`). */
+  function identity(harness: HarnessId, root: string | null, force = false): Promise<Detection> {
     const key = bindingKey(harness, root)
     const held = cache.get(key)
     if (!force && held && now() - held.at < 60_000) return held.identity
@@ -395,8 +396,8 @@ export function createHarnessAccounts(options: {
       }))
       // A probe that outlives the race still answers: its result replaces the "unknown" the race
       // cached, so a cold CLI (first run on macOS) names the account on the next read, not a minute later.
-      void probing.then(d => { if (timedOut) cache.set(key, { at: now(), identity: Promise.resolve(d) }) },
-        e => { if (timedOut && e instanceof SignedOutError) cache.set(key, { at: now(), identity: Promise.resolve({ ...unknown(), signedOut: true as const }) }) })
+      void probing.then(d => { if (timedOut) cache.set(key, { at: now(), identity: Promise.resolve(d), settled: d }) },
+        e => { if (timedOut && e instanceof SignedOutError) { const d = { ...unknown(), signedOut: true as const }; cache.set(key, { at: now(), identity: Promise.resolve(d), settled: d }) } })
       try {
         return await Promise.race([
           probing,
@@ -407,6 +408,7 @@ export function createHarnessAccounts(options: {
       finally { if (timer) clearTimeout(timer) }
     })()
     cache.set(key, { at: now(), identity: pending })
+    void pending.then(d => { const entry = cache.get(key); if (entry && entry.identity === pending) entry.settled = d })
     return pending
   }
   async function write(data: AccountsFile): Promise<void> {
@@ -545,7 +547,10 @@ export function createHarnessAccounts(options: {
     const root = normRoot(rootArg)
     const legacy = typeof harnesses !== 'string'
     const requested = legacy ? [...new Set(harnesses)] : [harnesses]
-    const detected = await Promise.all(requested.map(async harness => ({ harness, ...await identity(harness, root) })))
+    const detected = await Promise.all(requested.map(async harness => {
+      const source = identity(harness, root)
+      return { harness, ...await source, source }
+    }))
     const resolveAll = (data: AccountsFile, mutate: boolean) => {
       let changed = false
       const accounts = detected.map(({ harness, identity: found, confirmed, signedOut }) => {
@@ -569,6 +574,13 @@ export function createHarnessAccounts(options: {
     try {
       return done(await serial(async () => {
         const data = await read()
+        // The detection above predates the wait for the lock. A login switch (`bind` after a forced
+        // probe) may have settled meanwhile: adopting the older answer would flip the root back to the
+        // login it just left, and the next read would flip it again, minting accounts as it goes.
+        for (const d of detected) {
+          const latest = cache.get(bindingKey(d.harness, root))
+          if (latest?.settled && latest.identity !== d.source) { Object.assign(d, latest.settled, { source: latest.identity }); d.signedOut = latest.settled.signedOut }
+        }
         const { accounts, changed } = resolveAll(data, true)
         if (changed) await write(data)
         return accounts
