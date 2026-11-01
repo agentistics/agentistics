@@ -1,9 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { start } from './cli-session'
 import { parseSessionArgs } from './cli-parse'
 import { addSession, readRegistry } from './registry'
 import { __setHarnessAgentsReaderForTest } from './harness-agents-io'
 import { __setSessionBackendForTest } from './index'
+import { resetHarnessAvailability } from './harness-available'
 import { ensureSpawnRole, storedRoleFor } from './session-roles'
 import { createControlHost } from '../cli-start'
 import { createTask, addSubtask } from './task-web'
@@ -14,8 +18,23 @@ import type { ManagedSession, SessionBackend } from './types'
 // Worker vs leader hand-off, through BOTH real doors (`session start --handoff` and `spawnManaged`).
 isolateAgentEnv()
 const saved = process.env.AGENTOP_MANAGED_ID
-beforeAll(() => __setHarnessAgentsReaderForTest(async () => []))
-afterAll(() => { __setHarnessAgentsReaderForTest(null); __setSessionBackendForTest(null) })
+// Both doors plan a real spawn, which needs the harness CLI on PATH: a stub, so the test does not
+// depend on the machine having `claude` installed (CI does not).
+const stubBin = mkdtempSync(join(tmpdir(), 'hw-bin-'))
+const pathBefore = process.env.PATH
+beforeAll(() => {
+  __setHarnessAgentsReaderForTest(async () => [])
+  writeFileSync(join(stubBin, 'claude'), '#!/bin/sh\nexit 0\n')
+  chmodSync(join(stubBin, 'claude'), 0o755)
+  process.env.PATH = `${stubBin}:${pathBefore ?? ''}`
+  resetHarnessAvailability()
+})
+afterAll(() => {
+  __setHarnessAgentsReaderForTest(null); __setSessionBackendForTest(null)
+  if (pathBefore === undefined) delete process.env.PATH; else process.env.PATH = pathBefore
+  resetHarnessAvailability()
+  rmSync(stubBin, { recursive: true, force: true })
+})
 afterEach(() => { __setSessionBackendForTest(null); if (saved === undefined) delete process.env.AGENTOP_MANAGED_ID; else process.env.AGENTOP_MANAGED_ID = saved })
 
 const mkBackend = () => ({
@@ -49,7 +68,11 @@ const viaCli = async (parent: string): Promise<number> => {
   process.env.AGENTOP_MANAGED_ID = parent
   const cmd = parseSessionArgs(['claude', '--bg', '--force', '--handoff', '--cwd', process.cwd(), '-p', 'x'])
   if (cmd.kind !== 'start') throw new Error('not a start')
-  return quiet(() => start(cmd, mkBackend(), { settleMs: 50, provesCaller: async () => true }))
+  return quiet(() => start(cmd, mkBackend(), {
+    settleMs: 50, provesCaller: async () => true,
+    // The ORQ.H3 gate is not under test here; injected so the test never asks a real server.
+    handoffGate: async () => ({ ok: true }),
+  }))
 }
 const viaHost = async (parent: string): Promise<void> => {
   __setSessionBackendForTest(mkBackend())
