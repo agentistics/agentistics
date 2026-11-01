@@ -494,12 +494,13 @@ export async function start(
     }
   }
   const verifiedCaller = parentSessionIdForPlan && (cmd.handoff || await callerHoldsIdentity(parentSessionIdForPlan)) ? parentSessionIdForPlan : undefined
+  const handoffKeepsRole = cmd.handoff && (await storedRoleFor([parentSessionIdForPlan])) === 'worker'
   const filing = await planSpawnFilingSafe({
     harness: cmd.harness,
     liveIds: await liveIdsOf(backend),
-    // A person with no parent session is neither: only a parent (or an explicit role) makes a worker.
-    role: cmd.handoff ? 'leader' : spawnRole({ explicit: cmd.role, leaderPrefix: !!cmd.label && hasRolePrefix(cmd.label), hasParent: !!parentSessionIdForPlan }),
-    ...(cmd.handoff ? { handoffOf: parentSessionIdForPlan } : {}),
+    // A worker hand-off remains in its parent's team; a leader hand-off becomes a new root.
+    role: handoffKeepsRole ? 'worker' : cmd.handoff ? 'leader' : spawnRole({ explicit: cmd.role, leaderPrefix: !!cmd.label && hasRolePrefix(cmd.label), hasParent: !!parentSessionIdForPlan }),
+    ...(cmd.handoff ? { handoffOf: parentSessionIdForPlan, ...(handoffKeepsRole ? { handoffKeepsRole: true } : {}) } : {}),
     taskRef: cmd.taskId ?? cmd.task, subtaskRef: cmd.subtask, folderRef: cmd.folder,
     cwd: cmd.cwd, sharedCwd: cmd.sharedCwd, callerSessionId: verifiedCaller,
   })
@@ -518,16 +519,21 @@ export async function start(
   const id = newSessionId()
   const offeredConversationId = randomUUID()
   const logFile = managedProcessLogPath(cmd.harness, id, AGENTISTICS_DATA_DIR)
+  // A hand-off already PROVED its caller by the pane above (stronger than the token check), so the
+  // predecessor's away mode and role origin are inherited on that proof.
+  const parentVerified = (cmd.handoff && !!parentSessionIdForPlan)
+    || await callerHoldsIdentity(callerSessionId())
   // A hand-off names its predecessor exactly; any other spawn by a predecessor that has already
   // handed off is filed under its successor (`team-links.ts`).
-  const parentLink = await parentLinkOf(callerSessionId(), { followHandoff: !cmd.handoff })
-  const parentSessionId = parentLink.parentSessionId
-  // A hand-off already PROVED its caller by the pane above (stronger than the token check), so the
-  // predecessor's away mode and role origin are inherited on that proof. The CALLER is what is
-  // verified — the followed successor is never the process asking.
-  const parentVerified = (cmd.handoff && !!parentSessionId && parentSessionId === parentSessionIdForPlan)
-    || await callerHoldsIdentity(callerSessionId())
   const registry0 = parentVerified ? await readRegistry() : []
+  const handoffParentRow = cmd.handoff && parentSessionIdForPlan ? registry0.find(m => m.id === parentSessionIdForPlan) : undefined
+  const parentLink = handoffKeepsRole && handoffParentRow
+    ? {
+        ...(handoffParentRow.parentSessionId ? { parentSessionId: handoffParentRow.parentSessionId } : {}),
+        ...(handoffParentRow.parentConversationId ? { parentConversationId: handoffParentRow.parentConversationId } : {}),
+      }
+    : await parentLinkOf(callerSessionId(), { followHandoff: !cmd.handoff })
+  const parentSessionId = parentLink.parentSessionId
   // DSL.TIPO-SESSAO — the spawn gate decides the role from the session's function BEFORE anything is written
   // (a leader prefix is a statement of intent, a parent makes a worker, a hand-off a leader); a refusal starts nothing.
   // The requester is the PROVEN caller (pane for a hand-off, identity token otherwise — `parentVerified`): a claimed
@@ -541,6 +547,7 @@ export async function start(
     harness: cmd.harness,
     ...(cmd.role ? { role: cmd.role } : {}),
     ...(cmd.label && hasRolePrefix(cmd.label) ? { leaderPrefix: true } : {}),
+    ...(handoffKeepsRole ? { inheritedRole: 'worker' as const } : {}),
     ...(parentSessionId ? { parentId: parentSessionId } : {}),
     ...(filing.taskId ? { taskId: filing.taskId } : {}),
     ...(filing.subtaskId ? { subtaskId: filing.subtaskId } : {}),
@@ -555,7 +562,6 @@ export async function start(
     : undefined
   const away = await resolveSpawnAwayFor(cmd.away, parentSessionId, parentVerified)
   // HANDOFF: the successor keeps the predecessor's title and is briefed with the owner's last words to it.
-  const handoffParentRow = cmd.handoff && parentSessionId ? registry0.find(m => m.id === parentSessionId) : undefined
   const label = cmd.handoff ? handoffTitle(handoffParentRow?.label, cmd.label) : cmd.label
   // …and its launch flags when this hand-off did not name them (same harness only).
   const launch = handoffSpawnDefaults(handoffParentRow, cmd.harness, { ...cmd, mode: cmd.mode ?? registry0.find(r => r.id === verifiedCaller)?.mode })
@@ -568,7 +574,7 @@ export async function start(
   const agentCaller = await callerHoldsIdentity(callerSessionId())
   // CONTA.AUTO (B) — a hand-off with no `--account` takes the router's account with room, never the predecessor's while it is
   // limit-blocked; an explicit `--account` still wins.
-  const handoffPick = cmd.handoff && !cmd.account
+  const handoffPick = cmd.handoff && !handoffKeepsRole && !cmd.account
     ? await handoffAccountChoice({ harness: cmd.harness, ...(handoffParentRow ? { predecessor: handoffParentRow } : {}), agentCaller })
     : undefined
   if (handoffPick && !handoffPick.room) {
@@ -576,7 +582,7 @@ export async function start(
       ? 'Nenhuma conta tem folga agora: o sucessor abre na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.'
       : 'No account has room right now: the successor opens on the account whose window reopens first, never on the predecessor\'s limit-blocked one.')
   }
-  const asked = cmd.account ?? handoffPick?.id
+  const asked = cmd.account ?? (handoffKeepsRole ? handoffParentRow?.accountId : handoffPick?.id)
   const account = decideSpawnAccount({
     harness: cmd.harness, ...(asked ? { requested: asked } : {}),
     agentCaller,
@@ -684,7 +690,7 @@ export async function start(
   if (role) await applyRoleTitle(id, label ?? id, role, lang).catch(() => false)
   const configuration = await configureSpawn(filing, { id, conversationId: planned.plan.conversationId }, handoffParentRow)
   if (!configuration.ready) console.error(configurationPendingMessage(id, configuration))
-  if (handoffParentRow) {
+  if (handoffParentRow && !handoffKeepsRole) {
     // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
     await import('./team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq))
   }

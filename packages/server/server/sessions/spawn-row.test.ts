@@ -94,6 +94,7 @@ describe('ORQ.FORA API filing request', () => {
     const { spawnSessionFilingRequest } = await import('./spawn-row')
     expect(spawnSessionFilingRequest({ cwd: '/w', harness: 'codex', label: '[ LEADER ] - Next', parentSessionId: 'parent', parentVerified: true })).toMatchObject({ role: 'leader', callerSessionId: 'parent', harness: 'codex' })
     expect(spawnSessionFilingRequest({ cwd: '/w', parentSessionId: 'parent', handoff: true })).toMatchObject({ role: 'leader', handoffOf: 'parent' })
+    expect(spawnSessionFilingRequest({ cwd: '/w', parentSessionId: 'parent', handoff: true, handoffKeepsRole: true })).toMatchObject({ role: 'worker', handoffOf: 'parent', handoffKeepsRole: true })
     // CONTA.TROCA v2: the replaced row's filing is inherited while the parent and role stay the caller's.
     expect(spawnSessionFilingRequest({ cwd: '/w', parentSessionId: 'lead', parentVerified: true, role: 'worker', switchFrom: 'old' }))
       .toMatchObject({ role: 'worker', handoffOf: 'old', handoffKeepsRole: true, callerSessionId: 'lead' })

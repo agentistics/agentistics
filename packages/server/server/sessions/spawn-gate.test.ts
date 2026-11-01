@@ -20,6 +20,7 @@ describe('op 1 sessao-com-papel (pure)', () => {
     expect(decideSessionRole(facts({ role: 'leader', subtaskId: 's-1' }))).toMatchObject({ ok: false, code: 'leader_on_subtask' })
     expect(decideSessionRole(facts({ door: 'handoff', role: 'worker' }))).toMatchObject({ ok: false, code: 'worker_handoff' })
     expect(decideSessionRole(facts({ door: 'handoff' }))).toMatchObject({ ok: true, role: 'leader' })
+    expect(decideSessionRole(facts({ door: 'handoff', inheritedRole: 'worker' }))).toMatchObject({ ok: true, role: 'worker' })
     expect(decideSessionRole(facts({ leaderPrefix: true }))).toMatchObject({ ok: true, role: 'leader' })
   })
   test('acceptance 5: the owner may open with no role (left unassigned, never invented)', () => {

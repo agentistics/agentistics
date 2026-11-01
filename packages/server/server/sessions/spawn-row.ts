@@ -32,6 +32,7 @@ export function spawnSessionFilingRequest(req: {
   harness?: string | undefined
   label?: string | undefined
   handoff?: boolean | undefined
+  handoffKeepsRole?: boolean | undefined
   /** CONTA.TROCA v2: inherit this row's filing as a hand-off successor would. */
   switchFrom?: string | undefined
   taskId?: string | undefined
@@ -39,11 +40,11 @@ export function spawnSessionFilingRequest(req: {
   cwd: string
 }): SpawnFilingRequest {
   return {
-    role: spawnRole({ explicit: req.role, leaderPrefix: !!req.label && hasRolePrefix(req.label), hasParent: !!req.parentSessionId, handoff: req.handoff }),
+    role: spawnRole({ explicit: req.role, leaderPrefix: !!req.label && hasRolePrefix(req.label), hasParent: !!req.parentSessionId, handoff: req.handoff && !req.handoffKeepsRole }),
     taskRef: req.taskId, subtaskRef: req.subtaskId, cwd: req.cwd,
     harness: req.harness,
     callerSessionId: req.parentVerified || req.handoff ? req.parentSessionId : undefined,
-    ...(req.switchFrom ? { handoffOf: req.switchFrom, handoffKeepsRole: true } : req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId } : {}),
+    ...(req.switchFrom ? { handoffOf: req.switchFrom, handoffKeepsRole: true } : req.handoff && req.parentSessionId ? { handoffOf: req.parentSessionId, ...(req.handoffKeepsRole ? { handoffKeepsRole: true } : {}) } : {}),
   }
 }
 
