@@ -41,7 +41,11 @@ export function sessionState(v: SessionView): SessionState {
   }
 }
 
-export function stateLabel(state: SessionState, s: CliStrings): string {
+export function stateLabel(state: SessionState, s: CliStrings, external = false): string {
+  // An EXTERNAL row in `waiting` is not actionable: agentop does not run it, so "needs you" offers
+  // a move nobody can make here. The neutral word says the same pause without the ask; an
+  // actionable row keeps "needs you".
+  if (state === 'waiting' && external) return s.sessState.waitingExternal
   switch (state) {
     case 'working': return s.sessState.working
     case 'waiting-approval': return s.sessState.waitingApproval
@@ -173,7 +177,7 @@ export function toControlSession(
     // relayed fleet — from the one place the word is decided. A cell of its own would have to be
     // added to each of them, and the first one missed would say `needs you` about a session that
     // still has work running, which is the reading this mark exists to correct.
-    stateLabel: v.background ? `${stateLabel(state, s)} · ${s.sessBackground}` : stateLabel(state, s),
+    stateLabel: v.background ? `${stateLabel(state, s, v.status === 'external')} · ${s.sessBackground}` : stateLabel(state, s, v.status === 'external'),
     // The machine-readable half, for a surface that wants to style it rather than read it.
     ...(v.background ? { background: true } : {}),
     actionable: v.status !== 'external' && v.status !== 'closed',
