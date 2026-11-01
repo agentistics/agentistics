@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.183.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Trabalho aberto em outra conta do Claude não corre mais o risco de perder a resposta "confiar nesta pasta?" quando duas sessões começam ao mesmo tempo.',
+        en: 'Work opened in another Claude account no longer risks losing the "trust this folder" answer when two sessions start at the same time.',
+      },
+      {
+        pt: 'Ligar um fluxo pelo terminal agora chega ao app que já está aberto, sem precisar reiniciá-lo (fluxos experimentais).',
+        en: 'Turning a flow on from the terminal now reaches the app that is already running, with no restart needed (experimental flows).',
+      },
+    ],
+  },
   '2.182.0': {
     features: [
       {

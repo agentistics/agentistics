@@ -1,4 +1,4 @@
-import { chmod, mkdir, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises'
+import { chmod, link, mkdir, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
 type JsonObject = Record<string, unknown>
@@ -10,6 +10,12 @@ function isObject(value: unknown): value is JsonObject {
 const LOCK_STALE_MS = 30_000
 const LOCK_RETRY_MS = 25
 const inProcessLocks = new Map<string, Promise<void>>()
+type LockFs = Pick<typeof import('node:fs/promises'), 'link' | 'open' | 'readFile' | 'stat' | 'rename' | 'unlink'>
+let lockFs: LockFs = { link, open, readFile, stat, rename, unlink }
+
+export function __setClaudeTrustFsForTest(overrides: Partial<LockFs> | null): void {
+  lockFs = overrides ? { link, open, readFile, stat, rename, unlink, ...overrides } : { link, open, readFile, stat, rename, unlink }
+}
 
 async function realConfigFile(file: string): Promise<string> {
   try {
@@ -20,6 +26,15 @@ async function realConfigFile(file: string): Promise<string> {
   }
 }
 
+function errorCode(error: unknown): unknown {
+  return error && typeof error === 'object' && 'code' in error ? error.code : undefined
+}
+
+/** Exported for tests only: lets them drive the lock with their own operation. */
+export async function __withConfigLockForTest<T>(file: string, operation: () => Promise<T>): Promise<T> {
+  return withConfigLock(file, operation)
+}
+
 async function withConfigLock<T>(file: string, operation: () => Promise<T>): Promise<T> {
   const previous = inProcessLocks.get(file) ?? Promise.resolve()
   let release!: () => void
@@ -28,18 +43,72 @@ async function withConfigLock<T>(file: string, operation: () => Promise<T>): Pro
   inProcessLocks.set(file, queued)
   await previous
   const lock = `${file}.lock`
+  const ownerToken = `${process.pid}:${crypto.randomUUID()}`
   let handle: Awaited<ReturnType<typeof open>> | undefined
+  let acquired = false
   try {
     for (;;) {
+      // True once our own `open(..., 'wx')` succeeded: from then on the file at `lock` is ours.
+      let created = false
       try {
-        handle = await open(lock, 'wx', 0o600)
+        handle = await lockFs.open(lock, 'wx', 0o600)
+        created = true
+        await handle.write(ownerToken)
+        await handle.sync()
+        acquired = true
         break
       } catch (error) {
-        if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) throw error
+        await handle?.close().catch(() => {})
+        handle = undefined
+        if (created) {
+          // We made the file but could not finish writing our token: it must not block everyone for the stale window.
+          await lockFs.unlink(lock).catch(() => {})
+          throw error
+        }
+        if (errorCode(error) !== 'EEXIST') throw error
         try {
-          if (Date.now() - (await stat(lock)).mtimeMs > LOCK_STALE_MS) await unlink(lock)
+          const observed = await lockFs.stat(lock)
+          const observedToken = await lockFs.readFile(lock, 'utf8').catch(readError => {
+            if (errorCode(readError) === 'ENOENT') return null
+            throw readError
+          })
+          if (Date.now() - observed.mtimeMs > LOCK_STALE_MS) {
+            const reclaimed = `${lock}.${process.pid}.${crypto.randomUUID()}.stale`
+            try {
+              await lockFs.rename(lock, reclaimed)
+              // The rename moved whatever sat at `lock` at that instant. Judge THAT file, not the one we stat'd earlier.
+              let sameLock = false
+              try {
+                const [reclaimedStat, reclaimedToken] = await Promise.all([
+                  lockFs.stat(reclaimed),
+                  lockFs.readFile(reclaimed, 'utf8'),
+                ])
+                sameLock = reclaimedStat.mtimeMs === observed.mtimeMs && reclaimedToken === observedToken
+              } catch (reclaimError) {
+                if (errorCode(reclaimError) !== 'ENOENT') throw reclaimError
+              }
+              if (!sameLock) {
+                // We displaced a live holder's lock: put it back if `lock` is still free. EEXIST/ENOENT mean someone
+                // else took the name or the file is gone. Any other error (EPERM/EXDEV/ENOSYS: no hard links here)
+                // cannot be repaired: log and carry on without restoring. The displaced holder's own release only
+                // removes `lock` when it still holds its token, so it tolerates the loss.
+                try {
+                  await lockFs.link(reclaimed, lock)
+                } catch (restoreError) {
+                  const code = errorCode(restoreError)
+                  if (code !== 'ENOENT' && code !== 'EEXIST') {
+                    console.warn(`[sessions] could not restore Claude trust lock after reclaim: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`)
+                  }
+                }
+              }
+              // Whatever happened above, the reclaimed name must never be left behind.
+              await lockFs.unlink(reclaimed).catch(() => {})
+            } catch (reclaimError) {
+              if (errorCode(reclaimError) !== 'ENOENT') throw reclaimError
+            }
+          }
         } catch (statError) {
-          if (!(statError && typeof statError === 'object' && 'code' in statError && statError.code === 'ENOENT')) throw statError
+          if (errorCode(statError) !== 'ENOENT') throw statError
         }
         await new Promise(resolve => setTimeout(resolve, LOCK_RETRY_MS))
       }
@@ -47,7 +116,12 @@ async function withConfigLock<T>(file: string, operation: () => Promise<T>): Pro
     return await operation()
   } finally {
     await handle?.close().catch(() => {})
-    await unlink(lock).catch(() => {})
+    if (acquired) {
+      try {
+        if (await lockFs.readFile(lock, 'utf8') === ownerToken) await lockFs.unlink(lock)
+      } catch {
+      }
+    }
     release()
     if (inProcessLocks.get(file) === queued) inProcessLocks.delete(file)
   }
