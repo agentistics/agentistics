@@ -2146,7 +2146,14 @@ export async function spawnManaged(req: {
   const { spawnGate } = await import('./sessions/spawn-gate')
   // The role the resumed/reopened conversation already has: an explicit role that contradicts it is refused NOW, before
   // any spawn, instead of a healthy session being stopped after it (QA F6).
-  const inheritedRole = (req.inherit || req.resumeId) ? await storedRoleFor([req.resumeId, req.inherit?.conversationId, req.inherit?.id]).catch(() => undefined) : undefined
+  // A reopened worker has a NEW managed id; its role is stored under the conversation, so the parent row is resolved
+  // and both keys are tried (same lookup the host door's `handoffKeepsRole` uses).
+  const inheritedRole = req.handoff && req.parentSessionId
+    ? await (async () => {
+        const parentRow = (await readRegistry().catch(() => [])).find(r => r.id === req.parentSessionId)
+        return storedRoleFor([parentRow?.conversationId, req.parentSessionId]).catch(() => undefined)
+      })()
+    : (req.inherit || req.resumeId) ? await storedRoleFor([req.resumeId, req.inherit?.conversationId, req.inherit?.id]).catch(() => undefined) : undefined
   const gate = await spawnGate({
     // An account/harness switch (`switchFrom`) is the SAME piece of work moving on, like a reopen: it keeps the filing
     // the row had, so a leader filed on a subtask is not refused as `leader_on_subtask` (owner, 2026-10-30).
@@ -2210,7 +2217,15 @@ export async function spawnManaged(req: {
     : undefined
   // The parent's conversation id, read from the registry at spawn: stable across the parent's reopens.
   // A hand-off names its predecessor exactly; every other spawn follows a predecessor's hand-off to its successor.
-  const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId, { followHandoff: !req.handoff }) : {}
+  const handoffParentForLink = req.handoff && req.parentSessionId
+    ? (await readRegistry().catch(() => [] as ManagedSession[])).find(m => m.id === req.parentSessionId)
+    : undefined
+  const parentLink = req.handoff && inheritedRole === 'worker' && handoffParentForLink
+    ? {
+        ...(handoffParentForLink.parentSessionId ? { parentSessionId: handoffParentForLink.parentSessionId } : {}),
+        ...(handoffParentForLink.parentConversationId ? { parentConversationId: handoffParentForLink.parentConversationId } : {}),
+      }
+    : req.parentSessionId ? await parentLinkOf(req.parentSessionId, { followHandoff: !req.handoff }) : {}
   const storedContextRole = role
     ? { role }
     : await resolveContextRole(id, req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId)
@@ -2220,9 +2235,7 @@ export async function spawnManaged(req: {
     : await resolveSpawnAwayFor(req.away, req.parentSessionId, req.parentVerified === true)
   // HANDOFF.RELAY: a leader hand-off's successor is briefed with what the owner said to the
   // predecessor and the predecessor's last reply, so a hand-off can never swallow an answer.
-  const handoffParentRow = req.handoff && req.parentSessionId
-    ? (await readRegistry().catch(() => [] as ManagedSession[])).find(m => m.id === req.parentSessionId)
-    : undefined
+  const handoffParentRow = handoffParentForLink
   const relay = handoffParentRow
     ? await import('./sessions/handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
@@ -2295,11 +2308,12 @@ export async function spawnManaged(req: {
   // TEAM LINK (`team-links.ts`): a leader — explicit, a hand-off successor, a reopened leader — is born
   // at the root; everyone else is the (current) caller's child.
   // QA F8 — `supersedes` is part of the row as it is written (a reopen with a new managed id keeps its team), never a later patch.
+  const bornRole = req.handoff ? (inheritedRole ?? 'leader') : storedContextRole.role
   await addSession(withSupersedes(rootIfLeader(await spawnRow({ id, spawnedAt, req: {
     ...req, ...(mode ? { mode } : {}),
     ...(parentLink.parentSessionId ? { parentSessionId: parentLink.parentSessionId } : {}),
     ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
-  }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }), req.handoff ? 'leader' : storedContextRole.role), req.inherit && req.inherit.id !== id ? req.inherit.id : undefined))
+  }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }), bornRole), req.inherit && req.inherit.id !== id ? req.inherit.id : undefined))
   // A worker must be filed before its process can receive the first prompt.
   if (req.contextTaskId) {
     const { configureSpawn } = await import('./sessions/spawn-configuration')
@@ -2315,9 +2329,9 @@ export async function spawnManaged(req: {
       [id, planned.plan.conversationId],
     )
   }
-  if (storedContextRole.role === 'leader') {
+  if (bornRole === 'leader') {
     const title = req.label ?? req.inherit?.label ?? req.task ?? `${req.harness}/${basename(req.cwd)}`
-    await applyRoleTitle(id, title, storedContextRole.role, lang)
+    await applyRoleTitle(id, title, bornRole, lang)
   }
   // A REOPEN keeps the replaced row's mute. A session linked to a conversation is muted under that
   // conversation, which the new row keeps; one with no link (codex, kimi, gemini…) was muted under its
@@ -2377,7 +2391,7 @@ export async function spawnManaged(req: {
       : died.message ? s.sessDiedAtSpawn(died.message) : s.sessDiedAtSpawnStatus(died.status)
     return { ok: false, message }
   }
-  if (storedContextRole.role) await markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)
+  if (bornRole) await markRoleDelivered([planned.plan.conversationId, id], bornRole)
   // DSL.TIPO-SESSAO — the row is born with the gate's role or the spawn is undone (never a session without its role).
   if (gate.role) {
     const { verifyBornRole } = await import('./sessions/spawn-gate')
@@ -2390,7 +2404,7 @@ export async function spawnManaged(req: {
       return { ok: false, message: `The session started but its role (${gate.role}) could not be recorded, so it was stopped — try again.` }
     }
   }
-  if (handoffParentRow) {
+  if (handoffParentRow && inheritedRole !== 'worker') {
     // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
     await import('./sessions/team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
   }
@@ -5012,12 +5026,17 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
      * than a session that starts and immediately dies with a usage error on a screen nobody sees.
      */
     async spawnSession(req: SpawnSessionRequest): Promise<SpawnSessionResult> {
+      let handoffParent = req.handoff && req.parentVerified && req.parentSessionId
+        ? (await readRegistry()).find(r => r.id === req.parentSessionId)
+        : undefined
+      const handoffKeepsRole = !!(req.handoff && handoffParent
+        && (await storedRoleFor([handoffParent.conversationId, handoffParent.id])) === 'worker')
       // PLAN.ACCOUNTS D3 — the account, decided before anything is filed or spawned. A caller that
       // already decided (`/api/fleet/new`) or a login session passes through untouched.
       const { hostSpawnAccount } = await import('./sessions/spawn-account-io')
       const chosen = await hostSpawnAccount({
         harness: req.harness as HarnessId,
-        ...(req.accountId !== undefined ? { accountId: req.accountId } : {}),
+        ...(req.accountId !== undefined ? { accountId: req.accountId } : handoffKeepsRole && handoffParent?.accountId ? { accountId: handoffParent.accountId } : {}),
         ...(req.accountDecided ? { accountDecided: true } : {}),
         ...(req.account ? { login: true } : {}),
         ...(req.callerVerified ? { callerVerified: true } : {}),
@@ -5028,19 +5047,16 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // group, a hand-off inheriting its predecessor's filing, cwd and folder. A refusal spawns nothing.
       const { planSpawnFilingSafe } = await import('./sessions/spawn-filing-io')
       const { filingRow, refusalText, spawnSessionFilingRequest } = await import('./sessions/spawn-row')
-      const filing = await planSpawnFilingSafe(spawnSessionFilingRequest(req))
+      const filing = await planSpawnFilingSafe(spawnSessionFilingRequest({ ...req, handoffKeepsRole }))
       if (!filing.ok) return { ok: false, message: refusalText(filing) }
       const taskId = filing.taskId
       const subtaskId = filing.subtaskId
       const rowFiling = filingRow(filing, req.task)
       // Leader hand-off: the successor keeps the predecessor's title (generation counter in the ⓘ panel).
       let label = req.label
-      let handoffParent: ManagedSession | undefined
-      const parent = req.parentVerified && req.parentSessionId ? (await readRegistry()).find(r => r.id === req.parentSessionId) : undefined
+      const parent = req.parentVerified && req.parentSessionId ? handoffParent : undefined
       let launch: { model?: string | undefined; effort?: string | undefined; mode?: CanonicalMode | undefined } = { model: req.model, effort: req.effort, mode: req.mode ?? parent?.mode }
       if (req.handoff && req.parentSessionId) {
-        const { readRegistry } = await import('./sessions/registry')
-        handoffParent = (await readRegistry()).find(m => m.id === req.parentSessionId)
         const { handoffSpawnDefaults, handoffTitle } = await import('./sessions/handoff-inherit')
         label = handoffTitle(handoffParent?.label, req.label)
         launch = handoffSpawnDefaults(handoffParent, req.harness, req)

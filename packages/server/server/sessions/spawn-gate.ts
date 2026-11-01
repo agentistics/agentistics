@@ -5,7 +5,7 @@
  * flow.
  *
  * Op 1 — `sessao-com-papel` — is `decideSessionRole` below: the role comes from the session's FUNCTION, in this order:
- * a hand-off → leader; an explicit `--role`; a leader title prefix → leader; started by a session or a flow (with a
+ * a hand-off → leader (unless it succeeds a worker); an explicit `--role`; a leader title prefix → leader; started by a session or a flow (with a
  * parent or a subtask) → worker. A session or a flow that asks for a spawn whose role cannot be decided, or whose role
  * contradicts its function, is REFUSED in plain words; the owner may open a session with no role (shown "no role",
  * never invented). Op 2 (H2, hand-offs) and op 3 (H4, a spawn that serves an owner request) run in the engine's
@@ -63,10 +63,10 @@ export function decideSessionRole(f: SpawnFacts): SpawnGateAnswer {
     : f.requestedBy.kind === 'flow' ? { flow: f.requestedBy.name }
     : f.requestedBy.kind === 'engine' ? { flow: 'engine' } : 'owner' as const
   const no = (code: keyof typeof SENTENCE): SpawnGateAnswer => ({ ok: false, code, reason: SENTENCE[code] })
-  if (f.door === 'handoff' && f.role === 'worker') return no('worker_handoff')
+  if (f.door === 'handoff' && f.role === 'worker' && f.inheritedRole !== 'worker') return no('worker_handoff')
   // A reopen/resume keeps the role its conversation has: asking for another is refused BEFORE any spawn (QA F6).
   if (f.inheritedRole && f.role && f.role !== f.inheritedRole && f.door !== 'handoff') return no('role_conflict')
-  const role: SessionRole | undefined = f.door === 'handoff' ? 'leader'
+  const role: SessionRole | undefined = f.door === 'handoff' ? (f.inheritedRole ?? 'leader')
     : f.role ?? f.inheritedRole ?? (f.leaderPrefix ? 'leader'
       // A parent makes a worker (the owner filing one under a leader too); an agent (session, flow, engine) with a subtask too.
       : f.parentId || (f.requestedBy.kind !== 'owner' && (f.subtaskId || f.requestedBy.kind === 'flow' || f.requestedBy.kind === 'engine')) ? 'worker' : undefined)

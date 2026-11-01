@@ -256,3 +256,27 @@ describe('agentop run --help', () => {
     })
   }
 })
+
+describe('run stop reaps detached children', () => {
+  test('a setsid-detached grandchild carrying the run HOME dies; an unrelated process does not', async () => {
+    const { spawn: sp } = await import('node:child_process')
+    const { reapRunOwned, runOwnedPids } = await import('./cli-run')
+    const home = `/tmp/agr-reap-test-${process.pid}-${Date.now()}`
+    // a "server" that spawns a detached "relay" (own session) then exits, like a reparented relay
+    const relay = sp(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { detached: true, stdio: 'ignore', env: { ...process.env, HOME: home } })
+    relay.unref()
+    const bystander = sp(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { detached: true, stdio: 'ignore' })
+    bystander.unref()
+    try {
+      await Bun.sleep(300)
+      expect(runOwnedPids(home)).toEqual([relay.pid!])
+      await reapRunOwned(home, 2000)
+      await Bun.sleep(100)
+      expect(() => process.kill(relay.pid!, 0)).toThrow()
+      expect(() => process.kill(bystander.pid!, 0)).not.toThrow()
+    } finally {
+      try { process.kill(relay.pid!, 'SIGKILL') } catch {}
+      try { process.kill(bystander.pid!, 'SIGKILL') } catch {}
+    }
+  })
+})

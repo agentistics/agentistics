@@ -33,7 +33,7 @@ export interface SpawnFilingRequest {
   callerSessionId?: string | undefined
   /** The predecessor's id, for a leader hand-off. */
   handoffOf?: string | undefined
-  /** CONTA.TROCA v2: the predecessor is replaced on another harness; its role is NOT promoted to leader. */
+  /** The predecessor's role is kept for a worker hand-off or a cross-harness replacement. */
   handoffKeepsRole?: boolean | undefined
   /** Registry ids of sessions that are running now; `undefined` = ask the backend. */
   liveIds?: ReadonlySet<string> | undefined
