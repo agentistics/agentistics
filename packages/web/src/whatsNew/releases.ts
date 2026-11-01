@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.184.0': {
+    features: [
+      {
+        pt: 'Um líder que está esperando algo (uma entrega, memória livre, um horário ou o fim de um trabalho) agora é acordado sozinho quando isso acontece, uma vez só, mesmo que o app reinicie no meio (fluxos experimentais).',
+        en: 'A leader waiting for something (a delivery, free memory, a set time or a job ending) is now woken on its own when it happens, exactly once, even if the app restarts midway (experimental flows).',
+      },
+      {
+        pt: 'O harness nativo agora conversa com os modelos do Google. Conferido só com testes automáticos; uma conversa real ainda não foi feita.',
+        en: 'The native harness now talks to Google models. Checked only with automated tests; a real conversation has not been done yet.',
+      },
+      {
+        pt: 'No harness nativo, o modelo pode ir até a definição de um símbolo e listar onde ele é usado, pelos servidores de linguagem que você já configurou. Conferido com um servidor de teste; com um servidor real ainda não.',
+        en: 'In the native harness, the model can jump to a symbol\'s definition and list where it is used, through the language servers you already set up. Checked with a test server; not yet with a real one.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Quando um trabalho passa a vez para outro, o novo continua sendo trabalho do mesmo líder, com a mesma conta, e não vira líder por engano.',
+        en: 'When a worker hands its job to a new session, the new one stays a worker of the same leader, on the same account, instead of becoming a leader by mistake.',
+      },
+    ],
+  },
   '2.183.0': {
     features: [],
     fixes: [
