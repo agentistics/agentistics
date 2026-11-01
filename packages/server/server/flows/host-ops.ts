@@ -33,8 +33,8 @@ export interface TriggerHostDeps {
   rows(): Promise<ReadonlyArray<{ id: string; conversationId?: string | undefined; state?: string }>>
   /** The stored roles, read FRESH for each universe snapshot (a promotion or demotion counts at once). */
   roles(): Promise<(row: { id: string; conversationId?: string | undefined }) => string | undefined>
-  /** Type a line into a live session through the composer's send path. */
-  prompt(rowId: string, text: string): Promise<{ ok: boolean; message?: string }>
+  /** Type a line into a live session through the composer's send path (`failure` as the composer states it). */
+  prompt(rowId: string, text: string): Promise<{ ok: boolean; message?: string; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
   /** The owner-facing away notice (bell, Nay toast, phone push) — `away.notice`. */
   awayNotice(text: string): Promise<boolean>
   /** End a managed session — the same kill `agentop session kill` and the fleet's kill verb run. */
@@ -53,7 +53,7 @@ export function defaultTriggerHostDeps(): TriggerHostDeps {
     prompt: async (rowId, text) => {
       const { runFleetAction } = await import('../sessions/fleet-web')
       const out = await runFleetAction('en', { action: 'prompt', id: rowId, text })
-      return { ok: out.ok, ...(out.message ? { message: out.message } : {}) }
+      return { ok: out.ok, ...(out.message ? { message: out.message } : {}), ...(out.failure ? { failure: out.failure } : {}) }
     },
     awayNotice: async text => {
       const notify = (await (await import('../away')).defaultAwayDeps()).notify
@@ -138,7 +138,8 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps())
       if (!to || !body) return refuse('a nudge needs to and body', ['to', 'body'])
       const flow = typeof i.flow === 'string' && /^[a-z0-9-]+$/.test(i.flow) ? i.flow : 'dsl'
       const sent = await deps.prompt(to, `[from flow ${flow} · nudge]\n${body}`)
-      return sent.ok ? { ok: true, to } : refuse(sent.message ?? 'the nudge was not delivered', ['live session'])
+      // DSL.ACORDAR reads `failure`: a dialog open (`prompt`, nothing typed) is retried later; `unconfirmed` may have arrived.
+      return sent.ok ? { ok: true, to } : { ...refuse(sent.message ?? 'the nudge was not delivered', ['live session']), ...(sent.failure ? { failure: sent.failure } : {}) }
     },
     // SESSÕES.FECHAR: the engine's `fechar-entregue` calls this only after every gate passed (handback, stopped on two
     // reads, clean tree, work saved). The host only ends the session; it decides nothing.
