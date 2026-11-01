@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.182.0': {
+    features: [
+      {
+        pt: 'Você pode corrigir uma mensagem já enviada ou cancelá-la, e o app confirma quando o cancelamento valeu. Conferido ao vivo no Claude, no Copilot e no OpenCode.',
+        en: 'You can correct a message already sent or cancel it, and the app confirms when the cancel took effect. Checked live on Claude, Copilot and OpenCode.',
+      },
+      {
+        pt: 'No Codex, o ajuste foi feito contra uma gravação; a conferência ao vivo ainda está pendente.',
+        en: 'On Codex, the fix was made against a recording; the live check is still pending.',
+      },
+      {
+        pt: 'No Gemini, Kimi, Antigravity e no harness nativo, isso foi conferido apenas por testes automáticos, não ao vivo.',
+        en: 'On Gemini, Kimi, Antigravity and the native harness, this was checked only by automated tests, not live.',
+      },
+    ],
+    fixes: [],
+  },
   '2.181.0': {
     features: [
       {
