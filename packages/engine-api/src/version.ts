@@ -182,8 +182,10 @@
  * `requestState()`, an optional trailing `idempotencyKey` on `answer` / `setMode` / `setModel`, and the
  * declaration members `amend`, `cancelReceipt` and `reconcile`. Receipts carry a closed refusal list, `replayed`,
  * `durable` and (for a crash with no evidence) `in-doubt`. The host journals the action as `action.claimed` /
- * `action.settled`. An engine built against 1.20 still loads on a 1.21 host (a lower minor is compatible) and
- * simply never sees the new members; one built against 1.21 is refused by an older host, like every minor bump.
+ * `action.settled`. The surface door `StructuredSessionHandle` gains the same keyed members (optional, the session
+ * the socket declared only) and `limits()`; `TUI_LIMITS` states what a terminal session can (E7). An engine built
+ * against 1.20 still loads on a 1.21 host (a lower minor is compatible) and simply never sees the new members; one
+ * built against 1.21 is refused by an older host, like every minor bump.
  */
 export const ENGINE_API_VERSION = '1.21.0'
 

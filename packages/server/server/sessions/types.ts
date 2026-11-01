@@ -8,7 +8,7 @@
 
 import type { CanonicalMode, ConversationLinkReason, HarnessId, SendNowOutcome, SessionMode } from '@agentistics/core'
 import type { RepoFacts } from './repo-facts'
-import type { HarnessChat, StructuredAnswer, StructuredAttention, StructuredMcpServer, StructuredSetModel } from '@agentistics/engine-api'
+import type { HarnessChat, StructuredAmendResult, StructuredAnswer, StructuredAttention, StructuredCancelReceipt, StructuredLimits, StructuredMcpServer, StructuredRequestState, StructuredSetModel, StructuredSubmit, StructuredSubmitReceipt } from '@agentistics/engine-api'
 
 /**
  * How a harness accepts an initial prompt while starting an INTERACTIVE session.
@@ -784,17 +784,29 @@ export interface SessionBackend {
   modeOf?(id: string): SessionMode | null | undefined
   /** F4.D — the modes a structured session can be set to directly (the chip's menu); undefined: none. */
   modesOf?(id: string): SessionMode[] | undefined
-  /** F4.D — set a structured session's mode THROUGH its driver, by id, no cycling. False: refused / unknown id. */
-  setMode?(id: string, modeId: string): Promise<boolean>
+  /** F4.D — set a structured session's mode THROUGH its driver, by id, no cycling. False: refused / unknown id.
+   *  `key` (1.21): the caller's idempotency key, handed to the driver and recorded with the call. */
+  setMode?(id: string, modeId: string, key?: string): Promise<boolean>
   /**
    * 1.20 — a STRUCTURED session's model as its protocol states it, with the models it can switch to
    * mid-conversation; `undefined` for a session whose driver offers no switch.
    */
   modelsOf?(id: string): { current: string | null; options: Array<{ id: string; label: string }> } | undefined
   /** 1.20 — switch a structured session's model THROUGH its driver. A refusal carries the driver's sentence. */
-  setModel?(id: string, modelId: string): Promise<StructuredSetModel>
-  /** F2.0 — answer a structured session's open request through its driver. False: refused / stale. */
-  answer?(id: string, a: StructuredAnswer): Promise<boolean>
+  setModel?(id: string, modelId: string, key?: string): Promise<StructuredSetModel>
+  /** F2.0 — answer a structured session's open request through its driver. False: refused / stale. `key` as `setMode`. */
+  answer?(id: string, a: StructuredAnswer, key?: string): Promise<boolean>
+  /**
+   * 1.21 (ADAPTER.LIMITES E7) — a structured session's keyed members, through its driver (which runs them through its
+   * action ledger and records them itself). `null`: not a structured session here, or its driver has no such member.
+   */
+  submitRequest?(id: string, r: StructuredSubmit): Promise<StructuredSubmitReceipt | null>
+  amendRequest?(id: string, requestId: string, text: string, key: string): Promise<StructuredAmendResult | null>
+  cancelRequest?(id: string, requestId: string, key: string): Promise<StructuredCancelReceipt | null>
+  /** 1.21 — where a request is now (a READ); `null` as above. */
+  requestStateOf?(id: string, requestId: string): StructuredRequestState | null
+  /** 1.21 — what the session can do with an amend / a cancel / after a crash: its driver's declaration, `TUI_LIMITS` otherwise. */
+  limitsOf?(id: string): StructuredLimits
   /**
    * F2.0 — a structured session's own chat channel (the protocol, not a file), for the adapter chat
    * stream; `undefined` for any other session.

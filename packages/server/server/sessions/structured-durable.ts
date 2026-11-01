@@ -196,6 +196,12 @@ export interface DurableTransport extends StructuredTransport {
   record(call: SessionCall): void
   /** Drop the relay connection, leaving the child running (a server going away; tests). */
   detach(): void
+  /**
+   * 1.21 (E7) — reconcile 1 of a claimed key over THIS record (the driver's `KeyedTransport.recorded`): `made` = a call
+   * under the key is recorded; `absent` = the record was being kept when the key was claimed (`claimedAt`, ISO) and holds
+   * none; `no-record` = it cannot tell (the record was born after the claim — a relaunch — or the claim time is unknown).
+   */
+  recorded(key: string, claimedAt?: string): 'made' | 'absent' | 'no-record'
 }
 
 export interface ReplayTransport extends DurableTransport {
@@ -203,6 +209,10 @@ export interface ReplayTransport extends DurableTransport {
   bind(s: StructuredSession): void
   /** Settles once every recorded line and call has been replayed: faithful, or why not. */
   done: Promise<{ ok: true } | { ok: false; why: string }>
+  /** 1.21 (E7) — true while the record is being replayed: a keyed member then makes its write without the ledger. */
+  replaying(): boolean
+  /** 1.21 (E7) — the recorded keyed call being applied right now (its `step`), or null. */
+  replayCall(): { step?: 'read' } | null
 }
 
 export interface DurableStore {
@@ -234,6 +244,8 @@ export interface DurableStore {
    * re-attach replays it; absent = it never started. A READ — it changes nothing.
    */
   callByKey(id: string, key: string): ReplayCall | null
+  /** 1.21 (E7) — `DurableTransport.recorded` for a session by id (a READ). */
+  recorded(id: string, key: string, claimedAt?: string): 'made' | 'absent' | 'no-record'
 }
 
 /** `<data dir>/structured` — one directory per structured session whose child a relay holds. */
@@ -287,6 +299,19 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     return readGen(id, k, FILES.exit) !== null && existsSync(path.join(genDir(id, k), FILES.killed)) && read(id, FILES.ending) === null
   }
   const ids = (): string[] => { try { return readdirSync(root).filter(n => existsSync(path.join(root, n, FILES.saved))) } catch { return [] } }
+
+  /** When the record started (owner stamp; a pre-E7 record: its spawn.json's mtime), ms, or null. */
+  const bornOf = (id: string): number | null => {
+    try { const b = (JSON.parse(read(id, FILES.owner) ?? '{}') as { born?: unknown }).born; if (typeof b === 'number' && Number.isFinite(b)) return b } catch { /* no stamp */ }
+    try { return statSync(path.join(dirOf(id), FILES.saved)).mtimeMs } catch { return null }
+  }
+  const recordedIn = (id: string, key: string, claimedAt?: string): 'made' | 'absent' | 'no-record' => {
+    if (foreign(id) || read(id, FILES.saved) === null) return 'no-record'
+    if (callByKey(parseJsonl<ReplayCall>(read(id, FILES.calls) ?? '', isReplayCall), key)) return 'made'
+    const born = bornOf(id)
+    const at = claimedAt ? Date.parse(claimedAt) : Number.NaN
+    return born !== null && Number.isFinite(at) && born <= at ? 'absent' : 'no-record'
+  }
 
   function recorder(id: string, gen: () => number, delivered: () => number, now: () => number) {
     return (call: SessionCall) => {
@@ -387,13 +412,15 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
       rmSync(dir, { recursive: true, force: true })
       mkdirSync(dir, { recursive: true, mode: 0o700 })
       writeFileSync(path.join(dir, FILES.saved), JSON.stringify(saved), { mode: 0o600 })
-      writeFileSync(path.join(dir, FILES.owner), JSON.stringify({ root: realRoot() }), { mode: 0o600 })
+      // `born`: when this record started being kept — a key claimed before it cannot be "absent" from it (E7).
+      writeFileSync(path.join(dir, FILES.owner), JSON.stringify({ root: realRoot(), born: Date.now() }), { mode: 0o600 })
       const gens: Generation[] = []
       const cur = () => gens[gens.length - 1]
       const delivered = () => cur()?.lines.delivered() ?? 0
       return {
         delivered,
         record: recorder(id, () => Math.max(0, gens.length - 1), delivered, () => Date.now()),
+        recorded: (key, claimedAt) => recordedIn(id, key, claimedAt),
         // Like a server going away: the child runs on, and THIS side reads nothing more — not even
         // an end, which the driver would take for the child's exit.
         detach: () => { for (const g of gens) g.detach() },
@@ -429,6 +456,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
       return pids.every(p => !pidAlive(p))
     },
     remove(id) { rmSync(dirOf(id), { recursive: true, force: true }) },
+    recorded: (id, key, claimedAt) => recordedIn(id, key, claimedAt),
     callByKey(id, key) {
       if (foreign(id)) return null
       return callByKey(parseJsonl<ReplayCall>(read(id, FILES.calls) ?? '', isReplayCall), key) ?? null
@@ -462,6 +490,8 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
       let failed = false
       const fail = (why: string) => { if (failed) return; failed = true; doneResolve({ ok: false, why }) }
       let replaying = true
+      /** E7 — the keyed call being applied right now (its member runs synchronously inside `apply`). */
+      let replayingCall: ReplayCall | null = null
       /** The time of the call being replayed: a child launched BY that call reads it as its clock. */
       let callClock: number | undefined
       /** The generations the re-created driver launched, in order, and how each one's exit is handed over. */
@@ -480,6 +510,17 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
         // Not awaited: its answer is a recorded line still to be replayed after this call.
         else if (c.op === 'setMode') void session.setMode?.(c.id)
         else if (c.op === 'setModel') void session.setModel?.(c.id)
+        else if (c.op === 'submit' || c.op === 'amend' || c.op === 'cancelRequest') {
+          // E7 — the driver makes the recorded write NOW (synchronously, `replaying()`), without its ledger; the
+          // receipt it keeps answers the caller's retry. Not awaited: its answer is a recorded line still to come.
+          const s = session
+          const make = c.op === 'submit' ? s.submit && (() => s.submit!({ requestId: c.requestId, idempotencyKey: c.key, text: c.text }))
+            : c.op === 'amend' ? s.amend && (() => s.amend!(c.requestId, c.text, c.key))
+            : s.cancelRequest && (() => s.cancelRequest!(c.requestId, c.key))
+          if (!make) { fail(`the re-created driver has no ${c.op} for a recorded keyed call`); return }
+          replayingCall = c
+          try { void Promise.resolve(make()).catch(() => {}) } finally { replayingCall = null }
+        }
         else session.cancel()
       }
 
@@ -610,6 +651,9 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
         detach: () => { for (const g of launched) g.detach() },
         bind(s) { session = s; bound() },
         done,
+        replaying: () => replaying,
+        replayCall: () => (replayingCall && 'step' in replayingCall && replayingCall.step ? { step: replayingCall.step } : replayingCall ? {} : null),
+        recorded: (key, claimedAt) => recordedIn(id, key, claimedAt),
         launch(bin, args, cwd, env): StructuredPipe {
           const k = launched.length
           const spec = specOf(bin, args, cwd, env, savedSpawn?.backend?.unsetEnv)

@@ -139,6 +139,33 @@ export function validIdempotencyKey(k: unknown): k is IdempotencyKey {
   return typeof k === 'string' && k.length > 0 && k.length <= IDEMPOTENCY_KEY_MAX && IDEMPOTENCY_KEY_RE.test(k)
 }
 
+/** 1.21 — a session's ADAPTER.LIMITES declaration (the three 1.21 members of `StructuredDeclaration`). */
+export type StructuredLimits = Required<Pick<StructuredDeclaration, 'amend' | 'cancelReceipt' | 'reconcile'>>
+
+/**
+ * 1.21 — what ANY harness says when it runs in a terminal (tmux) instead of over its protocol (spec ADAPTER.LIMITES §6
+ * "TUI"): typed text is always a new message, a cancel is a keystroke whose only proof is the transcript tail, and
+ * nothing we choose is handed to the harness to read back after a crash.
+ */
+export const TUI_LIMITS: StructuredLimits = Object.freeze({
+  amend: Object.freeze({
+    queued: Object.freeze({ absent: 'a terminal session has no queue of ours: typed text is a new message' }),
+    running: Object.freeze({ absent: 'a terminal session cannot fold text into the running turn: typed text is a new message' }),
+  }),
+  cancelReceipt: Object.freeze({ via: 'Esc / Ctrl-C keystroke; the transcript tail shows the interruption (claude: [Request interrupted by user]), else nothing', confidence: 'inferred' as const }),
+  reconcile: Object.freeze({ absent: 'a terminal session takes no id of ours to read back after a crash' }),
+}) as StructuredLimits
+
+/** 1.21 — the limits a declaration states, each member absent in it read as its fallback (`absent`, in words). */
+export function limitsOf(d: StructuredDeclaration | null | undefined, driver = 'this driver'): StructuredLimits {
+  const no = (what: string) => ({ absent: `${driver} does not state ${what}` })
+  return {
+    amend: d?.amend ?? { queued: no('a queued amend'), running: no('a running amend') },
+    cancelReceipt: d?.cancelReceipt ?? no('a cancel receipt'),
+    reconcile: d?.reconcile ?? no('a protocol id to reconcile with'),
+  }
+}
+
 /** 1.21 — where a request is now (`requestState`). */
 export type StructuredRequestState = 'queued' | 'running' | 'finished' | 'cancelled' | 'unknown'
 
@@ -556,6 +583,17 @@ export interface StructuredSessionHandle {
   send(text: string): Promise<boolean>
   /** Cancels the turn in flight, and nothing else. False when the handle is invalid or nothing was running. */
   cancel(): Promise<boolean>
+  /**
+   * 1.21 (ADAPTER.LIMITES, optional) — the keyed members of the session, typed with the same surface header as `send`.
+   * `null`: the handle is invalid, the session is not structured, or its driver has no such member. The receipts are
+   * the driver's own (exactly-once by `idempotencyKey`).
+   */
+  submit?(r: StructuredSubmit): Promise<StructuredSubmitReceipt | null>
+  amend?(requestId: string, text: string, idempotencyKey: IdempotencyKey): Promise<StructuredAmendResult | null>
+  cancelRequest?(requestId: string, idempotencyKey: IdempotencyKey): Promise<StructuredCancelReceipt | null>
+  requestState?(requestId: string): Promise<StructuredRequestState | null>
+  /** 1.21 (optional) — what this session can do with an amend / a cancel / after a crash (`TUI_LIMITS` for a terminal one). */
+  limits?(): Promise<StructuredLimits | null>
 }
 
 /** `EngineHostServices.structuredSessions` (1.17, optional). */
