@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { chmod, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, open, readFile, readlink, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { ensureClaudeProjectTrusted } from './claude-trust'
+import { __setClaudeTrustFsForTest, ensureClaudeProjectTrusted } from './claude-trust'
 
 describe('ensureClaudeProjectTrusted', () => {
   test('writes the trust entry for a managed account root and cwd', async () => {
@@ -77,6 +77,43 @@ describe('ensureClaudeProjectTrusted', () => {
       const config = JSON.parse(await readFile(target, 'utf8'))
       expect(config.projects[cwd].hasTrustDialogAccepted).toBe(true)
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('does not remove another process lock after a non-contention open error', async () => {
+    const root = await mkdtemp('/tmp/agentop-claude-trust-')
+    const file = join(root, '.claude.json')
+    const lock = `${file}.lock`
+    try {
+      await writeFile(lock, 'held')
+      __setClaudeTrustFsForTest({
+        open: async (...args) => {
+          if (args[0] === lock) throw Object.assign(new Error('too many open files'), { code: 'EMFILE' })
+          return open(...args)
+        },
+      })
+      await expect(ensureClaudeProjectTrusted(root, join(root, 'worktree'))).resolves.toBeUndefined()
+      expect(await readFile(lock, 'utf8')).toBe('held')
+    } finally {
+      __setClaudeTrustFsForTest(null)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('reclaims stale locks by renaming them before retrying', async () => {
+    const root = await mkdtemp('/tmp/agentop-claude-trust-')
+    const file = join(root, '.claude.json')
+    const lock = `${file}.lock`
+    try {
+      await writeFile(lock, 'stale')
+      const old = new Date(Date.now() - 60_000)
+      await utimes(lock, old, old)
+      await ensureClaudeProjectTrusted(root, join(root, 'worktree'))
+      expect(await readFile(join(root, '.claude.json'), 'utf8')).toContain('hasTrustDialogAccepted')
+      await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      __setClaudeTrustFsForTest(null)
       await rm(root, { recursive: true, force: true })
     }
   })
