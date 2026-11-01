@@ -180,6 +180,8 @@ export const EVENT_TYPES = [
   'structured.attempt', 'structured.exhausted',
   // the native loop's completion gate (TOOL.3)
   'completion.blocked', 'completion.released',
+  // ADAPTER.LIMITES: an action on a structured session claimed by a caller's key, and its result
+  'action.claimed', 'action.settled',
 ] as const
 
 export type EventType = typeof EVENT_TYPES[number]
@@ -616,6 +618,34 @@ export interface ArtifactUnpinnedData { artifactId: string; n: number }
 /** ART.2: a version's blob was pruned under the disk budget — it reads back as expired, in words. */
 export interface ArtifactExpiredData { artifactId: string; n: number; reason: string }
 
+/** ADAPTER.LIMITES: the kinds of action a caller can key (engine-api 1.21 `IdempotencyKey`). */
+export const ACTION_KINDS = ['submit', 'amend', 'cancel', 'answer', 'set-mode', 'set-model'] as const
+export type ActionKind = typeof ACTION_KINDS[number]
+
+/**
+ * ADAPTER.LIMITES: a caller's key was claimed. The event id is derived from the key, so the journal's
+ * `UNIQUE(event_id)` makes the first writer win. No conversation text: the key (`[A-Za-z0-9._:-]`, ≤128), ids and a hash.
+ */
+export interface ActionClaimedData {
+  key: string
+  /** Named `kind`, not `action`: the frontier test (§38) bans the word as a property of a canonical event. */
+  kind: ActionKind
+  requestId: string
+  /** sha256 (hex) of the canonical JSON of the action's arguments — detects a key reused for a DIFFERENT action. */
+  argsHash: string
+  harness: string
+  /** The structured driver id, or `native` / `tui`. */
+  driver: string
+}
+
+/** ADAPTER.LIMITES: the result of a claimed action. `result` is the receipt object, minus `replayed`/`durable`, and carries no text. */
+export interface ActionSettledData {
+  key: string
+  result: unknown
+  /** Bumped when a late signal supersedes an `unconfirmed` cancel. Starts at 0. */
+  revision: number
+}
+
 export interface PolicyRequestedData {
   /** The policy that was consulted. */
   policy: string
@@ -809,6 +839,8 @@ export interface EventData {
   'structured.exhausted': StructuredExhaustedData
   'completion.blocked': CompletionBlockedData
   'completion.released': CompletionReleasedData
+  'action.claimed': ActionClaimedData
+  'action.settled': ActionSettledData
 }
 
 // Compile-time totality. Each alias fails to type-check (`true` is not assignable to `never`) if the

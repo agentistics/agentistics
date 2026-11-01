@@ -16,13 +16,15 @@
  * is a DIVERGENCE, and the host abandons the re-attach for the conversation-id resume it already has.
  */
 
+import { validIdempotencyKey } from '@agentistics/engine-api'
+
 /** One stdout line the relay recorded. */
 export interface OutRecord { t: number; l: string }
 /** One write the relay delivered to the child. */
 export interface InRecord { t: number; w: string }
 
 /** A call the host makes on a session. */
-export type SessionCall =
+export type SessionCall = (
   | { op: 'prompt'; text: string }
   | { op: 'answer'; choice?: number; text?: string; requestId?: string }
   | { op: 'cancel' }
@@ -30,6 +32,14 @@ export type SessionCall =
   | { op: 'setMode'; id: string }
   /** 1.20 — a model set through the protocol (it writes to the child, so a replay makes it again). */
   | { op: 'setModel'; id: string }
+) & {
+  /**
+   * 1.21 (ADAPTER.LIMITES) — the caller's idempotency key for this action, when it gave one. It is what lets a
+   * reconcile after a crash answer "this call was made, and a re-attach replays it" from the record alone.
+   * Optional: a record written before keys (or by a caller that gave none) has none.
+   */
+  key?: string
+}
 
 /**
  * A call the host made on the session, and when (`g`: the driver's child — its generation — the call
@@ -56,6 +66,7 @@ export const isReplayCall = (v: unknown): v is ReplayCall => {
   const c = v as ReplayCall
   if (typeof c.at !== 'number' || typeof c.t !== 'number') return false
   if (c.g !== undefined && !(Number.isInteger(c.g) && c.g >= 0)) return false
+  if (c.key !== undefined && !validIdempotencyKey(c.key)) return false
   if (c.op === 'prompt') return typeof c.text === 'string'
   if (c.op === 'setMode' || c.op === 'setModel') return typeof c.id === 'string'
   return c.op === 'answer' || c.op === 'cancel'
@@ -90,4 +101,12 @@ export function writeCheck(delivered: readonly InRecord[]) {
 /** PURE. The calls made after exactly `k` lines had been read, in the order they were made. */
 export function callsAt(calls: readonly ReplayCall[], k: number): ReplayCall[] {
   return calls.filter(c => c.at === k)
+}
+
+/**
+ * PURE (1.21). The recorded call made under `key`, or undefined: the FIRST one — a key names one action, so a
+ * second record under it would be a retry that should have been recognised, and the earlier one is the truth.
+ */
+export function callByKey(calls: readonly ReplayCall[], key: string): ReplayCall | undefined {
+  return calls.find(c => c.key === key)
 }

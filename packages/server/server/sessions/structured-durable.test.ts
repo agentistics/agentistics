@@ -8,7 +8,7 @@
  * worth of state over the same directory — re-attaches. Relays are stopped by their saved PID only.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type {
@@ -18,7 +18,7 @@ import type {
 import { structuredRegistry } from '@agentistics/engine-api'
 import { withStructured, type StructuredProvider } from './structured-backend'
 import { durableStore, type DurableStore, type DurableTransport } from './structured-durable'
-import { callsAt, parseJsonl, isOutRecord, writeCheck } from './structured-replay'
+import { callByKey, callsAt, isReplayCall, parseJsonl, isOutRecord, writeCheck } from './structured-replay'
 import { structuredIntentOf } from './structured-route'
 import type { BackendSpawn, SessionBackend } from './types'
 import { resumeAccountEnvironment } from './account-plan'
@@ -230,6 +230,35 @@ describe('structured-replay (pure)', () => {
     const calls = [{ at: 2, t: 1, op: 'prompt' as const, text: 'a' }, { at: 3, t: 2, op: 'cancel' as const }, { at: 2, t: 3, op: 'prompt' as const, text: 'b' }]
     expect(callsAt(calls, 2).map(c => (c.op === 'prompt' ? c.text : c.op))).toEqual(['a', 'b'])
     expect(parseJsonl('{"t":1,"l":"x"}\n{"t":2,"l"', isOutRecord)).toEqual([{ t: 1, l: 'x' }])
+  })
+})
+
+describe('calls.jsonl carries the caller\'s idempotency key (ADAPTER.LIMITES A3)', () => {
+  const rec = (o: object) => JSON.stringify({ at: 1, t: 1, ...o })
+  test('a call with a valid key parses and keeps it; one without parses as before; a malformed key is dropped like a torn line', () => {
+    const text = [
+      rec({ op: 'answer', choice: 1, key: 'call1:t2:1' }), rec({ op: 'prompt', text: 'old' }),
+      rec({ op: 'setMode', id: 'plan', key: 'has space' }), rec({ op: 'setModel', id: 'm', key: 7 }), rec({ op: 'cancel', key: 'c.1' }),
+    ].join('\n')
+    const calls = parseJsonl(text, isReplayCall)
+    expect(calls.map(c => c.key)).toEqual(['call1:t2:1', undefined, 'c.1'])
+    expect(calls.map(c => c.op)).toEqual(['answer', 'prompt', 'cancel'])
+  })
+  test('callByKey finds the FIRST call under a key, and nothing for an unknown key', () => {
+    const calls = parseJsonl([rec({ op: 'cancel', key: 'k' }), rec({ op: 'setMode', id: 'x', key: 'k' }), rec({ op: 'prompt', text: 'p' })].join('\n'), isReplayCall)
+    expect(callByKey(calls, 'k')?.op).toBe('cancel')
+    expect(callByKey(calls, 'nope')).toBeUndefined()
+  })
+  test('DurableStore.callByKey reads the session\'s record: found, absent key, absent session', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'dur-key-'))
+    try {
+      const store = durableStore(root)
+      expect(store.callByKey('s1', 'k')).toBeNull()
+      mkdirSync(store.dirOf('s1'), { recursive: true })
+      writeFileSync(path.join(store.dirOf('s1'), 'calls.jsonl'), `${rec({ op: 'answer', choice: 2, key: 'k1' })}\n${rec({ op: 'prompt', text: 'p' })}\n{"torn`)
+      expect(store.callByKey('s1', 'k1')).toMatchObject({ op: 'answer', choice: 2, key: 'k1' })
+      expect(store.callByKey('s1', 'k2')).toBeNull()
+    } finally { rmSync(root, { recursive: true, force: true }) }
   })
 })
 
