@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.185.0': {
+    features: [
+      {
+        pt: 'Ligação por voz (experimental): dá para usar a sua própria chave da ElevenLabs para uma voz mais natural. A chave fica guardada criptografada e nunca aparece na tela. Conferido com testes automáticos; uma ligação real com a ElevenLabs ainda não foi feita.',
+        en: 'Voice call (experimental): you can use your own ElevenLabs key for a more natural voice. The key is stored encrypted and never shown. Checked with automated tests; a real call with ElevenLabs has not been made yet.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ligação por voz: quando a resposta tem imagens, a voz avisa que deixou imagens na tela e continua falando o texto que vem depois, em vez de parar.',
+        en: 'Voice call: when a reply has images, the voice says it left images on screen and keeps speaking the text that follows, instead of stopping.',
+      },
+      {
+        pt: 'Ligação por voz: se uma fala sua se perder no caminho, a ligação pede para você repetir e volta a ouvir, em vez de ficar surda até desligar.',
+        en: 'Voice call: if something you said gets lost on the way, the call asks you to repeat and listens again, instead of going deaf until you hang up.',
+      },
+    ],
+  },
   '2.184.0': {
     features: [
       {
