@@ -32,6 +32,15 @@ export type SessionCall = (
   | { op: 'setMode'; id: string }
   /** 1.20 — a model set through the protocol (it writes to the child, so a replay makes it again). */
   | { op: 'setModel'; id: string }
+  /**
+   * 1.21 (ADAPTER.LIMITES E7) — the keyed actions. Recorded BY THE DRIVER after its ledger claimed the key and right
+   * before the protocol write (claim → record → write, spec §4.2), so every one carries its `key` and a record exists
+   * only for a claimed key. A re-attach makes the same call on the re-created driver, which makes the same write
+   * without the ledger (`ReplayTransport.replaying`).
+   */
+  | { op: 'submit'; requestId: string; text: string; key: string; step?: 'read' }
+  | { op: 'amend'; requestId: string; text: string; key: string; step?: 'read' }
+  | { op: 'cancelRequest'; requestId: string; key: string; step?: 'read' }
 ) & {
   /**
    * 1.21 (ADAPTER.LIMITES) — the caller's idempotency key for this action, when it gave one. It is what lets a
@@ -69,6 +78,11 @@ export const isReplayCall = (v: unknown): v is ReplayCall => {
   if (c.key !== undefined && !validIdempotencyKey(c.key)) return false
   if (c.op === 'prompt') return typeof c.text === 'string'
   if (c.op === 'setMode' || c.op === 'setModel') return typeof c.id === 'string'
+  if (c.op === 'submit' || c.op === 'amend' || c.op === 'cancelRequest') {
+    // A keyed action always has its key, and `step` names only the reconcile read-back.
+    if (typeof c.key !== 'string' || typeof c.requestId !== 'string' || (c.step !== undefined && c.step !== 'read')) return false
+    return c.op === 'cancelRequest' || typeof c.text === 'string'
+  }
   return c.op === 'answer' || c.op === 'cancel'
 }
 
@@ -108,5 +122,6 @@ export function callsAt(calls: readonly ReplayCall[], k: number): ReplayCall[] {
  * second record under it would be a retry that should have been recognised, and the earlier one is the truth.
  */
 export function callByKey(calls: readonly ReplayCall[], key: string): ReplayCall | undefined {
-  return calls.find(c => c.key === key)
+  // A reconcile read-back (`step: 'read'`) is not the action's write: it proves nothing was made.
+  return calls.find(c => c.key === key && !('step' in c && c.step === 'read'))
 }

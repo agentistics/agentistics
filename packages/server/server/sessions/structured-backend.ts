@@ -24,9 +24,9 @@
 import type {
   EngineAcp, EngineAcpSession, EngineStructured, HarnessChat, HarnessChatDelta, HarnessId,
   StructuredAnswer, StructuredAttention, StructuredDeclaration, StructuredDriverId, StructuredExit,
-  StructuredSession, StructuredSpawn, StructuredStart,
+  StructuredSession, StructuredSpawn, StructuredStart, StructuredSubmit,
 } from '@agentistics/engine-api'
-import { answerFits } from '@agentistics/engine-api'
+import { answerFits, limitsOf, TUI_LIMITS } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
 import { forkUnavailableNotice, harnessBlockedNotice } from './harness-notice'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
@@ -119,6 +119,14 @@ export function recordingSession(s: StructuredSession, t: Pick<DurableTransport,
       return ok
     },
     cancel() { s.cancel(); t.record({ op: 'cancel' }) },
+    // 1.21 (ADAPTER.LIMITES E7) — the keyed members are NOT recorded here: the driver records each one itself, through
+    // this same transport, after its ledger claimed the key and right before the write (claim → record → write, spec
+    // §4.2). Recording here would put the record BEFORE the claim (E1 open point 1) and a replay would then make writes
+    // for keys nobody claimed. `requestState` is a read.
+    ...(s.submit ? { submit: (r: StructuredSubmit) => s.submit!(r) } : {}),
+    ...(s.amend ? { amend: (requestId: string, text: string, key: string) => s.amend!(requestId, text, key) } : {}),
+    ...(s.cancelRequest ? { cancelRequest: (requestId: string, key: string) => s.cancelRequest!(requestId, key) } : {}),
+    ...(s.requestState ? { requestState: (requestId: string) => s.requestState!(requestId) } : {}),
     follow: (max, on) => s.follow(max, on),
     onExit: cb => s.onExit(cb),
     dispose: () => s.dispose(),
@@ -622,10 +630,10 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     attentionOf(id) { const l = structuredOnly(id); return l ? l.s.attention() : base.attentionOf?.(id) },
     modeOf(id) { const l = structuredOnly(id); return l ? (l.s.mode?.() ?? null) : base.modeOf?.(id) },
     modesOf(id) { const l = structuredOnly(id); return l ? (l.s.modes ? [...l.s.modes()] : undefined) : base.modesOf?.(id) },
-    async setMode(id, modeId) {
+    async setMode(id, modeId, key) {
       const l = structuredOnly(id)
       if (!l) return base.setMode?.(id, modeId) ?? false
-      const ok = (await l.s.setMode?.(modeId)) ?? false
+      const ok = (await l.s.setMode?.(modeId, key)) ?? false
       const now = ok ? l.s.mode?.()?.canonical : undefined
       if (now) modeSetTo.set(id, now)
       return ok
@@ -636,13 +644,24 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       if (!l.s.models || !l.s.setModel) return undefined
       return { current: l.s.model?.() ?? null, options: l.s.models().map(m => ({ id: m.id, label: m.label })) }
     },
-    async setModel(id, modelId) {
+    async setModel(id, modelId, key) {
       const l = structuredOnly(id)
       if (!l) return base.setModel ? base.setModel(id, modelId) : { ok: false, reason: 'this session has no model switch' }
       if (!l.s.setModel) return { ok: false, reason: 'this session has no model switch' }
-      return l.s.setModel(modelId).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : 'set model failed' }))
+      return l.s.setModel(modelId, key).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : 'set model failed' }))
     },
-    async answer(id, a: StructuredAnswer) { const l = structuredOnly(id); return l ? l.s.answer(a) : (base.answer?.(id, a) ?? false) },
+    async answer(id, a: StructuredAnswer, key?: string) { const l = structuredOnly(id); return l ? l.s.answer(a, key) : (base.answer?.(id, a) ?? false) },
+    // 1.21 (E7) — the keyed members go to the (recording) session's driver; it claims, records and writes.
+    async submitRequest(id, r) { const s = structuredOnly(id)?.s; return s?.submit ? s.submit(r) : null },
+    async amendRequest(id, requestId, text, key) { const s = structuredOnly(id)?.s; return s?.amend ? s.amend(requestId, text, key) : null },
+    async cancelRequest(id, requestId, key) { const s = structuredOnly(id)?.s; return s?.cancelRequest ? s.cancelRequest(requestId, key) : null },
+    requestStateOf(id, requestId) { const s = structuredOnly(id)?.s; return s?.requestState ? s.requestState(requestId) : null },
+    limitsOf(id) {
+      const l = live.get(id)
+      // A protocol session says what its driver declares (A5.4's ACP handle declares nothing: each member reads absent);
+      // any other — a terminal (tmux) session — what a TUI can.
+      return l ? limitsOf(l.declares, l.s.driver) : TUI_LIMITS
+    },
     cancelTurn(id) { const l = structuredOnly(id); if (!l) return false; l.s.cancel(); return true },
     chatOf(id) {
       const l = structuredOnly(id)
