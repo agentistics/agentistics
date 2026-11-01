@@ -408,7 +408,15 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
     await fallBack(id, l.req, conv, e.reason)
   }
 
+  /** Relays THIS process is starting right now: on disk and alive, not yet `live` — never adopted from under it. */
+  const starting = new Set<string>()
+
   async function startVia(req: BackendSpawn, route: Exclude<SpawnRoute, 'tmux'>, harness: HarnessId, reg: EngineStructured, acp: EngineAcp | null): Promise<boolean> {
+    starting.add(req.id)
+    try { return await startViaNow(req, route, harness, reg, acp) } finally { starting.delete(req.id) }
+  }
+
+  async function startViaNow(req: BackendSpawn, route: Exclude<SpawnRoute, 'tmux'>, harness: HarnessId, reg: EngineStructured, acp: EngineAcp | null): Promise<boolean> {
     if (route === 'structured') await provider.prepare?.().catch(() => {})
     // F2.0b — a structured child is launched through a relay that outlives this process.
     // The asking screen's language wins (QA F2); the server's stored preference is only the fallback.
@@ -446,6 +454,8 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
   let adopting = false
   /** Another LIVE process drives this relay (a CLI still finishing its spawn): not ours to take. */
   const drivenElsewhere = (id: string): boolean => {
+    // A fork / reopen this very process is still starting: its relay is alive before its session is `live`.
+    if (starting.has(id)) return true
     const pid = durable?.saved(id)?.driverPid
     return typeof pid === 'number' && pid !== process.pid && pidAlive(pid)
   }
