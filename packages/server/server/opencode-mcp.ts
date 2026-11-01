@@ -32,23 +32,31 @@ export type OpencodeMcpPlan =
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
-/** PURE. JSONC -> JSON text: line and block comments and trailing commas removed, strings left intact. */
+/** Copies a JSON string literal starting at `i`; returns its end (exclusive). */
+const stringEnd = (text: string, i: number): number => {
+  let j = i + 1
+  while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1
+  return Math.min(j + 1, text.length)
+}
+
+/** PURE. JSONC -> JSON text: comments first, then trailing commas (so a comment after a comma can't hide it); strings left intact. */
 export function stripJsonc(text: string): string {
-  let out = ''
-  let i = 0
-  while (i < text.length) {
+  let noComments = ''
+  for (let i = 0; i < text.length;) {
     const c = text[i]!
-    if (c === '"') {
-      let j = i + 1
-      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1
-      out += text.slice(i, j + 1); i = j + 1; continue
-    }
+    if (c === '"') { const e = stringEnd(text, i); noComments += text.slice(i, e); i = e; continue }
     if (c === '/' && text[i + 1] === '/') { while (i < text.length && text[i] !== '\n') i++; continue }
-    if (c === '/' && text[i + 1] === '*') { const end = text.indexOf('*/', i + 2); i = end < 0 ? text.length : end + 2; continue }
+    if (c === '/' && text[i + 1] === '*') { const end = text.indexOf('*/', i + 2); i = end < 0 ? text.length : end + 2; noComments += ' '; continue }
+    noComments += c; i++
+  }
+  let out = ''
+  for (let i = 0; i < noComments.length;) {
+    const c = noComments[i]!
+    if (c === '"') { const e = stringEnd(noComments, i); out += noComments.slice(i, e); i = e; continue }
     if (c === ',') {
       let j = i + 1
-      while (j < text.length && /\s/.test(text[j]!)) j++
-      if (text[j] === '}' || text[j] === ']') { i++; continue }
+      while (j < noComments.length && /\s/.test(noComments[j]!)) j++
+      if (noComments[j] === '}' || noComments[j] === ']') { i++; continue }
     }
     out += c; i++
   }
