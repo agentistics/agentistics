@@ -1,4 +1,4 @@
-import { chmod, mkdir, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises'
+import { chmod, link, mkdir, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
 type JsonObject = Record<string, unknown>
@@ -10,11 +10,11 @@ function isObject(value: unknown): value is JsonObject {
 const LOCK_STALE_MS = 30_000
 const LOCK_RETRY_MS = 25
 const inProcessLocks = new Map<string, Promise<void>>()
-type LockFs = Pick<typeof import('node:fs/promises'), 'open' | 'stat' | 'rename' | 'unlink'>
-let lockFs: LockFs = { open, stat, rename, unlink }
+type LockFs = Pick<typeof import('node:fs/promises'), 'link' | 'open' | 'readFile' | 'stat' | 'rename' | 'unlink'>
+let lockFs: LockFs = { link, open, readFile, stat, rename, unlink }
 
 export function __setClaudeTrustFsForTest(overrides: Partial<LockFs> | null): void {
-  lockFs = overrides ? { open, stat, rename, unlink, ...overrides } : { open, stat, rename, unlink }
+  lockFs = overrides ? { link, open, readFile, stat, rename, unlink, ...overrides } : { link, open, readFile, stat, rename, unlink }
 }
 
 async function realConfigFile(file: string): Promise<string> {
@@ -34,22 +34,50 @@ async function withConfigLock<T>(file: string, operation: () => Promise<T>): Pro
   inProcessLocks.set(file, queued)
   await previous
   const lock = `${file}.lock`
+  const ownerToken = `${process.pid}:${crypto.randomUUID()}`
   let handle: Awaited<ReturnType<typeof open>> | undefined
   let acquired = false
   try {
     for (;;) {
       try {
         handle = await lockFs.open(lock, 'wx', 0o600)
+        await handle.write(ownerToken)
+        await handle.sync()
         acquired = true
         break
       } catch (error) {
+        await handle?.close().catch(() => {})
+        handle = undefined
         if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) throw error
         try {
-          if (Date.now() - (await lockFs.stat(lock)).mtimeMs > LOCK_STALE_MS) {
+          const observed = await lockFs.stat(lock)
+          const observedToken = await lockFs.readFile(lock, 'utf8').catch(error => {
+            if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null
+            throw error
+          })
+          if (Date.now() - observed.mtimeMs > LOCK_STALE_MS) {
             const reclaimed = `${lock}.${process.pid}.${crypto.randomUUID()}.stale`
             try {
               await lockFs.rename(lock, reclaimed)
-              await lockFs.unlink(reclaimed)
+              let sameLock = false
+              try {
+                const [reclaimedStat, reclaimedToken] = await Promise.all([
+                  lockFs.stat(reclaimed),
+                  lockFs.readFile(reclaimed, 'utf8'),
+                ])
+                sameLock = reclaimedStat.mtimeMs === observed.mtimeMs && reclaimedToken === observedToken
+              } catch (reclaimError) {
+                if (!(reclaimError && typeof reclaimError === 'object' && 'code' in reclaimError && reclaimError.code === 'ENOENT')) throw reclaimError
+              }
+              if (sameLock) await lockFs.unlink(reclaimed).catch(() => {})
+              else {
+                try {
+                  await lockFs.link(reclaimed, lock)
+                  await lockFs.unlink(reclaimed).catch(() => {})
+                } catch (restoreError) {
+                  if (!(restoreError && typeof restoreError === 'object' && 'code' in restoreError && (restoreError.code === 'ENOENT' || restoreError.code === 'EEXIST'))) throw restoreError
+                }
+              }
             } catch (reclaimError) {
               if (!(reclaimError && typeof reclaimError === 'object' && 'code' in reclaimError && reclaimError.code === 'ENOENT')) throw reclaimError
             }
@@ -63,7 +91,13 @@ async function withConfigLock<T>(file: string, operation: () => Promise<T>): Pro
     return await operation()
   } finally {
     await handle?.close().catch(() => {})
-    if (acquired) await lockFs.unlink(lock).catch(() => {})
+    if (acquired) {
+      try {
+        if (await lockFs.readFile(lock, 'utf8') === ownerToken) await lockFs.unlink(lock)
+      } catch {
+        // The lock may have been reclaimed while the operation was running.
+      }
+    }
     release()
     if (inProcessLocks.get(file) === queued) inProcessLocks.delete(file)
   }
