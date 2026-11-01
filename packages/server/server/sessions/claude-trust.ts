@@ -26,6 +26,15 @@ async function realConfigFile(file: string): Promise<string> {
   }
 }
 
+function errorCode(error: unknown): unknown {
+  return error && typeof error === 'object' && 'code' in error ? error.code : undefined
+}
+
+/** Exported for tests only: lets them drive the lock with their own operation. */
+export async function __withConfigLockForTest<T>(file: string, operation: () => Promise<T>): Promise<T> {
+  return withConfigLock(file, operation)
+}
+
 async function withConfigLock<T>(file: string, operation: () => Promise<T>): Promise<T> {
   const previous = inProcessLocks.get(file) ?? Promise.resolve()
   let release!: () => void
@@ -39,8 +48,11 @@ async function withConfigLock<T>(file: string, operation: () => Promise<T>): Pro
   let acquired = false
   try {
     for (;;) {
+      // True once our own `open(..., 'wx')` succeeded: from then on the file at `lock` is ours.
+      let created = false
       try {
         handle = await lockFs.open(lock, 'wx', 0o600)
+        created = true
         await handle.write(ownerToken)
         await handle.sync()
         acquired = true
@@ -48,17 +60,23 @@ async function withConfigLock<T>(file: string, operation: () => Promise<T>): Pro
       } catch (error) {
         await handle?.close().catch(() => {})
         handle = undefined
-        if (!(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST')) throw error
+        if (created) {
+          // We made the file but could not finish writing our token: it must not block everyone for the stale window.
+          await lockFs.unlink(lock).catch(() => {})
+          throw error
+        }
+        if (errorCode(error) !== 'EEXIST') throw error
         try {
           const observed = await lockFs.stat(lock)
-          const observedToken = await lockFs.readFile(lock, 'utf8').catch(error => {
-            if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null
-            throw error
+          const observedToken = await lockFs.readFile(lock, 'utf8').catch(readError => {
+            if (errorCode(readError) === 'ENOENT') return null
+            throw readError
           })
           if (Date.now() - observed.mtimeMs > LOCK_STALE_MS) {
             const reclaimed = `${lock}.${process.pid}.${crypto.randomUUID()}.stale`
             try {
               await lockFs.rename(lock, reclaimed)
+              // The rename moved whatever sat at `lock` at that instant. Judge THAT file, not the one we stat'd earlier.
               let sameLock = false
               try {
                 const [reclaimedStat, reclaimedToken] = await Promise.all([
@@ -67,23 +85,30 @@ async function withConfigLock<T>(file: string, operation: () => Promise<T>): Pro
                 ])
                 sameLock = reclaimedStat.mtimeMs === observed.mtimeMs && reclaimedToken === observedToken
               } catch (reclaimError) {
-                if (!(reclaimError && typeof reclaimError === 'object' && 'code' in reclaimError && reclaimError.code === 'ENOENT')) throw reclaimError
+                if (errorCode(reclaimError) !== 'ENOENT') throw reclaimError
               }
-              if (sameLock) await lockFs.unlink(reclaimed).catch(() => {})
-              else {
+              if (!sameLock) {
+                // We displaced a live holder's lock: put it back if `lock` is still free. EEXIST/ENOENT mean someone
+                // else took the name or the file is gone. Any other error (EPERM/EXDEV/ENOSYS: no hard links here)
+                // cannot be repaired: log and carry on without restoring. The displaced holder's own release only
+                // removes `lock` when it still holds its token, so it tolerates the loss.
                 try {
                   await lockFs.link(reclaimed, lock)
-                  await lockFs.unlink(reclaimed).catch(() => {})
                 } catch (restoreError) {
-                  if (!(restoreError && typeof restoreError === 'object' && 'code' in restoreError && (restoreError.code === 'ENOENT' || restoreError.code === 'EEXIST'))) throw restoreError
+                  const code = errorCode(restoreError)
+                  if (code !== 'ENOENT' && code !== 'EEXIST') {
+                    console.warn(`[sessions] could not restore Claude trust lock after reclaim: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`)
+                  }
                 }
               }
+              // Whatever happened above, the reclaimed name must never be left behind.
+              await lockFs.unlink(reclaimed).catch(() => {})
             } catch (reclaimError) {
-              if (!(reclaimError && typeof reclaimError === 'object' && 'code' in reclaimError && reclaimError.code === 'ENOENT')) throw reclaimError
+              if (errorCode(reclaimError) !== 'ENOENT') throw reclaimError
             }
           }
         } catch (statError) {
-          if (!(statError && typeof statError === 'object' && 'code' in statError && statError.code === 'ENOENT')) throw statError
+          if (errorCode(statError) !== 'ENOENT') throw statError
         }
         await new Promise(resolve => setTimeout(resolve, LOCK_RETRY_MS))
       }
@@ -95,7 +120,6 @@ async function withConfigLock<T>(file: string, operation: () => Promise<T>): Pro
       try {
         if (await lockFs.readFile(lock, 'utf8') === ownerToken) await lockFs.unlink(lock)
       } catch {
-        // The lock may have been reclaimed while the operation was running.
       }
     }
     release()
