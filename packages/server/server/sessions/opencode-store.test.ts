@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { opencodeSessionExists, opencodeTranscriptRef, readOpencodeTurns, searchOpencodeDb, splitOpencodeRef } from './opencode-store'
+import { opencodeActivityOf, opencodeSessionExists, opencodeTranscriptRef, readOpencodeTurns, searchOpencodeDb, splitOpencodeRef } from './opencode-store'
 import { runTranscriptSearch } from './transcript-run'
 
 const dirs: string[] = []
@@ -94,4 +94,14 @@ test('runTranscriptSearch covers opencode through SQL even without grep, and rep
   expect(bad.failed).toEqual(['opencode']); expect(bad.unavailable).toBe('no-grep')
   const none = await runTranscriptSearch('docker', { ...base, opencode: { exists: async () => false, search: async () => ['no'] } })
   expect(none.unavailable).toBe('no-grep'); expect(none.ids.size).toBe(0)
+})
+
+test('OPENCODE.RESTO: the newest message says what an opencode session is doing', () => {
+  const m = (d: object) => ({ data: JSON.stringify(d) })
+  expect(opencodeActivityOf(m({ role: 'user' }))).toBe('working')
+  expect(opencodeActivityOf(m({ role: 'assistant', time: { created: 1 } }))).toBe('working')
+  expect(opencodeActivityOf(m({ role: 'assistant', time: { created: 1, completed: 2 } }))).toBe('waiting')
+  expect(opencodeActivityOf(m({ role: 'assistant', time: { created: 1 }, error: { name: 'APIError' } }))).toBe('waiting')
+  expect(opencodeActivityOf(null)).toBeNull()
+  expect(opencodeActivityOf({ data: 'not json' })).toBeNull()
 })

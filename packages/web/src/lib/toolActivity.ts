@@ -405,3 +405,29 @@ export function markTrailingRunning<T extends TurnLike>(items: readonly ChatItem
   const { endedAt: _drop, ...rest } = last.group
   return [...items.slice(0, -1), { type: 'activity', group: { ...rest, steps, running: true } }]
 }
+
+/**
+ * With the activity line OFF (the default), a turn that only used tools is not a message and draws nothing — fine
+ * while a sentence follows it, but an exchange that ends WITHOUT one (a model that ran a tool and stopped) left the
+ * person's message unanswered on screen, as if nothing had happened. Every such SILENT exchange gets one activity
+ * group, keyed by the index of its last tool turn (where it is drawn). Exchanges with any text are untouched, and
+ * so is the LAST exchange while the session is still `working` — its sentence may be on its way.
+ */
+export function silentToolRuns<T extends TurnLike>(turns: readonly T[], working = false): Map<number, ActivityGroup> {
+  const out = new Map<number, ActivityGroup>()
+  let run: { group: ActivityGroup; at: number } | null = null
+  let said = false
+  const close = () => { if (run && !said) out.set(run.at, run.group); run = null; said = false }
+  turns.forEach((t, index) => {
+    if (t.role === 'user') { close(); return }
+    if (t.text.trim() !== '') said = true
+    if ((t.tools?.length ?? 0) > 0) {
+      run ??= { group: { key: `s${t.tools?.[0]?.ref ?? t.at ?? `i${index}`}`, steps: [], ...(t.at ? { startedAt: t.at } : {}), running: false }, at: index }
+      run.group.steps.push(...stepsOfTurn(t))
+      run.at = index
+      if (t.at) run.group.endedAt = t.at
+    }
+  })
+  if (!working) close()
+  return out
+}

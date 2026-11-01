@@ -27,7 +27,8 @@ import { HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES } from './harness-
 /** The state word each session wears, and the machine-readable state beside it. */
 export function sessionState(v: SessionView): SessionState {
   if (v.status === 'closed') return 'closed'
-  if (v.status === 'external') return 'unknown'
+  // An external row is `unknown` unless its harness's STORE states its activity exactly (opencode.db).
+  if (v.status === 'external') return v.activity === 'working' || v.activity === 'waiting' ? v.activity : 'unknown'
   if (v.status === 'lost') return 'lost'
   switch (v.activity) {
     case 'waiting-approval': return 'waiting-approval'

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { inheritedIdentity, inheritedLaunch } from './reopen-inherit'
+import { forkLaunch, inheritedIdentity, inheritedLaunch } from './reopen-inherit'
 import { planSpawn } from './spawn-spec'
 import type { ManagedSession } from './types'
 
@@ -96,5 +96,18 @@ describe('ORQ.FORA reopen approval mode', () => {
     expect(launch.mode).toBe('no-questions')
     const result = planSpawn({ harness: 'claude', cwd: row.cwd, resumeId: 'c1', ...launch })
     expect(result.ok && result.plan.argv).toContain('--dangerously-skip-permissions')
+  })
+})
+
+describe('forkLaunch', () => {
+  const oc: ManagedSession = { id: 'o', harness: 'opencode', cwd: '/x', createdAt: '2026-01-01T00:00:00Z', conversationId: 'ses_1' }
+  it('a fork starts in the mode and on the model the original runs NOW', () => {
+    expect(forkLaunch(oc, 'opencode', { mode: 'no-questions', model: 'ollama/qwen2.5:0.5b' })).toEqual({ mode: 'no-questions', model: 'ollama/qwen2.5:0.5b' })
+  })
+  it('without a stated mode it falls back to the recorded one (as a reopen would)', () => {
+    expect(forkLaunch({ ...oc, mode: 'accept-edits' }, 'opencode', {})).toEqual({ mode: 'accept-edits' })
+  })
+  it('a live mode outranks the start mode on the row', () => {
+    expect(forkLaunch({ ...oc, mode: 'default' }, 'opencode', { mode: 'plan', model: null }).mode).toBe('plan')
   })
 })
