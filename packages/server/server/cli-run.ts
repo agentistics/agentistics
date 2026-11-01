@@ -228,6 +228,43 @@ function readStates(): ThrowawayState[] {
   }) } catch { return [] }
 }
 
+/**
+ * Pids whose environment carries this run's own HOME — the per-run `mkdtemp` directory, unique to
+ * the run, which `buildThrowawayEnv` puts in every process the run starts and which children
+ * inherit. That is how the run's STRUCTURED RELAYS (and a tmux server) are found: they start
+ * `setsid`-detached, so neither the run's process group nor, off systemd, any tree walk reaches
+ * them, and a relay outlives the server that launched it by design. An EXACT match on the
+ * environment entry — never a name or an argv substring — so nothing outside the run can match.
+ */
+export function runOwnedPids(home: string, procRoot = '/proc', self = process.pid): number[] {
+  const needle = `HOME=${home}`
+  const out: number[] = []
+  let entries: string[]
+  try { entries = readdirSync(procRoot) } catch { return out }
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue
+    const pid = Number(entry)
+    if (pid === self) continue
+    try {
+      if (readFileSync(join(procRoot, entry, 'environ'), 'utf8').split('\0').includes(needle)) out.push(pid)
+    } catch { /* gone, or not ours to read */ }
+  }
+  return out
+}
+
+function alive(pid: number): boolean { try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' } }
+
+/** TERM everything the run owns, wait, then KILL what is left. Returns the pids that needed KILL. */
+export async function reapRunOwned(home: string, graceMs = 3000, procRoot = '/proc'): Promise<number[]> {
+  const pids = runOwnedPids(home, procRoot)
+  for (const pid of pids) { try { process.kill(pid, 'SIGTERM') } catch {} }
+  const deadline = Date.now() + graceMs
+  while (Date.now() < deadline && pids.some(alive)) await Bun.sleep(50)
+  const left = pids.filter(alive)
+  for (const pid of left) { try { process.kill(pid, 'SIGKILL') } catch {} }
+  return left
+}
+
 async function stopState(state: ThrowawayState): Promise<void> {
   if (state.unit && process.platform === 'linux' && existsSync('/run/systemd/system')) {
     const result = spawn('systemctl', ['--user', 'stop', state.unit], { stdio: 'ignore' })
@@ -235,6 +272,8 @@ async function stopState(state: ThrowawayState): Promise<void> {
   } else if (state.pid) {
     try { process.kill(-state.pid, 'SIGTERM') } catch { try { process.kill(state.pid, 'SIGTERM') } catch {} }
   }
+  // Backstop for the detached relays/tmux the group kill and (off systemd) the scope never reach.
+  if (process.platform === 'linux') await reapRunOwned(state.home)
   rmSync(state.home, { recursive: true, force: true })
   removeRunTmp(state.tmp)
   releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)

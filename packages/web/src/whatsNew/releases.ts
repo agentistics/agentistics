@@ -30,6 +30,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Quando um trabalho passa a vez para outro, o novo continua sendo trabalho do mesmo líder, com a mesma conta, e não vira líder por engano.',
         en: 'When a worker hands its job to a new session, the new one stays a worker of the same leader, on the same account, instead of becoming a leader by mistake.',
       },
+      {
+        pt: 'Parar um teste numa cópia descartável do app agora encerra também os processos que ele abriu em segundo plano.',
+        en: 'Stopping a test in a throwaway copy of the app now also ends the processes it started in the background.',
+      },
     ],
   },
   '2.183.0': {
