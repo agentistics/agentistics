@@ -13,8 +13,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.184.0': {
     features: [
       {
-        pt: 'Um líder que está esperando algo (uma entrega, memória livre, um horário ou o fim de um trabalho) agora é acordado sozinho quando isso acontece, uma vez só, mesmo que o app reinicie no meio (fluxos experimentais).',
-        en: 'A leader waiting for something (a delivery, free memory, a set time or a job ending) is now woken on its own when it happens, exactly once, even if the app restarts midway (experimental flows).',
+        pt: 'Um líder que está esperando algo (uma entrega, memória livre, um horário ou o fim de um trabalho) agora é acordado sozinho quando isso acontece, uma vez só, mesmo que o app reinicie no meio (fluxos experimentais). Conferido pelo registro do app; ver a mensagem chegando na tela ainda falta conferir.',
+        en: 'A leader waiting for something (a delivery, free memory, a set time or a job ending) is now woken on its own when it happens, exactly once, even if the app restarts midway (experimental flows). Checked through the app\'s own records; seeing the message arrive on screen is still unchecked.',
       },
       {
         pt: 'O harness nativo agora conversa com os modelos do Google. Conferido só com testes automáticos; uma conversa real ainda não foi feita.',
