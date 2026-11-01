@@ -1,5 +1,5 @@
 import { HandoffBand } from './HandoffWarning'
-import { AccountLimitBand } from './AccountSwitch'
+import { AccountLimitBand, AccountLoginBand } from './AccountSwitch'
 /**
  * SessionChat — one live session, read as a conversation.
  *
@@ -23,7 +23,7 @@ import { AccountLimitBand } from './AccountSwitch'
 
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { reopeningLabel, withReopening } from '../../lib/reopeningStore'
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { flushSync } from 'react-dom'
 import { GROW_AT_PX, GROW_TURNS, INITIAL_TURNS, shownToInclude, windowStart } from '../../lib/turnWindow'
@@ -41,7 +41,7 @@ import { modeStyle } from '../../lib/modeStyle'
 import { NO_QUESTIONS_WARNING } from '@agentistics/core'
 import { NoQuestionsWarning } from './ModePicker'
 import { modeLabel, modeTitle, onlyModeNote } from '../../lib/modeLabel'
-import { modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
+import { modeChipState, modeMenuFor, modeMenuPlacement, type MenuPlacement } from '../../lib/modeMenu'
 import { ApprovalCard } from './ApprovalCard'
 import { composerAnswerRequest } from '../../lib/dialogAnswer'
 import { TypedModel } from './ModelSelect'
@@ -51,7 +51,7 @@ import { ChatBubble, type ChatTurn } from './ChatBubble'
 import { WorkingNote } from './WorkingNote'
 import { ToolActivity } from './ToolActivity'
 import { chatActivityStore } from '../../lib/appFlags'
-import { groupConsecutive, markTrailingRunning, type ChatItem } from '../../lib/toolActivity'
+import { groupConsecutive, markTrailingRunning, silentToolRuns, type ChatItem } from '../../lib/toolActivity'
 import { isImagePath, openComposerLightbox, previousPersonTurnMs } from '../../lib/attachmentPreview'
 import { promptCountLabel } from '../../lib/promptCount'
 import { splitImageAttachments } from '../../lib/attachmentPreview'
@@ -82,11 +82,14 @@ import {
   composeQuoted, locateExcerpt,
 } from '../../lib/quoteCards'
 import { ROW_FLASH } from '../../lib/noteFocus'
-import { modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
+import { isNayCwd, modelLabel, pendingEchoes, sessionIdentityKey } from '@agentistics/core'
 import { personQueuedCount, shouldRestoreDraft, visibleQueued } from '../../lib/queuedCards'
 import { SendNowControl, type SendNowRun } from './SendNowControl'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { CenteredLoader } from '../CenteredLoader'
+import { EngineSurfaceButtons } from '../EngineSurfaceButtons'
+import { EngineSurfaceInlineSlot } from '../EngineSurfaceHost'
+import { useHasActiveComposerSurface } from '../../lib/engineSurfaceHost'
 
 import {
   applyDraftRequest, consumeDraftRequest, getDraftRequest, useDraftRequest,
@@ -104,9 +107,10 @@ import { goToTurn } from '../../lib/turnScroll'
 import { findTurnIndex, registerChatSearchTarget } from '../../lib/chatSearchBridge'
 import { attachmentName, splitMessage } from '../../lib/messageAttachments'
 import { HARNESS_LABELS } from '../../lib/harness'
+import { HarnessInstallDialog, type HarnessInstallTarget } from '../HarnessInstallDialog'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useViewportWidth } from '../../hooks/useViewportWidth'
-import { modelDisplay } from '../../lib/modelDisplay'
+import { bandModel } from '../../lib/modelDisplay'
 import { handleComposerDrop } from '../../lib/mentionInsert'
 import { REPO_DRAG_MIME, readRepoDrag } from '../../lib/repoDrag'
 import { useNavigate } from 'react-router-dom'
@@ -231,8 +235,8 @@ export interface SessionChatProps {
   /** The shaped row, which carries the parsed dialog and what may be done about it. */
   row?: FleetRow
   lang: 'pt' | 'en'
-  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; step?: 'next' | 'back'; choices?: number[]; occurrence?: number; confirm?: boolean; handoff?: boolean })
-    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
+  act: (req: { id: string; action: FleetActionId; text?: string; choice?: number; step?: 'next' | 'back'; choices?: number[]; occurrence?: number; confirm?: boolean; handoff?: boolean; force?: boolean })
+    => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed'; action?: { kind: 'update-harness'; harness: string; need: string }; memoryBudget?: true }>
   /** Switch to the live terminal when a failed write found a blocking prompt. */
   onOpenTerminal?: () => void
   /**
@@ -489,6 +493,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * still what the user chose to send, exactly as if they had typed it. No audio leaves the
    * browser — the recognition is the browser's own, and this product uploads nothing.
    */
+  /** A composer surface with an active face is up for this session: it owns the microphone, so dictation steps aside. */
+  const engineSurfaceActive = useHasActiveComposerSurface(session.id)
   const toggleDictation = useCallback(() => {
     if (listening) { recognitionRef.current?.stop(); return }
     const w = window as unknown as { SpeechRecognition?: new () => never; webkitSpeechRecognition?: new () => never }
@@ -623,12 +629,18 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const [modelFreeText, setModelFreeText] = useState(false)
   // A SOURCE with its own settings (the native runtime) gives its model list and switch itself.
   const sourceControls = source?.controls
+  // 1.20 — a STRUCTURED row whose protocol lists its models switches through it (opencode's set_config_option):
+  // the list and the current model are the protocol's, not a typed slash command.
+  const protocolModels = row?.models && row.models.length > 0 ? row.models : null
   const modelReason = useMemo(
-    () => (sourceControls?.model ? null : modelSwitchReason(row?.harness ?? '', pt ? 'pt' : 'en')),
-    [row, pt, sourceControls?.model],
+    () => (sourceControls?.model || protocolModels ? null : modelSwitchReason(row?.harness ?? '', pt ? 'pt' : 'en')),
+    [row, pt, sourceControls?.model, protocolModels],
   )
+  /** A switch the harness's own version refused (opencode < 1.18.0 on its free tier): the update dialog it offers. */
+  const [updateOffer, setUpdateOffer] = useState<{ harness: string; need: string } | null>(null)
+  const [updateTarget, setUpdateTarget] = useState<HarnessInstallTarget | null>(null)
   useEffect(() => {
-    if (sourceControls?.model || modelReason || !row?.harness) return
+    if (sourceControls?.model || protocolModels || modelReason || !row?.harness) return
     let alive = true
     fetch(`/api/fleet/new?lang=${pt ? 'pt' : 'en'}`)
       .then(r => (r.ok ? r.json() : null))
@@ -643,9 +655,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       .catch(() => { /* no list, no picker — the control simply does not appear */ })
     return () => { alive = false }
   }, [row?.harness, modelReason, pt, sourceControls?.model])
-  const menuModels = sourceControls?.model ? sourceControls.model.options : models
-  const menuFreeText = sourceControls?.model ? sourceControls.model.freeText : modelFreeText
-  const currentModelId = sourceControls?.model?.current ?? session.model ?? ''
+  const menuModels = sourceControls?.model ? sourceControls.model.options : (protocolModels ?? models)
+  const menuFreeText = sourceControls?.model ? sourceControls.model.freeText : (protocolModels ? false : modelFreeText)
+  const statedModelId = sourceControls?.model?.current ?? (protocolModels ? row?.model : undefined)
+  const currentModelId = statedModelId ?? session.model ?? ''
   const currentModelLabel = menuModels.find(model => model.id === currentModelId)?.label ?? currentModelId
   /** M3 status band: the model button always names a model — the live control's, else the one the
    *  session was started on — and the effort when one is known. Never a bare "Modelo". */
@@ -654,7 +667,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // pins to an older version) is only the fallback. Owner, 2026-10-30: the card said "Opus 5.5" while
   // the band said "Opus 5", and an adopted session showed a bare "Modelo".
   const startedOrSwitched = currentModelId || row?.model || ''
-  const statusModelText = modelDisplay(session.harness, metrics?.stats?.model ?? metrics?.meta?.model, startedOrSwitched)
+  const statusModelText = bandModel(session.harness, statedModelId, metrics?.stats?.model ?? metrics?.meta?.model, startedOrSwitched)
   const statusModelLabel = !statusModelText
     ? (pt ? 'Modelo' : 'Model')
     : statusModelText === startedOrSwitched ? modelLabel(session.harness, startedOrSwitched) : statusModelText
@@ -958,6 +971,14 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
       if (refused) setNotice(refused)
       return
     }
+    if (row?.models && row.models.length > 0) {
+      const out = await act({ id: row.id, action: 'setModel', text: model })
+      if (!out.ok) {
+        setNotice(out.message)
+        if (out.action?.kind === 'update-harness') setUpdateOffer({ harness: out.action.harness, need: out.action.need })
+      } else { setUpdateOffer(null); setNotice(null); nudgeFleet() }
+      return
+    }
     const line = modelSwitchLine(row?.harness ?? '', model)
     if (!line) return
     await act({ id: row!.id, action: 'prompt', text: line })
@@ -1090,6 +1111,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * received "quote, quote, quote, all my text". Read through a ref so the bubble callbacks stay
    * stable for `ChatBubble`'s memo.
    */
+  /** This composer's own identity for engine surfaces: its button opens into its own inline slot. */
+  const engineSlotId = useId()
   const composerNow = useRef({ replyTo, draft, caret })
   composerNow.current = { replyTo, draft, caret }
   /** The reply fields ABOVE each quote, by quote index. The main field is `textareaRef`. */
@@ -1906,11 +1929,12 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // row has only the harness's cycle key, so its menu is the measured table and a choice is N cycles.
   const directModes = row?.modes && row.modes.length > 0 ? row.modes : null
   const modeOptions = useMemo(() => directModes ?? modeMenuFor(row?.harness), [directModes, row?.harness])
+  const modeChip = modeChipState({ hasMode: !!row?.mode, loading, live: payload?.live !== false, canPrompt, blocked, answering: answeringNow, direct: directModes !== null })
   // "No questions" is dangerous: choosing it only ASKS (a confirm modal explains the mode); the real
   // switch runs from the modal's confirm. `noQuestionsAsk` holds the pending target id.
   const [noQuestionsAsk, setNoQuestionsAsk] = useState<string | null>(null)
   const switchMode = useCallback(async (target: string) => {
-    if (!row?.mode || !canPrompt) return
+    if (!row?.mode || !modeChip.enabled) return
     if (directModes) {
       setModeMenuOpen(false)
       const out = await act({ id: session.id, action: 'setMode', text: target })
@@ -1926,7 +1950,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     const out = await act({ id: session.id, action: 'cycleMode', text: target })
     if (!out.ok) setNotice(out.message)
     if (out.ok) nudgeFleet()
-  }, [act, canPrompt, directModes, row?.mode, session.id])
+  }, [act, modeChip.enabled, directModes, row?.mode, session.id])
   const chooseMode = useCallback(async (target: string) => {
     const opt = modeOptions.find(mode => mode.id === target)
     if (opt && 'canonical' in opt && opt.canonical === 'no-questions' && row?.mode?.id !== target) {
@@ -2185,12 +2209,17 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     if (!out.ok) setNotice(out.message)
   }
 
-  async function reopenNow() {
+  /** The memory gate refused the last Reopen: "Reabrir mesmo assim" is offered, behind a confirmation. */
+  const [reopenForceable, setReopenForceable] = useState(false)
+  const [confirmReopenForce, setConfirmReopenForce] = useState(false)
+  async function reopenNow(force = false) {
     if (!reopen?.enabled || reopening) return
     setReopening(true)
-    const out = await withReopening([session.id], () => act({ id: session.id, action: 'resume' }))
+    setReopenForceable(false)
+    const out = await withReopening([session.id], () => act({ id: session.id, action: 'resume', ...(force ? { force: true } : {}) }))
     setReopening(false)
     setNotice(out.message)
+    setReopenForceable(!out.ok && (out as { memoryBudget?: true }).memoryBudget === true)
     // THE NEW ID IS REPORTED UP. The server hands it back precisely so a caller does not stay on
     // the row it just retired; see `onReopened` for what used to happen instead. Navigating is
     // still not this component's decision — it says what happened and hands over the id.
@@ -2222,6 +2251,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   useEffect(() => chatActivityStore.subscribe(() => setChatActivityOn(chatActivityStore.get())), [])
   const activityItems: ChatItem<ChatTurn>[] = useMemo(
     () => (chatActivityOn ? markTrailingRunning(groupConsecutive(turns.slice(firstShown)), showWorking && !composing) : []),
+    [chatActivityOn, turns, firstShown, showWorking, composing],
+  )
+  // Activity line OFF: a reply that only used tools would draw nothing at all — it still gets its one line.
+  const silentRuns = useMemo(
+    () => (chatActivityOn ? new Map<number, never>() : silentToolRuns(turns.slice(firstShown), showWorking && !composing)),
     [chatActivityOn, turns, firstShown, showWorking, composing],
   )
   const liveActivity = chatActivityOn && activityItems[activityItems.length - 1]?.type === 'activity' && showWorking && !composing
@@ -2622,7 +2656,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             ? activityItems.map(item => item.type === 'turn'
               ? renderTurn(item.turn, firstShown + item.index)
               : <ToolActivity key={item.group.key} group={item.group} lang={lang} variant="live" />)
-            : turns.slice(firstShown).map((t, j) => renderTurn(t, firstShown + j))}
+            : turns.slice(firstShown).map((t, j) => {
+              const silent = silentRuns.get(j)
+              return silent ? <ToolActivity key={silent.key} group={silent} lang={lang} variant="live" /> : renderTurn(t, firstShown + j)
+            })}
           {placedAttention.after.map((m, j) => <AttentionMarkLine key={`am-end-${j}`} mark={m} pt={pt} />)}
 
           {/* An echo IS an unread message by definition — it is retired the instant the transcript
@@ -3073,6 +3110,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             </div>
           )}
           {!source && <HandoffBand id={session.id} pt={pt} />}
+          {!source && <AccountLoginBand sessionId={session.id} lang={lang} onSwitched={id => onReopened?.(id)} />}
           {!source && <AccountLimitBand sessionId={session.id} lang={lang} onSwitched={id => onReopened?.(id)} />}
           {/* NO COMPOSER UNTIL THE CONVERSATION IS THERE. A field offered over a conversation still
               loading invites a message into a session whose state is not yet known — including one
@@ -3083,6 +3121,21 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             </p>
           ) : (
             <>
+              {/* A model switch the harness's OWN version refused (opencode < 1.18.0 on its free tier): said ABOVE
+                  the field, where the other session notices sit, with the one-click update beside it (QA F1: below the
+                  status band it was laid out but never seen). */}
+              {updateOffer && (
+                <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', margin: '0 0 8px', padding: '8px 10px', borderRadius: 9, border: '1px solid var(--anthropic-orange)', background: 'color-mix(in srgb, var(--anthropic-orange) 8%, transparent)' }}>
+                  <span style={{ flex: '1 1 220px', fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-primary)' }}>{notice}</span>
+                  <button
+                    type="button"
+                    onClick={() => setUpdateTarget({ id: updateOffer.harness, label: (HARNESS_LABELS as Record<string, string>)[updateOffer.harness] ?? updateOffer.harness, installed: true })}
+                    style={{ border: 0, borderRadius: 8, padding: '6px 10px', minHeight: isMobile ? 44 : undefined, background: 'var(--anthropic-orange)', color: '#fff', fontFamily: 'inherit', fontSize: 11.5, cursor: 'pointer' }}
+                  >
+                    {pt ? `Atualizar o ${(HARNESS_LABELS as Record<string, string>)[updateOffer.harness] ?? updateOffer.harness}` : `Update ${(HARNESS_LABELS as Record<string, string>)[updateOffer.harness] ?? updateOffer.harness}`}
+                  </button>
+                </div>
+              )}
               {blocked && (
                 <p style={{ margin: '0 0 8px', fontSize: 11.5, color: 'var(--anthropic-orange)', lineHeight: 1.5 }}>
                   {pt
@@ -3156,6 +3209,40 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                       {reopen.reason}
                     </span>
                   )}
+                  {/* What the last Reopen answered. The composer's own notice line is hidden with the
+                      composer while this block stands in for it, so a refusal (the memory gate's
+                      sentence) used to come back and be shown nowhere (QA OPENCODE.COMPLETO). */}
+                  {notice && !reopening && (
+                    <span role="status" data-reopen-notice style={{ width: '100%', order: 4, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-primary)' }}>
+                      {notice}
+                    </span>
+                  )}
+                  {reopenForceable && !reopening && (
+                    <button
+                      type="button"
+                      data-reopen-anyway
+                      onClick={() => setConfirmReopenForce(true)}
+                      style={{
+                        order: 5, padding: '7px 12px', borderRadius: 9, cursor: 'pointer',
+                        border: '1px solid var(--accent-red)', background: 'transparent',
+                        color: 'var(--accent-red)', fontFamily: 'inherit', fontSize: 12.5,
+                      }}
+                    >
+                      {pt ? 'Reabrir mesmo assim' : 'Reopen anyway'}
+                    </button>
+                  )}
+                  <ConfirmModal
+                    open={confirmReopenForce}
+                    title={pt ? 'Reabrir mesmo assim?' : 'Reopen anyway?'}
+                    message={pt
+                      ? 'Esta máquina está com pouca memória. Reabrir agora ignora a verificação de memória — a máquina pode ficar lenta ou fechar outros programas.'
+                      : 'This machine is low on memory. Reopening now overrides the memory check — the machine may slow down or close other programs.'}
+                    cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+                    confirmLabel={pt ? 'Reabrir mesmo assim' : 'Reopen anyway'}
+                    onCancel={() => setConfirmReopenForce(false)}
+                    onConfirm={() => { setConfirmReopenForce(false); void reopenNow(true) }}
+                    focusCancel
+                  />
                 </div>
               )}
 
@@ -3204,6 +3291,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               {/* Loose on the composer's own surface — no second card behind it. It used to sit in
                   its own `--bg-base` box with a border, which read as a field floating inside the
                   field that holds it; dropping both leaves it the same colour as its container. */}
+              {/* An engine surface asked to sit inline mounts here, directly above the composer. */}
+              <EngineSurfaceInlineSlot sessionId={session.id} slotId={engineSlotId} />
               <ComposerShell hidden={showReopen} dimmed={!canPrompt}>
                 <input
                   ref={fileRef}
@@ -3581,13 +3670,17 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     desktop's — the microphone was the whole of the difference. Where it cannot
                     work it is still in the menu, on a phone exactly as anywhere else, because there
                     is the only place the reason fits. */}
-                {dictation.state === 'ready' && (
+                {dictation.state === 'ready' && !engineSurfaceActive && (
                   <ComposerMicButton
                     onClick={toggleDictation}
                     disabled={!canPrompt}
                     listening={listening}
                     label={listening ? (pt ? 'Parar de ouvir' : 'Stop listening') : (pt ? 'Ditar' : 'Dictate')}
                   />
+                )}
+
+                {!answeringNow && (
+                  <EngineSurfaceButtons placement="composer" sessionId={session.id} sessionKind={isNayCwd(session.cwd) ? 'nay' : 'session'} slotId={engineSlotId} lang={pt ? 'pt' : 'en'} />
                 )}
 
                 {/* THE CONTEXT GAUGE (design item 3, owner 2026-09-27) — right after the
@@ -3792,7 +3885,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                             </button>
                           )}
                           <div id="composer-menu-message-region" style={{ display: foldedMenuGroups.has('message') ? 'none' : 'block' }}>
-                      {dictation.state === 'ready' && (
+                      {dictation.state === 'ready' && !engineSurfaceActive && (
                         <button
                           type="button"
                           onClick={toggleDictation}
@@ -3913,7 +4006,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                             <button
                               key={m.id}
                               disabled={sourceControls?.busy === true}
-                              aria-current={sourceControls?.model?.current === m.id ? 'true' : undefined}
+                              aria-current={(sourceControls?.model?.current ?? (protocolModels ? currentModelId : undefined)) === m.id ? 'true' : undefined}
                               onClick={() => { setMoreOpen(false); void switchModel(m.id) }}
                               style={{
                                 display: 'block', width: '100%', textAlign: 'left',
@@ -3922,14 +4015,14 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                                 fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
                               }}
                             >
-                              {m.label}{sourceControls?.model?.current === m.id ? ' ✓' : ''}
+                              {m.label}{(sourceControls?.model?.current ?? (protocolModels ? currentModelId : undefined)) === m.id ? ' ✓' : ''}
                             </button>
                           ))}
                           {menuFreeText && (
                             <TypedModel lang={pt ? 'pt' : 'en'} onPick={id => { setMoreOpen(false); void switchModel(id) }} />
                           )}
                           <p style={{ margin: '2px 8px 4px', fontSize: 10, lineHeight: 1.4, color: 'var(--text-tertiary)' }}>
-                            {sourceControls?.model
+                            {sourceControls?.model || protocolModels
                               ? (pt ? 'Vale para os próximos turnos.' : 'Applies to the next turns.')
                               : (pt ? 'Envia /model para a sessão.' : 'Sends /model to the session.')}
                           </p>
@@ -4009,7 +4102,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                         <ChevronDown size={12} aria-hidden className="ag-composer-status-chevron" />
                       </button>
                     )}
-                    {row?.mode && !answeringNow && (
+                    {row?.mode && modeChip.shown && (
                       <button
                         type="button"
                         ref={modeButtonRef}
@@ -4020,7 +4113,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                           if (rect) setModeMenuPos(modeMenuPlacement(rect, window.innerWidth, window.innerHeight, warns ? 270 : 190, warns ? 320 : 220))
                           setModeMenuOpen(value => !value)
                         }}
-                        disabled={!canPrompt}
+                        disabled={!modeChip.enabled}
                         aria-haspopup="menu"
                         aria-expanded={modeMenuOpen}
                         aria-label={pt ? `Modo: ${modeLabel(row.mode, 'pt')}` : `Mode: ${modeLabel(row.mode, 'en')}`}
@@ -4069,11 +4162,17 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     )}
               </div>
               </div>
-              {(notice ?? source?.notice) && (
+              {!updateOffer && (notice ?? source?.notice) && (
                 <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
                   {notice ?? source?.notice}
                 </p>
               )}
+              <HarnessInstallDialog
+                target={updateTarget}
+                pt={pt}
+                onClose={() => setUpdateTarget(null)}
+                onDone={() => { setUpdateOffer(null); setNotice(pt ? 'Atualizado. Reabra a sessão para usar a versão nova.' : 'Updated. Reopen the session to use the new version.') }}
+              />
               {deliveryFailure && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7, flexWrap: 'wrap' }}>
                   <button

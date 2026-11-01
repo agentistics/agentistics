@@ -9,7 +9,7 @@ afterEach(() => {
   for (const error of errors.splice(0)) error.mockRestore()
 })
 
-function host(resumeSession: () => Promise<unknown>) {
+function host(resumeSession: (req?: unknown) => Promise<unknown>) {
   return {
     sessions: async () => ({ sessions: [{ id: 'fallen', harness: 'claude', cwd: '/project', title: 'Motor', actionable: true, resume: { sessionId: 'conversation', title: 'Motor' } }] }),
     resumeSession,
@@ -53,4 +53,15 @@ test('a resume result keeps the replacement id and account refusal', async () =>
 test('a notice thrown by the resume (a reopen already in progress) keeps its own sentence', async () => {
   __setFleetHostForTest('en', host(async () => { throw new SessionNotice('Conversation reopen is already in progress; retry shortly.') }))
   expect(await runFleetAction('en', { action: 'resume', id: 'fallen' })).toEqual({ ok: false, message: 'Conversation reopen is already in progress; retry shortly.' })
+})
+
+test('a memory-gate refusal says so (memoryBudget), and "reopen anyway" reaches the resume as force', async () => {
+  const seen: unknown[] = []
+  const refusal = { ok: false, message: 'Not enough memory to start another session…', admission: { code: 'memory_budget', refusal: {}, message: 'x' } }
+  __setFleetHostForTest('en', host(async (req?: unknown) => { seen.push(req); return refusal }))
+  expect(await runFleetAction('en', { action: 'resume', id: 'fallen' })).toEqual({ ok: false, message: refusal.message, memoryBudget: true })
+  expect((seen[0] as { force?: boolean }).force).toBeUndefined()
+  __setFleetHostForTest('en', host(async (req?: unknown) => { seen.push(req); return { ok: true, id: 'r2', message: 'Started' } }))
+  expect(await runFleetAction('en', { action: 'resume', id: 'fallen', force: true })).toEqual({ ok: true, id: 'r2', message: 'Started' })
+  expect((seen[1] as { force?: boolean }).force).toBe(true)
 })

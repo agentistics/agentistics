@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { fmtSpan, groupConsecutive, groupPerExchange, groupSpanMs, kindOf, markTrailingRunning, objectOf, stepVerb, stepsOfTurn, summarize, type ActivityKind, type ActivityStep, type TurnLike } from './toolActivity'
+import { fmtSpan, groupConsecutive, silentToolRuns, groupPerExchange, groupSpanMs, kindOf, markTrailingRunning, objectOf, stepVerb, stepsOfTurn, summarize, type ActivityKind, type ActivityStep, type TurnLike } from './toolActivity'
 
 describe('kindOf — one rule for every harness', () => {
   test.each([
@@ -277,5 +277,29 @@ describe('CHAT.ACTIVITY P3 — unanswered steps are separate from completed acti
     const items = markTrailingRunning([{ type: 'activity', group: { key: 'pending', steps, running: true } }], false)
     const group = (items[0] as { type: 'activity'; group: import('./toolActivity').ActivityGroup }).group
     expect(summarize(group.steps, group.running, pt)).toBe(expected)
+  })
+})
+
+describe('silentToolRuns — a reply that only used tools still shows, with the activity line off', () => {
+  const u = (text: string, at: string): TurnLike => ({ role: 'user', text, at })
+  const a = (text: string, at: string, tools?: { name: string; ref?: string }[]): TurnLike => ({ role: 'assistant', text, at, ...(tools ? { tools } : {}) })
+  test('an exchange with tools and no sentence gets one group, at its last tool turn', () => {
+    const turns = [u('run it', 't1'), a('', 't2', [{ name: 'bash', ref: 'c1' }]), a('', 't3', [{ name: 'read', ref: 'c2' }])]
+    const runs = silentToolRuns(turns)
+    expect([...runs.keys()]).toEqual([2])
+    expect(runs.get(2)!.steps.map(s => s.name)).toEqual(['bash', 'read'])
+    expect(runs.get(2)!.running).toBe(false)
+  })
+  test('an exchange that said something is left to its sentence', () => {
+    expect(silentToolRuns([u('q', 't1'), a('', 't2', [{ name: 'bash' }]), a('done', 't3')]).size).toBe(0)
+  })
+  test('each exchange is judged on its own', () => {
+    const turns = [u('a', 't1'), a('', 't2', [{ name: 'bash' }]), u('b', 't3'), a('ok', 't4', [{ name: 'bash' }])]
+    expect([...silentToolRuns(turns).keys()]).toEqual([1])
+  })
+  test('the last exchange waits while the session is still working', () => {
+    const turns = [u('a', 't1'), a('', 't2', [{ name: 'bash' }])]
+    expect(silentToolRuns(turns, true).size).toBe(0)
+    expect(silentToolRuns(turns, false).size).toBe(1)
   })
 })

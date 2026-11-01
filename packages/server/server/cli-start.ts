@@ -46,6 +46,7 @@ import {
   followFleet, HARNESS_ORDER, repoShortName, sendNowDelivered,
   type ConversationLinkReason, type HarnessId,
   CANONICAL_MODES, type CanonicalMode, CANONICAL_MODE_TEXT, canonicalOfTuiMode,
+  hasRolePrefix,
 } from '@agentistics/core'
 import type {
   ActionResult,
@@ -129,18 +130,20 @@ import { awaitReplacement, type RestartVerdict, type ServingObservation } from '
 import { resolveLang } from './cli-lang'
 import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
-import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
-import { sessionActionError } from './sessions/action-error'
+import { forkLaunch, inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
+import { recordChipMode } from './sessions/chip-mode-record'
+import { SessionNotice, sessionActionError } from './sessions/action-error'
 import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { spawnCapabilities } from './sessions/codex-capabilities'
 import { readHarnessVersion } from './sessions/harness-version'
 import { answerStructured, reopenOrigin, spawnOriginOf, structuredIntentOf } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { applyAccountToPlan } from './sessions/account-plan'
+import { ensureClaudeProjectTrusted } from './sessions/claude-trust'
 import { prependContext } from './sessions/agentistics-context'
 import { rootIfLeader } from './sessions/team-links'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, withOwnerRequests, writeContextFile } from './sessions/spawn-context'
-import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './sessions/session-roles'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './sessions/spawn-context'
+import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor, storedRoleFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
 import { bornConversationLink } from './sessions/born-link'
@@ -184,6 +187,7 @@ import {
   collisionKey, managedProcessLogPath, readManagedConversation, readProcessConversation, readSpawnWindowConversation, resolveProcessLog, type ProcessTranscriptFile,
 } from './sessions/process-conversation'
 import { holderCollisions } from './sessions/process-transcript'
+import { harnessBlockedNotice } from './sessions/harness-notice'
 import { onTranscriptActivity } from './sessions/transcript-activity'
 import { extraServers, isServerCommand } from './idle-servers'
 import { planTaskDelete, taskDeleteIsNoop } from './sessions/task-delete'
@@ -204,6 +208,7 @@ import {
 import { createSessionHub, setProcessSessionHub, type SessionHub } from './sessions/session-hub'
 import { hostAdapterState, hostTailState, onAdapterStateChange } from './sessions/adapter-state-host'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './sessions/harness-session-file'
+import { inlineSteps, readInlineSelected } from './sessions/inline-select'
 import { cycleToMode, modeOf, modeSpecFor } from './sessions/mode-spec'
 import { isServerProcess, readServerSnapshot } from './sessions/shared-snapshot'
 import { conversationForProcess, forgetConversations, loadConversations } from './sessions/conversations'
@@ -2021,6 +2026,11 @@ function queuedSentence(position: number, lang: CliLang): string {
     : `No room right now — the session is queued (position ${position}) and starts by itself when memory frees; cancel it in Hardware → Resources.`
 }
 
+/** The row as written, with the row it replaces (QA F8). */
+function withSupersedes<T extends object>(row: T, replaced: string | undefined): T {
+  return replaced ? { ...row, supersedes: replaced } : row
+}
+
 export async function spawnManaged(req: {
   harness: HarnessId
   cwd: string
@@ -2031,6 +2041,8 @@ export async function spawnManaged(req: {
    */
   origin?: 'web' | 'terminal' | 'background'
   resumeId?: string
+  /** V-OPENCODE.2 — open a FORK of this conversation (structured drivers that declare `fork`). */
+  forkOf?: string
   prompt?: string
   model?: string
   effort?: string
@@ -2054,7 +2066,13 @@ export async function spawnManaged(req: {
   parentVerified?: boolean
   parentConversationId?: string
   handoff?: boolean
+  /** CONTA.TROCA — the row an account/harness switch replaces: the gate judges it as a reopen (same work, same filing). */
+  switchFrom?: string
   role?: 'leader' | 'worker'
+  /** DSL.TIPO-SESSAO — an agent's delegation through the engine (`engine-delegate.ts`): gate door `engine`. */
+  spawnDoor?: 'engine'
+  gateTaskId?: string
+  gateSubtaskId?: string
   /** Per-session away mode: on, off, or inherit a verified away parent's (absent = inherit). */
   away?: boolean | 'inherit'
   attemptId?: string
@@ -2121,6 +2139,32 @@ export async function spawnManaged(req: {
     accountRoot = decided.account?.root
   }
 
+  // DSL.TIPO-SESSAO — the spawn gate FIRST, before the memory admission and its queue (QA F7): a request it refuses is
+  // never queued. It decides the role BEFORE anything is written: a web spawn without a parent stays
+  // unassigned (the owner's), a parent makes a worker, a hand-off a leader; a session asking with no decidable or a
+  // contradictory role is refused in plain words and nothing is created.
+  const { spawnGate } = await import('./sessions/spawn-gate')
+  // The role the resumed/reopened conversation already has: an explicit role that contradicts it is refused NOW, before
+  // any spawn, instead of a healthy session being stopped after it (QA F6).
+  const inheritedRole = (req.inherit || req.resumeId) ? await storedRoleFor([req.resumeId, req.inherit?.conversationId, req.inherit?.id]).catch(() => undefined) : undefined
+  const gate = await spawnGate({
+    // An account/harness switch (`switchFrom`) is the SAME piece of work moving on, like a reopen: it keeps the filing
+    // the row had, so a leader filed on a subtask is not refused as `leader_on_subtask` (owner, 2026-10-30).
+    door: req.spawnDoor === 'engine' ? 'engine' : req.handoff ? 'handoff' : (req.inherit || req.switchFrom) ? 'reopen' : 'fleet-spawn',
+    // The engine is an in-process caller (an agent's delegation): never the owner.
+    // A session only when PROVEN (`parentVerified`); an unproven parent link is the owner filing a worker under it (QA F4).
+    requestedBy: req.spawnDoor === 'engine' ? { kind: 'engine' } : req.parentSessionId && req.parentVerified ? { kind: 'session', id: req.parentSessionId } : { kind: 'owner' },
+    harness: req.harness,
+    ...(req.role ? { role: req.role } : {}),
+    ...(req.label && hasRolePrefix(req.label) ? { leaderPrefix: true } : {}),
+    ...(req.parentSessionId ? { parentId: req.parentSessionId } : {}),
+    ...((req.gateTaskId ?? req.taskId) ? { taskId: (req.gateTaskId ?? req.taskId)! } : {}),
+    ...((req.gateSubtaskId ?? req.contextSubtaskId) ? { subtaskId: (req.gateSubtaskId ?? req.contextSubtaskId)! } : {}),
+    ...(req.label ? { title: req.label } : {}),
+    ...(inheritedRole ? { inheritedRole } : {}),
+  })
+  if (!gate.ok) return { ok: false, message: gate.reason }
+
   // THE GATE — before anything is spawned or written to the registry. A session that has already
   // been started cannot be un-started, so this has to run first, not merely early.
   let admittedWith: string | null = null
@@ -2161,13 +2205,9 @@ export async function spawnManaged(req: {
   // Minted BEFORE the plan: the agentistics context tells the harness its own session id.
   const id = newSessionId()
   const offeredConversationId = randomUUID()
-  // A web spawn without a parent is intentionally unassigned; only an explicit role or a
-  // verified parent-child relationship may create a stored role.
-  const role = req.role
-    ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.role, undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true))
-    : req.parentSessionId
-      ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], req.handoff ? 'leader' : 'worker', undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true))
-      : undefined
+  const role = gate.role
+    ? await ensureSpawnRole([req.resumeId, req.inherit?.id, req.inherit?.conversationId, offeredConversationId, id], gate.role, undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true))
+    : undefined
   // The parent's conversation id, read from the registry at spawn: stable across the parent's reopens.
   // A hand-off names its predecessor exactly; every other spawn follows a predecessor's hand-off to its successor.
   const parentLink = req.parentSessionId ? await parentLinkOf(req.parentSessionId, { followHandoff: !req.handoff }) : {}
@@ -2186,7 +2226,7 @@ export async function spawnManaged(req: {
   const relay = handoffParentRow
     ? await import('./sessions/handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
-  const ctx = buildSpawnContext(await withOwnerRequests({
+  const ctx = buildSpawnContext(await withPassagem(await withOwnerRequests({
       ...(relay ? { handoffRelay: relay.section } : {}),
       ...(req.handoff ? { handoffTakeover: true } : {}),
       ...(await resolveContextAway(away)),
@@ -2197,7 +2237,7 @@ export async function spawnManaged(req: {
       ...(await resolveContextTask(req.contextTaskId ?? req.taskId, req.contextSubtaskId, req.task)),
       ...(await resolveContextParent(req.parentSessionId ?? req.inherit?.parentConversationId ?? req.inherit?.parentSessionId)),
       ...storedContextRole,
-    }))
+    }), !!req.handoff))
   const logFile = managedProcessLogPath(req.harness, id, AGENTISTICS_DATA_DIR)
   const planned = planSpawn({
     harness: req.harness,
@@ -2216,6 +2256,20 @@ export async function spawnManaged(req: {
   }, await spawnCapabilities(req.harness))
   if (!planned.ok) return { ok: false, message: explainSpawnError(planned.error, s) }
   if (req.account) applyAccountToPlan(planned.plan, req.account)
+  const claudeConfigRoot = planned.plan.env?.CLAUDE_CONFIG_DIR
+  if (req.harness === 'claude' && claudeConfigRoot && !req.account?.loginArgv) {
+    try {
+      await ensureClaudeProjectTrusted(claudeConfigRoot, req.cwd)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      return {
+        ok: false,
+        message: lang === 'pt'
+          ? `Não foi possível confiar na pasta do Claude antes de iniciar: ${detail}`
+          : `Could not trust the Claude folder before starting: ${detail}`,
+      }
+    }
+  }
 
   // THE BINARY MUST BE REACHABLE FROM HERE. The pane is spawned with THIS process's PATH (see
   // `newSessionArgs`), so `Bun.which` answers exactly what the pane's exec will find — and a
@@ -2240,11 +2294,12 @@ export async function spawnManaged(req: {
   const bornLink = bornConversationLink(planned.plan.conversationId, req.resumeId)
   // TEAM LINK (`team-links.ts`): a leader — explicit, a hand-off successor, a reopened leader — is born
   // at the root; everyone else is the (current) caller's child.
-  await addSession(rootIfLeader(await spawnRow({ id, spawnedAt, req: {
+  // QA F8 — `supersedes` is part of the row as it is written (a reopen with a new managed id keeps its team), never a later patch.
+  await addSession(withSupersedes(rootIfLeader(await spawnRow({ id, spawnedAt, req: {
     ...req, ...(mode ? { mode } : {}),
     ...(parentLink.parentSessionId ? { parentSessionId: parentLink.parentSessionId } : {}),
     ...(parentLink.parentConversationId ? { parentConversationId: parentLink.parentConversationId } : {}),
-  }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }), req.handoff ? 'leader' : storedContextRole.role))
+  }, model, effort, bornLink, pendingContext: pendingContextFor(planned.plan, ctx), away, ...(accountId ? { accountId } : {}) }), req.handoff ? 'leader' : storedContextRole.role), req.inherit && req.inherit.id !== id ? req.inherit.id : undefined))
   // A worker must be filed before its process can receive the first prompt.
   if (req.contextTaskId) {
     const { configureSpawn } = await import('./sessions/spawn-configuration')
@@ -2293,6 +2348,8 @@ export async function spawnManaged(req: {
       // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
       structured: structuredIntentOf({ ...req, ...(mode ? { mode } : {}), origin: spawnOriginOf(req.origin, req.attach) }, {
         model, effort, ctx, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
+        // The language of the screen that asked (the host is built per request language): QA F2.
+        lang: lang === 'pt' ? 'pt' : 'en',
         // The driver applies it only where its declaration says the protocol assigns ids; the row is
         // linked by what the protocol then STATES (`onConversation`), never by this offer.
         conversationId: offeredConversationId,
@@ -2301,7 +2358,9 @@ export async function spawnManaged(req: {
     })
   } catch (e) {
     await abandon()
-    return { ok: false, message: s.sessSpawnFailed(e instanceof Error ? e.message : String(e)) }
+    // A SessionNotice (a harness too old, a fork that cannot happen) carries its own Portuguese sentence.
+    const reason = e instanceof SessionNotice && lang === 'pt' && e.pt ? e.pt : e instanceof Error ? e.message : String(e)
+    return { ok: false, message: s.sessSpawnFailed(reason), ...(e instanceof SessionNotice && e.action ? { action: e.action } : {}) }
   }
 
   // `spawn` returning is not evidence anything is RUNNING — tmux's contract is "I made you a
@@ -2319,6 +2378,18 @@ export async function spawnManaged(req: {
     return { ok: false, message }
   }
   if (storedContextRole.role) await markRoleDelivered([planned.plan.conversationId, id], storedContextRole.role)
+  // DSL.TIPO-SESSAO — the row is born with the gate's role or the spawn is undone (never a session without its role).
+  if (gate.role) {
+    const { verifyBornRole } = await import('./sessions/spawn-gate')
+    const born = await verifyBornRole([planned.plan.conversationId, offeredConversationId, id], gate.role, {
+      stored: storedRoleFor, ensure: async (k, r) => ensureSpawnRole(k, r, undefined, await spawnRoleOriginFor(req.parentSessionId, req.parentVerified === true)),
+    })
+    if (!born) {
+      await backend.kill(id).catch(() => {})
+      await abandon()
+      return { ok: false, message: `The session started but its role (${gate.role}) could not be recorded, so it was stopped — try again.` }
+    }
+  }
   if (handoffParentRow) {
     // Link both rows, move the predecessor's whole team here, keep this leader at the root, retire the predecessor.
     await import('./sessions/team-links-io').then(m => m.completeLeaderHandoff(handoffParentRow.id, id, relay, handoffParentRow.handoffSeq)).catch(() => {})
@@ -3838,7 +3909,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         const now = backend.modeOf?.(id)?.id
         const at = choices.findIndex(m => m.id === now)
         const next = choices[(at + 1) % choices.length]!
-        return (await backend.setMode(id, next.id)) ? { ok: true, message: s.sessModeCycled } : { ok: false, message: s.sessSendFailed(id) }
+        return (await backend.setMode(id, next.id)) && (await recordChipMode(id, backend), true) ? { ok: true, message: s.sessModeCycled } : { ok: false, message: s.sessSendFailed(id) }
       }
       const spec = modeSpecFor(managed.harness)
       if (!spec) return { ok: false, message: s.sessModeUnknown(managed.harness) }
@@ -3886,7 +3957,36 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const choices = backend.modesOf?.(id)
       if (!choices || !backend.setMode) return { ok: false, message: s.sessModeUnknown(managed.harness) }
       if (!choices.some(m => m.id === modeId)) return { ok: false, message: s.sessModeUnknown(managed.harness) }
-      return (await backend.setMode(id, modeId)) ? { ok: true, message: choices.find(m => m.id === modeId)!.label } : { ok: false, message: s.sessSendFailed(id) }
+      return (await backend.setMode(id, modeId)) && (await recordChipMode(id, backend), true) ? { ok: true, message: choices.find(m => m.id === modeId)!.label } : { ok: false, message: s.sessSendFailed(id) }
+    },
+
+    /**
+     * 1.20 — switch a structured session's model through its protocol. The id must be one the protocol listed for
+     * THIS session; the driver vets it (opencode's free tier on a build below 1.18.0 is refused, never sent).
+     */
+    async setSessionModel(id: string, modelId: string): Promise<ActionResult> {
+      const s = S()
+      const backend = await resolveBackend()
+      const blocked = await backend.unavailable()
+      if (blocked) return { ok: false, message: blocked }
+      const managed = (await readRegistry()).find(m => m.id === id)
+      if (!managed) return { ok: false, message: s.sessNoRegistryEntry }
+      const live = (await backend.list().catch(() => [])).find(b => b.id === id)
+      if (!live?.alive) return { ok: false, message: s.sessNotRunning }
+      const models = backend.modelsOf?.(id)
+      const pt = lang === 'pt'
+      if (!models || !backend.setModel || !models.options.some(m => m.id === modelId)) {
+        return { ok: false, message: pt ? 'Esta sessão não oferece esse modelo.' : 'This session does not offer that model.' }
+      }
+      const r = await backend.setModel(id, modelId)
+      if (r.ok) {
+        return { ok: true, message: pt ? `Modelo: ${modelId}` : `Model: ${modelId}` }
+      }
+      if (r.blocked) {
+        const n = harnessBlockedNotice(managed.harness, r.blocked)
+        return { ok: false, message: pt && n.pt ? n.pt : n.message, ...(n.action ? { action: n.action } : {}) }
+      }
+      return { ok: false, message: r.reason }
     },
 
     async rewindSession(id: string, prompt: string, occurrence: number): Promise<ActionResult> {
@@ -3984,6 +4084,32 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       return nowStructured
         ? { ok: true, message: pt ? 'Sessão de volta ao modo novo (a mesma conversa, retomada).' : 'Session back in the new mode (the same conversation, resumed).' }
         : { ok: true, message: pt ? 'A conversa foi retomada, mas o modo novo não subiu; ela segue no terminal.' : 'The conversation was resumed, but the new mode did not start; it continues in the terminal.' }
+    },
+
+    async forkSession(id: string, callerVerified = false, force = false): Promise<ActionResult> {
+      const pt = lang === 'pt'
+      const backend = await resolveBackend()
+      const row = (await readRegistry()).find(m => m.id === id)
+      if (!row) return { ok: false, message: S().sessNoRegistryEntry }
+      if (!backend.isStructured?.(id) || !row.conversationId) {
+        return { ok: false, message: pt ? 'Só uma sessão em andamento no modo novo, com conversa vinculada, pode ser ramificada.' : 'Only a running session in the new mode, with a linked conversation, can be forked.' }
+      }
+      // The fork is a NEW row beside the original: it files under the same task and carries the same
+      // name with a suffix, and the original is left exactly as it was.
+      const launch = forkLaunch(row, row.harness, { mode: backend.modeOf?.(id)?.canonical, model: backend.modelsOf?.(id)?.current })
+      const out = await this.spawnSession!({
+        harness: row.harness, cwd: row.cwd, attach: false, origin: 'web', forkOf: row.conversationId,
+        ...launch,
+        label: `${row.label ?? row.harness} (fork)`,
+        ...(row.task ? { task: row.task } : {}),
+        ...(callerVerified ? { callerVerified: true } : {}),
+        // "Start anyway", confirmed by the person after the memory gate refused: the SAME request, past the gate.
+        ...(force ? { force: true } : {}),
+      }).catch(e => ({ ok: false, message: e instanceof Error ? e.message : String(e) }) as SpawnSessionResult)
+      return {
+        ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}),
+        ...(!out.ok && out.admission ? { memoryRefusal: { ...(out.queued?.id ? { queuedId: out.queued.id } : {}) } } : {}),
+      }
     },
 
     async interruptSession(id: string): Promise<ActionResult> {
@@ -4593,6 +4719,36 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
        * HIGHLIGHTED row. The highlighted row is `No, exit`. Reported by a user who could only quit
        * from the web and had to open the terminal to say yes.
        */
+      /*
+       * A SIDE-BY-SIDE row whose highlight is colour only (opencode's permission prompt — see
+       * `inline-select.ts`). Nothing in the plain frame says which option is highlighted, so it is read
+       * off an ANSI capture, the ring is walked with `next`, and the highlight is LOOKED AT again before
+       * the confirm — a miscount costs a refusal, never the wrong answer.
+       */
+      if (read.select === 'inline' && needsChoice(options)) {
+        if (choice === undefined) return { ok: false, message: s.sessNeedsChoice(options.length) }
+        const picked = options.find(o => o.number === choice)
+        if (!picked) return { ok: false, message: s.sessChoiceGone }
+        const inline = spec.inlineSelect
+        if (!inline) return { ok: false, message: s.sessChooseUnknown(managed.harness) }
+        const labels = options.map(o => o.label)
+        const highlighted = async (): Promise<number | null> => {
+          const cap = await backend.captureTerminal(id, SEND_CAPTURE_LINES).catch(() => null)
+          return cap ? readInlineSelected(cap.lines, inline, labels) : null
+        }
+        const from = await highlighted()
+        if (from === null) return { ok: false, message: s.sessChoiceGone }
+        const target = picked.number - 1
+        for (let i = 0; i < inlineSteps(from, target, labels.length); i++) {
+          if (!await backend.sendKey(id, inline.next)) return { ok: false, message: s.sessSendFailed(id) }
+          await new Promise(r => setTimeout(r, ANSWER_SETTLE_MS))
+        }
+        if (await highlighted() !== target) return { ok: false, message: s.sessChoiceGone }
+        return await backend.sendKey(id, spec.key)
+          ? { ok: true, message: s.sessAnswered(picked.label) }
+          : { ok: false, message: s.sessSendFailed(id) }
+      }
+
       if (read.select === 'marker' && needsChoice(options)) {
         if (choice === undefined) return { ok: false, message: s.sessNeedsChoice(options.length) }
         const picked = options.find(o => o.number === choice)
@@ -4922,13 +5078,18 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(req.parentSessionId ? { parentSessionId: req.parentSessionId } : {}),
         ...(req.parentSessionId && req.parentVerified ? { parentVerified: true } : {}),
         ...(req.handoff ? { handoff: true } : {}),
+        ...(req.switchFrom ? { switchFrom: req.switchFrom } : {}),
         ...(filing.role ? { role: filing.role } : {}),
         ...(req.away !== undefined ? { away: req.away } : {}),
         ...(req.force ? { force: true } : {}),
         ...(req.origin ? { origin: req.origin } : {}),
+        ...(req.forkOf ? { forkOf: req.forkOf } : {}),
         ...(req.account ? { account: req.account } : {}),
         ...(chosen.accountId ? { accountId: chosen.accountId } : {}),
         ...(req.callerVerified ? { callerVerified: true } : {}),
+        ...(req.spawnDoor ? { spawnDoor: req.spawnDoor } : {}),
+        ...(req.gateTaskId ? { gateTaskId: req.gateTaskId } : {}),
+        ...(req.gateSubtaskId ? { gateSubtaskId: req.gateSubtaskId } : {}),
       }, S(), lang).then(afterStart)
     },
   }

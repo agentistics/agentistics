@@ -2,11 +2,11 @@
  * The consolidated history alone can be missing (or frozen before an account switch).
  */
 import { basename } from 'node:path'
-import { HARNESS_CAPABILITIES, resolveContextWindow, type HarnessId } from '@agentistics/core'
+import { HARNESS_CAPABILITIES, resolveContextWindow, type HarnessId, type SessionMeta } from '@agentistics/core'
 import { claudeTranscriptState } from '../transcript-state'
 import { createFileMemo, versionOf } from '../adapters/file-memo'
 import { transcriptReaderFor } from './harness-transcript'
-import { findConversation, type Conversation } from './conversations'
+import { toConversation, findConversation, type Conversation } from './conversations'
 import { readTailWindow } from './transcript-window'
 import { parseCodexRollout } from '../adapters/codex-parse'
 import { parseGeminiChat } from '../adapters/gemini-parse'
@@ -68,9 +68,14 @@ export async function refreshConversationContexts(
   history: readonly Conversation[],
   rows: readonly ContextLink[],
   readerFor = transcriptReaderFor,
+  loadOpencode: () => Promise<SessionMeta[]> = async () => {
+    const { opencodeAdapter } = await import('../adapters/opencode')
+    return opencodeAdapter.isAvailable() ? opencodeAdapter.loadSessions() : []
+  },
 ): Promise<Conversation[]> {
   const result = [...history]
   const seen = new Set<string>()
+  let opencode: Promise<SessionMeta[]> | undefined
   for (const row of rows) {
     const id = row.conversationId
     if (!id || row.endedAt || !HARNESS_CAPABILITIES[row.harness]?.contextWindow) continue
@@ -78,6 +83,19 @@ export async function refreshConversationContexts(
     if (seen.has(key)) continue
     seen.add(key)
     try {
+      // SQLite has no transcript path. Refresh exact native IDs through its adapter, including
+      // token/cost footer fields, so the consolidated-history TTL cannot freeze a live OpenCode row.
+      if (row.harness === 'opencode') {
+        const sessions = await (opencode ??= loadOpencode())
+        const meta = sessions.find(s => s.session_id === id)
+        if (meta) {
+          const previous = findConversation(result.filter(c => c.harness === row.harness), id)
+          const next = toConversation(meta)
+          if (previous) result[result.indexOf(previous)] = next
+          else result.push(next)
+        }
+        continue
+      }
       const reader = readerFor(row.harness)
       const path = await reader?.resolve({ conversationId: id, cwd: row.cwd })
       if (!path) continue

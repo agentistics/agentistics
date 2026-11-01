@@ -102,6 +102,26 @@ describe('AccountLimitBand', () => {
   })
 })
 
+describe('AccountLimitBand — a harness with no account to switch to (OpenCode)', () => {
+  const ocLimited: SwitchInfo = {
+    ok: true, supported: false, options: [], limitWatch: true,
+    limit: { at: 1, message: 'Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go' },
+  }
+  test('states the limit in words, with no switch button', async () => {
+    expect(lib.showLimitOnly(ocLimited)).toBe(true)
+    expect(lib.showLimitOnly({ ...ocLimited, limit: null })).toBe(false)
+    expect(lib.showLimitOnly({ ...limited, supported: false })).toBe(false) // no limitWatch: a switch-only harness off
+    getBody = ocLimited
+    const { host, root } = await mount(createElement(mod.AccountLimitBand, { sessionId: 'oc1', lang: 'pt', onSwitched: () => {} }))
+    const band = host.querySelector('[data-account-limit-band]')!
+    expect(band.className).toContain('visible')
+    expect(band.textContent).toContain('Limite de uso atingido')
+    expect(band.textContent).toContain('Free usage limit reached.')
+    expect(Array.from(band.querySelectorAll('button')).some(b => b.textContent?.includes('Continuar na outra conta'))).toBe(false)
+    await act(async () => { root.unmount() })
+  })
+})
+
 describe('AccountLimitBand dismissal', () => {
   test('the X is remembered for this limit after the session is opened again', async () => {
     getBody = limited

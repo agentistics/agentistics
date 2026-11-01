@@ -1,4 +1,5 @@
 /** Non-secret identities only. Credential objects never cross the probe boundary. */
+import { opencodePaths } from './opencode-paths'
 import { createHash, randomBytes } from 'node:crypto'
 import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -24,6 +25,18 @@ export interface HarnessAccount {
    * placeholder account that does not exist.
    */
   signedOut?: true
+  /**
+   * Stored. The harness REFUSED this login while running (Claude's `authentication_failed`, Codex's
+   * `unauthorized`): the login on disk expired or was revoked. The binding is kept — WHERE the account
+   * lives is still true — so a re-login in the same folder re-binds the SAME id. Cleared by `adopt`
+   * (any confirmed re-bind) and by `clearLoginExpired` (the harness answered again after it).
+   */
+  loginExpiredAt?: number
+  /**
+   * Stored. When a sign-in FINISHED on this account (`bind`). A refusal in a transcript that is not
+   * newer than this is the old token's last word, not a new expiry: it neither marks nor raises a bar.
+   */
+  loginRenewedAt?: number
   available: boolean
   firstSeen: number
   lastSeen: number
@@ -108,7 +121,7 @@ const DEFAULT_ROOTS: Record<HarnessId, () => string> = {
   gemini: () => process.env.GEMINI_CLI_HOME ?? join(homedir(), '.gemini'),
   kimi: () => process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code'),
   antigravity: () => join(homedir(), '.gemini', 'antigravity-cli'),
-  opencode: () => process.env.OPENCODE_DIR ?? join(homedir(), '.local', 'share', 'opencode'),
+  opencode: () => opencodePaths(process.env, homedir()).dir,
 }
 /** The login root a harness uses when no account root is set (its own env override, else its home dir). */
 export const defaultHarnessRoot = (harness: HarnessId): string => DEFAULT_ROOTS[harness]()
@@ -359,7 +372,7 @@ export function createHarnessAccounts(options: {
   const now = options.now ?? Date.now
   type Detection = { identity: AccountIdentity; confirmed: boolean; signedOut?: true }
   const unknown = (): Detection => ({ identity: fallback(), confirmed: false })
-  const cache = new Map<string, { at: number; identity: Promise<Detection> }>()
+  const cache = new Map<string, { at: number; identity: Promise<Detection>; settled?: Detection }>()
   let queue: Promise<unknown> = Promise.resolve()
   /** Writers only: a read/modify/write without the cross-process lock is refused. */
   function serial<T>(work: () => Promise<T>): Promise<T> {
@@ -370,7 +383,8 @@ export function createHarnessAccounts(options: {
     queue = result.catch(() => {})
     return result
   }
-  async function identity(harness: HarnessId, root: string | null, force = false): Promise<Detection> {
+  /** Not `async`: callers compare the very promise they were handed against the cache's (see `current`). */
+  function identity(harness: HarnessId, root: string | null, force = false): Promise<Detection> {
     const key = bindingKey(harness, root)
     const held = cache.get(key)
     if (!force && held && now() - held.at < 60_000) return held.identity
@@ -382,8 +396,8 @@ export function createHarnessAccounts(options: {
       }))
       // A probe that outlives the race still answers: its result replaces the "unknown" the race
       // cached, so a cold CLI (first run on macOS) names the account on the next read, not a minute later.
-      void probing.then(d => { if (timedOut) cache.set(key, { at: now(), identity: Promise.resolve(d) }) },
-        e => { if (timedOut && e instanceof SignedOutError) cache.set(key, { at: now(), identity: Promise.resolve({ ...unknown(), signedOut: true as const }) }) })
+      void probing.then(d => { if (timedOut) cache.set(key, { at: now(), identity: Promise.resolve(d), settled: d }) },
+        e => { if (timedOut && e instanceof SignedOutError) { const d = { ...unknown(), signedOut: true as const }; cache.set(key, { at: now(), identity: Promise.resolve(d), settled: d }) } })
       try {
         return await Promise.race([
           probing,
@@ -394,6 +408,7 @@ export function createHarnessAccounts(options: {
       finally { if (timer) clearTimeout(timer) }
     })()
     cache.set(key, { at: now(), identity: pending })
+    void pending.then(d => { const entry = cache.get(key); if (entry && entry.identity === pending) entry.settled = d })
     return pending
   }
   async function write(data: AccountsFile): Promise<void> {
@@ -501,7 +516,7 @@ export function createHarnessAccounts(options: {
       throw error
     }
   }
-  function adopt(data: AccountsFile, harness: HarnessId, root: string | null, detected: AccountIdentity) {
+  function adopt(data: AccountsFile, harness: HarnessId, root: string | null, detected: AccountIdentity, fresh = false) {
     const key = bindingKey(harness, root)
     const previous = data.accounts.find(a => a.id === data.bindings[key])
     let account = matchIdentity(data, harness, root, detected)
@@ -518,6 +533,9 @@ export function createHarnessAccounts(options: {
     if (detected.plan) account.plan = detected.plan
     account.lastSeen = now()
     account.retired = undefined
+    // A sign-in that just FINISHED (`bind`) replaced whatever expired. A routine re-probe (`current`)
+    // proves nothing: an expired token still names its owner, so the mark survives it.
+    if (fresh) { delete account.loginExpiredAt; account.loginRenewedAt = now() }
     data.bindings[key] = account.id
     const folded = previous && previous.id !== account.id && foldPlaceholder(data, account, previous)
     if (!folded) foldPlaceholder(data, account)
@@ -529,7 +547,10 @@ export function createHarnessAccounts(options: {
     const root = normRoot(rootArg)
     const legacy = typeof harnesses !== 'string'
     const requested = legacy ? [...new Set(harnesses)] : [harnesses]
-    const detected = await Promise.all(requested.map(async harness => ({ harness, ...await identity(harness, root) })))
+    const detected = await Promise.all(requested.map(async harness => {
+      const source = identity(harness, root)
+      return { harness, ...await source, source }
+    }))
     const resolveAll = (data: AccountsFile, mutate: boolean) => {
       let changed = false
       const accounts = detected.map(({ harness, identity: found, confirmed, signedOut }) => {
@@ -553,6 +574,13 @@ export function createHarnessAccounts(options: {
     try {
       return done(await serial(async () => {
         const data = await read()
+        // The detection above predates the wait for the lock. A login switch (`bind` after a forced
+        // probe) may have settled meanwhile: adopting the older answer would flip the root back to the
+        // login it just left, and the next read would flip it again, minting accounts as it goes.
+        for (const d of detected) {
+          const latest = cache.get(bindingKey(d.harness, root))
+          if (latest?.settled && latest.identity !== d.source) { Object.assign(d, latest.settled, { source: latest.identity }); d.signedOut = latest.settled.signedOut }
+        }
         const { accounts, changed } = resolveAll(data, true)
         if (changed) await write(data)
         return accounts
@@ -586,7 +614,7 @@ export function createHarnessAccounts(options: {
     async bind(root: string | null, detected: AccountIdentity & { harness: HarnessId }) {
       return serial(async () => {
         const data = await read()
-        const result = adopt(data, detected.harness, normRoot(root), detected)
+        const result = adopt(data, detected.harness, normRoot(root), detected, true)
         await write(data)
         return result
       })
@@ -618,6 +646,35 @@ export function createHarnessAccounts(options: {
       })
     },
     setNickname: (id: string, nickname: string) => update(id, { nickname }),
+    /** The harness refused this login at `at`. Idempotent (a mark already there is kept, no write); a refusal not newer than the last finished sign-in is ignored. */
+    async markLoginExpired(id: string, at: number): Promise<HarnessAccount | null> {
+      const seen = await snapshot()
+      const known = seen.accounts.find(a => a.id === canonicalAccountId(seen, id))
+      const stale = (a: HarnessAccount) => a.loginExpiredAt !== undefined || (a.loginRenewedAt !== undefined && at <= a.loginRenewedAt)
+      if (!known || stale(known)) return known ?? null
+      return serial(async () => {
+        const data = await read()
+        const account = data.accounts.find(a => a.id === canonicalAccountId(data, id))
+        if (!account || stale(account)) return account ?? null
+        account.loginExpiredAt = at
+        await write(data)
+        return account
+      })
+    },
+    /** The harness answered again after the mark (a `/login` inside the session): the login works. */
+    async clearLoginExpired(id: string): Promise<HarnessAccount | null> {
+      const seen = await snapshot()
+      const known = seen.accounts.find(a => a.id === canonicalAccountId(seen, id))
+      if (!known || known.loginExpiredAt === undefined) return known ?? null
+      return serial(async () => {
+        const data = await read()
+        const account = data.accounts.find(a => a.id === canonicalAccountId(data, id))
+        if (!account || account.loginExpiredAt === undefined) return account ?? null
+        delete account.loginExpiredAt
+        await write(data)
+        return account
+      })
+    },
     async list(harnesses: readonly HarnessId[] = HARNESS_ORDER): Promise<HarnessAccount[]> {
       const currentAccounts = await current(harnesses)
       const accounts = (await snapshot()).accounts
@@ -652,6 +709,24 @@ export const listHarnessAccounts = (harnesses?: readonly HarnessId[]) => store.l
 export const setAccountAvailable = (harness: HarnessId, key: string, available: boolean) => store.setAvailable(harness, key, available)
 export const retireAccount = (id: string) => store.retire(id)
 export const updateAccount = (id: string, patch: { available?: boolean; nickname?: string }) => store.update(id, patch)
+export const markLoginExpired = (id: string, at: number) => store.markLoginExpired(id, at)
+export const clearLoginExpired = (id: string) => store.clearLoginExpired(id)
+
+/**
+ * PURE. Can this account take work right now, in one word the screens share:
+ * `expired` — the harness refused its login while running (re-login in the same folder fixes it);
+ * `signed_out` — no binding names it, or the harness answered that its folder holds no login;
+ * `ok` otherwise. A retired account is `undefined`: it is removed, not signed out.
+ */
+export type AccountLoginState = 'ok' | 'expired' | 'signed_out'
+export function accountLoginState(
+  a: Pick<HarnessAccount, 'retired' | 'loginExpiredAt' | 'signedOut'>, bound: boolean,
+): AccountLoginState | undefined {
+  if (a.retired) return undefined
+  if (a.loginExpiredAt !== undefined) return 'expired'
+  if (!bound || a.signedOut) return 'signed_out'
+  return 'ok'
+}
 
 /** Tests install an isolated registry and probes; never read the owner's login. */
 export function __setHarnessAccountsForTest(next: ReturnType<typeof createHarnessAccounts>): void { store = next }

@@ -181,7 +181,26 @@ describe('relay and unknown headers fail closed', () => {
       for (const m of src.matchAll(/\[from agentistics · ([a-z-]+)\]/g)) found.add(m[1]!)
     }
     expect(found.size).toBeGreaterThan(3)
-    for (const k of found) expect(parseSystemEvent(`[from agentistics · ${k}]\nbody`)).not.toBeNull()
+    for (const k of found) {
+      const event = parseSystemEvent(`[from agentistics · ${k}]\nbody`)
+      if (k === 'surface') expect(event).toBeNull()
+      else expect(event).not.toBeNull()
+    }
     expect(parseSystemEvent('[from agentistics · relay]\nx')?.kind).toBe('relay')
   })
+})
+
+test('surface-submitted turns are user messages and strip only leading transport instructions', async () => {
+  const { surfaceTurnText } = await import('./systemEvent')
+  const raw = '[from agentistics · surface]\n[Respond briefly.\nUse the current context.]\n\nShow my tasks [today].'
+  expect(parseSystemEvent(raw)).toBeNull()
+  expect(surfaceTurnText(raw)).toBe('Show my tasks [today].')
+  expect(surfaceTurnText('[from agentistics · surface]\nHello')).toBe('Hello')
+  expect(surfaceTurnText('[from agentistics · surface]\n[Use [the current context].]\n\nHello')).toBe('Hello')
+  expect(surfaceTurnText('[from session abc · handback]\nHello')).toBeNull()
+  expect(surfaceTurnText('I typed [from agentistics · surface]')).toBeNull()
+})
+
+test('a peer wrapper containing a surface header remains a system event', () => {
+  expect(parseSystemEvent('<agent-message>[from agentistics · surface]\nhello</agent-message>')?.kind).toBe('notice')
 })

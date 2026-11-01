@@ -33,10 +33,11 @@ describe('HARNESS_SKILLS', () => {
       expect(h in HARNESS_SKILLS).toBe(true)
     }
   })
-  it('is wired for claude and antigravity', () => {
+  it('is wired for claude, antigravity and opencode', () => {
     expect(HARNESS_SKILLS.claude).not.toBeNull()
     expect(HARNESS_SKILLS.antigravity).not.toBeNull()
-    for (const h of ['codex', 'gemini', 'copilot', 'kimi', 'opencode'] as const) {
+    expect(HARNESS_SKILLS.opencode).not.toBeNull()
+    for (const h of ['codex', 'gemini', 'copilot', 'kimi'] as const) {
       expect(HARNESS_SKILLS[h]).toBeNull()
     }
   })
@@ -55,6 +56,10 @@ describe('HARNESS_SKILLS', () => {
 })
 
 describe('skillLine', () => {
+  it('opencode has no per-skill slash command: the line is a plain request for its `skill` tool', () => {
+    expect(skillLine('opencode', 'brainstorming')).toBe('Use the brainstorming skill.')
+    expect(skillsReason('opencode', 'en')).toBeNull()
+  })
   it('is the slash command the CLI itself resolves', () => {
     expect(skillLine('claude', 'brainstorming')).toBe('/brainstorming')
   })

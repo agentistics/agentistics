@@ -21,6 +21,7 @@ import type { ControlStrings } from '@agentistics/tui/control/i18n'
 import type { HarnessId } from '@agentistics/core'
 import { isExternalRowId } from './external-continue'
 import { SPAWN_SPECS } from './spawn-spec'
+import { FORK_ACTION_HARNESSES } from './fork-capability'
 
 /**
  * Verbs the WEB cannot perform, whatever the row says.
@@ -107,6 +108,8 @@ export type FleetActionId =
    * when the person asks for it. A session already in a terminal answers so, in a sentence.
    */
   | 'terminal'
+  /** V-OPENCODE.2 — FORK the conversation into a NEW session through the protocol (`forkOf`); the original stays as it is. */
+  | 'fork'
   /** FALLBACK.STRUCTURED — the inverse: a TUI row goes back to the structured (new) mode, same conversation. */
   | 'structured'
   /**
@@ -120,6 +123,8 @@ export type FleetActionId =
   | 'cycleMode'
   /** F4.D — set a structured session's mode DIRECTLY; `text` is one of the row's `modes` ids. */
   | 'setMode'
+  /** 1.20 — switch a STRUCTURED session's model through its protocol; `text` is one of the row's `models` ids. */
+  | 'setModel'
   /**
    * RESTORE the conversation to the point before one of the person's own prompts (`text` is that
    * prompt, `occurrence` which appearance counting from the latest) — the harness's OWN rewind,
@@ -178,6 +183,11 @@ export interface FleetActionRequest {
    * Without it a `prompt` to an external row answers `confirm` and changes nothing.
    */
   confirm?: boolean
+  /**
+   * For `resume` and `fork`: the person confirmed "reopen/start anyway" after the memory gate refused (`memoryBudget`
+   * on the answer). Read as `force === true` only — the same override `/api/fleet/new` takes.
+   */
+  force?: boolean
   /** PLAN.ACCOUNTS D3: an agent's session proof; the server reads it into `callerVerified`. */
   session?: { id?: unknown; token?: unknown }
   /** Server-set (`markCallerVerified`), never trusted from the wire: a verified agent is asking. */
@@ -232,6 +242,8 @@ export interface FleetRow {
   mode?: SessionMode
   /** F4.D — the modes this STRUCTURED row can be set to directly (`setMode`); absent: cycle with `cycleMode`. */
   modes?: SessionMode[]
+  /** 1.20 — the models this STRUCTURED row can switch to through its protocol (`setModel`); absent: no protocol switch. */
+  models?: Array<{ id: string; label: string }>
   conversationId?: string
   /** Exact managed successor recorded by the existing handoff registry. */
   handoffTo?: string
@@ -336,6 +348,9 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
   // key inside an attached pane, so it never needed a listed verb. The browser has no pane.
   verbs.push(interruptVerb(row, s))
   if (row.structured && row.actionable) verbs.push(terminalVerb(s))
+  if (row.structured && row.actionable && row.conversationId && FORK_ACTION_HARNESSES.has(row.harness)) {
+    verbs.push({ action: 'fork' as SessionAction, label: s.sessionsFork, enabled: true })
+  }
   if (isNativeRow(row)) verbs.push(...nativeStoreVerbs(row, s))
   return {
     id: row.id,
@@ -354,6 +369,7 @@ export function fleetRow(row: ControlSession, s: ControlStrings): FleetRow {
     ...(row.accountId ? { accountId: row.accountId } : {}),
     ...(row.mode ? { mode: row.mode } : {}),
     ...(row.modeChoices ? { modes: row.modeChoices } : {}),
+    ...(row.modelChoices ? { models: row.modelChoices.options } : {}),
     ...(row.handoffTo ? { handoffTo: row.handoffTo } : {}),
     ...(row.conversationId ? { conversationId: row.conversationId } : {}),
     ...(row.link !== undefined ? { link: row.link } : {}),

@@ -323,6 +323,10 @@ describe('CONTAS.LOGIN r3: the code is submitted, and a stuck or failed sign-in 
     expect(parsePaneDead('0 \n')).toBeNull()
     expect(parsePaneDead('1 1\n')).toBe(1)
     expect(parsePaneDead('1 0')).toBe(0)
+    // Dead but not yet reaped: no status is not a failure until the grace is over.
+    expect(parsePaneDead('1 \n', false)).toBeNull()
+    expect(parsePaneDead('1 \n', true)).toBe(1)
+    expect(parsePaneDead('1 0', false)).toBe(0)
   })
   test('a CLI still alive after the code fails with what its screen says, never waits forever', async () => {
     const cli = fakeCli([samples.claude])

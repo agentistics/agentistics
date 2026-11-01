@@ -35,7 +35,8 @@ import { emptyReason, renderSessionTable, resolveWidth } from './session-table'
 import { SPAWN_SPECS, planSpawn } from './spawn-spec'
 import { spawnCapabilities } from './codex-capabilities'
 import { readHarnessVersion } from './harness-version'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveSpawnAwayFor, withOwnerRequests, writeContextFile } from './spawn-context'
+import { spawnGate, UNPROVEN_SESSION, verifyBornRole } from './spawn-gate'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveContextTaskByRef, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './spawn-context'
 import { rulesFor } from './attention-rules'
 // The harness half of a rename. Shared with the cockpit's Rename verb — see `rename.ts`.
 import { renameInHarness, renameMessage } from './rename'
@@ -47,7 +48,7 @@ import { addSession, newSessionId, patchSession, readRegistry, removeSession, re
 import { callerHoldsIdentity, callerProof, callerSessionFromTree, type CallerProof } from './session-identity'
 import { spawnParentLink } from './team-links'
 import { decideSpawnAccount, spawnAccountMessage } from './spawn-account'
-import { newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
+import { handoffAccountChoice, newestRowOfConversation, recordedSpawnAccount, spawnAccountContext } from './spawn-account-io'
 import { liveIdsOf, planReopenCwd, planSpawnFilingSafe } from './spawn-filing-io'
 import type { FilingPlan } from './spawn-filing'
 import { filingJson, filingRow, refusalText, spawnRole, WARNING_TEXT } from './spawn-row'
@@ -74,8 +75,9 @@ import { spawnDeath } from './spawn-check'
 import { reportFreshSpawn } from './spawn-report'
 import { readHarnessAgents } from './harness-agents-io'
 import { planTakeover, type TakeoverRefusal } from './takeover'
-import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor } from './session-roles'
-import type { BackendInitialPrompt, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
+import { applyRoleTitle, deliverStoredRole, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor, storedRoleFor } from './session-roles'
+import { ensureClaudeProjectTrusted } from './claude-trust'
+import type { BackendInitialPrompt, BackendSpawn, ManagedSession, SessionBackend, SpawnPlan, SpawnPlanError } from './types'
 
 /**
  * The initial-prompt argument for `backend.spawn`, with the harness's screen RULES attached so the
@@ -87,6 +89,13 @@ function spawnPromptArg(plan: SpawnPlan, harness: HarnessId): { initialPrompt?: 
   if (!plan.initialPrompt) return {}
   const rules = rulesFor(harness)
   return { initialPrompt: { ...plan.initialPrompt, ...(rules ? { rules } : {}) } }
+}
+
+async function managedSpawn(backend: SessionBackend, req: BackendSpawn): Promise<{ delivery?: Promise<void> } | void> {
+  const harness = req.structured?.harness
+  const claudeConfigRoot = req.env?.CLAUDE_CONFIG_DIR
+  if (harness === 'claude' && claudeConfigRoot) await ensureClaudeProjectTrusted(claudeConfigRoot, req.cwd)
+  return backend.spawn(req)
 }
 
 /** Derived from the specs, never a second hand-written list — the two could not then disagree. */
@@ -452,6 +461,8 @@ export async function start(
   backend: SessionBackend,
   deps: {
     provesCaller?: (id: string) => Promise<boolean>
+    /** DSL.TIPO-SESSAO spawn gate; tests inject it. Default: `spawnGate` (engine `portao-de-spawn`, else op 1 here). */
+    spawnGate?: typeof spawnGate
     /** ORQ.H3 hand-off gate; tests inject it. Default: ask the server (`handoffGateViaServer`). */
     handoffGate?: (taskId: string) => Promise<import('./session-roles').HandoffGateAnswer>
     /** How long a healthy spawn is watched before it counts as up (`SETTLE_MS`). Tests shorten it. */
@@ -517,11 +528,31 @@ export async function start(
   const parentVerified = (cmd.handoff && !!parentSessionId && parentSessionId === parentSessionIdForPlan)
     || await callerHoldsIdentity(callerSessionId())
   const registry0 = parentVerified ? await readRegistry() : []
-  // A name that already wears the leader prefix is a statement of intent: never let it silently become a worker.
-  const wantedRole = cmd.handoff ? 'leader' as const : cmd.role ?? (cmd.label && hasRolePrefix(cmd.label) ? 'leader' as const : undefined)
+  // DSL.TIPO-SESSAO — the spawn gate decides the role from the session's function BEFORE anything is written
+  // (a leader prefix is a statement of intent, a parent makes a worker, a hand-off a leader); a refusal starts nothing.
+  // The requester is the PROVEN caller (pane for a hand-off, identity token otherwise — `parentVerified`): a claimed
+  // identity that cannot be proven is refused, never taken as the owner (QA F4).
+  const callerId = callerSessionId()
+  // `callerHoldsIdentity` only shows the env names a loadable key; the PROOF is the pane/relay ancestry (`callerProof`).
+  if (callerId && !(cmd.handoff ? parentVerified : (await proof(callerId)) === 'proven')) { console.error(UNPROVEN_SESSION); return 1 }
+  const gate = await (deps.spawnGate ?? spawnGate)({
+    door: cmd.handoff ? 'handoff' : 'cli-start',
+    requestedBy: callerId ? { kind: 'session', id: callerId } : { kind: 'owner' },
+    harness: cmd.harness,
+    ...(cmd.role ? { role: cmd.role } : {}),
+    ...(cmd.label && hasRolePrefix(cmd.label) ? { leaderPrefix: true } : {}),
+    ...(parentSessionId ? { parentId: parentSessionId } : {}),
+    ...(filing.taskId ? { taskId: filing.taskId } : {}),
+    ...(filing.subtaskId ? { subtaskId: filing.subtaskId } : {}),
+    ...(cmd.label ? { title: cmd.label } : {}),
+    ...(cmd.handoffFile ? { handoffFile: cmd.handoffFile } : {}),
+    ...(cmd.pedido ? { pedidoId: cmd.pedido } : {}),
+  })
+  if (!gate.ok) { console.error(gate.reason); return 1 }
+  const wantedRole = gate.role
   const role = wantedRole
     ? await ensureSpawnRole([offeredConversationId, id], wantedRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified))
-    : parentSessionId ? await ensureSpawnRole([offeredConversationId, id], 'worker', undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
+    : undefined
   const away = await resolveSpawnAwayFor(cmd.away, parentSessionId, parentVerified)
   // HANDOFF: the successor keeps the predecessor's title and is briefed with the owner's last words to it.
   const handoffParentRow = cmd.handoff && parentSessionId ? registry0.find(m => m.id === parentSessionId) : undefined
@@ -531,13 +562,25 @@ export async function start(
   const relay = handoffParentRow
     ? await import('./handoff-relay-io').then(m => m.captureHandoffRelay(handoffParentRow)).catch(() => undefined)
     : undefined
-  const ctx = buildSpawnContext(await withOwnerRequests({ ...(relay ? { handoffRelay: relay.section } : {}), ...(cmd.handoff ? { handoffTakeover: true } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) }))
+  const ctx = buildSpawnContext(await withPassagem(await withOwnerRequests({ ...(relay ? { handoffRelay: relay.section } : {}), ...(cmd.handoff ? { handoffTakeover: true } : {}), ...(await resolveContextAway(away)), sessionId: id, cwd, harness: cmd.harness, lang, ...(await folderCtxFor(folderId)), ...(await resolveContextTaskByRef(filing.taskId, filing.subtaskId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)) }), !!cmd.handoff, cmd.handoffFile ? { handoffFile: cmd.handoffFile } : {}))
   // PLAN.ACCOUNTS D3 — one decision for every door (`spawn-account.ts`). An agent is asking when
   // this command runs inside a pane that can prove its identity.
+  const agentCaller = await callerHoldsIdentity(callerSessionId())
+  // CONTA.AUTO (B) — a hand-off with no `--account` takes the router's account with room, never the predecessor's while it is
+  // limit-blocked; an explicit `--account` still wins.
+  const handoffPick = cmd.handoff && !cmd.account
+    ? await handoffAccountChoice({ harness: cmd.harness, ...(handoffParentRow ? { predecessor: handoffParentRow } : {}), agentCaller })
+    : undefined
+  if (handoffPick && !handoffPick.room) {
+    console.error(lang === 'pt'
+      ? 'Nenhuma conta tem folga agora: o sucessor abre na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.'
+      : 'No account has room right now: the successor opens on the account whose window reopens first, never on the predecessor\'s limit-blocked one.')
+  }
+  const asked = cmd.account ?? handoffPick?.id
   const account = decideSpawnAccount({
-    harness: cmd.harness, ...(cmd.account ? { requested: cmd.account } : {}),
-    agentCaller: await callerHoldsIdentity(callerSessionId()),
-    context: await spawnAccountContext(cmd.account ? [] : [cmd.harness]),
+    harness: cmd.harness, ...(asked ? { requested: asked } : {}),
+    agentCaller,
+    context: await spawnAccountContext(asked ? [] : [cmd.harness]),
   })
   if (!account.ok) { console.error(spawnAccountMessage(account.reason, account.detail, lang === 'pt' ? 'pt' : 'en')); return 1 }
   const planned = planSpawn({
@@ -548,7 +591,7 @@ export async function start(
     ...(account.account ? { account: { root: account.account.root } } : {}),
   }, await spawnCapabilities(cmd.harness))
   if (!planned.ok) { console.error(explainPlanError(planned.error)); return 1 }
-  if (!cmd.background && planned.plan.modeNeedsProtocol) { console.error(`${cmd.harness} cannot start a terminal in ${planned.plan.modeNeedsProtocol} mode; use a supported mode or a structured session.`); return 1 }
+  if (!cmd.background && planned.plan.modeNeedsProtocol) { console.error(`${cmd.harness} cannot start a terminal in ${planned.plan.modeNeedsProtocol} mode; add --bg to start it as a structured session, or choose another --mode.`); return 1 }
 
   // The memory GATE, before anything is registered or launched — `requested: 1` is this one
   // process. A refusal here means nothing below this point runs: no id is minted, no row is
@@ -608,8 +651,7 @@ export async function start(
   await writeContextFile(planned.plan)
   try {
     if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-    await backend.spawn({ id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}), ...spawnPromptArg(planned.plan, cmd.harness),
-      structured: structuredIntentOf({ harness: cmd.harness, origin: cmd.background ? 'background' : 'terminal', prompt: cmd.prompt, mode: launch.mode }, { ...launch, ctx, conversationId: offeredConversationId, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
+    await managedSpawn(backend, { id, cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}), structured: structuredIntentOf({ harness: cmd.harness, origin: cmd.background ? 'background' : 'terminal', prompt: cmd.prompt, mode: launch.mode }, { ...launch, ctx, conversationId: offeredConversationId, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }), ...spawnPromptArg(planned.plan, cmd.harness),
       ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
     })
   } catch (e) {
@@ -631,6 +673,13 @@ export async function start(
     return 1
   }
   if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
+  // DSL.TIPO-SESSAO — born with the gate's role, or undone: never a session the store reads as role-less.
+  if (role && !(await verifyBornRole([planned.plan.conversationId, offeredConversationId, id], role, { stored: storedRoleFor, ensure: async (k, r) => ensureSpawnRole(k, r, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) }))) {
+    console.error(`The session started but its role (${role}) could not be recorded, so it was stopped — try again.`)
+    await backend.kill(id).catch(() => {})
+    await removeSession(id).catch(() => {})
+    return 1
+  }
 
   if (role) await applyRoleTitle(id, label ?? id, role, lang).catch(() => false)
   const configuration = await configureSpawn(filing, { id, conversationId: planned.plan.conversationId }, handoffParentRow)
@@ -763,6 +812,7 @@ async function resolveTaskAndAttempts(
 export async function batch(
   cmd: Extract<SessionCommand, { kind: 'batch' }>,
   backend: SessionBackend,
+  batchDeps: { spawnGate?: typeof spawnGate; provesCaller?: (id: string) => Promise<boolean> } = {},
 ): Promise<number> {
   const started: Array<{ id: string; harness: string; cwd: string; filing: ReturnType<typeof filingJson> }> = []
   const failed: Array<{ harness: string; reason: string }> = []
@@ -806,6 +856,35 @@ export async function batch(
   if (createByTitle) plans = await planAll(PENDING_ID, true)
   if (!Array.isArray(plans)) { reportFilingRefusal(plans, cmd.json ?? false); return 1 }
 
+  // DSL.TIPO-SESSAO — every session of the batch passes the spawn gate FIRST — before the memory gate, before the task
+  // book is touched (QA F2/F7) — and BEFORE any is started: one refusal starts
+  // none (a batch is admitted or refused as a unit, like its memory gate).
+  // The requester is the PROVEN caller: a session identity that cannot be proven is refused, never taken as the owner.
+  const gateCaller = callerId ? ((batchDeps.provesCaller ? await batchDeps.provesCaller(callerId) : (await callerProof(callerId, async () => (backend as { listPanePids?: () => Promise<Map<string, number>> }).listPanePids?.())) === 'proven') ? callerId : null) : undefined
+  if (gateCaller === null) { console.error(UNPROVEN_SESSION); return 1 }
+  const gateParent = gateCaller ? (await parentLinkOf(gateCaller, { followHandoff: true })).parentSessionId : undefined
+  const gates = []
+  for (const [index, spec] of cmd.specs.entries()) {
+    const filing = plans[index]!
+    gates.push(await (batchDeps.spawnGate ?? spawnGate)({
+      door: 'cli-batch',
+      requestedBy: gateCaller ? { kind: 'session', id: gateCaller } : { kind: 'owner' },
+      harness: spec.harness,
+      ...(spec.role ? { role: spec.role } : {}),
+      ...(spec.name && hasRolePrefix(spec.name) ? { leaderPrefix: true } : {}),
+      ...(gateParent ? { parentId: gateParent } : {}),
+      ...(filing.taskId ? { taskId: filing.taskId } : {}),
+      ...(filing.subtaskId ? { subtaskId: filing.subtaskId } : {}),
+      ...(spec.name ? { title: spec.name } : {}),
+    }))
+  }
+  const refusedAt = gates.findIndex(g => !g.ok)
+  if (refusedAt !== -1) {
+    const g = gates[refusedAt]!
+    console.error(`session ${refusedAt + 1} of the batch: ${g.ok ? '' : g.reason}`)
+    return 1
+  }
+
   // The memory GATE, for the WHOLE batch — `requested` is every session it asks for, and a batch
   // is admitted or refused as a UNIT (see `spawn-admission.ts`'s docstring on `fits`: half a batch
   // is a plan nobody approved). Refused BEFORE the task book is even touched, so a refused batch
@@ -842,7 +921,8 @@ export async function batch(
     const id = newSessionId()
     const offeredConversationId = randomUUID()
     const logFile = managedProcessLogPath(spec.harness, id, AGENTISTICS_DATA_DIR)
-    const batchRole = spec.role ?? (spec.name && hasRolePrefix(spec.name) ? 'leader' as const : parentSessionId ? 'worker' as const : undefined)
+    const g = gates[index]!
+    const batchRole = g.ok ? g.role : undefined
     const role = batchRole ? await ensureSpawnRole([offeredConversationId, id], batchRole, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) : undefined
     const ctx = buildSpawnContext({ ...(await resolveContextAway(away)), sessionId: id, cwd, harness: spec.harness, lang, ...(await folderCtxFor(filing.folderId)), ...(await resolveContextParent(parentSessionId)), ...(role ? { role } : await resolveContextRole(id, offeredConversationId)), ...(await resolveContextTask(filing.taskId, filing.subtaskId, cmd.task)) })
     const account = decideSpawnAccount({
@@ -910,7 +990,7 @@ export async function batch(
     await writeContextFile(planned.plan)
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({
+      await managedSpawn(backend, {
         id, cwd, argv: planned.plan.argv,
         ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
         ...spawnPromptArg(planned.plan, spec.harness),
@@ -933,6 +1013,12 @@ export async function batch(
       continue
     }
     if (role) await markRoleDelivered([planned.plan.conversationId, id], role)
+    if (role && !(await verifyBornRole([planned.plan.conversationId, offeredConversationId, id], role, { stored: storedRoleFor, ensure: async (k, r) => ensureSpawnRole(k, r, undefined, await spawnRoleOriginFor(parentSessionId, parentVerified)) }))) {
+      failed.push({ harness: spec.harness, reason: `its role (${role}) could not be recorded, so it was stopped` })
+      await backend.kill(id).catch(() => {})
+      await removeSession(id).catch(() => {})
+      continue
+    }
     if (spec.notify === 'off') await muteAtSpawn(planned.plan.conversationId ?? id).catch(() => {})
     const configuration = await configureSpawn(filing, { id, conversationId: planned.plan.conversationId })
     if (!configuration.ready) {
@@ -1034,8 +1120,21 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
       if (!account.ok) { console.error(`${m.id}: ${spawnAccountMessage(account.reason, account.detail, 'en', true)}`); skipped.push(m.id); return }
       const planned = planSpawn({ harness: m.harness, cwd: m.cwd, resumeId: row.resumeId, ...(logFile ? { logFile } : {}), ...inheritedLaunch(m, m.harness), ...(account.account ? { account: { root: account.account.root } } : {}) }, await spawnCapabilities(m.harness))
       if (!planned.ok) { skipped.push(m.id); return }
+      // DSL.TIPO-SESSAO — the reopen door passes the spawn gate too (journaled; it keeps the role the row had).
+      const claimed = callerSessionId()
+      const reopenCaller = claimed && (await callerProof(claimed, async () => (backend as { listPanePids?: () => Promise<Map<string, number>> }).listPanePids?.())) === 'proven' ? claimed : undefined
+      if (claimed && !reopenCaller) { console.error(`${m.id}: ${UNPROVEN_SESSION}`); skipped.push(m.id); return }
+      const inherited = await storedRoleFor([m.conversationId, m.id]).catch(() => undefined)
+      const gate = await spawnGate({
+        door: 'reopen', requestedBy: reopenCaller ? { kind: 'session', id: reopenCaller } : { kind: 'owner' }, harness: m.harness,
+        ...(inherited ? { inheritedRole: inherited } : {}), ...(m.taskId ? { taskId: m.taskId } : {}), ...(m.subtaskId ? { subtaskId: m.subtaskId } : {}),
+        ...(m.label ? { title: m.label } : {}),
+      })
+      if (!gate.ok) { console.error(`${m.id}: ${gate.reason}`); skipped.push(m.id); return }
       await addSession({
         id, harness: m.harness, cwd: m.cwd, createdAt: new Date().toISOString(), task,
+        // DSL.TIPO-SESSAO — the row this reopen replaces: a leader's team follows it here (`currentLeaderId`).
+        supersedes: m.id,
         // INHERITED from the row being replaced, never taken from the request: a reopened session is
         // the same piece of work, and the attribution (taskId, subtaskId, attemptId) says so. See `inheritedIdentity`.
         ...inheritedIdentity(m),
@@ -1055,7 +1154,7 @@ async function openTask(task: string, json: boolean, force: boolean, backend: Se
     })
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({ id, cwd: m.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
+      await managedSpawn(backend, { id, cwd: m.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
         structured: structuredIntentOf({ harness: m.harness, origin: 'background', resumeId: row.resumeId, mode: m.mode }, { ...inheritedLaunch(m, m.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
         ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
       })
@@ -1408,6 +1507,19 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
     }
     if (plan.kind === 'free' || !planned.ok) return null
 
+    // DSL.TIPO-SESSAO (QA F3) — a takeover is a reopen door: the spawn gate runs BEFORE the holder is ended (journaled;
+    // the conversation keeps the role it has; an unproven session identity is refused).
+    const claimed = callerSessionId()
+    const takeCaller = claimed && (await callerProof(claimed, async () => (backend as { listPanePids?: () => Promise<Map<string, number>> }).listPanePids?.())) === 'proven' ? claimed : undefined
+    if (claimed && !takeCaller) { console.error(UNPROVEN_SESSION); return 1 }
+    const takeRole = await storedRoleFor([plan.conversationId, previous?.id]).catch(() => undefined)
+    const takeGate = await spawnGate({
+      door: 'reopen', requestedBy: takeCaller ? { kind: 'session', id: takeCaller } : { kind: 'owner' }, harness: live.harness,
+      ...(takeRole ? { inheritedRole: takeRole } : {}), ...(previous?.taskId ? { taskId: previous.taskId } : {}),
+      ...(previous?.subtaskId ? { subtaskId: previous.subtaskId } : {}), ...(live.name ? { title: live.name } : {}),
+    })
+    if (!takeGate.ok) { console.error(takeGate.reason); return 1 }
+
     // Ending somebody's running assistant loses whatever it was mid-turn, so it is stated before it
     // happens rather than reported after.
     console.log(`Closing ${plan.holder.label ?? plan.conversationId.slice(0, 8)} (pid ${plan.holder.pid}) to reopen it here…`)
@@ -1426,7 +1538,7 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
 
     try {
       if (logFile) await mkdir(dirname(logFile), { recursive: true, mode: 0o700 })
-      await backend.spawn({ id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
+      await managedSpawn(backend, { id, cwd: plan.cwd, argv: planned.plan.argv, ...(planned.plan.env ? { env: planned.plan.env } : {}), ...(planned.plan.unsetEnv ? { unsetEnv: planned.plan.unsetEnv } : {}),
         structured: structuredIntentOf({ harness: live.harness, origin: 'terminal', resumeId: live.sessionId, mode: previous?.mode }, { ...inheritedLaunch(previous, live.harness), mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } } }),
       })
     } catch (e) {
@@ -1441,6 +1553,8 @@ async function takeOver(ref: string, backend: SessionBackend): Promise<number | 
     const record: ManagedSession = {
       id, harness: live.harness, cwd: plan.cwd, createdAt: new Date().toISOString(),
       ...inheritedIdentity(previous),
+      // The row this takeover replaces: a leader's team follows it here (QA F3, `currentLeaderId`).
+      ...(previous && previous.id !== id ? { supersedes: previous.id } : {}),
       ...inheritedLaunch(previous, live.harness),
       ...(live.name ? { label: live.name, labelSince: Date.now() } : {}),
       conversationId: plan.conversationId,

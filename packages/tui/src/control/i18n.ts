@@ -316,6 +316,7 @@ export interface ControlStrings {
   sessionsInterrupt: string
   /** The web's "open in terminal" on a session running over its harness's protocol. */
   sessionsOpenTerminal: string
+  sessionsFork: string
   /** Why it is off: nothing is running to stop. */
   sessionsInterruptIdle: string
   /** Why a verb is off on a row agentop does not host. */
@@ -492,6 +493,8 @@ export interface ControlStrings {
    * silently inert is indistinguishable from a broken one.
    */
   sessionsNoHost: string
+  /** A second hand-off was asked while the first one already has a live successor. */
+  sessionsHandoffRunning: string
   /** Reopen was asked for on a row whose conversation cannot be resolved. */
   sessionsReopenNone: string
   /**
@@ -1067,6 +1070,7 @@ const EN: ControlStrings = {
     `Stop the ${n} selected session${n === 1 ? '' : 's'}? The assistant running in each is ended.`,
   sessionsInterrupt: 'Stop what it is doing',
   sessionsOpenTerminal: 'Open in terminal',
+  sessionsFork: 'Fork this conversation',
   sessionsInterruptIdle: 'Nothing is running right now, so there is nothing to stop.',
   sessionsExternalRow: 'This session was started outside agentop, so nothing here can act on it.',
   sessionsUnknownHarness: 'harness unknown',
@@ -1259,6 +1263,7 @@ const EN: ControlStrings = {
   sessionsNativeOnly: 'Only a native Agentistics session can be archived or deleted.',
   sessionsClosedNote: 'not running — reopen it to pick this conversation back up.',
   sessionsNoHost: 'session control is not available on this machine.',
+  sessionsHandoffRunning: 'a hand-off is already running for this leader — its successor is open. Open the successor instead of asking again.',
   sessionsReopenNone: 'no conversation to reopen — nothing on this machine resolves this row.',
   sessionsRowGone: 'this row is no longer in the list — refresh and try again.',
   spawnUnknownHarness: h => `this machine cannot start ${h} — no spawn spec for it here.`,
@@ -1694,6 +1699,7 @@ const PT: ControlStrings = {
       : `Encerrar as ${n} sessões selecionadas? O assistente que roda em cada uma é finalizado.`),
   sessionsInterrupt: 'Parar o que está fazendo',
   sessionsOpenTerminal: 'Abrir no terminal',
+  sessionsFork: 'Ramificar esta conversa',
   sessionsInterruptIdle: 'Nada está rodando agora, então não há o que parar.',
   sessionsExternalRow: 'Esta sessão foi iniciada fora do agentop, então nada aqui age sobre ela.',
   sessionsUnknownHarness: 'harness desconhecido',
@@ -1876,6 +1882,7 @@ const PT: ControlStrings = {
   sessionsNativeOnly: 'Só uma sessão nativa do Agentistics pode ser arquivada ou apagada.',
   sessionsClosedNote: 'não está rodando — reabra para retomar esta conversa.',
   sessionsNoHost: 'o controle de sessões não está disponível nesta máquina.',
+  sessionsHandoffRunning: 'já há uma passagem em andamento para este líder — o sucessor está aberto. Abra o sucessor em vez de pedir de novo.',
   sessionsReopenNone: 'nenhuma conversa para reabrir — nada nesta máquina resolve esta linha.',
   sessionsRowGone: 'esta linha não está mais na lista — atualize e tente de novo.',
   spawnUnknownHarness: h => `esta máquina não sabe iniciar ${h} — não há spawn spec para ele aqui.`,

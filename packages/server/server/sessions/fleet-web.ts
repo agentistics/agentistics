@@ -49,7 +49,7 @@ import {
 import { cachedBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
 import { readHarnessSkills, skillsReason, type HarnessSkill } from './harness-skills'
-import { HARNESS_ORDER, type ModelOption, type Baseline } from '@agentistics/core'
+import { HARNESS_CAPABILITIES, HARNESS_LABELS, HARNESS_ORDER, type ModelOption, type Baseline } from '@agentistics/core'
 import { catalogFields } from '../model-catalog-fields'
 import { artifactPathsFromTurns, type AllowedArtifact } from './artifact-file'
 import type { ArtifactResponse } from './artifact-web'
@@ -147,6 +147,13 @@ export interface FleetActionResponse {
    * continuation); `index.ts` answers it with `spawnAccountStatus` (403/409/422).
    */
   code?: SpawnAccountRefusal
+  /**
+   * `resume` refused by the MEMORY GATE: the browser offers "reopen anyway" (re-sent with `force: true`,
+   * after a confirmation). Kept apart from `code` — that one maps to an HTTP status for the account rule.
+   */
+  memoryBudget?: true
+  /** A refused fork's queue entry (`/api/resources/queue/:id`): "start anyway" cancels it first so no twin starts later. */
+  queuedId?: string
   /** A group reopen's partial result (opened / already running / every refused row with its code). */
   fell?: { opened: string[]; already: string[]; refused: { id: string; reason: SpawnAccountRefusal; message: string }[] }
 }
@@ -532,13 +539,7 @@ export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?:
   }
   const conversations = await loadConversations()
   const file = await findHandoffFile(view.cwd)
-  const successorId = managed.retire?.successorId ?? managed.handoffTo
-  const successor = registry.find(r => r.id === successorId)
-  const successorView = raw.sessions.find(r => r.id === successorId)
-  // A successor may be born between the hub poll and the registry read. Allow its birth grace.
-  const successorGone = !!successorId && !raw.unavailable && (successorView
-    ? ['closed', 'lost', 'exited'].includes(successorView.status) || successorView.activity === 'exited'
-    : !!successor && Date.now() > Date.parse(successor.createdAt) + 30_000)
+  const lifecycle = handoffLifecycleOf(registry, raw, managed)
   return computeHandoffPanel(handoffMetrics({
     harness: view.harness, conversationId: view.conversationId ?? managed.conversationId,
     id, title: managed.label ?? '', leader: true,
@@ -548,10 +549,31 @@ export async function readHandoffPanel(lang: CliLang, id: string, extraPercent?:
     ...(file ? { handoffPath: file.path, handoffBytes: file.bytes } : {}),
     workInFlight: [...(view.activity === 'working' ? ['main-response'] : []), ...(view.background ? ['background-work'] : [])],
   }, conversations), extraPercent !== undefined && Number.isInteger(extraPercent) && extraPercent >= 0 && extraPercent <= 100
-    ? { ...normalizeHandoffConfig(prefs.handoffConfig), extraPercent } : prefs.handoffConfig, quota, Date.now(), {
-    session: managed,
-    successor, successorGone,
-  })
+    ? { ...normalizeHandoffConfig(prefs.handoffConfig), extraPercent } : prefs.handoffConfig, quota, Date.now(), lifecycle)
+}
+
+/** The lifecycle facts the panel and the second-request guard both read: the row, its successor, whether that successor is gone. */
+function handoffLifecycleOf(registry: readonly ManagedSession[], raw: { sessions: readonly { id: string; status?: string; activity?: string }[]; unavailable?: unknown }, managed: ManagedSession): import('./handoff-panel').HandoffLifecycle {
+  const successorId = managed.retire?.successorId ?? managed.handoffTo
+  const successor = registry.find(r => r.id === successorId)
+  const successorView = raw.sessions.find(r => r.id === successorId)
+  // A successor may be born between the hub poll and the registry read. Allow its birth grace.
+  const successorGone = !!successorId && !raw.unavailable && (successorView
+    ? ['closed', 'lost', 'exited'].includes(successorView.status ?? '') || successorView.activity === 'exited'
+    : !!successor && Date.now() > Date.parse(successor.createdAt) + 30_000)
+  return { session: managed, successor, successorGone }
+}
+
+let handoffRawForTest: { sessions: readonly { id: string; status?: string; activity?: string }[]; unavailable?: unknown } | null = null
+/** Test seam: the fleet snapshot the second-request guard reads (the real hub has no process behind a test's rows). */
+export function __setHandoffRawForTest(raw: typeof handoffRawForTest): void { handoffRawForTest = raw }
+/** True when `id` is a leader whose hand-off already has a live successor: a second `handoff:true` prompt would start another. */
+async function handoffAlreadyRunning(id: string): Promise<boolean> {
+  const [registry, raw] = await Promise.all([readRegistry().catch(() => [] as ManagedSession[]), handoffRawForTest ?? fleetSessionHub().then(h => h.read()).catch(() => null)])
+  const managed = registry.find(r => r.id === id)
+  if (!managed) return false
+  const { handoffRunning } = await import('./handoff-panel')
+  return handoffRunning(handoffLifecycleOf(registry, raw ?? { sessions: [] }, managed), Date.now())
 }
 
 /**
@@ -726,6 +748,9 @@ async function runFleetActionOnce(
       // here (`external-continue.ts`): asked once, then the existing takeover ends the process and the
       // same id is resumed with this message as its first prompt.
       if (isExternalRowId(req.id)) return continueExternal(lang, req, text)
+      // A second hand-off request while the first has a live successor would start another successor. While it is only
+      // `preparing` the request can still be repeated — that is how an ignoring leader is asked again.
+      if (req.handoff === true && await handoffAlreadyRunning(req.id)) return { ok: false, message: s.sessionsHandoffRunning }
       // Taken BEFORE the message is typed, so the record can never be stamped later than the turn
       // the harness writes for it — the resolver refuses a record from after the turn it is asked
       // about, and a submit that waits on the pane takes hundreds of milliseconds.
@@ -787,6 +812,9 @@ async function runFleetActionOnce(
     case 'setMode':
       if (!host.setSessionMode) return { ok: false, message: s.sessionsNoHost }
       return await host.setSessionMode(req.id, text)
+    case 'setModel':
+      if (!host.setSessionModel) return { ok: false, message: s.sessionsNoHost }
+      return await host.setSessionModel(req.id, text)
     case 'rename':
       if (!host.renameSession) return { ok: false, message: s.sessionsNoHost }
       return await host.renameSession(req.id, text)
@@ -842,6 +870,13 @@ async function runFleetActionOnce(
     case 'terminal':
       if (!host.openInTerminal) return { ok: false, message: s.sessionsNoHost }
       return await host.openInTerminal(req.id)
+    case 'fork':
+      if (!host.forkSession) return { ok: false, message: s.sessionsNoHost }
+      {
+        const out = await host.forkSession(req.id, req.callerVerified === true, req.force === true)
+        // The memory gate refused: the browser offers "start anyway" (re-sent with `force: true`), taking the queue entry off first.
+        return out.memoryRefusal ? { ...out, memoryBudget: true as const, ...(out.memoryRefusal.queuedId ? { queuedId: out.memoryRefusal.queuedId } : {}) } : out
+      }
     case 'structured':
       if (!host.backToStructured) return { ok: false, message: s.sessionsNoHost }
       return await host.backToStructured(req.id)
@@ -928,12 +963,17 @@ async function runFleetActionOnce(
         attach: false,
         // PLAN.ACCOUNTS D3: a verified agent may not reopen a row whose account is off for agents.
         ...(req.callerVerified === true ? { callerVerified: true } : {}),
+        // "Reopen anyway", confirmed by the person after the memory gate refused (`memoryBudget` below).
+        ...(req.force === true ? { force: true } : {}),
       })
       if (!out) throw new Error('resumeSession returned no result')
       // THE NEW ID TRAVELS. A reopen mints a new managed row and retires the old one, so a caller
       // that stays on the id it asked about is looking at a dead session — which is exactly how
       // "reopen does nothing" was reported, on an action the server had performed correctly.
-      return { ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}) }
+      return {
+        ok: out.ok, message: out.message, ...(out.id ? { id: out.id } : {}), ...(out.accountRefusal ? { code: out.accountRefusal } : {}),
+        ...(!out.ok && out.admission ? { memoryBudget: true as const } : {}),
+      }
     }
     default:
       // The body is untrusted JSON, even though TypeScript names a closed action union.
@@ -1100,6 +1140,12 @@ export async function readFleetSkillBody(
  * linked conversation, a transcript not on this machine, a file that would not read. The card says
  * which; a confident `0` would read as a conversation that has never been compacted.
  */
+/** PURE. The card's sentence for a harness that records no compactions (`HARNESS_CAPABILITIES.compaction` false). */
+export function compactionAbsent(harness: string, pt: boolean): string {
+  const name = (HARNESS_LABELS as Record<string, string>)[harness] ?? harness
+  return pt ? `${name} não registra compactações da conversa.` : `${name} does not record conversation compactions.`
+}
+
 export async function readConversationFacts(
   lang: CliLang, id: string,
 ): Promise<{ compactions?: number; unavailable?: string }> {
@@ -1114,6 +1160,14 @@ export async function readConversationFacts(
         ? 'Esta sessão ainda não tem uma conversa vinculada.'
         : 'This session has no linked conversation yet.'),
     }
+  }
+  // Only a harness that RECORDS compactions has a count to read (`HARNESS_CAPABILITIES.compaction`:
+  // Claude alone). Every other one used to fall into the Claude transcript lookup below and answer
+  // "the transcript was not found on this machine" — false of an OpenCode session, whose conversation
+  // is right there in opencode.db (QA OPENCODE.COMPLETO item 4).
+  const capability = (HARNESS_CAPABILITIES as Record<string, { compaction?: boolean } | undefined>)[row.harness ?? '']
+  if (capability && !capability.compaction) {
+    return { unavailable: compactionAbsent(row.harness ?? '', pt) }
   }
   const { countCompactions, resolveClaudeTranscriptAnyAccount } = await import('./chat-tail')
   const path = await resolveClaudeTranscriptAnyAccount(row.cwd, row.conversationId).catch(() => null)
@@ -1350,6 +1404,8 @@ export interface FleetSpawnResponse {
   ok: boolean
   /** Already localized, and always present. */
   message: string
+  /** 1.20 — the update the harness's own version asks for, when that is why the start was refused. */
+  action?: { kind: 'update-harness'; harness: string; need: string }
   /** RES.1 — refused by the memory gate and queued; it starts by itself when room frees. */
   queued?: { id: string; position: number }
   /** The id of the session that was started, so the caller can attach to the very one it created. */
@@ -1408,6 +1464,25 @@ export async function runFleetSpawn(
   // PLAN.ACCOUNTS D3 — the registry/flag/router context, read once (the router only when the asked
   // harness has several accounts and none was named).
   const { spawnAccountContext } = await import('./spawn-account-io')
+  // CONTA.AUTO (B) — a leader hand-off that names no account takes the router's account with room, never the predecessor's
+  // while it is limit-blocked (`spawn-account-io.ts` `handoffAccountChoice`); an explicit account wins.
+  if (body.handoff === true && body.account === undefined && typeof body.parent === 'string' && body.parent && typeof body.harness === 'string') {
+    const { handoffAccountChoice } = await import('./spawn-account-io')
+    const { readRegistry } = await import('./registry')
+    const predecessor = (await readRegistry().catch(() => [])).find(r => r.id === body.parent)
+    const pick = await handoffAccountChoice({ harness: body.harness as HarnessId, ...(predecessor ? { predecessor } : {}), agentCaller: body.callerVerified === true })
+    if (pick) {
+      body = { ...body, account: pick.id }
+      if (!pick.room) {
+        const { broadcastNotification } = await import('../sse')
+        broadcastNotification({
+          type: 'warning', code: 'account.handoff_no_room', meta: { id: String(body.parent) },
+          title: lang === 'pt' ? 'Passagem sem conta com folga' : 'Hand-off with no account that has room',
+          message: lang === 'pt' ? 'Nenhuma conta tem folga agora: a passagem do líder abriu na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.' : 'No account has room right now: the leader hand-off opened on the account whose window reopens first, never on the predecessor\'s limit-blocked one.',
+        })
+      }
+    }
+  }
   const asked = HARNESS_ORDER.filter(h => h === body.harness && body.account === undefined)
   const decision = planFleetSpawn(body, await host.startableHarnesses(), await spawnAccountContext(asked))
   // A harness refused as unknown because the host's PATH reaches NO assistant at all is the PATH's
@@ -1449,6 +1524,8 @@ export function spawnResponse(out: SpawnSessionResult, lang: CliLang): FleetSpaw
     ...(out.accountRefusal ? { code: out.accountRefusal } : {}),
     ...(out.overridden ? { overridden: true as const, note: out.note } : {}),
     ...(out.queued ? { queued: out.queued } : {}),
+    // What the surface can OFFER next (the harness's own version refused the start: update it in one click).
+    ...(!out.ok && out.action ? { action: out.action } : {}),
   }
 }
 

@@ -23,7 +23,10 @@ export const FORK_CAPABILITIES: Record<HarnessId, ForkCapability> = {
   kimi: { follow: false, absent: 'Kimi account-switch/fork continuation is not verified on this machine.', probe: 'not verified' },
   copilot: { follow: false, absent: 'Copilot account-switch/fork continuation is not verified on this machine.', probe: 'not verified' },
   antigravity: { follow: false, absent: 'Antigravity account-switch/fork continuation is not verified on this machine.', probe: 'not verified' },
-  opencode: { follow: false, absent: 'OpenCode transcript fork continuation is not verified on this machine.', probe: 'not verified' },
+  // MEASURED 2026-10-31, opencode 1.19.5, throwaway HOME, `opencode acp`: `session/fork` returns the SUCCESSOR's id
+  // (exact, no guessing), the fork is titled `<title> (fork #1)`, lists under the same cwd, and a prompt to it recalls
+  // what the parent was told. So the successor is named by the protocol, not inferred from a transcript.
+  opencode: { follow: true, probe: 'ACP session/fork returns the successor sessionId; history carried (opencode 1.19.5)' },
 }
 
 export function forkCapabilityFor(harness: string | undefined): ForkCapability {
@@ -39,3 +42,10 @@ export function forkCapabilitySentence(harness: string | undefined, lang: 'pt' |
     ? 'A troca de conta/ramificação desta ferramenta não foi verificada; a conversa não será seguida automaticamente.'
     : 'This tool’s account-switch/fork continuation is not verified; the conversation will not be followed automatically.'
 }
+
+/**
+ * Harnesses whose structured driver declares `fork` (engine-api 1.18 `StructuredSpawn.forkOf`): the ones a row
+ * may OFFER "Fork this conversation" for. Distinct from `follow` above — that is about recognising a
+ * successor, this is about being able to ASK for one. Claude follows forks but its driver declares none.
+ */
+export const FORK_ACTION_HARNESSES: ReadonlySet<string> = new Set(['opencode'])

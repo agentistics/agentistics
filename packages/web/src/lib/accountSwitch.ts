@@ -6,12 +6,13 @@
 
 import { HARNESS_LABELS } from '@agentistics/core'
 import { withReopening } from './reopeningStore'
+import type { SessionAuth } from './accountRelogin'
 
 /** One account a session could move to. `harness` other than the session's own = a hand-off (new conversation + summary). */
 export interface SwitchOption { id: string; harness: string; label: string; plan?: string; recommended?: boolean }
 
 /** Why an account is not a target (the server's code; `accountPicker.ts` words it). */
-export type SwitchUnavailableReason = 'not_agentic' | 'signed_out' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
+export type SwitchUnavailableReason = 'not_agentic' | 'signed_out' | 'login_expired' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
 
 export interface SwitchUnavailable { id: string; harness: string; label: string; plan?: string; reason: SwitchUnavailableReason }
 
@@ -24,7 +25,14 @@ export interface SwitchInfo {
   /** Every other account of this machine, with why it cannot be picked. Absent from an older server. */
   unavailable?: SwitchUnavailable[]
   /** The conversation's last turn was refused by the account's usage limit. */
-  limit: { resetsAt?: number; message?: string; pendingPreview?: string } | null
+  limit: { resetsAt?: number; at?: number; message?: string; pendingPreview?: string } | null
+  /**
+   * The harness has no account to switch to but its limit is still read (OpenCode, from its own log):
+   * keep polling, and show the limit notice without a switch. Absent from an older server.
+   */
+  limitWatch?: boolean
+  /** HOTFIX.LOGIN-EXPIRADO: the session's account cannot work (login refused / signed out). Absent from an older server. */
+  auth?: SessionAuth | null
 }
 
 /** `ended` + `endedId`: the session WAS ended and could not be given back — the row to Reopen. */
@@ -77,6 +85,9 @@ export const isHandoff = (info: SwitchInfo, harness: string | undefined): boolea
 
 /** The notice is shown only when there is somewhere to go. */
 export const showLimitNotice = (info: SwitchInfo | null): boolean => !!info?.supported && !!info.limit && info.options.length > 0
+
+/** A limit on a harness with nowhere to switch (OpenCode): the notice states it, with no switch to offer. */
+export const showLimitOnly = (info: SwitchInfo | null): boolean => !!info?.limitWatch && !!info.limit
 
 /** The menu item exists only when there is somewhere to go. */
 export const canSwitch = (info: SwitchInfo | null): boolean => !!info?.supported && info.options.length > 0

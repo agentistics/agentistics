@@ -29,3 +29,12 @@ test('every mobile dock tab shares physical 44px controls, including settings, c
   expect(launch).not.toContain('ellipsis')
   expect(launch).toContain("whiteSpace: 'normal'")
 })
+
+test('engine sections belong inside Sessions; the four top-level tabs stay unchanged', () => {
+  const tabs = source.slice(source.indexOf('<div role="tablist"'), source.indexOf('<DockSettings pt='))
+  expect(tabs).toContain('DOCK_TABS.map')
+  expect(tabs).not.toContain('engineTabs')
+  const sessions = source.slice(source.indexOf('<SessionsAside'), source.indexOf('onGoToSession={goToSession}', source.indexOf('<SessionsAside')))
+  expect(sessions).toContain('extraTabs={engineTabs.map')
+  expect(source).toContain("useEngineSurfaces('nay-sessions')")
+})

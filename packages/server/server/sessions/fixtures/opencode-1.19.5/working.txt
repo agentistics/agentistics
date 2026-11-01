@@ -1,0 +1,40 @@
+
+  ┃
+  ┃  run the shell command: ls -la
+  ┃
+
+     + Thought: 291ms
+
+     ~ Writing command…
+
+     ▣  Build · GLM-5.3-Flash Free
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ┃
+  ┃
+  ┃
+  ┃  Build · GLM-5.3-Flash Free OpenCode
+  ╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+   ■■■⬝⬝⬝⬝⬝  esc interrupt                                                                 tab agents  ctrl+p commands
+

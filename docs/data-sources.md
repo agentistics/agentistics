@@ -235,3 +235,17 @@ Git stats are only available for sessions whose `project_path` is an accessible 
 `server/jsonl.ts` tracks a `claudeFilesModified` Set of unique file paths from Edit, Write, and MultiEdit tool calls. The final `files_modified` value is `Math.max(gitFileStats.filesModified, claudeFilesModified.size)`, whichever is higher. This ensures files Claude edited in non-git directories are still counted.
 
 The FILES KPI in `useData.ts` always prefers session-level `files_modified` (which captures direct Claude edits). It only falls back to project-level `git_stats.files_modified` when sessions show 0.
+
+
+## OpenCode
+
+OpenCode metrics are read from its SQLite `session`, `message`, and text `part` rows. The reader
+uses `OPENCODE_DB` when set, otherwise `$XDG_DATA_HOME/opencode/opencode.db` (default
+`~/.local/share/opencode/opencode.db`); `OPENCODE_DIR` is Agentistics's directory override.
+`OPENCODE_DB_PATH` is ignored, matching OpenCode. Disable with `AGENTISTICS_HARNESS_OPENCODE=0`.
+
+The database is opened read-only with WAL visibility. Session totals and step-finish usage repeat
+message counters and are not counted twice. Tokens, per-model API price estimates and the last
+prompt context reach the same dashboard/fleet/footer path as other harnesses. Unknown routes have
+no price; unknown context windows have no percentage. Tool and file activity remain unavailable.
+Credential tables are not read, and this mixed-content database is not archived.

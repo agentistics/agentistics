@@ -454,3 +454,42 @@ for (const lang of ['en', 'pt'] as const) {
     expect(pop!.querySelector<HTMLElement>('div')!.style.background).toBe('transparent')
   })
 }
+
+for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
+  test(`engine sections share the Sessions sub-navigation and preserve their mounted element (${lang}, ${width}px)`, async () => {
+    await render([], width, lang)
+    const state = await import('../../lib/engineSurfaceHost')
+    const { EngineSurfaceHost, EngineSurfaceNaySlot } = await import('../EngineSurfaceHost')
+    state.resetEngineSurfaceHostForTests()
+    const surface = { id: 'section-demo', placement: 'nay-sessions' as const, label: { pt: 'Interface extra', en: 'Extra interface' }, module: '/api/engine/x/section.js' }
+    let mounts = 0, unmounts = 0, element: HTMLElement | undefined
+    const load = async () => ({ mount(el: HTMLElement, ctx: { keepAlive(on: boolean): void }) { mounts++; element = el; el.textContent = 'section content'; ctx.keepAlive(true) }, unmount() { unmounts++ } })
+    const draw = async (enabled: boolean) => act(async () => root.render(<MemoryRouter>
+      <SessionsAside rows={[]} lang={lang} filters={filters} activeOnly={false} loading={false} unsupported={false} finishedTasks={[]} hideNew
+        extraTabs={enabled ? [{ id: 'engine:section-demo', label: surface.label[lang], onSelect: () => state.openEngineSurface(surface, { sessionId: null, lang }), content: <EngineSurfaceNaySlot surfaceId={surface.id} /> }] : []} />
+      <EngineSurfaceHost load={load} />
+    </MemoryRouter>))
+    await draw(true)
+    const section = host.querySelector<HTMLElement>('[data-segment="engine:section-demo"]')!
+    expect(section.textContent).toBe(surface.label[lang])
+    const strip = section.closest('[role="tablist"]')!
+    expect(strip.querySelector('[data-segment="active"]')).not.toBeNull()
+    expect(strip.querySelector('[data-segment="groups"]')).not.toBeNull()
+    expect(strip.querySelector('[data-segment="ended"]')).not.toBeNull()
+    expect(strip.classList.contains('ag-aside-tabs')).toBe(true)
+    await click(section)
+    const stable = element!
+    expect(host.querySelector('[data-engine-nay-sessions]')?.contains(stable)).toBe(true)
+    expect(section.getAttribute('aria-selected')).toBe('true')
+    await click(host.querySelector<HTMLElement>('[data-segment="groups"]')!)
+    expect(stable.closest('[data-engine-parked]')).not.toBeNull()
+    await click(section)
+    expect(element).toBe(stable)
+    expect(mounts).toBe(1)
+    expect(unmounts).toBe(0)
+    await draw(false)
+    expect(host.querySelector('[data-segment="engine:section-demo"]')).toBeNull()
+    expect(host.querySelector('[data-engine-nay-sessions]')).toBeNull()
+    await act(async () => { state.resetEngineSurfaceHostForTests() })
+  })
+}

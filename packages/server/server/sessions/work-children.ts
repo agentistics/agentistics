@@ -64,7 +64,10 @@ export const HELPER_PROCESSES: Record<HarnessId, RegExp[] | null> = {
   antigravity: null,
   // kimi 2.2.0, 2026-10-16, idle: kimi(.bak, self-updated) -> kimi-code -> `agentop mcp`.
   kimi: [],
-  opencode: null,
+  // opencode 1.19.5, 2026-10-31, idle under tmux in a throwaway (leader/qa/opencode-wp-a-probe/out1): the
+  // pane pid IS the native `opencode` binary and it had NO child processes, only its own threads — and
+  // none while a command ran either (see `WORK_CHILDREN_TRUSTED`).
+  opencode: [],
 }
 
 /**
@@ -84,7 +87,10 @@ export const WORK_CHILDREN_TRUSTED: Record<HarnessId, boolean> = {
   copilot: true,
   antigravity: true,
   kimi: true,
-  opencode: true,
+  // opencode 1.19.5, 2026-10-31: WHILE its bash tool ran `sleep 6 && echo done` the pane's process tree
+  // held NO child at all — the command runs inside opencode's own process (out3/pstree-running.txt). An
+  // empty work set is therefore no evidence of quiet, so it is not believed.
+  opencode: false,
 }
 
 /** The harness's own process chain below the pane (see the header). */
@@ -107,7 +113,8 @@ export const HARNESS_CHAIN: Record<HarnessId, HarnessChain | null> = {
   copilot: { exes: ['copilot'], argv: [/^(\S*\/)?node (\S*\/)?copilot(\/\S*)?(\s|$)/] },
   antigravity: null,
   kimi: { exes: ['kimi', 'kimi.bak', 'kimi-code'], argv: [] },
-  opencode: null,
+  // One native binary, the pane pid itself (measured 1.19.5, 2026-10-31).
+  opencode: { exes: ['opencode'], argv: [] },
 }
 
 export interface WorkChildrenOptions {

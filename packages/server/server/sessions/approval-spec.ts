@@ -49,6 +49,7 @@
 
 import type { HarnessId } from '@agentistics/core'
 import type { MarkerOpts } from './dialog-choice'
+import type { InlineSelectSpec } from './inline-select'
 import { FOOTER_LINES } from './attention'
 
 export interface ApprovalSpec {
@@ -143,6 +144,13 @@ export interface ApprovalSpec {
    * ABSENT means nobody has driven this harness's form, and the card offers no step buttons.
    */
   steps?: { next: string; back: string; probed: string }
+  /**
+   * A dialog whose options sit SIDE BY SIDE on one row and whose highlight is drawn in colour only —
+   * opencode's permission prompt. The row is read off the plain frame, the highlight off an ANSI capture,
+   * and a pick walks the ring with `next` and LOOKS before it confirms. See `inline-select.ts`. ABSENT
+   * means the harness draws no such row (or nobody measured it), and `readDialog` never looks for one.
+   */
+  inlineSelect?: InlineSelectSpec
   /** Provenance — the exact CLI version the dialog came from, and the date. */
   probed: string
 }
@@ -213,9 +221,25 @@ export const APPROVAL_SPECS: Record<HarnessId, ApprovalSpec | null> = {
     },
     steps: { next: 'Right', back: 'Left', probed: 'agy 1.4.6, 2026-10-23 (two-question ask_question, multi-select)' },
   },
-  // No spawn-spec/session-manager support (CLAUDE.md step 4, skipped by scope): agentop cannot start
-  // or drive an opencode session, so there is no dialog to approve.
-  opencode: null,
+  // opencode 1.19.5, driven under tmux 2026-10-31 (leader/qa/opencode-wp-a-probe/out2 + out3).
+  opencode: {
+    // `enter confirm` (permission) / `enter submit` (question) — Enter takes the highlighted option.
+    key: 'Enter',
+    probed: 'opencode 1.19.5, 2026-10-31',
+    // The permission prompt: `Allow once   Allow always   Reject` with `⇆ select  enter confirm` on the
+    // same row, highlight in colour only, a RING under Right/Left (Right x3 from the first = the first;
+    // Left x4 = the last). Opens on `Allow once` (Enter right after ran the command, twice).
+    inlineSelect: {
+      footer: /⇆ select\s+enter confirm/,
+      hints: /\s{3,}(?:ctrl\+f \S+\s+)?⇆ select\s+enter confirm\s*$/,
+      next: 'Right',
+      probed: 'opencode 1.19.5, 2026-10-31 (bash + edit permission prompts, Right/Left cycled, ANSI captured)',
+    },
+    // The `question` tool's numbered list: Down moved the highlight 1 -> 2 and Enter answered `Green`
+    // (single choice, out2). On a multi-select step the digit moved there AND ticked the box (`3` ->
+    // `[✓] Blue`, out3). `choice` stays ABSENT until a single-choice digit is measured: a numbered
+    // question is refused in words rather than answered by a guessed key.
+  },
 }
 
 /**
@@ -268,10 +292,11 @@ export function choiceKey(spec: ApprovalSpec | undefined, n: number): string | n
  */
 export function canPick(
   spec: ApprovalSpec | undefined,
-  select: 'numbered' | 'marker' | null,
+  select: 'numbered' | 'marker' | 'inline' | null,
 ): boolean {
   if (select === 'numbered') return !!spec?.choice
   if (select === 'marker') return !!spec?.move
+  if (select === 'inline') return !!spec?.inlineSelect
   return false
 }
 
@@ -282,9 +307,11 @@ export function readsMarkerSelect(harness: HarnessId | undefined): boolean {
 
 /** The options `readDialog` is given for this harness: whether to read a numberless select, and how. */
 export function markerReadOptions(harness: HarnessId | undefined): MarkerOpts {
-  const m = approvalFor(harness)?.markerSelect
-  if (!m) return { marker: false }
-  return { marker: true, ...(m.glyph ? { glyph: m.glyph } : {}), ...(m.footer ? { footer: m.footer } : {}) }
+  const spec = approvalFor(harness)
+  const inline = spec?.inlineSelect ? { inline: spec.inlineSelect } : {}
+  const m = spec?.markerSelect
+  if (!m) return { marker: false, ...inline }
+  return { marker: true, ...(m.glyph ? { glyph: m.glyph } : {}), ...(m.footer ? { footer: m.footer } : {}), ...inline }
 }
 
 /** The spec for a harness, or `undefined` when its dialog was never read. */

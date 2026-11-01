@@ -104,6 +104,18 @@ describe('buildSessionViews', () => {
     expect(v!.pid).toBe(4242)
   })
 
+  it('OPENCODE.RESTO: an external process carries the activity its STORE states for its conversation, never counted as an alert', () => {
+    const externalActivity = new Map<string, SessionActivity>([['ses_ext', 'waiting']])
+    const views = buildSessionViews({ reconciled: [], activity: new Map(), externalActivity, processes: [proc({ harness: 'opencode', sessionId: 'ses_ext', pid: 7 })] })
+    expect(views[0]!.status).toBe('external')
+    expect(views[0]!.activity).toBe('waiting')
+    expect(attentionCount(views)).toBe(0)
+    expect(bellTransitions(new Map(), views)).toEqual([])
+    // A process whose conversation the store did not state stays without one.
+    const [other] = buildSessionViews({ reconciled: [], activity: new Map(), externalActivity, processes: [proc({ harness: 'opencode', sessionId: 'ses_other' })] })
+    expect(other!.activity).toBeUndefined()
+  })
+
   it('EXT.OPEN: an external process known only by its directory gets NO conversation link — the guess is never exact', () => {
     const [v] = buildSessionViews({ reconciled: [], activity: new Map(), processes: [proc()] })
     expect(v!.conversationId).toBeUndefined()
@@ -146,6 +158,27 @@ describe('buildSessionViews', () => {
       processes: [proc({ cwd: '/repo/a', harness: 'codex' })],
     })
     expect(views).toHaveLength(2)
+  })
+
+  it('keeps an external opencode TUI in the folder of a managed opencode session (another conversation)', () => {
+    const own = row('o', { managed: managed('o', { harness: 'opencode', conversationId: 'ses_aaa' }) })
+    const views = buildSessionViews({
+      reconciled: [own],
+      activity: new Map([['o', 'working']]),
+      processes: [proc({ cwd: '/repo/a', harness: 'opencode', sessionId: 'ses_bbb', pid: 9 })],
+    })
+    expect(views).toHaveLength(2)
+    expect(views.some(v => v.status === 'external')).toBe(true)
+  })
+
+  it('covers an opencode process by the exact ses_ id both sides state', () => {
+    const own = row('o', { managed: managed('o', { harness: 'opencode', conversationId: 'ses_aaa' }) })
+    const views = buildSessionViews({
+      reconciled: [own],
+      activity: new Map([['o', 'working']]),
+      processes: [proc({ cwd: '/repo/a', harness: 'opencode', sessionId: 'ses_aaa', pid: 9 })],
+    })
+    expect(views).toHaveLength(1)
   })
 
   it('sorts what needs answering to the top', () => {

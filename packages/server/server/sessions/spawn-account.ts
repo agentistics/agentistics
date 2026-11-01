@@ -41,6 +41,12 @@ export interface SpawnAccountRow {
   defaultRoot?: boolean
   available: boolean
   retired?: boolean
+  /**
+   * The harness refused this account's login while running (`HarnessAccount.loginExpiredAt`). Still
+   * `bound` — the conversation's files are still at `root`, so a switch AWAY from it works — but no
+   * fresh spawn, switch or auto-switch may land ON it until it is signed in again.
+   */
+  expired?: true
   firstSeen?: number
 }
 
@@ -71,7 +77,7 @@ void _sameRefusals
 export const isAccountRefusal = (reason: string): reason is SpawnAccountRefusal => REFUSALS.includes(reason)
 
 const visible = (a: SpawnAccountRow) => a.available && !a.retired
-const usable = (a: SpawnAccountRow) => visible(a) && a.bound
+const usable = (a: SpawnAccountRow) => visible(a) && a.bound && !a.expired
 const at = (a: SpawnAccountRow): SpawnAccount => ({ id: a.id, root: a.root })
 /** The account signed in to the harness's DEFAULT root, if the registry knows it. */
 const homeOf = (mine: readonly SpawnAccountRow[]) => mine.find(a => a.bound && a.root === null && !a.retired)
@@ -112,7 +118,7 @@ export function decideSpawnAccount(input: {
     if (!found) return { ok: false, reason: 'unknown_account', detail: requested }
     if (agentCaller && !visible(found)) return { ok: false, reason: 'account_unavailable', detail: requested }
     if (found.retired) return { ok: false, reason: 'account_retired', detail: requested }
-    if (!found.bound) return { ok: false, reason: 'account_signed_out', detail: requested }
+    if (!found.bound || found.expired) return { ok: false, reason: 'account_signed_out', detail: requested }
     return { ok: true, account: at(found) }
   }
   const live = mine.filter(a => !a.retired)
@@ -121,7 +127,7 @@ export function decideSpawnAccount(input: {
   const routed = picked ? live.find(a => a.id === picked && usable(a)) : undefined
   if (routed) return { ok: true, account: at(routed) }
   const home = homeOf(live)
-  if (home && visible(home)) return { ok: true, account: at(home) }
+  if (home && visible(home) && !home.expired) return { ok: true, account: at(home) }
   // A visible account signed in to a SECONDARY root comes before an unregistered (or hidden) default.
   const other = live.filter(usable).sort((a, b) => (a.firstSeen ?? 0) - (b.firstSeen ?? 0))[0]
   if (other) return { ok: true, account: at(other) }

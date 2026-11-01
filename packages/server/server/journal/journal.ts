@@ -135,6 +135,8 @@ export const RARE_EVENT_TYPES: readonly string[] = [
   'memory.noted', 'memory.forgotten',
   // ART.2: the artifact store's metadata — a handful per session, read back by kind.
   'artifact.created', 'artifact.versioned', 'artifact.blocked', 'artifact.pinned', 'artifact.unpinned', 'artifact.expired',
+  // ADAPTER.LIMITES: a keyed action on a structured session and its result — a few per session, read back by session on a repeat.
+  'action.claimed', 'action.settled',
 ]
 const RARE_DDL = 'CREATE TABLE IF NOT EXISTS rare_events (rowid INTEGER PRIMARY KEY, type TEXT NOT NULL)'
 

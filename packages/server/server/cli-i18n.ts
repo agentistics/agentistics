@@ -141,6 +141,8 @@ export interface CliStrings {
     working: string
     waitingApproval: string
     waiting: string
+    /** The neutral word for an EXTERNAL row in `waiting` that is not actionable. */
+    waitingExternal: string
     exited: string
     lost: string
     external: string
@@ -624,6 +626,9 @@ const EN: CliStrings = {
     // middle of a narrow column, so the state that needs a person was being read as the one that
     // does not — and `needs you` sits beside `needs approval` as the pair they are.
     waiting: 'needs you',
+    // An EXTERNAL row waiting on nothing agentop can answer: it is a session we do not run, so
+    // "needs you" offers a move nobody can make here. The neutral "waiting" says the same pause.
+    waitingExternal: 'waiting',
     // ONE word for every way a session is not running. `exited`, `lost` and `closed` are three
     // internal facts and were three words on the row — but a reader has one question here ("is it
     // running?") and one move available ("reopen it"), so three answers to it was noise dressed as
@@ -1063,6 +1068,8 @@ const PT: CliStrings = {
     // Named for what it means to the READER rather than for what the machine is doing, and it
     // pairs with `precisa de aprovação` above as the distinction it is.
     waiting: 'precisa de você',
+    // O neutro para uma linha EXTERNA em pausa que este processo não pode atender.
+    waitingExternal: 'esperando',
     // One word for every way it is not running, as in English (the detail pane says which).
     exited: 'encerrada',
     lost: 'encerrada',

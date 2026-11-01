@@ -168,3 +168,17 @@ test('narrow and legacy fleet identity graphs resolve ended children alike', () 
   expect(startedByFleetPayload({ rows }).get('conv')).toEqual({ id: 'parent', title: 'Leader' })
   expect(startedByFleetPayload({})).toEqual(new Map())
 })
+
+test('SESSÕES.FECHAR: delivered-open rows are keyed by conversation id and managed id; junk is dropped', async () => {
+  const { deliveredOpenByConversation } = await import('./session-tokens')
+  const m = deliveredOpenByConversation({ sessions: [
+    { sessionId: 'wk-1', conversationId: 'conv-1', handbackAt: '2026-10-31T00:00:00.000Z', lastRun: { status: 'refused', reason: 'working tree is dirty' } },
+    { sessionId: 'wk-2', handbackAt: '2026-10-31T00:00:01.000Z' },
+    { conversationId: 'x' }, null, 'junk',
+  ] })
+  expect(m.get('conv-1')).toEqual({ managedId: 'wk-1', handbackAt: '2026-10-31T00:00:00.000Z', lastRun: { status: 'refused', reason: 'working tree is dirty' } })
+  expect(m.get('wk-1')).toEqual(m.get('conv-1'))
+  expect(m.get('wk-2')).toEqual({ managedId: 'wk-2', handbackAt: '2026-10-31T00:00:01.000Z' })
+  expect(m.size).toBe(3)
+  expect(deliveredOpenByConversation(null).size).toBe(0)
+})

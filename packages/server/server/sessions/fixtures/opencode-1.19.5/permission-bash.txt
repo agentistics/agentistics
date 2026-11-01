@@ -1,0 +1,40 @@
+
+  ┃
+  ┃  run the shell command: ls -la
+  ┃
+
+     + Thought: 291ms
+
+     $ ls -la
+
+     ▣  Build · GLM-5.3-Flash Free
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ┃
+  ┃  △ Permission required
+  ┃    # Shell command
+  ┃
+  ┃  $ ls -la
+  ┃
+  ┃
+  ┃   Allow once   Allow always   Reject                                 ctrl+f fullscreen  ⇆ select  enter confirm
+  ┃
+

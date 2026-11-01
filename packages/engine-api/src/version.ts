@@ -155,7 +155,39 @@
  * host invalidates when the surface unmounts or the session ends. Older hosts omit it; an engine that needs
  * it refuses to load there rather than guessing.
  */
-export const ENGINE_API_VERSION = '1.17.0'
+/**
+ * 1.18.0 — surfaces may be announced in the shared composer (an icon-only button; `icon` required) and may
+ * carry host-mapped icon names, a `layout` (`full`, `side` or `inline` above the session composer), a
+ * `frameless` flag, and an active state (`activeIcon`, `activeLabel`, `activeTone`). Also the `rail` placement (an
+ * icon entry in the app's navigation that opens the surface as a `page`, on its own route), and three mount
+ * context members: `keepAlive` (stay mounted off screen instead of unmounting), `setIndicator` (a pill in the
+ * top bar on every screen, judged by the pure `surfaceIndicatorRefusals`) and `onIndicatorEnd`, plus the optional `openSession(sessionId)` (navigate the app to a session without a
+ * reload; `false` for an invalid id). An engine
+ * built against 1.18 is refused by an older host, like every minor bump.
+ * Also (OpenCode in the app, optional): `StructuredSpawn.forkOf` (open a FORK of a conversation),
+ * `StructuredDeclaration.fork`, and `StructuredStart`'s `blocked` (a refusal the harness's own version causes,
+ * which the host tells the person instead of falling back). An engine built against 1.17 never sets them.
+ */
+/** 1.19.0 — floating surfaces, floatOnLeave, and engine sections inside the Nay panel's Sessions tab. */
+/**
+ * 1.20.0 — a structured session's MODEL mid-conversation and a STALLED turn (OpenCode parity, optional):
+ * `StructuredSession.models()` / `model()` / `setModel(id)` (the protocol's own switch, answered with a
+ * `StructuredSetModel`), `stalled()` (a read the host acts on by cancelling the turn, never the driver), and
+ * `StructuredSpawn.lang` (the screen's language for the sentences a driver writes into the chat). An engine
+ * built against 1.19 never calls them; one built against 1.20 is refused by an older host, like every minor bump.
+ */
+/**
+ * 1.21.0 — ADAPTER.LIMITES (optional, additive): a structured session's directed update, cancel receipt and
+ * exactly-once actions. `StructuredSession.submit()` (a request the CALLER names) / `amend()` / `cancelRequest()` /
+ * `requestState()`, an optional trailing `idempotencyKey` on `answer` / `setMode` / `setModel`, and the
+ * declaration members `amend`, `cancelReceipt` and `reconcile`. Receipts carry a closed refusal list, `replayed`,
+ * `durable` and (for a crash with no evidence) `in-doubt`. The host journals the action as `action.claimed` /
+ * `action.settled`. The surface door `StructuredSessionHandle` gains the same keyed members (optional, the session
+ * the socket declared only) and `limits()`; `TUI_LIMITS` states what a terminal session can (E7). An engine built
+ * against 1.20 still loads on a 1.21 host (a lower minor is compatible) and simply never sees the new members; one
+ * built against 1.21 is refused by an older host, like every minor bump.
+ */
+export const ENGINE_API_VERSION = '1.21.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

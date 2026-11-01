@@ -156,7 +156,7 @@ export function allSwitchOptions(o: {
     const picked = o.context.picks?.[h]
     const mine: SwitchOption[] = []
     for (const a of o.context.accounts) {
-      if (a.harness !== h || a.retired || !a.bound || !a.available) continue
+      if (a.harness !== h || a.retired || !a.bound || a.expired || !a.available) continue
       const ok = decideSpawnAccount({ harness: h, requested: a.id, agentCaller: o.agentCaller, context: o.context })
       if (!ok.ok) continue
       const m = o.meta.find(x => x.id === a.id)
@@ -168,7 +168,7 @@ export function allSwitchOptions(o: {
 }
 
 /** Why an account of this machine is NOT among a session's switch targets (CONTA.LIMITES). */
-export type SwitchUnavailableReason = 'not_agentic' | 'signed_out' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
+export type SwitchUnavailableReason = 'not_agentic' | 'signed_out' | 'login_expired' | 'cant_carry' | 'harness_unavailable' | 'unavailable'
 
 export interface SwitchUnavailable extends Omit<SwitchOption, 'recommended'> { reason: SwitchUnavailableReason }
 
@@ -197,6 +197,7 @@ export function unavailableSwitchTargets(o: {
       a.harness === o.harness && !switchSupported(a.harness) ? 'cant_carry'
         : a.harness !== o.harness && !o.startable.includes(a.harness) ? 'harness_unavailable'
           : !a.available ? 'not_agentic'
+            : a.expired ? 'login_expired'
             : !a.bound ? 'signed_out'
               : 'unavailable'
     const m = o.meta.find(x => x.id === a.id)
@@ -404,6 +405,8 @@ export function switchMessage(reason: SwitchRefusal, detail: string, lang: 'en' 
 export interface LimitState {
   /** Epoch ms the account's window resets, when the harness said. */
   resetsAt?: number
+  /** Epoch ms of the transcript entry that recorded the limit, when it carries a timestamp (CONTA.AUTO tells a copied old limit from a new one by it). */
+  at?: number
   /** The sentence the harness wrote. */
   message?: string
   /** The person's prompt that the limit refused, to be re-sent once on the new account. */
@@ -448,7 +451,9 @@ export function detectLimitInTail(harness: HarnessId, lines: readonly string[]):
         const info = (e.apiErrorParams as { rate_limit_info?: { resetsAt?: unknown } } | undefined)?.rate_limit_info
         const content = (e.message as { content?: { text?: unknown }[] } | undefined)?.content
         const message = Array.isArray(content) ? text(content[0]?.text) : undefined
+        const at = Date.parse(String(e.timestamp ?? ''))
         limit = {
+          ...(Number.isFinite(at) ? { at } : {}),
           ...(typeof info?.resetsAt === 'number' ? { resetsAt: info.resetsAt * 1000 } : {}),
           ...(message ? { message } : {}),
           ...(lastPrompt ? { pendingPrompt: lastPrompt } : {}),
@@ -465,7 +470,8 @@ export function detectLimitInTail(harness: HarnessId, lines: readonly string[]):
       if (p?.type === 'task_complete' || p?.type === 'error') {
         if (p.error?.codex_error_info === 'usage_limit_exceeded' || (p.type === 'error' && /usage limit/i.test(String(p.message ?? '')))) {
           const message = text(p.error?.message) ?? text(p.message)
-          limit = { ...(message ? { message } : {}), ...(lastPrompt ? { pendingPrompt: lastPrompt } : {}) }
+          const at = Date.parse(String(e.timestamp ?? ''))
+          limit = { ...(Number.isFinite(at) ? { at } : {}), ...(message ? { message } : {}), ...(lastPrompt ? { pendingPrompt: lastPrompt } : {}) }
         } else if (p.type === 'task_complete') {
           limit = null
         }
@@ -475,6 +481,90 @@ export function detectLimitInTail(harness: HarnessId, lines: readonly string[]):
     }
   }
   return limit
+}
+
+/**
+ * HOTFIX.LOGIN-EXPIRADO — where a harness writes, INTO its own transcript, that it refused the
+ * account's login (expired or revoked token). `Record<HarnessId, …>`, so a new harness must decide;
+ * `null` is the decision "never seen in a transcript", and that harness's sessions simply never raise
+ * the bar (its accounts still show `signed_out` when the registry says so). Read off the CLIs' own
+ * code, never guessed:
+ * - claude 2.1.314 (binary, 2026-10-30): an assistant entry with `isApiErrorMessage: true` and
+ *   `error: "authentication_failed"` — "Please run /login · …", "Your session has expired. Please run
+ *   /login to sign in again.", "API Error: 401 Invalid API key · Please run /login".
+ * - codex 0.16x (binary, 2026-10-30): an `event_msg` `error`/`task_complete` whose
+ *   `codex_error_info` is `unauthorized`, or whose message is the refresh failure ("Your access token
+ *   could not be refreshed … Please log out and sign in again.").
+ */
+// @harness-adapters-only: each vendor CLI writes its own refusal, in its own transcript format.
+export const AUTH_REFUSAL_SOURCES: Record<HarnessId, string | null> = {
+  claude: 'claude 2.1.314: assistant entry, error "authentication_failed"',
+  codex: 'codex: event_msg error/task_complete, codex_error_info "unauthorized"',
+  copilot: null, gemini: null, kimi: null, antigravity: null, opencode: null,
+}
+
+export interface AuthState {
+  /** Epoch ms of the refusal entry, when it carries a timestamp. */
+  at?: number
+  /** The sentence the harness wrote. */
+  message?: string
+  /** The person's prompt the refusal swallowed, offered for re-sending once the account works again. */
+  pendingPrompt?: string
+}
+
+const CODEX_AUTH = /could not be refreshed|sign in again|log out and sign in|codex login|unauthori[sz]ed/i
+
+/**
+ * PURE. Did the conversation's LAST turn stop on a refused login? `auth` is the refusal still in
+ * force (a later real reply clears it — the login works again; a new prompt does NOT: it is the one
+ * being refused). `answeredAt` is the newest real reply's time, so a stored mark older than it can be
+ * cleared (the person ran `/login` inside the session).
+ */
+export function detectAuthInTail(harness: HarnessId, lines: readonly string[]): { auth: AuthState | null; answeredAt?: number } {
+  if (!AUTH_REFUSAL_SOURCES[harness]) return { auth: null }
+  let auth: AuthState | null = null
+  let answeredAt: number | undefined
+  let lastPrompt: string | undefined
+  for (const line of lines) {
+    let e: Record<string, unknown>
+    try { e = JSON.parse(line) as Record<string, unknown> } catch { continue }
+    if (!e || typeof e !== 'object') continue
+    const at = Date.parse(String(e.timestamp ?? ''))
+    const when = Number.isFinite(at) ? { at } : {}
+    if (harness === 'claude') {
+      const prompt = claudePromptOf(e)
+      if (prompt) { lastPrompt = prompt; continue }
+      if (e.type !== 'assistant') continue
+      if (e.isApiErrorMessage === true && e.error === 'authentication_failed') {
+        const content = (e.message as { content?: { text?: unknown }[] } | undefined)?.content
+        const message = Array.isArray(content) ? text(content[0]?.text) : undefined
+        auth = { ...when, ...(message ? { message } : {}), ...(lastPrompt ? { pendingPrompt: lastPrompt } : {}) }
+      } else if (e.isApiErrorMessage !== true) {
+        auth = null
+        if (Number.isFinite(at)) answeredAt = at
+      }
+      continue
+    }
+    if (harness === 'codex') {
+      if (e.type !== 'event_msg') continue
+      const p = e.payload as { type?: string; message?: unknown; error?: { message?: unknown; codex_error_info?: unknown } } | undefined
+      if (p?.type === 'user_message') { const m = text(p.message); if (m) lastPrompt = m; continue }
+      if (p?.type === 'error' || p?.type === 'task_complete') {
+        const info = p.error?.codex_error_info
+        const said = text(p.error?.message) ?? text(p.message)
+        if (info === 'unauthorized' || (info === undefined && p.type === 'error' && said && CODEX_AUTH.test(said))) {
+          auth = { ...when, ...(said ? { message: said } : {}), ...(lastPrompt ? { pendingPrompt: lastPrompt } : {}) }
+        } else if (p.type === 'task_complete' && !p.error) {
+          auth = null
+          if (Number.isFinite(at)) answeredAt = at
+        }
+      } else if (p?.type === 'agent_message') {
+        auth = null
+        if (Number.isFinite(at)) answeredAt = at
+      }
+    }
+  }
+  return { auth, ...(answeredAt !== undefined ? { answeredAt } : {}) }
 }
 
 /** Codex's rollout name ends in the conversation id. */

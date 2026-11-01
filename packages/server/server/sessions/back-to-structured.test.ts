@@ -52,6 +52,8 @@ beforeAll(() => {
   mkdirSync(bin)
   writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 0\n')
   chmodSync(join(bin, 'claude'), 0o755)
+  writeFileSync(join(bin, 'opencode'), '#!/bin/sh\nexit 0\n')
+  chmodSync(join(bin, 'opencode'), 0o755)
   pathBefore = process.env.PATH
   process.env.PATH = `${bin}:${pathBefore ?? ''}`
   __setHarnessAgentsReaderForTest(async () => [])
@@ -129,5 +131,48 @@ describe('backToStructured', () => {
     __setFleetHostForTest('en', { async backToStructured(id: string) { seen.push(id); return { ok: true, message: 'ok' } } } as never)
     expect(await runFleetAction('en', { action: 'structured', id: 'm-1' } as never)).toMatchObject({ ok: true })
     expect(seen).toEqual(['m-1'])
+  })
+
+  test('the fleet action `fork` reaches the host and carries the new row id back', async () => {
+    const seen: string[] = []
+    __setFleetHostForTest('en', { async forkSession(id: string) { seen.push(id); return { ok: true, message: 'ok', id: 'm-2' } } } as never)
+    expect(await runFleetAction('en', { action: 'fork', id: 'm-1' } as never)).toMatchObject({ ok: true, id: 'm-2' })
+    expect(seen).toEqual(['m-1'])
+  })
+
+  test('a fork starts a NEW row beside the original, linked to its conversation, and leaves the original alone', async () => {
+    const m = tmuxRow({ harness: 'opencode', label: 'Docs', conversationId: 'ses_e70797397ffeSYPpraVLuN7l9J', task: 't-7' })
+    await addSession(m)
+    const rec = recordingBackend({ alive: [m.id], structured: [m.id], landsStructured: true })
+    __setSessionBackendForTest(rec.b)
+    try {
+      const out = await createControlHost('en', NO_TERMINAL).forkSession!(m.id)
+      expect(out.ok).toBe(true)
+      expect(rec.spawned.length).toBe(1)
+      expect(rec.killed).toEqual([])
+      expect(rec.spawned[0]!.structured).toMatchObject({ harness: 'opencode', origin: 'web', forkOf: m.conversationId })
+      const rows = await readRegistry()
+      expect(rows.find(r => r.id === m.id)?.endedAt).toBeUndefined()
+      const fresh = rows.find(r => r.id === rec.spawned[0]!.id)
+      expect(fresh).toBeDefined()
+      expect(fresh!.id).not.toBe(m.id)
+      expect(fresh).toMatchObject({ harness: 'opencode', label: 'Docs (fork)', task: 't-7' })
+      expect(out.id).toBe(fresh!.id)
+    } finally {
+      for (const r of await readRegistry()) if (r.cwd === dir) await removeSession(r.id)
+    }
+  }, 30_000)
+
+  test('the fleet action `fork` honours `force` and, on a memory refusal, answers memoryBudget with the queue entry', async () => {
+    const seen: Array<[string, boolean, boolean]> = []
+    __setFleetHostForTest('en', {
+      async forkSession(id: string, verified?: boolean, force?: boolean) {
+        seen.push([id, verified === true, force === true])
+        return force ? { ok: true, message: 'ok', id: 'm-3' } : { ok: false, message: 'low memory', memoryRefusal: { queuedId: 'q-9' } }
+      },
+    } as never)
+    expect(await runFleetAction('en', { action: 'fork', id: 'm-1' } as never)).toMatchObject({ ok: false, memoryBudget: true, queuedId: 'q-9' })
+    expect(await runFleetAction('en', { action: 'fork', id: 'm-1', force: true } as never)).toMatchObject({ ok: true, id: 'm-3' })
+    expect(seen).toEqual([['m-1', false, false], ['m-1', false, true]])
   })
 })

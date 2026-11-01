@@ -7,8 +7,13 @@ const child = { id: 'c1', conversationId: 'conv-c' }
 const prefs = (p: Record<string, unknown>) => p as unknown as Preferences
 
 describe('title rule', () => {
-  it('keeps the predecessor title, ignoring the requested one', () => {
-    expect(handoffTitle('[ LÍDER ] - Motor', '[ LÍDER ] - Motor (sessão 47)')).toBe('[ LÍDER ] - Motor')
+  it('an explicit --name on the hand-off wins', () => {
+    expect(handoffTitle('smk1', 'smk-succ')).toBe('smk-succ')
+    expect(handoffTitle('[ LÍDER ] - Motor', ' novo ')).toBe(' novo ')
+  })
+  it('falls back to the predecessor title when the caller named nothing', () => {
+    expect(handoffTitle('[ LÍDER ] - Motor', undefined)).toBe('[ LÍDER ] - Motor')
+    expect(handoffTitle('Motor', '   ')).toBe('Motor')
   })
   it('falls back to the requested label when the predecessor has none', () => {
     expect(handoffTitle(undefined, 'x')).toBe('x')

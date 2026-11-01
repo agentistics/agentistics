@@ -39,10 +39,14 @@ export type FleetActionId =
   | 'interrupt'
   /** F2.0b — "open in terminal" on a structured session (protocol-driven): the same conversation as a TUI. */
   | 'terminal'
+  /** V-OPENCODE.2 — fork the conversation into a new session; the answer carries the new `id`. */
+  | 'fork'
   /** Advance the harness to its NEXT mode. It cycles; there is no key that picks one. */
   | 'cycleMode'
   /** F4.D — set a structured row's mode directly; `text` is one of its `modes` ids. */
   | 'setMode'
+  /** 1.20 — switch a structured row's model through its protocol; `text` is one of its `models` ids. */
+  | 'setModel'
   /**
    * FLEET verbs — they act on a SET, not on the row whose `id` is in the request.
    *
@@ -104,6 +108,8 @@ export interface FleetRow {
   mode?: SessionMode
   /** F4.D — the modes a structured row can be set to directly; absent: only `cycleMode` exists. */
   modes?: SessionMode[]
+  /** 1.20 — the models a structured row can switch to through its protocol (`setModel`); absent: no protocol switch. */
+  models?: Array<{ id: string; label: string }>
   conversationId?: string
   /** Exact managed successor recorded by the existing handoff registry. */
   handoffTo?: string
@@ -255,9 +261,11 @@ export interface FleetState {
     ids?: readonly string[]
     /** This prompt requests a leader handoff; record only confirmed delivery. */
     handoff?: boolean
+    /** `resume` and `fork`: "reopen/start anyway", confirmed by the person after the memory gate refused. */
+    force?: boolean
     /** EXT.OPEN: yes to ending an external process so its conversation continues here. */
     confirm?: boolean
-  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
+  }) => Promise<{ ok: boolean; message: string; id?: string; confirm?: boolean; failure?: 'prompt' | 'ended' | 'unconfirmed'; action?: { kind: 'update-harness'; harness: string; need: string }; memoryBudget?: true; queuedId?: string }>
 }
 
 /**

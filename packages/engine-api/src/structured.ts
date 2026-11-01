@@ -65,6 +65,8 @@ export interface StructuredDeclaration {
   questions: StructuredFeature
   /** Cancel the turn in flight. */
   cancel: StructuredFeature
+  /** 1.18 (optional) — `StructuredSpawn.forkOf`: how the protocol forks a conversation, or why it cannot. Absent = the driver says nothing (no fork offered). */
+  fork?: StructuredFeature
   /**
    * Token usage the PROTOCOL states per turn (F2.1, additive and optional: a driver that says nothing
    * leaves the files / the harness's own store as the source of tokens, exactly as before).
@@ -81,6 +83,12 @@ export interface StructuredDeclaration {
    * print mode, for one, has no permission request at all, so it lists only `no-questions`).
    */
   startModes?: readonly CanonicalMode[]
+  /** 1.21 — directed update, per phase. `replace`/`steer` cite the protocol call; absent = the fallback (`appended`). */
+  amend?: { queued: StructuredFeature; running: StructuredFeature }
+  /** 1.21 — what proves a cancel took, and how sure it is. */
+  cancelReceipt?: StructuredFeature & { confidence?: 'exact' | 'inferred'; deadlineMs?: number }
+  /** 1.21 — the protocol id that survives a crash (a message uuid, a client id), or why there is none. */
+  reconcile?: StructuredFeature
 }
 
 /**
@@ -115,6 +123,104 @@ export interface StructuredUsage {
   byModel?: Record<string, { input: number; output: number }>
 }
 
+/**
+ * 1.21 — ADAPTER.LIMITES. A caller-chosen id for ONE ACTION (submit, amend, cancel, answer, set-mode, set-model);
+ * a retry of the same action reuses it. ≤128 characters of `[A-Za-z0-9._:-]` — it is journaled verbatim, so it
+ * carries no text and no secret. A request (`requestId`) and an action (`idempotencyKey`) are different things: one
+ * request can have many actions.
+ */
+export type IdempotencyKey = string
+
+export const IDEMPOTENCY_KEY_MAX = 128
+const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9._:-]+$/
+
+/** PURE. Whether a string may be used as an `IdempotencyKey`. */
+export function validIdempotencyKey(k: unknown): k is IdempotencyKey {
+  return typeof k === 'string' && k.length > 0 && k.length <= IDEMPOTENCY_KEY_MAX && IDEMPOTENCY_KEY_RE.test(k)
+}
+
+/** 1.21 — a session's ADAPTER.LIMITES declaration (the three 1.21 members of `StructuredDeclaration`). */
+export type StructuredLimits = Required<Pick<StructuredDeclaration, 'amend' | 'cancelReceipt' | 'reconcile'>>
+
+/**
+ * 1.21 — what ANY harness says when it runs in a terminal (tmux) instead of over its protocol (spec ADAPTER.LIMITES §6
+ * "TUI"): typed text is always a new message, a cancel is a keystroke whose only proof is the transcript tail, and
+ * nothing we choose is handed to the harness to read back after a crash.
+ */
+export const TUI_LIMITS: StructuredLimits = Object.freeze({
+  amend: Object.freeze({
+    queued: Object.freeze({ absent: 'a terminal session has no queue of ours: typed text is a new message' }),
+    running: Object.freeze({ absent: 'a terminal session cannot fold text into the running turn: typed text is a new message' }),
+  }),
+  cancelReceipt: Object.freeze({ via: 'Esc / Ctrl-C keystroke; the transcript tail shows the interruption (claude: [Request interrupted by user]), else nothing', confidence: 'inferred' as const }),
+  reconcile: Object.freeze({ absent: 'a terminal session takes no id of ours to read back after a crash' }),
+}) as StructuredLimits
+
+/** 1.21 — the limits a declaration states, each member absent in it read as its fallback (`absent`, in words). */
+export function limitsOf(d: StructuredDeclaration | null | undefined, driver = 'this driver'): StructuredLimits {
+  const no = (what: string) => ({ absent: `${driver} does not state ${what}` })
+  return {
+    amend: d?.amend ?? { queued: no('a queued amend'), running: no('a running amend') },
+    cancelReceipt: d?.cancelReceipt ?? no('a cancel receipt'),
+    reconcile: d?.reconcile ?? no('a protocol id to reconcile with'),
+  }
+}
+
+/** 1.21 — where a request is now (`requestState`). */
+export type StructuredRequestState = 'queued' | 'running' | 'finished' | 'cancelled' | 'unknown'
+
+/** 1.21 — one request the caller names. */
+export interface StructuredSubmit {
+  /** Unique in the session (the voice's commit `requestId`). */
+  requestId: string
+  idempotencyKey: IdempotencyKey
+  text: string
+}
+
+/** Why a submit is refused: a CLOSED list, never free text. */
+export const SUBMIT_REFUSED_REASONS = ['session-ended', 'queue-full', 'attention-open', 'key-conflict', 'empty'] as const
+export type SubmitRefusedReason = typeof SUBMIT_REFUSED_REASONS[number]
+/** Why an amend is refused: a CLOSED list. */
+export const AMEND_REFUSED_REASONS = ['finished', 'unknown-request', 'session-ended', 'key-conflict'] as const
+export type AmendRefusedReason = typeof AMEND_REFUSED_REASONS[number]
+
+/**
+ * Shared by every receipt. `replayed`: this is the recorded answer to an earlier call with the same key. `durable`:
+ * the key is journaled, so a repeat after a crash is recognised; `false` (journal off) means a crash makes the
+ * acceptance UNCERTAIN, and the caller must treat it so.
+ */
+interface ReceiptBase { requestId: string; at: string; replayed?: true }
+
+export type StructuredSubmitReceipt =
+  | (ReceiptBase & { state: 'queued' | 'started'; durable: boolean })
+  | (ReceiptBase & { state: 'refused'; reason: SubmitRefusedReason; durable: boolean })
+  /** A claimed key with no evidence either way after a crash. Never re-run by itself; the caller decides. */
+  | (ReceiptBase & { state: 'in-doubt'; durable: true })
+
+export type StructuredAmendResult =
+  /** `replaced`: the queued request's text was swapped before the model saw it. `steered`: the model gets it mid-turn. */
+  | (ReceiptBase & { result: 'amended'; how: 'replaced' | 'steered'; durable: boolean })
+  /** No replace/steer here: the correction is queued as the carrier request (framed as a correction), after the running turn. */
+  | (ReceiptBase & { result: 'appended'; carrierRequestId: string; reason: string; durable: boolean })
+  | (ReceiptBase & { result: 'refused'; reason: AmendRefusedReason; durable: boolean })
+  | (ReceiptBase & { result: 'in-doubt'; durable: true })
+
+export type StructuredCancelReceipt =
+  | (ReceiptBase & {
+      state: 'cancelled' | 'already-finished' | 'unconfirmed'
+      /** `queued`: withdrawn before the model saw it. `running`: stopped mid-turn. */
+      phase?: 'queued' | 'running'
+      confidence: 'exact' | 'inferred'
+      /** `turn`: the stop ended more than this request (claude merges queued prompts into one turn). */
+      scope: 'request' | 'turn'
+      /** The other requests that same stop ended. */
+      alsoEnded?: readonly string[]
+      /** `possible`: tools ran before the stop and their effects are NOT undone. */
+      effects: 'none' | 'possible'
+      durable: boolean
+    })
+  | (ReceiptBase & { state: 'in-doubt'; durable: true })
+
 /** A driver's state in this build. `stub` = the interface exists, every start is refused in a sentence. */
 export type StructuredDriverStatus = 'ready' | 'stub'
 
@@ -147,6 +253,12 @@ export interface StructuredSpawn {
   conversationId?: string
   /** Resume this conversation instead of starting a fresh one. */
   resumeId?: string
+  /**
+   * 1.18 — FORK this conversation: the session that opens is a NEW conversation carrying `forkOf`'s history
+   * (ACP `session/fork`), and its id is the one the driver states. Only a driver whose declaration offers it
+   * (`forks`) takes it; any other refuses in a sentence. Beside `resumeId`, the fork wins.
+   */
+  forkOf?: string
   /** The first prompt, sent once the session is open. */
   initialPrompt?: string
   /**
@@ -169,6 +281,8 @@ export interface StructuredSpawn {
    * driver honours only what `declares(h).startModes` lists; the host never sends anything else.
    */
   mode?: CanonicalMode
+  /** 1.20 — the language of the person's screen, for the few sentences a driver writes into the chat itself. Absent = English. */
+  lang?: 'en' | 'pt'
   /**
    * F2.0b — WHERE the child process runs. When present, the driver starts its protocol peer through
    * `transport.launch(...)` instead of spawning it itself, and speaks to it only through the returned
@@ -298,11 +412,38 @@ export interface StructuredSession {
    * false when the id is not listed, the session ended, or the harness refused it — the mode then stays
    * whatever the protocol last stated.
    */
-  setMode?(id: string): Promise<boolean>
+  setMode?(id: string, idempotencyKey?: IdempotencyKey): Promise<boolean>
+  /** 1.20 — the models this session can switch to mid-conversation, as the protocol lists them (absent = none stated). */
+  models?(): readonly StructuredModelOption[]
+  /** 1.20 — the model the PROTOCOL says this session runs (or the one just set and acknowledged), or null. */
+  model?(): string | null
+  /**
+   * 1.20 — switches the model through the protocol (never a typed line). A refusal says why in a sentence, and
+   * carries `blocked` when the harness's own version is the wall (opencode < 1.18.0 on its free tier).
+   */
+  setModel?(id: string, idempotencyKey?: IdempotencyKey): Promise<StructuredSetModel>
+  /**
+   * 1.20 — the turn in flight cannot finish on its own (the harness retries a provider that is not answering,
+   * forever), in the harness's own words, or null. A READ: the driver never acts on it (a durable session's
+   * writes must replay exactly) — the HOST cancels the turn through `cancel()`, as the person would.
+   */
+  stalled?(): string | null
   /** Queues a prompt. False when not running or the queue is full. */
   prompt(text: string): boolean
-  /** Answers the open request. False when none is open, the id is stale, or the answer does not fit it. */
-  answer(a: StructuredAnswer): boolean
+  /**
+   * 1.21 — queues a prompt the CALLER names, so `amend` and `cancelRequest` have something to point at. `prompt()`
+   * stays (it is `submit()` with a minted id). A repeat with the same `idempotencyKey` answers the recorded
+   * receipt and never reaches the harness twice.
+   */
+  submit?(r: StructuredSubmit): Promise<StructuredSubmitReceipt>
+  /** 1.21 — corrects a request already sent (`how` says whether the model sees it before or during its work). */
+  amend?(requestId: string, text: string, idempotencyKey: IdempotencyKey): Promise<StructuredAmendResult>
+  /** 1.21 — stops ONE request and says what happened. `cancel()` (no target, no receipt) stays. */
+  cancelRequest?(requestId: string, idempotencyKey: IdempotencyKey): Promise<StructuredCancelReceipt>
+  /** 1.21 — where a request is now. A READ: no side effect, never a resend. */
+  requestState?(requestId: string): StructuredRequestState
+  /** Answers the open request. False when none is open, the id is stale, or the answer does not fit it. `idempotencyKey` (1.21) makes a retry a no-op. */
+  answer(a: StructuredAnswer, idempotencyKey?: IdempotencyKey): boolean
   /** Cancels the turn in flight (and answers an open request `cancelled`). */
   cancel(): void
   /**
@@ -315,7 +456,20 @@ export interface StructuredSession {
   dispose(): void
 }
 
-export type StructuredStart = { ok: true; session: StructuredSession } | { ok: false; reason: string }
+/**
+ * 1.18 — why a start was REFUSED when the harness itself is the blocker and no other route will do better
+ * (the TUI hits the same wall): the host tells the person in plain words instead of falling back silently.
+ * `harness-version`: the installed build is older than `need` (and is `found`, when it said so).
+ */
+export type StructuredBlocked = { kind: 'harness-version'; need: string; found?: string }
+
+export type StructuredStart = { ok: true; session: StructuredSession } | { ok: false; reason: string; blocked?: StructuredBlocked }
+
+/** 1.20 — one model a session can switch to: the id the protocol takes and its own display name. */
+export interface StructuredModelOption { id: string; label: string }
+
+/** 1.20 — what `setModel` answered. */
+export type StructuredSetModel = { ok: true } | { ok: false; reason: string; blocked?: StructuredBlocked }
 
 /** One protocol, for the harnesses it serves. */
 export interface StructuredDriver {
@@ -429,6 +583,17 @@ export interface StructuredSessionHandle {
   send(text: string): Promise<boolean>
   /** Cancels the turn in flight, and nothing else. False when the handle is invalid or nothing was running. */
   cancel(): Promise<boolean>
+  /**
+   * 1.21 (ADAPTER.LIMITES, optional) — the keyed members of the session, typed with the same surface header as `send`.
+   * `null`: the handle is invalid, the session is not structured, or its driver has no such member. The receipts are
+   * the driver's own (exactly-once by `idempotencyKey`).
+   */
+  submit?(r: StructuredSubmit): Promise<StructuredSubmitReceipt | null>
+  amend?(requestId: string, text: string, idempotencyKey: IdempotencyKey): Promise<StructuredAmendResult | null>
+  cancelRequest?(requestId: string, idempotencyKey: IdempotencyKey): Promise<StructuredCancelReceipt | null>
+  requestState?(requestId: string): Promise<StructuredRequestState | null>
+  /** 1.21 (optional) — what this session can do with an amend / a cancel / after a crash (`TUI_LIMITS` for a terminal one). */
+  limits?(): Promise<StructuredLimits | null>
 }
 
 /** `EngineHostServices.structuredSessions` (1.17, optional). */

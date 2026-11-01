@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { computePlanCost, normalizeBillingSettings, type BillingSettings } from '@agentistics/core'
 import { createAccountMutator } from './accountMutations'
 import {
-  saveThenClose, saveErrorPlace, planCoverageText,
+  saveThenClose, saveErrorPlace, planCoverageText, planAbsentText,
   ownPeriods, REPORTS_LIMITS, accountsNeedingPlan, answerNotice, billableAccounts, billingRows, closeBefore, defaultStart, foldUnnamed, planOptionsFor, rowScope, scopePeriods, withScopePeriods, capabilityNotes, matchDetectedPlan, noticeAccounts, planSummary, toggleAvailability, withAccountPeriods,
   limitsForRow, planDraftWrites, detectedPlanId,
   type BillingAccount,
@@ -402,5 +402,16 @@ describe('CONTA.SEM.PLANO — a prefilled plan is saved, and the row says it was
     const det = [{ harness: 'claude' as const, mode: 'subscription' as const, planId: 'anthropic-pro', source: 'credentials' as const, evidenceEn: '', evidencePt: '', confidence: 'exact' as const, proposalOnly: true as const }]
     expect(detectedPlanId('claude', { ...a, plan: undefined }, det)).toBe('anthropic-pro')
     expect(detectedPlanId('claude', null, [{ ...det[0]!, source: 'none' as const }])).toBe('')
+  })
+})
+
+describe('planAbsentText — the session card agrees with this screen', () => {
+  test('OpenCode has no plan quota: never "has not reported yet"', () => {
+    expect(planAbsentText('opencode', 'OpenCode', true)).toBe('Sem cota de plano no OpenCode — não há limites de plano a mostrar.')
+    expect(planAbsentText('opencode', 'OpenCode', false)).toBe('No plan quota for OpenCode — there are no plan limits to show.')
+  })
+  test('a harness that reports limits is still waiting; one that never does says so', () => {
+    expect(planAbsentText('claude', 'Claude Code', false)).toContain('has not reported plan limits yet')
+    expect(planAbsentText('gemini', 'Gemini', false)).toBe('Gemini does not report plan limits.')
   })
 })

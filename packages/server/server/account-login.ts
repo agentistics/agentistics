@@ -275,13 +275,22 @@ async function runQuiet(argv: string[]): Promise<number> {
   try { return await Bun.spawn(argv, { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' }).exited } catch { return 127 }
 }
 
-/** PURE. `#{pane_dead} #{pane_dead_status}` -> the exit status of a dead pane, or null while alive. */
-export function parsePaneDead(out: string): number | null {
+/**
+ * PURE. `#{pane_dead} #{pane_dead_status}` -> the exit status of a dead pane, or null while alive.
+ * tmux flags a pane dead as soon as its pty closes, but fills `pane_dead_status` only once it has
+ * reaped the child: in that gap the status is EMPTY, and reading it as 1 reported a command that
+ * exited 0 as failed (a CI flake under load). So an empty status is "not settled yet" (null) until
+ * `settled` says the wait is over; only then does a child that died by signal read as 1.
+ */
+export function parsePaneDead(out: string, settled = true): number | null {
   const [dead, status] = out.trim().split(/\s+/)
   if (dead !== '1') return null
   const n = Number(status)
-  return Number.isInteger(n) ? n : 1
+  if (status !== undefined && Number.isInteger(n)) return n
+  return settled ? 1 : null
 }
+/** How long a dead pane may go without an exit status before it is taken as killed by a signal. */
+export const PANE_STATUS_GRACE_MS = 2_000
 
 export interface PasteTarget { paste: () => Promise<void>; enter: () => Promise<void>; screen: () => Promise<string> }
 /**
@@ -367,8 +376,11 @@ export async function runClaudeInLoginContext(root: string | null, argv: string[
     await tmux(['new-session', '-d', '-s', name, '-x', '240', '-y', '80', '-c', probeRoot, command])
     await tmux(['set-option', '-t', name, 'remain-on-exit', 'on']).catch(() => {})
     const deadline = Date.now() + 15_000
+    let firstDead = 0
     while (Date.now() < deadline) {
-      const dead = parsePaneDead(await tmux(['display-message', '-p', '-t', name, '#{pane_dead} #{pane_dead_status}']))
+      const paneState = await tmux(['display-message', '-p', '-t', name, '#{pane_dead} #{pane_dead_status}'])
+      if (!firstDead && parsePaneDead(paneState, true) !== null) firstDead = Date.now()
+      const dead = parsePaneDead(paneState, firstDead > 0 && Date.now() - firstDead >= PANE_STATUS_GRACE_MS)
       if (dead !== null) return { stdout: await tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-100']).catch(() => ''), code: dead }
       await new Promise<void>(resolve => setTimeout(resolve, 20))
     }
@@ -430,12 +442,15 @@ export async function launchLoginProcess(req: LoginRequest): Promise<LoginProces
       loginLog(`[account-login] ${req.harness} sign-in runs in tmux -L ${SHELL_SOCKET} session ${name}${req.harness === 'claude' ? ` (keychain item "${claudeKeychainService(env)}")` : ''}`)
     } catch { await clean(); throw new LoginFailure('login_unavailable') }
     const capture = () => tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-100'])
+    let firstDead = 0
     return {
       exited, snapshot: true,
       async read() {
         while (!ended) {
           try {
-            const dead = parsePaneDead(await tmux(['display-message', '-p', '-t', name, '#{pane_dead} #{pane_dead_status}']))
+            const paneState = await tmux(['display-message', '-p', '-t', name, '#{pane_dead} #{pane_dead_status}'])
+            if (!firstDead && parsePaneDead(paneState, true) !== null) firstDead = Date.now()
+            const dead = parsePaneDead(paneState, firstDead > 0 && Date.now() - firstDead >= PANE_STATUS_GRACE_MS)
             // -J rejoins soft-wrapped authorization URLs. Nothing is written to disk.
             const out = await capture()
             const digest = new Bun.CryptoHasher('sha256').update(out).digest('hex')

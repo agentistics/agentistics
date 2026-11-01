@@ -110,13 +110,15 @@ export function reopenOrigin(origin: SpawnOrigin | undefined, attach: boolean): 
  * agentistics MCP rides along so a structured session gets it from the protocol, not a config file.
  */
 export function structuredIntentOf(
-  req: { harness: HarnessId; origin?: SpawnOrigin; resumeId?: string; prompt?: string; mode?: CanonicalMode },
+  req: { harness: HarnessId; origin?: SpawnOrigin; resumeId?: string; /** V-OPENCODE.2 — open a FORK of this conversation. */ forkOf?: string; prompt?: string; mode?: CanonicalMode },
   o: {
     model?: string | undefined
     effort?: string | undefined
     conversationId?: string
     ctx?: { text: string; block: string }
     mcp?: { command: string; args: readonly string[]; env?: Readonly<Record<string, string>> }
+    /** 1.20 — the asking screen's language (QA F2: the server's stored preference can say nothing, or the wrong thing). */
+    lang?: 'en' | 'pt'
   },
 ): StructuredIntent {
   return {
@@ -124,12 +126,14 @@ export function structuredIntentOf(
     ...(req.origin ? { origin: req.origin } : {}),
     ...(o.model ? { model: o.model } : {}),
     ...(o.effort ? { effort: o.effort } : {}),
-    ...(o.conversationId && !req.resumeId ? { conversationId: o.conversationId } : {}),
+    ...(o.conversationId && !req.resumeId && !req.forkOf ? { conversationId: o.conversationId } : {}),
     ...(req.resumeId ? { resumeId: req.resumeId } : {}),
+    ...(req.forkOf ? { forkOf: req.forkOf } : {}),
     ...(req.mode && req.mode !== 'default' ? { mode: req.mode } : {}),
     ...(req.prompt ? { prompt: req.prompt } : {}),
-    ...(o.ctx && !req.resumeId ? { instructions: { text: o.ctx.text, block: o.ctx.block } } : {}),
+    ...(o.ctx && !req.resumeId && !req.forkOf ? { instructions: { text: o.ctx.text, block: o.ctx.block } } : {}),
     ...(o.mcp ? { mcp: [{ name: 'agentistics', command: o.mcp.command, args: [...o.mcp.args], ...(o.mcp.env ? { env: o.mcp.env } : {}) }] } : {}),
+    ...(o.lang ? { lang: o.lang } : {}),
   }
 }
 

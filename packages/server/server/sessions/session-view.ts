@@ -106,6 +106,8 @@ export interface SessionView {
   mode?: SessionMode
   /** F4.D — the modes a STRUCTURED session can be set to directly (its protocol's list); absent: cycle only. */
   modeChoices?: SessionMode[]
+  /** 1.20 — a STRUCTURED session's model switch: the protocol's current model and its list. */
+  modelChoices?: { current: string | null; options: Array<{ id: string; label: string }> }
   /** F2.0b — running over its harness's protocol right now: the web offers "open in terminal". */
   structured?: true
   /**
@@ -124,7 +126,7 @@ export interface SessionView {
    * Carried rather than re-derived downstream, because the two need different capabilities of the
    * harness and a surface that assumes "numbered" offers a digit the dialog never printed.
    */
-  dialogSelect?: 'numbered' | 'marker'
+  dialogSelect?: 'numbered' | 'marker' | 'inline'
   /**
    * The dialog's options were STATED by the session's protocol (a structured session, F2.0) rather than
    * read off a screen — so they are answered through its driver by NUMBER whatever the harness's
@@ -492,6 +494,8 @@ export const DEFAULT_CLOSED_LIMIT = 300
 export function buildSessionViews(o: {
   reconciled: readonly ReconciledSession[]
   activity: ReadonlyMap<string, SessionActivity>
+  /** An EXTERNAL process's activity, by the conversation it names, read exactly from its harness's store (opencode.db). */
+  externalActivity?: ReadonlyMap<string, SessionActivity>
   /**
    * Rows with work running that is NOT their own turn — a background subagent, a watcher.
    *
@@ -509,6 +513,8 @@ export function buildSessionViews(o: {
   modes?: ReadonlyMap<string, SessionMode>
   /** F4.D — the modes a structured session can be set to, keyed by row id. */
   modeChoices?: ReadonlyMap<string, SessionMode[]>
+  /** 1.20 — keyed by row id, see `SessionView.modelChoices`. */
+  modelChoices?: ReadonlyMap<string, { current: string | null; options: Array<{ id: string; label: string }> }>
   /** The ids running structured right now (`SessionBackend.isStructured`) — see `SessionView.structured`. */
   structured?: ReadonlySet<string>
   /** The options that dialog offers, keyed by session id. Absent where they could not be read. */
@@ -516,7 +522,7 @@ export function buildSessionViews(o: {
   /** The form around that dialog, keyed by session id. */
   dialogForm?: ReadonlyMap<string, DialogForm>
   /** How those options are picked, keyed by session id — see `SessionView.dialogSelect`. */
-  dialogSelect?: ReadonlyMap<string, 'numbered' | 'marker'>
+  dialogSelect?: ReadonlyMap<string, 'numbered' | 'marker' | 'inline'>
   /** The ids whose dialog the protocol STATED — see `SessionView.dialogStated`. */
   dialogStated?: ReadonlySet<string>
   /** Why the dialog could not be read, keyed by session id — see `SessionView.dialogUnreadable`. */
@@ -693,6 +699,7 @@ export function buildSessionViews(o: {
       // one, which `modeOf` already answers.
       ...(o.modes?.get(r.id) ? { mode: o.modes.get(r.id)! } : {}),
       ...(o.modeChoices?.get(r.id) ? { modeChoices: o.modeChoices.get(r.id)! } : {}),
+      ...(o.modelChoices?.get(r.id) ? { modelChoices: o.modelChoices.get(r.id)! } : {}),
       ...(!finished && r.status === 'running' && o.structured?.has(r.id) ? { structured: true as const } : {}),
       ...(o.fell?.has(r.id) ? { fell: true as const } : {}),
       ...(r.managed?.label ? { label: r.managed.label } : {}),
@@ -700,7 +707,9 @@ export function buildSessionViews(o: {
       ...(ownName ? { harnessName: ownName } : {}),
       ...(ownName && ownNameSince !== undefined ? { harnessNameSince: ownNameSince } : {}),
       ...(r.managed?.note ? { note: r.managed.note } : {}),
-      ...(r.managed?.model ? { model: r.managed.model } : {}),
+      // What the PROTOCOL says the session runs outranks what it was started with (a mid-conversation switch,
+      // or no model asked for at all — the harness's own default, which only the protocol can name).
+      ...((o.modelChoices?.get(r.id)?.current ?? r.managed?.model) ? { model: (o.modelChoices?.get(r.id)?.current ?? r.managed?.model)! } : {}),
       ...(r.managed?.effort ? { effort: r.managed.effort } : {}),
       ...(() => {
         const accountId = r.managed ? resolveSessionAccount([r.managed], { id: r.managed.id }, o.accounts) : undefined
@@ -817,6 +826,13 @@ export function buildSessionViews(o: {
   const covered = (p: HarnessProcess): boolean => {
     const exact = managedIdOfProcess(p, o.harnessSessions)
     if (exact !== undefined) return managed.some(m => m.id === exact)
+    // opencode keeps every session in one shared `opencode.db`, so a folder says nothing about WHICH
+    // conversation a process is driving: a TUI started by hand beside a managed (ACP) session in the
+    // same repository is another conversation, and the directory guess hid it as "closed". Cover it
+    // only by the exact `ses_…` id both sides state.
+    if (p.harness === 'opencode') {
+      return p.sessionId !== undefined && managed.some(m => m.harness === 'opencode' && m.conversationId === p.sessionId)
+    }
     return managed.some(m =>
       m.harness === p.harness &&
       (m.status === 'running' || m.status === 'unregistered') &&
@@ -877,6 +893,8 @@ export function buildSessionViews(o: {
       harness: p.harness,
       cwd: p.cwd,
       status: 'external' as const,
+      // OPENCODE.RESTO — what the harness's own STORE says the conversation is doing, where one can say it exactly.
+      ...(() => { const c = own?.sessionId ?? p.sessionId; const a = c ? o.externalActivity?.get(c) : undefined; return a ? { activity: a } : {} })(),
       // EXT.OPEN: the conversation the process ITSELF named (its harness record, its argv, its open
       // file) is an EXACT link — so the row reads its chat, artifacts and metrics like any session.
       // The directory guess never becomes one: that would show some other conversation under it.
@@ -1052,7 +1070,8 @@ export function buildSessionViews(o: {
 }
 
 export function attentionCount(views: readonly SessionView[]): number {
-  return views.filter(v => needsAttention(v.activity)).length
+  // An external row's activity is shown, never counted: nobody asked agentop to watch it, so it is no one's alert.
+  return views.filter(v => v.status !== 'external' && needsAttention(v.activity)).length
 }
 
 /**
@@ -1068,7 +1087,7 @@ export function bellTransitions(
 ): string[] {
   const out: string[] = []
   for (const v of next) {
-    if (!needsAttention(v.activity)) continue
+    if (v.status === 'external' || !needsAttention(v.activity)) continue
     const before = prev.get(v.id)
     if (before === v.activity) continue
     out.push(v.id)

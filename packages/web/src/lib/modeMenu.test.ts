@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { modeMenuFor, modeMenuPlacement } from './modeMenu'
+import { modeChipState, modeMenuFor, modeMenuPlacement } from './modeMenu'
 
 describe('modeMenu', () => {
   it('lists only modes measured for each harness', () => {
@@ -30,5 +30,25 @@ describe('modeMenu', () => {
     expect(modeMenuPlacement({ left: 0, bottom: 40 }, 100, 100, 190, 220)).toEqual({
       left: 8, top: 8, width: 84,
     })
+  })
+})
+
+describe('modeChipState', () => {
+  const base = { hasMode: true, loading: false, live: true, canPrompt: false, blocked: true, answering: false, direct: false }
+
+  it('a structured row (direct modes) with an approval card open can still be switched', () => {
+    expect(modeChipState({ ...base, direct: true })).toEqual({ shown: true, enabled: true })
+    expect(modeChipState({ ...base, direct: true, answering: true })).toEqual({ shown: true, enabled: true })
+  })
+
+  it('a terminal row stays locked while a dialog is open (the cycle key would go into the dialog)', () => {
+    expect(modeChipState(base)).toEqual({ shown: true, enabled: false })
+    expect(modeChipState({ ...base, answering: true })).toEqual({ shown: false, enabled: false })
+  })
+
+  it('an ordinary row follows canPrompt, and a dead or loading one never enables', () => {
+    expect(modeChipState({ ...base, blocked: false, canPrompt: true })).toEqual({ shown: true, enabled: true })
+    expect(modeChipState({ ...base, direct: true, live: false })).toEqual({ shown: true, enabled: false })
+    expect(modeChipState({ ...base, direct: true, loading: true }).enabled).toBe(false)
   })
 })
