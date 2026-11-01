@@ -195,6 +195,24 @@ test('concurrent store instances cannot lose accounts or mint duplicate migratio
   expect(migrated[0]).toEqual(migrated[1])
 })
 
+test('a read that detected the old login before a switch cannot flip the root back to it', async () => {
+  const login = { value: 'alice' }
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async harness => ({ key: `${harness}-${login.value}`, label: login.value }) })
+  const alice = await store.current('claude')
+  login.value = 'bob'
+  // `current` takes its detection (alice, still cached) first, then waits for the lock; the switch
+  // below forces a probe and binds bob in between. The read must adopt bob, not its stale answer.
+  const read = store.current('claude')
+  const identity = await store.forceProbe('claude')
+  const bob = (await store.bind(null, { ...identity, harness: 'claude' })).account
+  await read
+  const data = await store.readAccounts()
+  expect(bob.id).not.toBe(alice.id)
+  expect(data.bindings['claude:']).toBe(bob.id)
+  expect(data.accounts.map(a => a.id).sort()).toEqual([alice.id, bob.id].sort())
+  expect((await store.current('claude')).id).toBe(bob.id)
+})
+
 test('forced probes bypass only the requested root cache', async () => {
   let calls = 0
   const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => ({ key: `login-${++calls}`, label: 'Owner label' }) })
