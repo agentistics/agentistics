@@ -41,7 +41,7 @@ import type { HarnessId, StructuredPipe, StructuredSession, StructuredSpawn, Str
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { RELAY_FILES, type RelayLaunchSpec } from './structured-relay'
 import {
-  isInRecord, isOutRecord, isReplayCall, parseJsonl, writeCheck,
+  callByKey, isInRecord, isOutRecord, isReplayCall, parseJsonl, writeCheck,
   type InRecord, type OutRecord, type ReplayCall, type SessionCall,
 } from './structured-replay'
 
@@ -228,6 +228,12 @@ export interface DurableStore {
   remove(id: string): void
   /** Re-attach: a transport that replays this session's record, then continues live. */
   replay(id: string): ReplayTransport | null
+  /**
+   * 1.21 — the call this session's record holds under an idempotency `key`, or null (no record, no such key, or a
+   * foreign record). The reconcile of a claimed-but-unsettled action reads it: found = the call was made and a
+   * re-attach replays it; absent = it never started. A READ — it changes nothing.
+   */
+  callByKey(id: string, key: string): ReplayCall | null
 }
 
 /** `<data dir>/structured` — one directory per structured session whose child a relay holds. */
@@ -423,6 +429,10 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
       return pids.every(p => !pidAlive(p))
     },
     remove(id) { rmSync(dirOf(id), { recursive: true, force: true }) },
+    callByKey(id, key) {
+      if (foreign(id)) return null
+      return callByKey(parseJsonl<ReplayCall>(read(id, FILES.calls) ?? '', isReplayCall), key) ?? null
+    },
     replay(id) {
       const n = generations(id)
       if (n === 0 || !isAlive(id)) return null

@@ -106,17 +106,17 @@ export function recordingSession(s: StructuredSession, t: Pick<DurableTransport,
     ...(s.mode ? { mode: () => s.mode!() } : {}),
     // MODE.EVERYWHERE — setting a mode WRITES to the child, so it is recorded (before the write leaves,
     // like every call here) and a re-attach makes it again in the same place.
-    ...(s.setMode ? { setMode: (id: string) => { t.record({ op: 'setMode', id }); return s.setMode!(id) } } : {}),
+    ...(s.setMode ? { setMode: (id: string, key?: string) => { t.record({ op: 'setMode', id, ...(key ? { key } : {}) }); return s.setMode!(id, key) } } : {}),
     ...(s.models ? { models: () => s.models!() } : {}),
     ...(s.model ? { model: () => s.model!() } : {}),
     // 1.20 — a model switch WRITES to the child (set_config_option), so it is recorded like setMode.
-    ...(s.setModel ? { setModel: (id: string) => { t.record({ op: 'setModel', id }); return s.setModel!(id) } } : {}),
+    ...(s.setModel ? { setModel: (id: string, key?: string) => { t.record({ op: 'setModel', id, ...(key ? { key } : {}) }); return s.setModel!(id, key) } } : {}),
     // A read: the host acts on it through `cancel()` below, which is what gets recorded.
     ...(s.stalled ? { stalled: () => s.stalled!() } : {}),
     prompt(text) { const ok = s.prompt(text); if (ok) t.record({ op: 'prompt', text }); return ok },
-    answer(a) {
-      const ok = s.answer(a)
-      if (ok) t.record({ op: 'answer', ...(a.choice !== undefined ? { choice: a.choice } : {}), ...(a.text !== undefined ? { text: a.text } : {}), ...(a.requestId !== undefined ? { requestId: a.requestId } : {}) })
+    answer(a, key) {
+      const ok = s.answer(a, key)
+      if (ok) t.record({ op: 'answer', ...(key ? { key } : {}), ...(a.choice !== undefined ? { choice: a.choice } : {}), ...(a.text !== undefined ? { text: a.text } : {}), ...(a.requestId !== undefined ? { requestId: a.requestId } : {}) })
       return ok
     },
     cancel() { s.cancel(); t.record({ op: 'cancel' }) },
