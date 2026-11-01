@@ -11,6 +11,7 @@
  * the same defect `liveEmptyNotice` exists to prevent on the dashboard.
  */
 
+import { opencodeDbPath, readOpencodeActivity } from './opencode-store'
 import { anyGrant, scrubDeep, scrubTerminalLine } from '../vault/grants'
 import { canonicalOfTuiMode, type ConversationLinkReason, type HarnessId, type SessionMode } from '@agentistics/core'
 import { createLimiter } from '../utils'
@@ -1155,8 +1156,18 @@ export function createSessionsPoller(o: {
       const structured = new Set<string>()
       if (o.backend.isStructured) for (const r of reconciled) if (o.backend.isStructured(r.id)) structured.add(r.id)
 
+      // OPENCODE.RESTO — an EXTERNAL opencode (a TUI opened by hand) states its activity from opencode.db: exact, so
+      // its row reads working / waiting before anyone takes it over. Harnesses with no such store reading stay unknown.
+      const externalActivity = new Map<string, SessionActivity>()
+      for (const p of processes) {
+        if (p.harness !== 'opencode' || !p.sessionId || externalActivity.has(p.sessionId)) continue
+        const a = readOpencodeActivity(opencodeDbPath(), p.sessionId)
+        if (a) externalActivity.set(p.sessionId, a)
+      }
+
       const sessions = buildSessionViews({
         reconciled,
+        ...(externalActivity.size > 0 ? { externalActivity } : {}),
         ...(exactLinksOnDisk ? { exactLinksOnDisk } : {}),
         activity: confirmedActivity,
         background,

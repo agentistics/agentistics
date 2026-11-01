@@ -10,6 +10,36 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.178.0': {
+    features: [
+      {
+        pt: 'OpenCode: uma sessão iniciada pela linha de comando agora mostra o botão de modo e a lista de modelos.',
+        en: 'OpenCode: a session started from the command line now shows the mode button and the model list.',
+      },
+      {
+        pt: 'OpenCode: ao reabrir uma conversa, cada mensagem e os avisos de limite de uso continuam lá.',
+        en: 'OpenCode: when you reopen a chat, each message and the usage-limit notices are still there.',
+      },
+      {
+        pt: 'OpenCode: Ramificar mantém o modo e o modelo da conversa.',
+        en: 'OpenCode: Branch keeps the chat mode and model.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'OpenCode: o nome do modelo se atualiza na hora.',
+        en: 'OpenCode: the model name updates at once.',
+      },
+      {
+        pt: 'OpenCode: uma sessão aberta fora do agentistics mostra se está trabalhando.',
+        en: 'OpenCode: a session opened outside agentistics shows whether it is working.',
+      },
+      {
+        pt: 'OpenCode: uma resposta que só usou ferramentas agora mostra a atividade.',
+        en: 'OpenCode: a reply that only used tools now shows its activity.',
+      },
+    ],
+  },
   '2.177.0': {
     features: [
       {

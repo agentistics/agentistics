@@ -51,7 +51,7 @@ import { ChatBubble, type ChatTurn } from './ChatBubble'
 import { WorkingNote } from './WorkingNote'
 import { ToolActivity } from './ToolActivity'
 import { chatActivityStore } from '../../lib/appFlags'
-import { groupConsecutive, markTrailingRunning, type ChatItem } from '../../lib/toolActivity'
+import { groupConsecutive, markTrailingRunning, silentToolRuns, type ChatItem } from '../../lib/toolActivity'
 import { isImagePath, openComposerLightbox, previousPersonTurnMs } from '../../lib/attachmentPreview'
 import { promptCountLabel } from '../../lib/promptCount'
 import { splitImageAttachments } from '../../lib/attachmentPreview'
@@ -110,7 +110,7 @@ import { HARNESS_LABELS } from '../../lib/harness'
 import { HarnessInstallDialog, type HarnessInstallTarget } from '../HarnessInstallDialog'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { useViewportWidth } from '../../hooks/useViewportWidth'
-import { modelDisplay } from '../../lib/modelDisplay'
+import { bandModel } from '../../lib/modelDisplay'
 import { handleComposerDrop } from '../../lib/mentionInsert'
 import { REPO_DRAG_MIME, readRepoDrag } from '../../lib/repoDrag'
 import { useNavigate } from 'react-router-dom'
@@ -657,7 +657,8 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   }, [row?.harness, modelReason, pt, sourceControls?.model])
   const menuModels = sourceControls?.model ? sourceControls.model.options : (protocolModels ?? models)
   const menuFreeText = sourceControls?.model ? sourceControls.model.freeText : (protocolModels ? false : modelFreeText)
-  const currentModelId = sourceControls?.model?.current ?? (protocolModels ? row?.model : undefined) ?? session.model ?? ''
+  const statedModelId = sourceControls?.model?.current ?? (protocolModels ? row?.model : undefined)
+  const currentModelId = statedModelId ?? session.model ?? ''
   const currentModelLabel = menuModels.find(model => model.id === currentModelId)?.label ?? currentModelId
   /** M3 status band: the model button always names a model — the live control's, else the one the
    *  session was started on — and the effort when one is known. Never a bare "Modelo". */
@@ -666,7 +667,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   // pins to an older version) is only the fallback. Owner, 2026-10-30: the card said "Opus 5.5" while
   // the band said "Opus 5", and an adopted session showed a bare "Modelo".
   const startedOrSwitched = currentModelId || row?.model || ''
-  const statusModelText = modelDisplay(session.harness, metrics?.stats?.model ?? metrics?.meta?.model, startedOrSwitched)
+  const statusModelText = bandModel(session.harness, statedModelId, metrics?.stats?.model ?? metrics?.meta?.model, startedOrSwitched)
   const statusModelLabel = !statusModelText
     ? (pt ? 'Modelo' : 'Model')
     : statusModelText === startedOrSwitched ? modelLabel(session.harness, startedOrSwitched) : statusModelText
@@ -2252,6 +2253,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     () => (chatActivityOn ? markTrailingRunning(groupConsecutive(turns.slice(firstShown)), showWorking && !composing) : []),
     [chatActivityOn, turns, firstShown, showWorking, composing],
   )
+  // Activity line OFF: a reply that only used tools would draw nothing at all — it still gets its one line.
+  const silentRuns = useMemo(
+    () => (chatActivityOn ? new Map<number, never>() : silentToolRuns(turns.slice(firstShown), showWorking && !composing)),
+    [chatActivityOn, turns, firstShown, showWorking, composing],
+  )
   const liveActivity = chatActivityOn && activityItems[activityItems.length - 1]?.type === 'activity' && showWorking && !composing
   // Rendered per turn exactly as before; shared by both paths so the flag changes grouping only.
   const renderTurn = (t: ChatTurn, i: number) => (
@@ -2650,7 +2656,10 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
             ? activityItems.map(item => item.type === 'turn'
               ? renderTurn(item.turn, firstShown + item.index)
               : <ToolActivity key={item.group.key} group={item.group} lang={lang} variant="live" />)
-            : turns.slice(firstShown).map((t, j) => renderTurn(t, firstShown + j))}
+            : turns.slice(firstShown).map((t, j) => {
+              const silent = silentRuns.get(j)
+              return silent ? <ToolActivity key={silent.key} group={silent} lang={lang} variant="live" /> : renderTurn(t, firstShown + j)
+            })}
           {placedAttention.after.map((m, j) => <AttentionMarkLine key={`am-end-${j}`} mark={m} pt={pt} />)}
 
           {/* An echo IS an unread message by definition — it is retired the instant the transcript

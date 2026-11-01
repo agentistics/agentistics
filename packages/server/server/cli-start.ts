@@ -130,7 +130,7 @@ import { awaitReplacement, type RestartVerdict, type ServingObservation } from '
 import { resolveLang } from './cli-lang'
 import { scanProcesses, type HarnessProcess } from './live-sessions'
 import { resolveBackend } from './sessions'
-import { inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
+import { forkLaunch, inheritedIdentity, inheritedLaunch } from './sessions/reopen-inherit'
 import { recordChipMode } from './sessions/chip-mode-record'
 import { SessionNotice, sessionActionError } from './sessions/action-error'
 import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
@@ -4081,8 +4081,10 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       }
       // The fork is a NEW row beside the original: it files under the same task and carries the same
       // name with a suffix, and the original is left exactly as it was.
+      const launch = forkLaunch(row, row.harness, { mode: backend.modeOf?.(id)?.canonical, model: backend.modelsOf?.(id)?.current })
       const out = await this.spawnSession!({
         harness: row.harness, cwd: row.cwd, attach: false, origin: 'web', forkOf: row.conversationId,
+        ...launch,
         label: `${row.label ?? row.harness} (fork)`,
         ...(row.task ? { task: row.task } : {}),
         ...(callerVerified ? { callerVerified: true } : {}),

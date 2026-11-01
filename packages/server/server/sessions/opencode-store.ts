@@ -82,6 +82,28 @@ export function opencodeSessionExists(path: string, sessionId: string): boolean 
   return withDb(path, false, db => db.query('SELECT 1 FROM session WHERE id = ?').get(sessionId) !== null)
 }
 
+/**
+ * PURE. What an opencode session is doing, from its NEWEST message row as opencode wrote it: a person's message
+ * not yet answered, or an assistant message with no `time.completed` and no `error`, is `working`; anything else
+ * is `waiting`. The store says it — no screen, no guess — so an EXTERNAL opencode (a TUI opened by hand) can
+ * state its activity like a managed row (OPENCODE.RESTO gap 5). null: no message, or unreadable.
+ */
+export function opencodeActivityOf(newest: { data: string } | null | undefined): 'working' | 'waiting' | null {
+  if (!newest) return null
+  let d: { role?: string; time?: { completed?: number }; error?: unknown }
+  try { d = JSON.parse(newest.data) } catch { return null }
+  if (d.role === 'user') return 'working'
+  if (d.role !== 'assistant') return null
+  return d.time?.completed === undefined && !d.error ? 'working' : 'waiting'
+}
+
+/** IO. `opencodeActivityOf` for one session of the store at `path`. */
+export function readOpencodeActivity(path: string, sessionId: string): 'working' | 'waiting' | null {
+  return withDb(path, null as 'working' | 'waiting' | null, db => opencodeActivityOf(
+    db.query<{ data: string }, [string]>('SELECT data FROM message WHERE session_id = ? ORDER BY time_created DESC, id DESC LIMIT 1').get(sessionId),
+  ))
+}
+
 /** The whole conversation of one session, oldest first. `[]` when unreadable. */
 export function readOpencodeTurns(path: string, sessionId: string): ChatTurn[] {
   return withDb(path, [] as ChatTurn[], db => opencodeTurns(
