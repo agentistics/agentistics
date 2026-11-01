@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.181.0': {
+    features: [
+      {
+        pt: 'A base para corrigir ou cancelar uma mensagem já enviada está pronta e chega completa na próxima versão.',
+        en: 'The groundwork for correcting or cancelling a message already sent is in place and arrives complete in the next version.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Sessões iniciadas em outra conta do Claude não param mais na pergunta "confiar nesta pasta?".',
+        en: 'Workers started on another Claude account no longer stop at the "trust this folder?" question.',
+      },
+    ],
+  },
   '2.180.1': {
     features: [],
     fixes: [
