@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.177.0': {
+    features: [
+      {
+        pt: 'Uma sessão do OpenCode agora funciona em qualquer papel — líder, trabalhadora, revisão ou iniciada por outra sessão: recebe as instruções e ferramentas do agentistics, abre sessões, relata a entrega e passa a liderança sem perguntas.',
+        en: 'An OpenCode session now works in any role — leader, worker, review or started by another session: it gets the agentistics instructions and tools, opens sessions, reports its delivery and hands over leadership without questions.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'OpenCode: um arquivo de configuração com comentários não deixa mais a sessão sem ferramentas.',
+        en: 'OpenCode: a config file with comments no longer leaves the session without tools.',
+      },
+    ],
+  },
   '2.176.0': {
     features: [
       {

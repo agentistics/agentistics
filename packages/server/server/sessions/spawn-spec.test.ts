@@ -668,4 +668,18 @@ describe('opencode has a launcher (V-OPENCODE.2) — argv read from `opencode --
     expect(planSpawn({ harness: 'opencode', cwd: '/w', mode: 'no-questions' })).toMatchObject({ ok: true, plan: { modeNeedsProtocol: 'no-questions' } })
     expect(SPAWN_SPECS.opencode!.assignId).toBeUndefined()
   })
+  test('OPENCODE.PAPÉIS: the briefing is a context file named by OPENCODE_CONFIG_CONTENT "instructions", prompt or not; the prompt stays the person\'s', () => {
+    const context = { text: 'BRIEF', block: '<b>BRIEF</b>', dir: '/data/session-context/s1' }
+    for (const prompt of ['go', undefined]) {
+      const r = planSpawn({ harness: 'opencode', cwd: '/w', ...(prompt ? { prompt } : {}), context })
+      if (!r.ok) throw new Error('plan')
+      expect(r.plan.contextVia).toBe('files')
+      expect(r.plan.contextFile).toEqual({ dir: '/data/session-context/s1', name: 'AGENTS.md', text: 'BRIEF' })
+      expect(JSON.parse(r.plan.env!.OPENCODE_CONFIG_CONTENT!)).toEqual({ instructions: ['/data/session-context/s1/AGENTS.md'] })
+      expect(r.plan.argv.join(' ')).not.toContain('BRIEF')
+      if (prompt) expect(r.plan.argv.slice(-2)).toEqual(['--prompt', 'go'])
+    }
+    // a reopen carries no new briefing (the conversation already has it)
+    expect(planSpawn({ harness: 'opencode', cwd: '/w', resumeId: ID, context })).toEqual({ ok: true, plan: { argv: ['opencode', '--session', ID], conversationId: ID } })
+  })
 })

@@ -364,6 +364,9 @@ describe('--handoff (leader hand-off from the CLI)', () => {
   it('a value flag followed by --handoff is a missing value', () => {
     expect(parseSessionArgs(['claude', '--name', '--handoff'])).toMatchObject({ kind: 'error' })
   })
+  it('--handoff implies --bg: a no-questions successor needs the protocol, and an agent shell cannot attach (OPENCODE.PAPÉIS)', () => {
+    expect(parseSessionArgs(['opencode', '--handoff', '--mode', 'no-questions'])).toMatchObject({ kind: 'start', handoff: true, background: true, mode: 'no-questions' })
+  })
   it('without the switch there is no handoff key', () => {
     expect(parseSessionArgs(['claude'])).not.toHaveProperty('handoff')
   })

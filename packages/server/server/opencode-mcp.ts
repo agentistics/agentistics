@@ -9,8 +9,14 @@
  * `{"$schema":"https://opencode.ai/config.json","mcp":{"agentistics":{"type":"local",
  *   "command":[cmd,...args],"environment":{"AGENTISTICS_API":"…"}}}}` — note `command` is ONE ARRAY and the
  * env key is `environment`, unlike kimi's `command`+`args`+`env`. `opencode mcp list` read it back.
- * opencode merges `opencode.json` and `opencode.jsonc`; we edit whichever exists (`.json` first) and create
- * `.json` otherwise. A file with comments does not parse as JSON and is REFUSED, never rewritten.
+ * opencode merges `opencode.json` and `opencode.jsonc`, and BOTH may carry comments and trailing commas (JSONC).
+ *
+ * OPENCODE.PAPÉIS (measured 2026-10-31, opencode 1.19.5, `opencode debug config` in a scratch HOME): the merge is
+ * per key and `.jsonc` WINS over `.json`. A commented file is never rewritten (a rewrite would drop the person's
+ * comments), so `planOpencodeMcpFiles` reads both as JSONC and puts our entry where it both TAKES EFFECT and can be
+ * written losslessly: the file that already holds it, else a plain `.json`, else the sibling `.jsonc` (which wins).
+ * A commented file that already carries our exact entry is fine as it is. Before this, one comment in the person's
+ * `opencode.json` (a custom provider, typically) left every opencode session without the agentistics tools.
  */
 import { existsSync } from 'node:fs'
 import { readFile, rename, writeFile } from 'node:fs/promises'
@@ -26,13 +32,52 @@ export type OpencodeMcpPlan =
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
-function parseDoc(existing: string | null): { doc: Record<string, unknown> } | { refuse: string } {
-  if (existing === null || existing.trim() === '') return { doc: {} }
-  let parsed: unknown
-  try { parsed = JSON.parse(existing) } catch { return { refuse: 'the opencode config is not plain JSON (comments or a syntax error)' } }
-  if (!isRecord(parsed)) return { refuse: 'the opencode config is not a JSON object' }
-  return { doc: parsed }
+/** Copies a JSON string literal starting at `i`; returns its end (exclusive). */
+const stringEnd = (text: string, i: number): number => {
+  let j = i + 1
+  while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1
+  return Math.min(j + 1, text.length)
 }
+
+/** PURE. JSONC -> JSON text: comments first, then trailing commas (so a comment after a comma can't hide it); strings left intact. */
+export function stripJsonc(text: string): string {
+  let noComments = ''
+  for (let i = 0; i < text.length;) {
+    const c = text[i]!
+    if (c === '"') { const e = stringEnd(text, i); noComments += text.slice(i, e); i = e; continue }
+    if (c === '/' && text[i + 1] === '/') { while (i < text.length && text[i] !== '\n') i++; continue }
+    if (c === '/' && text[i + 1] === '*') { const end = text.indexOf('*/', i + 2); i = end < 0 ? text.length : end + 2; noComments += ' '; continue }
+    noComments += c; i++
+  }
+  let out = ''
+  for (let i = 0; i < noComments.length;) {
+    const c = noComments[i]!
+    if (c === '"') { const e = stringEnd(noComments, i); out += noComments.slice(i, e); i = e; continue }
+    if (c === ',') {
+      let j = i + 1
+      while (j < noComments.length && /\s/.test(noComments[j]!)) j++
+      if (noComments[j] === '}' || noComments[j] === ']') { i++; continue }
+    }
+    out += c; i++
+  }
+  return out
+}
+
+type Parsed = { doc: Record<string, unknown>; plain: boolean } | { refuse: string }
+
+function parseDoc(existing: string | null): Parsed {
+  if (existing === null || existing.trim() === '') return { doc: {}, plain: true }
+  let parsed: unknown
+  let plain = true
+  try { parsed = JSON.parse(existing) } catch {
+    plain = false
+    try { parsed = JSON.parse(stripJsonc(existing)) } catch { return { refuse: 'the opencode config does not parse (a syntax error)' } }
+  }
+  if (!isRecord(parsed)) return { refuse: 'the opencode config is not a JSON object' }
+  return { doc: parsed, plain }
+}
+
+const COMMENTED = 'the opencode config has comments, and rewriting it would drop them'
 
 /** PURE. What to do with the current content of the opencode config (`null` = no file yet). */
 export function planOpencodeMcp(existing: string | null, want: McpLaunch, apiUrl: string): OpencodeMcpPlan {
@@ -48,6 +93,7 @@ export function planOpencodeMcp(existing: string | null, want: McpLaunch, apiUrl
   const curCommand: unknown[] | null = Array.isArray(cur['command']) ? cur['command'] : null
   if (cur['type'] === 'local' && curCommand !== null && curCommand.length === command.length
       && command.every((c, i) => curCommand[i] === c) && curEnv['AGENTISTICS_API'] === apiUrl) return { action: 'noop' }
+  if (!r.plain) return { action: 'refuse', reason: COMMENTED }
   const entry = { ...cur, type: 'local', command, environment: { ...curEnv, AGENTISTICS_API: apiUrl } }
   const next = { ...(existing === null || existing.trim() === '' ? { $schema: 'https://opencode.ai/config.json' } : {}), ...doc, mcp: { ...(servers ?? {}), [CANONICAL_MCP_NAME]: entry } }
   return { action: 'write', text: `${JSON.stringify(next, null, 2)}\n` }
@@ -61,10 +107,41 @@ export function planOpencodeMcpRemoval(existing: string | null): OpencodeMcpPlan
   const servers = r.doc['mcp']
   if (!isRecord(servers)) return { action: 'noop' }
   if (!(CANONICAL_MCP_NAME in servers)) return { action: 'noop' }
+  if (!r.plain) return { action: 'refuse', reason: COMMENTED }
   const { [CANONICAL_MCP_NAME]: _gone, ...rest } = servers
   const { mcp: _m, ...others } = r.doc
   const next = Object.keys(rest).length > 0 ? { ...others, mcp: rest } : others
   return { action: 'write', text: `${JSON.stringify(next, null, 2)}\n` }
+}
+
+export type OpencodeConfigName = 'opencode.json' | 'opencode.jsonc'
+
+/**
+ * PURE. Which of the two user-scope files gets our entry, given their contents (`null` = absent), and what to do
+ * to it. `.jsonc` overrides `.json` key by key, so an entry in `.jsonc` is the one that counts.
+ */
+export function planOpencodeMcpFiles(
+  files: { json: string | null; jsonc: string | null }, want: McpLaunch, apiUrl: string,
+): { file: OpencodeConfigName; plan: OpencodeMcpPlan } {
+  const json = { name: 'opencode.json' as const, text: files.json, parsed: parseDoc(files.json) }
+  const jsonc = { name: 'opencode.jsonc' as const, text: files.jsonc, parsed: parseDoc(files.jsonc) }
+  const holds = (p: Parsed) => 'doc' in p && isRecord(p.doc['mcp']) && CANONICAL_MCP_NAME in (p.doc['mcp'] as Record<string, unknown>)
+  const plan = (f: typeof json | typeof jsonc) => ({ file: f.name, plan: planOpencodeMcp(f.text, want, apiUrl) })
+  // The winning file already names us: only there can the entry be fixed.
+  if (files.jsonc !== null && holds(jsonc.parsed)) return plan(jsonc)
+  if (files.json !== null) {
+    const p = plan(json)
+    if (p.plan.action !== 'refuse' || !('doc' in json.parsed)) return p
+    // A commented `.json`: write the sibling `.jsonc` instead (it wins), unless it is commented too.
+    if (files.jsonc === null || ('doc' in jsonc.parsed && jsonc.parsed.plain)) return plan(jsonc)
+    return p
+  }
+  if (files.jsonc !== null) {
+    const p = plan(jsonc)
+    // A commented `.jsonc` without our entry: a new `.json` beside it takes effect for that key.
+    return p.plan.action === 'refuse' && 'doc' in jsonc.parsed ? plan(json) : p
+  }
+  return plan(json)
 }
 
 /** The directory opencode reads its user-scope config from (`XDG_CONFIG_HOME` first, as opencode does). */
@@ -101,8 +178,16 @@ export async function removeOpencodeMcp(file: string): Promise<'written' | 'unch
   return apply(file, planOpencodeMcpRemoval(await readFile(file, 'utf-8')))
 }
 
+/** Both user-scope files, read as they are, and the one `planOpencodeMcpFiles` picks written. */
+export async function writeOpencodeMcpDir(dir: string, port: number): Promise<'written' | 'unchanged' | 'refused' | 'no-opencode'> {
+  if (!existsSync(dir)) return 'no-opencode'
+  const read = async (n: OpencodeConfigName) => existsSync(join(dir, n)) ? await readFile(join(dir, n), 'utf-8') : null
+  const pick = planOpencodeMcpFiles({ json: await read('opencode.json'), jsonc: await read('opencode.jsonc') }, agentisticsMcpLaunch(), `http://localhost:${port}`)
+  return apply(join(dir, pick.file), pick.plan)
+}
+
 /** Best-effort, idempotent; a machine without opencode is left untouched. */
 export async function ensureOpencodeMcp(port: number): Promise<void> {
   if (!mayRegisterHarnessMcp(port)) return
-  await writeOpencodeMcp(opencodeMcpPath(), port)
+  await writeOpencodeMcpDir(opencodeConfigDir(), port)
 }

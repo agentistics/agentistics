@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { planOpencodeMcp, planOpencodeMcpRemoval, writeOpencodeMcp, removeOpencodeMcp, ensureOpencodeMcp, opencodeMcpPath } from './opencode-mcp'
+import { planOpencodeMcp, planOpencodeMcpFiles, planOpencodeMcpRemoval, stripJsonc, writeOpencodeMcp, writeOpencodeMcpDir, removeOpencodeMcp, ensureOpencodeMcp, opencodeMcpPath } from './opencode-mcp'
 
 const want = { command: '/usr/bin/agentop', args: ['mcp'] }
 const API = 'http://localhost:47291'
@@ -44,7 +44,9 @@ describe('planOpencodeMcpRemoval (pure)', () => {
   test('nothing of ours: noop; unparseable: refuse', () => {
     expect(planOpencodeMcpRemoval(null)).toEqual({ action: 'noop' })
     expect(planOpencodeMcpRemoval('{"a":1}')).toEqual({ action: 'noop' })
-    expect(planOpencodeMcpRemoval('{ // c\n}').action).toBe('refuse')
+    expect(planOpencodeMcpRemoval('{ broken').action).toBe('refuse')
+    expect(planOpencodeMcpRemoval('{ // c\n}')).toEqual({ action: 'noop' })
+    expect(planOpencodeMcpRemoval(`{ // c\n"mcp": ${JSON.stringify({ agentistics: entry })} }`).action).toBe('refuse')
   })
 })
 
@@ -82,5 +84,60 @@ describe('IO in a throwaway directory', () => {
       await ensureOpencodeMcp(47291)
       expect(readFileSync(join(root, 'opencode', 'opencode.json'), 'utf8')).toBe('{}')
     } finally { if (prev === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = prev }
+  })
+})
+
+describe('OPENCODE.PAPÉIS — a commented opencode config still gets the agentistics MCP', () => {
+  const commented = '{\n  // my provider\n  "$schema": "https://opencode.ai/config.json", /* block */\n  "provider": { "x": { "options": { "baseURL": "http://a//b" } }, },\n}\n'
+  test('stripJsonc drops a trailing comma even when a comment follows it', () => {
+    expect(JSON.parse(stripJsonc('{"a": 1, // note\n}'))).toEqual({ a: 1 })
+    expect(JSON.parse(stripJsonc('{"a": 1 /* c */,\n}'))).toEqual({ a: 1 })
+    expect(JSON.parse(stripJsonc('{"a": [1, 2,\n // last\n],\n // end\n}'))).toEqual({ a: [1, 2] })
+  })
+  test('stripJsonc keeps // in a URL string and a comma inside a string', () => {
+    expect(JSON.parse(stripJsonc('{"u": "http://x/y", // c\n "s": "a,}", }'))).toEqual({ u: 'http://x/y', s: 'a,}' })
+  })
+  test('stripJsonc removes comments and trailing commas, never inside a string', () => {
+    expect(JSON.parse(stripJsonc(commented))).toEqual({ $schema: 'https://opencode.ai/config.json', provider: { x: { options: { baseURL: 'http://a//b' } } } })
+    expect(JSON.parse(stripJsonc('{"a":"x\\" // y", "b": [1,2,],}'))).toEqual({ a: 'x" // y', b: [1, 2] })
+  })
+  test('a commented file that already holds our exact entry is left alone (noop, not a refusal)', () => {
+    const ok = `{ // c\n"mcp": ${JSON.stringify({ agentistics: entry })} }`
+    expect(planOpencodeMcp(ok, want, API)).toEqual({ action: 'noop' })
+  })
+  test('commented .json: our entry goes to the sibling .jsonc (which wins), the .json is never rewritten', () => {
+    const p = planOpencodeMcpFiles({ json: commented, jsonc: null }, want, API)
+    expect(p.file).toBe('opencode.jsonc')
+    if (p.plan.action !== 'write') throw new Error('write')
+    expect(JSON.parse(p.plan.text).mcp.agentistics).toEqual(entry)
+    const p2 = planOpencodeMcpFiles({ json: commented, jsonc: '{"$schema":"https://opencode.ai/config.json"}' }, want, API)
+    expect(p2.file).toBe('opencode.jsonc')
+    expect(p2.plan.action).toBe('write')
+  })
+  test('a plain .json is edited as before; a .jsonc holding our entry is where it is fixed (it overrides .json)', () => {
+    expect(planOpencodeMcpFiles({ json: '{}', jsonc: null }, want, API).file).toBe('opencode.json')
+    expect(planOpencodeMcpFiles({ json: '{}', jsonc: '{}' }, want, API).file).toBe('opencode.json')
+    const stale = JSON.stringify({ mcp: { agentistics: { ...entry, command: ['old'] } } })
+    const p = planOpencodeMcpFiles({ json: '{}', jsonc: stale }, want, API)
+    expect(p.file).toBe('opencode.jsonc')
+    expect(p.plan.action).toBe('write')
+    expect(planOpencodeMcpFiles({ json: null, jsonc: null }, want, API).file).toBe('opencode.json')
+  })
+  test('commented .jsonc without our entry: a new .json carries it; commented with a stale entry: refused', () => {
+    const p = planOpencodeMcpFiles({ json: null, jsonc: commented }, want, API)
+    expect(p.file).toBe('opencode.json')
+    expect(p.plan.action).toBe('write')
+    const staleCommented = `{ // c\n"mcp": ${JSON.stringify({ agentistics: { ...entry, command: ['old'] } })} }`
+    expect(planOpencodeMcpFiles({ json: '{}', jsonc: staleCommented }, want, API).plan.action).toBe('refuse')
+    expect(planOpencodeMcpFiles({ json: commented, jsonc: commented }, want, API).plan.action).toBe('refuse')
+  })
+  test('IO: writes the sibling and leaves the commented file byte for byte', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'opencode-mcp-jsonc-'))
+    writeFileSync(join(dir, 'opencode.json'), commented)
+    expect(await writeOpencodeMcpDir(dir, 47291)).toBe('written')
+    expect(readFileSync(join(dir, 'opencode.json'), 'utf8')).toBe(commented)
+    expect(JSON.parse(readFileSync(join(dir, 'opencode.jsonc'), 'utf8')).mcp.agentistics.environment.AGENTISTICS_API).toBe(API)
+    expect(await writeOpencodeMcpDir(dir, 47291)).toBe('unchanged')
+    expect(await writeOpencodeMcpDir(join(dir, 'absent'), 47291)).toBe('no-opencode')
   })
 })
