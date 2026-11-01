@@ -606,4 +606,16 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
    * reference in a command stays literal and fails visibly) — it never resolves one itself.
    */
   vaultRefs?: EngineVaultRefs
+  /**
+   * 1.22 (V-CONTRATO, optional) — the roots an opaque `ChatHistoryRef.accountRef` authorizes: the isolation
+   * environment that account passes to its own child (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, …). `null` for an
+   * account the host does not know. Absent on an older host: every `accountRef` is then `unknown-account` —
+   * an engine NEVER reads a named account's history from the default roots.
+   */
+  chatAccounts?: EngineChatAccounts
+}
+
+/** 1.22 — see `EngineHostServices.chatAccounts`. */
+export interface EngineChatAccounts {
+  envOf(accountRef: string): Readonly<Record<string, string>> | null
 }
