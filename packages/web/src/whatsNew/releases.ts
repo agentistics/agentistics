@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.180.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Ligação por voz: o eco da própria voz e barulhos curtos não são mais tomados como interrupção; dizer "para", "não" ou "espera" continua pausando na hora.',
+        en: 'Voice call: the voice\'s own echo and short noises are no longer taken as an interruption; saying "stop", "no" or "wait" still pauses at once.',
+      },
+    ],
+  },
   '2.180.0': {
     features: [],
     fixes: [
