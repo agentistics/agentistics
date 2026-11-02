@@ -440,3 +440,9 @@ describe('OPENCODE.PAPÉIS — the session verb is named for every harness', () 
     expect(contextText({ sessionId: 'c1', cwd: '/w', role: 'worker' })).not.toContain('never with `agentop code`')
   })
 })
+
+// N8: flow tools are hidden from ListTools without the flag, so the model-visible context must never name them.
+test('the context text does not advertise the flow tools', () => {
+  const text = contextText({ sessionId: 's', cwd: '/w', role: 'worker' } as Parameters<typeof contextText>[0])
+  expect(text).not.toMatch(/agentistics_flow_(run|status)/)
+})
