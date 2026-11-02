@@ -109,7 +109,7 @@ describe('machineSecrets (engine-api 1.23)', () => {
     const ms = createMachineSecrets({ dir, protectors: () => [fakeProtector('dpapi', { probe: false })], machineId: () => 'a'.repeat(32) })
     const s = await ms.seal('engine/voice-elevenlabs-key', 'elevenlabs', pt()); if (!s.ok) throw new Error('seal')
     expect(ms.status()).toMatchObject({ available: true, strength: 'file', protector: 'machine id (file)' })
-    expect(ms.status().sentence).toContain('weaker')
+    expect(ms.status().sentence).toMatch(/WEAKER mode/)
     expect((await stat(join(dir, 'machine.key'))).mode & 0o777).toBe(0o600)
     expect((await stat(dir)).mode & 0o777).toBe(0o700)
     const onDisk = Buffer.concat(await Promise.all((await readdir(dir)).map(f => readFile(join(dir, f)))))
@@ -121,6 +121,36 @@ describe('machineSecrets (engine-api 1.23)', () => {
     // copied to another machine (another machine id): the file mode does not open
     const other = createMachineSecrets({ dir, protectors: () => [], machineId: () => 'b'.repeat(32) })
     expect(await other.open('engine/voice-elevenlabs-key', 'elevenlabs', s.sealed)).toMatchObject({ ok: false, code: 'protector-lost' })
+  })
+
+  test('RACE: two processes creating the first machine key at once end up with ONE key, and each opens what the other sealed', async () => {
+    const dir = await fresh(), p = fakeProtector()
+    const slow = p.wrap
+    p.wrap = async (dek, kid) => { await new Promise(r => setTimeout(r, 40)); return slow(dek, kid) }
+    const a = createMachineSecrets({ dir, protectors: () => [p], machineId: () => null })
+    const b = createMachineSecrets({ dir, protectors: () => [p], machineId: () => null })
+    const [sa, sb] = await Promise.all([a.ready(), b.ready()])
+    expect(sa.available && sb.available).toBe(true)
+    expect(p.store.size).toBe(1) // one wrap happened, not two
+    const sealed = await a.seal('engine/provider-key', 'x', pt()); if (!sealed.ok) throw new Error('seal')
+    const o = await b.open('engine/provider-key', 'x', sealed.sealed)
+    expect(o.ok && new TextDecoder().decode(o.plaintext)).toBe(KEY)
+    expect((await readdir(dir)).filter(n => n.startsWith('.create')).length).toBe(0) // the lock is released
+  })
+
+  test('the protector (DPAPI/powershell) is hit ONCE per process: the wrapped machine key is cached', async () => {
+    const dir = await fresh(), p = fakeProtector()
+    const first = createMachineSecrets({ dir, protectors: () => [p], machineId: () => null })
+    const s = await first.seal('engine/provider-key', 'x', pt()); if (!s.ok) throw new Error('seal')
+    first.dispose()
+    let unwraps = 0, probes = 0
+    const un = p.unwrap, pr = p.probe
+    p.unwrap = async (r, k) => { unwraps++; return un(r, k) }
+    p.probe = async () => { probes++; return pr() }
+    const again = createMachineSecrets({ dir, protectors: () => [p], machineId: () => null })
+    for (let i = 0; i < 5; i++) { const o = await again.open('engine/provider-key', 'x', s.sealed); if (o.ok) o.plaintext.fill(0) }
+    await again.seal('engine/provider-key', 'y', pt()); await again.ready()
+    expect(unwraps).toBe(1); expect(probes).toBe(0)
   })
 
   test('no protector AND no machine id: refuses (uninitialized) and writes NOTHING, never plaintext', async () => {

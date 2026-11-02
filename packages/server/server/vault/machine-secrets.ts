@@ -19,7 +19,7 @@
  * out per call as fresh buffers the caller zeroes. Nothing here logs, and no refusal sentence is built from input.
  */
 import { createHash, hkdfSync, randomBytes } from 'node:crypto'
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rename, rmdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { EngineMachineSecrets, EngineMachineSecretsStatus, OpenResult, SealResult, VaultRefusal } from '@agentistics/engine-api'
 import {
@@ -53,7 +53,7 @@ export interface MachineSecretsOptions {
 
 const T = {
   none: { en: 'No keystore on this machine answered and there is no machine id, so keys cannot be stored encrypted here.', pt: 'Nenhum chaveiro desta máquina respondeu e não há identificador da máquina, então as chaves não podem ser guardadas cifradas aqui.' },
-  weak: { en: 'No keystore answered: keys are encrypted with a key derived from this machine’s id (weaker: another process of this user could open them).', pt: 'Nenhum chaveiro respondeu: as chaves são cifradas com uma chave derivada do identificador desta máquina (mais fraco: outro processo deste usuário poderia abri-las).' },
+  weak: { en: 'This is the WEAKER mode: no keystore on this machine answered, so keys are encrypted with a key derived from the machine id. Another process of this user on this machine could open them.', pt: 'Este é o modo MAIS FRACO: nenhum chaveiro desta máquina respondeu, então as chaves são cifradas com uma chave derivada do identificador da máquina. Outro processo deste usuário nesta máquina poderia abri-las.' },
   lost: { en: 'The machine key can no longer be opened by its protector. Store the key again.', pt: 'A chave da máquina não abre mais pelo protetor dela. Guarde a chave de novo.' },
   copied: { en: 'This sealed file belongs to another machine or vault.', pt: 'Este arquivo selado pertence a outra máquina ou cofre.' },
   tampered: { en: 'This sealed file is damaged or was changed.', pt: 'Este arquivo selado está danificado ou foi alterado.' },
@@ -117,7 +117,32 @@ export function createMachineSecrets(o: MachineSecretsOptions): EngineMachineSec
     return true
   }
 
+  /** Create the machine key under an exclusive lock (`mkdir` is atomic): of two processes starting at once ONE creates it, the other waits and opens the winner's. */
   async function createNew(): Promise<boolean> {
+    await mkdir(o.dir, { recursive: true, mode: 0o700 })
+    const lock = join(o.dir, '.create.lock')
+    for (let i = 0; ; i++) {
+      try { await mkdir(lock); break } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+        const raw = await readOrNull(metaPath)
+        if (raw) return reopen(raw)
+        const age = await stat(lock).then(st => Date.now() - st.mtimeMs, () => 0)
+        if (age > 30_000 || i > 300) await rmdir(lock).catch(() => {}) // a crashed creator's lock
+        else await new Promise(r => setTimeout(r, 50))
+      }
+    }
+    try {
+      const raw = await readOrNull(metaPath) // the winner may have finished between our check and our lock
+      if (raw) return reopen(raw)
+      return await createLocked()
+    } finally { await rmdir(lock).catch(() => {}) }
+  }
+  async function reopen(raw: Uint8Array): Promise<boolean> {
+    try { const j = JSON.parse(new TextDecoder().decode(raw)) as MachineMeta; if (j?.v === 1 && typeof j.kid === 'string') return await openExisting(j) } catch { /* unreadable */ }
+    down('protector-lost', say('lost')); return false
+  }
+
+  async function createLocked(): Promise<boolean> {
     const { dek, kid } = newDataKey()
     for (const p of o.protectors()) {
       const probe = await p.probe().catch(() => ({ ok: false as const, reason: '' }))
@@ -164,7 +189,7 @@ export function createMachineSecrets(o: MachineSecretsOptions): EngineMachineSec
 
   return {
     status: () => ({ ...st }),
-    ready: () => settle(false),
+    ready: () => settle(true),
     async seal(purpose, name, plaintext): Promise<SealResult> {
       if (!isEnginePurpose(purpose) || typeof name !== 'string' || name === '') return refuse('purpose', say('purpose'))
       await settle(true)
