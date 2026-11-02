@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
 import { readdir, readlink, realpath, stat } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import { promisify } from 'node:util'
@@ -117,6 +118,66 @@ export function defaultWorktreeTargetDeps(): WorktreeTargetDeps {
   }
 }
 
+/** `alvo-trabalho` — where a session's work really is, read only from facts the host already holds. */
+export interface WorkTargetDeps {
+  /** The registry row: the cwd the session was STARTED in and its conversation id. */
+  session(sessionId: string): Promise<{ cwd: string; conversationId?: string } | null>
+  /** The cwd the session ENDED UP in (`SessionMeta.current_cwd`, the consolidate store), when it records one. */
+  storedCwd(sessionId: string, conversationId?: string): Promise<string | undefined>
+  git(cwd: string, args: string[]): Promise<string>
+}
+
+/**
+ * FECHAR.CWD-COMPARTILHADO: a worker started in a BARE clone (or a shared checkout) does its work in a linked worktree it
+ * made itself, so the registry cwd says nothing about whether ITS work is saved. The one place that names where it went is
+ * the store's `current_cwd`. It is accepted only if it is a LINKED worktree (not bare, not a main checkout) of the SAME
+ * repository the session started in and git lists it; anything else is "not identified" — never a guess.
+ *  - `{ ok: true, path }`          the session's own worktree (differs from its start cwd).
+ *  - `{ ok: true, bare: boolean }` nothing identified; `bare` says the start cwd has no work tree at all.
+ */
+export async function workTarget(sessionId: string, deps: WorkTargetDeps): Promise<Record<string, unknown> | Refusal> {
+  const row = await deps.session(sessionId).catch(() => null)
+  if (!row) return refuse('session was not found', ['existing session'])
+  const text = async (dir: string, args: string[]) => (await deps.git(dir, args)).trim()
+  const start = await real(row.cwd)
+  let bare = false
+  let startCommon: string | null = null
+  try {
+    bare = (await text(start, ['rev-parse', '--is-bare-repository'])) === 'true'
+    startCommon = await real(await text(start, ['rev-parse', '--path-format=absolute', '--git-common-dir']))
+  } catch { /* the start folder is gone or not a repository: nothing to compare against */ }
+  const none = { ok: true, bare, cwd: start }
+  const where = await deps.storedCwd(sessionId, row.conversationId).catch(() => undefined)
+  if (!where || !startCommon) return none
+  const path = await real(where)
+  if (path === start || !(await stat(path).then(s => s.isDirectory(), () => false))) return none
+  try {
+    if ((await text(path, ['rev-parse', '--is-bare-repository'])) === 'true') return none
+    const gitDir = await real(await text(path, ['rev-parse', '--path-format=absolute', '--absolute-git-dir']))
+    const common = await real(await text(path, ['rev-parse', '--path-format=absolute', '--git-common-dir']))
+    if (gitDir === common || common !== startCommon) return none
+    const top = await real(await text(path, ['rev-parse', '--show-toplevel']))
+    const listed = parseWorktreeList(await deps.git(start, ['worktree', 'list', '--porcelain']))
+    if (!(await Promise.all(listed.map(e => real(e.path)))).includes(top)) return none
+    return { ok: true, bare, path: top, cwd: start }
+  } catch { return none }
+}
+
+export function defaultWorkTargetDeps(): WorkTargetDeps {
+  return {
+    session: async id => {
+      const row = (await (await import('../sessions/registry')).readRegistry()).find(r => r.id === id)
+      return row ? { cwd: row.cwd, ...(row.conversationId ? { conversationId: row.conversationId } : {}) } : null
+    },
+    storedCwd: async (id, conversationId) => {
+      const map = await (await import('../consolidate')).loadConsolidated()
+      const meta = (conversationId ? map.get(conversationId) : undefined) ?? map.get(id)
+      return meta?.current_cwd || undefined
+    },
+    git: async (cwd, args) => (await exec('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, ...args], { timeout: 15_000, env: gitEnv() })).stdout,
+  }
+}
+
 const REMOVE_KEYS = new Set(['sessionId', 'path', 'head', 'snapshotId'])
 
 /** The two worktree ops: read the target (I11), and remove it only after recomputing everything (I9). */
@@ -155,6 +216,51 @@ export function worktreeHostOps(deps: WorktreeTargetDeps = defaultWorktreeTarget
       return { ok: true, removed: true, path: t.path, branch: t.branch, head: t.head, snapshotId }
     },
   }
+}
+
+/** F3 DOCKER.DETECTAR — what the read-only probe needs, injected so it is tested with a fake `docker`. */
+export interface DockerProbeDeps {
+  /** Run `docker <args>`; `null` when the binary is missing, otherwise its exit code and stdout. */
+  docker(args: string[]): Promise<{ code: number; stdout: string } | null>
+  isWsl(): boolean
+  /** True where Docker Desktop's WSL integration mount exists. */
+  desktopMount(): boolean
+}
+export type DockerKind = 'wsl2-desktop' | 'desktop' | 'native' | 'none'
+export interface DockerState { present: boolean; running: boolean; version: string | null; kind: DockerKind }
+
+export function defaultDockerProbeDeps(): DockerProbeDeps {
+  return {
+    docker: async args => {
+      try { return { code: 0, stdout: (await exec('docker', args, { timeout: 8_000, windowsHide: true })).stdout } }
+      catch (error) {
+        const e = error as NodeJS.ErrnoException & { code?: string | number; stdout?: string }
+        return e.code === 'ENOENT' ? null : { code: typeof e.code === 'number' ? e.code : 1, stdout: typeof e.stdout === 'string' ? e.stdout : '' }
+      }
+    },
+    isWsl: () => process.platform === 'linux' && (Boolean(process.env.WSL_DISTRO_NAME) || /microsoft/i.test(readFileSync('/proc/version', 'utf8'))),
+    desktopMount: () => existsSync('/mnt/wsl/docker-desktop'),
+  }
+}
+
+/** Read-only: asks `docker` about itself and never installs, starts or stops anything. */
+export async function detectDocker(deps: DockerProbeDeps = defaultDockerProbeDeps()): Promise<DockerState> {
+  const client = await deps.docker(['version', '--format', '{{.Client.Version}}'])
+  // A missing binary is the only "absent": an installed client with no daemon still answers with its own version.
+  if (!client) return { present: false, running: false, version: null, kind: 'none' }
+  const clientVersion = client.stdout.trim()
+  const server = await deps.docker(['version', '--format', '{{.Server.Version}}'])
+  const serverVersion = server && server.code === 0 ? server.stdout.trim() : ''
+  const running = serverVersion.length > 0
+  const os = running ? (await deps.docker(['info', '--format', '{{.OperatingSystem}}']))?.stdout.trim() ?? '' : ''
+  const desktop = /docker desktop/i.test(os) || (!running && deps.desktopMount())
+  const kind: DockerKind = desktop ? (deps.isWsl() ? 'wsl2-desktop' : 'desktop') : 'native'
+  return { present: true, running, version: serverVersion || clientVersion || null, kind }
+}
+
+/** The read-only `docker-detectar` host op. */
+export function dockerHostOps(deps?: DockerProbeDeps) {
+  return { 'docker-detectar': async () => ({ ok: true, ...(await detectDocker(deps)) }) }
 }
 
 const streaks = new Map<string, { at: number; count: number }>()
@@ -310,7 +416,7 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps())
 }
 
 /** The host operation registry: the v1 read-only gates plus the trigger layer's two host ops. */
-export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: WorktreeTargetDeps) {
+export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: WorktreeTargetDeps, dockerDeps?: DockerProbeDeps, workDeps: WorkTargetDeps = defaultWorkTargetDeps()) {
   return {
     // DSL.TIPO-SESSAO op 1, called by the engine's `portao-de-spawn` flow — the same decision the host applies without it.
     'sessao-com-papel': sessaoComPapelHostOp(),
@@ -318,6 +424,11 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
     'capacidade-de-workers': async (value: unknown) => workerCapacity(defaultBudgets, () => sessionAccount(sessionOf(value) ?? undefined)),
     ...triggerHostOps(triggerDeps),
     ...worktreeHostOps(worktreeDeps),
+    ...dockerHostOps(dockerDeps),
+    'alvo-trabalho': async (value: unknown) => {
+      const id = sessionOf(value)
+      return id ? workTarget(id, workDeps) : refuse('session id is required', ['sessionId'])
+    },
     'sessao-parada': async (value: unknown) => {
       const id = sessionOf(value)
       if (!id) return refuse('session id is required', ['sessionId'])
