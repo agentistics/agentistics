@@ -333,3 +333,53 @@ test('docker-detectar: the real probe never throws on this machine', async () =>
   expect(typeof r.present).toBe('boolean')
   expect(['wsl2-desktop', 'desktop', 'native', 'none']).toContain(r.kind)
 })
+
+// ── FECHAR.CWD-COMPARTILHADO (host): alvo-trabalho ────────────────────────────────────────────────────────────────
+import { workTarget, type WorkTargetDeps } from './host-ops'
+
+const workFixture = () => {
+  const f = wtFixture()
+  const bareDir = realpathSync(mkdtempSync(join(tmpdir(), 'wt-bare-'))); roots.push(bareDir)
+  f.g(bareDir, 'clone', '--bare', f.main, bareDir + '/b.git')
+  const bare = join(bareDir, 'b.git')
+  f.g(bare, 'worktree', 'add', '-b', 'feat/own', join(bareDir, 'own'))
+  const own = realpathSync(join(bareDir, 'own'))
+  const state = { cwd: bare, stored: own as string | undefined }
+  const deps: WorkTargetDeps = {
+    session: async () => ({ cwd: state.cwd, conversationId: 'c1' }),
+    storedCwd: async () => state.stored,
+    git: async (cwd, args) => f.g(cwd, ...args),
+  }
+  return { ...f, bare, own, state, deps }
+}
+
+test('alvo-trabalho: a bare start cwd with the session\'s own linked worktree in the store identifies that worktree', async () => {
+  const f = workFixture()
+  expect(await workTarget('S', f.deps)).toMatchObject({ ok: true, bare: true, path: f.own })
+})
+
+test('alvo-trabalho: a shared main-checkout start cwd resolves the worktree the session moved into', async () => {
+  const f = workFixture()
+  f.state.cwd = f.main; f.state.stored = f.wt
+  expect(await workTarget('S', f.deps)).toMatchObject({ ok: true, bare: false, path: f.wt })
+})
+
+test('alvo-trabalho: nothing identified is `none` — no store record, the start cwd itself, a main checkout, another repository', async () => {
+  const f = workFixture()
+  f.state.stored = undefined
+  expect(await workTarget('S', f.deps)).toEqual({ ok: true, bare: true, cwd: f.bare })
+  f.state.stored = f.bare
+  expect(await workTarget('S', f.deps)).not.toHaveProperty('path')
+  f.state.cwd = f.wt; f.state.stored = f.main // the main checkout is not a linked worktree
+  expect(await workTarget('S', f.deps)).not.toHaveProperty('path')
+  const other = workFixture()
+  f.state.cwd = f.bare; f.state.stored = other.own // a worktree of a DIFFERENT repository is never accepted
+  expect(await workTarget('S', f.deps)).not.toHaveProperty('path')
+  f.state.stored = join(f.own, 'gone')
+  expect(await workTarget('S', f.deps)).not.toHaveProperty('path')
+})
+
+test('alvo-trabalho: an unknown session refuses', async () => {
+  const f = workFixture()
+  expect(await workTarget('S', { ...f.deps, session: async () => null })).toMatchObject({ refused: true })
+})
