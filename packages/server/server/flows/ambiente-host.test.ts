@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ambienteHostOps, defaultAmbienteDeps, type AmbienteDeps } from './ambiente-host'
+import { ambienteHostOps, carriesPort, defaultAmbienteDeps, purgeCopies, type AmbienteDeps } from './ambiente-host'
 import type { ThrowawayState } from '../cli-run'
 import { gitEnv } from '../backup/repo-probe'
 
@@ -26,15 +26,15 @@ function repo() {
   return { origin, root, c1, c2, cb }
 }
 
-function deps(over: Partial<AmbienteDeps> = {}): AmbienteDeps & { stopped: string[]; launched: string[][] } {
-  const stopped: string[] = [], launched: string[][] = []
+function deps(over: Partial<AmbienteDeps> = {}): AmbienteDeps & { stopped: string[]; launched: string[][]; killed: number[] } {
+  const stopped: string[] = [], launched: string[][] = [], killed: number[] = []
   const base = defaultAmbienteDeps()
   return {
     ...base, dataDir: tmp('amb-data-'), home: tmp('amb-home-'), env: { XDG_RUNTIME_DIR: '/run/user/1' }, platform: 'linux',
     hasSystemdRun: () => true, memAvailable: () => 8 * 1024 ** 3, ancestors: () => [], lockFds: () => [],
     registry: async () => [], accountRoots: async () => [], runOwned: () => [], pidsWithLock: () => [],
     readState: () => null, stopRun: async s => { stopped.push(s.name) }, launch: argv => { launched.push(argv); return 4242 },
-    fetchVersionOk: async () => true, sleep: async () => {}, stopped, launched, ...over,
+    fetchVersionOk: async () => true, sleep: async () => {}, killLauncher: p => { killed.push(p) }, cliHead: () => ['/bin/agentop'], stopped, launched, killed, ...over,
   }
 }
 const state = (over: Partial<ThrowawayState> = {}): ThrowawayState => ({ name: 'amb-xyz', home: tmp('amb-runhome-'), apiPort: 48100, webPort: 48101, startedAt: '', command: [], ...over })
@@ -96,14 +96,15 @@ describe('preflight (I5–I7, I16)', () => {
 })
 
 describe('run (I4, I15, I17)', () => {
-  test('happy path launches --serve with --cwd/--seed-from and never wraps in heavy (I15)', async () => {
+  test('happy path launches --serve with --cwd/--seed-real and never wraps in heavy (I15)', async () => {
     const d = deps({ readState: () => state() }); const wt = tmp('amb-wt-')
     const r = await ambienteHostOps(d)['ambiente-run']({ id: 'amb-xyz', worktree: wt, semente: 'copia', comando: ['bun', 'run', 'dev'] }) as { ok?: boolean; run?: { apiPort: number }; saida?: string }
     expect(r.ok).toBe(true); expect(r.run?.apiPort).toBe(48100)
     const argv = d.launched[0]!
     expect(argv).toContain('--serve'); expect(argv).not.toContain('heavy')
     expect(argv[argv.indexOf('--cwd') + 1]).toBe(wt)
-    expect(argv[argv.indexOf('--seed-from') + 1]).toBe(join(d.dataDir, 'flows', 'ambientes', 'amb-xyz', 'semente'))
+    expect(argv).toContain('--seed-real'); expect(argv).not.toContain('--seed-from')
+    expect(argv.slice(0, 2)).toEqual(['/bin/agentop', 'run'])
     expect(argv.slice(argv.indexOf('--') + 1)).toEqual(['bun', 'run', 'dev'])
     expect(existsSync(r.saida!)).toBe(true)
   })
@@ -122,6 +123,16 @@ describe('run (I4, I15, I17)', () => {
     expect(refused(await ambienteHostOps(d)['ambiente-run']({ id: 'amb-xyz', worktree: '/w' })).code).toBe('AMB_SUBIR')
     expect(d.stopped).toEqual(['amb-xyz'])
   })
+  test('M1 a launcher whose run never registers is killed by its own pid; a state that shows up late is stopped', async () => {
+    let t = 0
+    const d = deps({ readState: () => null, now: () => t, sleep: async ms => { t += ms } })
+    expect(refused(await ambienteHostOps(d)['ambiente-run']({ id: 'amb-xyz', worktree: '/w' })).code).toBe('AMB_SUBIR')
+    expect(d.killed).toEqual([4242]); expect(d.stopped).toEqual([])
+    let t3 = 0, reads = 0
+    const d3 = deps({ readState: () => (reads++ > 0 && t3 > 20_000 ? state() : null), now: () => t3, sleep: async ms => { t3 += ms } })
+    expect(refused(await ambienteHostOps(d3)['ambiente-run']({ id: 'amb-xyz', worktree: '/w' })).code).toBe('AMB_SUBIR')
+    expect(d3.killed).toEqual([4242]); expect(d3.stopped).toEqual(['amb-xyz'])
+  })
   test('I10 a structured/ dir found after start => AMB_STRUCTURED, run stopped', async () => {
     const s = state(); mkdirSync(join(s.home, '.agentistics', 'structured'), { recursive: true })
     const d = deps({ readState: () => s })
@@ -135,13 +146,31 @@ describe('run (I4, I15, I17)', () => {
   })
 })
 
-describe('semente through the op (I9)', () => {
-  test('stages only allowed entries under the ambiente folder', async () => {
+describe('semente through the op (I9, B4)', () => {
+  test('the op copies NOTHING inside the server process: it reports what the launcher will seed and leaves the real store and the ambiente folder untouched', async () => {
     const d = deps(); writeFileSync(join(d.dataDir, 'accounts.json'), '{}'); mkdirSync(join(d.dataDir, 'structured')); mkdirSync(join(d.dataDir, 'content')); writeFileSync(join(d.dataDir, 'content', 'c'), 'c')
-    const r = await ambienteHostOps(d)['ambiente-semente']({ id: 'amb-xyz' }) as { staging: string; copied: string[] }
+    const r = await ambienteHostOps(d)['ambiente-semente']({ id: 'amb-xyz' }) as { copied: string[]; staging: unknown }
     expect(r.copied).toEqual(['content'])
-    expect(existsSync(join(r.staging, '.agentistics', 'accounts.json'))).toBe(false)
-    expect(existsSync(join(r.staging, '.agentistics', 'structured'))).toBe(false)
+    expect(existsSync(join(d.dataDir, 'flows'))).toBe(false)
+    expect(refused(await ambienteHostOps(d)['ambiente-semente']({ id: '../x' })).code).toBe('AMB_ENTRADA')
+  })
+  test('B4 a semente:copia run hands the copy to the launcher (--seed-real) and waits for it far longer than a plain run', async () => {
+    let t = 0
+    const d = deps({ readState: () => (t >= 100_000 ? state() : null), now: () => t, sleep: async ms => { t += ms } })
+    const r = await ambienteHostOps(d)['ambiente-run']({ id: 'amb-xyz', worktree: '/w', semente: 'copia' }) as { ok?: boolean }
+    expect(r.ok).toBe(true); expect(d.launched[0]).toContain('--seed-real')
+    let t2 = 0
+    const d2 = deps({ readState: () => (t2 >= 100_000 ? state() : null), now: () => t2, sleep: async ms => { t2 += ms } })
+    expect(refused(await ambienteHostOps(d2)['ambiente-run']({ id: 'amb-xyz', worktree: '/w' })).code).toBe('AMB_SUBIR')
+  })
+})
+
+describe('B1 the data dir is the one the server resolves (AGENTISTICS_DIR)', () => {
+  test('defaultAmbienteDeps().dataDir is config.AGENTISTICS_DATA_DIR, never an AGENTISTICS_DATA_DIR env var', async () => {
+    const { AGENTISTICS_DATA_DIR } = await import('../config')
+    const saved = process.env.AGENTISTICS_DATA_DIR
+    process.env.AGENTISTICS_DATA_DIR = '/should/not/be/used'
+    try { expect(defaultAmbienteDeps().dataDir).toBe(AGENTISTICS_DATA_DIR) } finally { if (saved === undefined) delete process.env.AGENTISTICS_DATA_DIR; else process.env.AGENTISTICS_DATA_DIR = saved }
   })
 })
 
@@ -163,11 +192,35 @@ describe('MCP sentinel (I14)', () => {
     expect(readFileSync(join(d.dataDir, 'flows', 'ambientes', 'amb-xyz', 'diario.log'), 'utf8')).toContain('settings.json')
     expect(d.stopped).toEqual(['amb-xyz'])
   })
+  test('B2 a config another process rewrote with a number that merely contains the port is NOT restored; the URL form is', async () => {
+    expect(carriesPort(Buffer.from('{"lastSeen": 1762148100123}'), 48100)).toBe(false)
+    expect(carriesPort(Buffer.from('http://localhost:481001/x'), 48100)).toBe(false)
+    expect(carriesPort(Buffer.from('AGENTISTICS_API=http://localhost:48100'), 48100)).toBe(true)
+    expect(carriesPort(Buffer.from('http://127.0.0.1:48100/'), 48100)).toBe(true)
+    const d = deps(); const cj = join(d.home, '.claude.json'); writeFileSync(cj, '{"n":1}')
+    const ops = ambienteHostOps(d)
+    await ops['ambiente-mcp-antes']({ id: 'amb-bbb' })
+    writeFileSync(cj, '{"n":2,"lastSeen":1762148100123}')
+    expect(await ops['ambiente-mcp-depois']({ id: 'amb-bbb', apiPort: 48100 })).toMatchObject({ ok: true, restored: [] })
+    expect(readFileSync(cj, 'utf8')).toBe('{"n":2,"lastSeen":1762148100123}')
+    expect(d.stopped).toEqual([])
+  })
+  test('M3 plaintext copies are gone after the check (restored or not); manifest.json stays; parar purges leftovers', async () => {
+    const d = deps(); const codex = join(d.home, '.codex', 'config.toml'); mkdirSync(join(d.home, '.codex'), { recursive: true }); writeFileSync(codex, 'key = "sk-secret"\n')
+    const ops = ambienteHostOps(d); const dir = join(d.dataDir, 'flows', 'ambientes', 'amb-mmm', 'mcp-antes')
+    await ops['ambiente-mcp-antes']({ id: 'amb-mmm' })
+    expect(readdirSync(dir).some(n => n.endsWith('.copy'))).toBe(true)
+    await ops['ambiente-mcp-depois']({ id: 'amb-mmm', apiPort: 48100 })
+    expect(readdirSync(dir)).toEqual(['manifest.json'])
+    writeFileSync(join(dir, '9.copy'), 'leftover'); await ops['ambiente-parar']({ id: 'amb-mmm' })
+    expect(readdirSync(dir)).toEqual(['manifest.json'])
+    purgeCopies('/nonexistent/x')
+  })
   test('nothing changed => ok; a file that did not exist and now carries the port is removed', async () => {
     const d = deps(); const ops = ambienteHostOps(d)
     await ops['ambiente-mcp-antes']({ id: 'amb-yyy' })
     expect(await ops['ambiente-mcp-depois']({ id: 'amb-yyy', apiPort: 48100 })).toMatchObject({ ok: true, restored: [] })
-    const copilot = join(d.home, '.copilot', 'mcp-config.json'); mkdirSync(join(d.home, '.copilot'), { recursive: true }); writeFileSync(copilot, '{"p":48100}')
+    const copilot = join(d.home, '.copilot', 'mcp-config.json'); mkdirSync(join(d.home, '.copilot'), { recursive: true }); writeFileSync(copilot, '{"env":{"AGENTISTICS_API":"http://localhost:48100"}}')
     d.readState = () => state({ name: 'amb-yyy' })
     expect(refused(await ops['ambiente-mcp-depois']({ id: 'amb-yyy', apiPort: 48100 })).code).toBe('AMB_MCP')
     expect(existsSync(copilot)).toBe(false)
