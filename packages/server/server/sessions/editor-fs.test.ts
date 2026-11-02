@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
 import {
   chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync,
@@ -20,11 +20,13 @@ import type { StartHost } from '../cli-start'
 // canonical, repo-wide answer — see its header for the full, cited variable list.
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: gitTestEnv() })
 
+// A fresh fixture per test: the tests write, rename and chmod inside it, so a shared one made the
+// outcome depend on the run order (--randomize).
 let root = ''
 let gitRepo = ''
 let plainDir = ''
 
-beforeAll(() => {
+beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'agentistics-editor-'))
 
   gitRepo = join(root, 'gitrepo')
@@ -47,7 +49,7 @@ beforeAll(() => {
   mkdirSync(join(plainDir, 'sub'))
 })
 
-afterAll(() => { rmSync(root, { recursive: true, force: true }) })
+afterEach(() => { rmSync(root, { recursive: true, force: true }) })
 
 // `StartHost` (via `ControlHost`) carries many members no test here calls — the same posture
 // `shell-web.test.ts`'s own `{} as StartHost` already takes for a host that is never driven
@@ -86,7 +88,7 @@ describe('resolveSessionDirectory', () => {
 describe('listChildren', () => {
   test('a git repo lists tracked + untracked-not-ignored, never the gitignored file', async () => {
     const r = await listChildren(gitRepo, '')
-    // `.gitignore` itself was `git add`ed in beforeAll (so its own rule takes effect from the
+    // `.gitignore` itself was `git add`ed in the fixture setup (so its own rule takes effect from the
     // commit, not merely from being present on disk) and is therefore a TRACKED file like any
     // other — it belongs in the listing. `ignored.log` is the one this test's name is about: it
     // matches `.gitignore`'s own pattern and must never appear.
@@ -152,7 +154,7 @@ describe('listChildren — empty (non-ignored) directories are listed even thoug
   // fixture's own unrelated tracked/untracked/ignored shape.
   let repo = ''
 
-  beforeAll(() => {
+  beforeEach(() => {
     repo = join(root, 'empty-dirs-repo')
     mkdirSync(repo)
     git(repo, 'init', '-q', '-b', 'main')
@@ -235,7 +237,7 @@ describe('listChildren — a raw fs mutation of a git-TRACKED path never leaves 
   // `gitRepo` fixture above (whose own tests rely on its exact tracked/untracked/ignored shape).
   let repo = ''
 
-  beforeAll(() => {
+  beforeEach(() => {
     repo = join(root, 'phantom-repo')
     mkdirSync(repo)
     git(repo, 'init', '-q', '-b', 'main')
@@ -395,6 +397,7 @@ describe('writeTreeFile', () => {
 
   test('a stale mtime is refused as a conflict, and the CURRENT disk content is returned', async () => {
     const target = join(gitRepo, 'README.md')
+    writeFileSync(target, '# updated\n')
     const current = statSync(target).mtimeMs
     const out = await writeTreeFile(gitRepo, 'README.md', '# my edit\n', current - 999999)
     expect(out).toMatchObject({ ok: false, reason: 'conflict' })

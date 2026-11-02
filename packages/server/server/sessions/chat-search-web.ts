@@ -21,7 +21,7 @@
  */
 
 import { stat } from 'node:fs/promises'
-import { CHAT_SEARCH_PAGE, searchChatTurns, type ChatSearchPage } from '@agentistics/core'
+import { CHAT_SEARCH_PAGE, featureOn, searchChatTurns, type ChatSearchPage } from '@agentistics/core'
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { readSessionChatAll } from './chat-web'
@@ -32,6 +32,25 @@ export interface ChatSearchAnswer extends ChatSearchPage {
   harness?: string
   /** Already-localized: why nothing could be searched (the chat's own sentence). */
   unavailable?: string
+  /**
+   * V-READ — present only when the engine searched (`adapter-chat` on, a harness that declares history).
+   * `false` = the scan stopped short (`stopped` says why): never render it as "no results", and `cursor`
+   * continues it. Absent = the host read the whole transcript, so the page is complete by construction.
+   */
+  complete?: boolean
+  stopped?: 'limit' | 'budget' | 'cancelled'
+  cursor?: string | null
+}
+
+/** The engine's search for a row, or `null` when the host's own serves. */
+export type EngineSearch = (
+  lang: CliLang, id: string, query: string, page: { cursor?: string; limit?: number; offset?: number },
+) => Promise<ChatSearchAnswer | null>
+
+/** With the `adapter-chat` flag ON the engine's `search()` is asked first; OFF it is never imported. */
+function defaultEngineSearch(): EngineSearch | null {
+  if (!featureOn('adapter-chat') || !featureOn('chat-history-engine')) return null
+  return async (...a) => (await import('./adapter-chat-web')).searchAdapterChat(...a)
 }
 
 const MEMO_MAX = 3
@@ -75,12 +94,17 @@ export async function searchSessionChat(
   lang: CliLang,
   id: string,
   query: string,
-  page: { offset?: number; limit?: number } = {},
+  page: { offset?: number; limit?: number; cursor?: string } = {},
   readerFor: typeof transcriptReaderFor = memoizedReaderFor,
+  engineSearch: EngineSearch | null = defaultEngineSearch(),
 ): Promise<ChatSearchAnswer> {
   // A refused query costs no read at all.
   const refused = searchChatTurns([], query, page)
   if (refused.tooShort) return refused
+  if (engineSearch) {
+    const viaEngine = await engineSearch(lang, id, query, page).catch(() => null)
+    if (viaEngine) return viaEngine
+  }
   let harness: string | undefined
   const payload = await readSessionChatAll(host, lang, id, readerFor, row => { harness = row.harness || undefined })
   const found = searchChatTurns(payload.turns, query, { limit: CHAT_SEARCH_PAGE, ...page })

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,6 +16,7 @@ beforeAll(() => {
   process.env.CLAUDE_CONFIG_DIR = root
   mkdirSync(join(root, 'projects', '-w'), { recursive: true })
 })
+beforeEach(() => { rmSync(file(), { force: true }) }) // each test starts with no transcript (order-independent)
 afterAll(() => { if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = saved; rmSync(root, { recursive: true, force: true }) })
 
 const probe = (cache?: ReturnType<typeof newLimitProbeCache>) => readLimitProbe({ harness: 'claude', conversationId: 'conv-p', cwd: '/w' }, cache)

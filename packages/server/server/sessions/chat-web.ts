@@ -63,6 +63,33 @@ export interface ChatRecorded {
   tokens: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | null
 }
 
+/**
+ * V-READ — where a page of the conversation sits in the engine's history (engine-api 1.22). Present ONLY
+ * when the turns came from the engine's `history()`; the legacy readers never state it.
+ *
+ * `status` tells a conversation with nothing in it (`ready`, `turns: []`) from one that cannot be shown
+ * yet (`pending`) or failed (`error`) — the three were all `[]` before. `before` is the opaque cursor of
+ * the next older page (`null` = this page reaches the start): send it back as `?before=`, together with
+ * `snapshot`. `resnapshot` means the cursor is no longer good (the conversation was rewritten, or it
+ * belongs to another conversation): drop the older pages and ask again WITHOUT `before`.
+ */
+export interface ChatHistoryMeta {
+  status: 'ready' | 'pending' | 'error'
+  /** Index of this page's first turn from the conversation's start (ready only). */
+  start?: number
+  /** Turns in the snapshot (ready only). */
+  total?: number
+  before?: string | null
+  snapshot?: string
+  epoch?: string
+  /** Pending: how long the engine suggests waiting. */
+  retryAfterMs?: number
+  /** Error: the engine's closed code, and whether asking again may work. */
+  code?: string
+  retryable?: boolean
+  resnapshot?: true
+}
+
 export interface ChatPayload {
   /** The turns, oldest first. Empty with no `unavailable` means a conversation with nothing in it. */
   turns: ChatTurn[]
@@ -134,6 +161,8 @@ export interface ChatPayload {
    * the stream's `state` events and draw `live` text, and need not watch the terminal.
    */
   source?: 'adapter'
+  /** V-READ: the history page this payload is (see `ChatHistoryMeta`). Absent on the legacy path. */
+  history?: ChatHistoryMeta
   /**
    * Messages handed to this session that its transcript does not carry yet.
    *

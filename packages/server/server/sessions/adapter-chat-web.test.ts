@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { adapterRowOf } from './adapter-chat-web'
+import { featureOn } from '@agentistics/core'
+import { adapterRowOf, searchAdapterChat } from './adapter-chat-web'
 import type { SessionSnapshot } from './sessions-host'
 import type { SessionView } from './session-view'
 
@@ -39,5 +40,24 @@ describe('F4 fix2 — an open adapter stream follows the switch, not only new on
   })
   test('the stream registers for the switch reset (closed at once when the switch moves)', () => {
     expect(stream).toContain('onReset: onChatStreamsReset')
+  })
+})
+
+describe('chat-history-engine — its OWN opt-in, the engine history()/search() read never rides adapter-chat', () => {
+  const src = readFileSync(join(import.meta.dir, 'adapter-chat-web.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+  test('default OFF, ON only for an explicit 1', () => {
+    expect(featureOn('chat-history-engine', {})).toBe(false)
+    expect(featureOn('chat-history-engine', { AGENTISTICS_CHAT_HISTORY_ENGINE: '0' })).toBe(false)
+    expect(featureOn('chat-history-engine', { AGENTISTICS_CHAT_HISTORY_ENGINE: '1' })).toBe(true)
+  })
+  test('the history-first branch is gated on it', () => {
+    expect(src).toContain("featureOn('chat-history-engine') && historyOf(chat)")
+  })
+  test('with it OFF the engine search is never asked (null before any hub or engine call)', async () => {
+    const prev = process.env.AGENTISTICS_CHAT_HISTORY_ENGINE
+    delete process.env.AGENTISTICS_CHAT_HISTORY_ENGINE
+    try { expect(await searchAdapterChat('en', 'x', 'q')).toBeNull() }
+    finally { if (prev !== undefined) process.env.AGENTISTICS_CHAT_HISTORY_ENGINE = prev }
   })
 })

@@ -187,7 +187,19 @@
  * against 1.20 still loads on a 1.21 host (a lower minor is compatible) and simply never sees the new members; one
  * built against 1.21 is refused by an older host, like every minor bump.
  */
-export const ENGINE_API_VERSION = '1.21.0'
+/**
+ * 1.22.0 — V-CONTRATO: the chat seam's whole conversation, paged (`chat.ts`). `HarnessChat` gains OPTIONAL
+ * `status` / `history` / `search` (`HarnessChatHistory`), `ChatDeclaration.history`, the discriminated
+ * `ChatSourceStatus` (`ready | pending | absent | error(code, reason)`, so an empty conversation is never
+ * mistaken for a missing one), opaque cursors bound to a snapshot and a `sourceEpoch`, an opaque `accountRef`
+ * (`ChatHistoryRef`) the host maps to its authorized roots through `EngineHostServices.chatAccounts`
+ * (optional), and `manifest.provides.chatHistory`. Pure helpers: `chatPageLimit` (100, cap 500),
+ * `chatSearchLimit`, `chatSearchVerdict` (never "no results" for an incomplete scan), `chatStatusOf`,
+ * `chatHasHistory`. `resolve` and `follow` are unchanged. Every new member is served BY the engine (or absent
+ * on the host), so an engine built against 1.22 may NEGOTIATE down and announce 1.21 to a 1.21 host, without
+ * history; a 1.21 engine loads on a 1.22 host and is simply never asked for history.
+ */
+export const ENGINE_API_VERSION = '1.22.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
