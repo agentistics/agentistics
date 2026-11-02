@@ -13,8 +13,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.186.0': {
     features: [
       {
-        pt: 'Chat pelo adapter (experimental): no Claude Code e no OpenCode, o histórico da conversa e a busca no chat agora vêm do motor, e as mensagens mais antigas carregam por páginas. Os outros harnesses continuam como antes. Conferido só com testes automáticos; numa sessão real ainda não. Nesse modo, a busca ainda diferencia acentos e também encontra o raciocínio do modelo; isso será corrigido.',
-        en: 'Chat through the adapter (experimental): in Claude Code and OpenCode, the conversation history and the chat search now come from the engine, and older messages load page by page. Other harnesses work as before. Checked only with automated tests; not yet in a real session. In this mode, search still treats accents as different letters and also matches the model\'s reasoning; this will be fixed.',
+        pt: 'Nova opção experimental, desligada por padrão: no Claude Code e no OpenCode, o histórico e a busca do chat passam a ser lidos de um jeito novo, que carrega as mensagens mais antigas aos poucos. Conferida só com testes automáticos; numa sessão real ainda não. Com ela ligada, a busca ainda diferencia letras com e sem acento e também encontra o raciocínio do modelo; isso será corrigido.',
+        en: 'New experimental option, off by default: in Claude Code and OpenCode, chat history and search are read in a new way that loads older messages a little at a time. Checked only with automated tests; not yet in a real session. With it on, search still treats letters with and without accents as different and also finds the model\'s reasoning; this will be fixed.',
       },
       {
         pt: "Ligação por voz (experimental): legenda numa linha que rola sob o globo e um cartão que mostra o que ela está fazendo agora, passo a passo; em telas largas dá para abrir 'Ver o que ela vê'.",

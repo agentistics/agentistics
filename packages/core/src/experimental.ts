@@ -92,8 +92,8 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
     // a live session yet, so it must not ride the default-ON `adapter-chat` flag to every user.
     isOn: raw => raw === '1',
     description: {
-      en: 'Chat history and search read in a new, faster way on long conversations (Claude Code and OpenCode).',
-      pt: 'Histórico e busca do chat lidos de um jeito novo, mais rápido em conversas longas (Claude Code e OpenCode).',
+      en: 'Chat history and search read in a new way that loads older messages a little at a time (Claude Code and OpenCode).',
+      pt: 'Histórico e busca do chat lidos de um jeito novo, que carrega as mensagens antigas aos poucos (Claude Code e OpenCode).',
     },
   },
   {
