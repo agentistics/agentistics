@@ -147,3 +147,126 @@ test('host-ops does not statically import cli-start', async () => {
   expect(src).not.toMatch(/^import[^\n]*['"]\.\.\/cli-start['"]/m)
   expect(src).toMatch(/await import\('\.\.\/cli-start'\)/)
 })
+
+// ── F2 LIMPEZA.REAL (host): alvo-worktree / remover-worktree ──────────────────────────────────────────────────────
+import { existsSync, mkdirSync, realpathSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { worktreeHostOps, worktreeTarget, type WorktreeTargetDeps } from './host-ops'
+
+type Row = Awaited<ReturnType<WorktreeTargetDeps['registry']>>[number]
+const wtFixture = () => {
+  const main = realpathSync(mkdtempSync(join(tmpdir(), 'lr-main-'))); roots.push(main)
+  const g = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { stdio: 'pipe', env: gitTestEnv() }).toString()
+  g(main, 'init', '-b', 'main'); g(main, 'config', 'user.email', 'f@example.invalid'); g(main, 'config', 'user.name', 'F')
+  writeFileSync(join(main, 'f'), 'x'); g(main, 'add', 'f'); g(main, 'commit', '-m', 'one')
+  const wt = join(main, '.wt-x'); g(main, 'worktree', 'add', '-b', 'feat/x', wt)
+  const state = { rows: [] as Row[], procs: [] as string[] | null }
+  const mk = (over: Partial<Row> = {}): Row => ({ id: 'S', cwd: wt, endedAt: '2026-11-02T00:00:00.000Z', repo: { repo: 'r', rootPath: main, worktree: true }, ...over })
+  state.rows = [mk()]
+  const deps: WorktreeTargetDeps = {
+    registry: async () => state.rows,
+    git: async (cwd, args) => g(cwd, ...args),
+    procCwds: async () => state.procs,
+  }
+  return { main, wt: realpathSync(wt), g, state, mk, deps, ops: worktreeHostOps(deps) }
+}
+const rm = { sessionId: 'S' } as const
+
+test('I3/I9/I1: a clean, ended session worktree is removed with plain `git worktree remove`; the branch and commits stay', async () => {
+  const f = wtFixture()
+  const t = await f.ops['alvo-worktree'](rm)
+  expect(t).toMatchObject({ ok: true, shared: false, path: f.wt, branch: 'feat/x', liveProcesses: 0, liveSessions: [], processCheck: 'ok' })
+  const head = f.g(f.wt, 'rev-parse', 'HEAD').trim()
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.wt, head, snapshotId: 'snap' })).toMatchObject({ ok: true, removed: true, path: f.wt })
+  expect(existsSync(f.wt)).toBe(false)
+  expect(f.g(f.main, 'rev-parse', 'feat/x').trim()).toBe(head)
+})
+
+test('I9: the host recomputes — a different path, a moved HEAD, a dirty tree or an extra input is refused and nothing is removed', async () => {
+  const f = wtFixture()
+  const head = f.g(f.wt, 'rev-parse', 'HEAD').trim()
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.main, head, snapshotId: 's' })).toMatchObject({ refused: true, reason: 'the requested path is not the registry worktree' })
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.wt, head: 'deadbeef', snapshotId: 's' })).toMatchObject({ refused: true, reason: 'HEAD changed since the snapshot' })
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.wt, head, snapshotId: 's', force: true })).toMatchObject({ refused: true, reason: 'unexpected input force' })
+  writeFileSync(join(f.wt, 'new.txt'), 'u')
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.wt, head, snapshotId: 's' })).toMatchObject({ refused: true, reason: 'working tree is dirty' })
+  expect(existsSync(f.wt)).toBe(true)
+})
+
+test('I1: no force path exists — a tracked edit makes the removal refuse and the folder survives', async () => {
+  const f = wtFixture()
+  const head = f.g(f.wt, 'rev-parse', 'HEAD').trim()
+  writeFileSync(join(f.wt, 'f'), 'changed')
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.wt, head, snapshotId: 's' })).toMatchObject({ refused: true })
+  expect(existsSync(f.wt)).toBe(true)
+})
+
+test('I5/I3: the main checkout, a missing `worktree` flag and a main-checkout cwd are shared — never a target', async () => {
+  const f = wtFixture()
+  f.state.rows = [f.mk({ cwd: f.main })]
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ ok: true, shared: true, path: f.main })
+  f.state.rows = [f.mk({ repo: { repo: 'r', rootPath: f.main, worktree: false } })]
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ ok: true, shared: true })
+  f.state.rows = [{ id: 'S', cwd: f.wt, endedAt: 'x' }]
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ ok: true, shared: true })
+  const head = f.g(f.main, 'rev-parse', 'HEAD').trim()
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.main, head, snapshotId: 's' })).toMatchObject({ refused: true })
+  expect(existsSync(f.main)).toBe(true)
+})
+
+test('I3b: a recorded parent repository that is gone refuses', async () => {
+  const f = wtFixture()
+  f.state.rows = [f.mk({ repo: { repo: 'r', rootPath: join(f.main, 'nope'), worktree: true } })]
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ refused: true, reason: 'the parent repository no longer exists' })
+  f.state.rows = [f.mk({ repo: { repo: 'r', worktree: true } })]
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ refused: true })
+})
+
+test('I3c/I3e: a locked worktree and a worktree with another worktree inside it are refused', async () => {
+  const f = wtFixture()
+  f.g(f.main, 'worktree', 'lock', f.wt)
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ refused: true, reason: 'the worktree is locked' })
+  f.g(f.main, 'worktree', 'unlock', f.wt)
+  f.g(f.main, 'worktree', 'add', '-b', 'feat/inner', join(f.wt, 'inner'))
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ refused: true, reason: 'another worktree lives inside this one' })
+})
+
+test('I4: a not-ended registry session inside the worktree, or a process with its cwd there, is reported live and blocks removal', async () => {
+  const f = wtFixture()
+  const head = f.g(f.wt, 'rev-parse', 'HEAD').trim()
+  f.state.rows = [f.mk(), { id: 'other', cwd: join(f.wt, 'sub'), repo: undefined } as Row]
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ liveSessions: ['other'] })
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.wt, head, snapshotId: 's' })).toMatchObject({ refused: true, reason: 'a live session or process is inside the worktree' })
+  f.state.rows = [f.mk()]
+  f.state.procs = [f.wt]
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ liveProcesses: 1 })
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.wt, head, snapshotId: 's' })).toMatchObject({ refused: true })
+  f.state.procs = null
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ processCheck: 'skipped' })
+  expect(existsSync(f.wt)).toBe(true)
+})
+
+test.skipIf(process.platform !== 'linux')('I4: the default process probe sees a real child whose cwd is inside the worktree', async () => {
+  const f = wtFixture()
+  const child = spawn('sleep', ['30'], { cwd: f.wt })
+  try {
+    const { defaultWorktreeTargetDeps } = await import('./host-ops')
+    const t = await worktreeTarget('S', { ...defaultWorktreeTargetDeps(), registry: async () => f.state.rows })
+    expect(t).toMatchObject({ kind: 'target' })
+    expect((t as { liveProcesses: number }).liveProcesses).toBeGreaterThanOrEqual(1)
+  } finally { child.kill() }
+})
+
+test('I9: a session without endedAt is not removable by the host either', async () => {
+  const f = wtFixture()
+  const head = f.g(f.wt, 'rev-parse', 'HEAD').trim()
+  f.state.rows = [{ ...f.mk(), endedAt: undefined as unknown as string }]
+  delete (f.state.rows[0] as { endedAt?: string }).endedAt
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.wt, head, snapshotId: 's' })).toMatchObject({ refused: true, reason: 'the session has not ended' })
+  mkdirSync(join(f.wt, 'keep'), { recursive: true })
+  expect(existsSync(f.wt)).toBe(true)
+})
+
+test('flowHostOps registers the two worktree ops', () => {
+  expect(Object.keys(flowHostOps())).toEqual(expect.arrayContaining(['alvo-worktree', 'remover-worktree']))
+})
