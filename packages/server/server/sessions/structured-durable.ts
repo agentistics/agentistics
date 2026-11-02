@@ -225,7 +225,7 @@ export interface DurableStore {
   alive(): string[]
   isAlive(id: string): boolean
   /**
-   * Whether a relay PROCESS of this record is running now — `false` for the "between two children" state
+   * Whether a relay PROCESS — or the CHILD it recorded — of this record is running now — `false` for the "between two children" state
    * `isAlive` still counts as alive (no process at all), and for an id with no record. REABRIR.OPENCODE:
    * the reopen of an ENDED row asks this before treating the row as its own live holder.
    */
@@ -295,6 +295,17 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
   const relayLive = (id: string, k: number): boolean => {
     const pid = relayPid(id, k)
     return pid !== null && pidAlive(pid) && readGen(id, k, FILES.exit) === null
+  }
+  /**
+   * Is the CHILD a relay recorded (`relay.pid`'s `child`) still running? It outlives a relay that died
+   * (the child is detached), so "no relay" alone does not prove no assistant is running. A recycled pid
+   * errs toward "running" — the safe direction: it only withholds a leftover-ending, never ends a live one.
+   */
+  const childLive = (id: string, k: number): boolean => {
+    if (foreign(id)) return false
+    const raw = readGen(id, k, FILES.pid)
+    if (!raw) return false
+    try { const c = (JSON.parse(raw) as { child?: unknown }).child; return typeof c === 'number' && c > 1 && pidAlive(c) } catch { return false }
   }
   const isAlive = (id: string): boolean => {
     if (foreign(id)) return false
@@ -445,7 +456,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     },
     alive: () => ids().filter(isAlive),
     isAlive,
-    running: id => { for (let k = 0, n = generations(id); k < n; k++) if (relayLive(id, k)) return true; return false },
+    running: id => { for (let k = 0, n = generations(id); k < n; k++) if (relayLive(id, k) || childLive(id, k)) return true; return false },
     lastActivityMs(id) {
       for (let k = lastGen(id); k >= 0; k--) { try { return statSync(path.join(genDir(id, k), FILES.out)).mtimeMs } catch { /* none yet */ } }
       return Date.now()
