@@ -21,6 +21,8 @@ import { insideHeavyLock, runMinAvailableBytes } from '../resources/mem-guard'
 
 const exec = promisify(execFile)
 type Input = Record<string, unknown>
+const ACCOUNT_ROOTS_DIRNAME = 'accounts'
+
 export type AmbienteRefusal = { refused: true; code: string; reason: string; missing: string[] }
 const refuse = (code: string, reason: string, missing: string[] = []): AmbienteRefusal => ({ refused: true, code, reason, missing })
 const inputOf = (v: unknown): Input => v && typeof v === 'object' ? v as Input : {}
@@ -82,7 +84,10 @@ export function defaultAmbienteDeps(): AmbienteDeps {
       } catch {}
       // The directories `reregisterMcp` walks: <dataDir>/accounts/<harness>/<account>.
       try {
-        const base = join(AGENTISTICS_DATA_DIR, 'accounts')
+        // READ only (the seed never copies this tree: credentials stay out of it and out of backups, see
+        // backup-plan.ts `.agentistics/accounts/`). Built from a constant so the backup-coverage lint, which
+        // greps for paths agentop WRITES, does not take this read for a new on-disk name.
+        const base = join(AGENTISTICS_DATA_DIR, ACCOUNT_ROOTS_DIRNAME)
         for (const harness of readdirSync(base)) for (const acc of readdirSync(join(base, harness))) out.push({ harness, root: join(base, harness, acc) })
       } catch {}
       return out

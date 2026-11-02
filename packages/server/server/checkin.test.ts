@@ -3,7 +3,7 @@ import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { planBudget, planPace, type PlanLimits } from '@agentistics/core'
 import {
   checkinAccountLimits, checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, deliveredOpenLine, fechamentoLines, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
-  runNow, checkinTick, resetCheckinSweep, type CheckinAction, type CheckinDeps, type CheckinNeed, validateCheckinRound,
+  runNow, checkinTick, resetCheckinSweep, type CheckinAction, type FechamentoItem, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
 
 let preferences: Record<string, unknown> = {}
