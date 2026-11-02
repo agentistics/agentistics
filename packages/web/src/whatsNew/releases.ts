@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.191.0': {
+    features: [
+      {
+        pt: 'Fluxos (experimental, desligado por padrão): um ambiente descartável para testar uma versão do código sem mexer nos seus dados nem nas suas configurações de verdade. Ele sobe, você testa, e depois é desmontado.',
+        en: 'Flows (experimental, off by default): a throwaway environment to test a version of the code without touching your real data or settings. It starts up, you test, and then it is taken down.',
+      },
+      {
+        pt: 'Fluxos (experimental, desligado por padrão): sessões de trabalho que terminaram e salvaram o que fizeram se fecham sozinhas. Sessões de líder nunca se fecham sozinhas.',
+        en: 'Flows (experimental, off by default): worker sessions that finished and saved their work close by themselves. Leader sessions never do.',
+      },
+      {
+        pt: 'O resumo do líder agora lista quem ainda está aberto e quem ainda não salvou o trabalho.',
+        en: 'The leader\'s summary now lists who is still open and who has not saved their work yet.',
+      },
+      {
+        pt: 'Ligação por voz: a barra mostra "Trabalhando" enquanto ela faz o que você pediu.',
+        en: 'Voice call: the bar says \'Working\' while she does what you asked.',
+      },
+    ],
+    fixes: [],
+  },
   '2.190.0': {
     features: [
       {
