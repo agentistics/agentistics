@@ -106,7 +106,7 @@ describe('machineSecrets (engine-api 1.23)', () => {
 
   test('NO PROTECTOR: the explicit weaker file mode (0600, machine id), shown in status; works without any vault', async () => {
     const dir = await fresh()
-    const ms = createMachineSecrets({ dir, protectors: () => [fakeProtector('dpapi', { probe: false })], machineId: () => 'a'.repeat(32) })
+    const ms = createMachineSecrets({ dir, protectors: () => [fakeProtector('dpapi', { probe: false })], retryMs: [], machineId: () => 'a'.repeat(32) })
     const s = await ms.seal('engine/voice-elevenlabs-key', 'elevenlabs', pt()); if (!s.ok) throw new Error('seal')
     expect(ms.status()).toMatchObject({ available: true, strength: 'file', protector: 'machine id (file)' })
     expect(ms.status().sentence).toMatch(/WEAKER mode/)
@@ -151,6 +151,13 @@ describe('machineSecrets (engine-api 1.23)', () => {
     for (let i = 0; i < 5; i++) { const o = await again.open('engine/provider-key', 'x', s.sealed); if (o.ok) o.plaintext.fill(0) }
     await again.seal('engine/provider-key', 'y', pt()); await again.ready()
     expect(unwraps).toBe(1); expect(probes).toBe(0)
+  })
+
+  test('a DPAPI that fails once (WSL interop hiccup) is re-probed and still chosen, not the weaker mode', async () => {
+    const p = fakeProtector(); let n = 0; const pr = p.probe
+    p.probe = async () => (n++ === 0 ? { ok: false, reason: 'accept4 failed 110' } : pr())
+    const ms = createMachineSecrets({ dir: await fresh(), protectors: () => [p], retryMs: [5], machineId: () => 'a'.repeat(32) })
+    expect(await ms.ready()).toMatchObject({ available: true, strength: 'os' })
   })
 
   test('no protector AND no machine id: refuses (uninitialized) and writes NOTHING, never plaintext', async () => {

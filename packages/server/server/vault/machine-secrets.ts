@@ -49,6 +49,8 @@ export interface MachineSecretsOptions {
   /** The machine id for the weaker file mode; `null` = none (then that mode is unavailable). */
   machineId: () => string | null
   lang?: () => 'en' | 'pt'
+  /** Pauses (ms) before re-probing a DPAPI that did not answer: WSL interop can fail transiently right after login, and the weaker file mode must not be chosen for good because of one hiccup. Default [1500, 4000]. */
+  retryMs?: number[]
 }
 
 const T = {
@@ -145,7 +147,12 @@ export function createMachineSecrets(o: MachineSecretsOptions): EngineMachineSec
   async function createLocked(): Promise<boolean> {
     const { dek, kid } = newDataKey()
     for (const p of o.protectors()) {
-      const probe = await p.probe().catch(() => ({ ok: false as const, reason: '' }))
+      let probe = await p.probe().catch(() => ({ ok: false as const, reason: '' }))
+      if (!probe.ok && p.id === 'dpapi') for (const wait of o.retryMs ?? [1500, 4000]) {
+        await new Promise(r => setTimeout(r, wait))
+        probe = await p.probe().catch(() => ({ ok: false as const, reason: '' }))
+        if (probe.ok) break
+      }
       if (!probe.ok) continue
       await mkdir(o.dir, { recursive: true, mode: 0o700 })
       const w = await p.wrap(dek, kid).catch(() => ({ ok: false as const, reason: '' }))
