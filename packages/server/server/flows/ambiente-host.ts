@@ -127,6 +127,17 @@ export function carriesPort(buf: Buffer | null, port: number): boolean {
 }
 
 /** Delete the plaintext config copies (M3), keeping only manifest.json. */
+/** What the dead server said last: its exit code when the log states one, and the last non-empty line (bounded). */
+export function exitNote(logPath: string): string {
+  let tail = ''
+  try { tail = readFileSync(logPath, 'utf8').slice(-4000) } catch { /* no log */ }
+  const lines = tail.split('\n').map(l => l.trim()).filter(Boolean)
+  const last = lines.length ? lines[lines.length - 1]!.slice(0, 240) : ''
+  const code = /exiting \((\d+)\)|exit(?:ed)? (?:with )?(?:code )?(\d+)/i.exec(last)
+  const n = code?.[1] ?? code?.[2]
+  return [n ? `exit code ${n}` : '', last ? `last log line: ${last}` : 'the log is empty'].filter(Boolean).join('; ')
+}
+
 export function purgeCopies(dir: string): void {
   try { for (const n of readdirSync(dir)) if (n.endsWith('.copy')) rmSync(join(dir, n), { force: true }) } catch {}
 }
@@ -186,7 +197,7 @@ export function ambienteHostOps(deps: AmbienteDeps = defaultAmbienteDeps()) {
         if (launcher !== undefined && !deps.launcherAlive(launcher)) { launcherDied = !(state = deps.readState(id)); break }
         await deps.sleep(250)
       }
-      if (!state && launcherDied) return refuse('AMB_SUBIR', `the launcher exited before the run registered; see ${logPath}`, ['live launcher'])
+      if (!state && launcherDied) return refuse('AMB_SUBIR', `the environment server exited before it registered (${exitNote(logPath)}); see ${logPath}`, ['live launcher'])
       if (!state) {
         // M1: the launcher is ours (its pid came from launch()); a launcher left alive could register and boot a server nobody tracks.
         if (launcher) deps.killLauncher(launcher)
@@ -200,7 +211,7 @@ export function ambienteHostOps(deps: AmbienteDeps = defaultAmbienteDeps()) {
       if (isRealAgentopPort(state.apiPort) || isRealAgentopPort(state.webPort)) { await stop(state); return refuse('AMB_PORTA', `the run got a real agentop port (${state.apiPort}/${state.webPort})`, ['own ports']) }
       let up = false
       while (deps.now() - tUp < AMBIENTE_UP_WAIT_MS && !(up = await deps.fetchVersionOk(state.apiPort))) {
-        if (launcher !== undefined && !deps.launcherAlive(launcher)) { await stop(state); return refuse('AMB_SUBIR', `the launcher exited before the server answered; see ${logPath}`, ['live launcher']) }
+        if (launcher !== undefined && !deps.launcherAlive(launcher)) { await stop(state); return refuse('AMB_SUBIR', `the environment server exited before it answered (${exitNote(logPath)}); see ${logPath}`, ['live launcher']) }
         await deps.sleep(500)
       }
       if (!up) { await stop(state); return refuse('AMB_SUBIR', `the server did not answer in ${AMBIENTE_UP_WAIT_MS / 1000}s; see ${logPath}`, ['responding server']) }
