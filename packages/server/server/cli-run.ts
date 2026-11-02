@@ -1,10 +1,13 @@
 import { spawn } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { createServer } from 'node:net'
+import { gitEnv } from './backup/repo-probe'
+import { applySeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
+export { SEED_ALLOW }
 const REAL_API_PORT = 47291
 const REAL_WEB_PORT = 47292
 const DEFAULT_TTL = '2h'
@@ -29,7 +32,7 @@ export type ThrowawayState = {
   command: string[]
 }
 
-type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[] }
+type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[]; serve: boolean; seedFrom: string | null; cwd: string | null }
 
 /** A Unix socket path (sun_path) holds 108 bytes including the NUL; Chrome/tmux sockets live under TMPDIR. */
 export const SOCKET_PATH_MAX = 107
@@ -60,13 +63,27 @@ export function removeRunTmp(path: string | undefined): void {
   } catch {}
 }
 
+/**
+ * AMBIENTE C2: variables that MOVE a harness's config directory (or the agentistics store) away from the run's own HOME. A
+ * throwaway that inherited one would register its MCP port in the owner's real configs. Dropped from every `run --rm` env;
+ * the XDG_* dirs are re-set inside the run's HOME. `KIMI_*_HOME` is matched by `isThrowawayEnvDrop`.
+ */
+export const THROWAWAY_ENV_DROP: readonly string[] = [
+  'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GEMINI_CLI_HOME', 'COPILOT_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR',
+  'OPENCODE_CONFIG_CONTENT', 'KIMI_DIR', 'AGENTISTICS_FLOWS', 'AGENTISTICS_DATA_DIR',
+]
+export const isThrowawayEnvDrop = (key: string): boolean => THROWAWAY_ENV_DROP.includes(key) || /^KIMI_.*HOME$/.test(key)
+
 export function buildThrowawayEnv(home: string, name: string, apiPort: number, webPort: number, source: NodeJS.ProcessEnv = process.env, opts: { tmp?: string; heavyHeld?: boolean } = {}): NodeJS.ProcessEnv {
   const tmp = opts.tmp ?? UNSET_RUN_TMP
   // Volta shims locate their toolchains relative to HOME unless VOLTA_HOME is set.
   // Capture the original installation before isolating HOME, or a shim may resolve itself.
   const voltaHome = source.VOLTA_HOME || join(source.HOME || source.USERPROFILE || homedir(), '.volta')
+  const inherited = Object.fromEntries(Object.entries(source).filter(([k]) => !isThrowawayEnvDrop(k) && !/^XDG_(CONFIG|DATA|STATE|CACHE)_HOME$/.test(k)))
   return {
-    ...source,
+    ...inherited,
+    XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local', 'share'),
+    XDG_STATE_HOME: join(home, '.local', 'state'), XDG_CACHE_HOME: join(home, '.cache'),
     ...(source.VOLTA_HOME || existsSync(voltaHome) ? { VOLTA_HOME: voltaHome } : {}),
     HOME: home, USERPROFILE: home, AGENTISTICS_DIR: join(home, '.agentistics'),
     PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1',
@@ -78,15 +95,20 @@ export function buildThrowawayEnv(home: string, name: string, apiPort: number, w
   }
 }
 
+export function readState(name: string): ThrowawayState | null {
+  try { return JSON.parse(readFileSync(statePath(name), 'utf8')) as ThrowawayState } catch { return null }
+}
+
 function usage(): string {
   return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] -- <command...>
        agentop run --rm [--ttl 2h] [--port-offset N] [--name x]
+       agentop run --rm --serve [--seed-from <staging>] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]
        agentop run ls
        agentop run stop <name>`
 }
 
-function stateRoot(): string { return join(process.env.HOME || process.env.USERPROFILE || homedir(), '.cache', STATE_ROOT_NAME) }
-function statePath(name: string): string { return join(stateRoot(), `${name}.json`) }
+export function stateRoot(): string { return join(process.env.HOME || process.env.USERPROFILE || homedir(), '.cache', STATE_ROOT_NAME) }
+export function statePath(name: string): string { return join(stateRoot(), `${name}.json`) }
 function safeName(value: string): string {
   const name = value.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^-+|-+$/g, '')
   if (!name) throw new Error('run name must contain letters, numbers, dot, underscore or hyphen')
@@ -111,11 +133,17 @@ function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'h
   let ttl = DEFAULT_TTL
   let portOffset: number | null = null
   let remove = false
+  let serve = false
+  let seedFrom: string | null = null
+  let cwd: string | null = null
   let command: string[] = []
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (arg === '--') { command = args.slice(i + 1); break }
     if (arg === '--rm') { remove = true; continue }
+    if (arg === '--serve') { serve = true; continue }
+    if (arg === '--seed-from') { seedFrom = args[++i] ?? ''; continue }
+    if (arg === '--cwd') { cwd = args[++i] ?? ''; continue }
     if (arg === '--name') { name = safeName(args[++i] ?? ''); continue }
     if (arg === '--ttl') { ttl = args[++i] ?? ''; parseTtl(ttl); continue }
     if (arg === '--port-offset') {
@@ -127,7 +155,8 @@ function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'h
     throw new Error(`unknown run option: ${arg}`)
   }
   if (!remove) throw new Error('agentop run requires --rm (throwaway runs are always explicit)')
-  return { name, ttl, portOffset, remove, command }
+  if ((seedFrom !== null || cwd !== null) && !serve) throw new Error('--seed-from and --cwd only apply with --serve')
+  return { name, ttl, portOffset, remove, command, serve, seedFrom, cwd }
 }
 
 type ThrowawayPorts = { apiPort: number; webPort: number; reservationPaths: string[] }
@@ -222,7 +251,7 @@ export function releaseThrowawayPorts(reservationPaths: string[] | string | unde
   }
 }
 
-function readStates(): ThrowawayState[] {
+export function readStates(): ThrowawayState[] {
   try { return readdirSync(stateRoot()).flatMap(file => {
     try { return [JSON.parse(readFileSync(join(stateRoot(), file), 'utf8')) as ThrowawayState] } catch { return [] }
   }) } catch { return [] }
@@ -265,7 +294,7 @@ export async function reapRunOwned(home: string, graceMs = 3000, procRoot = '/pr
   return left
 }
 
-async function stopState(state: ThrowawayState): Promise<void> {
+export async function stopState(state: ThrowawayState): Promise<void> {
   if (state.unit && process.platform === 'linux' && existsSync('/run/systemd/system')) {
     const result = spawn('systemctl', ['--user', 'stop', state.unit], { stdio: 'ignore' })
     await new Promise<void>(resolve => { result.once('exit', () => resolve()); result.once('error', () => resolve()) })
@@ -289,7 +318,7 @@ async function listRuns(): Promise<number> {
 }
 
 /** cmdlines of this process's ancestors (Linux /proc); empty where unreadable. */
-function ancestorCmdlines(): string[] {
+export function ancestorCmdlines(): string[] {
   const out: string[] = []
   let pid = process.ppid
   for (let depth = 0; pid > 1 && depth < 32; depth++) {
@@ -302,7 +331,7 @@ function ancestorCmdlines(): string[] {
   return out
 }
 
-function memAvailableBytes(): number | null {
+export function memAvailableBytes(): number | null {
   try {
     const m = /^MemAvailable:\s+(\d+) kB/m.exec(readFileSync('/proc/meminfo', 'utf8'))
     return m ? Number(m[1]) * 1024 : null
@@ -336,7 +365,47 @@ async function waitForMemory(): Promise<boolean> {
   }
 }
 
+/** The data dir the flows write under (`<dataDir>/flows/ambientes/<id>/semente/` is the only place a seed may come from). */
+function realDataDir(): string { return process.env.AGENTISTICS_DATA_DIR || join(homedir(), '.agentistics') }
+
+/** `--seed-from` accepts a path only inside `<dataDir>/flows/ambientes/<id>/semente/` (realpath), never anything else. */
+export function seedSourceOk(path: string, dataDir = realDataDir()): string | null {
+  let real: string
+  try { real = realpathSync(path) } catch { return null }
+  let base: string
+  try { base = realpathSync(join(dataDir, 'flows', 'ambientes')) } catch { return null }
+  const rel = real.startsWith(base + sep) ? real.slice(base.length + 1).split(sep) : null
+  return rel && rel.length >= 2 && rel[1] === 'semente' ? real : null
+}
+
+/** `--cwd` accepts a linked git worktree only (its git-dir differs from the common dir). */
+export function serveCwdOk(dir: string): string | null {
+  try {
+    const real = realpathSync(dir)
+    const env = gitEnv()
+    const run = (a: string[]) => Bun.spawnSync(['git', '-C', real, ...a], { stdout: 'pipe', stderr: 'ignore', env }).stdout.toString().trim()
+    const gd = run(['rev-parse', '--absolute-git-dir']), cd = run(['rev-parse', '--git-common-dir'])
+    if (!gd || !cd) return null
+    const gitDir = realpathSync(gd)
+    const common = realpathSync(join(real, cd))
+    return gitDir !== common ? real : null
+  } catch { return null }
+}
+
+/** `--serve` is long-lived: it must never sit under (or hold a descriptor of) the machine-wide heavy lock. */
+export function serveLockRefusal(env: NodeJS.ProcessEnv, ancestors: string[], fds: number[]): string | null {
+  if (insideHeavyLock(env, ancestors)) return 'agentop run --serve was started inside a heavy job; the server would stay tied to its lock. Run it from outside.'
+  if (fds.length) return `agentop run --serve inherited the heavy lock (fd ${fds.join(', ')}); the server would hold it. Run it from outside.`
+  return null
+}
+
 async function startRun(options: RunOptions): Promise<number> {
+  if (options.serve) {
+    const refusal = serveLockRefusal(process.env, ancestorCmdlines(), heavyLockFds('self'))
+    if (refusal) { console.error(refusal); return 4 }
+    if (options.seedFrom !== null && !seedSourceOk(options.seedFrom)) { console.error('--seed-from must be a staged seed under <dataDir>/flows/ambientes/<id>/semente/'); return 2 }
+    if (options.cwd !== null && !serveCwdOk(options.cwd)) { console.error('--cwd must be a linked git worktree'); return 2 }
+  }
   if (!await waitForMemory()) return 3
   mkdirSync(stateRoot(), { recursive: true, mode: 0o700 })
   if (existsSync(statePath(options.name))) throw new Error(`a throwaway run named ${options.name} already exists`)
@@ -356,10 +425,18 @@ async function startRun(options: RunOptions): Promise<number> {
     throw error
   }
   const { apiPort, webPort, reservationPaths } = ports
+  try {
+    if (options.seedFrom !== null) applySeed(join(seedSourceOk(options.seedFrom)!, '.agentistics'), agentistics)
+    ensureNoStructured(agentistics)
+  } catch (error) {
+    releaseThrowawayPorts(reservationPaths)
+    rmSync(home, { recursive: true, force: true })
+    throw error
+  }
   const state: ThrowawayState = { name: options.name, home, apiPort, webPort, reservationPaths, startedAt: new Date().toISOString(), command: options.command }
   const script = process.argv[1]
   const inside = insideHeavyLock(process.env, ancestorCmdlines())
-  const heavyPrefix = shouldWrapHeavy({
+  const heavyPrefix = options.serve ? [] : shouldWrapHeavy({
     hasCommand: options.command.length > 0, linux: process.platform === 'linux', hasFlock: !!Bun.which('flock'),
     inside,
   }) ? (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'heavy', '--'] : [process.execPath, 'heavy', '--']) : []
@@ -373,7 +450,7 @@ async function startRun(options: RunOptions): Promise<number> {
     const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0 })
     systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
     const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv
-    child = spawn(systemd ? 'systemd-run' : argv[0]!, systemd ? childArgs : argv.slice(1), { env, stdio: 'inherit', detached: !systemd })
+    child = spawn(systemd ? 'systemd-run' : argv[0]!, systemd ? childArgs : argv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
     state.pid = child.pid
     if (systemd) state.unit = unit
     writeFileSync(statePath(options.name), JSON.stringify(state, null, 2), { mode: 0o600 })

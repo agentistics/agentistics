@@ -72,6 +72,25 @@ home contains `.volta`, that installation is pinned in `VOLTA_HOME` before chang
 This lets Volta's bun/node/npm shims find their installed toolchains without repeatedly invoking
 themselves through `PATH`.
 
+Every run also drops the variables that move a harness's config away from the run's own `HOME`
+(`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_CLI_HOME`, `COPILOT_HOME`, `OPENCODE_*`, `KIMI_*_HOME`,
+`AGENTISTICS_DATA_DIR`, `AGENTISTICS_FLOWS`) and points `XDG_*_HOME` inside the run's home, and it
+removes any `structured/` directory from the run's store before starting (live relays belong to the
+real store only).
+
+### `run --serve` (disposable ambiente)
+
+```bash
+agentop run --rm --serve --name amb-x [--seed-from <staging>] [--cwd <worktree>] [--ttl 2h] [-- <server command>]
+```
+
+A long-lived server. Unlike `run --rm -- <cmd>` it is **never** wrapped in `agentop heavy`, and it
+refuses to start (exit 4) from inside a heavy job or with the heavy lock inherited as a descriptor.
+`--cwd` accepts only a linked git worktree. `--seed-from` accepts only a staged seed under
+`<dataDir>/flows/ambientes/<id>/semente/`; only an allow list of the real store (`journal.db`,
+`cache.db`, `git-stats.db`, `index/`, `content/`, `archive/` …) is ever copied, never sessions,
+accounts, the vault or `structured/`. The flows `ambiente-subir` / `ambiente-descer` drive this.
+
 ## `start`
 
 The **control center** — one full-screen application, in the terminal's *alternate buffer*, so it
