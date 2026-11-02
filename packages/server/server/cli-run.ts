@@ -229,7 +229,9 @@ async function portIsFree(port: number): Promise<boolean> {
   return await new Promise(resolve => {
     const server = createServer()
     server.once('error', () => resolve(false))
-    server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)))
+    // The server binds 0.0.0.0 (index.ts), so that is the address to probe: 127.0.0.1 alone misses a
+    // listener on another interface, which still makes the server's own bind fail with EADDRINUSE.
+    server.listen(port, '0.0.0.0', () => server.close(() => resolve(true)))
   })
 }
 

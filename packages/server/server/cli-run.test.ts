@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { spawn } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { buildThrowawayEnv, isRealAgentopPort, releaseThrowawayPorts, reserveThrowawayPorts, runRun, createRunTmp, removeRunTmp, RUN_TMP_PREFIX, SOCKET_PATH_MAX } from './cli-run'
 import { insideHeavyLock } from './resources/mem-guard'
@@ -188,6 +188,21 @@ describe('agentop run --rm', () => {
     try {
       const ports = await reserveThrowawayPorts(address.port)
       try { expect(ports.apiPort).not.toBe(address.port) } finally { releaseThrowawayPorts(ports.reservationPaths) }
+    } finally {
+      await new Promise<void>(resolve => occupied.close(() => resolve()))
+    }
+  })
+
+  integration('skips a port held on a non-loopback address (the server binds 0.0.0.0, not 127.0.0.1)', async () => {
+    const ext = Object.values(networkInterfaces()).flat().find(i => i && i.family === 'IPv4' && !i.internal)?.address
+    if (!ext) return
+    const occupied = createServer()
+    await new Promise<void>(resolve => occupied.listen(0, ext, () => resolve()))
+    const address = occupied.address()
+    if (!address || typeof address === 'string') throw new Error('failed to obtain a test port')
+    try {
+      const ports = await reserveThrowawayPorts(address.port)
+      try { expect([ports.apiPort, ports.webPort]).not.toContain(address.port) } finally { releaseThrowawayPorts(ports.reservationPaths) }
     } finally {
       await new Promise<void>(resolve => occupied.close(() => resolve()))
     }

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ambienteHostOps, carriesPort, defaultAmbienteDeps, purgeCopies, type AmbienteDeps } from './ambiente-host'
@@ -132,6 +132,19 @@ describe('run (I4, I15, I17)', () => {
     const d2 = deps({ readState: () => state(), fetchVersionOk: async () => false, launcherAlive: () => calls++ < 2, now: () => t2, sleep: async ms => { t2 += ms } })
     expect(refused(await ambienteHostOps(d2)['ambiente-run']({ id: 'amb-xyz', worktree: '/w' })).code).toBe('AMB_SUBIR')
     expect(t2).toBeLessThan(5_000); expect(d2.stopped).toEqual(['amb-xyz'])
+  })
+  test('a server that exited names the exit and the last log line, not a timeout', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'amb-log-'))
+    try {
+      let t = 0, calls = 0
+      const d = deps({ readState: () => state(), fetchVersionOk: async () => false, launcherAlive: () => calls++ < 2, now: () => t, sleep: async ms => { t += ms }, dataDir: dir })
+      const logDir = join(dir, 'flows', 'ambientes', 'amb-xyz'); mkdirSync(logDir, { recursive: true })
+      writeFileSync(join(logDir, 'run.log'), 'booting\n[server] Port 48100 is already in use by another agentop server — exiting (75).\n')
+      const r = refused(await ambienteHostOps(d)['ambiente-run']({ id: 'amb-xyz', worktree: '/w' })) as { reason: string }
+      expect(r.reason).toContain('exited')
+      expect(r.reason).toContain('exiting (75)')
+      expect(r.reason).not.toContain('in time')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
   })
   test('M1 a launcher whose run never registers is killed by its own pid; a state that shows up late is stopped', async () => {
     let t = 0
