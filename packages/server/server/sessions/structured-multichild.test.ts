@@ -219,9 +219,12 @@ describe('AGY.MULTICHILD — generations on the durable transport (real relay)',
     expect(r.store.alive()).toContain(r.id)
     expect(r.store.dead()).not.toContain(r.id)
     expect(r.store.endedAt?.(r.id)).toBeNull()
+    // …but no relay PROCESS runs: what a reopen of an ENDED row needs to know (REABRIR.OPENCODE).
+    expect(r.store.running?.(r.id)).toBe(false)
     r.rec.prompt('b')
     await r.answered('b')
     expect(r.store.isAlive(r.id)).toBe(true)
+    expect(r.store.running?.(r.id)).toBe(true)
     expect(r.store.dead()).not.toContain(r.id)
     expect(r.store.endedAt?.(r.id)).toBeNull()
     // The host ending it is an end again.

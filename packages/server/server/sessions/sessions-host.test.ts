@@ -1192,3 +1192,31 @@ describe('LINK.CROSSTALK — two claude sessions in one folder never trade conve
     expect(calls).toEqual([['m1', 'c-new']])
   })
 })
+
+describe('REABRIR.OPENCODE — a claude record never re-links a row of another harness', () => {
+  // A claude started with an opencode pane's environment inherits its TMUX variable and writes a record
+  // naming that pane. Read as the opencode row's own, the poller rewrote the row's `ses_…` to the claude
+  // conversation and its title to the claude session's name; the reopen then targeted the claude
+  // conversation and was refused as "already open in [ LÍDER ] - Brainstorm…" with no opencode alive.
+  const SES = 'ses_e705faa69ffeTha147mWbwRs0z'
+  it('neither the conversation nor the name of a claude record lands on an opencode row', async () => {
+    const convs: Array<[string, string]> = []
+    const names: Array<[string, string]> = []
+    const p = createSessionsPoller({
+      backend: fakeBackend({ sessions: [backendSession('oc1', { alive: false })], panePids: {} }),
+      readRegistry: async () => [managed('oc1', { harness: 'opencode', label: 'opencode work', conversationId: SES })],
+      scanProcesses: async () => ({ procs: [] }),
+      now: () => NOW,
+      loadHarnessSessions: async () => ({
+        byManagedId: new Map([['oc1', { harness: 'claude', sessionId: 'leader-conv', name: '[ LÍDER ] - Brainstorm', nameSince: 5, tmux: 'agentop-oc1:@0.%0' }]]),
+        byPid: new Map(), byConversation: new Map(),
+      } as never),
+      recordConversation: async (id, cid) => { convs.push([id, cid]) },
+      recordHarnessName: async (id, name) => { names.push([id, name]) },
+    })
+    const out = await p.poll()
+    expect(convs).toEqual([])
+    expect(names).toEqual([])
+    expect(out.sessions.find(s => s.id === 'oc1')?.harnessName).toBeUndefined()
+  })
+})
