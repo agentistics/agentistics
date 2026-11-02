@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkSync, writeFileSync, realpathSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
+import { resolveDataDir } from './data-dir'
 import { join } from 'node:path'
 import { gitEnv } from './backup/repo-probe'
-import { parseArgs, buildThrowawayEnv, isThrowawayEnvDrop, seedSourceOk, serveCwdOk, serveLockRefusal, runOwnedPids, THROWAWAY_ENV_DROP, THROWAWAY_ENV_KEEP } from './cli-run'
+import { guardedSeed, realDataDir, parseArgs, buildThrowawayEnv, isThrowawayEnvDrop, seedSourceOk, serveCwdOk, serveLockRefusal, runOwnedPids, THROWAWAY_ENV_DROP, THROWAWAY_ENV_KEEP } from './cli-run'
 import { buildSeed } from './run-seed'
 
 describe('throwaway env (I8, I12)', () => {
@@ -58,6 +60,35 @@ describe('--seed-from / --cwd validation', () => {
   })
 })
 
+describe('linked worktrees, SIGTERM during the seed, empty AGENTISTICS_DIR', () => {
+  const git = (cwd: string, ...a: string[]) => { const r = Bun.spawnSync(['git', '-C', cwd, ...a], { env: gitEnv(), stdout: 'pipe', stderr: 'pipe' }); if (r.exitCode !== 0) throw new Error(r.stderr.toString()); return r.stdout.toString() }
+  test('--cwd accepts a REAL linked worktree (absolute --git-common-dir) and still refuses its main checkout', () => {
+    const main = realpathSync(mkdtempSync(join(tmpdir(), 'ambmain-')))
+    git(main, 'init', '-q', '-b', 'main'); git(main, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x')
+    const wt = join(main, '.worktrees', 'w1')
+    git(main, 'worktree', 'add', '-q', '-b', 'amb/w1', wt)
+    expect(serveCwdOk(wt)).toBe(realpathSync(wt))
+    expect(serveCwdOk(main)).toBeNull()
+  })
+  test('R3 a SIGTERM that arrives during the seed cleans up and reports interrupted; a failing seed cleans and rethrows', async () => {
+    let cleaned = 0
+    const bus = new EventEmitter() as unknown as Pick<NodeJS.Process, 'on' | 'off'>
+    expect(await guardedSeed(() => { (bus as unknown as EventEmitter).emit('SIGTERM') }, () => { cleaned++ }, bus)).toBe('interrupted')
+    expect((bus as unknown as EventEmitter).listenerCount('SIGTERM')).toBe(0)
+    expect(cleaned).toBe(1)
+    expect(await guardedSeed(() => {}, () => { cleaned++ }, bus)).toBe('done')
+    expect(cleaned).toBe(1)
+    await expect(guardedSeed(() => { throw new Error('boom') }, () => { cleaned++ }, bus)).rejects.toThrow('boom')
+    expect(cleaned).toBe(2)
+  })
+  test('R5 an empty AGENTISTICS_DIR means the default in both the config and the launcher', () => {
+    const was = process.env.AGENTISTICS_DIR
+    process.env.AGENTISTICS_DIR = ''
+    try { expect(realDataDir()).toMatch(/\.agentistics$/) } finally { if (was === undefined) delete process.env.AGENTISTICS_DIR; else process.env.AGENTISTICS_DIR = was }
+    expect(resolveDataDir({ env: { AGENTISTICS_DIR: '' }, home: '/h', ownerHome: '/h', makeTemp: () => '/tmp/x' }).dir).toBe('/h/.agentistics')
+  })
+})
+
 describe('only the run\'s own pids (I20)', () => {
   test('a process whose HOME merely starts with the run HOME is not matched', () => {
     const proc = mkdtempSync(join(tmpdir(), 'ambproc-'))
@@ -80,7 +111,7 @@ describe('B3 every path-moving env variable the server reads is dropped or kept 
       for (const e of readdirSync(dir, { withFileTypes: true })) {
         const p = join(dir, e.name)
         if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p); continue }
-        if (!p.endsWith('.ts') || p.endsWith('.test.ts')) continue
+        if (!p.endsWith('.ts') || p.endsWith('.test.ts') || p.endsWith('.generated.ts')) continue
         const text = readFileSync(p, 'utf8')
         for (const m of text.matchAll(ENV_READ)) if (PATH_MOVING.test(m[1]!)) names.add(m[1]!)
         // destructuring: `const { A, B: x } = process.env` / `= env`

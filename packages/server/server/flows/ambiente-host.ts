@@ -55,6 +55,8 @@ export interface AmbienteDeps {
   launch(argv: string[], env: NodeJS.ProcessEnv, logPath: string): number | undefined
   /** Stop the launcher process group by its own pid (never by name). */
   killLauncher(pid: number): void
+  /** Is the launcher process still running? (fail fast when it died before registering.) */
+  launcherAlive(pid: number): boolean
   /** Path of the CLI entry the launcher runs (`agentop` binary, or the source `bin/cli.ts`). */
   cliHead(): string[]
   fetchVersionOk(port: number): Promise<boolean>
@@ -102,6 +104,7 @@ export function defaultAmbienteDeps(): AmbienteDeps {
       } finally { closeSync(fd) }
     },
     fetchVersionOk: async port => { try { return (await fetch(`http://127.0.0.1:${port}/api/version`, { signal: AbortSignal.timeout(2000) })).ok } catch { return false } },
+    launcherAlive: pid => { try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' } },
     killLauncher: pid => { try { process.kill(-pid, 'SIGTERM') } catch { try { process.kill(pid, 'SIGTERM') } catch {} } },
     cliHead: () => { const script = process.argv[1]; return script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script] : [process.execPath] },
     sleep: ms => new Promise(r => setTimeout(r, ms)),
@@ -177,7 +180,13 @@ export function ambienteHostOps(deps: AmbienteDeps = defaultAmbienteDeps()) {
       const t0 = deps.now()
       let state: ThrowawayState | null = null
       const stateWait = seeded ? AMBIENTE_SEED_STATE_WAIT_MS : AMBIENTE_STATE_WAIT_MS
-      while (deps.now() - t0 < stateWait && !(state = deps.readState(id))) await deps.sleep(250)
+      let launcherDied = false
+      while (deps.now() - t0 < stateWait && !(state = deps.readState(id))) {
+        // Fail fast: a launcher that exited without registering never will.
+        if (launcher !== undefined && !deps.launcherAlive(launcher)) { launcherDied = !(state = deps.readState(id)); break }
+        await deps.sleep(250)
+      }
+      if (!state && launcherDied) return refuse('AMB_SUBIR', `the launcher exited before the run registered; see ${logPath}`, ['live launcher'])
       if (!state) {
         // M1: the launcher is ours (its pid came from launch()); a launcher left alive could register and boot a server nobody tracks.
         if (launcher) deps.killLauncher(launcher)
@@ -190,7 +199,10 @@ export function ambienteHostOps(deps: AmbienteDeps = defaultAmbienteDeps()) {
       const tUp = deps.now()
       if (isRealAgentopPort(state.apiPort) || isRealAgentopPort(state.webPort)) { await stop(state); return refuse('AMB_PORTA', `the run got a real agentop port (${state.apiPort}/${state.webPort})`, ['own ports']) }
       let up = false
-      while (deps.now() - tUp < AMBIENTE_UP_WAIT_MS && !(up = await deps.fetchVersionOk(state.apiPort))) await deps.sleep(500)
+      while (deps.now() - tUp < AMBIENTE_UP_WAIT_MS && !(up = await deps.fetchVersionOk(state.apiPort))) {
+        if (launcher !== undefined && !deps.launcherAlive(launcher)) { await stop(state); return refuse('AMB_SUBIR', `the launcher exited before the server answered; see ${logPath}`, ['live launcher']) }
+        await deps.sleep(500)
+      }
       if (!up) { await stop(state); return refuse('AMB_SUBIR', `the server did not answer in ${AMBIENTE_UP_WAIT_MS / 1000}s; see ${logPath}`, ['responding server']) }
       if (existsSync(join(state.home, '.agentistics', 'structured'))) { await stop(state); return refuse('AMB_STRUCTURED', 'live relays exist in the ambiente store', ['no structured/ dir']) }
       if (deps.pidsWithLock(deps.runOwned(state.home)).length) { await stop(state); return refuse('AMB_LOCK', 'a process of the run holds the heavy lock', ['no heavy lock fd']) }

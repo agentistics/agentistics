@@ -34,7 +34,7 @@ function deps(over: Partial<AmbienteDeps> = {}): AmbienteDeps & { stopped: strin
     hasSystemdRun: () => true, memAvailable: () => 8 * 1024 ** 3, ancestors: () => [], lockFds: () => [],
     registry: async () => [], accountRoots: async () => [], runOwned: () => [], pidsWithLock: () => [],
     readState: () => null, stopRun: async s => { stopped.push(s.name) }, launch: argv => { launched.push(argv); return 4242 },
-    fetchVersionOk: async () => true, sleep: async () => {}, killLauncher: p => { killed.push(p) }, cliHead: () => ['/bin/agentop'], stopped, launched, killed, ...over,
+    fetchVersionOk: async () => true, sleep: async () => {}, killLauncher: p => { killed.push(p) }, launcherAlive: () => true, cliHead: () => ['/bin/agentop'], stopped, launched, killed, ...over,
   }
 }
 const state = (over: Partial<ThrowawayState> = {}): ThrowawayState => ({ name: 'amb-xyz', home: tmp('amb-runhome-'), apiPort: 48100, webPort: 48101, startedAt: '', command: [], ...over })
@@ -122,6 +122,16 @@ describe('run (I4, I15, I17)', () => {
     const d = deps({ readState: () => state(), fetchVersionOk: async () => false, now: () => t, sleep: async ms => { t += ms } })
     expect(refused(await ambienteHostOps(d)['ambiente-run']({ id: 'amb-xyz', worktree: '/w' })).code).toBe('AMB_SUBIR')
     expect(d.stopped).toEqual(['amb-xyz'])
+  })
+  test('fail fast: a launcher that died before registering refuses within seconds, not after the full wait', async () => {
+    let t = 0
+    const d = deps({ readState: () => null, launcherAlive: () => false, now: () => t, sleep: async ms => { t += ms } })
+    expect(refused(await ambienteHostOps(d)['ambiente-run']({ id: 'amb-xyz', worktree: '/w' })).code).toBe('AMB_SUBIR')
+    expect(t).toBeLessThan(5_000); expect(d.killed).toEqual([])
+    let t2 = 0, calls = 0
+    const d2 = deps({ readState: () => state(), fetchVersionOk: async () => false, launcherAlive: () => calls++ < 2, now: () => t2, sleep: async ms => { t2 += ms } })
+    expect(refused(await ambienteHostOps(d2)['ambiente-run']({ id: 'amb-xyz', worktree: '/w' })).code).toBe('AMB_SUBIR')
+    expect(t2).toBeLessThan(5_000); expect(d2.stopped).toEqual(['amb-xyz'])
   })
   test('M1 a launcher whose run never registers is killed by its own pid; a state that shows up late is stopped', async () => {
     let t = 0
