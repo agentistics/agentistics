@@ -132,6 +132,71 @@ export function purgeCopies(dir: string): void {
 export const ambienteId = (nome: string): string => `amb-${nome}`
 
 export function ambienteHostOps(deps: AmbienteDeps = defaultAmbienteDeps()) {
+  /** The sentinel check shared by `ambiente-mcp-depois` and every refusal of `ambiente-run` (R2): rehash, restore, purge the plaintext copies. `null` = no snapshot. */
+  const checkMcp = async (id: string, apiPort: number, waitMs = 0): Promise<{ restored: string[]; changedByOthers: string[] } | null> => {
+    const dir = join(ambDir(deps, id), 'mcp-antes')
+    let manifest: { files: Array<McpTarget & { n: number; sha256: string | null }> }
+    try { manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) } catch { return null }
+    if (waitMs) await deps.sleep(waitMs)
+    const restored: string[] = [], changedByOthers: string[] = []
+    for (const f of manifest.files) {
+      const now = readOrNull(f.path)
+      if ((now ? sha256(now) : null) === f.sha256) continue
+      if (carriesPort(now, apiPort) && !carriesPort(readOrNull(join(dir, `${f.n}.copy`)), apiPort)) {
+        if (f.sha256 === null) rmSync(f.path, { force: true })
+        else { const target = (() => { try { return realpathSync(f.path) } catch { return f.path } })(); const tmp = `${target}.amb-${process.pid}`; writeFileSync(tmp, readFileSync(join(dir, `${f.n}.copy`)), { mode: 0o600 }); renameSync(tmp, target) }
+        restored.push(`${f.harness}:${f.path}`)
+      } else changedByOthers.push(`${f.harness}:${f.path}`)
+    }
+    // M3: the copies may hold provider keys; they exist only to restore. Gone as soon as the check is done (manifest.json keeps the hashes).
+    purgeCopies(dir)
+    if (changedByOthers.length) { try { writeFileSync(join(ambDir(deps, id), 'diario.log'), `${new Date(deps.now()).toISOString()} changed by others: ${changedByOthers.join(', ')}\n`, { flag: 'a', mode: 0o600 }) } catch {} }
+    return { restored, changedByOthers }
+  }
+
+  /** Step 11–12: launch the server, wait for it, and run the checks that must hold once it is up. */
+  const runAmbiente = async (value: unknown, track: { apiPort: number | null }) => {
+      const i = inputOf(value)
+      const id = str(i.id), worktree = str(i.worktree), ttl = str(i.ttl) || '2h'
+      const nome = id.replace(/^amb-/, '')
+      if (!AMBIENTE_NOME.test(nome) || !worktree) return refuse('AMB_ENTRADA', 'id and worktree are required', ['id', 'worktree'])
+      const portOffset = i.portOffset === undefined || i.portOffset === null ? null : Number(i.portOffset)
+      if (portOffset !== null && (!Number.isInteger(portOffset) || portOffset < 0 || isRealAgentopPort(47291 + portOffset) || isRealAgentopPort(47292 + portOffset))) return refuse('AMB_PORTA', 'that port offset lands on the real agentop ports', ['safe port offset'])
+      const comando = Array.isArray(i.comando) ? i.comando.filter((x): x is string => typeof x === 'string') : []
+      const seeded = i.semente === 'copia'
+      const head = deps.cliHead()
+      const argv = [...head, 'run', '--rm', '--serve', '--name', id, '--ttl', ttl, ...(portOffset !== null ? ['--port-offset', String(portOffset)] : []),
+        ...(seeded ? ['--seed-real'] : []), '--cwd', worktree, ...(comando.length ? ['--', ...comando] : [])]
+      const out = join(deps.dataDir, 'flows', 'ambientes', id, 'saida')
+      mkdirSync(out, { recursive: true, mode: 0o700 })
+      const logPath = join(ambDir(deps, id), 'run.log')
+      const env: NodeJS.ProcessEnv = { ...deps.env, AGENTISTICS_RUN_NO_WAIT: '1', AGENTISTICS_AMBIENTE: id, AGENTISTICS_AMBIENTE_OUT: out }
+      delete env.AGENTISTICS_HEAVY_JOB
+      const launcher = deps.launch(argv, env, logPath)
+      const stop = async (s: ThrowawayState | null) => { if (s) await deps.stopRun(s).catch(() => {}) }
+      const t0 = deps.now()
+      let state: ThrowawayState | null = null
+      const stateWait = seeded ? AMBIENTE_SEED_STATE_WAIT_MS : AMBIENTE_STATE_WAIT_MS
+      while (deps.now() - t0 < stateWait && !(state = deps.readState(id))) await deps.sleep(250)
+      if (!state) {
+        // M1: the launcher is ours (its pid came from launch()); a launcher left alive could register and boot a server nobody tracks.
+        if (launcher) deps.killLauncher(launcher)
+        await deps.sleep(2000)
+        const late = deps.readState(id)
+        if (late) await stop(late)
+        return refuse('AMB_SUBIR', `the run did not register in ${stateWait / 1000}s; see ${logPath}`, ['run state'])
+      }
+      track.apiPort = state.apiPort
+      const tUp = deps.now()
+      if (isRealAgentopPort(state.apiPort) || isRealAgentopPort(state.webPort)) { await stop(state); return refuse('AMB_PORTA', `the run got a real agentop port (${state.apiPort}/${state.webPort})`, ['own ports']) }
+      let up = false
+      while (deps.now() - tUp < AMBIENTE_UP_WAIT_MS && !(up = await deps.fetchVersionOk(state.apiPort))) await deps.sleep(500)
+      if (!up) { await stop(state); return refuse('AMB_SUBIR', `the server did not answer in ${AMBIENTE_UP_WAIT_MS / 1000}s; see ${logPath}`, ['responding server']) }
+      if (existsSync(join(state.home, '.agentistics', 'structured'))) { await stop(state); return refuse('AMB_STRUCTURED', 'live relays exist in the ambiente store', ['no structured/ dir']) }
+      if (deps.pidsWithLock(deps.runOwned(state.home)).length) { await stop(state); return refuse('AMB_LOCK', 'a process of the run holds the heavy lock', ['no heavy lock fd']) }
+      return { ok: true, run: { name: state.name, home: state.home, apiPort: state.apiPort, webPort: state.webPort, unit: state.unit ?? null, pid: state.pid ?? launcher ?? null, tmp: state.tmp ?? null }, saida: out, log: logPath }
+  }
+
   return {
     /** repo name → its root path, from the registry's recorded repositories (I1: no input is a path). */
     'ambiente-repo': async (value: unknown) => {
@@ -224,44 +289,15 @@ export function ambienteHostOps(deps: AmbienteDeps = defaultAmbienteDeps()) {
 
     /** Step 11–12: launch the server, wait for it, and run the checks that must hold once it is up. */
     'ambiente-run': async (value: unknown) => {
-      const i = inputOf(value)
-      const id = str(i.id), worktree = str(i.worktree), ttl = str(i.ttl) || '2h'
-      const nome = id.replace(/^amb-/, '')
-      if (!AMBIENTE_NOME.test(nome) || !worktree) return refuse('AMB_ENTRADA', 'id and worktree are required', ['id', 'worktree'])
-      const portOffset = i.portOffset === undefined || i.portOffset === null ? null : Number(i.portOffset)
-      if (portOffset !== null && (!Number.isInteger(portOffset) || portOffset < 0 || isRealAgentopPort(47291 + portOffset) || isRealAgentopPort(47292 + portOffset))) return refuse('AMB_PORTA', 'that port offset lands on the real agentop ports', ['safe port offset'])
-      const comando = Array.isArray(i.comando) ? i.comando.filter((x): x is string => typeof x === 'string') : []
-      const seeded = i.semente === 'copia'
-      const head = deps.cliHead()
-      const argv = [...head, 'run', '--rm', '--serve', '--name', id, '--ttl', ttl, ...(portOffset !== null ? ['--port-offset', String(portOffset)] : []),
-        ...(seeded ? ['--seed-real'] : []), '--cwd', worktree, ...(comando.length ? ['--', ...comando] : [])]
-      const out = join(deps.dataDir, 'flows', 'ambientes', id, 'saida')
-      mkdirSync(out, { recursive: true, mode: 0o700 })
-      const logPath = join(ambDir(deps, id), 'run.log')
-      const env: NodeJS.ProcessEnv = { ...deps.env, AGENTISTICS_RUN_NO_WAIT: '1', AGENTISTICS_AMBIENTE: id, AGENTISTICS_AMBIENTE_OUT: out }
-      delete env.AGENTISTICS_HEAVY_JOB
-      const launcher = deps.launch(argv, env, logPath)
-      const stop = async (s: ThrowawayState | null) => { if (s) await deps.stopRun(s).catch(() => {}) }
-      const t0 = deps.now()
-      let state: ThrowawayState | null = null
-      const stateWait = seeded ? AMBIENTE_SEED_STATE_WAIT_MS : AMBIENTE_STATE_WAIT_MS
-      while (deps.now() - t0 < stateWait && !(state = deps.readState(id))) await deps.sleep(250)
-      if (!state) {
-        // M1: the launcher is ours (its pid came from launch()); a launcher left alive could register and boot a server nobody tracks.
-        if (launcher) deps.killLauncher(launcher)
-        await deps.sleep(2000)
-        const late = deps.readState(id)
-        if (late) await stop(late)
-        return refuse('AMB_SUBIR', `the run did not register in ${stateWait / 1000}s; see ${logPath}`, ['run state'])
-      }
-      const tUp = deps.now()
-      if (isRealAgentopPort(state.apiPort) || isRealAgentopPort(state.webPort)) { await stop(state); return refuse('AMB_PORTA', `the run got a real agentop port (${state.apiPort}/${state.webPort})`, ['own ports']) }
-      let up = false
-      while (deps.now() - tUp < AMBIENTE_UP_WAIT_MS && !(up = await deps.fetchVersionOk(state.apiPort))) await deps.sleep(500)
-      if (!up) { await stop(state); return refuse('AMB_SUBIR', `the server did not answer in ${AMBIENTE_UP_WAIT_MS / 1000}s; see ${logPath}`, ['responding server']) }
-      if (existsSync(join(state.home, '.agentistics', 'structured'))) { await stop(state); return refuse('AMB_STRUCTURED', 'live relays exist in the ambiente store', ['no structured/ dir']) }
-      if (deps.pidsWithLock(deps.runOwned(state.home)).length) { await stop(state); return refuse('AMB_LOCK', 'a process of the run holds the heavy lock', ['no heavy lock fd']) }
-      return { ok: true, run: { name: state.name, home: state.home, apiPort: state.apiPort, webPort: state.webPort, unit: state.unit ?? null, pid: state.pid ?? launcher ?? null, tmp: state.tmp ?? null }, saida: out, log: logPath }
+      // R2: whichever way this op ends in a refusal, the sentinel check (when the server booted) and the copy cleanup still run.
+      const track: { apiPort: number | null } = { apiPort: null }
+      const result = await runAmbiente(value, track)
+      const id = str(inputOf(value).id)
+      if ((result as { ok?: boolean }).ok === true || !/^amb-[a-z0-9-]{3,32}$/.test(id)) return result
+      if (track.apiPort === null) { purgeCopies(join(ambDir(deps, id), 'mcp-antes')); return result }
+      const checked = await checkMcp(id, track.apiPort)
+      if (checked && checked.restored.length) return { ...refuse('AMB_MCP', `the ambiente rewrote real configs: ${checked.restored.join(', ')} (restored); run refused earlier: ${(result as { code?: string }).code}`, ['untouched real configs']), restored: checked.restored, alertOwner: true }
+      return result
     },
 
     /** Step 12 (MCP): rehash; a file that now carries the ambiente's port is restored byte for byte and the run stopped. */
@@ -270,23 +306,9 @@ export function ambienteHostOps(deps: AmbienteDeps = defaultAmbienteDeps()) {
       const id = str(i.id), apiPort = Number(i.apiPort)
       const waitMs = Math.min(Math.max(Number(i.waitMs ?? 0), 0), 30_000)
       if (!/^amb-[a-z0-9-]{3,32}$/.test(id) || !Number.isInteger(apiPort)) return refuse('AMB_ENTRADA', 'id and apiPort are required', ['id', 'apiPort'])
-      const dir = join(ambDir(deps, id), 'mcp-antes')
-      let manifest: { files: Array<McpTarget & { n: number; sha256: string | null }> }
-      try { manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) } catch { return refuse('AMB_MCP', 'no sentinel snapshot for this ambiente', ['mcp-antes']) }
-      if (waitMs) await deps.sleep(waitMs)
-      const restored: string[] = [], changedByOthers: string[] = []
-      for (const f of manifest.files) {
-        const now = readOrNull(f.path)
-        if ((now ? sha256(now) : null) === f.sha256) continue
-        if (carriesPort(now, apiPort) && !carriesPort(readOrNull(join(dir, `${f.n}.copy`)), apiPort)) {
-          if (f.sha256 === null) rmSync(f.path, { force: true })
-          else { const target = (() => { try { return realpathSync(f.path) } catch { return f.path } })(); const tmp = `${target}.amb-${process.pid}`; writeFileSync(tmp, readFileSync(join(dir, `${f.n}.copy`)), { mode: 0o600 }); renameSync(tmp, target) }
-          restored.push(`${f.harness}:${f.path}`)
-        } else changedByOthers.push(`${f.harness}:${f.path}`)
-      }
-      // M3: the copies may hold provider keys; they exist only to restore. Gone as soon as the check is done (manifest.json keeps the hashes).
-      purgeCopies(dir)
-      if (changedByOthers.length) { try { writeFileSync(join(ambDir(deps, id), 'diario.log'), `${new Date(deps.now()).toISOString()} changed by others: ${changedByOthers.join(', ')}\n`, { flag: 'a', mode: 0o600 }) } catch {} }
+      const checked = await checkMcp(id, apiPort, waitMs)
+      if (checked === null) return refuse('AMB_MCP', 'no sentinel snapshot for this ambiente', ['mcp-antes'])
+      const { restored, changedByOthers } = checked
       if (restored.length) {
         const s = deps.readState(id)
         if (s) await deps.stopRun(s).catch(() => {})

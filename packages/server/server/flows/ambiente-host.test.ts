@@ -264,3 +264,39 @@ describe('parar / sessoes / home (I20, descer gates)', () => {
     expect(refused(await ops['ambiente-home-sem-repo']({ home })).code).toBe('AMB_REPO_NO_HOME')
   })
 })
+
+describe('R2 every refusal after the server booted still runs the sentinel check and the copy cleanup', () => {
+  /** A real config the "boot" rewrote with the ambiente's URL, then each refusal path; the file must come back and only manifest.json stay. */
+  const rig = async (over: Partial<AmbienteDeps>) => {
+    const st0 = state(); const d = deps({ readState: () => st0, ...over }); const cj = join(d.home, '.claude.json'); writeFileSync(cj, '{"n":1}')
+    const ops = ambienteHostOps(d); await ops['ambiente-mcp-antes']({ id: 'amb-xyz' })
+    const dir = join(d.dataDir, 'flows', 'ambientes', 'amb-xyz', 'mcp-antes')
+    expect(readdirSync(dir).some(n => n.endsWith('.copy'))).toBe(true)
+    writeFileSync(cj, '{"n":1,"mcp":"http://localhost:48100"}')
+    const r = await ops['ambiente-run']({ id: 'amb-xyz', worktree: '/w' }) as { code?: string; restored?: string[]; alertOwner?: boolean }
+    return { r, cj, dir, d }
+  }
+  const settled = (x: { cj: string; dir: string; r: { restored?: string[] } }) => { expect(readFileSync(x.cj, 'utf8')).toBe('{"n":1}'); expect(readdirSync(x.dir)).toEqual(['manifest.json']); expect(x.r.restored?.length).toBe(1) }
+  test('AMB_SUBIR (server never answered)', async () => {
+    let t = 0
+    const x = await rig({ fetchVersionOk: async () => false, now: () => t, sleep: async ms => { t += ms } }); expect(x.r.code).toBe('AMB_MCP'); expect(x.d.stopped).toEqual(['amb-xyz']); settled(x)
+  })
+  test('AMB_PORTA (the run got a real port)', async () => {
+    const x = await rig({ readState: () => state({ apiPort: 47291, webPort: 47292 }) }); expect(x.r.code).toBe('AMB_PORTA'); expect(x.d.stopped).toEqual(['amb-xyz'])
+    expect(readdirSync(x.dir)).toEqual(['manifest.json'])  // the real port is not the ambiente's (48100) so nothing is restored, but the copies are gone
+  })
+  test('AMB_STRUCTURED', async () => {
+    const st = state(); mkdirSync(join(st.home, '.agentistics', 'structured'), { recursive: true })
+    const x = await rig({ readState: () => st }); expect(x.r.code).toBe('AMB_MCP'); expect(x.d.stopped).toEqual(['amb-xyz']); settled(x)
+  })
+  test('AMB_LOCK', async () => { const x = await rig({ pidsWithLock: () => [99], runOwned: () => [99] }); expect(x.r.code).toBe('AMB_MCP'); expect(x.d.stopped).toEqual(['amb-xyz']); settled(x) })
+  test('AMB_SUBIR (the run never registered): copies purged', async () => {
+    let t = 0
+    const x = await rig({ readState: () => null, now: () => t, sleep: async ms => { t += ms } }); expect(x.r.code).toBe('AMB_SUBIR'); expect(readdirSync(x.dir)).toEqual(['manifest.json'])
+  })
+  test('early refusal (bad offset) purges too', async () => {
+    const d = deps(); writeFileSync(join(d.home, '.claude.json'), '{}'); const ops = ambienteHostOps(d); await ops['ambiente-mcp-antes']({ id: 'amb-xyz' })
+    const dir = join(d.dataDir, 'flows', 'ambientes', 'amb-xyz', 'mcp-antes')
+    expect(refused(await ops['ambiente-run']({ id: 'amb-xyz', worktree: '/w', portOffset: 0 })).code).toBe('AMB_PORTA'); expect(readdirSync(dir)).toEqual(['manifest.json'])
+  })
+})

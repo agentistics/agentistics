@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, symlinkS
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gitEnv } from './backup/repo-probe'
-import { buildThrowawayEnv, isThrowawayEnvDrop, seedSourceOk, serveCwdOk, serveLockRefusal, runOwnedPids, THROWAWAY_ENV_DROP, THROWAWAY_ENV_KEEP } from './cli-run'
+import { parseArgs, buildThrowawayEnv, isThrowawayEnvDrop, seedSourceOk, serveCwdOk, serveLockRefusal, runOwnedPids, THROWAWAY_ENV_DROP, THROWAWAY_ENV_KEEP } from './cli-run'
 import { buildSeed } from './run-seed'
 
 describe('throwaway env (I8, I12)', () => {
@@ -68,8 +68,12 @@ describe('only the run\'s own pids (I20)', () => {
   })
 })
 
+/** Every read form used in the repo: `process.env.X`, `env.X`, `process.env['X']`, `env["X"]`. */
+const ENV_READ = /(?:process\.env|\benv)(?:\.|\[\s*['"])([A-Z][A-Z0-9_]+)/g
+const PATH_MOVING = /(_HOME|_DIR|_FILE|_DB|_PATH|CONFIG)/
+
 describe('B3 every path-moving env variable the server reads is dropped or kept on purpose', () => {
-  test('lint: process.env.X with _HOME/_DIR/_FILE/CONFIG in server sources is in THROWAWAY_ENV_DROP or THROWAWAY_ENV_KEEP (with a reason)', () => {
+  test('lint: every env read form (process.env.X, env.X, brackets, destructuring, helper getters) of a _HOME/_DIR/_FILE/_DB/_PATH/CONFIG name in server sources is in THROWAWAY_ENV_DROP or THROWAWAY_ENV_KEEP (with a reason)', () => {
     const root = join(import.meta.dir)
     const names = new Set<string>()
     const walk = (dir: string) => {
@@ -77,7 +81,12 @@ describe('B3 every path-moving env variable the server reads is dropped or kept 
         const p = join(dir, e.name)
         if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p); continue }
         if (!p.endsWith('.ts') || p.endsWith('.test.ts')) continue
-        for (const m of readFileSync(p, 'utf8').matchAll(/process\.env\.([A-Z0-9_]+)/g)) if (/(_HOME|_DIR|_FILE|CONFIG)/.test(m[1]!)) names.add(m[1]!)
+        const text = readFileSync(p, 'utf8')
+        for (const m of text.matchAll(ENV_READ)) if (PATH_MOVING.test(m[1]!)) names.add(m[1]!)
+        // destructuring: `const { A, B: x } = process.env` / `= env`
+        for (const d of text.matchAll(/\{([^{}]*)\}\s*=\s*(?:process\.env|env)\b/g)) for (const k of d[1]!.matchAll(/\b([A-Z][A-Z0-9_]+)\b/g)) if (PATH_MOVING.test(k[1]!)) names.add(k[1]!)
+        // helper getters: `getenv('X')`, `readEnv("X")`, `envVar('X')`, `env.get('X')`
+        for (const h of text.matchAll(/\b(?:\w*[eE]nv\w*)(?:\.get)?\(\s*['"]([A-Z][A-Z0-9_]+)['"]/g)) if (PATH_MOVING.test(h[1]!)) names.add(h[1]!)
       }
     }
     walk(root)
@@ -87,7 +96,7 @@ describe('B3 every path-moving env variable the server reads is dropped or kept 
     for (const reason of Object.values(THROWAWAY_ENV_KEEP)) expect(reason.length).toBeGreaterThan(10)
   })
   test('a parent env that relocates the journal/archive/harness homes does not reach the run', () => {
-    const src = { HOME: '/real', AGENTISTICS_JOURNAL_DIR: '/real/j', AGENTISTICS_ARCHIVE_DIR: '/real/a', AGENTISTICS_GIT_STATS_CACHE_FILE: '/real/g', CLAUDE_DIR: '/c', HERMES_HOME: '/h', CODEX_DIR: '/x' }
+    const src = { HOME: '/real', OPENCODE_DB: '/real/o.db', OPENCODE_DIR: '/real/o', CLAUDE_SECURESTORAGE_CONFIG_DIR: '/real/s', AGENTISTICS_JOURNAL_DIR: '/real/j', AGENTISTICS_ARCHIVE_DIR: '/real/a', AGENTISTICS_GIT_STATS_CACHE_FILE: '/real/g', CLAUDE_DIR: '/c', HERMES_HOME: '/h', CODEX_DIR: '/x' }
     const env = buildThrowawayEnv('/tmp/h', 'amb-x', 48100, 48101, src, { tmp: '/tmp/t' })
     for (const k of Object.keys(src).filter(k => k !== 'HOME')) expect(env[k]).toBeUndefined()
   })
@@ -106,5 +115,13 @@ describe('B1 seeds come from AGENTISTICS_DIR; B4 --seed-real builds in the launc
     mkdirSync(join(src, 'content')); writeFileSync(join(src, 'content', 'c'), 'c'); mkdirSync(join(src, 'structured')); writeFileSync(join(src, 'accounts.json'), '{}')
     expect(buildSeed(src, dst)).toEqual(['content'])
     expect(existsSync(join(dst, 'structured'))).toBe(false); expect(existsSync(join(dst, 'accounts.json'))).toBe(false)
+  })
+})
+
+describe('R4 --seed-real wiring in parseArgs', () => {
+  test('needs --serve, is exclusive with --seed-from, and is carried through', () => {
+    expect(() => parseArgs(['--rm', '--seed-real'])).toThrow(/only apply with --serve/)
+    expect(() => parseArgs(['--rm', '--serve', '--seed-real', '--seed-from', '/x'])).toThrow(/exclusive/)
+    expect(parseArgs(['--rm', '--serve', '--seed-real', '--cwd', '/w'])).toMatchObject({ serve: true, seedReal: true, seedFrom: null, cwd: '/w' })
   })
 })
