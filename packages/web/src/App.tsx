@@ -171,7 +171,7 @@ import { sessionLinks } from './lib/sessionParent'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
 import { BUNDLE_VERSION, healStaleBundle, takeUpdatedToast } from './lib/bundleVersion'
-import { pinnedUpdate, firstVersionRetryMs, promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
+import { pinnedUpdate, createVersionChecker, promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
 import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
@@ -2198,47 +2198,34 @@ export default function AppLayout() {
   // focus (`versionRefetchDue`) — it used to read it once, so a tab open when a release shipped never
   // heard of it. Only the FIRST answer may restore the page state after an in-place upgrade.
   useEffect(() => {
-    let lastAt: number | null = null
-    let first = true
-    let firstTries = 0
-    let cancelled = false
-    const check = (trigger: 'interval' | 'focus', reconnected = false) => {
-      const now = Date.now()
-      if (!versionRefetchDue({ now, lastAt: reconnected ? null : lastAt, trigger, visible: document.visibilityState === 'visible' })) return
-      lastAt = now
-      const isFirst = first
-      first = false
-      // The FIRST ask is the one that puts the person back on their route after an update, and it
-      // lands while the server is still restarting. An unanswered first ask used to spend that
-      // chance for good (the next one is 5 minutes away and no longer "first"), so the route was
-      // never restored. It is retried quietly until the server answers.
-      const unanswered = () => {
-        if (!isFirst || cancelled) return
-        first = true
-        lastAt = null
-        window.setTimeout(() => { if (!cancelled) check('focus') }, firstVersionRetryMs(firstTries++))
-      }
-      fetch('/api/version', { cache: 'no-store' })
-        .then(r => r.ok ? r.json() : null)
-        .then(async (info: VersionAnswer | null) => {
-          if (!info) { unanswered(); return }
-          if (cancelled) return
-          // A bundle the server is not running (a service worker's precached copy of a previous
-          // release) drops the worker + caches and reloads ONCE onto the server's own version
-          // (`bundleVersion.ts`). Checked on load, on every poll, on focus and on reconnect.
-          if (!upgradeInFlight() && (await healStaleBundle(info.current)).kind === 'reload') return
-          setVersionAnswer(info)
-          if (!isFirst) return
-          // Back from an in-place upgrade on the bundle it was for: put the person where they were
-          // and play the finale. `consumeRestore` refuses an old bundle, an expired or foreign snapshot.
-          const back = consumeRestore(info.current)
-          if (!back) return
-          const here = `${window.location.pathname}${window.location.search}${window.location.hash}`
-          if (back.url !== here) navigate(back.url, { replace: true })
-          if (back.scrollY > 0) window.setTimeout(() => window.scrollTo({ top: back.scrollY }), 120)
-        })
-        .catch(() => { unanswered() })
-    }
+    const checker = createVersionChecker<VersionAnswer>({
+      now: Date.now,
+      visible: () => document.visibilityState === 'visible',
+      // The deadline covers the BODY: a server restarting mid-answer used to leave this ask pending forever.
+      ask: async () => {
+        try {
+          const r = await fetchJsonWithTimeout<VersionAnswer>('/api/version', SMALL_TIMEOUT_MS, { cache: 'no-store' })
+          return r.ok && r.json ? r.json : null
+        } catch { return null }
+      },
+      schedule: (fn, ms) => { window.setTimeout(fn, ms) },
+      onAnswer: async (info, isFirst) => {
+        // A bundle the server is not running (a service worker's precached copy of a previous
+        // release) drops the worker + caches and reloads ONCE onto the server's own version
+        // (`bundleVersion.ts`). Checked on load, on every poll, on focus and on reconnect.
+        if (!upgradeInFlight() && (await healStaleBundle(info.current)).kind === 'reload') return
+        setVersionAnswer(info)
+        if (!isFirst) return
+        // Back from an in-place upgrade on the bundle it was for: put the person where they were
+        // and play the finale. `consumeRestore` refuses an old bundle, an expired or foreign snapshot.
+        const back = consumeRestore(info.current)
+        if (!back) return
+        const here = `${window.location.pathname}${window.location.search}${window.location.hash}`
+        if (back.url !== here) navigate(back.url, { replace: true })
+        if (back.scrollY > 0) window.setTimeout(() => window.scrollTo({ top: back.scrollY }), 120)
+      },
+    })
+    const check = checker.check
     // The reload above leaves one line behind it: "Agentistics atualizado para vX".
     const updatedTo = takeUpdatedToast()
     // The first load of a new version: when it has curated notes the line leads to them
@@ -2263,7 +2250,7 @@ export default function AppLayout() {
     // is most likely: ask at once.
     window.addEventListener('online', onVisible)
     return () => {
-      cancelled = true
+      checker.dispose()
       offConnected()
       window.clearInterval(tick)
       document.removeEventListener('visibilitychange', onVisible)

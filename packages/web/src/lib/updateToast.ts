@@ -212,3 +212,45 @@ export function promptExit(exit: PromptExit, info: Pick<VersionAnswer, 'current'
 export function firstVersionRetryMs(attempt: number): number {
   return Math.min(5000, 1000 * (Math.max(0, attempt) + 1))
 }
+
+/**
+ * The version check as a driver with its dependencies handed in, so the "back to the same route"
+ * promise is testable: the FIRST ask is the one that restores the route after an update, and it
+ * lands while the server is restarting. An unanswered first ask (refused, 5xx, a stalled body that
+ * hit its deadline) is not spent — it is retried quietly (`firstVersionRetryMs`) until it answers.
+ * Later asks never retry (the poll and the focus ask cover them).
+ */
+export interface VersionChecker<T> { check(trigger: 'interval' | 'focus', reconnected?: boolean): void; dispose(): void }
+export function createVersionChecker<T>(d: {
+  now: () => number
+  visible: () => boolean
+  /** Resolves the answer, or null for ANY failure (network, status, body deadline). */
+  ask: () => Promise<T | null>
+  /** Handles an answer; `isFirst` tells it whether this is the one that may restore the page. */
+  onAnswer: (info: T, isFirst: boolean) => Promise<void> | void
+  schedule: (fn: () => void, ms: number) => void
+}): VersionChecker<T> {
+  let lastAt: number | null = null
+  let first = true
+  let tries = 0
+  let cancelled = false
+  const check = (trigger: 'interval' | 'focus', reconnected = false): void => {
+    const now = d.now()
+    if (!versionRefetchDue({ now, lastAt: reconnected ? null : lastAt, trigger, visible: d.visible() })) return
+    lastAt = now
+    const isFirst = first
+    first = false
+    const unanswered = (): void => {
+      if (!isFirst || cancelled) return
+      first = true
+      lastAt = null
+      d.schedule(() => { if (!cancelled) check('focus') }, firstVersionRetryMs(tries++))
+    }
+    d.ask().then(async info => {
+      if (info === null) { unanswered(); return }
+      if (cancelled) return
+      await d.onAnswer(info, isFirst)
+    }).catch(unanswered)
+  }
+  return { check, dispose: () => { cancelled = true } }
+}
