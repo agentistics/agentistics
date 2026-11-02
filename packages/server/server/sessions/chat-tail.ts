@@ -694,6 +694,19 @@ export async function countCompactions(path: string): Promise<number | null> {
   return n
 }
 
+/** Copilot twin of `countCompactions`: applied compactions in `events.jsonl`. `null` = unreadable. */
+export function countCopilotCompactionLines(content: string): number {
+  let n = 0
+  for (const line of content.split('\n')) {
+    if (!line.includes('"session.compaction_complete"')) continue
+    try { if (JSON.parse(line)?.data?.success === true) n++ } catch { /* torn tail line */ }
+  }
+  return n
+}
+export async function countCopilotCompactions(path: string): Promise<number | null> {
+  try { return countCopilotCompactionLines(await readFile(path, 'utf-8')) } catch { return null }
+}
+
 export async function readChatTurns(path: string, max = 400): Promise<ChatTurn[]> {
   return (await readChatWindow(path, max)).turns
 }

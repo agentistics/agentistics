@@ -854,3 +854,15 @@ describe('Claude per-tool failures', () => {
     expect(d).toContain('*** Add File: packages/a/src/y.ts')
   })
 })
+
+import { countCopilotCompactionLines } from './chat-tail'
+test('copilot compactions: only applied (success) compaction_complete lines count', () => {
+  const c = [
+    '{"type":"session.compaction_start","data":{}}',
+    '{"type":"session.compaction_complete","data":{"success":true,"outcome":"applied"}}',
+    '{"type":"session.compaction_complete","data":{"success":false}}',
+    '{"type":"session.compaction_complete","data":{"succ',
+  ].join('\n')
+  expect(countCopilotCompactionLines(c)).toBe(1)
+  expect(countCopilotCompactionLines('')).toBe(0)
+})

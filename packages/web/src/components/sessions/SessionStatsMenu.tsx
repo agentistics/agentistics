@@ -503,6 +503,12 @@ export function SessionStatsMenu({
               k={pt ? 'Esforço' : 'Effort'}
               v={startedEffort ?? (pt ? 'padrão do harness' : 'the harness default')}
             />
+            {s.quotaExhaustedAt && (
+              <Line
+                k={pt ? 'Plano' : 'Plan'}
+                v={pt ? 'cota mensal esgotada' : 'monthly quota exhausted'}
+              />
+            )}
             {/* A count of what has already been thrown away, beside the gauge of what is left. */}
             <Line
               k={pt ? 'Compactações' : 'Compactions'}

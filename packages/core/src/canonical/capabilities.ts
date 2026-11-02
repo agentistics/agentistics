@@ -125,8 +125,6 @@ export const LEGACY_FALSE_NOTES: LegacyFalseNotes = {
   },
   copilot: {
     agents: { state: 'not_supported', reason: 'Sub-agent metrics are not available in Copilot local event logs.', source: `${INFO}.copilot.missing (Sub-agent metrics)` },
-    contextWindow: { state: 'not_supported', reason: "Copilot's only token report is a cumulative one written at shutdown, and a cumulative total is not a context size.", source: `${TYPES} HarnessCapabilities.contextWindow docstring` },
-    compaction: COMPACTION,
     mcpServers: { state: 'not_supported', reason: 'Copilot keeps MCP names in mcp_tool_names and never records the server.', source: `${TYPES} HarnessCapabilities.mcpServers docstring` },
   },
   antigravity: {
@@ -256,7 +254,7 @@ export const CAPABILITY_REFINEMENTS: CapabilityRefinements = {
     tools: { source: `${P2}; ${REPLAY('gemini')}`, state: { state: 'partial', exactness: 'exact', limit: 'counted from the `toolCalls` of response records in both chat shapes.' } },
   },
   copilot: {
-    tokens: { source: `${P2}; ${REPLAY('copilot')}`, state: { state: 'partial', exactness: 'exact', limit: 'only at session.shutdown, one cumulative report per model; a crashed session has none (absent, never zero).' } },
+    tokens: { source: `${P2}; ${REPLAY('copilot')}`, state: { state: 'partial', exactness: 'exact', limit: 'the per-call session.usage_record (Copilot CLI >= 1.0.105) or, failing that, the one cumulative report at session.shutdown; a log with neither has none (absent, never zero).' } },
     cost: { source: `${P2}; ${REPLAY('copilot')}`, state: { state: 'partial', exactness: 'estimated', limit: 'priced from the table over the shutdown-only totals; see tokens.' } },
     gitLines: { source: `${P2}; ${REPLAY('copilot')}`, state: { state: 'partial', exactness: 'exact', limit: 'one aggregate for the whole session at shutdown (codeChanges); no per-call attribution.' } },
   },

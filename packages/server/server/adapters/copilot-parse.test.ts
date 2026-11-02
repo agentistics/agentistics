@@ -253,3 +253,48 @@ test('a shutdown with empty modelMetrics flags tokens unavailable instead of rep
 test('reported usage is never flagged unavailable', () => {
   expect(parseCopilotEvents(SAMPLE_WITH_SHUTDOWN, 'fb')!.tokens_unavailable).toBeUndefined()
 })
+
+// Cut from a real Copilot CLI 1.0.105 log (numbers kept, ids/text/paths dropped).
+const rec = (inT: number, out: number, cr: number, cw: number, ts: string) => JSON.stringify({
+  type: 'session.usage_record', timestamp: ts,
+  data: { usage: { model: 'gpt-5.6-luna', inputTokens: inT, outputTokens: out, cacheReadTokens: cr, cacheWriteTokens: cw, reasoningTokens: 51, maxPromptTokens: 200000 } },
+})
+const LIVE = [
+  JSON.stringify({ type: 'session.start', timestamp: '2026-11-01T09:08:37.653Z', data: { sessionId: 'live1', startTime: '2026-11-01T09:08:37.653Z', context: { cwd: '/p' } } }),
+  JSON.stringify({ type: 'user.message', timestamp: '2026-11-01T09:08:40.000Z', data: { content: 'go' } }),
+  rec(30580, 190, 17594, 12983, '2026-11-01T09:08:44.000Z'),
+  rec(42000, 300, 30000, 500, '2026-11-01T09:09:44.000Z'),
+  JSON.stringify({ type: 'session.compaction_complete', timestamp: '2026-11-01T09:10:00.000Z', data: { success: true, outcome: 'applied' } }),
+  JSON.stringify({ type: 'session.compaction_complete', timestamp: '2026-11-01T09:11:00.000Z', data: { success: false } }),
+].join('\n')
+
+test('a live session (no shutdown) reports tokens, model and context from the per-call records', () => {
+  const s = parseCopilotEvents(LIVE, 'f')!
+  expect(s.input_tokens).toBe(72580)
+  expect(s.output_tokens).toBe(490)
+  expect(s.cache_read_input_tokens).toBe(47594)
+  expect(s.model).toBe('gpt-5.6-luna')
+  expect(s.tokens_unavailable).toBeUndefined()
+  expect(s.context_tokens).toBe(42000)
+  expect(s.context_window).toBe(200000)
+  expect(s.compact_count).toBe(1)
+})
+
+test('shutdown stays authoritative: per-call records are not added on top of it', () => {
+  const withShutdown = LIVE + '\n' + JSON.stringify({ type: 'session.shutdown', timestamp: '2026-11-01T09:12:00.000Z', data: { currentModel: 'gpt-5.6-luna', modelMetrics: { 'gpt-5.6-luna': { usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 } } } } })
+  const s = parseCopilotEvents(withShutdown, 'f')!
+  expect(s.input_tokens).toBe(100)
+})
+
+test('a session that never called a model leaves context and compactions absent', () => {
+  const s = parseCopilotEvents(TOOLS, 'f')!
+  expect(s.context_tokens).toBeUndefined()
+  expect(s.context_window).toBeUndefined()
+  expect(s.compact_count).toBeUndefined()
+})
+
+test('a quota error is recorded with its time, in plain data', () => {
+  const q = LIVE + '\n' + JSON.stringify({ type: 'session.error', timestamp: '2026-11-01T09:13:00.000Z', data: { errorType: 'quota', errorCode: 'quota_exceeded', statusCode: 402, message: 'You have exceeded your monthly quota' } })
+  expect(parseCopilotEvents(q, 'f')!.quota_exhausted_at).toBe('2026-11-01T09:13:00.000Z')
+  expect(parseCopilotEvents(LIVE, 'f')!.quota_exhausted_at).toBeUndefined()
+})

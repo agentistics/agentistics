@@ -45,6 +45,8 @@ export interface SessionStats {
   git: { commits: number; added: number; removed: number; files: number } | null
   activeMinutes: number | null
   model: string | null
+  /** Copilot: when the harness last refused a call for an exhausted monthly quota. Present only then. */
+  quotaExhaustedAt?: string
 }
 
 /** Why a metric is absent, in the words the panel prints. Absent when the metric IS available. */
@@ -152,6 +154,7 @@ export function sessionStats(
       : null,
     activeMinutes: caps?.activeTime ? num(meta.active_minutes) : null,
     model,
+    ...(typeof meta.quota_exhausted_at === 'string' ? { quotaExhaustedAt: meta.quota_exhausted_at } : {}),
   }
 }
 

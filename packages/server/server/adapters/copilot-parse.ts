@@ -36,6 +36,16 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
   let filesModified = 0
   let copilotCredits: { nanoAiu: number; premiumRequests: number } | undefined
 
+  // Per-call report (`session.usage_record`, one per model call — Copilot CLI 1.0.105). The only
+  // token report a session that never reached `session.shutdown` (a live one) has, and the only
+  // per-turn prompt size, which is what a context gauge needs.
+  let recIn = 0, recOut = 0, recCacheRead = 0, recCacheWrite = 0, recCalls = 0
+  let recModel: string | undefined
+  let lastPrompt = 0
+  let promptWindow = 0
+  let compactCount = 0
+  let quotaExhaustedAt: string | undefined
+
   const userMessageTimestamps: string[] = []
   const messageHours: number[] = []
   // Per-turn timeline for computeActiveTime() (docs/harness-contract.md). Copilot brackets every
@@ -108,8 +118,23 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
       // this the open turn would run to the last line of the file, which can be hours of idle —
       // measured on a real session: aborted at 20:13:05, file ends 23:34.
       if (turnEvent) turnEvent.turnEnd = true
+    } else if (type === 'session.usage_record') {
+      const u = data.usage
+      if (u && typeof u === 'object') {
+        const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
+        recCalls++
+        recIn += n(u.inputTokens); recOut += n(u.outputTokens)
+        recCacheRead += n(u.cacheReadTokens); recCacheWrite += n(u.cacheWriteTokens)
+        if (typeof u.model === 'string' && u.model) recModel = u.model
+        // inputTokens is the WHOLE prompt of the call (cache included): the context in use.
+        if (n(u.inputTokens) > 0) lastPrompt = n(u.inputTokens)
+        if (n(u.maxPromptTokens) > 0) promptWindow = n(u.maxPromptTokens)
+      }
+    } else if (type === 'session.compaction_complete') {
+      if (data.success === true) compactCount++
     } else if (type === 'session.error') {
       toolErrors++
+      if (data.errorType === 'quota' || data.errorCode === 'quota_exceeded') quotaExhaustedAt = ts
     } else if (type === 'tool.execution_start') {
       // Copilot names its tool and hands over its arguments here. This is why the capability table
       // said `tools: false` for years while the data was sitting in the transcript.
@@ -179,6 +204,14 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
     }
   }
 
+  // Shutdown's cumulative report is authoritative when present; the per-call records stand in for
+  // a session that has not shut down (never both — they describe the same calls).
+  if (recCalls > 0 && !sawUsage) {
+    sawUsage = true
+    inputTokens = recIn; outputTokens = recOut; cacheReadTokens = recCacheRead; cacheWriteTokens = recCacheWrite
+  }
+  if (model === undefined && recModel) model = recModel
+
   const durationMinutes = startTime && endTime
     ? Math.max(0, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 60000)
     : 0
@@ -228,6 +261,12 @@ export function parseCopilotEvents(content: string, fallbackId: string): Session
     mcp_tool_call_count: mcpToolCallCount,
     mcp_tool_names: mcpToolNamesSet.size > 0 ? Array.from(mcpToolNamesSet) : undefined,
     ...(copilotCredits ? { copilot_credits: copilotCredits } : {}),
+    // The gauge: the LAST call's whole prompt over the window the harness named for it.
+    ...(lastPrompt > 0 ? { context_tokens: lastPrompt } : {}),
+    ...(promptWindow > 0 ? { context_window: promptWindow } : {}),
+    // 0 is a real answer once the log has any model call at all (a session that never compacted).
+    ...(recCalls > 0 || compactCount > 0 ? { compact_count: compactCount } : {}),
+    ...(quotaExhaustedAt ? { quota_exhausted_at: quotaExhaustedAt } : {}),
   }
 }
 

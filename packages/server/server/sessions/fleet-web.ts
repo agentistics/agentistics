@@ -1169,6 +1169,19 @@ export async function readConversationFacts(
   if (capability && !capability.compaction) {
     return { unavailable: compactionAbsent(row.harness ?? '', pt) }
   }
+  if (row.harness === 'copilot') {
+    // Copilot's own marker: one `session.compaction_complete` (success true) per applied compaction.
+    const { resolveCopilotTranscript } = await import('./harness-transcript')
+    const { countCopilotCompactions } = await import('./chat-tail')
+    const cp = await resolveCopilotTranscript({ conversationId: row.conversationId, cwd: row.cwd } as never).catch(() => null)
+    if (!cp) {
+      return { unavailable: pt ? 'A transcrição desta conversa não foi encontrada nesta máquina.' : 'This conversation’s transcript was not found on this machine.' }
+    }
+    const c = await countCopilotCompactions(cp)
+    return c === null
+      ? { unavailable: pt ? 'Não foi possível ler a transcrição.' : 'The transcript could not be read.' }
+      : { compactions: c }
+  }
   const { countCompactions, resolveClaudeTranscriptAnyAccount } = await import('./chat-tail')
   const path = await resolveClaudeTranscriptAnyAccount(row.cwd, row.conversationId).catch(() => null)
   if (!path) {

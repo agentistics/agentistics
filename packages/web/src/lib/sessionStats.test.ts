@@ -82,3 +82,13 @@ test('tokens_unavailable: the source stated no usage, so tokens, pair and cost a
   expect(s.conversation).toBeNull()
   expect(s.costUSD).toBeNull()
 })
+
+test('copilot parity: context gauge and quota come through for copilot', () => {
+    const st = sessionStats('copilot', 'c', {
+      session_id: 'c', harness: 'copilot', model: 'gpt-5.6-luna', input_tokens: 1, output_tokens: 1,
+      context_tokens: 50_000, context_window: 200_000, quota_exhausted_at: '2026-11-01T09:13:00.000Z',
+    } as never)
+    expect(st.context?.window).toBe(200_000)
+    expect(st.context?.fraction).toBeCloseTo(0.25)
+    expect(st.quotaExhaustedAt).toBe('2026-11-01T09:13:00.000Z')
+})

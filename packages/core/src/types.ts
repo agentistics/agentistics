@@ -101,9 +101,9 @@ export interface HarnessCapabilities {
   contextWindow: boolean
   /**
    * The harness records when it compacted the conversation, so `compact_count` can be filled.
-   * Claude Code writes a `compact_boundary` system line with a `compactMetadata` block; no other
-   * harness has an equivalent marker, so the profile's compaction figures are absent there rather
-   * than zero.
+   * Claude Code writes a `compact_boundary` system line with a `compactMetadata` block; Copilot writes
+   * `session.compaction_complete`; no other harness has an equivalent marker, so the profile's
+   * compaction figures are absent there rather than zero.
    */
   compaction: boolean
   /**
@@ -146,7 +146,7 @@ export const HARNESS_CAPABILITIES: Record<SurfaceHarnessId, HarnessCapabilities>
   // `tools` was false while `tool.execution_start` had been carrying the tool name and its
   // arguments all along — the flag was out of date, not the data missing. Verified against a real
   // events.jsonl before flipping it.
-  copilot: { tokens: true,  cost: true,  model: true,  tools: true,  agents: false, gitLines: true,  dynamicWorkflows: false, activeTime: true,  contextWindow: false, compaction: false, skills: false, mcpServers: false },
+  copilot: { tokens: true,  cost: true,  model: true,  tools: true,  agents: false, gitLines: true,  dynamicWorkflows: false, activeTime: true,  contextWindow: true,  compaction: true,  skills: false, mcpServers: false },
   // Antigravity (agy): tokens + model come from the `gen_metadata` protobuf blobs in
   // ~/.gemini/antigravity-cli/conversations/<id>.db (decoded by adapters/antigravity-protobuf.ts)
   // and cost is derived from them via calcCost().
@@ -419,6 +419,9 @@ export interface SessionMeta {
    * dropped nothing. See `compactsFromClaudeJsonl`.
    */
   compact_count?: number
+  /** Copilot only: when the harness last refused a call for an exhausted monthly quota
+   *  (`session.error` `errorType: quota`). Absent means none was recorded, not "has quota". */
+  quota_exhausted_at?: string
   compact_ms?: number
   compact_dropped_tokens?: number
   /** Skill invocations by name (`superpowers:brainstorming`), from the `Skill` tool_use.
