@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { planBudget, planPace, type PlanLimits } from '@agentistics/core'
 import {
-  checkinAccountLimits, checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, deliveredOpenLine, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
+  checkinAccountLimits, checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, deliveredOpenLine, fechamentoLines, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   runNow, checkinTick, resetCheckinSweep, type CheckinAction, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
 
@@ -327,6 +327,37 @@ describe('check-in agenda', () => {
     setCheckinDeps({ ...testDeps, readDeliveredOpen: async () => [{ sessionId: 'wk-1', handbackAt: 'x' }] })
     expect(await runNow(leader.conversationId, 1_000)).toBe(true)
     expect(prompts[0].text).toBe(promptFor(defaultConfig()) + deliveredOpenLine([{ sessionId: 'wk-1', handbackAt: 'x' }]))
+  })
+
+  test('F5.b: the three groups — not saved (with the reason), still open, ready to clean — each only when it has someone', () => {
+    expect(fechamentoLines({ abertos: [], prontosParaLimpar: [], naoSalvos: [] })).toBe('')
+    const only = (k: 'abertos' | 'prontosParaLimpar' | 'naoSalvos', items: FechamentoItem[]) => fechamentoLines({ abertos: [], prontosParaLimpar: [], naoSalvos: [], [k]: items })
+    const open = only('abertos', [{ sessionId: 'wk-1', handbackAt: 'x' }, { sessionId: 'wk-2', handbackAt: 'y', reason: 'session is not confirmed stopped' }])
+    expect(open).toContain('Entregaram e seguem abertos: wk-1; wk-2 (session is not confirmed stopped)')
+    expect(open).not.toContain('Prontos para limpar'); expect(open).not.toContain('NÃO salvo')
+    const ready = only('prontosParaLimpar', [{ sessionId: 'wk-3', handbackAt: 'z' }])
+    expect(ready).toContain('Prontos para limpar (já fechados, a pasta de trabalho ainda existe): wk-3')
+    expect(ready).toContain('limpeza-real'); expect(ready).not.toContain('seguem abertos')
+    const unsaved = only('naoSalvos', [{ sessionId: 'wk-4', handbackAt: 'w', reason: 'working tree is dirty', missing: ['b.txt'] }, { sessionId: 'wk-5', handbackAt: 'v' }])
+    expect(unsaved).toContain('Trabalho NÃO salvo')
+    expect(unsaved).toContain('wk-4 — working tree is dirty (falta: b.txt)')
+    expect(unsaved).toContain('wk-5 — motivo não registrado')
+    const all = fechamentoLines({ abertos: [{ sessionId: 'a', handbackAt: '1' }], prontosParaLimpar: [{ sessionId: 'b', handbackAt: '2' }], naoSalvos: [{ sessionId: 'c', handbackAt: '3', reason: 'r' }] })
+    expect(all.indexOf('NÃO salvo')).toBeLessThan(all.indexOf('seguem abertos'))
+    expect(all.indexOf('seguem abertos')).toBeLessThan(all.indexOf('Prontos para limpar'))
+  })
+
+  test('F5.b: the leader prompt carries the groups when the engine has them, else falls back to the old line', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    const groups = { abertos: [], prontosParaLimpar: [], naoSalvos: [{ sessionId: 'wk-9', handbackAt: 'x', reason: 'working tree is dirty' }] }
+    setCheckinDeps({ ...testDeps, readFechamento: async () => groups, readDeliveredOpen: async () => [{ sessionId: 'old', handbackAt: 'x' }] })
+    expect(await runNow(leader.conversationId, 1_000)).toBe(true)
+    expect(prompts[0].text).toBe(promptFor(defaultConfig()) + fechamentoLines(groups))
+    expect(prompts[0].text).not.toContain('old')
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    setCheckinDeps({ ...testDeps, readFechamento: async () => null, readDeliveredOpen: async () => [{ sessionId: 'old', handbackAt: 'x' }] })
+    expect(await runNow(leader.conversationId, 1_000)).toBe(true)
+    expect(prompts[0].text).toContain('old')
   })
 
   test('away mode adds a no-owner line to the leader prompt', async () => {
