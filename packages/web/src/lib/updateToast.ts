@@ -205,3 +205,10 @@ export function promptExit(exit: PromptExit, info: Pick<VersionAnswer, 'current'
     bell: { type: critical ? 'warning' : 'info', code: UPDATE_NOTICE_CODE, meta: { version: info.latest, from: info.current, critical } },
   }
 }
+
+/** How long to wait before asking `/api/version` again when the FIRST ask got no answer (the server
+ *  is restarting after an update): 1 s, 2 s, 3 s … settling at 5 s, so the route is restored the moment
+ *  it answers and never spends a request storm waiting. */
+export function firstVersionRetryMs(attempt: number): number {
+  return Math.min(5000, 1000 * (Math.max(0, attempt) + 1))
+}

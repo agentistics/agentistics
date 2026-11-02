@@ -1,3 +1,4 @@
+import { fetchJsonWithTimeout, SMALL_TIMEOUT_MS } from './startupLoad'
 /**
  * sharedPref.ts — state that belongs to the WORK, kept where every device can see it.
  *
@@ -320,9 +321,11 @@ function loadEndpoint(endpoint: string): Promise<void> {
   if (running) return running
   const run = (async () => {
     try {
-      const res = await fetch(endpoint)
-      if (!res.ok) return
-      const doc = await res.json() as Record<string, unknown>
+      // A deadline over the whole read: this promise is awaited by the boot (`loadPersonalPrefs`), so
+      // one that never settled kept the boot screen up forever. A timeout lands in the catch below.
+      const res = await fetchJsonWithTimeout<Record<string, unknown>>(endpoint, SMALL_TIMEOUT_MS)
+      if (!res.ok || !res.json) return
+      const doc = res.json
       const writable = res.headers.get('X-Prefs-Writable') !== 'false'
       if (writable) armed.add(endpoint)
       else armed.delete(endpoint)

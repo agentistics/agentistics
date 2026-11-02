@@ -171,12 +171,12 @@ import { sessionLinks } from './lib/sessionParent'
 import { ChatSelectionOverlay } from './components/sessions/ChatSelectionBar'
 import { brandAsset } from './lib/brand'
 import { BUNDLE_VERSION, healStaleBundle, takeUpdatedToast } from './lib/bundleVersion'
-import { pinnedUpdate, promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
+import { pinnedUpdate, firstVersionRetryMs, promptDismissedFor, promptExit, shouldShowToast, versionRefetchDue, type PromptExit, type VersionAnswer } from './lib/updateToast'
 import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateSnooze, useUpgradeFlow } from './lib/upgradeFlow'
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
 import { HOST_SESSION_PATH, resolveHostSessionRefresh } from './lib/hostSession'
-import { bootSlowLine, bootWatchdog, fetchWithTimeout, holdLoadError, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
+import { bootSlowLine, bootWatchdog, fetchJsonWithTimeout, fetchWithTimeout, holdLoadError, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
 import { sinceUpdate, useFinaleActive } from './lib/finaleGate'
 import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
 
@@ -2156,10 +2156,10 @@ export default function AppLayout() {
         // mode, team, billing, the gates); every CHOICE comes from `/api/user-prefs`, which is per
         // ACCOUNT on a central. The choice keys are stripped from the first one, so on a central
         // nobody reads the theme, language or card order somebody else saved in the shared file.
-        const [r, personal] = await Promise.all([fetchWithTimeout('/api/preferences', SMALL_TIMEOUT_MS), loadPersonalPrefs()])
+        const [r, personal] = await Promise.all([fetchJsonWithTimeout<Record<string, unknown>>('/api/preferences', SMALL_TIMEOUT_MS), loadPersonalPrefs()])
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        if (personal === null) throw new Error('user-prefs unavailable')
-        const prefs = await r.json() as Record<string, unknown>
+        if (personal === null || !r.json) throw new Error('user-prefs unavailable')
+        const prefs = r.json
         if (cancelled) return
         const merged: Record<string, unknown> = { ...prefs }
         for (const k of APP_CHOICE_KEYS) delete merged[k]
@@ -2200,6 +2200,7 @@ export default function AppLayout() {
   useEffect(() => {
     let lastAt: number | null = null
     let first = true
+    let firstTries = 0
     let cancelled = false
     const check = (trigger: 'interval' | 'focus', reconnected = false) => {
       const now = Date.now()
@@ -2207,10 +2208,21 @@ export default function AppLayout() {
       lastAt = now
       const isFirst = first
       first = false
+      // The FIRST ask is the one that puts the person back on their route after an update, and it
+      // lands while the server is still restarting. An unanswered first ask used to spend that
+      // chance for good (the next one is 5 minutes away and no longer "first"), so the route was
+      // never restored. It is retried quietly until the server answers.
+      const unanswered = () => {
+        if (!isFirst || cancelled) return
+        first = true
+        lastAt = null
+        window.setTimeout(() => { if (!cancelled) check('focus') }, firstVersionRetryMs(firstTries++))
+      }
       fetch('/api/version', { cache: 'no-store' })
         .then(r => r.ok ? r.json() : null)
         .then(async (info: VersionAnswer | null) => {
-          if (!info || cancelled) return
+          if (!info) { unanswered(); return }
+          if (cancelled) return
           // A bundle the server is not running (a service worker's precached copy of a previous
           // release) drops the worker + caches and reloads ONCE onto the server's own version
           // (`bundleVersion.ts`). Checked on load, on every poll, on focus and on reconnect.
@@ -2225,7 +2237,7 @@ export default function AppLayout() {
           if (back.url !== here) navigate(back.url, { replace: true })
           if (back.scrollY > 0) window.setTimeout(() => window.scrollTo({ top: back.scrollY }), 120)
         })
-        .catch(() => {})
+        .catch(() => { unanswered() })
     }
     // The reload above leaves one line behind it: "Agentistics atualizado para vX".
     const updatedTo = takeUpdatedToast()

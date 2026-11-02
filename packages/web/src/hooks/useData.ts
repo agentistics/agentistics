@@ -7,7 +7,7 @@ import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { eventStream, subscribeEvent } from '../lib/eventStream'
 import { isUsableDataCache } from '../lib/dataCache'
 import { afterFinale, sinceUpdate } from '../lib/finaleGate'
-import { acceptPayload, classifyLoadError, holdLoadError, inUpdateGrace, DATA_TIMEOUT_MS, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, dataUrl, SLIM_FOLLOWUP_MS, type LoadError, type StartupStripState } from '../lib/startupLoad'
+import { acceptPayload, classifyLoadError, holdLoadError, inUpdateGrace, DATA_TIMEOUT_MS, fetchJsonWithTimeout, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, dataUrl, SLIM_FOLLOWUP_MS, type LoadError, type StartupStripState } from '../lib/startupLoad'
 import { cacheFiguresOf } from '../lib/cacheFigures'
 import { useNativeVisible } from './useEngineCaps'
 import { startDataRefresh } from '../lib/dataRefresh'
@@ -461,11 +461,11 @@ export function useData(working = false) {
     flight.inFlight = true
     const epoch = patchEpochRef.current
     try {
-      let res: Response
-      try { res = await fetchWithTimeout(dataUrl(dataRef.current !== null), DATA_TIMEOUT_MS) } catch (err) { throw classifyLoadError(err) }
+      let res: Awaited<ReturnType<typeof fetchJsonWithTimeout>>
+      try { res = await fetchJsonWithTimeout(dataUrl(dataRef.current !== null), DATA_TIMEOUT_MS) } catch (err) { throw classifyLoadError(err) }
       if (!res.ok) throw classifyLoadError(null, res.status)
-      let fresh: unknown
-      try { fresh = await res.json() } catch (err) { throw classifyLoadError(err) }
+      if (res.parseError) throw classifyLoadError(res.parseError)
+      const fresh: unknown = res.json
       if (!isUsableDataCache(fresh)) throw classifyLoadError(new Error("the answer is not this app's data"))
       if (epoch !== patchEpochRef.current) return
       const next = fresh as AppData

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { acceptPayload, dataUrl, livenessStep, bootSlowLine, bootWatchdog, classifyLoadError, holdLoadError, loadErrorText, partialPollMs, POST_UPDATE_GRACE_MS, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
+import { fetchJsonWithTimeout, acceptPayload, dataUrl, livenessStep, bootSlowLine, bootWatchdog, classifyLoadError, holdLoadError, loadErrorText, partialPollMs, POST_UPDATE_GRACE_MS, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
 
 describe('classifyLoadError', () => {
   test('a status is a server error and keeps the HTTP detail the auth gates read', () => {
@@ -123,5 +123,68 @@ describe('the boot right after an update', () => {
     expect(bootSlowLine('en', 5000)).toContain('just restarted')
     expect(bootSlowLine('pt', null)).toBe('Ainda carregando — o servidor está respondendo.')
     expect(bootSlowLine('en', null)).toBe('Still loading — the server is answering.')
+  })
+})
+
+describe('fetchJsonWithTimeout — the deadline covers the body', () => {
+  const realFetch = globalThis.fetch
+  const restore = () => { globalThis.fetch = realFetch }
+
+  // A response whose headers arrive at once and whose body never does (a server restarting mid-answer).
+  const stalledBody = (signal: AbortSignal | null | undefined) => ({
+    ok: true, status: 200, headers: new Headers(),
+    json: () => new Promise((_, reject) => signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))),
+  }) as unknown as Response
+
+  test('a body that never arrives times out instead of hanging the boot', async () => {
+    globalThis.fetch = (async (_u: unknown, init?: RequestInit) => stalledBody(init?.signal)) as typeof fetch
+    try {
+      const err = await fetchJsonWithTimeout('/api/data', 30).catch(e => e)
+      expect(classifyLoadError(err).kind).toBe('timeout')
+    } finally { restore() }
+  })
+
+  test('server unreachable, then ready: the next ask succeeds', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => {
+      if (++calls === 1) throw new TypeError('Failed to fetch')
+      return { ok: true, status: 200, headers: new Headers(), json: async () => ({ ok: 1 }) } as unknown as Response
+    }) as unknown as typeof fetch
+    try {
+      const first = await fetchJsonWithTimeout('/api/data', 100).catch(e => e)
+      expect(classifyLoadError(first).kind).toBe('unreachable')
+      const second = await fetchJsonWithTimeout<{ ok: number }>('/api/data', 100)
+      expect(second.ok && second.json?.ok).toBe(1)
+    } finally { restore() }
+  })
+
+  test('an HTML body (old bundle behind a proxy page) is reported, not thrown', async () => {
+    globalThis.fetch = (async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => { throw new SyntaxError('Unexpected token <') } }) as unknown as Response) as unknown as typeof fetch
+    try {
+      const r = await fetchJsonWithTimeout('/api/data', 100)
+      expect(classifyLoadError(r.parseError).kind).toBe('incompatible')
+    } finally { restore() }
+  })
+})
+
+describe('an update with the server out for a few seconds renders no error', () => {
+  const kinds = [
+    { kind: 'unreachable', detail: 'Failed to fetch' }, { kind: 'timeout', detail: 'aborted' },
+    { kind: 'server', status: 503, detail: 'HTTP 503' }, { kind: 'unreachable', status: 502, detail: 'HTTP 502' },
+  ] as const
+  test('every failure of a restarting server is held as the loader, for minutes', () => {
+    for (const since of [0, 5_000, 60_000, 200_000]) {
+      for (const e of kinds) expect(holdLoadError({ ...e }, since)).toBe(true)
+      // the watchdog never turns the boot into the "can't reach / try again" screen in that window
+      expect(bootWatchdog(UNREACHABLE_AFTER_MS + 30_000, 'down', since)).not.toBe('unreachable')
+    }
+  })
+  test('a real, prolonged outage is still reported once the grace is spent', () => {
+    expect(holdLoadError({ kind: 'unreachable', detail: 'x' }, POST_UPDATE_GRACE_MS + 1)).toBe(false)
+    expect(bootWatchdog(UNREACHABLE_AFTER_MS, 'down', POST_UPDATE_GRACE_MS + 1)).toBe('unreachable')
+  })
+  test('the first /api/version ask is retried quietly until the server answers, so the route is restored', async () => {
+    const { firstVersionRetryMs } = await import('./updateToast')
+    expect([0, 1, 2, 10].map(firstVersionRetryMs)).toEqual([1000, 2000, 3000, 5000])
   })
 })

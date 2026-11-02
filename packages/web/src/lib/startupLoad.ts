@@ -83,6 +83,30 @@ export async function fetchWithTimeout(url: string, ms: number, init: RequestIni
   }
 }
 
+/**
+ * A fetch whose deadline covers the BODY too. `fetchWithTimeout` clears its timer when the headers
+ * arrive, so `await res.json()` after it could hang forever on a stalled connection (a server that
+ * restarted mid-answer, a phone on a relay) — the boot screen then never left, `refresh` stayed
+ * "in flight" and every later retry queued behind it. Here the abort stays armed until the body is
+ * read; a deadline hit rejects with an AbortError (`classifyLoadError` → 'timeout').
+ */
+export async function fetchJsonWithTimeout<T = unknown>(url: string, ms: number, init: RequestInit = {}): Promise<{ ok: boolean; status: number; headers: Headers; json: T | undefined; parseError?: unknown }> {
+  const ctl = new AbortController()
+  const t = setTimeout(() => ctl.abort(), ms)
+  try {
+    const res = await fetch(url, { ...init, signal: ctl.signal })
+    if (!res.ok) return { ok: false, status: res.status, headers: res.headers, json: undefined }
+    try {
+      return { ok: true, status: res.status, headers: res.headers, json: await res.json() as T }
+    } catch (err) {
+      if ((err as { name?: string } | null)?.name === 'AbortError') throw err
+      return { ok: true, status: res.status, headers: res.headers, json: undefined, parseError: err }
+    }
+  } finally {
+    clearTimeout(t)
+  }
+}
+
 export type BootVerdict = 'loading' | 'slow' | 'unreachable'
 
 /**
@@ -97,13 +121,13 @@ export const SLOW_AFTER_MS = 5000
 export const UNREACHABLE_AFTER_MS = 8000
 /**
  * Right after an in-app update the page reloads seconds after the NEW server first answered — a
- * server known to be up, still building its first data (measured ~11 s, with a ~5 s stretch where a
+ * server known to be up, still building its first data (measured ~11 s on a small history, minutes on a large one, with stretches where a
  * probe can miss its deadline). For this long after such a boot a missed probe or a failed first load
  * is "still starting", never "can't reach agentistics": that screen, with its Try again, is what
  * appeared under the end of every update. Past it, a server that still does not answer is reported
  * exactly as before. `sinceUpdateMs` is `null` on an ordinary boot (`finaleGate.ts` `sinceUpdate`).
  */
-export const POST_UPDATE_GRACE_MS = 90_000
+export const POST_UPDATE_GRACE_MS = 300_000
 export function inUpdateGrace(sinceUpdateMs: number | null | undefined): boolean {
   return sinceUpdateMs !== null && sinceUpdateMs !== undefined && sinceUpdateMs < POST_UPDATE_GRACE_MS
 }
