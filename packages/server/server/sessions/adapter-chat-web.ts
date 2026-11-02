@@ -16,9 +16,11 @@ import type { SessionSnapshot } from './sessions-host'
 import { featureOn } from '@agentistics/core'
 import { engine } from '../engine/load'
 import {
-  adapterChatResponse, pickAdapterChat, readAdapterChat, refuseAdapter, sameAdapterSource,
-  type AdapterChatRow, type AdapterSourceKind,
+  adapterChatResponse, historyOf, pickAdapterChat, readAdapterChat, readAdapterHistory, refuseAdapter,
+  sameAdapterSource, searchAdapterHistory,
+  type AdapterChatRow, type AdapterSearchAnswer, type AdapterSourceKind,
 } from './adapter-chat'
+import { anyGrant, scrubDeep } from '../vault/grants'
 import { finishChatRead, MAX_TURNS } from './chat-web'
 import { acquireChatSlot, onChatStreamsReset, onChatWake, releaseChatSlot } from './chat-stream'
 import { pendingFor } from './pending-prompts'
@@ -139,8 +141,19 @@ export async function openAdapterChatStream(
   })
 }
 
-/** `GET /api/fleet/chat` through the engine's channel, or `null` for the legacy read. */
-export async function readAdapterChatPayload(host: StartHost, lang: CliLang, id: string) {
+/**
+ * `GET /api/fleet/chat` through the engine's channel, or `null` for the legacy read.
+ *
+ * V-READ: a harness whose chat DECLARES history is read by `history()` — the snapshot page, or an older
+ * page when `before` (+ `snapshot`) come back from a previous answer. Only its `absent` falls through to
+ * the follow-based read below; `ready` (even `[]`), `pending` and `error` are answered as themselves.
+ */
+export async function readAdapterChatPayload(
+  host: StartHost,
+  lang: CliLang,
+  id: string,
+  page: { before?: string; snapshot?: string; signal?: AbortSignal } = {},
+) {
   const hub = await fleetSessionHub().catch(() => null)
   if (!hub) return null
   const row = await findRow(hub, lang, id).catch(() => null)
@@ -148,15 +161,57 @@ export async function readAdapterChatPayload(host: StartHost, lang: CliLang, id:
     ?? (await onAccountRoot(id) ? null : pickAdapterChat(row ?? undefined, true, chatOf))
   if (!row || !picked) return null
   const { chat, conversationId } = picked
-  const out = await readAdapterChat({
+  const common = {
     conversationId,
     chat,
     row,
     pending: pendingFor(conversationId, []).map(p => p.text),
     max: MAX_TURNS,
-    finish: (read, live) => finishChatRead(id, conversationId, read, live, lang, row.id),
+    finish: (read: { turns: import('@agentistics/core').ChatTurn[]; older: boolean }, live: boolean) =>
+      finishChatRead(id, conversationId, read, live, lang, row.id),
     foreign: foreignOf(hub, id, conversationId),
-  })
+  }
+  if (historyOf(chat)) {
+    const read = await readAdapterHistory({
+      ...common, lang,
+      ...(page.before ? { before: page.before } : {}),
+      ...(page.snapshot ? { snapshot: page.snapshot } : {}),
+      ...(page.signal ? { signal: page.signal } : {}),
+    })
+    if ('payload' in read) return read.payload
+    if (read.legacy === 'failed') { refuseAdapter(row.harness ?? '', conversationId); return null }
+  }
+  const out = await readAdapterChat(common)
   if (!out) refuseAdapter(row.harness ?? '', conversationId)
   return out
+}
+
+/**
+ * "Buscar na conversa" through the engine's `search()`, or `null` for the host's own search (flag off is
+ * the caller's check; here: no row, a second account's root, a harness that does not declare history).
+ */
+export async function searchAdapterChat(
+  lang: CliLang,
+  id: string,
+  query: string,
+  page: { cursor?: string; limit?: number; offset?: number; signal?: AbortSignal } = {},
+): Promise<(AdapterSearchAnswer & { harness?: string }) | null> {
+  const hub = await fleetSessionHub().catch(() => null)
+  if (!hub) return null
+  const row = await findRow(hub, lang, id).catch(() => null)
+  if (!row || !row.harness || await onAccountRoot(id)) return null
+  const picked = pickAdapterChat(row, true, chatOf)
+  if (!picked || !historyOf(picked.chat)) return null
+  const out = await searchAdapterHistory({
+    conversationId: picked.conversationId,
+    chat: picked.chat,
+    ...(row.cwd ? { cwd: row.cwd } : {}),
+    query, lang,
+    ...(page.cursor ? { cursor: page.cursor } : {}),
+    ...(page.limit !== undefined ? { limit: page.limit } : {}),
+    ...(page.offset !== undefined ? { offset: page.offset } : {}),
+    ...(page.signal ? { signal: page.signal } : {}),
+    scrub: async v => (anyGrant() ? scrubDeep(id, v) : v),
+  })
+  return out ? { ...out, harness: row.harness } : null
 }
