@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { gitEnv } from '../backup/repo-probe'
-import { readRawFleetSnapshot } from '../cli-start'
 import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
 
 const exec = promisify(execFile)
@@ -24,6 +23,29 @@ const sessionOf = (v: unknown): string | null => {
 }
 
 const streaks = new Map<string, { at: number; count: number }>()
+/** Two waiting polls count as consecutive only when they are at most this far apart (the idle poller ticks every 15 s). */
+export const STREAK_MAX_GAP_MS = 45_000
+/** Test seam: forget every remembered streak. */
+export const resetStoppedStreaks = () => streaks.clear()
+
+/**
+ * The "agent stopped" decision for one session over a fleet snapshot, with the streak bookkeeping (N6): a refusal ends the
+ * streak, and a streak only grows from a poll that is newer than the last yet within STREAK_MAX_GAP_MS of it.
+ */
+export function judgeStopped(id: string, snapshot: { polledAtMs: number; sessions: ReadonlyArray<{ id: string; status?: string; activity?: string; background?: boolean }> }): Refusal | { ok: true; sessionId: string; polls: number } {
+  const row = snapshot.sessions.find(s => s.id === id)
+  if (!row) { streaks.delete(id); return refuse('session was not found', ['existing session']) }
+  if (row.status !== 'running' || row.activity !== 'waiting' || row.background === true) {
+    streaks.delete(id)
+    return refuse('session is not confirmed stopped', ['waiting activity on two consecutive polls', 'no background work'])
+  }
+  const previous = streaks.get(id)
+  const consecutive = previous && snapshot.polledAtMs > previous.at && snapshot.polledAtMs - previous.at <= STREAK_MAX_GAP_MS
+  const count = consecutive ? previous.count + 1 : 1
+  // Same poll read twice keeps the older mark so it cannot count as a second confirmation.
+  if (!previous || snapshot.polledAtMs > previous.at) streaks.set(id, { at: snapshot.polledAtMs, count })
+  return count >= 2 ? { ok: true, sessionId: id, polls: count } : refuse('session is waiting, but needs a second confirmed poll', ['second waiting poll'])
+}
 
 const LIVE_STATES = new Set(['working', 'waiting', 'waiting-approval'])
 
@@ -163,16 +185,9 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps) {
     'sessao-parada': async (value: unknown) => {
       const id = sessionOf(value)
       if (!id) return refuse('session id is required', ['sessionId'])
-      const snapshot = await readRawFleetSnapshot()
-      const row = snapshot.sessions.find(s => s.id === id)
-      if (!row) return refuse('session was not found', ['existing session'])
-      if (row.status !== 'running' || row.activity !== 'waiting' || row.background === true) {
-        return refuse('session is not confirmed stopped', ['waiting activity on two consecutive polls', 'no background work'])
-      }
-      const previous = streaks.get(id)
-      const count = previous && snapshot.polledAtMs > previous.at ? previous.count + 1 : 1
-      streaks.set(id, { at: snapshot.polledAtMs, count })
-      return count >= 2 ? { ok: true, sessionId: id, polls: count } : refuse('session is waiting, but needs a second confirmed poll', ['second waiting poll'])
+      // Loaded lazily (N2): the TUI/backup-sized cli-start module must not weigh on every engine load.
+      const { readRawFleetSnapshot } = await import('../cli-start')
+      return judgeStopped(id, await readRawFleetSnapshot())
     },
     'arvore-limpa': async (value: unknown) => {
       const cwd = cwdOf(value)
