@@ -3,6 +3,7 @@ import {
   conversationHeldBy,
   conversationsInUse,
   duplicateConversations,
+  staleSelfHolder,
   type ClaimingSession,
 } from './conversation-claim'
 
@@ -167,5 +168,35 @@ describe('what KIND of thing holds a conversation', () => {
     ])
     expect(held.get('c1')?.id).toBe('row')
     expect(held.size).toBe(1)
+  })
+})
+
+describe('staleSelfHolder — REABRIR.OPENCODE, a pinned ended row is its own holder', () => {
+  // Owner, 2026-11-02: an OpenCode leader under "Encerradas → Dormindo" answered Reabrir with "that
+  // conversation is already open in <itself>" — its backend entry outlived the assistant.
+  const self = { id: 'oc00000001', label: '[ LÍDER ] - Brainstormg descricao de reuniao', kind: 'managed' as const }
+  it('the requested row holding its own conversation after it ENDED is stale — reopen it', () => {
+    expect(staleSelfHolder(self, 'oc00000001', { endedAt: '2026-11-02T13:42:00.000Z' }, true)).toBe(true)
+  })
+  it('endedAt alone is not proof: a relay that may still run (a CLI-owned one) is reused', () => {
+    expect(staleSelfHolder(self, 'oc00000001', { endedAt: '2026-11-02T13:42:00.000Z' }, undefined)).toBe(false)
+    expect(staleSelfHolder(self, 'oc00000001', { endedAt: '2026-11-02T13:42:00.000Z' }, false)).toBe(false)
+  })
+  it('a live row (no endedAt) stays idempotent: open it there', () => {
+    expect(staleSelfHolder(self, 'oc00000001', {}, true)).toBe(false)
+  })
+  it('another row, or a foreign process, is a real holder', () => {
+    expect(staleSelfHolder({ ...self, id: 'twin000001' }, 'oc00000001', { endedAt: 'x' }, true)).toBe(false)
+    expect(staleSelfHolder({ ...self, kind: 'process', pid: 9 }, 'oc00000001', { endedAt: 'x' }, true)).toBe(false)
+  })
+  it('nothing replaced (a closed/external conversation) is never this case', () => {
+    expect(staleSelfHolder(self, undefined, { endedAt: 'x' }, true)).toBe(false)
+    expect(staleSelfHolder(undefined, 'oc00000001', { endedAt: 'x' }, true)).toBe(false)
+  })
+  it('end to end over the claims: an ended row whose backend still lists it holds itself until ended', () => {
+    const held = conversationsInUse([{ id: 'oc00000001', kind: 'managed', alive: true, conversationId: 'ses_x', label: self.label }])
+    const holder = conversationHeldBy(held, 'ses_x')
+    expect(holder?.id).toBe('oc00000001')
+    expect(staleSelfHolder(holder, 'oc00000001', { endedAt: '2026-11-02T13:42:00.000Z' }, true)).toBe(true)
   })
 })

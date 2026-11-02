@@ -5444,7 +5444,7 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
     // Another server answers on this port. The dedicated code, not 0 and not 1: a service manager
     // must neither restart this (it is not a crash — see service-exit.ts) nor record it as a clean
     // stop of a server that never ran.
-    console.error(`[server] Port ${PORT} is already in use by another agentop server — exiting (${EXIT_INSTANCE_HELD}).`)
+    console.error(`[server] Port ${PORT} is already in use by another agentop server — exiting (${EXIT_INSTANCE_HELD}). (${err instanceof Error ? err.message : String(err)})`)
     process.exit(EXIT_INSTANCE_HELD)
   }
   throw err

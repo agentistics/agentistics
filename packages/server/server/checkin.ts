@@ -35,6 +35,8 @@ export interface CheckinDeps {
   readCheckinRelease: () => Promise<unknown>
   /** SESSÕES.FECHAR: workers that handed back and are still open (engine view `entregues-abertos`); flows off = []. */
   readDeliveredOpen?: () => Promise<readonly DeliveredOpen[]>
+  /** F5.b: the three groups (engine view `fechamento`, from handbacks.json + verdicts.jsonl); null = flows off or an older engine. */
+  readFechamento?: () => Promise<Fechamento | null>
   readCheckinMcpConfigs: (cwd: string) => Promise<unknown>
 }
 
@@ -102,6 +104,13 @@ const defaultDeps: CheckinDeps = {
     const { engine } = await import('./engine/load')
     const view = await engine()?.flows?.read?.('entregues-abertos', {}).catch(() => null)
     return Array.isArray(view) ? view as DeliveredOpen[] : []
+  },
+  readFechamento: async () => {
+    const { flowsExperimentalOn } = await import('./native-gate')
+    if (!flowsExperimentalOn()) return null
+    const { engine } = await import('./engine/load')
+    const view = await engine()?.flows?.read?.('fechamento', {}).catch(() => null) as Partial<Fechamento> | null | undefined
+    return view && Array.isArray(view.abertos) && Array.isArray(view.prontosParaLimpar) && Array.isArray(view.naoSalvos) ? view as Fechamento : null
   },
   readCheckinRelease: async () => {
     try {
@@ -232,8 +241,23 @@ export function deliveredOpenLine(list: readonly DeliveredOpen[]): string {
   const items = list.map(d => d.lastRun?.reason ? `${d.sessionId} (${d.lastRun.reason})` : d.sessionId).join('; ')
   return `\nWorkers que entregaram e seguem abertos: ${items}. Feche cada um com agentistics_flow_run name=fechar-entregue {sessionId} — ele só fecha se estiver parado, limpo e salvo; uma recusa diz o que falta.`
 }
+export interface FechamentoItem { sessionId: string; handbackAt: string; reason?: string; missing?: string[] }
+export interface Fechamento { abertos: readonly FechamentoItem[]; prontosParaLimpar: readonly FechamentoItem[]; naoSalvos: readonly FechamentoItem[] }
+const nameOf = (i: FechamentoItem) => i.sessionId
+/**
+ * PURE. F5.b — the three plain groups of workers that delivered, each only when it has someone: still open, ready to
+ * clean, and NOT saved (with why). Empty = ''. The leader acts through the flows; nothing here closes or removes anything.
+ */
+export function fechamentoLines(f: Fechamento): string {
+  const lines: string[] = []
+  if (f.naoSalvos.length) lines.push(`Trabalho NÃO salvo (não feche nem limpe; peça ao worker para salvar): ${f.naoSalvos.map(i => `${nameOf(i)} — ${i.reason ?? 'motivo não registrado'}${i.missing?.length ? ` (falta: ${i.missing.join(', ')})` : ''}`).join('; ')}.`)
+  if (f.abertos.length) lines.push(`Entregaram e seguem abertos: ${f.abertos.map(i => i.reason ? `${nameOf(i)} (${i.reason})` : nameOf(i)).join('; ')}. Feche cada um com agentistics_flow_run name=fechar-entregue {sessionId} — ele só fecha se estiver parado, limpo e salvo; uma recusa diz o que falta.`)
+  if (f.prontosParaLimpar.length) lines.push(`Prontos para limpar (já fechados, a pasta de trabalho ainda existe): ${f.prontosParaLimpar.map(nameOf).join('; ')}. Limpe com agentistics_flow_run name=limpeza-real {sessionId} se o dono liberou a limpeza.`)
+  return lines.length ? `\n${lines.join('\n')}` : ''
+}
 async function promptForLeader(c: CheckinConfig): Promise<string> {
-  const prompt = promptFor(c) + deliveredOpenLine(await (deps.readDeliveredOpen?.() ?? Promise.resolve([])).catch(() => []))
+  const groups = await (deps.readFechamento?.() ?? Promise.resolve(null)).catch(() => null)
+  const prompt = promptFor(c) + (groups ? fechamentoLines(groups) : deliveredOpenLine(await (deps.readDeliveredOpen?.() ?? Promise.resolve([])).catch(() => [])))
   const away = awayActive(parseAwayState((await deps.readPreferences()).away), Date.now())
   return away ? `${prompt}\nAWAY MODE — decide within the authorisations, record the decision, and never ask the owner; anything urgent goes as an away notice.` : prompt
 }

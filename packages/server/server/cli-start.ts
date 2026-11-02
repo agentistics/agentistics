@@ -194,7 +194,7 @@ import { planTaskDelete, taskDeleteIsNoop } from './sessions/task-delete'
 import { readSpawnBudget } from './sessions/memory-probe'
 // The lock on the door: one conversation, one live session. See `conversation-claim.ts` for the
 // measurement that made it necessary, and `live-claims.ts` for the evidence it is allowed to use.
-import { conversationHeldBy } from './sessions/conversation-claim'
+import { conversationHeldBy, staleSelfHolder } from './sessions/conversation-claim'
 import { withConversationResumeLock as withResumeLock } from './sessions/conversation-resume-lock'
 import { liveConversationHolders } from './sessions/live-claims'
 import type { ManagedSession, SessionBackend, SpawnPlanError } from './sessions/types'
@@ -3008,10 +3008,24 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
     // Ask under the conversation lock. Include the requested row itself: reopening a live row
     // focuses it, including a CLI relay hosted in another process. Only a foreign process with no
     // managed row needs the existing takeover planner below.
-    const holder = conversationHeldBy(
+    let holder = conversationHeldBy(
       await liveConversationHolders(await resolveBackend()),
       req.sessionId,
     )
+    // REABRIR.OPENCODE — the row being reopened is its OWN holder only because its backend entry outlived
+    // an assistant its record says has ended (a pinned "Dormindo" row): end that leftover entry, then
+    // reopen. Ending it first is what keeps this from ever being a second assistant in one conversation.
+    const provablyIdle = holder?.kind === 'managed' && holder.id === req.replaces && previous?.endedAt
+      ? await import('./sessions/structured-durable').then(({ defaultDurableStore }) => {
+        const store = defaultDurableStore()
+        return store.saved(holder!.id) !== null && store.running ? !store.running(holder!.id) : undefined
+      }).catch(() => undefined)
+      : undefined
+    if (staleSelfHolder(holder, req.replaces, previous, provablyIdle)) {
+      await (await resolveBackend()).kill(holder!.id).catch(() => false)
+      holder = conversationHeldBy(await liveConversationHolders(await resolveBackend()), req.sessionId)
+      if (holder && holder.id === req.replaces) return { ok: false, message: s.sessResumeInUse(holder.label) }
+    }
     // A managed row is somewhere to go: it has a pane and `o` attaches to it, so "open it there"
     // is an instruction the user can follow. It never becomes a takeover.
     if (holder?.kind === 'managed') {

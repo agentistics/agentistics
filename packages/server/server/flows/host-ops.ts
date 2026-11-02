@@ -5,6 +5,7 @@ import { join, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { gitEnv } from '../backup/repo-probe'
 import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
+import { ambienteHostOps } from './ambiente-host'
 
 const exec = promisify(execFile)
 /**
@@ -429,6 +430,7 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
       const id = sessionOf(value)
       return id ? workTarget(id, workDeps) : refuse('session id is required', ['sessionId'])
     },
+    ...ambienteHostOps(),
     'sessao-parada': async (value: unknown) => {
       const id = sessionOf(value)
       if (!id) return refuse('session id is required', ['sessionId'])

@@ -13,12 +13,13 @@
  * file lock stay agy's. An unparseable non-empty file is REFUSED, not repaired.
  */
 import path from 'node:path'
+import { mcpTargetPath } from './mcp-targets'
 import { HOME_DIR } from './config'
 import { agentisticsMcpLaunch, CANONICAL_MCP_NAME, sameMcpLaunch, type McpLaunch } from './mcp-launch'
 import { mayRegisterHarnessMcp } from './mcp-registration'
 import { findCli } from './chat-drivers/cli-detect'
 
-export const AGY_MCP_CONFIG = path.join(HOME_DIR, '.gemini', 'config', 'mcp_config.json')
+export const AGY_MCP_CONFIG = mcpTargetPath('antigravity', HOME_DIR)
 
 export type AgyMcpPlan = { action: 'none' } | { action: 'add' } | { action: 'replace' } | { action: 'refuse'; reason: string }
 

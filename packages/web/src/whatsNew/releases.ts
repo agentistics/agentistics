@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.191.0': {
+    features: [
+      {
+        pt: 'Fluxos (experimental, desligado por padrão): um ambiente descartável para testar uma versão do código sem mexer nos seus dados nem nas suas configurações de verdade. Ele sobe, você testa, e depois é desmontado.',
+        en: 'Flows (experimental, off by default): a throwaway environment to test a version of the code without touching your real data or settings. It starts up, you test, and then it is taken down.',
+      },
+      {
+        pt: 'Fluxos (experimental, desligado por padrão): sessões de trabalho que terminaram e salvaram o que fizeram se fecham sozinhas. Sessões de líder nunca se fecham sozinhas.',
+        en: 'Flows (experimental, off by default): worker sessions that finished and saved their work close by themselves. Leader sessions never do.',
+      },
+      {
+        pt: 'Fluxos (experimental): com os fluxos ligados, o resumo do líder lista quem ainda está aberto e quem ainda não salvou o trabalho. O fechamento automático foi testado com sessões simuladas; com um trabalhador real ainda não.',
+        en: 'Flows (experimental): with flows on, the leader\'s summary lists who is still open and who has not saved their work yet. Auto-close was tested with simulated sessions, not yet with a real worker.',
+      },
+      {
+        pt: 'Ligação por voz: a barra mostra "Trabalhando" enquanto ela faz o que você pediu.',
+        en: 'Voice call: the bar says \'Working\' while she does what you asked.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Reabrir uma sessão encerrada que ficou presa em "já está aberta em…" volta a funcionar.',
+        en: 'Reopening an ended session stuck on "already open in…" works again.',
+      },
+    ],
+  },
   '2.190.0': {
     features: [
       {

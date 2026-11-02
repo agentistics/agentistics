@@ -16,7 +16,8 @@
 import { existsSync } from 'node:fs'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { KIMI_DIR } from './config'
+import { HOME_DIR, KIMI_DIR } from './config'
+import { mcpTargetPath } from './mcp-targets'
 import { agentisticsMcpLaunch, sameMcpLaunch, CANONICAL_MCP_NAME, type McpLaunch } from './mcp-launch'
 import { mayRegisterHarnessMcp } from './mcp-registration'
 
@@ -47,7 +48,7 @@ export function planKimiMcp(existing: string | null, want: McpLaunch, apiUrl: st
 
 /** Where kimi reads its user-scope MCP servers: `KIMI_CODE_HOME` first, as kimi itself does. */
 export function kimiMcpPath(): string {
-  return join(process.env.KIMI_CODE_HOME || KIMI_DIR, 'mcp.json')
+  return mcpTargetPath('kimi', HOME_DIR, { KIMI_CODE_HOME: process.env.KIMI_CODE_HOME, KIMI_DIR })
 }
 
 /** UNGATED write of the entry into `file` (the gate is `ensureKimiMcp`'s). Returns what happened. */
