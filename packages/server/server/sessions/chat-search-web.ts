@@ -49,7 +49,7 @@ export type EngineSearch = (
 
 /** With the `adapter-chat` flag ON the engine's `search()` is asked first; OFF it is never imported. */
 function defaultEngineSearch(): EngineSearch | null {
-  if (!featureOn('adapter-chat')) return null
+  if (!featureOn('adapter-chat') || !featureOn('chat-history-engine')) return null
   return async (...a) => (await import('./adapter-chat-web')).searchAdapterChat(...a)
 }
 

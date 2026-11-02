@@ -172,7 +172,7 @@ export async function readAdapterChatPayload(
       finishChatRead(id, conversationId, read, live, lang, row.id),
     foreign: foreignOf(hub, id, conversationId),
   }
-  if (historyOf(chat)) {
+  if (featureOn('chat-history-engine') && historyOf(chat)) {
     const read = await readAdapterHistory({
       ...common, lang,
       ...(page.before ? { before: page.before } : {}),
@@ -197,6 +197,7 @@ export async function searchAdapterChat(
   query: string,
   page: { cursor?: string; limit?: number; offset?: number; signal?: AbortSignal } = {},
 ): Promise<(AdapterSearchAnswer & { harness?: string }) | null> {
+  if (!featureOn('adapter-chat') || !featureOn('chat-history-engine')) return null
   const hub = await fleetSessionHub().catch(() => null)
   if (!hub) return null
   const row = await findRow(hub, lang, id).catch(() => null)

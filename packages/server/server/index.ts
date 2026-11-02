@@ -3642,8 +3642,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         if (featureOn('adapter-chat')) {
           const lang = fleetLang(url.searchParams.get('lang'))
           const { readAdapterChatPayload } = await import('./sessions/adapter-chat-web')
-          const before = url.searchParams.get('before')
-          const snapshot = url.searchParams.get('snapshot')
+          const histOn = featureOn('chat-history-engine')
+          const before = histOn ? url.searchParams.get('before') : null
+          const snapshot = histOn ? url.searchParams.get('snapshot') : null
           const adapted = await readAdapterChatPayload(await hostForFleet(lang), lang, id, {
             ...(before ? { before } : {}), ...(snapshot ? { snapshot } : {}), signal: req.signal,
           })
