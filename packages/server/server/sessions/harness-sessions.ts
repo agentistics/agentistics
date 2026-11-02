@@ -179,6 +179,39 @@ export function resolveManagedIds(
 }
 
 /**
+ * Drop every `byManagedId` link whose record was written by a DIFFERENT harness than the row it names.
+ *
+ * The `tmux` field these records carry is an inherited environment variable (LINK.CROSSTALK), so ANY
+ * claude started with that environment — a `claude` subprocess, an assistant one session spawned
+ * through `agentop session`, a leader whose relay inherited the variable — writes a record naming
+ * the row's tmux session, whatever harness that row runs. Applied to an opencode row, the claude
+ * record's `sessionId` overrode the row's own `ses_…` everywhere `byManagedId` is read: the reopen
+ * target became a CLAUDE conversation, and the reopen lock then refused with "that conversation is
+ * already open in <the claude session's name>" — while no opencode process existed at all. A
+ * harness only ever writes records about ITSELF, so a record of harness X can describe a row of
+ * harness X and nothing else.
+ *
+ * `harnessOf` answers `undefined` for an id the registry does not hold (an unregistered pane being
+ * adopted); those links are kept, because adoption is exactly the reader that has no row yet.
+ */
+export function scopeToRowHarness(
+  index: HarnessSessionIndex,
+  harnessOf: (managedId: string) => HarnessId | undefined,
+): HarnessSessionIndex {
+  const fits = (id: string, file: HarnessSessionFile): boolean => {
+    const rowHarness = harnessOf(id)
+    return rowHarness === undefined || file.harness === undefined || file.harness === rowHarness
+  }
+  const byManagedId = new Map([...index.byManagedId].filter(([id, file]) => fits(id, file)))
+  const managedCandidates = index.managedCandidates
+    ? new Map([...index.managedCandidates]
+      .map(([id, list]) => [id, list.filter(c => fits(id, c.file))] as const)
+      .filter(([, list]) => list.length > 0))
+    : undefined
+  return { ...index, byManagedId, ...(managedCandidates ? { managedCandidates } : {}) }
+}
+
+/**
  * Every live session record this machine's harnesses have written, indexed both ways it is looked up.
  *
  * Both indexes are EXACT — a tmux session name and an OS pid — which is the whole point of reading

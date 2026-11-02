@@ -37,7 +37,7 @@ import { holderCollisions } from './process-transcript'
 import { collisionKey, type ProcessTranscriptFile } from './process-conversation'
 import { loadConversations, type Conversation } from './conversations'
 import { HEARTBEAT_MS, planCrashGroup, type CrashGroup } from './crash-group'
-import { emptyHarnessSessionIndex, resolveManagedIds, type HarnessSessionIndex } from './harness-sessions'
+import { emptyHarnessSessionIndex, resolveManagedIds, scopeToRowHarness, type HarnessSessionIndex } from './harness-sessions'
 import { chosenName } from './harness-session-file'
 import { reconcileSessions } from './session-ref'
 import type { AccountRegistryView } from './session-account'
@@ -482,7 +482,11 @@ export function createSessionsPoller(o: {
         // a pane's own: the record's `tmux` field is an inherited env var (LINK.CROSSTALK).
         timed('listPanePids', o.backend.listPanePids?.().catch(() => undefined) ?? Promise.resolve(undefined)),
       ])
-      const harnessSessions = resolveManagedIds(harnessSessionsRaw, panePidsRead)
+      // A claude record names a row by an INHERITED tmux variable, so it is only that row's own record
+      // when the row runs claude too (`scopeToRowHarness`). Scoped before resolving, so the pick among a
+      // row's candidates never weighs a record some other harness's row could not have written.
+      const rowHarness = new Map(registry.map(r => [r.id, r.harness]))
+      const harnessSessions = resolveManagedIds(scopeToRowHarness(harnessSessionsRaw, id => rowHarness.get(id)), panePidsRead)
       const accountRegistry = o.readAccountRegistry ? await o.readAccountRegistry().catch(() => undefined) : undefined
       markFleetPhase('poll: gather (registry/backend.list/scanProcesses/conversations/harnessSessions)', gatherStart)
 

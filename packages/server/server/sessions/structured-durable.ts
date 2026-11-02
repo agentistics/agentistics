@@ -224,6 +224,12 @@ export interface DurableStore {
   /** Managed ids whose relay is alive now, or that are between two children the driver started. */
   alive(): string[]
   isAlive(id: string): boolean
+  /**
+   * Whether a relay PROCESS of this record is running now — `false` for the "between two children" state
+   * `isAlive` still counts as alive (no process at all), and for an id with no record. REABRIR.OPENCODE:
+   * the reopen of an ENDED row asks this before treating the row as its own live holder.
+   */
+  running?(id: string): boolean
   /** When the child last said something (its record's mtime), ms. */
   lastActivityMs(id: string): number
   /** Ids with a directory whose relay is gone (collected at boot). */
@@ -439,6 +445,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     },
     alive: () => ids().filter(isAlive),
     isAlive,
+    running: id => { for (let k = 0, n = generations(id); k < n; k++) if (relayLive(id, k)) return true; return false },
     lastActivityMs(id) {
       for (let k = lastGen(id); k >= 0; k--) { try { return statSync(path.join(genDir(id, k), FILES.out)).mtimeMs } catch { /* none yet */ } }
       return Date.now()
