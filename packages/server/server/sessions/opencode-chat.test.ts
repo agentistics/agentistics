@@ -77,10 +77,27 @@ describe('opencode chat IO (read-only SQLite)', () => {
     expect(splitOpencodeChatPath('/a/b.db#ses_x/../y')).toBeNull()
   })
   test('the opencode transcript entry reads through the same path', async () => {
-    const reader = HARNESS_TRANSCRIPTS.opencode!
-    const read = await reader.read(`${db}#${SES}`, 2)
-    expect(read.older).toBe(true)
-    expect(read.turns.length).toBe(2)
-    expect((await reader.readRecent(`${db}#${SES}`, 1)).map(t => t.text)).toEqual(['again'])
+    // Own fixture: the sibling test above writes 'again' into the shared db, so this
+    // test must not depend on whether it ran first.
+    const ownDir = mkdtempSync(join(tmpdir(), 'oc-chat-entry-'))
+    const ownDb = join(ownDir, 'opencode.db')
+    const ow = new Database(ownDb)
+    try {
+      ow.exec('PRAGMA journal_mode=WAL')
+      ow.exec('CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_updated INTEGER)')
+      ow.exec('CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT)')
+      ow.exec('CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT)')
+      ow.query('INSERT INTO session VALUES (?, ?, ?)').run(SES, '/p', 1)
+      for (const m of msgs) ow.query('INSERT INTO message VALUES (?, ?, ?, ?)').run(m.id, SES, m.time_created, m.data)
+      parts.forEach((p, i) => ow.query('INSERT INTO part VALUES (?, ?, ?, ?, ?)').run(p.id, p.message_id, SES, i, p.data))
+      const reader = HARNESS_TRANSCRIPTS.opencode!
+      const read = await reader.read(`${ownDb}#${SES}`, 2)
+      expect(read.older).toBe(true)
+      expect(read.turns.length).toBe(2)
+      expect((await reader.readRecent(`${ownDb}#${SES}`, 1)).map(t => t.text)).toEqual(['Done — b.txt contains "hello".'])
+    } finally {
+      ow.close()
+      rmSync(ownDir, { recursive: true, force: true })
+    }
   })
 })
