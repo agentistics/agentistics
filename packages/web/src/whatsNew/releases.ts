@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.190.0': {
+    features: [
+      {
+        pt: 'Fluxos (experimental, desligado por padrão): um novo fluxo confere se o Docker está instalado e ligado neste computador. Ele só olha; não instala nem liga nada.',
+        en: 'Flows (experimental, off by default): a new flow checks whether Docker is installed and running on this computer. It only looks; it never installs or starts anything.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Fluxos (experimental): fechar uma sessão entregue agora confere a pasta de trabalho da própria sessão, mesmo quando ela foi aberta numa pasta compartilhada; se não achar essa pasta, recusa e diz por quê. Testado com sessões simuladas; com um trabalhador real ainda não.',
+        en: 'Flows (experimental): closing a delivered session now checks the session\'s own work folder, even when it was started in a shared folder; if it cannot find that folder, it refuses and says why. Tested with simulated sessions; not yet with a real worker.',
+      },
+    ],
+  },
   '2.189.0': {
     features: [
       {
