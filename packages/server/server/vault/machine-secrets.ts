@@ -19,7 +19,7 @@
  * out per call as fresh buffers the caller zeroes. Nothing here logs, and no refusal sentence is built from input.
  */
 import { createHash, hkdfSync, randomBytes } from 'node:crypto'
-import { chmod, mkdir, readFile, rename, rmdir, stat, unlink, writeFile } from 'node:fs/promises'
+import { chmod, link, mkdir, readFile, rename, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { EngineMachineSecrets, EngineMachineSecretsStatus, OpenResult, SealResult, VaultRefusal } from '@agentistics/engine-api'
 import {
@@ -56,7 +56,7 @@ export interface MachineSecretsOptions {
 const T = {
   none: { en: 'No keystore on this machine answered and there is no machine id, so keys cannot be stored encrypted here.', pt: 'Nenhum chaveiro desta máquina respondeu e não há identificador da máquina, então as chaves não podem ser guardadas cifradas aqui.' },
   weak: { en: 'This is the WEAKER mode: no keystore on this machine answered, so keys are encrypted with a key derived from the machine id. Another process of this user on this machine could open them.', pt: 'Este é o modo MAIS FRACO: nenhum chaveiro desta máquina respondeu, então as chaves são cifradas com uma chave derivada do identificador da máquina. Outro processo deste usuário nesta máquina poderia abri-las.' },
-  lost: { en: 'The machine key can no longer be opened by its protector. Store the key again.', pt: 'A chave da máquina não abre mais pelo protetor dela. Guarde a chave de novo.' },
+  lost: { en: 'The machine key can no longer be opened by its protector. Store the key again to start a new one (keys stored before cannot be opened any more).', pt: 'A chave da máquina não abre mais pelo protetor dela. Guarde a chave de novo para começar uma nova (as chaves guardadas antes não abrem mais).' },
   copied: { en: 'This sealed file belongs to another machine or vault.', pt: 'Este arquivo selado pertence a outra máquina ou cofre.' },
   tampered: { en: 'This sealed file is damaged or was changed.', pt: 'Este arquivo selado está danificado ou foi alterado.' },
   purpose: { en: 'An engine may only seal and open its own secrets (a purpose starting with `engine/`).', pt: 'Um motor só pode selar e abrir os próprios segredos (um propósito que começa com `engine/`).' },
@@ -70,6 +70,14 @@ async function writeAtomic(dir: string, name: string, data: Uint8Array): Promise
   const tmp = join(dir, `.tmp-${process.pid}-${randomBytes(4).toString('hex')}`)
   await writeFile(tmp, data, { mode: 0o600 })
   await rename(tmp, join(dir, name))
+}
+/** Publish `name` only if it does not exist yet (`link` fails with EEXIST): returns false when another process published first. */
+async function publishNew(dir: string, name: string, data: Uint8Array): Promise<boolean> {
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await chmod(dir, 0o700).catch(() => {})
+  const tmp = join(dir, `.tmp-${process.pid}-${randomBytes(4).toString('hex')}`)
+  await writeFile(tmp, data, { mode: 0o600 })
+  try { await link(tmp, join(dir, name)); return true } catch (e) { if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false; throw e } finally { await unlink(tmp).catch(() => {}) }
 }
 const readOrNull = async (p: string): Promise<Uint8Array | null> => { try { return new Uint8Array(await readFile(p)) } catch { return null } }
 
@@ -85,6 +93,7 @@ export function createMachineSecrets(o: MachineSecretsOptions): EngineMachineSec
   const say = (k: keyof typeof T) => T[k][lang()]
   let mk: { key: Uint8Array; kid: string } | null = null
   let st: EngineMachineSecretsStatus = { available: false, protector: null, strength: null, sentence: null }
+  let recovering: Promise<boolean> | null = null
   let settling: Promise<EngineMachineSecretsStatus> | null = null
   /** The refusal that explains why `mk` is missing, for seal/open. */
   let why: { code: VaultRefusal; sentence: string } | null = null
@@ -119,23 +128,30 @@ export function createMachineSecrets(o: MachineSecretsOptions): EngineMachineSec
     return true
   }
 
-  /** Create the machine key under an exclusive lock (`mkdir` is atomic): of two processes starting at once ONE creates it, the other waits and opens the winner's. */
-  async function createNew(): Promise<boolean> {
+  /** Create the machine key under an exclusive lock (`mkdir` is atomic): of two processes starting at once ONE creates it, the other waits and opens the winner's.
+   * The lock is broken only when its mtime is old (a crashed creator), never by counting waits; the creator touches it while it works.
+   * `force` (an explicit new `seal` after the old key was lost for good): the lost files are set aside, not deleted, then a new key is made. */
+  const LOCK_STALE_MS = 30_000
+  let lockPath = ''
+  const touch = () => utimes(lockPath, new Date(), new Date()).catch(() => {})
+  async function createNew(force = false): Promise<boolean> {
     await mkdir(o.dir, { recursive: true, mode: 0o700 })
     const lock = join(o.dir, '.create.lock')
-    for (let i = 0; ; i++) {
+    for (;;) {
       try { await mkdir(lock); break } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
-        const raw = await readOrNull(metaPath)
-        if (raw) return reopen(raw)
-        const age = await stat(lock).then(st => Date.now() - st.mtimeMs, () => 0)
-        if (age > 30_000 || i > 300) await rmdir(lock).catch(() => {}) // a crashed creator's lock
+        if (!force) { const raw = await readOrNull(metaPath); if (raw) return reopen(raw) }
+        const age = await stat(lock).then(x => Date.now() - x.mtimeMs, () => 0)
+        if (age > LOCK_STALE_MS) await rmdir(lock).catch(() => {}) // a crashed creator's lock
         else await new Promise(r => setTimeout(r, 50))
       }
     }
+    lockPath = lock
     try {
       const raw = await readOrNull(metaPath) // the winner may have finished between our check and our lock
-      if (raw) return reopen(raw)
+      if (raw && (!force || await reopen(raw))) return !force ? reopen(raw) : true
+      if (raw && why?.code !== 'protector-lost') return false // merely unreachable right now: never replace it
+      if (raw) { const t = Date.now(); for (const f of [META, FILE_KEY]) await rename(join(o.dir, f), join(o.dir, `${f}.lost-${t}`)).catch(() => {}) }
       return await createLocked()
     } finally { await rmdir(lock).catch(() => {}) }
   }
@@ -144,12 +160,16 @@ export function createMachineSecrets(o: MachineSecretsOptions): EngineMachineSec
     down('protector-lost', say('lost')); return false
   }
 
+  /** Someone else published a machine key first: use theirs. */
+  async function reopenPublished(): Promise<boolean> { const raw = await readOrNull(metaPath); return raw ? reopen(raw) : (down('protector-lost', say('lost')), false) }
+
   async function createLocked(): Promise<boolean> {
     const { dek, kid } = newDataKey()
+    await touch()
     for (const p of o.protectors()) {
       let probe = await p.probe().catch(() => ({ ok: false as const, reason: '' }))
       if (!probe.ok && p.id === 'dpapi') for (const wait of o.retryMs ?? [1500, 4000]) {
-        await new Promise(r => setTimeout(r, wait))
+        await new Promise(r => setTimeout(r, wait)); await touch()
         probe = await p.probe().catch(() => ({ ok: false as const, reason: '' }))
         if (probe.ok) break
       }
@@ -158,12 +178,14 @@ export function createMachineSecrets(o: MachineSecretsOptions): EngineMachineSec
       const w = await p.wrap(dek, kid).catch(() => ({ ok: false as const, reason: '' }))
       if (!w.ok) continue
       const meta: MachineMeta = { v: 1, kid, createdAt: new Date().toISOString(), strength: 'os', wrapper: w.record, protectorLabel: p.label(lang()) }
-      await writeAtomic(o.dir, META, new TextEncoder().encode(JSON.stringify(meta, null, 2) + '\n'))
+      await touch()
+      if (!(await publishNew(o.dir, META, new TextEncoder().encode(JSON.stringify(meta, null, 2) + '\n')))) { dek.fill(0); return reopenPublished() }
       adopt(dek, kid, { available: true, protector: meta.protectorLabel!, strength: 'os', sentence: null })
       return true
     }
     const id = o.machineId()
     if (!id) { dek.fill(0); down('uninitialized', say('none')); return false }
+    if (await readOrNull(metaPath)) { dek.fill(0); return reopenPublished() } // never write machine.key over a published machine
     const salt = new Uint8Array(randomBytes(16)), nonce = new Uint8Array(randomBytes(12))
     const kek = fileKek(id, salt, kid)
     try {
@@ -172,7 +194,7 @@ export function createMachineSecrets(o: MachineSecretsOptions): EngineMachineSec
       await writeAtomic(o.dir, FILE_KEY, blob)
     } finally { kek.fill(0) }
     const meta: MachineMeta = { v: 1, kid, createdAt: new Date().toISOString(), strength: 'file' }
-    await writeAtomic(o.dir, META, new TextEncoder().encode(JSON.stringify(meta, null, 2) + '\n'))
+    if (!(await publishNew(o.dir, META, new TextEncoder().encode(JSON.stringify(meta, null, 2) + '\n')))) { dek.fill(0); return reopenPublished() }
     adopt(dek, kid, { available: true, protector: 'machine id (file)', strength: 'file', sentence: say('weak') })
     return true
   }
@@ -200,6 +222,8 @@ export function createMachineSecrets(o: MachineSecretsOptions): EngineMachineSec
     async seal(purpose, name, plaintext): Promise<SealResult> {
       if (!isEnginePurpose(purpose) || typeof name !== 'string' || name === '') return refuse('purpose', say('purpose'))
       await settle(true)
+      // the old machine key is gone for good: an explicit seal starts a new one (what was sealed before is unrecoverable anyway and stays refused)
+      if (!mk && why?.code === 'protector-lost') { await (recovering ??= createNew(true).catch(() => false).finally(() => { recovering = null })) }
       if (!mk) return why ? refuse(why.code, why.sentence) : refuse('uninitialized', say('none'))
       return { ok: true, sealed: sealToBytes({ dek: mk.key, kid: mk.kid, purpose, name, plaintext }) }
     },

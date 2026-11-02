@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createMachineSecrets } from './machine-secrets'
@@ -190,6 +190,48 @@ describe('machineSecrets (engine-api 1.23)', () => {
   test('independent of the vault: never imports or consults it', async () => {
     const src = await readFile(join(import.meta.dir, 'machine-secrets.ts'), 'utf8')
     expect(src).not.toMatch(/from '\.\/service'|vaultStatusSync|ensureVaultOpen|openBytes|sealBytes/)
+  })
+
+  test('a lost machine key is not a dead end: an explicit seal starts a new one, the old files are kept aside, older blobs stay refused', async () => {
+    const dir = await fresh(), p = fakeProtector()
+    const first = createMachineSecrets({ dir, protectors: () => [p], machineId: () => null })
+    const old = await first.seal('engine/provider-key', 'x', pt()); if (!old.ok) throw new Error('seal')
+    first.dispose(); p.store.clear() // the protector lost the key for good
+    const ms = createMachineSecrets({ dir, protectors: () => [p], machineId: () => null })
+    expect(await ms.open('engine/provider-key', 'x', old.sealed)).toMatchObject({ ok: false, code: 'protector-lost' })
+    const fresh1 = await ms.seal('engine/provider-key', 'y', pt())
+    expect(fresh1.ok).toBe(true); if (!fresh1.ok) return
+    expect(await ms.open('engine/provider-key', 'y', fresh1.sealed)).toMatchObject({ ok: true })
+    expect(await ms.open('engine/provider-key', 'x', old.sealed)).toMatchObject({ ok: false, code: 'wrong-machine' })
+    expect((await readdir(dir)).some(f => f.startsWith('machine.json.lost-'))).toBe(true)
+    expect(ms.status()).toMatchObject({ available: true })
+  })
+
+  test('a protector that is merely unreachable never triggers a new machine key', async () => {
+    const dir = await fresh(), p = fakeProtector()
+    const a = createMachineSecrets({ dir, protectors: () => [p], machineId: () => null })
+    const s = await a.seal('engine/provider-key', 'x', pt()); if (!s.ok) throw new Error('seal')
+    a.dispose()
+    const down = fakeProtector('dpapi', { unwrap: 'unavailable' })
+    const b = createMachineSecrets({ dir, protectors: () => [down], machineId: () => null })
+    expect(await b.seal('engine/provider-key', 'z', pt())).toMatchObject({ ok: false, code: 'uninitialized' })
+    expect((await readdir(dir)).some(f => f.includes('.lost-'))).toBe(false)
+    const c = createMachineSecrets({ dir, protectors: () => [p], machineId: () => null })
+    expect(await c.open('engine/provider-key', 'x', s.sealed)).toMatchObject({ ok: true })
+  })
+
+  test('machine.json is published without overwriting: a stale lock is broken by age, never by waiting count, and an existing machine wins', async () => {
+    const dir = await fresh(), p = fakeProtector()
+    await mkdir(join(dir, '.create.lock'), { recursive: true })
+    const old = new Date(Date.now() - 120_000); await utimes(join(dir, '.create.lock'), old, old)
+    const ms = createMachineSecrets({ dir, protectors: () => [p], machineId: () => null })
+    expect((await ms.seal('engine/provider-key', 'x', pt())).ok).toBe(true)
+    const meta1 = await readFile(join(dir, 'machine.json'), 'utf8')
+    // a second process that raced and lost: its create must open the published machine, not replace it
+    const other = createMachineSecrets({ dir, protectors: () => [p], machineId: () => null })
+    expect((await other.seal('engine/provider-key', 'y', pt())).ok).toBe(true)
+    expect(await readFile(join(dir, 'machine.json'), 'utf8')).toBe(meta1)
+    await writeFile(join(dir, 'unused'), '')
   })
 
   test('backup: the machine directory sits inside `.agentistics/vault`, excluded with a reason (a machine-bound key is useless on another machine)', () => {
