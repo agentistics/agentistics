@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
 import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
@@ -397,7 +397,7 @@ async function waitForMemory(): Promise<boolean> {
 }
 
 /** The data dir the flows write under (`<dataDir>/flows/ambientes/<id>/semente/` is the only place a seed may come from). */
-function realDataDir(): string { return process.env.AGENTISTICS_DIR || join(homedir(), '.agentistics') }
+export function realDataDir(): string { return process.env.AGENTISTICS_DIR || join(homedir(), '.agentistics') }
 
 /** `--seed-from` accepts a path only inside `<dataDir>/flows/ambientes/<id>/semente/` (realpath), never anything else. */
 export function seedSourceOk(path: string, dataDir = realDataDir()): string | null {
@@ -409,6 +409,22 @@ export function seedSourceOk(path: string, dataDir = realDataDir()): string | nu
   return rel && rel.length >= 2 && rel[1] === 'semente' ? real : null
 }
 
+/**
+ * Runs the (synchronous) seed with SIGTERM/SIGINT remembered rather than lost: a failure cleans up and rethrows; a signal that arrived
+ * during the seed cleans up as soon as it ends and reports `interrupted`. Handlers are removed again on every path.
+ */
+export async function guardedSeed(seed: () => void, cleanup: () => void, signals: Pick<NodeJS.Process, 'on' | 'off'> = process): Promise<'done' | 'interrupted'> {
+  let hit = false
+  const mark = () => { hit = true }
+  signals.on('SIGTERM', mark); signals.on('SIGINT', mark)
+  try {
+    try { seed() } catch (error) { cleanup(); throw error }
+    await new Promise<void>(resolveTick => setTimeout(resolveTick, 0))
+    if (hit) { cleanup(); return 'interrupted' }
+    return 'done'
+  } finally { signals.off('SIGTERM', mark); signals.off('SIGINT', mark) }
+}
+
 /** `--cwd` accepts a linked git worktree only (its git-dir differs from the common dir). */
 export function serveCwdOk(dir: string): string | null {
   try {
@@ -418,7 +434,7 @@ export function serveCwdOk(dir: string): string | null {
     const gd = run(['rev-parse', '--absolute-git-dir']), cd = run(['rev-parse', '--git-common-dir'])
     if (!gd || !cd) return null
     const gitDir = realpathSync(gd)
-    const common = realpathSync(join(real, cd))
+    const common = realpathSync(resolve(real, cd))
     return gitDir !== common ? real : null
   } catch { return null }
 }
@@ -456,16 +472,15 @@ async function startRun(options: RunOptions): Promise<number> {
     throw error
   }
   const { apiPort, webPort, reservationPaths } = ports
-  try {
+  const cleanupSeed = () => { releaseThrowawayPorts(reservationPaths); rmSync(home, { recursive: true, force: true }) }
+  // R3: a SIGTERM/SIGINT that lands while the (synchronous) seed copy runs is honoured the moment it ends: the half-built home and the port reservations go.
+  const seeded = await guardedSeed(() => {
     if (options.seedFrom !== null) applySeed(join(seedSourceOk(options.seedFrom)!, '.agentistics'), agentistics)
     // B4: the allow-list copy of the REAL store runs HERE, in the run's own launcher process, never inside the real server's event loop.
     if (options.seedReal) buildSeed(realDataDir(), agentistics)
     ensureNoStructured(agentistics)
-  } catch (error) {
-    releaseThrowawayPorts(reservationPaths)
-    rmSync(home, { recursive: true, force: true })
-    throw error
-  }
+  }, cleanupSeed)
+  if (seeded === 'interrupted') return 143
   const state: ThrowawayState = { name: options.name, home, apiPort, webPort, reservationPaths, startedAt: new Date().toISOString(), command: options.command }
   const script = process.argv[1]
   const inside = insideHeavyLock(process.env, ancestorCmdlines())
