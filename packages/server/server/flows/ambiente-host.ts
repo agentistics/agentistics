@@ -133,9 +133,12 @@ export function exitNote(logPath: string): string {
   try { tail = readFileSync(logPath, 'utf8').slice(-4000) } catch { /* no log */ }
   const lines = tail.split('\n').map(l => l.trim()).filter(Boolean)
   const last = lines.length ? lines[lines.length - 1]!.slice(0, 240) : ''
-  const code = /exiting \((\d+)\)|exit(?:ed)? (?:with )?(?:code )?(\d+)/i.exec(last)
-  const n = code?.[1] ?? code?.[2]
-  return [n ? `exit code ${n}` : '', last ? `last log line: ${last}` : 'the log is empty'].filter(Boolean).join('; ')
+  // The launcher writes `exit <n>` / `exit signal <SIG>` the moment the command ends, BEFORE its own cleanup line ("removed …"), so prefer it.
+  const stated = [...lines].reverse().map(l => /^exit (?:(\d+)|signal (\w+))$/.exec(l)).find(Boolean)
+  const code = stated ? null : /exiting \((\d+)\)|exit(?:ed)? (?:with )?(?:code )?(\d+)/i.exec(last)
+  const n = stated?.[1] ?? code?.[1] ?? code?.[2]
+  const head = stated?.[2] ? `killed by ${stated[2]}` : n ? `exit code ${n}` : ''
+  return [head, last ? `last log line: ${last}` : 'the log is empty'].filter(Boolean).join('; ')
 }
 
 export function purgeCopies(dir: string): void {
