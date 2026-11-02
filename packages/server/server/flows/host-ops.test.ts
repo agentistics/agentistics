@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { flowHostOps, triggerHostOps } from './host-ops'
+import { STREAK_MAX_GAP_MS, flowHostOps, judgeStopped, resetStoppedStreaks, triggerHostOps } from './host-ops'
 
 const roots: string[] = []
 afterEach(() => { for (const p of roots.splice(0)) rmSync(p, { recursive: true, force: true }) })
@@ -113,4 +113,37 @@ test('SESSÕES.FECHAR: encerrar-sessao ends the named session through the kill v
   expect(await ops['encerrar-sessao']({ sessionId: 'nope' })).toEqual({ refused: true, reason: 'Session not found.', missing: ['session end'] })
   expect(await ops['encerrar-sessao']({})).toMatchObject({ refused: true, missing: ['sessionId'] })
   expect(kills).toEqual(['wk', 'nope'])
+})
+
+// N6: the "stopped" streak is only built from consecutive, recent, waiting polls.
+const poll = (at: number, activity = 'waiting') => ({ polledAtMs: at, sessions: [{ id: 's1', status: 'running', activity }] })
+test('stopped streak: first poll refuses, a second recent waiting poll confirms', () => {
+  resetStoppedStreaks()
+  expect(judgeStopped('s1', poll(1_000))).toMatchObject({ refused: true })
+  expect(judgeStopped('s1', poll(1_000 + 15_000))).toEqual({ ok: true, sessionId: 's1', polls: 2 })
+})
+test('stopped streak: working in between resets it (waiting→working→waiting is not two)', () => {
+  resetStoppedStreaks()
+  judgeStopped('s1', poll(1_000))
+  expect(judgeStopped('s1', poll(16_000, 'working'))).toMatchObject({ refused: true })
+  expect(judgeStopped('s1', poll(31_000))).toMatchObject({ refused: true })
+})
+test('stopped streak: a stale earlier poll does not count as a confirmation', () => {
+  resetStoppedStreaks()
+  judgeStopped('s1', poll(1_000))
+  expect(judgeStopped('s1', poll(1_000 + STREAK_MAX_GAP_MS + 1))).toMatchObject({ refused: true })
+  expect(judgeStopped('s1', poll(1_000 + STREAK_MAX_GAP_MS + 1 + 15_000))).toMatchObject({ ok: true, polls: 2 })
+})
+test('stopped streak: the same poll read twice and unknown ids never confirm', () => {
+  resetStoppedStreaks()
+  judgeStopped('s1', poll(1_000))
+  expect(judgeStopped('s1', poll(1_000))).toMatchObject({ refused: true })
+  expect(judgeStopped('other', poll(2_000))).toMatchObject({ refused: true, reason: 'session was not found' })
+})
+
+// N2: cli-start (TUI, backup…) is imported on demand inside the op, never at module load.
+test('host-ops does not statically import cli-start', async () => {
+  const src = await Bun.file(new URL('./host-ops.ts', import.meta.url)).text()
+  expect(src).not.toMatch(/^import[^\n]*['"]\.\.\/cli-start['"]/m)
+  expect(src).toMatch(/await import\('\.\.\/cli-start'\)/)
 })
