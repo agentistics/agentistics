@@ -37,7 +37,7 @@ export const SWITCH_LAYOUT: Record<HarnessId, 'claude-projects' | 'codex-session
   // carries per-login state (copilot's session-state, gemini's project hash table, kimi's workspace
   // index); nobody has measured a copied conversation resuming there. Hidden until somebody has.
   copilot: null, gemini: null, kimi: null,
-  antigravity: null, opencode: null,
+  antigravity: null, opencode: null, hermes: null,
 }
 
 export const switchSupported = (harness: HarnessId): boolean => SWITCH_LAYOUT[harness] !== null
@@ -500,7 +500,7 @@ export function detectLimitInTail(harness: HarnessId, lines: readonly string[]):
 export const AUTH_REFUSAL_SOURCES: Record<HarnessId, string | null> = {
   claude: 'claude 2.1.314: assistant entry, error "authentication_failed"',
   codex: 'codex: event_msg error/task_complete, codex_error_info "unauthorized"',
-  copilot: null, gemini: null, kimi: null, antigravity: null, opencode: null,
+  copilot: null, gemini: null, kimi: null, antigravity: null, opencode: null, hermes: null,
 }
 
 export interface AuthState {

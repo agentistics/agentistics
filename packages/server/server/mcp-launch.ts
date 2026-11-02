@@ -160,6 +160,7 @@ export const ROOT_MCP: Record<HarnessId, ((root: string, launch: McpLaunch, apiU
   kimi: null,
   antigravity: null,
   opencode: null,
+  hermes: null,
 }
 
 export function rootMcpRegistration(harness: HarnessId, root: string, launch: McpLaunch, apiUrl: string): RootMcpRegistration | null {

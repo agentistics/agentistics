@@ -44,6 +44,7 @@ const READABLE: Record<HarnessId, boolean> = {
   // No legacy adapter (CLAUDE.md step 4, skipped by scope): opencode never produces a SessionMeta,
   // so there is no route for this server to serve its raw messages from in the first place.
   opencode: false,
+  hermes: false,
 }
 
 /** The `~/.claude/projects` directory name for a path — the same encoding the server walks with. */

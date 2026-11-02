@@ -38,6 +38,7 @@ const SCREENS: Record<HarnessId, { blocked: string[]; idle: string[] } | null> =
     idle: ['Done.', '', '> ', 'agy · gemini-3.6-flash'],
   },
   opencode: null,
+  hermes: null,
 }
 
 describe('prompt guard, per harness', () => {

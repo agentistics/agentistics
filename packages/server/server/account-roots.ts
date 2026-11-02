@@ -49,11 +49,12 @@ export const ROOT_SHARED: Record<HarnessId, string[] | null> = {
   kimi: ['mcp.json'],
   antigravity: null,
   opencode: null,
+  hermes: null,
 }
 
 /** Where, inside the root the isolation variable points at, the harness keeps its config. */
 export const ROOT_CONFIG_SUBDIR: Record<HarnessId, string> = {
-  claude: '', codex: '', copilot: '', kimi: '', antigravity: '', opencode: '',
+  claude: '', codex: '', copilot: '', kimi: '', antigravity: '', opencode: '', hermes: '',
   // GEMINI_CLI_HOME is the user's HOME for gemini: it creates `.gemini` inside it (its enterprise docs).
   gemini: '.gemini',
 }
@@ -71,7 +72,7 @@ export const LOGIN_START = LOGIN_ADAPTERS
  * server restart.
  */
 const LOGIN_MARKER: Record<HarnessId, { path: string; anyEntryBut?: string[] } | null> = {
-  claude: null, codex: null, copilot: null, antigravity: null, opencode: null,
+  claude: null, codex: null, copilot: null, antigravity: null, opencode: null, hermes: null,
   // kimi writes `config.toml` with its DEFAULT text on first start (so it is no evidence of a login)
   // and keeps the device-code login's token in `<KIMI_CODE_HOME>/credentials/` (its toolkit's
   // `FileTokenStorage(join(homeDir, 'credentials'))`, read from the kimi 0.41 bundle, 2026-10-16).
@@ -99,6 +100,7 @@ const DEFAULT_CONFIG_DIR: Record<HarnessId, () => string> = {
   kimi: () => process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code'),
   antigravity: () => join(homedir(), '.gemini', 'antigravity-cli'),
   opencode: () => opencodePaths(process.env, homedir()).dir,
+  hermes: () => process.env.HERMES_HOME ?? join(homedir(), '.hermes'),
 }
 
 /** Second, independent refusal: a name that reads like a credential is never linked, table or not. */

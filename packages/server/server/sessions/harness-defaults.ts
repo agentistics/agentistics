@@ -157,5 +157,7 @@ export async function readHarnessDefaults(harness: HarnessId): Promise<HarnessDe
       }
       return {}
     }
+    // Hermes: its config is not read here — no live probe has measured where a default model lives.
+    case 'hermes': return {}
   }
 }

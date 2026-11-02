@@ -54,7 +54,7 @@ export interface StatsCache {
   totalSpeculationTimeSavedMs: number
 }
 
-export type HarnessId = 'claude' | 'codex' | 'gemini' | 'copilot' | 'antigravity' | 'kimi' | 'opencode'
+export type HarnessId = 'claude' | 'codex' | 'gemini' | 'copilot' | 'antigravity' | 'kimi' | 'opencode' | 'hermes'
 
 /** The NATIVE Agentistics harness: a harness on every surface, but with no adapter (no transcript, no spawn spec). */
 export const NATIVE_HARNESS_ID = 'agentistics' as const
@@ -69,6 +69,7 @@ export const HARNESS_LABELS: Record<SurfaceHarnessId, string> = {
   antigravity: 'Antigravity',
   kimi: 'Kimi Code',
   opencode: 'OpenCode',
+  hermes: 'Hermes',
   agentistics: 'Agentistics',
 }
 
@@ -173,6 +174,9 @@ export const HARNESS_CAPABILITIES: Record<SurfaceHarnessId, HarnessCapabilities>
   // OpenCode message usage feeds the SQLite adapter. Prices use the shared model table;
   // unknown routes stay unpriced. The last response's input side supplies the context gauge.
   opencode: { tokens: true, cost: true, model: true, tools: false, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: true, contextWindow: true, compaction: false, skills: false, mcpServers: false },
+  // Hermes (Nous Research): DECLARED only. No adapter reads its store yet and no live probe has run, so
+  // nothing is claimed — every metric is false until a recorded run proves otherwise.
+  hermes: { tokens: false, cost: false, model: false, tools: false, agents: false, gitLines: false, dynamicWorkflows: false, activeTime: false, contextWindow: false, compaction: false, skills: false, mcpServers: false },
   // The NATIVE Agentistics harness (`agentistics`): its sessions are SYNTHESIZED from the journal's
   // projection facts (`server/native-sessions.ts`), not parsed from a transcript, so a metric is `true`
   // only where the facts carry it. Tokens, cost and model are real (every billed response is a
@@ -189,7 +193,7 @@ export const HARNESS_CAPABILITIES: Record<SurfaceHarnessId, HarnessCapabilities>
  *  member missing — adding a harness left it silently absent from the Compare page, the filter bar,
  *  the data-source list and, worse, the consolidate store, so its sessions were never persisted. */
 const HARNESS_SORT: Record<HarnessId, number> = {
-  claude: 0, codex: 1, gemini: 2, copilot: 3, antigravity: 4, kimi: 5, opencode: 6,
+  claude: 0, codex: 1, gemini: 2, copilot: 3, antigravity: 4, kimi: 5, opencode: 6, hermes: 7,
 }
 
 /** The ADAPTER harnesses, in display order — what has a transcript, a spawn spec, a backup directory and

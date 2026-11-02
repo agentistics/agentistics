@@ -54,6 +54,7 @@ export const AWAY_TOP_MODEL: Record<HarnessId, { en: string; pt: string }> = {
   antigravity: { en: 'top model', pt: 'modelo de topo' },
   kimi: { en: 'top model', pt: 'modelo de topo' },
   opencode: { en: 'top model', pt: 'modelo de topo' },
+  hermes: { en: 'top model', pt: 'modelo de topo' },
 }
 
 const isHarness = (v: string): v is HarnessId => (HARNESS_ORDER as readonly string[]).includes(v)
