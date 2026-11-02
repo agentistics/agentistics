@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.188.0': {
+    features: [
+      {
+        pt: 'Fluxos (experimental, desligado por padrão): nova limpeza que apaga de verdade a pasta de trabalho de uma sessão encerrada. Antes de apagar, ela confere que a sessão terminou, entregou o trabalho e salvou tudo, guarda uma cópia que dá para restaurar e nunca mexe na pasta compartilhada; na dúvida, recusa. Testada com sessões simuladas; com uma sessão real de ponta a ponta ainda não.',
+        en: 'Flows (experimental, off by default): a new cleanup that really deletes the work folder of a finished session. Before deleting, it checks that the session ended, handed its work back and saved everything, keeps a copy that can be restored and never touches the shared folder; when in doubt, it refuses. Tested with simulated sessions; not yet end to end with a real one.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Fluxos (experimental): fechar uma sessão entregue não fica mais esperando para sempre quando o app não responde; ele recusa com um aviso.',
+        en: 'Flows (experimental): closing a delivered session no longer waits forever when the app does not answer; it refuses with a notice.',
+      },
+    ],
+  },
   '2.187.0': {
     features: [],
     fixes: [

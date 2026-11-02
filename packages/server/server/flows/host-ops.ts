@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process'
+import { readdir, readlink, realpath, stat } from 'node:fs/promises'
+import { join, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { gitEnv } from '../backup/repo-probe'
 import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
@@ -20,6 +22,139 @@ const cwdOf = (v: unknown): string | null => typeof inputOf(v).cwd === 'string' 
 const sessionOf = (v: unknown): string | null => {
   const i = inputOf(v)
   return typeof i.sessionId === 'string' ? i.sessionId : typeof i.session === 'string' ? i.session : null
+}
+
+/** Resolve a path through symlinks; a path that no longer exists comes back as written (never throws). */
+const real = async (p: string): Promise<string> => realpath(p).catch(() => p)
+const inside = (child: string, parent: string) => child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep)
+
+export interface WorktreeEntry { path: string; locked: boolean; prunable: boolean }
+/** Parse `git worktree list --porcelain`; the first entry is always the main checkout. */
+export function parseWorktreeList(out: string): WorktreeEntry[] {
+  return out.split(/\n\s*\n/).map(block => {
+    const lines = block.split('\n')
+    const path = lines.find(l => l.startsWith('worktree '))?.slice('worktree '.length)
+    return path ? { path, locked: lines.some(l => l === 'locked' || l.startsWith('locked ')), prunable: lines.some(l => l === 'prunable' || l.startsWith('prunable')) } : null
+  }).filter((x): x is WorktreeEntry => x !== null)
+}
+
+/** I3/I4/I5 — what the worktree-removal ops need to read, injected so the mapping is tested without a fleet. */
+export interface WorktreeTargetDeps {
+  registry(): Promise<ReadonlyArray<{ id: string; cwd: string; endedAt?: string; repo?: { repo?: string; root?: string; rootPath?: string; worktree: boolean } }>>
+  git(cwd: string, args: string[], timeoutMs?: number): Promise<string>
+  /** cwd of every process on the machine, or null where it cannot be read (not Linux). */
+  procCwds(): Promise<string[] | null>
+}
+
+export type WorktreeTarget =
+  | { kind: 'shared'; path: string; reason: string }
+  | { kind: 'gone'; path: string; rootPath: string; listed: boolean }
+  | { kind: 'target'; path: string; rootPath: string; branch: string; head: string; repo: string; endedAt?: string; liveSessions: string[]; liveProcesses: number; processCheck: 'ok' | 'skipped' }
+  | ({ kind: 'refused' } & Refusal)
+
+/**
+ * The ONE worktree a session may have removed, derived only from the registry (I3): its recorded cwd, a linked worktree of
+ * a recorded parent repository that still exists. A shared checkout (cwd in the main checkout) is never a target (I5).
+ */
+export async function worktreeTarget(sessionId: string, deps: WorktreeTargetDeps): Promise<WorktreeTarget> {
+  const denied = (reason: string, missing: string[] = []): WorktreeTarget => ({ kind: 'refused', ...refuse(reason, missing) })
+  const rows = await deps.registry().catch(() => null)
+  if (!rows) return denied('the session registry could not be read', ['readable registry'])
+  const row = rows.find(r => r.id === sessionId)
+  if (!row) return denied('session was not found', ['existing session'])
+  const cwd = await real(row.cwd)
+  if (!row.repo?.worktree) return { kind: 'shared', path: cwd, reason: 'the registry does not record a linked worktree' }
+  const rootRaw = row.repo.rootPath
+  if (!rootRaw) return denied('the registry has no parent repository path', ['repo.rootPath'])
+  const rootPath = await real(rootRaw)
+  const text = async (dir: string, args: string[], t?: number) => (await deps.git(dir, args, t)).trim()
+  let alvo: string
+  try { await readdir(rootPath) } catch { return denied('the parent repository no longer exists', ['parent repository']) }
+  // The folder is already gone: say whether git still lists it, so the flow can tell "already removed" from "metadata left".
+  if (!(await stat(row.cwd).then(() => true, () => false))) {
+    const listed = await deps.git(rootPath, ['worktree', 'list', '--porcelain']).then(o => parseWorktreeList(o).some(e => e.path === row.cwd || e.path === cwd), () => true)
+    return { kind: 'gone', path: cwd, rootPath, listed }
+  }
+  try { alvo = await real(await text(cwd, ['rev-parse', '--show-toplevel'])) } catch { return denied('the session folder is gone or not a git worktree', ['existing worktree']) }
+  if (alvo === rootPath) return { kind: 'shared', path: alvo, reason: 'the session works in the main checkout' }
+  try {
+    const gitDir = await real(await text(alvo, ['rev-parse', '--absolute-git-dir']))
+    const common = await real((await text(alvo, ['rev-parse', '--git-common-dir'])).replace(/^(?!\/)/, alvo + '/'))
+    if (gitDir === common) return { kind: 'shared', path: alvo, reason: 'the folder is a main checkout, not a linked worktree' }
+  } catch { return denied('could not tell a linked worktree from a main checkout', ['readable git dir']) }
+  let entries: WorktreeEntry[]
+  try { entries = parseWorktreeList(await deps.git(rootPath, ['worktree', 'list', '--porcelain'])) } catch { return denied('could not list the repository worktrees', ['readable worktree list']) }
+  const resolved = await Promise.all(entries.map(async e => ({ ...e, path: await real(e.path) })))
+  const at = resolved.findIndex(e => e.path === alvo)
+  if (at < 0) return denied('the folder is not a worktree of the recorded repository', ['listed worktree'])
+  if (at === 0) return { kind: 'shared', path: alvo, reason: 'the folder is the main checkout' }
+  if (resolved[at]!.locked) return denied('the worktree is locked', ['unlocked worktree'])
+  if (resolved[at]!.prunable) return denied('the worktree is prunable (metadata only)', ['present worktree'])
+  if (resolved.some((e, i) => i !== at && e.path !== alvo && inside(e.path, alvo))) return denied('another worktree lives inside this one', ['no nested worktree'])
+  let head: string
+  let branch: string
+  try { head = await text(alvo, ['rev-parse', 'HEAD']); branch = await text(alvo, ['branch', '--show-current']) } catch { return denied('could not read the worktree HEAD', ['readable HEAD']) }
+  const liveRows = await Promise.all(rows.filter(r => !r.endedAt).map(async r => ({ id: r.id, cwd: await real(r.cwd) })))
+  const liveSessions = liveRows.filter(r => inside(r.cwd, alvo)).map(r => r.id)
+  const procs = await deps.procCwds().catch(() => null)
+  const liveProcesses = procs ? (await Promise.all(procs.map(p => real(p)))).filter(p => inside(p, alvo)).length : 0
+  return { kind: 'target', path: alvo, rootPath, branch, head, repo: row.repo.repo ?? '', ...(row.endedAt ? { endedAt: row.endedAt } : {}), liveSessions, liveProcesses, processCheck: procs ? 'ok' : 'skipped' }
+}
+
+/** Linux only: the cwd of every process, read with readlink; permission errors are ignored. */
+async function linuxProcCwds(): Promise<string[] | null> {
+  if (process.platform !== 'linux') return null
+  const pids = (await readdir('/proc').catch(() => [])).filter(n => /^\d+$/.test(n))
+  const out = await Promise.all(pids.map(pid => readlink(join('/proc', pid, 'cwd')).catch(() => null)))
+  return out.filter((x): x is string => typeof x === 'string')
+}
+
+export function defaultWorktreeTargetDeps(): WorktreeTargetDeps {
+  return {
+    registry: async () => (await import('../sessions/registry')).readRegistry(),
+    git: async (cwd, args, timeoutMs = 15_000) => (await exec('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, ...args], { timeout: timeoutMs, env: gitEnv() })).stdout,
+    procCwds: linuxProcCwds,
+  }
+}
+
+const REMOVE_KEYS = new Set(['sessionId', 'path', 'head', 'snapshotId'])
+
+/** The two worktree ops: read the target (I11), and remove it only after recomputing everything (I9). */
+export function worktreeHostOps(deps: WorktreeTargetDeps = defaultWorktreeTargetDeps()) {
+  return {
+    'alvo-worktree': async (value: unknown) => {
+      const id = sessionOf(value)
+      if (!id) return refuse('session id is required', ['sessionId'])
+      const t = await worktreeTarget(id, deps)
+      if (t.kind === 'refused') return { refused: true, reason: t.reason, missing: t.missing }
+      if (t.kind === 'shared') return { ok: true, shared: true, path: t.path, reason: t.reason }
+      if (t.kind === 'gone') return { ok: true, shared: false, gone: true, path: t.path, rootPath: t.rootPath, listed: t.listed }
+      return { ok: true, shared: false, path: t.path, rootPath: t.rootPath, branch: t.branch, head: t.head, repo: t.repo, ...(t.endedAt ? { endedAt: t.endedAt } : {}), liveSessions: t.liveSessions, liveProcesses: t.liveProcesses, processCheck: t.processCheck }
+    },
+    'remover-worktree': async (value: unknown) => {
+      const i = inputOf(value)
+      const extra = Object.keys(i).find(k => !REMOVE_KEYS.has(k))
+      if (extra) return refuse(`unexpected input ${extra}`, [])
+      const { sessionId, path, head, snapshotId } = i
+      if (typeof sessionId !== 'string' || !sessionId || typeof path !== 'string' || !path || typeof head !== 'string' || !head || typeof snapshotId !== 'string' || !snapshotId) {
+        return refuse('sessionId, path, head and snapshotId are required', ['sessionId', 'path', 'head', 'snapshotId'])
+      }
+      const t = await worktreeTarget(sessionId, deps)
+      if (t.kind === 'refused') return { refused: true, reason: t.reason, missing: t.missing }
+      if (t.kind === 'shared') return refuse('a shared checkout is never removed', ['linked worktree'])
+      if (t.kind === 'gone') return refuse('the worktree folder is already gone', ['existing worktree'])
+      if (!t.endedAt) return refuse('the session has not ended', ['ended session'])
+      if (t.path !== path) return refuse('the requested path is not the registry worktree', ['registry worktree'])
+      if (t.head !== head) return refuse('HEAD changed since the snapshot', ['HEAD equal to the snapshot'])
+      if (t.liveSessions.length || t.liveProcesses) return refuse('a live session or process is inside the worktree', ['no live session or process'])
+      try {
+        const status = await deps.git(t.path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
+        if (status.length > 0) return refuse('working tree is dirty', ['clean working tree'])
+        await deps.git(t.rootPath, ['worktree', 'remove', t.path], 120_000)
+      } catch (error) { return refuse(`git refused to remove the worktree: ${String(error).slice(0, 300)}`, ['removable worktree']) }
+      return { ok: true, removed: true, path: t.path, branch: t.branch, head: t.head, snapshotId }
+    },
+  }
 }
 
 const streaks = new Map<string, { at: number; count: number }>()
@@ -175,13 +310,14 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps())
 }
 
 /** The host operation registry: the v1 read-only gates plus the trigger layer's two host ops. */
-export function flowHostOps(triggerDeps?: TriggerHostDeps) {
+export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: WorktreeTargetDeps) {
   return {
     // DSL.TIPO-SESSAO op 1, called by the engine's `portao-de-spawn` flow — the same decision the host applies without it.
     'sessao-com-papel': sessaoComPapelHostOp(),
     // ORQ.H4: what the plan allows now (op 3 of the spawn gate and the encaixe-do-pedido flow).
     'capacidade-de-workers': async (value: unknown) => workerCapacity(defaultBudgets, () => sessionAccount(sessionOf(value) ?? undefined)),
     ...triggerHostOps(triggerDeps),
+    ...worktreeHostOps(worktreeDeps),
     'sessao-parada': async (value: unknown) => {
       const id = sessionOf(value)
       if (!id) return refuse('session id is required', ['sessionId'])
