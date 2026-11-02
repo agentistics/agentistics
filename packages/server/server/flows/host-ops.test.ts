@@ -267,6 +267,15 @@ test('I9: a session without endedAt is not removable by the host either', async 
   expect(existsSync(f.wt)).toBe(true)
 })
 
+test('I3: a worktree folder already gone is reported as gone, with whether git still lists it', async () => {
+  const f = wtFixture()
+  execFileSync('rm', ['-rf', f.wt])
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ ok: true, shared: false, gone: true, listed: true })
+  f.g(f.main, 'worktree', 'prune')
+  expect(await f.ops['alvo-worktree'](rm)).toMatchObject({ ok: true, gone: true, listed: false })
+  expect(await f.ops['remover-worktree']({ ...rm, path: f.wt, head: 'x', snapshotId: 's' })).toMatchObject({ refused: true, reason: 'the worktree folder is already gone' })
+})
+
 test('flowHostOps registers the two worktree ops', () => {
   expect(Object.keys(flowHostOps())).toEqual(expect.arrayContaining(['alvo-worktree', 'remover-worktree']))
 })
