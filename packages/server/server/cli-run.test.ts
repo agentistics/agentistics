@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { spawn } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { networkInterfaces, tmpdir } from 'node:os'
 import { createServer } from 'node:net'
 import { buildThrowawayEnv, isRealAgentopPort, releaseThrowawayPorts, reserveThrowawayPorts, runRun, createRunTmp, removeRunTmp, RUN_TMP_PREFIX, SOCKET_PATH_MAX } from './cli-run'
 import { insideHeavyLock } from './resources/mem-guard'
@@ -22,6 +22,16 @@ const canBindLocalhost = await new Promise<boolean>(resolve => {
   server.listen(0, '127.0.0.1', () => server.close(() => resolve(true)))
 })
 const integration = canBindLocalhost ? test : test.skip
+
+/** A base whose NEXT port is also bindable, so a test can expect the pair to be chosen. */
+async function availablePair(): Promise<number> {
+  for (let i = 0; i < 20; i++) {
+    const base = await availablePort()
+    const ok = await new Promise<boolean>(resolve => { const s = createServer(); s.once('error', () => resolve(false)); s.listen(base + 1, '0.0.0.0', () => s.close(() => resolve(true))) })
+    if (ok && !existsSync(join(testHome, '.cache', 'agentistics-throwaway', 'ports', String(base + 1)))) return base
+  }
+  throw new Error('no free port pair')
+}
 
 async function availablePort(): Promise<number> {
   const server = createServer()
@@ -193,6 +203,21 @@ describe('agentop run --rm', () => {
     }
   })
 
+  integration('skips a port held on a non-loopback address (the server binds 0.0.0.0, not 127.0.0.1)', async () => {
+    const ext = Object.values(networkInterfaces()).flat().find(i => i && i.family === 'IPv4' && !i.internal)?.address
+    if (!ext) return
+    const occupied = createServer()
+    await new Promise<void>(resolve => occupied.listen(0, ext, () => resolve()))
+    const address = occupied.address()
+    if (!address || typeof address === 'string') throw new Error('failed to obtain a test port')
+    try {
+      const ports = await reserveThrowawayPorts(address.port)
+      try { expect([ports.apiPort, ports.webPort]).not.toContain(address.port) } finally { releaseThrowawayPorts(ports.reservationPaths) }
+    } finally {
+      await new Promise<void>(resolve => occupied.close(() => resolve()))
+    }
+  })
+
   integration('does not mutate a fake real home and removes the throwaway home', async () => {
     const home = mkdtempSync(join(tmpdir(), 'agentop-run-real-'))
     const realFile = join(home, '.claude.json')
@@ -216,6 +241,46 @@ describe('agentop run --rm', () => {
     const removedHome = removed!.slice('removed '.length)
     expect(() => readFileSync(join(removedHome, '.agentistics', 'missing'))).toThrow()
   }, 10_000)
+
+  integration('records the command\'s exit code in the log BEFORE the cleanup line', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'agentop-run-exit-'))
+    const result = await runCli(home, ['--rm', '--name', 'test-exitlog', '--ttl', '30s', '--', 'sh', '-c', 'exit 7'])
+    expect(result.code).toBe(7)
+    const lines = result.out.split('\n')
+    const exitAt = lines.findIndex(l => l === 'exit 7')
+    const removedAt = lines.findIndex(l => l.startsWith('removed '))
+    expect(exitAt).toBeGreaterThanOrEqual(0)
+    expect(exitAt).toBeLessThan(removedAt)
+  }, 15_000)
+
+  integration('a registered run with a dead pid never blocks: its state is pruned and its ports are free', async () => {
+    const base = await availablePair()
+    const stateDir = join(testHome, '.cache', 'agentistics-throwaway')
+    mkdirSync(stateDir, { recursive: true })
+    const deadHome = mkdtempSync(join(stateDir, 'dead-'))
+    writeFileSync(join(stateDir, 'dead-run.json'), JSON.stringify({ name: 'dead-run', home: deadHome, apiPort: base, webPort: base + 1, pid: 999_999_999, startedAt: '', command: [] }))
+    const ports = await reserveThrowawayPorts(base)
+    try {
+      expect(ports.apiPort).toBe(base)
+      expect(existsSync(join(stateDir, 'dead-run.json'))).toBe(false)
+      expect(existsSync(deadHome)).toBe(false)
+    } finally { releaseThrowawayPorts(ports.reservationPaths) }
+  })
+
+  integration('a port held by a LIVE registered run is skipped, and its state is left alone', async () => {
+    const base = await availablePort()
+    const stateDir = join(testHome, '.cache', 'agentistics-throwaway')
+    mkdirSync(stateDir, { recursive: true })
+    const liveHome = mkdtempSync(join(stateDir, 'live-'))
+    const file = join(stateDir, 'live-run.json')
+    writeFileSync(file, JSON.stringify({ name: 'live-run', home: liveHome, apiPort: base, webPort: base + 1, pid: process.pid, startedAt: '', command: [] }))
+    const ports = await reserveThrowawayPorts(base)
+    try {
+      expect([ports.apiPort, ports.webPort]).not.toContain(base)
+      expect([ports.apiPort, ports.webPort]).not.toContain(base + 1)
+      expect(existsSync(file)).toBe(true)
+    } finally { releaseThrowawayPorts(ports.reservationPaths); rmSync(file, { force: true }); rmSync(liveHome, { recursive: true, force: true }) }
+  })
 
   integration('refuses a --port-offset that lands on the real ports', async () => {
     const home = mkdtempSync(join(tmpdir(), 'agentop-run-offset-'))

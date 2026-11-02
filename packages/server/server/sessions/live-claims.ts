@@ -14,7 +14,7 @@
 
 import { scanProcesses, type HarnessProcess } from '../live-sessions'
 import { conversationsInUse, type ClaimingSession, type ConversationHolder } from './conversation-claim'
-import { emptyHarnessSessionIndex, loadHarnessSessions } from './harness-sessions'
+import { emptyHarnessSessionIndex, loadHarnessSessions, scopeToRowHarness, type HarnessSessionIndex } from './harness-sessions'
 import { readRegistry } from './registry'
 import { externalId } from './session-view'
 import { readHarnessAgents } from './harness-agents-io'
@@ -49,6 +49,40 @@ export function processClaims(
 }
 
 /**
+ * The claims of the rows agentop hosts — PURE. Each row drives the conversation its harness's own
+ * record names (matched by tmux session), else the one the registry stored.
+ *
+ * The record is only the row's own when the SAME harness wrote it (`scopeToRowHarness`): its `tmux`
+ * field is an inherited environment variable, so a claude started with an opencode pane's
+ * environment names that pane too. Trusted, the opencode row "drove" the claude conversation and
+ * its own `ses_…` read as free — a second opencode could be started inside it — while a reopen
+ * aimed at the claude conversation was refused in the name of the claude session.
+ */
+export function managedClaims(
+  registry: readonly ManagedSession[],
+  alive: ReadonlySet<string>,
+  harnessSessions: HarnessSessionIndex,
+): ClaimingSession[] {
+  const rowHarness = new Map(registry.map(m => [m.id, m.harness]))
+  const own = scopeToRowHarness(harnessSessions, id => rowHarness.get(id)).byManagedId
+  const claims: ClaimingSession[] = []
+  for (const m of registry) {
+    // Backend liveness wins over a stale endedAt stamp, including a CLI-owned relay.
+    const exact = own.get(m.id)?.sessionId
+    const conversationId = exact ?? m.conversationId
+    if (!conversationId) continue
+    claims.push({
+      id: m.id,
+      kind: 'managed',
+      alive: alive.has(m.id),
+      conversationId,
+      ...(m.label ? { label: m.label } : {}),
+    })
+  }
+  return claims
+}
+
+/**
  * Conversation id → the live session driving it.
  *
  * Three reads, each contributing something the others cannot:
@@ -69,7 +103,7 @@ export function processClaims(
 export async function liveConversationHolders(
   backend: SessionBackend,
 ): Promise<Map<string, ConversationHolder>> {
-  const [registry, backendSessions, harnessSessions, procs] = await Promise.all([
+  const [registry, backendSessions, harnessSessionsRaw, procs] = await Promise.all([
     readRegistry().catch(() => [] as ManagedSession[]),
     backend.list(),
     loadHarnessSessions().catch(() => emptyHarnessSessionIndex()),
@@ -77,24 +111,11 @@ export async function liveConversationHolders(
   ])
   const alive = new Set(backendSessions.filter(b => b.alive).map(b => b.id))
 
-  const claims: ClaimingSession[] = []
-  for (const m of registry) {
-    // Backend liveness wins over a stale endedAt stamp, including a CLI-owned relay.
-    const exact = harnessSessions.byManagedId.get(m.id)?.sessionId
-    const conversationId = exact ?? m.conversationId
-    if (!conversationId) continue
-    claims.push({
-      id: m.id,
-      kind: 'managed',
-      alive: alive.has(m.id),
-      conversationId,
-      ...(m.label ? { label: m.label } : {}),
-    })
-  }
+  const claims: ClaimingSession[] = managedClaims(registry, alive, harnessSessionsRaw)
   // An assistant running BESIDE agentop holds its conversation just as hard as one we started, and
   // it is the case the registry is blind to by construction. `/proc` only reports processes that
   // exist, so these are alive by definition.
-  claims.push(...processClaims(procs, pid => harnessSessions.byPid.get(pid)?.sessionId))
+  claims.push(...processClaims(procs, pid => harnessSessionsRaw.byPid.get(pid)?.sessionId))
   // The harness's OWN list of live sessions — the only source that sees a BACKGROUND agent, which
   // has no tty, no tmux and nothing in the registry.
   //

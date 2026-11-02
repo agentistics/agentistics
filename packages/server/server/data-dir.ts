@@ -46,7 +46,7 @@ export function resolveDataDir({ env, home, ownerHome, makeTemp }: DataDirInputs
   const real = join(home, '.agentistics')
   const owners = join(ownerHome, '.agentistics')
   const explicit = env.AGENTISTICS_DIR
-  if (!underTest(env)) return { dir: explicit ?? real, isolated: false }
+  if (!underTest(env)) return { dir: explicit || real, isolated: false }
   if (explicit !== undefined && explicit !== '') {
     if (ownerHome && resolve(explicit) === resolve(owners)) {
       throw new Error(

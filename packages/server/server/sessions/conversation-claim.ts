@@ -170,3 +170,37 @@ export function duplicateConversations(
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([conversationId, holders]) => ({ conversationId, holders }))
 }
+
+/**
+ * Is the holder of a reopen the requested row ITSELF, left behind by a session that has ENDED? — PURE.
+ *
+ * `liveConversationHolders` lets backend liveness win over a stale `endedAt` (a CLI-owned relay can outlive
+ * the stamp), so a row whose backend entry outlived its assistant — a structured relay still up after its
+ * child exited, a pane left behind — is its own "holder". Reopening it then answered "that conversation is
+ * already open in <this very row>", pointing at the row the person was looking at, which said it was NOT
+ * running (owner, 2026-11-02: a pinned OpenCode leader under "Encerradas → Dormindo", unreopenable).
+ *
+ * `endedAt` alone is NOT that proof — a CLI-owned relay outlives a stale stamp and is reused
+ * (`reopen-dup.test.ts`). So the row must ALSO be provably idle: its structured record exists and no relay
+ * process of it runs. Then a reopen of THAT row reopens it — the caller ends the leftover entry first, so
+ * the reopen can never become a second assistant beside a still-running one. A twin row, a foreign process,
+ * or the requested row with no `endedAt` (a live row — reopening it stays idempotent) are not this case.
+ */
+export function staleSelfHolder(
+  holder: ConversationHolder | undefined,
+  replaces: string | undefined,
+  replacedRow: { endedAt?: string } | undefined,
+  /**
+   * Is a process of this row PROVABLY not running? `true` only with positive proof (a structured record
+   * whose relays are all gone — the "between two children" state the backend still lists as alive);
+   * `undefined`/`false` when nobody can tell. Without proof the row stays its own live holder: a relay
+   * owned by a CLI process outlives a stale `endedAt` and must be REUSED, never killed.
+   */
+  provablyIdle: boolean | undefined,
+): boolean {
+  return holder?.kind === 'managed'
+    && replaces !== undefined
+    && holder.id === replaces
+    && Boolean(replacedRow?.endedAt)
+    && provablyIdle === true
+}

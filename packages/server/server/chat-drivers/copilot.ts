@@ -14,6 +14,7 @@ import path from 'node:path'
 import { agentisticsMcpLaunch, sameMcpLaunch } from '../mcp-launch'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { mcpTargetPath } from '../mcp-targets'
 import { HOME_DIR } from '../config'
 import { mayRegisterHarnessMcp } from '../mcp-registration'
 import type { ChatDriver } from './types'
@@ -21,7 +22,7 @@ import { findCli } from './cli-detect'
 
 
 // MCP config file path for copilot
-const COPILOT_MCP_CONFIG = path.join(HOME_DIR, '.copilot', 'mcp-config.json')
+const COPILOT_MCP_CONFIG = mcpTargetPath('copilot', HOME_DIR)
 
 
 function copilotIsAvailable(): boolean {
