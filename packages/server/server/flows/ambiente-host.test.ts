@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ambienteHostOps, carriesPort, defaultAmbienteDeps, purgeCopies, type AmbienteDeps } from './ambiente-host'
+import { ambienteHostOps, carriesPort, defaultAmbienteDeps, exitNote, purgeCopies, type AmbienteDeps } from './ambiente-host'
 import type { ThrowawayState } from '../cli-run'
 import { gitEnv } from '../backup/repo-probe'
 
@@ -144,6 +144,16 @@ describe('run (I4, I15, I17)', () => {
       expect(r.reason).toContain('exited')
       expect(r.reason).toContain('exiting (75)')
       expect(r.reason).not.toContain('in time')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+  test('exit code comes from the launcher\'s own `exit <n>` line, not the cleanup line after it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'amb-log-'))
+    try {
+      const f = join(dir, 'run.log')
+      writeFileSync(f, 'throwaway x\nexit 7\nremoved /home/x/run-abc\n')
+      expect(exitNote(f)).toContain('exit code 7')
+      writeFileSync(f, 'throwaway x\nexit signal SIGKILL\nremoved /home/x/run-abc\n')
+      expect(exitNote(f)).toContain('SIGKILL')
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
   test('M1 a launcher whose run never registers is killed by its own pid; a state that shows up late is stopped', async () => {

@@ -235,14 +235,40 @@ async function portIsFree(port: number): Promise<boolean> {
   })
 }
 
+/** A registered run is live while its pid answers or anything still carries its HOME (relays outlive the launcher). */
+function runIsLive(state: ThrowawayState): boolean {
+  if (typeof state.pid === 'number' && alive(state.pid)) return true
+  return process.platform === 'linux' && runOwnedPids(state.home).length > 0
+}
+
+/**
+ * Dead registered runs (launcher killed, state never cleaned) kept the registry — and `agentop run ls` — full of
+ * entries for ports nobody holds. Prune only entries with no live pid and nothing carrying their HOME; returns the
+ * ports held by LIVE registered runs so the picker can skip them.
+ */
+export function pruneStaleRuns(): Set<number> {
+  const held = new Set<number>()
+  for (const state of readStates()) {
+    if (!state || typeof state.name !== 'string' || typeof state.home !== 'string') continue
+    if (runIsLive(state)) { held.add(state.apiPort); held.add(state.webPort); continue }
+    if (!state.home.startsWith(stateRoot() + sep)) continue // never delete a home outside the run registry
+    rmSync(state.home, { recursive: true, force: true })
+    removeRunTmp(state.tmp)
+    releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
+    rmSync(statePath(state.name), { force: true })
+  }
+  return held
+}
+
 export async function reserveThrowawayPorts(preferred: number): Promise<ThrowawayPorts> {
   mkdirSync(portReservationRoot(), { recursive: true, mode: 0o700 })
   const lockPath = await acquireAllocationLock()
   try {
+    const held = pruneStaleRuns()
     let apiPort = Math.max(1024, preferred)
     for (let attempts = 0; attempts < 1000 && apiPort < 65534; attempts++, apiPort++) {
       const webPort = apiPort + 1
-      if (isRealAgentopPort(apiPort) || isRealAgentopPort(webPort)) continue
+      if (isRealAgentopPort(apiPort) || isRealAgentopPort(webPort) || held.has(apiPort) || held.has(webPort)) continue
       const apiReservationPath = portReservationPath(apiPort)
       try {
         mkdirSync(apiReservationPath, { mode: 0o700 })
@@ -518,7 +544,11 @@ async function startRun(options: RunOptions): Promise<number> {
   // caller must wait for the first one's removal instead of exiting the process under it.
   let cleaning: Promise<void> | undefined
   const cleanup = () => (cleaning ??= stopState(state))
-  const childExit = new Promise<number>(resolve => { child.once('exit', (status, sig) => resolve(status ?? (sig ? 1 : 0))); child.once('error', () => resolve(1)) })
+  // The command's end is recorded in the log BEFORE any cleanup line, so whoever reads run.log (the ambiente flow) can name the exit code.
+  const childExit = new Promise<number>(resolve => {
+    child.once('exit', (status, sig) => { console.log(status !== null ? `exit ${status}` : `exit signal ${sig}`); resolve(status ?? (sig ? 1 : 0)) })
+    child.once('error', () => { console.log('exit 1'); resolve(1) })
+  })
   const signal = async (sig: NodeJS.Signals) => { try { process.kill(child.pid!, sig) } catch {} ; await childExit; await cleanup(); process.exit(128 + (sig === 'SIGINT' ? 2 : 15)) }
   process.once('SIGINT', () => void signal('SIGINT'))
   process.once('SIGTERM', () => void signal('SIGTERM'))
