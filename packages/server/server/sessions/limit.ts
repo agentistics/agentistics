@@ -113,6 +113,8 @@ export const LIMIT_RULES: Record<HarnessId, LimitRule | null> = {
   copilot: null,
   antigravity: null,
   kimi: null,
+  // hermes: declared, not probed — no terminal-UI behaviour has been measured, so none is claimed.
+  hermes: null,
   // opencode has NO quota endpoint and no reset time, so only the error text it prints can say a
   // session is blocked, and `resetAt` is deliberately absent (a reset nobody printed is a guess).
   // Strings MEASURED in the opencode 1.19.5 binary (provider-error handling), not invented:

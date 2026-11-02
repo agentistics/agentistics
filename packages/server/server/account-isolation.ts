@@ -10,4 +10,5 @@ export const ISOLATION_ENV: Record<HarnessId, string | null> = {
   claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', copilot: 'COPILOT_HOME',
   gemini: 'GEMINI_CLI_HOME', kimi: 'KIMI_CODE_HOME', antigravity: null,
   opencode: null,
+  hermes: null,
 }

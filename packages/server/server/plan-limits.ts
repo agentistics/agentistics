@@ -21,7 +21,7 @@ import {
   type HarnessId,
   type LivePlanSession, type PlanLimits, type PlanNoticeState, type PlanThresholdNotice, type ScopeBudget,
 } from '@agentistics/core'
-import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, KIMI_DIR, OPENCODE_DIR } from './config'
+import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, HERMES_DIR, KIMI_DIR, OPENCODE_DIR } from './config'
 import {
   bind, byId, canonicalAccountId, forceProbe, sameLogin, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
 } from './harness-accounts'
@@ -52,7 +52,7 @@ export const planAccountKey = (harness: HarnessId, account = 'default'): string 
 
 const sessionHomes: Record<HarnessId, string> = {
   claude: CLAUDE_DIR, codex: CODEX_DIR, gemini: GEMINI_DIR, copilot: COPILOT_DIR,
-  kimi: KIMI_DIR, antigravity: ANTIGRAVITY_DIR, opencode: OPENCODE_DIR,
+  kimi: KIMI_DIR, antigravity: ANTIGRAVITY_DIR, opencode: OPENCODE_DIR, hermes: HERMES_DIR,
 }
 
 type LiveSessionRef = { session_id: string; harness: string; native_session_id?: string; project_path?: string }
@@ -526,7 +526,7 @@ export async function ingestFromRoot(l: PlanLimits, root: string | null, account
  */
 const ROLLOUT_HOME: Record<HarnessId, { home: () => string; sub: string } | null> = {
   claude: null, codex: { home: () => CODEX_DIR, sub: 'sessions' },
-  gemini: null, copilot: null, antigravity: null, kimi: null, opencode: null,
+  gemini: null, copilot: null, antigravity: null, kimi: null, opencode: null, hermes: null,
 }
 
 /**

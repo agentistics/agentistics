@@ -27,6 +27,7 @@ export const FORK_CAPABILITIES: Record<HarnessId, ForkCapability> = {
   // (exact, no guessing), the fork is titled `<title> (fork #1)`, lists under the same cwd, and a prompt to it recalls
   // what the parent was told. So the successor is named by the protocol, not inferred from a transcript.
   opencode: { follow: true, probe: 'ACP session/fork returns the successor sessionId; history carried (opencode 1.19.5)' },
+  hermes: { follow: false, absent: 'Hermes fork continuation is declared in the ACP profile but not verified: no live probe has run.', probe: 'not verified' },
 }
 
 export function forkCapabilityFor(harness: string | undefined): ForkCapability {

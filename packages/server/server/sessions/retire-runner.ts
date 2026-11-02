@@ -239,6 +239,7 @@ export const MCP_COMMAND_SOURCES: Record<HarnessId, ((cwd: string) => Promise<st
   antigravity: null,
   kimi: null,
   opencode: null,
+  hermes: null,
 }
 
 async function claudeMcpCommands(cwd: string): Promise<string[]> {
@@ -326,7 +327,7 @@ export const RETIRE_TRANSCRIPT_MAX_BYTES = 64 * 1024 * 1024
 
 export const BG_TASKS_APPLICABLE: Record<HarnessId, boolean> = {
   claude: true, codex: false, gemini: false, copilot: false,
-  antigravity: false, kimi: false, opencode: false,
+  antigravity: false, kimi: false, opencode: false, hermes: false,
 }
 
 export async function readRetireBgTasks(

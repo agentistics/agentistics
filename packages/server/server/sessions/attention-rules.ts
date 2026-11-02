@@ -166,6 +166,8 @@ export const ATTENTION_RULES: Record<HarnessId, AttentionRules | null> = {
       /enter Submit · esc Back/i,
     ],
   },
+  // hermes: declared, not probed — no terminal-UI behaviour has been measured, so none is claimed.
+  hermes: null,
   opencode: {
     probed: 'opencode 1.19.5, 2026-10-31 (TUI under tmux, throwaway HOME; leader/qa/opencode-wp-a-probe/out2)',
     approval: [

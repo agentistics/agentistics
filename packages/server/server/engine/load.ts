@@ -293,6 +293,7 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
         antigravity: config.ANTIGRAVITY_DIR,
         kimi: config.KIMI_DIR,
         opencode: config.OPENCODE_DIR,
+        hermes: config.HERMES_DIR,
       },
       opencodeDbPath: config.OPENCODE_DB_PATH,
     },

@@ -86,6 +86,8 @@ export const HARNESS_COLOR: Record<SurfaceHarnessId, string> = {
   kimi: '#e11d48',
   // Mirrors HARNESS_COLORS.opencode in packages/web/src/lib/harness.ts.
   opencode: '#06b6d4',
+  // Mirrors HARNESS_COLORS.hermes in packages/web/src/lib/harness.ts.
+  hermes: '#a16207',
   // Mirrors HARNESS_COLORS.agentistics in packages/web/src/lib/harness.ts.
   agentistics: '#f97316',
 }
@@ -98,6 +100,7 @@ export const HARNESS_LABEL: Record<SurfaceHarnessId, string> = {
   antigravity: 'Antigravity',
   kimi: 'Kimi',
   opencode: 'opencode',
+  hermes: 'hermes',
   agentistics: 'Agentistics',
 }
 

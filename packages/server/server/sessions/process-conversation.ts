@@ -211,6 +211,7 @@ const PROCESS_LOG_DIRS: Record<HarnessId, string | null> = {
   copilot: null,
   kimi: null,
   opencode: null,
+  hermes: null,
 }
 
 /**

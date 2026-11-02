@@ -67,6 +67,7 @@ export const TRANSCRIPT_SOURCES: Record<HarnessId, TranscriptSource | null> = {
   // opencode's store is a single SQLite database, not a directory of text files `grep -r` can walk
   // — and there is no legacy adapter anyway (CLAUDE.md step 4, skipped by scope).
   opencode: null,
+  hermes: null,
 }
 
 /**
@@ -131,6 +132,7 @@ export function conversationIdFrom(harness: HarnessId, path: string, root: strin
     // Unreachable in practice: TRANSCRIPT_SOURCES.opencode is null, so grepArgv is never built for
     // it. Listed so the switch stays exhaustive rather than relying on a fallthrough.
     case 'opencode':
+    case 'hermes':
       return null
   }
 }

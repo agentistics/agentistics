@@ -122,6 +122,7 @@ const DEFAULT_ROOTS: Record<HarnessId, () => string> = {
   kimi: () => process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code'),
   antigravity: () => join(homedir(), '.gemini', 'antigravity-cli'),
   opencode: () => opencodePaths(process.env, homedir()).dir,
+  hermes: () => process.env.HERMES_HOME ?? join(homedir(), '.hermes'),
 }
 /** The login root a harness uses when no account root is set (its own env override, else its home dir). */
 export const defaultHarnessRoot = (harness: HarnessId): string => DEFAULT_ROOTS[harness]()
@@ -174,6 +175,7 @@ export const IDENTITY_PROBES: Record<HarnessId, ((root: string | null) => Promis
   kimi: null,
   antigravity: root => readAntigravityIdentity(join(root ?? DEFAULT_ROOTS.antigravity(), 'antigravity-oauth-token')),
   opencode: null,
+  hermes: null,
 }
 
 export function hasIdentityProbe(harness: HarnessId): boolean {
