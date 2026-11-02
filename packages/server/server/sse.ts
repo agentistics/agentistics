@@ -137,6 +137,7 @@ const HARNESS_SESSION_DIRS: Record<HarnessId, string | null> = {
   antigravity: ANTIGRAVITY_BRAIN_DIR,
   kimi: join(KIMI_DIR, 'sessions'),
   opencode: dirname(OPENCODE_DB_PATH),
+  hermes: null,
 }
 
 /** Mirror a new/changed source file into the archive, then tell the rebuild scheduler. */

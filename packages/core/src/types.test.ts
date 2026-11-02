@@ -415,7 +415,7 @@ test('gemini-2.5-flash resolves to correct price', () => {
 // HARNESS_CAPABILITIES
 
 test('HARNESS_CAPABILITIES declares every harness', () => {
-  expect(Object.keys(HARNESS_CAPABILITIES).sort()).toEqual(['agentistics', 'antigravity', 'claude', 'codex', 'copilot', 'gemini', 'kimi', 'opencode'])
+  expect(Object.keys(HARNESS_CAPABILITIES).sort()).toEqual(['agentistics', 'antigravity', 'claude', 'codex', 'copilot', 'gemini', 'hermes', 'kimi', 'opencode'])
 })
 
 test('kimi reports tokens, model and cost', () => {

@@ -338,6 +338,8 @@ export const SPAWN_SPECS: Record<HarnessId, SpawnSpec | null> = {
     efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     resume: id => ['--conversation', id], // `--conversation  Resume a previous conversation by ID`
   },
+  // hermes: declared, not probed — no terminal-UI behaviour has been measured, so none is claimed.
+  hermes: null,
   // `opencode [project]  start opencode tui` — flags read from `opencode --help` 1.17.9 (V-OPENCODE.2, 2026-10-30):
   // `-m, --model  model to use in the format of provider/model`, `-s, --session  session id to continue`,
   // `--prompt  prompt to use`, `--agent  agent to use`, `--fork  fork the session when continuing`. The structured

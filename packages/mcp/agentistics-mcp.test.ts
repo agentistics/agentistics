@@ -10,7 +10,7 @@ import { harnessIds, harnessParam } from "./session-tokens.js";
  * that if a new harness is added to @agentistics/core, it's not silently missed.
  */
 test("All HarnessIds from core must be in the MCP HARNESS_IDS", () => {
-  const expectedHarnesses: HarnessId[] = ["claude", "codex", "gemini", "copilot", "antigravity", "kimi", "opencode"];
+  const expectedHarnesses: HarnessId[] = ["claude", "codex", "gemini", "copilot", "antigravity", "kimi", "opencode", "hermes"];
 
   // Every SURFACE harness while the native runtime is visible; the adapters alone while it is not.
   expect(harnessIds(true)).toEqual(SURFACE_HARNESS_ORDER);

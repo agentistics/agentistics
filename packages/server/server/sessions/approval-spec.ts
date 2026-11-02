@@ -221,6 +221,8 @@ export const APPROVAL_SPECS: Record<HarnessId, ApprovalSpec | null> = {
     },
     steps: { next: 'Right', back: 'Left', probed: 'agy 1.4.6, 2026-10-23 (two-question ask_question, multi-select)' },
   },
+  // hermes: declared, not probed — no terminal-UI behaviour has been measured, so none is claimed.
+  hermes: null,
   // opencode 1.19.5, driven under tmux 2026-10-31 (leader/qa/opencode-wp-a-probe/out2 + out3).
   opencode: {
     // `enter confirm` (permission) / `enter submit` (question) — Enter takes the highlighted option.

@@ -18,6 +18,8 @@ export const HARNESS_COLORS: Record<SurfaceHarnessId, string> = {
   // Rose — the last hue left that stays legible on both surfaces without colliding with the others.
   kimi: '#e11d48',
   opencode: '#06b6d4',
+  // Amber-gold: the one hue left that is not an existing harness's (claude is orange, kimi rose).
+  hermes: '#a16207',
   // Agentistics' own brand amber-orange, a step off Claude's amber so the two never read as one series.
   agentistics: '#f97316',
 }
@@ -35,6 +37,8 @@ export const HARNESS_PROVIDERS: Record<SurfaceHarnessId, string> = {
   // and it can equally run Anthropic/OpenAI/Google models depending on the user's own config. There
   // is no single pricing page to point at, so this names the shape rather than inventing a vendor.
   opencode: 'Multiple providers (opencode routes per model)',
+  // Hermes (Nous Research) routes per provider too (OpenRouter and others), so there is no single vendor page.
+  hermes: 'Multiple providers (Hermes routes per provider)',
   // The native harness is a client for ANY provider the person configured, so the page links to none.
   agentistics: 'Any configured provider (Anthropic, OpenAI-compatible endpoints, Ollama…)',
 }
@@ -383,6 +387,31 @@ export const HARNESS_INFO: Record<SurfaceHarnessId, HarnessInfo> = {
       en: 'Session totals and step-finish parts duplicate message usage and are never summed again. Missing context limits stay unknown.',
       pt: 'Totais da sessão e partes step-finish repetem o uso das mensagens e nunca são somados novamente. Limites de contexto ausentes ficam desconhecidos.',
     },
+  },
+  hermes: {
+    blurb: {
+      en: 'Hermes (Nous Research) is DECLARED only: it is listed, but no live run has verified it yet and no session data is read from it.',
+      pt: 'O Hermes (Nous Research) está apenas DECLARADO: aparece na lista, mas nenhuma execução ao vivo o verificou ainda e nenhum dado de sessão é lido dele.',
+    },
+    format: {
+      en: 'Expected: a read-only SQLite store (state.db). Derived from its source, not recorded from a real install.',
+      pt: 'Esperado: um banco SQLite somente leitura (state.db). Derivado do código-fonte, não gravado de uma instalação real.',
+    },
+    retention: {
+      en: 'Unknown: not measured on a live install.',
+      pt: 'Desconhecida: não medida em uma instalação real.',
+    },
+    source: ['$HERMES_HOME (default ~/.hermes)'],
+    contains: [],
+    missing: [{
+      item: { en: 'Everything', pt: 'Tudo' },
+      why: { en: 'No adapter reads Hermes yet, so no token, cost, model or tool figure is shown.', pt: 'Nenhum adaptador lê o Hermes ainda, então nenhum número de tokens, custo, modelo ou ferramenta é exibido.' },
+    }],
+    note: {
+      en: 'Status: not live-verified. Off by default; it shows up only where Hermes is detected.',
+      pt: 'Situação: não verificado ao vivo. Desligado por padrão; só aparece onde o Hermes é detectado.',
+    },
+    pricingUrl: 'https://openrouter.ai/models',
   },
   agentistics: {
     blurb: {

@@ -12,7 +12,7 @@
  */
 
 /** Mirrors `HarnessId` — must stay EQUAL to the host's union. */
-export type HarnessId = 'claude' | 'codex' | 'gemini' | 'copilot' | 'antigravity' | 'kimi' | 'opencode'
+export type HarnessId = 'claude' | 'codex' | 'gemini' | 'copilot' | 'antigravity' | 'kimi' | 'opencode' | 'hermes'
 
 /** Mirrors `ProviderId` — must stay EQUAL to the host's union. */
 export type ProviderId = 'anthropic' | 'openai' | 'google' | 'moonshot' | 'openai-compatible' | 'other'

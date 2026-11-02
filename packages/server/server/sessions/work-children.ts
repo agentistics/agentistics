@@ -68,6 +68,8 @@ export const HELPER_PROCESSES: Record<HarnessId, RegExp[] | null> = {
   // pane pid IS the native `opencode` binary and it had NO child processes, only its own threads — and
   // none while a command ran either (see `WORK_CHILDREN_TRUSTED`).
   opencode: [],
+  // hermes: never watched idle (no live probe yet): nothing is claimed.
+  hermes: null,
 }
 
 /**
@@ -91,6 +93,8 @@ export const WORK_CHILDREN_TRUSTED: Record<HarnessId, boolean> = {
   // held NO child at all — the command runs inside opencode's own process (out3/pstree-running.txt). An
   // empty work set is therefore no evidence of quiet, so it is not believed.
   opencode: false,
+  // hermes: process tree never measured, so an empty work set is not believed.
+  hermes: false,
 }
 
 /** The harness's own process chain below the pane (see the header). */
@@ -115,6 +119,8 @@ export const HARNESS_CHAIN: Record<HarnessId, HarnessChain | null> = {
   kimi: { exes: ['kimi', 'kimi.bak', 'kimi-code'], argv: [] },
   // One native binary, the pane pid itself (measured 1.19.5, 2026-10-31).
   opencode: { exes: ['opencode'], argv: [] },
+  // hermes: not measured; no chain is claimed.
+  hermes: null,
 }
 
 export interface WorkChildrenOptions {

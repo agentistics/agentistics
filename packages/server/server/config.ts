@@ -306,6 +306,9 @@ const OPENCODE_PATHS = opencodePaths(process.env, HOME_DIR)
 export const OPENCODE_DIR = OPENCODE_PATHS.dir
 export const OPENCODE_DB_PATH = OPENCODE_PATHS.dbPath
 
+// Hermes (Nous Research). DECLARED only: detection of its home, no adapter reads it yet. HERMES_HOME overrides.
+export const HERMES_DIR = process.env.HERMES_HOME ?? join(HOME_DIR, '.hermes')
+
 export const ANTIGRAVITY_DIR = process.env.ANTIGRAVITY_DIR ?? join(GEMINI_DIR, 'antigravity-cli')
 export const ANTIGRAVITY_BRAIN_DIR = join(ANTIGRAVITY_DIR, 'brain')
 export const ANTIGRAVITY_HISTORY_FILE = join(ANTIGRAVITY_DIR, 'history.jsonl')
@@ -481,7 +484,7 @@ export interface HarnessRoot {
  *  antigravity has no isolation variable and keeps its own single-directory reader, and opencode reads its explicitly resolved SQLite database directly. Keyed by `HarnessId`, so a new harness does not compile until it is decided here. */
 export const DEFAULT_HARNESS_DIRS: Record<HarnessId, string | null> = {
   claude: CLAUDE_DIR, codex: CODEX_DIR, gemini: GEMINI_DIR, copilot: COPILOT_DIR, kimi: KIMI_DIR,
-  antigravity: null, opencode: null,
+  antigravity: null, opencode: null, hermes: null,
 }
 const ROOTS_TTL_MS = 5_000
 const rootsMemo = new Map<string, { at: number; value: Promise<HarnessRoot[]> }>()
