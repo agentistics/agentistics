@@ -18,8 +18,8 @@ function fakeProtector(id: 'dpapi' | 'libsecret' = 'dpapi', behaviour: { probe?:
     id, store,
     label: () => `fake ${id}`,
     probe: async () => (behaviour.probe === false ? { ok: false, reason: 'nope' } : { ok: true }),
-    wrap: async (dek, kid) => { store.set(kid, new Uint8Array(dek)); return { ok: true, record: { type: id, createdAt: 'now', params: { kid } } as WrapperRecord } },
-    unwrap: async (rec, kid): Promise<UnwrapResult> => {
+    wrap: async (dek: Uint8Array, kid: string) => { store.set(kid, new Uint8Array(dek)); return { ok: true, record: { type: id, createdAt: 'now', params: { kid } } as WrapperRecord } },
+    unwrap: async (_rec: WrapperRecord, kid: string): Promise<UnwrapResult> => {
       if (behaviour.unwrap === 'unavailable') return { ok: false, kind: 'unavailable', reason: 'down' }
       const v = store.get(kid)
       return behaviour.unwrap === 'missing' || !v ? { ok: false, kind: 'missing', reason: 'gone' } : { ok: true, dek: new Uint8Array(v) }
