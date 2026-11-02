@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
-import { applySeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
+import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
 export { SEED_ALLOW }
@@ -32,7 +32,7 @@ export type ThrowawayState = {
   command: string[]
 }
 
-type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[]; serve: boolean; seedFrom: string | null; cwd: string | null }
+type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[]; serve: boolean; seedFrom: string | null; seedReal: boolean; cwd: string | null }
 
 /** A Unix socket path (sun_path) holds 108 bytes including the NUL; Chrome/tmux sockets live under TMPDIR. */
 export const SOCKET_PATH_MAX = 107
@@ -71,7 +71,28 @@ export function removeRunTmp(path: string | undefined): void {
 export const THROWAWAY_ENV_DROP: readonly string[] = [
   'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GEMINI_CLI_HOME', 'COPILOT_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR',
   'OPENCODE_CONFIG_CONTENT', 'KIMI_DIR', 'AGENTISTICS_FLOWS', 'AGENTISTICS_DATA_DIR',
+  // The store itself: journal, archive and the git-stats cache are resolved from their own variables, not only from AGENTISTICS_DIR.
+  'AGENTISTICS_JOURNAL_DIR', 'AGENTISTICS_ARCHIVE_DIR', 'AGENTISTICS_GIT_STATS_CACHE_FILE',
+  // Harness homes the server reads (config.ts, account-roots.ts).
+  'CLAUDE_DIR', 'CODEX_DIR', 'GEMINI_DIR', 'COPILOT_DIR', 'ANTIGRAVITY_DIR', 'HERMES_HOME',
+  'CLAUDE_CREDENTIALS_FILE', 'CLAUDE_JSON_FILE', 'CLAUDE_SETTINGS_FILE', 'CLAUDE_SETTINGS_LOCAL_FILE', 'CODEX_AUTH_FILE',
+  // Per-file / per-directory relocations of the store's own state (events, tasks, team sync, parse cache).
+  'AGENTISTICS_EVENTS_FILE', 'AGENTISTICS_EVENT_PRODUCER_FILE', 'AGENTISTICS_EVENT_SUBSCRIPTIONS_FILE', 'AGENTISTICS_MOBILE_SUBSCRIPTIONS_FILE',
+  'AGENTISTICS_PARSE_CACHE_FILE', 'AGENTISTICS_TASKS_FILE', 'AGENTISTICS_TEAM_CONN_DIR', 'AGENTISTICS_TEAM_DIR', 'AGENTISTICS_TEAM_SENT_FILE',
+  'AGENTISTICS_TEAM_SYNC_FILE',
 ]
+/** Path-moving variables the server reads that a run deliberately KEEPS, each with its reason (the lint test requires every one to be here or in the drop list). */
+export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
+  XDG_RUNTIME_DIR: 'systemd --user scope and the tmux socket dir live there; the run does not own it',
+  TMUX_TMPDIR: 'overwritten by buildThrowawayEnv to the run tmp',
+  TMPDIR: 'overwritten by buildThrowawayEnv to the run tmp',
+  VOLTA_HOME: 'toolchain location, re-set explicitly from the real one so shims resolve',
+  AGENTISTICS_DIR: 'overwritten by buildThrowawayEnv to <home>/.agentistics',
+  GIT_COMMON_DIR: 'a git variable, not a store path; the fixtures scrub it through gitEnv()',
+  FIXTURE_DIR: 'test-only fixture location, never set in a run',
+  XDG_CONFIG_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
+  XDG_CACHE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
+}
 export const isThrowawayEnvDrop = (key: string): boolean => THROWAWAY_ENV_DROP.includes(key) || /^KIMI_.*HOME$/.test(key)
 
 export function buildThrowawayEnv(home: string, name: string, apiPort: number, webPort: number, source: NodeJS.ProcessEnv = process.env, opts: { tmp?: string; heavyHeld?: boolean } = {}): NodeJS.ProcessEnv {
@@ -102,7 +123,7 @@ export function readState(name: string): ThrowawayState | null {
 function usage(): string {
   return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] -- <command...>
        agentop run --rm [--ttl 2h] [--port-offset N] [--name x]
-       agentop run --rm --serve [--seed-from <staging>] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]
+       agentop run --rm --serve [--seed-from <staging> | --seed-real] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]
        agentop run ls
        agentop run stop <name>`
 }
@@ -135,6 +156,7 @@ function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'h
   let remove = false
   let serve = false
   let seedFrom: string | null = null
+  let seedReal = false
   let cwd: string | null = null
   let command: string[] = []
   for (let i = 0; i < args.length; i++) {
@@ -142,6 +164,7 @@ function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'h
     if (arg === '--') { command = args.slice(i + 1); break }
     if (arg === '--rm') { remove = true; continue }
     if (arg === '--serve') { serve = true; continue }
+    if (arg === '--seed-real') { seedReal = true; continue }
     if (arg === '--seed-from') { seedFrom = args[++i] ?? ''; continue }
     if (arg === '--cwd') { cwd = args[++i] ?? ''; continue }
     if (arg === '--name') { name = safeName(args[++i] ?? ''); continue }
@@ -155,8 +178,9 @@ function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'h
     throw new Error(`unknown run option: ${arg}`)
   }
   if (!remove) throw new Error('agentop run requires --rm (throwaway runs are always explicit)')
-  if ((seedFrom !== null || cwd !== null) && !serve) throw new Error('--seed-from and --cwd only apply with --serve')
-  return { name, ttl, portOffset, remove, command, serve, seedFrom, cwd }
+  if ((seedFrom !== null || seedReal || cwd !== null) && !serve) throw new Error('--seed-from, --seed-real and --cwd only apply with --serve')
+  if (seedFrom !== null && seedReal) throw new Error('--seed-from and --seed-real are exclusive')
+  return { name, ttl, portOffset, remove, command, serve, seedFrom, seedReal, cwd }
 }
 
 type ThrowawayPorts = { apiPort: number; webPort: number; reservationPaths: string[] }
@@ -366,7 +390,7 @@ async function waitForMemory(): Promise<boolean> {
 }
 
 /** The data dir the flows write under (`<dataDir>/flows/ambientes/<id>/semente/` is the only place a seed may come from). */
-function realDataDir(): string { return process.env.AGENTISTICS_DATA_DIR || join(homedir(), '.agentistics') }
+function realDataDir(): string { return process.env.AGENTISTICS_DIR || join(homedir(), '.agentistics') }
 
 /** `--seed-from` accepts a path only inside `<dataDir>/flows/ambientes/<id>/semente/` (realpath), never anything else. */
 export function seedSourceOk(path: string, dataDir = realDataDir()): string | null {
@@ -427,6 +451,8 @@ async function startRun(options: RunOptions): Promise<number> {
   const { apiPort, webPort, reservationPaths } = ports
   try {
     if (options.seedFrom !== null) applySeed(join(seedSourceOk(options.seedFrom)!, '.agentistics'), agentistics)
+    // B4: the allow-list copy of the REAL store runs HERE, in the run's own launcher process, never inside the real server's event loop.
+    if (options.seedReal) buildSeed(realDataDir(), agentistics)
     ensureNoStructured(agentistics)
   } catch (error) {
     releaseThrowawayPorts(reservationPaths)
