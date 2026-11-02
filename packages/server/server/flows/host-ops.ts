@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
 import { readdir, readlink, realpath, stat } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import { promisify } from 'node:util'
@@ -157,6 +158,51 @@ export function worktreeHostOps(deps: WorktreeTargetDeps = defaultWorktreeTarget
   }
 }
 
+/** F3 DOCKER.DETECTAR — what the read-only probe needs, injected so it is tested with a fake `docker`. */
+export interface DockerProbeDeps {
+  /** Run `docker <args>`; `null` when the binary is missing, otherwise its exit code and stdout. */
+  docker(args: string[]): Promise<{ code: number; stdout: string } | null>
+  isWsl(): boolean
+  /** True where Docker Desktop's WSL integration mount exists. */
+  desktopMount(): boolean
+}
+export type DockerKind = 'wsl2-desktop' | 'desktop' | 'native' | 'none'
+export interface DockerState { present: boolean; running: boolean; version: string | null; kind: DockerKind }
+
+export function defaultDockerProbeDeps(): DockerProbeDeps {
+  return {
+    docker: async args => {
+      try { return { code: 0, stdout: (await exec('docker', args, { timeout: 8_000, windowsHide: true })).stdout } }
+      catch (error) {
+        const e = error as NodeJS.ErrnoException & { code?: string | number; stdout?: string }
+        return e.code === 'ENOENT' ? null : { code: typeof e.code === 'number' ? e.code : 1, stdout: typeof e.stdout === 'string' ? e.stdout : '' }
+      }
+    },
+    isWsl: () => process.platform === 'linux' && (Boolean(process.env.WSL_DISTRO_NAME) || /microsoft/i.test(readFileSync('/proc/version', 'utf8'))),
+    desktopMount: () => existsSync('/mnt/wsl/docker-desktop'),
+  }
+}
+
+/** Read-only: asks `docker` about itself and never installs, starts or stops anything. */
+export async function detectDocker(deps: DockerProbeDeps = defaultDockerProbeDeps()): Promise<DockerState> {
+  const client = await deps.docker(['version', '--format', '{{.Client.Version}}'])
+  // A missing binary is the only "absent": an installed client with no daemon still answers with its own version.
+  if (!client) return { present: false, running: false, version: null, kind: 'none' }
+  const clientVersion = client.stdout.trim()
+  const server = await deps.docker(['version', '--format', '{{.Server.Version}}'])
+  const serverVersion = server && server.code === 0 ? server.stdout.trim() : ''
+  const running = serverVersion.length > 0
+  const os = running ? (await deps.docker(['info', '--format', '{{.OperatingSystem}}']))?.stdout.trim() ?? '' : ''
+  const desktop = /docker desktop/i.test(os) || (!running && deps.desktopMount())
+  const kind: DockerKind = desktop ? (deps.isWsl() ? 'wsl2-desktop' : 'desktop') : 'native'
+  return { present: true, running, version: serverVersion || clientVersion || null, kind }
+}
+
+/** The read-only `docker-detectar` host op. */
+export function dockerHostOps(deps?: DockerProbeDeps) {
+  return { 'docker-detectar': async () => ({ ok: true, ...(await detectDocker(deps)) }) }
+}
+
 const streaks = new Map<string, { at: number; count: number }>()
 /** Two waiting polls count as consecutive only when they are at most this far apart (the idle poller ticks every 15 s). */
 export const STREAK_MAX_GAP_MS = 45_000
@@ -310,7 +356,7 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps())
 }
 
 /** The host operation registry: the v1 read-only gates plus the trigger layer's two host ops. */
-export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: WorktreeTargetDeps) {
+export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: WorktreeTargetDeps, dockerDeps?: DockerProbeDeps) {
   return {
     // DSL.TIPO-SESSAO op 1, called by the engine's `portao-de-spawn` flow — the same decision the host applies without it.
     'sessao-com-papel': sessaoComPapelHostOp(),
@@ -318,6 +364,7 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
     'capacidade-de-workers': async (value: unknown) => workerCapacity(defaultBudgets, () => sessionAccount(sessionOf(value) ?? undefined)),
     ...triggerHostOps(triggerDeps),
     ...worktreeHostOps(worktreeDeps),
+    ...dockerHostOps(dockerDeps),
     'sessao-parada': async (value: unknown) => {
       const id = sessionOf(value)
       if (!id) return refuse('session id is required', ['sessionId'])

@@ -279,3 +279,57 @@ test('I3: a worktree folder already gone is reported as gone, with whether git s
 test('flowHostOps registers the two worktree ops', () => {
   expect(Object.keys(flowHostOps())).toEqual(expect.arrayContaining(['alvo-worktree', 'remover-worktree']))
 })
+
+// ── F3 DOCKER.DETECTAR (host) ─────────────────────────────────────────────────────────────────────────────────────
+import { detectDocker, dockerHostOps, type DockerProbeDeps } from './host-ops'
+
+/** A fake `docker`: answers by its argv; `null` models a binary that is not on PATH. */
+const fakeDocker = (o: { installed?: boolean; running?: boolean; os?: string; wsl?: boolean; mount?: boolean }): DockerProbeDeps & { calls: string[][] } => {
+  const calls: string[][] = []
+  return {
+    calls,
+    isWsl: () => o.wsl ?? false,
+    desktopMount: () => o.mount ?? false,
+    docker: async args => {
+      calls.push(args)
+      if (o.installed === false) return null
+      const fmt = args[2]
+      if (fmt === '{{.Client.Version}}') return { code: 0, stdout: '27.3.1\n' }
+      if (fmt === '{{.Server.Version}}') return o.running ? { code: 0, stdout: '27.3.1\n' } : { code: 1, stdout: '' }
+      if (fmt === '{{.OperatingSystem}}') return { code: 0, stdout: `${o.os ?? 'Ubuntu 24.04'}\n` }
+      return { code: 1, stdout: '' }
+    },
+  }
+}
+
+test('docker-detectar: absent binary -> none, nothing else probed', async () => {
+  const d = fakeDocker({ installed: false })
+  expect(await detectDocker(d)).toEqual({ present: false, running: false, version: null, kind: 'none' })
+  expect(d.calls).toHaveLength(1)
+})
+
+test('docker-detectar: installed but daemon down -> present, not running, client version', async () => {
+  expect(await detectDocker(fakeDocker({ running: false }))).toEqual({ present: true, running: false, version: '27.3.1', kind: 'native' })
+})
+
+test('docker-detectar: native engine running', async () => {
+  expect(await detectDocker(fakeDocker({ running: true }))).toEqual({ present: true, running: true, version: '27.3.1', kind: 'native' })
+})
+
+test('docker-detectar: Docker Desktop in WSL2 running, and installed-but-stopped via the integration mount', async () => {
+  expect(await detectDocker(fakeDocker({ running: true, os: 'Docker Desktop', wsl: true }))).toMatchObject({ running: true, kind: 'wsl2-desktop' })
+  expect(await detectDocker(fakeDocker({ running: false, wsl: true, mount: true }))).toMatchObject({ present: true, running: false, kind: 'wsl2-desktop' })
+  expect(await detectDocker(fakeDocker({ running: true, os: 'Docker Desktop', wsl: false }))).toMatchObject({ kind: 'desktop' })
+})
+
+test('docker-detectar: the op is read-only (only `docker version` / `docker info`) and returns ok', async () => {
+  const d = fakeDocker({ running: true })
+  expect(await dockerHostOps(d)['docker-detectar']()).toMatchObject({ ok: true, present: true, running: true })
+  expect(d.calls.every(c => c[0] === 'version' || c[0] === 'info')).toBe(true)
+})
+
+test('docker-detectar: the real probe never throws on this machine', async () => {
+  const r = await detectDocker()
+  expect(typeof r.present).toBe('boolean')
+  expect(['wsl2-desktop', 'desktop', 'native', 'none']).toContain(r.kind)
+})
