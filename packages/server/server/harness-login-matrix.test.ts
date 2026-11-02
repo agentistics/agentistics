@@ -17,9 +17,9 @@ import { findHarnessBinary, harnessSearchPath } from './sessions/user-path'
 /** Where each assistant's own installer puts its binary, relative to HOME (see user-path.ts). */
 const INSTALL_DIR: Record<HarnessId, string> = {
   claude: '.local/bin', codex: '.bun/bin', gemini: '.bun/bin', copilot: '.volta/bin', kimi: '.kimi-code/bin',
-  antigravity: '.local/bin', opencode: '.local/bin',
+  antigravity: '.local/bin', opencode: '.local/bin', hermes: '.local/bin',
 }
-const BIN: Record<HarnessId, string> = { claude: 'claude', codex: 'codex', gemini: 'gemini', copilot: 'copilot', kimi: 'kimi', antigravity: 'agy', opencode: 'opencode' }
+const BIN: Record<HarnessId, string> = { claude: 'claude', codex: 'codex', gemini: 'gemini', copilot: 'copilot', kimi: 'kimi', antigravity: 'agy', opencode: 'opencode', hermes: 'hermes' }
 /** What each CLI prints when asked to sign in — same shape as the captures in account-login.test.ts. */
 const SAYS: Partial<Record<HarnessId, string>> = {
   claude: 'Open this URL:\\nhttps://claude.com/cai/oauth/authorize?code=true&client_id=fake&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=FAKE\\nPaste code here if prompted >',

@@ -62,6 +62,7 @@ export const TRANSCRIPT_RETENTION: Record<HarnessId, { days: number; who: string
   antigravity: null,
   kimi: null,
   opencode: null,
+  hermes: null,
 }
 
 const DAY_MS = 86_400_000

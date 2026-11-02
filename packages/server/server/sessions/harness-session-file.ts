@@ -272,6 +272,7 @@ export const HARNESS_SESSION_SOURCES: Record<HarnessId, HarnessSessionSource | n
   antigravity: null,
   kimi: null,
   opencode: null,
+  hermes: null,
 }
 
 /**
@@ -388,4 +389,5 @@ export const HARNESS_PROCESS_TRANSCRIPTS: Record<HarnessId, HarnessProcessTransc
   // opencode 1.17.9, probed 2026-10-08: one `opencode.db` (+ its -wal/-shm) for EVERY session, so
   // the open file names the store, never the session.
   opencode: null,
+  hermes: null,
 }

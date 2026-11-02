@@ -163,6 +163,12 @@ export const HARNESS_SECRETS: Record<HarnessId, ExcludeRule[]> = {
       why: 'The whole session-history database, because its account/credential tables carry OAuth tokens and this exclusion model cannot split one file into a safe part and a secret part. Over-excluding costs the user their opencode conversation history, which is recoverable by using opencode again; under-excluding costs them a live token, which is not.',
     },
   ],
+  // Hermes keeps provider keys in `~/.hermes/.env` and OAuth state in `auth.json` (derived from its
+  // source, NOT yet confirmed on a live install): both are credentials, never shared.
+  hermes: [
+    { pattern: '.hermes/.env', match: 'prefix', reason: 'secret', restoreWith: 'hermes setup (re-enter your provider key)', why: 'Hermes stores provider API keys in this file.' },
+    { pattern: '.hermes/auth.json', match: 'prefix', reason: 'secret', restoreWith: 'hermes login (re-authenticate)', why: 'Hermes stores OAuth credentials in this file.' },
+  ],
 }
 
 /** Secrets that are not scoped to one harness. */
@@ -556,6 +562,7 @@ const RAW_DIR: Record<HarnessId, string> = {
   // this backup has no reason to carry (a binary is reinstallable; the auth.json beside it there is
   // also outside this dir, so this raw dir does not reach it either).
   opencode: '.local/share/opencode',
+  hermes: '.hermes',
 }
 
 /** Cross-harness data. Always included: a backup without these restores metrics that no filter,

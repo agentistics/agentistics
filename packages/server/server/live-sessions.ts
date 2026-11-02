@@ -130,6 +130,8 @@ const VERSIONED_INSTALL: Record<HarnessId, RegExp | null> = {
   kimi: null,
   // A single native binary named after the tool (`~/.opencode/bin/opencode`), never a version.
   opencode: null,
+  // Hermes is a Python program (comm `python3`): no live-process identity has been measured, so none is claimed.
+  hermes: null,
 }
 
 /** The harness an executable PATH belongs to, for installs named after their version — PURE. */
@@ -287,6 +289,7 @@ const NOT_A_SESSION: Record<HarnessId, readonly string[] | null> = {
   antigravity: null,
   kimi: [...MANAGEMENT.kimi],
   opencode: [...MANAGEMENT.opencode],
+  hermes: null,
 }
 
 /**

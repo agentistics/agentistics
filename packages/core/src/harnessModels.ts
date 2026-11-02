@@ -80,6 +80,7 @@ export const HARNESS_MODELS: Record<HarnessId, ModelOption[]> = {
   // No SPAWN_SPECS entry either (CLAUDE.md step 4, skipped by scope) — this table exists to label
   // SPAWN_SPECS[h].modelSuggestions, and opencode has none of those to label.
   opencode: [],
+  hermes: [],
 }
 
 /** The ids only, keyed by harness — what `spawn-spec.ts`'s `modelSuggestions` must equal. */

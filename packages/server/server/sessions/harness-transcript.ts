@@ -565,6 +565,8 @@ export const HARNESS_TRANSCRIPTS: Record<HarnessId, HarnessTranscript | null> = 
   // `opencode-chat-io.ts`. The LINK half: a TUI row gets its `ses_…` from argv (`-s`) or from opencode's own
   // log (`opencode-run-link.ts`), never from the folder.
   opencode: OPENCODE,
+  // hermes: its store is a SQLite file (`state.db`) read by the engine; no chat reader is wired here yet.
+  hermes: null,
 }
 
 /**

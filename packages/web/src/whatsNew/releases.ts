@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.189.0': {
+    features: [
+      {
+        pt: 'Hermes Agent: o app passou a conhecer o Hermes, mas só como declarado. Ele ainda não abre sessões, não mostra chat nem números de uso, e não foi testado com o Hermes rodando de verdade. Nada muda para quem não o tem instalado.',
+        en: 'Hermes Agent: the app now knows about Hermes, but only as declared. It cannot start sessions yet, shows no chat or usage figures, and has not been tested with Hermes really running. Nothing changes if you do not have it installed.',
+      },
+    ],
+    fixes: [],
+  },
   '2.188.0': {
     features: [
       {

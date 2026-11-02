@@ -61,6 +61,8 @@ export const HARNESS_SKILLS: Record<HarnessId, SkillSource | null> = {
   gemini: null,
   copilot: null,
   kimi: null,
+  // hermes: declared, not probed — no terminal-UI behaviour has been measured, so none is claimed.
+  hermes: null,
   // MEASURED 2026-10-30, opencode 1.17.9, `opencode debug skill` in a throwaway HOME: it lists SKILL.md
   // directories from ~/.config/opencode/{skills,skill}, ~/.opencode/skills, ~/.claude/skills and
   // ~/.agents/skills, and per project from .opencode/skills and .claude/skills (+ the built-in

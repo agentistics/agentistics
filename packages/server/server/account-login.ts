@@ -21,6 +21,7 @@ export const LOGIN_ADAPTERS: Record<HarnessId, LoginAdapter | null> = {
   kimi: { argv: ['kimi', 'login'], kind: 'device', pty: false, hosts: ['kimi.com', 'www.kimi.com', 'auth.kimi.com', 'kimi.moonshot.cn'], path: /device|oauth/i },
   antigravity: null,
   opencode: null,
+  hermes: null,
 }
 export const LOGIN_MESSAGES: Record<LoginError, string> = {
   login_unavailable: 'Could not start sign-in. Check that the assistant and tmux are installed.',

@@ -356,6 +356,8 @@ describe('LEGACY_FALSE_NOTES — the classification of every legacy false', () =
     'gemini.agents': 'not_supported', 'gemini.gitLines': 'not_supported', 'gemini.dynamicWorkflows': 'unknown',
     'gemini.compaction': 'not_supported', 'gemini.skills': 'unknown',
     'gemini.mcpServers': 'not_supported',
+    // hermes is DECLARED only: nothing is recorded, so every cell is unknown.
+    'hermes.tokens': 'unknown', 'hermes.cost': 'unknown', 'hermes.model': 'unknown', 'hermes.tools': 'unknown', 'hermes.agents': 'unknown', 'hermes.gitLines': 'unknown', 'hermes.dynamicWorkflows': 'unknown', 'hermes.activeTime': 'unknown', 'hermes.contextWindow': 'unknown', 'hermes.compaction': 'unknown', 'hermes.skills': 'unknown', 'hermes.mcpServers': 'unknown',
     'copilot.agents': 'not_supported', 'copilot.dynamicWorkflows': 'unknown', 'copilot.contextWindow': 'not_supported',
     'copilot.compaction': 'not_supported', 'copilot.skills': 'unknown', 'copilot.mcpServers': 'not_supported',
     'antigravity.agents': 'not_supported', 'antigravity.gitLines': 'not_supported', 'antigravity.dynamicWorkflows': 'unknown',

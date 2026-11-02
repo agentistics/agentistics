@@ -41,6 +41,7 @@ export function storeDirOf(harness: HarnessId, root: string): string | null {
     case 'gemini': return join(root, '.gemini', 'tmp')
     case 'antigravity': return null
     case 'opencode': return null
+    case 'hermes': return null
   }
 }
 

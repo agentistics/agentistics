@@ -252,7 +252,7 @@ test('meterless harnesses key canonical roots and expose isolation capabilities 
     expect((await probeAccountIdentity(harness, other)).key).not.toBe(result.key)
   }
   expect(IDENTITY_PROBES.antigravity).toBeInstanceOf(Function)
-  expect(ISOLATION_ENV).toEqual({ claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', copilot: 'COPILOT_HOME', gemini: 'GEMINI_CLI_HOME', kimi: 'KIMI_CODE_HOME', antigravity: null, opencode: null })
+  expect(ISOLATION_ENV).toEqual({ claude: 'CLAUDE_CONFIG_DIR', codex: 'CODEX_HOME', copilot: 'COPILOT_HOME', gemini: 'GEMINI_CLI_HOME', kimi: 'KIMI_CODE_HOME', antigravity: null, opencode: null, hermes: null })
 })
 
 test('real claude probe passes the selected root and returns per-seat keys with fallback identity fields', async () => {
