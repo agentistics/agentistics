@@ -25,6 +25,7 @@
 import path from 'node:path'
 import { agentisticsMcpLaunch } from '../mcp-launch'
 import { existsSync } from 'node:fs'
+import { mcpTargetPath } from '../mcp-targets'
 import { HOME_DIR } from '../config'
 import { mayRegisterHarnessMcp } from '../mcp-registration'
 import type { ChatDriver } from './types'
@@ -32,7 +33,7 @@ import type { ChatMessage } from '../chat-tty'
 import { findCli } from './cli-detect'
 
 // chat-drivers/ is one level deeper than chat-tty.ts, so 4 levels up to reach the repo root
-const CODEX_CONFIG_PATH = path.join(HOME_DIR, '.codex', 'config.toml')
+const CODEX_CONFIG_PATH = mcpTargetPath('codex', HOME_DIR)
 const CODEX_AUTH_PATH = path.join(HOME_DIR, '.codex', 'auth.json')
 const MCP_SERVER_NAME = 'agentistics'
 

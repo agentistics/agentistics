@@ -17,6 +17,7 @@
 import path from 'node:path'
 import { agentisticsMcpLaunch, sameMcpLaunch } from '../mcp-launch'
 import { existsSync } from 'node:fs'
+import { mcpTargetPath } from '../mcp-targets'
 import { HOME_DIR } from '../config'
 import { mayRegisterHarnessMcp } from '../mcp-registration'
 import type { ChatDriver } from './types'
@@ -24,7 +25,7 @@ import type { ChatMessage } from '../chat-tty'
 import { findCli } from './cli-detect'
 
 // chat-drivers/ is one level deeper than chat-tty.ts, so 4 levels up to reach the repo root
-const GEMINI_SETTINGS_PATH = path.join(HOME_DIR, '.gemini', 'settings.json')
+const GEMINI_SETTINGS_PATH = mcpTargetPath('gemini', HOME_DIR)
 const GEMINI_OAUTH_PATH = path.join(HOME_DIR, '.gemini', 'oauth_creds.json')
 const MCP_SERVER_NAME = 'agentistics'
 

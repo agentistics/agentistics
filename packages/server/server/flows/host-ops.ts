@@ -4,6 +4,7 @@ import { join, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { gitEnv } from '../backup/repo-probe'
 import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
+import { ambienteHostOps } from './ambiente-host'
 
 const exec = promisify(execFile)
 /**
@@ -318,6 +319,7 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
     'capacidade-de-workers': async (value: unknown) => workerCapacity(defaultBudgets, () => sessionAccount(sessionOf(value) ?? undefined)),
     ...triggerHostOps(triggerDeps),
     ...worktreeHostOps(worktreeDeps),
+    ...ambienteHostOps(),
     'sessao-parada': async (value: unknown) => {
       const id = sessionOf(value)
       if (!id) return refuse('session id is required', ['sessionId'])
