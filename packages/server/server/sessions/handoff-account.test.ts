@@ -46,8 +46,12 @@ describe('handoffAccountChoice (CONTA.AUTO B)', () => {
     expect(await handoffAccountChoice({ harness: 'claude', agentCaller: true })).toBeUndefined()
     budgets = [row(home), row(second)]
     process.env.AGENTISTICS_MULTI_ACCOUNT = '0'
-    expect(await handoffAccountChoice({ harness: 'claude', agentCaller: true })).toBeUndefined()
-    process.env.AGENTISTICS_MULTI_ACCOUNT = '1'
+    try {
+      expect(await handoffAccountChoice({ harness: 'claude', agentCaller: true })).toBeUndefined()
+    } finally {
+      // restore even when the assertion fails, so the flag never leaks into the next test or file
+      process.env.AGENTISTICS_MULTI_ACCOUNT = '1'
+    }
   })
   test('nobody has room: the account whose window reopens first, flagged room:false — and never the limited predecessor\'s', async () => {
     const { handoffAccountChoice } = await import('./spawn-account-io')

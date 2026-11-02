@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.187.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Histórico e busca do chat (opção experimental): a busca agora encontra a palavra com ou sem acento e procura só no texto que aparece na conversa, sem o raciocínio do modelo nem as ferramentas.',
+        en: 'Chat history and search (experimental option): search now finds a word with or without accents and only looks at the text shown in the conversation, not the model\'s reasoning or tools.',
+      },
+      {
+        pt: 'Fluxos (experimental): uma execução que ainda está rodando não aparece mais como interrompida quando outro processo a consulta.',
+        en: 'Flows (experimental): a run that is still going no longer shows as interrupted when another process checks on it.',
+      },
+    ],
+  },
   '2.186.0': {
     features: [
       {
