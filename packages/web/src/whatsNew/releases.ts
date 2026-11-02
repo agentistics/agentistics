@@ -29,7 +29,12 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Voice call: the bar says \'Working\' while she does what you asked.',
       },
     ],
-    fixes: [],
+    fixes: [
+      {
+        pt: 'Reabrir uma sessão encerrada que ficou presa em "já está aberta em…" volta a funcionar.',
+        en: 'Reopening an ended session stuck on "already open in…" works again.',
+      },
+    ],
   },
   '2.190.0': {
     features: [
