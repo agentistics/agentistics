@@ -21,8 +21,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Flows (experimental, off by default): worker sessions that finished and saved their work close by themselves. Leader sessions never do.',
       },
       {
-        pt: 'O resumo do líder agora lista quem ainda está aberto e quem ainda não salvou o trabalho.',
-        en: 'The leader\'s summary now lists who is still open and who has not saved their work yet.',
+        pt: 'Fluxos (experimental): com os fluxos ligados, o resumo do líder lista quem ainda está aberto e quem ainda não salvou o trabalho. O fechamento automático foi testado com sessões simuladas; com um trabalhador real ainda não.',
+        en: 'Flows (experimental): with flows on, the leader\'s summary lists who is still open and who has not saved their work yet. Auto-close was tested with simulated sessions, not yet with a real worker.',
       },
       {
         pt: 'Ligação por voz: a barra mostra "Trabalhando" enquanto ela faz o que você pediu.',
