@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
 import { resolveDataDir } from './data-dir'
 import { join } from 'node:path'
-import { gitEnv } from './backup/repo-probe'
+import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 import { guardedSeed, realDataDir, parseArgs, buildThrowawayEnv, isThrowawayEnvDrop, seedSourceOk, serveCwdOk, serveLockRefusal, runOwnedPids, THROWAWAY_ENV_DROP, THROWAWAY_ENV_KEEP } from './cli-run'
 import { buildSeed } from './run-seed'
 
@@ -55,13 +55,13 @@ describe('--seed-from / --cwd validation', () => {
   test('--cwd refuses a plain directory and a main checkout', () => {
     const d = mkdtempSync(join(tmpdir(), 'ambcwd-'))
     expect(serveCwdOk(d)).toBeNull()
-    Bun.spawnSync(['git', 'init', '-q', d], { env: gitEnv() })
+    Bun.spawnSync(['git', 'init', '-q', d], { env: gitTestEnv() })
     expect(serveCwdOk(d)).toBeNull()
   })
 })
 
 describe('linked worktrees, SIGTERM during the seed, empty AGENTISTICS_DIR', () => {
-  const git = (cwd: string, ...a: string[]) => { const r = Bun.spawnSync(['git', '-C', cwd, ...a], { env: gitEnv(), stdout: 'pipe', stderr: 'pipe' }); if (r.exitCode !== 0) throw new Error(r.stderr.toString()); return r.stdout.toString() }
+  const git = (cwd: string, ...a: string[]) => { const r = Bun.spawnSync(['git', '-C', cwd, ...a], { env: gitTestEnv(), stdout: 'pipe', stderr: 'pipe' }); if (r.exitCode !== 0) throw new Error(r.stderr.toString()); return r.stdout.toString() }
   test('--cwd accepts a REAL linked worktree (absolute --git-common-dir) and still refuses its main checkout', () => {
     const main = realpathSync(mkdtempSync(join(tmpdir(), 'ambmain-')))
     git(main, 'init', '-q', '-b', 'main'); git(main, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x')

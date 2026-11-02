@@ -5,17 +5,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ambienteHostOps, carriesPort, defaultAmbienteDeps, exitNote, purgeCopies, type AmbienteDeps } from './ambiente-host'
 import type { ThrowawayState } from '../cli-run'
-import { gitEnv } from '../backup/repo-probe'
+import { gitTestEnv } from '@agentistics/core/gitTestEnv'
 
-// gitEnv() drops GIT_DIR/GIT_INDEX_FILE: under a git hook they point at the REAL repository, and these fixtures commit, branch and push.
-const g = (cwd: string, ...a: string[]) => execFileSync('git', ['-C', cwd, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { encoding: 'utf8', env: gitEnv() }).trim()
+// gitTestEnv() drops GIT_DIR/GIT_INDEX_FILE: under a git hook they point at the REAL repository, and these fixtures commit, branch and push.
+const g = (cwd: string, ...a: string[]) => execFileSync('git', ['-C', cwd, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { encoding: 'utf8', env: gitTestEnv() }).trim()
 const tmp = (p: string) => realpathSync(mkdtempSync(join(tmpdir(), p)))
 
 /** A local origin --bare + a clone with a main commit, a second main commit, and a commit that lives only on a branch. */
 function repo() {
   const origin = tmp('amb-origin-'), root = join(tmp('amb-root-'), 'r')
-  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { env: gitEnv() })
-  execFileSync('git', ['clone', '-q', origin, root], { env: gitEnv() })
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { env: gitTestEnv() })
+  execFileSync('git', ['clone', '-q', origin, root], { env: gitTestEnv() })
   writeFileSync(join(root, 'a'), '1'); g(root, 'add', '.'); g(root, 'commit', '-qm', 'one')
   const c1 = g(root, 'rev-parse', 'HEAD')
   writeFileSync(join(root, 'a'), '2'); g(root, 'commit', '-qam', 'two')
