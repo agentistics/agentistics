@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { readdir, readlink, realpath } from 'node:fs/promises'
+import { readdir, readlink, realpath, stat } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { gitEnv } from '../backup/repo-probe'
@@ -48,6 +48,7 @@ export interface WorktreeTargetDeps {
 
 export type WorktreeTarget =
   | { kind: 'shared'; path: string; reason: string }
+  | { kind: 'gone'; path: string; rootPath: string; listed: boolean }
   | { kind: 'target'; path: string; rootPath: string; branch: string; head: string; repo: string; endedAt?: string; liveSessions: string[]; liveProcesses: number; processCheck: 'ok' | 'skipped' }
   | ({ kind: 'refused' } & Refusal)
 
@@ -68,7 +69,12 @@ export async function worktreeTarget(sessionId: string, deps: WorktreeTargetDeps
   const rootPath = await real(rootRaw)
   const text = async (dir: string, args: string[], t?: number) => (await deps.git(dir, args, t)).trim()
   let alvo: string
-  try { await readdir(rootPath); } catch { return denied('the parent repository no longer exists', ['parent repository']) }
+  try { await readdir(rootPath) } catch { return denied('the parent repository no longer exists', ['parent repository']) }
+  // The folder is already gone: say whether git still lists it, so the flow can tell "already removed" from "metadata left".
+  if (!(await stat(row.cwd).then(() => true, () => false))) {
+    const listed = await deps.git(rootPath, ['worktree', 'list', '--porcelain']).then(o => parseWorktreeList(o).some(e => e.path === row.cwd || e.path === cwd), () => true)
+    return { kind: 'gone', path: cwd, rootPath, listed }
+  }
   try { alvo = await real(await text(cwd, ['rev-parse', '--show-toplevel'])) } catch { return denied('the session folder is gone or not a git worktree', ['existing worktree']) }
   if (alvo === rootPath) return { kind: 'shared', path: alvo, reason: 'the session works in the main checkout' }
   try {
@@ -122,6 +128,7 @@ export function worktreeHostOps(deps: WorktreeTargetDeps = defaultWorktreeTarget
       const t = await worktreeTarget(id, deps)
       if (t.kind === 'refused') return { refused: true, reason: t.reason, missing: t.missing }
       if (t.kind === 'shared') return { ok: true, shared: true, path: t.path, reason: t.reason }
+      if (t.kind === 'gone') return { ok: true, shared: false, gone: true, path: t.path, rootPath: t.rootPath, listed: t.listed }
       return { ok: true, shared: false, path: t.path, rootPath: t.rootPath, branch: t.branch, head: t.head, repo: t.repo, ...(t.endedAt ? { endedAt: t.endedAt } : {}), liveSessions: t.liveSessions, liveProcesses: t.liveProcesses, processCheck: t.processCheck }
     },
     'remover-worktree': async (value: unknown) => {
@@ -135,6 +142,7 @@ export function worktreeHostOps(deps: WorktreeTargetDeps = defaultWorktreeTarget
       const t = await worktreeTarget(sessionId, deps)
       if (t.kind === 'refused') return { refused: true, reason: t.reason, missing: t.missing }
       if (t.kind === 'shared') return refuse('a shared checkout is never removed', ['linked worktree'])
+      if (t.kind === 'gone') return refuse('the worktree folder is already gone', ['existing worktree'])
       if (!t.endedAt) return refuse('the session has not ended', ['ended session'])
       if (t.path !== path) return refuse('the requested path is not the registry worktree', ['registry worktree'])
       if (t.head !== head) return refuse('HEAD changed since the snapshot', ['HEAD equal to the snapshot'])
