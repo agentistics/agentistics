@@ -80,6 +80,10 @@ export const THROWAWAY_ENV_DROP: readonly string[] = [
   'AGENTISTICS_EVENTS_FILE', 'AGENTISTICS_EVENT_PRODUCER_FILE', 'AGENTISTICS_EVENT_SUBSCRIPTIONS_FILE', 'AGENTISTICS_MOBILE_SUBSCRIPTIONS_FILE',
   'AGENTISTICS_PARSE_CACHE_FILE', 'AGENTISTICS_TASKS_FILE', 'AGENTISTICS_TEAM_CONN_DIR', 'AGENTISTICS_TEAM_DIR', 'AGENTISTICS_TEAM_SENT_FILE',
   'AGENTISTICS_TEAM_SYNC_FILE',
+  // R1: read through an injected `env` object (opencode-paths.ts, account-login.ts), invisible to a `process.env.X` grep.
+  'OPENCODE_DB', 'OPENCODE_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+  // A leaked git hook environment would point the run's git at the owner's real repository / index.
+  'GIT_DIR', 'GIT_INDEX_FILE',
 ]
 /** Path-moving variables the server reads that a run deliberately KEEPS, each with its reason (the lint test requires every one to be here or in the drop list). */
 export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
@@ -88,10 +92,13 @@ export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
   TMPDIR: 'overwritten by buildThrowawayEnv to the run tmp',
   VOLTA_HOME: 'toolchain location, re-set explicitly from the real one so shims resolve',
   AGENTISTICS_DIR: 'overwritten by buildThrowawayEnv to <home>/.agentistics',
+  MONGO_DB: 'a database NAME on the (never contacted) central, not a path',
   GIT_COMMON_DIR: 'a git variable, not a store path; the fixtures scrub it through gitEnv()',
   FIXTURE_DIR: 'test-only fixture location, never set in a run',
   XDG_CONFIG_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
   XDG_CACHE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
+  XDG_DATA_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
+  XDG_STATE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
 }
 export const isThrowawayEnvDrop = (key: string): boolean => THROWAWAY_ENV_DROP.includes(key) || /^KIMI_.*HOME$/.test(key)
 
@@ -143,7 +150,7 @@ function parseTtl(value: string): number {
   return n * ({ s: 1, m: 60, h: 3600, d: 86400 } as Record<string, number>)[m[2]!]!
 }
 
-function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'help' } | { action: 'stop'; name: string } {
+export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'help' } | { action: 'stop'; name: string } {
   if (args[0] === '--help' || args[0] === '-h') return { action: 'help' }
   if (args[0] === 'ls') return { action: 'ls' }
   if (args[0] === 'stop') {
