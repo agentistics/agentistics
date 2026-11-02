@@ -408,8 +408,8 @@ export const HARNESS_INFO: Record<SurfaceHarnessId, HarnessInfo> = {
       why: { en: 'No adapter reads Hermes yet, so no token, cost, model or tool figure is shown.', pt: 'Nenhum adaptador lê o Hermes ainda, então nenhum número de tokens, custo, modelo ou ferramenta é exibido.' },
     }],
     note: {
-      en: 'Status: not live-verified. Off by default; it shows up only where Hermes is detected.',
-      pt: 'Situação: não verificado ao vivo. Desligado por padrão; só aparece onde o Hermes é detectado.',
+      en: 'Status: declared only, not live-verified. It cannot start sessions yet.',
+      pt: 'Situação: só declarado, não verificado ao vivo. Ainda não inicia sessões.',
     },
     pricingUrl: 'https://openrouter.ai/models',
   },
