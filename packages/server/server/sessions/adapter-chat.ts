@@ -19,10 +19,19 @@
  * - **An error CLOSES the stream** and remembers the conversation as refused for `ADAPTER_REFUSAL_MS`,
  *   so the client's reconnect lands on the legacy stream instead of failing the same way again.
  */
-import { applyHarnessChatDeltas, type ChatSourceRef, type HarnessChat, type HarnessChatDelta } from '@agentistics/engine-api'
-import { chatDelta, type ChatTurn, type SessionConversationLink } from '@agentistics/core'
-import type { ChatPayload } from './chat-web'
+import {
+  applyHarnessChatDeltas, chatHasHistory,
+  type ChatHistoryPage, type ChatSearchPage, type ChatSourceRef, type ChatUnavailable,
+  type HarnessChat, type HarnessChatDelta, type HarnessChatHistory,
+} from '@agentistics/engine-api'
+import {
+  chatDelta, excerptAround, findMatches, foldQuery,
+  type ChatSearchHit, type ChatSearchPage as HostSearchPage, type ChatTurn, type SessionConversationLink,
+} from '@agentistics/core'
+import type { CliLang } from '../cli-lang'
+import type { ChatHistoryMeta, ChatPayload } from './chat-web'
 import { conversationOfRow } from './row-conversation'
+import { splitContextBlock } from './agentistics-context'
 import { isExternalRowId } from './external-continue'
 import { RefusalLog } from './refusal-log'
 
@@ -494,4 +503,257 @@ export function firstWindow(
       void gate.then(ok => finish(ok ? w : null))
     })
   })
+}
+
+// ─── V-READ: history and search through the engine's 1.22 contract ────────────────────────────────
+
+/** How long one `history()` / `search()` call may take before its signal aborts it (the engine answers `timeout`/`cancelled`). */
+export const ADAPTER_HISTORY_TIMEOUT_MS = 10_000
+/** How long one `search()` call may scan before it answers what it has with `complete: false`. */
+export const ADAPTER_SEARCH_BUDGET_MS = 4_000
+
+/**
+ * PURE. The chat's history members when this harness DECLARES them (`declares.history.from`) and has
+ * them; `null` for a 1.21 engine, a declared absence, or a half-implemented entry — the host's own
+ * readers serve those.
+ */
+export function historyOf(chat: HarnessChat): (HarnessChat & HarnessChatHistory) | null {
+  if (chat.declares.history?.from === undefined) return null
+  return chatHasHistory(chat) ? chat : null
+}
+
+type Say = Record<CliLang, string>
+const say = (m: Say, lang: CliLang): string => m[lang] ?? m.en
+
+/** The sentence for a source that is not readable: never an empty list, always a reason a person reads. */
+export function historySentence(u: ChatUnavailable, lang: CliLang): string {
+  if (u.status === 'pending') {
+    return say({
+      en: 'This conversation is not ready yet — the harness writes its history when the first message is sent. Try again in a moment.',
+      pt: 'Esta conversa ainda não está pronta — o histórico só é gravado quando a primeira mensagem é enviada. Tente de novo em instantes.',
+    } as Say, lang)
+  }
+  if (u.status === 'absent') {
+    return say({ en: 'There is no history for this conversation.', pt: 'Não há histórico para esta conversa.' } as Say, lang)
+  }
+  switch (u.code) {
+    case 'epoch-changed': case 'bad-cursor': case 'foreign':
+      return say({
+        en: 'The conversation changed while you were reading it (rewound or rewritten) — reloading from the start.',
+        pt: 'A conversa mudou enquanto você lia (voltou no tempo ou foi reescrita) — recarregando desde o início.',
+      } as Say, lang)
+    case 'timeout': case 'cancelled':
+      return say({
+        en: 'Reading the history took too long. Try again.',
+        pt: 'Ler o histórico demorou demais. Tente de novo.',
+      } as Say, lang)
+    case 'unknown-account':
+      return say({
+        en: 'The account this conversation belongs to is not available here.',
+        pt: 'A conta a que esta conversa pertence não está disponível aqui.',
+      } as Say, lang)
+    case 'bad-query':
+      return say({ en: 'Type something to search for.', pt: 'Digite algo para buscar.' } as Say, lang)
+    default:
+      return say({
+        en: 'The history could not be read right now. Try again in a moment.',
+        pt: 'Não foi possível ler o histórico agora. Tente de novo em instantes.',
+      } as Say, lang)
+  }
+}
+
+const RESNAPSHOT_CODES = new Set(['epoch-changed', 'bad-cursor', 'foreign'])
+
+function withTimeout(signal: AbortSignal | undefined, ms: number): AbortSignal {
+  const t = AbortSignal.timeout(ms)
+  return signal ? AbortSignal.any([signal, t]) : t
+}
+
+/** What a history read decided: a payload to serve, or the legacy flow (`absent`, or the call threw). */
+export type AdapterHistoryRead = { payload: ChatPayload } | { legacy: 'absent' | 'failed' }
+
+/**
+ * M01/M07/M11 — one read of the conversation's PAGE from `history()`, for harnesses that declare it.
+ *
+ * - `ready` is served as it is — `ready([])` is a conversation with nothing in it, and NO other reader is asked.
+ * - `pending` / `error` are served as a sentence + `history.status`, never as `[]`.
+ * - `absent` → `{ legacy: 'absent' }`: the caller continues with the flow it had before this existed.
+ * - A call that throws breaks the contract: `{ legacy: 'failed' }` (the caller refuses the conversation).
+ * - An older page asked with a cursor of another epoch / conversation → `history.resnapshot`, with no turns.
+ */
+export async function readAdapterHistory(o: {
+  conversationId: string
+  chat: HarnessChat
+  row: AdapterChatRow
+  pending: string[]
+  max: number
+  lang: CliLang
+  before?: string
+  snapshot?: string
+  signal?: AbortSignal
+  timeoutMs?: number
+  finish(read: { turns: ChatTurn[]; older: boolean }, live: boolean): Promise<ChatPayload>
+  foreign?: () => Promise<ReadonlySet<string>>
+}): Promise<AdapterHistoryRead> {
+  const h = historyOf(o.chat)
+  if (!h) return { legacy: 'absent' }
+  const live = rowLive(o.row)
+  const ref = { conversationId: o.conversationId, ...(o.row.cwd ? { cwd: o.row.cwd } : {}), pending: o.pending }
+  try {
+    if (o.foreign) {
+      // CROSSBIND: the source the engine resolves must not be another row's.
+      const src = await o.chat.resolve(ref)
+      if (src && sourceForeign(src, o.conversationId, await o.foreign())) {
+        logForeign(o.conversationId, src)
+        return { legacy: 'failed' }
+      }
+    }
+    const res: ChatHistoryPage | ChatUnavailable = await h.history(ref, {
+      limit: o.max,
+      ...(o.before ? { before: o.before } : {}),
+      ...(o.snapshot ? { snapshot: o.snapshot } : {}),
+      signal: withTimeout(o.signal, o.timeoutMs ?? ADAPTER_HISTORY_TIMEOUT_MS),
+    })
+    if (res.status === 'absent') return { legacy: 'absent' }
+    const link = o.row.link
+    if (res.status === 'ready') {
+      const meta: ChatHistoryMeta = {
+        status: 'ready', start: res.start, total: res.total, before: res.before, snapshot: res.snapshot, epoch: res.sourceEpoch,
+      }
+      // The window notice belongs to the newest page only ("the last N turns"); an older page is not the end.
+      const older = !o.before && !o.snapshot && res.before !== null
+      const p = adapterPayload(await o.finish({ turns: res.turns as ChatTurn[], older }, live), link)
+      return { payload: { ...p, history: meta } }
+    }
+    const base = adapterPayload(await o.finish({ turns: [], older: false }, live), link)
+    if (res.status === 'pending') {
+      return { payload: {
+        ...base,
+        unavailable: historySentence(res, o.lang),
+        transcript: { state: 'not-yet-written', reason: 'live-no-file-yet' },
+        history: { status: 'pending', retryAfterMs: res.retryAfterMs },
+      } }
+    }
+    const resnapshot = RESNAPSHOT_CODES.has(res.code) && !!(o.before || o.snapshot)
+    return { payload: {
+      ...base,
+      unavailable: historySentence(res, o.lang),
+      transcript: { state: 'unreadable', reason: 'read-failed' },
+      history: { status: 'error', code: res.code, retryable: res.retryable, ...(resnapshot ? { resnapshot: true as const } : {}) },
+    } }
+  } catch {
+    return { legacy: 'failed' }
+  }
+}
+
+/** The answer of "Buscar na conversa" through the engine (a superset of the host's page — see `chat-search-web.ts`). */
+export interface AdapterSearchAnswer extends HostSearchPage {
+  /** False = the scan stopped short: "no results" must never be said, and `cursor` continues it. */
+  complete: boolean
+  stopped?: 'limit' | 'budget' | 'cancelled'
+  cursor?: string | null
+  /** Already-localized: why nothing could be searched. */
+  unavailable?: string
+  /**
+   * Which numbering `hits[].index` is in. The engine counts its own turns; the chat view numbers turns
+   * AFTER the host split the injected context into a chip, so the two can differ by one — an index is
+   * only ever stated in the space it was measured in.
+   */
+  indexSpace?: 'engine'
+}
+
+/** PURE. An engine hit as the host's page shape: the snippet is all the engine sends of the message. */
+export function hostHitOf(h: ChatSearchPage['hits'][number], query: string): ChatSearchHit {
+  const spans = findMatches(h.snippet, foldQuery(query))
+  const { excerpt, highlights } = excerptAround(h.snippet, spans)
+  return {
+    index: h.index, role: h.role, ...(h.at ? { at: h.at } : {}), text: h.snippet,
+    excerpt, highlights, matches: Math.max(1, spans.length),
+  }
+}
+
+/**
+ * The host's display rules on engine hits: a user turn that opens with the injected `<agentistics-context>`
+ * block shows only what the person typed, so a hit INSIDE the block is dropped and one in the rest is
+ * re-snippeted from the rest. The engine sends a snippet only, so the full turn of each user hit is read
+ * through `history({ before: hit.before, limit: 1 })` (the page that ends at the hit). A turn that cannot
+ * be read keeps its hit untouched — dropping on a failed read would hide a real message.
+ */
+async function displayHits(
+  h: HarnessChatHistory, ref: { conversationId: string; cwd?: string }, hits: ChatSearchPage['hits'], query: string, timeoutMs: number,
+): Promise<ChatSearchHit[]> {
+  const out: ChatSearchHit[] = []
+  for (const hit of hits) {
+    if (hit.role !== 'user') { out.push(hostHitOf(hit, query)); continue }
+    let full: string | null = null
+    try {
+      const pg = await h.history(ref, { before: hit.before, limit: 1, signal: withTimeout(undefined, timeoutMs) })
+      if (pg.status === 'ready') full = pg.turns[pg.turns.length - 1]?.text ?? null
+    } catch { /* keep the hit */ }
+    const split = full === null ? null : splitContextBlock(full)
+    if (!split) { out.push(hostHitOf(hit, query)); continue }
+    if (findMatches(split.rest, foldQuery(query)).length === 0) continue
+    out.push(hostHitOf({ ...hit, snippet: split.rest.slice(0, 160) }, query))
+  }
+  return out
+}
+
+/**
+ * M09 — "Buscar na conversa" from the engine's `search()`, for harnesses that declare it; `null` = the
+ * host's own whole-transcript search serves (undeclared, or the source is `absent`). It never says
+ * "no results" for a scan that did not finish: `complete` is the engine's word, passed through, and a
+ * pending/error source is a sentence with `complete: false`.
+ */
+export async function searchAdapterHistory(o: {
+  conversationId: string
+  chat: HarnessChat
+  cwd?: string
+  query: string
+  cursor?: string
+  limit?: number
+  offset?: number
+  lang: CliLang
+  signal?: AbortSignal
+  budgetMs?: number
+  timeoutMs?: number
+  /** The vault scrub the chat applies to its turns (a granted secret must not surface in a snippet). */
+  scrub?: <T>(v: T) => Promise<T>
+  /** CROSSBIND: the owners of every source (see `readAdapterHistory`); a foreign source → `null` (host search). */
+  foreign?: () => Promise<ReadonlySet<string>>
+  /** A rewind agentop drove is pending: the chat cuts turns the engine still has → the host search serves. */
+  rewindPending?: boolean
+}): Promise<AdapterSearchAnswer | null> {
+  const h = historyOf(o.chat)
+  if (!h) return null
+  if (o.rewindPending) return null
+  const empty = { query: o.query, total: 0, offset: o.offset ?? 0, hits: [] as ChatSearchHit[], scanned: 0 }
+  try {
+    const ref = { conversationId: o.conversationId, ...(o.cwd ? { cwd: o.cwd } : {}) }
+    if (o.foreign) {
+      const src = await o.chat.resolve({ ...ref, pending: [] })
+      if (!src) return null
+      if (sourceForeign(src, o.conversationId, await o.foreign())) { logForeign(o.conversationId, src); return null }
+    }
+    const res = await h.search(
+      ref,
+      {
+        query: o.query,
+        ...(o.cursor ? { cursor: o.cursor } : {}),
+        ...(o.limit !== undefined ? { limit: o.limit } : {}),
+        budgetMs: o.budgetMs ?? ADAPTER_SEARCH_BUDGET_MS,
+        signal: withTimeout(o.signal, o.timeoutMs ?? ADAPTER_HISTORY_TIMEOUT_MS),
+      },
+    )
+    if (res.status === 'absent') return null
+    if (res.status !== 'ready') return { ...empty, complete: false, unavailable: historySentence(res, o.lang) }
+    const hits = await displayHits(h, ref, res.hits, o.query, o.timeoutMs ?? ADAPTER_HISTORY_TIMEOUT_MS)
+    const shown = o.scrub ? await o.scrub(hits) : hits
+    return {
+      ...empty, total: shown.length, hits: shown, scanned: res.scanned,
+      complete: res.complete, ...(res.stopped ? { stopped: res.stopped } : {}), cursor: res.cursor,
+      indexSpace: 'engine',
+    }
+  } catch {
+    return null
+  }
 }

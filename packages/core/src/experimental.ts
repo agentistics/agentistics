@@ -86,6 +86,17 @@ export const EXPERIMENTAL_FEATURES: readonly ExperimentalFeature[] = [
     },
   },
   {
+    id: 'chat-history-engine',
+    env: 'AGENTISTICS_CHAT_HISTORY_ENGINE',
+    // Opt-in: the history/search read of the engine's chat channel (V-READ) has not been verified in
+    // a live session yet, so it must not ride the default-ON `adapter-chat` flag to every user.
+    isOn: raw => raw === '1',
+    description: {
+      en: 'Chat history and search read in a new way that loads older messages a little at a time (Claude Code and OpenCode).',
+      pt: 'Histórico e busca do chat lidos de um jeito novo, que carrega as mensagens antigas aos poucos (Claude Code e OpenCode).',
+    },
+  },
+  {
     id: 'multi-account',
     env: 'AGENTISTICS_MULTI_ACCOUNT',
     // ON by default since 2026-10-28 (owner report: a fresh Mac could not add a second login and the

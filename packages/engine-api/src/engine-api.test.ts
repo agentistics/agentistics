@@ -145,7 +145,7 @@ describe('ES.6h — the typed code host (1.8)', () => {
     answer: () => ({ ok: false as const, sentence: 'x' }), cancel: () => ({ ok: false as const, sentence: 'x' }), end: async () => {},
   })
   test('the engine-api is 1.9 (1.8 + the chat channel) and a 1.7 engine\'s opaque handle still satisfies CodeHost but is not a port', () => {
-    expect(ENGINE_API_VERSION).toBe('1.21.0')
+    expect(ENGINE_API_VERSION).toBe('1.22.0')
     const opaque: CodeHost = { kind: 'code-host', dispose: async () => {} }
     expect(asCodePort(opaque)).toBeNull()
     expect(asCodePort(null)).toBeNull()
@@ -217,5 +217,26 @@ describe('1.21 — ADAPTER.LIMITES declarations ride the registry; keys and refu
     const a: StructuredAmendResult = { result: 'appended', requestId: 'r1', carrierRequestId: 'r3', at: 't', reason: 'running, no steer', durable: false }
     const u: StructuredSubmitReceipt = { state: 'in-doubt', requestId: 'r1', at: 't', durable: true }
     expect([r.state, a.result, u.state]).toEqual(['cancelled', 'appended', 'in-doubt'])
+  })
+})
+
+describe('1.22 — chat history is optional both ways (mismatch)', () => {
+  const table = (p: string): CapabilityName | null => (p === '/api/provider' ? 'localShell' : null)
+  const base = (apiVersion: string, chatHistory?: EngineManifest['provides']['chatHistory']): EngineManifest => ({
+    name: 'agentistics-engine', version: '0.0.1', apiVersion,
+    provides: { nativeRuntime: false, replay: [], live: [], chat: ['claude'], providers: [], ...(chatHistory ? { chatHistory } : {}) },
+  })
+  test('a 1.21 engine (no chatHistory) loads on a 1.22 host', () => {
+    expect(apiCompatible('1.22.0', '1.21.0')).toBe(true)
+    expect(checkEngine({ manifest: base('1.21.0'), routes: [], commands: [] }, '1.22.0', table)).toEqual([])
+    expect(base('1.21.0').provides.chatHistory).toBeUndefined()
+  })
+  test('a 1.22 engine that negotiated down to 1.21 loads on a 1.21 host; one that did not is refused in words', () => {
+    expect(checkEngine({ manifest: base('1.21.0'), routes: [], commands: [] }, '1.21.0', table)).toEqual([])
+    expect(checkEngine({ manifest: base('1.22.0', ['claude', 'opencode']), routes: [], commands: [] }, '1.21.0', table))
+      .toEqual([{ kind: 'api-mismatch', host: '1.21.0', engine: '1.22.0' }])
+  })
+  test('a 1.22 engine with chatHistory loads on a 1.22 host', () => {
+    expect(checkEngine({ manifest: base('1.22.0', ['claude', 'opencode']), routes: [], commands: [] }, '1.22.0', table)).toEqual([])
   })
 })

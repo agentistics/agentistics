@@ -27,6 +27,9 @@ export interface EngineManifest {
     /** 1.9 — the harnesses whose integration serves `chat`. Derived from the registry, never restated.
      *  Optional: an engine built against 1.8 does not say, and then serves none. */
     chat?: HarnessId[]
+    /** 1.22 — the harnesses whose chat also serves `history` / `search` / `status` (`chatHasHistory`). Derived
+     *  from the registry. Optional: an engine built against 1.21 does not say, and then serves none. */
+    chatHistory?: HarnessId[]
     providers: ProviderId[]
     /** 1.16 — deterministic experimental flows, when the host also enables `flows`. */
     flows?: boolean

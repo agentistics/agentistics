@@ -3609,9 +3609,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         }
         const offset = num('offset')
         const limit = num('limit')
+        const cursor = url.searchParams.get('cursor')
         const payload = await searchSessionChat(
           await hostForFleet(lang), lang, id, url.searchParams.get('q') ?? '',
-          { ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) },
+          { ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}), ...(cursor ? { cursor } : {}) },
         )
         return new Response(JSON.stringify(payload), {
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
@@ -3641,7 +3642,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         if (featureOn('adapter-chat')) {
           const lang = fleetLang(url.searchParams.get('lang'))
           const { readAdapterChatPayload } = await import('./sessions/adapter-chat-web')
-          const adapted = await readAdapterChatPayload(await hostForFleet(lang), lang, id)
+          const histOn = featureOn('chat-history-engine')
+          const before = histOn ? url.searchParams.get('before') : null
+          const snapshot = histOn ? url.searchParams.get('snapshot') : null
+          const adapted = await readAdapterChatPayload(await hostForFleet(lang), lang, id, {
+            ...(before ? { before } : {}), ...(snapshot ? { snapshot } : {}), signal: req.signal,
+          })
           if (adapted) {
             return new Response(JSON.stringify(adapted), {
               headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },

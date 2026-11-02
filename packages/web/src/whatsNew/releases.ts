@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.186.0': {
+    features: [
+      {
+        pt: 'Nova opção experimental, desligada por padrão: no Claude Code e no OpenCode, o histórico e a busca do chat passam a ser lidos de um jeito novo, que carrega as mensagens mais antigas aos poucos. Conferida só com testes automáticos; numa sessão real ainda não. Com ela ligada, a busca ainda diferencia letras com e sem acento e também encontra o raciocínio do modelo; isso será corrigido.',
+        en: 'New experimental option, off by default: in Claude Code and OpenCode, chat history and search are read in a new way that loads older messages a little at a time. Checked only with automated tests; not yet in a real session. With it on, search still treats letters with and without accents as different and also finds the model\'s reasoning; this will be fixed.',
+      },
+      {
+        pt: "Ligação por voz (experimental): legenda numa linha que rola sob o globo e um cartão que mostra o que ela está fazendo agora, passo a passo; em telas largas dá para abrir 'Ver o que ela vê'.",
+        en: "Voice call (experimental): a rolling caption under the globe and a card showing what she is doing now, step by step; on wide screens you can open 'See what she sees'.",
+      },
+    ],
+    fixes: [],
+  },
   '2.185.0': {
     features: [
       {
