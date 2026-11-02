@@ -202,6 +202,42 @@ describe('M09 — search through the engine, honest about completeness', () => {
   })
 })
 
+describe('V-READ fix — search gate (F1) and display rules (F2)', () => {
+  const ready = (hits: ChatSearchPage['hits']): ChatSearchPage =>
+    ({ status: 'ready', hits, complete: true, cursor: null, scanned: 5, snapshot: 's', sourceEpoch: 'e' })
+  const ctx = '<agentistics-context>\nsecret briefing about zebra\n</agentistics-context>\n\nmeu pedido real'
+
+  test('F1: a source owned by another row is never searched through the engine', async () => {
+    const { chat, calls } = histChat(() => page([]), () => ready([]))
+    const other = { ...chat, async resolve() { return { ...src, conversationId: 'c-other', sourceRef: '/x/c-other.jsonl' } } } as HarnessChat
+    const out = await searchAdapterHistory({
+      conversationId: 'c1', chat: other, query: 'zebra', lang: 'en', foreign: async () => new Set(['c-other']),
+    })
+    expect(out).toBeNull()
+    expect(calls.search).toBe(0)
+  })
+  test('F2: a hit inside the injected briefing is dropped; one in what the person typed stays (re-snippeted)', async () => {
+    const mk = (q: string) => histChat(
+      () => page([{ role: 'user', text: ctx }]),
+      () => ready([{ index: 0, role: 'user', snippet: 'secret briefing about zebra', before: 'B0' }]),
+    )
+    const a = mk('zebra')
+    const dropped = await searchAdapterHistory({ conversationId: 'c1', chat: a.chat, query: 'zebra', lang: 'en' })
+    expect(dropped!.hits).toEqual([])
+    const b = mk('pedido')
+    const kept = await searchAdapterHistory({ conversationId: 'c1', chat: b.chat, query: 'pedido', lang: 'en' })
+    expect(kept!.hits).toHaveLength(1)
+    expect(kept!.hits[0]!.text).toBe('meu pedido real')
+    expect(kept!.indexSpace).toBe('engine')
+  })
+  test('F2: a pending rewind sends the search to the host (which applies the cut)', async () => {
+    const { chat, calls } = histChat(() => page([]), () => ready([]))
+    const out = await searchAdapterHistory({ conversationId: 'c1', chat, query: 'x', lang: 'en', rewindPending: true })
+    expect(out).toBeNull()
+    expect(calls.search).toBe(0)
+  })
+})
+
 describe('searchSessionChat — flag OFF is the legacy search; engine answers only when it can', () => {
   const host = { sessions: async () => ({ sessions: [{ id: 's', harness: 'claude', cwd: '/x', conversationId: 'c1', state: 'exited' }] }) } as never
   const reader = (turns: ChatTurn[]) => () => ({ resolve: async () => '/p', read: async () => ({ turns, older: false }), readRecent: async () => [] }) as never

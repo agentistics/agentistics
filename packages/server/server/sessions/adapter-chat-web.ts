@@ -15,6 +15,7 @@ import type { SessionHub } from './session-hub'
 import type { SessionSnapshot } from './sessions-host'
 import { featureOn } from '@agentistics/core'
 import { engine } from '../engine/load'
+import { pendingRewindFor } from './rewind-pending'
 import {
   adapterChatResponse, historyOf, pickAdapterChat, readAdapterChat, readAdapterHistory, refuseAdapter,
   sameAdapterSource, searchAdapterHistory,
@@ -212,6 +213,8 @@ export async function searchAdapterChat(
     ...(page.offset !== undefined ? { offset: page.offset } : {}),
     ...(page.signal ? { signal: page.signal } : {}),
     scrub: async v => (anyGrant() ? scrubDeep(id, v) : v),
+    foreign: foreignOf(hub, id, picked.conversationId),
+    rewindPending: pendingRewindFor(picked.conversationId, Date.now()) !== null,
   })
   return out ? { ...out, harness: row.harness } : null
 }

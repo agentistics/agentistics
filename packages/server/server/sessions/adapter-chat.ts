@@ -31,6 +31,7 @@ import {
 import type { CliLang } from '../cli-lang'
 import type { ChatHistoryMeta, ChatPayload } from './chat-web'
 import { conversationOfRow } from './row-conversation'
+import { splitContextBlock } from './agentistics-context'
 import { isExternalRowId } from './external-continue'
 import { RefusalLog } from './refusal-log'
 
@@ -653,6 +654,12 @@ export interface AdapterSearchAnswer extends HostSearchPage {
   cursor?: string | null
   /** Already-localized: why nothing could be searched. */
   unavailable?: string
+  /**
+   * Which numbering `hits[].index` is in. The engine counts its own turns; the chat view numbers turns
+   * AFTER the host split the injected context into a chip, so the two can differ by one — an index is
+   * only ever stated in the space it was measured in.
+   */
+  indexSpace?: 'engine'
 }
 
 /** PURE. An engine hit as the host's page shape: the snippet is all the engine sends of the message. */
@@ -663,6 +670,32 @@ export function hostHitOf(h: ChatSearchPage['hits'][number], query: string): Cha
     index: h.index, role: h.role, ...(h.at ? { at: h.at } : {}), text: h.snippet,
     excerpt, highlights, matches: Math.max(1, spans.length),
   }
+}
+
+/**
+ * The host's display rules on engine hits: a user turn that opens with the injected `<agentistics-context>`
+ * block shows only what the person typed, so a hit INSIDE the block is dropped and one in the rest is
+ * re-snippeted from the rest. The engine sends a snippet only, so the full turn of each user hit is read
+ * through `history({ before: hit.before, limit: 1 })` (the page that ends at the hit). A turn that cannot
+ * be read keeps its hit untouched — dropping on a failed read would hide a real message.
+ */
+async function displayHits(
+  h: HarnessChatHistory, ref: { conversationId: string; cwd?: string }, hits: ChatSearchPage['hits'], query: string, timeoutMs: number,
+): Promise<ChatSearchHit[]> {
+  const out: ChatSearchHit[] = []
+  for (const hit of hits) {
+    if (hit.role !== 'user') { out.push(hostHitOf(hit, query)); continue }
+    let full: string | null = null
+    try {
+      const pg = await h.history(ref, { before: hit.before, limit: 1, signal: withTimeout(undefined, timeoutMs) })
+      if (pg.status === 'ready') full = pg.turns[pg.turns.length - 1]?.text ?? null
+    } catch { /* keep the hit */ }
+    const split = full === null ? null : splitContextBlock(full)
+    if (!split) { out.push(hostHitOf(hit, query)); continue }
+    if (findMatches(split.rest, foldQuery(query)).length === 0) continue
+    out.push(hostHitOf({ ...hit, snippet: split.rest.slice(0, 160) }, query))
+  }
+  return out
 }
 
 /**
@@ -685,13 +718,24 @@ export async function searchAdapterHistory(o: {
   timeoutMs?: number
   /** The vault scrub the chat applies to its turns (a granted secret must not surface in a snippet). */
   scrub?: <T>(v: T) => Promise<T>
+  /** CROSSBIND: the owners of every source (see `readAdapterHistory`); a foreign source → `null` (host search). */
+  foreign?: () => Promise<ReadonlySet<string>>
+  /** A rewind agentop drove is pending: the chat cuts turns the engine still has → the host search serves. */
+  rewindPending?: boolean
 }): Promise<AdapterSearchAnswer | null> {
   const h = historyOf(o.chat)
   if (!h) return null
+  if (o.rewindPending) return null
   const empty = { query: o.query, total: 0, offset: o.offset ?? 0, hits: [] as ChatSearchHit[], scanned: 0 }
   try {
+    const ref = { conversationId: o.conversationId, ...(o.cwd ? { cwd: o.cwd } : {}) }
+    if (o.foreign) {
+      const src = await o.chat.resolve({ ...ref, pending: [] })
+      if (!src) return null
+      if (sourceForeign(src, o.conversationId, await o.foreign())) { logForeign(o.conversationId, src); return null }
+    }
     const res = await h.search(
-      { conversationId: o.conversationId, ...(o.cwd ? { cwd: o.cwd } : {}) },
+      ref,
       {
         query: o.query,
         ...(o.cursor ? { cursor: o.cursor } : {}),
@@ -702,11 +746,12 @@ export async function searchAdapterHistory(o: {
     )
     if (res.status === 'absent') return null
     if (res.status !== 'ready') return { ...empty, complete: false, unavailable: historySentence(res, o.lang) }
-    const hits = res.hits.map(hit => hostHitOf(hit, o.query))
+    const hits = await displayHits(h, ref, res.hits, o.query, o.timeoutMs ?? ADAPTER_HISTORY_TIMEOUT_MS)
     const shown = o.scrub ? await o.scrub(hits) : hits
     return {
       ...empty, total: shown.length, hits: shown, scanned: res.scanned,
       complete: res.complete, ...(res.stopped ? { stopped: res.stopped } : {}), cursor: res.cursor,
+      indexSpace: 'engine',
     }
   } catch {
     return null
