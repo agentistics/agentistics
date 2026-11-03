@@ -58,6 +58,7 @@ import { highlight, type Token, type TokenKind } from '../../lib/codeHighlight'
 import { buildHighlightColors, type CodeThemeVariant } from '../../lib/monacoTheme'
 import { repoMediaUrl } from '../../lib/attachmentUrl'
 import { MermaidDiagram } from './MermaidDiagram'
+import { CodeCopyBlock } from '../chat/CodeCopyPre'
 
 export interface MarkdownPreviewProps {
   /** The live buffer — unsaved edits show, per the toggle's own contract. */
@@ -355,6 +356,7 @@ function MarkdownCode({ className, children }: { className?: string; children?: 
  * `MarkdownCode` exactly as it would have — one level higher in the tree, which is the entire fix.
  */
 function MarkdownPre({ children }: { children?: ReactNode }) {
+  const pt = usePreviewContext().lang === 'pt'
   // react-markdown hands a `pre` node's children over as an ARRAY (hast's own shape: a `<pre>` node
   // always has exactly one `code` child, but it is still a one-element array, not the element bare)
   // — `isValidElement` answers `false` for an array, so unwrapping the single-child case is what
@@ -364,7 +366,7 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
     const codeProps = only.props as { className?: string }
     if (fenceLanguageOf(codeProps.className)?.toLowerCase() === 'mermaid') return only
   }
-  return <pre>{children}</pre>
+  return <CodeCopyBlock pt={pt}>{children}</CodeCopyBlock>
 }
 
 // The MAP ITSELF is hoisted too, not only the functions inside it — react-markdown only needs each

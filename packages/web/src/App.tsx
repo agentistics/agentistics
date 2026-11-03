@@ -179,6 +179,7 @@ import { HOST_SESSION_PATH, resolveHostSessionRefresh } from './lib/hostSession'
 import { bootDeadlineMs, bootRetryDelayMs, bootSlowLine, bootWatchdog, fetchJsonWithTimeout, fetchWithTimeout, holdLoadError, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
 import { sinceUpdate, useFinaleActive } from './lib/finaleGate'
 import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
+import { ASIDE_Z } from './lib/zLayers'
 
 /**
  * What the SESSIONS filter bar may filter by — narrower than the dashboard's on purpose: a fleet
@@ -754,10 +755,10 @@ function SideNav({
     </div>
   )
   return (
-    <aside style={{
+    <aside data-app-aside style={{
       position: 'fixed', top: 0, left: 0, bottom: 0,
       // The Sessões area adds the area rail (and its gap) in front of the list; the list keeps its width.
-      width: (collapsed ? SIDEBAR_W_COLLAPSED : width) + (mode === 'sessions' ? AREA_RAIL_W + PANEL_GAP : 0), zIndex: 200,
+      width: (collapsed ? SIDEBAR_W_COLLAPSED : width) + (mode === 'sessions' ? AREA_RAIL_W + PANEL_GAP : 0), zIndex: ASIDE_Z,
       // FLOATING-PANELS DESIGN (`sdd/brief.md`): in the sessions workspace this element is the
       // FRAME, not a panel — its own background reads as the frame's ground colour, and the actual
       // sessions-list PANEL (below the mark/mode-switch, its own border+radius+overflow:hidden) is
