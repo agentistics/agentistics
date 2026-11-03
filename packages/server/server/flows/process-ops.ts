@@ -10,10 +10,16 @@
  *    session is `encerrar-sessao`'s job (the fleet's kill verb), which stops the tree itself — so
  *    fechar-entregue, the leader's retire and `agentop session kill` all end in the same stop.
  *
+ * `AGENTISTICS_REAPER` governs this door exactly as it governs the server's timer (one reader,
+ * `reaperMode`, read per call): for `coletar-processos`, `0|off` REFUSES (kills nothing) and `dry`
+ * forces dryRun — the input cannot override it to false. `matar-arvore-sessao` is an explicit close of
+ * ONE ended session a person/flow asked for, so `0|off` does NOT block it (the env switches the
+ * unattended collector off, not the close verb), while `dry` still makes it dry.
+ *
  * Answers carry what was FOUND, what was STOPPED and the MB freed, so the run record in `flows/runs`
  * says it. A refusal is `{refused, reason, missing}`, the host-op convention.
  */
-import { collectorPass, stopSessionProcesses } from '../sessions/session-reaper-io'
+import { collectorPass, reaperMode, stopSessionProcesses } from '../sessions/session-reaper-io'
 import { reapSentence } from '../sessions/session-reaper'
 
 type Refusal = { refused: true; reason: string; missing: string[] }
@@ -29,11 +35,14 @@ export interface ProcessOpsDeps {
   endedAt(id: string): Promise<number | null>
   /** Is `id` listed alive by the backend? `null` = could not be listed. */
   alive(id: string): Promise<boolean | null>
+  /** The `AGENTISTICS_REAPER` mode, read per call. */
+  mode?(): 'off' | 'dry' | 'on'
 }
 
 export function defaultProcessOpsDeps(): ProcessOpsDeps {
   return {
     collect: collectorPass,
+    mode: () => reaperMode(),
     stopOne: stopSessionProcesses,
     async endedAt(id) {
       const row = (await (await import('../sessions/registry')).readRegistry()).find(r => r.id === id)
@@ -54,8 +63,10 @@ export function processHostOps(deps: ProcessOpsDeps = defaultProcessOpsDeps()) {
   return {
     'coletar-processos': async (value: unknown) => {
       const i = rec(value)
+      const mode = deps.mode?.() ?? 'on'
+      if (mode === 'off') return refuse('coletor desligado por AGENTISTICS_REAPER=0', ['AGENTISTICS_REAPER unset or not 0'])
       const graceMs = typeof i.graceMs === 'number' && Number.isFinite(i.graceMs) && i.graceMs >= 0 ? i.graceMs : undefined
-      const r = await deps.collect({ dryRun: dryOf(i), ...(graceMs !== undefined ? { graceMs } : {}) })
+      const r = await deps.collect({ dryRun: mode === 'dry' || dryOf(i), ...(graceMs !== undefined ? { graceMs } : {}) })
       if (r.skippedWhy && r.skippedWhy !== 'nothing carries a session marker') return refuse(`the collector could not judge: ${r.skippedWhy}`, ['readable /proc, registry and backend'])
       return {
         ok: true, dryRun: r.dryRun,
@@ -74,7 +85,7 @@ export function processHostOps(deps: ProcessOpsDeps = defaultProcessOpsDeps()) {
       const alive = await deps.alive(id)
       if (alive === null) return refuse('the session backend could not be listed', ['listable backend'])
       if (alive) return refuse(`session ${id} is still running — encerrar-sessao ends it`, ['session not running'])
-      const dryRun = dryOf(i)
+      const dryRun = deps.mode?.() === 'dry' || dryOf(i)
       const r = await deps.stopOne(id, { endedMs, dryRun })
       return {
         ok: r.stuck.length === 0, dryRun, sessionId: id,
