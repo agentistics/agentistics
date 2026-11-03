@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { bootDeadlineMs, bootRetryDelayMs, BOOT_DEADLINE_CAP_MS, BOOT_RETRY_CAP_MS, fetchJsonWithTimeout, acceptPayload, dataUrl, livenessStep, bootSlowLine, bootWatchdog, classifyLoadError, holdLoadError, loadErrorText, partialPollMs, POST_UPDATE_GRACE_MS, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
+import { bootDeadlineMs, bootRetryDelayMs, BOOT_DEADLINE_CAP_MS, BOOT_LONG_EVERY, BOOT_RETRY_CAP_MS, fetchJsonWithTimeout, acceptPayload, dataUrl, livenessStep, bootSlowLine, bootWatchdog, classifyLoadError, holdLoadError, loadErrorText, partialPollMs, POST_UPDATE_GRACE_MS, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
 
 describe('classifyLoadError', () => {
   test('a status is a server error and keeps the HTTP detail the auth gates read', () => {
@@ -196,6 +196,16 @@ describe('boot-phase retry policy', () => {
     expect(bootDeadlineMs(20_000, 50)).toBe(BOOT_DEADLINE_CAP_MS)
     expect(bootDeadlineMs(4000, 50)).toBe(4000)
   })
+  test('a healthy server on a slow link still gets through: every few attempts waits the full deadline', () => {
+    // A 780 KB first answer over a slow phone link can take ~9 s; a deadline capped at 4 s forever never opens the page.
+    const needed = 9_000
+    let opened = -1
+    for (let a = 0; a < 3 * BOOT_LONG_EVERY; a++) if (bootDeadlineMs(20_000, a) >= needed) { opened = a; break }
+    expect(opened).toBeGreaterThanOrEqual(0)
+    expect(opened).toBeLessThan(BOOT_LONG_EVERY)
+    expect(bootDeadlineMs(20_000, BOOT_LONG_EVERY - 1)).toBe(20_000)
+    expect(bootDeadlineMs(20_000, 2 * BOOT_LONG_EVERY - 1)).toBe(20_000)
+  })
   test('the pause between attempts never passes the cap (the old 15 s backoff left a ready page waiting)', () => {
     for (let a = 0; a < 30; a++) expect(bootRetryDelayMs(a)).toBeLessThanOrEqual(BOOT_RETRY_CAP_MS)
     expect(retryDelayMs(10)).toBe(15_000)
@@ -203,14 +213,20 @@ describe('boot-phase retry policy', () => {
   test('a request held open by a restarting server is retried until the server answers, and the page opens within a few seconds of it', () => {
     // Simulated clock: the server holds every request until `backAt` and answers any attempt STARTED
     // at or after it; an attempt started earlier is dropped at its deadline and retried after the pause.
-    const backAt = 55_000
-    let now = 0, attempt = 0, openedAt = -1
-    while (openedAt < 0 && now < 200_000) {
-      if (now >= backAt) { openedAt = now; break }
-      now += bootDeadlineMs(20_000, attempt) + bootRetryDelayMs(attempt)
-      attempt++
+    // Swept over many comeback instants: usually within a short attempt, never worse than one full deadline.
+    const lags: number[] = []
+    for (let backAt = 1_000; backAt <= 120_000; backAt += 1_000) {
+      let now = 0, attempt = 0, openedAt = -1
+      while (openedAt < 0 && now < 400_000) {
+        if (now >= backAt) { openedAt = now; break }
+        now += bootDeadlineMs(20_000, attempt) + bootRetryDelayMs(attempt)
+        attempt++
+      }
+      expect(openedAt).toBeGreaterThanOrEqual(backAt)
+      lags.push(openedAt - backAt)
     }
-    expect(openedAt).toBeGreaterThanOrEqual(backAt)
-    expect(openedAt - backAt).toBeLessThanOrEqual(BOOT_DEADLINE_CAP_MS + BOOT_RETRY_CAP_MS)
+    lags.sort((x, y) => x - y)
+    expect(lags[Math.floor(lags.length / 2)]).toBeLessThanOrEqual(BOOT_DEADLINE_CAP_MS + BOOT_RETRY_CAP_MS)
+    expect(lags[lags.length - 1]).toBeLessThanOrEqual(20_000 + BOOT_RETRY_CAP_MS)
   })
 })

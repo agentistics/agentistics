@@ -75,13 +75,21 @@ export function retryDelayMs(attempt: number): number {
  *     attempt up to the normal deadline, so a slow link still gets through after a few tries;
  *   - the pause between attempts never exceeds `BOOT_RETRY_CAP_MS` (the steady-state backoff of
  *     15 s left a page that was one second from opening waiting for the next try).
- * Worst case from "server answers" to "request lands" is therefore deadline + pause: ~3 s on the first tries, at most ~5 s once a request has failed several times.
+ * Worst case from "server answers" to "request lands" is deadline + pause: ~3 s on the first tries, ~5 s after
+ * several failures, and up to the full deadline when the server comes back during one of the long attempts.
  */
 export const BOOT_FIRST_DEADLINE_MS = 2500
 export const BOOT_RETRY_CAP_MS = 750
 export const BOOT_DEADLINE_CAP_MS = 4000
+/** Every `BOOT_LONG_EVERY`-th attempt (from the 4th on) waits the FULL deadline: a healthy server on a slow
+ *  link (a phone, a relay) whose answer takes longer than the short cap to download would otherwise be
+ *  dropped at the cap forever and the page would never open. The short attempts in between keep the
+ *  "server just came back" case fast. */
+export const BOOT_LONG_EVERY = 4
 export function bootDeadlineMs(maxMs: number, attempt: number): number {
-  return Math.min(maxMs, BOOT_DEADLINE_CAP_MS, BOOT_FIRST_DEADLINE_MS * 1.6 ** Math.max(0, attempt))
+  const a = Math.max(0, attempt)
+  if (a % BOOT_LONG_EVERY === BOOT_LONG_EVERY - 1) return maxMs
+  return Math.min(maxMs, BOOT_DEADLINE_CAP_MS, BOOT_FIRST_DEADLINE_MS * 1.6 ** a)
 }
 export function bootRetryDelayMs(attempt: number): number {
   return Math.min(BOOT_RETRY_CAP_MS, 250 * 2 ** Math.max(0, attempt))
