@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.197.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Blocos de código nas conversas ganham um botão de copiar (sempre visível no celular), que copia só o código, inclusive quando o app é aberto por HTTP.',
+        en: 'Code blocks in conversations get a copy button (always visible on touch screens) that copies just the code, also when the app is opened over HTTP.',
+      },
+      {
+        pt: 'No celular e no tablet, tocar nos botões e nas listas não seleciona mais o texto sem querer; o texto das mensagens continua selecionável.',
+        en: 'On phones and tablets, tapping buttons and lists no longer selects text by accident; message text can still be selected.',
+      },
+      {
+        pt: 'A gaveta da árvore de áreas abre por cima da barra do topo e do aviso de líder, com o fundo escurecido nas telas de toque.',
+        en: 'The area tree drawer opens above the top bar and the leader notice, with a dimmed background on touch screens.',
+      },
+    ],
+  },
   '2.197.2': {
     features: [],
     fixes: [
