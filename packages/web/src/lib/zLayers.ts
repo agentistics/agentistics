@@ -17,6 +17,20 @@
  * (410) and up, already above all of this.
  */
 
+/** The left aside (sessions list / area rail). Below the top bar: they only meet when the rail's tree opens. */
+export const ASIDE_Z = 200
+
+/** The fixed top bar (session tab strip + the notice row under it). */
+export const TOPBAR_Z = 300
+
+/**
+ * The aside while its area-tree DRAWER is open (and the scrim behind it). It must cover the whole top bar
+ * — the session tab and the "needs you" notice — so it sits above `TOPBAR_Z` and the full-screen panels,
+ * still below the mobile pill bar, the Nay button and every dialog. Mirrored in `index.css` as
+ * `--ag-z-drawer`; `zLayers.test.ts` keeps the two equal.
+ */
+export const ASIDE_DRAWER_Z = 322
+
 /** A panel drawn over the whole viewport in place — below every modal, above the sticky header. */
 export const PANEL_FULLSCREEN_Z = 320
 

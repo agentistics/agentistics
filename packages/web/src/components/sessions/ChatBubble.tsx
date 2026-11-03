@@ -24,6 +24,7 @@ import { useEscapeOwner } from '../../lib/overlayStack'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { stripDictatedMark } from '../../lib/dictationMark'
 import ReactMarkdown from 'react-markdown'
+import { codeCopyComponents } from '../chat/CodeCopyPre'
 import remarkGfm from 'remark-gfm'
 // A single newline is a LINE BREAK here. Without this plugin markdown collapses it to a space, so a
 // message written across several lines renders as one run-on paragraph — which is what "the
@@ -1005,7 +1006,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
                   <>
                     {splitPastedContent(text).map((seg, i) => seg.kind === 'paste'
                       ? <PastedBlock key={i} text={seg.text} pt={pt} />
-                      : <ReactMarkdown key={i} remarkPlugins={[remarkGfm, remarkBreaks]}>{seg.text}</ReactMarkdown>)}
+                      : <ReactMarkdown key={i} remarkPlugins={[remarkGfm, remarkBreaks]} components={codeCopyComponents(pt)}>{seg.text}</ReactMarkdown>)}
                   </>
                 )
               }
@@ -1025,7 +1026,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
                         </div>
                       ) : (
                         <div key={i} style={{ marginBottom: i < segs.length - 1 ? 8 : 0 }}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{seg.text}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={codeCopyComponents(pt)}>{seg.text}</ReactMarkdown>
                         </div>
                       ))}
                     </>
@@ -1033,7 +1034,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
                 }
               }
               if (command === '') {
-                return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{renderedText}</ReactMarkdown>
+                return <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={codeCopyComponents(pt)}>{renderedText}</ReactMarkdown>
               }
               return (
                 <>
@@ -1042,7 +1043,7 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
                     fontWeight: 650, color: 'var(--anthropic-orange)',
                   }}>{command}</span>
                   {rest.trim() !== '' && (
-                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{rest}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={codeCopyComponents(pt)}>{rest}</ReactMarkdown>
                   )}
                 </>
               )
@@ -1285,7 +1286,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId,
               : <span>{title}</span>)}
             {stamp && <time dateTime={new Date(at!).toISOString()} title={stamp.full} style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{stamp.label}</time>}
           </div>}
-          <div className="ag-chat-md"><ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{event.body || (pt ? '(sem texto)' : '(no text)')}</ReactMarkdown></div>
+          <div className="ag-chat-md"><ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]} components={codeCopyComponents(pt)}>{event.body || (pt ? '(sem texto)' : '(no text)')}</ReactMarkdown></div>
         </div>
       )}
     >

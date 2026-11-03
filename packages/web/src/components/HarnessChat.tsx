@@ -2,6 +2,7 @@ import { SurfaceTurnBadge } from './SurfaceTurnBadge'
 import { AgentisticsLoader } from './AgentisticsLoader'
 import React, { useState, useEffect, useRef, useLayoutEffect, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
+import { CodeCopyBlock } from './chat/CodeCopyPre'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import { ChevronLeft, ChevronDown, ChevronUp } from 'lucide-react'
@@ -134,10 +135,12 @@ export function MessageBubble({ msg, harness, pt }: { msg: TranscriptMessage; ha
             code: ({ children, className }) => {
               const isBlock = !!className
               return isBlock
-                ? <pre style={{ background: 'var(--bg-surface)', padding: '8px 10px', borderRadius: 6, overflowX: 'auto', margin: '6px 0', fontSize: 12, maxWidth: '100%' }}><code style={{ whiteSpace: 'pre', display: 'block' }}>{children}</code></pre>
+                ? <code style={{ whiteSpace: 'pre', display: 'block' }}>{children}</code>
                 : <code style={{ background: 'var(--bg-surface)', padding: '1px 4px', borderRadius: 3, fontSize: 12, wordBreak: 'break-all' }}>{children}</code>
             },
-            pre: ({ children }) => <>{children}</>,
+            pre: ({ children }) => (
+              <CodeCopyBlock pt={pt} preProps={{ style: { background: 'var(--bg-surface)', padding: '8px 10px', borderRadius: 6, overflowX: 'auto', margin: '6px 0', fontSize: 12, maxWidth: '100%' } }}>{children}</CodeCopyBlock>
+            ),
           }}
         >
           {surfaceText ?? msg.content}
