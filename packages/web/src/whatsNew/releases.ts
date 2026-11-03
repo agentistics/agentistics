@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.195.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O fechamento automático não encerra mais um worker que avisou que está esperando a próxima etapa; ele só fecha depois da entrega final.',
+        en: 'Automatic closing no longer ends a worker that said it is waiting for the next step; it only closes after the final delivery.',
+      },
+      {
+        pt: 'A espera por uma entrega pode filtrar pelo assunto, e não dispara mais com qualquer entrega da mesma sessão.',
+        en: 'Waiting for a delivery can filter by subject, and no longer fires on any delivery from the same session.',
+      },
+    ],
+  },
   '2.194.0': {
     features: [
       {
