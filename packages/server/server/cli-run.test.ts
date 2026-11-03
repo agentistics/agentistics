@@ -345,3 +345,20 @@ describe('run stop reaps detached children', () => {
     }
   })
 })
+
+describe('watchParent (a run is tied to whoever started it)', () => {
+  test('fires once when the parent changes, never while it stays', async () => {
+    const { watchParent } = await import('./cli-run')
+    let ppid = 100
+    let fired = 0
+    const t = watchParent(100, () => ppid, () => { fired++ }, 5)
+    await new Promise(r => setTimeout(r, 20))
+    expect(fired).toBe(0)
+    ppid = 1
+    await new Promise(r => setTimeout(r, 20))
+    ppid = 7
+    await new Promise(r => setTimeout(r, 20))
+    expect(fired).toBe(1)
+    clearInterval(t)
+  })
+})
