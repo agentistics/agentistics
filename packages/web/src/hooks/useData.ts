@@ -11,6 +11,7 @@ import { acceptPayload, classifyLoadError, holdLoadError, inUpdateGrace, DATA_TI
 import { cacheFiguresOf } from '../lib/cacheFigures'
 import { useNativeVisible } from './useEngineCaps'
 import { startDataRefresh } from '../lib/dataRefresh'
+import { openEventStream } from '../lib/streamMux'
 
 /**
  * True only for a non-empty string. `start_time`/`end_time`/`date` fields are typed as `string`
@@ -428,7 +429,7 @@ export function useData(working = false) {
    *  a stream that errors is closed rather than left reconnecting. */
   const openProgress = useCallback(() => {
     if (streamRef.current || typeof EventSource === 'undefined') return
-    const es = new EventSource('/api/data-stream')
+    const es = openEventStream('/api/data-stream')
     streamRef.current = es
     es.addEventListener('progress', (e: Event) => {
       try {
