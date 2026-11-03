@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  CRITICAL_SNOOZE_MS, RESTORE_TTL_MS, SNOOZE_MS, decodeRestore, encodeRestore, isNewer, parseSnooze,
+  createVersionChecker, CRITICAL_SNOOZE_MS, RESTORE_TTL_MS, SNOOZE_MS, decodeRestore, encodeRestore, isNewer, parseSnooze,
   safeAppUrl, shouldShowToast, snapshotRestore, snoozeActive, snoozeFor, type VersionAnswer,
   UPDATE_NOTICE_CODE, promptExit, promptTimeoutMs,
   VERSION_POLL_MS, VERSION_FOCUS_MIN_MS, versionRefetchDue, promptDismissedFor,
@@ -154,5 +154,49 @@ describe('UPD.PINNED: the bell keeps the update pinned', () => {
     expect(pinnedUpdate(info, true)).toBeNull()
     expect(pinnedUpdate({ ...info, upgradable: 'container' }, false)).toBeNull()
     expect(pinnedUpdate(null, false)).toBeNull()
+  })
+})
+
+describe('createVersionChecker — the first ask survives a restarting server', () => {
+  const setup = (answers: Array<{ v: string } | null>) => {
+    const timers: Array<{ fn: () => void; ms: number }> = []
+    const seen: Array<{ v: string; isFirst: boolean }> = []
+    let i = 0
+    const c = createVersionChecker<{ v: string }>({
+      now: () => 1_000_000, visible: () => true,
+      ask: async () => answers[i++] ?? null,
+      onAnswer: (info, isFirst) => { seen.push({ v: info.v, isFirst }) },
+      schedule: (fn, ms) => { timers.push({ fn, ms }) },
+    })
+    const flush = () => new Promise(r => setTimeout(r, 0))
+    return { c, timers, seen, flush }
+  }
+
+  test('unanswered first ask retries quietly, and the answer that lands is still the FIRST (restores the route)', async () => {
+    const { c, timers, seen, flush } = setup([null, null, { v: '2.191.0' }])
+    c.check('interval'); await flush()
+    expect(timers.map(t => t.ms)).toEqual([1000])
+    timers.shift()!.fn(); await flush()
+    expect(timers.map(t => t.ms)).toEqual([2000])
+    timers.shift()!.fn(); await flush()
+    expect(seen).toEqual([{ v: '2.191.0', isFirst: true }])
+    expect(timers).toEqual([])
+  })
+
+  test('once answered, later asks are not first and never retry', async () => {
+    const { c, timers, seen, flush } = setup([{ v: 'a' }, null, { v: 'b' }])
+    c.check('interval'); await flush()
+    c.check('focus', true); await flush()   // reconnected, unanswered, not first
+    expect(timers).toEqual([])
+    c.check('focus', true); await flush()
+    expect(seen).toEqual([{ v: 'a', isFirst: true }, { v: 'b', isFirst: false }])
+  })
+
+  test('dispose stops the retry loop', async () => {
+    const { c, timers, seen, flush } = setup([null, { v: 'x' }])
+    c.check('interval'); await flush()
+    c.dispose()
+    timers.shift()!.fn(); await flush()
+    expect(seen).toEqual([])
   })
 })
