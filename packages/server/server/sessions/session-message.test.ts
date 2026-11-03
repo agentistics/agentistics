@@ -49,8 +49,22 @@ describe('SESSÕES.FECHAR: a delivered handback becomes the session.handback flo
     await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'done' }, f.deps)
     expect(events).toEqual([{
       type: 'session.handback', id: `session.handback:child-1:${new Date(1_000_000).toISOString()}`,
-      payload: { sessionId: 'child-1', to: 'parent-1', at: new Date(1_000_000).toISOString(), taskId: 't1', subtaskId: 's1' },
+      payload: { sessionId: 'child-1', to: 'parent-1', at: new Date(1_000_000).toISOString(), taskId: 't1', subtaskId: 's1', text: 'done' },
     }])
+  })
+  test('awaiting rides the event; invalid awaiting is refused before anything is typed', async () => {
+    const events: Array<{ payload: Record<string, unknown> }> = []
+    const f = fake({ handbackEvent: async e => { events.push(e as never) } })
+    const ok = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'Phase 1 done', awaiting: ' engine merged abc ' }, f.deps)
+    expect(ok.ok).toBe(true)
+    expect(events[0]!.payload.awaiting).toBe('engine merged abc')
+    expect(events[0]!.payload.text).toBe('Phase 1 done')
+    resetMessageRateLimit()
+    for (const [kind, awaiting] of [['block', 'x'], ['handback', 'a\nb'], ['handback', 'y'.repeat(201)]] as const) {
+      const bad = await sendSessionMessage('child-1', { to: 'parent-1', kind, body: 'x', awaiting }, f.deps)
+      expect(bad).toMatchObject({ ok: false, code: 'bad_awaiting' })
+    }
+    expect(f.prompts.length).toBe(1)
   })
   test('block / question / an undelivered handback emit nothing; a failing emitter never fails the send', async () => {
     const events: unknown[] = []
@@ -58,6 +72,10 @@ describe('SESSÕES.FECHAR: a delivered handback becomes the session.handback flo
     await sendSessionMessage('child-1', { to: 'parent-1', kind: 'block', body: 'x' }, fake({ handbackEvent }).deps)
     resetMessageRateLimit()
     await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, fake({ handbackEvent, prompt: async () => ({ ok: false, message: 'gone' }) }).deps)
+    expect(events).toEqual([])
+    // FLUXO.WAIT: a question that merely MENTIONS a release is no handback, and a message to someone else never names this sender as `from`.
+    resetMessageRateLimit()
+    await sendSessionMessage('motor', { to: 'jarvis', kind: 'question', body: '2.192 is out?' }, fake({ handbackEvent }).deps)
     expect(events).toEqual([])
     resetMessageRateLimit()
     const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, fake({ handbackEvent: async () => { throw new Error('engine down') } }).deps)

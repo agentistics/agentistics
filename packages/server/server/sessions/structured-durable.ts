@@ -33,6 +33,7 @@
  */
 import { noteStructuredLine, sessionAccountOf } from '../plan-limits'
 import { clearComposing, noteComposingLine } from './structured-composing'
+import { procStartMs } from './session-reaper-io'
 import { spawn as spawnChild } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createConnection, type Socket } from 'node:net'
@@ -70,6 +71,19 @@ export function relayCommand(): RelayCommand {
   return existsSync(RELAY_SCRIPT)
     ? { command: process.execPath, args: ['run', RELAY_SCRIPT] }
     : { command: process.execPath, args: ['__structured-relay'] }
+}
+
+/**
+ * The relay's OWN environment: this process's, with `AGENTOP_MANAGED_ID` set to the session the relay
+ * SERVES (its child's) — never inherited from whoever started it. A relay started by a CLI inside
+ * session X otherwise carried X's marker, so it was listed under X, and ending X could have ended it.
+ */
+export function relayEnv(env: NodeJS.ProcessEnv, spec: Pick<RelayLaunchSpec, 'env'>): NodeJS.ProcessEnv {
+  const out = { ...env }
+  const own = spec.env?.AGENTOP_MANAGED_ID
+  if (own) out.AGENTOP_MANAGED_ID = own
+  else delete out.AGENTOP_MANAGED_ID
+  return out
 }
 
 const FILES = { ...RELAY_FILES, saved: 'spawn.json', owner: 'owner.json', calls: 'calls.jsonl', ending: 'ending', killed: 'killed' } as const
@@ -224,6 +238,12 @@ export interface DurableStore {
   /** Managed ids whose relay is alive now, or that are between two children the driver started. */
   alive(): string[]
   isAlive(id: string): boolean
+  /**
+   * Whether a relay PROCESS — or the CHILD it recorded — of this record is running now — `false` for the "between two children" state
+   * `isAlive` still counts as alive (no process at all), and for an id with no record. REABRIR.OPENCODE:
+   * the reopen of an ENDED row asks this before treating the row as its own live holder.
+   */
+  running?(id: string): boolean
   /** When the child last said something (its record's mtime), ms. */
   lastActivityMs(id: string): number
   /** Ids with a directory whose relay is gone (collected at boot). */
@@ -290,6 +310,36 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     const pid = relayPid(id, k)
     return pid !== null && pidAlive(pid) && readGen(id, k, FILES.exit) === null
   }
+  /**
+   * Is the CHILD a relay recorded (`relay.pid`'s `child`) still running? It outlives a relay that died
+   * (the child is detached), so "no relay" alone does not prove no assistant is running. A recycled pid
+   * errs toward "running" — the safe direction: it only withholds a leftover-ending, never ends a live one.
+   */
+  const childLive = (id: string, k: number): boolean => {
+    if (foreign(id)) return false
+    const raw = readGen(id, k, FILES.pid)
+    if (!raw) return false
+    try { const c = (JSON.parse(raw) as { child?: unknown }).child; return typeof c === 'number' && c > 1 && pidAlive(c) } catch { return false }
+  }
+  /** Is anything left in process group `pgid`? */
+  const groupAlive = (pgid: number): boolean => {
+    try { process.kill(-pgid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' }
+  }
+  const sameChild = (id: string, k: number, c: number): boolean => {
+    const started = procStartMs(c)
+    if (started === null) return false
+    try {
+      const written = statSync(path.join(genDir(id, k), FILES.pid)).mtimeMs
+      return started >= written - 60_000 && started <= written + 5_000
+    } catch { return false }
+  }
+  /** The recorded child pid of generation `k`, or null. */
+  const childPid = (id: string, k: number): number | null => {
+    if (foreign(id)) return null
+    const raw = readGen(id, k, FILES.pid)
+    if (!raw) return null
+    try { const c = (JSON.parse(raw) as { child?: unknown }).child; return typeof c === 'number' && c > 1 ? c : null } catch { return null }
+  }
   const isAlive = (id: string): boolean => {
     if (foreign(id)) return false
     const k = lastGen(id)
@@ -323,7 +373,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
   function startRelay(dir: string, spec: RelayLaunchSpec): void {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     writeFileSync(path.join(dir, FILES.launch), JSON.stringify(spec), { mode: 0o600 })
-    const child = spawnChild(relay.command, [...relay.args, dir], { detached: true, stdio: 'ignore', cwd: dir })
+    const child = spawnChild(relay.command, [...relay.args, dir], { detached: true, stdio: 'ignore', cwd: dir, env: relayEnv(process.env, spec) })
     child.on('error', () => {})
     child.unref()
   }
@@ -439,6 +489,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     },
     alive: () => ids().filter(isAlive),
     isAlive,
+    running: id => { for (let k = 0, n = generations(id); k < n; k++) if (relayLive(id, k) || childLive(id, k)) return true; return false },
     lastActivityMs(id) {
       for (let k = lastGen(id); k >= 0; k--) { try { return statSync(path.join(genDir(id, k), FILES.out)).mtimeMs } catch { /* none yet */ } }
       return Date.now()
@@ -451,9 +502,25 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
       const pids: number[] = []
       for (let k = 0, n = generations(id); k < n; k++) { const p = relayPid(id, k); if (p !== null && pidAlive(p)) pids.push(p) }
       for (const pid of pids) { try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ } }
+      // A CHILD whose relay already died runs on in its own process group (it was started detached,
+      // so its pid is the pgid) and nothing else will ever end it: TERM that group too.
+      const orphans: number[] = []
+      for (let k = 0, n = generations(id); k < n; k++) {
+        const p = relayPid(id, k)
+        if (p !== null && pidAlive(p)) continue
+        const c = childPid(id, k)
+        // Only while the group's leader is still the process the relay recorded: it was spawned the
+        // moment before `relay.pid` was written, so its start sits right at that file's mtime. A pid
+        // reused since (and made a group leader by someone else) is never signalled.
+        if (c !== null && groupAlive(c) && sameChild(id, k, c)) orphans.push(c)
+      }
+      for (const g of orphans) { try { process.kill(-g, 'SIGTERM') } catch { /* gone */ } }
+      const done = () => pids.every(p => !pidAlive(p)) && orphans.every(g => !groupAlive(g))
       const until = Date.now() + timeoutMs
-      while (Date.now() < until) { if (pids.every(p => !pidAlive(p))) return true; await sleep(50) }
-      return pids.every(p => !pidAlive(p))
+      while (Date.now() < until) { if (done()) return true; await sleep(50) }
+      for (const g of orphans) { try { process.kill(-g, 'SIGKILL') } catch { /* gone */ } }
+      await sleep(100)
+      return done()
     },
     remove(id) { rmSync(dirOf(id), { recursive: true, force: true }) },
     recorded: (id, key, claimedAt) => recordedIn(id, key, claimedAt),

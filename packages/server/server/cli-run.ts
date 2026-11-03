@@ -1,10 +1,13 @@
 import { spawn } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { createServer } from 'node:net'
+import { gitEnv } from './backup/repo-probe'
+import { applySeed, buildSeed, ensureNoStructured, heavyLockFds, SEED_ALLOW } from './run-seed'
 import { insideHeavyLock, runMinAvailableBytes, runWaitMaxMs, shouldAnnounceWait, shouldWaitForMemory, shouldWrapHeavy } from './resources/mem-guard'
 
+export { SEED_ALLOW }
 const REAL_API_PORT = 47291
 const REAL_WEB_PORT = 47292
 const DEFAULT_TTL = '2h'
@@ -29,7 +32,7 @@ export type ThrowawayState = {
   command: string[]
 }
 
-type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[] }
+type RunOptions = { name: string; ttl: string; portOffset: number | null; remove: boolean; command: string[]; serve: boolean; seedFrom: string | null; seedReal: boolean; cwd: string | null }
 
 /** A Unix socket path (sun_path) holds 108 bytes including the NUL; Chrome/tmux sockets live under TMPDIR. */
 export const SOCKET_PATH_MAX = 107
@@ -60,13 +63,55 @@ export function removeRunTmp(path: string | undefined): void {
   } catch {}
 }
 
+/**
+ * AMBIENTE C2: variables that MOVE a harness's config directory (or the agentistics store) away from the run's own HOME. A
+ * throwaway that inherited one would register its MCP port in the owner's real configs. Dropped from every `run --rm` env;
+ * the XDG_* dirs are re-set inside the run's HOME. `KIMI_*_HOME` is matched by `isThrowawayEnvDrop`.
+ */
+export const THROWAWAY_ENV_DROP: readonly string[] = [
+  'CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GEMINI_CLI_HOME', 'COPILOT_HOME', 'OPENCODE_CONFIG', 'OPENCODE_CONFIG_DIR',
+  'OPENCODE_CONFIG_CONTENT', 'KIMI_DIR', 'AGENTISTICS_FLOWS', 'AGENTISTICS_DATA_DIR',
+  // The store itself: journal, archive and the git-stats cache are resolved from their own variables, not only from AGENTISTICS_DIR.
+  'AGENTISTICS_JOURNAL_DIR', 'AGENTISTICS_ARCHIVE_DIR', 'AGENTISTICS_GIT_STATS_CACHE_FILE',
+  // Harness homes the server reads (config.ts, account-roots.ts).
+  'CLAUDE_DIR', 'CODEX_DIR', 'GEMINI_DIR', 'COPILOT_DIR', 'ANTIGRAVITY_DIR', 'HERMES_HOME',
+  'CLAUDE_CREDENTIALS_FILE', 'CLAUDE_JSON_FILE', 'CLAUDE_SETTINGS_FILE', 'CLAUDE_SETTINGS_LOCAL_FILE', 'CODEX_AUTH_FILE',
+  // Per-file / per-directory relocations of the store's own state (events, tasks, team sync, parse cache).
+  'AGENTISTICS_EVENTS_FILE', 'AGENTISTICS_EVENT_PRODUCER_FILE', 'AGENTISTICS_EVENT_SUBSCRIPTIONS_FILE', 'AGENTISTICS_MOBILE_SUBSCRIPTIONS_FILE',
+  'AGENTISTICS_PARSE_CACHE_FILE', 'AGENTISTICS_TASKS_FILE', 'AGENTISTICS_TEAM_CONN_DIR', 'AGENTISTICS_TEAM_DIR', 'AGENTISTICS_TEAM_SENT_FILE',
+  'AGENTISTICS_TEAM_SYNC_FILE',
+  // R1: read through an injected `env` object (opencode-paths.ts, account-login.ts), invisible to a `process.env.X` grep.
+  'OPENCODE_DB', 'OPENCODE_DIR', 'CLAUDE_SECURESTORAGE_CONFIG_DIR',
+  // A leaked git hook environment would point the run's git at the owner's real repository / index.
+  'GIT_DIR', 'GIT_INDEX_FILE',
+]
+/** Path-moving variables the server reads that a run deliberately KEEPS, each with its reason (the lint test requires every one to be here or in the drop list). */
+export const THROWAWAY_ENV_KEEP: Readonly<Record<string, string>> = {
+  XDG_RUNTIME_DIR: 'systemd --user scope and the tmux socket dir live there; the run does not own it',
+  TMUX_TMPDIR: 'overwritten by buildThrowawayEnv to the run tmp',
+  TMPDIR: 'overwritten by buildThrowawayEnv to the run tmp',
+  VOLTA_HOME: 'toolchain location, re-set explicitly from the real one so shims resolve',
+  AGENTISTICS_DIR: 'overwritten by buildThrowawayEnv to <home>/.agentistics',
+  MONGO_DB: 'a database NAME on the (never contacted) central, not a path',
+  GIT_COMMON_DIR: 'a git variable, not a store path; the fixtures scrub it through gitEnv()',
+  FIXTURE_DIR: 'test-only fixture location, never set in a run',
+  XDG_CONFIG_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
+  XDG_CACHE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
+  XDG_DATA_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
+  XDG_STATE_HOME: 'dropped and re-set inside the run HOME by buildThrowawayEnv',
+}
+export const isThrowawayEnvDrop = (key: string): boolean => THROWAWAY_ENV_DROP.includes(key) || /^KIMI_.*HOME$/.test(key)
+
 export function buildThrowawayEnv(home: string, name: string, apiPort: number, webPort: number, source: NodeJS.ProcessEnv = process.env, opts: { tmp?: string; heavyHeld?: boolean } = {}): NodeJS.ProcessEnv {
   const tmp = opts.tmp ?? UNSET_RUN_TMP
   // Volta shims locate their toolchains relative to HOME unless VOLTA_HOME is set.
   // Capture the original installation before isolating HOME, or a shim may resolve itself.
   const voltaHome = source.VOLTA_HOME || join(source.HOME || source.USERPROFILE || homedir(), '.volta')
+  const inherited = Object.fromEntries(Object.entries(source).filter(([k]) => !isThrowawayEnvDrop(k) && !/^XDG_(CONFIG|DATA|STATE|CACHE)_HOME$/.test(k)))
   return {
-    ...source,
+    ...inherited,
+    XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local', 'share'),
+    XDG_STATE_HOME: join(home, '.local', 'state'), XDG_CACHE_HOME: join(home, '.cache'),
     ...(source.VOLTA_HOME || existsSync(voltaHome) ? { VOLTA_HOME: voltaHome } : {}),
     HOME: home, USERPROFILE: home, AGENTISTICS_DIR: join(home, '.agentistics'),
     PORT: String(apiPort), WEB_PORT: String(webPort), SERVE_STATIC: '1',
@@ -78,15 +123,20 @@ export function buildThrowawayEnv(home: string, name: string, apiPort: number, w
   }
 }
 
+export function readState(name: string): ThrowawayState | null {
+  try { return JSON.parse(readFileSync(statePath(name), 'utf8')) as ThrowawayState } catch { return null }
+}
+
 function usage(): string {
   return `Usage: agentop run --rm [--ttl 2h] [--port-offset N] [--name x] -- <command...>
        agentop run --rm [--ttl 2h] [--port-offset N] [--name x]
+       agentop run --rm --serve [--seed-from <staging> | --seed-real] [--cwd <worktree>] [--ttl 2h] [--name x] [-- <server command...>]
        agentop run ls
        agentop run stop <name>`
 }
 
-function stateRoot(): string { return join(process.env.HOME || process.env.USERPROFILE || homedir(), '.cache', STATE_ROOT_NAME) }
-function statePath(name: string): string { return join(stateRoot(), `${name}.json`) }
+export function stateRoot(): string { return join(process.env.HOME || process.env.USERPROFILE || homedir(), '.cache', STATE_ROOT_NAME) }
+export function statePath(name: string): string { return join(stateRoot(), `${name}.json`) }
 function safeName(value: string): string {
   const name = value.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^-+|-+$/g, '')
   if (!name) throw new Error('run name must contain letters, numbers, dot, underscore or hyphen')
@@ -100,7 +150,7 @@ function parseTtl(value: string): number {
   return n * ({ s: 1, m: 60, h: 3600, d: 86400 } as Record<string, number>)[m[2]!]!
 }
 
-function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'help' } | { action: 'stop'; name: string } {
+export function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'help' } | { action: 'stop'; name: string } {
   if (args[0] === '--help' || args[0] === '-h') return { action: 'help' }
   if (args[0] === 'ls') return { action: 'ls' }
   if (args[0] === 'stop') {
@@ -111,11 +161,19 @@ function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'h
   let ttl = DEFAULT_TTL
   let portOffset: number | null = null
   let remove = false
+  let serve = false
+  let seedFrom: string | null = null
+  let seedReal = false
+  let cwd: string | null = null
   let command: string[] = []
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (arg === '--') { command = args.slice(i + 1); break }
     if (arg === '--rm') { remove = true; continue }
+    if (arg === '--serve') { serve = true; continue }
+    if (arg === '--seed-real') { seedReal = true; continue }
+    if (arg === '--seed-from') { seedFrom = args[++i] ?? ''; continue }
+    if (arg === '--cwd') { cwd = args[++i] ?? ''; continue }
     if (arg === '--name') { name = safeName(args[++i] ?? ''); continue }
     if (arg === '--ttl') { ttl = args[++i] ?? ''; parseTtl(ttl); continue }
     if (arg === '--port-offset') {
@@ -127,7 +185,9 @@ function parseArgs(args: string[]): RunOptions | { action: 'ls' } | { action: 'h
     throw new Error(`unknown run option: ${arg}`)
   }
   if (!remove) throw new Error('agentop run requires --rm (throwaway runs are always explicit)')
-  return { name, ttl, portOffset, remove, command }
+  if ((seedFrom !== null || seedReal || cwd !== null) && !serve) throw new Error('--seed-from, --seed-real and --cwd only apply with --serve')
+  if (seedFrom !== null && seedReal) throw new Error('--seed-from and --seed-real are exclusive')
+  return { name, ttl, portOffset, remove, command, serve, seedFrom, seedReal, cwd }
 }
 
 type ThrowawayPorts = { apiPort: number; webPort: number; reservationPaths: string[] }
@@ -169,18 +229,46 @@ async function portIsFree(port: number): Promise<boolean> {
   return await new Promise(resolve => {
     const server = createServer()
     server.once('error', () => resolve(false))
-    server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)))
+    // The server binds 0.0.0.0 (index.ts), so that is the address to probe: 127.0.0.1 alone misses a
+    // listener on another interface, which still makes the server's own bind fail with EADDRINUSE.
+    server.listen(port, '0.0.0.0', () => server.close(() => resolve(true)))
   })
+}
+
+/** A registered run is live while its pid answers or anything still carries its HOME (relays outlive the launcher). */
+function runIsLive(state: ThrowawayState): boolean {
+  if (typeof state.pid === 'number' && alive(state.pid)) return true
+  return process.platform === 'linux' && runOwnedPids(state.home).length > 0
+}
+
+/**
+ * Dead registered runs (launcher killed, state never cleaned) kept the registry — and `agentop run ls` — full of
+ * entries for ports nobody holds. Prune only entries with no live pid and nothing carrying their HOME; returns the
+ * ports held by LIVE registered runs so the picker can skip them.
+ */
+export function pruneStaleRuns(): Set<number> {
+  const held = new Set<number>()
+  for (const state of readStates()) {
+    if (!state || typeof state.name !== 'string' || typeof state.home !== 'string') continue
+    if (runIsLive(state)) { held.add(state.apiPort); held.add(state.webPort); continue }
+    if (!state.home.startsWith(stateRoot() + sep)) continue // never delete a home outside the run registry
+    rmSync(state.home, { recursive: true, force: true })
+    removeRunTmp(state.tmp)
+    releaseThrowawayPorts(state.reservationPaths ?? state.reservationPath)
+    rmSync(statePath(state.name), { force: true })
+  }
+  return held
 }
 
 export async function reserveThrowawayPorts(preferred: number): Promise<ThrowawayPorts> {
   mkdirSync(portReservationRoot(), { recursive: true, mode: 0o700 })
   const lockPath = await acquireAllocationLock()
   try {
+    const held = pruneStaleRuns()
     let apiPort = Math.max(1024, preferred)
     for (let attempts = 0; attempts < 1000 && apiPort < 65534; attempts++, apiPort++) {
       const webPort = apiPort + 1
-      if (isRealAgentopPort(apiPort) || isRealAgentopPort(webPort)) continue
+      if (isRealAgentopPort(apiPort) || isRealAgentopPort(webPort) || held.has(apiPort) || held.has(webPort)) continue
       const apiReservationPath = portReservationPath(apiPort)
       try {
         mkdirSync(apiReservationPath, { mode: 0o700 })
@@ -222,7 +310,7 @@ export function releaseThrowawayPorts(reservationPaths: string[] | string | unde
   }
 }
 
-function readStates(): ThrowawayState[] {
+export function readStates(): ThrowawayState[] {
   try { return readdirSync(stateRoot()).flatMap(file => {
     try { return [JSON.parse(readFileSync(join(stateRoot(), file), 'utf8')) as ThrowawayState] } catch { return [] }
   }) } catch { return [] }
@@ -265,7 +353,7 @@ export async function reapRunOwned(home: string, graceMs = 3000, procRoot = '/pr
   return left
 }
 
-async function stopState(state: ThrowawayState): Promise<void> {
+export async function stopState(state: ThrowawayState): Promise<void> {
   if (state.unit && process.platform === 'linux' && existsSync('/run/systemd/system')) {
     const result = spawn('systemctl', ['--user', 'stop', state.unit], { stdio: 'ignore' })
     await new Promise<void>(resolve => { result.once('exit', () => resolve()); result.once('error', () => resolve()) })
@@ -289,7 +377,7 @@ async function listRuns(): Promise<number> {
 }
 
 /** cmdlines of this process's ancestors (Linux /proc); empty where unreadable. */
-function ancestorCmdlines(): string[] {
+export function ancestorCmdlines(): string[] {
   const out: string[] = []
   let pid = process.ppid
   for (let depth = 0; pid > 1 && depth < 32; depth++) {
@@ -302,7 +390,7 @@ function ancestorCmdlines(): string[] {
   return out
 }
 
-function memAvailableBytes(): number | null {
+export function memAvailableBytes(): number | null {
   try {
     const m = /^MemAvailable:\s+(\d+) kB/m.exec(readFileSync('/proc/meminfo', 'utf8'))
     return m ? Number(m[1]) * 1024 : null
@@ -336,7 +424,63 @@ async function waitForMemory(): Promise<boolean> {
   }
 }
 
+/** The data dir the flows write under (`<dataDir>/flows/ambientes/<id>/semente/` is the only place a seed may come from). */
+export function realDataDir(): string { return process.env.AGENTISTICS_DIR || join(homedir(), '.agentistics') }
+
+/** `--seed-from` accepts a path only inside `<dataDir>/flows/ambientes/<id>/semente/` (realpath), never anything else. */
+export function seedSourceOk(path: string, dataDir = realDataDir()): string | null {
+  let real: string
+  try { real = realpathSync(path) } catch { return null }
+  let base: string
+  try { base = realpathSync(join(dataDir, 'flows', 'ambientes')) } catch { return null }
+  const rel = real.startsWith(base + sep) ? real.slice(base.length + 1).split(sep) : null
+  return rel && rel.length >= 2 && rel[1] === 'semente' ? real : null
+}
+
+/**
+ * Runs the (synchronous) seed with SIGTERM/SIGINT remembered rather than lost: a failure cleans up and rethrows; a signal that arrived
+ * during the seed cleans up as soon as it ends and reports `interrupted`. Handlers are removed again on every path.
+ */
+export async function guardedSeed(seed: () => void, cleanup: () => void, signals: Pick<NodeJS.Process, 'on' | 'off'> = process): Promise<'done' | 'interrupted'> {
+  let hit = false
+  const mark = () => { hit = true }
+  signals.on('SIGTERM', mark); signals.on('SIGINT', mark)
+  try {
+    try { seed() } catch (error) { cleanup(); throw error }
+    await new Promise<void>(resolveTick => setTimeout(resolveTick, 0))
+    if (hit) { cleanup(); return 'interrupted' }
+    return 'done'
+  } finally { signals.off('SIGTERM', mark); signals.off('SIGINT', mark) }
+}
+
+/** `--cwd` accepts a linked git worktree only (its git-dir differs from the common dir). */
+export function serveCwdOk(dir: string): string | null {
+  try {
+    const real = realpathSync(dir)
+    const env = gitEnv()
+    const run = (a: string[]) => Bun.spawnSync(['git', '-C', real, ...a], { stdout: 'pipe', stderr: 'ignore', env }).stdout.toString().trim()
+    const gd = run(['rev-parse', '--absolute-git-dir']), cd = run(['rev-parse', '--git-common-dir'])
+    if (!gd || !cd) return null
+    const gitDir = realpathSync(gd)
+    const common = realpathSync(resolve(real, cd))
+    return gitDir !== common ? real : null
+  } catch { return null }
+}
+
+/** `--serve` is long-lived: it must never sit under (or hold a descriptor of) the machine-wide heavy lock. */
+export function serveLockRefusal(env: NodeJS.ProcessEnv, ancestors: string[], fds: number[]): string | null {
+  if (insideHeavyLock(env, ancestors)) return 'agentop run --serve was started inside a heavy job; the server would stay tied to its lock. Run it from outside.'
+  if (fds.length) return `agentop run --serve inherited the heavy lock (fd ${fds.join(', ')}); the server would hold it. Run it from outside.`
+  return null
+}
+
 async function startRun(options: RunOptions): Promise<number> {
+  if (options.serve) {
+    const refusal = serveLockRefusal(process.env, ancestorCmdlines(), heavyLockFds('self'))
+    if (refusal) { console.error(refusal); return 4 }
+    if (options.seedFrom !== null && !seedSourceOk(options.seedFrom)) { console.error('--seed-from must be a staged seed under <dataDir>/flows/ambientes/<id>/semente/'); return 2 }
+    if (options.cwd !== null && !serveCwdOk(options.cwd)) { console.error('--cwd must be a linked git worktree'); return 2 }
+  }
   if (!await waitForMemory()) return 3
   mkdirSync(stateRoot(), { recursive: true, mode: 0o700 })
   if (existsSync(statePath(options.name))) throw new Error(`a throwaway run named ${options.name} already exists`)
@@ -356,10 +500,19 @@ async function startRun(options: RunOptions): Promise<number> {
     throw error
   }
   const { apiPort, webPort, reservationPaths } = ports
+  const cleanupSeed = () => { releaseThrowawayPorts(reservationPaths); rmSync(home, { recursive: true, force: true }) }
+  // R3: a SIGTERM/SIGINT that lands while the (synchronous) seed copy runs is honoured the moment it ends: the half-built home and the port reservations go.
+  const seeded = await guardedSeed(() => {
+    if (options.seedFrom !== null) applySeed(join(seedSourceOk(options.seedFrom)!, '.agentistics'), agentistics)
+    // B4: the allow-list copy of the REAL store runs HERE, in the run's own launcher process, never inside the real server's event loop.
+    if (options.seedReal) buildSeed(realDataDir(), agentistics)
+    ensureNoStructured(agentistics)
+  }, cleanupSeed)
+  if (seeded === 'interrupted') return 143
   const state: ThrowawayState = { name: options.name, home, apiPort, webPort, reservationPaths, startedAt: new Date().toISOString(), command: options.command }
   const script = process.argv[1]
   const inside = insideHeavyLock(process.env, ancestorCmdlines())
-  const heavyPrefix = shouldWrapHeavy({
+  const heavyPrefix = options.serve ? [] : shouldWrapHeavy({
     hasCommand: options.command.length > 0, linux: process.platform === 'linux', hasFlock: !!Bun.which('flock'),
     inside,
   }) ? (script?.endsWith('.ts') || script?.endsWith('.js') ? [process.execPath, script, 'heavy', '--'] : [process.execPath, 'heavy', '--']) : []
@@ -373,7 +526,7 @@ async function startRun(options: RunOptions): Promise<number> {
     const env = buildThrowawayEnv(home, options.name, apiPort, webPort, process.env, { tmp, heavyHeld: inside || heavyPrefix.length > 0 })
     systemd = process.platform === 'linux' && !!process.env.XDG_RUNTIME_DIR && await commandExists('systemd-run')
     const childArgs = systemd ? ['--user', '--scope', '--unit', unit.replace(/\.scope$/, ''), '-p', 'MemoryMax=2G', '-p', `RuntimeMaxSec=${parseTtl(options.ttl)}`, '--', ...argv] : argv
-    child = spawn(systemd ? 'systemd-run' : argv[0]!, systemd ? childArgs : argv.slice(1), { env, stdio: 'inherit', detached: !systemd })
+    child = spawn(systemd ? 'systemd-run' : argv[0]!, systemd ? childArgs : argv.slice(1), { env, stdio: 'inherit', detached: !systemd, ...(options.cwd ? { cwd: serveCwdOk(options.cwd)! } : {}) })
     state.pid = child.pid
     if (systemd) state.unit = unit
     writeFileSync(statePath(options.name), JSON.stringify(state, null, 2), { mode: 0o600 })
@@ -391,15 +544,39 @@ async function startRun(options: RunOptions): Promise<number> {
   // caller must wait for the first one's removal instead of exiting the process under it.
   let cleaning: Promise<void> | undefined
   const cleanup = () => (cleaning ??= stopState(state))
-  const childExit = new Promise<number>(resolve => { child.once('exit', (status, sig) => resolve(status ?? (sig ? 1 : 0))); child.once('error', () => resolve(1)) })
+  // The command's end is recorded in the log BEFORE any cleanup line, so whoever reads run.log (the ambiente flow) can name the exit code.
+  const childExit = new Promise<number>(resolve => {
+    child.once('exit', (status, sig) => { console.log(status !== null ? `exit ${status}` : `exit signal ${sig}`); resolve(status ?? (sig ? 1 : 0)) })
+    child.once('error', () => { console.log('exit 1'); resolve(1) })
+  })
   const signal = async (sig: NodeJS.Signals) => { try { process.kill(child.pid!, sig) } catch {} ; await childExit; await cleanup(); process.exit(128 + (sig === 'SIGINT' ? 2 : 15)) }
   process.once('SIGINT', () => void signal('SIGINT'))
   process.once('SIGTERM', () => void signal('SIGTERM'))
+  // The run is tied to whoever started it. A session's pane hangs up its process group when the
+  // session is killed — the default SIGHUP action ended this launcher WITHOUT its cleanup, and the
+  // run's systemd scope (a cgroup of its own) kept the command alive until its TTL (03/11: run-r*
+  // scopes still active after their session ended). A parent that died outright reparents us: same.
+  process.once('SIGHUP', () => void signal('SIGTERM'))
+  const parentWatch = watchParent(process.ppid, () => process.ppid, () => void signal('SIGTERM'))
   const ttlTimer = setTimeout(() => { try { process.kill(child.pid!, 'SIGTERM') } catch {} }, parseTtl(options.ttl) * 1000)
   const code = await childExit
   clearTimeout(ttlTimer)
+  clearInterval(parentWatch)
   await cleanup()
   return code
+}
+
+/** Calls `onGone` once when the launcher's parent changes (it died and we were reparented). */
+export function watchParent(initial: number, current: () => number, onGone: () => void, everyMs = 1000): ReturnType<typeof setInterval> {
+  let fired = false
+  const t = setInterval(() => {
+    if (fired || current() === initial) return
+    fired = true
+    clearInterval(t)
+    onGone()
+  }, everyMs)
+  t.unref?.()
+  return t
 }
 
 async function commandExists(command: string): Promise<boolean> {

@@ -5,6 +5,8 @@ import { join, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { gitEnv } from '../backup/repo-probe'
 import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
+import { ambienteHostOps } from './ambiente-host'
+import { processHostOps } from './process-ops'
 
 const exec = promisify(execFile)
 /**
@@ -281,10 +283,15 @@ export function judgeStopped(id: string, snapshot: { polledAtMs: number; session
     return refuse('session is not confirmed stopped', ['waiting activity on two consecutive polls', 'no background work'])
   }
   const previous = streaks.get(id)
-  const consecutive = previous && snapshot.polledAtMs > previous.at && snapshot.polledAtMs - previous.at <= STREAK_MAX_GAP_MS
+  // The SAME poll read again (the hub serves a snapshot up to 1 s old, so the flow's `parada` and the `fechar` re-check
+  // right after it often share one) adds nothing — but it must not RESET what the earlier read already established
+  // either: it answers with the streak's own count. Counting it as a first sighting refused 35 of 42 closes.
+  if (previous && snapshot.polledAtMs <= previous.at) {
+    return previous.count >= 2 ? { ok: true, sessionId: id, polls: previous.count } : refuse('session is waiting, but needs a second confirmed poll', ['second waiting poll'])
+  }
+  const consecutive = previous !== undefined && snapshot.polledAtMs - previous.at <= STREAK_MAX_GAP_MS
   const count = consecutive ? previous.count + 1 : 1
-  // Same poll read twice keeps the older mark so it cannot count as a second confirmation.
-  if (!previous || snapshot.polledAtMs > previous.at) streaks.set(id, { at: snapshot.polledAtMs, count })
+  streaks.set(id, { at: snapshot.polledAtMs, count })
   return count >= 2 ? { ok: true, sessionId: id, polls: count } : refuse('session is waiting, but needs a second confirmed poll', ['second waiting poll'])
 }
 
@@ -367,7 +374,11 @@ const defaultBudgets = async () => {
 }
 
 /** The host ops the trigger layer calls: the managed-session universe and a nudge into a live session. */
-export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps()) {
+export const NUDGE_REPEAT_MS = 60 * 60_000
+
+export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps(), now: () => number = Date.now) {
+  /** session + flow + text → when it was last delivered. The same reason is not typed into the same session twice in an hour. */
+  const nudged = new Map<string, number>()
   return {
     'aviso-ao-dono': async (value: unknown) => {
       const text = typeof inputOf(value).text === 'string' ? (inputOf(value).text as string).trim() : ''
@@ -400,7 +411,15 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps())
       const body = typeof i.body === 'string' ? i.body.trim() : ''
       if (!to || !body) return refuse('a nudge needs to and body', ['to', 'body'])
       const flow = typeof i.flow === 'string' && /^[a-z0-9-]+$/.test(i.flow) ? i.flow : 'dsl'
+      // A wait's wake is re-sent by design until acked (the engine owns that cadence); every other flow nudges once an hour.
+      const key = `${to}\0${flow}\0${body}`
+      const last = nudged.get(key)
+      if (flow !== 'wait' && last !== undefined && now() - last < NUDGE_REPEAT_MS) return { ok: true, to, deduped: true }
       const sent = await deps.prompt(to, `[from flow ${flow} · nudge]\n${body}`)
+      if (sent.ok) {
+        nudged.set(key, now())
+        if (nudged.size > 500) for (const [k, at] of nudged) if (now() - at >= NUDGE_REPEAT_MS) nudged.delete(k)
+      }
       // DSL.ACORDAR reads `failure`: a dialog open (`prompt`, nothing typed) is retried later; `unconfirmed` may have arrived.
       return sent.ok ? { ok: true, to } : { ...refuse(sent.message ?? 'the nudge was not delivered', ['live session']), ...(sent.failure ? { failure: sent.failure } : {}) }
     },
@@ -425,10 +444,12 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
     ...triggerHostOps(triggerDeps),
     ...worktreeHostOps(worktreeDeps),
     ...dockerHostOps(dockerDeps),
+    ...processHostOps(),
     'alvo-trabalho': async (value: unknown) => {
       const id = sessionOf(value)
       return id ? workTarget(id, workDeps) : refuse('session id is required', ['sessionId'])
     },
+    ...ambienteHostOps(),
     'sessao-parada': async (value: unknown) => {
       const id = sessionOf(value)
       if (!id) return refuse('session id is required', ['sessionId'])

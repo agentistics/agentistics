@@ -10,6 +10,89 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.195.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'O fechamento automático não encerra mais um worker que avisou que está esperando a próxima etapa; ele só fecha depois da entrega final.',
+        en: 'Automatic closing no longer ends a worker that said it is waiting for the next step; it only closes after the final delivery.',
+      },
+      {
+        pt: 'A espera por uma entrega pode filtrar pelo assunto, e não dispara mais com qualquer entrega da mesma sessão.',
+        en: 'Waiting for a delivery can filter by subject, and no longer fires on any delivery from the same session.',
+      },
+    ],
+  },
+  '2.194.0': {
+    features: [
+      {
+        pt: 'Fechar uma sessão agora encerra tudo o que ela abriu (assistente, ferramentas, testes); um coletor automático recolhe sobras de sessões fechadas e mostra quanta memória liberou.',
+        en: 'Closing a session now ends everything it opened (assistant, tools, tests); an automatic collector sweeps leftovers of closed sessions and shows how much memory it freed.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Uma sessão encerrada não volta mais a ligar sozinha, e a tela de processos não marca mais como encerrado o que está vivo.',
+        en: 'A closed session no longer turns itself back on, and the processes screen no longer marks something alive as ended.',
+      },
+      {
+        pt: 'Avisos dos fluxos aparecem como cartão do sistema (não como mensagem sua), e o fechamento de sessões que já entregaram passou a funcionar.',
+        en: 'Flow notices appear as a system card (not as a message from you), and closing sessions that already delivered now works.',
+      },
+    ],
+  },
+  '2.193.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'OpenCode: ler um print ou arquivo colado no chat não trava mais a sessão esperando uma permissão escondida; suas regras de permissão continuam valendo.',
+        en: 'OpenCode: reading a screenshot or file pasted into the chat no longer freezes the session waiting on a hidden permission; your permission rules still apply.',
+      },
+      {
+        pt: 'Reabrir uma sessão quando o assistente antigo ainda está rodando agora avisa em vez de abrir um segundo assistente na mesma conversa.',
+        en: 'Reopening a session while the old assistant is still running now warns you instead of opening a second assistant in the same conversation.',
+      },
+    ],
+  },
+  '2.192.0': {
+    features: [
+      {
+        pt: 'Chaves de provedor (OpenRouter, OpenAI, Anthropic, ElevenLabs…) ficam trancadas neste computador e funcionam mesmo com o cofre trancado; nunca aparecem em tela nem em registro.',
+        en: 'Provider keys (OpenRouter, OpenAI, Anthropic, ElevenLabs…) stay locked on this computer and work even while the vault is locked; they never show on screen or in logs.',
+      },
+      {
+        pt: 'Ligação por voz: ao sair da aba durante uma ligação, abre uma janelinha flutuante (Chrome/Edge) com mudo, encerrar e voltar; formato compacto ou barra fina.',
+        en: 'Voice call: leaving the tab during a call opens a small floating window (Chrome/Edge) with mute, hang up and back; compact or thin bar.',
+      },
+    ],
+    fixes: [],
+  },
+  '2.191.0': {
+    features: [
+      {
+        pt: 'Fluxos (experimental, desligado por padrão): um ambiente descartável para testar uma versão do código sem mexer nos seus dados nem nas suas configurações de verdade. Ele sobe, você testa, e depois é desmontado.',
+        en: 'Flows (experimental, off by default): a throwaway environment to test a version of the code without touching your real data or settings. It starts up, you test, and then it is taken down.',
+      },
+      {
+        pt: 'Fluxos (experimental, desligado por padrão): sessões de trabalho que terminaram e salvaram o que fizeram se fecham sozinhas. Sessões de líder nunca se fecham sozinhas.',
+        en: 'Flows (experimental, off by default): worker sessions that finished and saved their work close by themselves. Leader sessions never do.',
+      },
+      {
+        pt: 'Fluxos (experimental): com os fluxos ligados, o resumo do líder lista quem ainda está aberto e quem ainda não salvou o trabalho. O fechamento automático foi testado com sessões simuladas; com um trabalhador real ainda não.',
+        en: 'Flows (experimental): with flows on, the leader\'s summary lists who is still open and who has not saved their work yet. Auto-close was tested with simulated sessions, not yet with a real worker.',
+      },
+      {
+        pt: 'Ligação por voz: a barra mostra "Trabalhando" enquanto ela faz o que você pediu.',
+        en: 'Voice call: the bar says \'Working\' while she does what you asked.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Reabrir uma sessão encerrada que ficou presa em "já está aberta em…" volta a funcionar.',
+        en: 'Reopening an ended session stuck on "already open in…" works again.',
+      },
+    ],
+  },
   '2.190.0': {
     features: [
       {

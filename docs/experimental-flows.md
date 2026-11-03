@@ -23,6 +23,16 @@ fsmonitor, suppress credential prompts and time out after 15 seconds.
 The engine vendors the MIT duckflux core at `duckflux.pin`, so the ordinary official
 binary build needs only the public checkout and engine checkout.
 
+### Intermediate handbacks and subject-filtered waits
+
+`agentistics_session_message` accepts an optional `awaiting` (kind=handback only, one line, at most 200
+characters): "I stopped on purpose, waiting for X". The `session.handback` event carries `awaiting` and the
+message `text`; the engine records both and `fechar-entregue` refuses to close the worker ("worker awaiting: X")
+while its newest handback has `awaiting`. A later handback without `awaiting` is final again.
+
+A `agentistics_wait` handback condition takes an optional `match` (case-insensitive substring of the handback
+text). Without it the wait fires on any handback from that session, as before.
+
 Known experimental limits: waiting-poll history is process-local and its freshness
 still needs refinement; handback evidence is supplied by the caller; cleanup only
 previews. Independent QA and owner validation are required before release.

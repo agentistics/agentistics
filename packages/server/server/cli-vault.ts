@@ -297,8 +297,8 @@ async function cmdReset(args: string[]): Promise<number> {
   for (const f of files) process.stdout.write(`  ${displayPath(f)}\n`)
   process.stdout.write(t(`They cannot be recovered. Re-enter them afterwards with: ${allRestoreWith()}\n`, `Eles não podem ser recuperados. Cadastre-os de novo depois com: ${allRestoreWith()}\n`))
   process.stdout.write(t(
-    'Provider keys (~/.agentistics/provider-keys) belong to the engine and are not touched here; without this vault they no longer open — re-enter them with `agentop provider key set <provider>`.\n',
-    'As chaves de provedor (~/.agentistics/provider-keys) pertencem ao motor e não são tocadas aqui; sem este cofre elas não abrem mais — cadastre-as de novo com `agentop provider key set <provider>`.\n'))
+    'Provider keys (~/.agentistics/provider-keys) belong to the engine and are not touched here; the ones sealed with this vault no longer open — re-enter them with `agentop provider key set <provider>`. Keys sealed to the machine (provider-keys/machine) do not depend on this vault.\n',
+    'As chaves de provedor (~/.agentistics/provider-keys) pertencem ao motor e não são tocadas aqui; as seladas com este cofre não abrem mais — cadastre-as de novo com `agentop provider key set <provider>`. As seladas à máquina (provider-keys/machine) não dependem deste cofre.\n'))
   if (!args.includes('--yes')) {
     if (!process.stdin.isTTY) { process.stderr.write(t('Refusing without a terminal; pass --yes.\n', 'Recusado sem terminal; passe --yes.\n')); return 1 }
     if (!(await confirm(t('Delete them?', 'Apagar?'), false))) return 1
