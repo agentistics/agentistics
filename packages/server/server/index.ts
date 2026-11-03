@@ -10,6 +10,7 @@ import { featureOn } from '@agentistics/core'
 import { getRates } from './rates'
 import { getVersionInfo, startVersionRecheck } from './version'
 import { sendTelemetry } from './telemetry'
+import { createMuxState, onMuxMessage, closeMux, type MuxState } from './stream-mux'
 import { handleUpgradeRoute, upgradableHint, versionWithRestart } from './upgrade-web'
 import { compressResponse, negotiateEncoding } from './http-compress'
 import { encodedBody, etagMatches, versionOf } from './data-response-cache'
@@ -499,18 +500,22 @@ type WSData = {
   shellInput?: ShellInputState
   /** An engine route's accepted socket (`engine/engine-sockets.ts`) — a fourth, disjoint kind. */
   engineSocket?: EngineSocketState
+  /** The tab's multiplexed push channel (`stream-mux.ts`) — a fifth, disjoint kind. */
+  streamMux?: MuxState
 }
 
 // Shared WS + request handlers, so the binary can bind the SAME logic to two ports below:
 // PORT (47291 = api + mcp) and WEB_PORT (47292 = the web dashboard you open).
 const _wsHandlers = {
   open(ws: ServerWebSocket<WSData>) {
+    if (ws.data.streamMux) return
     if (ws.data.fleetInput) { openInputSocket(ws); return }
     if (ws.data.shellInput) { openShellInputSocket(ws); return }
     if (ws.data.engineSocket) { openEngineSocket(ws.data.engineSocket, ws); return }
     if (!ws.data.isAgent) return; registerAgent(ws)
   },
   message(ws: ServerWebSocket<WSData>, msg: string | Buffer) {
+    if (ws.data.streamMux) { onMuxMessage(ws.data.streamMux, ws, msg); return }
     if (ws.data.fleetInput) { onInputMessage(ws, msg); return }
     if (ws.data.shellInput) { onShellInputMessage(ws, msg); return }
     if (ws.data.engineSocket) { onEngineSocketMessage(ws.data.engineSocket, msg); return }
@@ -518,6 +523,7 @@ const _wsHandlers = {
   },
   pong(ws: ServerWebSocket<WSData>) { if (!ws.data.isAgent) return; onAgentPong(ws) },
   close(ws: ServerWebSocket<WSData>, code?: number, reason?: string) {
+    if (ws.data.streamMux) { closeMux(ws.data.streamMux); return }
     if (ws.data.fleetInput) { closeInputSocket(ws); return }
     if (ws.data.shellInput) { closeShellInputSocket(ws); return }
     if (ws.data.engineSocket) { closeEngineSocket(ws.data.engineSocket, code ?? 1005, reason ?? ''); return }
@@ -834,6 +840,27 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       liveSessions = sampled ?? []
       const body = TEAM_CENTRAL ? { limits: [], registered: [], budgets: [], freeSlots: 0, freeSlotsByHarness: {}, freeSlotsByAccount: {}, unassignedLive: {}, liveSessions: [], now } : await planLimitsPayload(prefs.billing, now, liveSessions)
       return new Response(JSON.stringify(body), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+    }
+    // The tab's push streams over ONE WebSocket (`stream-mux.ts`): a browser's ~6 HTTP/1.1
+    // connections per origin are shared by every tab, and the long-lived EventSources filled them —
+    // `/api/health` and every fetch then queued, the second tab never loaded. A WebSocket is outside
+    // that pool. Every gate above has already run for this upgrade; each subscription is then
+    // replayed as a plain GET through `handleRequest` with this request's own headers and IP, so it
+    // runs every gate AGAIN, exactly as the SSE route would. SAME-ORIGIN is the WS-only addition
+    // (CSWSH — a browser sends cookies on a cross-site WebSocket handshake).
+    if (url.pathname === '/api/stream-mux' && req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+      if (!wsInputOriginOk({ origin: req.headers.get('origin'), host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC })) {
+        return new Response(JSON.stringify({ error: 'forbidden_origin' }), {
+          status: 403, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        })
+      }
+      const ip = server.requestIP(req)
+      const sub = Object.create(server, { requestIP: { value: () => ip } }) as Server<WSData>
+      const state = createMuxState(req, r => handleRequest(r, sub))
+      if (server.upgrade(req, { data: { user: '', memberId: '', streamMux: state } })) return
+      return new Response(JSON.stringify({ error: 'upgrade_failed' }), {
+        status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      })
     }
     if (url.pathname === '/api/events' && req.method === 'GET') {
       // Each SSE client holds a socket and a controller for as long as it stays connected, so an

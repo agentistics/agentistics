@@ -3230,6 +3230,17 @@ harness must not break.
 
 ## Important rules
 
+- **A browser push stream is `openEventStream(url)` (`web/src/lib/streamMux.ts`), never `new
+  EventSource(url)`.** A browser allows ~6 HTTP/1.1 connections per ORIGIN, shared by EVERY tab; each
+  EventSource held one for as long as it was open, so two tabs (events + data + a chat stream per
+  watched session + terminals) filled the pool, `/api/health` and every fetch queued, the second tab
+  never booted and the Calls page said "the server is not answering" over a healthy server. The
+  streams now ride ONE WebSocket per tab (`/api/stream-mux`, `server/stream-mux.ts`), which is outside
+  that pool. Each subscription is replayed as a plain GET through `handleRequest` with the upgrade's
+  own headers and IP, so every gate (rate limit, capability, host, auth) runs exactly as for the SSE
+  route; only the push paths in `MUX_EXACT`/`MUX_NATIVE` are reachable, and the upgrade checks Origin (CSWSH).
+  When the socket cannot be opened at all a stream falls back to a real EventSource. A new push route
+  must be added to the server's allowlist; `streamMux.test.ts` fails on any raw `new EventSource(`.
 - **A person's CHOICES live in `/api/user-prefs`, never `/api/preferences`, and the SCREEN stays in
   the browser.** `/api/preferences` is the MACHINE's file, and on a central it is shared by everyone
   signed in, so for months one person's pins, session groups, notification settings, theme and
