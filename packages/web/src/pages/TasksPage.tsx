@@ -72,6 +72,7 @@ import {
   useTaskDetail, useTaskList, useTaskStatuses, useTaskTypes,
   type AttemptRollup, type AttemptView, type TaskDetail, type TaskFieldPatch, type TaskFile,
   type TaskListRow, type TaskRecord, type TasksError, type TaskStatus,
+  hasMeasurableSessions,
 } from '../lib/tasks'
 
 function EmptyNotice({ error }: { error: TasksError }) {
@@ -607,11 +608,13 @@ function TaskDetailView({ id }: { id: string }) {
           onDeleted={() => navigate('/tasks')}
         />
 
-        <p style={{ margin: 0, fontSize: 11, color: 'var(--text-tertiary)' }}>
-          {lang === 'pt'
-            ? 'Isso é custo, prompts e tempo. Se o trabalho ficou bom não é medido aqui.'
-            : 'These are cost, prompts and time. Whether the work is any good is not measured here.'}
-        </p>
+        {hasMeasurableSessions(detail.rollup) && (
+          <p style={{ margin: 0, fontSize: 11, color: 'var(--text-tertiary)' }}>
+            {lang === 'pt'
+              ? 'Isso é custo, prompts e tempo. Se o trabalho ficou bom não é medido aqui.'
+              : 'These are cost, prompts and time. Whether the work is any good is not measured here.'}
+          </p>
+        )}
       </div>
     </div>
   )

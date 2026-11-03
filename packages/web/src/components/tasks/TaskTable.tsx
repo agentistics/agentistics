@@ -280,12 +280,13 @@ function cellFor(
     )
     case 'due': return row.task.dueDate
       ? <DueCell date={row.task.dueDate} closed={row.task.status === 'done' || row.task.status === 'abandoned'} nowMs={nowMs} />
-      : <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
-    case 'claim': return <ClaimCell claim={row.task.claim} nowMs={nowMs} />
+      : (hasMeasurableSessions(row.rollup) ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span> : null)
+    case 'claim': return !row.task.claim && !hasMeasurableSessions(row.rollup) ? null : <ClaimCell claim={row.task.claim} nowMs={nowMs} />
     case 'progress': return row.counts.subtasks === 0
       // Nothing to be a fraction of. An empty bar here would say "0% done" about a task nobody
-      // broke up, which is a claim about the work rather than about the board.
-      ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span>
+      // broke up, which is a claim about the work rather than about the board. A sessionless task
+      // draws nothing at all (a blank cell, like Sessions), not a dash.
+      ? (hasMeasurableSessions(row.rollup) ? <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>—</span> : null)
       : <TaskProgressBar done={row.counts.subtasksDone} inProgress={row.counts.subtasksInProgress} statusCounts={row.counts.subtasksByStatus} total={row.counts.subtasks} statuses={statuses} />
     case 'updated': return (
       <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>

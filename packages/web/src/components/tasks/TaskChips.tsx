@@ -25,7 +25,6 @@ import {
 import { BlockedDialog } from './BlockedDialog'
 import { boardCopy, statusLabel, type Lang } from './copy'
 import { chipStyle, ChipSelect } from './ChipSelect'
-import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { PanelMenu } from './PickerMenu'
 import { StatusChip } from './StatusChip'
 import { DurationCellView } from './SubtaskDurationCell'
@@ -203,16 +202,13 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
   const [busy, setBusy] = useState(false)
   /** Set while the task is on its way to `blocked` — the reason dialog is ours. */
   const [blocking, setBlocking] = useState(false)
-  /** Set when a `done` write refused for having no session filed under this task yet. */
-  const [doneRefusal, setDoneRefusal] = useState(false)
 
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); await fn(); await reload(); setBusy(false) }
   const onStatus = async (st: TaskStatus) => {
     if (st === 'blocked') { setBlocking(true); return }
     setBusy(true)
-    const result = await markTask(id, st)
+    await markTask(id, st)
     setBusy(false)
-    if (!result.ok && result.reason === 'done_needs_session') { setDoneRefusal(true); return }
     await reload()
   }
 
@@ -342,16 +338,6 @@ export function TaskChips({ id, detail, lang, statuses, reload, onFileSession, c
             setBlocking(false)
             await run(() => markTask(id, 'blocked', { reason, blockedBy }))
           }}
-        />
-      )}
-
-      {doneRefusal && (
-        <DoneNeedsSessionDialog
-          title={task.title}
-          scope="task"
-          lang={lang}
-          onCancel={() => setDoneRefusal(false)}
-          onFile={() => { setDoneRefusal(false); onFileSession?.() }}
         />
       )}
     </>

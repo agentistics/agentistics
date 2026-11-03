@@ -1,3 +1,4 @@
+import { useTaskSessionless } from './lib/taskSessionlessStore'
 import { EngineSurfaceButtons } from './components/EngineSurfaceButtons'
 import { EngineSurfaceHost } from './components/EngineSurfaceHost'
 import { EngineSurfaceIndicators } from './components/EngineSurfaceIndicator'
@@ -2774,6 +2775,8 @@ export default function AppLayout() {
   // header that already carries the filters, and its own summary row keeps the three headline
   // figures visible while it is shut — so closing it costs nothing and gives back the viewport.
   // Desktop has the room and keeps what it had.
+  // A task with no session anywhere: the fleet stats strip would read as zeros over a plain to-do.
+  const taskSessionless = useTaskSessionless()
   const [fleetOpen, setFleetOpen] = useState<boolean>(() => fleetOpenStore.get() ?? !isMobile)
   useEffect(() => fleetOpenStore.subscribe(() => {
     const v = fleetOpenStore.get()
@@ -3725,6 +3728,7 @@ export default function AppLayout() {
           "Connected · last sync" in the aside. */}
       {/* Guarded by this row's own condition — see `dashboardTopBar`. */}
       {!location.pathname.startsWith('/settings') && (() => {
+        if (taskSessionless) return null
         return (
           // It hangs from the PAGE PANEL's top edge now, not from the strip: the panel sits
           // `OUTER_GAP` below the strip with a 1px border, and the tab starts right inside that
@@ -4283,7 +4287,7 @@ export default function AppLayout() {
             {/* Totals + fleet stats — the mobile counterpart of the desktop action-cluster numbers
                 and the collapsible fleet tab that hangs under the desktop header. Shares fleetOpen
                 with the desktop tab, so the choice survives a resize. */}
-            <div style={{ borderTop: '1px solid var(--border)' }}>
+            {!taskSessionless && <div style={{ borderTop: '1px solid var(--border)' }}>
               <button
                 onClick={toggleFleet}
                 style={{
@@ -4347,7 +4351,7 @@ export default function AppLayout() {
                   </div>
                 )
               })()}
-            </div>
+            </div>}
           </div>
         )}
 
@@ -4413,7 +4417,7 @@ export default function AppLayout() {
         <PageRouteFrame compact={inSessionsWorkspace || isMobile} scrollRef={pageScrollRef}
           maxWidth={pageMaxWidth(location.pathname)} footer={pageFooter}
           before={<>
-            {!inSessionsWorkspace && !isMobile && fleetOpen && dashboardTopBar && (
+            {!inSessionsWorkspace && !isMobile && fleetOpen && !taskSessionless && dashboardTopBar && (
               <div style={{ display: 'flex', justifyContent: 'flex-end', minWidth: 0 }}>{fleetStrip}</div>
             )}
             {!inSessionsWorkspace && backfillNote}

@@ -19,7 +19,7 @@
  * aside is exactly the asymmetry this move exists to end.
  */
 
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
@@ -65,6 +65,7 @@ import {
   type TaskFile, type TaskListRow, groupActivity, type ActivityFilter, type GroupedActivity,
 } from '../../lib/tasks'
 import { Link2 } from 'lucide-react'
+import { setTaskSessionless } from '../../lib/taskSessionlessStore'
 import { ChipSelect } from './ChipSelect'
 import { taskPath } from '../../lib/sessionTaskLink'
 
@@ -996,8 +997,15 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
     ]
   // A task with no session at any level has no metrics to show: the Metrics tab is not offered.
   const sessionless = !hasMeasurableSessions(detail.rollup)
-  const tabList = sessionless ? TABS.filter(([k]) => k !== 'overview') : TABS
-  const tab: DeliveryTab = sessionless && rawTab === 'overview' ? 'subtasks' : rawTab
+  // The Sessions tab goes with it: a tab that can only say "none" is the empty look this avoids.
+  const tabList = sessionless ? TABS.filter(([k]) => k !== 'overview' && k !== 'sessions') : TABS
+  const tab: DeliveryTab = sessionless && (rawTab === 'overview' || rawTab === 'sessions') ? 'subtasks' : rawTab
+  // The app header's fleet stats strip would read as zeros over a sessionless full page.
+  useEffect(() => {
+    if (dense) return
+    setTaskSessionless(sessionless)
+    return () => setTaskSessionless(false)
+  }, [dense, sessionless])
   const descriptionEditor = (
     <DescriptionEditor
       id={id}

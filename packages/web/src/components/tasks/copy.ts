@@ -67,6 +67,8 @@ export interface BoardCopy {
   sessionsPriced: string
   addSubtask: string
   nothingBrokenOut: string
+  /** The neutral empty state of a task with no session anywhere. */
+  noSubtasksYet: string
   remove: string
   /**
    * The footer row under the subtask grid, drawn only when the delivery has sessions filed
@@ -383,6 +385,7 @@ const EN: BoardCopy = {
   nothingBrokenOut:
     'Nothing broken out yet. A session is filed under a SUBTASK, never under the task itself — '
     + 'so break the work into parts here, and the task’s cost becomes the cost of its parts.',
+  noSubtasksYet: 'No subtasks yet.',
   remove: 'Remove',
   directSessions: 'Sessions filed directly on the task',
   endSession: 'End this session?',
@@ -659,6 +662,7 @@ const PT: BoardCopy = {
   nothingBrokenOut:
     'Nada dividido ainda. Uma sessão se filia a uma SUBTAREFA, nunca à tarefa em si — divida o '
     + 'trabalho em partes aqui, e o custo da tarefa passa a ser o custo das partes dela.',
+  noSubtasksYet: 'Nenhuma subtarefa ainda.',
   remove: 'Remover',
   directSessions: 'Sessões diretas na tarefa',
   endSession: 'Encerrar esta sessão?',

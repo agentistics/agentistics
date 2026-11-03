@@ -67,7 +67,6 @@ import {
   statusStyle, surface, type BoardStatus,
 } from './board'
 import { SessionPicker } from './SessionPicker'
-import { DoneNeedsSessionDialog } from './DoneNeedsSessionDialog'
 import { TaskProgressBar } from './TaskProgressBar'
 import { ColResizeHandle } from './ColResizeHandle'
 import { contentWidthOf, fitContentWidth } from './columnWidths'
@@ -177,9 +176,6 @@ export function SubtaskTable(p: SubtaskTableProps) {
   const threadCounts = commentCounts(p.comments ?? [], p.subtasks).bySubtask
   const [draft, setDraft] = useState('')
   const [linking, setLinking] = useState<string | null>(null)
-  /** Set when a status write refused `done` for having no session filed yet — see
-   *  `DoneNeedsSessionDialog`. Named so its shortcut can reopen `SessionPicker` for the SAME row. */
-  const [doneRefusal, setDoneRefusal] = useState<{ id: string; title: string } | null>(null)
   // The staged-session draft's dialogs — shared with `TaskTable`'s inline rows (`useStagedDialogs`).
   const stagedDialogs = useStagedDialogs<StagedTarget>(p.lang, {
     save: (t, d) => p.onSaveStagedSession(t.subtask.id, d),
@@ -220,7 +216,13 @@ export function SubtaskTable(p: SubtaskTableProps) {
   // per-person board arrangement (server-side, `boardPrefs.ts`), the same slot `TaskTable.tsx`'s
   // inline subtask grid writes, so both surfaces always draw the same columns.
   const [storedCols, setColumns] = useBoardPref('subtaskColumns')
-  const shownCols: SubtaskColumnId[] = storedCols ?? DEFAULT_SUBTASK_COLUMNS
+  // No session at any level (every filing is in `p.sessions`): the columns only a session can
+  // fill are not offered or drawn — a plain to-do list reads as Subtask + Status, not as a grid of
+  // blanks. The stored choice is untouched, so they return the moment a session is filed.
+  const sessionless = p.sessions.length === 0
+  const SESSION_ONLY: readonly SubtaskColumnId[] = ['started', 'completed', 'duration', 'sessions', 'model', 'cost', 'tokens']
+  const columnPool = sessionless ? SUBTASK_COLUMNS.filter(c => !SESSION_ONLY.includes(c.id)) : SUBTASK_COLUMNS
+  const shownCols: SubtaskColumnId[] = (storedCols ?? DEFAULT_SUBTASK_COLUMNS).filter(id => columnPool.some(c => c.id === id))
   const [savedWidths, setSavedWidths] = useBoardPref('subtaskColumnWidths')
   const [draggingWidth, setDraggingWidth] = useState<{ id: string; w: number } | null>(null)
   // The grid's own widths (`subtaskGridLayout.ts`): the name column resizes too, and the table is
@@ -270,10 +272,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
   const colCount = 3 + shownCols.length
 
   const pickStatus = async (t: Subtask, status: TaskStatus) => {
-    const result = await p.onPatch(t.id, { status })
-    if (!result.ok && result.reason === 'done_needs_session') {
-      setDoneRefusal({ id: t.id, title: t.title })
-    }
+    await p.onPatch(t.id, { status })
   }
 
   const done = p.subtasks.filter(t => t.done).length
@@ -373,7 +372,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
             width={230}
             orderable
             triggerStyle={viewSegment(isMobile)}
-            items={SUBTASK_COLUMNS.map(c => ({ value: c.id, label: copy.subtaskColumns[c.id] }))}
+            items={columnPool.map(c => ({ value: c.id, label: copy.subtaskColumns[c.id] }))}
             value={shownCols}
             onChange={next => setColumns(next as SubtaskColumnId[])}
             note={copy.pickers.columnsNote}
@@ -466,7 +465,7 @@ export function SubtaskTable(p: SubtaskTableProps) {
           {ordered.length === 0 && (
             <tr>
               <td colSpan={colCount} style={{ ...cell, fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.55 }}>
-                {p.subtasks.length === 0 ? copy.nothingBrokenOut : boardCopy(p.lang).subtaskFilter.noMatch}
+                {p.subtasks.length === 0 ? (sessionless ? copy.noSubtasksYet : copy.nothingBrokenOut) : boardCopy(p.lang).subtaskFilter.noMatch}
               </td>
             </tr>
           )}
@@ -725,22 +724,6 @@ export function SubtaskTable(p: SubtaskTableProps) {
           // out, since every attach read-modify-writes the same store.
           onPick={async ids => { for (const id of ids) await p.onAttach(linking, id) }}
           onClose={() => setLinking(null)}
-        />
-      )}
-
-      {doneRefusal && (
-        <DoneNeedsSessionDialog
-          title={doneRefusal.title}
-          scope="subtask"
-          lang={p.lang}
-          onCancel={() => setDoneRefusal(null)}
-          onFile={() => {
-            // The SAME shortcut `SubtaskSessions`' own `⋯` menu opens — this row's
-            // `SessionPicker`, not a second implementation of it.
-            const id = doneRefusal.id
-            setDoneRefusal(null)
-            setLinking(id)
-          }}
         />
       )}
 

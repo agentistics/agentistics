@@ -615,18 +615,16 @@ export function useTaskDetail(ref: string | undefined, filters?: Filters) {
 
 /**
  * A status write the server can refuse for a NAMED reason — same shape `attachSession` uses for
- * `blocked`. `done_needs_session` is `task-web.ts`'s refusal of a `done` with no session filed
- * under the task or subtask yet; the caller opens the matching dialog rather than reporting a bare
- * failure, so the rule reads as a question and not as a bug. `invalid_group`/`subtask_has_sessions`/
+ * `blocked`. `invalid_group`/`subtask_has_sessions`/
  * `group_field_conflict` are `patchSubtask`'s own refusals of a bad `parentGroupId` write (§F.1 of
  * docs/superpowers/specs/2026-09-11-alm-session-linking-ux.md) — see `checkParentGroup`
  * (`task-attach.ts`). A refusal with no `reason` is anything else (a bad ref, a network hiccup) —
  * nothing this shape names, so there is nothing to ask about.
  */
 export type StatusRefusalReason =
-  | 'done_needs_session' | 'invalid_group' | 'subtask_has_sessions' | 'group_field_conflict'
+  | 'invalid_group' | 'subtask_has_sessions' | 'group_field_conflict'
 const STATUS_REFUSAL_REASONS: readonly StatusRefusalReason[] =
-  ['done_needs_session', 'invalid_group', 'subtask_has_sessions', 'group_field_conflict']
+  ['invalid_group', 'subtask_has_sessions', 'group_field_conflict']
 export type StatusWriteResult = { ok: true } | { ok: false; reason?: StatusRefusalReason }
 
 async function postStatus(path: string, body: unknown): Promise<StatusWriteResult> {
