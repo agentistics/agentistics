@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.193.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'OpenCode: ler um print ou arquivo colado no chat não trava mais a sessão esperando uma permissão escondida; suas regras de permissão continuam valendo.',
+        en: 'OpenCode: reading a screenshot or file pasted into the chat no longer freezes the session waiting on a hidden permission; your permission rules still apply.',
+      },
+      {
+        pt: 'Reabrir uma sessão quando o assistente antigo ainda está rodando agora avisa em vez de abrir um segundo assistente na mesma conversa.',
+        en: 'Reopening a session while the old assistant is still running now warns you instead of opening a second assistant in the same conversation.',
+      },
+    ],
+  },
   '2.192.0': {
     features: [
       {
