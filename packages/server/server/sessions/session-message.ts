@@ -28,7 +28,16 @@ export interface MessageRequest {
   to: string
   kind: string
   body: string
+  /**
+   * Only with kind=handback: "I stopped on purpose, waiting for <this>" (an intermediate handback, not a final one).
+   * Carried in the `session.handback` event so the engine does NOT close the worker between phases.
+   */
+  awaiting?: string
 }
+
+/** The longest `awaiting` / event text kept. */
+export const AWAITING_MAX = 200
+export const HANDBACK_TEXT_MAX = 2000
 
 export interface SenderTask {
   taskId?: string
@@ -54,15 +63,16 @@ export interface MessageDeps {
   now: () => number
 }
 
-export interface HandbackEvent { type: 'session.handback'; id: string; payload: { sessionId: string; to: string; at: string; taskId?: string; subtaskId?: string } }
+export interface HandbackEvent { type: 'session.handback'; id: string; payload: { sessionId: string; to: string; at: string; taskId?: string; subtaskId?: string; text?: string; awaiting?: string } }
 
 /** PURE. The flows event for a handback `senderId` delivered to `to` at `at` (ms). */
-export function handbackFlowEvent(senderId: string, to: string, at: number, filed: SenderTask): HandbackEvent {
+export function handbackFlowEvent(senderId: string, to: string, at: number, filed: SenderTask, extra: { text?: string; awaiting?: string } = {}): HandbackEvent {
   const iso = new Date(at).toISOString()
   return {
     type: 'session.handback',
     id: `session.handback:${senderId}:${iso}`,
-    payload: { sessionId: senderId, to, at: iso, ...(filed.taskId ? { taskId: filed.taskId } : {}), ...(filed.subtaskId ? { subtaskId: filed.subtaskId } : {}) },
+    payload: { sessionId: senderId, to, at: iso, ...(filed.taskId ? { taskId: filed.taskId } : {}), ...(filed.subtaskId ? { subtaskId: filed.subtaskId } : {}),
+      ...(extra.text ? { text: extra.text } : {}), ...(extra.awaiting ? { awaiting: extra.awaiting } : {}) },
   }
 }
 
@@ -74,6 +84,7 @@ const MESSAGES: Record<string, string> = {
   unverified_sender: 'Only a session started by agentistics can send messages (its identity could not be verified).',
   missing_argument: '`to`, `kind` and a non-empty `body` are required.',
   bad_kind: 'kind must be handback, block or question.',
+  bad_awaiting: '`awaiting` is only valid with kind=handback, and must be one line of at most 200 characters.',
   no_such_session: 'No session on this machine matches that reference.',
   ambiguous_session: 'More than one session matches that reference; use its id.',
   self: 'A session cannot message itself.',
@@ -107,6 +118,8 @@ export async function sendSessionMessage(
   if (!to || !body) return fail('missing_argument')
   if (!isMessageKind(req.kind)) return fail('bad_kind')
   const kind = req.kind
+  const awaiting = typeof req.awaiting === 'string' ? req.awaiting.trim() : ''
+  if (req.awaiting !== undefined && req.awaiting !== null && (typeof req.awaiting !== 'string' || (awaiting && (kind !== 'handback' || /[\r\n]/.test(awaiting) || [...awaiting].length > AWAITING_MAX)))) return fail('bad_awaiting')
 
   const rows = await deps.rows().catch(() => [] as FleetRowForGroups[])
   const r = resolveSessionForGroup(rows, to)
@@ -145,7 +158,7 @@ export async function sendSessionMessage(
     mirrored = res.ok
     if (kind === 'handback' && filed.subtaskId && deps.handbackSubtask) await deps.handbackSubtask(filed.subtaskId).catch(() => {})
   }
-  if (kind === 'handback' && deps.handbackEvent) void deps.handbackEvent(handbackFlowEvent(senderId, target.id, t, filed)).catch(() => {})
+  if (kind === 'handback' && deps.handbackEvent) void deps.handbackEvent(handbackFlowEvent(senderId, target.id, t, filed, { text: body.slice(0, HANDBACK_TEXT_MAX), ...(awaiting ? { awaiting } : {}) })).catch(() => {})
   return { ok: true, to: target.id, kind, delivered: true, message: sent.message ?? 'Delivered.', mirrored }
 }
 

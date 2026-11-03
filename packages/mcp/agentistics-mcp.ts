@@ -602,13 +602,14 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_session_message",
     description:
-      "Send a message to ANOTHER agentistics session — the standard channel between a session and the one that started it (or the ones it started). `to` is a session reference (managed id, conversation id, exact title or unique id prefix); `kind` is handback (work finished/committed), block (you cannot continue) or question (you need a decision); `body` is the text. It is typed into the target's own conversation through the same path its composer uses, headed `[from session <id> · <kind>]`, and — when YOUR session is filed on a task or subtask — also recorded there as a comment of that kind. Use it to report to the session that started you instead of asking the user; a parent may message its children the same way. Refused for a session that does not exist, for yourself, from a process that is not a verified agentop session, and more than once per 2 seconds to the same session.",
+      "Send a message to ANOTHER agentistics session — the standard channel between a session and the one that started it (or the ones it started). `to` is a session reference (managed id, conversation id, exact title or unique id prefix); `kind` is handback (work finished/committed), block (you cannot continue) or question (you need a decision); `body` is the text. It is typed into the target's own conversation through the same path its composer uses, headed `[from session <id> · <kind>]`, and — when YOUR session is filed on a task or subtask — also recorded there as a comment of that kind. Use it to report to the session that started you instead of asking the user; a parent may message its children the same way. Refused for a session that does not exist, for yourself, from a process that is not a verified agentop session, and more than once per 2 seconds to the same session. INTERMEDIATE handback: a handback is read by the runtime as \"I finished everything\" (the product may close you once you are stopped, clean and saved). If you stop on purpose between phases, waiting for a signal, pass `awaiting` (kind=handback only, one line ≤200 chars, e.g. \"engine merged <sha>\"): the runtime then refuses to close you while that is your newest handback. A later handback WITHOUT `awaiting` counts as final again.",
     inputSchema: {
       type: "object",
       properties: {
         to: { type: "string", description: "The target session reference." },
         kind: { type: "string", enum: ["handback", "block", "question"] },
         body: { type: "string", description: "The message." },
+        awaiting: { type: "string", description: "kind=handback only: what you stopped waiting for (marks the handback as intermediate; the worker is not closed). Omit on a final handback." },
       },
       required: ["to", "kind", "body"],
     },
@@ -616,7 +617,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_wait",
     description:
-      "EXPERIMENTAL (AGENTISTICS_FLOWS) — a DURABLE wait the SERVER keeps for YOU: instead of polling or running a background command, register what you wait for and a deadline; when the condition is met (or the deadline passes, once) the server types a wake message into your own session, headed `[from flow wait · nudge]`, naming the wait id and generation. Conditions are a closed set: `{kind:'handback', from:<session id>, since?:ISO}` (a handback FROM that session), `{kind:'memory', minAvailableMB}` (free memory, two stable readings), `{kind:'time', at:ISO}`, `{kind:'gate', gate:'sessao-parada'|'arvore-limpa'|'trabalho-salvo', sessionId}`. action=register needs `condition` + `deadlineAt` (ISO UTC, ≤30 days; pass `requestId` to make a retry the same wait); action=ack (`waitId`, `generation`) confirms you RECEIVED the wake — without it the wake is sent again (at most 3 times), so ack every wake, and treat a repeated wake for the same id+generation as already handled; action=cancel (`waitId`) before it fires; action=list your open waits; action=handoff (`from`: the previous leader on the same task) moves its waits to you. A wait is never 'working' nor an approval.",
+      "EXPERIMENTAL (AGENTISTICS_FLOWS) — a DURABLE wait the SERVER keeps for YOU: instead of polling or running a background command, register what you wait for and a deadline; when the condition is met (or the deadline passes, once) the server types a wake message into your own session, headed `[from flow wait · nudge]`, naming the wait id and generation. Conditions are a closed set: `{kind:'handback', from:<session id>, since?:ISO, match?:text}` (a handback FROM that session; `match` = case-insensitive substring its text must contain, so another subject does not wake you), `{kind:'memory', minAvailableMB}` (free memory, two stable readings), `{kind:'time', at:ISO}`, `{kind:'gate', gate:'sessao-parada'|'arvore-limpa'|'trabalho-salvo', sessionId}`. action=register needs `condition` + `deadlineAt` (ISO UTC, ≤30 days; pass `requestId` to make a retry the same wait); action=ack (`waitId`, `generation`) confirms you RECEIVED the wake — without it the wake is sent again (at most 3 times), so ack every wake, and treat a repeated wake for the same id+generation as already handled; action=cancel (`waitId`) before it fires; action=list your open waits; action=handoff (`from`: the previous leader on the same task) moves its waits to you. A wait is never 'working' nor an approval.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1281,6 +1282,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           to: a?.to,
           kind: a?.kind,
           body: a?.body,
+          awaiting: a?.awaiting,
           session: sessionProof(process.env),
         });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
