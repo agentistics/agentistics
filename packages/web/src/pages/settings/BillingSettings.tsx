@@ -114,6 +114,8 @@ export function BillingAccountsPanel() {
   const [accountsLoaded, setAccountsLoaded] = useState(false)
   // The first answer arrived, ok or not: the list has its final height, so `#contas` may be scrolled to.
   const [accountsSettled, setAccountsSettled] = useState(false)
+  // The answer never came or was not ok: say so instead of listing a generic row per assistant.
+  const [accountsFailed, setAccountsFailed] = useState(false)
   const [pendingIds, setPending] = useState<Set<string>>(new Set())
   const [failedIds, setFailed] = useState<Set<string>>(new Set())
   const mutator = useRef(createAccountMutator<BillingAccount>((id, body) =>
@@ -125,14 +127,15 @@ export function BillingAccountsPanel() {
   const reloadAccounts = useCallback(() => setAccountsReload(n => n + 1), [])
   useEffect(() => {
     let cancelled = false
-    fetch('/api/accounts')
+    fetch('/api/accounts', { signal: AbortSignal.timeout(15_000) })
       .then(r => (r.ok ? r.json() : null))
       .then((b: { accounts?: BillingAccount[] } | null) => {
         if (cancelled) return
         setAccounts(b?.accounts ?? [])
         if (b) setAccountsLoaded(true)
+        setAccountsFailed(!b)
       })
-      .catch(() => { /* the assistants' own timelines still work without the list */ })
+      .catch(() => { if (!cancelled) setAccountsFailed(true) })
       .finally(() => { if (!cancelled) setAccountsSettled(true) })
     return () => { cancelled = true }
   }, [accountsReload])
@@ -180,7 +183,9 @@ export function BillingAccountsPanel() {
     return entry ? catalogPlanName(entry, pt ? 'pt' : 'en') : null
   }, [detections, pt])
 
-  const rows: BillingRowView[] = useMemo(() => billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt, accountLabels).map(r => {
+  // Until /api/accounts answered there is no account to list: billingRows would fall back to ONE generic
+  // row per assistant, which reads as the real accounts and is not. Nothing is listed until they arrive.
+  const rows: BillingRowView[] = useMemo(() => !accountsSettled ? [] : billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt, accountLabels).map(r => {
     const periods = scopePeriods(ctx.billing, r.scope)
     const cur = splitTimeline(sortPeriods(periods), today()).current
     const next = cur ? null : upcomingPeriod(periods, today())
@@ -192,7 +197,7 @@ export function BillingAccountsPanel() {
       problem: validateTimeline({ periods }).size > 0,
       limits: limitsForRow(planLimits, r),
     }
-  }), [accounts, ctx.billing, harnesses, pt, planLimits, accountLabels, detectedName])
+  }), [accountsSettled, accounts, ctx.billing, harnesses, pt, planLimits, accountLabels, detectedName])
 
   const orphans = useMemo(() => orphanTimelines(ctx.billing, rows), [ctx.billing, rows])
   /** An orphan in words: whose it was, and the plan it holds (in force, else the latest). */
@@ -393,11 +398,19 @@ export function BillingAccountsPanel() {
   return (
     <div id={ACCOUNTS_ANCHOR} ref={anchorRef} data-usage-accounts style={{ scrollMarginTop: 72 }}>
       <SectionHeader label={pt ? 'Contas' : 'Accounts'} />
-      <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
+      {!accountsSettled && <div data-accounts-loading role="status" style={{ padding: '14px 2px', fontSize: 12.5, color: 'var(--text-tertiary)' }}>{pt ? 'Carregando contas…' : 'Loading accounts…'}</div>}
+      {accountsSettled && accountsFailed && (
+        <div data-accounts-error role="alert" style={{ padding: '14px 2px', fontSize: 12.5, color: 'var(--accent-red)', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span>{pt ? 'Não foi possível carregar as contas.' : 'Could not load the accounts.'}</span>
+          <button type="button" data-accounts-retry onClick={() => { setAccountsSettled(false); reloadAccounts() }}
+            style={{ minHeight: 32, padding: '4px 12px', fontSize: 12.5, cursor: 'pointer' }}>{pt ? 'Tentar de novo' : 'Try again'}</button>
+        </div>
+      )}
+      {accountsSettled && !accountsFailed && <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
         selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow}
         onSignIn={signIn} signingIn={null} signInError={signInError}
         hiddenSignedOut={hiddenSignedOut} onHideSignedOut={hideSignedOut}
-        onRelogin={r => { if (r.account) setRelogin({ id: r.account.id, harness: r.harness, who: r.title }) }} />
+        onRelogin={r => { if (r.account) setRelogin({ id: r.account.id, harness: r.harness, who: r.title }) }} />}
       {relogin && (
         <ReloginModal accountId={relogin.id} harness={relogin.harness} who={relogin.who} lang={pt ? 'pt' : 'en'}
           onClose={() => { setRelogin(null); reloadAccounts() }} onDone={() => reloadAccounts()} />
@@ -406,7 +419,7 @@ export function BillingAccountsPanel() {
       {removeError && <div role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--accent-red)' }}>{removeError}</div>}
 
       {/* Accounts that load late must not list every account timeline as stray for a moment. */}
-      {accountsSettled && orphans.length > 0 && (
+      {accountsSettled && !accountsFailed && orphans.length > 0 && (
         <div data-orphan-plans style={{ marginTop: 6, marginBottom: 14 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
             {pt ? 'Planos de contas que não aparecem mais' : 'Plans of accounts no longer listed'}
