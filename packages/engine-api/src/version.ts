@@ -199,7 +199,14 @@
  * on the host), so an engine built against 1.22 may NEGOTIATE down and announce 1.21 to a 1.21 host, without
  * history; a 1.21 engine loads on a 1.22 host and is simply never asked for history.
  */
-export const ENGINE_API_VERSION = '1.22.0'
+/**
+ * 1.23.0 — MACHINE-SECRETS: `EngineHostServices.machineSecrets` (optional), `EngineMachineSecrets` /
+ * `EngineMachineSecretsStatus`: seal and open bytes under a key held by the machine's silent protector, so
+ * a provider key works with the vault locked and is still encrypted at rest. Additive only: an engine
+ * built against 1.22 loads on a 1.23 host and never sees it; one built against 1.23 is refused by an older
+ * host like every minor bump, or negotiates down and keeps its keys where they were.
+ */
+export const ENGINE_API_VERSION = '1.23.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

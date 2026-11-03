@@ -226,6 +226,17 @@ export function candidateProtectors(): Protector[] {
   return detectionOrder(platform(), isWsl()).map(id => protectorById(id)).filter((p): p is Protector => p !== null)
 }
 
+/**
+ * The SILENT protectors that may hold a machine key (engine-api 1.23 `machineSecrets`), best first, each rooted in `dir`.
+ * Only the OS keystores: never a presence protector (Hello, FIDO2), a passphrase or the memory one — a key that must work
+ * unattended cannot wait for a person. Empty under test unless a test overrides the protectors.
+ */
+export function machineProtectorCandidates(dir: string): Protector[] {
+  if (_override) return _override.filter(p => p.id !== 'hello' && p.id !== 'fido2' && p.id !== 'passphrase' && p.id !== 'recovery')
+  if (!realMode()) return []
+  return detectionOrder(platform(), isWsl()).map(id => protectorById(id, undefined, dir)).filter((p): p is Protector => p !== null)
+}
+
 /** Interop can come up late at login: DPAPI is probed again after these pauses before giving up. */
 const WSL_DPAPI_RETRY_MS = [1_500, 4_000]
 
