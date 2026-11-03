@@ -266,6 +266,8 @@ export interface CliStrings {
    * prevents were only found by reading two screens side by side and noticing identical text.
    */
   sessResumeInUse: (holder: string) => string
+  /** A recorded assistant child is still running although its relay died — never a second assistant over it. */
+  sessResumeChildAlive: string
   /**
    * A takeover that could not end the process holding the conversation.
    *
@@ -734,6 +736,8 @@ const EN: CliStrings = {
     'it was reopened but had not come up in time to be written to — nothing was typed into it.',
   sessResumeInUse: (holder: string) =>
     `that conversation is already open in ${holder} — open it there instead of starting a second assistant in it.`,
+  sessResumeChildAlive:
+    'an assistant process is still running in this conversation; close it or wait for it to finish.',
   sessAdoptFailed: (holder: string) =>
     `the assistant running that conversation (${holder}) would not stop, so it was left alone — nothing was opened.`,
   sessTakeoverRefused: (reason: TakeoverRefusal) => {
@@ -1163,6 +1167,8 @@ const PT: CliStrings = {
     'ela foi reaberta mas não subiu a tempo de receber a mensagem — nada foi digitado nela.',
   sessResumeInUse: (holder: string) =>
     `essa conversa já está aberta em ${holder} — abra ela por lá, em vez de colocar um segundo assistente dentro dela.`,
+  sessResumeChildAlive:
+    'ainda há um processo do assistente rodando nesta conversa; feche-o ou espere.',
   sessAdoptFailed: (holder: string) =>
     `o assistente que roda essa conversa (${holder}) não encerrou, então foi deixado como estava — nada foi aberto.`,
   sessTakeoverRefused: (reason: TakeoverRefusal) => {

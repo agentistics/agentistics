@@ -204,3 +204,31 @@ test('an ended row whose relay died but whose CHILD survives is not idle: nothin
     expect(created.length).toBe(before)
   } finally { __setSessionBackendForTest(backend) }
 }, 15_000)
+
+test('a row OUTSIDE alive whose relay died but whose CHILD runs refuses the reopen: no new row, nothing killed', async () => {
+  const conversationId = randomUUID()
+  const old = await row(conversationId, { endedAt: new Date().toISOString() })
+  const d = structuredRecord(old.id, null)
+  writeFileSync(join(d, 'relay.pid'), JSON.stringify({ relay: 2_147_000_000, child: fakeRelay(d) }))
+  withKillSpy()
+  killed.length = 0
+  try {
+    const before = created.length
+    const out = await host().resumeSession!({ sessionId: conversationId, harness: 'claude', cwd: dir, label: 'oc', attach: false, replaces: old.id })
+    expect(out.ok).toBe(false)
+    expect(out.message).toContain('still running')
+    expect(killed).toEqual([])
+    expect(created.length).toBe(before)
+  } finally { __setSessionBackendForTest(backend) }
+}, 15_000)
+
+test('relay dead and child dead: the takeover still proceeds', async () => {
+  const conversationId = randomUUID()
+  const old = await row(conversationId, { endedAt: new Date().toISOString() })
+  const d = structuredRecord(old.id, null)
+  writeFileSync(join(d, 'relay.pid'), JSON.stringify({ relay: 2_147_000_000, child: 2_147_000_001 }))
+  const before = created.length
+  const out = await host().resumeSession!({ sessionId: conversationId, harness: 'claude', cwd: dir, label: 'oc', attach: false, replaces: old.id })
+  expect(out.ok).toBe(true)
+  expect(created.length - before).toBe(1)
+}, 15_000)
