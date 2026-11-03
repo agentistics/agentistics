@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.194.0': {
+    features: [
+      {
+        pt: 'Fechar uma sessão agora encerra tudo o que ela abriu (assistente, ferramentas, testes); um coletor automático recolhe sobras de sessões fechadas e mostra quanta memória liberou.',
+        en: 'Closing a session now ends everything it opened (assistant, tools, tests); an automatic collector sweeps leftovers of closed sessions and shows how much memory it freed.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Uma sessão encerrada não volta mais a ligar sozinha, e a tela de processos não marca mais como encerrado o que está vivo.',
+        en: 'A closed session no longer turns itself back on, and the processes screen no longer marks something alive as ended.',
+      },
+      {
+        pt: 'Avisos dos fluxos aparecem como cartão do sistema (não como mensagem sua), e o fechamento de sessões que já entregaram passou a funcionar.',
+        en: 'Flow notices appear as a system card (not as a message from you), and closing sessions that already delivered now works.',
+      },
+    ],
+  },
   '2.193.0': {
     features: [],
     fixes: [
