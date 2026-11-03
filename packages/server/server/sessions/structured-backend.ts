@@ -21,6 +21,7 @@
  * - `chatOf` — the session's own chat channel (turns, `live` text, `state`) for the adapter chat stream;
  * - `kill` — end it; `attachCommand` — no terminal to attach to, said in a sentence.
  */
+import { stopSessionProcesses } from './session-reaper-io'
 import type {
   EngineAcp, EngineAcpSession, EngineStructured, HarnessChat, HarnessChatDelta, HarnessId,
   StructuredAnswer, StructuredAttention, StructuredDeclaration, StructuredDriverId, StructuredExit,
@@ -65,6 +66,13 @@ export interface StructuredProvider {
   onStarted?(id: string, driver: StructuredDriverId): void
   /** Persist a normal end BEFORE its durable/live records disappear. */
   onEnded?(id: string, endedAt?: string): Promise<unknown>
+  /**
+   * The registry says this session ENDED (`endedAt`). A closed session is never brought back by
+   * itself: a child that dies under it is not relaunched, structured or in tmux. Measured 03/11 — the
+   * claude of two EXITED leaders was stopped by pid and a fresh relay was up three minutes later.
+   * Absent = never closed (the old behaviour). A read that fails answers false.
+   */
+  closed?(id: string): Promise<boolean>
   /** A structured session fell back to tmux (or could not), for the log / the row's note. */
   onFallback?(id: string, outcome: { reason: string; resumed: boolean; structured?: boolean }): void
   /**
@@ -383,6 +391,10 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
   }
 
   const fallBack = async (id: string, req: BackendSpawn, conv: string | null, reason: string): Promise<boolean> => {
+    if (await (provider.closed?.(id) ?? Promise.resolve(false)).catch(() => false)) {
+      provider.onFallback?.(id, { reason: `${reason}; the session is closed — not relaunched`, resumed: false })
+      return false
+    }
     if (conv && await relaunchStructured(id, req, conv)) {
       provider.onFallback?.(id, { reason, resumed: true, structured: true })
       return true
@@ -641,7 +653,10 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       if (!relayed) return true
       const gone = await durable!.terminate(id).catch(() => false)
       if (gone) durable!.remove(id)
-      return gone
+      // The relay ends its child's process GROUP; a child whose relay had already died, and anything
+      // that left the group, still carries the session's marker (`session-reaper.ts`).
+      const rest = await stopSessionProcesses(id)
+      return gone && rest.stuck.length === 0
     },
     attachCommand(id) {
       const l = live.get(id)
