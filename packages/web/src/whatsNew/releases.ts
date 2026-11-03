@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.196.0': {
+    features: [],
+    fixes: [
+      {
+        pt: "Com várias abas do app abertas, ele não trava mais nem mostra 'servidor não responde' à toa: as atualizações ao vivo de cada aba passam por um único canal.",
+        en: "With several app tabs open, it no longer freezes or shows 'server not responding' for no reason: each tab's live updates now go through a single channel.",
+      },
+      {
+        pt: "Modo ligação (experimental): a página Ligações mostra 'carregando' em vez de ficar vazia, e quando a ElevenLabs recusa a voz a ligação diz o motivo (por exemplo, plano gratuito não pode usar vozes da biblioteca).",
+        en: "Call mode (experimental): the Calls page shows 'loading' instead of staying empty, and when ElevenLabs refuses the voice the call says why (for example, the free plan cannot use library voices).",
+      },
+    ],
+  },
   '2.195.0': {
     features: [],
     fixes: [
