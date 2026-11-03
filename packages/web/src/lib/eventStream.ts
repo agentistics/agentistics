@@ -18,6 +18,8 @@
  * comes back on its own, exactly as it did per-hook.
  */
 
+import { openEventStream } from './streamMux'
+
 export type StreamEventHandler = (e: MessageEvent) => void
 
 export interface EventStream {
@@ -110,7 +112,7 @@ export function sharedEventStream(makeES: () => EventSource): EventStream {
 }
 
 /** The app-wide shared `/api/events` stream — one socket for the whole app, across every chunk. */
-export const eventStream: EventStream = sharedEventStream(() => new EventSource('/api/events'))
+export const eventStream: EventStream = sharedEventStream(() => openEventStream('/api/events'))
 
 /** Subscribe to one `/api/events` event type on the shared socket. */
 export function subscribeEvent(type: string, handler: StreamEventHandler): () => void {
