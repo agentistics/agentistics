@@ -58,7 +58,7 @@ export function useBootHold(active = true): void {
   }, [active])
 }
 
-/** The one short line under the loader; `null` leaves whatever is there. */
+/** The one short line under the loader; `null` leaves whatever is there, `''` clears it. */
 export function setBootStatus(text: string | null): void {
   if (text === null) return
   const el = splash()?.querySelector<HTMLElement>('.ag-boot-status')
