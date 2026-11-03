@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.197.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Página Ligações com uma ligação em andamento: o cartão mostra o nome da sessão em que você está ligado, em vez de "Sessão ?", e o botão "Voltar para a ligação" fica com o ícone do tamanho certo.',
+        en: 'Calls page with a call in progress: the card shows the name of the session you are calling instead of "Session ?", and the "Back to the call" button has a properly sized icon.',
+      },
+    ],
+  },
   '2.197.3': {
     features: [],
     fixes: [
