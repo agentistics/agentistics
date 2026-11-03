@@ -478,6 +478,40 @@ describe('withStructured — fallback', () => {
     expect(eng.sessions[1]!.prompts).toEqual(['again'])
   })
 
+  test('a CLOSED session whose child dies is never brought back — not structured, not in tmux', async () => {
+    // 03/11: the claude of two EXITED leaders was stopped by pid; a fresh relay was up 3 min later.
+    const base = fakeBase()
+    const eng = fakeEngine()
+    const fell: Array<[string, { reason: string; resumed: boolean }]> = []
+    let closed = false
+    const b = withStructured(base, provider(eng.reg, {
+      resumeSpawn: async (req, conv) => ({ id: 'ignored', cwd: req.cwd, argv: ['gemini', '--resume', conv] }),
+      onFallback: (id, o) => fell.push([id, o]),
+      closed: async () => closed,
+    }))
+    await b.spawn(web('gemini'))
+    closed = true
+    eng.sessions[0]!.fail('claude exited (code 137)')
+    await new Promise(r => setTimeout(r, 5))
+    expect(eng.started.length).toBe(1)
+    expect(base.calls).toEqual([])
+    expect(fell).toHaveLength(1)
+    expect(fell[0]![0]).toBe('m-1')
+    expect(fell[0]![1].resumed).toBe(false)
+    expect(fell[0]![1].reason).toContain('closed — not relaunched')
+    expect(b.structuredSessions()).toEqual([])
+  })
+
+  test('the closed check failing reads as NOT closed (the old relaunch still happens)', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine()
+    const b = withStructured(base, provider(eng.reg, { closed: async () => { throw new Error('registry locked') } }))
+    await b.spawn(web('gemini'))
+    eng.sessions[0]!.fail('x')
+    await new Promise(r => setTimeout(r, 5))
+    expect(eng.started.length).toBe(2)
+  })
+
   test('a structured relaunch that is refused falls to tmux (resume by id) and the row is tmux\'s', async () => {
     const base = fakeBase()
     const eng = fakeEngine({ refuseAfter: 1 })
