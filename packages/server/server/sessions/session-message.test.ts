@@ -59,6 +59,10 @@ describe('SESSÕES.FECHAR: a delivered handback becomes the session.handback flo
     resetMessageRateLimit()
     await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, fake({ handbackEvent, prompt: async () => ({ ok: false, message: 'gone' }) }).deps)
     expect(events).toEqual([])
+    // FLUXO.WAIT: a question that merely MENTIONS a release is no handback, and a message to someone else never names this sender as `from`.
+    resetMessageRateLimit()
+    await sendSessionMessage('motor', { to: 'jarvis', kind: 'question', body: '2.192 is out?' }, fake({ handbackEvent }).deps)
+    expect(events).toEqual([])
     resetMessageRateLimit()
     const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'x' }, fake({ handbackEvent: async () => { throw new Error('engine down') } }).deps)
     expect(out.ok).toBe(true)

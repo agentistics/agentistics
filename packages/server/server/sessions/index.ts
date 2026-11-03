@@ -94,6 +94,10 @@ export async function resolveBackend(): Promise<SessionBackend> {
         const { patchSession } = await import('./registry')
         return patchSession(id, { endedAt: endedAt ?? new Date().toISOString() })
       },
+      async closed(id) {
+        const row = (await (await import('./registry')).readRegistry()).find(r => r.id === id)
+        return !!row?.endedAt
+      },
       async onConversation(id, conversationId) {
         // Refused (and logged) when another row owns that conversation — CROSSBIND, `registry.ts`. A
         // contended lock is retried on the next poll; a live holder later, in case it ends.

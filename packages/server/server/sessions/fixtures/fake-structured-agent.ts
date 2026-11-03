@@ -45,6 +45,13 @@ process.stdin.on('data', (chunk: string) => {
   }
 })
 process.stdin.on('end', () => process.exit(0))
+process.stdin.on('close', () => process.exit(0))
+process.stdin.on('error', () => process.exit(0))
+
+// The parent (the relay, or the test that spawned this directly) is the only reader of stdout: once
+// it is gone — reparented to init or a subreaper — nobody will ever end this process. Leave.
+const parent = process.ppid
+setInterval(() => { if (process.ppid !== parent) process.exit(0) }, 250).unref()
 
 // Test fixture: never outlive the `bun test` that started it (see structured-relay.ts's TEST_RUNNER_PID_ENV).
 const runner = Number(process.env.AGENTISTICS_TEST_RUNNER_PID)
