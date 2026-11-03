@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.197.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A 2.197.0 não chegou a ser publicada por uma falha do GitHub; esta versão traz a mesma correção da tela presa depois de atualizar.',
+        en: '2.197.0 was never published because of a GitHub failure; this version carries the same fix for the screen stuck after an update.',
+      },
+    ],
+  },
   '2.197.0': {
     features: [],
     fixes: [
