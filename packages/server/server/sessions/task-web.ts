@@ -444,6 +444,18 @@ export async function addComment(
   })
   if (threadId) await noteThreadComment(threadId, o.session)
   await w.store.logEvents([event(task.id, author, 'comment', { detail: o.message && o.session ? JSON.stringify({ message: { ...o.message, from: o.session } }) : commentTargetPhrase(plan.target) })])
+  // A session mentioned with the `#«Title · id»` chip is told, as a SYSTEM item, when it is live.
+  // Fire-and-forget: the comment is already saved, and a delivery problem never fails the write.
+  if (body.includes('#«')) {
+    const thread = threadId ? w.book.threads.find(t => t.id === threadId) : undefined
+    const sub = plan.subtaskId ? w.book.subtasks.find(x => x.id === plan.subtaskId) : undefined
+    void import('./task-mentions').then(async m => m.deliverMentions({
+      taskId: task.id, taskTitle: task.title, author, body, commentId: id,
+      ...(sub ? { subtaskTitle: sub.title } : {}),
+      ...(thread ? { threadTitle: thread.title } : {}),
+      ...(o.session ? { authorSessionIds: [o.session] } : {}),
+    }, await m.defaultMentionDeps())).catch(() => undefined)
+  }
   return { ok: true, id, ...(threadId ? { threadId } : {}) }
 }
 

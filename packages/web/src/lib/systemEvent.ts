@@ -116,6 +116,7 @@ export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): stri
     case 'notice':
       if (e.label === 'handoff') return pt ? 'Passagem de bastão · sistema' : 'Handoff context · system'
       if (e.label === 'context') return pt ? 'Contexto do agentistics · sistema' : 'agentistics context · system'
+      if (e.label === 'mention') return pt ? 'Sessão mencionada numa tarefa · sistema' : 'Session mentioned on a task · system'
       return pt ? `Aviso do agentistics (${e.label ?? 'aviso'})` : `agentistics notice (${e.label ?? 'notice'})`
     case 'flow': return pt ? `Fluxo ${e.flow ?? ''} · ${e.label ?? 'aviso'}` : `Flow ${e.flow ?? ''} · ${e.label ?? 'notice'}`
     case 'session-note':
