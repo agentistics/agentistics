@@ -61,7 +61,7 @@ import {
   detachSession, editComment, editTask, fileUrl, fmtDuration,
   patchSubtask, removeComment, removeSubtask, saveStagedSession,
   uploadFile, useTaskActivity, useTaskStatuses,
-  type AttemptRollup, type AttemptView, type Subtask, type TaskDetail, type TaskSessionRow,
+  hasMeasurableSessions, type AttemptRollup, type AttemptView, type Subtask, type TaskDetail, type TaskSessionRow,
   type TaskFile, type TaskListRow, groupActivity, type ActivityFilter, type GroupedActivity,
 } from '../../lib/tasks'
 import { Link2 } from 'lucide-react'
@@ -946,7 +946,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
   // The full page opens on the CONVERSATIONS (owner's choice, 2026-10-04); the dense panel in the
   // session aside keeps opening on the figures, which is what it is read for.
   const [innerTab, setInnerTab] = useState<DeliveryTab>(dense ? 'overview' : 'subtasks')
-  const tab = tabProp ?? innerTab
+  const rawTab = tabProp ?? innerTab
   const setTab = onTabChange ?? setInnerTab
   const [, setBusy] = useState(false)
   /** A subtask's or group's comment thread, opened from its row in the Subtasks tab. */
@@ -994,6 +994,10 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
       ['activity', copy.tabs.activity, 0],
       ['about', tc.tabAbout, 0],
     ]
+  // A task with no session at any level has no metrics to show: the Metrics tab is not offered.
+  const sessionless = !hasMeasurableSessions(detail.rollup)
+  const tabList = sessionless ? TABS.filter(([k]) => k !== 'overview') : TABS
+  const tab: DeliveryTab = sessionless && rawTab === 'overview' ? 'subtasks' : rawTab
   const descriptionEditor = (
     <DescriptionEditor
       id={id}
@@ -1038,7 +1042,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
               scrollbarWidth: 'none',
             }}
           >
-            {TABS.map(([key, label, count]) => {
+            {tabList.map(([key, label, count]) => {
               const active = tab === key
               return (
                 <button

@@ -66,7 +66,7 @@ const session = (id: string, over = '') => `
   })
 `
 
-test('setSubtaskDone refuses a subtask with NO session filed under it', async () => {
+test('setSubtaskDone reaches done on a subtask with NO session filed under it (sessionless tasks)', async () => {
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
@@ -74,7 +74,7 @@ test('setSubtaskDone refuses a subtask with NO session filed under it', async ()
     const after = await store.read()
     console.log(JSON.stringify({ result, status: after.subtasks[0].status, done: after.subtasks[0].done }))
   `)
-  expect(out).toEqual({ result: { ok: false, message: 'done_needs_session' }, status: 'todo', done: false })
+  expect(out).toEqual({ result: { ok: true }, status: 'done', done: true })
 })
 
 test('setSubtaskDone succeeds once a session is filed under THAT subtask', async () => {
@@ -123,14 +123,14 @@ test('patchSubtask allows moving to a non-done status with no session at all', a
   expect(out).toEqual({ result: { ok: true }, status: 'in_progress' })
 })
 
-test('markTask refuses `done` on a task with zero sessions anywhere under it — and writes nothing', async () => {
+test('markTask allows `done` on a task with zero sessions anywhere under it', async () => {
   const out = await run(`
     ${task('t1')}
     const result = await web.markTask('t1', 'done')
     const after = await store.read()
     console.log(JSON.stringify({ result, status: after.tasks[0].status }))
   `)
-  expect(out).toEqual({ result: { ok: false, message: 'done_needs_session' }, status: 'todo' })
+  expect(out).toMatchObject({ result: { ok: true }, status: 'done' })
 })
 
 test('markTask allows `done` on a task with a session filed DIRECTLY under it', async () => {
@@ -186,7 +186,7 @@ test('setSubtaskDone reaches `done` on a group MEMBER with NO session filed unde
   expect(out).toEqual({ result: { ok: true }, status: 'done', done: true })
 })
 
-test('setSubtaskDone STILL refuses a GROUP itself with no session filed on it — the gate is unchanged for groups', async () => {
+test('setSubtaskDone reaches done on a GROUP with no session filed on it', async () => {
   const out = await run(`
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
@@ -195,10 +195,10 @@ test('setSubtaskDone STILL refuses a GROUP itself with no session filed on it �
     const row = after.subtasks.find(s => s.id === 'g1')
     console.log(JSON.stringify({ result, status: row.status, done: row.done }))
   `)
-  expect(out).toEqual({ result: { ok: false, message: 'done_needs_session' }, status: 'todo', done: false })
+  expect(out).toEqual({ result: { ok: true }, status: 'done', done: true })
 })
 
-test('setSubtaskDone still refuses an ordinary LOOSE subtask with no session — completely unaffected by the group exemption', async () => {
+test('setSubtaskDone reaches done on an ordinary LOOSE subtask with no session', async () => {
   const out = await run(`
     ${task('t1')}
     ${subtask('s1', 't1')}
@@ -207,7 +207,7 @@ test('setSubtaskDone still refuses an ordinary LOOSE subtask with no session —
     const row = after.subtasks.find(s => s.id === 's1')
     console.log(JSON.stringify({ result, status: row.status, done: row.done }))
   `)
-  expect(out).toEqual({ result: { ok: false, message: 'done_needs_session' }, status: 'todo', done: false })
+  expect(out).toEqual({ result: { ok: true }, status: 'done', done: true })
 })
 
 /**
@@ -219,7 +219,7 @@ test('setSubtaskDone still refuses an ordinary LOOSE subtask with no session —
  * invariant this whole feature exists to hold. This reproduces that exact scenario and its two
  * control cases.
  */
-test('patchSubtask REFUSES leaving a group and going `done` in ONE call when the subtask has no session — must not skip the gate on the stale pre-patch state', async () => {
+test('patchSubtask leaving a group and going `done` in ONE call with no session succeeds and leaves the group', async () => {
   const out = await run(`
     ${task('t1')}
     ${subtask('g1', 't1', 'isGroup: true,')}
@@ -230,8 +230,8 @@ test('patchSubtask REFUSES leaving a group and going `done` in ONE call when the
     console.log(JSON.stringify({ result, status: row.status, done: row.done, parentGroupId: row.parentGroupId ?? null }))
   `)
   expect(out).toEqual({
-    result: { ok: false, message: 'done_needs_session' },
-    status: 'todo', done: false, parentGroupId: 'g1',
+    result: { ok: true },
+    status: 'done', done: true, parentGroupId: null,
   })
 })
 

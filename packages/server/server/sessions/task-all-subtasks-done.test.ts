@@ -236,7 +236,7 @@ test('deliveredAt is frozen: re-marking an already-delivered task done again nev
 
 // --- the auto-path and the manual done-gate can never disagree ---------------------------------
 
-test('the auto-complete path goes through the SAME done_needs_session gate as a manual move, and the two always agree', async () => {
+test('with no session anywhere, the subtask and the task both reach done (no session gate)', async () => {
   // A task whose only top-level subtask is DONE, but with NO session anywhere under the task at
   // all, is structurally unreachable through the ordinary product surfaces (`done_needs_session`
   // refuses the subtask's own move to `done` first) — so the auto-path's `markTask` call can never
@@ -253,10 +253,10 @@ test('the auto-complete path goes through the SAME done_needs_session gate as a 
       subtaskResult, taskResult, taskStatus: after.tasks[0].status, subtaskStatus: after.subtasks[0].status,
     }))
   `)
-  expect(out).toEqual({
-    subtaskResult: { ok: false, message: 'done_needs_session' },
-    taskResult: { ok: false, message: 'done_needs_session' },
-    taskStatus: 'todo', subtaskStatus: 'todo',
+  expect(out).toMatchObject({
+    subtaskResult: { ok: true },
+    taskResult: { ok: true },
+    taskStatus: 'done', subtaskStatus: 'done',
   })
 })
 

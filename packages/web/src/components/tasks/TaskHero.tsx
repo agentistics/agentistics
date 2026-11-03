@@ -18,7 +18,7 @@ import { BetaTag } from '../BetaTag'
 import { NA, button, fmtInt, fmtTokens, harnessColor, statusStyle } from './board'
 import { TaskChips, TaskMoreMenu } from './TaskChips'
 import { RenameInput } from './RenameInput'
-import { editTask } from '../../lib/tasks'
+import { editTask, hasMeasurableSessions } from '../../lib/tasks'
 import { boardCopy } from './copy'
 import { copilotCreditsTooltip, formatTaskCost, useMoney } from './money'
 import { threadCopy, type Lang } from './threadCopy'
@@ -126,7 +126,10 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
   const mix = mixOf(detail.stats.harnesses)
   const models = detail.stats.models.filter(m => (m.tokens ?? 0) > 0).slice(0, 3).map(m => m.key)
 
-  const kpis: Array<[string, string, boolean]> = [
+  // No session at any level: the KPI strip and the harness mix are not drawn at all (a clean card,
+  // not a row of zeros).
+  const measured = hasMeasurableSessions(r)
+  const kpis: Array<[string, string, boolean]> = !measured ? [] : [
     [t.kpiCost, cost, false],
     [t.kpiSessions, fmtInt(r.sessionsUsed), false],
     [t.kpiActive, fmtHours(r.activeMinutes, lang), false],
@@ -234,7 +237,7 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
         {!isMobile && <div style={{ alignSelf: 'flex-start' }}>{actions}</div>}
       </div>
 
-      <div style={{
+      {measured && <div style={{
         display: 'flex', flexWrap: 'wrap', marginTop: 14, border: '1px solid var(--border)', borderRadius: 9, overflow: 'hidden',
       }}>
         {kpis.filter(([, , desktopOnly]) => !(isMobile && desktopOnly)).map(([label, value], i) => (
@@ -268,7 +271,7 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
               </>
             )}
         </div>
-      </div>
+      </div>}
     </section>
   )
 }

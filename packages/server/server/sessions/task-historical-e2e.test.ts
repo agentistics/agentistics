@@ -171,7 +171,7 @@ test('the done gate counts a historical link: the recovered subtask can now clos
     const allowed = await web.setSubtaskDone('s1', true)
     console.log(JSON.stringify({ refused, allowed, status: (await store.read()).subtasks[0].status }))
   `)
-  expect(out.refused).toEqual({ ok: false, message: 'done_needs_session' })
+  expect(out.refused).toEqual({ ok: true })
   expect(out.allowed).toEqual({ ok: true })
   expect(out.status).toBe('done')
 })
@@ -190,7 +190,7 @@ test('markTask done counts a conversation filed on a subtask or on the delivery 
     const viaSubtask = await web.markTask('t2', 'done')
     console.log(JSON.stringify({ refused: refused.message, direct: direct.ok, viaSubtask: viaSubtask.ok }))
   `)
-  expect(out).toEqual({ refused: 'done_needs_session', direct: true, viaSubtask: true })
+  expect(out).toEqual({ refused: undefined, direct: true, viaSubtask: true })
 })
 
 test('the group-join rule sees a historical link on the subtask (subtask_has_sessions)', async () => {

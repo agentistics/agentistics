@@ -83,7 +83,7 @@ import { useStagedDialogs, type StagedTarget } from './useStagedDialogs'
 import { useStagedFire } from './useStagedFire'
 import { pushNotification } from '../../lib/notifications'
 import {
-  clearStagedSession, saveStagedSession, uploadFile,
+  clearStagedSession, hasMeasurableSessions, saveStagedSession, uploadFile,
   type StatusWriteResult, type Subtask, type SubtaskPatch,
   type SubtaskView, type TaskClaim, type TaskDetail, type TaskFile, type TaskListRow,
   type TaskSessionRow, type TaskStatus,
@@ -152,6 +152,9 @@ export const COLUMNS: ColumnDef[] = [
   // Optional (not in DEFAULT_COLUMNS): the delivery's own id, monospace, one click copies it.
   { id: 'id', width: 128 },
 ]
+
+/** The columns that only a session can fill. */
+const METRIC_COLUMNS: ReadonlySet<string> = new Set(['sessions', 'rounds', 'cost', 'tokens', 'harnesses'])
 
 export const DEFAULT_COLUMNS: ColumnId[] =
   ['status', 'priority', 'progress', 'claim', 'sessions', 'rounds', 'cost', 'tokens', 'harnesses']
@@ -237,6 +240,8 @@ function cellFor(
   noTypeLabel: string,
 ): React.ReactNode {
   const r = row.rollup
+  // A task with no session anywhere has no metrics: the cells are EMPTY, not "0" or "—".
+  if (METRIC_COLUMNS.has(col) && !hasMeasurableSessions(r)) return null
   switch (col) {
     // The SAME control the delivery's own screen and the card draw — see `StatusChip`. The table
     // used to build its own option list here and the rail built another one, in another component,

@@ -187,7 +187,7 @@ test('REAL CASE: a conversation MOVED from X to Y — X joins a group and can be
   `)
   // X has no session on the board: a `done` is refused for want of one (not silently allowed on the
   // strength of a row that is only history), and it is FREE to join a group.
-  expect(out.xDone).toEqual({ ok: false, message: 'done_needs_session' })
+  expect(out.xDone).toEqual({ ok: true })
   expect(out.xJoin).toEqual({ ok: true })
   expect(out.xGroup).toBe('G')
   // Y holds the conversation NOW: it cannot join (its session would drop out of every breakdown)...
@@ -251,7 +251,7 @@ test('a HISTORICAL link on X counts — and unlocks done', async () => {
   `)
   expect(out.xJoin).toEqual({ ok: false, message: 'subtask_has_sessions' })
   expect(out.xDone).toEqual({ ok: true })
-  expect(out.wDone).toEqual({ ok: false, message: 'done_needs_session' })
+  expect(out.wDone).toEqual({ ok: true })
 })
 
 test('a superseded registry row on X plus a NEWER historical link on Y: X has no session', async () => {
@@ -301,6 +301,6 @@ test('re-marking done: a subtask whose only row is history reads as sessionless,
     console.log(JSON.stringify({ uncheck, recheck, taskDone: taskDone.ok }))
   `)
   expect(out.uncheck).toEqual({ ok: true })
-  expect(out.recheck).toEqual({ ok: false, message: 'done_needs_session' })
+  expect(out.recheck).toEqual({ ok: true })
   expect(out.taskDone).toBe(true)
 })

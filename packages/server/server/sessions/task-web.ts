@@ -646,9 +646,8 @@ export async function patchSubtask(subtaskId: string, patch: {
   // See this function's own docblock: a group MEMBER can never hold a session, so the gate is
   // unreachable for it by construction and is skipped rather than left to refuse forever. Judged on
   // `nextParentGroupId` (the post-patch value), not `found` — see above.
-  if (status === 'done' && found.status !== 'done' && !isGroupMember({ parentGroupId: nextParentGroupId })) {
-    if (!hasSession) return { ok: false, message: 'done_needs_session' }
-  }
+  // (Owner decision: `done` no longer needs a session — a board used for plain tasks must be able
+  // to close them. Rollups still count every session that IS filed.)
 
   // SETTING a staged draft on a group member is refused for the exact reason `planAttach` refuses
   // to file a real session there — a draft that could never be fired on this row is not a draft
@@ -1327,7 +1326,6 @@ export async function markTask(
    * delivery-evidence block, rather than calling `rowsOfTask` a second time.
    */
   const mine = to === 'done' && task.status !== 'done' ? rowsOfTask(task, w.rollupRows) : undefined
-  if (mine && mine.length === 0) return { ok: false, message: 'done_needs_session' }
 
   // `done` is the ONE status that stamps a delivery. Every other move is a change of where the work
   // stands, and stamping one of those would close rounds-to-delivery on work that is not delivered.

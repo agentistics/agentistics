@@ -31,6 +31,16 @@ export type LinkProvenance = 'assigned' | 'observed' | 'none'
 export type TaskStatus = string
 export type AttemptStatus = 'running' | 'delivered' | 'abandoned'
 
+/**
+ * A task with no session at ANY level (direct, under a subtask, under a group) has nothing to
+ * measure: every metric surface (table cells, hero KPIs, the Metrics tab) is withheld for it, so a
+ * plain to-do reads as a clean card rather than a row of dashes and zeros. `done` no longer needs a
+ * session (the server's refusal is gone), which is what makes this a normal state.
+ */
+export function hasMeasurableSessions(rollup: { sessionsUsed: number } | null | undefined): boolean {
+  return (rollup?.sessionsUsed ?? 0) > 0
+}
+
 export interface AttemptRollup {
   sessionsUsed: number
   sessionsLinked: number
