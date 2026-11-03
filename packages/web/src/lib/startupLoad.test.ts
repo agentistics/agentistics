@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { fetchJsonWithTimeout, acceptPayload, dataUrl, livenessStep, bootSlowLine, bootWatchdog, classifyLoadError, holdLoadError, loadErrorText, partialPollMs, POST_UPDATE_GRACE_MS, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
+import { bootDeadlineMs, bootRetryDelayMs, BOOT_DEADLINE_CAP_MS, BOOT_RETRY_CAP_MS, fetchJsonWithTimeout, acceptPayload, dataUrl, livenessStep, bootSlowLine, bootWatchdog, classifyLoadError, holdLoadError, loadErrorText, partialPollMs, POST_UPDATE_GRACE_MS, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
 
 describe('classifyLoadError', () => {
   test('a status is a server error and keeps the HTTP detail the auth gates read', () => {
@@ -186,5 +186,31 @@ describe('an update with the server out for a few seconds renders no error', () 
   test('the first /api/version ask is retried quietly until the server answers, so the route is restored', async () => {
     const { firstVersionRetryMs } = await import('./updateToast')
     expect([0, 1, 2, 10].map(firstVersionRetryMs)).toEqual([1000, 2000, 3000, 5000])
+  })
+})
+
+describe('boot-phase retry policy', () => {
+  test('the first attempt gives up fast and the deadline grows to a cap below the normal one', () => {
+    expect(bootDeadlineMs(20_000, 0)).toBe(2500)
+    expect(bootDeadlineMs(20_000, 1)).toBeGreaterThan(2500)
+    expect(bootDeadlineMs(20_000, 50)).toBe(BOOT_DEADLINE_CAP_MS)
+    expect(bootDeadlineMs(4000, 50)).toBe(4000)
+  })
+  test('the pause between attempts never passes the cap (the old 15 s backoff left a ready page waiting)', () => {
+    for (let a = 0; a < 30; a++) expect(bootRetryDelayMs(a)).toBeLessThanOrEqual(BOOT_RETRY_CAP_MS)
+    expect(retryDelayMs(10)).toBe(15_000)
+  })
+  test('a request held open by a restarting server is retried until the server answers, and the page opens within a few seconds of it', () => {
+    // Simulated clock: the server holds every request until `backAt` and answers any attempt STARTED
+    // at or after it; an attempt started earlier is dropped at its deadline and retried after the pause.
+    const backAt = 55_000
+    let now = 0, attempt = 0, openedAt = -1
+    while (openedAt < 0 && now < 200_000) {
+      if (now >= backAt) { openedAt = now; break }
+      now += bootDeadlineMs(20_000, attempt) + bootRetryDelayMs(attempt)
+      attempt++
+    }
+    expect(openedAt).toBeGreaterThanOrEqual(backAt)
+    expect(openedAt - backAt).toBeLessThanOrEqual(BOOT_DEADLINE_CAP_MS + BOOT_RETRY_CAP_MS)
   })
 })

@@ -176,7 +176,7 @@ import { consumeRestore, snoozeUpdate, startUpgrade, upgradeInFlight, useUpdateS
 import { NayUpdateCard, type UpdateCardPlacement } from './components/nay/NayUpdateCard'
 import { UpgradeOverlay } from './components/UpgradeOverlay'
 import { HOST_SESSION_PATH, resolveHostSessionRefresh } from './lib/hostSession'
-import { bootSlowLine, bootWatchdog, fetchJsonWithTimeout, fetchWithTimeout, holdLoadError, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
+import { bootDeadlineMs, bootRetryDelayMs, bootSlowLine, bootWatchdog, fetchJsonWithTimeout, fetchWithTimeout, holdLoadError, loadErrorText, SMALL_TIMEOUT_MS, type BootVerdict, type LoadError } from './lib/startupLoad'
 import { sinceUpdate, useFinaleActive } from './lib/finaleGate'
 import { bootReleased, scheduleBootRelease, setBootStatus, useBootHold } from './lib/bootSplash'
 
@@ -325,6 +325,9 @@ function LoadingScreen({ lang }: { lang: string }) {
   useBootHold(underSplash && !unreachable)
   const slowLine = verdict === 'slow' ? bootSlowLine(lang === 'pt' ? 'pt' : 'en', sinceUpdate()) : null
   useEffect(() => { if (underSplash) setBootStatus(slowLine) }, [underSplash, slowLine])
+  // The line belongs to this screen: when it leaves (the data arrived, or the splash is held on by a
+  // route still loading) the line goes with it instead of staying under the loader.
+  useEffect(() => () => { if (underSplash) setBootStatus('') }, [underSplash])
   if (unreachable) {
     return <ServerProblem lang={lang} problem={{ kind: 'unreachable', detail: '' }} onRetry={() => location.reload()} autoRetry />
   }
@@ -2156,7 +2159,7 @@ export default function AppLayout() {
         // mode, team, billing, the gates); every CHOICE comes from `/api/user-prefs`, which is per
         // ACCOUNT on a central. The choice keys are stripped from the first one, so on a central
         // nobody reads the theme, language or card order somebody else saved in the shared file.
-        const [r, personal] = await Promise.all([fetchJsonWithTimeout<Record<string, unknown>>('/api/preferences', SMALL_TIMEOUT_MS), loadPersonalPrefs()])
+        const [r, personal] = await Promise.all([fetchJsonWithTimeout<Record<string, unknown>>('/api/preferences', bootDeadlineMs(SMALL_TIMEOUT_MS, attempt)), loadPersonalPrefs()])
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         if (personal === null || !r.json) throw new Error('user-prefs unavailable')
         const prefs = r.json
@@ -2186,7 +2189,7 @@ export default function AppLayout() {
         if (cancelled) return
         // Keep archiveChoice/installDismissedPref at their loading values and retry with
         // capped backoff, so a transient failure never wipes the user's saved choice.
-        const delay = Math.min(1000 * 2 ** attempt, 15000)
+        const delay = bootRetryDelayMs(attempt)
         setTimeout(() => { if (!cancelled) void load(attempt + 1) }, delay)
       }
     }

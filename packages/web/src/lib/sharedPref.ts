@@ -1,4 +1,4 @@
-import { fetchJsonWithTimeout, SMALL_TIMEOUT_MS } from './startupLoad'
+import { bootDeadlineMs, fetchJsonWithTimeout, SMALL_TIMEOUT_MS } from './startupLoad'
 /**
  * sharedPref.ts — state that belongs to the WORK, kept where every device can see it.
  *
@@ -316,6 +316,7 @@ export function createSharedPref<T>(opts: {
 }
 
 /** Read ONE endpoint and hand its document to every store registered on it. Shared while in flight. */
+const loadFailures = new Map<string, number>()
 function loadEndpoint(endpoint: string): Promise<void> {
   const running = inFlight.get(endpoint)
   if (running) return running
@@ -323,8 +324,11 @@ function loadEndpoint(endpoint: string): Promise<void> {
     try {
       // A deadline over the whole read: this promise is awaited by the boot (`loadPersonalPrefs`), so
       // one that never settled kept the boot screen up forever. A timeout lands in the catch below.
-      const res = await fetchJsonWithTimeout<Record<string, unknown>>(endpoint, SMALL_TIMEOUT_MS)
-      if (!res.ok || !res.json) return
+      // The deadline starts short and grows with each failed read (`bootDeadlineMs`): a restarting
+      // server that holds the connection must not keep the boot waiting the full 10 s per try.
+      const res = await fetchJsonWithTimeout<Record<string, unknown>>(endpoint, bootDeadlineMs(SMALL_TIMEOUT_MS, loadFailures.get(endpoint) ?? 0))
+      if (!res.ok || !res.json) { loadFailures.set(endpoint, (loadFailures.get(endpoint) ?? 0) + 1); return }
+      loadFailures.delete(endpoint)
       const doc = res.json
       const writable = res.headers.get('X-Prefs-Writable') !== 'false'
       if (writable) armed.add(endpoint)
@@ -334,6 +338,7 @@ function loadEndpoint(endpoint: string): Promise<void> {
       for (const store of registry) if (store.endpoint === endpoint) store.adopt(doc[store.prefKey], writable)
     } catch {
       /* offline, or a central that has not signed us in yet — stay unarmed and local */
+      loadFailures.set(endpoint, (loadFailures.get(endpoint) ?? 0) + 1)
     } finally {
       inFlight.delete(endpoint)
     }

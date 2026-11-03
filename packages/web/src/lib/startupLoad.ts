@@ -66,6 +66,27 @@ export function retryDelayMs(attempt: number): number {
   return Math.min(15_000, 2000 * 2 ** Math.max(0, attempt))
 }
 
+/**
+ * BOOT-PHASE retry policy (nothing painted yet — the splash is up). After a restart the page keeps
+ * asking until the server answers, and the person is looking at the splash the whole time, so the
+ * time from "the server is back" to "the page opens" is the time that matters:
+ *   - each attempt's deadline starts short (a restarting server that holds the connection but never
+ *     finishes its answer is dropped after `BOOT_FIRST_DEADLINE_MS`, not 10-20 s) and grows with the
+ *     attempt up to the normal deadline, so a slow link still gets through after a few tries;
+ *   - the pause between attempts never exceeds `BOOT_RETRY_CAP_MS` (the steady-state backoff of
+ *     15 s left a page that was one second from opening waiting for the next try).
+ * Worst case from "server answers" to "request lands" is therefore deadline + pause: ~3 s on the first tries, at most ~5 s once a request has failed several times.
+ */
+export const BOOT_FIRST_DEADLINE_MS = 2500
+export const BOOT_RETRY_CAP_MS = 750
+export const BOOT_DEADLINE_CAP_MS = 4000
+export function bootDeadlineMs(maxMs: number, attempt: number): number {
+  return Math.min(maxMs, BOOT_DEADLINE_CAP_MS, BOOT_FIRST_DEADLINE_MS * 1.6 ** Math.max(0, attempt))
+}
+export function bootRetryDelayMs(attempt: number): number {
+  return Math.min(BOOT_RETRY_CAP_MS, 250 * 2 ** Math.max(0, attempt))
+}
+
 /** Deadlines. The first data answer is normally under a second; a server that has not answered in
  *  20 s is reported rather than waited for. */
 export const DATA_TIMEOUT_MS = 20_000
