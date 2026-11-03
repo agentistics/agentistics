@@ -33,6 +33,7 @@
 import { applyChatDelta } from '@agentistics/core'
 import { sessionScratch, type CachedChat } from './sessionScratch'
 import { setAttachmentsDir } from './attachmentUrl'
+import { openEventStream } from './streamMux'
 
 /**
  * The FALLBACK cadence: a watched conversation is pushed (`/api/fleet/chat-stream`, PERF.1), and this
@@ -264,7 +265,7 @@ function tick(): void {
 
 function openStream(e: LiveEntry, now: number): void {
   if (e.stream !== null || typeof EventSource === 'undefined' || now < e.streamRetryAt) return
-  const es = new EventSource(`/api/fleet/chat-stream?id=${encodeURIComponent(e.id)}&lang=${e.lang}`)
+  const es = openEventStream(`/api/fleet/chat-stream?id=${encodeURIComponent(e.id)}&lang=${e.lang}`)
   e.stream = es
   e.streamAt = now
   es.onopen = () => { e.streamAt = Date.now() }
