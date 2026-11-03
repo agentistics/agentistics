@@ -3039,6 +3039,21 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       return { ok: true, id: holder.id, message: s.sessResumeInUse(holder.label), ...(ticket ? { ticket } : {}) }
     }
 
+    // REABRIR.FILHO-VIVO — a structured row whose RELAY died can still have its harness CHILD running
+    // (detached). `durable.alive()` calls that row dead, so it is not a holder and the takeover below
+    // would start a SECOND assistant on the conversation. The durable record is the witness: any
+    // recorded row of this conversation whose relay or child still runs refuses the reopen. A recycled
+    // pid errs toward refusing — never toward a second assistant.
+    {
+      const orphan = await import('./sessions/structured-durable').then(async ({ defaultDurableStore }) => {
+        const store = defaultDurableStore()
+        const ids = new Set((await readRegistry()).filter(m => m.conversationId === req.sessionId).map(m => m.id))
+        if (req.replaces) ids.add(req.replaces)
+        for (const id of ids) if (store.saved(id) !== null && store.running?.(id)) return true
+        return false
+      }).catch(() => false)
+      if (orphan) return { ok: false, message: s.sessResumeChildAlive }
+    }
     const harness = req.harness as HarnessId
     const plan = planTakeover({
       conversationId: req.sessionId,
