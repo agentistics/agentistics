@@ -19,6 +19,7 @@
      this instead of a constant, so the header growing can never leave the body sliding under it.
      The 44px here is the control row alone: the value a first paint uses before the measurement. */
   --ag-topbar-h: 44px;
+  --ag-z-drawer: 322; /* = ASIDE_DRAWER_Z in lib/zLayers.ts (kept equal by zLayers.test.ts) */
 
   --bg-base: #0a0a0f;
   --bg-surface: #111118;
@@ -649,6 +650,41 @@ textarea,
 .ag-chat-md pre code {
   padding: 0; border: none; background: transparent;
   color: var(--text-secondary); white-space: pre; line-height: 1.55;
+}
+
+/* Copy button on a fenced block: touch devices always see it, a pointer device on hover/focus. */
+.ag-code-block { position: relative; max-width: 100%; user-select: text; -webkit-user-select: text; }
+.ag-code-block > pre { user-select: text; -webkit-user-select: text; }
+.ag-code-copy {
+  position: absolute; top: 0; right: 0; display: flex; align-items: flex-start; justify-content: flex-end;
+  min-width: 44px; min-height: 44px; padding: 5px; border: none; background: transparent;
+  cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ag-code-copy { min-width: 0; min-height: 0; opacity: 0; transition: opacity 0.12s; }
+  .ag-code-block:hover .ag-code-copy, .ag-code-copy:focus-visible, .ag-code-copy[data-copied] { opacity: 1; }
+}
+.ag-code-copy-chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px; border-radius: 6px;
+  font-size: 11px; color: var(--text-secondary); background: var(--bg-elevated, var(--bg-card));
+  border: 1px solid var(--border-subtle);
+}
+.ag-code-copy[data-copied] .ag-code-copy-chip { color: var(--accent-green, #22c55e); }
+
+/* Copying on a phone (COPIAR): a long-press must pick up the TEXT of a message, never the app around it.
+   Controls, rows, tabs and bars are not selectable (and show no callout); content text is. `:where`
+   keeps the control rule at zero specificity so any explicit `user-select` still wins. */
+@media (hover: none) and (pointer: coarse) {
+  :where(button, [role="button"], [role="tab"], [role="tablist"], [role="menu"], [role="menuitem"], [role="option"],
+         summary, nav, header, aside, svg, img, label, select, [data-session-row], [data-selectable="false"]) {
+    -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ag-chat-md, .ag-chat-md :where(p, li, td, th, pre, code, blockquote, h1, h2, h3, h4, span),
+  [data-selectable="true"] {
+    -webkit-user-select: text; user-select: text; -webkit-touch-callout: default;
+  }
 }
 
 /* The table scrolls in its own box rather than widening the bubble. */
@@ -1452,3 +1488,13 @@ tr:focus-within .ag-row-actions,
 [data-account-row]:focus:not(:focus-visible) { outline: none; }
 [role="checkbox"]:focus-visible { outline: 2px solid var(--anthropic-orange); outline-offset: 2px; border-radius: 4px; }
 [data-account-row]:focus-visible { outline: 2px solid var(--anthropic-orange); outline-offset: -2px; }
+
+/* MENU.LATERAL-ATRAS: while the area-tree drawer is open the whole aside rises above the top bar (session tab,
+   "needs you" notice), and a scrim darkens everything behind it. `z-index: -1` keeps the scrim under the
+   aside's own content but inside its stacking context, so it still covers the top bar. */
+[data-app-aside]:has([data-area-rail][data-open="true"]) { z-index: var(--ag-z-drawer) !important; }
+@media (max-width: 767px) {
+  [data-app-aside]:has([data-area-rail][data-open="true"])::before {
+    content: ''; position: fixed; inset: 0; z-index: -1; background: var(--ag-scrim); pointer-events: none;
+  }
+}

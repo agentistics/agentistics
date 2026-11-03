@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from 'react'
+import { TOPBAR_Z } from '../../lib/zLayers'
 /**
  * TopBar — the fixed strip along the top of the PAGE, to the right of the aside.
  *
@@ -61,7 +62,7 @@ export function TopBar({ height, asideWidth, trailing, trailingFlush = false, no
   return (
     <div
       style={{
-        position: 'fixed', top: 0, left: asideWidth, right: 0, minHeight: height + (above ? aboveHeight : 0), zIndex: 300,
+        position: 'fixed', top: 0, left: asideWidth, right: 0, minHeight: height + (above ? aboveHeight : 0), zIndex: TOPBAR_Z,
         display: 'flex', flexDirection: 'column', padding: 0, boxSizing: 'border-box',
         // On the Sessions board (`noBottomBorder`) the bar is FRAME, not a panel: the same ground
         // colour as the gaps and the icon rail, so the board reads as one surface.
