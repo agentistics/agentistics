@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { STREAK_MAX_GAP_MS, flowHostOps, judgeStopped, resetStoppedStreaks, triggerHostOps } from './host-ops'
+import { NUDGE_REPEAT_MS, STREAK_MAX_GAP_MS, flowHostOps, judgeStopped, resetStoppedStreaks, triggerHostOps } from './host-ops'
 
 const roots: string[] = []
 afterEach(() => { for (const p of roots.splice(0)) rmSync(p, { recursive: true, force: true }) })
@@ -139,6 +139,22 @@ test('stopped streak: the same poll read twice and unknown ids never confirm', (
   judgeStopped('s1', poll(1_000))
   expect(judgeStopped('s1', poll(1_000))).toMatchObject({ refused: true })
   expect(judgeStopped('other', poll(2_000))).toMatchObject({ refused: true, reason: 'session was not found' })
+})
+
+// FLUXO.FECHAR: `parada` confirms on two polls, then the `fechar` re-check reads the SAME snapshot — still confirmed.
+test('stopped streak: a re-check on the poll that already confirmed stays confirmed (the 35 refusals)', () => {
+  resetStoppedStreaks()
+  judgeStopped('s1', poll(1_000))
+  expect(judgeStopped('s1', poll(16_000))).toMatchObject({ ok: true, polls: 2 })
+  expect(judgeStopped('s1', poll(16_000))).toMatchObject({ ok: true, polls: 2 })
+  expect(judgeStopped('s1', poll(31_000))).toMatchObject({ ok: true, polls: 3 })
+})
+test('stopped streak: the re-check refuses when the session is working on the next poll', () => {
+  resetStoppedStreaks()
+  judgeStopped('s1', poll(1_000))
+  judgeStopped('s1', poll(16_000))
+  expect(judgeStopped('s1', poll(31_000, 'working'))).toMatchObject({ refused: true })
+  expect(judgeStopped('s1', poll(31_000))).toMatchObject({ refused: true })
 })
 
 // N2: cli-start (TUI, backup…) is imported on demand inside the op, never at module load.
@@ -382,4 +398,24 @@ test('alvo-trabalho: nothing identified is `none` — no store record, the start
 test('alvo-trabalho: an unknown session refuses', async () => {
   const f = workFixture()
   expect(await workTarget('S', { ...f.deps, session: async () => null })).toMatchObject({ refused: true })
+})
+
+test('FLUXO.CARTAO: the same nudge to the same session is typed once an hour (waits excepted)', async () => {
+  const prompts: string[] = []
+  let at = 1_000
+  const ops = triggerHostOps({
+    registry: async () => [], rows: async () => [], roles: async () => () => undefined,
+    prompt: async (_id, text) => { prompts.push(text); return { ok: true } },
+    awayNotice: async () => true, kill: async () => ({ ok: true }),
+  }, () => at)
+  const nudge = (to: string, body: string, flow = 'trabalho-sem-commit') => ops['cutucar-sessao']({ to, body, flow })
+  expect(await nudge('s1', 'commit it')).toEqual({ ok: true, to: 's1' })
+  expect(await nudge('s1', 'commit it')).toMatchObject({ ok: true, deduped: true })
+  expect(await nudge('s2', 'commit it')).toEqual({ ok: true, to: 's2' })
+  expect(await nudge('s1', 'a different reason')).toEqual({ ok: true, to: 's1' })
+  expect(prompts).toHaveLength(3)
+  at += NUDGE_REPEAT_MS
+  expect(await nudge('s1', 'commit it')).toEqual({ ok: true, to: 's1' })
+  await nudge('s1', 'w-1 gen 1', 'wait'); await nudge('s1', 'w-1 gen 1', 'wait')
+  expect(prompts.filter(p => p.startsWith('[from flow wait'))).toHaveLength(2)
 })

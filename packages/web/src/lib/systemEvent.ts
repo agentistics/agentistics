@@ -13,7 +13,7 @@ import { parseInjectedHeader, roleLine, slashInvocation, unwrapAllPasted } from 
  * so the header is no longer the first line. Whole-message wrappers are unwrapped before matching;
  * a wrapper the person really pasted around ordinary text still finds no header and stays theirs.
  */
-export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin' | 'role' | 'rename' | 'relay' | 'notice' | 'session-note'
+export type SystemEventKind = 'away' | 'away-off' | 'question' | 'handback' | 'block' | 'session-question' | 'checkin' | 'role' | 'rename' | 'relay' | 'notice' | 'session-note' | 'flow'
 
 export interface SystemEvent {
   kind: SystemEventKind
@@ -21,8 +21,10 @@ export interface SystemEvent {
   sender?: string
   /** Everything after the header line, or the full legacy prompt. */
   body: string
-  /** The header's own kind word, for the generic kinds (`notice`, `session-note`). */
+  /** The header's own kind word, for the generic kinds (`notice`, `session-note`, `flow`). */
   label?: string
+  /** The flow's name for a `[from flow <name> · …]` message. */
+  flow?: string
 }
 
 /** Agentistics' relay channel may fence a peer report in this wrapper before it reaches a CLI. Claude
@@ -76,6 +78,8 @@ export function parseSystemEvent(raw: string): SystemEvent | null {
     // Fail closed: a header nobody listed is still agentistics talking, never the person.
     return { kind: 'notice', label: what, body }
   }
+  // A flow's nudge is the flow talking — a system card, never the person's bubble.
+  if (h.origin === 'flow') return { kind: 'flow', flow: h.flow!, label: what, body }
   if (what === 'handback' || what === 'block') return { kind: what, sender: h.sender, body }
   if (what === 'question') return { kind: 'session-question', sender: h.sender, body }
   return { kind: 'session-note', sender: h.sender, label: what, body }
@@ -113,6 +117,7 @@ export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): stri
       if (e.label === 'handoff') return pt ? 'Passagem de bastão · sistema' : 'Handoff context · system'
       if (e.label === 'context') return pt ? 'Contexto do agentistics · sistema' : 'agentistics context · system'
       return pt ? `Aviso do agentistics (${e.label ?? 'aviso'})` : `agentistics notice (${e.label ?? 'notice'})`
+    case 'flow': return pt ? `Fluxo ${e.flow ?? ''} · ${e.label ?? 'aviso'}` : `Flow ${e.flow ?? ''} · ${e.label ?? 'notice'}`
     case 'session-note':
       if (e.label === 'agent') return pt ? 'Mensagem de outro agente' : 'Message from another agent'
       return (pt ? `Mensagem de uma sessão (${e.label ?? 'mensagem'})` : `Message from a session (${e.label ?? 'message'})`) + suffix

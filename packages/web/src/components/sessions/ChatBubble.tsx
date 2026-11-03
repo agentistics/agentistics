@@ -29,7 +29,7 @@ import remarkGfm from 'remark-gfm'
 // message written across several lines renders as one run-on paragraph — which is what "the
 // messages are not formatted" turned out to mean. `HarnessChat` has always used it.
 import remarkBreaks from 'remark-breaks'
-import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User } from 'lucide-react'
+import { ArrowUpRight, Info, Check, ChevronDown, Clock, Copy, CornerUpLeft, Ellipsis, ExternalLink, Forward, Image as ImageIcon, KeyRound, Link2, ListChecks, Loader, Mic, User, Workflow } from 'lucide-react'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import { loadClosedFleet, useFleet } from '../../lib/fleet'
 import { surfaceTurnText, parseSystemEvent, systemEventLine, systemEventTitle, systemEventSender, type SystemEvent } from '../../lib/systemEvent'
@@ -1295,7 +1295,7 @@ export function SystemEventRow({ event, pt, sessionId, titleOf, senderSessionId,
         aria-expanded={open}
         style={{ ...sysBtn, gap: 5, ...touch(isMobile) }}
       >
-        <Info size={14} style={{ flexShrink: 0 }} />
+        {event.kind === 'flow' ? <Workflow size={14} style={{ flexShrink: 0 }} aria-label="flow" /> : <Info size={14} style={{ flexShrink: 0 }} />}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}{title && <span style={{ color: 'var(--text-tertiary)' }}> · {title}</span>}</span>
         <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : undefined }} />
       </button>
@@ -1321,7 +1321,7 @@ export const ChatBubble = memo(function ChatBubble(props: ChatBubbleProps) {
   const event = parsed?.kind === 'rename' && (props.awaiting || props.turn.pending) ? null : parsed
   if (event) return event.sender
     ? <FleetSystemEventRow event={event} lang={props.lang} at={props.turn.at} />
-    : <SystemEventRow event={event} pt={props.lang === 'pt'} sessionId={props.sessionId} />
+    : <SystemEventRow event={event} pt={props.lang === 'pt'} sessionId={props.sessionId} defaultOpen={event.kind === 'flow'} />
   const surfaceText = props.turn.role === 'user' ? surfaceTurnText(props.turn.text) : null
   if (surfaceText !== null) return <ChatBubbleInner {...props} surfaceSubmitted turn={{ ...props.turn, text: surfaceText }} />
   return <ChatBubbleInner {...props} />
