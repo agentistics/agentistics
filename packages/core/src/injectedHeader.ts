@@ -8,7 +8,9 @@
  * wrapper spanning the whole message is unwrapped before matching.
  */
 export interface InjectedHeader {
-  origin: 'agentistics' | 'session'
+  origin: 'agentistics' | 'session' | 'flow'
+  /** The flow's name for `from flow <name>` headers (a nudge a flow typed, never the person). */
+  flow?: string
   /** The sending session's id (or short id) for `from session` headers. */
   sender?: string
   /** The header's kind word, verbatim (`handback`, `relay`, `whatever-comes-next`). */
@@ -17,7 +19,7 @@ export interface InjectedHeader {
   body: string
 }
 
-const HEADER = /^\s*\[from (agentistics|session ([^\s\]·]+)) · ([^\]\r\n]+?)\]\s*(?:\r?\n|$)/
+const HEADER = /^\s*\[from (agentistics|session ([^\s\]·]+)|flow ([a-z0-9-]+)) · ([^\]\r\n]+?)\]\s*(?:\r?\n|$)/
 const PASTED = /^\s*<pasted_content id="([^"]+)">[ \t]*\r?\n([\s\S]*?)(?:\r?\n)?<\/pasted_content id="\1">\s*$/
 
 /** The text inside ONE wrapper spanning the whole message, else the text unchanged. */
@@ -38,9 +40,10 @@ export function parseInjectedHeader(raw: string): InjectedHeader | null {
   const m = HEADER.exec(text)
   if (!m) return null
   return {
-    origin: m[1] === 'agentistics' ? 'agentistics' : 'session',
+    origin: m[1] === 'agentistics' ? 'agentistics' : m[3] ? 'flow' : 'session',
     ...(m[2] ? { sender: m[2] } : {}),
-    kind: m[3]!.trim(),
+    ...(m[3] ? { flow: m[3] } : {}),
+    kind: m[4]!.trim(),
     body: text.slice(m[0].length).replace(/<\/?pasted_content(?:\s+id="[^"]*")?\s*>/gi, '').trim(),
   }
 }
