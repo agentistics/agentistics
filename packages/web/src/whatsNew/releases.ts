@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.192.0': {
+    features: [
+      {
+        pt: 'Chaves de provedor (OpenRouter, OpenAI, Anthropic, ElevenLabs…) ficam trancadas neste computador e funcionam mesmo com o cofre trancado; nunca aparecem em tela nem em registro.',
+        en: 'Provider keys (OpenRouter, OpenAI, Anthropic, ElevenLabs…) stay locked on this computer and work even while the vault is locked; they never show on screen or in logs.',
+      },
+      {
+        pt: 'Ligação por voz: ao sair da aba durante uma ligação, abre uma janelinha flutuante (Chrome/Edge) com mudo, encerrar e voltar; formato compacto ou barra fina.',
+        en: 'Voice call: leaving the tab during a call opens a small floating window (Chrome/Edge) with mute, hang up and back; compact or thin bar.',
+      },
+    ],
+    fixes: [],
+  },
   '2.191.0': {
     features: [
       {

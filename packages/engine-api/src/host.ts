@@ -385,6 +385,43 @@ export interface EngineSecrets {
   open(purpose: `engine/${string}`, name: string, sealed: Uint8Array): Promise<OpenResult>
 }
 
+/**
+ * 1.23 — secrets sealed to THIS MACHINE, independent of the vault's lock state. For values an engine
+ * must be able to use unattended, 100% of the time (a model-provider API key, a voice-service key):
+ * they stay encrypted at rest, but opening one never needs the person to unlock anything. The vault
+ * (`EngineSecrets`) stays for values handed to models during a session.
+ *
+ * The wrapping key is a random machine key kept by the platform's silent protector (macOS Keychain,
+ * Windows DPAPI — also from WSL —, Secret Service, systemd-creds), never by the vault. When none
+ * answers, the host falls back to a weaker, explicit mode (`strength: 'file'`: a 0600 key file bound to
+ * the machine id) and says so in `status()`; it NEVER stores plaintext. The envelope is the same as
+ * `EngineSecrets` (AES-256-GCM, per-purpose subkey, AAD binds purpose + name + machine key id), so a
+ * blob copied to another machine refuses with `wrong-machine`. `open()` returns a fresh `Uint8Array`
+ * per call: the engine MUST `fill(0)` it after use and never cache it. `VaultRefusal` is not widened:
+ * `uninitialized` = no protector available, `protector-lost` = the machine key cannot be unwrapped any
+ * more; `locked` is never returned.
+ */
+export interface EngineMachineSecretsStatus {
+  /** `true` when a machine key is (or can be) held; `false` = nothing can be sealed right now. */
+  available: boolean
+  /** The protector as the person knows it ("Windows (DPAPI, reached from WSL)"); `null` when unavailable or not yet checked. */
+  protector: string | null
+  /** `os` = an operating-system keystore holds the machine key; `file` = the weaker explicit fallback; `null` = unavailable. */
+  strength: 'os' | 'file' | null
+  /** Why it is unavailable, or what the weaker mode means; `null` otherwise. Never carries a value. */
+  sentence: string | null
+}
+
+export interface EngineMachineSecrets {
+  /** Never throws, never blocks: the last known state (`available: false` until `ready()` has settled once). */
+  status(): EngineMachineSecretsStatus
+  /** Settles the protector choice (probing may take about a second) and returns the status. Never throws. */
+  ready(): Promise<EngineMachineSecretsStatus>
+  /** `purpose` MUST start with `engine/` — any other is refused (`code: 'purpose'`). */
+  seal(purpose: `engine/${string}`, name: string, plaintext: Uint8Array): Promise<SealResult>
+  open(purpose: `engine/${string}`, name: string, sealed: Uint8Array): Promise<OpenResult>
+}
+
 export interface EngineMemoryFact {
   chainId: string
   factId: string
@@ -579,6 +616,11 @@ export interface EngineHostServices<E extends EngineEvent = EngineEvent> {
    * writes a new plaintext secret.
    */
   secrets?: EngineSecrets
+  /**
+   * 1.23 — secrets sealed to this machine, usable with the vault locked (`EngineMachineSecrets`). OPTIONAL: a host
+   * before 1.23 has none, and an engine then keeps its unattended keys wherever it kept them before.
+   */
+  machineSecrets?: EngineMachineSecrets
   now(): Date
   /**
    * The contract version THIS host speaks (1.4) — `ENGINE_API_VERSION` of the engine-api it was built

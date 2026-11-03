@@ -37,6 +37,7 @@ import type { SpawnBudget } from '../sessions/spawn-admission'
 import { CPU_REFUSE_PER_CORE } from '../sessions/spawn-admission'
 import { createEngine as slotEngine } from '../engine-slot.generated'
 import { engineSecrets, routeEngineVaultAudit } from '../vault/engine-secrets'
+import { engineMachineSecrets } from '../vault/machine-secrets-host'
 import { hostEngineBoard } from './engine-board'
 import { hostDelegateMembers } from './engine-delegate'
 import { nativeVaultRefs } from '../vault/grants'
@@ -426,6 +427,8 @@ export async function hostServices(): Promise<EngineHostServices<AgentisticsEven
     originPolicy: () => ({ allowedOrigins: [...config.ALLOWED_ORIGINS], dev: process.env.SERVE_STATIC !== '1' }),
     // 1.5 — the vault, restricted to `engine/…` purposes (vault/engine-secrets.ts).
     secrets: engineSecrets(),
+    // 1.23 — secrets sealed to this machine, usable with the vault locked (vault/machine-secrets.ts).
+    machineSecrets: engineMachineSecrets(),
     now: () => new Date(),
     // 1.4: which contract this host speaks, and the fleet's confirmed transitions. The hub is fed by
     // this process's own fleet polls (`readRawFleetSnapshot`) and plans nothing while nobody listens.
