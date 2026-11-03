@@ -2531,10 +2531,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return json(found)
     }
     if (url.pathname === '/api/tasks' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string }
+      const body = await req.json().catch(() => ({})) as { title?: string; detail?: string; type?: string; dueDate?: string; priority?: string }
       const { createTask } = await import('./sessions/task-web')
+      if (body.dueDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(String(body.dueDate).trim())) return json({ error: 'invalid_due_date' }, 400)
       const made = await createTask({
         title: body.title ?? '',
+        ...(body.dueDate !== undefined ? { dueDate: String(body.dueDate).trim() } : {}),
+        ...(typeof body.priority === 'string' ? { priority: body.priority } : {}),
         ...(body.detail !== undefined ? { detail: body.detail } : {}),
         ...(typeof body.type === 'string' ? { type: body.type } : {}),
       })
@@ -5450,6 +5453,23 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
     })().catch(err => console.error('[agentask] queued thread replies:', err instanceof Error ? err.message : String(err)))
       .finally(() => { flushing = false })
   }, 30_000).unref()
+  // Agentask DEADLINE REMINDERS — a task or subtask due tomorrow / today / past due raises one bell
+  // notification per threshold (`sessions/task-deadlines.ts`; the raised keys survive a restart).
+  // A day-granular rule, so a half-hourly tick is plenty; a tick with nothing due writes nothing.
+  const deadlineTick = () => {
+    void (async () => {
+      const [{ runDeadlineTick }, { broadcastNotification }] = await Promise.all([import('./sessions/task-deadlines-io'), import('./sse')])
+      await runDeadlineTick({
+        notify: r => broadcastNotification({
+          type: r.threshold === 'soon' ? 'info' : 'warning',
+          code: `task.deadline.${r.threshold}`,
+          meta: { title: r.title, task: r.taskTitle, due: r.due, kind: r.kind, taskId: r.taskId, id: r.id },
+        }),
+      })
+    })().catch(err => console.error('[agentask] deadline reminders:', err instanceof Error ? err.message : String(err)))
+  }
+  setTimeout(deadlineTick, 60_000).unref()
+  setInterval(deadlineTick, 30 * 60_000).unref()
   // CONTA.AUTO — a session stopped at its account's usage limit moves, once per limit episode, to another account of the
   // same harness that has room (`sessions/auto-switch.ts`). Off with the Settings switch or without multiple accounts;
   // a tick does nothing when no session is limit-blocked (one registry read + the tail of each live transcript).

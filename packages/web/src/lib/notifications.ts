@@ -325,6 +325,20 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   // AWAY MODE: a leader's notice to the owner while they are out (`POST /api/away/notice`) — the
   // warning or decision that cannot wait, sent instead of a question that would block the turn.
   // `{text}` is the leader's own sentence (secrets redacted by the server).
+  // AGENTASK DEADLINES: one reminder per item per threshold (tomorrow / today / past due).
+  // `{title}` is the task or subtask, `{task}` its parent task, `{due}` the due day.
+  'task.deadline.soon': {
+    pt: { title: 'Prazo amanhã', message: '"{title}" vence amanhã ({due}). Tarefa: {task}.' },
+    en: { title: 'Due tomorrow', message: '"{title}" is due tomorrow ({due}). Task: {task}.' },
+  },
+  'task.deadline.today': {
+    pt: { title: 'Prazo hoje', message: '"{title}" vence hoje ({due}). Tarefa: {task}.' },
+    en: { title: 'Due today', message: '"{title}" is due today ({due}). Task: {task}.' },
+  },
+  'task.deadline.overdue': {
+    pt: { title: 'Prazo vencido', message: '"{title}" venceu em {due} e ainda está aberta. Tarefa: {task}.' },
+    en: { title: 'Overdue', message: '"{title}" was due on {due} and is still open. Task: {task}.' },
+  },
   'away.notice': {
     pt: { title: 'Aviso do líder (modo ausente)', message: '{text}' },
     en: { title: 'Leader notice (away mode)', message: '{text}' },

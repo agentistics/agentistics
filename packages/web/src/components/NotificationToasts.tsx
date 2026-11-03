@@ -3,6 +3,7 @@ import { AlertCircle, AlertTriangle, Info, CheckCircle2, BellOff, X } from 'luci
 import { useNotifications, dismissNotification, resolveNotification, type AppNotification, type NotificationType } from '../lib/notifications'
 import { getNotificationSettings, NAY_CARD_CODES } from '../lib/sessionNotifications'
 import { pushLimitAlert } from '../lib/planLimitNotice'
+import { pushDeadlineAlert } from '../lib/taskDeadlineNotice'
 import { UPDATE_NOTICE_CODE } from '../lib/updateToast'
 import { openWhatsNew } from '../whatsNew/open'
 import { setSessionMuted } from '../lib/mutedSessions'
@@ -116,6 +117,8 @@ export function NotificationToasts({ lang }: Props) {
       if (n.code === UPDATE_NOTICE_CODE) continue
       // A plan-limit notice is Nay's card when the card can take it; otherwise it is a toast.
       if (pushLimitAlert(n)) continue
+      // An Agentask deadline reminder is Nay's card too, with the same fallback.
+      if (pushDeadlineAlert(n)) continue
       if (n.code && (NAY_CARD_CODES.has(n.code) || (n.code.startsWith('session.') && n.code !== SESSION_MUTED_CODE && getNotificationSettings().doNotDisturb))) continue
       if (severityChanged) {
         if (timers.current[n.id]) clearTimeout(timers.current[n.id])

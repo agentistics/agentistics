@@ -77,6 +77,9 @@ There are **38 tools** (`packages/mcp/agentistics-mcp.ts`, the `TOOLS` array). B
 | **Tags** — 2, read-only | `agentistics_tags`, `agentistics_tag_detail` |
 | **Team** — 2, read-only | `agentistics_team_status`, `agentistics_team_members` |
 
+**Reminders on the board.** `agentistics_task_create` takes an optional `dueDate` (`yyyy-mm-dd`) and `priority`, so one call registers a personal reminder — a task with no session, only a deadline, a detail and (through `agentistics_task_comment`) attachments. Such a task reaches `done` without any session and shows a clean view with no metrics. The app raises one reminder per threshold (the day before, the day of, and once when overdue) in the bell, as a push and as a card on Nay's floating button.
+
+
 Each tool's own `description` (what `tools/list` returns) is the authoritative contract; the
 sections below document the ones whose shapes are stable.
 

@@ -266,10 +266,15 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_create",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Create a task. A title is required; a description is optional. Creating a title that already exists returns the existing task rather than a duplicate, so this is safe to call before filing work under a name you are not sure exists.",
+      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Create a task. A title is required; a description is optional. Creating a title that already exists returns the existing task rather than a duplicate, so this is safe to call before filing work under a name you are not sure exists (an existing task keeps its own due date and priority). Pass `dueDate` (yyyy-mm-dd) to register a REMINDER in one call: a task with no session at all, just a deadline, a detail and (through agentistics_task_comment) attachments — it reaches `done` without a session and shows a clean view with no metrics, and the app reminds the owner the day before, the day of and once when overdue (bell, push and Nay's floating chat). Optional `priority` is urgent | high | medium | low.",
     inputSchema: {
       type: "object",
-      properties: { title: { type: "string" }, detail: { type: "string" } },
+      properties: {
+        title: { type: "string" },
+        detail: { type: "string" },
+        dueDate: { type: "string", description: "Deadline day, yyyy-mm-dd. Triggers deadline reminders." },
+        priority: { type: "string", description: "urgent | high | medium | low (default low)." },
+      },
       required: ["title"],
     },
   },
@@ -1011,7 +1016,12 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
       case "agentistics_task_create": {
         const a = args as any;
-        const body = await apiSend("POST", "/api/tasks", { title: a?.title, detail: a?.detail });
+        const body = await apiSend("POST", "/api/tasks", {
+          title: a?.title,
+          detail: a?.detail,
+          ...(typeof a?.dueDate === "string" ? { dueDate: a.dueDate } : {}),
+          ...(typeof a?.priority === "string" ? { priority: a.priority } : {}),
+        });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_status": {

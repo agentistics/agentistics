@@ -138,6 +138,7 @@ const SAY: Record<NayAlert['kind'], { pt: string; en: string }> = {
   stale: { pt: 'Ei, essa sessão está parada faz tempo.', en: 'Hey, this session has been waiting a while.' },
   limit: { pt: 'Ei, olha o limite do plano.', en: 'Hey, look at the plan limit.' },
   checkin: { pt: 'Ei, o check-in achou coisas para você.', en: 'Hey, the check-in found things for you.' },
+  'task-deadline': { pt: 'Ei, um prazo está chegando.', en: 'Hey, a deadline is coming up.' },
 }
 
 const STATE_CHIP: Record<NayAlert['kind'], { pt: string; en: string; fg: string; bg: string }> = {
@@ -148,6 +149,13 @@ const STATE_CHIP: Record<NayAlert['kind'], { pt: string; en: string; fg: string;
   stale: { pt: 'sem abrir', en: 'not opened', fg: 'var(--text-secondary)', bg: 'var(--border)' },
   limit: { pt: 'limite do plano', en: 'plan limit', fg: 'var(--anthropic-orange-light)', bg: 'var(--anthropic-orange-dim)' },
   checkin: { pt: 'check-in', en: 'check-in', fg: 'var(--accent-red)', bg: 'var(--accent-red-dim)' },
+  'task-deadline': { pt: 'prazo', en: 'deadline', fg: 'var(--anthropic-orange-light)', bg: 'var(--anthropic-orange-dim)' },
+}
+
+const DEADLINE_SAY: Record<'soon' | 'today' | 'overdue', { pt: string; en: string }> = {
+  soon: { pt: 'Prazo amanhã', en: 'Due tomorrow' },
+  today: { pt: 'Prazo hoje', en: 'Due today' },
+  overdue: { pt: 'Prazo vencido', en: 'Overdue' },
 }
 
 /** Where a check-in item's link leads: the same routes the rest of the app already uses. */
@@ -430,7 +438,8 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
 
   const limitText = alert.limit ? limitNoticeText(alert.limit, lang) : null
   const ck = alert.checkin
-  const say = limitText ? limitText.title : ck ? (ck.summary ? summaryTitle(lang) : needsTitle(ck.items.length, lang)) : SAY[alert.kind][lang]
+  const dl = alert.deadline
+  const say = dl ? DEADLINE_SAY[dl.threshold][lang] : limitText ? limitText.title : ck ? (ck.summary ? summaryTitle(lang) : needsTitle(ck.items.length, lang)) : SAY[alert.kind][lang]
   const chip = STATE_CHIP[alert.kind]
   const harnessLabel = alert.harness ? (HARNESS_LABELS[alert.harness as HarnessId] ?? alert.harness) : null
   const harnessColor = alert.harness ? (HARNESS_COLORS[alert.harness as HarnessId] ?? 'var(--text-tertiary)') : null
@@ -600,7 +609,12 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
             {alert.model && <span style={chipStyle}>{alert.model}</span>}
             <span style={{ ...chipStyle, border: 'none', background: chip.bg, color: chip.fg }}>{chip[lang]}</span>
           </div>
-          {alert.clean ? (
+          {alert.deadline ? (
+            <div data-nay-deadline style={{ display: 'grid', gap: 4, fontSize: 12.5, lineHeight: 1.45, color: 'var(--text-secondary)' }}>
+              <span>{pt ? 'Vence em' : 'Due'} <b style={numStyle}>{alert.deadline.due}</b></span>
+              {alert.deadline.task && alert.deadline.task !== alert.deadline.title && <span style={{ color: 'var(--text-tertiary)' }}>{pt ? 'Tarefa: ' : 'Task: '}{alert.deadline.task}</span>}
+            </div>
+          ) : alert.clean ? (
             <div data-nay-clean style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-secondary)' }}>
               {pt ? `Dá para liberar ${cleanSize(alert.clean.bytes, lang)} em ${alert.clean.count} itens. ${alert.clean.kept} mantidos por segurança.` : `${cleanSize(alert.clean.bytes, lang)} can be freed across ${alert.clean.count} items. ${alert.clean.kept} kept for safety.`}
             </div>
@@ -635,6 +649,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
         )}
         </div>
         {!vault && <div data-rise data-nay-actions style={{ display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0 }}>
+          {alert.deadline && <button type="button" style={primary} onClick={() => void close(() => { dismissAlert(alert.key); navigate(`/tasks/${encodeURIComponent(alert.deadline!.taskId)}`) })}>{pt ? 'Abrir a tarefa' : 'Open the task'}</button>}
           {alert.clean && <button type="button" style={primary} onClick={() => void close(() => {
             dismissAlert(alert.key)
             window.dispatchEvent(new CustomEvent('agentistics:open-clean'))
@@ -652,17 +667,17 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
               {pt ? `Continuar no ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}` : `Continue in ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}`}
             </button>
           )}
-          {!alert.demo && !alert.limit && !alert.clean && !ck && !vault && (
+          {!alert.demo && !alert.limit && !alert.clean && !alert.deadline && !ck && !vault && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(alert.sessionId) })}>
               {pt ? 'Responder' : 'Reply'}
             </button>
           )}
-          {!alert.demo && !alert.limit && !alert.clean && !ck && !vault && (
+          {!alert.demo && !alert.limit && !alert.clean && !alert.deadline && !ck && !vault && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); navigate(`/sessions/${encodeURIComponent(alert.sessionId)}`) })}>
               {pt ? 'Ir para a sessão' : 'Go to session'}
             </button>
           )}
-          {!alert.demo && !alert.limit && !alert.clean && !ck && !vault && (
+          {!alert.demo && !alert.limit && !alert.clean && !alert.deadline && !ck && !vault && (
             <button
               type="button"
               aria-label={pt ? 'Silenciar esta sessão' : 'Mute this session'}

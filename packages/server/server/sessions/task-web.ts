@@ -116,7 +116,14 @@ export async function showTask(
 }
 
 /** Create a task. Title is required; a description is not — a task nobody described is a task. */
-export async function createTask(o: { title: string; detail?: string; type?: string }): Promise<Task | null> {
+export async function createTask(o: {
+  title: string
+  detail?: string
+  type?: string
+  /** `yyyy-MM-dd`. A malformed day is dropped (the route refuses it before getting here). */
+  dueDate?: string
+  priority?: string
+}): Promise<Task | null> {
   const title = o.title.trim()
   if (!title) return null
   const w = await loadTaskWorld()
@@ -138,7 +145,9 @@ export async function createTask(o: { title: string; detail?: string; type?: str
     ...(o.detail?.trim() ? { detail: o.detail.trim() } : {}),
     // Only a KNOWN type sticks — an unknown one is dropped, like a task nobody classified.
     ...(o.type && isKnownTypeId(o.type, w.book.types) ? { type: o.type } : {}),
+    ...(o.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(o.dueDate.trim()) ? { dueDate: o.dueDate.trim() } : {}),
   }
+  if (o.priority) task.priority = migratePriority(o.priority)
   await w.store.upsertTask(task)
   return task
 }
