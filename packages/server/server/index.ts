@@ -2217,12 +2217,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // SESSION → SESSION MESSAGES — `agentistics_session_message` (`sessions/session-message.ts`). The sender
     // must PROVE it is a session (the MCP sends id + HMAC, `session-proof.ts`); unverified is refused.
     if (url.pathname === '/api/session-message' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { to?: unknown; kind?: unknown; body?: unknown; session?: { id?: unknown; token?: unknown } }
+      const body = await req.json().catch(() => ({})) as { to?: unknown; kind?: unknown; body?: unknown; awaiting?: unknown; session?: { id?: unknown; token?: unknown } }
       const { verifySessionIdentity } = await import('./sessions/session-identity')
       const sender = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
       const { sendSessionMessage, defaultMessageDeps, messageStatus } = await import('./sessions/session-message')
       const out = await sendSessionMessage(sender, {
         to: String(body.to ?? ''), kind: String(body.kind ?? ''), body: String(body.body ?? ''),
+        ...(body.awaiting !== undefined && body.awaiting !== null ? { awaiting: body.awaiting as string } : {}),
       }, await defaultMessageDeps())
       return json(out, messageStatus(out))
     }
