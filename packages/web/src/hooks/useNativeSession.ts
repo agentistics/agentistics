@@ -25,6 +25,7 @@ import {
 } from '../lib/nativeChat'
 import { approveUrl, browserUrl, cancelUrl, dirsUrl, effortUrl, execIdOf, messagesUrl, modelUrl, refusalSentence, runsUrl, streamUrl, windowUrl } from '../lib/nativeSession'
 import { parseRuns, type RunLineView } from '../lib/nativeRuns'
+import { openEventStream } from '../lib/streamMux'
 
 const REFRESH_DEBOUNCE_MS = 250
 const RECONNECT_MS = 1500
@@ -106,7 +107,7 @@ export function useNativeSession(id: string, lang: 'pt' | 'en'): NativeSession {
     let alive = true
     const open = () => {
       if (!alive) return
-      es = new EventSource(streamUrl(id, streamFromSeq(stateRef.current)))
+      es = openEventStream(streamUrl(id, streamFromSeq(stateRef.current)))
       es.onmessage = e => {
         const frame = parseNativeFrame(String(e.data))
         if (!frame) return

@@ -37,6 +37,7 @@ import {
   parseEnd,
   type TerminalState,
 } from '../lib/terminalStream'
+import { openEventStream } from '../lib/streamMux'
 
 /** How long a fresh connection may sit without a single frame before it is called stalled. Long
  *  enough that a slow-but-healthy first capture is not falsely failed, short enough that a dead
@@ -77,7 +78,7 @@ export function useTerminalStream(
     // Fresh id → clear any previous session's frame before a single byte of the new one arrives.
     dispatch({ type: 'connecting' })
 
-    const es = new EventSource(streamUrl(scope, id, wantRef.current))
+    const es = openEventStream(streamUrl(scope, id, wantRef.current))
 
     // Has this connection drawn anything yet? While false, a timeout or an error means the channel
     // never established — worth saying so. Once true, a drop is a transient blip: keep the screen and
