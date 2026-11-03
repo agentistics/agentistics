@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { acceptPayload, dataUrl, livenessStep, bootSlowLine, bootWatchdog, classifyLoadError, holdLoadError, loadErrorText, partialPollMs, POST_UPDATE_GRACE_MS, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
+import { bootDeadlineMs, bootRetryDelayMs, BOOT_DEADLINE_CAP_MS, BOOT_LONG_EVERY, BOOT_RETRY_CAP_MS, fetchJsonWithTimeout, acceptPayload, dataUrl, livenessStep, bootSlowLine, bootWatchdog, classifyLoadError, holdLoadError, loadErrorText, partialPollMs, POST_UPDATE_GRACE_MS, retryDelayMs, startupStripText, SLOW_AFTER_MS, UNREACHABLE_AFTER_MS } from './startupLoad'
 
 describe('classifyLoadError', () => {
   test('a status is a server error and keeps the HTTP detail the auth gates read', () => {
@@ -123,5 +123,110 @@ describe('the boot right after an update', () => {
     expect(bootSlowLine('en', 5000)).toContain('just restarted')
     expect(bootSlowLine('pt', null)).toBe('Ainda carregando — o servidor está respondendo.')
     expect(bootSlowLine('en', null)).toBe('Still loading — the server is answering.')
+  })
+})
+
+describe('fetchJsonWithTimeout — the deadline covers the body', () => {
+  const realFetch = globalThis.fetch
+  const restore = () => { globalThis.fetch = realFetch }
+
+  // A response whose headers arrive at once and whose body never does (a server restarting mid-answer).
+  const stalledBody = (signal: AbortSignal | null | undefined) => ({
+    ok: true, status: 200, headers: new Headers(),
+    json: () => new Promise((_, reject) => signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))),
+  }) as unknown as Response
+
+  test('a body that never arrives times out instead of hanging the boot', async () => {
+    globalThis.fetch = (async (_u: unknown, init?: RequestInit) => stalledBody(init?.signal)) as typeof fetch
+    try {
+      const err = await fetchJsonWithTimeout('/api/data', 30).catch(e => e)
+      expect(classifyLoadError(err).kind).toBe('timeout')
+    } finally { restore() }
+  })
+
+  test('server unreachable, then ready: the next ask succeeds', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => {
+      if (++calls === 1) throw new TypeError('Failed to fetch')
+      return { ok: true, status: 200, headers: new Headers(), json: async () => ({ ok: 1 }) } as unknown as Response
+    }) as unknown as typeof fetch
+    try {
+      const first = await fetchJsonWithTimeout('/api/data', 100).catch(e => e)
+      expect(classifyLoadError(first).kind).toBe('unreachable')
+      const second = await fetchJsonWithTimeout<{ ok: number }>('/api/data', 100)
+      expect(second.ok && second.json?.ok).toBe(1)
+    } finally { restore() }
+  })
+
+  test('an HTML body (old bundle behind a proxy page) is reported, not thrown', async () => {
+    globalThis.fetch = (async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => { throw new SyntaxError('Unexpected token <') } }) as unknown as Response) as unknown as typeof fetch
+    try {
+      const r = await fetchJsonWithTimeout('/api/data', 100)
+      expect(classifyLoadError(r.parseError).kind).toBe('incompatible')
+    } finally { restore() }
+  })
+})
+
+describe('an update with the server out for a few seconds renders no error', () => {
+  const kinds = [
+    { kind: 'unreachable', detail: 'Failed to fetch' }, { kind: 'timeout', detail: 'aborted' },
+    { kind: 'server', status: 503, detail: 'HTTP 503' }, { kind: 'unreachable', status: 502, detail: 'HTTP 502' },
+  ] as const
+  test('every failure of a restarting server is held as the loader, for minutes', () => {
+    for (const since of [0, 5_000, 60_000, 200_000]) {
+      for (const e of kinds) expect(holdLoadError({ ...e }, since)).toBe(true)
+      // the watchdog never turns the boot into the "can't reach / try again" screen in that window
+      expect(bootWatchdog(UNREACHABLE_AFTER_MS + 30_000, 'down', since)).not.toBe('unreachable')
+    }
+  })
+  test('a real, prolonged outage is still reported once the grace is spent', () => {
+    expect(holdLoadError({ kind: 'unreachable', detail: 'x' }, POST_UPDATE_GRACE_MS + 1)).toBe(false)
+    expect(bootWatchdog(UNREACHABLE_AFTER_MS, 'down', POST_UPDATE_GRACE_MS + 1)).toBe('unreachable')
+  })
+  test('the first /api/version ask is retried quietly until the server answers, so the route is restored', async () => {
+    const { firstVersionRetryMs } = await import('./updateToast')
+    expect([0, 1, 2, 10].map(firstVersionRetryMs)).toEqual([1000, 2000, 3000, 5000])
+  })
+})
+
+describe('boot-phase retry policy', () => {
+  test('the first attempt gives up fast and the deadline grows to a cap below the normal one', () => {
+    expect(bootDeadlineMs(20_000, 0)).toBe(2500)
+    expect(bootDeadlineMs(20_000, 1)).toBeGreaterThan(2500)
+    expect(bootDeadlineMs(20_000, 50)).toBe(BOOT_DEADLINE_CAP_MS)
+    expect(bootDeadlineMs(4000, 50)).toBe(4000)
+  })
+  test('a healthy server on a slow link still gets through: every few attempts waits the full deadline', () => {
+    // A 780 KB first answer over a slow phone link can take ~9 s; a deadline capped at 4 s forever never opens the page.
+    const needed = 9_000
+    let opened = -1
+    for (let a = 0; a < 3 * BOOT_LONG_EVERY; a++) if (bootDeadlineMs(20_000, a) >= needed) { opened = a; break }
+    expect(opened).toBeGreaterThanOrEqual(0)
+    expect(opened).toBeLessThan(BOOT_LONG_EVERY)
+    expect(bootDeadlineMs(20_000, BOOT_LONG_EVERY - 1)).toBe(20_000)
+    expect(bootDeadlineMs(20_000, 2 * BOOT_LONG_EVERY - 1)).toBe(20_000)
+  })
+  test('the pause between attempts never passes the cap (the old 15 s backoff left a ready page waiting)', () => {
+    for (let a = 0; a < 30; a++) expect(bootRetryDelayMs(a)).toBeLessThanOrEqual(BOOT_RETRY_CAP_MS)
+    expect(retryDelayMs(10)).toBe(15_000)
+  })
+  test('a request held open by a restarting server is retried until the server answers, and the page opens within a few seconds of it', () => {
+    // Simulated clock: the server holds every request until `backAt` and answers any attempt STARTED
+    // at or after it; an attempt started earlier is dropped at its deadline and retried after the pause.
+    // Swept over many comeback instants: usually within a short attempt, never worse than one full deadline.
+    const lags: number[] = []
+    for (let backAt = 1_000; backAt <= 120_000; backAt += 1_000) {
+      let now = 0, attempt = 0, openedAt = -1
+      while (openedAt < 0 && now < 400_000) {
+        if (now >= backAt) { openedAt = now; break }
+        now += bootDeadlineMs(20_000, attempt) + bootRetryDelayMs(attempt)
+        attempt++
+      }
+      expect(openedAt).toBeGreaterThanOrEqual(backAt)
+      lags.push(openedAt - backAt)
+    }
+    lags.sort((x, y) => x - y)
+    expect(lags[Math.floor(lags.length / 2)]).toBeLessThanOrEqual(BOOT_DEADLINE_CAP_MS + BOOT_RETRY_CAP_MS)
+    expect(lags[lags.length - 1]).toBeLessThanOrEqual(20_000 + BOOT_RETRY_CAP_MS)
   })
 })

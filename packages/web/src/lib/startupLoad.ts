@@ -66,6 +66,35 @@ export function retryDelayMs(attempt: number): number {
   return Math.min(15_000, 2000 * 2 ** Math.max(0, attempt))
 }
 
+/**
+ * BOOT-PHASE retry policy (nothing painted yet — the splash is up). After a restart the page keeps
+ * asking until the server answers, and the person is looking at the splash the whole time, so the
+ * time from "the server is back" to "the page opens" is the time that matters:
+ *   - each attempt's deadline starts short (a restarting server that holds the connection but never
+ *     finishes its answer is dropped after `BOOT_FIRST_DEADLINE_MS`, not 10-20 s) and grows with the
+ *     attempt up to the normal deadline, so a slow link still gets through after a few tries;
+ *   - the pause between attempts never exceeds `BOOT_RETRY_CAP_MS` (the steady-state backoff of
+ *     15 s left a page that was one second from opening waiting for the next try).
+ * Worst case from "server answers" to "request lands" is deadline + pause: ~3 s on the first tries, ~5 s after
+ * several failures, and up to the full deadline when the server comes back during one of the long attempts.
+ */
+export const BOOT_FIRST_DEADLINE_MS = 2500
+export const BOOT_RETRY_CAP_MS = 750
+export const BOOT_DEADLINE_CAP_MS = 4000
+/** Every `BOOT_LONG_EVERY`-th attempt (from the 4th on) waits the FULL deadline: a healthy server on a slow
+ *  link (a phone, a relay) whose answer takes longer than the short cap to download would otherwise be
+ *  dropped at the cap forever and the page would never open. The short attempts in between keep the
+ *  "server just came back" case fast. */
+export const BOOT_LONG_EVERY = 4
+export function bootDeadlineMs(maxMs: number, attempt: number): number {
+  const a = Math.max(0, attempt)
+  if (a % BOOT_LONG_EVERY === BOOT_LONG_EVERY - 1) return maxMs
+  return Math.min(maxMs, BOOT_DEADLINE_CAP_MS, BOOT_FIRST_DEADLINE_MS * 1.6 ** a)
+}
+export function bootRetryDelayMs(attempt: number): number {
+  return Math.min(BOOT_RETRY_CAP_MS, 250 * 2 ** Math.max(0, attempt))
+}
+
 /** Deadlines. The first data answer is normally under a second; a server that has not answered in
  *  20 s is reported rather than waited for. */
 export const DATA_TIMEOUT_MS = 20_000
@@ -78,6 +107,30 @@ export async function fetchWithTimeout(url: string, ms: number, init: RequestIni
   const t = setTimeout(() => ctl.abort(), ms)
   try {
     return await fetch(url, { ...init, signal: ctl.signal })
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+/**
+ * A fetch whose deadline covers the BODY too. `fetchWithTimeout` clears its timer when the headers
+ * arrive, so `await res.json()` after it could hang forever on a stalled connection (a server that
+ * restarted mid-answer, a phone on a relay) — the boot screen then never left, `refresh` stayed
+ * "in flight" and every later retry queued behind it. Here the abort stays armed until the body is
+ * read; a deadline hit rejects with an AbortError (`classifyLoadError` → 'timeout').
+ */
+export async function fetchJsonWithTimeout<T = unknown>(url: string, ms: number, init: RequestInit = {}): Promise<{ ok: boolean; status: number; headers: Headers; json: T | undefined; parseError?: unknown }> {
+  const ctl = new AbortController()
+  const t = setTimeout(() => ctl.abort(), ms)
+  try {
+    const res = await fetch(url, { ...init, signal: ctl.signal })
+    if (!res.ok) return { ok: false, status: res.status, headers: res.headers, json: undefined }
+    try {
+      return { ok: true, status: res.status, headers: res.headers, json: await res.json() as T }
+    } catch (err) {
+      if ((err as { name?: string } | null)?.name === 'AbortError') throw err
+      return { ok: true, status: res.status, headers: res.headers, json: undefined, parseError: err }
+    }
   } finally {
     clearTimeout(t)
   }
@@ -97,13 +150,13 @@ export const SLOW_AFTER_MS = 5000
 export const UNREACHABLE_AFTER_MS = 8000
 /**
  * Right after an in-app update the page reloads seconds after the NEW server first answered — a
- * server known to be up, still building its first data (measured ~11 s, with a ~5 s stretch where a
+ * server known to be up, still building its first data (measured ~11 s on a small history, minutes on a large one, with stretches where a
  * probe can miss its deadline). For this long after such a boot a missed probe or a failed first load
  * is "still starting", never "can't reach agentistics": that screen, with its Try again, is what
  * appeared under the end of every update. Past it, a server that still does not answer is reported
  * exactly as before. `sinceUpdateMs` is `null` on an ordinary boot (`finaleGate.ts` `sinceUpdate`).
  */
-export const POST_UPDATE_GRACE_MS = 90_000
+export const POST_UPDATE_GRACE_MS = 300_000
 export function inUpdateGrace(sinceUpdateMs: number | null | undefined): boolean {
   return sinceUpdateMs !== null && sinceUpdateMs !== undefined && sinceUpdateMs < POST_UPDATE_GRACE_MS
 }
