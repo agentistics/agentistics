@@ -126,8 +126,9 @@ export async function sampleLivePlanSessions(
   for (const s of sessions) {
     if (!isHarnessId(s.harness)) continue
     if (!wanted.has(s.session_id)) continue
-    let account = managedAccountOfRef(s.session_id) ?? (s.native_session_id ? managedAccountOfRef(s.native_session_id) : undefined)
-    if (!account) {
+    const registered = managedAccountOfRef(s.session_id) ?? (s.native_session_id ? managedAccountOfRef(s.native_session_id) : undefined)
+    let account: string | undefined
+    {
       const retiredIds = new Set(registry.accounts.filter(a => a.retired).map(a => a.id))
       let known = pathAccounts.get(s.session_id)
       // A default-home attribution cached while the account was active is stale once it retires.
@@ -139,6 +140,15 @@ export async function sampleLivePlanSessions(
         account = hit?.account
         if (hit) pathAccounts.set(s.session_id, { harness: s.harness, account: hit.account, viaDefault: hit.viaDefault })
       }
+      // The ROOT the session really runs under (where its transcript sits) outranks the account it was
+      // REGISTERED on: usage lands on the login that is spending it, never on a label that went stale.
+      if (account && registered && account !== registered && !warnedDivergence.has(s.session_id)) {
+        warnedDivergence.add(s.session_id)
+        console.warn(`[plan-limits] session ${s.session_id} is registered on account ${registered} but its transcript sits under ${account}; attributing usage to ${account}`)
+      }
+      account ??= registered
+    }
+    if (!account) {
       // A managed row and an explicit transcript root were exhausted above. The only remaining
       // identity this session can have is the harness's default home binding; never guess from
       // whichever visible account happens to have a meter.
@@ -164,6 +174,7 @@ export async function sampleLivePlanSessions(
   return [...rates].map(([id, x]) => ({ id, model: x.session.model ?? 'unknown', burnPctPerHour: x.rate, harness: x.harness, ...(x.account ? { account: x.account } : {}) }))
 }
 
+const warnedDivergence = new Set<string>()
 const keyOf = (l: Pick<PlanLimits, 'harness' | 'account'>): string => `${l.harness}:${l.account}`
 
 type Sink = {
@@ -586,6 +597,32 @@ export function __setManagedLookupForTest(f: ManagedLookup | null): void {
 }
 
 /**
+ * The config root a child launched with `spec` really runs under: `null` is the harness's default
+ * home, a path is an explicit root. `env` is the launching process's environment — the child inherits
+ * it, `spec.env` overrides and `spec.unsetEnv` removes (`account-switch`'s move to the default root).
+ */
+export function launchConfigRoot(spec: { env?: Readonly<Record<string, string>>; unsetEnv?: readonly string[] }, env: NodeJS.ProcessEnv = process.env): string | null {
+  const v = spec.unsetEnv?.includes('CLAUDE_CONFIG_DIR') ? undefined : (spec.env?.CLAUDE_CONFIG_DIR ?? env.CLAUDE_CONFIG_DIR)
+  return v ? v : null
+}
+
+/**
+ * The account a reading belongs to when the session's REGISTERED account (`ManagedSession.accountId`)
+ * and the root it really runs under may disagree. The root wins: usage lands on the login that is
+ * actually spending it. A root no binding names says nothing, so the registered account stands.
+ */
+export async function reconcileAccount(harness: HarnessId, registered: string | undefined, root: string | null | undefined, session?: string): Promise<string | undefined> {
+  if (root === undefined) return registered
+  let real: string | null = null
+  try { real = await attributeReading(harness, root) } catch { /* unreadable registry: keep the registered account */ }
+  if (!real || real === 'default') return registered ?? (real ?? undefined)
+  if (registered && registered !== real) {
+    console.warn(`[plan-limits] session${session ? ` ${session}` : ''} is registered on account ${registered} but runs under ${root ?? 'the default home'} (${real}); attributing the reading to ${real}`)
+  }
+  return real
+}
+
+/**
  * The claude tap: one raw stream-json line as the relay delivered it. `accountId` is the
  * structured session's `ManagedSession.accountId` (or a lookup, called only for a rate-limit
  * line); a session started before accounts existed carries none and is the default root's.
@@ -594,6 +631,8 @@ export function __setManagedLookupForTest(f: ManagedLookup | null): void {
 export function noteStructuredLine(
   line: string, atMs: number,
   accountId?: string | Promise<string | undefined> | (() => Promise<string | undefined>),
+  /** The root the session really runs under (`launchConfigRoot`); undefined = not known. */
+  root?: string | null,
 ): void {
   if (!line.includes('rate_limit_event')) return
   let parsed: unknown
@@ -601,7 +640,8 @@ export function noteStructuredLine(
   const l = parseClaudeRateLimitEvent(parsed, atMs)
   if (!l) return
   void Promise.resolve().then(() => typeof accountId === 'function' ? accountId() : accountId)
-    .then(a => ingestFromRoot(l, null, a)).catch(() => {})
+    .then(a => reconcileAccount('claude', a, root))
+    .then(a => ingestFromRoot(l, root ?? null, a)).catch(() => {})
 }
 
 /** The newest `rate_limits` record in the last 256 KB of a codex rollout, or null. */

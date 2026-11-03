@@ -180,7 +180,9 @@ export function BillingAccountsPanel() {
     return entry ? catalogPlanName(entry, pt ? 'pt' : 'en') : null
   }, [detections, pt])
 
-  const rows: BillingRowView[] = useMemo(() => billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt, accountLabels).map(r => {
+  // Until /api/accounts answered there is no account to list: billingRows would fall back to ONE generic
+  // row per assistant, which reads as the real accounts and is not. Nothing is listed until they arrive.
+  const rows: BillingRowView[] = useMemo(() => !accountsSettled ? [] : billingRows(accounts, ctx.billing, harnesses, h => HARNESS_LABELS[h] ?? h, pt, accountLabels).map(r => {
     const periods = scopePeriods(ctx.billing, r.scope)
     const cur = splitTimeline(sortPeriods(periods), today()).current
     const next = cur ? null : upcomingPeriod(periods, today())
@@ -192,7 +194,7 @@ export function BillingAccountsPanel() {
       problem: validateTimeline({ periods }).size > 0,
       limits: limitsForRow(planLimits, r),
     }
-  }), [accounts, ctx.billing, harnesses, pt, planLimits, accountLabels, detectedName])
+  }), [accountsSettled, accounts, ctx.billing, harnesses, pt, planLimits, accountLabels, detectedName])
 
   const orphans = useMemo(() => orphanTimelines(ctx.billing, rows), [ctx.billing, rows])
   /** An orphan in words: whose it was, and the plan it holds (in force, else the latest). */
@@ -393,11 +395,12 @@ export function BillingAccountsPanel() {
   return (
     <div id={ACCOUNTS_ANCHOR} ref={anchorRef} data-usage-accounts style={{ scrollMarginTop: 72 }}>
       <SectionHeader label={pt ? 'Contas' : 'Accounts'} />
-      <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
+      {!accountsSettled && <div data-accounts-loading role="status" style={{ padding: '14px 2px', fontSize: 12.5, color: 'var(--text-tertiary)' }}>{pt ? 'Carregando contas…' : 'Loading accounts…'}</div>}
+      {accountsSettled && <BillingAccountList lang={ctx.lang} rows={rows} now={limitsNow} pendingIds={pendingIds} failedIds={failedIds} limitsReady={planLimits !== null}
         selectedKey={editKey} onToggle={a => { void toggleAccount(a) }} onEdit={openRow}
         onSignIn={signIn} signingIn={null} signInError={signInError}
         hiddenSignedOut={hiddenSignedOut} onHideSignedOut={hideSignedOut}
-        onRelogin={r => { if (r.account) setRelogin({ id: r.account.id, harness: r.harness, who: r.title }) }} />
+        onRelogin={r => { if (r.account) setRelogin({ id: r.account.id, harness: r.harness, who: r.title }) }} />}
       {relogin && (
         <ReloginModal accountId={relogin.id} harness={relogin.harness} who={relogin.who} lang={pt ? 'pt' : 'en'}
           onClose={() => { setRelogin(null); reloadAccounts() }} onDone={() => reloadAccounts()} />

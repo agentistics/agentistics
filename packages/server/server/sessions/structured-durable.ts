@@ -31,7 +31,7 @@
  * conversation's protocol traffic — the same text the harness's own transcript holds — and no secret
  * (`StructuredSpawn.env` never carries one). It is deleted when the session ends.
  */
-import { noteStructuredLine, sessionAccountOf } from '../plan-limits'
+import { launchConfigRoot, noteStructuredLine, sessionAccountOf } from '../plan-limits'
 import { clearComposing, noteComposingLine } from './structured-composing'
 import { procStartMs } from './session-reaper-io'
 import { spawn as spawnChild } from 'node:child_process'
@@ -414,7 +414,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
       try { startRelay(dir, spec) } catch { end(null); return }
       if (gen.killed) markKilled(dir)
       conn = relayConnection(path.join(dir, FILES.sock), 0, {
-        line: (l, t) => { noteStructuredLine(l, t, accountOf); noteComposingLine(id, harness, l); lines.push(l, t) },
+        line: (l, t) => { noteStructuredLine(l, t, accountOf, launchConfigRoot(spec)); noteComposingLine(id, harness, l); lines.push(l, t) },
         exit: end,
         // Another server took the child over: this one goes quiet, and must not read the
         // silence as an exit (that would make it fall back and start a second copy).
@@ -668,7 +668,7 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
             if (exitedEarly) { lines.end(); exitResolve(exitCode) }
           }
           conn = relayConnection(path.join(genDir(id, k), FILES.sock), r.out.length, {
-            line: (l, ts) => { noteStructuredLine(l, ts, accountOf); noteComposingLine(id, harness, l); if (replaying) pendingLive.push({ l, t: ts }); else lines.push(l, ts) },
+            line: (l, ts) => { noteStructuredLine(l, ts, accountOf, launchConfigRoot(spec)); noteComposingLine(id, harness, l); if (replaying) pendingLive.push({ l, t: ts }); else lines.push(l, ts) },
             exit: c => {
               clearComposing(id)
               gen.ended = true

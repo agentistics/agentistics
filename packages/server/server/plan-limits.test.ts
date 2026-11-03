@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { CODEX_DIR } from './config'
+import { CLAUDE_DIR, CODEX_DIR } from './config'
 import { existsSync, chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,7 +11,7 @@ import { spawnOutcome } from './sessions/spawn-outcome'
 import { lockFile } from './sessions/file-lock'
 import {
   __resetPlanLimitsForTest, __setLiveTranscriptPathForTest, foldAliasedLimits, __setManagedLookupForTest, __settleCodexRolloutsForTest, ingestPlanLimits, latestCodexLimits, noteCodexRollout,
-  noteStructuredLine, planLimitsPayload, planAccountKey, sampleLivePlanSessions, sessionAccountOf, setPlanLimitsSink, syncPlanLimitsFromFile,
+  noteStructuredLine, launchConfigRoot, planLimitsPayload, planAccountKey, sampleLivePlanSessions, sessionAccountOf, setPlanLimitsSink, syncPlanLimitsFromFile,
   watchPlanLimitsFile, __setPersistHooksForTest,
 } from './plan-limits'
 import type { PlanThresholdNotice } from '@agentistics/core'
@@ -1354,5 +1354,56 @@ describe('CONTA.IDENTIDADE: restarted onto another account', () => {
       const out = await sampleLivePlanSessions(sessions(101), [conv], 60_000, burn)
       expect(out.map(s => [s.account, s.burnPctPerHour])).toEqual([['acc_B', 3]])
     }
+  })
+})
+
+// ── CONTAS.TROCADAS: a reading belongs to the root the session really runs under ────────────────
+describe('CONTAS.TROCADAS: real root outranks the registered account', () => {
+  const setup = async () => {
+    const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => { throw new Error('No probe') } })
+    __setHarnessAccountsForTest(store)
+    const viniRoot = join(dir, 'vini-root')
+    await store.bind(null, { harness: 'claude', key: 'principal', label: 'Principal' })
+    await store.bind(viniRoot, { harness: 'claude', key: 'vini', label: 'Vini' })
+    const b = (await store.readAccounts()).bindings
+    return { principal: b['claude:']!, vini: b[`claude:${viniRoot}`]!, viniRoot }
+  }
+  const weekOf = async (account: string, now: number) =>
+    (await planLimitsPayload(undefined, now)).limits.find(l => l.account === account)?.windows.find(w => w.kind === 'week')?.usedPct
+
+  test('(a) registered as Vini but running in the default root: the stream reading goes to Principal', async () => {
+    const { principal, vini } = await setup()
+    expect(principal).not.toBe(vini)
+    __setManagedLookupForTest(async () => [{ id: 's1', harness: 'claude', accountId: vini, createdAt: '2026-11-03T00:00:00Z' }])
+    const now = now0()
+    noteStructuredLine(claudeLine([67, now + 72 * H]), now, sessionAccountOf('s1'), null)
+    await until(async () => (await weekOf(principal, now)) === 67)
+    expect(await weekOf(vini, now)).toBeUndefined()
+  })
+
+  test('(a) the live sampler follows the transcript root over the registered account', async () => {
+    const { principal, vini } = await setup()
+    __setManagedLookupForTest(async () => [{ id: 's1', harness: 'claude', accountId: vini, createdAt: '2026-11-03T00:00:00Z' }])
+    __setLiveTranscriptPathForTest(async () => join(CLAUDE_DIR, 'projects', 'p', 's1.jsonl'))
+    const live = await sampleLivePlanSessions([{ session_id: 's1', harness: 'claude', input_tokens: 1 }], ['s1'], 0, {}, new Set(['s1']))
+    expect(live[0]?.account).toBe(principal)
+  })
+
+  test('(b) registered and real root agree: nothing changes', async () => {
+    const { vini, viniRoot } = await setup()
+    __setManagedLookupForTest(async () => [{ id: 's2', harness: 'claude', accountId: vini, createdAt: '2026-11-03T00:00:00Z' }])
+    const now = now0()
+    noteStructuredLine(claudeLine([99, now + 72 * H]), now, sessionAccountOf('s2'), viniRoot)
+    await until(async () => (await weekOf(vini, now)) === 99)
+    __setLiveTranscriptPathForTest(async () => join(viniRoot, 'projects', 'p', 's2.jsonl'))
+    const live = await sampleLivePlanSessions([{ session_id: 's2', harness: 'claude', input_tokens: 1 }], ['s2'], 0, {}, new Set(['s2']))
+    expect(live[0]?.account).toBe(vini)
+  })
+
+  test('launchConfigRoot: spec env, then inherited env; unsetEnv means the default home', () => {
+    expect(launchConfigRoot({ env: { CLAUDE_CONFIG_DIR: '/r' } }, { CLAUDE_CONFIG_DIR: '/x' })).toBe('/r')
+    expect(launchConfigRoot({}, { CLAUDE_CONFIG_DIR: '/x' })).toBe('/x')
+    expect(launchConfigRoot({ unsetEnv: ['CLAUDE_CONFIG_DIR'] }, { CLAUDE_CONFIG_DIR: '/x' })).toBeNull()
+    expect(launchConfigRoot({}, {})).toBeNull()
   })
 })

@@ -75,6 +75,16 @@ describe('old routes land on Usage', () => {
   }
 })
 
+describe('before the accounts arrive', () => {
+  test('shows a loading state, never the generic one-row-per-assistant list', async () => {
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch // /api/accounts never answers
+    const el = mount('/usage')
+    await flush()
+    expect(el.querySelector('[data-accounts-loading]')).not.toBeNull()
+    expect(el.querySelectorAll('[data-billing-row]').length).toBe(0)
+  })
+})
+
 describe('the account row and its editor', () => {
   test('one compact row per account, with the switch and the pencil', async () => {
     const el = mount('/usage#contas')
