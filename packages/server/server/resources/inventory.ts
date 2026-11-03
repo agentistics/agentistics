@@ -75,8 +75,9 @@ export function autoSwaps(p: Pick<AgentopProcess, 'kind' | 'label'>, capable = f
 }
 
 export interface ProcessOwner {
-  /** `session` — an assistant session's process (CLAUDE_PID); `pid` — a helper's declared owner pid. */
-  kind: 'session' | 'pid'
+  /** `session` — an assistant session's process (CLAUDE_PID); `pid` — a helper's declared owner pid;
+   *  `relay` — a structured relay, owned by the session named in its own `structured/<id>` argument. */
+  kind: 'session' | 'pid' | 'relay'
   pid: number
   sessionId?: string
   alive: boolean
@@ -192,6 +193,22 @@ export function orphanReason(kind: ProcessKind, e: Pick<ProcEntry, 'ppid' | 'cwd
   return undefined
 }
 
+/**
+ * The session a structured RELAY serves, read from its own argument (`…/structured/<id>[/g<k>]`) — PURE.
+ * Never from its environment: a relay started by a CLI inside session X inherits X's
+ * `AGENTOP_MANAGED_ID`, `CLAUDE_PID` and `CLAUDE_CODE_SESSION_ID`, so the screen named the relay of a
+ * LIVE session after another conversation and called it ended (03/11: `structured/ee6debf036` listed as
+ * `c8c43867 — encerrado`).
+ */
+export function structuredRelayOwner(argv: readonly string[]): string | null {
+  const at = argv.findIndex(a => a === '__structured-relay' || /(^|\/)structured-relay\.ts$/.test(a))
+  if (at < 0) return null
+  const dir = argv[at + 1]
+  if (!dir) return null
+  const m = /(?:^|\/)structured\/([A-Za-z0-9._-]+)(?:\/g\d+)?\/?$/.exec(dir)
+  return m ? m[1]! : null
+}
+
 /** Build the inventory — PURE over what was read. Sorted by memory, biggest first. */
 export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): AgentopProcess[] {
   const helperPids = new Map([...ctx.helpers].map(([pid, h]) => [pid, h.id] as const))
@@ -227,8 +244,14 @@ export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): Age
         }
       }
     }
-    const managedId = e.env.AGENTOP_MANAGED_ID ?? e.ancestorManagedId
-    const orphanWhy = orphanReason(c.kind, e)
+    const relayId = structuredRelayOwner(e.argv)
+    const isolatedHome = isThrowawayHome(e.env.HOME, ctx.home, ctx.tempRoots)
+    // A relay's inherited owner is the session that STARTED it, not the one it serves. Under an
+    // isolated (test/preview) HOME the inherited owner is kept: it is what retires a leaked test relay.
+    if (relayId && !isolatedHome) owner = { kind: 'relay', pid: e.pid, sessionId: relayId, alive: true }
+    const managedId = relayId ?? e.env.AGENTOP_MANAGED_ID ?? e.ancestorManagedId
+    // A relay is detached ON PURPOSE (it outlives the server); a parent of 1 is its normal state.
+    const orphanWhy = relayId && !e.cwdGone ? undefined : orphanReason(c.kind, e)
     out.push({
       pid: e.pid,
       ppid: e.ppid,
@@ -243,7 +266,7 @@ export function buildInventory(entries: ProcEntry[], ctx: InventoryContext): Age
       orphan: e.ppid === 1,
       owner,
       self: e.pid === ctx.selfPid,
-      isolatedHome: isThrowawayHome(e.env.HOME, ctx.home, ctx.tempRoots),
+      isolatedHome,
       ...(c.helperId ? { helperId: c.helperId } : {}),
       ...(orphanWhy ? { orphanWhy } : {}),
       ...(managedId ? { managedId } : {}),

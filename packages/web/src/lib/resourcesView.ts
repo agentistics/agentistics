@@ -20,7 +20,7 @@ export interface ResProcess {
   ageSec: number
   stale: boolean
   orphan: boolean
-  owner: { kind: 'session' | 'pid'; pid: number; sessionId?: string; alive: boolean } | null
+  owner: { kind: 'session' | 'pid' | 'relay'; pid: number; sessionId?: string; alive: boolean } | null
   self: boolean
   isolatedHome: boolean
   orphanWhy?: 'parent-gone' | 'cwd-deleted'
@@ -135,6 +135,9 @@ export function ownerText(p: ResProcess, lang: ResLang): string {
   if (p.self) return pt ? 'este servidor' : 'this server'
   if (!p.owner) return p.orphan ? (pt ? 'nenhum (órfão)' : 'none (orphan)') : (pt ? 'desconhecido' : 'unknown')
   const id = p.owner.sessionId ? p.owner.sessionId.slice(0, 8) : `pid ${p.owner.pid}`
+  // A relay serves the session named in its own argument; whether THAT session is live is the
+  // session row's to say (the group heading), never an inherited "ended".
+  if (p.owner.kind === 'relay') return pt ? `sessão ${id}` : `session ${id}`
   return p.owner.alive ? id : `${id} — ${pt ? 'encerrado' : 'ended'}`
 }
 

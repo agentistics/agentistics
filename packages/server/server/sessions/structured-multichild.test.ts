@@ -8,6 +8,7 @@
  * "The server restarts" is: the transport drops its relay connections without touching any child, and
  * `replay()` re-attaches a fresh driver over the same directory. Processes are stopped by saved PID only.
  */
+import { survivingFixtures } from './fixtures/fixture-guard'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -150,7 +151,13 @@ afterEach(async () => {
     }
     await store.terminate(id, 3000).catch(() => false)
   }
-  for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true })
+  const survivors: string[] = []
+  for (const r of roots.splice(0)) {
+    // GUARD: nothing a test started may outlive its teardown.
+    for (const p of await survivingFixtures(r)) survivors.push(`${p.pid} ${p.cmd}`)
+    rmSync(r, { recursive: true, force: true })
+  }
+  if (survivors.length) throw new Error(`fixture(s) outlived the test: ${survivors.join('; ')}`)
 })
 
 let seq = 0

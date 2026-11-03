@@ -7,6 +7,7 @@
  * without touching the child (exactly what a dying process does), and composite B — a fresh process's
  * worth of state over the same directory — re-attaches. Relays are stopped by their saved PID only.
  */
+import { survivingFixtures } from './fixtures/fixture-guard'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -192,7 +193,10 @@ afterEach(async () => {
       r.store.markEnding(id, 'test teardown')
       await r.store.terminate(id, 4000)
     }
+    // GUARD: nothing a test started may outlive its teardown.
+    const left = await survivingFixtures(r.root)
     rmSync(r.root, { recursive: true, force: true })
+    if (left.length) throw new Error(`fixture(s) outlived the test: ${left.map(p => `${p.pid} ${p.cmd}`).join('; ')}`)
   }
   // One test spins a rig per structured harness; tearing each down may take up to 4 s.
 }, 30_000)

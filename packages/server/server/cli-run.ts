@@ -552,11 +552,31 @@ async function startRun(options: RunOptions): Promise<number> {
   const signal = async (sig: NodeJS.Signals) => { try { process.kill(child.pid!, sig) } catch {} ; await childExit; await cleanup(); process.exit(128 + (sig === 'SIGINT' ? 2 : 15)) }
   process.once('SIGINT', () => void signal('SIGINT'))
   process.once('SIGTERM', () => void signal('SIGTERM'))
+  // The run is tied to whoever started it. A session's pane hangs up its process group when the
+  // session is killed — the default SIGHUP action ended this launcher WITHOUT its cleanup, and the
+  // run's systemd scope (a cgroup of its own) kept the command alive until its TTL (03/11: run-r*
+  // scopes still active after their session ended). A parent that died outright reparents us: same.
+  process.once('SIGHUP', () => void signal('SIGTERM'))
+  const parentWatch = watchParent(process.ppid, () => process.ppid, () => void signal('SIGTERM'))
   const ttlTimer = setTimeout(() => { try { process.kill(child.pid!, 'SIGTERM') } catch {} }, parseTtl(options.ttl) * 1000)
   const code = await childExit
   clearTimeout(ttlTimer)
+  clearInterval(parentWatch)
   await cleanup()
   return code
+}
+
+/** Calls `onGone` once when the launcher's parent changes (it died and we were reparented). */
+export function watchParent(initial: number, current: () => number, onGone: () => void, everyMs = 1000): ReturnType<typeof setInterval> {
+  let fired = false
+  const t = setInterval(() => {
+    if (fired || current() === initial) return
+    fired = true
+    clearInterval(t)
+    onGone()
+  }, everyMs)
+  t.unref?.()
+  return t
 }
 
 async function commandExists(command: string): Promise<boolean> {

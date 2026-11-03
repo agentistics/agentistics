@@ -21,6 +21,7 @@ import {
   showPrefixArgs, trimCapture, fleetPanesArgs, parseFleetPanes, fleetPanesWithCapturesArgs, splitFleetPanesWithCaptures,
   type TerminalProfile,
 } from './tmux-cli'
+import { stopSessionProcesses } from './session-reaper-io'
 import { collectOwnPids, escalateKill, procIO } from './kill-escalate'
 import { dependencyCommandLine } from './dependency-plan'
 import { probeDependency } from './dependency-probe'
@@ -812,7 +813,10 @@ export const tmuxBackend: SessionBackend = {
     // …and a session whose harness ignored the hang-up is not gone either: it is an orphan that
     // blocks the next reopen of the conversation. Escalate on the row's OWN pids, SIGKILL last.
     const { stuck } = await escalateKill(own, procIO())
-    return stuck.length === 0
+    // …and whatever the session started OUTSIDE the pane's tree (an MCP server that double-forked, a
+    // child that called setsid) still carries its marker: stopped too (`session-reaper.ts`).
+    const rest = await stopSessionProcesses(id)
+    return stuck.length === 0 && rest.stuck.length === 0
   },
 
   attachCommand(id: string) {

@@ -18,6 +18,7 @@ import { planGovernor, type Alert, type Kill } from './governor'
 import { readHelpers, mutateHelpers, pruneHelpers, type HelperRecord } from './helpers'
 import { readHeavyState, type HeavyState } from './heavy-io'
 import { registeredSpawnQueue } from '../sessions/spawn-queue'
+import { reaperState, startSessionReaper, type ReaperState } from '../sessions/session-reaper-io'
 
 export const TICK_MS = 30_000
 export const KILL_GRACE_MS = 5_000
@@ -36,6 +37,8 @@ export interface ResourcesSnapshot {
   killsEnabled: boolean
   /** Spawns the memory gate refused and is holding until room frees (sessions/spawn-queue.ts). */
   spawnQueue: Array<{ id: string; label: string; sinceMs: number; position: number }>
+  /** The collector of closed sessions' leftover processes (sessions/session-reaper-io.ts). */
+  reaper?: ReaperState
 }
 
 export interface GovernorDeps {
@@ -53,7 +56,7 @@ let memAlarm: MemAlarmState = { raised: false }
 
 export function resourcesSnapshot(): ResourcesSnapshot | null {
   // The queue moves between ticks (a spawn queued a second ago); read it live.
-  return snapshot ? { ...snapshot, spawnQueue: registeredSpawnQueue()?.list() ?? [] } : null
+  return snapshot ? { ...snapshot, spawnQueue: registeredSpawnQueue()?.list() ?? [], reaper: reaperState() } : null
 }
 
 const killsEnabled = (): boolean => process.env.AGENTISTICS_GOVERNOR !== '0'
@@ -165,6 +168,7 @@ export function governorTick(deps: GovernorDeps): Promise<ResourcesSnapshot> {
       recent: [...recent],
       killsEnabled: killsEnabled(),
       spawnQueue: registeredSpawnQueue()?.list() ?? [],
+      reaper: reaperState(),
     }
     return snapshot
   })().finally(() => { running = null })
@@ -185,6 +189,8 @@ function mbText(bytes: number | null): string {
 
 export function startGovernor(deps: GovernorDeps): void {
   if (timer || process.platform !== 'linux') return
+  // Closed sessions' leftover processes: boot + periodic (or the coletor-processos flow, flows on).
+  startSessionReaper(deps.log)
   void governorTick(deps).catch(e => deps.log(`[governor] tick failed: ${String(e)}`))
   timer = setInterval(() => {
     void governorTick(deps).catch(e => deps.log(`[governor] tick failed: ${String(e)}`))
