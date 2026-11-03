@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.197.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uso das contas: o consumo de cada conta Claude agora vai para a conta em que a sessão realmente roda; antes, duas contas podiam aparecer com os números trocados.',
+        en: 'Account usage: each Claude account now gets the usage of the sessions that really run on it; before, two accounts could show each other\'s numbers.',
+      },
+      {
+        pt: 'A tela de contas mostra "carregando" até as suas contas chegarem, e um aviso com "tentar de novo" se não carregar, em vez de uma lista genérica sem números.',
+        en: 'The accounts screen shows "loading" until your accounts arrive, and a notice with "try again" if they fail to load, instead of a generic list with no numbers.',
+      },
+    ],
+  },
   '2.197.1': {
     features: [],
     fixes: [
