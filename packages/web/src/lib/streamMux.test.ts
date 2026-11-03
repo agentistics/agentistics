@@ -6,6 +6,7 @@ class FakeWs {
   onopen: (() => void) | null = null
   onmessage: ((e: { data: string }) => void) | null = null
   onclose: (() => void) | null = null
+  onerror: (() => void) | null = null
   send(s: string) { this.sent.push(JSON.parse(s)) }
   open() { this.onopen?.() }
   push(m: unknown) { this.onmessage?.({ data: JSON.stringify(m) }) }
@@ -98,6 +99,39 @@ describe('streamMux — every push stream of a tab over one socket', () => {
     expect(sockets.length).toBe(2)
     sockets[1]!.open()
     expect(sockets[1]!.sent).toEqual([{ op: 'sub', sid: 1, url: '/api/events' }])
+  })
+
+  test('a socket whose open fails is handled (never unhandled) and falls back to EventSource', async () => {
+    const made: string[] = []
+    const prev = (globalThis as { EventSource?: unknown }).EventSource
+    ;(globalThis as { EventSource?: unknown }).EventSource = class { onopen = null; onerror = null; onmessage = null; readyState = 0; constructor(u: string) { made.push(u) } addEventListener() {} close() {} }
+    try {
+      const sockets: FakeWs[] = []
+      const mux = createStreamMux(() => {
+        const w = new FakeWs()
+        sockets.push(w)
+        // a real dead server answers with error+close, asynchronously, after construction
+        setTimeout(() => { w.onerror?.(); w.drop() }, 0)
+        return w as unknown as WebSocket
+      })
+      mux.open('/api/events')
+      await wait(1300)
+      // the error never escaped as an unhandled one — reaching here is the proof — and after the
+      // second failed open the stream is a native EventSource
+      expect(sockets.length).toBe(2)
+      expect(made).toEqual(['/api/events'])
+    } finally { (globalThis as { EventSource?: unknown }).EventSource = prev }
+  })
+
+  test('a socket constructor that throws also falls back, without raising', () => {
+    const made: string[] = []
+    const prev = (globalThis as { EventSource?: unknown }).EventSource
+    ;(globalThis as { EventSource?: unknown }).EventSource = class { onopen = null; onerror = null; onmessage = null; readyState = 0; constructor(u: string) { made.push(u) } addEventListener() {} close() {} }
+    try {
+      const mux = createStreamMux(() => { throw new Error('no socket here') })
+      mux.open('/api/events')
+      expect(made).toEqual(['/api/events'])
+    } finally { (globalThis as { EventSource?: unknown }).EventSource = prev }
   })
 
   test('a socket that can never open falls back to a real EventSource', () => {

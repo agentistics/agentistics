@@ -147,14 +147,12 @@ class Mux {
     try { ws = this.makeWs() } catch { ws = null }
     if (!ws) { this.giveUp(); return }
     this.ws = ws
-    ws.onopen = () => {
-      this.wsOpen = true
-      this.everOpened = true
-      this.failures = 0
-      for (const src of this.sources.values()) if (!src.retryTimer) this.sub(src)
-    }
-    ws.onmessage = (e) => this.onMessage(String(e.data))
-    ws.onclose = () => {
+    // A socket that dies before (or after) opening fires `error` and then `close`. Both are the
+    // same event for us; the guard makes whichever arrives first the only one handled.
+    let down = false
+    const fail = () => {
+      if (down || this.ws !== ws) return
+      down = true
       const wasOpen = this.wsOpen
       this.ws = null
       this.wsOpen = false
@@ -169,6 +167,18 @@ class Mux {
       if (wasOpen) this.failures = 1
       this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; if (this.sources.size) this.connect() }, delay)
     }
+    ws.onopen = () => {
+      this.wsOpen = true
+      this.everOpened = true
+      this.failures = 0
+      for (const src of this.sources.values()) if (!src.retryTimer) this.sub(src)
+    }
+    ws.onmessage = (e) => this.onMessage(String(e.data))
+    // Never leave a failed open as an unhandled error: on some runtimes (Bun's `ws` shim under
+    // happy-dom) an `error` with no listener is rethrown and aborts the caller — a mounted hook or
+    // an unrelated test. The listener routes it to the same fallback as a close.
+    ws.onerror = () => fail()
+    ws.onclose = () => fail()
   }
 
   private giveUp(): void {
@@ -210,6 +220,13 @@ class Mux {
 
 function defaultSocket(): WebSocket | null {
   if (typeof WebSocket === 'undefined' || typeof location === 'undefined') return null
+  // A headless DOM (happy-dom, as every DOM test registers) is not a page talking to a server:
+  // there is no `/api/stream-mux` to upgrade to, and under Bun its `ws` shim throws an error that
+  // no listener on the WebSocket can catch, aborting the mount. Take the EventSource path at once,
+  // which is both correct for a test that stubs EventSource and what a real page does when the
+  // socket cannot be had.
+  if (typeof (globalThis as { happyDOM?: unknown }).happyDOM !== 'undefined') return null
+  if (location.protocol !== 'http:' && location.protocol !== 'https:') return null
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return new WebSocket(`${proto}//${location.host}/api/stream-mux`)
 }
