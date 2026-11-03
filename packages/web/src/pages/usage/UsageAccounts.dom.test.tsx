@@ -75,6 +75,34 @@ describe('old routes land on Usage', () => {
   }
 })
 
+describe('before the accounts arrive', () => {
+  test('shows a loading state, never the generic one-row-per-assistant list', async () => {
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch // /api/accounts never answers
+    const el = mount('/usage')
+    await flush()
+    expect(el.querySelector('[data-accounts-loading]')).not.toBeNull()
+    expect(el.querySelectorAll('[data-billing-row]').length).toBe(0)
+  })
+})
+
+describe('when /api/accounts fails', () => {
+  for (const [name, f] of [
+    ['not ok', () => Promise.resolve(new Response('{}', { status: 500 }))],
+    ['network error', () => Promise.reject(new Error('down'))],
+  ] as const) {
+    test(`${name}: an error with a retry, never the generic list`, async () => {
+      const real = globalThis.fetch
+      globalThis.fetch = ((u: unknown) => String(u).includes('/api/accounts') ? f() : real(u as string)) as unknown as typeof fetch
+      const el = mount('/usage')
+      await flush()
+      expect(el.querySelector('[data-accounts-error]')?.textContent).toContain('Could not load the accounts')
+      expect(el.querySelector('[data-accounts-retry]')).not.toBeNull()
+      expect(el.querySelectorAll('[data-billing-row]').length).toBe(0)
+      globalThis.fetch = real
+    })
+  }
+})
+
 describe('the account row and its editor', () => {
   test('one compact row per account, with the switch and the pencil', async () => {
     const el = mount('/usage#contas')
