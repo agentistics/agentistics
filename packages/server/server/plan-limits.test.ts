@@ -1400,6 +1400,29 @@ describe('CONTAS.TROCADAS: real root outranks the registered account', () => {
     expect(live[0]?.account).toBe(vini)
   })
 
+  test('a switch Vini → Principal: the sampler follows the new registered account (same conversation id)', async () => {
+    const { principal, vini, viniRoot } = await setup()
+    __setManagedLookupForTest(async () => [{ id: 's3', harness: 'claude', accountId: vini, createdAt: '2026-11-03T00:00:00Z' }])
+    __setLiveTranscriptPathForTest(async () => join(viniRoot, 'projects', 'p', 's3.jsonl'))
+    const sess = [{ session_id: 's3', harness: 'claude', input_tokens: 1 }]
+    expect((await sampleLivePlanSessions(sess, ['s3'], 0, {}, new Set(['s3'])))[0]?.account).toBe(vini)
+    // the switch: a new row for the same conversation on Principal, the transcript copied to the default root
+    __setManagedLookupForTest(async () => [{ id: 's3', harness: 'claude', accountId: principal, createdAt: '2026-11-03T01:00:00Z' }])
+    __setLiveTranscriptPathForTest(async () => join(CLAUDE_DIR, 'projects', 'p', 's3.jsonl'))
+    expect((await sampleLivePlanSessions(sess, ['s3'], 1000, {}, new Set(['s3'])))[0]?.account).toBe(principal)
+  })
+
+  test('a copied transcript under two roots: the most recently written copy is the live one', async () => {
+    const { mkdir, writeFile, utimes } = await import('node:fs/promises')
+    const { resolveLiveTranscriptPath } = await import('./plan-limits')
+    const rootA = join(dir, 'copy-a'); const rootB = join(dir, 'copy-b')
+    const old = join(rootA, 'projects', '-x', '11111111-1111-4111-8111-111111111111.jsonl'); const fresh = join(rootB, 'projects', '-x', '11111111-1111-4111-8111-111111111111.jsonl')
+    for (const f of [old, fresh]) { await mkdir(join(f, '..'), { recursive: true }); await writeFile(f, '{}\n') }
+    await utimes(old, 1, 1); await utimes(fresh, 2000, 2000)
+    const got = await resolveLiveTranscriptPath({ session_id: '11111111-1111-4111-8111-111111111111', harness: 'claude', project_path: '/x' }, { [`claude:${rootA}`]: 'a', [`claude:${rootB}`]: 'b' })
+    expect(got).toBe(fresh)
+  })
+
   test('launchConfigRoot: spec env, then inherited env; unsetEnv means the default home', () => {
     expect(launchConfigRoot({ env: { CLAUDE_CONFIG_DIR: '/r' } }, { CLAUDE_CONFIG_DIR: '/x' })).toBe('/r')
     expect(launchConfigRoot({}, { CLAUDE_CONFIG_DIR: '/x' })).toBe('/x')

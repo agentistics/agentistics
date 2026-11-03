@@ -44,7 +44,7 @@ type LiveUsageSample = { tokens: number; at: number; model: string; harness: Har
 const liveUsage = new Map<string, LiveUsageSample>()
 /** The account a transcript path resolved to, per session: one root scan per session, not per request.
  *  `viaDefault`: the account came from the default home's binding (a guess), not an explicit root. */
-const pathAccounts = new Map<string, { harness: HarnessId; account: string; viaDefault: boolean }>()
+const pathAccounts = new Map<string, { harness: HarnessId; account: string; viaDefault: boolean; registered?: string }>()
 const isHarnessId = (value: string): value is HarnessId => HARNESS_ORDER.some(harness => harness === value)
 
 /** One key for both the API's measured budgets and the sampler's resolved accounts. */
@@ -61,6 +61,7 @@ export const resolveLiveTranscriptPath = async (s: LiveSessionRef, bindings: Rec
   const ref = { conversationId: s.native_session_id ?? s.session_id, cwd: s.project_path }
   const prefix = `${s.harness}:`
   const roots = Object.keys(bindings).filter(k => k.startsWith(prefix) && k.length > prefix.length).map(k => k.slice(prefix.length))
+  const found: string[] = []
   // Search registered roots as well as the harness's normal home. No conversation content is read.
   for (const root of roots) {
     let path: string | null = null
@@ -77,9 +78,15 @@ export const resolveLiveTranscriptPath = async (s: LiveSessionRef, bindings: Rec
       case 'kimi': path = await readers.resolveKimiTranscript(ref, join(root, 'sessions')); break
       case 'antigravity': path = await readers.resolveAntigravityTranscript(ref, join(root, 'brain')); break
     }
-    if (path) return path
+    if (path) found.push(path)
   }
-  return readers.transcriptReaderFor(s.harness)?.resolve(ref) ?? null
+  const home = await readers.transcriptReaderFor(s.harness)?.resolve(ref)
+  if (home) found.push(home)
+  // An account switch COPIES the transcript, so the same conversation can sit under several roots:
+  // the live one is the copy written to most recently, never whichever root is listed first.
+  if (found.length < 2) return found[0] ?? null
+  const stamped = await Promise.all([...new Set(found)].map(async p => ({ p, m: (await stat(p).catch(() => null))?.mtimeMs ?? 0 })))
+  return stamped.sort((a, b) => b.m - a.m)[0]!.p
 }
 let liveTranscriptPath = resolveLiveTranscriptPath
 /** Tests only: avoid looking for transcripts in the owner's home. */
@@ -131,6 +138,8 @@ export async function sampleLivePlanSessions(
     {
       const retiredIds = new Set(registry.accounts.filter(a => a.retired).map(a => a.id))
       let known = pathAccounts.get(s.session_id)
+      // A switch keeps the conversation id but changes the registered account: the cached path answer is stale.
+      if (known && known.registered !== registered) { pathAccounts.delete(s.session_id); known = undefined }
       // A default-home attribution cached while the account was active is stale once it retires.
       if (known?.viaDefault && retiredIds.has(known.account)) { pathAccounts.delete(s.session_id); known = undefined }
       if (known && known.harness === s.harness) account = known.account
@@ -138,7 +147,7 @@ export async function sampleLivePlanSessions(
         const path = await liveTranscriptPath(s, registry.bindings).catch(() => null)
         const hit = path ? attributeAtPath(s.harness, path, registry.bindings, retiredIds) : undefined
         account = hit?.account
-        if (hit) pathAccounts.set(s.session_id, { harness: s.harness, account: hit.account, viaDefault: hit.viaDefault })
+        if (hit) pathAccounts.set(s.session_id, { harness: s.harness, account: hit.account, viaDefault: hit.viaDefault, registered })
       }
       // The ROOT the session really runs under (where its transcript sits) outranks the account it was
       // REGISTERED on: usage lands on the login that is spending it, never on a label that went stale.
@@ -520,8 +529,13 @@ export function watchPlanLimitsFile(): () => void {
  */
 export async function attributeReading(harness: HarnessId, root: string | null): Promise<string | null> {
   let bindings: Record<string, string> = {}
-  try { bindings = (await readAccounts()).bindings } catch { /* unreadable registry: as if empty */ }
-  return bindings[`${harness}:${root ?? ''}`] ?? (root === null ? 'default' : null)
+  let retired = new Set<string>()
+  try { const r = await readAccounts(); bindings = r.bindings; retired = new Set(r.accounts.filter(a => a.retired).map(a => a.id)) } catch { /* unreadable registry: as if empty */ }
+  const bound = bindings[`${harness}:${root ?? ''}`]
+  // The default home's binding is a guess about whoever signed in last: a retired account says nothing
+  // (the sampler's `attributeAtPath` applies the same rule). An explicit root's binding always stands.
+  if (bound && !(root === null && retired.has(bound))) return bound
+  return root === null ? 'default' : null
 }
 
 /** Ingest a reading from `root` once attributed; dropped when the account cannot be determined. */
@@ -616,7 +630,9 @@ export async function reconcileAccount(harness: HarnessId, registered: string | 
   let real: string | null = null
   try { real = await attributeReading(harness, root) } catch { /* unreadable registry: keep the registered account */ }
   if (!real || real === 'default') return registered ?? (real ?? undefined)
-  if (registered && registered !== real) {
+  const warnKey = `${session ?? ''}|${registered}|${real}`
+  if (registered && registered !== real && !warnedDivergence.has(warnKey)) {
+    warnedDivergence.add(warnKey)
     console.warn(`[plan-limits] session${session ? ` ${session}` : ''} is registered on account ${registered} but runs under ${root ?? 'the default home'} (${real}); attributing the reading to ${real}`)
   }
   return real
