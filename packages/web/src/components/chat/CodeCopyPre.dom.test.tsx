@@ -22,6 +22,7 @@ beforeAll(async () => {
 })
 beforeEach(() => {
   written = []
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (t: string) => { written.push(t) } } })
   host = document.createElement('div'); document.body.appendChild(host)
   root = createRoot(host)

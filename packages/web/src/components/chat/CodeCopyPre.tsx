@@ -9,7 +9,7 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, Copy } from 'lucide-react'
-import { copyText } from '../../lib/copyText'
+import { copyText } from '../../lib/clipboard'
 
 export const COPY_LABEL = { en: 'Copy', pt: 'Copiar' }
 export const COPIED_LABEL = { en: 'Copied', pt: 'Copiado' }

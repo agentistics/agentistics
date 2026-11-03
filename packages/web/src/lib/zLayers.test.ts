@@ -54,11 +54,11 @@ describe('the area-tree drawer covers the whole top bar (MENU.LATERAL-ATRAS)', (
     expect(ASIDE_DRAWER_Z).toBeLessThan(NAY_FAB_Z)
   })
 
-  test('the stylesheet token equals the scale and the open aside takes it, with a scrim on a phone', () => {
+  test('the stylesheet token equals the scale and the open aside takes it, with a scrim on touch devices', () => {
     const css = read('index.css')
     expect(css).toContain(`--ag-z-drawer: ${ASIDE_DRAWER_Z};`)
     expect(css).toMatch(/\[data-app-aside\]:has\(\[data-area-rail\]\[data-open="true"\]\) \{ z-index: var\(--ag-z-drawer\) !important; \}/)
-    expect(css).toMatch(/\[data-app-aside\]:has\([^)]*\)::before \{[^}]*background: var\(--ag-scrim\)/)
+    expect(css).toMatch(/@media \(hover: none\) and \(pointer: coarse\) \{\s*\[data-app-aside\]:has\([^)]*\)::before \{[^}]*background: var\(--ag-scrim\)/)
   })
 
   test('the top bar and the aside take their tiers from the scale', () => {

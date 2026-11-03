@@ -654,7 +654,8 @@ textarea,
 
 /* Copy button on a fenced block: touch devices always see it, a pointer device on hover/focus. */
 .ag-code-block { position: relative; max-width: 100%; user-select: text; -webkit-user-select: text; }
-.ag-code-block > pre { user-select: text; -webkit-user-select: text; }
+.ag-code-block > pre { user-select: text; -webkit-user-select: text; padding-top: 30px; } /* the chip's strip: it never covers code */
+.ag-chat-md > .ag-code-block:last-child > pre { margin-bottom: 0; }
 .ag-code-copy {
   position: absolute; top: 0; right: 0; display: flex; align-items: flex-start; justify-content: flex-end;
   min-width: 44px; min-height: 44px; padding: 5px; border: none; background: transparent;
@@ -1491,9 +1492,11 @@ tr:focus-within .ag-row-actions,
 
 /* MENU.LATERAL-ATRAS: while the area-tree drawer is open the whole aside rises above the top bar (session tab,
    "needs you" notice), and a scrim darkens everything behind it. `z-index: -1` keeps the scrim under the
-   aside's own content but inside its stacking context, so it still covers the top bar. */
+   aside's own content but inside its stacking context, so it still covers the top bar. The scrim is for touch
+   devices (the tree opens by tap there and has no hover to dismiss it); a pointer device keeps the plain hover tree.
+   NOTE: the aside is mounted from 768px up (`!isMobile`); below that the phone navigates by MobileAreaBar's sheet. */
 [data-app-aside]:has([data-area-rail][data-open="true"]) { z-index: var(--ag-z-drawer) !important; }
-@media (max-width: 767px) {
+@media (hover: none) and (pointer: coarse) {
   [data-app-aside]:has([data-area-rail][data-open="true"])::before {
     content: ''; position: fixed; inset: 0; z-index: -1; background: var(--ag-scrim); pointer-events: none;
   }
