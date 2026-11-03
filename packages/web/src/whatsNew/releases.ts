@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.197.0': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Depois de atualizar, o app abre uns 2 segundos depois de o servidor voltar, na mesma tela em que você estava, sem ficar preso em "acabou de reiniciar… já vai abrir" e sem tela de erro, mesmo com refresh no meio.',
+        en: 'After an update the app opens about 2 seconds after the server is back, on the same screen you were on, without getting stuck on "just restarted… opening soon" and without an error screen, even if you refresh in the middle.',
+      },
+    ],
+  },
   '2.196.0': {
     features: [],
     fixes: [
