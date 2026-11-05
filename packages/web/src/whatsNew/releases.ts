@@ -10,6 +10,32 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.198.0': {
+    features: [
+      {
+        pt: 'OpenCode 2.x: as sessões da versão nova (inclusive as abertas no terminal do OpenCode) voltam a aparecer e abrem com o histórico completo.',
+        en: 'OpenCode 2.x: sessions from the new version (including ones opened in the OpenCode terminal) show up again and open with their full history.',
+      },
+      {
+        pt: 'OpenCode 2.x: dá para trocar de modelo no meio da conversa e escolher o nível de esforço.',
+        en: 'OpenCode 2.x: you can switch models mid-conversation and pick the effort level.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'OpenCode 2.x: quando o provedor fica tentando de novo sem parar, o turno travado é parado e as mensagens na fila voltam a andar.',
+        en: 'OpenCode 2.x: when the provider keeps retrying forever, the stuck turn is stopped and queued messages move again.',
+      },
+      {
+        pt: 'Se o OpenCode não puder ser lido, aparece um aviso dizendo o que fazer, em vez de uma lista vazia sem explicação.',
+        en: 'If OpenCode cannot be read, a notice says what to do instead of an empty list with no explanation.',
+      },
+      {
+        pt: 'Ligações: o cartão da chamada mostra o nome da sessão e o botão Voltar tem o tamanho certo.',
+        en: 'Calls: the live call card shows the session name and the Back button has the right size.',
+      },
+    ],
+  },
   '2.197.3': {
     features: [],
     fixes: [
