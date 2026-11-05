@@ -13,7 +13,7 @@ import { realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { readPreferences } from '../preferences'
 import { planFiling, type FilingPlan, type FilingRepo } from './spawn-filing'
-import { planAttach } from './task-attach'
+import { LEADER_ONLY_MESSAGE, planAttach } from './task-attach'
 import { readRegistry } from './registry'
 import { repoFacts } from './repo-facts'
 import type { ManagedSession } from './types'
@@ -163,7 +163,15 @@ export async function planReopenCwd(
 
 /** Workers fail fast. Persons and hand-offs spawn first, then report the board's attach refusal. */
 function checkAttach(plan: FilingPlan, book: Pick<TaskBook, 'tasks' | 'subtasks'>): FilingPlan {
-  if (!plan.ok || plan.role !== 'worker' || !plan.taskId || !plan.subtaskId) return plan
+  if (!plan.ok || plan.role !== 'worker' || !plan.taskId) return plan
+  if (!plan.subtaskId) {
+    // Only a leader is filed on the task itself. A worker that merely INHERITED the task from its
+    // parent starts unfiled (never auto-assigned a subtask) with a warning; one that NAMED the task
+    // alone is refused.
+    if (!plan.taskInherited) return { ok: false, code: 'worker_needs_subtask', detail: LEADER_ONLY_MESSAGE }
+    const { taskId: _t, taskTitle: _tt, taskInherited: _i, ...rest } = plan
+    return { ...rest, warnings: [...plan.warnings, 'inherited_task_needs_subtask'] }
+  }
   const a = planAttach({
     target: { kind: 'subtask', id: plan.subtaskId },
     taskIds: book.tasks.map(t => t.id),

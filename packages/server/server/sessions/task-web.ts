@@ -27,7 +27,7 @@ import {
   type Task, type TaskEvent, type TaskStatus,
 } from './task-model'
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
-import { checkParentGroup, planAttach, sanitizeSubtaskBlockedBy } from './task-attach'
+import { LEADER_ONLY_MESSAGE, checkParentGroup, directFilingAllowed, planAttach, sanitizeSubtaskBlockedBy } from './task-attach'
 import { planMove } from './task-rank'
 import { resolveAttachmentRead } from './attachment-web'
 import { commentTargetPhrase, planCommentTarget, type CommentTargetRefusal } from './task-comment'
@@ -919,7 +919,9 @@ export type AttachResult =
   | {
     ok: false
     reason: 'no_such_task' | 'no_such_session' | 'no_such_subtask' | 'needs_subtask'
-      | 'wrong_delivery' | 'blocked' | 'subtask_in_group'
+      | 'wrong_delivery' | 'blocked' | 'subtask_in_group' | 'leader_only'
+    /** Sentence for `leader_only`. */
+    message?: string
     /** Set only for `reason: 'blocked'` — the subtask ids still open. */
     blockedBy?: readonly string[]
   }
@@ -942,6 +944,14 @@ export async function attachSession(
   // historical link has no row to patch (it is refiled through `attachConversation`).
   const row = w.registryRows.find(r => r.id === sessionId)
   if (!row) return { ok: false, reason: 'no_such_session' }
+
+  // Only a leader is filed on the task itself; a worker must name a subtask.
+  if (!o.subtaskId) {
+    const { effectiveRole } = await import('./session-roles')
+    if (!directFilingAllowed(await effectiveRole(row))) {
+      return { ok: false, reason: 'leader_only', message: LEADER_ONLY_MESSAGE }
+    }
+  }
 
   // Direct filing under the task is allowed too — `o.subtaskId` is optional. `planAttach` decides
   // the pair either way, which is what makes this a MOVE rather than an add: filing under a
