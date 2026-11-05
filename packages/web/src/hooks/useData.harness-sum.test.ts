@@ -64,3 +64,37 @@ describe('projection overlay never mixes an empty projection into a populated sc
     expect(overlayProjected(null, empty)).toBeNull()
   })
 })
+
+describe('union = sum with per-harness projection coverage (A1 guard)', () => {
+  const blendedOf = () => ({ input: 3, cacheRead: 0.3, cacheWrite: 3.75 })
+  /** A projection that covers Codex alone: it reports exactly what the legacy figures say for Codex. */
+  const projectionOf = (d: ReturnType<typeof run>, covered: string[]): ProjectedDerived => ({
+    totalSessions: d.totalSessions, totalCostUSD: d.totalCostUSD, modelUsage: d.modelUsage, tokenTotals: d.tokenTotals,
+    inputTokens: d.tokenTotals.input, outputTokens: d.tokenTotals.output, toolCounts: d.toolCounts, totalToolCalls: d.totalToolCalls,
+    projectStats: d.projectStats, cacheTotals: d.cacheTotals, cacheHitRate: d.cacheHitRate, cacheGrossSavedUSD: 0,
+    cacheWriteOverheadUSD: 0, cacheNetSavedUSD: 0, cachePerModel: d.cachePerModel, coveredHarnesses: covered, figuresSource: 'projections',
+  }) as unknown as ProjectedDerived
+  const view = (h: SurfaceHarnessId[], projected: ProjectedDerived | null) => {
+    const legacy = run(h)
+    const candidates = h.length ? h : ['claude', 'codex', 'opencode']
+    return overlayProjected(legacy, projected, { candidates, blendedOf, legacyFor: x => computeDerivedStats(data, { ...base, harnesses: [x as SurfaceHarnessId] }) })!
+  }
+  test('Codex covered, OpenCode has no projection: the union equals the sum, in sessions, messages, tokens and cost', () => {
+    const codexProjection = projectionOf(run(['codex']), ['codex'])
+    const codex = view(['codex'], codexProjection)
+    const zero = { ...run(['opencode']), totalSessions: 0, totalCostUSD: 0, modelUsage: {}, tokenTotals: { ...run(['opencode']).tokenTotals, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, toolCounts: {}, totalToolCalls: 0, projectStats: {} }
+    const open = view(['opencode'], projectionOf(zero as never, []))
+    const both = view(['codex', 'opencode'], codexProjection)
+    expect(open.totalSessions).toBe(run(['opencode']).totalSessions)
+    expect(both.totalSessions).toBe(codex.totalSessions + open.totalSessions)
+    expect(both.totalSessions).toBe(4)
+    expect(both.totalMessages).toBe(codex.totalMessages + open.totalMessages)
+    expect(both.tokenTotals.input).toBe(codex.tokenTotals.input + open.tokenTotals.input)
+    expect(both.totalCostUSD).toBeCloseTo(codex.totalCostUSD + open.totalCostUSD, 9)
+    expect(both.totalToolCalls).toBe(codex.totalToolCalls + open.totalToolCalls)
+  })
+  test('both covered: the projection is used as is', () => {
+    const p = projectionOf(run(['codex', 'opencode']), ['codex', 'opencode'])
+    expect(view(['codex', 'opencode'], p).totalSessions).toBe(p.totalSessions)
+  })
+})
