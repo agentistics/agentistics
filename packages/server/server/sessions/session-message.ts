@@ -46,6 +46,8 @@ export interface SenderTask {
 
 export interface MessageDeps {
   rows: () => Promise<readonly FleetRowForGroups[]>
+  /** References kept in a worker's briefing follow a replaced parent's current successor. */
+  resolveTarget?: (reference: string) => Promise<string>
   /** Type the text into one row through the composer's send path. */
   prompt: (rowId: string, text: string) => Promise<{ ok: boolean; message?: string; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
   /** The task/subtask the sender is filed on, from the registry. */
@@ -122,7 +124,8 @@ export async function sendSessionMessage(
   if (req.awaiting !== undefined && req.awaiting !== null && (typeof req.awaiting !== 'string' || (awaiting && (kind !== 'handback' || /[\r\n]/.test(awaiting) || [...awaiting].length > AWAITING_MAX)))) return fail('bad_awaiting')
 
   const rows = await deps.rows().catch(() => [] as FleetRowForGroups[])
-  const r = resolveSessionForGroup(rows, to)
+  const currentTo = deps.resolveTarget ? await deps.resolveTarget(to).catch(() => to) : to
+  const r = resolveSessionForGroup(rows, currentTo)
   if (!r.ok) return fail(r.code, undefined, r.matches)
   const target = r.session
   if (target.id === senderId || (target.conversationId && target.conversationId === senderId)) return fail('self')
@@ -178,6 +181,15 @@ export function messageStatus(out: MessageReply): number {
 export async function defaultMessageDeps(): Promise<MessageDeps> {
   return {
     rows: async () => (await (await import('./fleet-web')).readFleet('en')).rows,
+    resolveTarget: async reference => {
+      const { readRegistry } = await import('./registry')
+      const { currentLeaderId } = await import('./team-links')
+      const rows = await readRegistry()
+      // Resolve against the registry as well: the retired parent can already be absent from
+      // the fleet. Follow managed/conversation ids and their usual reference syntax.
+      const found = resolveSessionForGroup(rows.map(r => ({ ...r, title: r.label ?? r.id })), reference)
+      return found.ok ? currentLeaderId(rows, found.session.id) : reference
+    },
     prompt: async (rowId, text) => {
       const { runFleetAction } = await import('./fleet-web')
       const out = await runFleetAction('en', { action: 'prompt', id: rowId, text })
