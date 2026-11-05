@@ -6,6 +6,7 @@ import type { HealthIssue, SessionMeta, StatsCache } from '@agentistics/core'
 import { PROJECTS_DIR, STATS_CACHE_FILE } from './config'
 import { safeReadDir, safeStat, safeReadJson } from './utils'
 import { getEnabledAdapters } from './adapters/types'
+import { getOpencodeReadIssue } from './adapters/opencode-status'
 import type { JournalStatus, JournalDisabledReason } from './journal/types'
 
 const execAsync = promisify(exec)
@@ -132,6 +133,18 @@ export function analyzeJournalStatus(status: JournalStatus | null, issues: Healt
       ].join(' '),
     })
   }
+}
+
+/** The OpenCode reader's last failure sentence (adapters/opencode-status.ts) as a health issue. */
+export function analyzeOpencodeStatus(description: string | null, issues: HealthIssue[]): void {
+  if (!description) return
+  issues.push({
+    id: 'opencode-unreadable',
+    severity: 'warning',
+    title: 'OpenCode sessions cannot be read',
+    description,
+    guide: 'OpenCode sessions, tokens and cost are missing from the dashboard until this is fixed.\nOpenCode 2.x is read through its background service (`opencode service status`); 1.x through opencode.db.',
+  })
 }
 
 export async function runHealthChecks(): Promise<HealthIssue[]> {
@@ -279,6 +292,9 @@ export async function runHealthChecks(): Promise<HealthIssue[]> {
   // itself is defensive (see readJournalStatus), so a throwing or unregistered source never
   // breaks the checks above it.
   analyzeJournalStatus(readJournalStatus(), issues)
+
+  // 6b. OpenCode: a store or service the reader cannot read is reported, never shown as "0 sessions".
+  if (enabledIds.has('opencode')) analyzeOpencodeStatus(getOpencodeReadIssue(), issues)
 
   // 7. What the engine contributes, when one is loaded.
   await appendEngineHealth(issues)
