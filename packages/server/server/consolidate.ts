@@ -5,6 +5,7 @@ import { CONSOLIDATED_DIR } from './config'
 import { createLimiter, safeReadDir, safeReadJson } from './utils'
 import { HARNESS_ORDER, migrateAgentMetrics, normalizeSessionTimes, coerceSessionLists } from '@agentistics/core'
 
+let coldReadStarted = false
 const writeLimit = createLimiter(20)
 const readyDirs = new Set<string>()
 
@@ -141,6 +142,9 @@ async function readRecordFile(path: string, stamp: string | null): Promise<Sessi
  *  onto what they are given (the git_remote backfill), and the remembered record must stay what the
  *  file says. Nothing writes into a nested field of a session. */
 export async function loadConsolidated(opts: { skipIds?: ReadonlySet<string> } = {}): Promise<Map<string, SessionMeta>> {
+  const started = performance.now()
+  const cold = !coldReadStarted
+  coldReadStarted = true
   const map = new Map<string, SessionMeta>()
   const limit = createLimiter(40)
   // Per-harness subdirs + legacy flat files (treated as claude)
@@ -168,5 +172,20 @@ export async function loadConsolidated(opts: { skipIds?: ReadonlySet<string> } =
     if (byId.has(s.session_id) || opts.skipIds?.has(s.session_id)) continue
     byId.set(s.session_id, { ...s })
   }
+  if (cold) console.log(`[boot-history] consolidated: ${map.size} records in ${Math.round(performance.now() - started)} ms`)
   return byId
+}
+
+/** Exact stored identity for a bookmarked chat: no full-store scan on the recent boot window. */
+export async function loadConsolidatedSession(sessionId: string): Promise<SessionMeta | null> {
+  const limit = createLimiter(1)
+  const paths = [
+    ...HARNESS_ORDER.map(h => consolidatedPath(h, sessionId)),
+    join(CONSOLIDATED_DIR, `${sessionId.replace(/[/\\]/g, '_')}.json`),
+  ]
+  for (const path of paths) {
+    const s = await readRecord(path, limit)
+    if (s?.session_id === sessionId) return { ...s }
+  }
+  return null
 }

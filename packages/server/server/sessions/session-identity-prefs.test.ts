@@ -40,7 +40,7 @@ const row = (id: string, conversationId?: string) => ({
 describe('session identity preferences', () => {
   test('the production registry used by server link callbacks is wrapped', async () => {
     const source = await readFile(new URL('./registry.ts', import.meta.url), 'utf8')
-    expect(source).toContain('const defaultRegistry = withIdentityPreferences(createSessionRegistry(MANAGED_SESSIONS_FILE))')
+    expect(source).toContain('const defaultRegistry = withIdentityPreferences(createSessionRegistry(MANAGED_SESSIONS_FILE), undefined, {')
   })
 
   test('notifies once for a change and preserves a newer destination layout', async () => {
@@ -143,4 +143,52 @@ describe('session identity preferences', () => {
       expect(await failing.patch('absent', { conversationId: 'x' })).toBe(false)
     } finally { await rm(dir, { recursive: true, force: true }) }
   })
+})
+
+
+test('production registry reads return while startup identity repair is still pending', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'folder-rekey-'))
+  let finish!: () => void
+  const gate = new Promise<void>(r => { finish = r })
+  try {
+    const raw = createSessionRegistry(join(dir, 'sessions.json'))
+    await raw.add(row('mid', 'conv'))
+    let repairs = 0
+    const registry = withIdentityPreferences(raw, async () => { repairs++; await gate }, { backgroundReadRepair: true })
+    const deadline = new Promise<'blocked'>(r => setTimeout(() => r('blocked'), 100))
+    const first = await Promise.race([registry.read(), deadline])
+    expect(first).not.toBe('blocked')
+    expect(await registry.read()).toEqual([row('mid', 'conv')])
+    expect(repairs).toBe(1)
+  } finally {
+    finish()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+
+test('writes during background repair wait for it, then repair their durable new link', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'folder-rekey-'))
+  let finish!: () => void
+  const gate = new Promise<void>(r => { finish = r })
+  try {
+    const raw = createSessionRegistry(join(dir, 'sessions.json'))
+    await raw.add(row('mid', 'old'))
+    const events: string[] = []
+    const registry = withIdentityPreferences(raw, async rows => {
+      const id = rows[0]!.conversationId
+      events.push(`repair:${id}`)
+      if (id === 'old') await gate
+    }, { backgroundReadRepair: true, onReadRepair: () => { events.push('refresh') } })
+    await registry.read()
+    let written = false
+    const write = registry.patch('mid', { conversationId: 'next' }).then(() => { written = true })
+    await new Promise(r => setTimeout(r, 10))
+    expect(written).toBe(false)
+    expect((await raw.read())[0]!.conversationId).toBe('old')
+    finish()
+    await write
+    expect(events).toEqual(['repair:old', 'refresh', 'repair:next'])
+    expect((await raw.read())[0]!.conversationId).toBe('next')
+  } finally { finish(); await rm(dir, { recursive: true, force: true }) }
 })

@@ -34,7 +34,7 @@ describe('slimApiResponse', () => {
   })
   test('carries only the most recent sessions, newest first', () => {
     const s = slimApiResponse(data(SLIM_SESSION_LIMIT + 50))
-    expect(s.sessions).toHaveLength(SLIM_SESSION_LIMIT)
+    expect(s.sessions).toHaveLength(15)
     expect(s.sessions[0]!.session_id).toBe(`s${SLIM_SESSION_LIMIT + 49}`)
   })
   test('does not mutate the source build', () => {

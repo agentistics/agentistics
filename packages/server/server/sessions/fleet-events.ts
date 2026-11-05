@@ -66,6 +66,7 @@ export const MAX_FLEET_STREAMS = 32
 
 /** The `/api/fleet` payload, as far as the stream reads it (`fleet-web.ts` `FleetPayload`). */
 export interface FleetFramePayload {
+  historyLoading?: boolean
   sessions: FleetRow[]
   rows: ControlSession[]
   attention: number
@@ -245,6 +246,7 @@ export function buildFleetFrame(p: FleetFramePayload, closedLimit: number): Flee
   }
   const metaValues: Record<string, unknown> = {
     attention: p.attention,
+    ...(p.historyLoading !== undefined ? { historyLoading: p.historyLoading } : {}),
     tasks: p.tasks,
     finishedTasks: p.finishedTasks,
     closedTotal,

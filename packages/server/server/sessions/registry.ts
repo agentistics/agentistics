@@ -575,7 +575,15 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
 }
 
 /** The registry this machine actually uses. */
-const defaultRegistry = withIdentityPreferences(createSessionRegistry(MANAGED_SESSIONS_FILE))
+const defaultRegistry = withIdentityPreferences(createSessionRegistry(MANAGED_SESSIONS_FILE), undefined, {
+  backgroundReadRepair: true,
+  onReadRepair: async () => {
+    const { broadcastSessionGroupsChanged } = await import('../sse')
+    broadcastSessionGroupsChanged()
+    const { processSessionHub } = await import('./session-hub')
+    void processSessionHub()?.refresh().catch(() => {})
+  },
+})
 
 export const readRegistry = (): Promise<ManagedSession[]> => defaultRegistry.read()
 export const adoptSessionRecords = (rs: readonly ManagedSession[]): Promise<void> => defaultRegistry.adopt(rs)

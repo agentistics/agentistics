@@ -134,6 +134,7 @@ export interface SessionsAsideProps {
   finishedTasks: readonly string[]
   /** True until the first poll answers — an empty list before then is "not asked yet". */
   loading: boolean
+  historyLoading?: boolean
   /** Ended conversations the live view did not send: an empty list is not "no sessions" then. */
   closedTotal?: number
   /** This machine may not be asked at all: a central, or a profile with no host power. */
@@ -287,7 +288,7 @@ function roleExtras(row: ControlSession | undefined, pt: boolean): MenuEntry[] {
 }
 
 export function SessionsAside({
-  lang, capacity, rows, loading, closedTotal = 0, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
+  lang, capacity, rows, loading, historyLoading = false, closedTotal = 0, unsupported, unavailable, filters, activeOnly, finishedTasks, stale,
   onOpenRow, hideNew, rowsById, act, filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
   onCreated, selectedId, onGoToSession, extraTabs,
 }: SessionsAsideProps) {
@@ -1786,6 +1787,11 @@ export function SessionsAside({
           Deliberately NOT `--accent-red`: nothing has failed in the seeded case, and in the stale
           case the machine being unreachable is a fact about the connection, not a fault in the
           fleet. Same reasoning the cockpit's central pill applies to `stale`. */}
+      {historyLoading && (
+        <div role="status" style={{ position: 'absolute', bottom: 8, left: 8, right: 8, zIndex: 3, padding: '8px 10px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)' }}>
+          {pt ? 'Carregando o resto das sessões… Busca e filtros ainda podem ter resultados parciais.' : 'Loading the remaining sessions… Search and filters may still show partial results.'}
+        </div>
+      )}
       {stale && (
         <p role="status" style={{
           display: 'flex', alignItems: 'flex-start', gap: 6,
@@ -1816,7 +1822,7 @@ export function SessionsAside({
         ref={asideScrollRef}
         data-mobile-sessions-scroll={isMobile || undefined}
         className="ag-noscroll"
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', display: extra ? 'flex' : undefined, flexDirection: extra ? 'column' : undefined }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingBottom: historyLoading ? 96 : undefined, display: extra ? 'flex' : undefined, flexDirection: extra ? 'column' : undefined }}
         onDragOverCapture={autoScrollDuringDrag}
         // LEAVING A FOLDER: a nested folder dragged by its body and dropped ANYWHERE that is not a
         // folder (blank space, a heading, the pinned band, the automatic sections) comes back out
@@ -1909,7 +1915,7 @@ export function SessionsAside({
             )}
             {shownTeams.length === 0 && shownLoose.length === 0 && (
               <EmptyReason
-                pt={pt} loading={loading} unsupported={unsupported} unavailable={unavailable}
+                pt={pt} loading={loading || historyLoading} unsupported={unsupported} unavailable={unavailable}
                 leadersOnly={leadersOnly} searching={narrowedLive}
                 withheld={Math.max(valueFiltered.filter(r => !active.has(r.state)).length, closedTotal)}
                 withheldInTab

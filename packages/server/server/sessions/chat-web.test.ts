@@ -326,3 +326,45 @@ test('the reader is told the conversations the OTHER rows own, never its own', a
   expect(owners.has(B)).toBe(true)
   expect(owners.has(A)).toBe(false)
 })
+
+
+test('a bookmarked managed chat outside the initial window resolves its exact id without history', async () => {
+  const { createSessionRegistry } = await import('./registry')
+  const { MANAGED_SESSIONS_FILE } = await import('../config')
+  const registry = createSessionRegistry(MANAGED_SESSIONS_FILE)
+  const id = 'boot-bookmarked-chat'
+  await registry.add({ id, harness: 'codex', cwd: NO_PROJECT, createdAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-02T00:00:00Z', conversationId: 'exact-bookmark' })
+  let resolved: unknown
+  try {
+    const host = { sessions: async () => ({ sessions: [], historyLoading: true }) } as never
+    const reader = (() => ({
+      resolve: async (ref: unknown) => { resolved = ref; return '/boot/bookmarked-chat' },
+      read: async () => ({ turns: [{ role: 'user', text: 'old conversation' }], older: false }),
+    })) as never
+    const out = await readSessionChat(host, 'en', id, reader)
+    expect(resolved).toMatchObject({ conversationId: 'exact-bookmark', cwd: NO_PROJECT })
+    expect(out.unavailable).toBeUndefined()
+    expect(out.turns[0]!.text).toBe('old conversation')
+  } finally { await registry.remove(id) }
+})
+
+
+test('a bookmarked closed chat reads its single stored identity while the history scan is pending', async () => {
+  const { writeConsolidated } = await import('../consolidate')
+  const { rm } = await import('node:fs/promises')
+  const { consolidatedPath } = await import('../consolidate')
+  const sessionId = 'boot-closed-bookmark'
+  await writeConsolidated([{ session_id: sessionId, harness: 'codex', project_path: NO_PROJECT, start_time: '2026-01-01T00:00:00Z' } as never])
+  let resolved: unknown
+  try {
+    const host = { sessions: async () => ({ sessions: [], historyLoading: true }) } as never
+    const reader = (() => ({
+      resolve: async (ref: unknown) => { resolved = ref; return '/boot/closed-bookmarked-chat' },
+      read: async () => ({ turns: [{ role: 'user', text: 'closed conversation' }], older: false }),
+    })) as never
+    const out = await readSessionChat(host, 'en', `closed:${sessionId}`, reader)
+    expect(resolved).toMatchObject({ conversationId: sessionId, cwd: NO_PROJECT })
+    expect(out.turns[0]!.text).toBe('closed conversation')
+    expect(out.unavailable).toBeUndefined()
+  } finally { await rm(consolidatedPath('codex', sessionId)) }
+})

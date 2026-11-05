@@ -86,12 +86,14 @@ export async function rekeySessionIdentities(
 }
 
 /** The production registry's link boundary: all server/CLI writers share this wrapper.
- * The first read repairs old links once, before the fleet publishes its snapshot. Raw registry
+ * The first read repairs old links once. Production reads let the repair finish in the background;
+ * writes still await their own repair after the registry link is durable. Raw registry
  * operations stay independent of preferences (including tests and their temporary registries).
  */
 export function withIdentityPreferences(
   registry: SessionRegistry,
   rekey: (rows: readonly ConversationIdentity[]) => Promise<void> = rekeySessionIdentities,
+  options: { backgroundReadRepair?: boolean; onReadRepair?: () => void | Promise<void> } = {},
 ): SessionRegistry {
   const repair = (rows: readonly ConversationIdentity[]) => Promise.resolve().then(() => rekey(rows)).catch(() => {})
   let healed: Promise<void> | undefined
@@ -99,31 +101,46 @@ export function withIdentityPreferences(
     ...registry,
     async read() {
       const rows = await registry.read()
-      healed ??= repair(rows)
-      await healed
+      healed ??= (() => {
+        const started = performance.now()
+        return repair(rows).finally(async () => {
+          if (options.backgroundReadRepair) console.log(`[boot-fleet] identity repair (background): ${Math.round(performance.now() - started)} ms`)
+          await Promise.resolve().then(options.onReadRepair).catch(() => {})
+        })
+      })()
+      if (!options.backgroundReadRepair) await healed
       return rows
     },
+    async remove(id) {
+      await healed
+      return registry.remove(id)
+    },
     async add(row) {
+      await healed
       await registry.add(row)
       await repair([row])
     },
     async adopt(rows) {
+      await healed
       await registry.adopt(rows)
       // Adoption fills missing fields; use the actual persisted links, not stale input records.
       const ids = new Set(rows.map(r => r.id))
       await repair((await registry.read()).filter(r => ids.has(r.id)))
     },
     async patch(id, patch) {
+      await healed
       const matched = await registry.patch(id, patch)
       if (matched && patch.conversationId) await repair([{ id, conversationId: patch.conversationId }])
       return matched
     },
     async link(id, patch, opts) {
+      await healed
       const outcome = await registry.link(id, patch, opts)
       if (outcome.ok) await repair([{ id, conversationId: patch.conversationId }])
       return outcome
     },
     async patchMany(ids, patch) {
+      await healed
       const matched = await registry.patchMany(ids, patch)
       if (matched && patch.conversationId) {
         const wanted = new Set(ids)

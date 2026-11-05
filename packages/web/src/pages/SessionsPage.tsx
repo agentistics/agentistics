@@ -3200,6 +3200,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             rows={fleet.rows}
             finishedTasks={fleet.finishedTasks}
             loading={loading}
+            historyLoading={fleet.historyLoading}
             closedTotal={fleet.closedTotal ?? 0}
             unsupported={unsupported}
             filters={filters}
