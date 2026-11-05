@@ -539,6 +539,18 @@ describe('opencode (1.19.5, measured 2026-10-31 under tmux)', () => {
     expect(harnessOfProcess('opencode', EXE, ['opencode', 'attach', 'http://127.0.0.1:4096'])).toBe('opencode')
     expect(harnessOfProcess('opencode', EXE, ['opencode', '/home/u/proj'])).toBe('opencode')
   })
+  test('2.x (@opencode/cli 2.2.5): the npm native binary is identified, the service child and its verbs are infrastructure, `mini` is a conversation', () => {
+    const X = '/home/u/proj/node_modules/@opencode/cli/bin/opencode.exe'
+    expect(installedHarnessAt(X)).toBe('opencode')
+    expect(installedHarnessAt('/home/u/.nvm/lib/node_modules/@opencode/cli-darwin-arm64/bin/opencode')).toBe('opencode')
+    expect(harnessOfProcess('opencode', X, ['/home/u/proj/node_modules/.bin/opencode'])).toBe('opencode')
+    expect(harnessOfProcess('opencode', X, ['opencode', '/home/u/proj'])).toBe('opencode')
+    expect(harnessOfProcess('opencode', X, ['opencode', 'mini'])).toBe('opencode')
+    expect(harnessOfProcess('opencode', X, [X, 'serve', '--service'])).toBeUndefined()
+    for (const verb of ['service', 'api', 'pair', 'reload', 'serve', 'update', 'upgrade', 'uninstall', 'acp', 'debug', 'auth', 'mcp', 'plugin', 'models', 'stats', 'run', 'session']) {
+      expect(harnessOfProcess('opencode', X, ['opencode', verb])).toBeUndefined()
+    }
+  })
   test('`-s` / `--session` name a `ses_…` session; `-s` with any other value names nothing', () => {
     const SES = 'ses_e70797397ffeSYPpraVLuN7l9J'
     expect(sessionIdFromArgv(['opencode', '-s', SES])).toBe(SES)

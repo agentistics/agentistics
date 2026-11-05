@@ -1165,9 +1165,11 @@ export function createSessionsPoller(o: {
       // OPENCODE.RESTO — an EXTERNAL opencode (a TUI opened by hand) states its activity from opencode.db: exact, so
       // its row reads working / waiting before anyone takes it over. Harnesses with no such store reading stay unknown.
       const externalActivity = new Map<string, SessionActivity>()
+      const v2 = processes.some(p => p.harness === 'opencode' && p.sessionId) ? await import('./opencode-v2-io').then(m => m.isOpencodeV2Now() ? m : null).catch(() => null) : null
       for (const p of processes) {
         if (p.harness !== 'opencode' || !p.sessionId || externalActivity.has(p.sessionId)) continue
-        const a = readOpencodeActivity(opencodeDbPath(), p.sessionId)
+        // 2.x: the service says whether a turn runs; the 1.x tables are frozen there and are never read.
+        const a = v2 ? await (await import('./opencode-v2-api')).opencodeV2Activity(p.sessionId, v2.opencodeV2Io()).catch(() => null) : readOpencodeActivity(opencodeDbPath(), p.sessionId)
         if (a) externalActivity.set(p.sessionId, a)
       }
 

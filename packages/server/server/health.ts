@@ -6,6 +6,7 @@ import type { HealthIssue, SessionMeta, StatsCache } from '@agentistics/core'
 import { PROJECTS_DIR, STATS_CACHE_FILE } from './config'
 import { safeReadDir, safeStat, safeReadJson } from './utils'
 import { getEnabledAdapters } from './adapters/types'
+import { opencodeV2Status, type OpencodeV2Status } from './sessions/opencode-v2-api'
 import type { JournalStatus, JournalDisabledReason } from './journal/types'
 
 const execAsync = promisify(exec)
@@ -134,8 +135,33 @@ export function analyzeJournalStatus(status: JournalStatus | null, issues: Healt
   }
 }
 
+/** How long a failed read of the 2.x service keeps the warning up (the fleet re-reads it every few seconds while a TUI is open). */
+export const OPENCODE_V2_STALE_MS = 60_000
+
+/**
+ * OpenCode 2.x externals are read only through the service's API. When the last read failed, the rows of TUIs opened
+ * by hand lose their session and activity — said in a sentence rather than left to vanish. PURE.
+ */
+export function analyzeOpencodeV2Status(status: OpencodeV2Status | null, now: number, issues: HealthIssue[]): void {
+  if (!status || status.reachable || now - status.at > OPENCODE_V2_STALE_MS) return
+  issues.push({
+    id: 'opencode-v2-service-unreachable',
+    severity: 'warning',
+    title: 'OpenCode sessions cannot be read',
+    description: `OpenCode 2.x sessions opened outside agentistics cannot be linked or show their activity: the OpenCode background service did not answer (${status.reason ?? 'unreachable'}).`,
+    guide: [
+      'OpenCode 2.x keeps its sessions behind a background service. To bring it back:',
+      '  - open OpenCode once in a terminal (it starts the service), or',
+      '  - run: opencode service start',
+      '',
+      'agentistics never starts that service on its own.',
+    ].join('\n'),
+  })
+}
+
 export async function runHealthChecks(): Promise<HealthIssue[]> {
   const issues: HealthIssue[] = []
+  analyzeOpencodeV2Status(opencodeV2Status(), Date.now(), issues)
 
   // Determine which harnesses are active so Claude-specific checks can be
   // skipped when only non-Claude harnesses are present.
