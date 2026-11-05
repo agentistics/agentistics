@@ -32,6 +32,7 @@ import { planCostOf } from './lib/topUsage'
 import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
 import { useProjectedDerived } from './hooks/useProjectedDerived'
+import { overlayProjected } from './lib/projectedDerived'
 import { ConfirmModal } from './pages/settings/primitives'
 import { type JournalBackfillSummary } from './lib/journalBackfill'
 import { DEFAULT_CARD_ORDER, migrateCardOrder, type CardId } from './lib/cardOrder'
@@ -2443,7 +2444,7 @@ export default function AppLayout() {
     enabled: teamSession?.projectionsWeb === true, filters, activeOnly: derivedActiveOnly, stamp: data,
   })
   const derived = useMemo(
-    () => (legacyDerived && projectedOverlay ? { ...legacyDerived, ...projectedOverlay } : legacyDerived),
+    () => overlayProjected(legacyDerived, projectedOverlay),
     [legacyDerived, projectedOverlay],
   )
 

@@ -135,3 +135,18 @@ export async function projectedDerived(
     figuresSource: 'projections',
   }
 }
+
+/**
+ * Lays the projection over the legacy answer, unless the projection does not COVER the scope.
+ *
+ * Messages, the longest session, streaks and the heatmap stay on the legacy path, so a projection
+ * that reports no session for a scope the legacy path has sessions in (a harness whose reader has
+ * not fed the journal) would show "259 messages, 0 sessions, 0 tokens" side by side, and the sum of
+ * two filters would no longer equal their union. An empty projection never overrides a non-empty
+ * legacy figure: that scope keeps the legacy figures whole, never a mix.
+ */
+export function overlayProjected<D extends { totalSessions: number }>(legacy: D | null, overlay: ProjectedDerived | null): D | null {
+  if (!legacy || !overlay) return legacy
+  if (overlay.totalSessions === 0 && legacy.totalSessions > 0) return legacy
+  return { ...legacy, ...overlay }
+}
