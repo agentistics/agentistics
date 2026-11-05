@@ -49,6 +49,7 @@ import { boardCopy, type Lang } from './copy'
 import { RailSection } from './RailSection'
 import { TaskChips, TaskMoreMenu } from './TaskChips'
 import { SubtaskTable } from './SubtaskTable'
+import { LeaderCards, TaskSessionsTab } from './TaskSessionsTab'
 import { BlockedSubtaskResolve } from './BlockedSubtaskResolve'
 import { useStagedFire } from './useStagedFire'
 import { TaskFiles } from './TaskFiles'
@@ -241,88 +242,6 @@ function AttemptCard({ a, lang }: { a: AttemptView; lang: Lang }) {
       </div>
       {cfg && <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{cfg}</div>}
       <Rollup r={a.rollup} lang={lang} />
-    </div>
-  )
-}
-
-/**
- * The task's sessions, joined against the LIVE fleet.
- *
- * The join happens here rather than on the server because the fleet is a 5s refcounted poll every
- * surface already shares: asking the task route to embed it would give the board a second, slower
- * copy of the same truth, and the two would disagree by a poll interval — which people report as
- * flicker. A row the fleet does not carry keeps its stored facts and says the state is unknown,
- * rather than claiming it finished.
- */
-function SessionsTab({ detail }: { detail: TaskDetail }) {
-  const money = useMoney()
-  const { fleet } = useFleet('en')
-  const live = useMemo(
-    () => new Map((fleet.sessions ?? []).map(r => [r.id, r])),
-    [fleet.sessions],
-  )
-  if (detail.sessions.length === 0) {
-    return (
-      <div style={{ ...surface, padding: 14, fontSize: 12.5, color: 'var(--text-tertiary)' }}>
-        No session is filed under this task yet.
-      </div>
-    )
-  }
-  return (
-    <div style={{ ...surface, overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
-        <thead>
-          <tr>{['Session', 'State', 'Harness', 'Where', 'Your prompts', 'Tokens', 'Cost', ''].map((h, i) => (
-            <th key={i} style={{ ...microLabel, textAlign: 'left', padding: '8px 10px', fontWeight: 600 }}>{h}</th>
-          ))}</tr>
-        </thead>
-        <tbody>
-          {detail.sessions.map(row => {
-            const l = live.get(row.id)
-            const st = l ? SESSION_STATE[l.state] : undefined
-            return (
-              <tr key={row.id} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '8px 10px', fontSize: 12.5, color: 'var(--text-primary)' }}>
-                  {l?.title ?? row.label ?? row.id}
-                </td>
-                <td style={{ padding: '8px 10px' }}>
-                  {st
-                    ? <span style={pill(st.color)}>{st.label}</span>
-                    // The fleet does not carry it: that is "we cannot see it now", not "it finished".
-                    : <span style={pill()}>
-                      {row.historical ? 'historical' : row.native ? 'native' : row.endedAt ? 'finished' : 'not in fleet'}
-                    </span>}
-                </td>
-                <td style={{ padding: '8px 10px' }}><span style={pill(harnessColor(row.harness))}>{row.harness}</span></td>
-                <td style={{ padding: '8px 10px', fontSize: 12, color: 'var(--text-tertiary)' }}>
-                  {row.cwd.split('/').slice(-2).join('/')}
-                </td>
-                <td style={{ padding: '8px 10px', ...numeric }}>{fmtInt(row.rounds)}</td>
-                <td style={{ padding: '8px 10px', ...numeric }}>{fmtTokens(row.tokens)}</td>
-                <td style={{ padding: '8px 10px', ...numeric }}>{money(row.costUSD, row.costUSD === null ? null : { [row.harness]: row.costUSD })}</td>
-                <td style={{ padding: '8px 10px' }}>
-                  {/* A historical conversation has no session to open — its id names nothing the
-                      Sessions workspace holds, so it gets no link rather than one that 404s. */}
-                  {row.historical ? (
-                    <span
-                      title="Historical conversation: its numbers count here, but there is no session to open."
-                      style={{ fontSize: 11.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}
-                    >no session</span>
-                  ) : (
-                  <a
-                    href={sessionPath(row.id)}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5,
-                      color: 'var(--anthropic-orange)', textDecoration: 'none', whiteSpace: 'nowrap',
-                    }}
-                  >Open <ExternalLink size={12} /></a>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
     </div>
   )
 }
@@ -1025,6 +944,9 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
             </div>
           )}
 
+          {/* The LEADERS of the task — only a leader is filed on the task itself. */}
+          <LeaderCards detail={detail} lang={lang} />
+
           {/*
            * UNDERLINE tabs (owner's choice, 2026-10-04): transparent, quiet text, and the brand
            * accent ONLY on the active tab's bottom edge — the orange-filled bar made the page's
@@ -1153,7 +1075,7 @@ export function DeliveryDetail({ id, detail, lang, reload, dense, onDeleted, tab
 
           {tab === 'about' && descriptionEditor}
 
-          {tab === 'sessions' && <SessionsTab detail={detail} />}
+          {tab === 'sessions' && <TaskSessionsTab detail={detail} lang={lang} />}
 
           {tab === 'comments' && <CommentsTab id={id} detail={detail} onChanged={reload} lang={lang} />}
 
