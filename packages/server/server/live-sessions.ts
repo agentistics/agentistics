@@ -737,6 +737,22 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
       for (const p of unlinked) { const id = linked.get(p.pid!); if (id) p.sessionId = id }
     } catch { /* best-effort: an unread log is an unlinked row, as before */ }
   }
+  // codex 0.161 holds `state_5.sqlite`, not the rollout, so an external TUI usually names no conversation by
+  // fd. Its own `threads` table does (`codex-thread-link.ts`): the thread created in this cwd at this
+  // process's start time. Same guard as opencode: only the real /proc, only unlinked processes.
+  const codexUnlinked = procs.filter(p => p.harness === 'codex' && !p.sessionId && p.pid !== undefined)
+  if (procRoot === '/proc' && codexUnlinked.length > 0) {
+    try {
+      const { readCodexProcessSessions } = await import('./sessions/codex-thread-log')
+      const taken = new Set<string>()
+      try {
+        const { readRegistry } = await import('./sessions/registry')
+        for (const m of await readRegistry()) if (m.harness === 'codex' && m.conversationId) taken.add(m.conversationId)
+      } catch { /* no registry: nothing is excluded */ }
+      const linked = await readCodexProcessSessions(codexUnlinked.map(p => ({ pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs })), undefined, taken)
+      for (const p of codexUnlinked) { const id = linked.get(p.pid!); if (id) p.sessionId = id }
+    } catch { /* best-effort: an unread state is an unlinked row, as before */ }
+  }
   const unavailable = procs.length > 0
     ? null
     : detectionUnavailable({ platform: 'linux', procReadable: true, foreignPids, cwdDenied })
