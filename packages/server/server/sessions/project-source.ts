@@ -41,12 +41,17 @@ let cache: ProjectCache | null = null
 let indexingPromise: Promise<void> | null = null
 const diskIndex = new DiskIndex()
 
+/** Test seam: Bun resolves `os.homedir()` once at startup, so a test cannot point it elsewhere. */
+let homeOverride: string | null = null
+export function setHomeForTest(path: string | null): void { homeOverride = path }
+function currentHome(): string { return homeOverride ?? homedir() }
+
 function normalPath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 }
 
 /** The home itself and temporary trees are implementation space, never places to start a session. */
-export function isExcludedProjectPath(path: string, home = homedir(), temporary = tmpdir()): boolean {
+export function isExcludedProjectPath(path: string, home = currentHome(), temporary = tmpdir()): boolean {
   const candidate = normalPath(path)
   const homeRoot = normalPath(home)
   const temporaryRoot = normalPath(temporary)
@@ -67,7 +72,7 @@ async function readHistoryAndRoots(): Promise<{ history: ProjectCandidate[]; roo
 
 function normalizeScanRoots(roots: string[]): string[] {
   return [...new Map(
-    [homedir(), ...roots.map(root => pathForHost(root, process.platform === 'win32' ? 'win32' : 'linux'))]
+    [currentHome(), ...roots.map(root => pathForHost(root, process.platform === 'win32' ? 'win32' : 'linux'))]
       .filter(Boolean).map(root => [projectPathKey(root), root] as const),
   ).values()]
 }
@@ -84,8 +89,19 @@ function withTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = BACKGROUND
   ])
 }
 
+/** Folders the on-demand shallow re-read found that the last full scan did not hold (yet). They are
+ *  folded into EVERY rebuild of the index, so a disk-index tick can never make them vanish; a full
+ *  scan that STARTED after they were found takes them over (or drops them if the folder is gone). */
+const shallowAdded = new Map<string, { candidate: ProjectCandidate; at: number }>()
+
+function withShallowAdded(candidates: ProjectCandidate[]): ProjectCandidate[] {
+  if (shallowAdded.size === 0) return candidates
+  return [...candidates, ...missingFromIndex(candidates, [...shallowAdded.values()].map(v => v.candidate))]
+}
+
 function startBackgroundIndex(history: ProjectCandidate[], scanRoots: string[]): void {
   if (indexingPromise) return
+  const scanStartedAt = Date.now()
   indexingPromise = (async () => {
     const diskRoots = scanRoots.filter(isWholeDiskRoot)
     diskIndex.configure(diskRoots)
@@ -96,7 +112,9 @@ function startBackgroundIndex(history: ProjectCandidate[], scanRoots: string[]):
         path: d.path, name: d.name, remote: '', lastSeenMs: 0, sessions: 0,
         source: d.repo || d.worktree ? 'repo' : 'folder', worktree: d.worktree,
       }) as ProjectCandidate[]
-      cache = { at: Date.now(), candidates: mergeWalkedAndHistory(visibleCandidates(walked), visibleCandidates(history)), indexing: snapshot.indexing || !!indexingPromise, indexProgress: snapshot.progress }
+      // `at` is the time of the last FULL scan: this 2 s tick must not renew it, or the 60 s
+      // revalidation in `allCandidates` would never come due while the server is up.
+      cache = { at: cache?.at ?? Date.now(), candidates: withShallowAdded(mergeWalkedAndHistory(visibleCandidates(walked), visibleCandidates(history))), indexing: snapshot.indexing || !!indexingPromise, indexProgress: snapshot.progress }
     }
     diskIndex.onSnapshot = update
     diskIndex.start()
@@ -119,6 +137,8 @@ function startBackgroundIndex(history: ProjectCandidate[], scanRoots: string[]):
       const resolved = new Map(unresolved.map((c, i) => [c.path, flags[i]!]))
       candidates = candidates.map(c => resolved.has(c.path) ? { ...c, worktree: resolved.get(c.path) } : c)
     }
+    for (const [key, v] of shallowAdded) if (v.at <= scanStartedAt) shallowAdded.delete(key)
+    candidates = withShallowAdded(candidates)
     const snapshot = diskIndex.snapshot()
     cache = { at: Date.now(), candidates, indexing: snapshot.indexing, indexProgress: snapshot.progress }
   })().catch(() => {
@@ -152,11 +172,14 @@ async function allCandidates(): Promise<ProjectCache> {
   return cache
 }
 
-/** A shallow re-read is skipped when the last one is this recent — typing must not hammer the disk. */
+/** A shallow re-read is skipped when the last one STARTED this recently — typing must not hammer the disk. */
 const SHALLOW_MIN_INTERVAL_MS = 1_500
 const SHALLOW_DEPTH = 2
 const SHALLOW_BUDGET_MS = 300
+/** A query that finds a re-read already running waits for it, but only this long. */
+const SHALLOW_WAIT_MS = 300
 let lastShallowAt = 0
+let shallowInFlight: Promise<void> | null = null
 
 /** PURE: the fresh candidates whose path the index does not hold yet. */
 export function missingFromIndex(known: readonly ProjectCandidate[], fresh: readonly ProjectCandidate[]): ProjectCandidate[] {
@@ -164,15 +187,7 @@ export function missingFromIndex(known: readonly ProjectCandidate[], fresh: read
   return fresh.filter(c => !have.has(projectPathKey(c.path, false)))
 }
 
-/**
- * A folder created outside agentop seconds ago is not in a cache that only revalidates in the
- * background on a 60 s TTL. When a search finds nothing, re-read the configured roots SHALLOWLY
- * (depth 2, 300 ms, never a disk root) and fold in what is new. Cheap, bounded, on demand.
- */
-async function shallowRefresh(): Promise<void> {
-  const nowMs = Date.now()
-  if (!cache || nowMs - lastShallowAt < SHALLOW_MIN_INTERVAL_MS) return
-  lastShallowAt = nowMs
+async function readShallow(): Promise<void> {
   const roots = (await readScanRoots()).filter(r => !isWholeDiskRoot(r))
   const groups = await Promise.all(roots.map(root =>
     withTimeout(scanDirectories(root, { depth: SHALLOW_DEPTH, timeBudgetMs: SHALLOW_BUDGET_MS }).catch(() => []), [], SHALLOW_BUDGET_MS + 200)))
@@ -180,13 +195,43 @@ async function shallowRefresh(): Promise<void> {
     path: d.path, name: d.name, remote: '', lastSeenMs: 0, sessions: 0,
     source: d.repo || d.worktree ? 'repo' : 'folder', worktree: d.worktree,
   } as ProjectCandidate)))
+  if (!cache) return
   const added = missingFromIndex(cache.candidates, fresh)
-  if (added.length > 0 && cache) cache = { ...cache, candidates: [...cache.candidates, ...added] }
+  if (added.length === 0) return
+  const at = Date.now()
+  for (const c of added) shallowAdded.set(projectPathKey(c.path, false), { candidate: c, at })
+  cache = { ...cache, candidates: [...cache.candidates, ...added] }
+}
+
+/**
+ * A folder created outside agentop seconds ago is not in an index that only does a full scan every
+ * 60 s. On a non-empty query, re-read the configured roots SHALLOWLY (depth 2, 300 ms, never a disk
+ * root) and fold in what is new — kept in `shallowAdded` so later rebuilds hold it too. A re-read
+ * already running is WAITED for (briefly) rather than skipped.
+ */
+async function shallowRefresh(): Promise<void> {
+  if (!cache) return
+  if (shallowInFlight) {
+    await withTimeout(shallowInFlight, undefined, SHALLOW_WAIT_MS)
+    return
+  }
+  const nowMs = Date.now()
+  if (nowMs - lastShallowAt < SHALLOW_MIN_INTERVAL_MS) return
+  lastShallowAt = nowMs
+  shallowInFlight = readShallow().catch(() => {}).finally(() => { shallowInFlight = null })
+  await withTimeout(shallowInFlight, undefined, SHALLOW_WAIT_MS + SHALLOW_BUDGET_MS + 200)
+}
+
+/** Test seam: what a disk-index tick does to the cache. */
+export function emitIndexSnapshotForTest(): void {
+  diskIndex.onSnapshot?.(diskIndex.snapshot())
 }
 
 /** Drop the index, so a directory created seconds ago is findable without waiting out the TTL. */
 export function forgetProjects(): void {
   cache = null
+  shallowAdded.clear()
+  lastShallowAt = 0
 }
 
 /**
@@ -240,8 +285,7 @@ export async function findProjects(
 ): Promise<ProjectSearch> {
   let indexed = await allCandidates()
   const q = query.trim().toLowerCase()
-  if (q && !q.startsWith('/') && !q.startsWith('~')
-    && !indexed.candidates.some(c => c.name.toLowerCase().includes(q) || c.path.toLowerCase().includes(q))) {
+  if (q && !q.startsWith('/') && !q.startsWith('~')) {
     await shallowRefresh()
     indexed = await allCandidates()
   }
@@ -271,7 +315,7 @@ export async function findProjects(
   // goes. Checked only when it LOOKS like a path, so an ordinary word never costs a stat.
   const typed = query.trim()
   if (typed.startsWith('/') || typed.startsWith('~')) {
-    const path = typed.startsWith('~') ? typed.replace(/^~/, homedir()) : typed
+    const path = typed.startsWith('~') ? typed.replace(/^~/, currentHome()) : typed
     if (!known.some(c => projectPathKey(c.path) === projectPathKey(path)) && await isDirectory(path)) {
       fixed.push({
         path, name: baseName(path), remote: '', lastSeenMs: 0, sessions: 0, source: 'typed',
@@ -327,7 +371,9 @@ export function isHabitCandidate(c: ProjectCandidate): boolean {
  * Read off the FULL visible list — never the search-filtered rows the wizard holds, or typing
  * would move it.
  */
-export async function newProjectParent(pt: boolean, home = homedir()): Promise<{ path: string; exists: boolean }> {
+export async function newProjectParent(pt: boolean, home = currentHome()): Promise<{ path: string; exists: boolean }> {
+  await allCandidates()
+  await shallowRefresh()
   const { candidates: all } = await allCandidates()
   const candidates = all.filter(isHabitCandidate)
   // A place the browser would not show back (dot-folders such as ~/.gemini, the prune list, the temp
