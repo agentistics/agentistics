@@ -251,7 +251,8 @@ packages/server/server/          — server-side modules (never bundled by Vite)
   │                          carrying no activity — nothing about them is capturable), and
   │                          `sessions-host.ts` is the 5s poller, whose failed poll keeps the
   │                          previous list plus a reason rather than reporting an empty one.
-  │                          `project-search.ts` / `project-source.ts` feed the wizard's search
+  │                          `project-source.ts` also (a) re-reads the scan roots SHALLOWLY (depth 2, 300 ms, never a disk root) when a search matches nothing, so a folder created outside agentop is found without waiting the 60 s TTL, and (b) proposes the New-project parent from REPOSITORY checkouts only (`isHabitCandidate`) — never from history cwds, where a harness's dated scratch folder (Codex `.../Codex/2026-10-29`) used to win the count; no repos → `<home>/projects`.
+                          `project-search.ts` / `project-source.ts` feed the wizard's search
   │                          field from the LOCAL store, so it works with the server stopped.
   │                          **A reboot takes tmux and leaves the registry**, so every managed
   │                          session reconciles to `lost` while keeping its name, note and task —

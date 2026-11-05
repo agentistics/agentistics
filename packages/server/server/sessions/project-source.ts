@@ -152,6 +152,38 @@ async function allCandidates(): Promise<ProjectCache> {
   return cache
 }
 
+/** A shallow re-read is skipped when the last one is this recent — typing must not hammer the disk. */
+const SHALLOW_MIN_INTERVAL_MS = 1_500
+const SHALLOW_DEPTH = 2
+const SHALLOW_BUDGET_MS = 300
+let lastShallowAt = 0
+
+/** PURE: the fresh candidates whose path the index does not hold yet. */
+export function missingFromIndex(known: readonly ProjectCandidate[], fresh: readonly ProjectCandidate[]): ProjectCandidate[] {
+  const have = new Set(known.map(c => projectPathKey(c.path, false)))
+  return fresh.filter(c => !have.has(projectPathKey(c.path, false)))
+}
+
+/**
+ * A folder created outside agentop seconds ago is not in a cache that only revalidates in the
+ * background on a 60 s TTL. When a search finds nothing, re-read the configured roots SHALLOWLY
+ * (depth 2, 300 ms, never a disk root) and fold in what is new. Cheap, bounded, on demand.
+ */
+async function shallowRefresh(): Promise<void> {
+  const nowMs = Date.now()
+  if (!cache || nowMs - lastShallowAt < SHALLOW_MIN_INTERVAL_MS) return
+  lastShallowAt = nowMs
+  const roots = (await readScanRoots()).filter(r => !isWholeDiskRoot(r))
+  const groups = await Promise.all(roots.map(root =>
+    withTimeout(scanDirectories(root, { depth: SHALLOW_DEPTH, timeBudgetMs: SHALLOW_BUDGET_MS }).catch(() => []), [], SHALLOW_BUDGET_MS + 200)))
+  const fresh: ProjectCandidate[] = visibleCandidates(groups.flat().map(d => ({
+    path: d.path, name: d.name, remote: '', lastSeenMs: 0, sessions: 0,
+    source: d.repo || d.worktree ? 'repo' : 'folder', worktree: d.worktree,
+  } as ProjectCandidate)))
+  const added = missingFromIndex(cache.candidates, fresh)
+  if (added.length > 0 && cache) cache = { ...cache, candidates: [...cache.candidates, ...added] }
+}
+
 /** Drop the index, so a directory created seconds ago is findable without waiting out the TTL. */
 export function forgetProjects(): void {
   cache = null
@@ -206,7 +238,13 @@ export function filterCandidatesByDisk<T extends { path: string }>(
 export async function findProjects(
   query: string, cwd: string, perKind = PROJECTS_PER_KIND, requestedDisk?: string,
 ): Promise<ProjectSearch> {
-  const indexed = await allCandidates()
+  let indexed = await allCandidates()
+  const q = query.trim().toLowerCase()
+  if (q && !q.startsWith('/') && !q.startsWith('~')
+    && !indexed.candidates.some(c => c.name.toLowerCase().includes(q) || c.path.toLowerCase().includes(q))) {
+    await shallowRefresh()
+    indexed = await allCandidates()
+  }
   const configuredRoots = (await readPreferences().catch(() => ({ scanRoots: [] as string[] }))).scanRoots ?? []
   const discovered = await discoverProjectDisks().catch(() => [])
   const disks = discovered.filter(d => d.isInstallDisk || configuredRoots.some(root => pathOnDisk(root, d)))
@@ -275,13 +313,23 @@ function baseName(path: string): string {
 }
 
 /**
+ * PURE: only a REPOSITORY'S own checkout shows a habit of where projects live. A harness's scratch
+ * folder (Codex files every chat under a dated `.../Codex/2026-10-29`) holds many sessions' cwds and
+ * used to win the count, so the proposal inherited an old session's directory.
+ */
+export function isHabitCandidate(c: ProjectCandidate): boolean {
+  return projectKind(c) === 'repo' && !c.worktree
+}
+
+/**
  * Where "Novo projeto" puts a folder by default: the folder that already holds most of this
  * person's projects, else `<home>/projetos|projects` (created together with the project).
  * Read off the FULL visible list — never the search-filtered rows the wizard holds, or typing
  * would move it.
  */
 export async function newProjectParent(pt: boolean, home = homedir()): Promise<{ path: string; exists: boolean }> {
-  const { candidates } = await allCandidates()
+  const { candidates: all } = await allCandidates()
+  const candidates = all.filter(isHabitCandidate)
   // A place the browser would not show back (dot-folders such as ~/.gemini, the prune list, the temp
   // tree) is never a habit worth copying: judged on the project's parent, segment by segment.
   const visible = candidates.map(c => c.path).filter(path => {
