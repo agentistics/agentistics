@@ -51,3 +51,15 @@ export function linkCodexProcesses(
   for (const [pid, t] of candidateOf) if (claimants.get(t.id) === 1) out.set(pid, t.id)
   return out
 }
+
+/**
+ * The npm/bun install of codex is `bin/codex.js`, which spawns the native binary and STAYS ALIVE as its
+ * parent: both are "codex", same cwd, start times a few ms apart. Left in, they are two claimants of one
+ * thread and the ambiguity rule refuses both. The parent whose child is also codex is the wrapper — drop it
+ * (it also stops the list drawing one terminal twice).
+ */
+export function dropWrapperParents<T extends { pid: number; ppid?: number }>(procs: readonly T[]): T[] {
+  const parents = new Set<number>()
+  for (const p of procs) if (p.ppid !== undefined) parents.add(p.ppid)
+  return procs.filter(p => !parents.has(p.pid))
+}
