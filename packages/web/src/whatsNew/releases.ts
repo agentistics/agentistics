@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.8': {
+    features: [],
+    fixes: [
+      {
+        pt: 'OpenCode: o anel de contexto e o contador do líder (a coroa com os tokens) voltam a aparecer; antes sumiam quando o último turno da sessão tinha sido interrompido, e para modelos locais ou personalizados sem janela conhecida.',
+        en: 'OpenCode: the context ring and the leader\'s token counter (the crown) show up again; before, they vanished when the session\'s last turn had been interrupted, and for local or custom models with no known window.',
+      },
+      {
+        pt: 'OpenCode: a janela de contexto de um modelo local ou personalizado agora é lida do seu próprio opencode.json (limit.context), então o anel aparece também para eles.',
+        en: 'OpenCode: the context window of a local or custom model is now read from your own opencode.json (limit.context), so the ring shows for them too.',
+      },
+    ],
+  },
   '2.200.7': {
     features: [],
     fixes: [

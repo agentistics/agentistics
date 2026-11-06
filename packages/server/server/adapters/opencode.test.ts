@@ -110,3 +110,35 @@ test('live OpenCode refresh uses the exact SQLite session ID and bypasses the tr
   expect(next[0]!.contextWindow).toBeUndefined()
   expect(next[0]!.costUSD).toBeUndefined()
 })
+
+test('an aborted zero-token tail turn does not blank the context reading (ring + leader counter)', () => {
+  const { path, db, add } = fixture()
+  try {
+    const models = { anthropic: { models: { 'claude-sonnet-4-6': { limit: { context: 200000 } } } } }
+    // Real shape, measured on opencode 1.19.5: `completed` set, no `finish`, every counter 0.
+    const aborted = (id: string, offset: number) => {
+      const m = message(id, { role: 'assistant', modelID: 'claude-sonnet-4-6', providerID: 'anthropic', time: { created: at + offset, completed: at + offset + 500 },
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }, offset)
+      add(m)
+    }
+    aborted('msg_abort1', 2000); aborted('msg_abort2', 3000)
+    const s = loadOpencodeDb(path, models)[0]!
+    expect(s.context_tokens).toBe(330)
+    expect(s.context_window).toBe(200000)
+    const c = toConversation(s)
+    expect(c.contextTokens).toBe(330); expect(c.contextWindow).toBe(200000)
+  } finally { db.close() }
+})
+
+test('a route with no stated window keeps its context level but draws no gauge', () => {
+  const { path, db } = fixture()
+  try {
+    const s = loadOpencodeDb(path, {})[0]!
+    expect(s.context_tokens).toBe(330); expect(s.context_window).toBeUndefined()
+    const c = toConversation(s)
+    // `claude-sonnet-4-6` is in the shared table, so the window resolves there; a route nobody verified does not.
+    const local = toConversation({ ...s, model: 'ollama/qwen-coder', context_window: undefined })
+    expect(local.contextTokens).toBe(330); expect(local.contextWindow).toBeUndefined()
+    expect(c.contextTokens).toBe(330)
+  } finally { db.close() }
+})
