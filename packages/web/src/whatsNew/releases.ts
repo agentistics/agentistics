@@ -26,6 +26,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'In the Sessions list, each session title takes at most two lines and ends in "…", without breaking in the middle of a word; the full title shows on hover.',
       },
       {
+        pt: 'Saiu o aviso "Resumo do modo autônomo — Fiquei ausente há mais de 5 horas. Quer que a Nay prepare um resumo?".',
+        en: 'Removed the "Autonomous-mode summary — I\'ve been away for more than 5 hours. Would you like Nay to prepare a summary?" notification.',
+      },
+      {
         pt: 'Na aba Encerradas, os grupos Dormindo, Finalizadas hoje e Antes de hoje agora têm seta para recolher e abrir (com a contagem quando recolhidos) e lembram o estado; "Antes de hoje" começa recolhido.',
         en: 'In the Ended tab, the Sleeping, Finished today and Before today groups now have a chevron to fold and unfold (with the count while folded) and remember their state; "Before today" starts folded.',
       },

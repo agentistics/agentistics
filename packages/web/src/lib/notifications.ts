@@ -333,18 +333,6 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Aviso do líder (modo autônomo)', message: '{text}' },
     en: { title: 'Leader notice (autonomous mode)', message: '{text}' },
   },
-  'away.digest_offer': {
-    pt: { title: 'Resumo do modo autônomo', message: 'Fiquei ausente há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' },
-    en: { title: 'Autonomous-mode summary', message: 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?' },
-  },
-  'away.digest_failed': {
-    pt: { title: 'Não foi possível abrir o resumo', message: 'Tente novamente em instantes.' },
-    en: { title: 'Could not open the summary', message: 'Please try again shortly.' },
-  },
-  'away.digest_stale': {
-    pt: { title: 'Oferta de resumo expirada', message: 'Esta oferta não está mais disponível.' },
-    en: { title: 'Summary offer expired', message: 'This offer is no longer available.' },
-  },
   'sessions.idle': {
     pt: { title: 'Sessões ociosas', message: '{count} {sessionsNoun} sem mensagem sua há um tempo: {names}{more}. {freed}Clique para revisar.' },
     en: { title: 'Idle sessions', message: '{count} {sessionsNoun} you have not messaged in a while: {names}{more}. {freed}Click to review.' },
