@@ -71,7 +71,7 @@ export function currentLeaderId(rows: readonly TeamRow[], id: string): string {
   let cur = id
   for (let i = 0; i < 16; i++) {
     // A leader REOPENED with a new managed id: the row that supersedes it leads now (a live one first).
-    const reopened = rows.filter(r => r.supersedes === cur && !seen.has(r.id)).sort((a, b) => (b.endedAt ? 0 : 1) - (a.endedAt ? 0 : 1))[0]
+    const reopened = rows.filter(r => r.supersedes === cur && !seen.has(r.id) && !r.endedAt).sort((a, b) => (b.endedAt ? 0 : 1) - (a.endedAt ? 0 : 1))[0]
     if (reopened) { seen.add(reopened.id); cur = reopened.id; continue }
     const row = rows.find(r => r.id === cur)
     const next = row?.handoffTo
@@ -81,11 +81,24 @@ export function currentLeaderId(rows: readonly TeamRow[], id: string): string {
     const live = succ?.endedAt && succ.conversationId
       ? rows.find(r => r.id !== succ.id && !r.endedAt && r.conversationId === succ.conversationId) ?? succ
       : succ
-    if (!live) return cur
+    // A dead successor (the hand-off failed and the old runner stayed) leads nothing: stay on `cur`.
+    if (!live || live.endedAt) return cur
     seen.add(live.id)
     cur = live.id
   }
   return cur
+}
+
+/**
+ * The session a MESSAGE to `reference` should reach. `reference` matches a row by managed id or
+ * conversation id ONLY (never title/label). The message is redirected to the successor only when the
+ * original row is really retired (ended) and the successor is alive; a live original keeps its mail.
+ * An unmatched reference is returned as is.
+ */
+export function messageTargetFor(rows: readonly TeamRow[], reference: string): string {
+  const hit = rows.find(r => r.id === reference) ?? rows.find(r => !!r.conversationId && r.conversationId === reference)
+  if (!hit || !hit.endedAt) return reference
+  return currentLeaderId(rows, hit.id)
 }
 
 export interface HandoffReparent {

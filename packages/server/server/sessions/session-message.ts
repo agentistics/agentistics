@@ -183,12 +183,10 @@ export async function defaultMessageDeps(): Promise<MessageDeps> {
     rows: async () => (await (await import('./fleet-web')).readFleet('en')).rows,
     resolveTarget: async reference => {
       const { readRegistry } = await import('./registry')
-      const { currentLeaderId } = await import('./team-links')
-      const rows = await readRegistry()
-      // Resolve against the registry as well: the retired parent can already be absent from
-      // the fleet. Follow managed/conversation ids and their usual reference syntax.
-      const found = resolveSessionForGroup(rows.map(r => ({ ...r, title: r.label ?? r.id })), reference)
-      return found.ok ? currentLeaderId(rows, found.session.id) : reference
+      const { messageTargetFor } = await import('./team-links')
+      // Registry, not the fleet: the retired parent can already be absent from it. Matches by managed
+      // or conversation id only, and redirects only a retired leader to a LIVE successor.
+      return messageTargetFor(await readRegistry(), reference)
     },
     prompt: async (rowId, text) => {
       const { runFleetAction } = await import('./fleet-web')
