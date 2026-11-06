@@ -28,7 +28,9 @@ export function AgentUseBadge({ view, lang }: { view: AgentUseView; lang: Lang }
   </div>
 }
 
-export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMobile = false, onSaved }: {
+export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMobile = false, onSaved, showBadge = true }: {
+  /** The plan-usage card already shows the badge right above; drawing it twice is noise. */
+  showBadge?: boolean
   accountId: string
   /** The account's name as the screen shows it, for labels. */
   who: string
@@ -59,7 +61,7 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
   const tap = isMobile ? 44 : undefined
   const btn = (kind: 'primary' | 'secondary', disabled = false) => ({ ...dialogButtonStyle(kind, isMobile, disabled), ...(isMobile ? {} : { padding: '5px 12px', fontSize: 12.5 }) })
   const small: React.CSSProperties = { border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 8, padding: '4px 9px', fontSize: 12, cursor: 'pointer', minHeight: tap, display: 'inline-flex', alignItems: 'center', gap: 4 }
-  const time: React.CSSProperties = { background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 6, padding: '4px 6px', minHeight: tap, colorScheme: 'dark light', minWidth: 0 }
+  const time: React.CSSProperties = { background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 6, padding: '4px 6px', minHeight: tap, colorScheme: 'dark light', minWidth: 0, flex: '1 1 0', maxWidth: 140 }
 
   const save = async () => {
     if (problem || busy) return
@@ -80,7 +82,7 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
       <ToggleSwitch on={draft.enabled} onToggle={() => setDraft(d => ({ ...d, enabled: !d.enabled }))} tap={tap}
         label={`${pt ? 'Agenda de uso por agentes' : 'Agent-use schedule'} · ${who}`} />
     </div>
-    {view && !dirty && <AgentUseBadge view={view} lang={lang} />}
+    {showBadge && view && !dirty && <AgentUseBadge view={view} lang={lang} />}
     <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
       {draft.enabled
         ? (pt ? 'Fora destes horários a conta fica desligada para agentes. Ligar à mão vence a agenda; desligar à mão volta ao que a agenda manda. Uma sessão já rodando não é encerrada.'
@@ -103,12 +105,13 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
       const day = draft.days[d]!
       return <div key={d} data-agent-day-editor={d} style={{ borderTop: '1px solid var(--border)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, opacity: draft.enabled ? 1 : 0.6 }}>
         <b style={{ fontSize: 12.5 }}>{DAY_SHORT[d][lang]}</b>
-        {day.windows.map((w, i) => <div key={i} data-agent-window style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <input type="time" aria-label={`${DAY_SHORT[d][lang]} · ${pt ? 'início' : 'from'} ${i + 1}`} value={w.from} onChange={e => { setFocusDay(d); setDraft(s => setWindow(s, d, i, { from: e.target.value })) }} style={time} />
+        {day.windows.map((w, i) => <div key={i} data-agent-window style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}><div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', minWidth: 0 }}>
+          <input type="time" step={60} aria-label={`${DAY_SHORT[d][lang]} · ${pt ? 'início' : 'from'} ${i + 1}`} value={w.from} onChange={e => { setFocusDay(d); setDraft(s => setWindow(s, d, i, { from: e.target.value })) }} style={time} />
           <span style={{ color: 'var(--text-tertiary)' }}>–</span>
-          <input type="time" aria-label={`${DAY_SHORT[d][lang]} · ${pt ? 'fim' : 'to'} ${i + 1}`} value={w.to} onChange={e => { setFocusDay(d); setDraft(s => setWindow(s, d, i, { to: e.target.value })) }} style={time} />
-          {w.to <= w.from && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt ? 'até o dia seguinte' : 'into the next day'}</span>}
-          <button type="button" aria-label={pt ? 'Remover janela' : 'Remove window'} onClick={() => setDraft(s => removeWindow(s, d, i))} style={{ ...small, padding: 4, minWidth: tap }}><X size={13} aria-hidden /></button>
+          <input type="time" step={60} aria-label={`${DAY_SHORT[d][lang]} · ${pt ? 'fim' : 'to'} ${i + 1}`} value={w.to} onChange={e => { setFocusDay(d); setDraft(s => setWindow(s, d, i, { to: e.target.value })) }} style={time} />
+          <button type="button" aria-label={pt ? 'Remover janela' : 'Remove window'} onClick={() => setDraft(s => removeWindow(s, d, i))} style={{ ...small, padding: 4, minWidth: tap, flexShrink: 0 }}><X size={13} aria-hidden /></button>
+        </div>
+          {w.to <= w.from && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt ? 'termina no dia seguinte' : 'ends the next day'}</span>}
         </div>)}
         {day.windows.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{pt ? 'Sem janela: o dia fica desligado.' : 'No window: the day stays off.'}</span>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

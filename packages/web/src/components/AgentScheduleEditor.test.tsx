@@ -20,7 +20,7 @@ describe('AgentScheduleEditor', () => {
   test('windows, the midnight crossing, the ceiling and the copy action of a selected day', () => {
     expect(html.match(/data-agent-window/g)?.length).toBe(2)
     expect(html).toContain('value="22:00"')
-    expect(html).toContain('até o dia seguinte')
+    expect(html).toContain('termina no dia seguinte')
     expect(html).toContain('value="20"')
     expect(html).toContain('% da semana')
   })
