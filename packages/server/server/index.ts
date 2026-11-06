@@ -4068,7 +4068,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         }
         return null
       }
-      const res = await handleShellRoute(req, url, await hostForFleet(shellLang), shellLang, { nativeCwd })
+      const res = await handleShellRoute(req, url, await hostForFleet(shellLang), shellLang, {
+        nativeCwd,
+        targetRows: async () => (await import('./sessions/registry')).readRegistry(),
+      })
       if (res) {
         for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v)
         return res

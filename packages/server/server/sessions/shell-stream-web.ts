@@ -14,6 +14,7 @@
  * is left here is the scope check, the stream ceiling and the SSE plumbing.
  */
 
+import { shellTmux as tmux } from './shell-tmux'
 import { readShells } from './shell-store'
 import { createShellTerminal, type TmuxRun } from './shell-terminal'
 import { createTerminalHub, type TerminalHub } from './terminal-hub'
@@ -30,21 +31,6 @@ export const MAX_SHELL_STREAMS = 32
 
 /** See `terminal-web.ts`: a channel deduped to silence is what a proxy reaps as idle. */
 const KEEPALIVE_MS = 15_000
-
-async function tmux(args: string[]): Promise<{ code: number; out: string; err: string }> {
-  try {
-    const p = Bun.spawn(['tmux', ...args], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' })
-    const [out, err] = await Promise.all([
-      new Response(p.stdout).text(),
-      new Response(p.stderr).text(),
-    ])
-    return { code: await p.exited, out, err }
-  } catch {
-    // tmux is not on PATH. 127 is what a shell reports for that; a capture then reads as gone,
-    // which is the truth — there is no pane. Never a throw.
-    return { code: 127, out: '', err: '' }
-  }
-}
 
 const terminal = createShellTerminal(tmux as TmuxRun)
 

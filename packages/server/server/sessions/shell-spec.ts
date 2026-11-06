@@ -44,6 +44,7 @@ export interface ShellOpenFacts {
   openCount: number
   /** `process.env.SHELL`, which may be absent or empty. */
   shell: string | undefined
+  platform?: string
 }
 
 export type ShellOpenPlan =
@@ -60,14 +61,15 @@ const FALLBACK_SHELL = '/bin/bash'
  * close a shell to make room, and asking somebody to destroy work to make room for an open that
  * could never have succeeded is worse than saying no.
  *
- * The shell is run BARE — no `-l`. tmux gives the pane a tty, so it is already an interactive
- * shell; adding a login flag would make it read a different set of rc files from the panes
- * `agentop session` opens, and two kinds of shell on one machine is a difference nobody asked for.
+ * macOS services may have no SHELL. Use its system zsh and a login interactive shell
+ * so path_helper and the user’s login setup run. Linux keeps its existing shell behavior.
  */
 export function planShellOpen(f: ShellOpenFacts): ShellOpenPlan {
   if (!f.tmuxAvailable) return { ok: false, reason: 'no-tmux' }
   if (!f.cwd) return { ok: false, reason: 'no-cwd' }
   if (!f.cwdExists) return { ok: false, reason: 'cwd-missing' }
   if (f.openCount >= SHELL_CAP) return { ok: false, reason: 'at-cap' }
-  return { ok: true, argv: [f.shell || FALLBACK_SHELL], cwd: f.cwd }
+  return { ok: true, argv: f.platform === 'darwin'
+    ? [f.shell || '/bin/zsh', '-il']
+    : [f.shell || FALLBACK_SHELL], cwd: f.cwd }
 }

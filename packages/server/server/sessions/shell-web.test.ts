@@ -42,3 +42,15 @@ describe('resolveShellTarget — the directory always comes from a record, never
     expect(await resolveShellTarget(rows, SID, async () => null)).toBeNull()
   })
 })
+
+
+test('opening resolves authoritative target records without walking the metric fleet', async () => {
+  let fleetCalls = 0
+  const host = { sessions: async () => { fleetCalls++; throw new Error('expensive fleet must not run') } } as unknown as StartHost
+  const url = new URL('http://x/api/shell/open')
+  const res = await handleShellRoute(new Request(url, {
+    method: 'POST', body: JSON.stringify({ sessionId: 'unknown' }),
+  }), url, host, 'en', { targetRows: async () => [] })
+  expect(res?.status).toBe(404)
+  expect(fleetCalls).toBe(0)
+})

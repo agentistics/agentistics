@@ -10,6 +10,20 @@ const ok: ShellOpenFacts = {
 }
 
 describe('planShellOpen', () => {
+  test('macOS services without SHELL start the system login interactive zsh', () => {
+    expect(planShellOpen({ ...ok, platform: 'darwin', shell: undefined }))
+      .toEqual({ ok: true, argv: ['/bin/zsh', '-il'], cwd: '/home/u/proj' })
+    expect(planShellOpen({ ...ok, platform: 'darwin', shell: '' }))
+      .toEqual({ ok: true, argv: ['/bin/zsh', '-il'], cwd: '/home/u/proj' })
+  })
+
+  test('macOS honors the user shell and Linux retains its existing startup', () => {
+    expect(planShellOpen({ ...ok, platform: 'darwin', shell: '/bin/bash' }))
+      .toEqual({ ok: true, argv: ['/bin/bash', '-il'], cwd: '/home/u/proj' })
+    expect(planShellOpen({ ...ok, platform: 'linux' }))
+      .toEqual({ ok: true, argv: [ok.shell!], cwd: '/home/u/proj' })
+  })
+
   test('opens the user’s own shell in the session’s directory', () => {
     expect(planShellOpen(ok)).toEqual({ ok: true, argv: ['/usr/bin/zsh'], cwd: '/home/u/proj' })
   })
