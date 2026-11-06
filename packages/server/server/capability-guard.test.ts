@@ -97,7 +97,6 @@ describe('routeCapability', () => {
     expect(routeCapability('/api/codex-sessions/x')).toBe('localTranscripts')
     expect(routeCapability('/api/gemini-sessions')).toBe('localTranscripts')
     expect(routeCapability('/api/copilot-sessions/y')).toBe('localTranscripts')
-    expect(routeCapability('/api/nay-sessions')).toBe('localTranscripts')
     expect(routeCapability('/api/projects-list')).toBe('localTranscripts')
     expect(routeCapability('/api/team/proposals')).toBe('localTranscripts')
     // Billing detection reads ~/.claude.json and the settings files. It extracts only non-secret

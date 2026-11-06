@@ -24,12 +24,12 @@ export interface NayHarnessOption {
 }
 
 export interface NayDefaults { chatHarness?: string; chatModel?: string; chatEffort?: string }
-export interface NayLaunchRequest { harness?: unknown; model?: unknown; effort?: unknown }
+export interface NayLaunchRequest { harness?: unknown; model?: unknown; effort?: unknown; /** An account id of the harness; absent/''/'auto' = the account router decides. */ account?: unknown }
 
-export interface NayLaunch { harness: string; model?: string; effort?: string }
+export interface NayLaunch { harness: string; model?: string; effort?: string; account?: string }
 export type NayLaunchResult =
   | ({ ok: true } & NayLaunch)
-  | { ok: false; reason: 'unknown_harness' | 'unknown_effort' | 'no_model_flag' | 'no_harness'; value?: string }
+  | { ok: false; reason: 'unknown_harness' | 'unknown_effort' | 'unknown_account' | 'no_model_flag' | 'no_harness'; value?: string }
 
 /** The harness a Nay conversation uses when nobody chose one: Nay was built on Claude Code. */
 export const NAY_DEFAULT_HARNESS = 'claude'
@@ -78,5 +78,17 @@ export function planNayLaunch(
     effort = e || undefined
   } else if (sameAsSaved && saved.chatEffort && opt.efforts.includes(saved.chatEffort)) effort = saved.chatEffort
 
-  return { ok: true, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}) }
+  // The account is the router's unless the person named one. Shape only here: whether the id exists
+  // for this harness is the account rule's call (`decideSpawnAccount`), which refuses in words.
+  let account: string | undefined
+  if (req.account !== undefined && req.account !== null) {
+    if (typeof req.account !== 'string') return { ok: false, reason: 'unknown_account' }
+    const a = req.account.trim()
+    if (a && a !== 'auto') {
+      if (!SAFE_ID.test(a)) return { ok: false, reason: 'unknown_account', value: a }
+      account = a
+    }
+  }
+
+  return { ok: true, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(account ? { account } : {}) }
 }

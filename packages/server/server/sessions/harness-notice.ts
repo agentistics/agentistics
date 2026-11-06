@@ -32,3 +32,33 @@ export function forkUnavailableNotice(harness: HarnessId | null, why?: string): 
   const pt = `Esta sessão${name ? ` do ${name}` : ''} não pode ser ramificada aqui, então nada foi iniciado. Reabra-a como estava ou inicie uma nova sessão.${why ? ` (${why})` : ''}`
   return new SessionNotice(en, pt)
 }
+
+/**
+ * NAY.ADAPTER — the Nay starts ONLY on the structured route (the adapter), never as a terminal session. When
+ * that road is closed the start is REFUSED in words: a Nay that quietly became a TUI is a chat panel with no
+ * conversation behind it. `why` says which door is shut so the sentence can send the person the right way:
+ *  - `engine`: the adapter chat is off (flag OFF, or a build without the engine) → the Nay is unavailable;
+ *  - `driver`: this assistant has no ready driver → offer the ones that have (`ready`);
+ *  - `mode`/`refused`: the driver cannot start it as asked / the start was refused.
+ */
+export function nayStartRefusedNotice(why: 'engine' | 'driver' | 'refused', harness: HarnessId | null, ready: readonly HarnessId[]): SessionNotice {
+  const name = harness ? nameOf(harness) : null
+  if (why === 'engine') {
+    return new SessionNotice(
+      'Nay needs the agentistics engine, which is not available in this build (or the engine chat is switched off). Nothing was started.',
+      'A Nay precisa do motor do agentistics, que não está disponível nesta instalação (ou o chat do motor está desligado). Nada foi iniciado.',
+    )
+  }
+  const list = ready.map(nameOf).join(', ')
+  const offer = ready.length > 0
+  const reason = why === 'driver'
+    ? `${name ?? 'This assistant'} has no ready connection to run the Nay`
+    : `${name ?? 'The assistant'} refused to start the Nay`
+  const reasonPt = why === 'driver'
+    ? `${name ? `O ${name}` : 'Este assistente'} não tem conexão pronta para rodar a Nay`
+    : `${name ? `O ${name}` : 'O assistente'} recusou iniciar a Nay`
+  return new SessionNotice(
+    `${reason}, so nothing was started.${offer ? ` Pick another assistant: ${list}.` : ''}`,
+    `${reasonPt}, então nada foi iniciado.${offer ? ` Escolha outro assistente: ${list}.` : ''}`,
+  )
+}

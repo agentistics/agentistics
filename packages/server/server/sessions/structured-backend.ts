@@ -30,7 +30,8 @@ import type {
 import { answerFits, limitsOf, TUI_LIMITS } from '@agentistics/engine-api'
 import { SPAWN_SPECS } from './spawn-spec'
 import { ensureClaudeProjectTrusted } from './claude-trust'
-import { forkUnavailableNotice, harnessBlockedNotice } from './harness-notice'
+import { forkUnavailableNotice, harnessBlockedNotice, nayStartRefusedNotice } from './harness-notice'
+import { HARNESS_ORDER, isNayCwd } from '@agentistics/core'
 import type { DurableStore, DurableTransport, SavedSpawn } from './structured-durable'
 import { pidAlive } from './structured-durable'
 import { modeNeedsProtocolSentence, routableDriver, routeSpawn, structuredOrigin, type SpawnRoute } from './structured-route'
@@ -74,7 +75,7 @@ export interface StructuredProvider {
    */
   closed?(id: string): Promise<boolean>
   /** A structured session fell back to tmux (or could not), for the log / the row's note. */
-  onFallback?(id: string, outcome: { reason: string; resumed: boolean; structured?: boolean }): void
+  onFallback?(id: string, outcome: { reason: string; resumed: boolean; structured?: boolean; /** NAY.ADAPTER: a Nay whose driver dropped — it was NOT relaunched in a terminal. */ nayDropped?: boolean }): void
   /**
    * F3.3 — before a structured start: what the tmux backend does before every pane (the session-identity
    * key the agentistics MCP proves its session with, `session-identity.ts`). Absent = nothing.
@@ -425,6 +426,9 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       durable.remove(id)
       if (purposeful) return
     }
+    // NAY.ADAPTER: the Nay never becomes a TUI. A dropped driver ends the conversation as "dropped · reopen"
+    // (the row stays reopenable, and a reopen is a web spawn = structured again).
+    if (isNayCwd(l.req.cwd)) { provider.onFallback?.(id, { reason: e.reason, resumed: false, nayDropped: true }); return }
     const conv = l.s.conversationId() ?? l.req.structured?.resumeId ?? l.req.structured?.conversationId ?? null
     await fallBack(id, l.req, conv, e.reason)
   }
@@ -589,6 +593,16 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
         if (route !== 'structured' || !reg || !reg.declares(harness)?.fork?.via) throw forkUnavailableNotice(harness)
         if (await startVia(req, route, harness, reg, acp)) return {}
         throw forkUnavailableNotice(harness)
+      }
+      // NAY.ADAPTER: the Nay starts ONLY on the structured route. No tmux fallback, for a closed door or a
+      // refused start: it is refused in words, offering the assistants that have a ready driver.
+      if (isNayCwd(req.cwd)) {
+        const ready = reg ? HARNESS_ORDER.filter(h => routableDriver(h, reg.driverFor(h)) !== null) : []
+        if (route !== 'structured' || !harness || !reg) {
+          throw nayStartRefusedNotice(!flagOn || !reg ? 'engine' : 'driver', harness, ready.filter(h => h !== harness))
+        }
+        if (await startVia(req, route, harness, reg, acp)) return {}
+        throw nayStartRefusedNotice('refused', harness, ready.filter(h => h !== harness))
       }
       if (route !== 'tmux' && harness) {
         if (await startVia(req, route, harness, reg ?? acpAsStructured(acp!), acp)) return {}

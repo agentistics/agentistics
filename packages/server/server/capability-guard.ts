@@ -76,7 +76,6 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/codex-sessions', 'localTranscripts'],
   ['/api/gemini-sessions', 'localTranscripts'],
   ['/api/copilot-sessions', 'localTranscripts'],
-  ['/api/nay-sessions', 'localTranscripts'],
   // The session fleet, and everything under it. `/api/fleet` alone captures each live session's
   // SCREEN — a coding assistant's terminal, transcript and all — `/api/fleet/act` types into it,
   // answers a permission prompt for it or kills it, `/api/fleet/stream` streams that screen

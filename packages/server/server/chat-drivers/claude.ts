@@ -1,4 +1,4 @@
-import { registerMcpGlobally, streamViaClaude } from '../chat-tty'
+import { registerMcpGlobally } from '../chat-tty'
 import type { ChatDriver } from './types'
 import { findCli } from './cli-detect'
 
@@ -29,18 +29,4 @@ export const claudeDriver: ChatDriver = {
     await registerMcpGlobally(port)
   },
 
-  async stream(message, history, model, cb, resumeSessionId, opts) {
-    await streamViaClaude(
-      message,
-      history,
-      model,
-      cb.onChunk,
-      cb.onTool,
-      cb.onDone,
-      cb.onError,
-      cb.onSessionId,
-      resumeSessionId,
-      opts,
-    )
-  },
 }

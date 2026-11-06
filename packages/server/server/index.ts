@@ -21,11 +21,8 @@ import {
   readStoredNotifications, addStoredNotification, markStoredNotificationsRead,
   dismissStoredNotification, clearStoredNotifications, localViewer, type NotificationInput,
 } from './notifications-store'
-import { streamViaClaude, execCommand, ensureNayChat, type ChatMessage, type ChatAttachment } from './chat-tty'
-import { getChatDriver, chatHarnessStatus, chatDefaultModel } from './chat-drivers/index'
-import { modelCatalog } from './model-catalog'
-import { resolveChatModel } from './model-catalog-parse'
-import { listNaySessions, getNaySessionMessages } from './nay-sessions'
+import { execCommand, ensureNayChat } from './chat-tty'
+import { chatHarnessStatus } from './chat-drivers/index'
 import { listClaudeSessions, getClaudeSessionMessages, type ClaudeSessionSummary, type ClaudeSessionMessage } from './claude-sessions'
 import { listCodexSessions, getCodexSessionMessages, type CodexSessionSummary, type CodexSessionMessage } from './codex-sessions'
 import { listGeminiSessions, getGeminiSessionMessages, type GeminiSessionSummary, type GeminiSessionMessage } from './gemini-sessions'
@@ -1805,21 +1802,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
-    if (url.pathname === '/api/nay-sessions' && req.method === 'GET') {
-      const sessions = await listNaySessions()
-      return new Response(JSON.stringify(sessions), {
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
-    if (url.pathname.startsWith('/api/nay-sessions/') && req.method === 'GET') {
-      const id = url.pathname.slice('/api/nay-sessions/'.length)
-      const messages = await getNaySessionMessages(id)
-      return new Response(JSON.stringify(messages), {
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-      })
-    }
-
     // GET /api/claude-sessions?projectPath=...  → list sessions for a project
     // GET /api/claude-sessions/:id?projectPath=... → messages for a session
     if (url.pathname === '/api/claude-sessions' && req.method === 'GET') {
@@ -3201,7 +3183,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const proof: { session?: unknown; callerVerified?: unknown } = { session: body?.session }
         const callerVerified = await markCallerVerified(proof, verifySessionIdentity)
         const out = await startNaySession(fleetLang(url.searchParams.get('lang')), defaultNayDeps(PORT), {
-          harness: body?.harness, model: body?.model, effort: body?.effort,
+          harness: body?.harness, model: body?.model, effort: body?.effort, account: body?.account,
         }, { callerVerified })
         return new Response(JSON.stringify(out), {
           status: out.code === 'memory_budget' ? 409 : out.code ? spawnAccountStatus(out.code) : 200,
@@ -4101,7 +4083,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     // profile forbids them; this is the user's own switch on top, and it can only narrow further
     // (chat-gate.ts). Enforced HERE, not only in the UI, because a hidden button is not a closed
     // door — the endpoint is what actually spawns the CLI.
-    if (url.pathname === '/api/chat-harnesses' || url.pathname === '/api/chat-tty') {
+    if (url.pathname === '/api/chat-harnesses') {
       if (!chatAllowed(CAPS.localChat, (await readPreferences()).chatEnabled)) {
         return new Response(JSON.stringify({ error: 'chat_disabled' }), {
           status: 403,
@@ -4122,93 +4104,9 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return handleHarnessInstallRoute(req, decodeURIComponent(harnessInstall[1]!), harnessInstall[2] as 'install' | 'update')
     }
 
-    if (url.pathname === '/api/chat-tty' && req.method === 'POST') {
-      try {
-        const body = await req.json() as { message: string; history?: ChatMessage[]; model?: string; sessionId?: string | null; thinkingBudget?: number; attachments?: ChatAttachment[]; harness?: string }
-        const { message, history = [], model: requestedModel, sessionId = null, thinkingBudget, attachments, harness } = body
-
-        // Resolve the requested driver.
-        // - If harness explicitly provided but not installed → stream an error (no silent Claude fallback)
-        // - If harness not provided → default to claude
-        // - Installed-but-not-authed harnesses still route to their driver
-        const requestedDriver = harness ? getChatDriver(harness as import('@agentistics/core').HarnessId) : undefined
-        if (harness && requestedDriver && !requestedDriver.isAvailable()) {
-          const label = requestedDriver.label
-          const errBody = new TextEncoder().encode(`data: ${JSON.stringify({ error: `${label} is not installed. Install it to use it as a Nay backend.` })}
-
-`)
-          return new Response(new ReadableStream({
-            start(ctrl) { ctrl.enqueue(errBody); ctrl.close() },
-          }), {
-            status: 200,
-            headers: {
-              ...CORS_HEADERS,
-              'Content-Type': 'text/event-stream',
-              'Cache-Control': 'no-cache',
-              'X-Accel-Buffering': 'no',
-            },
-          })
-        }
-        const driver = (requestedDriver?.isAvailable() ? requestedDriver : undefined) ?? getChatDriver('claude')!
-
-        // The model MUST belong to the resolved driver — a model from another harness would be
-        // rejected by that CLI. A listed id is taken as asked; an unlisted one only where the list
-        // is the incomplete fallback table AND it is a safe argv value; otherwise the machine's
-        // configured default, and `''` means no --model at all (the CLI's own default).
-        const model = resolveChatModel(requestedModel, await modelCatalog(driver.id), await chatDefaultModel(driver.id))
-
-        // Ensure MCP is registered for the selected driver
-        await driver.ensureMcp(PORT)
-
-        const enc = new TextEncoder()
-        const stream = new ReadableStream<Uint8Array>({
-          start(ctrl) {
-            void driver.stream(
-              message,
-              history,
-              model,
-              {
-                onChunk(text) {
-                  ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ text })}\n\n`))
-                },
-                onTool(tool) {
-                  ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ tool })}\n\n`))
-                },
-                onDone() {
-                  ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ done: true })}\n\n`))
-                  ctrl.close()
-                },
-                onError(err) {
-                  ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ error: err })}\n\n`))
-                  ctrl.close()
-                },
-                onSessionId(id) {
-                  ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ sessionId: id })}\n\n`))
-                },
-              },
-              sessionId,
-              { thinkingBudget, attachments, signal: req.signal },
-            )
-          },
-        })
-        return new Response(stream, {
-          status: 200,
-          headers: {
-            ...CORS_HEADERS,
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no',
-          },
-        })
-      } catch (err) {
-        const safe = safeError(err, { verbose: PROFILE === 'local' })
-        console.error(safe.logLine)
-        return new Response(JSON.stringify(safe.body), {
-          status: 400,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        })
-      }
-    }
+    // POST /api/chat-tty and GET /api/nay-sessions — REMOVED (NAY.ADAPTER). The Nay is an ordinary managed
+    // session started by POST /api/fleet/nay; the old one-process-per-message `claude --print` route and
+    // the direct ~/.claude/projects reader fall through to the 404. `nay-legacy-removed.test.ts` pins that.
 
     // POST /api/claude-chat — REMOVED. An older, Claude-only duplicate of /api/chat-tty that no
     // client called once Nay became real sessions, and it spawned `claude` on the host with no

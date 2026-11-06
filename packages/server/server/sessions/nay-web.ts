@@ -24,6 +24,7 @@ const LAUNCH_REFUSAL: Record<string, { pt: string; en: string }> = {
   unknown_harness: { pt: 'Este assistente não pode ser iniciado nesta máquina.', en: 'That assistant cannot be started on this machine.' },
   unknown_effort: { pt: 'Este assistente não aceita esse esforço de raciocínio.', en: 'That assistant does not accept that reasoning effort.' },
   no_model_flag: { pt: 'Este assistente não permite escolher o modelo.', en: 'That assistant has no way to choose a model.' },
+  unknown_account: { pt: 'Esta conta não existe para este assistente.', en: 'That account does not exist for this assistant.' },
   no_harness: { pt: 'Nenhum assistente pode ser iniciado nesta máquina.', en: 'No assistant can be started on this machine.' },
 }
 

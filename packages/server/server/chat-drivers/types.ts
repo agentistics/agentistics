@@ -39,14 +39,6 @@ export interface ChatDriver {
   /** Static guidance for install / login. */
   setup: ChatDriverSetup
   ensureMcp(port: number): Promise<void>
-  stream(
-    message: string,
-    history: ChatMessage[],
-    model: string,
-    cb: ChatStreamCallbacks,
-    resumeSessionId?: string | null,
-    opts?: StreamViaClaudioOpts,
-  ): Promise<void>
 }
 
 /** Per-harness status payload returned by GET /api/chat-harnesses. */

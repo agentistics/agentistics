@@ -114,6 +114,14 @@ export async function resolveBackend(): Promise<SessionBackend> {
         await ensureSessionIdentityKey()
       },
       onFallback(id, o) {
+        if (o.nayDropped) {
+          console.warn(`[sessions] the Nay conversation ${id} dropped (${o.reason}); not relaunched in a terminal`)
+          void import('../sse').then(m => m.broadcastNotification({
+            type: 'warning', code: 'nay.dropped', meta: { id },
+            title: 'A conversa da Nay caiu', message: 'The Nay conversation dropped · A conversa da Nay caiu. Reabra a conversa no painel da Nay.',
+          })).catch(() => {})
+          return
+        }
         if (o.structured) console.warn(`[sessions] structured session ${id} came back structured (resumed by conversation id): ${o.reason}`)
         else console.warn(`[sessions] structured session ${id} fell back to tmux (${o.resumed ? 'resumed by conversation id' : 'could not resume'}): ${o.reason}`)
       },

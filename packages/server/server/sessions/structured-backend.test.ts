@@ -878,3 +878,55 @@ describe('QA F2 — the driver speaks the language of the screen that ASKED', ()
     expect(eng.started[1]!.lang).toBe('pt') // no request language: the stored preference
   })
 })
+
+describe('withStructured — the Nay never becomes a terminal (NAY.ADAPTER)', () => {
+  const NAY = '/home/u/.agentistics/nay-chat'
+  const nay = (harness: HarnessId): BackendSpawn => web(harness, { cwd: NAY })
+
+  test('a ready driver starts it structured', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine()
+    const b = withStructured(base, provider(eng.reg))
+    await b.spawn(nay('gemini'))
+    expect(eng.started.length).toBe(1)
+    expect(base.calls).toEqual([])
+  })
+
+  test('a refused structured start is told in words, with no tmux pane', async () => {
+    const base = fakeBase()
+    const b = withStructured(base, provider(fakeEngine({ refuse: 'login needed' }).reg))
+    const err = await b.spawn(nay('gemini')).then(() => null, e => e as Error)
+    expect(err).toBeInstanceOf(SessionNotice)
+    expect(base.calls).toEqual([])
+  })
+
+  test('a harness with no ready driver is refused and the others are offered', async () => {
+    const base = fakeBase()
+    const b = withStructured(base, provider(fakeEngine().reg))
+    const err = await b.spawn(nay('claude')).then(() => null, e => e as SessionNotice)
+    expect(err).toBeInstanceOf(SessionNotice)
+    expect((err as SessionNotice).message).toContain('Pick another assistant')
+    expect((err as SessionNotice).message).toContain('gemini')
+    expect(base.calls).toEqual([])
+  })
+
+  test('flag OFF: the Nay is unavailable with one sentence, never a terminal', async () => {
+    const base = fakeBase()
+    const b = withStructured(base, provider(fakeEngine().reg, { flagOn: () => false }))
+    const err = await b.spawn(nay('gemini')).then(() => null, e => e as SessionNotice)
+    expect((err as SessionNotice).message).toContain('needs the agentistics engine')
+    expect(base.calls).toEqual([])
+  })
+
+  test('a dropped driver is reported as dropped and NOT resumed in tmux', async () => {
+    const base = fakeBase()
+    const eng = fakeEngine()
+    const seen: Array<{ reason: string; resumed: boolean; nayDropped?: boolean }> = []
+    const b = withStructured(base, provider(eng.reg, { onFallback: (_id, o) => { seen.push(o) } }))
+    await b.spawn(nay('gemini'))
+    eng.sessions[0]!.fail('driver died')
+    await new Promise(r => setTimeout(r, 0))
+    expect(seen).toEqual([{ reason: 'driver died', resumed: false, nayDropped: true }])
+    expect(base.calls).toEqual([])
+  })
+})

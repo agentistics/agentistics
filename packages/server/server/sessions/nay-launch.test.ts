@@ -41,4 +41,12 @@ describe('planNayLaunch', () => {
   test('no harness at all is its own refusal', () => {
     expect(planNayLaunch({}, {}, [])).toEqual({ ok: false, reason: 'no_harness' })
   })
+  test('the account is the router\'s unless one is named; shape-checked only', () => {
+    expect(planNayLaunch({}, {}, H)).not.toHaveProperty('account')
+    expect(planNayLaunch({ account: 'auto' }, {}, H)).not.toHaveProperty('account')
+    expect(planNayLaunch({ account: '' }, {}, H)).not.toHaveProperty('account')
+    expect(planNayLaunch({ account: 'acc_123' }, {}, H)).toMatchObject({ ok: true, account: 'acc_123' })
+    expect(planNayLaunch({ account: 5 }, {}, H)).toEqual({ ok: false, reason: 'unknown_account' })
+    expect(planNayLaunch({ account: '../x y' }, {}, H)).toMatchObject({ ok: false, reason: 'unknown_account' })
+  })
 })

@@ -21,12 +21,12 @@ The agentistics server must be running at http://localhost:47291.
 
 ## Your identity — read this first
 
-You are **Nay**, the built-in analytics assistant for **agentistics**.
-You are NOT a generic AI assistant. When asked "who are you?", "what are you?", "quem é você?", or similar, always introduce yourself as:
+You are **Nay**, the commander and consultant of **agentistics**: the one assistant that sees the whole
+machine — the task board, the fleet of sessions (any harness: Claude Code, Codex, Gemini, Copilot, Antigravity, Kimi, OpenCode), plan limits and accounts, costs, tokens and productivity metrics. You advise on what to do next and you organise the work. When asked "who are you?", "quem é você?" or similar, say so in the user's language, in one or two sentences:
 
-> **Nay** — assistente de analytics integrada ao agentistics. Analiso uso do Claude Code: custos, tokens, sessões, projetos e métricas de produtividade. Posso criar layouts personalizados no dashboard e gerar relatórios em PDF.
+> **Nay** — a comandante e consultora do agentistics. Vejo o quadro de tarefas, as sessões de todos os assistentes, os limites de plano e as métricas de uso, e te ajudo a decidir o que fazer e a organizar o trabalho.
 
-Never describe yourself as "Claude" or "an AI assistant created by Anthropic" in response to identity questions.
+Never describe yourself as "Claude" or "an AI assistant created by Anthropic" in response to identity questions, and never as a "Claude Code analytics" assistant — you are not tied to one harness.
 
 ---
 
@@ -36,9 +36,9 @@ Never describe yourself as "Claude" or "an AI assistant created by Anthropic" in
 For EVERY question, regardless of what was discussed before, call the relevant tools to get fresh data.
 Even if a prior message mentions "embark was the most expensive", call agentistics_projects again to answer a follow-up question about tokens.
 
-**Rule 2 — Never describe what you are about to do. Never ask for permission.**
-Call tools immediately. Do not write "I will analyze...", "Let me check...", "Aguarde...", "Com base no relatório acima...". Just call the tool and respond with the actual result.
-All tools in this workspace are pre-approved — never ask "may I", "please confirm", "preciso de sua permissão", or any similar phrasing. Just act.
+**Rule 2 — Reading is immediate; anything that opens, closes or spends is confirmed first.**
+For questions (metrics, board, fleet, limits) call the tools immediately and answer with the actual result — no "I will analyze...", no "Aguarde...". Read tools are pre-approved.
+But an action that **opens a session, closes or stops one, or spends money/quota** (starting an assistant, sending work to a paid account, ending someone's session) is NEVER done on your own: say exactly what you would do (which sessions, which assistant and account, the estimated cost) and wait for the person to answer yes in this chat. Only then act. Never close a session you did not open without naming it and getting an explicit yes.
 
 **Rule 3 — Never reference "the Nay agent" or "the report above" as a source.**
 You have direct tool access. Use it. If you need data, call the tool.
@@ -90,8 +90,11 @@ For questions about total Claude Code usage across ALL projects, use agentistics
 | "Generate/export a PDF report" | agentistics_export_pdf |
 | "What tags exist / cost of tag X?" | agentistics_tags, then agentistics_tag_detail |
 | "Cost/usage by repository?" | agentistics_repos |
-| "Am I connected to a team/central?" | agentistics_team_status |
-| "Who's on the team? (central only)" | agentistics_team_members |
+| "What is urgent / what should we do next?" | agentistics_tasks, agentistics_task_next |
+| "How are my plan limits / which account has room?" | agentistics_plan_limits, agentistics_harnesses |
+| "What are the sessions doing?" | agentistics_sessions |
+| "Tell session X something" | agentistics_session_message |
+| "Wait for them to finish" | agentistics_wait |
 | Any follow-up question | Call tools again — never rely on prior conversation |
 
 ---
@@ -116,8 +119,11 @@ For questions about total Claude Code usage across ALL projects, use agentistics
 | agentistics_tags | List all tags with aggregate sessions/cost/tokens |
 | agentistics_tag_detail | Full detail for one tag: breakdown + top projects/models/harnesses/repos/members |
 | agentistics_repos | Repository breakdown by normalized git remote |
-| agentistics_team_status | This machine's team mode (solo/central/member) and central connections |
-| agentistics_team_members | Team roster (central only): presence, latency, last seen |
+| agentistics_plan_limits | Plan limits per account/harness: how much window is left |
+| agentistics_harnesses | Installed harnesses, their models and readiness |
+| agentistics_task_next | The next task(s) ready to be picked up, and why others are withheld |
+| agentistics_session_message | Send a message to another session (handback / block / question) |
+| agentistics_wait | Wait for a session's reply or a handback |
 | agentistics_session_groups | The user's session folders/groups and which sessions each holds |
 | agentistics_session_group_create | Create a folder (group), optionally filing sessions into it |
 | agentistics_session_group_edit | Add/remove a session, rename, nest or delete a folder |
@@ -301,146 +307,7 @@ export interface StreamViaClaudioOpts {
   signal?: AbortSignal
 }
 
-export async function streamViaClaude(
-  message: string,
-  history: ChatMessage[],
-  model: string,
-  onChunk: (text: string) => void,
-  onTool: (name: string) => void,
-  onDone: () => void,
-  onError: (err: string) => void,
-  onSessionId?: (id: string) => void,
-  resumeSessionId?: string | null,
-  opts?: StreamViaClaudioOpts,
-): Promise<void> {
-  // When resuming a session, just pass the new message — history is in the JSONL
-  // When starting a new session, fall back to the old inline-history approach
-  let prompt: string
-  const args = ['claude', '--print', '--output-format', 'stream-json', '--verbose']
 
-  if (opts?.thinkingBudget && opts.thinkingBudget > 0) {
-    args.push('--budget-tokens', String(opts.thinkingBudget))
-  }
-
-  // `''` is the CLI's own default — no flag, never an invented model.
-  if (model) args.push('--model', model)
-
-  const imageAttachments = opts?.attachments?.filter(a => a.isImage) ?? []
-  const textAttachments = opts?.attachments?.filter(a => !a.isImage) ?? []
-
-  // Inject text-file contents into the message
-  let augmentedMessage = message
-  for (const att of textAttachments) {
-    const ext = att.name.split('.').pop() ?? ''
-    augmentedMessage = `[Attached file: ${att.name}]\n\`\`\`${ext}\n${att.data}\n\`\`\`\n\n${augmentedMessage}`
-  }
-
-  if (resumeSessionId) {
-    args.push('--resume', resumeSessionId)
-    prompt = augmentedMessage
-  } else {
-    const recent = history.filter(h => h.content.trim()).slice(-8)
-    prompt = ''
-    for (const h of recent) {
-      prompt += `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}\n\n`
-    }
-    prompt += augmentedMessage.length > 0 && recent.length > 0 ? `User: ${augmentedMessage}` : augmentedMessage
-  }
-
-  // When images are attached, switch to stream-json input so we can send base64 image blocks
-  if (imageAttachments.length > 0) {
-    args.push('--input-format', 'stream-json')
-  }
-
-  const cwd = opts?.cwd ?? NAY_CHAT_DIR
-
-  try {
-    const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe', stdin: 'pipe', cwd })
-    opts?.signal?.addEventListener('abort', () => { try { proc.kill() } catch { /* already dead */ } }, { once: true })
-
-    if (imageAttachments.length > 0) {
-      // Build a multimodal content array
-      type ContentBlock =
-        | { type: 'text'; text: string }
-        | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
-
-      const content: ContentBlock[] = []
-      // For non-resume sessions, prepend history as a text block
-      if (!resumeSessionId) {
-        const recent = history.filter(h => h.content.trim()).slice(-8)
-        if (recent.length > 0) {
-          let histText = ''
-          for (const h of recent) {
-            histText += `${h.role === 'user' ? 'User' : 'Assistant'}: ${h.content}\n\n`
-          }
-          content.push({ type: 'text', text: histText.trimEnd() })
-        }
-      }
-      for (const att of imageAttachments) {
-        content.push({ type: 'image', source: { type: 'base64', media_type: att.mimeType, data: att.data } })
-      }
-      content.push({ type: 'text', text: augmentedMessage })
-
-      const event = JSON.stringify({ type: 'user', message: { role: 'user', content } })
-      proc.stdin.write(event + '\n')
-    } else {
-      proc.stdin.write(prompt)
-    }
-    proc.stdin.end()
-
-    const decoder = new TextDecoder()
-    let lineBuffer = ''
-    let emittedLength = 0
-    let gotResult = false
-    const seenTools = new Set<string>()
-
-    for await (const raw of proc.stdout as unknown as AsyncIterable<Uint8Array>) {
-      lineBuffer += decoder.decode(raw, { stream: true })
-      const lines = lineBuffer.split('\n')
-      lineBuffer = lines.pop() ?? ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed) continue
-        try {
-          const event = JSON.parse(trimmed) as Record<string, unknown>
-          if (event.type === 'assistant') {
-            const msg = event.message as { content?: Array<{ type: string; text?: string; name?: string }> } | undefined
-            for (const block of msg?.content ?? []) {
-              if (block.type === 'text' && typeof block.text === 'string') {
-                const delta = block.text.slice(emittedLength)
-                if (delta) { onChunk(delta); emittedLength = block.text.length }
-              } else if (block.type === 'tool_use' && typeof block.name === 'string') {
-                if (!seenTools.has(block.name)) {
-                  seenTools.add(block.name)
-                  onTool(block.name)
-                }
-              }
-            }
-          } else if (event.type === 'result') {
-            gotResult = true
-            const ev = event as { subtype?: string; error?: unknown; session_id?: string }
-            if (ev.subtype === 'error') {
-              onError(String(ev.error ?? 'claude CLI error'))
-              return
-            }
-            if (ev.session_id && onSessionId) onSessionId(ev.session_id)
-          }
-        } catch { /* ignore malformed lines */ }
-      }
-    }
-
-    const exit = await proc.exited
-    if (exit !== 0 && !gotResult) {
-      const errText = await new Response(proc.stderr).text()
-      onError(`claude CLI exited with code ${exit}: ${errText.slice(0, 300)}`)
-      return
-    }
-    onDone()
-  } catch (err) {
-    onError(`claude not found or failed to start: ${err instanceof Error ? err.message : String(err)}`)
-  }
-}
 
 export async function execCommand(
   command: string,
