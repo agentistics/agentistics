@@ -1,5 +1,6 @@
 import { EngineSurfaceButtons } from './components/EngineSurfaceButtons'
 import { EngineSurfaceHost } from './components/EngineSurfaceHost'
+import { setEngineSurfaceLang } from './lib/engineSurfaceHost'
 import { EngineSurfaceIndicators } from './components/EngineSurfaceIndicator'
 import { ActionNotice } from './components/sessions/ActionNotice'
 import { HandoffMeter } from './components/sessions/HandoffWarning'
@@ -1093,6 +1094,8 @@ export default function AppLayout() {
    * set state, so the header's PT/EN toggle held for as long as the tab lived and a reload came back
    * in whatever was last saved from Settings. A person's choice: `/api/user-prefs`.
    */
+  // A mounted engine surface (kept alive, parked, a call in progress) follows the app's language live.
+  useEffect(() => { setEngineSurfaceLang(lang === 'pt' ? 'pt' : 'en') }, [lang])
   const setLang = useCallback((l: Lang) => {
     setLangState(l)
     putPersonal({ lang: l })

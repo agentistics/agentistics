@@ -54,6 +54,8 @@ export interface SurfaceMountContext {
   keepAlive(on: boolean): void
   setIndicator(indicator: SurfaceIndicator | null): void
   onIndicatorEnd(fn: () => void): () => void
+  /** 1.24, optional. Calls `fn` with the new language when the app's language changes; `ctx.lang` is live too. Returns the remover. */
+  onLangChange?(fn: (lang: 'pt' | 'en') => void): () => void
   /** 1.18, optional. Navigates the app to `/sessions/<id>` without a reload; `false` for an invalid id or when it cannot. */
   openSession?(sessionId: string): boolean
 }
