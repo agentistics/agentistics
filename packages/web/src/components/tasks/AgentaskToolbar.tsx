@@ -20,6 +20,7 @@ import { ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronUp, Eye, EyeOff, Lay
 import { PRIORITY_ORDER, type SortSpec, type TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { BOARD_SORTS } from './BoardArrange'
+import { DEFAULT_PREFS } from './boardPrefs'
 import { button, field, liveStatusMap, microLabel, type BoardStatus } from './board'
 import type { BoardView, GroupBy, LaneKey } from './boardPrefs'
 import { LANE_KEYS } from './boardPrefs'
@@ -85,7 +86,7 @@ const T = (lang: Lang) => lang === 'pt'
   }
 
 /** The sort a panel treats as "nothing chosen". */
-const PLAIN_SORT: SortSpec = { key: 'manual', dir: 'asc' }
+const PLAIN_SORT: SortSpec = DEFAULT_PREFS.sort
 
 /** How many things are moved off their default — the badge on the View button and the chips. */
 export function activeChips(s: ViewState, lang: Lang): Array<{ id: string; label: string; clear: Partial<ViewActions> | string }> {
@@ -95,7 +96,7 @@ export function activeChips(s: ViewState, lang: Lang): Array<{ id: string; label
   if (!s.shownIsDefault && hidden > 0) out.push({ id: 'visible', label: t.hiding(hidden), clear: 'visible' })
   if (s.view === 'board' && s.lanes !== 'none') out.push({ id: 'lanes', label: `${t.lanes}: ${t[s.lanes]}`, clear: 'lanes' })
   if (s.view === 'table' && s.groupBy === 'type') out.push({ id: 'groupBy', label: `${t.group} ${t.byType}`, clear: 'groupBy' })
-  if (s.view === 'board' && s.sort.key !== 'manual') {
+  if (s.view === 'board' && (s.sort.key !== PLAIN_SORT.key || s.sort.dir !== PLAIN_SORT.dir)) {
     const k = BOARD_SORTS.find(x => x.key === s.sort.key)?.label ?? String(s.sort.key)
     out.push({ id: 'sort', label: `${t.sort}: ${k} ${s.sort.dir === 'asc' ? '↑' : '↓'}`, clear: 'sort' })
   }
@@ -139,7 +140,7 @@ export function ViewPanel({ lang, state: s, actions: a, statuses }: {
   )
   const listTitle = s.groupBy === 'type' ? t.types : t.statuses
   return (
-    <div data-view-panel style={{ display: 'grid', gap: 14, fontSize: 12.5 }}>
+    <div data-view-panel style={{ display: 'grid', gap: 14, fontSize: 12.5, ...(mobile ? {} : { maxHeight: 'min(640px, calc(100vh - 150px))', overflowY: 'auto', paddingRight: 2 }) }}>
       {s.view === 'table' && (
         <section>
           <div style={sectionTitle}>{t.group}</div>

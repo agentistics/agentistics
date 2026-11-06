@@ -38,7 +38,7 @@ import { mobileBoardCopy } from '../components/tasks/boardCopyThreads'
 import { TaskTable } from '../components/tasks/TaskTable'
 import { SubtaskTable } from '../components/tasks/SubtaskTable'
 import {
-  useBoardPref,
+  DEFAULT_PREFS, useBoardPref,
 } from '../components/tasks/boardPrefs'
 import { AgentaskToolbar, ViewPanel, type ViewActions, type ViewState } from '../components/tasks/AgentaskToolbar'
 import { isDefaultVisible, visibleStatuses } from '../components/tasks/statusDefaults'
@@ -188,8 +188,7 @@ function TaskList() {
     color: active ? 'var(--text-primary)' : 'var(--text-tertiary)',
   })
 
-  const laneChips = liveStatusOrder(statuses)
-    .filter(st => boardColumns.includes(st))
+  const laneChips = boardColumns
     .map(st => ({ status: st, count: shown.filter(r => r.task.status === st).length }))
   const activeLane = resolveLane(lane, laneChips)
   const [groupBy, setGroupBy] = useBoardPref('groupBy')
@@ -217,7 +216,7 @@ function TaskList() {
   const forgetTypeGroups = () => setTypeGroups(null)
   const restoreView = () => {
     forgetGroups(); forgetTypeGroups()
-    setGroupBy('status'); setLanes('none'); setSort({ key: 'manual', dir: 'asc' })
+    setGroupBy('status'); setLanes('none'); setSort(DEFAULT_PREFS.sort)
     setColumnSort({}); setWip({}); setHideEmpty(false); setComposeSubtaskProgress(true)
   }
   const viewActions: ViewActions = {
@@ -231,7 +230,7 @@ function TaskList() {
     if (id === 'visible') { if (onTypes) forgetTypeGroups(); else forgetGroups() }
     else if (id === 'lanes') setLanes('none')
     else if (id === 'groupBy') setGroupBy('status')
-    else if (id === 'sort') setSort({ key: 'manual', dir: 'asc' })
+    else if (id === 'sort') setSort(DEFAULT_PREFS.sort)
     else if (id === 'wip') setWip({})
     else if (id === 'hideEmpty') setHideEmpty(false)
   }
