@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { Radio, X } from 'lucide-react'
 import { useFleet } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { writeBoardPrefs } from './boardPrefs'
+import { pathOfView } from '../../lib/tasksViewRoute'
 import { LiveDelivery } from './LiveDelivery'
 import { HOVER_CLOSE_MS, HOVER_OPEN_MS, liveActivity, popoverClickGoes, shortcutLabel } from './liveShortcutModel'
 
@@ -36,7 +36,7 @@ export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'e
   }, [open])
   if (!enabled) return null
 
-  const go = () => { clear(); setOpen(false); writeBoardPrefs({ view: 'live' }); navigate('/tasks') }
+  const go = () => { clear(); setOpen(false); navigate(pathOfView('live')) }
   const enter = () => { if (isMobile) return; clear(); openTimer.current = setTimeout(() => setOpen(true), HOVER_OPEN_MS) }
   const leave = () => { if (isMobile) return; clear(); closeTimer.current = setTimeout(() => setOpen(false), HOVER_CLOSE_MS) }
   const fade = reduced() ? 'opacity .12s' : 'opacity .15s, transform .15s'
@@ -74,7 +74,7 @@ export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'e
           <div role="dialog" aria-modal="true" aria-label="Live Delivery" data-live-sheet style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'flex-end' }}>
             <div onClick={() => setOpen(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.5)' }} />
             <div style={{
-              position: 'relative', width: '100%', maxHeight: '86dvh', display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)',
+              position: 'relative', width: '100%', maxHeight: 'calc(86dvh / var(--ui-zoom, 1))', display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)',
               borderTopLeftRadius: 16, borderTopRightRadius: 16, border: '1px solid var(--border)', paddingBottom: 'var(--safe-bottom, 0px)',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '6px 8px 0' }}>
@@ -106,7 +106,7 @@ export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'e
           }}
         >
           <div style={{
-            width: 'min(780px, calc(100vw - 24px))', height: 'min(560px, 72vh)', overflow: 'hidden', padding: 12, boxSizing: 'border-box',
+            width: 'min(780px, calc(100vw / var(--ui-zoom, 1) - 24px))', height: 'min(560px, calc(72vh / var(--ui-zoom, 1)))', overflow: 'hidden', padding: 12, boxSizing: 'border-box',
             background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 18px 50px rgba(0,0,0,.45)', cursor: 'pointer',
           }}><LiveDelivery lang={lang} compact /></div>
         </div>

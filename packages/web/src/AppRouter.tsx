@@ -102,6 +102,10 @@ export default function AppRouter() {
           <Route path="repositories/actions" element={<Suspense fallback={<PageFallback />}><ActionsPage /></Suspense>} />
           <Route path="repo/:id" element={<Suspense fallback={<PageFallback />}><RepoDetailPage /></Suspense>} />
           <Route path="tasks" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
+          <Route path="tasks/metrics" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
+          <Route path="tasks/board" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
+          <Route path="tasks/table" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
+          <Route path="tasks/live" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
           <Route path="tasks/activity" element={<Suspense fallback={<PageFallback />}><TaskActivityPage /></Suspense>} />
           <Route path="tasks/:id" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
           <Route path="tags" element={<Suspense fallback={<PageFallback />}><TagsPage /></Suspense>} />

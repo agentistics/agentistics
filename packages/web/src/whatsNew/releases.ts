@@ -20,6 +20,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'A Live agora abre com "só com agentes ativos" ligado, todas as tarefas e todas as etapas; cartões na fila ficam apagados e mostram a posição; modelo e conta em duas etiquetas; colunas maiores com barra de rolagem laranja.',
         en: 'Live now opens with "only active agents" on, all tasks and all steps; queued cards are dimmed and show their place; model and account in two pills; wider columns with an orange scrollbar.',
       },
+      {
+        pt: 'O menu do Agentask lista cada visão (Métricas, Quadro, Tabela, Live, Atividade) e destaca a ativa; os prazos estimados mostram só o horário aproximado, sem o selo de confiança.',
+        en: 'The Agentask menu lists every view (Metrics, Board, Table, Live, Activity) and highlights the active one; estimated deadlines show only the approximate time, with no confidence label.',
+      },
     ],
     fixes: [
       {
