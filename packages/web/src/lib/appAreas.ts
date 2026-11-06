@@ -55,7 +55,7 @@ export const APP_AREAS: readonly Area[] = [
     { id: 'leaders', path: '/leadership', labelPt: 'Líderes', labelEn: 'Leaders' },
     { id: 'checkins', path: '/leadership/checkins', labelPt: 'Check-ins', labelEn: 'Check-ins' },
     { id: 'handoffs', path: '/leadership/handoffs', labelPt: 'Passagens', labelEn: 'Hand-offs' },
-    { id: 'away', path: '/leadership/away', labelPt: 'Modo ausente', labelEn: 'Away mode' },
+    { id: 'away', path: '/leadership/away', labelPt: 'Modo autônomo', labelEn: 'Autonomous mode' },
   ] },
   { id: 'tasks', icon: 'clipboard', labelPt: 'Agentask', labelEn: 'Agentask', beta: true, pages: [
     { id: 'board', path: '/tasks', labelPt: 'Quadro', labelEn: 'Board' },

@@ -41,7 +41,7 @@ describe('session away header indicator', () => {
         const html = renderToStaticMarkup(<AwayChip id="managed" away pt={pt} />)
         expect(html).toContain('role="switch"')
         expect(html).toContain('aria-checked="true"')
-        expect(html).toContain(pt ? 'Modo ausente só nesta sessão' : 'Away mode on this session only')
+        expect(html).toContain(pt ? 'Modo autônomo só nesta sessão' : 'Autonomous mode on this session only')
         expect(html).toContain('var(--anthropic-orange)')
         expect(html).not.toContain('>Away<')
         if (width === 390) expect(html).toContain('min-height:44px')
@@ -51,7 +51,7 @@ describe('session away header indicator', () => {
   })
   test('the session menu carries the per-session switch, only for an actionable session', () => {
     const [item] = awayMenuItems({ id: 'x', actionable: true, away: false }, false, false)
-    expect(item!.label).toBe('Away mode on this session…'); expect(item!.on).toBe(false)
+    expect(item!.label).toBe('Autonomous mode on this session…'); expect(item!.on).toBe(false)
     expect(awayMenuItems({ id: 'x', actionable: true, away: false }, true, true)[0]!.on).toBe(true)
     expect(awayMenuItems({ id: 'x', actionable: false }, false, false)).toEqual([])
     expect(awayMenuItems(undefined, false, false)).toEqual([])

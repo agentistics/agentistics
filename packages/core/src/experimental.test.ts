@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { EXPERIMENTAL_FEATURES, applyExperimental, resolveExperimental, EXPERIMENTAL_APPLIED_ENV } from './experimental'
+import { EXPERIMENTAL_FEATURES, applyExperimental, applyAutonomousFlows, resolveExperimental, EXPERIMENTAL_APPLIED_ENV } from './experimental'
 
 describe('experimental features table', () => {
   test('every row names a distinct AGENTISTICS_ variable and both descriptions', () => {
@@ -124,5 +124,33 @@ describe('multi-account — a fresh machine can add a second login', () => {
     applyExperimental(false, env)
     expect(env.AGENTISTICS_MULTI_ACCOUNT).toBe('0')
     expect(featureOn('multi-account', env)).toBe(false)
+  })
+})
+
+describe('applyAutonomousFlows', () => {
+  test('autonomous on turns flows on; off restores the previous state', () => {
+    const env: Record<string, string | undefined> = {}
+    expect(applyAutonomousFlows(true, env)).toBe(true)
+    expect(env.AGENTISTICS_FLOWS).toBe('1')
+    expect(applyAutonomousFlows(false, env)).toBe(true)
+    expect(env.AGENTISTICS_FLOWS).toBeUndefined()
+    expect(env.AGENTISTICS_FLOWS_PRIOR).toBeUndefined()
+  })
+  test('an explicit setting wins, either way, and is never touched', () => {
+    const off: Record<string, string | undefined> = { AGENTISTICS_FLOWS: '0' }
+    expect(applyAutonomousFlows(true, off)).toBe(false)
+    expect(off.AGENTISTICS_FLOWS).toBe('0')
+    expect(applyAutonomousFlows(false, off)).toBe(false)
+    expect(off.AGENTISTICS_FLOWS).toBe('0')
+    const on: Record<string, string | undefined> = { AGENTISTICS_FLOWS: '1' }
+    applyAutonomousFlows(true, on); applyAutonomousFlows(false, on)
+    expect(on.AGENTISTICS_FLOWS).toBe('1')
+  })
+  test('turning it on twice is idempotent', () => {
+    const env: Record<string, string | undefined> = {}
+    applyAutonomousFlows(true, env)
+    expect(applyAutonomousFlows(true, env)).toBe(false)
+    applyAutonomousFlows(false, env)
+    expect(env.AGENTISTICS_FLOWS).toBeUndefined()
   })
 })

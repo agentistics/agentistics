@@ -36,6 +36,14 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Agenda das contas: cada conta pode ter dias, horários e um teto diário de uso pelos agentes. Fora da agenda, os agentes deixam a conta de lado; ligar ou desligar à mão continua valendo.',
         en: 'Account schedule: each account can have days, hours and a daily usage ceiling for agents. Outside the schedule, agents leave the account alone; switching it on or off by hand still applies.',
       },
+      {
+        pt: 'O "modo ausente" agora se chama "modo autônomo": ligado, as sessões trabalham sem pedir permissão e os líderes seguem em frente dentro do que você autorizou.',
+        en: 'Away mode is now "Autonomous mode": while it is on, sessions work without asking permission and leaders keep going within what you authorised.',
+      },
+      {
+        pt: 'Com o modo autônomo ligado, toda sessão nova (Nova sessão, linha de comando, MCP, passagem de líder) já nasce no modo "sem perguntas" — a menos que você escolha outro. A Nova sessão mostra de onde veio o modo.',
+        en: 'With autonomous mode on, every new session (New session, command line, MCP, leader hand-off) is born in "no questions" mode — unless you pick another. New session shows where the mode came from.',
+      },
     ],
     fixes: [
       {

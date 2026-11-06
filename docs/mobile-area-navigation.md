@@ -32,7 +32,7 @@ a separate install path. The update prompt is suppressed while the area sheet is
 reappear after it closes.
 
 The sidebar's file-download control exports PDF and is labelled PDF; it is a separate action.
-Theme lives in the desktop footer and mobile sheet. The header moon indicates Away mode, so it
+Theme lives in the desktop footer and mobile sheet. The header moon indicates Autonomous mode, so it
 remains available and does not change the theme. The document's `lang` attribute follows the UI
 language, including the initial loading screen.
 
@@ -45,7 +45,7 @@ Preferences.
 Default timer adapters call browser timers through wrappers; storing native timer functions directly
 on an adapter object gives them a foreign receiver and can crash the browser with Illegal invocation.
 
-Leaders, Check-ins, Hand-offs and Away mode are subpages of Sessions, retaining their `/leadership`
+Leaders, Check-ins, Hand-offs and Autonomous mode are subpages of Sessions, retaining their `/leadership`
 URLs. The central Home tab returns these document pages to the session list.
 The shared tree has one Sessions area, with combined session-attention and check-in warning counts.
 On mobile, the list's duplicate page title is omitted. Its local view toggle reads List / Fleet summary:

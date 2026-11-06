@@ -1,4 +1,4 @@
-/** Server-owned away-mode summary offers and the bounded digest sent to Nay. */
+/** Server-owned autonomous-mode summary offers and the bounded digest sent to Nay. */
 import { AWAY_OFF, awayActive, parseAwayState, redactSecrets, type AwayState } from '@agentistics/core'
 import type { PreferencesMutator } from './preferences'
 
@@ -255,7 +255,7 @@ async function offerAwayDigestLocked(now: number): Promise<void> {
   const { sendMobileNotice, readMobileSubscriptions, webPushTransport } = await import('./events/mobile-push')
   const pt = prefs.lang === 'pt'
   broadcastNotification({ type: 'info', code: 'away.digest_offer', meta: { bucket, since: away.since, notificationKey: `away.digest:${away.since}:${bucket}` } })
-  void sendMobileNotice(pt ? 'Agentistics · Resumo do modo ausente' : 'Agentistics · Away-mode summary', pt ? 'Fiquei fora há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' : 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?', await readMobileSubscriptions(), webPushTransport).catch(() => {})
+  void sendMobileNotice(pt ? 'Agentistics · Resumo do modo autônomo' : 'Agentistics · Autonomous-mode summary', pt ? 'Fiquei fora há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' : 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?', await readMobileSubscriptions(), webPushTransport).catch(() => {})
 }
 
 let timer: ReturnType<typeof setInterval> | null = null

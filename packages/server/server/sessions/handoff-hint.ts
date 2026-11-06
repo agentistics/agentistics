@@ -279,7 +279,7 @@ export interface HandoffHintDeps {
   hinted: (id: string) => Promise<{ level: number; tokens?: number }>
   /** Persists the state; returns false when it could not be written. */
   markHinted: (id: string, level: number, tokens: number | undefined) => Promise<boolean>
-  /** The away-mode sentence to append (empty when the owner is not away). Optional: absent = none. */
+  /** The autonomous-mode sentence to append (empty when the owner is not away). Optional: absent = none. */
   awayNote?: (id: string) => Promise<string>
   /** Read fresh right before sending: the owner's latest message has no reply yet. Absent = never. */
   ownerWaiting?: (id: string) => Promise<boolean>

@@ -252,7 +252,7 @@ function withTimeout(send: RelaySend, ms: number): BoundedSend {
  * because of the relay. The transcript is read from the cursor (not only the tail); the send is
  * bounded by a timeout. When the successor is missing, dead, slow, or the read could not reach the
  * cursor, what was owed is recorded as a comment on the successor's (else the predecessor's) task
- * and — when no task takes it — in the owner's notifications (the bell, whether or not away mode
+ * and — when no task takes it — in the owner's notifications (the bell, whether or not autonomous mode
  * is on). The kill proceeds in every case.
  */
 export async function flushBeforeKill(

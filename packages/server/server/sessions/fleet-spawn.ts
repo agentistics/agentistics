@@ -80,7 +80,7 @@ export interface FleetSpawnBody {
   mode?: unknown
   label?: unknown
   /**
-   * PER-SESSION AWAY MODE: `true`, `false` or `'inherit'` (absent = inherit a VERIFIED away parent's
+   * PER-SESSION AUTONOMOUS MODE: `true`, `false` or `'inherit'` (absent = inherit a VERIFIED away parent's
    * own flag). Read strictly — a truthy string must not switch it on, nor a falsy one off.
    */
   away?: unknown
@@ -120,7 +120,7 @@ export interface FleetSpawnPlan {
   label?: string
   /** A leader title prefix is an explicit leader-role request, shared with the CLI path. */
   role?: 'leader'
-  /** Per-session away mode as requested (absent = inherit). */
+  /** Per-session autonomous mode as requested (absent = inherit). */
   away?: AwaySpawnRequest
   /** Always false — see the header. */
   attach: false
@@ -216,7 +216,8 @@ export function planFleetSpawn(
   if (modeText !== undefined && (!isCanonicalMode(modeText) || (modeText !== 'default' && !(spec.modes ?? []).includes(modeText)))) {
     return { ok: false, reason: 'unknown_mode', detail: modeText }
   }
-  const mode = modeText !== undefined && modeText !== 'default' ? (modeText as CanonicalMode) : undefined
+  // An explicit "default" is KEPT: it is a choice that must beat autonomous mode (like CLI `--mode default`).
+  const mode = modeText !== undefined ? (modeText as CanonicalMode) : undefined
 
   const model = text(body.model)
   if (model && !spec.supportsModel) {
