@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { TaskStatusDef } from '@agentistics/core'
 import {
-  defaultVisibleStatuses, hiddenStatuses, isDefaultVisible, moveStatus, visibleStatuses,
+  defaultVisibleStatuses, hiddenStatuses, isDefaultVisible, moveStatus, uniqueStatusLabels, visibleStatuses,
 } from './statusDefaults'
 
 const def = (id: string, label: string, order: number): TaskStatusDef =>
@@ -37,5 +37,19 @@ describe('default status visibility', () => {
   it('moves a status one step and ignores the ends', () => {
     expect(moveStatus(['a', 'b', 'c'], 'b', -1)).toEqual(['b', 'a', 'c'])
     expect(moveStatus(['a', 'b', 'c'], 'a', -1)).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('two statuses sharing a label', () => {
+  const dup = [def('todo', 'To do', 1), def('in_review', 'In review', 2), def('x_ab12', 'In review', 3), def('done', 'Done', 4)]
+  it('shows the one with the canonical id by default and hides the other', () => {
+    expect(defaultVisibleStatuses(dup)).toEqual(['todo', 'in_review', 'done'])
+    expect(hiddenStatuses(defaultVisibleStatuses(dup), dup)).toEqual(['x_ab12'])
+  })
+  it('never yields the same visible name twice', () => {
+    const names = Object.values(uniqueStatusLabels(dup)).map(n => n.toLowerCase())
+    expect(new Set(names).size).toBe(names.length)
+    expect(uniqueStatusLabels(dup).in_review).toBe('In review')
+    expect(uniqueStatusLabels(dup).x_ab12).toBe('In review (x_ab12)')
   })
 })

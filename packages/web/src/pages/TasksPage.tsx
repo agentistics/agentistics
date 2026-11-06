@@ -41,7 +41,7 @@ import {
   DEFAULT_PREFS, useBoardPref,
 } from '../components/tasks/boardPrefs'
 import { AgentaskToolbar, ViewPanel, type ViewActions, type ViewState } from '../components/tasks/AgentaskToolbar'
-import { isDefaultVisible, visibleStatuses } from '../components/tasks/statusDefaults'
+import { isDefaultVisible, visibleStatuses, uniqueStatusLabels } from '../components/tasks/statusDefaults'
 import { DELIVERY_TABS, DeliveryDetail, type DeliveryTab } from '../components/tasks/DeliveryDetail'
 import { TaskHero } from '../components/tasks/TaskHero'
 import { liveSessionsOf } from '../components/tasks/threadView'
@@ -200,8 +200,9 @@ function TaskList() {
   ], [types, shown, lang])
   const statusItems = useMemo(() => {
     const m = liveStatusMap(statuses)
+    const names = uniqueStatusLabels(statuses)
     return liveStatusOrder(statuses).map(id => ({
-      id, label: m[id]?.label ?? id, color: m[id]?.color ?? 'var(--text-tertiary)',
+      id, label: names[id] ?? m[id]?.label ?? id, color: m[id]?.color ?? 'var(--text-tertiary)',
       count: shown.filter(r => r.task.status === id).length,
     }))
   }, [statuses, shown])

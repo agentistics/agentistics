@@ -140,7 +140,7 @@ export function ViewPanel({ lang, state: s, actions: a, statuses }: {
   )
   const listTitle = s.groupBy === 'type' ? t.types : t.statuses
   return (
-    <div data-view-panel style={{ display: 'grid', gap: 14, fontSize: 12.5, ...(mobile ? {} : { maxHeight: 'min(640px, calc(100vh - 150px))', overflowY: 'auto', paddingRight: 2 }) }}>
+    <div data-view-panel style={{ display: 'grid', gap: 14, fontSize: 12.5, }}>
       {s.view === 'table' && (
         <section>
           <div style={sectionTitle}>{t.group}</div>
@@ -312,7 +312,7 @@ export function AgentaskToolbar({ lang, q, onQ, state, actions, statuses, onView
   return (
     <div data-toolbar style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
       {search}
-      <PanelMenu title={t.view} width={360} triggerStyle={trigger} ariaLabel={t.view}
+      <PanelMenu title={t.view} width={360} maxHeight={640} triggerStyle={trigger} ariaLabel={t.view}
         render={() => <ViewPanel lang={lang} state={state} actions={actions} statuses={statuses} />}>
         {viewLabel}
       </PanelMenu>

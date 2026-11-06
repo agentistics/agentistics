@@ -63,3 +63,21 @@ export function moveStatus(shown: readonly string[], id: string, by: -1 | 1): st
   ;[next[i], next[j]] = [next[j]!, next[i]!]
   return next
 }
+
+/**
+ * PURE: a label per id that is never shown twice. Two real statuses may share a label (the legacy
+ * `in_review` plus a later custom "In review"); the first keeps its name, every later one gets its
+ * id appended so the panel never lists the same visible name twice.
+ */
+export function uniqueStatusLabels(list: readonly TaskStatusDef[] | null): Record<string, string> {
+  const out: Record<string, string> = {}
+  const seen = new Set<string>()
+  for (const id of liveStatusOrder(list)) {
+    const base = list?.find(s => s.id === id)?.label ?? id
+    let label = seen.has(base.trim().toLowerCase()) ? `${base} (${id})` : base
+    while (seen.has(label.trim().toLowerCase())) label += '*'
+    seen.add(label.trim().toLowerCase())
+    out[id] = label
+  }
+  return out
+}
