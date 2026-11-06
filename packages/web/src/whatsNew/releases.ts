@@ -22,6 +22,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Signing in again: if the login worked but the app had not yet seen the credential, the dialog no longer stays on "sign-in failed" — it keeps looking and finishes by itself once the credential appears.',
       },
       {
+        pt: 'Na lista de Sessões, o título de cada sessão ocupa no máximo duas linhas e termina em "…", sem quebrar no meio da palavra; o título inteiro aparece ao passar o mouse.',
+        en: 'In the Sessions list, each session title takes at most two lines and ends in "…", without breaking in the middle of a word; the full title shows on hover.',
+      },
+      {
         pt: 'Na aba Encerradas, os grupos Dormindo, Finalizadas hoje e Antes de hoje agora têm seta para recolher e abrir (com a contagem quando recolhidos) e lembram o estado; "Antes de hoje" começa recolhido.',
         en: 'In the Ended tab, the Sleeping, Finished today and Before today groups now have a chevron to fold and unfold (with the count while folded) and remember their state; "Before today" starts folded.',
       },

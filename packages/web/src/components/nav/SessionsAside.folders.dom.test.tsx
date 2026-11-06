@@ -8,6 +8,7 @@ import type { Filters } from '@agentistics/core'
 let createRoot: typeof import('react-dom/client').createRoot
 let MemoryRouter: typeof import('react-router-dom').MemoryRouter
 let SessionsAside: typeof import('./SessionsAside').SessionsAside
+let TITLE_CLAMP: typeof import('./SessionLine').TITLE_CLAMP
 let loadSharedPrefs: typeof import('../../lib/sharedPref').loadSharedPrefs
 let writePrefs: typeof import('../../lib/sessionsAsidePrefs').writeAsideGroupPrefs
 let readPrefs: typeof import('../../lib/sessionsAsidePrefs').readAsideGroupPrefs
@@ -59,6 +60,7 @@ beforeAll(async () => {
   createRoot = (await import('react-dom/client')).createRoot
   MemoryRouter = (await import('react-router-dom')).MemoryRouter
   SessionsAside = (await import('./SessionsAside')).SessionsAside
+  TITLE_CLAMP = (await import('./SessionLine')).TITLE_CLAMP
   loadSharedPrefs = (await import('../../lib/sharedPref')).loadSharedPrefs
   const asidePrefs = await import('../../lib/sessionsAsidePrefs')
   writePrefs = asidePrefs.writeAsideGroupPrefs
@@ -534,4 +536,22 @@ for (const width of [1280, 390]) test(`Encerradas headings fold, show a count wh
   // The heading is a real <button>: keyboard activation is the browser's click.
   expect(endedHead('sleeping')!.tagName).toBe('BUTTON')
   expect(endedHead('sleeping')!.getAttribute('type')).toBe('button')
+})
+
+// ROW.TITLE-CLAMP — a long title takes at most two lines and ends in "…", never split mid-word.
+for (const width of [1280, 390]) test(`a long session title is clamped to two lines with its full text on hover (${width}px)`, async () => {
+  act(() => writePrefs({ tab: 'active', foldedTeams: [] }))
+  const long = 'MODO.AUTONOMO-SIMPLES · só liga/desliga + agenda igual à de uso (Sonnet high) e mais um pedaço grande de texto'
+  await render([{ ...row('long-one', 'working'), title: long }], width, 'pt')
+  const title = host.querySelector<HTMLElement>('[data-line-title]')!
+  expect(title).not.toBeNull()
+  // happy-dom drops the prefixed pair from `style`; the browsers get it from this very object.
+  expect(TITLE_CLAMP).toMatchObject({ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, lineClamp: 2 })
+  expect(title.style.cssText).toContain('line-clamp: 2')
+  expect(title.style.overflow).toBe('hidden')
+  expect(title.style.overflowWrap).toBe('break-word') // never `anywhere`: that split words in the middle
+  // The whole title stays reachable (hover) and copyable: the break opportunities add no characters.
+  expect(title.closest('[data-session-open]')!.getAttribute('title')).toBe(long)
+  expect(title.textContent).toBe(long)
+  expect(title.querySelectorAll('wbr').length).toBeGreaterThan(0)
 })

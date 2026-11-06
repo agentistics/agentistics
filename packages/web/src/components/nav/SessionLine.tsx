@@ -8,16 +8,20 @@
  *
  * Everything a row could do before is still here: open, right-click / long-press menu with the
  * row's own verbs, pin, reopen, the "go to session" button of the Nay dock, the muted mark and the
- * reopening status. Titles WRAP rather than end in "…" — nothing is hidden behind an ellipsis.
+ * reopening status. A title takes at most TWO lines and ends in "…" past that (owner, 2026-11-06: a
+long one used to run to six lines and break mid-word); the whole title is in the row's `title`
+(hover) and in the open session's header, so nothing is lost. Lines break at word boundaries and at
+the marks a title is built from (`titleBreaks.ts`), never in the middle of a word.
  */
 
-import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
+import { createContext, Fragment, useContext, useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
 import { RoleIcon, type RoleIconKind } from './RoleIcon'
 import { BellOff, MoreVertical, Pin, RotateCcw, SquareArrowOutUpRight } from 'lucide-react'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { STATE_COLOR } from '../../lib/sessionCardStyle'
 import { sessionDisplayTitle, hasLeaderTitle } from '../../lib/sessionDisplayTitle'
 import { sessionIdentityKey } from '../../lib/sessionIdentity'
+import { titlePieces } from '../../lib/titleBreaks'
 import { mutedTooltip, useMutedKeys } from '../../lib/notifyMenu'
 import { registerSessionRoleAlias, useSessionRole } from '../../lib/sessionRoles'
 import { reopeningLabel, useReopening } from '../../lib/reopeningStore'
@@ -72,6 +76,17 @@ export interface SessionLineProps {
 
 /** The title's line box (13px × 1.35): the role icon is centred in a box exactly this tall. */
 const TITLE_LINE_PX = 17.5
+
+/**
+ * At most two lines, then "…". `-webkit-line-clamp` is the one form every engine ships (Chromium,
+ * Firefox and WebKit/Safari all honour the prefixed pair; the unprefixed `line-clamp` rides along for
+ * the day they all do). `overflow-wrap: break-word` only ever splits a token that cannot fit a whole
+ * line on its own — `anywhere` also shrinks the min-content and split every long title mid-word.
+ */
+export const TITLE_CLAMP: CSSProperties = {
+  display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, lineClamp: 2,
+  overflow: 'hidden', whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'normal',
+} as CSSProperties
 
 export function SessionLine({
   session, selected, tap, time, fell = false, lead = false, summary, facts, leading, pinned = false, onPin, onOpen, openLabel,
@@ -161,11 +176,11 @@ export function SessionLine({
             flex: '0 1 auto', minWidth: 0, lineHeight: `${TITLE_LINE_PX}px`,
             ...(ending || reopening
               ? { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
-              : { whiteSpace: 'normal', overflowWrap: 'anywhere' }),
+              : TITLE_CLAMP),
             fontSize: 13, fontWeight: lead || waiting ? 600 : 500,
             color: fell ? STATE_COLOR.lost : undefined,
           }}>
-            {title}
+            {titlePieces(title).map((piece, i) => <Fragment key={i}>{i > 0 && <wbr />}{piece}</Fragment>)}
           </span>
           {summary && (
             <span data-team-summary style={{ flexBasis: '100%', minWidth: 0, fontSize: 11, lineHeight: 1.35, color: 'var(--text-tertiary)', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{summary}</span>
