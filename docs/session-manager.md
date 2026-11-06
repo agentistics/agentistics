@@ -4,6 +4,17 @@
 sessions are hosted by tmux on its own socket (`-L agentop`), so they survive `agentop` exiting and
 never mix with your own tmux sessions.
 
+When a managed session gains a conversation ID, its preferences and role move to the
+conversation key. The server repairs older registry links once in the background on its first
+read. Role repair reads and writes the role document once under the shared file lock for the
+whole registry, removing migrated managed keys and retaining the newest assignment, its origin,
+timestamp and delivery watermark. Later boots have no role moves to repeat. Writes arriving
+during that initial repair wait for the batch before applying their own changes.
+
+Short-lived CLI processes skip the startup read repair and its server refresh callback. Their
+explicit conversation-link writes still migrate that session's preferences and role after the
+registry write is durable.
+
 An ended session is never part of the "sessions that fell" recovery group. The poller persists
 `endedAt` when the backend reports a dead command; structured drivers record normal termination
 before dropping their records, and boot consumes relay-recorded exits before discarding dead relays.

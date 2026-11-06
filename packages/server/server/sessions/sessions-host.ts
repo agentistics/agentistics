@@ -10,6 +10,7 @@
  * "nothing is running" and "this machine cannot tell". An empty list rendered as a confident zero is
  * the same defect `liveEmptyNotice` exists to prevent on the dashboard.
  */
+import { initialRegistry, isInitialSnapshot, markInitialSnapshot } from './boot-fleet'
 
 import { dedupeRepeatedPrompt } from './prompt-dedupe'
 import { opencodeDbPath, readOpencodeActivity } from './opencode-store'
@@ -278,6 +279,8 @@ export function createSessionsPoller(o: {
   backend: SessionBackend
   readRegistry: () => Promise<ManagedSession[]>
   scanProcesses: () => Promise<{ procs: HarnessProcess[] }>
+  /** Server opt-in: resolve a recent window first; one-shot CLI readers keep the full first poll. */
+  initialSessionLimit?: number
   /**
    * Every conversation this machine knows about — what names an external session and what fills the
    * "closed, reopenable" rows. Injected and OPTIONAL: it is a filesystem read, and the tests that
@@ -428,6 +431,8 @@ export function createSessionsPoller(o: {
   // final), so it runs once; a LIVE row the live read has not linked gets another go every minute.
   const afterTheFactTried = new Map<string, number>()
   let last: SessionSnapshot | null = null
+  let bootComplete = false
+  let loggedFull = false
   /**
    * When the heartbeat last wrote. `-Infinity` so the FIRST poll always stamps.
    *
@@ -440,6 +445,12 @@ export function createSessionsPoller(o: {
 
   async function poll(): Promise<SessionSnapshot> {
     const nowMs = now()
+    const started = performance.now()
+    const initial = !bootComplete && o.initialSessionLimit !== undefined
+    const markPhase = (label: string, at: number) => {
+      markFleetPhase(label, at)
+      if (o.initialSessionLimit !== undefined && (initial || !loggedFull)) console.log(`[boot-fleet] ${initial ? 'recent' : 'history'} ${label}: ${Math.round(performance.now() - at)} ms`)
+    }
 
     const blocked = await o.backend.unavailable().catch(() => undefined)
     if (blocked) {
@@ -462,7 +473,10 @@ export function createSessionsPoller(o: {
       // than inferred from a solo timing that has already proved not to transfer.
       const timed = <T>(label: string, p: Promise<T>): Promise<T> => {
         const started = performance.now()
-        return p.then(v => { markFleetPhase(`poll: gather · ${label}`, started); return v })
+        return p.then(v => {
+          markPhase(`poll: gather · ${label}`, started)
+          return v
+        })
       }
       const [registry, backendSessions, processes, conversations, harnessSessionsRaw, panePidsRead] = await Promise.all([
         timed('readRegistry', o.readRegistry()),
@@ -471,7 +485,7 @@ export function createSessionsPoller(o: {
         // History is an enrichment, never a prerequisite: a store that cannot be read costs the
         // closed rows, not the running ones.
         timed('loadConversations',
-          o.loadConversations ? o.loadConversations().catch(() => [] as Conversation[]) : Promise.resolve([])),
+          !initial && o.loadConversations ? o.loadConversations().catch(() => [] as Conversation[]) : Promise.resolve([])),
         // Same rule: unreadable costs the harness's own names and its exact conversation ids, and
         // every row falls back to behaving exactly as it did before this existed.
         timed('loadHarnessSessions',
@@ -488,17 +502,19 @@ export function createSessionsPoller(o: {
       const rowHarness = new Map(registry.map(r => [r.id, r.harness]))
       const harnessSessions = resolveManagedIds(scopeToRowHarness(harnessSessionsRaw, id => rowHarness.get(id)), panePidsRead)
       const accountRegistry = o.readAccountRegistry ? await o.readAccountRegistry().catch(() => undefined) : undefined
-      markFleetPhase('poll: gather (registry/backend.list/scanProcesses/conversations/harnessSessions)', gatherStart)
+      markPhase('poll: gather (registry/backend.list/scanProcesses/conversations/harnessSessions)', gatherStart)
 
       const exited = new Set(backendSessions.filter(b => !b.alive).map(b => b.id))
       const newlyEnded = registry.filter(m => !m.endedAt && exited.has(m.id))
       if (newlyEnded.length > 0) {
         const endedAt = new Date(nowMs).toISOString()
-        await o.endSessions?.(newlyEnded.map(m => m.id), endedAt).catch(() => undefined)
+        if (!initial) await o.endSessions?.(newlyEnded.map(m => m.id), endedAt).catch(() => undefined)
         for (const m of newlyEnded) m.endedAt = endedAt
       }
 
+      const selected = initial ? new Set(initialRegistry(registry, backendSessions, o.initialSessionLimit).map(r => r.id)) : null
       const reconciled = reconcileSessions(registry, backendSessions)
+        .filter(r => !selected || selected.has(r.id) || r.backend?.alive)
       const harnessOf = new Map(registry.map(r => [r.id, r.harness]))
 
       // Take back any session the backend is running that the registry has lost. It is not a
@@ -507,7 +523,7 @@ export function createSessionsPoller(o: {
       // longer-lived one — leaving the user sitting in a session the cockpit could no longer name,
       // attach to, rename or kill. Adoption never invents anything: see `session-adopt.ts`. It is
       // idempotent by construction (an adopted row stops being `unregistered`), so it writes once.
-      if (o.adoptSessions) {
+      if (!initial && o.adoptSessions) {
         const adoptStart = performance.now()
         const adopt = planAdoptions({
           rows: reconciled,
@@ -519,7 +535,7 @@ export function createSessionsPoller(o: {
         // Best effort, exactly like the heartbeat: a registry that cannot be written costs the
         // adoption, never the fleet on screen.
         if (adopt.length > 0) await o.adoptSessions(adopt).catch(() => undefined)
-        markFleetPhase(`poll: adoptSessions x${adopt.length}`, adoptStart)
+        markPhase(`poll: adoptSessions x${adopt.length}`, adoptStart)
       }
 
       const nextDigest = new Map<string, string>()
@@ -803,13 +819,13 @@ export function createSessionsPoller(o: {
           if (dialog.kind === 'unreadable') dialogUnreadable.set(r.id, dialog.reason!)
         }
       })))
-      markFleetPhase(`poll: capture+chatTail x${reconciled.length} (concurrency ${CAPTURE_CONCURRENCY})`, captureStart)
+      markPhase(`poll: capture+chatTail x${reconciled.length} (concurrency ${CAPTURE_CONCURRENCY})`, captureStart)
       retainKeys(chatTailMemo, new Set(reconciled.filter(r => r.backend?.alive).map(r => r.id)))
 
       // The heartbeat: one write, one timestamp, every session the backend reports as ALIVE. See
       // `crash-group.ts` for why one shared timestamp is what makes the grouping exact.
       const aliveIds = backendSessions.filter(b => b.alive).map(b => b.id)
-      if (o.touchSessions && nowMs - lastHeartbeatMs >= heartbeatMs) {
+      if (!initial && o.touchSessions && nowMs - lastHeartbeatMs >= heartbeatMs) {
         lastHeartbeatMs = nowMs
         // Best effort, and never awaited into the poll's own failure path: a registry that cannot be
         // written costs the crash group, not the fleet on screen.
@@ -820,7 +836,7 @@ export function createSessionsPoller(o: {
       // would CHANGE the registry, so this is one write per session and not one per poll.
       const recordConvStart = performance.now()
       let recordConvWrites = 0
-      if (o.recordConversation) {
+      if (!initial && o.recordConversation) {
         const isLiveRow = (id: string): boolean => panePidsRead ? panePidsRead.has(id) : backendSessions.some(b => b.id === id && b.alive)
         const owners = liveLinks(registry, isLiveRow)
         for (const m of registry) {
@@ -833,7 +849,7 @@ export function createSessionsPoller(o: {
           await o.recordConversation(m.id, exact, 'assigned', 'harness-session-file').catch(() => undefined)
         }
       }
-      markFleetPhase(`poll: recordConversation x${recordConvWrites}`, recordConvStart)
+      markPhase(`poll: recordConversation x${recordConvWrites}`, recordConvStart)
 
       // The pane pids, read ONCE for the two things below that need them: the per-process
       // conversation link, and the hardware sample further down. Two `tmux list-panes` calls a poll
@@ -862,7 +878,7 @@ export function createSessionsPoller(o: {
       const managedLogLinked = new Set<string>()
       const isLive = (id: string): boolean => panePids?.has(id) ?? false
       let live = liveLinks(registry, isLive)
-      if (o.recordConversation && o.readManagedConversation) {
+      if (!initial && o.recordConversation && o.readManagedConversation) {
         const managedFound: Array<[ManagedSession, string]> = []
         for (const m of registry) {
           if (linkDecision(m, 'managed-log') === 'keep') continue
@@ -888,7 +904,7 @@ export function createSessionsPoller(o: {
       }
       const procLinkStart = performance.now()
       let procLinkWrites = 0
-      if (o.recordConversation && o.readProcessConversation) {
+      if (!initial && o.recordConversation && o.readProcessConversation) {
         // THE COLLISION GUARD, resolved BEFORE any content is trusted — see `agyLogCollisions`'s and
         // `holderCollisions`' own headers for what was actually measured. agy names its log by
         // SECOND, so two live processes of such a harness — anywhere on this machine, not only
@@ -968,7 +984,7 @@ export function createSessionsPoller(o: {
       // statement about the session it is driving, so it is recorded like the process-log route
       // (`assigned`, `process-log`), follows `/new` the same way, and never moves a row onto a
       // conversation another live row drives.
-      if (o.recordConversation) {
+      if (!initial && o.recordConversation) {
         const scanned = new Map<number, string>()
         for (const p of processes) if (SCAN_LINKED.has(p.harness) && p.sessionId && p.pid !== undefined) scanned.set(p.pid, p.sessionId)
         for (const m of registry) {
@@ -984,7 +1000,7 @@ export function createSessionsPoller(o: {
           } catch { /* retry next poll */ }
         }
       }
-      markFleetPhase(`poll: processConversation x${procLinkWrites}`, procLinkStart)
+      markPhase(`poll: processConversation x${procLinkWrites}`, procLinkStart)
 
       // THE POST-MORTEM LINK. The block above can only name a conversation while the process is
       // ALIVE (it reads `/proc/<pid>/fd`), so a session that ended before that read landed kept
@@ -992,7 +1008,7 @@ export function createSessionsPoller(o: {
       // left behind says which conversation it made. See `conversationFromSpawnWindow`.
       const afterStart = performance.now()
       let afterWrites = 0
-      if (o.recordConversation && o.readSpawnWindowConversation) {
+      if (!initial && o.recordConversation && o.readSpawnWindowConversation) {
         let budget = AFTER_THE_FACT_PER_POLL
         const taken = new Set(registry.map(m => m.conversationId).filter((v): v is string => Boolean(v)))
         for (const m of registry) {
@@ -1028,7 +1044,7 @@ export function createSessionsPoller(o: {
           }
         }
       }
-      markFleetPhase(`poll: afterTheFactConversation x${afterWrites}`, afterStart)
+      markPhase(`poll: afterTheFactConversation x${afterWrites}`, afterStart)
 
       // The conversation link for the harnesses no `assignId` can be given (codex, kimi,
       // antigravity, gemini): claimed ONCE, at first sighting, and refused on any ambiguity. Written
@@ -1037,7 +1053,7 @@ export function createSessionsPoller(o: {
       // carrying a link are skipped there, so this too writes once per session, not once per poll.
       const claimStart = performance.now()
       let claimWrites = 0
-      if (o.recordConversation) {
+      if (!initial && o.recordConversation) {
         const plan = planFirstSightingClaims({
           rows: registry.map(m => ({
             id: m.id,
@@ -1061,14 +1077,14 @@ export function createSessionsPoller(o: {
           await o.recordConversation(claim.rowId, claim.sessionId, 'observed', 'first-sighting').catch(() => undefined)
         }
       }
-      markFleetPhase(`poll: firstSightingClaims x${claimWrites}`, claimStart)
+      markPhase(`poll: firstSightingClaims x${claimWrites}`, claimStart)
 
       // The `/rename` name, captured WHILE there is still a harness file to read it from, so the
       // title outlives the process. Only a name a PERSON typed (`chosenName` drops the harness's own
       // invented `agentistics-77`), and only when it CHANGED — one write per rename, never per poll.
       const recordNameStart = performance.now()
       let recordNameWrites = 0
-      if (o.recordHarnessName) {
+      if (!initial && o.recordHarnessName) {
         for (const m of registry) {
           const file = harnessSessions.byManagedId.get(m.id)
           const name = chosenName(file)
@@ -1077,7 +1093,7 @@ export function createSessionsPoller(o: {
           await o.recordHarnessName(m.id, name, file?.nameSince).catch(() => undefined)
         }
       }
-      markFleetPhase(`poll: recordHarnessName x${recordNameWrites}`, recordNameStart)
+      markPhase(`poll: recordHarnessName x${recordNameWrites}`, recordNameStart)
 
       // Decided against the BACKEND's own list rather than the reconciled statuses, because that is
       // the question: a row the backend has never heard of is one the machine took.
@@ -1131,7 +1147,7 @@ export function createSessionsPoller(o: {
         // without this every pid the fleet ever had stayed in the map for the life of the server.
         retainKeys(prevProcStats, seenPids)
       }
-      if (canReadProc) markFleetPhase(`poll: procStat+procRss x${reconciled.length} (sequential)`, procStatStart)
+      if (canReadProc) markPhase(`poll: procStat+procRss x${reconciled.length} (sequential)`, procStatStart)
 
       // Confirm the raw readings before anything downstream sees them: the count, the sort, the bell
       // and the TUI all read `activity`, so confirming here is the one place that makes every surface
@@ -1214,12 +1230,18 @@ export function createSessionsPoller(o: {
         ...(fell ? { fell } : {}),
       }
       last = snap
+      bootComplete = true
+      if (initial) markInitialSnapshot(snap)
+      if (o.initialSessionLimit !== undefined && (initial || !loggedFull)) {
+        console.log(`[boot-fleet] ${initial ? 'recent' : 'history'}: ${sessions.length} rows in ${Math.round(performance.now() - started)} ms`)
+        if (!initial) loggedFull = true
+      }
       return snap
     } catch (e) {
       // A failed poll keeps the previous answer and SAYS the refresh failed. Returning an empty
       // list would report every running session as gone the moment tmux hiccups.
       const message = e instanceof Error ? e.message : String(e)
-      return {
+      const failed: SessionSnapshot = {
         sessions: last?.sessions ?? [],
         attention: last?.attention ?? 0,
         rang: [],
@@ -1230,6 +1252,8 @@ export function createSessionsPoller(o: {
         ...(last?.fell ? { fell: last.fell } : {}),
         unavailable: `could not refresh sessions: ${message}`,
       }
+      if (last && isInitialSnapshot(last)) markInitialSnapshot(failed)
+      return failed
     }
   }
 

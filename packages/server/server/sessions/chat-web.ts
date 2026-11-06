@@ -38,6 +38,12 @@ import { transcriptReaderFor } from './harness-transcript'
 import { readChatMemo } from './chat-read-memo'
 import { conversationOfRow, foreignConversations } from './row-conversation'
 import { readRegistry } from './registry'
+import { buildSessionViews } from './session-view'
+import { reconcileSessions } from './session-ref'
+import { toControlSession } from './control-session'
+import { cliStrings } from '../cli-i18n'
+import { loadConsolidatedSession } from '../consolidate'
+import { toConversation } from './conversations'
 import { migratePrompts, pendingFor, type PendingPrompt } from './pending-prompts'
 import { HARNESS_PROCESS_TRANSCRIPTS } from './harness-session-file'
 import { transcriptAvailability, transcriptSentence, type TranscriptAvailability } from './transcript-availability'
@@ -231,7 +237,23 @@ async function readSessionChatCore(
   if (!host.sessions) return { turns: [], unavailable: s.sessionsNoHost, live: false }
 
   const fleet = await host.sessions()
-  const row = fleet.sessions.find(r => r.id === id)
+  let row = fleet.sessions.find(r => r.id === id)
+  if (!row && fleet.historyLoading) {
+    // A bookmarked managed conversation outside the recent window must open without the old store.
+    // Resolve only its recorded exact identity, through the existing pure row mappers.
+    const managed = (await readRegistry()).find(r => r.id === id)
+    if (managed) {
+      const view = buildSessionViews({ reconciled: reconcileSessions([managed], []), activity: new Map(), processes: [] })[0]
+      if (view) row = toControlSession(view, cliStrings(lang))
+    } else {
+      const conversationId = conversationOfRow({ id })
+      const meta = conversationId ? await loadConsolidatedSession(conversationId) : null
+      if (meta) {
+        const view = buildSessionViews({ reconciled: [], activity: new Map(), processes: [], conversations: [toConversation(meta)] })[0]
+        if (view?.id === id) row = toControlSession(view, cliStrings(lang))
+      }
+    }
+  }
   if (!row) {
     return {
       turns: [],

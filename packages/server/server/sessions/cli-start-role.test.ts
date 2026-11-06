@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { start } from './cli-session'
 import { parseSessionArgs } from './cli-parse'
 import { addSession, readRegistry } from './registry'
-import { loadRoles, defaultRoleDeps } from './session-roles'
+import { loadRoles, defaultRoleDeps, roleOfRow } from './session-roles'
 import type { SessionBackend } from './types'
 import { isolateAgentEnv } from './agent-env.testing'
 
@@ -38,14 +38,14 @@ async function run(argv: string[], parent?: string) {
 describe('agentop session <harness> --bg — the stored role', () => {
   test('a detected parent and no --role stores worker', async () => {
     const { child, roles } = await run(['claude', '--bg', '--force', '--cwd', process.cwd(), '--name', 'Motor', '-p', 'x'], 'parent-bg-1')
-    expect(roles[child.id]).toBe('worker')
+    expect(roleOfRow(roles, child)).toBe('worker')
   }, 60_000)
   test('a --name wearing the leader prefix never silently becomes a worker', async () => {
     const { child, roles } = await run(['claude', '--bg', '--force', '--cwd', process.cwd(), '--name', '[ LÍDER ] - Motor', '-p', 'x'], 'parent-bg-3')
-    expect(roles[child.id]).toBe('leader')
+    expect(roleOfRow(roles, child)).toBe('leader')
   }, 60_000)
   test('--role leader works with --bg', async () => {
     const { child, roles } = await run(['claude', '--bg', '--force', '--role', 'leader', '--cwd', process.cwd(), '--name', 'Motor', '-p', 'x'], 'parent-bg-2')
-    expect(roles[child.id]).toBe('leader')
+    expect(roleOfRow(roles, child)).toBe('leader')
   }, 60_000)
 })

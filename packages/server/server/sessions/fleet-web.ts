@@ -46,7 +46,7 @@ import { forceRowScreen } from './adapter-state-host'
 import {
   buildFleetFrame, closedPage, compactFleetRows, compactFleetSession, compactGetBody, fleetEventsResponse, type FleetFrame,
 } from './fleet-events'
-import { cachedBaseline } from './fleet-baseline'
+import { backgroundBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
 import { readHarnessSkills, skillsReason, type HarnessSkill } from './harness-skills'
 import { HARNESS_CAPABILITIES, HARNESS_LABELS, HARNESS_ORDER, type ModelOption, type Baseline } from '@agentistics/core'
@@ -72,6 +72,7 @@ export type {
 } from './fleet-arrange'
 
 export interface FleetPayload {
+  historyLoading?: boolean
   sessions: FleetRow[]
   /**
    * The SAME rows, unshaped — what the cockpit itself arranges.
@@ -372,11 +373,12 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
     const tasks = host.sessionTasks ? await host.sessionTasks().catch(() => []) : []
     const finishedTasks = fleet.finishedTasks ?? []
     // A failed store read costs freshness, never the fleet: the fleet is what this route is for.
-    const baseline = await cachedBaseline(
+    const baseline = backgroundBaseline(
       async () => [...(await loadConsolidated()).values()],
       Date.now(),
-    ).catch(() => undefined)
+    )
     return {
+      historyLoading: fleet.historyLoading ?? false,
       sessions: fleet.sessions.map(row => fleetRow(row, s)),
       rows: fleet.sessions,
       attention: fleet.attention,
