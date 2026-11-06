@@ -89,7 +89,8 @@ export function flyCard(el: HTMLElement, from: Box, o: { fromColor: string; toCo
   const g = ghostOf(el, from)
   layer.appendChild(g)
   const geo = flightGeometry(from, to)
-  const dur = o.speed && o.speed > 1 ? 620 : 980
+  // ~600 ms: a card that changes stage must be FOLLOWED by the eye, not waited for (owner, 06/11).
+  const dur = o.speed && o.speed > 1 ? 480 : 600
   // The slot opens at the destination before the card arrives.
   const slot = document.createElement('div')
   slot.style.cssText = `position:fixed;left:${to.left}px;top:${to.top}px;width:${to.width}px;height:${to.height}px;border:1.5px dashed ${o.toColor};border-radius:10px;background:${o.toColor}14`
@@ -220,4 +221,28 @@ export function transitionKind(prev: string | undefined, next: string): Transiti
 export function intersects(b: Box, view: Box): boolean {
   return b.left < view.left + view.width && b.left + b.width > view.left
     && b.top < view.top + view.height && b.top + b.height > view.top
+}
+
+
+/** A brief ring in the destination column's colour round a card that has just landed. */
+export function ring(el: HTMLElement, color: string, ms = 900): void {
+  if (!canAnimate() || reducedMotion()) return
+  el.animate([{ boxShadow: `0 0 0 2px ${color}` }, { boxShadow: `0 0 0 2px ${color}`, offset: 0.45 }, { boxShadow: '0 0 0 0 transparent' }], { duration: ms, easing: 'ease-out' })
+}
+
+/** The card's stage-bar segments fade from the colours they had in the previous column to the ones they have now. */
+export function recolorBar(el: HTMLElement, from: readonly string[], ms = 400): void {
+  if (!canAnimate() || reducedMotion()) return
+  const segs = Array.from(el.querySelectorAll<HTMLElement>('[data-live-bar] i'))
+  segs.forEach((seg, k) => {
+    const was = from[k]
+    if (!was) return
+    const now = getComputedStyle(seg).backgroundColor
+    seg.animate([{ backgroundColor: was }, { backgroundColor: now }], { duration: ms, easing: 'ease-out' })
+  })
+}
+
+/** The destination column is collapsed (no card element to land): flash its header in the arriving colour. */
+export function flashHeader(head: HTMLElement | null, color: string, ms = 900): void {
+  if (head) ring(head, color, ms)
 }

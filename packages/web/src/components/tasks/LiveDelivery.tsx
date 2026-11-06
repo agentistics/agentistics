@@ -6,66 +6,77 @@
  * long. Everything on a card is either read from the book or from the fleet, and an estimate always
  * says what it was computed from — "sem estimativa" is a legitimate answer, a made-up number is not.
  *
- * Mobile: ONE stage at a time (the chips above it), same cards, 44px targets — the same shape as the
- * board's `MobileLane`, so nobody has to learn a second phone layout.
+ * Desktop never scrolls vertically (owner, 06/11): the board fills the height it is given, each column
+ * shows the cards that fit plus a "+N" that flows the rest into extra sub-columns — growth is
+ * horizontal, under the one orange scroll bar. Mobile: ONE stage at a time (the chips above it), same
+ * cards, 44px targets — the same shape as the board's `MobileLane`.
+ *
+ * The cards are `LiveCardView` (option A); the leaders are `LiveLeaders`; every rule they follow is
+ * in `liveCardModel` / `liveDeliveryModel`, so this file lays out and wires, it does not decide.
  */
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ExternalLink } from 'lucide-react'
+import { plainLeaderName } from '@agentistics/core'
 import { CenteredLoader } from '../CenteredLoader'
 import { useFleet, type FleetRow } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { usePlanLimits } from '../../lib/planLimits'
-import { accountDisplayName } from '../../lib/planLimits'
-import { Select } from '../../pages/settings/primitives'
-import { harnessColor, microLabel, pill, surface } from './board'
-import { SessionChip } from '../sessions/RoleChip'
+import { pathOfView } from '../../lib/tasksViewRoute'
+import { microLabel, surface } from './board'
 import {
-  LIVE_STAGES, LIVE_STATE_LABEL, orderQueueFirstUp, STAGE_LABEL, byStage, etaText, filterCards, fmtSpan, joinLive, summarize,
-  fmtClock, LIVE_DEFAULTS, isQueued, queuePosition, cardPills, type StageFilter, type LeaderRecord, type LiveCard, type LiveReply, type LiveStage,
+  LIVE_STAGES, orderQueueFirstUp, STAGE_LABEL, byStage, filterCards, fmtClock, fmtSpan, joinLive, summarize, LIVE_DEFAULTS,
+  type StageFilter, type LiveCard, type LiveReply, type LiveStage,
 } from './liveDeliveryModel'
+import {
+  columnCollapsed, fitCount, lingering, stageBar, mergeGone, pack, planDepartures, readCollapsedPrefs, sinceWord,
+  snapshotOf, taskOfSession, taskOptions, writeCollapsedPrefs, type CollapsedPrefs, type BoardSnapshot, type Gone,
+} from './liveCardModel'
+import { LiveCardView } from './LiveCardView'
+import { LiveLeaders } from './LiveLeaders'
+import { LiveTaskFilter } from './LiveTaskFilter'
+import { PipPortal, requestPipWindow, type OpenedWindow } from './livePip'
 import { useLiveDeliveries } from './useLiveDeliveries'
-import { disintegrate, flyCard, intersects, reintegrate, transitionKind, type Box } from './liveDeliveryFx'
+import { disintegrate, flashHeader, flyCard, intersects, recolorBar, reintegrate, ring, transitionKind, type Box } from './liveDeliveryFx'
 
 const reducedMotion = (): boolean => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } }
 
-const STATE_COLOR = {
-  working: 'var(--accent-green, #3ecf8e)', waiting: 'var(--text-tertiary)',
-  'needs-you': 'var(--accent-red, #ff5f5f)', down: 'var(--accent-red, #ff5f5f)', none: 'var(--text-tertiary)',
-} as const
+const COL_W = 280, COL_GAP = 8, COLLAPSED_W = 40, MORE_H = 30, CARD_GAP = 8
 
 const copy = (pt: boolean) => pt ? {
-  title: 'Live Delivery', all: 'Todas as tarefas', onlyActive: 'só com agentes ativos',
+  title: 'Live Delivery', onlyActive: 'só com agentes ativos',
   deliveries: (n: number) => `${n} ${n === 1 ? 'entrega ativa' : 'entregas ativas'}`,
   agents: (n: number) => `${n} ${n === 1 ? 'agente trabalhando' : 'agentes trabalhando'}`,
   next: (t: string) => `próxima entrega prevista ${t}`, noNext: 'sem entrega com estimativa',
-  live: 'atualizado ao vivo', inStage: 'nesta etapa', total: 'total', empty: 'Nada nesta etapa',
+  live: 'atualizado ao vivo', empty: 'Nada nesta etapa',
   down: 'Não consegui ler as entregas agora.', refused: 'O quadro não está disponível neste perfil.',
   loading: 'Carregando entregas…', none: 'Nenhuma entrega ativa agora.',
-  delivered: 'entregue', last: 'última ação',
-  allSteps: 'Todas as etapas', queued: 'NA FILA', waitingSlot: 'aguardando vaga', account: 'conta',
+  delivered: 'publicado', allSteps: 'Todas as etapas', external: 'abrir janela externa', externalBlocked: 'O navegador bloqueou a janela externa.',
+  more: (n: number) => `+${n}`, less: 'menos', collapse: 'Recolher coluna', expand: 'Abrir coluna',
+  left: 'saiu', recentLeft: (n: number) => `saíram há pouco (${n})`, noneLeft: 'Ninguém saiu do quadro nos últimos minutos.',
 } : {
-  title: 'Live Delivery', all: 'All tasks', onlyActive: 'only with active agents',
+  title: 'Live Delivery', onlyActive: 'only with active agents',
   deliveries: (n: number) => `${n} active ${n === 1 ? 'delivery' : 'deliveries'}`,
   agents: (n: number) => `${n} ${n === 1 ? 'agent working' : 'agents working'}`,
   next: (t: string) => `next delivery expected ${t}`, noNext: 'no delivery has an estimate',
-  live: 'updated live', inStage: 'in this stage', total: 'total', empty: 'Nothing in this stage',
+  live: 'updated live', empty: 'Nothing in this stage',
   down: 'Could not read the deliveries right now.', refused: 'The board is not available on this profile.',
   loading: 'Loading deliveries…', none: 'No active delivery right now.',
-  delivered: 'delivered', last: 'last action',
-  allSteps: 'All steps', queued: 'QUEUED', waitingSlot: 'waiting for a slot', account: 'account',
+  delivered: 'published', allSteps: 'All steps', external: 'open in a window', externalBlocked: 'The browser blocked the external window.',
+  more: (n: number) => `+${n}`, less: 'less', collapse: 'Collapse column', expand: 'Open column',
+  left: 'left', recentLeft: (n: number) => `left recently (${n})`, noneLeft: 'Nothing left the board in the last minutes.',
 }
 
 /** The hooks wrapper: the shared fleet stream, the plan-limits account labels and the live read model. */
-export function LiveDelivery({ lang, compact }: { lang: 'pt' | 'en'; compact?: boolean }) {
+export function LiveDelivery({ lang, compact, focusSessionId, inPip }: { lang: 'pt' | 'en'; compact?: boolean; focusSessionId?: string | null; inPip?: boolean }) {
   const { fleet } = useFleet(lang)
   const plan = usePlanLimits()
   const { reply, error, nowMs } = useLiveDeliveries(fleet.sessions)
-  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} compact={compact} />
+  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} compact={compact} focusSessionId={focusSessionId} inPip={inPip} />
 }
 
-/** PURE of data sources: everything it draws comes in as props, so it is tested without mocking a store. */
-export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabels, compact }: {
+export interface LiveDeliveryViewProps {
   /** The shortcut popover/sheet: no leaders band, the board takes the room it is given. */
   compact?: boolean
   lang: 'pt' | 'en'
@@ -74,43 +85,85 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   nowMs: number
   fleet: readonly FleetRow[]
   accountLabels: Record<string, string>
-}) {
+  /** Opened from this session: the board starts filtered by ITS task (removable like any chip). */
+  focusSessionId?: string | null
+  /** The tasks to start with (a window opened from another Live carries its filter along). */
+  initialTaskIds?: readonly string[]
+  /** Rendered inside the external window: no button to open another, fills that window. */
+  inPip?: boolean
+}
+
+/** PURE of data sources: everything it draws comes in as props, so it is tested without mocking a store. */
+export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabels, compact, focusSessionId, initialTaskIds, inPip }: LiveDeliveryViewProps) {
   const pt = lang === 'pt'
   const L = copy(pt)
   const isMobile = useIsMobile()
   const navigate = useNavigate()
-  const [taskId, setTaskId] = useState<string | null>(null)
+  const [taskIds, setTaskIds] = useState<readonly string[]>(initialTaskIds ?? LIVE_DEFAULTS.taskIds)
   const [onlyActive, setOnlyActive] = useState(LIVE_DEFAULTS.onlyActive)
   const [stageFilter, setStageFilter] = useState<StageFilter>(LIVE_DEFAULTS.stage)
+  const [prefs, setPrefs] = useState<CollapsedPrefs>(() => readCollapsedPrefs())
+  const [expandedCols, setExpandedCols] = useState<Partial<Record<LiveStage, boolean>>>({})
+  const [openPub, setOpenPub] = useState<ReadonlySet<string>>(new Set())
+  const [pip, setPip] = useState<OpenedWindow | null>(null)
+  const [pipNote, setPipNote] = useState(false)
+  const [gone, setGone] = useState<Gone[]>([])
+  const [showGone, setShowGone] = useState(false)
+  const [clock, setClock] = useState(() => Date.now())
 
   const cards = useMemo(() => joinLive(reply?.deliveries ?? [], fleet), [reply, fleet])
-  const shown = useMemo(() => filterCards(cards, { taskId, onlyActive }), [cards, taskId, onlyActive])
+  const shown = useMemo(() => filterCards(cards, { taskIds, onlyActive }), [cards, taskIds, onlyActive])
   const columns = useMemo(() => orderQueueFirstUp(byStage(shown), shown), [shown])
   const visibleStages = stageFilter === 'all' ? LIVE_STAGES : LIVE_STAGES.filter(s => s === stageFilter)
   const sum = useMemo(() => summarize(shown, nowMs), [shown, nowMs])
-  const tasks = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const c of cards) m.set(c.d.taskId, c.d.taskTitle)
-    return [...m.entries()].map(([value, label]) => ({ value, label }))
-  }, [cards])
+  const options = useMemo(() => taskOptions(cards, nowMs), [cards, nowMs])
+  const leaders = reply?.leaders ?? []
+  const leaderIds = useMemo(() => new Set(leaders.map(l => l.id)), [leaders])
 
-  // Stage changes are animated FLIP-style: each card's last stage and box are remembered, and a card
-  // that shows up in another column glides from where it was (a merge approved is disintegrated and
-  // reintegrated instead). Cards the first render shows — and cards that merely scrolled — do not move.
+  // Opened from a session -> filtered by ITS task (a worker's piece, a leader's filing). Once per session.
+  const appliedFocus = useRef<string | null>(null)
+  useEffect(() => {
+    if (!focusSessionId || !reply || appliedFocus.current === focusSessionId) return
+    appliedFocus.current = focusSessionId
+    const t = taskOfSession(focusSessionId, { sessionTasks: reply.sessionTasks, cards, leaders })
+    if (t) setTaskIds([t])
+  }, [focusSessionId, reply, cards, leaders])
+
+  // Nothing leaves the board without a word: diff the board against its last self.
+  const snap = useRef<BoardSnapshot | null>(null)
+  const filterSig = `${taskIds.join(',')}|${onlyActive}`
+  useEffect(() => {
+    if (!reply) return
+    const next = snapshotOf(shown, leaders, filterSig)
+    const departed = planDepartures(snap.current, next, {
+      allKeys: new Set(cards.map(c => c.d.key)), hidden: reply.hidden ?? [], leaderIdsNow: leaderIds, nowMs: Date.now(), pt,
+    })
+    snap.current = next
+    if (departed.length) setGone(g => mergeGone(g, departed, Date.now()))
+  }, [reply, shown, leaders, cards, filterSig, leaderIds, pt])
+  const lingeringNow = useMemo(() => lingering(gone, clock), [gone, clock])
+  useEffect(() => {
+    if (gone.length === 0) return
+    const t = setInterval(() => { const n = Date.now(); setClock(n); setGone(g => mergeGone(g, [], n)) }, 1000)
+    return () => clearInterval(t)
+  }, [gone.length])
+
   const seen = useRef(new Map<string, { stage: LiveStage; box: Box }>())
   const boardRef = useRef<HTMLDivElement>(null)
   const chipRowRef = useRef<HTMLDivElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
-  // Desktop: the board takes the room left under its own top edge, so the horizontal bar is always on screen.
   const [fitH, setFitH] = useState<number | null>(null)
   useLayoutEffect(() => {
     if (compact || isMobile) return
-    const measure = () => { const el = wrapRef.current; if (el) setFitH(Math.max(420, Math.floor(window.innerHeight / (Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom')) || 1) - el.getBoundingClientRect().top - 16))) }
+    const measure = () => {
+      const el = wrapRef.current
+      const win = el?.ownerDocument.defaultView ?? window
+      if (el) setFitH(Math.max(420, Math.floor(win.innerHeight / (Number(getComputedStyle(win.document.documentElement).getPropertyValue('--ui-zoom')) || 1) - el.getBoundingClientRect().top - 16)))
+    }
     measure()
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
   }, [compact, isMobile, reply === null])
-  // Phone: the active stage pill scrolls into view (the row is wider than the screen).
   useEffect(() => {
     const el = chipRowRef.current?.querySelector<HTMLElement>(`[data-chip="${stageFilter}"]`)
     el?.scrollIntoView?.({ inline: 'center', block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' })
@@ -158,7 +211,8 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       const from = { ...prev.box, left: prev.box.left - moved }
       flights.push(() => {
         el.style.opacity = '0'
-        const back = () => { el.style.opacity = '' }
+        const prevBar = stageBar(prev.stage, null).map(x => x.color)
+        const back = () => { el.style.opacity = ''; ring(el, STAGE_LABEL[stage].color); recolorBar(el, prevBar) }
         if (kind === 'merge-approved') void disintegrate(el, from).then(() => reintegrate(el)).then(back, back)
         else void flyCard(el, from, { fromColor: STAGE_LABEL[prev.stage].color, toColor: STAGE_LABEL[stage].color }).then(back, back)
       })
@@ -167,8 +221,29 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     seen.current = now
   })
 
+
+  // A card that moved into a COLLAPSED column has no element to land: its header flashes in the arriving colour instead.
+  const stageOf = useRef(new Map<string, LiveStage>())
+  useEffect(() => {
+    const root = boardRef.current
+    const nextMap = new Map<string, LiveStage>()
+    for (const c of shown) {
+      nextMap.set(c.d.key, c.d.stage)
+      const was = stageOf.current.get(c.d.key)
+      if (!root || was === undefined || was === c.d.stage) continue
+      if (root.querySelector(`[data-live-card="${CSS.escape(c.d.key)}"]`)) continue
+      flashHeader(root.querySelector<HTMLElement>(`[data-live-column="${c.d.stage}"] [data-live-colhead]`), STAGE_LABEL[c.d.stage].color)
+    }
+    stageOf.current = nextMap
+  }, [shown])
+  const openExternal = useCallback(async () => {
+    const r = await requestPipWindow({ width: 540, height: 680, fallbackUrl: `${window.location.origin}${pathOfView('live')}` })
+    if (r.kind === 'pip') setPip(r)
+    else if (r.kind === 'blocked') setPipNote(true)
+  }, [])
+  useEffect(() => () => { setPip(p => { if (p?.kind === 'pip') try { p.win.close() } catch { /* already closed */ } return null }) }, [])
+
   if (error === 'refused') return <Note text={L.refused} />
-  // The app's one loader (`CenteredLoader`), never a loose "loading…" line.
   if (reply === null && error !== 'down') return <CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" />
   if (reply === null) return <Note text={L.down} />
 
@@ -176,98 +251,76 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     const id = c.agents[0]?.id ?? c.d.sessionIds[0]
     navigate(id ? `/sessions/${encodeURIComponent(id)}` : `/tasks/${encodeURIComponent(c.d.taskId)}`)
   }
-  const accountOf = (a: LiveCard['agents'][number]) =>
-    a.accountId ? accountDisplayName(accountLabels, a.harness, a.accountId) : null
+  const leaderOf = (c: LiveCard): string | null => {
+    const ids = new Set([...c.agents.map(a => a.id), ...c.d.sessionIds])
+    const l = leaders.find(x => x.workers.some(w => ids.has(w.id)))
+    return l ? plainLeaderName(l.title) : null
+  }
+  const roleOf = (c: LiveCard): 'leader' | 'worker' => (c.agents.some(a => leaderIds.has(a.id)) ? 'leader' : 'worker')
+  const renderCard = (c: LiveCard, embedded = false) => (
+    <LiveCardView
+      key={c.d.key} c={c} cards={cards} nowMs={nowMs} pt={pt} fleet={fleet} accountLabels={accountLabels} runtime={reply.runtime}
+      leaderName={leaderOf(c)} role={roleOf(c)} mobile={isMobile} onOpen={open} embedded={embedded}
+    />
+  )
+  const togglePub = (key: string) => setOpenPub(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n })
+  const renderPub = (c: LiveCard) => {
+    const isOpen = openPub.has(c.d.key)
+    const when = c.d.deliveredAtMs ? `${L.delivered} ${fmtClock(c.d.deliveredAtMs)} · ${fmtSpan(nowMs - c.d.deliveredAtMs)}` : L.delivered
+    return (
+      <div key={c.d.key} data-live-pubrow={c.d.key} data-open={isOpen ? '1' : '0'} style={{ display: 'grid' }}>
+        <button
+          type="button" aria-expanded={isOpen} onClick={() => togglePub(c.d.key)} className="ag-tap" title={c.d.title}
+          style={{ ...surface, display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', minWidth: 0, fontSize: 11.5, ...(isOpen ? { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 } : {}) }}
+        >
+          <span aria-hidden style={{ transform: isOpen ? 'none' : 'rotate(-90deg)', transition: reducedMotion() ? 'none' : 'transform .2s', flexShrink: 0 }}>▾</span>
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 600 }}>{c.d.title}</span>
+          <span style={{ color: 'var(--text-tertiary)', fontSize: 10.5, flexShrink: 0 }}>{when}</span>
+        </button>
+        <div style={{ display: 'grid', gridTemplateRows: isOpen ? '1fr' : '0fr', transition: reducedMotion() ? 'none' : 'grid-template-rows .2s' }}>
+          <div style={{ overflow: 'hidden', minHeight: 0 }}>{isOpen && renderCard(c, true)}</div>
+        </div>
+      </div>
+    )
+  }
+  const cardsOf = (s: LiveStage) => columns[s]
 
   const summaryLine = [
     L.deliveries(sum.deliveries), L.agents(sum.agentsWorking),
     sum.nextEtaMs !== null ? L.next(fmtClock(sum.nextEtaMs)) : L.noNext, L.live,
   ].join(' · ')
 
+  const pillBtn = (active: boolean): React.CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 30, padding: '0 12px',
+    borderRadius: 999, fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
+    border: `1px solid ${active ? 'var(--anthropic-orange)' : 'var(--border)'}`,
+    background: active ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
+    color: active ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
+  })
   const filters = (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <div style={{ minWidth: isMobile ? '100%' : 190, flex: isMobile ? '1 1 100%' : undefined }}>
-        <Select
-          value={taskId ?? ''} onChange={v => setTaskId(v || null)}
-          options={[{ value: '', label: L.all }, ...tasks]}
-        />
-      </div>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
+      <LiveTaskFilter options={options} chosen={taskIds} onChange={setTaskIds} pt={pt} />
       {!isMobile && <button
         type="button" className="ag-tap" aria-pressed={stageFilter === 'all'} data-live-allsteps onClick={() => setStageFilter(stageFilter === 'all' ? (LIVE_STAGES.find(s => columns[s].length > 0) ?? 'running') : 'all')}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 30, padding: '0 12px',
-          borderRadius: 999, fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
-          border: `1px solid ${stageFilter === 'all' ? 'var(--anthropic-orange)' : 'var(--border)'}`,
-          background: stageFilter === 'all' ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-          color: stageFilter === 'all' ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
-        }}
+        style={pillBtn(stageFilter === 'all')}
       >{L.allSteps}</button>}
-      <button
-        type="button" className="ag-tap" aria-pressed={onlyActive} onClick={() => setOnlyActive(v => !v)}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 30, padding: '0 12px',
-          borderRadius: 999, fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
-          border: `1px solid ${onlyActive ? 'var(--anthropic-orange)' : 'var(--border)'}`,
-          background: onlyActive ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
-          color: onlyActive ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
-        }}
-      ><span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--anthropic-orange)' }} />{L.onlyActive}</button>
+      <button type="button" className="ag-tap" aria-pressed={onlyActive} onClick={() => setOnlyActive(v => !v)} style={pillBtn(onlyActive)}>
+        <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--anthropic-orange)' }} />{L.onlyActive}
+      </button>
+      {gone.length > 0 && (
+        <button type="button" className="ag-tap" data-live-gone-toggle aria-pressed={showGone} onClick={() => setShowGone(v => !v)} style={pillBtn(showGone)}>{L.recentLeft(gone.length)}</button>
+      )}
+      {!isMobile && !inPip && (
+        <button type="button" className="ag-tap" data-live-external onClick={() => void openExternal()} disabled={pip?.kind === 'pip'} title={L.external} style={{ ...pillBtn(false), opacity: pip?.kind === 'pip' ? 0.5 : 1 }}>
+          <ExternalLink size={13} aria-hidden />{L.external}
+        </button>
+      )}
     </div>
   )
 
-  const renderCard = (c: LiveCard) => {
-    const eta = etaText(c.d.eta, lang)
-    const agent = c.agents[0]
-    const queued = isQueued(c)
-    const pos = queuePosition(cards, c)
-    const pills = cardPills(c, accountOf, L.account)
-    const stateWord = LIVE_STATE_LABEL[c.liveState][pt ? 'pt' : 'en']
-    const grey = 'var(--text-tertiary)'
-    return (
-      <button
-        key={c.d.key} type="button" data-live-card={c.d.key} data-stage={c.d.stage} data-alert={c.alert ? '1' : undefined} data-queued={queued ? '1' : undefined}
-        onClick={() => open(c)}
-        style={{
-          ...surface, display: 'grid', gap: 6, textAlign: 'left', width: '100%', padding: isMobile ? '10px 12px' : '8px 8px',
-          cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', minWidth: 0,
-          border: queued ? '1px dashed var(--border)' : `1px solid ${c.alert ? 'var(--accent-red, #ff5f5f)' : 'var(--border)'}`,
-          ...(queued ? { opacity: 0.62 } : {}),
-        }}
-      >
-        <span style={{ fontWeight: 700, fontSize: 12.5, overflowWrap: 'anywhere' }}>{c.d.title}</span>
-        <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>{c.d.subtaskId ? c.d.taskTitle : ''}</span>
-        {queued ? (
-          <span style={{ display: 'grid', gap: 2, fontSize: 11.5 }}>
-            <b data-live-queued style={{ letterSpacing: '.04em', color: grey }}>{L.queued}{pos ? ` · ${pos}${pt ? 'º' : pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}` : ''}</b>
-            <span style={{ color: grey }}>{L.waitingSlot}</span>
-          </span>
-        ) : (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-            <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: STATE_COLOR[c.liveState], flexShrink: 0 }} />
-            {stateWord}{agent && c.agents.length > 1 ? ` · ${c.agents.length}` : ''}
-          </span>
-        )}
-        {pills.runtime && <span data-live-pill="runtime" style={{ ...pill(harnessColor(agent?.harness ?? c.d.harnesses[0] ?? '')), width: 'fit-content', maxWidth: '100%', overflowWrap: 'anywhere' }}>{pills.runtime}</span>}
-        {pills.account && <span data-live-pill="account" style={{ ...pill(), width: 'fit-content', maxWidth: '100%', overflowWrap: 'anywhere' }}>{pills.account}</span>}
-        <span style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>
-          <span>{L.inStage} <b style={{ color: queued ? grey : 'var(--text-primary)', fontWeight: 600 }}>{c.d.stage === 'published' ? '—' : fmtSpan(c.d.stageSinceMs === null ? null : nowMs - c.d.stageSinceMs)}</b></span>
-          {!queued && <span>{L.total} <b style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{c.d.stage === 'published' ? '—' : fmtSpan(c.d.startedAtMs === null ? null : nowMs - c.d.startedAtMs)}</b></span>}
-        </span>
-        {!queued && (
-          <span
-            title={eta.title}
-            style={{ fontSize: 11, padding: '3px 7px', borderRadius: 5, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange-light)' }}
-          >{c.d.stage === 'published' && c.d.deliveredAtMs ? `${L.delivered} ${fmtClock(c.d.deliveredAtMs)}` : eta.line}</span>
-        )}
-        {c.d.blockedReason && <span style={{ fontSize: 11, color: 'var(--accent-red, #ff5f5f)' }}>{c.d.blockedReason}</span>}
-        {c.d.lastAction && !queued && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }} title={L.last}>↳ {c.d.lastAction.text}</span>}
-      </button>
-    )
-  }
-
   const header = (
     <div style={{ display: 'grid', gap: 10 }}>
-      {!compact && <LeadersBand leaders={reply.leaders ?? []} lang={lang} onOpen={id => navigate(`/sessions/${encodeURIComponent(id)}`)} />}
+      {!compact && !inPip && <LiveLeaders leaders={leaders} runtime={reply.runtime} accountLabels={accountLabels} nowMs={nowMs} lang={lang} onOpen={id => navigate(`/sessions/${encodeURIComponent(id)}`)} />}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 650 }}>
           <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-red, #ff5f5f)' }} />{L.title}
@@ -279,10 +332,33 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         {!isMobile && filters}
       </div>
       {isMobile && filters}
+      {pipNote && <span role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{L.externalBlocked}</span>}
+      {showGone && (
+        <ul data-live-gone-list style={{ ...surface, listStyle: 'none', margin: 0, padding: '8px 10px', display: 'grid', gap: 3, fontSize: 11.5 }}>
+          {gone.length === 0 && <li style={{ color: 'var(--text-tertiary)' }}>{L.noneLeft}</li>}
+          {gone.map(g => (
+            <li key={g.key} data-live-gone={g.key} style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <b style={{ fontWeight: 600 }}>{g.title}</b><span style={{ color: 'var(--text-tertiary)' }}>— {L.left}: {g.reason} · {sinceWord(g.atMs, clock, pt)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 
-  if (reply.deliveries.length === 0) return <div style={{ display: 'grid', gap: 12 }}>{header}<Note text={L.none} /></div>
+  const goneRows = lingeringNow.map(g => (
+    <div key={g.key} data-live-gone-line={g.key} role="status" style={{ ...surface, padding: '5px 8px', fontSize: 11, color: 'var(--text-tertiary)', borderStyle: 'dashed', overflowWrap: 'anywhere' }}>
+      <b style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{L.left}:</b> {g.title} — {g.reason} · {sinceWord(g.atMs, clock, pt)}
+    </div>
+  ))
+
+  const pipPortal = pip?.kind === 'pip' ? (
+    <PipPortal win={pip.win} onClose={() => setPip(null)}>
+      <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet} accountLabels={accountLabels} compact inPip initialTaskIds={taskIds} />
+    </PipPortal>
+  ) : null
+
+  if (reply.deliveries.length === 0 && leaders.length === 0 && gone.length === 0) return <div style={{ display: 'grid', gap: 12 }}>{header}<Note text={L.none} />{pipPortal}</div>
 
   if (isMobile) {
     const chip = (active: boolean): React.CSSProperties => ({
@@ -322,10 +398,12 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
                   <span style={{ ...microLabel, fontSize: 11 }}>{columns[s].length === 0 ? L.empty : columns[s].length}</span>
                 </header>
               )}
-              {columns[s].map(renderCard)}
+              {s === 'published' && goneRows}
+              {s === 'published' ? columns[s].map(renderPub) : columns[s].map(c => renderCard(c))}
             </section>
           ))}
         </div>
+        {pipPortal}
       </div>
     )
   }
@@ -333,94 +411,153 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   return (
     <div ref={wrapRef} style={{ display: 'grid', gap: 12, gridTemplateRows: 'auto minmax(0, 1fr)', height: compact ? '100%' : (fitH ?? 560), minHeight: compact ? 0 : 420 }}>
       {header}
-      <div ref={boardRef} className="ag-scroll" data-live-board style={{ display: 'flex', gap: 8, overflowX: 'auto', overflowY: 'auto', alignItems: 'flex-start', padding: '6px 2px 10px', minHeight: 0 }}>
-        {visibleStages.map(s => {
-          const empty = columns[s].length === 0
-          return (
-            <section key={s} data-live-column={s} style={{ flex: empty ? '0 0 40px' : '0 0 280px', width: empty ? 40 : 280, minWidth: 0, display: 'grid', gap: 8, alignContent: 'start', opacity: empty ? 0.5 : 1 }}>
-              <header style={{ borderTop: `3px solid ${STAGE_LABEL[s].color}`, padding: '8px 4px 2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...(empty ? { flexDirection: 'column', gap: 6 } : {}) }}>
-                <span style={{ fontWeight: 700, fontSize: 13, ...(empty ? { writingMode: 'vertical-rl', whiteSpace: 'nowrap' } : {}) }}>{STAGE_LABEL[s][pt ? 'pt' : 'en']}</span>
-                <span style={{ ...microLabel, fontSize: 11 }}>{columns[s].length}</span>
-              </header>
-              {columns[s].map(renderCard)}
-            </section>
-          )
-        })}
+      {/* HORIZONTAL scroll only: columns fit the height they are given, the rest flows sideways. */}
+      <div ref={boardRef} className="ag-scroll" data-live-board style={{ display: 'flex', gap: COL_GAP, overflowX: 'auto', overflowY: 'hidden', alignItems: 'stretch', padding: '6px 2px 10px', minHeight: 0 }}>
+        {visibleStages.map(s => (
+          <Column
+            key={s} stage={s} pt={pt} cards={cardsOf(s)} prefs={prefs} L={L}
+            expanded={!!expandedCols[s]} onExpanded={v => setExpandedCols(m => ({ ...m, [s]: v }))}
+            onToggle={() => {
+              const was = columnCollapsed(s, cardsOf(s).length, prefs)
+              const next = { ...prefs, [s]: !was }
+              setPrefs(next); writeCollapsedPrefs(next)
+            }}
+            render={s === 'published' ? renderPub : renderCard}
+            extra={s === 'published' && goneRows.length ? goneRows : null}
+            peek={s === 'published' && goneRows.length > 0}
+            sig={s === 'published' ? [...openPub].join(',') + lingeringNow.length : ''}
+          />
+        ))}
       </div>
+      {pipPortal}
     </div>
   )
 }
 
-const RAW_STATE_WORDS: Record<string, { en: string; pt: string }> = {
-  'waiting-approval': { en: 'needs your approval', pt: 'precisa da sua aprovação' },
-  waiting: { en: 'waiting for you', pt: 'esperando você' },
-  working: { en: 'working', pt: 'trabalhando' },
-  running: { en: 'working', pt: 'trabalhando' },
-  lost: { en: 'lost', pt: 'perdida' },
-  exited: { en: 'finished', pt: 'encerrada' },
-  closed: { en: 'finished', pt: 'encerrada' },
-  external: { en: 'outside agentop', pt: 'fora do agentop' },
-}
-/** A fleet state in plain words — never the raw value (`waiting-approval`). */
-function stateWordOf(state: string, pt: boolean): string {
-  const w = RAW_STATE_WORDS[state]
-  return w ? (pt ? w.pt : w.en) : state.replace(/-/g, ' ')
-}
-
-function Note({ text }: { text: string }) {
-  return <div style={{ ...surface, padding: '14px 12px', fontSize: 12.5, color: 'var(--text-tertiary)', textAlign: 'center' }}>{text}</div>
-}
-
 /**
- * The LEADERS band — apart from the delivery columns on purpose: a leader follows and decides, it does
- * not execute a delivery, so it is never a card. Shows what each is doing now, the workers it runs and
- * what waits on a decision (each opens the session that is waiting).
+ * One stage column. Collapsed it is the thin vertical strip empty columns always were; open it shows
+ * the cards that FIT the height and a "+N" that flows the rest into extra sub-columns to the right —
+ * measured, not guessed, and never a vertical scroll bar.
  */
-function LeadersBand({ leaders, lang, onOpen }: { leaders: readonly LeaderRecord[]; lang: 'pt' | 'en'; onOpen: (id: string) => void }) {
-  const pt = lang === 'pt'
-  const mobile = useIsMobile()
-  const [open, setOpen] = useState(true)
-  if (leaders.length === 0) return null
-  const awaiting = leaders.reduce((n, l) => n + l.awaiting.length, 0)
+function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, render, extra, sig, peek }: {
+  stage: LiveStage; pt: boolean; cards: LiveCard[]; prefs: CollapsedPrefs; L: ReturnType<typeof copy>
+  /** Something just left the board and says so in this column: open it for a moment unless the person closed it on purpose. */
+  peek?: boolean
+  expanded: boolean; onExpanded: (v: boolean) => void; onToggle: () => void
+  render: (c: LiveCard) => React.ReactNode; extra: React.ReactNode; sig: string
+}) {
+  const collapsed = columnCollapsed(stage, cards.length, prefs) && !(peek && prefs[stage] === undefined)
+  const label = STAGE_LABEL[stage][pt ? 'pt' : 'en']
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const [m, setM] = useState<{ heights: number[]; avail: number; extraH: number } | null>(null)
+  // Cards of a column that was just collapsed stay mounted for the width animation to play over them.
+  const [lingerOpen, setLingerOpen] = useState(false)
+  const wasCollapsed = useRef(collapsed)
+  useEffect(() => {
+    if (!wasCollapsed.current && collapsed && !reducedMotion()) {
+      setLingerOpen(true)
+      const t = setTimeout(() => setLingerOpen(false), 230)
+      wasCollapsed.current = collapsed
+      return () => clearTimeout(t)
+    }
+    wasCollapsed.current = collapsed
+    return undefined
+  }, [collapsed])
+
+  const signature = useMemo(
+    () => cards.map(c => `${c.d.key}:${c.liveState}:${c.d.lastAction?.text.length ?? 0}:${c.d.block ? 1 : 0}`).join('|') + `#${expanded}#${sig}`,
+    [cards, expanded, sig],
+  )
+  useLayoutEffect(() => { setM(null) }, [signature])
+  useLayoutEffect(() => {
+    if (m !== null || collapsed) return
+    const el = bodyRef.current
+    if (!el) return
+    const slots = Array.from(el.querySelectorAll<HTMLElement>('[data-live-slot]'))
+    const heights = slots.map(x => x.getBoundingClientRect().height + CARD_GAP)
+    const extraH = el.querySelector<HTMLElement>('[data-live-extra]')?.getBoundingClientRect().height ?? 0
+    setM({ heights, avail: el.clientHeight, extraH: extraH > 0 ? extraH + CARD_GAP : 0 })
+  }, [m, collapsed, signature])
+  useEffect(() => {
+    // The height the column is given changes with the window and with the header above it.
+    const el = bodyRef.current
+    if (!el || collapsed || typeof ResizeObserver === 'undefined') return
+    let last = el.clientHeight
+    const ro = new ResizeObserver(() => { if (Math.abs(el.clientHeight - last) > 2) { last = el.clientHeight; setM(null) } })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [collapsed])
+
+  const shownCount = m ? fitCount(m.heights, m.avail - m.extraH, MORE_H + CARD_GAP) : cards.length
+  const cut = m !== null && shownCount < cards.length
+  // The standing "left the board" lines sit above the first sub-column: count them as a pseudo-card.
+  const packs = m && expanded && cut
+    ? (m.extraH > 0 ? pack([m.extraH, ...m.heights], m.avail).map(col => col.filter(i => i > 0).map(i => i - 1)) : pack(m.heights, m.avail))
+    : null
+  const cols = packs ? packs.length : 1
+  const width = collapsed ? COLLAPSED_W : cols * COL_W + (cols - 1) * COL_GAP
+  const mountBody = !collapsed || lingerOpen
+  const slot = (c: LiveCard) => <div key={c.d.key} data-live-slot style={{ minWidth: 0 }}>{render(c)}</div>
+  const slotStyle: React.CSSProperties = { display: 'grid', gap: CARD_GAP, alignContent: 'start', minWidth: 0, width: COL_W, flex: '0 0 auto' }
+
   return (
-    <section data-live-leaders style={{ ...surface, display: 'grid', gap: 0 }}>
-      <button
-        type="button" aria-expanded={open} onClick={() => setOpen(v => !v)} className="ag-tap"
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'none', border: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, color: 'var(--text-primary)', textAlign: 'left' }}
+    <section
+      data-live-column={stage} data-collapsed={collapsed ? '1' : '0'}
+      style={{
+        flex: `0 0 ${width}px`, width, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden',
+        opacity: cards.length === 0 && collapsed ? 0.5 : 1,
+        transition: reducedMotion() ? 'none' : 'flex-basis .2s ease, width .2s ease, opacity .2s ease',
+      }}
+    >
+      <header
+        role="button" tabIndex={0} aria-expanded={!collapsed} aria-label={`${label} — ${collapsed ? L.expand : L.collapse}`}
+        title={collapsed ? L.expand : L.collapse} data-live-colhead onClick={onToggle}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
+        style={{
+          borderTop: `3px solid ${STAGE_LABEL[stage].color}`, padding: '8px 4px 2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6,
+          cursor: 'pointer', flexShrink: 0, ...(collapsed ? { flexDirection: 'column', gap: 6 } : {}),
+        }}
       >
-        <SessionChip color="var(--accent-purple)">{pt ? 'LÍDERES' : 'LEADERS'}</SessionChip>
-        {mobile ? <span style={{ flex: 1 }} /> : <span style={{ color: 'var(--text-tertiary)', flex: 1, minWidth: 0 }}>{pt ? 'acompanham e decidem, não executam entregas' : 'follow and decide, they do not execute deliveries'}</span>}
-        {awaiting > 0 && <span style={{ ...pill('var(--anthropic-orange)'), fontWeight: 600 }}>{awaiting} {pt ? 'aguardando decisão' : 'awaiting a decision'}</span>}
-        <span aria-hidden style={{ transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform .2s' }}>▾</span>
-      </button>
-      {open && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10, padding: '0 10px 10px' }}>
-          {leaders.map(l => (
-            <div
-              key={l.id} data-live-leader={l.id}
-              style={{ ...surface, padding: '10px 12px', display: 'grid', gap: 6, border: `1px solid ${l.awaiting.length ? 'var(--anthropic-orange)' : 'var(--border)'}`, minWidth: 0 }}
-            >
-              <button type="button" onClick={() => onOpen(l.id)} style={{ background: 'none', border: 0, padding: 0, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontWeight: 700, fontSize: 12.5, overflowWrap: 'anywhere' }}>{l.title}</button>
-              <span style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                <span style={pill(harnessColor(l.harness))}>{l.harness}</span>{l.model && <span>{l.model}</span>}
-                <span style={{ color: 'var(--text-tertiary)' }}>· {stateWordOf(l.state, pt)}</span>
-              </span>
-              <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{l.currentAction ? <>↳ {l.currentAction}</> : <span style={{ color: 'var(--text-tertiary)' }}>—</span>}</span>
-              <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{l.workers.length} {l.workers.length === 1 ? 'worker' : 'workers'}</span>
-              {l.workers.length > 0 && (
-                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 2, fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                  {l.workers.slice(0, 4).map(w => <li key={w.id} style={{ display: 'flex', gap: 6, minWidth: 0 }}><span style={{ color: 'var(--text-tertiary)', flexShrink: 0 }}>{stateWordOf(w.state, pt)}</span><span style={{ overflowWrap: 'anywhere' }}>{w.title}</span></li>)}
-                </ul>
-              )}
-              {l.awaiting.map(a => (
-                <button key={a.id} type="button" onClick={() => onOpen(a.id)} className="ag-tap"
-                  style={{ textAlign: 'left', fontFamily: 'inherit', fontSize: 12, color: 'var(--anthropic-orange-light)', background: 'var(--anthropic-orange-dim)', border: 0, borderRadius: 5, padding: '4px 8px', cursor: 'pointer', overflowWrap: 'anywhere' }}
-                >{pt ? 'decidir' : 'decide'}: {a.title}</button>
-              ))}
+        <span style={{ fontWeight: 700, fontSize: 13, ...(collapsed ? { writingMode: 'vertical-rl', whiteSpace: 'nowrap' } : {}) }}>{label}</span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {!collapsed && expanded && cut && (
+            <button type="button" data-live-less className="ag-tap" onClick={e => { e.stopPropagation(); onExpanded(false) }}
+              style={{ background: 'none', border: 0, color: 'var(--anthropic-orange-light)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>{L.less}</button>
+          )}
+          <span style={{ ...microLabel, fontSize: 11 }}>{cards.length}</span>
+        </span>
+      </header>
+      {mountBody && (
+        <div
+          ref={bodyRef} data-live-colbody
+          style={{
+            flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', gap: COL_GAP, alignItems: 'flex-start',
+            opacity: collapsed ? 0 : 1, transition: reducedMotion() ? 'none' : 'opacity .15s ease', pointerEvents: collapsed ? 'none' : undefined,
+          }}
+        >
+          {packs ? packs.map((idxs, k) => (
+            <div key={k} data-live-subcol style={slotStyle}>
+              {k === 0 && extra && <div data-live-extra style={{ display: 'grid', gap: CARD_GAP }}>{extra}</div>}
+              {idxs.map(i => slot(cards[i]!))}
             </div>
-          ))}
+          )) : (
+            <div style={slotStyle}>
+              {extra && <div data-live-extra style={{ display: 'grid', gap: CARD_GAP }}>{extra}</div>}
+              {(m ? cards.slice(0, shownCount) : cards).map(slot)}
+              {cut && (
+                <button type="button" data-live-more className="ag-tap" onClick={() => onExpanded(true)}
+                  style={{ minHeight: MORE_H, borderRadius: 8, border: '1px dashed var(--border)', background: 'transparent', color: 'var(--anthropic-orange-light)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600 }}
+                >{L.more(cards.length - shownCount)}</button>
+              )}
+              {cards.length === 0 && !extra && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>{L.empty}</span>}
+            </div>
+          )}
         </div>
       )}
     </section>
   )
+}
+
+function Note({ text }: { text: string }) {
+  return <div style={{ ...surface, padding: '14px 12px', fontSize: 12.5, color: 'var(--text-tertiary)', textAlign: 'center' }}>{text}</div>
 }

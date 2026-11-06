@@ -14,8 +14,21 @@ import type { LiveReply } from './liveDeliveryModel'
 /** The slow safety refetch while the tab is visible. */
 export const LIVE_HEARTBEAT_MS = 60_000
 
+/**
+ * The last good reply, kept for the page's life: opening the Live (a hover popover is opened and
+ * closed many times) paints from it at once while the fresh read lands behind it — no blocking fetch
+ * between the pointer and the first useful paint.
+ */
+let lastReply: { reply: LiveReply; atMs: number } | null = null
+export const LIVE_CACHE_MAX_AGE_MS = 10 * 60_000
+export function cachedLiveReply(nowMs = Date.now()): LiveReply | null {
+  return lastReply && nowMs - lastReply.atMs < LIVE_CACHE_MAX_AGE_MS ? lastReply.reply : null
+}
+/** Test hook. */
+export function resetLiveCache(): void { lastReply = null }
+
 export function useLiveDeliveries(fleet: readonly FleetRow[]) {
-  const [reply, setReply] = useState<LiveReply | null>(null)
+  const [reply, setReply] = useState<LiveReply | null>(() => cachedLiveReply())
   const [error, setError] = useState<'down' | 'refused' | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
 
@@ -24,7 +37,9 @@ export function useLiveDeliveries(fleet: readonly FleetRow[]) {
       const res = await fetch('/api/tasks/live')
       if (res.status === 403 || res.status === 404) { setError('refused'); return }
       if (!res.ok) { setError('down'); return }
-      setReply(await res.json() as LiveReply)
+      const fresh = await res.json() as LiveReply
+      lastReply = { reply: fresh, atMs: Date.now() }
+      setReply(fresh)
       setError(null)
     } catch {
       setError('down')

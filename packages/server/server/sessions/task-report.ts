@@ -50,6 +50,8 @@ export interface TaskSessionRow {
   createdAt: string
   endedAt?: string
   label?: string
+  /** The reasoning effort the session was started with (registry), when one was asked for. */
+  effort?: string
   conversationId?: string
   /**
    * True for a conversation filed on the board with NO session behind it (`HistoricalSession`): its
@@ -639,6 +641,7 @@ export function buildTaskDetail(o: {
         createdAt: r.createdAt,
         ...(r.endedAt ? { endedAt: r.endedAt } : {}),
         ...(r.label ? { label: r.label } : {}),
+        ...(typeof (r as { effort?: unknown }).effort === 'string' ? { effort: (r as { effort: string }).effort } : {}),
         ...(r.conversationId ? { conversationId: r.conversationId } : {}),
         ...(isHistoricalRow(r) ? { historical: true } : {}),
         ...(isNativeRow(r) ? { native: true } : {}),

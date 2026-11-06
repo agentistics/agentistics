@@ -20,7 +20,7 @@ test('a click on the popover surface goes; on a card or control it does not', ()
 })
 
 test('Live opens with only-active ON, all tasks, all steps', () => {
-  expect(LIVE_DEFAULTS).toEqual({ taskId: null, onlyActive: true, stage: 'all' })
+  expect(LIVE_DEFAULTS).toEqual({ taskIds: [], onlyActive: true, stage: 'all' })
 })
 
 test('queued cards are recognised and numbered oldest first', () => {

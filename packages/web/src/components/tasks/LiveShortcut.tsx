@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Radio, X } from 'lucide-react'
 import { useFleet } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -15,12 +15,22 @@ import { pathOfView } from '../../lib/tasksViewRoute'
 import { LiveDelivery } from './LiveDelivery'
 import { HOVER_CLOSE_MS, HOVER_OPEN_MS, liveActivity, popoverClickGoes, shortcutLabel } from './liveShortcutModel'
 
+/** The session id when the page is a session (`/sessions/<id>`), else null. */
+export function sessionIdOfPath(pathname: string): string | null {
+  const m = /^\/sessions\/([^/?#]+)/.exec(pathname)
+  if (!m) return null
+  try { return decodeURIComponent(m[1]!) } catch { return m[1]! }
+}
+
 const reduced = (): boolean => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } }
 
 export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'en'; enabled?: boolean }) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
   const navigate = useNavigate()
+  // Hovered/tapped from a session: the Live opens already filtered by THAT session's task (a worker's
+  // piece, a leader's filing). The chip is removable and the other filters work as usual.
+  const focusSessionId = sessionIdOfPath(useLocation().pathname)
   const { fleet } = useFleet(lang, enabled)
   const act = liveActivity(fleet.sessions)
   const [open, setOpen] = useState(false)
@@ -81,7 +91,7 @@ export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'e
                 <button type="button" className="ag-tap-icon" aria-label={pt ? 'Fechar' : 'Close'} onClick={() => setOpen(false)}
                   style={{ width: 32, height: 32, border: 0, background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }}><X size={18} /></button>
               </div>
-              <div className="ag-scroll" style={{ overflowY: 'auto', padding: '0 12px 8px', minHeight: 0 }}><LiveDelivery lang={lang} compact /></div>
+              <div className="ag-scroll" style={{ overflowY: 'auto', padding: '0 12px 8px', minHeight: 0 }}><LiveDelivery lang={lang} compact focusSessionId={focusSessionId} /></div>
               <div style={{ padding: '8px 12px 12px' }}>
                 <button type="button" className="ag-tap" onClick={go} style={{
                   width: '100%', minHeight: 44, borderRadius: 10, border: 0, background: 'var(--anthropic-orange)', color: '#fff',
@@ -108,7 +118,7 @@ export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'e
           <div style={{
             width: 'min(780px, calc(100vw / var(--ui-zoom, 1) - 24px))', height: 'min(560px, calc(72vh / var(--ui-zoom, 1)))', overflow: 'hidden', padding: 12, boxSizing: 'border-box',
             background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 18px 50px rgba(0,0,0,.45)', cursor: 'pointer',
-          }}><LiveDelivery lang={lang} compact /></div>
+          }}><LiveDelivery lang={lang} compact focusSessionId={focusSessionId} /></div>
         </div>
       )}
     </div>

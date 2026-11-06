@@ -13,9 +13,13 @@ afterEach(() => { globalThis.fetch = originalFetch })
 // Select reaches for `useIsMobile()`, and static markup has no window (same stub as primitives.test).
 const withWindow = (fn: () => string): string => {
   const g = globalThis as { window?: unknown }
-  const had = 'window' in g
+  // A file that registered and then unregistered a DOM leaves the key behind as `undefined`
+  // (`'window' in g` is then true with nothing in it): test for an object, restore what was there.
+  const hadKey = 'window' in g
+  const before = g.window
+  const had = typeof before === 'object' && before !== null
   if (!had) g.window = { innerWidth: 1440, innerHeight: 900, matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }), addEventListener() {}, removeEventListener() {} }
-  try { return fn() } finally { if (!had) delete g.window }
+  try { return fn() } finally { if (!had) { if (hadKey) g.window = before; else delete g.window } }
 }
 
 describe('leader check-in defaults in Settings', () => {

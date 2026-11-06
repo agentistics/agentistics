@@ -11,8 +11,21 @@ export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
   '2.200.8': {
-    features: [],
+    features: [
+      {
+        pt: 'Live redesenhada: cartões no formato novo (título curto, quem é, estado, o que espera, assistente · modelo · esforço, barra de etapas, tempo nessa etapa e total, duas estimativas: próxima etapa e publicação); coluna Bloqueado; títulos das colunas recolhem e abrem animados (Publicado vem recolhido, com cada item numa linha que abre no lugar); sem rolagem vertical no desktop, com "+N" para o que não cabe; filtro de tarefas múltiplo com "Recentes" no topo, já filtrado pela tarefa da sessão de onde você abriu; botão "abrir janela externa"; e nada some em silêncio: quem sai do quadro deixa "saiu: motivo".',
+        en: 'Live redesigned: cards in the new shape (short title, who it is, state, what it waits for, assistant · model · effort, stage bar, time in this stage and total, two estimates: next stage and publication); a Blocked column; column headers collapse and open with animation (Published starts collapsed, each item one line that opens in place); no vertical scroll on desktop, with a "+N" for what does not fit; multi-select task filter with "Recent" on top, already filtered by the task of the session you opened it from; an "open in a window" button; and nothing disappears silently: whatever leaves the board leaves a "left: reason" line.',
+      },
+      {
+        pt: 'A faixa LÍDERES vem recolhida em uma linha de resumo; aberta, mostra uma linha por líder e, ao clicar, os workers dele.',
+        en: 'The LEADERS band starts closed on one summary line; opened, it shows one row per leader and, on click, its workers.',
+      },
+    ],
     fixes: [
+      {
+        pt: 'Live: o "total" do cartão agora é o trabalho real daquela peça (não a idade da tarefa, que chegava a mostrar 52 dias); o Publicado deixa de esvaziar com filtro de tarefa; o resumo do líder não mostra mais JSON cru; workers parados não aparecem mais como "esperando você"; todo cartão mostra assistente · modelo · esforço.',
+        en: 'Live: a card\'s "total" is now that piece\'s real work (not the task\'s age, which showed up to 52 days); Published no longer empties with a task filter; the leader summary no longer shows raw JSON; idle workers no longer read "waiting for you"; every card shows assistant · model · effort.',
+      },
       {
         pt: 'Agentask abre bem mais rápido: as tarefas abertas e recentes chegam primeiro e o histórico fechado carrega por trás, sem a tela mexer.',
         en: 'Agentask opens much faster: open and recent tasks arrive first and the closed history loads behind them, without the screen moving.',

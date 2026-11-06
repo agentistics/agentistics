@@ -263,15 +263,20 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     rows = fleet.map(r => ({
       id: r.id, title: r.title, harness: r.harness, state: r.state,
       ...(r.model ? { model: r.model } : {}),
+      ...(r.effort ? { effort: r.effort } : {}),
       ...(r.accountId ? { accountId: r.accountId } : {}),
       ...(r.parentSessionId ? { parentSessionId: r.parentSessionId } : {}),
       ...(r.lastLines ? { lastLines: r.lastLines } : {}),
+      ...(r.task ? { task: r.task } : {}),
+      ...(typeof r.startedAt === 'number' ? { createdMs: r.startedAt } : {}),
     }))
     const roles = await listRoles(await defaultRoleDeps())
     leaderIds = new Set(fleet.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
   } catch { /* no fleet: deliveries without live state */ }
   const reply = await replyPromise
-  return describeLive({ reply, rows, leaderIds, nowMs, filters })
+  const { liveRuntimeFacts } = await import('./live-runtime')
+  const runtime = await liveRuntimeFacts(nowMs).catch(() => ({}))
+  return describeLive({ reply, rows, leaderIds, nowMs, filters, runtime })
 }
 
 /** Create a task. Title is required; a description is not — a task nobody described is a task. */

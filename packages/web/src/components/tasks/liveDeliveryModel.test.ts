@@ -54,8 +54,10 @@ describe('filters, grouping, summary', () => {
     rec({ key: '3', taskId: 'B', sessionIds: ['c'], stage: 'published', deliveredAtMs: 1 }),
   ], [row('a', 'working'), row('c', 'exited')])
   test('only-active keeps cards with an agent alive; a task filter narrows', () => {
-    expect(filterCards(cards, { taskId: null, onlyActive: true }).map(c => c.d.key)).toEqual(['1'])
-    expect(filterCards(cards, { taskId: 'B', onlyActive: false }).map(c => c.d.key)).toEqual(['2', '3'])
+    // Publicado is exempt from the agent switch: a finished piece has no live agent by definition.
+    expect(filterCards(cards, { taskIds: [], onlyActive: true }).map(c => c.d.key)).toEqual(['1', '3'])
+    expect(filterCards(cards, { taskIds: ['B'], onlyActive: false }).map(c => c.d.key)).toEqual(['2', '3'])
+    expect(filterCards(cards, { taskIds: ['A', 'B'], onlyActive: true }).map(c => c.d.key)).toEqual(['1', '3'])
   })
   test('stages group and the summary ignores published', () => {
     expect(byStage(cards).leader).toHaveLength(1)
