@@ -15,7 +15,9 @@ import {
   PRIORITY, cardStyle, claimLeft, fmtInt, fmtTokens, liveStatusOrder, microLabel,
   numeric, pill, statusStyle, surface, type BoardStatus,
 } from './board'
-import type { LaneKey } from './boardPrefs'
+import { useBoardPref, type LaneKey } from './boardPrefs'
+import { resolveBoardPage } from './boardPaging'
+import { BoardPager } from './BoardPager'
 import { TaskProgressBar } from './TaskProgressBar'
 import { HarnessBadges } from './HarnessBadges'
 import { boardCopy, statusLabel } from './copy'
@@ -272,6 +274,9 @@ export function BoardView(p: BoardViewProps) {
     return () => clearTimeout(t)
   }, [refused])
   const [over, setOver] = useState<{ lane: string; status: BoardStatus; index: number } | null>(null)
+  // Cards per page is ONE per-person choice; the page INDEX is per column (clamped when read).
+  const [pageSize, setPageSize] = useBoardPref('pageSize')
+  const [pages, setPages] = useState<Record<string, number>>({})
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 60_000)
@@ -377,6 +382,8 @@ export function BoardView(p: BoardViewProps) {
               const over_ = limit !== undefined && col.rows.length > limit
               const isOverCol = over?.lane === lane.name && over.status === col.status
               const colSort = effectiveSort(p.sort, p.columnSort, col.status)
+              const pageKey = `${lane.name}\u0000${col.status}`
+              const pg = resolveBoardPage(col.rows.length, pageSize, pages[pageKey] ?? 0)
               const canMove = reorderable(col.status)
               const dragged = drag ? rows.find(r => r.task.id === drag) : undefined
               // The note is for a card that WOULD reorder here: one coming from another column is a
@@ -478,7 +485,10 @@ export function BoardView(p: BoardViewProps) {
                         —
                       </div>
                     )
-                    : col.rows.map((r, i) => (
+                    : col.rows.slice(pg.start, pg.end).map((r, k) => {
+                      // `i` is the position in the WHOLE column: a drop index is never page-relative.
+                      const i = pg.start + k
+                      return (
                       <div
                         key={r.task.id}
                         data-task-card
@@ -516,7 +526,13 @@ export function BoardView(p: BoardViewProps) {
                           lang={p.lang}
                         />
                       </div>
-                    ))}
+                      )
+                    })}
+                  <BoardPager
+                    info={pg} pageSize={pageSize} lang={p.lang} compact
+                    onPage={n => setPages(cur => ({ ...cur, [pageKey]: n }))}
+                    onPageSize={n => { setPageSize(n); setPages({}) }}
+                  />
                 </section>
               )
             })}
@@ -548,6 +564,9 @@ export function MobileLane(p: {
     const t = setInterval(() => setNowMs(Date.now()), 60_000)
     return () => clearInterval(t)
   }, [])
+  const [pageSize, setPageSize] = useBoardPref('pageSize')
+  const [page, setPage] = useState(0)
+  useEffect(() => { setPage(0) }, [p.status])
   const list = useMemo(() => {
     if (p.status === null) return []
     return sortRows(
@@ -556,6 +575,7 @@ export function MobileLane(p: {
       { statusOrder: liveStatusOrder(p.statuses) },
     )
   }, [p.rows, p.status, p.sort, p.columnSort, p.statuses])
+  const pg = resolveBoardPage(list.length, pageSize, page)
   if (list.length === 0) {
     return (
       <div style={{
@@ -566,7 +586,7 @@ export function MobileLane(p: {
   }
   return (
     <div style={{ display: 'grid', gap: 10 }}>
-      {list.map(r => (
+      {list.slice(pg.start, pg.end).map(r => (
         <Card
           key={r.task.id}
           row={r}
@@ -577,6 +597,7 @@ export function MobileLane(p: {
           statuses={p.statuses}
         />
       ))}
+      <BoardPager info={pg} pageSize={pageSize} lang={lang} onPage={setPage} onPageSize={n => { setPageSize(n); setPage(0) }} />
     </div>
   )
 }

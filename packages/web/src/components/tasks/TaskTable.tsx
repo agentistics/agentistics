@@ -40,6 +40,8 @@ import {
   type TaskStatusDef, type TaskTypeDef, sortTaskTypes,
 } from '@agentistics/core'
 import { DEFAULT_PREFS, useBoardPref } from './boardPrefs'
+import { resolveBoardPage } from './boardPaging'
+import { BoardPager } from './BoardPager'
 import { ColResizeHandle } from './ColResizeHandle'
 import { contentWidthOf, fitContentWidth, hasCustomWidths, resolveWidths, tableMinWidth } from './columnWidths'
 import { SortTh } from './SortHeader'
@@ -733,6 +735,8 @@ export function TaskTable(p: TaskTableProps) {
   const [storedGroups, setGroups] = useBoardPref('groups')
   const [groupBy, setGroupBy] = useBoardPref('groupBy')
   const [hideEmpty, setHideEmpty] = useBoardPref('hideEmpty')
+  const [pageSize, setPageSize] = useBoardPref('pageSize')
+  const [pages, setPages] = useState<Record<string, number>>({})
   const [storedTypeGroups, setTypeGroups] = useBoardPref('typeGroups')
   const [storedCollapsed, setStoredCollapsed] = useBoardPref('collapsed')
   const collapsed = useMemo(() => new Set<string>(storedCollapsed), [storedCollapsed])
@@ -1139,6 +1143,7 @@ export function TaskTable(p: TaskTableProps) {
       {visible.map(g => {
         const s = { color: g.color }
         const isFolded = collapsed.has(g.key)
+        const pg = resolveBoardPage(g.rows.length, pageSize, pages[g.key] ?? 0)
         return (
           <div key={g.key} style={{ ...surface, overflow: 'hidden', borderLeft: `3px solid ${s.color}` }}>
             <div
@@ -1211,7 +1216,7 @@ export function TaskTable(p: TaskTableProps) {
                     </thead>
                   )}
                   <tbody>
-                    {g.rows.map(row => {
+                    {g.rows.slice(pg.start, pg.end).map(row => {
                       const open = expanded.has(row.task.id)
                       const detail = p.details.get(row.task.id)
                       // The column FILTER (t-63b7d3b2b0 #2) narrows what is drawn, never `p.subtasks`
@@ -1539,6 +1544,15 @@ export function TaskTable(p: TaskTableProps) {
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            )}
+            {!isFolded && (
+              <div style={{ padding: '0 10px' }}>
+                <BoardPager
+                  info={pg} pageSize={pageSize} lang={p.lang}
+                  onPage={n => setPages(cur => ({ ...cur, [g.key]: n }))}
+                  onPageSize={n => { setPageSize(n); setPages({}) }}
+                />
               </div>
             )}
           </div>
