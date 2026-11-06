@@ -50,7 +50,7 @@ export interface AgentToolPolicy {
 
 /** Every tool the MCP exposes today — 38 on `origin/dev` (the spec's §1 said 44; P0.3 re-counted). */
 export const AGENT_TOOL_NAMES = [
-  // ALM (18)
+  // ALM (19)
   'agentistics_tasks',
   'agentistics_task',
   'agentistics_task_create',
@@ -66,6 +66,7 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_task_next',
   'agentistics_task_claim',
   'agentistics_task_activity',
+  'agentistics_live_delivery',
   'agentistics_task_edit',
   'agentistics_task_session',
   'agentistics_task_delete',
@@ -140,6 +141,7 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_task_next: { ...TASKS, risk: 'R', routes: ['GET /api/tasks/next'], reason: 'asks what is ready; claims nothing' },
   agentistics_task_claim: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref/claim'], reason: 'a lease that expires on its own and can be released' },
   agentistics_task_activity: { ...TASKS, risk: 'R', routes: ['GET /api/tasks/activity'], reason: 'reads the board activity log' },
+  agentistics_live_delivery: { ...TASKS, risk: 'R', routes: ['GET /api/tasks/live'], reason: 'reads the live delivery line and the leaders band; changes nothing' },
   agentistics_task_edit: { ...TASKS, risk: 'W', routes: ['POST /api/tasks/:ref'], reason: 'edits task fields; reversible by another edit' },
   agentistics_task_session: {
     ...TASKS, risk: 'W', routes: ['POST /api/tasks/x/sessions', 'POST /api/tasks/:ref/sessions'],

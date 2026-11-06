@@ -4,7 +4,7 @@
  * It used to be four stacked rows: a title row with five controls, a search line, and a bar of
  * seven loose pills (Group · Columns · Hide empty · Compose · Sort · WIP · Reset). Now a single row:
  *
- *   [ search ] [ View ▾ ] [ active chips… ]  ········  [ Metrics | Board | Table ] [ + New task ]
+ *   [ search ] [ View ▾ ] [ active chips… ]  ········  [ Metrics | Board | Table | Live Delivery ] [ + New task ]
  *
  * and everything that shapes WHAT is shown lives in the View panel (`ViewPanel`): which statuses
  * are visible and in what order, how the board/table is grouped, sort, WIP limits, empty groups,
@@ -68,7 +68,7 @@ const T = (lang: Lang) => lang === 'pt'
     wip: 'Limite de cards por coluna', wipNote: 'O limite avisa, nunca bloqueia.',
     hideEmpty: 'Ocultar grupos vazios', compose: 'Compor em andamento', manage: 'Status e tipos',
     restore: 'Restaurar padrão', up: 'Subir', down: 'Descer', hide: 'Ocultar', show: 'Mostrar',
-    search: 'Buscar', metrics: 'Métricas', board: 'Quadro', table: 'Tabela', newTask: 'Nova tarefa',
+    search: 'Buscar', metrics: 'Métricas', board: 'Quadro', table: 'Tabela', live: 'Entrega ao vivo', newTask: 'Nova tarefa',
     none: 'Nenhuma raia', repo: 'Repositório', harness: 'Harness', priority: 'Prioridade',
     asc: 'Crescente', desc: 'Decrescente', hiding: (n: number) => `${n} oculto${n === 1 ? '' : 's'}`,
     clear: 'Remover', handOrder: 'Ordem manual',
@@ -79,7 +79,7 @@ const T = (lang: Lang) => lang === 'pt'
     wip: 'Cards per column limit', wipNote: 'A limit warns, it never blocks.',
     hideEmpty: 'Hide empty groups', compose: 'Compose in progress', manage: 'Statuses & types',
     restore: 'Restore default', up: 'Move up', down: 'Move down', hide: 'Hide', show: 'Show',
-    search: 'Search', metrics: 'Metrics', board: 'Board', table: 'Table', newTask: 'New task',
+    search: 'Search', metrics: 'Metrics', board: 'Board', table: 'Table', live: 'Live Delivery', newTask: 'New task',
     none: 'No lanes', repo: 'Repository', harness: 'Harness', priority: 'Priority',
     asc: 'Ascending', desc: 'Descending', hiding: (n: number) => `${n} hidden`,
     clear: 'Remove', handOrder: 'Hand order',
@@ -151,7 +151,7 @@ export function ViewPanel({ lang, state: s, actions: a, statuses }: {
         </section>
       )}
 
-      {s.view !== 'overview' && (
+      {s.view !== 'overview' && s.view !== 'live' && (
         <section>
           <div style={sectionTitle}>{listTitle}</div>
           <div style={{ display: 'grid', gap: 1 }} data-visible-list>
@@ -242,7 +242,7 @@ export function ViewPanel({ lang, state: s, actions: a, statuses }: {
         </>
       )}
 
-      {s.view !== 'overview' && (
+      {s.view !== 'overview' && s.view !== 'live' && (
         <section style={{ display: 'grid', gap: 2 }}>
           {check(s.hideEmpty, t.hideEmpty, () => a.onHideEmpty(!s.hideEmpty), 'hideEmpty')}
           {s.view === 'board' && check(s.compose, t.compose, () => a.onCompose(!s.compose), 'compose')}
@@ -331,8 +331,8 @@ export function AgentaskToolbar({ lang, q, onQ, state, actions, statuses, onView
         <button type="button" data-view="overview" style={seg(state.view === 'overview')} onClick={() => onView('overview')}><BarChart3 size={14} /> {t.metrics}</button>
         <button type="button" data-view="board" style={seg(state.view === 'board')} onClick={() => onView('board')}><LayoutGrid size={14} /> {t.board}</button>
         <button type="button" data-view="table" style={seg(state.view === 'table')} onClick={() => onView('table')}><Rows3 size={14} /> {t.table}</button>
+        <button type="button" data-view="live" style={seg(state.view === 'live')} onClick={() => onView('live')}><span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-red, #ff5f5f)', display: 'inline-block' }} /> {t.live}</button>
       </div>
-      {/* Live Delivery's own segment and the pagination control land here (feat/live-delivery). */}
       <button type="button" style={button(false, 'primary')} onClick={onNew}><Plus size={15} /> {t.newTask}</button>
     </div>
   )

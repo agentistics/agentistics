@@ -79,7 +79,7 @@ test('toolbar: one row, search + view button + switcher + new task; chips are re
       onView={noop} onNew={noop} onOpenSheet={noop} onClearChip={id => cleared.push(id)} />)
   expect(host.querySelectorAll('[data-toolbar]').length).toBe(1)
   expect(host.querySelector('input[placeholder="Search"]')).not.toBeNull()
-  expect(host.querySelectorAll('[data-view]').length).toBe(3)
+  expect(host.querySelectorAll('[data-view]').length).toBe(4)
   expect(host.querySelector('[data-chip="visible"]')!.textContent).toContain('5 hidden')
   await act(async () => { host.querySelector<HTMLButtonElement>('[data-chip="hideEmpty"] button')!.click() })
   expect(cleared).toEqual(['hideEmpty'])

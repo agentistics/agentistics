@@ -13,6 +13,18 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.200.0': {
     features: [
       {
+        pt: 'Agentask saiu do beta.',
+        en: 'Agentask is out of beta.',
+      },
+      {
+        pt: 'O quadro mostra 10 tarefas por página por coluna, e dá para escolher 10, 25, 50 ou 100. A escolha fica guardada por pessoa.',
+        en: 'The board shows 10 tasks per page per column, and you can choose 10, 25, 50 or 100. The choice is saved per person.',
+      },
+      {
+        pt: 'Nova visão Entrega ao vivo no Agentask: cada peça aparece na etapa em que está (fila, execução, QA, revisão, ajuste, publicado), com o agente, o tempo e a estimativa com fonte. Os líderes ficam numa faixa própria. Os cards deslizam entre as colunas, e um merge aprovado se desfaz em cinza e reaparece em verde em Publicado. A Nay também consulta essa visão.',
+        en: 'New Live Delivery view in Agentask: each piece appears at the stage it is in (queue, running, QA, review, rework, published), with the agent, the time and a sourced estimate. Leaders sit in their own lane. Cards slide between columns, and an approved merge crumbles to grey and reappears in green under Published. Nay can also look at this view.',
+      },
+      {
         pt: 'Modo autônomo de ponta a ponta: o líder recebe um aviso quando um worker fica parado há 30 minutos, e a esteira leva cada entrega da sessão à revisão e à limpeza, sem marcar como concluída sozinha.',
         en: 'End-to-end autonomous mode: the leader gets a notice when a worker has been idle for 30 minutes, and the pipeline takes each delivery from the session through review and cleanup, without marking it done on its own.',
       },

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { effectiveView, pickDefaultLane, resolveLane } from './mobileLanes'
+import { effectiveView, hasStoredView, pickDefaultLane, resolveLane } from './mobileLanes'
 
 const lanes = (...p: [string, number][]) => p.map(([status, count]) => ({ status, count }))
 
@@ -29,5 +29,17 @@ describe('effectiveView', () => {
     expect(effectiveView('overview', true, false)).toBe('board')
     expect(effectiveView('table', true, true)).toBe('table')
     expect(effectiveView('overview', false, false)).toBe('overview')
+  })
+})
+
+describe('hasStoredView', () => {
+  test('a stored Live Delivery choice counts, so a phone keeps it instead of falling back to the board', () => {
+    const store = new Map<string, string>()
+    ;(globalThis as { localStorage?: unknown }).localStorage = { getItem: (k: string) => store.get(k) ?? null }
+    store.set('k', JSON.stringify({ view: 'live' }))
+    expect(hasStoredView('k')).toBe(true)
+    store.set('k', JSON.stringify({ view: 'nonsense' }))
+    expect(hasStoredView('k')).toBe(false)
+    delete (globalThis as { localStorage?: unknown }).localStorage
   })
 })

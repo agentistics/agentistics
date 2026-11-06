@@ -33,7 +33,6 @@ import { useFleet, type FleetRow } from '../../lib/fleet'
 import { messageTime } from '../../lib/messageTime'
 import { patchSubtask, type Subtask, type TaskSessionRow } from '../../lib/tasks'
 import { button, pill, surface, SESSION_STATE } from './board'
-import { BetaTag } from '../BetaTag'
 
 export interface BlockedSubtaskResolveProps {
   taskId: string
@@ -155,7 +154,6 @@ export function BlockedSubtaskResolve(p: BlockedSubtaskResolveProps) {
           <span style={{ fontSize: 13.5, fontWeight: 650, color: 'var(--text-primary)', flex: 1 }}>
             {pt ? 'Subtarefa bloqueada' : 'Subtask blocked'}
           </span>
-          <BetaTag what={pt ? 'A vinculação de tarefas' : 'Filing sessions under tasks'} />
         </div>
 
         {step === 'confirm' && (

@@ -6,6 +6,8 @@
  * delivery cost", and the two would drift.
  */
 
+import { buildLive } from './task-live'
+import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
 import {
   canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
@@ -113,6 +115,44 @@ export async function showTask(
       files: w.book.files.filter(f => f.taskId === task.id),
     }),
   }
+}
+
+/**
+ * The LIVE DELIVERY line: active pieces, their stage and an ETA with its source (`task-live.ts`).
+ * Built from the same detail the task page reads, so the line can never disagree with a task's own
+ * page about which sessions it holds. Tasks that are `done` with no history to give are skipped
+ * outright — only a done task can feed the ETA's samples, and one with no subtask or session
+ * contributes nothing.
+ */
+export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveView> {
+  const w = await loadTaskWorld()
+  const nowMs = Date.now()
+  const details = w.book.tasks.map(task => buildTaskDetail({
+    task,
+    attempts: w.book.attempts,
+    rows: w.rollupRows,
+    metas: w.metas,
+    costOf: w.costOf,
+    comments: [],
+    threads: [],
+    subtasks: w.book.subtasks.filter(t => t.taskId === task.id),
+    files: [],
+  }))
+  const labels = new Map(w.book.statuses.map(s => [s.id, s.label]))
+  const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id) })
+  // The fleet and the stored roles are read WHERE the view is built, so the page and the MCP tool
+  // answer from one source. A fleet that cannot be read costs the agent state, never the line.
+  let rows: FleetRowLite[] = []
+  let leaderIds = new Set<string>()
+  try {
+    const { readFleet } = await import('./fleet-web')
+    const { listRoles, defaultRoleDeps, roleOfRow } = await import('./session-roles')
+    const fleet = await readFleet('en')
+    rows = fleet.rows as unknown as FleetRowLite[]
+    const roles = await listRoles(await defaultRoleDeps())
+    leaderIds = new Set(fleet.rows.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
+  } catch { /* no fleet: deliveries without live state */ }
+  return describeLive({ reply, rows, leaderIds, nowMs, filters })
 }
 
 /** Create a task. Title is required; a description is not — a task nobody described is a task. */

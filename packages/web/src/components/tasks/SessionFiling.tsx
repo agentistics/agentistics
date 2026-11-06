@@ -41,7 +41,6 @@ import {
 import { TabStrip } from '../sessions/formBits'
 import { button, field, microLabel, pill, statusStyle, surface } from './board'
 import { boardCopy, statusLabel, type Lang } from './copy'
-import { BetaTag } from '../BetaTag'
 
 /**
  * The sentence for a refusal `fileInto` does not open a dedicated dialog for. `blocked` is handled
@@ -215,7 +214,6 @@ export function SessionFiling(p: SessionFilingProps) {
       <span style={microLabel}>
         {target && !moving ? copy.delivery : copy.fileUnder}
       </span>
-      <BetaTag what={copy.deliveries} />
       <span style={{ flex: 1 }} />
       <button
         onClick={p.onClose}

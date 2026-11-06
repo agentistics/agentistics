@@ -113,7 +113,7 @@ Commands:
   resources     Print the agentop processes on this machine, what each costs, and the alerts
   session       Start / list / attach assistant sessions (tmux-backed; --bg detaches);
                 'session ls' prints the cockpit's table of what is running
-  task          BETA — the delivery board: what each piece of work cost, in how many rounds
+  task          the delivery board: what each piece of work cost, in how many rounds
                 and across how many sessions ('task ls | show | deliver | abandon')
   hooks         Teach Claude Code to run work in parallel through agentop
                 (installs a skill + SessionStart/Stop hooks; explicit, reversible)
