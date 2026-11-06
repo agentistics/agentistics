@@ -37,3 +37,30 @@ Its isolated subprocess wraps the real data builder in a minimal HTTP server, st
 adapter build, checks health before releasing it, and checks eight data requests receive the same
 fixture payload after one build. It deliberately avoids the unrelated daemons started by
 `index.ts`. These tests complement, rather than replace, full-server QA with real history.
+
+The managed server's fleet now has two boot phases. The first poll resolves
+`INITIAL_SESSION_LIMIT` (15) recent managed records and every live pane, without loading the
+conversation store or performing registry mutations. Registry reads return durable identities while
+one startup preference/role repair runs in the background. Writes wait for that repair, and link
+writes still repair their own durable result. Completion broadcasts the folder-change signal and
+refreshes the hub. The repair never changes which conversation a registry record names.
+
+After publishing the recent snapshot, the hub requests a full poll on a later scheduling turn.
+The crash-reopen offer and the behaviour baseline do not hold the recent snapshot open. Fleet
+GET/SSE keep their existing row shapes, with an optional `historyLoading` boolean; older clients
+can ignore it. The web requests 15 ended rows in its first window, paints that window before
+paging in its HTTP fallback, and labels pending history so search/filter results cannot silently
+look complete. Existing row ids are retained by the stream when history arrives. A bookmarked
+chat outside the window resolves its exact registry id or its single consolidated record independently
+of the history scan.
+The slim metrics response also carries 15 recent sessions; its existing partial/full follow-up
+remains in place. One-shot CLI pollers retain their full first read.
+
+Boot diagnostics print durations for the first recent poll and first full-history poll, including
+the gather, capture, link, and hardware stages, plus the first consolidated-store read and the
+background identity repair. They contain counts and durations, never session contents. On the
+measured store, raw history reading took 147–175 ms for 3,456 records. A copied-store identity
+repair took 38,279 ms, of which 38,255 ms was 1,627 sequential role rekeys, each taking the role
+lock and reading/writing its document again; a read with the same repair in the background took
+7 ms. These are process-level measurements with a warm OS cache, not a post-reboot latency bound.
+Batching those role rewrites is separate follow-up work.

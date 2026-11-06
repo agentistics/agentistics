@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  checkParentGroup, filedUnder, planAttach, reconcileAttachment, sanitizeSubtaskBlockedBy,
+  LEADER_ONLY_MESSAGE, checkParentGroup, directFilingAllowed, filedUnder, planAttach, reconcileAttachment, sanitizeSubtaskBlockedBy,
 } from './task-attach'
 
 const SUBS = [
@@ -281,5 +281,14 @@ describe('reconcileAttachment', () => {
   it('leaves an ordinary task-only row alone', () => {
     expect(reconcileAttachment({ taskId: 't1' }, SUBS)).toEqual({ taskId: 't1', subtaskId: null })
     expect(reconcileAttachment({}, SUBS)).toEqual({ taskId: null, subtaskId: null })
+  })
+})
+
+describe('directFilingAllowed — only leaders are filed on the task itself', () => {
+  it('accepts a leader and a person (no inferred role), refuses a worker', () => {
+    expect(directFilingAllowed('leader')).toBe(true)
+    expect(directFilingAllowed(undefined)).toBe(true)
+    expect(directFilingAllowed('worker')).toBe(false)
+    expect(LEADER_ONLY_MESSAGE).toContain('only leader sessions are filed on the task itself')
   })
 })

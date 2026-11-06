@@ -10,6 +10,7 @@
  * payload straight after. It is a PREFIX of the truth, never a different truth: nothing in it is
  * computed, only left out.
  */
+import { INITIAL_SESSION_LIMIT } from './sessions/boot-fleet'
 import type { ApiResponse } from './data'
 
 /** Fields that are large per session and are drawn only once a session is opened or charted. */
@@ -28,7 +29,7 @@ export const SLIM_DROPPED_SESSION_FIELDS = [
 ] as const
 
 /** How many sessions the slim answer carries (most recent first). */
-export const SLIM_SESSION_LIMIT = 200
+export const SLIM_SESSION_LIMIT = INITIAL_SESSION_LIMIT
 
 export function slimApiResponse(data: ApiResponse): ApiResponse {
   const drop = new Set<string>(SLIM_DROPPED_SESSION_FIELDS)

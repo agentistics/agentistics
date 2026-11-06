@@ -8,6 +8,7 @@
  * reason codes.
  */
 
+import { shellTmux as tmux } from './shell-tmux'
 import type { StartHost } from '../cli-start'
 import type { CliLang } from '../cli-lang'
 import { closeShells, listShells, openShell } from './shell-backend'
@@ -37,18 +38,6 @@ const REFUSAL: Record<ShellRefusal, { en: string; pt: string }> = {
 }
 
 /** One tmux runner for this module's own calls — the same shape `shell-terminal.ts` is given. */
-async function tmux(args: string[]): Promise<{ code: number; out: string; err: string }> {
-  try {
-    const p = Bun.spawn(['tmux', ...args], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' })
-    const [out, err] = await Promise.all([
-      new Response(p.stdout).text(),
-      new Response(p.stderr).text(),
-    ])
-    return { code: await p.exited, out, err }
-  } catch {
-    return { code: 127, out: '', err: '' }
-  }
-}
 const resizeShellPane = createPaneResizer(tmux)
 
 const json = (body: unknown, status = 200): Response =>
@@ -77,7 +66,10 @@ export async function handleShellRoute(
   url: URL,
   host: StartHost,
   lang: CliLang,
-  opts: { nativeCwd?: (id: string) => Promise<string | null> } = {},
+  opts: {
+    nativeCwd?: (id: string) => Promise<string | null>
+    targetRows?: () => Promise<readonly { id: string; conversationId?: string; cwd?: string }[]>
+  } = {},
 ): Promise<Response | null> {
   // The live READ channel — the same SSE frames `/api/fleet/stream` sends, so the browser's reader
   // is the same reader. The three checks are the ones a stream needs and no more: an id, SCOPE (the
@@ -144,24 +136,38 @@ export async function handleShellRoute(
   if (url.pathname === '/api/shell/open' && req.method === 'POST') {
     const body = await req.json().catch(() => ({})) as { sessionId?: string }
     if (!body.sessionId) return json({ error: 'sessionId required' }, 400)
-    if (!host.sessions) return json({ error: 'no_host' }, 503)
+    if (!host.sessions && !opts.targetRows) return json({ error: 'no_host' }, 503)
 
     // SCOPE IS CHECKED HERE, like `readAttachTicket` and `readFleetSkills`: the directory comes
     // from the ROW, never from the caller, so an unknown id is refused rather than answered with a
     // shell somewhere. `/api/fleet/new` is the one route that takes a directory from a body, and it
     // says why.
-    const fleet = await host.sessions()
-    const target = await resolveShellTarget(fleet.sessions, body.sessionId, opts.nativeCwd)
+    const started = performance.now()
+    const rows = opts.targetRows ? await opts.targetRows() : (await host.sessions!()).sessions
+    let target = await resolveShellTarget(rows, body.sessionId, opts.nativeCwd)
+    // Detected (external) sessions live only in the fleet, not in the registry: fall back to the
+    // slow lookup before declaring the session unknown.
+    if (!target && opts.targetRows && host.sessions) {
+      const fleet = await host.sessions().catch(() => null)
+      target = await resolveShellTarget(fleet?.sessions ?? [], body.sessionId)
+    }
+    const targetMs = performance.now() - started
     if (!target) return json({ error: 'unknown_session' }, 404)
 
-    const out = await openShell(target)
+    const stages: string[] = []
+    const out = await openShell({ ...target, timing: (stage, ms) => stages.push(`${stage};dur=${ms.toFixed(1)}`) })
+    const timed = (body: unknown) => {
+      const response = json(body)
+      response.headers.set('Server-Timing', `target;dur=${targetMs.toFixed(1)}, ${stages.join(', ')}, total;dur=${(performance.now() - started).toFixed(1)}`)
+      return response
+    }
     if (!out.ok) {
       // A REFUSAL IS A 200 CARRYING A SENTENCE, not an error status. The request was well formed
       // and the answer is "no, and here is why" — a 4xx would make the browser draw its generic
       // failure instead of the one sentence that says what to do about it.
-      return json({ ok: false, reason: out.reason, message: REFUSAL[out.reason][lang] })
+      return timed({ ok: false, reason: out.reason, message: REFUSAL[out.reason][lang] })
     }
-    return json({ ok: true, shell: out.shell })
+    return timed({ ok: true, shell: out.shell })
   }
 
   if (url.pathname === '/api/shell/close' && req.method === 'POST') {

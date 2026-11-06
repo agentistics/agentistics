@@ -71,7 +71,7 @@ afterAll(async () => {
 
 
 
-async function paint(props: { loading: boolean; closedTotal?: number }) {
+async function paint(props: { loading: boolean; closedTotal?: number; historyLoading?: boolean }) {
   await loadSharedPrefs()
   act(() => writePrefs({ leadersOnly: false, tab: 'active', foldedTeams: [] }))
   const host = document.createElement('div')
@@ -79,7 +79,7 @@ async function paint(props: { loading: boolean; closedTotal?: number }) {
   const root: Root = createRoot(host)
   act(() => root.render(
     <MemoryRouter><SessionsAside lang="pt" rows={[]} filters={filters} activeOnly={false}
-      loading={props.loading} {...(props.closedTotal ? { closedTotal: props.closedTotal } : {})}
+      loading={props.loading} historyLoading={props.historyLoading} {...(props.closedTotal ? { closedTotal: props.closedTotal } : {})}
       unsupported={false} finishedTasks={[]} hideNew rowsById={new Map()} act={async () => ({ ok: true, message: '' })} />
     </MemoryRouter>,
   ))
@@ -99,6 +99,16 @@ test('live view empty but the machine holds ended conversations: never "no sessi
   const m = await paint({ loading: false, closedTotal: 85 })
   try {
     expect(m.host.textContent).toContain('85 conversas estão em Encerradas')
+    expect(m.host.textContent).not.toContain('Nenhuma sessão nesta máquina ainda')
+  } finally { await m.done() }
+})
+
+
+test('partial history is visible and never claims that search or filters found nothing', async () => {
+  const m = await paint({ loading: false, historyLoading: true })
+  try {
+    expect(m.host.textContent).toContain('Carregando o resto das sessões')
+    expect(m.host.textContent).toContain('Busca e filtros ainda podem ter resultados parciais')
     expect(m.host.textContent).not.toContain('Nenhuma sessão nesta máquina ainda')
   } finally { await m.done() }
 })

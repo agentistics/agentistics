@@ -30,6 +30,8 @@ let inFlight: Promise<Baseline> | null = null
 export function resetBaselineCache(): void {
   cached = null
   inFlight = null
+  if (scheduled !== null) clearTimeout(scheduled)
+  scheduled = null
 }
 
 export async function cachedBaseline(
@@ -60,3 +62,15 @@ export async function cachedBaseline(
   )
   return run
 }
+
+/** Fleet chrome never waits for the history scan. A later snapshot carries its result. */
+export function backgroundBaseline(load: () => Promise<SessionMeta[]>, nowMs: number): Baseline | undefined {
+  if ((!cached || nowMs - cached.at >= BASELINE_TTL_MS) && !inFlight && scheduled === null) {
+    scheduled = setTimeout(() => {
+      scheduled = null
+      void cachedBaseline(load, nowMs).catch(() => {})
+    }, 100)
+  }
+  return cached?.value
+}
+let scheduled: ReturnType<typeof setTimeout> | null = null

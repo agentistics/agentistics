@@ -1152,6 +1152,8 @@ export interface TranscriptSearch {
 }
 
 export interface ControlSessions {
+  /** Recent boot window; the history scan is still pending. Older hosts omit it. */
+  historyLoading?: boolean
   sessions: ControlSession[]
   /** How many are waiting on a person. Drives the header counter, from every tab. */
   attention: number

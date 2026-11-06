@@ -1,0 +1,223 @@
+{
+ "data": [
+  {
+   "id": "msg_1ac0b760c001VNQrwzXysfhMt4",
+   "time": {
+    "created": 1793887794793
+   },
+   "text": "\"WRITE_PROBE please\"",
+   "files": [],
+   "type": "user"
+  },
+  {
+   "id": "msg_1ac0b767a001D88NctqzmpT66i",
+   "time": {
+    "created": 1793887794814,
+    "streamed": 1793887794838,
+    "completed": 1793887794854
+   },
+   "type": "assistant",
+   "agent": "build",
+   "model": {
+    "id": "m1",
+    "providerID": "stub",
+    "variant": "default"
+   },
+   "content": [
+    {
+     "type": "tool",
+     "id": "call_probe_1",
+     "name": "write",
+     "executed": false,
+     "state": {
+      "status": "completed",
+      "input": {
+       "path": "/dev/shm/oc2/api/wsB/probe-out.txt",
+       "content": "hello-probe"
+      },
+      "content": [
+       {
+        "type": "text",
+        "text": "Created file successfully: probe-out.txt"
+       }
+      ],
+      "metadata": {
+       "truncated": false
+      }
+     },
+     "time": {
+      "created": 1793887794830,
+      "ran": 1793887794836,
+      "completed": 1793887794851
+     }
+    }
+   ],
+   "finish": "tool-calls",
+   "rawFinish": "tool_calls",
+   "cost": 0,
+   "tokens": {
+    "input": 1234,
+    "output": 7,
+    "reasoning": 0,
+    "cache": {
+     "read": 0,
+     "write": 0
+    }
+   }
+  },
+  {
+   "id": "msg_1ac0b76af001KqVZ3mRtMneB8A",
+   "time": {
+    "created": 1793887794867,
+    "streamed": 1793887794885,
+    "completed": 1793887794888
+   },
+   "type": "assistant",
+   "agent": "build",
+   "model": {
+    "id": "m1",
+    "providerID": "stub",
+    "variant": "default"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "DONE"
+    }
+   ],
+   "finish": "stop",
+   "rawFinish": "stop",
+   "cost": 0,
+   "tokens": {
+    "input": 1234,
+    "output": 7,
+    "reasoning": 0,
+    "cache": {
+     "read": 0,
+     "write": 0
+    }
+   }
+  },
+  {
+   "id": "msg_1ac0b76ce001no1bHmAdstNtK2",
+   "time": {
+    "created": 1793887794894
+   },
+   "type": "idle",
+   "outcome": "succeeded"
+  },
+  {
+   "id": "msg_1ac0d104c001dPg2eQkZorGcgS",
+   "metadata": {
+    "notice": "instructions",
+    "instructionSources": [
+     "core/environment"
+    ]
+   },
+   "time": {
+    "created": 1793887899724
+   },
+   "type": "system",
+   "text": "The environment you are running in is now:\n<env>\n  Working directory: /dev/shm/oc2/api/wsB\n  Workspace root folder: /dev/shm/oc2/api/wsB\n  Is directory a git repo: no\n  Platform: linux\n  Prefer /tmp/agr-Anfkpg/opencode over generic system temporary directories such as /tmp; it is pre-created and approved for external access.\n</env>",
+   "description": "Instructions updated: core/environment"
+  },
+  {
+   "id": "msg_1ac0d0d97001h7AJ4dsgrQF1IM",
+   "time": {
+    "created": 1793887899727
+   },
+   "text": "REASON_PROBE via api",
+   "type": "user"
+  },
+  {
+   "id": "msg_1ac0d105e001YhxKmljA5NqjVN",
+   "time": {
+    "created": 1793887899750,
+    "streamed": 1793887899797,
+    "completed": 1793887899799
+   },
+   "type": "assistant",
+   "agent": "build",
+   "model": {
+    "id": "m1",
+    "providerID": "stub",
+    "variant": "default"
+   },
+   "content": [
+    {
+     "type": "reasoning",
+     "text": "thinking about it",
+     "native": {
+      "reasoningField": "reasoning_content"
+     },
+     "time": {
+      "created": 1793887899782,
+      "completed": 1793887899791
+     }
+    },
+    {
+     "type": "text",
+     "text": "ANSWER"
+    }
+   ],
+   "finish": "stop",
+   "rawFinish": "stop",
+   "cost": 0,
+   "tokens": {
+    "input": 1234,
+    "output": 7,
+    "reasoning": 0,
+    "cache": {
+     "read": 0,
+     "write": 0
+    }
+   }
+  },
+  {
+   "id": "msg_1ac0d109b0012ilMbly50pw5b9",
+   "time": {
+    "created": 1793887899803
+   },
+   "type": "idle",
+   "outcome": "succeeded"
+  },
+  {
+   "id": "msg_1ac0d10e1001wr2jgEpUVKkUQn",
+   "time": {
+    "created": 1793887899883
+   },
+   "text": "ERR_PROBE",
+   "type": "user"
+  },
+  {
+   "id": "msg_1ac0d10f2001FWZVLdzDgsE6wd",
+   "time": {
+    "created": 1793887905899
+   },
+   "type": "assistant",
+   "agent": "build",
+   "model": {
+    "id": "m1",
+    "providerID": "stub",
+    "variant": "default"
+   },
+   "content": [],
+   "retry": {
+    "attempt": 4,
+    "at": 1793887913737,
+    "error": {
+     "type": "provider.internal",
+     "message": "stub boom",
+     "status": 500,
+     "response": {
+      "body": "{\"error\":{\"message\":\"stub boom\",\"type\":\"server_error\"}}"
+     }
+    }
+   }
+  }
+ ],
+ "cursor": {
+  "previous": "eyJpZCI6Im1zZ18xYWMwYjc2MGMwMDFWTlFyd3pYeXNmaE10NCIsIm9yZGVyIjoiYXNjIiwiZGlyZWN0aW9uIjoicHJldmlvdXMifQ",
+  "next": "eyJpZCI6Im1zZ18xYWMwZDEwZjIwMDFGV1pWTGR6RGdzRTZ3ZCIsIm9yZGVyIjoiYXNjIiwiZGlyZWN0aW9uIjoibmV4dCJ9"
+ }
+}

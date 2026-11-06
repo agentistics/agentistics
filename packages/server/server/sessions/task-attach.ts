@@ -49,6 +49,18 @@
  * task clears it too, because a subtask of one delivery cannot own a session of another.
  */
 
+/**
+ * Only a LEADER session is filed on the task itself (owner, 2026-11-05). A worker is the unit of
+ * WORK, so it belongs on a subtask; a task card full of workers is unreadable. `undefined` is a
+ * person's own session (no role inferred) and is let through, like every other role rule here.
+ * Legacy workers already filed directly are left alone — this is checked at filing time only.
+ */
+export const LEADER_ONLY_MESSAGE =
+  'only leader sessions are filed on the task itself; file this session on a subtask'
+export function directFilingAllowed(role: 'leader' | 'worker' | undefined): boolean {
+  return role !== 'worker'
+}
+
 export interface AttachSubtask {
   id: string
   taskId: string

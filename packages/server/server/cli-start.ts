@@ -1,3 +1,4 @@
+import { INITIAL_SESSION_LIMIT, isInitialSnapshot } from './sessions/boot-fleet'
 import { sessionNotify, type ControlSession } from '@agentistics/tui/control/session-fleet'
 /**
  * cli-start.ts — the logic behind the `agentop` control center.
@@ -102,7 +103,7 @@ import { formatBytes, layerTotal, retainedTotal } from './backup/backup-size'
 import { lastBackup, lastPerHarness, lastBackupRun, loadBackupHistory } from './backup/backup-store'
 import { scheduleStatus } from './backup/schedule'
 import { loadConsolidated } from './consolidate'
-import { cachedBaseline, resetBaselineCache } from './sessions/fleet-baseline'
+import { backgroundBaseline, cachedBaseline, resetBaselineCache } from './sessions/fleet-baseline'
 import { onOutputLine, publishLines, streamCommand } from './cli-stream'
 import {
   composeRebuildCommands,
@@ -1594,6 +1595,7 @@ let sessionsPoller: SessionsPoller | null = null
 export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeof createSessionsPoller>[0] {
   return {
     backend, readRegistry, scanProcesses, loadConversations, touchSessions,
+    ...(isServerProcess() ? { initialSessionLimit: INITIAL_SESSION_LIMIT } : {}),
     endSessions: (ids, endedAt) => patchSessions(ids, { endedAt }),
     loadHarnessSessions,
     // CONTA.IDENTIDADE: each row names the account its process runs on (`session-account.ts`).
@@ -1674,6 +1676,17 @@ export function ensureSessionHub(): Promise<SessionHub> {
       const { fleetHub } = await import('./engine/fleet-hub')
       // Only a FRESH reading says anything new: an `unavailable` snapshot is the previous one again.
       hub.observe(snap => { if (!snap.unavailable) fleetHub.observe(snap.sessions, snap.polledAtMs) })
+      // Let the recent snapshot reach readers before starting the historical scan.
+      if (isServerProcess()) {
+        let first = true
+        hub.observe(snap => {
+          if (!first || snap.unavailable) return
+          first = false
+          setTimeout(() => {
+            if (hub.stats().polls === 1) void hub.refresh().catch(() => {})
+          }, 100)
+        })
+      }
       setProcessSessionHub(hub)
       return hub
     })()
@@ -3845,7 +3858,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // A failed store read costs freshness, never the fleet: the fleet is what this method is for.
       const baseline = await timeFleetPhase(
         'sessions: cachedBaseline',
-        () => cachedBaseline(async () => [...(await loadConsolidated()).values()], Date.now()),
+        () => isServerProcess()
+          ? Promise.resolve(backgroundBaseline(async () => [...(await loadConsolidated()).values()], Date.now()))
+          : cachedBaseline(async () => [...(await loadConsolidated()).values()], Date.now()),
       ).catch(() => undefined)
       // Resolved per session and MEMOIZED by directory: a directory does not change repository, and
       // this poll runs every five seconds over the whole fleet — asking git three times per session
@@ -3866,7 +3881,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // the offer is a statement about the QUESTION, not about the event.
       const fellAt = snap.fell?.atMs
       const answered = fellAt !== undefined && dismissedFallMs !== null && fellAt <= dismissedFallMs
-      const restorable = answered
+      const restorable = answered || isInitialSnapshot(snap)
         ? []
         : await timeFleetPhase('sessions: restorableSessions', () => restorableSessions(snap.fell?.entries ?? []))
       // NATIVE.LIFE: the engine's own sessions join as ordinary rows (`native-fleet.ts`) — no pane, no
@@ -3878,6 +3893,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const nativeAttention = nativeRows.filter(n => n.state === 'waiting' || n.state === 'waiting-approval').length
       return {
         ...(restorable.length > 0 ? { restorable } : {}),
+        historyLoading: isInitialSnapshot(snap),
         sessions: [...snap.sessions.map((v, i) => toControlSession(v, s, facts[i])), ...nativeRows],
         attention: snap.attention + nativeAttention,
         rang: snap.rang,

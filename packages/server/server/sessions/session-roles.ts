@@ -587,6 +587,49 @@ export async function markRoleDelivered(
   })
 }
 
+/** Apply a move to an already locked, mutable document. */
+function moveStoredRole(doc: RolesDoc, fromKeys: readonly (string | undefined)[], toKeys: readonly (string | undefined)[]): boolean {
+  const from = [...new Set(fromKeys.filter((k): k is string => !!k))]
+  const to = [...new Set(toKeys.filter((k): k is string => !!k))]
+  if (!from.length || !to.length) return false
+  const sourceKey = from.find(k => doc.roles[k])
+  const delivered = from.map(k => doc.lastDeliveredRole?.[k]).find((r): r is SessionRole => !!r)
+  if (!sourceKey && !delivered) return false
+
+  // Re-read under the lock: a newer assignment made while repair was queued must win.
+  // Legacy entries have no timestamp; equal timestamps deliberately prefer the source.
+  const targetKey = to.find(k => doc.roles[k])
+  const sourceAt = sourceKey ? doc.at?.[sourceKey] : undefined
+  const targetAt = targetKey ? doc.at?.[targetKey] : undefined
+  const targetWins = targetKey && targetAt !== undefined && (sourceAt === undefined || targetAt > sourceAt)
+  const heldKey = targetWins ? targetKey : sourceKey ?? targetKey
+  const effective = heldKey ? doc.roles[heldKey] : undefined
+  const effectiveOrigin = heldKey ? doc.origins?.[heldKey] : undefined
+  const effectiveAt = heldKey ? doc.at?.[heldKey] : undefined
+  const origins = doc.origins ??= {}
+  const at = doc.at ??= {}
+  const lastDeliveredRole = doc.lastDeliveredRole ??= {}
+  for (const key of to) {
+    if (effective) {
+      doc.roles[key] = effective
+      if (effectiveOrigin) origins[key] = effectiveOrigin
+      else delete origins[key]
+      if (effectiveAt !== undefined) at[key] = effectiveAt
+      else delete at[key]
+    }
+    if (delivered && !lastDeliveredRole[key]) lastDeliveredRole[key] = delivered
+  }
+  for (const key of from) {
+    if (!to.includes(key)) {
+      delete doc.roles[key]
+      delete origins[key]
+      delete at[key]
+      delete lastDeliveredRole[key]
+    }
+  }
+  return true
+}
+
 /** Move role state when a managed row is replaced or its conversation is discovered. */
 export async function rekeyStoredRole(
   fromKeys: readonly (string | undefined)[],
@@ -597,49 +640,28 @@ export async function rekeyStoredRole(
   return serial(depsP.then(d => d.dataDir), async () => {
     const deps = await depsP
     const doc = await loadRoles(deps)
-    const from = [...new Set(fromKeys.filter((k): k is string => !!k))]
-    const to = [...new Set(toKeys.filter((k): k is string => !!k))]
-    if (from.length === 0 || to.length === 0) return
+    if (moveStoredRole(doc, fromKeys, toKeys)) await writeRolesDoc(deps.dataDir, doc).catch(() => {})
+  })
+}
 
-    const role = from.map(k => doc.roles[k]).find((r): r is SessionRole => !!r)
-    const delivered = from.map(k => doc.lastDeliveredRole?.[k]).find((r): r is SessionRole => !!r)
-    if (!role && !delivered) return
-
-    const roles = { ...doc.roles }
-    const origins = { ...(doc.origins ?? {}) }
-    const at = { ...(doc.at ?? {}) }
-    const fromOrigin = from.map(k => doc.origins?.[k]).find(o => !!o)
-    const lastDeliveredRole = { ...(doc.lastDeliveredRole ?? {}) }
-    // Rekeying can see assignments made independently under the managed and conversation keys. Recency,
-    // rather than which side happens to be the target, determines the winner. Legacy entries have no `at`
-    // and therefore lose to any timestamped entry; equal timestamps deliberately prefer the source key.
-    const sourceKey = from.find(k => doc.roles[k])
-    const sourceAt = sourceKey ? doc.at?.[sourceKey] : undefined
-    const targetKey = to.find(k => doc.roles[k])
-    const targetAt = targetKey ? doc.at?.[targetKey] : undefined
-    const targetWins = targetKey && targetAt !== undefined && (sourceAt === undefined || targetAt > sourceAt)
-    const heldKey = targetWins ? targetKey : sourceKey ?? targetKey
-    const effective = heldKey ? doc.roles[heldKey] : role
-    const effectiveOrigin = heldKey ? doc.origins?.[heldKey] : fromOrigin
-    const effectiveAt = heldKey ? doc.at?.[heldKey] : undefined
-    for (const key of to) {
-      if (effective) {
-        roles[key] = effective
-        if (effectiveOrigin) origins[key] = effectiveOrigin
-        if (effectiveAt !== undefined) at[key] = effectiveAt
-        else delete at[key]
-      }
-      if (delivered && !lastDeliveredRole[key]) lastDeliveredRole[key] = delivered
+/** Repair the whole registry with one locked read/write; migrated managed keys are removed.
+ * Returns the number of repaired identities. A second boot performs no moves or writes.
+ */
+export async function rekeyStoredRoleBatch(
+  links: ReadonlyMap<string, string>,
+  providedDeps?: Pick<RoleDeps, 'dataDir' | 'legacyPref'>,
+): Promise<number> {
+  if (!links.size) return 0
+  const depsP = providedDeps ? Promise.resolve(providedDeps) : defaultRoleDeps()
+  return serial(depsP.then(d => d.dataDir), async () => {
+    const deps = await depsP
+    const doc = await loadRoles(deps)
+    let repaired = 0
+    for (const [from, to] of links) {
+      if (from !== to && moveStoredRole(doc, [from], [to])) repaired++
     }
-    for (const key of from) {
-      if (!to.includes(key)) {
-        delete roles[key]
-        delete origins[key]
-        delete at[key]
-        delete lastDeliveredRole[key]
-      }
-    }
-    await writeRolesDoc(deps.dataDir, { ...doc, roles, origins, lastDeliveredRole }).catch(() => {})
+    if (repaired) await writeRolesDoc(deps.dataDir, doc)
+    return repaired
   })
 }
 
@@ -698,4 +720,16 @@ export async function deliverStoredRole(
     }).catch(() => {})
     return true
   })
+}
+
+/**
+ * The role a row works under: the stored one, else what its spawn relationship implies (a parent
+ * started it => worker; a leader-prefixed label => leader), else undefined (a person's session).
+ */
+export async function effectiveRole(row: { id: string; conversationId?: string | undefined; label?: string | undefined; parentSessionId?: string | undefined }): Promise<SessionRole | undefined> {
+  const stored = await storedRoleFor([row.conversationId, row.id])
+  if (stored) return stored
+  const { spawnRole } = await import('./spawn-row')
+  const { hasRolePrefix } = await import('@agentistics/core')
+  return spawnRole({ leaderPrefix: !!row.label && hasRolePrefix(row.label), hasParent: !!row.parentSessionId })
 }

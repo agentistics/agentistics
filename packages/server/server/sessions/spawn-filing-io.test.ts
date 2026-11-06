@@ -182,3 +182,27 @@ describe('attachAfterSpawn', () => {
   })
 
 })
+
+describe('only leaders are filed on the task itself', () => {
+  const d = '/tmp'
+  const sub = { tasks: [T('t-1', 'One')], subtasks: [S('s-1', 't-1', 'Step')] }
+  const o = { ...common, book: sub, rows: [] as ManagedSession[], liveIds: new Set<string>(), cwd: d }
+  test('a worker naming only the task is refused with the sentence', async () => {
+    const r = await planSpawnFiling({ ...o, role: 'worker', taskRef: 't-1' })
+    expect(r).toMatchObject({ ok: false, code: 'worker_needs_subtask' })
+    if (!r.ok) expect(r.detail).toContain('only leader sessions are filed on the task itself')
+  })
+  test('a worker on a subtask, and a leader on the task, are accepted', async () => {
+    expect((await planSpawnFiling({ ...o, role: 'worker', taskRef: 't-1', subtaskRef: 's-1' })).ok).toBe(true)
+    expect((await planSpawnFiling({ ...o, role: 'leader', taskRef: 't-1' })).ok).toBe(true)
+  })
+  test('a worker that only INHERITS the parent task starts unfiled, with a warning', async () => {
+    const parent = { ...row('p', d), taskId: 't-1' }
+    const r = await planSpawnFiling({ ...o, role: 'worker', sharedCwd: true, callerSessionId: 'p', rows: [parent], liveIds: new Set(['p']) })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.taskId).toBeUndefined()
+      expect(r.warnings).toContain('inherited_task_needs_subtask')
+    }
+  })
+})

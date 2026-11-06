@@ -49,6 +49,8 @@ export interface ProjectedDerived {
   toolCounts: Record<string, number>
   totalToolCalls: number
   projectStats: Record<string, { sessions: number; messages: number; tools: number }>
+  /** Harnesses the projection holds at least one session for, in this scope. Absent in hand-built overlays. */
+  coveredHarnesses?: string[]
   /** Marks the overlay, so a page can say where its numbers came from. */
   figuresSource: 'projections'
 }
@@ -93,12 +95,13 @@ export async function projectedDerived(
   /** The blended rate the cache-savings estimate uses: `blendedCostPerToken` over all-time usage. */
   blendedOf: (usage: Record<string, ModelUsage>) => BlendedRate,
 ): Promise<ProjectedDerived> {
-  const [byModel, whole, mainTools, byProject, projectTools] = await Promise.all([
+  const [byModel, whole, mainTools, byProject, projectTools, byHarness] = await Promise.all([
     allMetricGroups(q, { ...scope, groupBy: 'model', subagent: 'false', metrics: 'tokens,cost' }),
     allMetricGroups(q, { ...scope, metrics: 'sessions' }),
     allMetricGroups(q, { ...scope, subagent: 'false', metrics: 'tools' }),
     allMetricGroups(q, { ...scope, groupBy: 'project', metrics: 'sessions,messages' }),
     allMetricGroups(q, { ...scope, groupBy: 'project', subagent: 'false', metrics: 'tools' }),
+    allMetricGroups(q, { ...scope, groupBy: 'harness', metrics: 'sessions' }),
   ])
   const modelUsage: Record<string, ModelUsage> = {}
   let totalCostUSD = 0
@@ -132,6 +135,85 @@ export async function projectedDerived(
     toolCounts,
     totalToolCalls: toolsOf(mainTools.groups[0])?.calls ?? 0,
     projectStats,
+    coveredHarnesses: byHarness.groups.filter(g => (g.metrics.sessions?.count ?? 0) > 0).map(g => String(g.key.harness)),
     figuresSource: 'projections',
+  }
+}
+
+/** The legacy figures one harness contributes: what `computeDerivedStats` answers, narrowed to that harness. */
+export interface LegacyFigures {
+  totalSessions: number
+  totalCostUSD: number
+  modelUsage: Record<string, ModelUsage>
+  tokenTotals: TokenBreakdown
+  toolCounts: Record<string, number>
+  totalToolCalls: number
+  projectStats: Record<string, { sessions: number; messages: number; tools: number }>
+}
+
+export interface OverlayCoverage<D> {
+  /** Harnesses the current filters select (all the data's harnesses when none is chosen). */
+  candidates: readonly string[]
+  /** The legacy answer narrowed to one harness, or null. */
+  legacyFor(harness: string): D | null
+  blendedOf(usage: Record<string, ModelUsage>): BlendedRate
+}
+
+const addRecord = (a: Record<string, number>, b: Record<string, number>): Record<string, number> => {
+  const out = { ...a }
+  for (const [k, v] of Object.entries(b)) out[k] = (out[k] ?? 0) + v
+  return out
+}
+
+/**
+ * Lays the projection over the legacy answer, harness by harness.
+ *
+ * Messages, the longest session, streaks and the heatmap stay on the legacy path. A harness whose
+ * reader has not fed the journal has NO projection: its sessions, tokens, cost and tools come from the
+ * legacy (adapter) figures, added to the projection of the harnesses that do have one. That keeps
+ * "Codex + OpenCode" equal to Codex plus OpenCode, whichever of the two the projection covers, and
+ * never shows "259 messages, 0 sessions". Without coverage information (`coverage` absent or a
+ * hand-built overlay) an empty projection never overrides a non-empty legacy figure.
+ */
+export function overlayProjected<D extends LegacyFigures>(legacy: D | null, overlay: ProjectedDerived | null, coverage?: OverlayCoverage<D>): D | null {
+  if (!legacy || !overlay) return legacy
+  const covered = overlay.coveredHarnesses
+  if (!coverage || !covered) {
+    if (overlay.totalSessions === 0 && legacy.totalSessions > 0) return legacy
+    return { ...legacy, ...overlay }
+  }
+  const parts = coverage.candidates.filter(h => !covered.includes(h))
+    .map(h => coverage.legacyFor(h)).filter((d): d is D => d !== null && d.totalSessions > 0)
+  if (overlay.totalSessions === 0 && parts.length === 0 && legacy.totalSessions > 0) return legacy
+  if (parts.length === 0) return { ...legacy, ...overlay }
+  const modelUsage: Record<string, ModelUsage> = { ...overlay.modelUsage }
+  for (const d of parts) {
+    for (const [m, u] of Object.entries(d.modelUsage)) {
+      const cur = modelUsage[m]
+      modelUsage[m] = cur ? {
+        inputTokens: cur.inputTokens + u.inputTokens, outputTokens: cur.outputTokens + u.outputTokens,
+        cacheReadInputTokens: cur.cacheReadInputTokens + u.cacheReadInputTokens,
+        cacheCreationInputTokens: cur.cacheCreationInputTokens + u.cacheCreationInputTokens,
+        webSearchRequests: cur.webSearchRequests + u.webSearchRequests, costUSD: cur.costUSD + u.costUSD,
+      } : u
+    }
+  }
+  const tokenTotals = sumTokens([overlay.tokenTotals, ...parts.map(d => d.tokenTotals)])
+  const projectStats = { ...overlay.projectStats }
+  for (const d of parts) {
+    for (const [k, v] of Object.entries(d.projectStats)) {
+      const cur = projectStats[k]
+      projectStats[k] = cur ? { sessions: cur.sessions + v.sessions, messages: cur.messages + v.messages, tools: cur.tools + v.tools } : v
+    }
+  }
+  return {
+    ...legacy, ...overlay,
+    totalSessions: overlay.totalSessions + parts.reduce((a, d) => a + d.totalSessions, 0),
+    totalCostUSD: overlay.totalCostUSD + parts.reduce((a, d) => a + d.totalCostUSD, 0),
+    modelUsage, tokenTotals, inputTokens: tokenTotals.input, outputTokens: tokenTotals.output,
+    ...cacheFiguresOf(modelUsage, coverage.blendedOf(modelUsage)),
+    toolCounts: parts.reduce((a, d) => addRecord(a, d.toolCounts), overlay.toolCounts),
+    totalToolCalls: overlay.totalToolCalls + parts.reduce((a, d) => a + d.totalToolCalls, 0),
+    projectStats,
   }
 }

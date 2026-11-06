@@ -21,7 +21,7 @@ import {
   TrendingUp, Users, X, Zap, BellOff,
 } from 'lucide-react'
 import { mutedTooltip, useSessionMuted } from './lib/notifyMenu'
-import { useData, useDerivedStats } from './hooks/useData'
+import { blendedCostPerToken, computeDerivedStats, useData, useDerivedStats } from './hooks/useData'
 import { subscribeEvent } from './lib/eventStream'
 import { usePlanBasis } from './hooks/usePlanBasis'
 import { useBillingAccounts } from './hooks/useBillingAccounts'
@@ -32,6 +32,7 @@ import { planCostOf } from './lib/topUsage'
 import { bootLoading } from './lib/bootPhase'
 import { editorEnabledFor } from './lib/editorGate'
 import { useProjectedDerived } from './hooks/useProjectedDerived'
+import { overlayProjected } from './lib/projectedDerived'
 import { ConfirmModal } from './pages/settings/primitives'
 import { type JournalBackfillSummary } from './lib/journalBackfill'
 import { DEFAULT_CARD_ORDER, migrateCardOrder, type CardId } from './lib/cardOrder'
@@ -844,6 +845,7 @@ function SideNav({
                   rows={fleet.rows}
                   finishedTasks={fleet.finishedTasks}
                   loading={fleetLoading}
+                  historyLoading={fleet.historyLoading}
                   closedTotal={fleet.closedTotal ?? 0}
                   unsupported={fleetUnsupported}
                   filters={sessionsFilters}
@@ -2442,10 +2444,19 @@ export default function AppLayout() {
   const projectedOverlay = useProjectedDerived({
     enabled: teamSession?.projectionsWeb === true, filters, activeOnly: derivedActiveOnly, stamp: data,
   })
-  const derived = useMemo(
-    () => (legacyDerived && projectedOverlay ? { ...legacyDerived, ...projectedOverlay } : legacyDerived),
-    [legacyDerived, projectedOverlay],
-  )
+  // A harness the projections do not cover keeps its legacy (adapter) figures; the others use the projection.
+  const derived = useMemo(() => {
+    const candidates = (() => {
+      const chosen = [...new Set([...(filters.harnesses ?? []), ...(filters.harness ? [filters.harness] : [])])]
+      if (chosen.length > 0) return chosen as string[]
+      return [...new Set((derivedSource?.sessions ?? []).map(s => s.harness ?? 'claude'))] as string[]
+    })()
+    return overlayProjected(legacyDerived, projectedOverlay, {
+      candidates,
+      blendedOf: blendedCostPerToken,
+      legacyFor: h => computeDerivedStats(derivedSource, { ...filters, harnesses: [h] as typeof filters.harnesses, harness: undefined }, tagsList, derivedActiveOnly, derivedActiveOnly ? runningIds : NO_RUNNING_IDS),
+    })
+  }, [legacyDerived, projectedOverlay, filters, derivedSource, tagsList, derivedActiveOnly, runningIds])
 
   // ── the plan cost basis ──────────────────────────────────────────────────────────────────
   // Computed ONCE here and passed down: two surfaces each cutting A their own way would tell two

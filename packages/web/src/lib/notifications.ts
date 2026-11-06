@@ -45,6 +45,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão não iniciada', message: 'A subtarefa escolhida não pode receber uma sessão.' },
     en: { title: 'Session not started', message: 'The chosen subtask cannot take a session.' },
   },
+  'worker_needs_subtask': {
+    pt: { title: 'Sessão não iniciada', message: 'Um worker precisa ir para uma subtarefa; só sessões líderes ficam direto na tarefa.' },
+    en: { title: 'Session not started', message: 'A worker must go on a subtask; only leader sessions sit directly on a task.' },
+  },
   'board_unreadable': {
     pt: { title: 'Sessão não iniciada', message: 'Não foi possível ler o quadro para arquivar a sessão.' },
     en: { title: 'Session not started', message: 'The board could not be read to file the session.' },

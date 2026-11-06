@@ -159,6 +159,9 @@ export function installedHarnessAt(exePath: string, harness?: HarnessId): Harnes
     // the npm package `opencode-ai` ships the same binary under `node_modules/opencode-ai/…/bin/opencode`.
     [/\/\.opencode\/bin\/opencode$/, 'opencode'],
     [/\/node_modules\/opencode-[^/]+\/(?:.*\/)?bin\/opencode$/, 'opencode'],
+    // opencode 2.x (npm `@opencode/cli`, measured 2.2.5): `node_modules/@opencode/cli/bin/opencode.exe` (a native ELF;
+    // other platforms ship `@opencode/cli-<platform>/bin/opencode`).
+    [/\/node_modules\/@opencode\/cli(?:-[^/]+)?\/(?:.*\/)?bin\/opencode(?:\.exe)?$/, 'opencode'],
     [/\/\.local\/share\/gh\/copilot\/copilot$/, 'copilot'],
     [/^(?:\/usr\/local|\/opt\/homebrew|\/home\/[^/]+\/\.local)\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi|opencode)$/, 'path-bin'],
   ]
@@ -252,6 +255,8 @@ const MANAGEMENT: Record<'claude' | 'codex' | 'copilot' | 'kimi' | 'opencode', r
   opencode: [
     'completion', 'acp', 'mcp', 'run', 'debug', 'providers', 'auth', 'agent', 'upgrade', 'uninstall',
     'serve', 'web', 'models', 'stats', 'export', 'import', 'github', 'session', 'plugin', 'plug', 'db',
+    // 2.x (`opencode --help`, 2.2.5). `serve --service` is the background service the TUI spawns as its child.
+    'update', 'api', 'service', 'reload', 'pair',
   ],
 }
 
@@ -725,7 +730,6 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
   const unlinked = procs.filter(p => p.harness === 'opencode' && !p.sessionId && p.pid !== undefined)
   if (procRoot === '/proc' && unlinked.length > 0) {
     try {
-      const { readOpencodeProcessSessions } = await import('./sessions/opencode-run-log')
       const all = procs.filter(p => p.harness === 'opencode' && p.pid !== undefined)
       // Sessions a managed row already drives are not candidates for a TUI beside it (see `linkOpencodeProcesses`).
       const taken = new Set<string>()
@@ -733,9 +737,39 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
         const { readRegistry } = await import('./sessions/registry')
         for (const m of await readRegistry()) if (m.harness === 'opencode' && m.conversationId) taken.add(m.conversationId)
       } catch { /* no registry: nothing is excluded, as before */ }
-      const linked = await readOpencodeProcessSessions(all.map(p => ({ pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs, ...(p.stdinIsTty !== undefined ? { tty: p.stdinIsTty } : {}) })), undefined, taken)
+      const refs = all.map(p => ({ pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs, ...(p.stdinIsTty !== undefined ? { tty: p.stdinIsTty } : {}) }))
+      // 2.x writes none of the log lines the 1.x link reads: its TUIs are linked through the service's API.
+      const { opencodeV2Io, isOpencodeV2Now } = await import('./sessions/opencode-v2-io')
+      const linked = isOpencodeV2Now()
+        ? await (await import('./sessions/opencode-v2-api')).readOpencodeV2ProcessSessions(refs, opencodeV2Io(), taken)
+        : await (await import('./sessions/opencode-run-log')).readOpencodeProcessSessions(refs, undefined, taken)
       for (const p of unlinked) { const id = linked.get(p.pid!); if (id) p.sessionId = id }
     } catch { /* best-effort: an unread log is an unlinked row, as before */ }
+  }
+  // codex 0.161 holds `state_5.sqlite`, not the rollout, so an external TUI usually names no conversation by
+  // fd. Its own `threads` table does (`codex-thread-link.ts`): the thread created in this cwd at this
+  // process's start time. Same guard as opencode: only the real /proc, only unlinked processes.
+  if (procRoot === '/proc' && procs.some(p => p.harness === 'codex')) {
+    try {
+      const { dropWrapperParents } = await import('./sessions/codex-thread-link')
+      const { readCodexProcessSessions, codexStatePathOfPid } = await import('./sessions/codex-thread-log')
+      // The npm/bun wrapper (`codex.js`) outlives the native binary it spawned: one terminal, two "codex"
+      // processes. Keep the child — the row list and the link both want one.
+      const ppidOf = new Map<number, number>((table ?? []).map(r => [r.pid, r.ppid]))
+      const codex = procs.filter(p => p.harness === 'codex' && p.pid !== undefined)
+      const keep = new Set(dropWrapperParents(codex.map(p => ({ pid: p.pid!, ppid: ppidOf.get(p.pid!) }))).map(p => p.pid))
+      for (let i = procs.length - 1; i >= 0; i--) { const p = procs[i]!; if (p.harness === 'codex' && p.pid !== undefined && !keep.has(p.pid)) procs.splice(i, 1) }
+      const taken = new Set<string>()
+      try {
+        const { readRegistry } = await import('./sessions/registry')
+        for (const m of await readRegistry()) if (m.harness === 'codex' && m.conversationId) taken.add(m.conversationId)
+      } catch { /* no registry: nothing is excluded */ }
+      const all = procs.filter(p => p.harness === 'codex' && p.pid !== undefined)
+      const linked = await readCodexProcessSessions(all.map(p => ({
+        pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs, knownId: p.sessionId, statePath: codexStatePathOfPid(p.pid!),
+      })), undefined, taken)
+      for (const p of all) { if (p.sessionId) continue; const id = linked.get(p.pid!); if (id) p.sessionId = id }
+    } catch { /* best-effort: an unread state is an unlinked row, as before */ }
   }
   const unavailable = procs.length > 0
     ? null

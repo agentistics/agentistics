@@ -25,6 +25,33 @@ function fake(over: Partial<MessageDeps> = {}) {
 
 beforeEach(resetMessageRateLimit)
 
+describe('messages follow a replaced parent', () => {
+  test('resolves before delivery, comment mirroring and handback events', async () => {
+    const events: unknown[] = []
+    const f = fake({ resolveTarget: async () => 'parent-1', senderTask: async () => ({ taskId: 't1' }), handbackEvent: async e => { events.push(e) } })
+    const out = await sendSessionMessage('child-1', { to: 'old-parent', kind: 'handback', body: 'ready' }, f.deps)
+    expect(out).toMatchObject({ ok: true, to: 'parent-1' })
+    expect(f.prompts[0]!.id).toBe('parent-1')
+    expect(f.comments[0]!.c.message?.to).toBe('parent-1')
+    expect(events[0]).toMatchObject({ payload: { to: 'parent-1' } })
+    expect(await sendSessionMessage('child-1', { to: 'old-conversation', kind: 'question', body: 'again' }, f.deps))
+      .toMatchObject({ ok: false, code: 'rate_limited' })
+  })
+
+  test('a reference resolving to the sender is still a self-message', async () => {
+    const f = fake({ resolveTarget: async () => 'child-1' })
+    expect(await sendSessionMessage('child-1', { to: 'old-parent', kind: 'question', body: 'hi' }, f.deps))
+      .toMatchObject({ ok: false, code: 'self' })
+    expect(f.prompts).toEqual([])
+  })
+
+  test('a resolver failure preserves ordinary reference resolution', async () => {
+    const f = fake({ resolveTarget: async () => { throw new Error('registry unavailable') } })
+    expect(await sendSessionMessage('child-1', { to: 'conv-p', kind: 'question', body: 'hi' }, f.deps))
+      .toMatchObject({ ok: true, to: 'parent-1' })
+  })
+})
+
 describe('handback moves the sender\'s subtask', () => {
   test('handback from a session filed on a subtask calls handbackSubtask', async () => {
     const moved: string[] = []

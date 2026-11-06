@@ -13,6 +13,18 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.197.4': {
     features: [
       {
+        pt: 'Agentask: só sessões líderes ficam presas direto na tarefa; os workers vão para as subtarefas. A lista de sessões no fim da tarefa foi redesenhada para dar conta de muitas sessões, com grupos e busca.',
+        en: 'Agentask: only leader sessions are attached straight to a task; workers go on subtasks. The session list at the end of a task is redesigned to handle many sessions, with groups and search.',
+      },
+      {
+        pt: 'OpenCode no Uso: tokens, custo, contexto e número de sessões das versões 1 e 2 agora aparecem, e o filtro Codex + OpenCode soma os dois.',
+        en: 'OpenCode in Usage: tokens, cost, context and session count from versions 1 and 2 now show up, and the Codex + OpenCode filter adds both.',
+      },
+      {
+        pt: 'Sessões do OpenCode 2 abertas fora do app aparecem na lista, ligadas ao processo e com atividade.',
+        en: 'OpenCode 2 sessions opened outside the app show up in the list, linked to their process and with activity.',
+      },
+      {
         pt: 'OpenCode 2.x: as sessões da versão nova (inclusive as abertas no terminal do OpenCode) voltam a aparecer e abrem com o histórico completo.',
         en: 'OpenCode 2.x: sessions from the new version (including ones opened in the OpenCode terminal) show up again and open with their full history.',
       },
@@ -22,6 +34,26 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       },
     ],
     fixes: [
+      {
+        pt: 'Quando um líder troca de harness ou de conta, a sessão nova herda os workers do antigo, e as mensagens deles chegam ao líder novo.',
+        en: 'When a leader switches harness or account, the new session inherits the old one\'s workers, and their messages reach the new leader.',
+      },
+      {
+        pt: 'Terminal: o Shell volta a abrir no macOS (zsh de login, Homebrew no PATH), com um carregamento central visível do clique até a primeira tela, e abre bem mais rápido.',
+        en: 'Terminal: the Shell opens on macOS again (login zsh, Homebrew on PATH), with a central loader from the click to the first frame, and it opens much faster.',
+      },
+      {
+        pt: 'O app abre mais rápido: as sessões recentes e ativas aparecem primeiro e o resto carrega por trás.',
+        en: 'The app opens faster: recent and live sessions show first and the rest loads behind.',
+      },
+      {
+        pt: 'Uma pasta criada agora aparece na Nova sessão → Onde.',
+        en: 'A newly created folder now shows up in New session → Where.',
+      },
+      {
+        pt: 'Sessões externas do Codex podem ser tocadas e retomadas pelo app.',
+        en: 'External Codex sessions can be driven and resumed from the app.',
+      },
       {
         pt: 'OpenCode 2.x: quando o provedor fica tentando de novo sem parar, o turno travado é parado e as mensagens na fila voltam a andar.',
         en: 'OpenCode 2.x: when the provider keeps retrying forever, the stuck turn is stopped and queued messages move again.',
