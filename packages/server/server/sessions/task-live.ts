@@ -163,6 +163,20 @@ interface Piece {
   blockedReason: string | null
 }
 
+/** Resolve the target carried by newer activity records and by the older human-readable detail. */
+function eventSubtaskId(e: TaskEvent, titles: ReadonlyMap<string, string>): string | null {
+  if (e.subtaskId) return e.subtaskId
+  const rawTarget = (e as TaskEvent & { target?: unknown }).target
+  if (rawTarget && typeof rawTarget === 'object') {
+    const target = rawTarget as { kind?: unknown; id?: unknown }
+    if (target.kind === 'subtask' && typeof target.id === 'string' && target.id) return target.id
+  }
+  const detail = e.detail?.trim() ?? ''
+  const match = /^on subtask ["“](.*)["”]$/i.exec(detail)
+  if (!match) return null
+  return titles.get(`${e.taskId}\0${match[1]}`) ?? null
+}
+
 const ms = (iso: string | undefined | null): number | null => {
   const n = iso ? Date.parse(iso) : NaN
   return Number.isFinite(n) ? n : null
@@ -223,10 +237,19 @@ export function buildLive(o: {
     }
   }
 
+  const subtaskTitles = new Map<string, string>()
+  for (const d of o.details) for (const sub of d.subtasks) {
+    const key = `${sub.taskId}\0${sub.title}`
+    // Ambiguous titles cannot safely identify an activity target; explicit event ids still work.
+    if (subtaskTitles.has(key)) subtaskTitles.set(key, '')
+    else subtaskTitles.set(key, sub.id)
+  }
   const lastBySubject = new Map<string, TaskEvent>()
   for (const e of o.events) {
-    const prev = lastBySubject.get(e.taskId)
-    if (!prev || e.at >= prev.at) lastBySubject.set(e.taskId, e)
+    const subtaskId = eventSubtaskId(e, subtaskTitles)
+    const subject = subtaskId ? `${e.taskId}/${subtaskId}` : e.taskId
+    const prev = lastBySubject.get(subject)
+    if (!prev || e.at >= prev.at) lastBySubject.set(subject, e)
   }
 
   const deliveries: LiveDelivery[] = []
@@ -247,7 +270,7 @@ export function buildLive(o: {
     const startedAtMs = ms(p.times?.startedAt) ?? ms(p.sub?.startedAt ?? p.task.startedAt)
     const harness = dominant(liveSessions.concat(p.sessions).map(s => s.harness))
     const model = dominant(liveSessions.concat(p.sessions).map(s => s.model).filter((m): m is string => !!m))
-    const ev = lastBySubject.get(p.task.id)
+    const ev = lastBySubject.get(p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id)
     deliveries.push({
       key: p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id,
       taskId: p.task.id, taskTitle: p.task.title,
