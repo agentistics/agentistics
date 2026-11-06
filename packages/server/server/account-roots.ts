@@ -27,6 +27,7 @@ import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { HARNESS_ORDER, featureOn, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, PORT } from './config'
+import { defaultClaudeConfigDir } from './default-claude-root'
 import {
   ISOLATION_ENV, IDENTITY_PROBES, bind as bindAccount, byId, forceProbe, readAccounts, retireAccount,
   type AccountIdentity, type HarnessAccount,
@@ -93,7 +94,7 @@ async function hasLoginMarker(harness: HarnessId, root: string): Promise<boolean
 }
 
 const DEFAULT_CONFIG_DIR: Record<HarnessId, () => string> = {
-  claude: () => process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'),
+  claude: () => defaultClaudeConfigDir(process.env, AGENTISTICS_DATA_DIR) ?? join(homedir(), '.claude'),
   codex: () => process.env.CODEX_HOME ?? join(homedir(), '.codex'),
   copilot: () => process.env.COPILOT_HOME ?? join(homedir(), '.copilot'),
   gemini: () => join(process.env.GEMINI_CLI_HOME ?? homedir(), '.gemini'),

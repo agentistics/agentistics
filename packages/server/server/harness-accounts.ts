@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
+import { defaultClaudeConfigDir } from './default-claude-root'
 import { withFileLock } from './sessions/file-lock'
 import { ISOLATION_ENV } from './account-isolation'
 import { runClaudeInLoginContext } from './account-login'
@@ -115,7 +116,7 @@ async function readCopilotIdentity(file: string): Promise<AccountIdentity> {
 
 export { ISOLATION_ENV }
 const DEFAULT_ROOTS: Record<HarnessId, () => string> = {
-  claude: () => process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'),
+  claude: () => defaultClaudeConfigDir(process.env, AGENTISTICS_DATA_DIR) ?? join(homedir(), '.claude'),
   codex: () => process.env.CODEX_HOME ?? join(homedir(), '.codex'),
   copilot: () => process.env.COPILOT_HOME ?? join(homedir(), '.copilot'),
   gemini: () => process.env.GEMINI_CLI_HOME ?? join(homedir(), '.gemini'),
