@@ -241,6 +241,12 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   // Raised once per retroactive removal (never once per cycle — the uploader guards the
   // transition), so a rules change that takes several cycles to land is one "removing" toast and
   // one "done", not a stream of them.
+  // APP.LENTO: `vigia-desempenho` saw a performance budget stay broken. It changed nothing; the profile
+  // it kept (when it could) is the evidence for whoever fixes it.
+  'perf.budget_broken': {
+    pt: { title: 'O agentistics está lento', message: '{whatPt}. Nada foi reiniciado; um perfil de CPU foi guardado em {profile}.' },
+    en: { title: 'agentistics is running slow', message: '{what}. Nothing was restarted; a CPU profile was kept at {profile}.' },
+  },
   'member.rules_proposed': {
     pt: { title: 'Outra máquina sua restringiu repositórios', message: '{name} enviou {count} proposta(s) de regra para {central}. Nada mudou aqui — abra a conexão para decidir.' },
     en: { title: 'Another of your machines restricted repositories', message: '{name} sent {count} rule proposal(s) for {central}. Nothing changed here — open the connection to decide.' },
