@@ -201,6 +201,18 @@ describe('buildSessionViews', () => {
     expect(views).toHaveLength(1)
   })
 
+  it('MAC.OPENCODE r2: a DEAD managed row never hides the live TUI driving its conversation', () => {
+    for (const status of ['exited', 'lost'] as const) {
+      const dead = row('o', { status, managed: managed('o', { harness: 'opencode', conversationId: 'ses_aaa' }) })
+      const views = buildSessionViews({
+        reconciled: [dead],
+        activity: new Map([['o', 'exited']]),
+        processes: [proc({ cwd: '/repo/a', harness: 'opencode', sessionId: 'ses_aaa', pid: 9 })],
+      })
+      expect(views.some(v => v.status === 'external')).toBe(true)
+    }
+  })
+
   it('sorts what needs answering to the top', () => {
     const reconciled = [row('w'), row('k'), row('ap'), row('x', { status: 'exited' })]
     const activity = new Map<string, SessionActivity>([

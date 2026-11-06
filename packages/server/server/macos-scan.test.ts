@@ -89,3 +89,100 @@ describe('installedHarnessAt on macOS homes', () => {
     expect(installedHarnessAt('/Users/dev/tmp/opencode')).toBeUndefined()
   })
 })
+
+/**
+ * MAC.OPENCODE r2 — the owner's report (2026-11-06, agentop 2.200.5, opencode 2.2.5 from Homebrew): "OpenCode
+ * sessions open in a terminal do not appear in the session list". macOS `ps -o comm=` prints argv[0] as the shell
+ * started it — the bare word `opencode` — so no install layout could be matched and every such TUI was dropped at the
+ * very first step. The fakes below answer in the real formats: `ps -axwwo pid=,etime=,comm=` and `lsof -F` field
+ * output (lsof always adds the `f` lines), with Homebrew's layout from homebrew-core `opencode.rb` 2.2.5.
+ */
+describe('scanMacProcesses — an opencode TUI typed by name (Homebrew)', () => {
+  const CELLAR = '/opt/homebrew/Cellar/opencode/2.2.5/bin/opencode'
+  function homebrewMac(txtOk = true) {
+    const calls: string[] = []
+    const run: MacRun = async argv => {
+      const a = argv.join(' ')
+      calls.push(a)
+      if (a === 'ps -axwwo pid=,etime=,comm=') {
+        return { ok: true, stdout: ['    1 10-01:00:00 /sbin/launchd', '  700 00:12:00 -zsh', '  701 00:11:58 opencode', '  702 00:11:57 opencode', '  703 00:03 vim'].join('\n') }
+      }
+      if (a.startsWith('lsof -a -d txt -p ')) {
+        if (!txtOk) return { ok: false, stdout: '' }
+        return { ok: true, stdout: ['p701', 'ftxt', `n${CELLAR}`, 'ftxt', 'n/usr/lib/dyld', 'p702', 'ftxt', `n${CELLAR}`, 'ftxt', 'n/usr/lib/libSystem.B.dylib'].join('\n') }
+      }
+      if (a.startsWith('ps -ww -o pid=,command= -p ')) {
+        // 702 is the background service the 2.x TUI spawns for itself: plumbing, never a session.
+        return { ok: true, stdout: ['  701 opencode', '  702 /opt/homebrew/Cellar/opencode/2.2.5/bin/opencode serve --service'].join('\n') }
+      }
+      if (a.includes('-d cwd')) return { ok: true, stdout: ['p701', 'fcwd', 'n/Users/owner/proj', 'p702', 'fcwd', 'n/Users/owner/proj'].join('\n') }
+      if (a.includes('-d 0')) return { ok: true, stdout: ['p701', 'f0', 'n/dev/ttys004', 'p702', 'f0', 'n/dev/null'].join('\n') }
+      return { ok: true, stdout: '' }
+    }
+    return { run, calls }
+  }
+  test('the bare `opencode` from `ps` is resolved through lsof txt to the Cellar binary and becomes ONE external TUI row', async () => {
+    const { run, calls } = homebrewMac()
+    const r = await scanMacProcesses(Date.now(), run)
+    expect(r.procs.map(p => [p.pid, p.harness, p.cwd, p.stdinIsTty])).toEqual([[701, 'opencode', '/Users/owner/proj', true]])
+    // One txt read for every bare-named candidate, and none for the rest of the table (`-zsh`, `vim`).
+    const txt = calls.filter(c => c.startsWith('lsof -a -d txt'))
+    expect(txt).toEqual(['lsof -a -d txt -p 701,702 -Fpn'])
+  })
+  test('an unreadable txt leaves the process unmatched (never guessed from the bare name)', async () => {
+    const r = await scanMacProcesses(Date.now(), homebrewMac(false).run)
+    expect(r.procs).toEqual([])
+  })
+})
+
+describe('executableFromLsofTxt', () => {
+  const fields = new Map([[9, ['/usr/lib/dyld', '/Users/o/.local/share/claude/versions/2.1.300', '/usr/lib/libc.dylib']], [5, ['/opt/homebrew/Cellar/opencode/2.2.5/bin/opencode', '/usr/lib/dyld']]])
+  test('the file named like the command wins; a versioned install is found by the caller\'s layout test', async () => {
+    const { executableFromLsofTxt } = await import('./macos-processes')
+    expect(executableFromLsofTxt(fields, 5, 'opencode')).toBe('/opt/homebrew/Cellar/opencode/2.2.5/bin/opencode')
+    expect(executableFromLsofTxt(fields, 9, 'claude', p => installedHarnessAt(p) === 'claude')).toBe('/Users/o/.local/share/claude/versions/2.1.300')
+    expect(executableFromLsofTxt(fields, 9, 'claude', () => false)).toBeUndefined()
+    expect(executableFromLsofTxt(fields, 77, 'opencode')).toBeUndefined()
+  })
+})
+
+describe('installedHarnessAt — Homebrew Cellar', () => {
+  test('Apple Silicon, Intel and Linuxbrew cellars are installations; a cellar binary of another name is not', () => {
+    expect(installedHarnessAt('/opt/homebrew/Cellar/opencode/2.2.5/bin/opencode')).toBe('opencode')
+    expect(installedHarnessAt('/usr/local/Cellar/opencode/2.2.5/bin/opencode')).toBe('opencode')
+    expect(installedHarnessAt('/home/linuxbrew/.linuxbrew/Cellar/opencode/2.2.5/bin/opencode')).toBe('opencode')
+    expect(installedHarnessAt('/opt/homebrew/Cellar/opencode/2.2.5/bin/opencode', 'claude')).toBeUndefined()
+    expect(installedHarnessAt('/opt/homebrew/Cellar/ripgrep/14.1.1/bin/rg')).toBeUndefined()
+  })
+})
+
+/**
+ * The OWNER'S Mac, as read on it (2026-11-06, opencode 2.2.5 installed `npm i -g @opencode/cli` under Homebrew's node, so
+ * `/opt/homebrew/bin/opencode` → `/opt/homebrew/lib/node_modules/@opencode/cli/bin/opencode.exe`):
+ *   1287  ppid 1      `…/@opencode/cli/bin/opencode.exe serve --service`   (the 2.x background service, cwd ~)
+ *   45443 ppid 10729  `opencode`                                           (the TUI the owner opened, cwd ~/upx-workspace)
+ *   49659 `opencode acp` → child `opencode.exe serve --stdio --port 0`    (agentistics-managed ACP sessions)
+ * Only 45443 is an external session; ps names it by the bare word while its program file ends in `.exe`.
+ */
+describe('scanMacProcesses — the owner\'s real Mac process table', () => {
+  const EXE = '/opt/homebrew/lib/node_modules/@opencode/cli/bin/opencode.exe'
+  const run: MacRun = async argv => {
+    const a = argv.join(' ')
+    if (a === 'ps -axwwo pid=,etime=,comm=') {
+      return { ok: true, stdout: [` 1287 2-03:00:00 ${EXE}`, '10729 01:00:00 -zsh', '45443 00:40:00 opencode', '49659 00:20:00 opencode', `49660 00:20:00 ${EXE}`].join('\n') }
+    }
+    if (a.startsWith('lsof -a -d txt -p ')) {
+      return { ok: true, stdout: ['p45443', 'ftxt', `n${EXE}`, 'ftxt', 'n/usr/lib/dyld', 'p49659', 'ftxt', `n${EXE}`, 'ftxt', 'n/usr/lib/dyld'].join('\n') }
+    }
+    if (a.startsWith('ps -ww -o pid=,command= -p ')) {
+      return { ok: true, stdout: [` 1287 ${EXE} serve --service`, '45443 opencode', '49659 opencode acp', `49660 ${EXE} serve --stdio --port 0`].join('\n') }
+    }
+    if (a.includes('-d cwd')) return { ok: true, stdout: ['p1287', 'n/Users/blpsoares', 'p45443', 'n/Users/blpsoares/upx-workspace', 'p49659', 'n/Users/blpsoares/upx-workspace', 'p49660', 'n/Users/blpsoares/upx-workspace'].join('\n') }
+    if (a.includes('-d 0')) return { ok: true, stdout: ['p45443', 'n/dev/ttys007', 'p49659', 'n/dev/ttys009'].join('\n') }
+    return { ok: true, stdout: '' }
+  }
+  test('the TUI is the one external row; the service and the managed ACP pair are plumbing', async () => {
+    const r = await scanMacProcesses(Date.now(), run)
+    expect(r.procs.map(p => [p.pid, p.harness, p.cwd])).toEqual([[45443, 'opencode', '/Users/blpsoares/upx-workspace']])
+  })
+})

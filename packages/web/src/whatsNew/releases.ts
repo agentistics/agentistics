@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.7': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Nova sessão do OpenCode: o seletor de modelo volta a listar os modelos (os do seu opencode.json e os do OpenCode), mesmo se a primeira leitura falhar; antes a lista ficava vazia por horas.',
+        en: 'New OpenCode session: the model picker lists models again (the ones in your opencode.json and OpenCode\'s own), even if the first read fails; before, the list stayed empty for hours.',
+      },
+      {
+        pt: 'Mac: sessões do OpenCode abertas no terminal (instalado pelo Homebrew ou digitado pelo nome) voltam a aparecer na lista de sessões.',
+        en: 'Mac: OpenCode sessions opened in a terminal (Homebrew install, or started by name) show up in the session list again.',
+      },
+      {
+        pt: 'Uma sessão do OpenCode que você já tinha reaberto pelo agentistics e depois abriu no terminal não fica mais escondida atrás da linha antiga.',
+        en: 'An OpenCode session you once reopened through agentistics and later opened in a terminal is no longer hidden behind the old row.',
+      },
+      {
+        pt: 'Reabrir uma sessão não pisca mais o aviso "reabrir sessões que caíram" enquanto ela ainda está abrindo.',
+        en: 'Reopening a session no longer flashes the "reopen the sessions that fell" offer while it is still starting.',
+      },
+    ],
+  },
   '2.200.6': {
     features: [
       {
