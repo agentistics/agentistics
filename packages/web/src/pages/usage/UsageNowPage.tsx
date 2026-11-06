@@ -5,6 +5,8 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { PageHeader } from '../../components/nav/PageHeader'
 import { usePlanLimits } from '../../lib/planLimits'
 import { usageHeadline } from '../../lib/usagePlan'
+import { useApiUsage } from '../../lib/apiUsage'
+import { ApiUsageSection } from '../../components/ApiUsageSection'
 import { BillingAccountsPanel } from '../settings/BillingSettings'
 import { UsageChartsPanel, usageLimitsStatus } from './UsageChartsPanel'
 import { orderedBudgets, type Lang } from './usageView'
@@ -23,9 +25,11 @@ export function UsageNowContent({ lang, sessions = [], harnesses = [], accounts 
   const isMobile = useIsMobile()
   const { budgets, readings, now, limits, failure } = usePlanLimits()
   const rows = orderedBudgets(budgets)
+  const apis = useApiUsage().items
   return <div style={{ minWidth: 0 }}>
     <PageHeader lang={lang} areaId="usage" pageId="now" isMobile={isMobile} status={usageHeadline(rows, now, lang) ?? undefined} />
     <div style={{ marginBottom: 20 }}><UsageChartsPanel budgets={rows} readings={readings} status={usageLimitsStatus(limits, failure)} sessions={sessions} harnesses={harnesses} lang={lang} now={now} /></div>
     {accounts && <BillingAccountsPanel />}
+    <ApiUsageSection items={apis} now={now} lang={lang} emptyNotice />
   </div>
 }
