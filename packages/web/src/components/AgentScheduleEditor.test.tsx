@@ -70,6 +70,15 @@ describe('the plan-usage modal card offers the schedule', () => {
   })
 })
 
+describe('F2: the popup row shows the off-by-schedule reason', () => {
+  const html = renderToStaticMarkup(<PlanUsageSummary limits={[limits]} now={NOW} lang="pt"
+    agentUse={() => ({ on: false, pending: false, onToggle: () => {}, accountId: 'acc_1', reloginable: false, view: { reason: 'weekly-cap', on: false, dayUsedPct: null, weekUsedPct: 50, maxWeeklyPct: 50 } })} />)
+  test('reason text beside the switch', () => {
+    expect(html).toContain('data-agent-use-badge="weekly-cap"')
+    expect(html).toContain('Teto da semana atingido')
+  })
+})
+
 describe('all day + weekly ceiling in the editor', () => {
   const full: AgentSchedule = { enabled: true, maxWeeklyPct: 60, days: { mon: { windows: [{ from: '09:00', to: '18:00' }], allDay: true, maxDailyPct: 20 } } }
   const html = renderToStaticMarkup(<AgentScheduleEditor accountId="acc_1" who="x" schedule={full} lang="pt"
@@ -82,6 +91,12 @@ describe('all day + weekly ceiling in the editor', () => {
     expect(html).toContain('value="20"')
     expect(html).toContain('Gastar no máximo')
     expect(html).toContain('% da semana neste dia')
+  })
+  test('F1: no "00:00 – 24:00" beside the chip, and the summary says "dia inteiro"', () => {
+    expect(html).not.toContain('00:00 – 24:00')
+    expect(html).toContain('data-agent-schedule-line')
+    expect(html).toContain('seg: dia inteiro')
+    expect(html).toContain('aria-pressed="true" data-agent-allday="mon"')
   })
   test('weekly ceiling field above the days, with the live reading', () => {
     expect(html.indexOf('data-agent-weekly-cap')).toBeLessThan(html.indexOf('data-agent-day-editor'))

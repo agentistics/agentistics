@@ -540,6 +540,19 @@ test('an all-OFF harness with no meter, no live session and no Billing profile i
   expect(Object.keys((await planLimitsPayload(undefined, now, [])).harnesses)).toContain('copilot')
 })
 
+test('F3: a harness whose every account is off BY SCHEDULE is listed spawnable:false with the reason', async () => {
+  const now = Date.now()
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), now: () => now, probe: async () => ({ key: 'gh:me', label: 'me' }) })
+  __setHarnessAccountsForTest(store)
+  await store.current(['copilot'])
+  const rec = (await store.list(['copilot']))[0]!
+  await store.setAvailable('copilot', 'gh:me', false)
+  await store.update(rec.id, { agentSchedule: { enabled: true, days: {} } })
+  const body = await planLimitsPayload(undefined, now, [])
+  expect(body.harnesses.copilot?.spawnable).toBe(false)
+  expect(body.harnesses.copilot?.unavailableReason).toContain('day off')
+})
+
 // ─── C1: meter attribution + switch detection (spec §5; D1–D3 of §1) ─────────────────────────
 
 const H = 3_600_000
