@@ -174,6 +174,15 @@ export function setEngineSurfaceIndicator(n: number, indicator: SurfaceIndicator
   patch(n, { indicator })
 }
 
+/**
+ * The app's language changed: every mounted surface (parked ones too) now carries it, and a surface that
+ * asked through `ctx.onLangChange` is told. Called by the app root; a no-op when nothing changed.
+ */
+export function setEngineSurfaceLang(lang: 'pt' | 'en'): void {
+  if (!mounted.some(s => s.lang !== lang)) return
+  commit(mounted.map(s => (s.lang === lang ? s : { ...s, lang })))
+}
+
 /** `ctx.onIndicatorEnd`: one callback per surface; the returned function removes it if still current. */
 export function onEngineSurfaceIndicatorEnd(n: number, fn: () => void): () => void {
   if (!mounted.some(x => x.nonce === n)) return () => {}

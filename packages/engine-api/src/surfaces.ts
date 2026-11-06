@@ -132,6 +132,7 @@ export interface SurfaceMountContext {
    * fleet about it.
    */
   sessionKind?: 'nay' | 'session'
+  /** The app's language. From 1.24 it is LIVE (a getter): read it again after `onLangChange`, not once at mount. */
   lang: 'pt' | 'en'
   reducedMotion: boolean
   /**
@@ -168,6 +169,12 @@ export interface SurfaceMountContext {
   setIndicator(indicator: SurfaceIndicator | null): void
   /** 1.18. The callback the indicator's secondary button calls; returns the function that removes it. */
   onIndicatorEnd(fn: () => void): () => void
+  /**
+   * 1.24, optional (an older host omits it, and `lang` is then fixed at mount). Calls `fn` with the new language
+   * whenever the app's language changes while the surface is mounted — parked or kept alive included — and returns
+   * the function that removes it. The surface redraws itself; the host never remounts it (a call in progress survives).
+   */
+  onLangChange?(fn: (lang: 'pt' | 'en') => void): () => void
   /**
    * 1.18, optional (a host may omit it). Navigates the app to the session (`/sessions/<id>`) with the
    * app's own router, without reloading the page, and returns `true`. Returns `false`, doing nothing, when

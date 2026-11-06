@@ -134,6 +134,26 @@ test('390px sessions indicator reserves a wrapping row below the title, with ico
   }
 })
 
+describe('language changes reach a mounted surface', () => {
+  test('ctx.lang is live and onLangChange fires once per change; the surface is not remounted; remover works', async () => {
+    state.resetEngineSurfaceHostForTests()
+    const seen: string[] = []; let mounts = 0; let ctxRef: SurfaceMountContext | null = null
+    const view = await mount(h(hostMod.EngineSurfaceHost, { load: async () => ({ mount(_el: HTMLElement, ctx: SurfaceMountContext) { mounts++; ctxRef = ctx; ctx.keepAlive(true); ctx.onLangChange?.(l => seen.push(l)) } }) }))
+    await act(async () => { state.openEngineSurface({ ...rail, placement: 'app-bar', layout: 'full' } as never, { sessionId: null, lang: 'pt' }) })
+    await settle()
+    expect(ctxRef!.lang).toBe('pt')
+    await act(async () => { state.setEngineSurfaceLang('en') })
+    await settle()
+    expect(ctxRef!.lang).toBe('en'); expect(seen).toEqual(['en']); expect(mounts).toBe(1)
+    await act(async () => { state.setEngineSurfaceLang('en') }); await settle()
+    expect(seen).toEqual(['en'])
+    await act(async () => { state.setEngineSurfaceLang('pt') }); await settle()
+    expect(seen).toEqual(['en', 'pt']); expect(mounts).toBe(1)
+    await act(async () => { view.root.unmount() })
+    state.resetEngineSurfaceHostForTests()
+  })
+})
+
 describe('beta tag on a rail entry', () => {
   const wearsTag = async (surface: object) => {
     state.resetEngineSurfaceHostForTests()

@@ -208,7 +208,8 @@
  */
 /**
  * 1.24.0 — SURFACE.BETA: `EngineSurface.beta` (optional boolean). The host draws its own beta tag beside the
- * surface's entry; a non-boolean is refused (`bad-beta`). Additive only: a host that predates it ignores the
+ * surface's entry; a non-boolean is refused (`bad-beta`). Same minor: `SurfaceMountContext.lang` is live and the optional
+ * `onLangChange(fn)` tells a mounted surface the app's language changed (a keep-alive page redraws, never remounts). Additive only: a host that predates it ignores the
  * field, so an engine built against 1.24 still works there (the entry just carries no tag).
  */
 export const ENGINE_API_VERSION = '1.24.0'
