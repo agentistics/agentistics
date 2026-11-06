@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.5': {
+    features: [
+      {
+        pt: 'Na agenda de uso por agentes, cada dia tem a opção "Dia inteiro", e há um teto da semana: os agentes param quando a semana chega ao % que você definir. O teto do dia agora diz claramente "gastar no máximo X% da semana neste dia".',
+        en: 'In the agent-use schedule, each day has an "All day" option, and there is a weekly ceiling: agents stop once the week reaches the % you set. The daily ceiling now reads clearly as "spend at most X% of the week on this day".',
+      },
+    ],
+    fixes: [],
+  },
   '2.200.3': {
     features: [],
     fixes: [
