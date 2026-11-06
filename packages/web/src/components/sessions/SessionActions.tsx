@@ -25,7 +25,6 @@ import { canSwitch } from '../../lib/accountSwitch'
 import { SessionFiling } from '../tasks/SessionFiling'
 import { StopSessionConfirm } from '../tasks/StopSessionConfirm'
 import { boardCopy } from '../tasks/copy'
-import { BetaTag } from '../BetaTag'
 import type { FleetActionId, FleetRow, FleetVerb } from '../../lib/fleet'
 import { withReopening } from '../../lib/reopeningStore'
 import { pushNotification } from '../../lib/notifications'
@@ -106,9 +105,6 @@ const TEXT_VERBS = new Set<string>(['rename', 'note'])
 // because both need the session ended first.
 // `terminal` (F2.0b) is offered by the server only on a row running over its harness's protocol.
 const MENU_ORDER: string[] = ['rename', 'note', 'task', 'resume', 'terminal', 'fork', 'kill', 'forget', 'archive', 'delete']
-
-/** The verbs that belong to the delivery board rather than to the session itself. */
-const TASK_VERBS = new Set<string>(['task'])
 
 export function SessionActions({
   row, lang, act, onGone, onOpened, extra = [], extraTop, inline = false,
@@ -427,11 +423,6 @@ export function SessionActions({
                   >
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                       {v.label}
-                      {/* The task verbs are the delivery board reaching into this menu. Marked
-                          here too: a reader who only ever opens this menu never sees the board's
-                          own header, and a caveat shown on four surfaces of six is worse than
-                          none — they conclude the unmarked two are the finished part. */}
-                      {TASK_VERBS.has(v.action) && <BetaTag what={pt ? 'As tarefas' : 'Tasks'} />}
                     </span>
                     {/* The row's OWN sentence for why it cannot take this verb. A control that
                         refuses silently is indistinguishable from one that is broken. */}

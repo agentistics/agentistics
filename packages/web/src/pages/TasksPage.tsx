@@ -50,7 +50,6 @@ import { ConfirmModal, Select } from './settings/primitives'
 import { DatePicker } from '../components/DatePicker'
 import { BlockedDialog } from '../components/tasks/BlockedDialog'
 import { TaskProgressBar } from '../components/tasks/TaskProgressBar'
-import { BetaTag } from '../components/BetaTag'
 import { StatusChip } from '../components/tasks/StatusChip'
 import { boardCopy, statusLabel, type Lang } from '../components/tasks/copy'
 import { TaskFiles } from '../components/tasks/TaskFiles'
@@ -242,7 +241,6 @@ function TaskList() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <h1 style={{ fontSize: 20, margin: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
               Agentask
-              <BetaTag what="Agentask" />
             </h1>
             <button style={button(true, 'primary')} onClick={() => setOpen(v => !v)}>
               <Plus size={15} /> New task
@@ -322,7 +320,6 @@ function TaskList() {
         <div style={{ flex: 1, minWidth: 200 }}>
           <h1 style={{ fontSize: 19, margin: 0, fontWeight: 650, display: 'flex', alignItems: 'center', gap: 8 }}>
             Agentask
-            <BetaTag what="Agentask" />
           </h1>
           <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--text-tertiary)' }}>
             What each piece of work cost, in how many rounds and across how many sessions.

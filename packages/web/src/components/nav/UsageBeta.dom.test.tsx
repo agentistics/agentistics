@@ -27,16 +27,16 @@ afterEach(async () => {
 afterAll(async () => GlobalRegistrator.unregister())
 
 for (const lang of ['pt', 'en'] as const) {
-  for (const variant of ['aside', 'sheet'] as const) test(`Usage uses the Agentask beta chip in ${variant}, ${lang}`, async () => {
+  for (const variant of ['aside', 'sheet'] as const) test(`Usage carries the beta chip, and Agentask no longer does, in ${variant}, ${lang}`, async () => {
     const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
     await act(async () => root!.render(createElement(Router, null,
       createElement(Tree, { lang, pathname: '/usage', variant }))))
     const usage = Array.from(document.querySelectorAll('a[href="/usage"]')).find(a => a.textContent?.startsWith(lang === 'pt' ? 'Uso' : 'Usage'))!
     const tasks = document.querySelector('a[href="/tasks"]')!
     const chip = usage.querySelector('span[title]') as HTMLElement
-    const reference = tasks.querySelector('span[title]') as HTMLElement
     expect(chip.textContent).toBe('beta')
-    expect(chip.style.cssText).toBe(reference.style.cssText)
+    // Agentask left beta (2.199.0): its entry carries no chip at all.
+    expect(tasks.querySelector('span[title]')).toBeNull()
     expect(chip.title).toContain(lang === 'pt' ? 'Uso está em beta' : 'Usage is in beta')
   })
   test(`rail tooltip and every Usage page title carry beta, ${lang}`, async () => {
