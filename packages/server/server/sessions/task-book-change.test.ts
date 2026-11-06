@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createTaskStore } from './task-store'
 import { sseClients, sseEncoder } from '../sse'
 
-test('a task-book write pushes a bare `change` event to SSE clients', async () => {
+test('a task-book write pushes a dedicated `book` event (never `change`) to SSE clients', async () => {
   const got: string[] = []
   const ctrl = { enqueue: (b: Uint8Array) => { got.push(new TextDecoder().decode(b)) } } as unknown as Parameters<typeof sseClients.add>[0]
   sseClients.add(ctrl)
@@ -17,7 +17,8 @@ test('a task-book write pushes a bare `change` event to SSE clients', async () =
     got.length = 0
     expect(await store.patchTask('t1', { status: 'in_review' } as never)).toBe(true)
     await new Promise(r => setTimeout(r, 400))
-    expect(got.some(c => c.startsWith('event: change'))).toBe(true)
+    expect(got.some(c => c.startsWith('event: book'))).toBe(true)
+    expect(got.some(c => c.startsWith('event: change'))).toBe(false)
     expect(sseEncoder).toBeDefined()
   } finally { sseClients.delete(ctrl) }
 })
