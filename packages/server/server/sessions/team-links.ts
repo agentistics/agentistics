@@ -71,7 +71,7 @@ export function currentLeaderId(rows: readonly TeamRow[], id: string): string {
   let cur = id
   for (let i = 0; i < 16; i++) {
     // A leader REOPENED with a new managed id: the row that supersedes it leads now (a live one first).
-    const reopened = rows.filter(r => r.supersedes === cur && !seen.has(r.id) && !r.endedAt).sort((a, b) => (b.endedAt ? 0 : 1) - (a.endedAt ? 0 : 1))[0]
+    const reopened = rows.filter(r => r.supersedes === cur && !seen.has(r.id)).sort((a, b) => (b.endedAt ? 0 : 1) - (a.endedAt ? 0 : 1))[0]
     if (reopened) { seen.add(reopened.id); cur = reopened.id; continue }
     const row = rows.find(r => r.id === cur)
     const next = row?.handoffTo
@@ -81,8 +81,7 @@ export function currentLeaderId(rows: readonly TeamRow[], id: string): string {
     const live = succ?.endedAt && succ.conversationId
       ? rows.find(r => r.id !== succ.id && !r.endedAt && r.conversationId === succ.conversationId) ?? succ
       : succ
-    // A dead successor (the hand-off failed and the old runner stayed) leads nothing: stay on `cur`.
-    if (!live || live.endedAt) return cur
+    if (!live) return cur
     seen.add(live.id)
     cur = live.id
   }
@@ -95,10 +94,36 @@ export function currentLeaderId(rows: readonly TeamRow[], id: string): string {
  * original row is really retired (ended) and the successor is alive; a live original keeps its mail.
  * An unmatched reference is returned as is.
  */
+export function liveLeaderId(rows: readonly TeamRow[], id: string): string {
+  // Walk the WHOLE chain (A -> B(retired) -> C): the answer is the last LIVE node, else the original.
+  const seen = new Set<string>([id])
+  let cur = id
+  let live: string | undefined
+  for (let i = 0; i < 16; i++) {
+    const reopened = rows.filter(r => r.supersedes === cur && !seen.has(r.id)).sort((a, b) => (b.endedAt ? 0 : 1) - (a.endedAt ? 0 : 1))[0]
+    let nextId: string | undefined
+    if (reopened) nextId = reopened.id
+    else {
+      const next = rows.find(r => r.id === cur)?.handoffTo
+      if (!next || seen.has(next)) break
+      const succ = rows.find(r => r.id === next)
+      nextId = succ?.endedAt && succ.conversationId
+        ? rows.find(r => r.id !== succ.id && !r.endedAt && r.conversationId === succ.conversationId)?.id ?? succ.id
+        : succ?.id
+    }
+    if (!nextId) break
+    seen.add(nextId)
+    cur = nextId
+    const row = rows.find(r => r.id === cur)
+    if (row && !row.endedAt) live = cur
+  }
+  return live ?? id
+}
+
 export function messageTargetFor(rows: readonly TeamRow[], reference: string): string {
   const hit = rows.find(r => r.id === reference) ?? rows.find(r => !!r.conversationId && r.conversationId === reference)
   if (!hit || !hit.endedAt) return reference
-  return currentLeaderId(rows, hit.id)
+  return liveLeaderId(rows, hit.id)
 }
 
 export interface HandoffReparent {
