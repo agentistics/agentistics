@@ -532,6 +532,15 @@ export function SessionsAside({
     setExpandedEndedState(next)
     writeAsideGroupPrefs({ expandedEndedGroups: [...next] })
   }
+  /** Folded sections of the Encerradas tab (`sleeping` | `today` | `older`) — per viewer, with the rest
+   *  of the arrangement. The same chevron-on-the-heading control the folders and sections use. */
+  const [foldedEnded, setFoldedEndedState] = useState<Set<string>>(new Set(storedGroupPrefs.foldedEndedSections))
+  const toggleEndedSection = (id: string) => {
+    const next = new Set(foldedEnded)
+    next.has(id) ? next.delete(id) : next.add(id)
+    setFoldedEndedState(next)
+    writeAsideGroupPrefs({ foldedEndedSections: [...next] })
+  }
   /** Dimmed folders (nothing in them matches) the person opened on this screen — see `folderFold`. */
   const [openedDimmed, setOpenedDimmed] = useState<Set<string>>(() => new Set())
   const toggleOpenedDimmed = (id: string) => setOpenedDimmed(cur => {
@@ -581,6 +590,7 @@ export function SessionsAside({
     setHiddenGroups(new Set(p.hiddenUserGroups))
     setSortExplicit(p.sortExplicit)
     setExpandedEndedState(new Set(p.expandedEndedGroups))
+    setFoldedEndedState(new Set(p.foldedEndedSections))
   }), [])
   const toggleGroupNameHidden = (id: string) => {
     const next = toggleHidden(hiddenGroups, id)
@@ -921,7 +931,6 @@ export function SessionsAside({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [searched, rows, query, withPins, fellIdSet, isPinnedRow],
   )
-  const [showAllEnded, setShowAllEnded] = useState(false)
   // The ended history is paged in on demand: the tab that draws it is what asks for it.
   useEffect(() => { if (tab === 'ended') loadClosedFleet() }, [tab])
   const liveCount = useMemo(() => valueFiltered.filter(r => active.has(r.state) && !fellIdSet.has(r.id)).length, [valueFiltered, active, fellIdSet])
@@ -1459,6 +1468,20 @@ export function SessionsAside({
     padding: '10px 8px 4px', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
     color: 'var(--text-tertiary)',
   }
+  /** A heading of the Encerradas tab that folds: chevron + label, the count while folded. Click, Enter
+   *  and Space all work (it is a real button); `aria-expanded` says which state it is in. */
+  const endedSectionHeader = (id: string, label: string, count: number) => {
+    const folded = foldedEnded.has(id)
+    return (
+      <button type="button" data-ended-toggle={id} aria-expanded={!folded} onClick={() => toggleEndedSection(id)}
+        style={{ ...sectionHeading, display: 'flex', alignItems: 'center', gap: 6, width: '100%', minHeight: tap,
+          background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+        {folded ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+        <span>{label}</span>
+        {folded && <span data-ended-count style={{ opacity: 0.65 }}>{count}</span>}
+      </button>
+    )
+  }
   const linkButton: React.CSSProperties = {
     border: 'none', background: 'transparent', color: 'var(--anthropic-orange)', cursor: 'pointer',
     fontFamily: 'inherit', fontSize: 12, fontWeight: 600, padding: '0 4px', flexShrink: 0,
@@ -1875,7 +1898,9 @@ export function SessionsAside({
                         onClick={() => toggleFoldedTeam(t.key)}
                         style={{
                           visibility: hasTeam ? 'visible' : 'hidden',
-                          width: tap ?? 24, height: tap ?? 28, flexShrink: 0, border: 'none', background: 'transparent',
+                          // Top-aligned at the row's own height, so it stays level with the crown / first
+                          // title line when the title wraps over several lines.
+                          alignSelf: 'flex-start', width: tap ?? 24, height: tap ?? 34, flexShrink: 0, border: 'none', background: 'transparent',
                           color: 'var(--text-tertiary)', borderRadius: 6, cursor: 'pointer', padding: 0,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                         }}
@@ -2024,29 +2049,16 @@ export function SessionsAside({
             )}
             {ended.sleeping.length > 0 && (
               <div data-ended-section="sleeping">
-                <div style={sectionHeading}>{pt ? 'Dormindo' : 'Sleeping'}</div>
-                {ended.sleeping.map(r => renderEndedLine(r))}
+                {endedSectionHeader('sleeping', pt ? 'Dormindo' : 'Sleeping', ended.sleeping.length)}
+                {!foldedEnded.has('sleeping') && ended.sleeping.map(r => renderEndedLine(r))}
               </div>
             )}
             {(ended.today.length > 0 || ended.older.length > 0) && (
               <div data-ended-section="finished">
-                {ended.today.length > 0 && <div style={sectionHeading}>{pt ? 'Finalizadas hoje' : 'Finished today'}</div>}
-                {ended.today.map(r => renderEndedLine(r))}
-                {showAllEnded && ended.older.length > 0 && (
-                  <>
-                    <div style={sectionHeading}>{pt ? 'Antes de hoje' : 'Before today'}</div>
-                    {ended.older.map(r => renderEndedLine(r))}
-                  </>
-                )}
-                {ended.older.length > 0 && (
-                  <button type="button" data-ended-all onClick={() => setShowAllEnded(v => !v)}
-                    aria-expanded={showAllEnded}
-                    style={{ ...linkButton, display: 'flex', width: '100%', padding: '0 8px', minHeight: tap ?? 30, textAlign: 'left' }}>
-                    {showAllEnded
-                      ? (pt ? 'Mostrar só as de hoje' : 'Show only today')
-                      : (pt ? `Ver todas as finalizadas (${ended.older.length + ended.today.length})` : `See all finished (${ended.older.length + ended.today.length})`)}
-                  </button>
-                )}
+                {ended.today.length > 0 && endedSectionHeader('today', pt ? 'Finalizadas hoje' : 'Finished today', ended.today.length)}
+                {!foldedEnded.has('today') && ended.today.map(r => renderEndedLine(r))}
+                {ended.older.length > 0 && endedSectionHeader('older', pt ? 'Antes de hoje' : 'Before today', ended.older.length)}
+                {!foldedEnded.has('older') && ended.older.map(r => renderEndedLine(r))}
               </div>
             )}
             {ended.fell.length + ended.sleeping.length + ended.today.length + ended.older.length === 0 && (

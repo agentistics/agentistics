@@ -138,7 +138,12 @@ export function SessionLine({
         title={fell ? `${title} · ${pt ? 'esta sessão caiu' : 'this session fell'}` : title}
         style={{
           flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
-          minHeight: tap ?? (lead ? 32 : 28), padding: leading ? '3px 6px 3px 4px' : '3px 6px', borderRadius: 6,
+          // Top-aligned in the row, with the padding that centres ONE title line in the minimum height:
+          // a single-line row looks exactly as before, and a wrapped title grows DOWNWARD, so the role
+          // icon (and the team chevron beside it) always sit on the FIRST line, never mid-card.
+          alignSelf: 'flex-start', marginTop: ((tap ?? (lead ? 34 : 30)) - (tap ?? (lead ? 32 : 28))) / 2,
+          minHeight: tap ?? (lead ? 32 : 28), boxSizing: 'border-box',
+          padding: `${((tap ?? (lead ? 32 : 28)) - TITLE_LINE_PX) / 2}px ${leading ? '6px 3px 4px' : '6px 3px 6px'}`, borderRadius: 6,
           border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', cursor: 'pointer',
         }}
       >

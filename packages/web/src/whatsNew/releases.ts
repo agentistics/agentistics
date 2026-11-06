@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.8': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Na aba Encerradas, os grupos Dormindo, Finalizadas hoje e Antes de hoje agora têm seta para recolher e abrir (com a contagem quando recolhidos) e lembram o estado; "Antes de hoje" começa recolhido.',
+        en: 'In the Ended tab, the Sleeping, Finished today and Before today groups now have a chevron to fold and unfold (with the count while folded) and remember their state; "Before today" starts folded.',
+      },
+      {
+        pt: 'Nos cartões de líder das Sessões, a seta de abrir a equipe fica alinhada com a coroa e a primeira linha do título, mesmo quando o título ocupa várias linhas.',
+        en: 'On leader cards in Sessions, the team chevron now lines up with the crown and the first title line, even when the title wraps over several lines.',
+      },
+    ],
+  },
   '2.200.6': {
     features: [
       {

@@ -429,7 +429,7 @@ for (const state of ['closed', 'exited', 'lost'] as const) test(`ended ${state} 
     rowsById={new Map([[session.id, { verbs }]])} /></MemoryRouter>))
   // The old row is in Ended, outside the recent recovery group.
   expect(host.querySelector('[data-fell-banner]')).toBeNull()
-  await click(host.querySelector<HTMLElement>('[data-ended-all]')!)
+  await click(host.querySelector<HTMLElement>('[data-ended-toggle="older"]')!)
   const line = host.querySelector<HTMLElement>('[data-session-line]')!
   await act(async () => line.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })))
   const labels = Array.from(document.querySelectorAll('[role="menuitem"]')).map(el => el.textContent)
@@ -493,3 +493,45 @@ for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
     await act(async () => { state.resetEngineSurfaceHostForTests() })
   })
 }
+
+// ENCERRADAS.COLAPSAR — the headings of the Encerradas tab fold like every other group.
+const endedFleet = () => [
+  { ...row('slept', 'closed'), endedAt: Date.now() - 3_600_000 },
+  { ...row('pin-ended', 'closed'), endedAt: Date.now() - 7_200_000 },
+  { ...row('old-one', 'closed'), endedAt: Date.now() - 33 * 86_400_000 },
+  { ...row('old-two', 'exited'), endedAt: Date.now() - 40 * 86_400_000 },
+]
+const endedHead = (id: string) => host.querySelector<HTMLButtonElement>(`[data-ended-toggle="${id}"]`)
+const endedLines = (section: string) => host.querySelectorAll(`[data-ended-section="${section}"] [data-session-line]`).length
+
+for (const width of [1280, 390]) test(`Encerradas headings fold, show a count when folded, and remember it (${width}px)`, async () => {
+  act(() => writePrefs({ tab: 'ended', foldedEndedSections: ['older'] }))
+  await render(endedFleet(), width, 'pt')
+  // Default: sleeping + today expanded, "Antes de hoje" folded with its count.
+  const older = endedHead('older')!
+  expect(older.getAttribute('aria-expanded')).toBe('false')
+  expect(older.querySelector('[data-ended-count]')?.textContent).toBe('2')
+  expect(endedHead('sleeping')!.getAttribute('aria-expanded')).toBe('true')
+  expect(endedHead('today')!.getAttribute('aria-expanded')).toBe('true')
+  expect(endedHead('today')!.querySelector('[data-ended-count]')).toBeNull()
+  expect(endedLines('finished')).toBe(1)
+  await click(older)
+  expect(older.getAttribute('aria-expanded')).toBe('true')
+  expect(endedLines('finished')).toBe(3)
+  expect(readPrefs().foldedEndedSections).toEqual([])
+  // Fold "today" too: its rows go, its count appears, and the choice is stored.
+  await click(endedHead('today')!)
+  expect(endedHead('today')!.getAttribute('aria-expanded')).toBe('false')
+  expect(endedHead('today')!.querySelector('[data-ended-count]')?.textContent).toBe('1')
+  expect(endedLines('finished')).toBe(2)
+  expect(readPrefs().foldedEndedSections).toEqual(['today'])
+  // A reload (fresh mount) reads the stored state, not the default.
+  await act(async () => root.unmount())
+  root = createRoot(host)
+  await render(endedFleet(), width, 'pt')
+  expect(endedHead('older')!.getAttribute('aria-expanded')).toBe('true')
+  expect(endedHead('today')!.getAttribute('aria-expanded')).toBe('false')
+  // The heading is a real <button>: keyboard activation is the browser's click.
+  expect(endedHead('sleeping')!.tagName).toBe('BUTTON')
+  expect(endedHead('sleeping')!.getAttribute('type')).toBe('button')
+})
