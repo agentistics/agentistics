@@ -7,6 +7,7 @@
  * ask and what to do when the answer does not come.
  */
 
+import { debounceWithMaxWait } from './debounceMaxWait'
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { subscribeEvent } from './eventStream'
 import { peekTaskList, putTaskList, subscribeTaskList, type TaskListEntry } from './taskListStore'
@@ -516,12 +517,12 @@ export function useTaskList(filters?: Filters) {
     void load()
     // The app's one push channel (`eventStream.ts`) — no second poll. A `change` is debounced: a
     // burst of file events is one refetch.
-    let t: ReturnType<typeof setTimeout> | null = null
-    const off = subscribeEvent('change', () => {
-      if (t) clearTimeout(t)
-      t = setTimeout(() => void load(), 400)
-    })
-    return () => { off(); if (t) clearTimeout(t) }
+    const kick = debounceWithMaxWait(() => void load(), 400, 2000)
+    // `book` = a task-book write (dedicated event, so `useData` does not refetch /api/data for it).
+    const offChange = subscribeEvent('change', kick)
+    const offBook = subscribeEvent('book', kick)
+    const off = () => { offChange(); offBook() }
+    return () => { off(); kick.cancel() }
   }, [load])
 
   return {

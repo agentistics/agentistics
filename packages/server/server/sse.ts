@@ -17,6 +17,7 @@ import { harnessEnabled } from './adapters/types'
 import { LATE_WATCH_INTERVAL_MS, planLateWatches, type WatchWant } from './watch-plan'
 import { addStoredNotification } from './notifications-store'
 import type { NotificationSubject } from './notifications-authority'
+import { debounceWithMaxWait } from './debounce-maxwait'
 
 export type SseController = ReadableStreamDefaultController<Uint8Array>
 
@@ -105,19 +106,18 @@ let sseDebounce: ReturnType<typeof setTimeout> | null = null
  */
 export function enableRebuildOnChange(): void { rebuildOnChange = true; useWatcherDrivenRefresh() }
 
-let bookDebounce: ReturnType<typeof setTimeout> | null = null
-/** A task-book write: tell every client with a bare `change` — no data rebuild, the book is not in
- *  `/api/data`. Debounced so a burst of writes is one push. */
-export function notifyBookChange(delayMs = 150): void {
-  if (bookDebounce) clearTimeout(bookDebounce)
-  bookDebounce = setTimeout(() => {
-    bookDebounce = null
-    const payload = sseEncoder.encode('event: change\ndata: {}\n\n')
-    for (const ctrl of [...sseClients]) {
-      try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
-    }
-  }, delayMs)
-}
+/** A task-book write: tell every client with a dedicated `book` event — NOT `change`, which makes
+ *  `useData` refetch the whole of `/api/data` (megabytes) for a write the book alone explains.
+ *  Only the board and Live views listen to `book`. Debounced with a ceiling so a burst is one push
+ *  and a steady stream still gets through. */
+const BOOK_MAX_WAIT_MS = 2000
+const pushBook = debounceWithMaxWait(() => {
+  const payload = sseEncoder.encode('event: book\ndata: {}\n\n')
+  for (const ctrl of [...sseClients]) {
+    try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
+  }
+}, 150, BOOK_MAX_WAIT_MS)
+export function notifyBookChange(): void { pushBook() }
 
 onBookWrite(() => notifyBookChange())
 

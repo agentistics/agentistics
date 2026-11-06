@@ -72,7 +72,7 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
   const text = wrap
     ? { display: 'block', overflowWrap: 'anywhere' } as const
     : { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as const
-  const waiting = lang === 'pt' ? 'aguardando leitura' : 'waiting for the first reading'
+  const waiting = lang === 'pt' ? 'sem leitura do plano' : 'no plan reading'
   return <>
     <HarnessMark harness={harness} size={20} />
     <div style={{ minWidth: 0 }}>
@@ -92,10 +92,10 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
 
 export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen, embedded = false, agentUse, onRelogin }: {
   /** The popup's per-account controls: ONLY the agent-use switch and "Sign in again" (never the schedule). */
-  agentUse?: (harness: PlanLimits['harness'], account?: string) => { on: boolean; pending: boolean; onToggle: () => void; accountId: string; reloginable: boolean } | undefined
+  agentUse?: ((harness: PlanLimits['harness'], account?: string) => { on: boolean; pending: boolean; onToggle: () => void; accountId: string; reloginable: boolean } | undefined) & { loaded?: boolean; accounts?: readonly { harness: PlanLimits['harness']; id: string; label?: string }[] }
   onRelogin?: (r: { accountId: string; harness: PlanLimits['harness']; who: string }) => void
   onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang; /** Inside a card that already carries the title: fill its width, no own title or inset. */ embedded?: boolean }) {
-  const rows = subscriptionRows(limits, registered, accountLabels)
+  const rows = subscriptionRows(limits, registered, accountLabels, agentUse?.accounts)
   const apis = useApiUsage().items ?? []
   const sectioned = apis.length > 0
   return <div data-plan-usage-summary style={{ width: '100%', maxWidth: embedded ? undefined : 344, boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -108,6 +108,7 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
         <div data-plan-row={row.harness} style={PLAN_ROW_GRID}>
           <PlanUsageRowCells harness={row.harness} name={who} plan={row.plan} limits={row.limits} now={now} lang={lang} />
         </div>
+        {!control && agentUse && agentUse.loaded === false && row.account && <div data-plan-row-controls-loading style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-tertiary)' }}>…</div>}
         {control && <div data-plan-row-controls={control.accountId} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <ToggleSwitch on={control.on} disabled={control.pending} onToggle={control.onToggle} label={`${lang === 'pt' ? 'Uso por agentes' : 'Agent use'} · ${who}`} />
@@ -157,7 +158,7 @@ export function PlanSessionBlock({ limits, now, lang }: { limits: PlanLimits; no
 
 /**
  * The DETAILED card (Nay's Limits tab, mobile panel). `limits: null` is a registered plan that has
- * reported nothing yet: named, state "waiting for the first reading", NO ring and no zero.
+ * reported nothing yet: named, state "no plan reading", NO ring and no zero.
  */
 export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedded = false, showPlan = true, agentUse, isMobile = false }: { isMobile?: boolean; agentUse?: { on: boolean; pending: boolean; onToggle: () => void; accountId?: string; schedule?: AgentSchedule; view?: AgentUseView; applyAccount?: (account: unknown) => void }; showPlan?: boolean; embedded?: boolean; accountLabel?: string; limits: PlanLimits | null; pending?: { harness: PlanLimits['harness']; plan: string }; now: number; lang: Lang }) {
   const pt = lang === 'pt'
@@ -166,7 +167,7 @@ export function PlanUsageCard({ limits, pending, accountLabel, now, lang, embedd
   const worst = limits ? Math.max(...limits.windows.map(w => currentUsedPct(w, now)), 0) : null
   const early = limits?.windows.some(w => warnForecast(w, now, limits.updatedAt) !== null) ?? false
   const level = early && limitLevel(worst) === 'ok' ? 'attention' : limitLevel(worst)
-  const state = limits ? limitLevelWord(level, lang, worst) : (pt ? 'aguardando leitura' : 'waiting for the first reading')
+  const state = limits ? limitLevelWord(level, lang, worst) : (pt ? 'sem leitura do plano' : 'no plan reading')
   const stale = limits ? stalePhrase(limits, now, lang) : null
   return <div data-plan-usage-card={harness} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, padding: embedded ? 0 : 12, borderRadius: 12, background: 'var(--bg-card)', border: embedded ? undefined : '1px solid var(--border)' }}>
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>

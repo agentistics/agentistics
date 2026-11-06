@@ -19,7 +19,7 @@ export function NayLimitsTab({ lang, isMobile, onNavigate, embedded = false, man
   const navigate = useNavigate()
   const { limits, registered, accountLabels, now } = usePlanLimits()
   const agentUse = usePlanAgentUse(manageAgentUse, lang)
-  const rows = subscriptionRows(limits, registered, accountLabels)
+  const rows = subscriptionRows(limits, registered, accountLabels, agentUse.accounts)
   const apis = useApiUsage().items
   const sectioned = !!apis && apis.length > 0
   return (

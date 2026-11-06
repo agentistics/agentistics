@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { debounceWithMaxWait } from '../../lib/debounceMaxWait'
 import { subscribeEvent } from '../../lib/eventStream'
 import type { FleetRow } from '../../lib/fleet'
 import type { LiveReply } from './liveDeliveryModel'
@@ -17,7 +18,6 @@ export function useLiveDeliveries(fleet: readonly FleetRow[]) {
   const [reply, setReply] = useState<LiveReply | null>(null)
   const [error, setError] = useState<'down' | 'refused' | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -31,14 +31,14 @@ export function useLiveDeliveries(fleet: readonly FleetRow[]) {
     }
   }, [])
 
-  const later = useCallback((ms: number) => {
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => void load(), ms)
-  }, [load])
+  const later = useMemo(() => debounceWithMaxWait(() => void load(), 500, 2000), [load])
 
   useEffect(() => {
     void load()
-    const off = subscribeEvent('change', () => later(500))
+    // `change` = session data moved; `book` = a task-book write (which `useData` ignores).
+    const offChange = subscribeEvent('change', () => later())
+    const offBook = subscribeEvent('book', () => later())
+    const off = () => { offChange(); offBook() }
     const tick = setInterval(() => setNowMs(Date.now()), 15_000)
     // The push channel can drop while a tab is hidden (Safari suspends timers and sockets of a
     // background tab): coming back reads the line again at once, and a slow heartbeat — only while
@@ -49,7 +49,7 @@ export function useLiveDeliveries(fleet: readonly FleetRow[]) {
     return () => {
       off(); clearInterval(tick); clearInterval(beat)
       document.removeEventListener('visibilitychange', onVisible)
-      if (timer.current) clearTimeout(timer.current)
+      later.cancel()
     }
   }, [load, later])
 
@@ -61,8 +61,9 @@ export function useLiveDeliveries(fleet: readonly FleetRow[]) {
   const first = useRef(true)
   useEffect(() => {
     if (first.current) { first.current = false; return }
-    later(1500)
-  }, [signature, later])
+    const t = setTimeout(() => void load(), 1500)
+    return () => clearTimeout(t)
+  }, [signature, load])
 
   return { reply, error, nowMs, reload: load }
 }

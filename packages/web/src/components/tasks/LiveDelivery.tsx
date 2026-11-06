@@ -101,37 +101,48 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     const firstPaint = seen.current.size === 0
     const rv = root.getBoundingClientRect()
     const view: Box = { left: rv.left, top: rv.top, width: rv.width, height: rv.height }
-    root.querySelectorAll<HTMLElement>('[data-live-card]').forEach(el => {
+    const cardEls = Array.from(root.querySelectorAll<HTMLElement>('[data-live-card]'))
+    const rect = (el: HTMLElement): Box => { const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, width: r.width, height: r.height } }
+    // Pass 1 — every scroll-into-view of the pass happens BEFORE any destination is measured, so no
+    // card is aimed at a spot a later scroll moves. The remembered origins were measured at the old
+    // scrollLeft, so they are shifted by the total scroll below.
+    const startLeft = root.scrollLeft
+    if (!firstPaint && root.scrollWidth > root.clientWidth) {
+      for (const el of cardEls) {
+        const prev = seen.current.get(el.getAttribute('data-live-card')!)
+        const stage = el.getAttribute('data-stage') as LiveStage
+        if (!prev || transitionKind(prev.stage, stage) === 'none') continue
+        if (intersects(rect(el), view)) continue
+        // The destination column is off-screen (a narrow window): bring it into view.
+        const col = root.querySelector<HTMLElement>(`[data-live-column="${stage}"]`)
+        if (!col) continue
+        const c = col.getBoundingClientRect()
+        root.scrollLeft = root.scrollLeft + (c.left - view.left) - Math.max(0, (view.width - c.width) / 2)
+      }
+    }
+    const moved = root.scrollLeft - startLeft
+    // Pass 2 — measure everything at the final scroll, then launch the flights.
+    const flights: Array<() => void> = []
+    for (const el of cardEls) {
       const key = el.getAttribute('data-live-card')!
       const stage = el.getAttribute('data-stage') as LiveStage
-      const r = el.getBoundingClientRect()
+      const r = rect(el)
       const prev = seen.current.get(key)
-      now.set(key, { stage, box: { left: r.left, top: r.top, width: r.width, height: r.height } })
-      if (firstPaint || !prev) return
+      now.set(key, { stage, box: r })
+      if (firstPaint || !prev) continue
       const kind = transitionKind(prev.stage, stage)
-      if (kind === 'none' || r.width === 0) return
-      // Out of sight at either end (scrolled sideways): no ghost over unrelated screen.
-      let from = prev.box
-      if (!intersects(now.get(key)!.box, view)) {
-        // The destination column is off-screen (a narrow window): bring it into view first, shifting the
-        // remembered origin by the scroll so the glide still starts where the card was on screen.
-        const col = root.querySelector<HTMLElement>(`[data-live-column="${stage}"]`)
-        if (!col || root.scrollWidth <= root.clientWidth) return
-        const before = root.scrollLeft
-        const c = col.getBoundingClientRect()
-        root.scrollLeft = before + (c.left - view.left) - Math.max(0, (view.width - c.width) / 2)
-        const moved = root.scrollLeft - before
-        if (moved === 0) return
-        const r2 = el.getBoundingClientRect()
-        now.set(key, { stage, box: { left: r2.left, top: r2.top, width: r2.width, height: r2.height } })
-        from = { ...prev.box, left: prev.box.left - moved }
-      }
-      if (!intersects(now.get(key)!.box, view)) return
-      el.style.opacity = '0'
-      const back = () => { el.style.opacity = '' }
-      if (kind === 'merge-approved') void disintegrate(el, from).then(() => reintegrate(el)).then(back, back)
-      else void flyCard(el, from, { fromColor: STAGE_LABEL[prev.stage].color, toColor: STAGE_LABEL[stage].color }).then(back, back)
-    })
+      if (kind === 'none' || r.width === 0) continue
+      // Out of sight at either end: no ghost over unrelated screen.
+      if (!intersects(r, view)) continue
+      const from = { ...prev.box, left: prev.box.left - moved }
+      flights.push(() => {
+        el.style.opacity = '0'
+        const back = () => { el.style.opacity = '' }
+        if (kind === 'merge-approved') void disintegrate(el, from).then(() => reintegrate(el)).then(back, back)
+        else void flyCard(el, from, { fromColor: STAGE_LABEL[prev.stage].color, toColor: STAGE_LABEL[stage].color }).then(back, back)
+      })
+    }
+    for (const f of flights) f()
     seen.current = now
   })
 
