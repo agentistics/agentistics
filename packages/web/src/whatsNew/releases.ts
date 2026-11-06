@@ -11,11 +11,24 @@ export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
   '2.200.8': {
-    features: [],
+    features: [
+      {
+        pt: 'O agentistics agora vigia o próprio desempenho: se ficar lento por alguns minutos, guarda um retrato do que estava pesando e avisa você uma vez, dizendo o que passou do limite. Não reinicia nada.',
+        en: 'agentistics now watches its own performance: if it stays slow for a few minutes, it keeps a snapshot of what was weighing it down and tells you once, naming what went over the limit. It restarts nothing.',
+      },
+    ],
     fixes: [
       {
         pt: 'Agentask abre bem mais rápido: as tarefas abertas e recentes chegam primeiro e o histórico fechado carrega por trás, sem a tela mexer.',
         en: 'Agentask opens much faster: open and recent tasks arrive first and the closed history loads behind them, without the screen moving.',
+      },
+      {
+        pt: 'O app deixou de ficar lento: o servidor parou de refazer o tempo todo trabalho que não tinha mudado e, parado, usa uma fração do processador que usava. Navegar entre páginas e abrir listas voltou a ser rápido.',
+        en: 'The app is no longer slow: the server stopped redoing, over and over, work that had not changed, and when nothing happens it uses a fraction of the processor it did. Moving between pages and opening lists is quick again.',
+      },
+      {
+        pt: 'Digitar no campo de mensagem não trava mais enquanto as sessões trabalham: as atualizações de fundo esperam você pausar a digitação.',
+        en: 'Typing in the message field no longer stalls while sessions work: background updates wait for you to pause typing.',
       },
     ],
   },
