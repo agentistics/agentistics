@@ -1423,11 +1423,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         return json({ sessions: Array.isArray(view) ? view : [] })
       }
       if (url.pathname === '/api/flows/run' && req.method === 'POST') {
-        const body = await req.json().catch(() => ({})) as { name?: unknown; inputs?: unknown }
+        const body = await req.json().catch(() => ({})) as { name?: unknown; inputs?: unknown; session?: { id?: unknown; token?: unknown } }
         if (typeof body.name !== 'string') return json({ error: 'bad_request', sentence: 'flow name is required' }, 400)
         const { flowRunInputs } = await import('./flows/status')
         const parsed = flowRunInputs(body.inputs)
         if (!parsed.ok) return json({ error: 'owner_credential_required', sentence: parsed.sentence }, 403)
+        if (body.name === 'pipeline-autonomo') {
+          const { verifySessionIdentity } = await import('./sessions/session-identity')
+          const actor = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
+          if (!actor) return json({ error: 'unverified_sender', sentence: 'A verified managed session must advance the pipeline.' }, 403)
+          parsed.inputs.actorId = actor
+        }
         try { return json(await flowApi.run(body.name, parsed.inputs)) }
         catch (error) { return json({ error: 'flow_failed', sentence: String(error) }, 400) }
       }

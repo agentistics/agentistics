@@ -1000,6 +1000,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const a = args as any;
         const body = await apiSend("POST", "/api/flows/run", {
           name: a?.name,
+          session: sessionProof(process.env),
           ...(a?.inputs && typeof a.inputs === "object" ? { inputs: a.inputs } : {}),
         });
         return text(body);

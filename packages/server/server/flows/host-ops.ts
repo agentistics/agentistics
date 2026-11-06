@@ -8,6 +8,7 @@ import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
 import { ambienteHostOps } from './ambiente-host'
 import { processHostOps } from './process-ops'
 import { stalledHostOps } from './stalled-host'
+import { pipelineHostOps } from './pipeline-host'
 
 const exec = promisify(execFile)
 /**
@@ -447,6 +448,7 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
     ...dockerHostOps(dockerDeps),
     ...processHostOps(),
     ...stalledHostOps(),
+    ...pipelineHostOps(),
     'alvo-trabalho': async (value: unknown) => {
       const id = sessionOf(value)
       return id ? workTarget(id, workDeps) : refuse('session id is required', ['sessionId'])

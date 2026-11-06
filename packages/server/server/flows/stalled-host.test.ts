@@ -12,7 +12,7 @@ function fixture() {
   const notices: unknown[] = []
   const d: StalledHostDeps = {
     registry: async () => rows,
-    snapshot: async () => ({ polledAtMs: now, sessions: [{ id: 'worker', cwd: rows[0]!.cwd, status: 'running', activity: 'waiting', attached: false, lastLines: ['waiting'], chatTurns: [{ role: 'assistant', text: 'Ready for next phase', at: '2026-11-06T00:00:00Z' }] }] }),
+    snapshot: async () => ({ polledAtMs: now, sessions: [{ id: 'worker', cwd: rows[0]!.cwd, status: 'running', activity: 'waiting', attached: false, approvalDetection: false, searchFields: { name: '', folder: '', harness: '', note: '', task: '', prompt: '' }, lastLines: ['waiting'], chatTurns: [{ role: 'assistant', text: 'Ready for next phase', at: '2026-11-06T00:00:00Z' }] }] }),
     role: async r => r.id === 'worker' ? 'worker' : 'leader',
     dirty: async () => true,
     message: async (...args) => { notices.push(args); return { ok: true } },
