@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.197.4': {
+  '2.198.0': {
     features: [
       {
         pt: 'Agentask: só sessões líderes ficam presas direto na tarefa; os workers vão para as subtarefas. A lista de sessões no fim da tarefa foi redesenhada para dar conta de muitas sessões, com grupos e busca.',
@@ -24,16 +24,12 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Sessões do OpenCode 2 abertas fora do app aparecem na lista, ligadas ao processo e com atividade.',
         en: 'OpenCode 2 sessions opened outside the app show up in the list, linked to their process and with activity.',
       },
-      {
-        pt: 'OpenCode 2.x: as sessões da versão nova (inclusive as abertas no terminal do OpenCode) voltam a aparecer e abrem com o histórico completo.',
-        en: 'OpenCode 2.x: sessions from the new version (including ones opened in the OpenCode terminal) show up again and open with their full history.',
-      },
-      {
-        pt: 'OpenCode 2.x: dá para trocar de modelo no meio da conversa e escolher o nível de esforço.',
-        en: 'OpenCode 2.x: you can switch models mid-conversation and pick the effort level.',
-      },
     ],
     fixes: [
+      {
+        pt: 'Contas: refazer o login não trava mais o app — a janela de login parava de responder por pedir o status sem parar.',
+        en: 'Accounts: signing in again no longer freezes the app — the sign-in dialog kept polling its status nonstop.',
+      },
       {
         pt: 'Quando um líder troca de harness ou de conta, a sessão nova herda os workers do antigo, e as mensagens deles chegam ao líder novo.',
         en: 'When a leader switches harness or account, the new session inherits the old one\'s workers, and their messages reach the new leader.',
@@ -54,6 +50,20 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Sessões externas do Codex podem ser tocadas e retomadas pelo app.',
         en: 'External Codex sessions can be driven and resumed from the app.',
       },
+    ],
+  },
+  '2.197.4': {
+    features: [
+      {
+        pt: 'OpenCode 2.x: as sessões da versão nova (inclusive as abertas no terminal do OpenCode) voltam a aparecer e abrem com o histórico completo.',
+        en: 'OpenCode 2.x: sessions from the new version (including ones opened in the OpenCode terminal) show up again and open with their full history.',
+      },
+      {
+        pt: 'OpenCode 2.x: dá para trocar de modelo no meio da conversa e escolher o nível de esforço.',
+        en: 'OpenCode 2.x: you can switch models mid-conversation and pick the effort level.',
+      },
+    ],
+    fixes: [
       {
         pt: 'OpenCode 2.x: quando o provedor fica tentando de novo sem parar, o turno travado é parado e as mensagens na fila voltam a andar.',
         en: 'OpenCode 2.x: when the provider keeps retrying forever, the stuck turn is stopped and queued messages move again.',
