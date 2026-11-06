@@ -880,7 +880,14 @@ export function buildSessionViews(o: {
     // lookup succeeding would leave it correctly listed and anonymously labelled.
     const own = (p.pid !== undefined ? o.harnessSessions?.byPid.get(p.pid) : undefined)
       ?? (p.sessionId ? o.harnessSessions?.byConversation.get(p.sessionId) : undefined)
-    const ownName = chosenName(own)
+    // OPENCODE.ATIVAS-TUI — opencode keeps no per-pid record, so an external opencode row had no name at all and every
+    // tab of a TUI read "opencode in <dir>". When the process NAMED its session (its tabs record, `-s`), the session's
+    // own title is that conversation's exact name — never a directory guess (`conversationForProcess` with a named id
+    // answers that conversation or nothing).
+    const namedConvTitle = p.harness === 'opencode' && (own?.sessionId ?? p.sessionId)
+      ? conversationForProcess(conversations, { harness: p.harness, cwd: p.cwd, namedId: (own?.sessionId ?? p.sessionId)! })?.title
+      : undefined
+    const ownName = chosenName(own) ?? (namedConvTitle && namedConvTitle.trim() !== '' ? namedConvTitle : undefined)
     // What this process appears to be driving. The harness's own `sessionId` outranks the argv one
     // and the directory guess alike: it is what the process is writing to, said by the process.
     const conv = conversationForProcess(conversations, {

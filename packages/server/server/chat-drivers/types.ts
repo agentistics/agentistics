@@ -55,6 +55,8 @@ export interface HarnessChatStatus {
   label: string
   /** CLI binary is found on PATH. */
   installed: boolean
+  /** Has an integrated installer; otherwise setup.docUrl provides official guidance. */
+  canInstall?: boolean
   /** Auth/config file is present (best-effort). */
   authReady: boolean
   /** installed && authReady — driver is usable. */

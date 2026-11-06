@@ -343,3 +343,16 @@ unmatched results and standalone `ERROR_MESSAGE` records remain unattributed.
 
 The web activity strip suppresses pending transcript activity for ended, exited, lost and
 closed sessions independently of experimental chat preferences.
+
+### Session catalog and Nay chat backends
+
+`GET /api/chat-harnesses` lists only registered Nay chat drivers. The session and Usage
+catalogs request `?all=1` to include every compatible harness. Catalog installation status
+uses `availableHarnesses()` with the same PATH resolution and blind-detection handling as
+fleet startup; a catalog entry alone never makes a harness launchable.
+
+Catalog `canInstall` comes from the server's integrated installer registry. Missing harnesses
+without an installer link to official setup instructions. Selecting a harness requires an
+installed entry in `/api/fleet/new`. Reading availability means a limit window or recorded
+usage reading exists, independently of session counts. Usage has four columns; narrow screens
+show labelled cards so each status and new-session action remains visible.

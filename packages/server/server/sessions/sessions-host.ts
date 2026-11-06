@@ -986,7 +986,16 @@ export function createSessionsPoller(o: {
       // conversation another live row drives.
       if (!initial && o.recordConversation) {
         const scanned = new Map<number, string>()
-        for (const p of processes) if (SCAN_LINKED.has(p.harness) && p.sessionId && p.pid !== undefined) scanned.set(p.pid, p.sessionId)
+        // A 2.x TUI with several tabs reports one record per tab under ONE pid (`expandOpencodeTabs`): that pane
+        // drives no single conversation, so it links to none — never to whichever tab happened to be listed last.
+        const several = new Set<number>()
+        for (const p of processes) {
+          if (!SCAN_LINKED.has(p.harness) || !p.sessionId || p.pid === undefined) continue
+          const held = scanned.get(p.pid)
+          if (held !== undefined && held !== p.sessionId) several.add(p.pid)
+          scanned.set(p.pid, p.sessionId)
+        }
+        for (const pid of several) scanned.delete(pid)
         for (const m of registry) {
           if (!SCAN_LINKED.has(m.harness)) continue
           const pid = panePids?.get(m.id)

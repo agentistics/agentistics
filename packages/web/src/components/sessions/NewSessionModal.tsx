@@ -31,11 +31,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { unlockIfLocked } from '../vault/VaultUnlockHost'
 import { ChevronDown, ChevronLeft, ChevronRight, Check, ClipboardList, Lock, Paperclip, X } from 'lucide-react'
 import { attachmentRoom, MAX_ATTACHMENTS, planPaste } from '../../lib/pastePlan'
-import { Field, inputStyle } from './formBits'
+import { Field, inputStyle, Muted } from './formBits'
 import { ModePicker, NoQuestionsWarning } from './ModePicker'
 import { PillPicker } from './PillPicker'
 import { CANONICAL_MODE_TEXT, type CanonicalMode } from '@agentistics/core'
-import { HarnessPicker } from './HarnessPicker'
+import { HarnessCatalogTable } from '../HarnessCatalogTable'
 import { HarnessInstallDialog } from '../HarnessInstallDialog'
 import { ModelSelect, ModelId } from './ModelSelect'
 import { EffortPicker } from './EffortPicker'
@@ -59,6 +59,7 @@ import { forceOfferOf, forcedNote } from '../../lib/spawnAdmission'
 import { pushNotification } from '../../lib/notifications'
 import { setSessionRole, type SessionRole } from '../../lib/sessionRoles'
 import { usePlanLimits } from '../../lib/planLimits'
+import { useChatHarnesses } from '../../hooks/useChatHarnesses'
 import { useAway } from '../../lib/awayMode'
 import { PlanLimitBars } from '../PlanLimitMeter'
 import { useEscapeOwner } from '../../lib/overlayStack'
@@ -153,6 +154,7 @@ export function NewSessionModal({
    * provider is its own answer on the first step; see `lib/nativeSession.ts`.
    */
   const { nativeRuntime } = useEngineCaps()
+  const { harnesses: chatHarnesses, loading: chatHarnessesLoading } = useChatHarnesses(true)
   const [nativeProvider, setNativeProvider] = useState(restored?.nativeProvider ?? '')
   const [providerOpen, setProviderOpen] = useState(false)
   const nativeOptions = useNativeProviders(nativeRuntime === true, nativeProvider, lang)
@@ -881,20 +883,24 @@ export function NewSessionModal({
               is the one answer on this step that is REQUIRED. */}
           {step === 'assistant' && (<>
           <Field label={pt ? 'Assistente' : 'Assistant'}>
-            <HarnessPicker
+            <HarnessCatalogTable
               lang={lang}
-              harnesses={harnesses}
-              value={harness?.id ?? ''}
-              onChange={id => { setHarness(harnesses?.find(h => h.id === id) ?? null); setDirty(true) }}
-              {...(unavailable ? { notice: unavailable } : {})}
-              {...(retryable ? { onRetry: retry } : {})}
-              onInstall={id => setInstalling(id)}
+              statuses={chatHarnesses}
+              available={harnesses?.filter(h => h.installed !== false) ?? []}
               planLimits={planSnap.limits}
+              readings={planSnap.readings}
               now={planSnap.now}
+              selected={harness?.id ?? ''}
+              mode="new"
+              loading={chatHarnessesLoading || harnesses === null}
+              onSelect={id => { setHarness(harnesses?.find(h => h.id === id) ?? null); setDirty(true) }}
+              onInstall={id => setInstalling(id)}
             />
+            {unavailable && <Muted text={unavailable} />}
+            {retryable && <button type="button" onClick={retry} style={{ alignSelf: 'flex-start', padding: '7px 11px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>{pt ? 'Tentar de novo' : 'Try again'}</button>}
           </Field>
           <HarnessInstallDialog
-            target={installing ? { id: installing, label: harnesses?.find(h => h.id === installing)?.label ?? installing } : null}
+            target={installing ? { id: installing, label: chatHarnesses.find(h => h.id === installing)?.label ?? harnesses?.find(h => h.id === installing)?.label ?? installing } : null}
             pt={pt}
             onClose={() => setInstalling(null)}
             onDone={() => retry()}

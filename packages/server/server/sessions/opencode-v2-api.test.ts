@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Database } from 'bun:sqlite'
 import {
-  isOpencodeV2, linkOpencodeV2Processes, opencodeStateDir, opencodeV2Activity, opencodeV2Status, parseActive,
+  isOpencodeV2, linkOpencodeV2Processes, opencodeStateDir, opencodeTabSessions, parseOpencodeTabs, readOpencodeTabs, opencodeV2Activity, opencodeV2Status, parseActive,
   parseServiceRecord, parseSessions, readOpencodeV2ProcessSessions, readOpencodeV2Sessions, resetOpencodeV2, type OpencodeV2Session,
 } from './opencode-v2-api'
 import { analyzeOpencodeV2Status } from '../health'
@@ -148,5 +148,58 @@ describe('health: never silent', () => {
     analyzeOpencodeV2Status(bad, 1000 + 10 * 60_000, none)
     analyzeOpencodeV2Status(null, 2000, none)
     expect(none).toEqual([])
+  })
+})
+
+// OPENCODE.ATIVAS-TUI — a 2.x TUI holds SEVERAL sessions (its tabs) and writes them to `<state>/<channel>/tui/tabs.json`
+// (recorded on 2.2.5, 2026-11-06: one TUI in /work/ws with two open tabs, one in /work/ws2, one in the home dir).
+describe('the TUI tabs record — one process, several sessions', () => {
+  const TABS = readFileSync(new URL('./__fixtures__/opencode-v2.2.5/tabs.json', import.meta.url), 'utf8')
+  const ref = (pid: number, cwd: string, tty?: boolean) => ({ pid, cwd, startedMs: 1, ...(tty !== undefined ? { tty } : {}) })
+
+  test('the recorded file is read per directory, in tab order', () => {
+    const t = parseOpencodeTabs(TABS)
+    expect(t.cwd.get('/work/ws')).toEqual(['ses_e518c628affezx8DVpFfW7DYbK', 'ses_e518c336fffef88wYtVixaUt8C'])
+    expect(t.cwd.get('/work/ws2')).toEqual(['ses_e5189f9d0ffebyLrwS5rCUdmAW'])
+    expect(t.global).toEqual([])
+  })
+
+  test('junk is an empty record, never a throw', () => {
+    for (const raw of ['', 'nope', '[]', '{"cwd":3}', '{"cwd":{"/a":{"tabs":[{"title":"no id"},7]}}}']) {
+      const t = parseOpencodeTabs(raw)
+      expect([...t.cwd.values()].flat()).toEqual([])
+    }
+  })
+
+  test('each TUI gets every tab of ITS directory — three tabs are three sessions, not an ambiguity', () => {
+    const t = parseOpencodeTabs(TABS)
+    const m = opencodeTabSessions([ref(10, '/work/ws'), ref(11, '/work/ws2'), ref(12, '/elsewhere')], t)
+    expect(m.get(10)).toEqual(['ses_e518c628affezx8DVpFfW7DYbK', 'ses_e518c336fffef88wYtVixaUt8C'])
+    expect(m.get(11)).toEqual(['ses_e5189f9d0ffebyLrwS5rCUdmAW'])
+    expect(m.has(12)).toBe(false)
+  })
+
+  test('a session a managed row drives is not offered to a TUI; a non-tty process gets nothing', () => {
+    const t = parseOpencodeTabs(TABS)
+    const m = opencodeTabSessions([ref(10, '/work/ws'), ref(11, '/work/ws2', false)], t, new Set(['ses_e518c628affezx8DVpFfW7DYbK']))
+    expect(m.get(10)).toEqual(['ses_e518c336fffef88wYtVixaUt8C'])
+    expect(m.has(11)).toBe(false)
+  })
+
+  test('global tabs belong to the TUI only when exactly one is running', () => {
+    const t = parseOpencodeTabs('{"global":{"tabs":[{"sessionID":"ses_g"}]},"cwd":{}}')
+    expect(opencodeTabSessions([ref(10, '/a')], t).get(10)).toEqual(['ses_g'])
+    expect(opencodeTabSessions([ref(10, '/a'), ref(11, '/b')], t).size).toBe(0)
+  })
+
+  test('every channel directory is read and merged (IO)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc2-tabs-'))
+    mkdirSync(join(dir, 'latest', 'tui'), { recursive: true })
+    mkdirSync(join(dir, 'beta', 'tui'), { recursive: true })
+    writeFileSync(join(dir, 'latest', 'tui', 'tabs.json'), TABS)
+    writeFileSync(join(dir, 'beta', 'tui', 'tabs.json'), '{"cwd":{"/work/ws":{"tabs":[{"sessionID":"ses_beta"},{"sessionID":"ses_e518c336fffef88wYtVixaUt8C"}]}}}')
+    const t = readOpencodeTabs(dir)
+    expect(new Set(t.cwd.get('/work/ws'))).toEqual(new Set(['ses_e518c628affezx8DVpFfW7DYbK', 'ses_e518c336fffef88wYtVixaUt8C', 'ses_beta']))
+    expect(readOpencodeTabs(join(dir, 'missing')).cwd.size).toBe(0)
   })
 })
