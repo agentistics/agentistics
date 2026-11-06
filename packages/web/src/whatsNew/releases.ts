@@ -45,6 +45,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'Ligações: quando a sessão termina a tarefa, a resposta agora é sempre falada (antes podia ficar presa em "Preparando áudio").',
         en: 'Calls: when the session finishes its task, the answer is now always spoken (it could get stuck on "Preparing audio").',
       },
+      {
+        pt: 'Ligações: a voz se configura num painel com quatro partes (quem fala, vozes com busca, conta ElevenLabs, voz local), em tela cheia no celular.',
+        en: 'Calls: voice settings live in a four-part panel (who speaks, voices with search, ElevenLabs account, local voice), full screen on phones.',
+      },
     ],
   },
   '2.200.3': {
