@@ -54,6 +54,16 @@ describe('parseApiUsage', () => {
     expect(Lib.apiUsedPct(ok!)).toBe(64)
     expect(Lib.apiUsedPct(denied!)).toBeNull()
   })
+  test('keeps only same-origin engine endpoints and https links in key config', () => {
+    const [valid, invalid] = Lib.parseApiUsage({ items: [
+      { id: 'valid', label: 'Valid', status: 'no-key', unit: 'credits', config: { kind: 'api-key', status: 'missing', endpoint: '/api/engine/x/key', createUrl: 'https://example.test/key', pricingUrl: 'http://example.test/pricing' } },
+      { id: 'invalid', label: 'Invalid', status: 'no-key', unit: 'credits', config: { kind: 'api-key', status: 'missing', endpoint: 'https://example.test/key', createUrl: 'http://example.test/key' } },
+    ] })
+    expect(valid!.config).toMatchObject({ endpoint: '/api/engine/x/key', createUrl: 'https://example.test/key' })
+    expect(valid!.config?.pricingUrl).toBeUndefined()
+    expect(invalid!.config).toBeUndefined()
+    expect(Lib.apiRowLine(valid!, NOW, 'pt')).toBe('Sem chave · Adicionar')
+  })
 })
 
 describe('popover summary', () => {
@@ -102,6 +112,35 @@ describe('popover summary', () => {
     expect(el.querySelector('[data-api-row="p"]')!.textContent).not.toContain('permission denied')
     expect(el.querySelector('[data-api-row="p"]')!.getAttribute('title')).toBe('permission denied')
     expect(el.querySelector('[data-api-row="e"]')!.textContent).toContain('upstream unavailable')
+  })
+  test('configured rows expose the pencil and save clears the password field', async () => {
+    const item = Lib.parseApiUsage({
+      items: [{
+        id: 'k', label: 'K', status: 'no-key', unit: 'credits',
+        config: {
+          kind: 'api-key', status: 'missing', endpoint: '/api/engine/x/key', createUrl: 'https://example.test/key',
+          requirements: [{ label: { pt: 'Leitura', en: 'Read' }, level: { pt: 'Ler', en: 'Read' }, required: true }],
+        },
+      }],
+    })[0]!
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe('POST')
+      expect(init?.body).toBe(JSON.stringify({ key: 'secret-value' }))
+      return Response.json({ missing: [{ pt: 'Falta leitura', en: 'Read is missing' }] })
+    }) as unknown as typeof fetch
+    const el = render(h(Section, { items: [item], now: NOW, lang: 'pt' }))
+    await act(async () => { (el.querySelector('[data-api-config-open]') as HTMLButtonElement).click() })
+    const input = document.querySelector('[data-api-key-input]') as HTMLInputElement
+    await act(async () => {
+      input.value = 'secret-value'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect(input.value).toBe('secret-value')
+    await act(async () => { (document.querySelector('[role=dialog] button:last-of-type') as HTMLButtonElement).click() })
+    await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+    expect((document.querySelector('[data-api-key-input]') as HTMLInputElement | null)?.value ?? '').toBe('')
   })
 })
 
