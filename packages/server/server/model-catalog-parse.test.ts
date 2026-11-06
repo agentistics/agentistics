@@ -190,8 +190,22 @@ describe('parseOpencodeConfigModels', () => {
     expect(parseOpencodeConfigModels('{"model":"upx/fable-5.1"}', SRC)?.map(m => m.id)).toEqual(['upx/fable-5.1'])
   })
 
+  test('opencode.jsonc: // and /* */ comments and trailing commas are read; strings keep their //', () => {
+    const jsonc = `{
+      // the default
+      "model": "upx/fable-5.1", /* inline */
+      "provider": {
+        "upx": {
+          "options": { "baseURL": "https://api.example.com/v1" },
+          "models": { "fable-5.1": {}, "opus-5": {}, },
+        },
+      },
+    }`
+    expect(parseOpencodeConfigModels(jsonc, SRC)?.map(m => m.id)).toEqual(['upx/fable-5.1', 'upx/opus-5'])
+  })
+
   test('junk, comments and an unexpected shape say nothing', () => {
-    expect(parseOpencodeConfigModels('{ // c\n "model": "a/b" }', SRC)).toBeNull()
+    expect(parseOpencodeConfigModels('{ "model": "a/b" ', SRC)).toBeNull()
     expect(parseOpencodeConfigModels('[]', SRC)).toBeNull()
     expect(parseOpencodeConfigModels('{"provider":{"x":{"models":[1]}}}', SRC)).toBeNull()
     expect(parseOpencodeConfigModels('{"model":"not an id"}', SRC)).toBeNull()
