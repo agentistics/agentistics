@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.8': {
+    features: [
+      {
+        pt: 'O raciocínio do modelo agora é uma linha como as de atividade: um cérebro que pulsa com "Raciocinando… · 12 s" enquanto ele pensa e vira "Raciocinou · 12 s" quando termina — clique para ler o texto. Vale para qualquer assistente que envia o raciocínio.',
+        en: 'The model\'s reasoning is now a line like the activity ones: a pulsing brain reading "Reasoning… · 12 s" while it thinks, then "Reasoned · 12 s" when done — click to read the text. It applies to every assistant that sends its reasoning.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'OpenCode: as linhas de ferramenta mostram o que está rodando (o comando, o arquivo) e quando falhou, em vez de só "execute" com um círculo girando.',
+        en: 'OpenCode: tool rows show what is running (the command, the file) and when it failed, instead of just "execute" with a spinner.',
+      },
+      {
+        pt: 'OpenCode: se um turno fica 90 s sem dar sinal, o chat avisa "Sem resposta do OpenCode há N s", diz qual foi o último passo e lembra que dá para parar.',
+        en: 'OpenCode: if a turn goes 90 s without a sign, the chat says "No answer from OpenCode for N s", names the last step and reminds you that you can stop it.',
+      },
+      {
+        pt: 'No compositor, Cmd+Enter (ou Ctrl+Enter) sempre envia, mesmo numa janela estreita; um Enter que só confirma um acento não envia mais a palavra pela metade; e um envio recusado agora diz por quê em vez de ficar mudo.',
+        en: 'In the composer, Cmd+Enter (or Ctrl+Enter) always sends, even in a narrow window; an Enter that only confirms an accent no longer sends a half-written word; and a refused send now says why instead of staying silent.',
+      },
+    ],
+  },
   '2.200.6': {
     features: [
       {
