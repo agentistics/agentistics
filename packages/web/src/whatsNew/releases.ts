@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.8': {
+    features: [
+      {
+        pt: 'O modo autônomo ficou simples: um interruptor e "Quando" — "Até eu desligar" ou "Agendado", com os mesmos dias, horários e "Dia inteiro" da agenda de uso por agentes. Fora dos horários as sessões voltam a perguntar; ao abrir e fechar cada janela, as sessões rodando são avisadas. Releases, workers e merges ficam liberados por padrão (até 4 workers, 1 no modelo de topo por provedor) — nada para configurar.',
+        en: 'Autonomous mode is simple now: one switch and "When" — "Until I turn it off" or "Scheduled", with the same days, hours and "All day" as the agent-use schedule. Outside the hours sessions ask you again; when each window opens and closes the running sessions are told. Releases, workers and merges are allowed by default (up to 4 workers, 1 on each provider\'s top model) — nothing to configure.',
+      },
+    ],
+    fixes: [],
+  },
   '2.200.6': {
     features: [
       {

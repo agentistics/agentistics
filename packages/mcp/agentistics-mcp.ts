@@ -682,7 +682,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_session_away",
     description:
-      "Read or switch AUTONOMOUS MODE, or send the owner a notice while autonomous — the fleet works on its own, without asking permission or questions (the owner may be asleep or travelling). While it is on, every new session is born in the no-questions approval mode unless its caller names a mode. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `on: false` switches it off. Every session started while it is active is told in its briefing. With `target` (a session's managed id or conversation id) `on` switches THAT session's own autonomous mode instead — it alone is told the owner is out, even with the global switch off, and a running one is told the change; sessions it starts inherit it. Ceilings are per PROVIDER: `topCaps` maps a harness (claude, codex, gemini, copilot, antigravity, kimi, opencode) to how many workers may run on its top model tier at once. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
+      "Read or switch AUTONOMOUS MODE, or send the owner a notice while autonomous — the fleet works on its own, without asking permission or questions (the owner may be asleep or travelling). While it is on, every new session is born in the no-questions approval mode unless its caller names a mode. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `schedule` makes it SCHEDULED instead of open-ended: `{enabled:true, days:{mon:{windows:[{from:\"09:00\",to:\"18:00\"}]}, tue:{windows:[],allDay:true}}}` (local clock, weekdays mon…sun, hour windows per day, `allDay` = whole day) — it is on only inside those windows. Omitted `authorised` = all three. `on: false` switches it off. Every session started while it is active is told in its briefing. With `target` (a session's managed id or conversation id) `on` switches THAT session's own autonomous mode instead — it alone is told the owner is out, even with the global switch off, and a running one is told the change; sessions it starts inherit it. Ceilings are per PROVIDER: `topCaps` maps a harness (claude, codex, gemini, copilot, antigravity, kimi, opencode) to how many workers may run on its top model tier at once. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
     inputSchema: {
       type: "object",
       properties: {
@@ -690,8 +690,9 @@ const TOOLS: Tool[] = [
         until: { type: "string", description: "ISO instant the autonomous period ends. Omit for 'until I turn it off'." },
         authorised: { type: "array", items: { type: "string", enum: ["releases", "workers", "merges"] } },
         note: { type: "string", description: "Free text from the owner (max 500 chars)." },
-        maxWorkers: { type: "number", description: "Ceiling of worker sessions at once while autonomous (default 6)." },
-        topCaps: { type: "object", additionalProperties: { type: "number" }, description: "Per provider (harness id → number): ceiling of workers on that provider's top model tier at once (Opus, top GPT tier, Gemini Pro, …). A provider with no entry gets 2." },
+        schedule: { type: "object", description: "Optional agenda: {enabled:true, days:{<mon|tue|wed|thu|fri|sat|sun>:{windows:[{from:'HH:MM',to:'HH:MM'}], allDay?:true}}}. Autonomous mode is on only inside the windows (machine-local time; to<=from crosses midnight). Omit for 'until I turn it off'." },
+        maxWorkers: { type: "number", description: "Ceiling of worker sessions at once while autonomous (default 4)." },
+        topCaps: { type: "object", additionalProperties: { type: "number" }, description: "Per provider (harness id → number): ceiling of workers on that provider's top model tier at once (Opus, top GPT tier, Gemini Pro, …). A provider with no entry gets 1." },
         target: { type: "string", description: "A session's managed id or conversation id: switch only that session's own autonomous mode (with `on`)." },
         notice: { type: "string", description: "While autonomous: a warning or decision that cannot wait, sent to the owner's bell/Nay as a notice (max 500 chars) instead of a question that blocks your turn. Leaders only; ignores the other fields." },
       },
@@ -1288,6 +1289,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiSend("PUT", "/api/away", {
           on: a.on,
           ...(a.until !== undefined ? { until: a.until } : {}),
+          ...(a.schedule !== undefined ? { schedule: a.schedule } : {}),
           ...(a.authorised !== undefined ? { authorised: a.authorised } : {}),
           ...(a.note !== undefined ? { note: a.note } : {}),
           ...(a.maxWorkers !== undefined ? { maxWorkers: a.maxWorkers } : {}),

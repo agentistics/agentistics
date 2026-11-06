@@ -10,6 +10,7 @@
 
 import { HARNESS_ORDER, type HarnessId } from './types'
 import { redactSecrets } from './redact'
+import { parseAgentSchedule, scheduleCanBeOn, scheduleSummaryText, scheduleVerdict, type AgentSchedule } from './agentSchedule'
 
 /** The closed list of things the owner can pre-authorise while away. */
 export const AWAY_AUTH_IDS = ['releases', 'workers', 'merges'] as const
@@ -24,6 +25,13 @@ export interface AwayState {
   /** ISO instant the away period ends; `null` = until the owner says they are back. */
   until: string | null
   authorised: AwayAuthId[]
+  /**
+   * When set (and enabled), autonomous mode is ON only inside the scheduled windows (machine-local
+   * clock): weekdays, hour windows per day, "all day". It is the SAME shape as an account's agent-use
+   * schedule — the owner edits it with the same editor. `until`, when also set, is the outer bound.
+   * Ceilings (`maxDailyPct`/`maxWeeklyPct`) are ignored here: no usage reading is passed.
+   */
+  schedule?: AgentSchedule
   /** Free text the owner adds (≤ `AWAY_NOTE_MAX`). */
   note?: string
   /** Ceiling of worker sessions running at once (a cap ABOVE plan_limits' cadence.parallel). */
@@ -40,10 +48,13 @@ export interface AwayState {
 export type AwayTopCaps = Partial<Record<HarnessId, number>>
 
 export const AWAY_NOTE_MAX = 500
-/** Owner defaults (08/10: at most 6 workers, at most 2 on the top model); the activation dialog can change them. */
-export const AWAY_DEFAULT_MAX_WORKERS = 6
+/**
+ * Automatic defaults (owner, 2026-11-06: the activation dialog asks for NOTHING but on/off and when).
+ * At most 4 workers, at most 1 on a provider's top model tier; agents may still pass their own ceilings.
+ */
+export const AWAY_DEFAULT_MAX_WORKERS = 4
 /** The top-model ceiling of a provider with no entry of its own — equal for every harness. */
-export const AWAY_DEFAULT_TOP_CAP = 2
+export const AWAY_DEFAULT_TOP_CAP = 1
 
 /** What "the top model tier" means for each provider, as a person reads it (and the briefing names it). */
 export const AWAY_TOP_MODEL: Record<HarnessId, { en: string; pt: string }> = {
@@ -115,12 +126,42 @@ function readTopCaps(raw: unknown, legacyMaxOpus: unknown, maxWorkers: number, s
   return out
 }
 
-/** True while the owner is away: switched on and not past `until`. */
+/** True when the state carries an ENABLED schedule (the windows decide, not just the switch). */
+export const awayScheduled = (s: AwayState | null | undefined): s is AwayState & { schedule: AgentSchedule } => !!s?.schedule && s.schedule.enabled
+
+/**
+ * True while the owner is away: switched on, not past `until`, and — when a schedule is set —
+ * inside one of its windows at `now` (local clock; a window that crosses midnight belongs to the day
+ * it started on). Lazy like `until`: nothing rewrites the state at a window edge, every reader asks.
+ */
 export function awayActive(s: AwayState | null | undefined, now: number): boolean {
   if (!s || s.on !== true) return false
-  if (s.until === null) return true
-  const t = Date.parse(s.until)
-  return Number.isFinite(t) && t > now
+  if (s.until !== null) {
+    const t = Date.parse(s.until)
+    if (!(Number.isFinite(t) && t > now)) return false
+  }
+  if (awayScheduled(s)) return scheduleVerdict(s.schedule, new Date(now), null).on
+  return true
+}
+
+/**
+ * The state the fleet is TOLD at `now`: the stored state without its schedule while inside a window,
+ * switched off outside it. This is what a window edge notifies sessions with — a notice is about the
+ * effective on/off, never about a schedule the session cannot evaluate.
+ */
+export function awayEffective(s: AwayState, now: number): AwayState {
+  if (!awayActive(s, now)) return { ...AWAY_OFF, since: s.since }
+  const { schedule: _drop, ...rest } = s
+  return rest
+}
+
+export type AwayEdge = 'on' | 'off' | null
+
+/** Did a scheduled state cross a window edge since the last look? `last` undefined = first look (no edge). */
+export function awayScheduleEdge(s: AwayState | null | undefined, last: boolean | undefined, now: number): { active: boolean; edge: AwayEdge } {
+  const active = awayActive(s, now)
+  if (!awayScheduled(s) || last === undefined || last === active) return { active, edge: null }
+  return { active, edge: active ? 'on' : 'off' }
 }
 
 /** Reads a stored value defensively (preferences.json is hand-editable). Anything malformed reads as off. */
@@ -132,18 +173,20 @@ export function parseAwayState(v: unknown): AwayState {
   const note = typeof o.note === 'string' && o.note.trim() !== '' ? o.note.trim().slice(0, AWAY_NOTE_MAX) : undefined
   const maxWorkers = ceiling(o.maxWorkers, AWAY_DEFAULT_MAX_WORKERS) ?? AWAY_DEFAULT_MAX_WORKERS
   const topCaps = readTopCaps(o.topCaps, o.maxOpus, maxWorkers, false) ?? {}
+  const schedule = parseAgentSchedule(o.schedule)
   return {
     on: o.on === true,
     since: typeof o.since === 'string' ? o.since : '',
     until,
     authorised,
+    ...(schedule?.enabled ? { schedule } : {}),
     ...(note ? { note } : {}),
     maxWorkers,
     topCaps,
   }
 }
 
-export type AwayInputError = 'on_required' | 'bad_until' | 'until_in_past' | 'unknown_authorisation' | 'note_too_long' | 'bad_ceiling'
+export type AwayInputError = 'on_required' | 'bad_until' | 'until_in_past' | 'unknown_authorisation' | 'note_too_long' | 'bad_ceiling' | 'bad_schedule' | 'empty_schedule'
 
 /**
  * Validates a write. `on` is required; turning OFF keeps nothing else. `until` is an ISO instant in
@@ -162,7 +205,17 @@ export function normalizeAwayInput(body: unknown, now: number): { ok: true; stat
     if (t <= now) return { ok: false, error: 'until_in_past', detail: o.until }
     until = new Date(t).toISOString()
   }
-  const raw = o.authorised === undefined ? [] : Array.isArray(o.authorised) ? o.authorised : [o.authorised]
+  let schedule: AgentSchedule | undefined
+  if (o.schedule !== undefined && o.schedule !== null) {
+    const sch = parseAgentSchedule(o.schedule)
+    if (!sch) return { ok: false, error: 'bad_schedule' }
+    if (sch.enabled) {
+      if (!scheduleCanBeOn(sch)) return { ok: false, error: 'empty_schedule' }
+      schedule = sch
+    }
+  }
+  // Absent = the automatic default (everything the owner can pre-authorise); an explicit list, even [], is respected.
+  const raw = o.authorised === undefined ? [...AWAY_AUTH_IDS] : Array.isArray(o.authorised) ? o.authorised : [o.authorised]
   const bad = raw.find(a => !isAwayAuthId(a))
   if (bad !== undefined) return { ok: false, error: 'unknown_authorisation', detail: String(bad) }
   const authorised = AWAY_AUTH_IDS.filter(id => raw.includes(id))
@@ -173,7 +226,7 @@ export function normalizeAwayInput(body: unknown, now: number): { ok: true; stat
   // `maxOpus` is still accepted from an older client and lands in `topCaps.claude`.
   const topCaps = readTopCaps(o.topCaps, o.maxOpus, maxWorkers, true)
   if (topCaps === null) return { ok: false, error: 'bad_ceiling' }
-  return { ok: true, state: { on: true, since, until, authorised, ...(note ? { note } : {}), maxWorkers, topCaps } }
+  return { ok: true, state: { on: true, since, until, authorised, ...(schedule ? { schedule } : {}), ...(note ? { note } : {}), maxWorkers, topCaps } }
 }
 
 /** "on the top model of each provider at once: claude (Opus / Fable) ≤ 1, codex (top GPT tier) ≤ 2; any other provider ≤ 2". */
@@ -184,7 +237,10 @@ export function topCapsText(s: Pick<AwayState, 'topCaps' | 'maxWorkers'>): strin
 }
 
 function untilText(s: AwayState): string {
-  return s.until === null ? 'until they say they are back' : `until ${s.until}`
+  const end = s.until === null ? 'until they say they are back' : `until ${s.until}`
+  if (!awayScheduled(s)) return end
+  const days = scheduleSummaryText(s.schedule, 'en')
+  return `only inside the owner's scheduled windows (local time: ${days}), ${end}`
 }
 
 function authText(s: AwayState): string {
@@ -244,7 +300,7 @@ export function awayBriefingLines(
 /** Appended to the (Portuguese) hand-off hint while away is active; empty otherwise. */
 export function awayHandoffNote(s: AwayState | null | undefined, now: number): string {
   if (!s || !awayActive(s, now)) return ''
-  const ate = s.until === null ? 'até avisar que voltou' : `até ${s.until}`
+  const ate = (awayScheduled(s) ? `nos horários agendados (${scheduleSummaryText(s.schedule, 'pt')}), ` : '') + (s.until === null ? 'até avisar que voltou' : `até ${s.until}`)
   const ok = s.authorised.length > 0 ? s.authorised.join(', ') : 'nada além das regras'
   const tops = HARNESS_ORDER.filter(h => s.topCaps[h] !== undefined).map(h => `${h} ${awayTopCap(s, h)}`)
   const top = `${tops.length > 0 ? `${tops.join(', ')}, demais ` : ''}${Math.min(AWAY_DEFAULT_TOP_CAP, s.maxWorkers)}`
@@ -331,7 +387,7 @@ export function sessionAwayNotice(
 /** A stable fingerprint of what a session is told while away; `'off'` when it is not away. */
 export function awayStateSignature(s: AwayState | null): string {
   if (!s) return 'off'
-  return JSON.stringify([s.until, [...s.authorised].sort(), s.maxWorkers, HARNESS_ORDER.map(h => s.topCaps[h] ?? null)])
+  return JSON.stringify([s.until, [...s.authorised].sort(), s.maxWorkers, HARNESS_ORDER.map(h => s.topCaps[h] ?? null), s.schedule ?? null])
 }
 
 /**

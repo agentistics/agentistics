@@ -17,7 +17,7 @@ describe('awayActive', () => {
 describe('parseAwayState', () => {
   it('reads malformed input as off and drops unknown authorisations', () => {
     expect(parseAwayState('x').on).toBe(false)
-    expect(parseAwayState({ on: true, until: 'nope', authorised: ['releases', 'rm-rf', 'releases'] })).toEqual({ on: true, since: '', until: null, authorised: ['releases'], maxWorkers: 6, topCaps: {} })
+    expect(parseAwayState({ on: true, until: 'nope', authorised: ['releases', 'rm-rf', 'releases'] })).toEqual({ on: true, since: '', until: null, authorised: ['releases'], maxWorkers: 4, topCaps: {} })
   })
 })
 
@@ -27,7 +27,7 @@ describe('normalizeAwayInput', () => {
   })
   it('turning off keeps nothing else', () => {
     const r = normalizeAwayInput({ on: false, authorised: ['releases'], note: 'x' }, NOW)
-    expect(r).toEqual({ ok: true, state: { on: false, since: '2026-10-12T03:00:00.000Z', until: null, authorised: [], maxWorkers: 6, topCaps: {} } })
+    expect(r).toEqual({ ok: true, state: { on: false, since: '2026-10-12T03:00:00.000Z', until: null, authorised: [], maxWorkers: 4, topCaps: {} } })
   })
   it('refuses an unknown authorisation, a past or broken until, a long note', () => {
     expect(normalizeAwayInput({ on: true, authorised: ['everything'] }, NOW)).toMatchObject({ ok: false, error: 'unknown_authorisation' })
@@ -37,7 +37,7 @@ describe('normalizeAwayInput', () => {
   })
   it('normalises until to ISO and orders authorisations', () => {
     const r = normalizeAwayInput({ on: true, until: '2026-10-12T12:00:00Z', authorised: ['merges', 'releases'], note: '  ship it  ' }, NOW)
-    expect(r).toEqual({ ok: true, state: { on: true, since: '2026-10-12T03:00:00.000Z', until: '2026-10-12T12:00:00.000Z', authorised: ['releases', 'merges'], note: 'ship it', maxWorkers: 6, topCaps: {} } })
+    expect(r).toEqual({ ok: true, state: { on: true, since: '2026-10-12T03:00:00.000Z', until: '2026-10-12T12:00:00.000Z', authorised: ['releases', 'merges'], note: 'ship it', maxWorkers: 4, topCaps: {} } })
   })
 })
 
@@ -50,7 +50,7 @@ describe('awayBriefingLines', () => {
     const lines = awayBriefingLines(on({ note: 'focus on QUAL', maxWorkers: 4, topCaps: { claude: 1, codex: 3 } }), 'leader', NOW)
     expect(lines).toHaveLength(4)
     expect(lines[0]).toBe("AUTONOMOUS MODE (until they say they are back) — decide and proceed without asking permission or questions. Pre-authorised: publish releases the leader has approved (QA green); open worker sessions within the plan limits; owner's note: focus on QUAL. These authorisations stand in for the owner's approval wherever the rules below ask for it — act on them without asking permission; anything outside them waits in the hand-off file for their return.")
-    expect(lines[1]).toContain('Never run more than 4 workers at once; at most this many of them on a provider\'s top model tier at once: claude (Opus / Fable) ≤ 1, codex (top GPT tier) ≤ 3, any other provider ≤ 2')
+    expect(lines[1]).toContain('Never run more than 4 workers at once; at most this many of them on a provider\'s top model tier at once: claude (Opus / Fable) ≤ 1, codex (top GPT tier) ≤ 3, any other provider ≤ 1')
     expect(lines[1]).toContain('free RAM drops under 2 GB')
     expect(lines[1]).toContain('mid tier: scoped implementation; light tier: probes')
     expect(lines[1]).not.toContain('Opus:')
@@ -110,8 +110,8 @@ describe('ceilings and notices', () => {
   it('a provider with no entry takes the shared default — no harness has its own', () => {
     const s = parseAwayState({ on: true, maxWorkers: 6, topCaps: { codex: 1 } })
     expect(awayTopCap(s, 'codex')).toBe(1)
-    expect(awayTopCap(s, 'claude')).toBe(2)
-    expect(awayTopCap(s, 'gemini')).toBe(2)
+    expect(awayTopCap(s, 'claude')).toBe(1)
+    expect(awayTopCap(s, 'gemini')).toBe(1)
     expect(awayTopCap({ maxWorkers: 1, topCaps: {} }, 'kimi')).toBe(1)
   })
   it('notice must be non-empty and bounded', () => {
@@ -120,7 +120,7 @@ describe('ceilings and notices', () => {
     expect(normalizeAwayNotice(' release 2.133 is out ')).toBe('release 2.133 is out')
   })
   it('hand-off note names authorisations and ceilings', () => {
-    expect(awayHandoffNote(on(), NOW)).toContain('autorizado: releases, workers; teto 6 workers / modelo de topo por provedor: claude 2, demais 2')
+    expect(awayHandoffNote(on(), NOW)).toContain('autorizado: releases, workers; teto 6 workers / modelo de topo por provedor: claude 2, demais 1')
   })
 })
 
@@ -176,5 +176,117 @@ describe('autonomousSpawnMode', () => {
   })
   test('a harness that cannot carry no-questions is left alone, never refused', () => {
     expect(autonomousSpawnMode(undefined, true, false, 'plan')).toEqual({ mode: 'plan', fromAutonomous: false })
+  })
+})
+
+// ── SCHEDULED autonomous mode (MODO.AUTONOMO-SIMPLES) ───────────────────────────────────────────
+import { awayEffective, awayScheduleEdge, awayScheduled } from './awayMode'
+import type { AgentSchedule } from './agentSchedule'
+
+// Local-clock helper: the evaluator reads getDay()/getHours() on the machine's zone, so build the
+// instants from LOCAL components instead of pinning a UTC string.
+const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo - 1, d, h, mi, 0, 0).getTime()
+// 2026-11-02 is a Monday.
+const MON = (h: number, mi = 0) => at(2026, 11, 2, h, mi)
+const TUE = (h: number, mi = 0) => at(2026, 11, 3, h, mi)
+const sched = (days: AgentSchedule['days']): AgentSchedule => ({ enabled: true, days })
+const scheduled = (days: AgentSchedule['days'], o: Partial<AwayState> = {}): AwayState => on({ schedule: sched(days), ...o })
+
+describe('awayActive with a schedule', () => {
+  const workday = { mon: { windows: [{ from: '09:00', to: '18:00' }] } }
+  it('is on inside the window and off outside it, with the window start inclusive and the end exclusive', () => {
+    const s = scheduled(workday)
+    expect(awayActive(s, MON(8, 59))).toBe(false)
+    expect(awayActive(s, MON(9, 0))).toBe(true)
+    expect(awayActive(s, MON(17, 59))).toBe(true)
+    expect(awayActive(s, MON(18, 0))).toBe(false)
+  })
+  it('is off on a day that is not selected', () => {
+    expect(awayActive(scheduled(workday), TUE(10))).toBe(false)
+  })
+  it('"all day" covers the whole calendar day and stops at midnight', () => {
+    const s = scheduled({ mon: { windows: [], allDay: true } })
+    expect(awayActive(s, MON(0, 0))).toBe(true)
+    expect(awayActive(s, MON(23, 59))).toBe(true)
+    expect(awayActive(s, TUE(0, 0))).toBe(false)
+  })
+  it('a window crossing midnight belongs to the day it started on', () => {
+    const s = scheduled({ mon: { windows: [{ from: '22:00', to: '02:00' }] } })
+    expect(awayActive(s, MON(21, 59))).toBe(false)
+    expect(awayActive(s, MON(22, 0))).toBe(true)
+    expect(awayActive(s, TUE(1, 59))).toBe(true)
+    expect(awayActive(s, TUE(2, 0))).toBe(false)
+  })
+  it('several windows in one day', () => {
+    const s = scheduled({ mon: { windows: [{ from: '08:00', to: '10:00' }, { from: '14:00', to: '16:00' }] } })
+    expect([MON(9), MON(12), MON(15)].map(t => awayActive(s, t))).toEqual([true, false, true])
+  })
+  it('a disabled schedule is ignored (the switch alone decides) and `until` stays the outer bound', () => {
+    expect(awayActive(on({ schedule: { enabled: false, days: {} } }), MON(3))).toBe(true)
+    const s = scheduled({ mon: { windows: [], allDay: true } }, { until: new Date(MON(12)).toISOString() })
+    expect(awayActive(s, MON(11))).toBe(true)
+    expect(awayActive(s, MON(13))).toBe(false)
+  })
+  it('the switch off beats any window', () => {
+    expect(awayActive(scheduled({ mon: { windows: [], allDay: true } }, { on: false }), MON(10))).toBe(false)
+  })
+  it('awayScheduled is true only for an enabled schedule', () => {
+    expect(awayScheduled(scheduled(workday))).toBe(true)
+    expect(awayScheduled(on())).toBe(false)
+    expect(awayScheduled(on({ schedule: { enabled: false, days: {} } }))).toBe(false)
+  })
+})
+
+describe('awayScheduleEdge', () => {
+  const s = scheduled({ mon: { windows: [{ from: '09:00', to: '18:00' }] } })
+  it('reports the edge only when the effective state flipped since the last look', () => {
+    expect(awayScheduleEdge(s, false, MON(9, 0))).toEqual({ active: true, edge: 'on' })
+    expect(awayScheduleEdge(s, true, MON(18, 0))).toEqual({ active: false, edge: 'off' })
+    expect(awayScheduleEdge(s, true, MON(12))).toEqual({ active: true, edge: null })
+  })
+  it('a first look (last undefined) announces nothing, and an unscheduled state never has an edge', () => {
+    expect(awayScheduleEdge(s, undefined, MON(12))).toEqual({ active: true, edge: null })
+    expect(awayScheduleEdge(on(), false, MON(12))).toEqual({ active: true, edge: null })
+  })
+})
+
+describe('awayEffective', () => {
+  it('drops the schedule while inside a window and reads as off outside', () => {
+    const s = scheduled({ mon: { windows: [{ from: '09:00', to: '18:00' }] } })
+    expect(awayEffective(s, MON(10)).schedule).toBeUndefined()
+    expect(awayEffective(s, MON(10)).on).toBe(true)
+    expect(awayEffective(s, MON(20)).on).toBe(false)
+  })
+})
+
+describe('normalizeAwayInput with a schedule', () => {
+  const days = { mon: { windows: [{ from: '09:00', to: '18:00' }] } }
+  it('stores an enabled schedule and applies the automatic defaults (all authorisations, 4 workers, 1 per provider)', () => {
+    const r = normalizeAwayInput({ on: true, schedule: { enabled: true, days } }, NOW)
+    expect(r).toMatchObject({ ok: true, state: { on: true, until: null, authorised: ['releases', 'workers', 'merges'], maxWorkers: 4, topCaps: {}, schedule: { enabled: true, days } } })
+  })
+  it('refuses malformed and empty schedules', () => {
+    expect(normalizeAwayInput({ on: true, schedule: { enabled: true, days: { xyz: { windows: [] } } } }, NOW)).toMatchObject({ ok: false, error: 'bad_schedule' })
+    expect(normalizeAwayInput({ on: true, schedule: { enabled: true, days: { mon: { windows: [] } } } }, NOW)).toMatchObject({ ok: false, error: 'empty_schedule' })
+    expect(normalizeAwayInput({ on: true, schedule: { enabled: true, days: {} } }, NOW)).toMatchObject({ ok: false, error: 'empty_schedule' })
+  })
+  it('a disabled schedule is not stored; an explicit authorised list (even empty) is respected', () => {
+    const r = normalizeAwayInput({ on: true, authorised: [], schedule: { enabled: false, days: {} } }, NOW)
+    expect(r.ok && r.state.schedule).toBeUndefined()
+    expect(r.ok && r.state.authorised).toEqual([])
+  })
+  it('round-trips through parseAwayState', () => {
+    const r = normalizeAwayInput({ on: true, schedule: { enabled: true, days } }, NOW)
+    expect(r.ok && parseAwayState(r.state).schedule).toEqual({ enabled: true, days })
+  })
+})
+
+describe('the briefing of a scheduled state', () => {
+  it('names the windows (local time) so the model knows it is not open-ended', () => {
+    const s = scheduled({ mon: { windows: [], allDay: true } })
+    const [line] = awayBriefingLines(s, 'worker', MON(10))
+    expect(line).toContain("only inside the owner's scheduled windows")
+    expect(line).toContain('Mon: all day')
+    expect(awayBriefingLines(s, 'worker', TUE(10))).toEqual([])
   })
 })

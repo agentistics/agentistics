@@ -5345,6 +5345,11 @@ startHostAllowlistRefresh()
 Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleCompressed })
 startCheckinTimer()
 startAwayDigestTimer()
+// Scheduled autonomous mode: at each window edge, tell the running sessions and refresh the browsers.
+void import('./away').then(async m => m.startAwayScheduleTimer(() => {
+  void import('./sse').then(sse => sse.broadcastAwayChanged()).catch(() => {})
+  void import('./sessions/fleet-web').then(f => f.kickFleet()).catch(() => {})
+})).catch(() => {})
 // Binary mode also serves the web dashboard on WEB_PORT (47292) — that's the URL you open.
 // Same handler → the SPA's same-origin `/api/*` calls resolve against 47292 and just work,
 // while 47291 stays the dedicated api + mcp port.

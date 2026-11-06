@@ -1,107 +1,129 @@
 /**
- * The ONE dialog autonomous mode asks on activation: until when, what is pre-authorised, the worker
- * ceiling, a top-model ceiling for EVERY active provider (a reported limit or a registered plan —
- * what `agentistics_plan_limits` reads) and a free note — then it frees the person. Built only from
- * the settings primitives (`ConfirmModal`, `Select`, `Checkbox`, `FieldTextarea`); nothing hand-rolled.
+ * The ONE dialog autonomous mode asks — and it asks almost nothing (owner, 2026-11-06): an on/off
+ * switch and WHEN ("until I turn it off", or a schedule). The schedule is the very editor the
+ * agent-use agenda of an account uses (`AgentScheduleDays` — weekdays, hour windows, "all day"),
+ * minus the usage ceilings, which have no meaning here. What sessions may do without asking
+ * (releases, workers, merges), the worker ceiling and the per-provider top-model ceiling are
+ * automatic defaults decided by the server — they are not asked. A free note stays, collapsed.
  */
-import { AwayImpact } from './AwayImpact'
 import React, { useEffect, useState } from 'react'
-import { AWAY_AUTH_IDS, AWAY_AUTH_LABEL, AWAY_DEFAULT_MAX_WORKERS, AWAY_DEFAULT_TOP_CAP, AWAY_MAX_CEILING, AWAY_NOTE_MAX, AWAY_TOP_MODEL, SURFACE_HARNESS_ORDER, type AwayAuthId, type AwayTopCaps, type HarnessId } from '@agentistics/core' // @native-gated: activeCapProviders keeps only harnesses AWAY_TOP_MODEL names
-import { Checkbox, ConfirmModal, FieldTextarea, Select } from '../pages/settings/primitives'
-import { AUTONOMOUS_ICON, activeCapProviders, setAway, UNTIL_CHOICES, untilChoiceLabel, untilFromChoice, useAway, type UntilChoice } from '../lib/awayMode'
-import { usePlanLimits } from '../lib/planLimits'
-import { HARNESS_LABELS } from '../lib/harness'
+import { AWAY_DEFAULT_MAX_WORKERS, AWAY_DEFAULT_TOP_CAP, AWAY_NOTE_MAX, defaultAgentSchedule, scheduleCanBeOn, type AgentDay, type AgentSchedule } from '@agentistics/core'
+import { ConfirmModal, FieldTextarea } from '../pages/settings/primitives'
+import { ToggleSwitch } from './ToggleSwitch'
+import { AgentScheduleDays } from './AgentScheduleEditor'
+import { CenteredLoader } from './CenteredLoader'
+import { AUTONOMOUS_ICON, setAway, useAway, type AwayRequest } from '../lib/awayMode'
+import { scheduleProblem, scheduleSummaryText } from '../lib/agentScheduleView'
+import { useIsMobile } from '../hooks/useIsMobile'
 
-const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i)
+export type AwayWhen = 'indefinite' | 'scheduled'
+
+/** The request body for what the dialog holds. Pure: the ceilings and authorisations are the server's defaults. */
+export function awayRequestOf(on: boolean, when: AwayWhen, schedule: AgentSchedule, note: string): AwayRequest {
+  if (!on) return { on: false }
+  return {
+    on: true,
+    ...(when === 'scheduled' ? { schedule: { ...schedule, enabled: true } } : {}),
+    ...(note.trim() ? { note } : {}),
+  }
+}
+
+/** Why the dialog cannot be confirmed, in words; null when it can. */
+export function awayDialogProblem(on: boolean, when: AwayWhen, schedule: AgentSchedule, lang: 'pt' | 'en'): string | null {
+  if (!on || when !== 'scheduled') return null
+  const p = scheduleProblem(schedule, lang)
+  if (p) return p
+  return scheduleCanBeOn(schedule) ? null : (lang === 'pt' ? 'Marque ao menos um dia com horário (ou "Dia inteiro").' : 'Pick at least one day with hours (or "All day").')
+}
 
 export default function AwayModeDialog({ open, lang, onClose }: { open: boolean; lang: 'pt' | 'en'; onClose: () => void }) {
   const pt = lang === 'pt'
-  const [until, setUntil] = useState<UntilChoice>('tomorrow9')
-  const [auth, setAuth] = useState<AwayAuthId[]>(['releases', 'workers'])
-  const [maxWorkers, setMaxWorkers] = useState(AWAY_DEFAULT_MAX_WORKERS)
-  const [topCaps, setTopCaps] = useState<AwayTopCaps>({})
-  const plans = usePlanLimits()
-  const stored = useAway().state?.topCaps ?? {}
-  const providers = activeCapProviders(SURFACE_HARNESS_ORDER, plans.limits, plans.registered, stored) // @native-gated: filtered to AWAY_TOP_MODEL
-  const capOf = (h: HarnessId) => Math.min(topCaps[h] ?? stored[h] ?? AWAY_DEFAULT_TOP_CAP, maxWorkers)
+  const isMobile = useIsMobile()
+  const away = useAway()
+  const [on, setOn] = useState(true)
+  const [when, setWhen] = useState<AwayWhen>('indefinite')
+  const [schedule, setSchedule] = useState<AgentSchedule>(() => ({ ...defaultAgentSchedule(), enabled: true }))
+  const [focusDay, setFocusDay] = useState<AgentDay | null>(null)
   const [note, setNote] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  useEffect(() => { if (open) { setError(null); setBusy(false); setTopCaps({}) } }, [open])
+  // Opening reads what is stored (editing a running schedule), otherwise starts from the defaults.
+  const stored = away.state
+  useEffect(() => {
+    if (!open) return
+    setError(null); setBusy(false); setOn(true); setFocusDay(null)
+    const s = stored && stored.on ? stored : null
+    setWhen(s?.schedule ? 'scheduled' : 'indefinite')
+    setSchedule(s?.schedule ?? { ...defaultAgentSchedule(), enabled: true })
+    setNote(s?.note ?? '')
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const problem = awayDialogProblem(on, when, schedule, lang)
   const confirm = async () => {
-    if (busy) return
+    if (busy || problem) return
     setBusy(true)
-    const r = await setAway({
-      on: true, until: untilFromChoice(until, Date.now()), authorised: auth, note,
-      // Only the providers listed are sent; one not listed keeps the shared default.
-      maxWorkers, topCaps: Object.fromEntries(providers.map(h => [h, capOf(h)])),
-    })
+    const r = await setAway(awayRequestOf(on, when, schedule, note))
     setBusy(false)
     if (r.ok) onClose()
-    else setError(pt ? `Não foi possível ligar o modo autônomo (${r.error}).` : `Could not turn autonomous mode on (${r.error}).`)
+    else setError(pt ? `Não foi possível salvar o modo autônomo (${r.error}).` : `Could not save autonomous mode (${r.error}).`)
   }
 
-  const label = (t: string) => <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{t}</span>
+  const tap = isMobile ? 44 : undefined
+  const seg = (id: AwayWhen, text: string) => {
+    const sel = when === id
+    return <button key={id} type="button" aria-pressed={sel} data-away-when={id} onClick={() => setWhen(id)}
+      style={{ flex: 1, minHeight: tap ?? 34, padding: '6px 10px', fontSize: 13, cursor: 'pointer', border: 'none',
+        background: sel ? 'var(--anthropic-orange)' : 'transparent', color: sel ? '#000' : 'var(--text-secondary)', fontWeight: sel ? 650 : 500 }}>{text}</button>
+  }
+  const defaultsLine = pt
+    ? `Padrão automático: releases, workers e merges liberados; até ${AWAY_DEFAULT_MAX_WORKERS} workers e ${AWAY_DEFAULT_TOP_CAP} no modelo de topo por provedor.`
+    : `Automatic defaults: releases, workers and merges allowed; up to ${AWAY_DEFAULT_MAX_WORKERS} workers and ${AWAY_DEFAULT_TOP_CAP} on each provider's top model.`
+  const summary = on && when === 'scheduled' ? scheduleSummaryText(schedule, lang) : ''
+
   return (
     <ConfirmModal
       open={open}
       tone="default"
       icon={<AUTONOMOUS_ICON size={17} />}
-      title={pt ? 'Ligar o modo autônomo' : 'Turn on autonomous mode'}
-      message={pt
-        ? 'As sessões nascem sem perguntas e passam a trabalhar de forma autônoma: os líderes decidem dentro do que você autorizar, seguem o ritmo do plano e não param o turno com perguntas; os workers reportam ao líder.'
-        : 'New sessions start in no-questions mode and work autonomously: leaders decide within what you authorise, pace by your plan and never stop a turn on a question; workers report to their leader.'}
-      confirmLabel={busy ? (pt ? 'Ligando…' : 'Turning on…') : (pt ? 'Ligar' : 'Turn on')}
+      title={pt ? 'Modo autônomo' : 'Autonomous mode'}
+      message={pt ? 'Ligado, as sessões trabalham sem pedir permissão: os líderes decidem e registram, os workers reportam ao líder.'
+        : 'When on, sessions work without asking permission: leaders decide and record, workers report to their leader.'}
+      confirmLabel={busy ? (pt ? 'Salvando…' : 'Saving…') : on ? (pt ? 'Ligar' : 'Turn on') : (pt ? 'Desligar' : 'Turn off')}
       cancelLabel={pt ? 'Cancelar' : 'Cancel'}
+      busy={busy || !!problem || stored === null}
       onConfirm={() => { void confirm() }}
       onCancel={onClose}
     >
-      <AwayImpact pt={pt} open={open} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {label(pt ? 'Até quando' : 'Until when')}
-          <Select value={until} onChange={v => setUntil(v as UntilChoice)}
-            options={UNTIL_CHOICES.map(c => ({ value: c, label: untilChoiceLabel(c, lang) }))} />
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {label(pt ? 'Pode sem me perguntar' : 'Allowed without asking me')}
-          {AWAY_AUTH_IDS.map(id => (
-            <Checkbox key={id} checked={auth.includes(id)} label={AWAY_AUTH_LABEL[id][lang]}
-              onChange={c => setAuth(a => (c ? [...a, id] : a.filter(x => x !== id)))} />
-          ))}
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {label(pt ? 'Máx. de workers' : 'Max workers')}
-          <Select value={String(maxWorkers)} onChange={v => setMaxWorkers(Number(v))}
-            options={range(1, AWAY_MAX_CEILING).map(n => ({ value: String(n), label: String(n) }))} />
-        </div>
-        <div data-away-top-caps style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {label(pt ? 'Máx. no modelo de topo, por provedor' : 'Max on the top model, per provider')}
-          {providers.length === 0 ? (
-            <span style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.45 }}>
-              {pt ? `Nenhum plano ativo detectado ainda — cada provedor fica com até ${Math.min(AWAY_DEFAULT_TOP_CAP, maxWorkers)}.`
-                : `No active plan detected yet — every provider gets up to ${Math.min(AWAY_DEFAULT_TOP_CAP, maxWorkers)}.`}
-            </span>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
-              {providers.map(h => (
-                <div key={h} data-provider={h} style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-                  <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {HARNESS_LABELS[h] ?? h} · {AWAY_TOP_MODEL[h][lang]}
-                  </span>
-                  <Select value={String(capOf(h))} onChange={v => setTopCaps(c => ({ ...c, [h]: Number(v) }))}
-                    options={range(0, maxWorkers).map(n => ({ value: String(n), label: String(n) }))} />
-                </div>
-              ))}
+      {stored === null ? <CenteredLoader placement="area" label={pt ? 'Carregando…' : 'Loading…'} testId="away-dialog-loader" /> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: tap }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{pt ? 'Sessões trabalham sem pedir permissão' : 'Sessions work without asking permission'}</span>
+            <ToggleSwitch on={on} onToggle={() => setOn(v => !v)} tap={tap} label={pt ? 'Modo autônomo' : 'Autonomous mode'} />
+          </div>
+          {on && <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{pt ? 'Quando' : 'When'}</span>
+              <div role="group" aria-label={pt ? 'Quando' : 'When'} style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>
+                {seg('indefinite', pt ? 'Até eu desligar' : 'Until I turn it off')}
+                {seg('scheduled', pt ? 'Agendado' : 'Scheduled')}
+              </div>
             </div>
-          )}
+            {when === 'scheduled' && <div data-away-schedule style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+              <AgentScheduleDays draft={schedule} setDraft={setSchedule} focusDay={focusDay} setFocusDay={setFocusDay} lang={lang} isMobile={isMobile} caps={false}
+                emptyHint={pt ? 'Nenhum dia marcado: o modo autônomo nunca ligaria.' : 'No day selected: autonomous mode would never turn on.'} />
+              {summary && <span data-away-schedule-line style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>{summary}</span>}
+              <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{pt ? 'Fora destes horários as sessões voltam a perguntar a você.' : 'Outside these hours sessions ask you again.'}</span>
+            </div>}
+            <span data-away-defaults style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>{defaultsLine}</span>
+            <details>
+              <summary style={{ fontSize: 12.5, color: 'var(--text-secondary)', cursor: 'pointer', minHeight: tap }}>{pt ? 'Recado para os líderes (opcional)' : 'Note for the leaders (optional)'}</summary>
+              <FieldTextarea label="" value={note} onChange={setNote} rows={2} maxLength={AWAY_NOTE_MAX}
+                placeholder={pt ? 'ex.: foco no QUAL; nada de deploy em cloud' : 'e.g. focus on QUAL; no cloud deploys'} />
+            </details>
+          </>}
+          {(problem || error) && <span role="alert" style={{ fontSize: 12, color: '#ef4444' }}>{problem ?? error}</span>}
         </div>
-        <FieldTextarea label={pt ? 'Recado para os líderes (opcional)' : 'Note for the leaders (optional)'}
-          value={note} onChange={setNote} rows={2} maxLength={AWAY_NOTE_MAX}
-          placeholder={pt ? 'ex.: foco no QUAL; nada de deploy em cloud' : 'e.g. focus on QUAL; no cloud deploys'} />
-        {error && <span role="alert" style={{ fontSize: 12, color: '#ef4444' }}>{error}</span>}
-      </div>
+      )}
     </ConfirmModal>
   )
 }

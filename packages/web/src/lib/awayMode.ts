@@ -5,7 +5,7 @@
  * The rules and words sessions are told live in core's `awayMode.ts`.
  */
 import { useSyncExternalStore } from 'react'
-import { AWAY_OFF, AWAY_TOP_MODEL, awayActive, parseAwayState, type AwayAuthId, type AwayState, type AwayTopCaps, type HarnessId } from '@agentistics/core'
+import { AWAY_OFF, AWAY_TOP_MODEL, awayActive, awayScheduled, parseAwayState, scheduleSummaryText, type AgentSchedule, type AwayAuthId, type AwayState, type AwayTopCaps, type HarnessId } from '@agentistics/core'
 import { subscribeEvent } from './eventStream'
 import { Infinity as InfinityIcon, type LucideIcon } from 'lucide-react'
 
@@ -72,6 +72,8 @@ export function useAway(): AwaySnapshot {
 export interface AwayRequest {
   on: boolean
   until?: string | null
+  /** Scheduled instead of open-ended: on only inside these windows (same shape as an account's agent-use agenda). */
+  schedule?: AgentSchedule
   authorised?: AwayAuthId[]
   note?: string
   maxWorkers?: number
@@ -140,6 +142,7 @@ export function untilChoiceLabel(c: UntilChoice, lang: 'pt' | 'en'): string {
 /** "until 09:00" / "until Mon 09:00" / "until I'm back" — local clock, short. */
 export function awayUntilLabel(s: AwayState | null, lang: 'pt' | 'en', now: number): string {
   const pt = lang === 'pt'
+  if (s && awayScheduled(s)) return `${pt ? 'agendado' : 'scheduled'}: ${scheduleSummaryText(s.schedule, lang)}`
   if (!s || s.until === null) return pt ? 'até você desligar' : "until you turn it off"
   const d = new Date(s.until)
   const time = d.toLocaleTimeString(pt ? 'pt-BR' : 'en-US', { hour: '2-digit', minute: '2-digit' })

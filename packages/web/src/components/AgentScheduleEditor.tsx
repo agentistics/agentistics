@@ -61,7 +61,6 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
   const problem = scheduleProblem(draft, lang)
   const tap = isMobile ? 44 : undefined
   const btn = (kind: 'primary' | 'secondary', disabled = false) => ({ ...dialogButtonStyle(kind, isMobile, disabled), ...(isMobile ? {} : { padding: '5px 12px', fontSize: 12.5 }) })
-  const small: React.CSSProperties = { border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 8, padding: '4px 9px', fontSize: 12, cursor: 'pointer', minHeight: tap, display: 'inline-flex', alignItems: 'center', gap: 4 }
   const time: React.CSSProperties = { background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 6, padding: '4px 6px', minHeight: tap, colorScheme: 'dark light', minWidth: 0, flex: '1 1 0', maxWidth: 140 }
 
   const save = async () => {
@@ -76,7 +75,6 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
     } finally { setBusy(false) }
   }
 
-  const selected = AGENT_DAYS.filter(d => draft.days[d])
   return <div data-agent-schedule={accountId} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minHeight: tap }}>
       <span style={{ fontSize: 13, fontWeight: 600 }}>{pt ? 'Agenda de uso por agentes' : 'Agent-use schedule'}</span>
@@ -99,6 +97,38 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
       %
       {weekReadingHint(view, lang) && <span data-agent-week-hint style={{ color: 'var(--text-tertiary)', fontSize: 11.5 }}>{weekReadingHint(view, lang)}</span>}
     </label>
+    <AgentScheduleDays draft={draft} setDraft={setDraft} focusDay={focusDay} setFocusDay={setFocusDay} view={view} lang={lang} isMobile={isMobile} />
+    {(dirty || error) && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+      {(problem || error) && <span role="alert" style={{ fontSize: 12, color: 'var(--accent-red)', marginRight: 'auto' }}>{problem ?? error}</span>}
+      <button type="button" disabled={busy} onClick={() => { setDraft(saved); setError(null) }} style={btn('secondary', busy)}>{pt ? 'Descartar' : 'Discard'}</button>
+      <button type="button" data-agent-schedule-save disabled={busy || !!problem || !dirty} onClick={() => { void save() }} style={btn('primary', busy || !!problem || !dirty)}>{busy ? (pt ? 'Salvando…' : 'Saving…') : (pt ? 'Salvar agenda' : 'Save schedule')}</button>
+    </div>}
+  </div>
+}
+
+/**
+ * The weekday chips + the per-day hour windows ("Dia inteiro", copy to the selected days): the part of
+ * the agent-use schedule that says WHEN. One component, drawn by the account editor above and by the
+ * autonomous-mode dialog (`caps={false}` there: no usage-based ceilings, only days and hours).
+ */
+export function AgentScheduleDays({ draft, setDraft, focusDay, setFocusDay, view, lang, isMobile = false, caps = true, emptyHint }: {
+  draft: AgentSchedule
+  setDraft: React.Dispatch<React.SetStateAction<AgentSchedule>>
+  focusDay: AgentDay | null
+  setFocusDay: (d: AgentDay | null) => void
+  view?: AgentUseView
+  lang: Lang
+  isMobile?: boolean
+  /** The per-day "spend at most N% of the week" ceiling. Off where no usage is measured. */
+  caps?: boolean
+  emptyHint?: string
+}) {
+  const pt = lang === 'pt'
+  const tap = isMobile ? 44 : undefined
+  const small: React.CSSProperties = { border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 8, padding: '4px 9px', fontSize: 12, cursor: 'pointer', minHeight: tap, display: 'inline-flex', alignItems: 'center', gap: 4 }
+  const time: React.CSSProperties = { background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 6, padding: '4px 6px', minHeight: tap, colorScheme: 'dark light', minWidth: 0, flex: '1 1 0', maxWidth: 140 }
+  const selected = AGENT_DAYS.filter(d => draft.days[d])
+  return <>
     <div role="group" aria-label={pt ? 'Dias da semana' : 'Weekdays'} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, opacity: draft.enabled ? 1 : 0.6 }}>
       {AGENT_DAYS.map(d => {
         const on = !!draft.days[d]
@@ -110,7 +140,7 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
         </button>
       })}
     </div>
-    {selected.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{pt ? 'Nenhum dia marcado: com a agenda ligada, agentes não usam esta conta.' : 'No day selected: with the schedule on, agents never use this account.'}</span>}
+    {selected.length === 0 && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{emptyHint ?? (pt ? 'Nenhum dia marcado: com a agenda ligada, agentes não usam esta conta.' : 'No day selected: with the schedule on, agents never use this account.')}</span>}
     {selected.map(d => {
       const day = draft.days[d]!
       return <div key={d} data-agent-day-editor={d} style={{ borderTop: '1px solid var(--border)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, opacity: draft.enabled ? 1 : 0.6 }}>
@@ -132,22 +162,17 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
         {!day.allDay && day.windows.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{pt ? 'Sem janela: o dia fica desligado.' : 'No window: the day stays off.'}</span>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {!day.allDay && <button type="button" onClick={() => setDraft(s => addWindow(s, d))} style={small}><Plus size={13} aria-hidden />{pt ? 'janela' : 'window'}</button>}
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+          {caps && <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
             {pt ? 'Gastar no máximo' : 'Spend at most'}
             <input type="number" inputMode="decimal" min={1} max={100} step={1} placeholder="—" aria-label={`${DAY_SHORT[d][lang]} · ${pt ? 'teto do dia (% da semana)' : 'daily ceiling (% of the week)'}`}
               value={day.maxDailyPct ?? ''} onChange={e => { const v = e.target.value.trim(); setDraft(s => setDailyCap(s, d, v === '' ? undefined : Number(v))) }}
               style={{ ...time, width: 64 }} />
             {pt ? '% da semana neste dia' : '% of the week on this day'}
-          </label>
+          </label>}
           {d === TODAY_ID() && dayReadingHint(view, lang) && <span data-agent-day-hint style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{dayReadingHint(view, lang)}</span>}
           {selected.length > 1 && <button type="button" data-agent-copy={d} onClick={() => setDraft(s => copyToSelected(s, d))} style={small}>{pt ? 'Copiar para os dias marcados' : 'Copy to the selected days'}</button>}
         </div>
       </div>
     })}
-    {(dirty || error) && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-      {(problem || error) && <span role="alert" style={{ fontSize: 12, color: 'var(--accent-red)', marginRight: 'auto' }}>{problem ?? error}</span>}
-      <button type="button" disabled={busy} onClick={() => { setDraft(saved); setError(null) }} style={btn('secondary', busy)}>{pt ? 'Descartar' : 'Discard'}</button>
-      <button type="button" data-agent-schedule-save disabled={busy || !!problem || !dirty} onClick={() => { void save() }} style={btn('primary', busy || !!problem || !dirty)}>{busy ? (pt ? 'Salvando…' : 'Saving…') : (pt ? 'Salvar agenda' : 'Save schedule')}</button>
-    </div>}
-  </div>
+  </>
 }
