@@ -10,6 +10,28 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.199.0': {
+    features: [
+      {
+        pt: 'Todo assistente compatível aparece em Nova sessão e em Uso, a partir de um catálogo único.',
+        en: 'Every compatible assistant now shows up in New session and in Usage, from a single catalog.',
+      },
+      {
+        pt: 'Abas do OpenCode abertas fora do app aparecem como sessões que você pode continuar, também no Mac.',
+        en: 'OpenCode tabs opened outside the app appear as sessions you can continue, on Mac too.',
+      },
+      {
+        pt: 'O vidro (menus, barras e janelas translúcidos) agora é parte do app: está sempre ligado e saiu das configurações.',
+        en: 'Glass (translucent menus, bars and dialogs) is now part of the app: always on, and gone from settings.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Contas: duas contas Claude do mesmo plano não se confundem mais — acabou o falso "login expirado", o mesmo uso nas duas e a conta Principal aparecendo desconectada.',
+        en: 'Accounts: two Claude accounts on the same plan are no longer mixed up — no more false "login expired", the same usage on both, or the Principal account shown as disconnected.',
+      },
+    ],
+  },
   '2.198.0': {
     features: [
       {
