@@ -38,7 +38,10 @@ export function useLiveDeliveries(fleet: readonly FleetRow[]) {
 
   useEffect(() => {
     void load()
-    const off = subscribeEvent('change', () => later(500))
+    // `change` = session data moved; `book` = a task-book write (which `useData` ignores).
+    const offChange = subscribeEvent('change', () => later(500))
+    const offBook = subscribeEvent('book', () => later(500))
+    const off = () => { offChange(); offBook() }
     const tick = setInterval(() => setNowMs(Date.now()), 15_000)
     // The push channel can drop while a tab is hidden (Safari suspends timers and sockets of a
     // background tab): coming back reads the line again at once, and a slow heartbeat — only while

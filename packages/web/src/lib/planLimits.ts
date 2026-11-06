@@ -287,7 +287,7 @@ export interface SubscriptionRow {
 }
 
 /** "All subscriptions": every reading, plus every registered plan that has none yet (no ring, no zero). */
-export function subscriptionRows(limits: PlanLimits[] | null, registered: RegisteredPlan[], labels: Record<string, string> = {}): SubscriptionRow[] {
+export function subscriptionRows(limits: PlanLimits[] | null, registered: RegisteredPlan[], labels: Record<string, string> = {}, accounts: readonly { harness: PlanLimits['harness']; id: string; label?: string }[] = []): SubscriptionRow[] {
   const found = new Set((limits ?? []).map(l => l.harness))
   const foundAccount = new Set((limits ?? []).map(l => `${l.harness}:${l.account}`))
   const rows: (SubscriptionRow & { account?: string })[] = [
@@ -296,6 +296,13 @@ export function subscriptionRows(limits: PlanLimits[] | null, registered: Regist
       .filter(r => (r.account ? !foundAccount.has(`${r.harness}:${r.account}`) : !found.has(r.harness)))
       .map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null, accountLabel: r.accountLabel, ...(r.account ? { account: r.account } : {}) })),
   ]
+  // Registry accounts with no plan reading and no registered plan: still listed (switch + agenda), so
+  // an account switched off by its schedule is not reachable only from Usage → Accounts.
+  const listed = new Set(rows.filter(r => r.account).map(r => `${r.harness}:${r.account}`))
+  for (const a of accounts) {
+    if (!a.id || listed.has(`${a.harness}:${a.id}`)) continue
+    rows.push({ harness: a.harness, plan: undefined, limits: null, accountLabel: a.label, account: a.id })
+  }
   const named = rows.map(r => {
     const { account } = r
     const label = (account ? labels[accountLabelKey(r.harness, account)] : undefined) ?? r.accountLabel

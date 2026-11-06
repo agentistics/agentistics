@@ -517,10 +517,14 @@ export function useTaskList(filters?: Filters) {
     // The app's one push channel (`eventStream.ts`) — no second poll. A `change` is debounced: a
     // burst of file events is one refetch.
     let t: ReturnType<typeof setTimeout> | null = null
-    const off = subscribeEvent('change', () => {
+    const kick = () => {
       if (t) clearTimeout(t)
       t = setTimeout(() => void load(), 400)
-    })
+    }
+    // `book` = a task-book write (dedicated event, so `useData` does not refetch /api/data for it).
+    const offChange = subscribeEvent('change', kick)
+    const offBook = subscribeEvent('book', kick)
+    const off = () => { offChange(); offBook() }
     return () => { off(); if (t) clearTimeout(t) }
   }, [load])
 

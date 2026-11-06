@@ -131,7 +131,14 @@ export async function handleAccountsRequest(
   if (!HARNESS_ORDER.includes(harness) || typeof (body as { available?: unknown } | null)?.available !== 'boolean') {
     return json({ error: 'Expected a harness and boolean available' }, 400)
   }
-  const account = await setAccountAvailable(harness, key, (body as { available: boolean }).available)
+  const desired = (body as { available: boolean }).available
+  // Same override path as PATCH /api/accounts/:id — a bare write here was undone by the next
+  // schedule tick on a scheduled account. Accounts with no id (legacy rows) keep the plain write.
+  const file = await readAccounts().catch(() => null)
+  const found = file?.accounts.find(a => a.harness === harness && a.key === key)
+  const account = found?.id
+    ? await toggleAccountAgentUse(found.id, desired)
+    : await setAccountAvailable(harness, key, desired)
   return account ? json({ account }) : json({ error: 'Account not found' }, 404)
 }
 

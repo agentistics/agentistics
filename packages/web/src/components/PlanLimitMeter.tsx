@@ -92,10 +92,10 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
 
 export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen, embedded = false, agentUse, onRelogin }: {
   /** The popup's per-account controls: ONLY the agent-use switch and "Sign in again" (never the schedule). */
-  agentUse?: (harness: PlanLimits['harness'], account?: string) => { on: boolean; pending: boolean; onToggle: () => void; accountId: string; reloginable: boolean } | undefined
+  agentUse?: ((harness: PlanLimits['harness'], account?: string) => { on: boolean; pending: boolean; onToggle: () => void; accountId: string; reloginable: boolean } | undefined) & { loaded?: boolean; accounts?: readonly { harness: PlanLimits['harness']; id: string; label?: string }[] }
   onRelogin?: (r: { accountId: string; harness: PlanLimits['harness']; who: string }) => void
   onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang; /** Inside a card that already carries the title: fill its width, no own title or inset. */ embedded?: boolean }) {
-  const rows = subscriptionRows(limits, registered, accountLabels)
+  const rows = subscriptionRows(limits, registered, accountLabels, agentUse?.accounts)
   const apis = useApiUsage().items ?? []
   const sectioned = apis.length > 0
   return <div data-plan-usage-summary style={{ width: '100%', maxWidth: embedded ? undefined : 344, boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -108,6 +108,8 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
         <div data-plan-row={row.harness} style={PLAN_ROW_GRID}>
           <PlanUsageRowCells harness={row.harness} name={who} plan={row.plan} limits={row.limits} now={now} lang={lang} />
         </div>
+        {!control && agentUse && agentUse.loaded === false && row.account && <div data-plan-row-controls-loading style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-tertiary)' }}>…</div>}
+        {!row.limits && row.account && control && <div data-plan-row-noreading style={{ marginTop: 4, fontSize: 11.5, color: 'var(--text-tertiary)' }}>{lang === 'pt' ? 'sem leitura do plano' : 'no plan reading'}</div>}
         {control && <div data-plan-row-controls={control.accountId} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <ToggleSwitch on={control.on} disabled={control.pending} onToggle={control.onToggle} label={`${lang === 'pt' ? 'Uso por agentes' : 'Agent use'} · ${who}`} />

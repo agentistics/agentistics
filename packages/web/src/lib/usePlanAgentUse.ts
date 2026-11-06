@@ -30,6 +30,8 @@ export interface AgentUseControl {
 /** Availability comes from the registry, including accounts with no meter or hidden budgets. */
 export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
   const [accounts, setAccounts] = useState<PlanAccount[]>([])
+  // False until the registry answered once (or failed): rows must not render controls-less in between.
+  const [loaded, setLoaded] = useState(false)
   const [optimistic, setOptimistic] = useState<Record<string, boolean>>({})
   const mutator = useRef(createAccountMutator<PlanAccount>((id, body) => fetch(`/api/accounts/${encodeURIComponent(id)}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -43,11 +45,12 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
       const version = revision.current
       try {
         const r = await fetch('/api/accounts', { cache: 'no-store' })
-        if (!r.ok) return
+        if (!r.ok) { if (active) setLoaded(true); return }
         const body = await r.json() as { accounts?: PlanAccount[] }
         if (active && version === revision.current) setAccounts(prev => (body.accounts ?? []).map(a =>
           mutator.has(a.id) ? prev.find(p => p.id === a.id) ?? a : a))
-      } catch { /* Without the registry, meters remain visible but cannot be switched. */ }
+        if (active) setLoaded(true)
+      } catch { if (active) setLoaded(true) /* Without the registry, meters remain visible but cannot be switched. */ }
     }
     void reload()
     const off = subscribeEvent('plan-limits', () => { void reload() })
@@ -55,7 +58,7 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
     return () => { active = false; off(); connected() }
   }, [enabled, mutator])
 
-  return (harness: HarnessId, id?: string): AgentUseControl | undefined => {
+  const lookup = (harness: HarnessId, id?: string): AgentUseControl | undefined => {
     const account = accounts.find(a => a.id && a.id === id && a.harness === harness && !a.retired)
     if (!enabled || !account) return undefined
     return {
@@ -87,4 +90,10 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
       },
     }
   }
+  // `loaded` lets a row show a placeholder instead of a controls-less first frame; `accounts` lets the
+  // list add the accounts that have no plan reading (they would otherwise be invisible here).
+  return Object.assign(lookup, {
+    loaded,
+    accounts: accounts.filter(a => !a.retired).map(a => ({ harness: a.harness, id: a.id, label: a.nickname ?? a.label })),
+  })
 }

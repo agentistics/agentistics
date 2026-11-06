@@ -122,6 +122,9 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         root.scrollLeft = before + (c.left - view.left) - Math.max(0, (view.width - c.width) / 2)
         const moved = root.scrollLeft - before
         if (moved === 0) return
+        // Boxes captured earlier in this pass were measured at the old scrollLeft: shift them by the
+        // scroll so the next render's transition does not start displaced.
+        for (const [k, v] of now) if (k !== key) now.set(k, { ...v, box: { ...v.box, left: v.box.left - moved } })
         const r2 = el.getBoundingClientRect()
         now.set(key, { stage, box: { left: r2.left, top: r2.top, width: r2.width, height: r2.height } })
         from = { ...prev.box, left: prev.box.left - moved }
