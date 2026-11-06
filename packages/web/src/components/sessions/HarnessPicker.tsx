@@ -20,6 +20,27 @@ export interface HarnessPickerOption {
   id: string
   label: string
   installed?: boolean
+  /** A missing harness with no integrated installer: `docUrl` is the official page, shown as "Como instalar". */
+  canInstall?: boolean
+  docUrl?: string
+}
+
+/**
+ * The picker's list: what this machine can start, then every OTHER compatible harness it knows of
+ * and does not have — dimmed, with an install affordance. Installed ones first.
+ */
+export function withMissingHarnesses(
+  startable: readonly HarnessPickerOption[] | null,
+  catalog: readonly { id: string; label: string; installed: boolean; canInstall?: boolean; setup?: { docUrl?: string } }[],
+): HarnessPickerOption[] | null {
+  if (startable === null) return null
+  const have = new Set(startable.map(h => h.id))
+  const missing: HarnessPickerOption[] = catalog
+    .filter(h => !h.installed && !have.has(h.id))
+    .map(h => ({ id: h.id, label: h.label, installed: false, ...(h.canInstall !== undefined ? { canInstall: h.canInstall } : {}), ...(h.setup?.docUrl ? { docUrl: h.setup.docUrl } : {}) }))
+  const ok = startable.filter(h => h.installed !== false)
+  const gone = startable.filter(h => h.installed === false)
+  return [...ok, ...gone, ...missing]
 }
 
 export interface HarnessPickerProps {
@@ -91,12 +112,18 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
         }
         // ONE chip per harness. A missing one is greyed and its click opens the install flow, with a
         // small inline "Instalar" saying so — it is never a second control beside the chip.
+        const howTo = missing && h.canInstall === false && !!h.docUrl
+        const Tag = (howTo ? 'a' : 'button') as 'button'
+        const tagProps = howTo
+          ? { href: h.docUrl, target: '_blank', rel: 'noopener noreferrer' }
+          : { type: 'button' as const }
         return (
-          <button
+          <Tag
+            {...(tagProps as object)}
             key={h.id}
             type="button"
             title={missing ? (pt ? `${name} não está instalado — clique para instalar` : `${name} is not installed — click to install`) : undefined}
-            onClick={() => (missing ? onInstall?.(h.id) : onChange(h.id))}
+            onClick={howTo ? undefined : () => (missing ? onInstall?.(h.id) : onChange(h.id))}
             onMouseEnter={peek} onFocus={peek}
             onMouseLeave={() => setHover(null)} onBlur={() => setHover(null)}
             data-harness-card={h.id}
@@ -107,6 +134,7 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
               background: on ? `color-mix(in srgb, ${color} 14%, transparent)` : 'var(--bg-elevated)',
               color: on ? 'var(--text-primary)' : 'var(--text-secondary)',
               fontFamily: 'inherit', fontSize: 13, fontWeight: on ? 650 : 500,
+              ...(howTo ? { textDecoration: 'none', boxSizing: 'border-box' as const } : {}),
               opacity: missing ? 0.62 : 1,
               // @touch-intentional: on a phone the chip IS a full grid cell (half the row), a real 44px button — not a pill.
               minHeight: isMobile ? 44 : undefined,
@@ -125,10 +153,10 @@ export function HarnessPicker({ lang, harnesses, value, onChange, notice, onRetr
             )}
             {missing && (
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--anthropic-orange)', marginLeft: 2 }}>
-                {pt ? 'Instalar' : 'Install'}
+                {howTo ? (pt ? 'Como instalar' : 'How to install') : (pt ? 'Instalar' : 'Install')}
               </span>
             )}
-          </button>
+          </Tag>
         )
       })}
       {hover && (() => {

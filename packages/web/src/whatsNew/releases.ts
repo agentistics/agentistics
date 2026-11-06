@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.5': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Nova sessão volta a mostrar os assistentes como antes; os não instalados aparecem apagados com o botão Instalar.',
+        en: 'New session shows the assistants as before again; the ones not installed appear dimmed with an Install button.',
+      },
+    ],
+  },
   '2.200.4': {
     features: [],
     fixes: [
