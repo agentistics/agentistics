@@ -10,7 +10,7 @@
  * board's `MobileLane`, so nobody has to learn a second phone layout.
  */
 
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useFleet, type FleetRow } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -21,7 +21,7 @@ import { harnessColor, microLabel, pill, surface } from './board'
 import { SessionChip } from '../sessions/RoleChip'
 import {
   LIVE_STAGES, LIVE_STATE_LABEL, STAGE_LABEL, byStage, etaText, filterCards, fmtSpan, joinLive, summarize,
-  fmtClock, type LeaderRecord, type LiveCard, type LiveReply, type LiveStage,
+  fmtClock, LIVE_DEFAULTS, isQueued, queuePosition, cardPills, type StageFilter, type LeaderRecord, type LiveCard, type LiveReply, type LiveStage,
 } from './liveDeliveryModel'
 import { useLiveDeliveries } from './useLiveDeliveries'
 import { disintegrate, flyCard, intersects, reintegrate, transitionKind, type Box } from './liveDeliveryFx'
@@ -40,6 +40,7 @@ const copy = (pt: boolean) => pt ? {
   down: 'Não consegui ler as entregas agora.', refused: 'O quadro não está disponível neste perfil.',
   loading: 'Carregando entregas…', none: 'Nenhuma entrega ativa agora.',
   delivered: 'entregue', last: 'última ação',
+  allSteps: 'Todas as etapas', queued: 'NA FILA', waitingSlot: 'aguardando vaga', account: 'conta',
 } : {
   title: 'Live Delivery', all: 'All tasks', onlyActive: 'only with active agents',
   deliveries: (n: number) => `${n} active ${n === 1 ? 'delivery' : 'deliveries'}`,
@@ -49,18 +50,21 @@ const copy = (pt: boolean) => pt ? {
   down: 'Could not read the deliveries right now.', refused: 'The board is not available on this profile.',
   loading: 'Loading deliveries…', none: 'No active delivery right now.',
   delivered: 'delivered', last: 'last action',
+  allSteps: 'All steps', queued: 'QUEUED', waitingSlot: 'waiting for a slot', account: 'account',
 }
 
 /** The hooks wrapper: the shared fleet stream, the plan-limits account labels and the live read model. */
-export function LiveDelivery({ lang }: { lang: 'pt' | 'en' }) {
+export function LiveDelivery({ lang, compact }: { lang: 'pt' | 'en'; compact?: boolean }) {
   const { fleet } = useFleet(lang)
   const plan = usePlanLimits()
   const { reply, error, nowMs } = useLiveDeliveries(fleet.sessions)
-  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} />
+  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} compact={compact} />
 }
 
 /** PURE of data sources: everything it draws comes in as props, so it is tested without mocking a store. */
-export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabels }: {
+export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabels, compact }: {
+  /** The shortcut popover/sheet: no leaders band, the board takes the room it is given. */
+  compact?: boolean
   lang: 'pt' | 'en'
   reply: LiveReply | null
   error: 'down' | 'refused' | null
@@ -73,15 +77,13 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const isMobile = useIsMobile()
   const navigate = useNavigate()
   const [taskId, setTaskId] = useState<string | null>(null)
-  const [onlyActive, setOnlyActive] = useState(false)
-  const [picked, setPicked] = useState<LiveStage | null>(null)
+  const [onlyActive, setOnlyActive] = useState(LIVE_DEFAULTS.onlyActive)
+  const [stageFilter, setStageFilter] = useState<StageFilter>(LIVE_DEFAULTS.stage)
 
   const cards = useMemo(() => joinLive(reply?.deliveries ?? [], fleet), [reply, fleet])
   const shown = useMemo(() => filterCards(cards, { taskId, onlyActive }), [cards, taskId, onlyActive])
   const columns = useMemo(() => byStage(shown), [shown])
-  // Phone: open on the first stage that holds something, unless the person chose one.
-  const stage: LiveStage = picked ?? LIVE_STAGES.find(s => columns[s].length > 0) ?? 'running'
-  const setStage = setPicked
+  const visibleStages = stageFilter === 'all' ? LIVE_STAGES : LIVE_STAGES.filter(s => s === stageFilter)
   const sum = useMemo(() => summarize(shown, nowMs), [shown, nowMs])
   const tasks = useMemo(() => {
     const m = new Map<string, string>()
@@ -170,6 +172,16 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         />
       </div>
       <button
+        type="button" className="ag-tap" aria-pressed={stageFilter === 'all'} data-live-allsteps onClick={() => setStageFilter(stageFilter === 'all' ? (LIVE_STAGES.find(s => columns[s].length > 0) ?? 'running') : 'all')}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 30, padding: '0 12px',
+          borderRadius: 999, fontFamily: 'inherit', fontSize: 12.5, cursor: 'pointer',
+          border: `1px solid ${stageFilter === 'all' ? 'var(--anthropic-orange)' : 'var(--border)'}`,
+          background: stageFilter === 'all' ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
+          color: stageFilter === 'all' ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
+        }}
+      >{L.allSteps}</button>
+      <button
         type="button" className="ag-tap" aria-pressed={onlyActive} onClick={() => setOnlyActive(v => !v)}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 30, padding: '0 12px',
@@ -185,50 +197,56 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const renderCard = (c: LiveCard) => {
     const eta = etaText(c.d.eta, lang)
     const agent = c.agents[0]
-    const harnesses = c.agents.length ? [...new Set(c.agents.map(a => a.harness))] : c.d.harnesses
-    const models = c.agents.length ? [...new Set(c.agents.map(a => a.model).filter(Boolean))] : c.d.models
-    const accounts = [...new Set(c.agents.map(accountOf).filter((x): x is string => !!x))]
+    const queued = isQueued(c)
+    const pos = queuePosition(cards, c)
+    const pills = cardPills(c, accountOf, L.account)
     const stateWord = LIVE_STATE_LABEL[c.liveState][pt ? 'pt' : 'en']
+    const grey = 'var(--text-tertiary)'
     return (
       <button
-        key={c.d.key} type="button" data-live-card={c.d.key} data-stage={c.d.stage} data-alert={c.alert ? '1' : undefined}
+        key={c.d.key} type="button" data-live-card={c.d.key} data-stage={c.d.stage} data-alert={c.alert ? '1' : undefined} data-queued={queued ? '1' : undefined}
         onClick={() => open(c)}
         style={{
           ...surface, display: 'grid', gap: 6, textAlign: 'left', width: '100%', padding: isMobile ? '10px 12px' : '8px 8px',
           cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', minWidth: 0,
-          border: `1px solid ${c.alert ? 'var(--accent-red, #ff5f5f)' : 'var(--border)'}`,
+          border: queued ? '1px dashed var(--border)' : `1px solid ${c.alert ? 'var(--accent-red, #ff5f5f)' : 'var(--border)'}`,
+          ...(queued ? { opacity: 0.62 } : {}),
         }}
       >
         <span style={{ fontWeight: 700, fontSize: 12.5, overflowWrap: 'anywhere' }}>{c.d.title}</span>
         <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>{c.d.subtaskId ? c.d.taskTitle : ''}</span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-          <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: STATE_COLOR[c.liveState], flexShrink: 0 }} />
-          {stateWord}{agent && c.agents.length > 1 ? ` · ${c.agents.length}` : ''}
-        </span>
-        {harnesses.length > 0 && (
-          <span style={{ display: 'inline-flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', fontSize: 11.5, color: 'var(--text-secondary)' }}>
-            {harnesses.map(h => <span key={h} style={pill(harnessColor(h))}>{h}</span>)}
-            {models.length > 0 && <span>{models.join(', ')}</span>}
+        {queued ? (
+          <span style={{ display: 'grid', gap: 2, fontSize: 11.5 }}>
+            <b data-live-queued style={{ letterSpacing: '.04em', color: grey }}>{L.queued}{pos ? ` · ${pos}${pt ? 'º' : pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}` : ''}</b>
+            <span style={{ color: grey }}>{L.waitingSlot}</span>
+          </span>
+        ) : (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+            <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: STATE_COLOR[c.liveState], flexShrink: 0 }} />
+            {stateWord}{agent && c.agents.length > 1 ? ` · ${c.agents.length}` : ''}
           </span>
         )}
-        {accounts.length > 0 && <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap' }}>{accounts.map(a => <SessionChip key={a}>{a}</SessionChip>)}</span>}
+        {pills.runtime && <span data-live-pill="runtime" style={{ ...pill(harnessColor(agent?.harness ?? c.d.harnesses[0] ?? '')), width: 'fit-content', maxWidth: '100%', overflowWrap: 'anywhere' }}>{pills.runtime}</span>}
+        {pills.account && <span data-live-pill="account" style={{ ...pill(), width: 'fit-content', maxWidth: '100%', overflowWrap: 'anywhere' }}>{pills.account}</span>}
         <span style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>
-          <span>{L.inStage} <b style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{c.d.stage === 'published' ? '—' : fmtSpan(c.d.stageSinceMs === null ? null : nowMs - c.d.stageSinceMs)}</b></span>
-          <span>{L.total} <b style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{c.d.stage === 'published' ? '—' : fmtSpan(c.d.startedAtMs === null ? null : nowMs - c.d.startedAtMs)}</b></span>
+          <span>{L.inStage} <b style={{ color: queued ? grey : 'var(--text-primary)', fontWeight: 600 }}>{c.d.stage === 'published' ? '—' : fmtSpan(c.d.stageSinceMs === null ? null : nowMs - c.d.stageSinceMs)}</b></span>
+          {!queued && <span>{L.total} <b style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{c.d.stage === 'published' ? '—' : fmtSpan(c.d.startedAtMs === null ? null : nowMs - c.d.startedAtMs)}</b></span>}
         </span>
-        <span
-          title={eta.title}
-          style={{ fontSize: 11, padding: '3px 7px', borderRadius: 5, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange-light)' }}
-        >{c.d.stage === 'published' && c.d.deliveredAtMs ? `${L.delivered} ${fmtClock(c.d.deliveredAtMs)}` : eta.line}</span>
+        {!queued && (
+          <span
+            title={eta.title}
+            style={{ fontSize: 11, padding: '3px 7px', borderRadius: 5, background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange-light)' }}
+          >{c.d.stage === 'published' && c.d.deliveredAtMs ? `${L.delivered} ${fmtClock(c.d.deliveredAtMs)}` : eta.line}</span>
+        )}
         {c.d.blockedReason && <span style={{ fontSize: 11, color: 'var(--accent-red, #ff5f5f)' }}>{c.d.blockedReason}</span>}
-        {c.d.lastAction && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }} title={L.last}>↳ {c.d.lastAction.text}</span>}
+        {c.d.lastAction && !queued && <span style={{ fontSize: 11, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }} title={L.last}>↳ {c.d.lastAction.text}</span>}
       </button>
     )
   }
 
   const header = (
     <div style={{ display: 'grid', gap: 10 }}>
-      <LeadersBand leaders={reply.leaders ?? []} lang={lang} onOpen={id => navigate(`/sessions/${encodeURIComponent(id)}`)} />
+      {!compact && <LeadersBand leaders={reply.leaders ?? []} lang={lang} onOpen={id => navigate(`/sessions/${encodeURIComponent(id)}`)} />}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 650 }}>
           <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-red, #ff5f5f)' }} />{L.title}
@@ -243,43 +261,60 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   if (reply.deliveries.length === 0) return <div style={{ display: 'grid', gap: 12 }}>{header}<Note text={L.none} /></div>
 
   if (isMobile) {
+    const chip = (active: boolean): React.CSSProperties => ({
+      flex: '0 0 auto', minHeight: 32, padding: '0 14px', borderRadius: 999, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+      border: `1px solid ${active ? 'transparent' : 'var(--border)'}`,
+      background: active ? 'var(--anthropic-orange-dim)' : 'var(--bg-card)',
+      color: active ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
+      fontWeight: active ? 600 : 400,
+    })
     return (
       <div style={{ display: 'grid', gap: 10 }}>
         {header}
         <div className="ag-noscroll" role="tablist" style={{ display: 'flex', gap: 6, overflowX: 'auto', margin: '0 -12px', padding: '0 12px', scrollbarWidth: 'none' }}>
+          <button role="tab" className="ag-tap" aria-selected={stageFilter === 'all'} onClick={() => setStageFilter('all')} style={chip(stageFilter === 'all')}>{L.allSteps} · {shown.length}</button>
           {LIVE_STAGES.map(s => (
-            <button
-              key={s} role="tab" className="ag-tap" aria-selected={s === stage} onClick={() => setStage(s)}
-              style={{
-                flex: '0 0 auto', minHeight: 32, padding: '0 14px', borderRadius: 999, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
-                border: `1px solid ${s === stage ? 'transparent' : 'var(--border)'}`,
-                background: s === stage ? 'var(--anthropic-orange-dim)' : 'var(--bg-card)',
-                color: s === stage ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
-                fontWeight: s === stage ? 600 : 400,
-              }}
-            >{STAGE_LABEL[s][pt ? 'pt' : 'en']} · {columns[s].length}</button>
+            <button key={s} role="tab" className="ag-tap" aria-selected={s === stageFilter} onClick={() => setStageFilter(s)} style={chip(s === stageFilter)}>
+              {STAGE_LABEL[s][pt ? 'pt' : 'en']} · {columns[s].length}
+            </button>
           ))}
         </div>
-        {columns[stage].length === 0 ? <Note text={L.empty} /> : <div ref={boardRef} style={{ display: 'grid', gap: 10, paddingTop: 6 }}>{columns[stage].map(renderCard)}</div>}
+        <div ref={boardRef} style={{ display: 'grid', gap: 10, paddingTop: 6 }}>
+          {visibleStages.map(s => (
+            <section key={s} data-live-column={s} style={{ display: 'grid', gap: 8, alignContent: 'start', opacity: columns[s].length === 0 ? 0.5 : 1 }}>
+              {(stageFilter === 'all' || columns[s].length === 0) && (
+                <header data-live-stage-head style={{
+                  position: 'sticky', top: 0, zIndex: 2, background: 'var(--bg-surface)', borderTop: `3px solid ${STAGE_LABEL[s].color}`,
+                  padding: '6px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                  <span style={{ fontWeight: 700, fontSize: 13 }}>{STAGE_LABEL[s][pt ? 'pt' : 'en']}</span>
+                  <span style={{ ...microLabel, fontSize: 11 }}>{columns[s].length === 0 ? L.empty : columns[s].length}</span>
+                </header>
+              )}
+              {columns[s].map(renderCard)}
+            </section>
+          ))}
+        </div>
       </div>
     )
   }
 
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
+    <div style={{ display: 'grid', gap: 12, gridTemplateRows: 'auto minmax(0, 1fr)', height: compact ? '100%' : 'calc(100dvh - 190px)', minHeight: compact ? 0 : 420 }}>
       {header}
-      <div ref={boardRef} style={{ display: 'flex', gap: 8, overflowX: 'auto', alignItems: 'flex-start', padding: '6px 2px 6px' }}>
-        {LIVE_STAGES.map(s => (
-          <section key={s} data-live-column={s} style={{ flex: '1 1 0', minWidth: 112, display: 'grid', gap: 8, alignContent: 'start' }}>
-            <header style={{ borderTop: `3px solid ${STAGE_LABEL[s].color}`, padding: '8px 4px 2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 700, fontSize: 13 }}>{STAGE_LABEL[s][pt ? 'pt' : 'en']}</span>
-              <span style={{ ...microLabel, fontSize: 11 }}>{columns[s].length}</span>
-            </header>
-            {columns[s].length === 0
-              ? <div style={{ ...surface, padding: '10px 12px', fontSize: 11, color: 'var(--text-tertiary)', borderStyle: 'dashed', textAlign: 'center' }}>—</div>
-              : columns[s].map(renderCard)}
-          </section>
-        ))}
+      <div ref={boardRef} className="ag-scroll" data-live-board style={{ display: 'flex', gap: 8, overflowX: 'auto', overflowY: 'auto', alignItems: 'flex-start', padding: '6px 2px 10px', minHeight: 0 }}>
+        {visibleStages.map(s => {
+          const empty = columns[s].length === 0
+          return (
+            <section key={s} data-live-column={s} style={{ flex: empty ? '0 0 40px' : '0 0 280px', width: empty ? 40 : 280, minWidth: 0, display: 'grid', gap: 8, alignContent: 'start', opacity: empty ? 0.5 : 1 }}>
+              <header style={{ borderTop: `3px solid ${STAGE_LABEL[s].color}`, padding: '8px 4px 2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...(empty ? { flexDirection: 'column', gap: 6 } : {}) }}>
+                <span style={{ fontWeight: 700, fontSize: 13, ...(empty ? { writingMode: 'vertical-rl', whiteSpace: 'nowrap' } : {}) }}>{STAGE_LABEL[s][pt ? 'pt' : 'en']}</span>
+                <span style={{ ...microLabel, fontSize: 11 }}>{columns[s].length}</span>
+              </header>
+              {columns[s].map(renderCard)}
+            </section>
+          )
+        })}
       </div>
     </div>
   )

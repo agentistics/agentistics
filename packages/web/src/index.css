@@ -1512,3 +1512,8 @@ tr:focus-within .ag-row-actions,
 .ag-scroll::-webkit-scrollbar-track { background: color-mix(in srgb, var(--text-primary) 6%, transparent); border-radius: 999px; }
 .ag-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--anthropic-orange) 60%, transparent); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
 .ag-scroll::-webkit-scrollbar-thumb:hover { background: var(--anthropic-orange); background-clip: padding-box; border: 2px solid transparent; }
+
+/* Live shortcut: a green dot that breathes while an agent works. Reduced motion renders it still (no class). */
+@keyframes ag-live-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(62,207,142,.55); } 50% { box-shadow: 0 0 0 5px rgba(62,207,142,0); } }
+.ag-live-pulse { animation: ag-live-pulse 1.8s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) { .ag-live-pulse { animation: none; } }
