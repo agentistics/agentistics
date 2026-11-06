@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { defaultClaudeConfigDir, isManagedAccountRoot } from './default-claude-root'
 
 const DATA = '/h/.agentistics'
@@ -14,7 +17,6 @@ describe('default claude root', () => {
   test('absent env is absent', () => { expect(defaultClaudeConfigDir({}, DATA)).toBeUndefined() })
 })
 
-import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from './config'
 import { claudeCredentialsFile } from './claude-usage'
 import { defaultHarnessRoot } from './harness-accounts'
@@ -38,5 +40,31 @@ describe('a leaked managed-account CLAUDE_CONFIG_DIR never becomes the default l
     expect(plan.ok && plan.plan.unsetEnv).toEqual(['CLAUDE_CONFIG_DIR'])
     const own = withEnv('/work/claude', () => planSpawn({ harness: 'claude', cwd: '/w' }))
     expect(own.ok && own.plan.unsetEnv).toBeUndefined()
+  })
+})
+
+describe('managed-root detection resolves symlinks and case', () => {
+  test('a symlinked data dir and its real path name the same managed folder', () => {
+    const real = realpathSync(mkdtempSync(join(tmpdir(), 'dcr-')))
+    try {
+      mkdirSync(join(real, 'data', 'accounts', 'claude'), { recursive: true })
+      symlinkSync(join(real, 'data'), join(real, 'link'))
+      expect(isManagedAccountRoot(join(real, 'link', 'accounts', 'claude', 'r_x'), join(real, 'data'))).toBe(true)
+      expect(isManagedAccountRoot(join(real, 'data', 'accounts', 'claude', 'r_x'), join(real, 'link'))).toBe(true)
+      expect(isManagedAccountRoot(join(real, 'link', 'accounts-other'), join(real, 'data'))).toBe(false)
+    } finally { rmSync(real, { recursive: true, force: true }) }
+  })
+  test('/private/var vs /var style aliases (a symlinked parent of the data dir)', () => {
+    const real = realpathSync(mkdtempSync(join(tmpdir(), 'dcr-')))
+    try {
+      mkdirSync(join(real, 'private', 'var', 'h', '.agentistics'), { recursive: true })
+      symlinkSync(join(real, 'private', 'var'), join(real, 'var'))
+      expect(isManagedAccountRoot(join(real, 'private', 'var', 'h', '.agentistics', 'accounts', 'claude', 'r_x'), join(real, 'var', 'h', '.agentistics'))).toBe(true)
+    } finally { rmSync(real, { recursive: true, force: true }) }
+  })
+  test('case differences count on win32/darwin (drive letter), not on linux', () => {
+    expect(isManagedAccountRoot('c:/Users/H/.agentistics/accounts/claude/r_x', 'C:/Users/H/.agentistics', 'win32')).toBe(true)
+    expect(isManagedAccountRoot('/users/h/.AGENTISTICS/accounts/claude/r_x', '/Users/h/.agentistics', 'darwin')).toBe(true)
+    expect(isManagedAccountRoot('/h/.AGENTISTICS/accounts/claude/r_x', '/h/.agentistics', 'linux')).toBe(false)
   })
 })

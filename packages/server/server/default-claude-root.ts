@@ -10,12 +10,31 @@
  * same percentage), and the real default account stayed "not connected". A root the user set by hand
  * (outside the managed accounts folder) still wins, as before.
  */
-import { join, resolve, sep } from 'node:path'
+import { realpathSync } from 'node:fs'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 
-export function isManagedAccountRoot(dir: string | undefined, dataDir: string): boolean {
+/**
+ * realpath of the nearest existing ancestor plus the not-yet-existing tail; plain `resolve` when
+ * nothing resolves. Symlinks, `/private/var` vs `/var` and the like compare equal this way.
+ */
+function canonical(path: string): string {
+  const abs = resolve(path)
+  const tail: string[] = []
+  let at = abs
+  for (;;) {
+    try { return join(realpathSync(at), ...tail.reverse()) } catch { /* not there yet: climb */ }
+    const up = dirname(at)
+    if (up === at) return abs
+    tail.push(basename(at))
+    at = up
+  }
+}
+
+export function isManagedAccountRoot(dir: string | undefined, dataDir: string, platform: NodeJS.Platform = process.platform): boolean {
   if (!dir) return false
-  const base = join(resolve(dataDir), 'accounts') + sep
-  return (resolve(dir) + sep).startsWith(base)
+  const fold = (p: string) => platform === 'win32' || platform === 'darwin' ? p.toLowerCase() : p
+  const base = fold(join(canonical(dataDir), 'accounts') + sep)
+  return fold(canonical(dir) + sep).startsWith(base)
 }
 
 /** The env value that really names the default Claude login, or undefined (fall back to `~/.claude`). */

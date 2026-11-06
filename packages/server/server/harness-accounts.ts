@@ -567,7 +567,11 @@ export function createHarnessAccounts(options: {
         if (!mutate) return matchIdentity(data, harness, root, found) ?? bound
           ?? { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now() }
         changed = true
-        return adopt(data, harness, root, found).account
+        const adopted = adopt(data, harness, root, found).account
+        // The default Claude login answered `loggedIn` right now: a mark left by an earlier refusal
+        // (or by a leaked account root) must not outlive that proof, or the owner re-logs in only to drop it.
+        if (harness === 'claude' && root === null) delete adopted.loginExpiredAt
+        return adopted
       })
       return { accounts, changed }
     }
