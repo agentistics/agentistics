@@ -150,7 +150,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
     const active = pathname === to
     const Glyph = surfaceGlyph(s.icon)
     return (
-      <Tip key={s.id} label={label} show={collapsed}>
+      <Tip key={s.id} label={<>{label}{s.beta && <> <BetaTag what={label} lang={lang} /></>}</>} show={collapsed}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <a href={to} data-engine-rail={s.id}
             aria-label={collapsed ? label : undefined} title={collapsed ? undefined : label}
@@ -166,6 +166,7 @@ export function AreaTree({ lang, pathname, collapsed = false, variant = 'aside',
             }}>
             <span style={{ flexShrink: 0, display: 'flex' }}>{Glyph && <Glyph size={17} aria-hidden />}</span>
             {!collapsed && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>}
+            {!collapsed && s.beta && <BetaTag what={label} lang={lang} style={{ marginLeft: 4 }} />}
           </a>
         </div>
       </Tip>

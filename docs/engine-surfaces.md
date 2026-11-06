@@ -227,3 +227,9 @@ when disabled, no tab, button, window or module request appears.
 Turns submitted through the structured surface handle show the person's text as a user bubble with a
 microphone chip. The transport header and any leading bracketed instruction paragraphs are removed
 from the display. Peer reports continue to use the system-event renderer.
+
+## Beta mark (engine-api 1.24)
+
+`beta: true` on a surface makes the host draw its own beta tag beside the entry's label (the area tree,
+the mobile "Go to" sheet and, as a tooltip, the collapsed rail), the same tag the native beta pages use.
+It is optional and additive: a host that predates it ignores the field.

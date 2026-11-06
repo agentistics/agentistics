@@ -109,4 +109,10 @@ describe('1.19', () => {
     expect(surfaceRefusals([surface({ floatOnLeave: 'yes' as never })])).toContainEqual({ id: 'demo', reason: 'bad-float-on-leave' })
     expect(surfaceRefusals([surface({ floatOnLeave: false })])).toEqual([])
   })
+
+  it('beta is an optional boolean', () => {
+    expect(surfaceRefusals([surface({ beta: true })])).toEqual([])
+    expect(surfaceRefusals([surface({ beta: false })])).toEqual([])
+    expect(surfaceRefusals([surface({ beta: 'yes' as never })])).toContainEqual({ id: 'demo', reason: 'bad-beta' })
+  })
 })

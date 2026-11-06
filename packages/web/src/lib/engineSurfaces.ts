@@ -29,6 +29,8 @@ export interface EngineSurfaceInfo {
   frameless?: boolean
   /** 1.19: kept-alive inline/side surfaces float when their session leaves; false opts out. */
   floatOnLeave?: boolean
+  /** 1.24: the entry wears the host's beta tag. */
+  beta?: boolean
 }
 
 /** A pill in the top bar on every screen while it is set (`ctx.setIndicator`). */
@@ -132,7 +134,7 @@ export function surfacesFrom(status: unknown, placement: SurfacePlacement): Engi
     out.push({
       id: s.id, placement, label: { pt: label.pt, en: label.en }, module: s.module,
       ...(typeof s.floatOnLeave === 'boolean' ? { floatOnLeave: s.floatOnLeave } : {}), ...(icon ? { icon } : {}), ...(activeIcon ? { activeIcon } : {}), ...(activeLabel ? { activeLabel } : {}),
-      ...(activeTone ? { activeTone } : {}), ...(layout ? { layout } : {}), ...(s.frameless === true ? { frameless: true } : {}),
+      ...(activeTone ? { activeTone } : {}), ...(layout ? { layout } : {}), ...(s.frameless === true ? { frameless: true } : {}), ...(s.beta === true ? { beta: true } : {}),
     })
   }
   return out

@@ -134,6 +134,30 @@ test('390px sessions indicator reserves a wrapping row below the title, with ico
   }
 })
 
+describe('beta tag on a rail entry', () => {
+  const wearsTag = async (surface: object) => {
+    state.resetEngineSurfaceHostForTests()
+    status = { present: true, surfaces: [surface] }
+    caps.invalidateEngineCaps()
+    const view = await mount(app({ nav: null, path: '' }))
+    const link = view.host.querySelector('a[data-engine-rail="demo"]') as HTMLElement
+    const tag = Array.from(link.querySelectorAll('span')).find(e => e.textContent === 'beta')
+    await act(async () => { view.root.unmount() })
+    view.host.remove()
+    return tag
+  }
+  test('beta:true draws the host BetaTag beside the label; without it nothing changes', async () => {
+    const tag = await wearsTag({ ...rail, beta: true })
+    expect(tag).toBeTruthy()
+    expect(tag!.getAttribute('title')).toContain('Demo is in beta')
+    expect(await wearsTag(rail)).toBeUndefined()
+  })
+  test('surfacesFrom carries beta only when it is true', () => {
+    expect(surfacesFrom({ surfaces: [{ ...rail, beta: true }] }, 'rail')[0]!.beta).toBe(true)
+    expect(surfacesFrom({ surfaces: [{ ...rail, beta: 'yes' }] }, 'rail')[0]!.beta).toBeUndefined()
+  })
+})
+
 describe('rail page, keepAlive and indicator', () => {
   test('rail entry → page mount → leaving without keepAlive unmounts', async () => {
     state.resetEngineSurfaceHostForTests()
