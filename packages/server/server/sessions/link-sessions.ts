@@ -68,11 +68,21 @@ export function linkManagedSessions(
     if (typeof s.project_path === 'string' && s.project_path !== s.current_cwd) add(`${s.harness}\0${s.project_path}`, entry)
   }
 
+  // Sorted by start, so the window [startedMs, startedMs + windowMs] is two binary searches: one
+  // repository can hold thousands of sessions and hundreds of managed rows.
+  for (const list of byPlace.values()) list.sort((a, b) => a.at - b.at)
+  const firstAtOrAfter = (list: readonly { at: number }[], t: number): number => {
+    let lo = 0, hi = list.length
+    while (lo < hi) { const mid = (lo + hi) >>> 1; if (list[mid]!.at < t) lo = mid + 1; else hi = mid }
+    return lo
+  }
+
   for (const { m, startedMs } of withStart) {
-    const candidates = (byPlace.get(`${m.harness as HarnessId}\0${m.cwd}`) ?? [])
-      .filter(({ s, at }) => sessionAtCwd(s, m.cwd) && at >= startedMs && at - startedMs <= windowMs)
-      // Strictly after, and inside the window. A conversation that predates the start is not it.
-      .map(({ s }) => s)
+    const place = byPlace.get(`${m.harness as HarnessId}\0${m.cwd}`) ?? []
+    // Strictly after, and inside the window. A conversation that predates the start is not it.
+    const from = firstAtOrAfter(place, startedMs), to = firstAtOrAfter(place, startedMs + windowMs + 1)
+    // Two is already "ambiguous": the slice never needs more than that to decide.
+    const candidates = place.slice(from, Math.min(to, from + 2)).filter(({ s }) => sessionAtCwd(s, m.cwd)).map(({ s }) => s)
 
     // Two conversations this session could be — refuse rather than take the closest. "Closest" is a
     // coin flip dressed as a rule when two assistants were opened in one directory minutes apart.

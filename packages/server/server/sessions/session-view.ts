@@ -956,8 +956,12 @@ export function buildSessionViews(o: {
   // was running. "Some sessions do not appear" and "some appear twice" were the same bug, seen
   // from its two ends.
   const coveredConv = new Set<string>()
+  // APP.LENTO: a map, not `managed.find` per row — 3.000 × 3.000 comparisons every poll on a real
+  // fleet (6 % of the server's CPU). First occurrence wins, as `find` did.
+  const managedById = new Map<string, SessionView>()
+  for (const v of managed) if (!managedById.has(v.id)) managedById.set(v.id, v)
   for (const r of o.reconciled) {
-    const m = managed.find(v => v.id === r.id)
+    const m = managedById.get(r.id)
     // `exited` and `lost` rows cover nothing: their work IS over, and the conversation belongs in
     // history where it can be reopened.
     if (!m || (m.status !== 'running' && m.status !== 'unregistered')) continue
