@@ -2739,8 +2739,8 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         // §F.1 — it is simply never allowed to hold a session). Everything else stays 404: the ref,
         // the session or the subtask named nothing.
         return json(
-          { ok: false, reason: result.reason, ...(result.blockedBy ? { blockedBy: result.blockedBy } : {}) },
-          result.reason === 'blocked' || result.reason === 'subtask_in_group' ? 422 : 404,
+          { ok: false, reason: result.reason, ...(result.message ? { message: result.message } : {}), ...(result.blockedBy ? { blockedBy: result.blockedBy } : {}) },
+          result.reason === 'blocked' || result.reason === 'subtask_in_group' || result.reason === 'leader_only' ? 422 : 404,
         )
       }
       if (verb === 'links') {

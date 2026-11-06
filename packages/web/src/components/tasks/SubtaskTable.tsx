@@ -658,48 +658,6 @@ export function SubtaskTable(p: SubtaskTableProps) {
             </tr>
             )
           })}
-          {directView && (
-            // The `id: null` direct-branch bucket — sessions filed straight on the delivery,
-            // under no subtask. Styled distinctly from a real subtask row: no status chip, no
-            // due date, because this is not a piece of planned work — it is "everything not
-            // broken out". See docs/superpowers/specs/2026-09-10-task-session-hierarchy-design.md
-            // §4.4. It disappears entirely when there is nothing filed directly (the server only
-            // emits this bucket when `direct.length > 0` — see `subtaskViews()`).
-            <tr>
-              {/* No gear here — this bucket is not a subtask, it has nothing a menu could act on. */}
-              <td style={cell} />
-              <td style={{ ...cell, minWidth: isMobile ? 150 : undefined, color: 'var(--text-tertiary)', fontStyle: 'italic', fontSize: 12 }}>
-                {copy.directSessions}
-              </td>
-              {shownCols.map(id => {
-                const def = SUBTASK_COLUMNS.find(c => c.id === id)!
-                return (
-                  <td key={id} style={{ ...cell, textAlign: def.numeric ? 'right' : 'left', minWidth: id === 'sessions' ? 160 : undefined, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {id === 'sessions' && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 }}>
-                        {directSessions.map(s => (
-                          <SessionRef
-                            key={s.id}
-                            id={s.id}
-                            title={s.label}
-                            harness={s.harness}
-                            lang={p.lang}
-                            historical={s.historical === true}
-                            onOpen={p.onOpenSession}
-                            onUnfile={sid => void p.onUnfile(sid)}
-                          />
-                        ))}
-                      </span>
-                    )}
-                    {id === 'model' && <ModelCellView sessions={directSessions} />}
-                    {id === 'cost' && <CostCellView r={directView.rollup} cost={directCost} money={money} lang={p.lang} />}
-                    {id === 'tokens' && <TokensCellView tok={directTok} />}
-                  </td>
-                )
-              })}
-              <td style={cell} />
-            </tr>
-          )}
           <tr>
             <td colSpan={colCount} style={{ ...cell }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, width: '100%' }}>

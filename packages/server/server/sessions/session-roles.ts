@@ -699,3 +699,15 @@ export async function deliverStoredRole(
     return true
   })
 }
+
+/**
+ * The role a row works under: the stored one, else what its spawn relationship implies (a parent
+ * started it => worker; a leader-prefixed label => leader), else undefined (a person's session).
+ */
+export async function effectiveRole(row: { id: string; conversationId?: string | undefined; label?: string | undefined; parentSessionId?: string | undefined }): Promise<SessionRole | undefined> {
+  const stored = await storedRoleFor([row.conversationId, row.id])
+  if (stored) return stored
+  const { spawnRole } = await import('./spawn-row')
+  const { hasRolePrefix } = await import('@agentistics/core')
+  return spawnRole({ leaderPrefix: !!row.label && hasRolePrefix(row.label), hasParent: !!row.parentSessionId })
+}
