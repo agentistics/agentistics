@@ -74,11 +74,14 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const navigate = useNavigate()
   const [taskId, setTaskId] = useState<string | null>(null)
   const [onlyActive, setOnlyActive] = useState(false)
-  const [stage, setStage] = useState<LiveStage>('running')
+  const [picked, setPicked] = useState<LiveStage | null>(null)
 
   const cards = useMemo(() => joinLive(reply?.deliveries ?? [], fleet), [reply, fleet])
   const shown = useMemo(() => filterCards(cards, { taskId, onlyActive }), [cards, taskId, onlyActive])
   const columns = useMemo(() => byStage(shown), [shown])
+  // Phone: open on the first stage that holds something, unless the person chose one.
+  const stage: LiveStage = picked ?? LIVE_STAGES.find(s => columns[s].length > 0) ?? 'running'
+  const setStage = setPicked
   const sum = useMemo(() => summarize(shown, nowMs), [shown, nowMs])
   const tasks = useMemo(() => {
     const m = new Map<string, string>()
@@ -108,11 +111,26 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       const kind = transitionKind(prev.stage, stage)
       if (kind === 'none' || r.width === 0) return
       // Out of sight at either end (scrolled sideways): no ghost over unrelated screen.
-      if (!intersects(now.get(key)!.box, view) || !intersects(prev.box, view)) return
+      let from = prev.box
+      if (!intersects(now.get(key)!.box, view)) {
+        // The destination column is off-screen (a narrow window): bring it into view first, shifting the
+        // remembered origin by the scroll so the glide still starts where the card was on screen.
+        const col = root.querySelector<HTMLElement>(`[data-live-column="${stage}"]`)
+        if (!col || root.scrollWidth <= root.clientWidth) return
+        const before = root.scrollLeft
+        const c = col.getBoundingClientRect()
+        root.scrollLeft = before + (c.left - view.left) - Math.max(0, (view.width - c.width) / 2)
+        const moved = root.scrollLeft - before
+        if (moved === 0) return
+        const r2 = el.getBoundingClientRect()
+        now.set(key, { stage, box: { left: r2.left, top: r2.top, width: r2.width, height: r2.height } })
+        from = { ...prev.box, left: prev.box.left - moved }
+      }
+      if (!intersects(now.get(key)!.box, view)) return
       el.style.opacity = '0'
       const back = () => { el.style.opacity = '' }
-      if (kind === 'merge-approved') void disintegrate(el, prev.box).then(() => reintegrate(el)).then(back, back)
-      else void flyCard(el, prev.box, { fromColor: STAGE_LABEL[prev.stage].color, toColor: STAGE_LABEL[stage].color }).then(back, back)
+      if (kind === 'merge-approved') void disintegrate(el, from).then(() => reintegrate(el)).then(back, back)
+      else void flyCard(el, from, { fromColor: STAGE_LABEL[prev.stage].color, toColor: STAGE_LABEL[stage].color }).then(back, back)
     })
     seen.current = now
   })
@@ -165,7 +183,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         key={c.d.key} type="button" data-live-card={c.d.key} data-stage={c.d.stage} data-alert={c.alert ? '1' : undefined}
         onClick={() => open(c)}
         style={{
-          ...surface, display: 'grid', gap: 6, textAlign: 'left', width: '100%', padding: '10px 12px',
+          ...surface, display: 'grid', gap: 6, textAlign: 'left', width: '100%', padding: isMobile ? '10px 12px' : '8px 8px',
           cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', minWidth: 0,
           border: `1px solid ${c.alert ? 'var(--accent-red, #ff5f5f)' : 'var(--border)'}`,
         }}
@@ -239,9 +257,9 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       {header}
-      <div ref={boardRef} style={{ display: 'flex', gap: 10, overflowX: 'auto', alignItems: 'flex-start', padding: '6px 2px 6px' }}>
+      <div ref={boardRef} style={{ display: 'flex', gap: 8, overflowX: 'auto', alignItems: 'flex-start', padding: '6px 2px 6px' }}>
         {LIVE_STAGES.map(s => (
-          <section key={s} data-live-column={s} style={{ flex: '1 0 210px', minWidth: 210, display: 'grid', gap: 8, alignContent: 'start' }}>
+          <section key={s} data-live-column={s} style={{ flex: '1 1 0', minWidth: 112, display: 'grid', gap: 8, alignContent: 'start' }}>
             <header style={{ borderTop: `3px solid ${STAGE_LABEL[s].color}`, padding: '8px 4px 2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontWeight: 700, fontSize: 13 }}>{STAGE_LABEL[s][pt ? 'pt' : 'en']}</span>
               <span style={{ ...microLabel, fontSize: 11 }}>{columns[s].length}</span>
@@ -254,6 +272,22 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       </div>
     </div>
   )
+}
+
+const RAW_STATE_WORDS: Record<string, { en: string; pt: string }> = {
+  'waiting-approval': { en: 'needs your approval', pt: 'precisa da sua aprovação' },
+  waiting: { en: 'waiting for you', pt: 'esperando você' },
+  working: { en: 'working', pt: 'trabalhando' },
+  running: { en: 'working', pt: 'trabalhando' },
+  lost: { en: 'lost', pt: 'perdida' },
+  exited: { en: 'finished', pt: 'encerrada' },
+  closed: { en: 'finished', pt: 'encerrada' },
+  external: { en: 'outside agentop', pt: 'fora do agentop' },
+}
+/** A fleet state in plain words — never the raw value (`waiting-approval`). */
+function stateWordOf(state: string, pt: boolean): string {
+  const w = RAW_STATE_WORDS[state]
+  return w ? (pt ? w.pt : w.en) : state.replace(/-/g, ' ')
 }
 
 function Note({ text }: { text: string }) {
@@ -292,13 +326,13 @@ function LeadersBand({ leaders, lang, onOpen }: { leaders: readonly LeaderRecord
               <button type="button" onClick={() => onOpen(l.id)} style={{ background: 'none', border: 0, padding: 0, textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontWeight: 700, fontSize: 12.5, overflowWrap: 'anywhere' }}>{l.title}</button>
               <span style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', fontSize: 11.5, color: 'var(--text-secondary)' }}>
                 <span style={pill(harnessColor(l.harness))}>{l.harness}</span>{l.model && <span>{l.model}</span>}
-                <span style={{ color: 'var(--text-tertiary)' }}>· {l.state}</span>
+                <span style={{ color: 'var(--text-tertiary)' }}>· {stateWordOf(l.state, pt)}</span>
               </span>
               <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{l.currentAction ? <>↳ {l.currentAction}</> : <span style={{ color: 'var(--text-tertiary)' }}>—</span>}</span>
               <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{l.workers.length} {l.workers.length === 1 ? 'worker' : 'workers'}</span>
               {l.workers.length > 0 && (
                 <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 2, fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                  {l.workers.slice(0, 4).map(w => <li key={w.id} style={{ display: 'flex', gap: 6, minWidth: 0 }}><span style={{ color: 'var(--text-tertiary)', flexShrink: 0 }}>{w.state}</span><span style={{ overflowWrap: 'anywhere' }}>{w.title}</span></li>)}
+                  {l.workers.slice(0, 4).map(w => <li key={w.id} style={{ display: 'flex', gap: 6, minWidth: 0 }}><span style={{ color: 'var(--text-tertiary)', flexShrink: 0 }}>{stateWordOf(w.state, pt)}</span><span style={{ overflowWrap: 'anywhere' }}>{w.title}</span></li>)}
                 </ul>
               )}
               {l.awaiting.map(a => (

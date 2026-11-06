@@ -14,7 +14,7 @@
  * shows both and no total, and an open task shows no duration — "still running" is not "took N h".
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
@@ -112,6 +112,12 @@ function TaskList() {
   const view = effectiveView(storedView, isMobile, hasStoredView())
   const [lane, setLane] = useState<string | null>(null)
   const [sheet, setSheet] = useState(false)
+  useEffect(() => {
+    if (!sheet) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSheet(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sheet])
   const MB = mobileBoardCopy(lang)
   // The kanban's arrangement, persisted with everything else the board remembers. The SORT is
   // shared with the table on purpose: a board that ranks its cards one way in the grid and another
