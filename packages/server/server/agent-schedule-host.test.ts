@@ -87,4 +87,18 @@ describe('PATCH/GET /api/accounts', () => {
     expect(body.account.agentSchedule).toBeUndefined()
     expect(body.account.agentUse).toBeUndefined()
   })
+  test('all-day day is on at 00:00 and 23:59; the weekly ceiling turns it off, no reading never does', async () => {
+    const full: AgentSchedule = { enabled: true, maxWeeklyPct: 50, days: { mon: { windows: [], allDay: true } } }
+    limits = [week(10)]
+    await setAccountAgentSchedule('acc_1', full, at(2, 0, 0))
+    expect((await account()).available).toBe(true)
+    await evaluateAgentSchedules(at(2, 23, 59))
+    expect((await account()).available).toBe(true)
+    limits = [week(50)]
+    await evaluateAgentSchedules(at(2, 23, 59))
+    expect((await account()).available).toBe(false)
+    limits = []
+    await evaluateAgentSchedules(at(2, 23, 59))
+    expect((await account()).available).toBe(true)
+  })
 })

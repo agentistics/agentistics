@@ -102,3 +102,41 @@ describe('parseAgentSchedule', () => {
     expect(parseAgentSchedule('x')).toBeNull()
   })
 })
+
+describe('allDay', () => {
+  const full: AgentSchedule = { enabled: true, days: { mon: { windows: [{ from: '09:00', to: '12:00' }], allDay: true, maxDailyPct: 20 }, tue: { windows: [] } } }
+  test('the whole calendar day is on: 00:00, 12:00, 23:59', () => {
+    for (const [h, m] of [[0, 0], [12, 0], [23, 59]] as const) expect(scheduleVerdict(full, at(2, h, m), 0)).toMatchObject({ on: true, reason: 'in-window', day: 'mon' })
+  })
+  test('the next day boundary: Tuesday 00:00 is not covered, and there is no tail', () => {
+    expect(scheduleVerdict(full, at(3, 0, 0), 0)).toMatchObject({ on: false, day: 'tue' })
+  })
+  test('the daily ceiling still applies on an all-day day', () => {
+    expect(scheduleVerdict(full, at(2, 12), 20)).toMatchObject({ on: false, reason: 'daily-cap' })
+  })
+  test('parse round-trips allDay and rejects a non-boolean', () => {
+    expect(parseAgentSchedule(full)!.days.mon).toEqual({ windows: [{ from: '09:00', to: '12:00' }], maxDailyPct: 20, allDay: true })
+    expect(parseAgentSchedule({ enabled: true, days: { mon: { windows: [], allDay: 'yes' } } })).toBeNull()
+  })
+})
+
+describe('weekly ceiling', () => {
+  const w: AgentSchedule = { enabled: true, maxWeeklyPct: 60, days: { mon: { windows: [{ from: '09:00', to: '12:00' }] } } }
+  test('below / at / above', () => {
+    expect(scheduleVerdict(w, at(2, 10), 0, 59.9)).toMatchObject({ on: true, maxWeeklyPct: 60 })
+    expect(scheduleVerdict(w, at(2, 10), 0, 60)).toMatchObject({ on: false, reason: 'weekly-cap' })
+    expect(scheduleVerdict(w, at(2, 10), 0, 80)).toMatchObject({ on: false, reason: 'weekly-cap' })
+  })
+  test('no weekly reading never blocks', () => {
+    expect(scheduleVerdict(w, at(2, 10), null, null).on).toBe(true)
+  })
+  test('manual ON still wins over the weekly ceiling', () => {
+    const v = scheduleVerdict(w, at(2, 10), 0, 90)
+    expect(resolveAgentUse(w, 'on', v)).toMatchObject({ available: true, reason: 'manual-on' })
+  })
+  test('parse validates and round-trips', () => {
+    expect(parseAgentSchedule(w)!.maxWeeklyPct).toBe(60)
+    expect(parseAgentSchedule({ ...w, maxWeeklyPct: 0 })).toBeNull()
+    expect(parseAgentSchedule({ ...w, maxWeeklyPct: 101 })).toBeNull()
+  })
+})
