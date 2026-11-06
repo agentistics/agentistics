@@ -122,6 +122,17 @@ export function byStage(cards: readonly LiveCard[]): Record<LiveStage, LiveCard[
   return out
 }
 
+/** PURE. Within each column the queued cards read 1st → last from the top; the rest keep their order, ahead of the queue. */
+export function orderQueueFirstUp(cols: Record<LiveStage, LiveCard[]>, all: readonly LiveCard[]): Record<LiveStage, LiveCard[]> {
+  const out = {} as Record<LiveStage, LiveCard[]>
+  for (const s of LIVE_STAGES) {
+    const list = cols[s]
+    const pos = (c: LiveCard) => queuePosition(all, c) ?? 0
+    out[s] = [...list.filter(c => !isQueued(c)), ...list.filter(isQueued).sort((a, b) => pos(a) - pos(b))]
+  }
+  return out
+}
+
 export interface LiveSummary { deliveries: number; agentsWorking: number; nextEtaMs: number | null }
 
 export function summarize(cards: readonly LiveCard[], nowMs: number): LiveSummary {

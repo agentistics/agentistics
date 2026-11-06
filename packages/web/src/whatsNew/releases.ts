@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.200.4': {
+  '2.200.5': {
     features: [
       {
         pt: 'Atalho da Live Delivery no topo das Sessões: passe o mouse para ver a Live ao vivo num popup grande (no celular, toque para abrir uma folha), clique para ir à Live.',
@@ -25,6 +25,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'The Agentask menu lists every view (Metrics, Board, Table, Live, Activity) and highlights the active one; estimated deadlines show only the approximate time, with no confidence label.',
       },
     ],
+    fixes: [],
+  },
+  '2.200.4': {
+    features: [],
     fixes: [
       {
         pt: 'Entrega ao vivo abre mais rápido, reaproveitando leituras enquanto nada mudou.',

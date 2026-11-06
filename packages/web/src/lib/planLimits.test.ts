@@ -3,6 +3,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 ;(globalThis as { EventSource?: unknown }).EventSource ??= class { addEventListener() {} removeEventListener() {} close() {} }
 import * as events from './eventStream'
 import * as store from './planLimits'
+import { accountDisplayName } from './planLimits'
 const { __setPlanLimitsForTest, failureOfStatus, FETCH_TIMEOUT_MS, planLimitsSnapshot, retryDelayMs, subscribePlanLimits } = store
 
 test('first-answer retry backs off and is capped', () => {
@@ -105,5 +106,14 @@ describe('subscriptionRows — registry accounts with no plan reading', () => {
   test('an account that already has a row is not duplicated', () => {
     const rows = subscriptionRowsWithAccounts([], [{ harness: 'claude', plan: 'max', account: 'acc_v', accountLabel: 'Vini' } as never], {}, [{ harness: 'claude', id: 'acc_v' }])
     expect(rows.filter(r => r.account === 'acc_v')).toHaveLength(1)
+  })
+})
+
+describe('accountDisplayName (F4)', () => {
+  test('uses the label, falls back across harness spelling, then the raw id', () => {
+    const labels = { 'claude:acc_1': 'Principal' }
+    expect(accountDisplayName(labels, 'claude', 'acc_1')).toBe('Principal')
+    expect(accountDisplayName(labels, 'claude-code', 'acc_1')).toBe('Principal')
+    expect(accountDisplayName(labels, 'claude', 'acc_9')).toBe('acc_9')
   })
 })

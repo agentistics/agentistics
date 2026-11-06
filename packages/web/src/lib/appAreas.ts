@@ -58,7 +58,7 @@ export const APP_AREAS: readonly Area[] = [
     { id: 'away', path: '/leadership/away', labelPt: 'Modo autônomo', labelEn: 'Autonomous mode' },
   ] },
   { id: 'tasks', icon: 'clipboard', labelPt: 'Agentask', labelEn: 'Agentask', pages: [
-    { id: 'board', path: '/tasks', also: ['/tasks/board'], labelPt: 'Quadro', labelEn: 'Board' },
+    { id: 'board', path: '/tasks/board', also: ['/tasks'], labelPt: 'Quadro', labelEn: 'Board' },
     { id: 'metrics', path: '/tasks/metrics', labelPt: 'Métricas', labelEn: 'Metrics' },
     { id: 'table', path: '/tasks/table', labelPt: 'Tabela', labelEn: 'Table' },
     { id: 'live', path: '/tasks/live', labelPt: 'Live', labelEn: 'Live' },
