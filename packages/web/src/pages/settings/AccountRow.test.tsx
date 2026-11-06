@@ -2,7 +2,7 @@ import React from 'react'
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { PlanLimits } from '@agentistics/core'
-import { BillingAccountList, type BillingAccountListProps, type BillingRowView } from './AccountRow'
+import { BillingAccountList, quietRelogin, type BillingAccountListProps, type BillingRowView } from './AccountRow'
 import * as store from '../../lib/planLimits'
 const { __setPlanLimitsFailureForTest, __setPlanLimitsForTest } = store
 import { usageColors } from '../../lib/usageColors'
@@ -263,4 +263,14 @@ describe('USO.CARREGANDO: before the first plan-limits answer no row claims "No 
     expect(h).not.toContain('data-usage-waiting')
     expect(text(h)).toContain('No reading yet')
   })
+})
+
+describe('quietRelogin (drawer secondary button)', () => {
+  const r = (login: string, relogin: boolean) => ({ account: { login, relogin } } as unknown as BillingRowView)
+  test('shows for a healthy account that can re-login', () => { expect(quietRelogin(r('ok', true))).toBe(true) })
+  test('hidden when the login is off (the alert block owns the button)', () => {
+    expect(quietRelogin(r('expired', true))).toBe(false)
+    expect(quietRelogin(r('signed_out', true))).toBe(false)
+  })
+  test('hidden when the account cannot re-login', () => { expect(quietRelogin(r('ok', false))).toBe(false) })
 })
