@@ -142,6 +142,26 @@ describe('popover summary', () => {
     await act(async () => { await new Promise(r => setTimeout(r, 0)) })
     expect((document.querySelector('[data-api-key-input]') as HTMLInputElement | null)?.value ?? '').toBe('')
   })
+  test('key feedback stays in the dialog: plan notes, unverified checks and save errors', async () => {
+    const item = Lib.parseApiUsage({ items: [{ id: 'k', label: 'K', status: 'no-key', unit: 'credits', config: {
+      kind: 'api-key', status: 'missing', endpoint: '/api/engine/x/key', notes: [{ pt: 'Plano grátis', en: 'Free plan' }],
+    } }] })[0]!
+    let fail = false
+    globalThis.fetch = (async () => fail ? Response.json({ error: 'bad key' }, { status: 400 }) : Response.json({ unverified: [{ pt: 'TTS', en: 'TTS' }] })) as unknown as typeof fetch
+    const el = render(h(Section, { items: [item], now: NOW, lang: 'pt' }))
+    await act(async () => { (el.querySelector('[data-api-config-open]') as HTMLButtonElement).click() })
+    expect(document.querySelector('[data-api-plan-notes]')?.textContent).toContain('Plano grátis')
+    const input = document.querySelector('[data-api-key-input]') as HTMLInputElement
+    await act(async () => { input.value = 'secret'; input.dispatchEvent(new Event('input', { bubbles: true })); await new Promise(r => setTimeout(r, 0)) })
+    await act(async () => { (document.querySelector('[role=dialog] button:last-of-type') as HTMLButtonElement).click(); await new Promise(r => setTimeout(r, 0)) })
+    expect(document.querySelector('[data-api-unverified]')?.textContent).toContain('TTS')
+    expect(document.querySelector('[data-api-key-dialog]')).not.toBeNull()
+    fail = true
+    await act(async () => { input.value = 'secret2'; input.dispatchEvent(new Event('input', { bubbles: true })); await new Promise(r => setTimeout(r, 0)) })
+    await act(async () => { (document.querySelector('[role=dialog] button:last-of-type') as HTMLButtonElement).click(); await new Promise(r => setTimeout(r, 0)) })
+    expect(document.querySelector('[data-api-key-error]')?.textContent).toContain('bad key')
+    expect((document.querySelector('[data-api-key-input]') as HTMLInputElement).value).toBe('secret2')
+  })
 })
 
 describe('usage page section', () => {

@@ -6,7 +6,7 @@
  */
 import { useState } from 'react'
 import { KeyRound, Pencil } from 'lucide-react'
-import { apiRowLine, apiUsedPct, __refreshApiUsageForTest, type ApiUsageItem } from '../lib/apiUsage'
+import { apiRowLine, apiUsedPct, refreshApiUsage, type ApiUsageItem } from '../lib/apiUsage'
 import { PlanUsageRing, PLAN_ROW_GRID } from './PlanLimitMeter'
 import { ConfirmModal, dialogButtonStyle } from '../pages/settings/primitives'
 
@@ -40,7 +40,7 @@ export function ApiUsageRow({ item, now, lang, bordered = true }: { item: ApiUsa
     </div>
     {item.config && <button type="button" data-api-config-open aria-label={lang === 'pt' ? `Editar chave · ${item.label}` : `Edit key · ${item.label}`} title={lang === 'pt' ? 'Editar' : 'Edit'} onClick={() => setOpen(true)} style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 7, padding: 6, cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}><Pencil size={14} aria-hidden /></button>}
   </div>
-  {item.config && <ApiKeyDialog item={item} lang={lang} open={open} onClose={() => setOpen(false)} onChanged={() => { setOpen(false); void __refreshApiUsageForTest() }} />}
+  {item.config && <ApiKeyDialog item={item} lang={lang} open={open} onClose={() => setOpen(false)} onChanged={() => { setOpen(false); void refreshApiUsage() }} />}
   </>
 }
 
@@ -50,22 +50,30 @@ function ApiKeyDialog({ item, lang, open, onClose, onChanged }: { item: ApiUsage
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [missing, setMissing] = useState<{ pt: string; en: string }[]>([])
+  const [unverified, setUnverified] = useState<{ pt: string; en: string }[]>([])
+  const [error, setError] = useState('')
   const save = async () => {
     if (!key || busy) return
     const submitted = key
-    setKey('')
+    setError(''); setMissing([]); setUnverified([])
     setBusy(true)
     try {
       const response = await fetch(config.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: submitted }) })
-      const body = await response.json().catch(() => null) as { missing?: unknown } | null
-      if (Array.isArray(body?.missing)) setMissing(body!.missing.filter(x => x && typeof x === 'object' && typeof (x as { pt?: unknown }).pt === 'string' && typeof (x as { en?: unknown }).en === 'string') as { pt: string; en: string }[])
-      if (response.ok) onChanged()
-    } finally { setBusy(false) }
+      const body = await response.json().catch(() => null) as { missing?: unknown; unverified?: unknown; error?: unknown } | null
+      const read = (v: unknown) => Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && typeof (x as { pt?: unknown }).pt === 'string' && typeof (x as { en?: unknown }).en === 'string') as { pt: string; en: string }[] : []
+      const nextMissing = read(body?.missing), nextUnverified = read(body?.unverified)
+      setMissing(nextMissing); setUnverified(nextUnverified)
+      if (!response.ok) { setError(typeof body?.error === 'string' ? body.error : (pt ? 'Não foi possível salvar a chave.' : 'Could not save the key.')); return }
+      setKey('')
+      if (!nextMissing.length && !nextUnverified.length) onChanged()
+    } catch { setError(pt ? 'Não foi possível salvar a chave.' : 'Could not save the key.') }
+    finally { setBusy(false) }
   }
   const remove = async () => {
     if (busy) return
     setBusy(true)
-    try { if ((await fetch(config.endpoint, { method: 'DELETE' })).ok) onChanged() }
+    try { const response = await fetch(config.endpoint, { method: 'DELETE' }); if (response.ok) onChanged(); else setError(pt ? 'Não foi possível remover a chave.' : 'Could not remove the key.') }
+    catch { setError(pt ? 'Não foi possível remover a chave.' : 'Could not remove the key.') }
     finally { setBusy(false) }
   }
   const requirements = config.requirements ?? []
@@ -81,7 +89,10 @@ function ApiKeyDialog({ item, lang, open, onClose, onChanged }: { item: ApiUsage
       {config.status === 'set' && <button type="button" data-api-key-remove disabled={busy} onClick={() => { void remove() }} style={{ ...dialogButtonStyle('danger', false, busy), alignSelf: 'flex-start' }}>{pt ? 'Remover' : 'Remove'}</button>}
       {requirements.length > 0 && <div data-api-requirements style={{ fontSize: 12, color: 'var(--text-secondary)' }}><b>{pt ? 'Permissões' : 'Requirements'}</b><ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{requirements.map((r, i) => <li key={i}>{r.label[lang]} — {r.level[lang]}{r.required ? ` · ${pt ? 'obrigatório' : 'required'}` : ` · ${pt ? 'opcional' : 'optional'}`}</li>)}</ul></div>}
       {config.pricingUrl && <a href={config.pricingUrl} target="_blank" rel="noreferrer" data-api-pricing-link>{pt ? 'Ver preços ↗' : 'View pricing ↗'}</a>}
+      {config.notes && <ul data-api-plan-notes style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--text-secondary)' }}>{config.notes.map((n, i) => <li key={i}>{n[lang]}</li>)}</ul>}
       {missing.length > 0 && <div data-api-missing role="alert" style={{ color: 'var(--anthropic-orange)', fontSize: 12 }}><b>{pt ? 'Permissões ausentes' : 'Missing permissions'}</b><ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{missing.map((m, i) => <li key={i}>{m[lang]}</li>)}</ul></div>}
+      {unverified.length > 0 && <div data-api-unverified role="status" style={{ color: 'var(--text-secondary)', fontSize: 12 }}><b>{pt ? 'Não verificado' : 'Not verified'}</b><ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>{unverified.map((m, i) => <li key={i}>{m[lang]}</li>)}</ul></div>}
+      {error && <div data-api-key-error role="alert" style={{ color: 'var(--anthropic-orange)', fontSize: 12 }}>{error}</div>}
     </div>
   </ConfirmModal>
 }
