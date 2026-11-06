@@ -17,15 +17,17 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join, delimiter } from 'node:path'
 import { HARNESS_ORDER, modelsFor, type HarnessId, type ModelOption } from '@agentistics/core'
 import { CODEX_DIR, HOME_DIR, KIMI_DIR } from './config'
-import { userSearchPath } from './sessions/user-path'
+import { harnessSearchPath } from './sessions/user-path'
 import {
   parseAgyModels,
   parseClaudeModelCatalog,
   parseCodexModelsCache,
   parseKimiModelAliases,
+  parseOpencodeConfigModels,
   parseOpencodeModels,
   type CatalogProvenance,
 } from './model-catalog-parse'
+import { catalogStale, type PlanEntry } from './model-catalog-plan'
 
 export interface ModelCatalog {
   models: ModelOption[]
@@ -52,14 +54,25 @@ async function readText(path: string): Promise<string | null> {
   try { return await readFile(path, 'utf8') } catch { return null }
 }
 
+/**
+ * The PATH a model-listing CLI runs with: the process's own, plus the user's install dirs AND the
+ * system ones (`/opt/homebrew/bin`, `/usr/local/bin`). A macOS LaunchAgent starts with
+ * `/usr/bin:/bin:/usr/sbin:/sbin`, and opencode installed by Homebrew lives in neither — the list
+ * was asked of a binary that could not be found, failed, and was remembered as "no models".
+ */
+export function catalogCliPath(path: string | undefined = process.env.PATH, home: string = HOME_DIR): string {
+  return [harnessSearchPath(path, home), join(home, '.npm-global', 'bin')].filter(Boolean).join(delimiter)
+}
+
 /** Run a CLI with the user's usual bin dirs on PATH (a sidecar's PATH is often stripped). */
 async function runCli(argv: string[]): Promise<string | null> {
   try {
     const env = { ...process.env }
-    // The SAME search path every harness lookup uses (`userSearchPath`: ~/.local/bin, bun, volta, kimi, opencode …) —
-    // a private list here missed `~/.opencode/bin`, so a service could START opencode and still list none of its models.
-    env.PATH = [userSearchPath(), join(HOME_DIR, '.npm-global', 'bin')].filter(Boolean).join(delimiter)
-    const proc = Bun.spawn(argv, { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', env })
+    env.PATH = catalogCliPath(process.env.PATH)
+    // Resolve the binary against THAT path ourselves: a bare name is otherwise looked up on the
+    // parent's PATH on some platforms, which is exactly the one that lacks it.
+    const bin = Bun.which(argv[0]!, { PATH: env.PATH }) ?? argv[0]!
+    const proc = Bun.spawn([bin, ...argv.slice(1)], { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore', env })
     const timer = setTimeout(() => proc.kill(), COMMAND_TIMEOUT_MS)
     const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
     clearTimeout(timer)
@@ -72,7 +85,14 @@ async function runCli(argv: string[]): Promise<string | null> {
 const CLAUDE_CATALOG_DIR = join(HOME_DIR, '.claude', 'cache', 'model-catalog')
 
 /** Where each harness publishes its list, if it does. ABSENT = no such list: table + free text. */
-const READERS: Partial<Record<HarnessId, { ttl: number; read: Reader }>> = {
+interface Source {
+  ttl: number
+  read: Reader
+  /** A PARTIAL list for when `read` says nothing (the CLI cannot run): offered with the typed-id box still open. */
+  fallback?: Reader
+}
+
+const READERS: Partial<Record<HarnessId, Source>> = {
   claude: {
     ttl: FILE_TTL_MS,
     read: async p => {
@@ -109,19 +129,33 @@ const READERS: Partial<Record<HarnessId, { ttl: number; read: Reader }>> = {
       const out = await runCli(['opencode', 'models'])
       return out === null ? null : parseOpencodeModels(out, { ...p, source: 'opencode models' })
     },
+    // The user's own opencode.json: the default `model` and every custom provider's models. A custom
+    // provider (`upx`) is declared ONLY here, so it is what the picker can still offer when the CLI fails.
+    fallback: async p => {
+      const dir = join(process.env.XDG_CONFIG_HOME || join(HOME_DIR, '.config'), 'opencode')
+      for (const name of ['opencode.json', 'opencode.jsonc']) {
+        const text = await readText(join(dir, name))
+        const list = text === null ? null : parseOpencodeConfigModels(text, { ...p, source: `~/.config/opencode/${name}` })
+        if (list) return list
+      }
+      return null
+    },
   },
 }
 
-interface Entry { at: number; models: ModelOption[] | null }
+interface Entry extends PlanEntry { models: ModelOption[] | null; partial: ModelOption[] | null }
 const cache = new Map<HarnessId, Entry>()
 const inflight = new Map<HarnessId, Promise<void>>()
+let clock: () => number = Date.now
 
-function tableAnswer(harness: HarnessId): ModelCatalog {
-  return { models: modelsFor(harness), source: 'table', freeText: true }
+function tableAnswer(harness: HarnessId, partial: ModelOption[] | null = null): ModelCatalog {
+  const table = modelsFor(harness)
+  const extra = (partial ?? []).filter(m => !table.some(t => t.id === m.id))
+  return { models: [...table, ...extra], source: 'table', freeText: true }
 }
 
 function answerFrom(harness: HarnessId, entry: Entry | undefined): ModelCatalog {
-  return entry?.models ? { models: entry.models, source: 'cli', freeText: false } : tableAnswer(harness)
+  return entry?.models ? { models: entry.models, source: 'cli', freeText: false } : tableAnswer(harness, entry?.partial ?? null)
 }
 
 function refresh(harness: HarnessId): Promise<void> {
@@ -129,13 +163,23 @@ function refresh(harness: HarnessId): Promise<void> {
   if (!reader) return Promise.resolve()
   const running = inflight.get(harness)
   if (running) return running
-  const job = reader.read({ verifiedAt: today(), source: '' })
+  const p = { verifiedAt: today(), source: '' }
+  const job = reader.read(p)
     .catch(() => null)
-    .then(models => {
-      // A failed read keeps the last good list rather than dropping back to the table — a CLI that
-      // is offline for a minute has not stopped offering its models.
+    .then(async models => {
       const prev = cache.get(harness)
-      cache.set(harness, { at: Date.now(), models: models ?? prev?.models ?? null })
+      // The fallback is read only when the source said nothing, and never allowed to fail the refresh.
+      const partial = models || !reader.fallback ? (prev?.partial ?? null) : await reader.fallback(p).catch(() => null)
+      // A failed read keeps the last good list rather than dropping back to the table — a CLI that
+      // is offline for a minute has not stopped offering its models. It is also asked again SOON
+      // (`catalogStale`): a failure is a fact about the moment, never worth six hours.
+      cache.set(harness, {
+        at: clock(),
+        ok: models !== null,
+        failures: models !== null ? 0 : (prev?.failures ?? 0) + 1,
+        models: models ?? prev?.models ?? null,
+        partial: partial ?? prev?.partial ?? null,
+      })
     })
     .finally(() => inflight.delete(harness))
   inflight.set(harness, job)
@@ -144,7 +188,7 @@ function refresh(harness: HarnessId): Promise<void> {
 
 function stale(harness: HarnessId, entry: Entry | undefined): boolean {
   const reader = READERS[harness]
-  return !!reader && (!entry || Date.now() - entry.at > reader.ttl)
+  return !!reader && catalogStale(entry, reader.ttl, clock())
 }
 
 /** The catalog NOW, never waiting. A stale or cold entry starts a background refresh. */
@@ -176,4 +220,14 @@ export function warmModelCatalogs(): void {
 export function resetModelCatalogForTests(): void {
   cache.clear()
   inflight.clear()
+  clock = Date.now
+  for (const [h, src] of Object.entries(ORIGINAL_READERS) as [HarnessId, Source][]) READERS[h] = src
+}
+
+const ORIGINAL_READERS: Partial<Record<HarnessId, Source>> = { ...READERS }
+
+/** Test seam: replace one harness's source (and the clock the TTLs are measured on). */
+export function setModelReaderForTests(harness: HarnessId, read: Reader, now?: () => number, fallback?: Reader): void {
+  READERS[harness] = { ttl: COMMAND_TTL_MS, read, ...(fallback ? { fallback } : {}) }
+  if (now) clock = now
 }

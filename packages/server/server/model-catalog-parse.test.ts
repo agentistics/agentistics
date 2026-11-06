@@ -5,6 +5,7 @@ import {
   parseCodexModelsCache,
   parseKimiModelAliases,
   parseOpencodeModels,
+  parseOpencodeConfigModels,
   isSafeModelId,
   resolveChatModel,
 } from './model-catalog-parse'
@@ -166,5 +167,33 @@ describe('catalogFields', () => {
 
   test('no catalog at all is the table with nothing named', () => {
     expect(catalogFields([], undefined)).toEqual({ modelSuggestions: [], models: [], modelsSource: 'table', modelFreeText: true })
+  })
+})
+
+describe('parseOpencodeConfigModels', () => {
+  const cfg = JSON.stringify({
+    model: 'upx/fable-5.1',
+    provider: {
+      upx: { models: { 'fable-5.1': { name: 'Fable' }, 'opus-5': {} } },
+      ollama: { models: { 'qwen3:4b': {} } },
+      empty: {},
+    },
+  })
+
+  test('lists every provider/model the config declares, default first', () => {
+    expect(parseOpencodeConfigModels(cfg, SRC)?.map(m => m.id)).toEqual([
+      'upx/fable-5.1', 'upx/opus-5', 'ollama/qwen3:4b',
+    ])
+  })
+
+  test('the default alone is a list (a provider declared elsewhere)', () => {
+    expect(parseOpencodeConfigModels('{"model":"upx/fable-5.1"}', SRC)?.map(m => m.id)).toEqual(['upx/fable-5.1'])
+  })
+
+  test('junk, comments and an unexpected shape say nothing', () => {
+    expect(parseOpencodeConfigModels('{ // c\n "model": "a/b" }', SRC)).toBeNull()
+    expect(parseOpencodeConfigModels('[]', SRC)).toBeNull()
+    expect(parseOpencodeConfigModels('{"provider":{"x":{"models":[1]}}}', SRC)).toBeNull()
+    expect(parseOpencodeConfigModels('{"model":"not an id"}', SRC)).toBeNull()
   })
 })

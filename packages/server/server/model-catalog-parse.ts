@@ -106,6 +106,30 @@ export function parseOpencodeModels(stdout: string, p: CatalogProvenance): Model
 }
 
 /**
+ * `opencode.json`: what the USER declared — the top-level `model` (the default) and every
+ * `provider.<id>.models.<name>` key, as `provider/name`. It is the FALLBACK of `opencode models`
+ * (which also lists the connected and free providers): a list built from it is partial by
+ * nature, so the caller keeps the typed-id box open. A custom provider such as `upx` lives ONLY
+ * here, which is why this beats an empty picker when the CLI cannot be run.
+ */
+export function parseOpencodeConfigModels(json: string, p: CatalogProvenance): ModelOption[] | null {
+  const doc = parseJson(json)
+  if (!isRecord(doc)) return null
+  const ids: string[] = []
+  if (typeof doc.model === 'string' && MODEL_ID.test(doc.model.trim())) ids.push(doc.model.trim())
+  if (isRecord(doc.provider)) {
+    for (const [prov, def] of Object.entries(doc.provider)) {
+      if (!isRecord(def) || !isRecord(def.models)) continue
+      for (const name of Object.keys(def.models)) {
+        const id = `${prov}/${name}`
+        if (MODEL_ID.test(id)) ids.push(id)
+      }
+    }
+  }
+  return nonEmpty(uniq(ids.map(id => option(id, id, p))))
+}
+
+/**
  * Kimi's `~/.kimi-code/config.toml`. `kimi -m` takes a model ALIAS the user configured, so the
  * `[models."<alias>"]` table headers ARE the list. Read by pattern rather than a TOML parser: only
  * the header lines are needed, and all three key spellings TOML allows are accepted.
