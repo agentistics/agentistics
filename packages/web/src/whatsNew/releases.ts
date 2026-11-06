@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.7': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Nova sessão do OpenCode: o seletor de modelo volta a listar os modelos (os do seu opencode.json e os do OpenCode), mesmo se a primeira leitura falhar; antes a lista ficava vazia por horas.',
+        en: 'New OpenCode session: the model picker lists models again (the ones in your opencode.json and OpenCode\'s own), even if the first read fails; before, the list stayed empty for hours.',
+      },
+    ],
+  },
   '2.200.6': {
     features: [
       {
