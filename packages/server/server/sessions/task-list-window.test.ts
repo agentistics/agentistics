@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { LIST_DETAIL_CLIP, RECENT_WINDOW_MS, clipDetails, recentRows } from './task-list-window'
+import { LIST_DETAIL_CLIP, RECENT_WINDOW_MS, clipDetails, listOptionsOf, recentRows } from './task-list-window'
 import type { TaskListRow } from './task-report'
 
 const NOW = Date.parse('2026-11-06T12:00:00Z')
@@ -49,5 +49,16 @@ describe('clipDetails', () => {
     const out = clipDetails([short, none])
     expect(out[0]).toBe(short)
     expect(out[1]).toBe(none)
+  })
+})
+
+describe('listOptionsOf — the MCP and CLI read the whole text', () => {
+  const opts = (q: string) => listOptionsOf(new URL(`http://x/api/tasks${q}`).searchParams)
+  test('a plain call (what the MCP tool sends) is unclipped and whole', () => {
+    expect(opts('')).toEqual({ clip: false, recent: false })
+  })
+  test('only the web list opts into clipping, and full=1 still wins', () => {
+    expect(opts('?clip=1&recent=1')).toEqual({ clip: true, recent: true })
+    expect(opts('?clip=1&full=1').clip).toBe(false)
   })
 })

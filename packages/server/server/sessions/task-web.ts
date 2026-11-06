@@ -139,7 +139,10 @@ const listCache = new Map<string, ListCacheEntry>()
 const listInFlight = new Map<string, { key: string; promise: Promise<ListCacheEntry> }>()
 const LIST_CACHE_KEYS = 8
 
-onBookWrite(() => { listCache.clear() })
+// A build already in flight must not be joined by a read that follows the write (same key, same
+// mtime and size would otherwise hand it the pre-write reply).
+let listGeneration = 0
+onBookWrite(() => { listGeneration++; listCache.clear(); listInFlight.clear() })
 
 async function buildListReply(filter?: TaskFilter): Promise<TaskListReply> {
   const w = await loadTaskWorld()
@@ -179,8 +182,11 @@ async function cachedListReply(filter?: TaskFilter): Promise<TaskListReply> {
   if (hit?.key === key && Date.now() - hit.builtAtMs < LIVE_REPLY_MAX_AGE_MS) return hit.reply
   const flying = listInFlight.get(filterKey)
   if (flying?.key === key) return (await flying.promise).reply
+  const generation = listGeneration
   const promise = (async () => {
     const entry: ListCacheEntry = { key, builtAtMs: Date.now(), reply: await buildListReply(filter) }
+    // A write that landed while this was building made it stale whatever its key says.
+    if (generation !== listGeneration) return entry
     listCache.set(filterKey, entry)
     while (listCache.size > LIST_CACHE_KEYS) listCache.delete(listCache.keys().next().value as string)
     return entry

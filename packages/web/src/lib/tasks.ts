@@ -492,7 +492,7 @@ function withParam(q: string, param: string): string {
 
 async function fetchTaskList(q: string): Promise<TaskListEntry> {
   try {
-    const res = await fetch(`/api/tasks${q}`)
+    const res = await fetch(`/api/tasks${withParam(q, 'clip=1')}`)
     if (res.status === 403 || res.status === 404) return { rows: [], overview: null, excluded: 0, error: 'refused' }
     if (!res.ok) return { rows: [], overview: null, excluded: 0, error: 'down' }
     const body = await res.json() as {

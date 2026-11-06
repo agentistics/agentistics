@@ -161,10 +161,32 @@ export function rowsOfTask<R extends BoardRow>(
   rows: readonly R[],
   owners: ReadonlyMap<string, string> = conversationOwners(rows),
 ): R[] {
-  return rows.filter(r =>
-    (r.taskId === task.id
-      || (r.task !== undefined && legacyTaskId(r.task) === task.id))
-    && (!r.conversationId || owners.get(r.conversationId) === task.id))
+  return (rowsByTask(rows).get(task.id) ?? []).filter(r => !r.conversationId || owners.get(r.conversationId) === task.id)
+}
+
+/**
+ * The registry bucketed by the task each row NAMES (its `taskId`, or the id derived from its legacy
+ * `task` name), in registry order. `rowsOfTask` used to scan every row for every task — 136 tasks x
+ * 3000 rows — which was ~100 ms of a 230 ms live-line build on the real book. A row naming two
+ * different tasks (an id AND a legacy name that derive differently) sits in both buckets, exactly as
+ * the scan matched it for both. Memoized on the array: one board read hands the same rows to every
+ * task, and the length guard rebuilds for a caller that grew its own array.
+ */
+const bucketMemo = new WeakMap<readonly unknown[], { length: number; byTask: Map<string, unknown[]> }>()
+function rowsByTask<R extends BoardRow>(rows: readonly R[]): Map<string, R[]> {
+  const hit = bucketMemo.get(rows)
+  if (hit && hit.length === rows.length) return hit.byTask as Map<string, R[]>
+  const byTask = new Map<string, R[]>()
+  const put = (id: string, r: R) => { const l = byTask.get(id); if (l) l.push(r); else byTask.set(id, [r]) }
+  for (const r of rows) {
+    if (r.taskId !== undefined) put(r.taskId, r)
+    if (r.task !== undefined) {
+      const legacy = legacyTaskId(r.task)
+      if (legacy !== r.taskId) put(legacy, r)
+    }
+  }
+  bucketMemo.set(rows, { length: rows.length, byTask })
+  return byTask
 }
 
 // The rule lives in `task-conversations.ts` (see there); re-exported so this module stays the one

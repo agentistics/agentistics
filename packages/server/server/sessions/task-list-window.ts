@@ -50,3 +50,15 @@ export function clipDetails(rows: readonly TaskListRow[]): TaskListRow[] {
     return { ...r, task: { ...r.task, detail: d.slice(0, LIST_DETAIL_CLIP) }, detailClipped: true }
   })
 }
+
+/**
+ * What a `GET /api/tasks` query string asks for. The DEFAULT is the whole text: the CLI and the MCP
+ * tools read the board to learn what to do, and a brief cut at 400 characters is a brief half read.
+ * Only the web list opts into the clipped form (`clip=1`), and `full=1` wins over it.
+ */
+export function listOptionsOf(params: URLSearchParams): { clip: boolean; recent: boolean } {
+  return {
+    clip: params.get('clip') === '1' && params.get('full') !== '1',
+    recent: params.get('recent') === '1',
+  }
+}

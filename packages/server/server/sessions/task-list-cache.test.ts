@@ -4,6 +4,7 @@
  * carries the same totals as the whole.
  */
 import { describe, expect, test } from 'bun:test'
+import { listOptionsOf } from './task-list-window'
 import { createTask, editTask, listTasks, markTask, addComment } from './task-web'
 
 const titles = async (opts = {}) => (await listTasks(undefined, opts)).tasks.map(r => r.task.title)
@@ -58,5 +59,17 @@ describe('the split load', () => {
     expect(raw.task.detail).toBe(long)
     await editTask(t!.id, { title: 'split-long-2' })
     expect(await titles({ clip: true })).toContain('split-long-2')
+  })
+})
+
+describe('what an agent reads (MCP agentistics_tasks / CLI = a plain GET /api/tasks)', () => {
+  test('a 4000-char brief comes back whole, unclipped and unflagged', async () => {
+    const brief = 'acceptance: ' + 'z'.repeat(3988)
+    const t = await createTask({ title: 'brief-4000', detail: brief })
+    const opts = listOptionsOf(new URL('http://x/api/tasks').searchParams)
+    const row = (await listTasks(undefined, opts)).tasks.find(r => r.task.id === t!.id)!
+    expect(row.task.detail).toBe(brief)
+    expect(row.task.detail!.length).toBe(4000)
+    expect(row.detailClipped).toBeUndefined()
   })
 })

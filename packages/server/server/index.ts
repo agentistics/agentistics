@@ -2420,12 +2420,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/tasks' && req.method === 'GET') {
       const { listTasks } = await import('./sessions/task-web')
+      const { listOptionsOf } = await import('./sessions/task-list-window')
       // Two-step load (`task-list-window.ts`): `recent=1` is the open/recent rows, the plain call the
-      // rest; `full=1` keeps the whole description for the one caller that searches it.
-      return json(await listTasks(taskFilterOf(url), {
-        clip: url.searchParams.get('full') !== '1',
-        recent: url.searchParams.get('recent') === '1',
-      }))
+      // rest. Descriptions are cut to a card's worth ONLY for the caller that asks (`clip=1`, the web
+      // list): the CLI and the MCP tools read the board to learn what to DO, and a brief cut at 400
+      // characters is a brief half read. `full=1` still wins over `clip=1`.
+      return json(await listTasks(taskFilterOf(url), listOptionsOf(url.searchParams)))
     }
     // The LIVE DELIVERY line (`task-live.ts`). Matched before the generic `<ref>` GET, like `next`.
     if (url.pathname === '/api/tasks/live' && req.method === 'GET') {

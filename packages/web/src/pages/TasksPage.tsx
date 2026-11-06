@@ -35,6 +35,7 @@ import {
 import { BoardView, MobileLane } from '../components/tasks/TaskBoard'
 import { LiveDelivery } from '../components/tasks/LiveDelivery'
 import { effectiveView, hasStoredView, resolveLane } from '../components/tasks/mobileLanes'
+import { planPartial, rowsForPlan } from '../components/tasks/partialPlan'
 import { mobileBoardCopy } from '../components/tasks/boardCopyThreads'
 import { TaskTable } from '../components/tasks/TaskTable'
 import { SubtaskTable } from '../components/tasks/SubtaskTable'
@@ -97,7 +98,7 @@ function TaskList() {
   // range and the harness / project / repo chips scope which SESSIONS count toward each task, which
   // is what makes "what did this cost me last week" answerable.
   const { filters, lang } = useOutletContext<AppContext>()
-  const { rows, overview, excluded, error, partial, reload } = useTaskList(filters)
+  const { rows: listRows, overview, excluded, error, partial, reload } = useTaskList(filters)
   const { statuses, reload: reloadStatuses } = useTaskStatuses()
   const { types, reload: reloadTypes } = useTaskTypes()
   const navigate = useNavigate()
@@ -145,6 +146,14 @@ function TaskList() {
   const [hideEmpty, setHideEmpty] = useBoardPref('hideEmpty')
   const [composeSubtaskProgress, setComposeSubtaskProgress] = useBoardPref('composeSubtaskProgress')
   const boardColumns = useMemo(() => visibleStatuses(storedGroups, statuses), [storedGroups, statuses])
+  const [groupBy, setGroupBy] = useBoardPref('groupBy')
+  // While only step one of the split load is here, a view draws only what step two cannot move
+  // (`partialPlan.ts`): the closed history is never drawn half-way, and a view it would reshuffle
+  // waits for the whole list. The row-reading code below only ever sees the result.
+  const plan = planPartial({
+    partial, view, groupBy, lanes: isMobile ? 'none' : lanes, statusOrder: liveStatusOrder(statuses),
+  })
+  const rows = useMemo(() => rowsForPlan(listRows, plan), [listRows, plan])
   /**
    * The tasks on their way to `blocked`, waiting on the dialog's answer.
    *
@@ -213,7 +222,6 @@ function TaskList() {
   const laneChips = boardColumns
     .map(st => ({ status: st, count: (!needle ? statusTotals?.[st] : undefined) ?? shown.filter(r => r.task.status === st).length }))
   const activeLane = resolveLane(lane, laneChips)
-  const [groupBy, setGroupBy] = useBoardPref('groupBy')
   const [storedTypeGroups, setTypeGroups] = useBoardPref('typeGroups')
   const onTypes = view === 'table' && groupBy === 'type'
   const typeItems = useMemo(() => [
@@ -225,9 +233,9 @@ function TaskList() {
     const names = uniqueStatusLabels(statuses)
     return liveStatusOrder(statuses).map(id => ({
       id, label: names[id] ?? m[id]?.label ?? id, color: m[id]?.color ?? 'var(--text-tertiary)',
-      count: shown.filter(r => r.task.status === id).length,
+      count: (!needle ? statusTotals?.[id] : undefined) ?? shown.filter(r => r.task.status === id).length,
     }))
-  }, [statuses, shown])
+  }, [statuses, shown, needle, statusTotals])
   const viewState: ViewState = {
     view, items: onTypes ? typeItems : statusItems,
     shown: onTypes ? (storedTypeGroups ?? typeItems.map(i => i.id)) : boardColumns,
