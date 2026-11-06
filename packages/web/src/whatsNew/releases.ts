@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Quando a porta do app já está ocupada, o aviso agora diz qual programa está usando ela.',
+        en: 'When the app port is already taken, the message now names the program holding it.',
+      },
+      {
+        pt: 'Cancelar uma sessão enquanto ela ainda está começando não deixa mais um processo vivo para trás.',
+        en: 'Cancelling a session while it is still starting no longer leaves a process running behind.',
+      },
+      {
+        pt: 'A instalação de teste no Mac usa portas fora da faixa que o macOS reserva, então não falha mais por porta ocupada.',
+        en: 'The test install on Mac uses ports outside the range macOS reserves, so it no longer fails on a busy port.',
+      },
+    ],
+  },
   '2.200.1': {
     features: [],
     fixes: [
