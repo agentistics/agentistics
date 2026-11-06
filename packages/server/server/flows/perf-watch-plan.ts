@@ -41,7 +41,7 @@ export interface PerfBudgets {
   routes: Record<string, PerfBudget>
 }
 
-/** Sampled every 30 s by the flow: cpu 6 × 30 s = the brief's "idle CPU > 25 % for 3 min". */
+/** The host samples every 30 s (the flow folds them every few minutes): cpu 6 × 30 s = the brief's "CPU > 25 % for 3 min". */
 export const SAMPLE_EVERY_MS = 30_000
 export const DEFAULT_PERF_BUDGETS: PerfBudgets = {
   cpuPct: { max: 25, streak: 6 },

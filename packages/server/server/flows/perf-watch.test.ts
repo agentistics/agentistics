@@ -9,7 +9,7 @@ function deps(samples: Partial<PerfSample>[], over: Partial<PerfWatchDeps> = {})
   const notices: { keys: string[]; file: string | null }[] = []
   let i = 0
   const d: PerfWatchDeps = {
-    sample: () => ({ at: i, cpuPct: 5, rssMB: 400, loopLagMaxMs: 10, routes: {}, ...samples[Math.min(i++, samples.length - 1)] }),
+    samples: () => [{ at: i, cpuPct: 5, rssMB: 400, loopLagMaxMs: 10, routes: {}, ...samples[Math.min(i++, samples.length - 1)] }],
     profile: async () => ({ nodes: [], samples: [] }),
     write: async file => { writes.push(file) },
     prune: async () => {},
@@ -22,6 +22,16 @@ function deps(samples: Partial<PerfSample>[], over: Partial<PerfWatchDeps> = {})
 }
 
 describe('vigia-desempenho host ops', () => {
+  test('several samples since the last run are folded in order: a streak inside ONE run fires', async () => {
+    const { d, notices } = deps([{}], { samples: () => Array.from({ length: 6 }, (_, k) => ({ at: k, cpuPct: 97, rssMB: 1, loopLagMaxMs: 1, routes: {} })) })
+    const ops = perfWatchHostOps(d)
+    const s = await ops['amostrar-desempenho']({}) as { samples: number; fire: { key: string }[] }
+    expect(s.samples).toBe(6)
+    expect(s.fire.map(b => b.key)).toEqual(['cpuPct'])
+    await ops['capturar-desempenho'](s)
+    expect(notices.map(n => n.keys)).toEqual([['cpuPct']])
+  })
+
   test('within budget: samples, captures nothing, tells nobody', async () => {
     const { d, writes, notices } = deps([{}])
     const ops = perfWatchHostOps(d)

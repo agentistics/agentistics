@@ -2,7 +2,9 @@
  * perf-watch.ts — IO for `vigia-desempenho` (APP.LENTO prevention). Two host ops the engine's flow
  * wires together; the decisions are `perf-watch-plan.ts` (pure).
  *
- *  - `amostrar-desempenho` {dryRun?} — one SAMPLE of this process: CPU since the previous sample (from
+ *  - `amostrar-desempenho` {dryRun?} — the SAMPLES of this process since the previous run (the host takes
+ *    one every `SAMPLE_EVERY_MS` into a small ring once the flow has run; the flow itself runs every few
+ *    minutes, so `flows/runs` gets one record per run, not one per sample), each: CPU since the previous sample (from
  *    `process.cpuUsage`), RSS, the worst event-loop lag of the window (a 250 ms drift timer), and the
  *    p95 of the REAL requests the server answered in the window, per watched route. Nothing is
  *    requested to measure it: a GET of `/api/fleet` from here would wake the fleet poller, which only
@@ -17,7 +19,7 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { DEFAULT_PERF_BUDGETS, describeBreach, emptyPerfWatchState, evaluatePerf, p95, routeBucket, type PerfBreach, type PerfSample, type PerfWatchState } from './perf-watch-plan'
+import { DEFAULT_PERF_BUDGETS, SAMPLE_EVERY_MS, describeBreach, emptyPerfWatchState, evaluatePerf, p95, routeBucket, type PerfBreach, type PerfSample, type PerfWatchState } from './perf-watch-plan'
 
 export const PERF_DIR = join(AGENTISTICS_DATA_DIR, 'perf')
 export const PROFILE_MS = 10_000
@@ -58,6 +60,14 @@ function startLagMonitor(): void {
 
 let last: { at: number; cpu: NodeJS.CpuUsage } | null = null
 let state: PerfWatchState = emptyPerfWatchState()
+const RING_MAX = 40
+const ring: PerfSample[] = []
+let ringTimer: ReturnType<typeof setInterval> | null = null
+function startRing(): void {
+  if (ringTimer) return
+  ringTimer = setInterval(() => { ring.push(takeSample()); if (ring.length > RING_MAX) ring.shift() }, SAMPLE_EVERY_MS)
+  ringTimer.unref?.()
+}
 
 /** One sample of this process; resets the window. Exported for tests through `perfWatchHostOps`. */
 export function takeSample(now = Date.now()): PerfSample {
@@ -74,7 +84,8 @@ export function takeSample(now = Date.now()): PerfSample {
 }
 
 export interface PerfWatchDeps {
-  sample(): PerfSample
+  /** The samples taken since the previous call, oldest first, plus one taken now. */
+  samples(): PerfSample[]
   profile(ms: number): Promise<object>
   write(file: string, text: string): Promise<void>
   prune(dir: string, keep: number): Promise<void>
@@ -99,7 +110,7 @@ async function inspectorProfile(ms: number): Promise<object> {
 
 export function defaultPerfWatchDeps(): PerfWatchDeps {
   return {
-    sample: () => takeSample(),
+    samples: () => { startRing(); const out = ring.splice(0); out.push(takeSample()); return out },
     profile: inspectorProfile,
     write: async (file, text) => { await mkdir(PERF_DIR, { recursive: true }); await writeFile(file, text) },
     prune: async (dir, keep) => {
@@ -124,10 +135,13 @@ export function perfWatchHostOps(d: PerfWatchDeps = defaultPerfWatchDeps()) {
   return {
     'amostrar-desempenho': async (value: unknown) => {
       if (d.off()) return refuse('the performance watch is off (AGENTISTICS_PERF_WATCH=0)')
-      const s = d.sample()
-      const r = evaluatePerf(state, s)
-      if (rec(value).dryRun !== true) state = r.state
-      return { ok: true, sample: s, over: r.over, fire: r.fire }
+      const samples = d.samples()
+      let st = state
+      const fire: PerfBreach[] = []
+      let over: PerfBreach[] = []
+      for (const s of samples) { const r = evaluatePerf(st, s); st = r.state; over = r.over; fire.push(...r.fire) }
+      if (rec(value).dryRun !== true) state = st
+      return { ok: true, samples: samples.length, last: samples.at(-1), over, fire }
     },
     'capturar-desempenho': async (value: unknown) => {
       if (d.off()) return refuse('the performance watch is off (AGENTISTICS_PERF_WATCH=0)')
@@ -154,4 +168,4 @@ export function perfWatchHostOps(d: PerfWatchDeps = defaultPerfWatchDeps()) {
 }
 
 /** Tests only. */
-export function resetPerfWatch(): void { state = emptyPerfWatchState(); last = null; lastCapture = -Infinity; capturing = false; latencies.clear(); lagMax = 0 }
+export function resetPerfWatch(): void { if (ringTimer) clearInterval(ringTimer); ringTimer = null; ring.length = 0; state = emptyPerfWatchState(); last = null; lastCapture = -Infinity; capturing = false; latencies.clear(); lagMax = 0 }
