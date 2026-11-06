@@ -10,7 +10,7 @@
  * board's `MobileLane`, so nobody has to learn a second phone layout.
  */
 
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useFleet, type FleetRow } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -25,6 +25,8 @@ import {
 } from './liveDeliveryModel'
 import { useLiveDeliveries } from './useLiveDeliveries'
 import { disintegrate, flyCard, intersects, reintegrate, transitionKind, type Box } from './liveDeliveryFx'
+
+const reducedMotion = (): boolean => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } }
 
 const STATE_COLOR = {
   working: 'var(--accent-green, #3ecf8e)', waiting: 'var(--text-tertiary)',
@@ -96,6 +98,22 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   // reintegrated instead). Cards the first render shows — and cards that merely scrolled — do not move.
   const seen = useRef(new Map<string, { stage: LiveStage; box: Box }>())
   const boardRef = useRef<HTMLDivElement>(null)
+  const chipRowRef = useRef<HTMLDivElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  // Desktop: the board takes the room left under its own top edge, so the horizontal bar is always on screen.
+  const [fitH, setFitH] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    if (compact || isMobile) return
+    const measure = () => { const el = wrapRef.current; if (el) setFitH(Math.max(420, Math.floor(window.innerHeight / (Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom')) || 1) - el.getBoundingClientRect().top - 16))) }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [compact, isMobile, reply === null])
+  // Phone: the active stage pill scrolls into view (the row is wider than the screen).
+  useEffect(() => {
+    const el = chipRowRef.current?.querySelector<HTMLElement>(`[data-chip="${stageFilter}"]`)
+    el?.scrollIntoView?.({ inline: 'center', block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' })
+  }, [stageFilter])
   useLayoutEffect(() => {
     const root = boardRef.current
     if (!root) return
@@ -165,13 +183,13 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
 
   const filters = (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-      <div style={{ minWidth: 190 }}>
+      <div style={{ minWidth: isMobile ? '100%' : 190, flex: isMobile ? '1 1 100%' : undefined }}>
         <Select
           value={taskId ?? ''} onChange={v => setTaskId(v || null)}
           options={[{ value: '', label: L.all }, ...tasks]}
         />
       </div>
-      <button
+      {!isMobile && <button
         type="button" className="ag-tap" aria-pressed={stageFilter === 'all'} data-live-allsteps onClick={() => setStageFilter(stageFilter === 'all' ? (LIVE_STAGES.find(s => columns[s].length > 0) ?? 'running') : 'all')}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 30, padding: '0 12px',
@@ -180,7 +198,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
           background: stageFilter === 'all' ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated)',
           color: stageFilter === 'all' ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
         }}
-      >{L.allSteps}</button>
+      >{L.allSteps}</button>}
       <button
         type="button" className="ag-tap" aria-pressed={onlyActive} onClick={() => setOnlyActive(v => !v)}
         style={{
@@ -251,7 +269,10 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 650 }}>
           <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-red, #ff5f5f)' }} />{L.title}
         </span>
-        <span data-live-summary style={{ fontSize: 12, color: 'var(--text-tertiary)', flex: 1, minWidth: 220 }}>{summaryLine}</span>
+        <span data-live-summary style={{
+          fontSize: 12, color: 'var(--text-tertiary)', flex: 1, minWidth: isMobile ? 0 : 220,
+          ...(isMobile ? { flexBasis: '100%', order: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' } : {}),
+        }}>{summaryLine}</span>
         {!isMobile && filters}
       </div>
       {isMobile && filters}
@@ -262,7 +283,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
 
   if (isMobile) {
     const chip = (active: boolean): React.CSSProperties => ({
-      flex: '0 0 auto', minHeight: 32, padding: '0 14px', borderRadius: 999, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+      flex: '0 0 auto', scrollSnapAlign: 'start', minHeight: 36, padding: '0 14px', whiteSpace: 'nowrap', borderRadius: 999, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
       border: `1px solid ${active ? 'transparent' : 'var(--border)'}`,
       background: active ? 'var(--anthropic-orange-dim)' : 'var(--bg-card)',
       color: active ? 'var(--anthropic-orange-light)' : 'var(--text-secondary)',
@@ -271,10 +292,17 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     return (
       <div style={{ display: 'grid', gap: 10 }}>
         {header}
-        <div className="ag-noscroll" role="tablist" style={{ display: 'flex', gap: 6, overflowX: 'auto', margin: '0 -12px', padding: '0 12px', scrollbarWidth: 'none' }}>
-          <button role="tab" className="ag-tap" aria-selected={stageFilter === 'all'} onClick={() => setStageFilter('all')} style={chip(stageFilter === 'all')}>{L.allSteps} · {shown.length}</button>
+        <div
+          ref={chipRowRef} className="ag-scroll" role="tablist" data-live-stagerow
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto', overflowY: 'hidden', flexShrink: 0,
+            margin: '0 -12px', padding: '4px 12px 10px', minHeight: 48, boxSizing: 'border-box',
+            scrollSnapType: 'x proximity', scrollPaddingLeft: 12, scrollBehavior: reducedMotion() ? 'auto' : 'smooth', WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          <button role="tab" data-chip="all" className="ag-tap" aria-selected={stageFilter === 'all'} onClick={() => setStageFilter('all')} style={chip(stageFilter === 'all')}>{L.allSteps} · {shown.length}</button>
           {LIVE_STAGES.map(s => (
-            <button key={s} role="tab" className="ag-tap" aria-selected={s === stageFilter} onClick={() => setStageFilter(s)} style={chip(s === stageFilter)}>
+            <button key={s} role="tab" data-chip={s} className="ag-tap" aria-selected={s === stageFilter} onClick={() => setStageFilter(s)} style={chip(s === stageFilter)}>
               {STAGE_LABEL[s][pt ? 'pt' : 'en']} · {columns[s].length}
             </button>
           ))}
@@ -300,7 +328,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   }
 
   return (
-    <div style={{ display: 'grid', gap: 12, gridTemplateRows: 'auto minmax(0, 1fr)', height: compact ? '100%' : 'calc(100dvh / var(--ui-zoom, 1) - 190px)', minHeight: compact ? 0 : 420 }}>
+    <div ref={wrapRef} style={{ display: 'grid', gap: 12, gridTemplateRows: 'auto minmax(0, 1fr)', height: compact ? '100%' : (fitH ?? 560), minHeight: compact ? 0 : 420 }}>
       {header}
       <div ref={boardRef} className="ag-scroll" data-live-board style={{ display: 'flex', gap: 8, overflowX: 'auto', overflowY: 'auto', alignItems: 'flex-start', padding: '6px 2px 10px', minHeight: 0 }}>
         {visibleStages.map(s => {
