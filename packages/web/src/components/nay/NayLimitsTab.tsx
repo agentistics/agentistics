@@ -10,6 +10,8 @@ import { usePlanAgentUse } from '../../lib/usePlanAgentUse'
 import { subscriptionRows, usePlanLimits } from '../../lib/planLimits'
 import { AgentisticsLoader } from '../AgentisticsLoader'
 import { PlanUsageCard } from '../PlanLimitMeter'
+import { useApiUsage } from '../../lib/apiUsage'
+import { accountsSectionTitle, ApiUsageSection, SectionTitle } from '../ApiUsageSection'
 import { RecordCardAction } from '../../pages/settings/primitives'
 
 export function NayLimitsTab({ lang, isMobile, onNavigate, embedded = false, manageAgentUse = false }: { manageAgentUse?: boolean; lang: 'pt' | 'en'; isMobile: boolean; onNavigate?: () => void; embedded?: boolean }) {
@@ -18,6 +20,8 @@ export function NayLimitsTab({ lang, isMobile, onNavigate, embedded = false, man
   const { limits, registered, accountLabels, now } = usePlanLimits()
   const agentUse = usePlanAgentUse(manageAgentUse, lang)
   const rows = subscriptionRows(limits, registered, accountLabels)
+  const apis = useApiUsage().items
+  const sectioned = !!apis && apis.length > 0
   return (
     <div data-nay-limits style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: embedded ? 0 : isMobile ? '8px 10px' : '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
       {limits === null ? (
@@ -29,6 +33,7 @@ export function NayLimitsTab({ lang, isMobile, onNavigate, embedded = false, man
             : 'No plan limits observed yet. Claude Code reports them in sessions started from the web; Codex in every session.'}
         </p>
       ) : (<>
+        {sectioned && <SectionTitle>{accountsSectionTitle(lang)}</SectionTitle>}
         {rows.map(r => r.limits
           ? <PlanUsageCard key={`${r.harness}:${r.limits.account}`} limits={r.limits} accountLabel={r.accountLabel} agentUse={agentUse(r.harness, r.account)} isMobile={isMobile} now={now} lang={lang} />
           : <PlanUsageCard key={`${r.harness}:${r.account ?? r.plan}`} limits={null} accountLabel={r.accountLabel} agentUse={agentUse(r.harness, r.account)} isMobile={isMobile} pending={{ harness: r.harness, plan: r.plan ?? '' }} now={now} lang={lang} />)}
@@ -36,6 +41,7 @@ export function NayLimitsTab({ lang, isMobile, onNavigate, embedded = false, man
           <RecordCardAction inline label={pt ? 'Gerenciar planos' : 'Manage plans'} onClick={() => { onNavigate?.(); navigate('/usage#contas') }}>{pt ? 'Gerenciar planos' : 'Manage plans'}</RecordCardAction>
         </div>
       </>)}
+      <ApiUsageSection items={apis} now={now} lang={lang} />
       {limits !== null && (
         <p data-nay-limits-opencode style={{ margin: 0, fontSize: 11.5, color: 'var(--text-tertiary)', lineHeight: 1.5 }}>
           {pt

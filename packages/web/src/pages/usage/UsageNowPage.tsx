@@ -5,6 +5,8 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { PageHeader } from '../../components/nav/PageHeader'
 import { usePlanLimits } from '../../lib/planLimits'
 import { usageHeadline } from '../../lib/usagePlan'
+import { useApiUsage } from '../../lib/apiUsage'
+import { ApiUsageSection } from '../../components/ApiUsageSection'
 import { BillingAccountsPanel } from '../settings/BillingSettings'
 import { UsageChartsPanel, usageLimitsStatus } from './UsageChartsPanel'
 import { orderedBudgets, type Lang } from './usageView'
@@ -31,6 +33,7 @@ export function UsageNowContent({ lang, sessions = [], harnesses = [], accounts 
     out[id] = { sessions: (out[id]?.sessions ?? 0) + 1 }
     return out
   }, {})
+  const apis = useApiUsage().items
   return <div style={{ minWidth: 0 }}>
     <PageHeader lang={lang} areaId="usage" pageId="now" isMobile={isMobile} status={usageHeadline(rows, now, lang) ?? undefined} />
     <div style={{ marginBottom: 20 }}><UsageChartsPanel budgets={rows} readings={readings} status={usageLimitsStatus(limits, failure)} sessions={sessions} harnesses={harnesses} lang={lang} now={now} /></div>
@@ -40,5 +43,6 @@ export function UsageNowContent({ lang, sessions = [], harnesses = [], accounts 
       <HarnessCatalogTable lang={lang} statuses={chatHarnesses} usage={usage} planLimits={limits} readings={readings} now={now} mode="usage" loading={chatHarnessesLoading} />
     </section>
     {accounts && <BillingAccountsPanel />}
+    <ApiUsageSection items={apis} now={now} lang={lang} emptyNotice />
   </div>
 }
