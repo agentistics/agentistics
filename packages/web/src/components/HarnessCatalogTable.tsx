@@ -48,9 +48,9 @@ export function HarnessCatalogTable({ lang, statuses, available = [], usage = {}
         <span data-catalog-reading style={cell(hasReading ? 'ok' : '')}>{mobile && `${pt ? 'Leitura' : 'Reading'}: `}{reading}</span>
         <span data-catalog-usage style={cell(count > 0 ? 'ok' : '')}>{mobile && `${pt ? 'Uso' : 'Usage'}: `}{count > 0 ? `${count.toLocaleString(pt ? 'pt-BR' : 'en-US')} ${pt ? 'sessões' : 'sessions'}` : (pt ? 'Sem uso' : 'No usage')}</span>
         {mode === 'new' && <div data-catalog-action style={{ minWidth: 0, ...(mobile ? { gridColumn: '2', gridRow: '1 / 5', alignSelf: 'center' } : {}) }}>
-          {installed && canSelect ? <button type="button" onClick={() => onSelect?.(h.id)} style={buttonStyle(selected === h.id)}>{selected === h.id ? (pt ? 'Selecionado' : 'Selected') : (pt ? 'Selecionar' : 'Select')}</button>
-            : !installed && h.canInstall ? <button type="button" onClick={() => onInstall?.(h.id)} style={buttonStyle(false)}>{pt ? 'Instalar' : 'Install'}</button>
-              : !installed && h.setup.docUrl ? <a href={h.setup.docUrl} target="_blank" rel="noopener noreferrer" style={{ ...buttonStyle(false), display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', textDecoration: 'none' }}>{pt ? 'Como instalar' : 'How to install'}</a>
+          {installed && canSelect ? <button type="button" onClick={() => onSelect?.(h.id)} style={buttonStyle(selected === h.id, mobile)}>{selected === h.id ? (pt ? 'Selecionado' : 'Selected') : (pt ? 'Selecionar' : 'Select')}</button>
+            : !installed && h.canInstall ? <button type="button" onClick={() => onInstall?.(h.id)} style={buttonStyle(false, mobile)}>{pt ? 'Instalar' : 'Install'}</button>
+              : !installed && h.setup.docUrl ? <a href={h.setup.docUrl} target="_blank" rel="noopener noreferrer" style={{ ...buttonStyle(false, mobile), display: 'flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box', textDecoration: 'none' }}>{pt ? 'Como instalar' : 'How to install'}</a>
                 : <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{pt ? 'Sem lançamento' : 'Cannot launch'}</span>}
         </div>}
 
@@ -62,4 +62,4 @@ export function HarnessCatalogTable({ lang, statuses, available = [], usage = {}
 function gridStyle(mode: 'new' | 'usage', mobile: boolean): React.CSSProperties {
   return { display: 'grid', gridTemplateColumns: mobile ? (mode === 'new' ? 'minmax(0, 1fr) 100px' : 'minmax(0, 1fr)') : (mode === 'new' ? 'minmax(100px, 1.5fr) minmax(65px, 1fr) minmax(60px, .9fr) minmax(52px, .8fr) 94px' : 'minmax(100px, 2fr) repeat(3, minmax(65px, 1fr))'), minWidth: 0, gap: mobile ? '4px 8px' : 8, alignItems: 'center', padding: '10px', color: 'var(--text-secondary)' }
 }
-function buttonStyle(selected: boolean): React.CSSProperties { return { width: '100%', minHeight: '2.75rem', padding: '6px 9px', borderRadius: 7, border: `1px solid ${selected ? 'var(--accent)' : 'var(--border-subtle)'}`, background: selected ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5, fontWeight: 650 } }
+function buttonStyle(selected: boolean, mobile: boolean): React.CSSProperties { return { width: '100%', minHeight: mobile ? 44 : '2.75rem', padding: '6px 9px', borderRadius: 7, border: `1px solid ${selected ? 'var(--accent)' : 'var(--border-subtle)'}`, background: selected ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5, fontWeight: 650 } }

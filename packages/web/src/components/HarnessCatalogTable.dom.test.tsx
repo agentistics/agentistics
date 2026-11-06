@@ -138,6 +138,7 @@ test('mobile cards keep labelled installation, reading, usage and selection in e
     expect(row.textContent).toContain('Leitura: Sem leitura')
     expect(row.textContent).toContain('Uso: Sem uso')
     expect(row.querySelector('[data-catalog-action] button')!.textContent).toBe('Selecionar')
+    expect(parseFloat(row.querySelector<HTMLElement>('[data-catalog-action] button')!.style.minHeight)).toBe(44)
   } finally { Object.defineProperty(window, 'innerWidth', { configurable: true, value: width }) }
 })
 
