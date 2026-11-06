@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { readFile, mkdir, writeFile, rename, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
+import { HARNESS_ORDER, type AgentDayBaseline, type AgentManual, type AgentSchedule, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
 import { withFileLock } from './sessions/file-lock'
 import { ISOLATION_ENV } from './account-isolation'
@@ -37,7 +37,18 @@ export interface HarnessAccount {
    * newer than this is the old token's last word, not a new expiry: it neither marks nor raises a bar.
    */
   loginRenewedAt?: number
+  /**
+   * The ONE flag every router/spawn/plan-limits reader honours. With an active `agentSchedule` it is
+   * WRITTEN by the schedule evaluator (`agent-schedule-host.ts`) — the effective state — never a
+   * second flag beside it.
+   */
   available: boolean
+  /** Stored. When agents may use the account (`@agentistics/core` agentSchedule.ts). */
+  agentSchedule?: AgentSchedule
+  /** Stored. A person flipped the switch against the schedule; cleared when the schedule agrees. */
+  agentManual?: AgentManual
+  /** Stored. The weekly reading today's spend is measured from (local day). */
+  agentDayBaseline?: AgentDayBaseline
   firstSeen: number
   lastSeen: number
 }
@@ -52,6 +63,15 @@ export interface AccountsFile {
    * managed sessions, billing) resolve through it, so nothing recorded under the old id is orphaned.
    */
   aliases?: Record<string, string>
+}
+export interface AccountPatch {
+  available?: boolean
+  nickname?: string
+  /** `null` removes the schedule. */
+  agentSchedule?: AgentSchedule | null
+  /** `null` clears the manual override. */
+  agentManual?: AgentManual | null
+  agentDayBaseline?: AgentDayBaseline
 }
 export type AccountIdentity = Pick<HarnessAccount, 'key' | 'label' | 'plan'>
 const fallback = (): AccountIdentity => ({ key: 'default', label: 'Conta padrão' })
@@ -593,13 +613,22 @@ export function createHarnessAccounts(options: {
       throw error
     }
   }
-  async function update(id: string, patch: { available?: boolean; nickname?: string }): Promise<HarnessAccount | null> {
+  async function update(id: string, patch: AccountPatch): Promise<HarnessAccount | null> {
     return serial(async () => {
       const data = await read()
       const at = canonicalAccountId(data, id)
       const account = data.accounts.find(a => a.id === at)
       if (!account) return null
       if (patch.available !== undefined) account.available = patch.available
+      if (patch.agentSchedule !== undefined) {
+        if (patch.agentSchedule === null) delete account.agentSchedule
+        else account.agentSchedule = patch.agentSchedule
+      }
+      if (patch.agentManual !== undefined) {
+        if (patch.agentManual === null) delete account.agentManual
+        else account.agentManual = patch.agentManual
+      }
+      if (patch.agentDayBaseline !== undefined) account.agentDayBaseline = patch.agentDayBaseline
       if (patch.nickname !== undefined) {
         const nickname = sanitizeNickname(patch.nickname)
         if (nickname) account.nickname = nickname
@@ -710,7 +739,7 @@ export const currentHarnessAccounts = (harnesses: readonly HarnessId[]) => store
 export const listHarnessAccounts = (harnesses?: readonly HarnessId[]) => store.list(harnesses)
 export const setAccountAvailable = (harness: HarnessId, key: string, available: boolean) => store.setAvailable(harness, key, available)
 export const retireAccount = (id: string) => store.retire(id)
-export const updateAccount = (id: string, patch: { available?: boolean; nickname?: string }) => store.update(id, patch)
+export const updateAccount = (id: string, patch: AccountPatch) => store.update(id, patch)
 export const markLoginExpired = (id: string, at: number) => store.markLoginExpired(id, at)
 export const clearLoginExpired = (id: string) => store.clearLoginExpired(id)
 

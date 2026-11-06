@@ -8,6 +8,9 @@ import { requestPlanUsageModal } from '../lib/planUsageModalRequests'
 import { scrollIsOutside } from '../lib/popoverScroll'
 import { PlanUsageSessionSwitch, type PlanUsageSession } from './PlanUsageSessionSwitch'
 import { LimitLevelIcon, PlanUsageSummary } from './PlanLimitMeter'
+import { usePlanAgentUse } from '../lib/usePlanAgentUse'
+import { ReloginModal } from '../pages/settings/ReloginModal'
+import type { HarnessId } from '@agentistics/core'
 
 const POP_W = 344
 const CARET = 10
@@ -41,6 +44,9 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: {
   const popRef = useRef<HTMLDivElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [rect, setRect] = useState<DOMRect | null>(null)
+  // CONTAS.AGENDA-AGENTICA: per account, ONLY the agent-use switch and "Sign in again".
+  const agentUse = usePlanAgentUse(rect !== null, lang)
+  const [relogin, setRelogin] = useState<{ accountId: string; harness: HarnessId; who: string } | null>(null)
   const worst = useMemo(() => (snap.limits ?? []).flatMap(l => l.windows.map(w => ({ l, w, pct: currentUsedPct(w, snap.now) }))).sort((a, b) => b.pct - a.pct)[0], [snap.limits, snap.now])
   const level = limitLevel(worst?.pct ?? null)
   const base = pt ? 'Uso dos planos' : 'Plan usage'
@@ -104,7 +110,7 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: {
       : { ...common, left: popLeft, width: popW, bottom: window.innerHeight - rect.top + CARET + 2 }
     pop = createPortal(
       <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={style} onMouseEnter={open} onMouseLeave={closeSoon} onFocus={open} onBlur={closeSoon} onKeyDown={onPopKey}>
-        <PlanUsageSummary onOpen={openModal} limits={snap.limits} registered={snap.registered} accountLabels={snap.accountLabels} now={snap.now} lang={lang} />
+        <PlanUsageSummary onOpen={openModal} agentUse={agentUse} onRelogin={r => { close(); setRelogin(r) }} limits={snap.limits} registered={snap.registered} accountLabels={snap.accountLabels} now={snap.now} lang={lang} />
         <PlanUsageSessionSwitch lang={lang} session={openSession && { ...openSession, onSwitch: () => {
           btnRef.current?.focus(); skipReturnFocus.current = true; close(); openSession.onSwitch()
         } }} />
@@ -131,6 +137,7 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: {
         {level !== 'ok' && <span style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LimitLevelIcon pct={worst!.pct} size={14} lang={lang} /></span>}
       </button>
       {pop}
+      {relogin && <ReloginModal accountId={relogin.accountId} harness={relogin.harness} who={relogin.who} lang={lang} onClose={() => setRelogin(null)} />}
     </div>
   )
 }

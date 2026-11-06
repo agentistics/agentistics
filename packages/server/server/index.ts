@@ -291,6 +291,8 @@ if (!TEAM_CENTRAL) {
     void import('./claude-usage').then(m => m.startClaudeUsagePoll()).catch(() => {})
     // agy keeps one weekly quota per model group: read it while an agy process is alive.
     void import('./antigravity-usage').then(m => m.startAntigravityUsagePoll()).catch(() => {})
+    // CONTAS.AGENDA-AGENTICA: once a minute, each account's agent schedule writes its effective `available`.
+    void import('./agent-schedule-host').then(m => m.startAgentScheduleTicker()).catch(() => {})
     return pl.seedPlanLimits(sd.STRUCTURED_DIR)
   }).catch(err => console.warn('[plan-limits] seed failed:', String(err)))
 }
