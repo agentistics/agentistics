@@ -73,6 +73,32 @@ describe('startClaudeUsagePoll — every Claude login, each attributed by its ow
     stop()
     expect(order).toEqual(['fetch', 'confirm', 'ingest'])
   })
+  test('a binding slower than the bound skips the default reading for that tick; the next tick ingests it', async () => {
+    let probes = 0
+    let release!: () => void
+    const slow = new Promise<void>(r => { release = r })
+    const ingested: Array<string | null> = []
+    let ticks = 0
+    let done!: () => void
+    const finished = new Promise<void>(r => { done = r })
+    const stop = startClaudeUsagePoll({
+      now: () => NOW,
+      readCredential: async () => cred(),
+      accountRoots: async () => [],
+      bindingBoundMs: 10,
+      pollMs: 30,
+      fetchImpl: async () => { ticks++; return new Response(usageBody, { status: 200 }) },
+      confirmDefaultBinding: async () => { if (probes++ === 0) await slow },
+      ingest: async (_l, root) => { ingested.push(root); done() },
+    })
+    await Bun.sleep(20)
+    expect(ticks).toBeGreaterThanOrEqual(1)
+    expect(ingested).toEqual([])
+    release()
+    await finished
+    stop()
+    expect(ingested[0]).toBeNull()
+  })
   test('reads the default login AND each extra account root, ingesting each under its root', async () => {
     const OTHER = 'fake-token-of-the-second-login'
     const auths: string[] = []

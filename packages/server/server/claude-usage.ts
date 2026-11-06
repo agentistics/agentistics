@@ -72,6 +72,10 @@ export interface UsageDeps {
   ingest?: (limits: PlanLimits, root: string | null) => Promise<unknown>
   /** Settles the default home's account binding before its reading is attributed. Default: the identity probe (skipped when `ingest` is injected). */
   confirmDefaultBinding?: () => Promise<unknown>
+  /** How long a tick waits for the default binding to settle before skipping the default reading (default 1500). */
+  bindingBoundMs?: number
+  /** Poll interval override (tests). */
+  pollMs?: number
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>
   now?: () => number
 }
@@ -104,7 +108,8 @@ export async function fetchClaudeUsage(deps: UsageDeps = {}): Promise<UsageResul
  */
 export function startClaudeUsagePoll(deps: UsageDeps = {}): () => void {
   if (process.env.AGENTISTICS_CLAUDE_USAGE === '0') return () => {}
-  let delay = CLAUDE_USAGE_POLL_MS
+  const pollMs = deps.pollMs ?? CLAUDE_USAGE_POLL_MS
+  let delay = pollMs
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
   const ingest = deps.ingest ?? ((l: PlanLimits, root: string | null) => ingestFromRoot(l, root))
@@ -123,12 +128,20 @@ export function startClaudeUsagePoll(deps: UsageDeps = {}): () => void {
         // probe) first, or the first read after a restart lands on a stale one. Asked only when there
         // IS a reading to attribute (a machine with no credential never spawns the probe, so boot stays
         // quiet), and bounded: a slow probe delays this reading, never the tick behind it.
-        if (root === null) await Promise.race([confirmDefaultBinding().catch(() => {}), new Promise<void>(res => { setTimeout(res, 1500).unref?.() })])
+        // On a timeout the default reading is SKIPPED for this tick (the probe keeps running and settles the
+        // binding; the next tick attributes it): ingesting under a stale binding is the misattribution.
+        if (root === null) {
+          const settled = await Promise.race([
+            confirmDefaultBinding().then(() => true, () => true),
+            new Promise<boolean>(res => { setTimeout(() => res(false), deps.bindingBoundMs ?? 1500).unref?.() }),
+          ])
+          if (!settled) continue
+        }
         await ingest(r.limits, root).catch(() => false)
       }
       if ('skip' in r && r.skip === 'rate-limited') limited = true
     }
-    delay = limited ? Math.min(MAX_BACKOFF_MS, delay * 2) : CLAUDE_USAGE_POLL_MS
+    delay = limited ? Math.min(MAX_BACKOFF_MS, delay * 2) : pollMs
     if (stopped) return
     timer = setTimeout(() => { void tick() }, delay)
     timer.unref?.()
