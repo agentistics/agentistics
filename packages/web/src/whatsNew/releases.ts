@@ -10,6 +10,40 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.0': {
+    features: [
+      {
+        pt: 'Modo ligação em beta para todos: o botão de ligar e a página Ligações aparecem sem precisar ligar o modo experimental. A chave da ElevenLabs pode ser cadastrada direto no cartão Voz.',
+        en: 'Call mode is now in beta for everyone: the call button and the Calls page show up without turning on experimental mode. The ElevenLabs key can be added right in the Voice card.',
+      },
+      {
+        pt: 'Escolha a voz da ElevenLabs pelo botão de voz da ligação, com amostra que não gasta crédito; o cartão Voz mostra quanto foi usado, quanto sobra e quando renova.',
+        en: 'Pick your ElevenLabs voice from the call voice button, with samples that cost no credits; the Voice card shows how much was used, what is left and when it renews.',
+      },
+      {
+        pt: 'Uso dos planos ganha as seções Contas e APIs: o saldo das chaves de API pagas aparece no painel e na página de uso.',
+        en: 'Plan usage now has Accounts and APIs sections: the balance of paid API keys shows in the panel and on the usage page.',
+      },
+      {
+        pt: 'Quadro de tarefas com uma barra só: busca, painel Visualização, filtros e as visões Métricas, Quadro e Tabela no mesmo lugar. Por padrão aparecem os status bloqueado, a fazer, em andamento, em revisão e concluído; os outros podem ser reexibidos.',
+        en: 'Task board with a single toolbar: search, the View panel, filters and the Metrics, Board and Table views in one place. By default the blocked, to do, in progress, in review and done statuses are shown; the others can be shown again.',
+      },
+      {
+        pt: 'Agenda das contas: cada conta pode ter dias, horários e um teto diário de uso pelos agentes. Fora da agenda, os agentes deixam a conta de lado; ligar ou desligar à mão continua valendo.',
+        en: 'Account schedule: each account can have days, hours and a daily usage ceiling for agents. Outside the schedule, agents leave the account alone; switching it on or off by hand still applies.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ligação entende português ou inglês sozinha, mesmo com o app em outro idioma, e responde no idioma falado.',
+        en: 'Calls detect whether you speak Portuguese or English on their own, even with the app in another language, and reply in the language spoken.',
+      },
+      {
+        pt: 'Página Ligações com uma ligação em andamento: o cartão mostra o nome da sessão em vez de "Sessão ?", e o botão "Voltar para a ligação" tem o ícone do tamanho certo.',
+        en: 'Calls page with a call in progress: the card shows the session name instead of "Session ?", and the "Back to the call" button has a properly sized icon.',
+      },
+    ],
+  },
   '2.199.0': {
     features: [
       {
