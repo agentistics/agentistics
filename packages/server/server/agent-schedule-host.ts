@@ -35,22 +35,27 @@ export interface AgentUseView {
   /** Weekly quota spent today, in percentage points; null = not measurable. */
   dayUsedPct: number | null
   maxDailyPct?: number
+  /** Absolute weekly usage now (null = no weekly reading) and the weekly ceiling, if any. */
+  weekUsedPct: number | null
+  maxWeeklyPct?: number
 }
 
 function evaluate(a: HarnessAccount, limits: readonly PlanLimits[], now: Date) {
   const schedule = a.agentSchedule
   if (!scheduleActive(schedule) || a.retired) return null
-  const { baseline, dayUsedPct } = foldDayUsage(a.agentDayBaseline, weekReading(limits, a.id), now)
-  const verdict = scheduleVerdict(schedule, now, dayUsedPct)
+  const week = weekReading(limits, a.id)
+  const { baseline, dayUsedPct } = foldDayUsage(a.agentDayBaseline, week, now)
+  const weekUsedPct = week ? week.usedPct : null
+  const verdict = scheduleVerdict(schedule, now, dayUsedPct, weekUsedPct)
   const state = resolveAgentUse(schedule, a.agentManual, verdict)!
-  return { baseline, dayUsedPct, verdict, state }
+  return { baseline, dayUsedPct, weekUsedPct, verdict, state }
 }
 
 export function agentUseView(a: HarnessAccount, limits: readonly PlanLimits[], now = new Date()): AgentUseView | undefined {
   const e = evaluate(a, limits, now)
   if (!e) return undefined
   // The view reports the state the evaluator WILL write, so a screen is never a minute behind an edit.
-  return { reason: e.state.reason, on: e.state.available, dayUsedPct: e.dayUsedPct, ...(e.verdict.maxDailyPct !== undefined ? { maxDailyPct: e.verdict.maxDailyPct } : {}) }
+  return { reason: e.state.reason, on: e.state.available, dayUsedPct: e.dayUsedPct, weekUsedPct: e.weekUsedPct, ...(e.verdict.maxDailyPct !== undefined ? { maxDailyPct: e.verdict.maxDailyPct } : {}), ...(e.verdict.maxWeeklyPct !== undefined ? { maxWeeklyPct: e.verdict.maxWeeklyPct } : {}) }
 }
 
 const sameBaseline = (a?: AgentDayBaseline, b?: AgentDayBaseline) =>

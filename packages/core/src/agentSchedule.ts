@@ -27,9 +27,13 @@ export interface AgentDaySchedule {
   windows: AgentWindow[]
   /** Ceiling for the day: percentage points of the WEEKLY quota spent since 00:00 local. Absent = no ceiling. */
   maxDailyPct?: number
+  /** The whole day is one window (00:00 → end of day). `windows` is kept untouched so turning it off restores them. */
+  allDay?: boolean
 }
 export interface AgentSchedule {
   enabled: boolean
+  /** Stop agents when ABSOLUTE weekly usage reaches this percentage. Absent = no weekly ceiling. */
+  maxWeeklyPct?: number
   /** A day absent from the map is a day the account does not work for agents. */
   days: Partial<Record<AgentDay, AgentDaySchedule>>
 }
@@ -43,6 +47,7 @@ export type AgentUseReason =
   | 'outside-window'  // a scheduled day, but not inside one of its windows
   | 'day-off'         // the day is not selected
   | 'daily-cap'       // inside a window, but today's ceiling is spent
+  | 'weekly-cap'      // the week has reached the weekly ceiling: off whatever the day says
 
 export interface AgentScheduleVerdict {
   on: boolean
@@ -51,6 +56,8 @@ export interface AgentScheduleVerdict {
   day: AgentDay
   /** The ceiling in force for that day, if any. */
   maxDailyPct?: number
+  /** The weekly ceiling in force, if any. */
+  maxWeeklyPct?: number
 }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/
@@ -60,15 +67,21 @@ const minutesOf = (hhmm: string): number => Number(hhmm.slice(0, 2)) * 60 + Numb
 /** Validate and normalise untrusted input; `null` when it is not a schedule at all. */
 export function parseAgentSchedule(raw: unknown): AgentSchedule | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const r = raw as { enabled?: unknown; days?: unknown }
+  const r = raw as { enabled?: unknown; days?: unknown; maxWeeklyPct?: unknown }
   if (typeof r.enabled !== 'boolean') return null
+  let maxWeeklyPct: number | undefined
+  if (r.maxWeeklyPct !== undefined && r.maxWeeklyPct !== null) {
+    if (typeof r.maxWeeklyPct !== 'number' || !Number.isFinite(r.maxWeeklyPct) || r.maxWeeklyPct <= 0 || r.maxWeeklyPct > 100) return null
+    maxWeeklyPct = Math.round(r.maxWeeklyPct * 10) / 10
+  }
   const days: Partial<Record<AgentDay, AgentDaySchedule>> = {}
   if (r.days !== undefined) {
     if (!r.days || typeof r.days !== 'object' || Array.isArray(r.days)) return null
     for (const [key, value] of Object.entries(r.days as Record<string, unknown>)) {
       if (!AGENT_DAYS.includes(key as AgentDay)) return null
       if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-      const v = value as { windows?: unknown; maxDailyPct?: unknown }
+      const v = value as { windows?: unknown; maxDailyPct?: unknown; allDay?: unknown }
+      if (v.allDay !== undefined && typeof v.allDay !== 'boolean') return null
       if (!Array.isArray(v.windows) || v.windows.length > 12) return null
       const windows: AgentWindow[] = []
       for (const w of v.windows) {
@@ -81,10 +94,10 @@ export function parseAgentSchedule(raw: unknown): AgentSchedule | null {
         if (typeof v.maxDailyPct !== 'number' || !Number.isFinite(v.maxDailyPct) || v.maxDailyPct <= 0 || v.maxDailyPct > 100) return null
         maxDailyPct = Math.round(v.maxDailyPct * 10) / 10
       }
-      days[key as AgentDay] = { windows, ...(maxDailyPct !== undefined ? { maxDailyPct } : {}) }
+      days[key as AgentDay] = { windows, ...(maxDailyPct !== undefined ? { maxDailyPct } : {}), ...(v.allDay === true ? { allDay: true } : {}) }
     }
   }
-  return { enabled: r.enabled, days }
+  return { enabled: r.enabled, ...(maxWeeklyPct !== undefined ? { maxWeeklyPct } : {}), days }
 }
 
 /** True when the schedule decides anything at all. */
@@ -95,7 +108,7 @@ export const scheduleActive = (s: AgentSchedule | undefined | null): s is AgentS
  * local; `null` = not measurable (no weekly reading), which never blocks — a ceiling nobody can
  * measure is not a ceiling that was reached.
  */
-export function scheduleVerdict(schedule: AgentSchedule, now: Date, dayUsedPct: number | null): AgentScheduleVerdict {
+export function scheduleVerdict(schedule: AgentSchedule, now: Date, dayUsedPct: number | null, weekUsedPct: number | null = null): AgentScheduleVerdict {
   const today = DAY_OF_INDEX[now.getDay()]!
   const yesterday = DAY_OF_INDEX[(now.getDay() + 6) % 7]!
   const minute = now.getHours() * 60 + now.getMinutes()
@@ -108,16 +121,24 @@ export function scheduleVerdict(schedule: AgentSchedule, now: Date, dayUsedPct: 
     const from = minutesOf(w.from), to = minutesOf(w.to)
     return to <= from && minute < to
   }
+  const weekCap = schedule.maxWeeklyPct
+  const withWeek = <T extends AgentScheduleVerdict>(v: T): T => (weekCap !== undefined ? { ...v, maxWeeklyPct: weekCap } : v)
   const decide = (day: AgentDay): AgentScheduleVerdict => {
     const cap = schedule.days[day]?.maxDailyPct
     if (cap !== undefined && dayUsedPct !== null && dayUsedPct >= cap) return { on: false, reason: 'daily-cap', day, maxDailyPct: cap }
     return { on: true, reason: 'in-window', day, ...(cap !== undefined ? { maxDailyPct: cap } : {}) }
   }
   const t = schedule.days[today]
-  if (t?.windows.some(inToday)) return decide(today)
-  if (schedule.days[yesterday]?.windows.some(inYesterdayTail)) return decide(yesterday)
+  // A weekly ceiling no reading can measure never blocks (like the daily one).
+  if (weekCap !== undefined && weekUsedPct !== null && weekUsedPct >= weekCap) {
+    return withWeek({ on: false, reason: 'weekly-cap', day: today, ...(t?.maxDailyPct !== undefined ? { maxDailyPct: t.maxDailyPct } : {}) })
+  }
+  // An all-day day is the whole of its calendar day; it has no tail into the next one.
+  if (t?.allDay || t?.windows.some(inToday)) return withWeek(decide(today))
+  const yd = schedule.days[yesterday]
+  if (!yd?.allDay && yd?.windows.some(inYesterdayTail)) return withWeek(decide(yesterday))
   const cap = t?.maxDailyPct
-  return { on: false, reason: t ? 'outside-window' : 'day-off', day: today, ...(cap !== undefined ? { maxDailyPct: cap } : {}) }
+  return withWeek({ on: false, reason: t ? 'outside-window' : 'day-off', day: today, ...(cap !== undefined ? { maxDailyPct: cap } : {}) })
 }
 
 export interface AgentUseState {

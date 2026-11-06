@@ -8,7 +8,7 @@ import { AGENT_DAYS, type AgentDay, type AgentSchedule, type AgentUseReason, typ
 type Lang = 'pt' | 'en'
 
 /** What `GET /api/accounts` adds to an account with an active schedule. */
-export interface AgentUseView { reason: AgentUseReason; on: boolean; dayUsedPct: number | null; maxDailyPct?: number }
+export interface AgentUseView { reason: AgentUseReason; on: boolean; dayUsedPct: number | null; maxDailyPct?: number; weekUsedPct?: number | null; maxWeeklyPct?: number }
 
 export const DAY_SHORT: Record<AgentDay, { pt: string; en: string }> = {
   mon: { pt: 'seg', en: 'Mon' }, tue: { pt: 'ter', en: 'Tue' }, wed: { pt: 'qua', en: 'Wed' }, thu: { pt: 'qui', en: 'Thu' },
@@ -23,9 +23,29 @@ const REASON: Record<AgentUseReason, { pt: string; en: string }> = {
   'outside-window': { pt: 'Fora da agenda — desligada para agentes', en: 'Outside the schedule — off for agents' },
   'day-off': { pt: 'Dia fora da agenda — desligada para agentes', en: 'Day not scheduled — off for agents' },
   'daily-cap': { pt: 'Teto do dia atingido — desligada para agentes', en: 'Daily ceiling reached — off for agents' },
+  'weekly-cap': { pt: 'Teto da semana atingido — desligada para agentes', en: 'Weekly ceiling reached — off for agents' },
 }
 
 export function agentUseReasonText(reason: AgentUseReason, lang: Lang): string { return REASON[reason][lang] }
+
+/** Summary of a day's hours for plan popups and agenda lines: "dia inteiro" instead of 00:00–24:00. */
+export function dayWindowsText(day: { windows: readonly AgentWindow[]; allDay?: boolean }, lang: Lang): string {
+  if (day.allDay) return lang === 'pt' ? 'dia inteiro' : 'all day'
+  return day.windows.map(w => `${w.from}–${w.to}`).join(', ')
+}
+
+/** One line for a whole schedule: "seg, ter: dia inteiro · qua: 09:00–18:00". Empty when no day is set. */
+export function scheduleSummaryText(schedule: { days: Partial<Record<AgentDay, { windows: readonly AgentWindow[]; allDay?: boolean }>> } | undefined, lang: Lang): string {
+  if (!schedule) return ''
+  const groups = new Map<string, AgentDay[]>()
+  for (const d of Object.keys(DAY_SHORT) as AgentDay[]) {
+    const day = schedule.days[d]
+    if (!day) continue
+    const t = dayWindowsText(day, lang)
+    groups.set(t, [...(groups.get(t) ?? []), d])
+  }
+  return [...groups].map(([t, ds]) => `${ds.map(d => DAY_SHORT[d][lang]).join(', ')}: ${t || (lang === 'pt' ? 'sem janela' : 'no window')}`).join(' · ')
+}
 
 /** "today: 12% of 20% allowed" — null when there is no ceiling or nothing measurable. */
 export function dailyUsageText(view: AgentUseView, lang: Lang): string | null {
@@ -35,6 +55,37 @@ export function dailyUsageText(view: AgentUseView, lang: Lang): string | null {
   return lang === 'pt' ? `hoje: ${used}% de ${view.maxDailyPct}% permitido` : `today: ${used}% of ${view.maxDailyPct}% allowed`
 }
 
+/** "today 4% so far · week at 30%" — the live reading beside the daily field; null when nothing is measurable. */
+export function dayReadingHint(view: AgentUseView | undefined, lang: Lang): string | null {
+  if (!view || view.dayUsedPct === null) return null
+  const used = Math.round(view.dayUsedPct * 10) / 10
+  const week = view.weekUsedPct == null ? null : Math.round(view.weekUsedPct * 10) / 10
+  if (lang === 'pt') return `hoje já foram ${used}%${week !== null ? ` · semana em ${week}%` : ''}`
+  return `${used}% so far today${week !== null ? ` · week at ${week}%` : ''}`
+}
+
+/** The weekly-ceiling hint: the live absolute reading, or the honest "no reading" (which never blocks). */
+export function weekReadingHint(view: AgentUseView | undefined, lang: Lang): string | null {
+  if (!view) return null
+  if (view.weekUsedPct == null) return lang === 'pt' ? 'sem leitura semanal ainda — o teto não bloqueia' : 'no weekly reading yet — the ceiling does not block'
+  const week = Math.round(view.weekUsedPct * 10) / 10
+  return lang === 'pt' ? `semana em ${week}% agora` : `week at ${week}% now`
+}
+
+export function setWeeklyCap(s: AgentSchedule, pct: number | undefined): AgentSchedule {
+  const { maxWeeklyPct: _drop, ...rest } = s
+  return pct === undefined ? rest : { ...rest, maxWeeklyPct: pct }
+}
+
+/** Full day on/off. Off restores the windows that were kept (09:00–18:00 when there are none). */
+export function setAllDay(s: AgentSchedule, day: AgentDay, on: boolean): AgentSchedule {
+  const d = s.days[day]
+  if (!d) return s
+  if (on) return { ...s, days: { ...s.days, [day]: { ...d, allDay: true } } }
+  const { allDay: _drop, ...rest } = d
+  return { ...s, days: { ...s.days, [day]: { ...rest, windows: rest.windows.length ? rest.windows : [{ ...DEFAULT_WINDOW }] } } }
+}
+
 const DEFAULT_WINDOW: AgentWindow = { from: '09:00', to: '18:00' }
 
 export function toggleDay(s: AgentSchedule, day: AgentDay, template?: AgentDay): AgentSchedule {
@@ -42,7 +93,7 @@ export function toggleDay(s: AgentSchedule, day: AgentDay, template?: AgentDay):
   if (days[day]) delete days[day]
   else {
     const from = template && days[template]
-    days[day] = from ? { windows: from.windows.map(w => ({ ...w })), ...(from.maxDailyPct !== undefined ? { maxDailyPct: from.maxDailyPct } : {}) } : { windows: [{ ...DEFAULT_WINDOW }] }
+    days[day] = from ? { windows: from.windows.map(w => ({ ...w })), ...(from.maxDailyPct !== undefined ? { maxDailyPct: from.maxDailyPct } : {}), ...(from.allDay ? { allDay: true } : {}) } : { windows: [{ ...DEFAULT_WINDOW }] }
   }
   return { ...s, days }
 }
@@ -79,17 +130,18 @@ export function copyToSelected(s: AgentSchedule, from: AgentDay): AgentSchedule 
   const src = s.days[from]
   if (!src) return s
   const days = { ...s.days }
-  for (const d of AGENT_DAYS) if (d !== from && days[d]) days[d] = { windows: src.windows.map(w => ({ ...w })), ...(src.maxDailyPct !== undefined ? { maxDailyPct: src.maxDailyPct } : {}) }
+  for (const d of AGENT_DAYS) if (d !== from && days[d]) days[d] = { windows: src.windows.map(w => ({ ...w })), ...(src.maxDailyPct !== undefined ? { maxDailyPct: src.maxDailyPct } : {}), ...(src.allDay ? { allDay: true } : {}) }
   return { ...s, days }
 }
 
 /** Why the draft cannot be saved, in words; null when it can. */
 export function scheduleProblem(s: AgentSchedule, lang: Lang): string | null {
+  if (s.maxWeeklyPct !== undefined && (!(s.maxWeeklyPct > 0) || s.maxWeeklyPct > 100)) return lang === 'pt' ? 'Teto da semana entre 1 e 100%' : 'Weekly ceiling between 1 and 100%'
   for (const d of AGENT_DAYS) {
     const day = s.days[d]
     if (!day) continue
-    if (day.windows.some(w => !/^\d\d:\d\d$/.test(w.from) || !/^\d\d:\d\d$/.test(w.to))) return lang === 'pt' ? `${DAY_SHORT[d].pt}: horário incompleto` : `${DAY_SHORT[d].en}: incomplete time`
-    if (day.windows.some(w => w.from === w.to)) return lang === 'pt' ? `${DAY_SHORT[d].pt}: uma janela começa e termina no mesmo horário` : `${DAY_SHORT[d].en}: a window starts and ends at the same time`
+    if (!day.allDay && day.windows.some(w => !/^\d\d:\d\d$/.test(w.from) || !/^\d\d:\d\d$/.test(w.to))) return lang === 'pt' ? `${DAY_SHORT[d].pt}: horário incompleto` : `${DAY_SHORT[d].en}: incomplete time`
+    if (!day.allDay && day.windows.some(w => w.from === w.to)) return lang === 'pt' ? `${DAY_SHORT[d].pt}: uma janela começa e termina no mesmo horário` : `${DAY_SHORT[d].en}: a window starts and ends at the same time`
     if (day.maxDailyPct !== undefined && (!(day.maxDailyPct > 0) || day.maxDailyPct > 100)) return lang === 'pt' ? `${DAY_SHORT[d].pt}: teto entre 1 e 100%` : `${DAY_SHORT[d].en}: ceiling between 1 and 100%`
   }
   return null

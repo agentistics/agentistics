@@ -10,7 +10,9 @@ import { ApiUsageSection } from '../../components/ApiUsageSection'
 import { BillingAccountsPanel } from '../settings/BillingSettings'
 import { UsageChartsPanel, usageLimitsStatus } from './UsageChartsPanel'
 import { orderedBudgets, type Lang } from './usageView'
-import { HarnessCatalogTable } from '../../components/HarnessCatalogTable'
+import { useState } from 'react'
+import { HarnessPicker, withMissingHarnesses } from '../../components/sessions/HarnessPicker'
+import { HarnessInstallDialog } from '../../components/HarnessInstallDialog'
 import { useChatHarnesses } from '../../hooks/useChatHarnesses'
 
 export default function UsageNowPage() {
@@ -26,22 +28,24 @@ export default function UsageNowPage() {
 export function UsageNowContent({ lang, sessions = [], harnesses = [], accounts = true }: { lang: Lang; sessions?: SessionMeta[]; harnesses?: SurfaceHarnessId[]; accounts?: boolean }) {
   const isMobile = useIsMobile()
   const { budgets, readings, now, limits, failure } = usePlanLimits()
-  const { harnesses: chatHarnesses, loading: chatHarnessesLoading } = useChatHarnesses(true)
+  const { harnesses: chatHarnesses, reload } = useChatHarnesses(true)
+  const [installing, setInstalling] = useState<string | null>(null)
+  // Only the harnesses this machine does NOT have: the charts above already show the rest.
+  const missing = (withMissingHarnesses([], chatHarnesses) ?? [])
   const rows = orderedBudgets(budgets)
-  const usage = sessions.reduce<Record<string, { sessions: number }>>((out, session) => {
-    const id = session.harness ?? 'claude'
-    out[id] = { sessions: (out[id]?.sessions ?? 0) + 1 }
-    return out
-  }, {})
   const apis = useApiUsage().items
   return <div style={{ minWidth: 0 }}>
     <PageHeader lang={lang} areaId="usage" pageId="now" isMobile={isMobile} status={usageHeadline(rows, now, lang) ?? undefined} />
     <div style={{ marginBottom: 20 }}><UsageChartsPanel budgets={rows} readings={readings} status={usageLimitsStatus(limits, failure)} sessions={sessions} harnesses={harnesses} lang={lang} now={now} /></div>
-    <section style={{ marginBottom: 20 }} aria-labelledby="usage-harness-catalog-title">
-      <h2 id="usage-harness-catalog-title" style={{ fontSize: 16, margin: '0 0 6px' }}>{lang === 'pt' ? 'Uso por harness' : 'Usage by harness'}</h2>
-      <p style={{ color: 'var(--text-secondary)', fontSize: 12, margin: '0 0 12px' }}>{lang === 'pt' ? 'O catálogo completo, com instalação, leitura e uso claramente separados.' : 'The full catalog, with installation, reading and usage kept explicit.'}</p>
-      <HarnessCatalogTable lang={lang} statuses={chatHarnesses} usage={usage} planLimits={limits} readings={readings} now={now} mode="usage" loading={chatHarnessesLoading} />
-    </section>
+    {missing.length > 0 && <div style={{ marginBottom: 20 }} data-usage-missing-harnesses>
+      <HarnessPicker lang={lang} harnesses={missing} value="" onChange={() => undefined} onInstall={setInstalling} />
+      <HarnessInstallDialog
+        target={installing ? { id: installing, label: missing.find(h => h.id === installing)?.label ?? installing } : null}
+        pt={lang === 'pt'}
+        onClose={() => setInstalling(null)}
+        onDone={() => reload()}
+      />
+    </div>}
     {accounts && <BillingAccountsPanel />}
     <ApiUsageSection items={apis} now={now} lang={lang} emptyNotice />
   </div>
