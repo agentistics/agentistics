@@ -100,7 +100,7 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
   const sectioned = apis.length > 0
   return <div data-plan-usage-summary style={{ width: '100%', maxWidth: embedded ? undefined : 344, boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4, ...(embedded ? {} : { minHeight: 0, flex: '1 1 auto' }) }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>{!embedded && <>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span></>}<span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
-    <div data-plan-usage-scroll className="ag-scroll" style={embedded ? undefined : { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div data-plan-usage-scroll className="ag-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 4, ...(embedded ? {} : { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }) }}>
     {sectioned && <SectionTitle>{accountsSectionTitle(lang)}</SectionTitle>}
     {rows.map((row, i) => {
       const control = agentUse?.(row.harness, row.account)
