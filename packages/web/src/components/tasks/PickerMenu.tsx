@@ -105,6 +105,12 @@ export function PanelMenu({
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v) }
+  const wasOpen = useRef(false)
+  // Closing hands focus back to the button that opened the panel (Esc, outside click, a row that acts).
+  useEffect(() => {
+    if (wasOpen.current && !open) trigger.current?.focus()
+    wasOpen.current = open
+  }, [open])
 
   useEscapeOwner(open, () => setOpen(false))
   useEffect(() => {

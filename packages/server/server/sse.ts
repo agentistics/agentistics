@@ -12,6 +12,7 @@ import { centralManifest, centralHtml } from './central-branding'
 import { invalidateCache, rebuildNow, useWatcherDrivenRefresh } from './data'
 import { createRebuildScheduler } from './rebuild-scheduler'
 import { mirrorFile } from './archive'
+import { onBookWrite } from './sessions/task-store'
 import { harnessEnabled } from './adapters/types'
 import { LATE_WATCH_INTERVAL_MS, planLateWatches, type WatchWant } from './watch-plan'
 import { addStoredNotification } from './notifications-store'
@@ -103,6 +104,22 @@ let sseDebounce: ReturnType<typeof setTimeout> | null = null
  * mark the cache stale, nudge listeners — rather than starting a full build in the background.
  */
 export function enableRebuildOnChange(): void { rebuildOnChange = true; useWatcherDrivenRefresh() }
+
+let bookDebounce: ReturnType<typeof setTimeout> | null = null
+/** A task-book write: tell every client with a bare `change` — no data rebuild, the book is not in
+ *  `/api/data`. Debounced so a burst of writes is one push. */
+export function notifyBookChange(delayMs = 150): void {
+  if (bookDebounce) clearTimeout(bookDebounce)
+  bookDebounce = setTimeout(() => {
+    bookDebounce = null
+    const payload = sseEncoder.encode('event: change\ndata: {}\n\n')
+    for (const ctrl of [...sseClients]) {
+      try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
+    }
+  }, delayMs)
+}
+
+onBookWrite(() => notifyBookChange())
 
 export function triggerSseNotification() {
   if (rebuildOnChange) rebuilds.changed()
