@@ -126,7 +126,7 @@ import { useViewportWidth } from '../hooks/useViewportWidth'
 import { railActivityFromHint } from '../lib/railActivity'
 import { useHardwarePressureWatch } from '../hooks/useHardwarePressureWatch'
 import { useIdleSessions } from '../hooks/useIdleSessions'
-import { useNotifications } from '../lib/notifications'
+import { useUnreadNotificationCount } from '../lib/notifications'
 import { takeIdleReviewRequest } from '../lib/idleReviewRequest'
 import { publishIdleReview } from '../lib/idleReviewStore'
 import { IdleSessionsModal } from '../components/sessions/IdleSessionsModal'
@@ -2231,7 +2231,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
   useEffect(() => { setSessionDrawer(false) }, [selected?.id])
   // Ending a session shows its own state on the session view; the drawer must not sit over it.
   useEffect(() => { if (selectedEnding) setSessionDrawer(false) }, [selectedEnding])
-  const unreadInbox = useNotifications().filter(n => !n.read).length
+  const unreadInbox = useUnreadNotificationCount()
   const planLimits = usePlanLimits()
 
   const magnifierButton = isMobile

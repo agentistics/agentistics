@@ -5,6 +5,8 @@ import { applyDataPatch, type DataPatch, calcStreak, calcCost, canonicalProjectP
 import { startOfDay, endOfDay, subDays, isAfter, isBefore, parseISO, format, differenceInCalendarDays, addDays, getDay } from 'date-fns'
 import { makeTagFilter, type TagDef } from '../lib/tagMatch'
 import { eventStream, subscribeEvent } from '../lib/eventStream'
+import { renderWhenInputQuiet } from '../lib/inputQuiet'
+import { localDayCache } from '../lib/tzSignature'
 import { isUsableDataCache } from '../lib/dataCache'
 import { afterFinale, sinceUpdate } from '../lib/finaleGate'
 import { acceptPayload, classifyLoadError, holdLoadError, inUpdateGrace, DATA_TIMEOUT_MS, bootDeadlineMs, bootRetryDelayMs, fetchJsonWithTimeout, fetchWithTimeout, LIVENESS_MS, LIVENESS_TIMEOUT_MS, livenessStep, partialPollMs, retryDelayMs, dataUrl, SLIM_FOLLOWUP_MS, type LoadError, type StartupStripState } from '../lib/startupLoad'
@@ -472,10 +474,14 @@ export function useData(working = false) {
       const next = fresh as AppData
       dataRevisionRef.current = res.headers.get('X-Agentistics-Data-Revision')
       if (acceptPayload(dataRef.current, next)) {
+        const hadData = dataRef.current !== null
         dataRef.current = next
         // A refresh is never urgent: as a transition React can answer a tap that lands first and
         // render the new payload in the gaps, instead of holding the thread for the whole commit.
-        startTransition(() => setData(next))
+        // And with data already on screen it waits for the person to stop typing (`inputQuiet.ts`):
+        // the derivation it triggers is one long task React cannot split.
+        if (hadData) renderWhenInputQuiet(() => startTransition(() => setData(dataRef.current)))
+        else startTransition(() => setData(next))
       }
       setError(null); setLoadError(null); setOffline(null)
       setLoading(false)
@@ -551,7 +557,9 @@ export function useData(working = false) {
         if (!next || !isUsableDataCache(next)) { void fetchData(); return }
         patchEpochRef.current++
         dataRevisionRef.current = patch.revision
-        dataRef.current = next; setData(next); setOffline(null)
+        // The patch is applied to the held copy NOW (the next patch chains on its revision); only the
+        // RENDER waits for the input to go quiet, and the latest copy is the one rendered.
+        dataRef.current = next; renderWhenInputQuiet(() => setData(dataRef.current)); setOffline(null)
         writeDataCache(next)
       } catch { void fetchData() }
     })
@@ -684,6 +692,23 @@ function inRange(date: Date, start: Date, end: Date) {
  *  Re-exported here to keep every existing `from './useData'` import working. */
 export { calcStreak } from '@agentistics/core'
 
+/**
+ * APP.LENTO: the local day of one ISO timestamp, remembered. `localActivityDates` parsed and
+ * formatted EVERY recorded turn of every session (date-fns `parseISO` + `format`) on every
+ * derivation, and the server pushes a data patch after each rebuild — every few seconds while
+ * sessions work — so typing in the composer waited behind ~20 % of a 300 ms long task spent here.
+ * A timestamp's local day does not change, so it is computed once; the cache is bounded.
+ */
+const LOCAL_DAY = localDayCache<string, string | null>(500_000)
+function localDayOf(value: string): string | null {
+  const known = LOCAL_DAY.get(value)
+  if (known !== undefined) return known
+  const date = parseISO(value)
+  const day = Number.isNaN(date.getTime()) ? null : format(date, 'yyyy-MM-dd')
+  LOCAL_DAY.set(value, day)
+  return day
+}
+
 /** Local activity days for streaks. UTC daily aggregates cannot be rebucketed without
  * timestamps: one UTC day overlaps two local days. Use recorded turns, falling back to
  * session endpoints for older adapters. Cache-only history is deliberately omitted. */
@@ -692,8 +717,8 @@ export function localActivityDates(sessions: readonly Pick<SessionMeta,
   const dates = new Set<string>()
   const add = (value: unknown): void => {
     if (!isDateStr(value)) return
-    const date = parseISO(value)
-    if (!Number.isNaN(date.getTime())) dates.add(format(date, 'yyyy-MM-dd'))
+    const day = localDayOf(value)
+    if (day !== null) dates.add(day)
   }
   for (const session of sessions) {
     if (session.user_message_timestamps?.length) {

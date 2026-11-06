@@ -31,7 +31,9 @@ const port = Number(process.env.PORT) && Number(process.env.PORT) !== 47291 ? Nu
 if (port === 47291 || port === 47292 || port + 1 === 47291) { console.error('refusing the real ports'); process.exit(2) }
 
 let out = ''
-const proc = spawn([process.execPath, '--cpu-prof', `--cpu-prof-dir=${OUT}`, '--cpu-prof-md', join(REPO, 'packages/server/bin/cli.ts'), 'server', '--port', String(port)], {
+// `--no-prof`: the same throwaway without the profiler (a browser session against it, a long soak).
+const PROF = !args.includes('--no-prof') ? ['--cpu-prof', `--cpu-prof-dir=${OUT}`, '--cpu-prof-md'] : []
+const proc = spawn([process.execPath, ...PROF, join(REPO, 'packages/server/bin/cli.ts'), 'server', '--port', String(port)], {
   cwd: REPO,
   env: {
     ...process.env, HOME: home, USERPROFILE: home, AGENTISTICS_DIR: join(home, '.agentistics'), TMUX_TMPDIR: join(home, '..', 'tmux'),
@@ -45,6 +47,7 @@ const logFile = join(OUT, 'server.log')
 const drain = async (s: ReadableStream<Uint8Array>) => { const d = new TextDecoder(); for await (const c of s) { const t = d.decode(c); out += t; appendFileSync(logFile, t) } }
 void drain(proc.stdout as ReadableStream<Uint8Array>); void drain(proc.stderr as ReadableStream<Uint8Array>)
 const base = `http://127.0.0.1:${port}`
+console.log(`server ${base} (web ${port + 1})`)
 for (let i = 0; i < 2400; i++) {
   if (proc.exitCode !== null) { console.error(`server exited ${proc.exitCode} (signal ${proc.signalCode})`, out.slice(-3000)); process.exit(1) }
   try { if ((await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(500) })).ok) break } catch { /* not yet */ }

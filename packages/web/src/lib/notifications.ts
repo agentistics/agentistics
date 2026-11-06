@@ -627,7 +627,12 @@ function apply(next: unknown): void {
     && typeof (x as AppNotification).id === 'string'
     && typeof (x as AppNotification).ts === 'number'
     && typeof (x as AppNotification).type === 'string')
-  items = valid.map(x => ({ ...x, read: x.read === true }))
+  const incoming = valid.map(x => ({ ...x, read: x.read === true }))
+  // APP.LENTO: the bell refreshes on every SSE notification, and the answer is usually the list it
+  // already has. A new array re-rendered every subscriber (the whole Sessions workspace among them,
+  // a ~300 ms long task) for nothing; an identical answer now keeps the identity and emits nothing.
+  if (incoming.length === items.length && JSON.stringify(incoming) === JSON.stringify(items)) return
+  items = incoming
   emit()
 }
 
@@ -707,6 +712,12 @@ function subscribe(cb: () => void): () => void {
  *  React. Components must use `useNotifications()` so they re-render on change. */
 export function readNotifications(): AppNotification[] {
   return items
+}
+
+/** Reactive count of the unread notifications to SHOW — re-renders only when the NUMBER changes. */
+export function useUnreadNotificationCount(): number {
+  const count = () => visible.reduce((n, x) => n + (x.read ? 0 : 1), 0)
+  return useSyncExternalStore(subscribe, count, count)
 }
 
 /** Reactive list of the notifications to SHOW (newest first) — muted categories left out. */
