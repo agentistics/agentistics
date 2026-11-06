@@ -37,7 +37,7 @@ describe('AgentScheduleEditor', () => {
 
 describe('the popup draws only the switch and "Sign in again"', () => {
   const html = renderToStaticMarkup(<PlanUsageSummary limits={[limits]} now={NOW} lang="pt"
-    agentUse={() => ({ on: false, pending: false, onToggle: () => {}, accountId: 'acc_1', reloginable: true })} onRelogin={() => {}} />)
+    agentUse={() => ({ on: false, pending: false, onToggle: () => {}, accountId: 'acc_1', reloginable: true, loginBroken: true })} onRelogin={() => {}} />)
   test('switch + re-login per account', () => {
     expect(html).toContain('data-plan-row-controls="acc_1"')
     expect(html).toContain('role="switch"')
@@ -47,6 +47,11 @@ describe('the popup draws only the switch and "Sign in again"', () => {
   test('no schedule in the popup', () => {
     expect(html).not.toContain('data-agent-schedule')
     expect(html).not.toContain('data-agent-day')
+  })
+  test('a working account (login ok) never shows the button, even if it could run it', () => {
+    const h = renderToStaticMarkup(<PlanUsageSummary limits={[limits]} now={NOW} lang="pt"
+      agentUse={() => ({ on: true, pending: false, onToggle: () => {}, accountId: 'acc_1', reloginable: true, loginBroken: false })} onRelogin={() => {}} />)
+    expect(h).not.toContain('Refazer login')
   })
   test('no re-login button when the account cannot run it', () => {
     const h = renderToStaticMarkup(<PlanUsageSummary limits={[limits]} now={NOW} lang="pt"

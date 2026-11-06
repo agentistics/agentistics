@@ -137,6 +137,8 @@ function Usage({ r, now, lang, t, ready = true }: { r: BillingRowView; now: numb
 }
 
 /** The row's account cannot work now (its login expired, or nothing holds it). */
+/** A healthy login that can still be redone by hand (secondary action in the drawer). */
+export const quietRelogin = (r: BillingRowView): boolean => !!r.account && !loginOff(r) && r.account.relogin === true
 export const loginOff = (r: BillingRowView): boolean => r.account?.login === 'expired' || r.account?.login === 'signed_out'
 
 const actionLabel = (r: BillingRowView, t: ReturnType<typeof T>) => (r.problem ? t.review : r.plan || r.starts ? t.edit : r.detected ? t.confirm : t.setPlan)

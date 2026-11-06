@@ -157,7 +157,14 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
   // A session surface drawn as `side` whose session has its aside on screen lives inside that aside.
   const aside = !offscreen && layout === 'side' && !!sideSlot
   const drawn = useRef<SurfaceLayout>(layout)
+  const langNow = useRef(lang)
+  const langListeners = useRef(new Set<(l: 'pt' | 'en') => void>())
   drawn.current = layout
+  useEffect(() => {
+    if (langNow.current === lang) return
+    langNow.current = lang
+    for (const fn of [...langListeners.current]) { try { fn(lang) } catch { /* a surface's own fault */ } }
+  }, [lang])
   const host = useRef<HTMLDivElement>(null)
   const park = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLDivElement>(null)
@@ -200,7 +207,9 @@ function Frame({ open, load }: { open: OpenSurface; load?: Loader }) {
     drawn.current = effectiveSurfaceLayout(open.layout, resolveInlineSlot() !== null)
     // Every verb is bound to THIS surface, so a parked one can never move the one on screen.
     const ctx: SurfaceMountContext = {
-      sessionId, ...(sessionKind ? { sessionKind } : {}), lang, reducedMotion,
+      sessionId, ...(sessionKind ? { sessionKind } : {}), reducedMotion,
+      get lang() { return langNow.current },
+      onLangChange: fn => { if (typeof fn !== 'function') return () => {}; langListeners.current.add(fn); return () => { langListeners.current.delete(fn) } },
       get layout() { return drawn.current },
       setLayout: l => {
         setEngineSurfaceLayout(l, nonce)

@@ -300,6 +300,7 @@ function sanitizeEvent(raw: unknown): TaskEvent | null {
     id: e.id, taskId: e.taskId, kind: e.kind,
     at: typeof e.at === 'string' ? e.at : new Date(0).toISOString(),
     actor: typeof e.actor === 'string' ? e.actor : 'unknown',
+    ...(typeof e.subtaskId === 'string' && e.subtaskId ? { subtaskId: e.subtaskId } : {}),
     ...(typeof e.detail === 'string' ? { detail: e.detail } : {}),
     ...(typeof e.from === 'string' ? { from: e.from } : {}),
     ...(typeof e.to === 'string' ? { to: e.to } : {}),

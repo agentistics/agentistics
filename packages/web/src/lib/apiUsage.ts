@@ -12,6 +12,25 @@ import { fmtWhen } from './planLimits'
 
 export type ApiUsageStatus = 'ok' | 'no-key' | 'no-permission' | 'error'
 
+export interface ApiUsageRequirement {
+  label: { pt: string; en: string }
+  level: { pt: string; en: string }
+  required: boolean
+}
+export interface ApiUsageNote { pt: string; en: string }
+
+export interface ApiUsageConfig {
+  kind: 'api-key'
+  status: 'set' | 'missing'
+  last4?: string
+  where?: string
+  endpoint: string
+  createUrl?: string
+  pricingUrl?: string
+  requirements?: ApiUsageRequirement[]
+  notes?: ApiUsageNote[]
+}
+
 export interface ApiUsageItem {
   id: string
   label: string
@@ -23,11 +42,19 @@ export interface ApiUsageItem {
   resetsAt?: number
   plan?: string
   detail?: string
+  config?: ApiUsageConfig
 }
 
 const STATUSES: readonly ApiUsageStatus[] = ['ok', 'no-key', 'no-permission', 'error']
 export const API_USAGE_URL = '/api/engine/x/api-usage'
 export const API_USAGE_POLL_MS = 60_000
+
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms)
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), ms)
+  return controller.signal
+}
 
 /** A tiny fixture shaped like the engine's answer: one item ok, one without permission. */
 export const API_USAGE_FIXTURE: { items: unknown[] } = {
@@ -38,6 +65,42 @@ export const API_USAGE_FIXTURE: { items: unknown[] } = {
 }
 
 const finite = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+
+function sameOriginEndpoint(v: unknown): v is string {
+  return typeof v === 'string' && /^\/api\/engine\/x\/(?!\/)[^\s?#]+$/.test(v)
+}
+
+function httpsUrl(v: unknown): v is string {
+  if (typeof v !== 'string') return false
+  try { return new URL(v).protocol === 'https:' }
+  catch { return false }
+}
+
+function configOf(v: unknown): ApiUsageConfig | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const c = v as Record<string, unknown>
+  if (c.kind !== 'api-key' || (c.status !== 'set' && c.status !== 'missing') || !sameOriginEndpoint(c.endpoint)) return undefined
+  const config: ApiUsageConfig = { kind: 'api-key', status: c.status, endpoint: c.endpoint }
+  if (typeof c.last4 === 'string' && /^[^\s]{1,4}$/.test(c.last4)) config.last4 = c.last4
+  if (typeof c.where === 'string' && c.where) config.where = c.where
+  if (httpsUrl(c.createUrl)) config.createUrl = c.createUrl
+  if (httpsUrl(c.pricingUrl)) config.pricingUrl = c.pricingUrl
+  if (Array.isArray(c.requirements)) {
+    const requirements = c.requirements.filter(r => {
+      if (!r || typeof r !== 'object') return false
+      const x = r as Record<string, unknown>
+      const label = x.label as Record<string, unknown> | undefined
+      const level = x.level as Record<string, unknown> | undefined
+      return !!label && !!level && typeof label.pt === 'string' && typeof label.en === 'string' && typeof level.pt === 'string' && typeof level.en === 'string' && typeof x.required === 'boolean'
+    }) as ApiUsageRequirement[]
+    if (requirements.length) config.requirements = requirements
+  }
+  if (Array.isArray(c.notes)) {
+    const notes = c.notes.filter(n => n && typeof n === 'object' && typeof (n as { pt?: unknown }).pt === 'string' && typeof (n as { en?: unknown }).en === 'string') as ApiUsageNote[]
+    if (notes.length) config.notes = notes
+  }
+  return config
+}
 
 function instant(v: unknown): number | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return v
@@ -61,6 +124,8 @@ export function parseApiUsage(body: unknown): ApiUsageItem[] {
     if (resetsAt !== undefined) item.resetsAt = resetsAt
     if (typeof r.plan === 'string' && r.plan) item.plan = r.plan
     if (typeof r.detail === 'string' && r.detail) item.detail = r.detail
+    const config = configOf(r.config)
+    if (config) item.config = config
     out.push(item)
   }
   return out
@@ -78,7 +143,7 @@ const nf = (lang: 'pt' | 'en') => new Intl.NumberFormat(lang === 'pt' ? 'pt-BR' 
 export function apiRowLine(i: ApiUsageItem, now: number, lang: 'pt' | 'en'): string {
   const pt = lang === 'pt'
   switch (i.status) {
-    case 'no-key': return pt ? 'sem chave configurada' : 'no key configured'
+    case 'no-key': return i.config?.status === 'missing' ? (pt ? 'Sem chave · Adicionar' : 'No key · Add') : (pt ? 'sem chave configurada' : 'no key configured')
     case 'no-permission': return pt ? 'a chave não tem permissão para ler o saldo' : 'the key cannot read the balance'
     case 'error': return pt ? 'não foi possível ler o saldo' : 'could not read the balance'
     case 'ok': {
@@ -100,9 +165,10 @@ const emit = (next: ApiUsageSnapshot) => { snap = next; for (const l of listener
 
 async function refresh(): Promise<void> {
   try {
-    const r = await fetch(API_USAGE_URL, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
-    // 404 = community build / no engine route; any other refusal reads the same: no APIs to show.
-    if (!r.ok) { emit({ items: [] }); return }
+    const r = await fetch(API_USAGE_URL, { cache: 'no-store', signal: timeoutSignal(8_000) })
+    // 404 = community build. Before the first answer, any refusal gives the initial empty state;
+    // after a good answer, transient server failures must not erase what is already on screen.
+    if (!r.ok) { if (r.status === 404 || snap.items === null) emit({ items: [] }); return }
     emit({ items: parseApiUsage(await r.json()) })
   } catch {
     // A dropped connection keeps what is on screen; before the first answer there is simply nothing.
@@ -129,3 +195,4 @@ export function useApiUsage(): ApiUsageSnapshot {
 
 /** Tests / fixtures: put a list in place without the network. */
 export function __setApiUsageForTest(items: ApiUsageItem[] | null): void { emit({ items }) }
+export function refreshApiUsage(): Promise<void> { return refresh() }

@@ -53,7 +53,7 @@ import {
   type PeriodDraft,
 } from './billingForm'
 import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
-import { BillingAccountList, loginOff, type BillingRowView } from './AccountRow'
+import { BillingAccountList, loginOff, quietRelogin, type BillingRowView } from './AccountRow'
 import { ReloginModal } from './ReloginModal'
 import { AgentScheduleEditor } from '../../components/AgentScheduleEditor'
 import { AUTH_COPY } from '../../lib/accountRelogin'
@@ -495,6 +495,14 @@ export function BillingAccountsPanel() {
                 </div>
               )
             })()}
+            {row.account && quietRelogin(row) && (
+              <div style={{ marginBottom: 12 }}>
+                <button type="button" data-account-drawer-relogin-quiet onClick={() => setRelogin({ id: row.account!.id, harness: row.harness, who: row.title })}
+                  style={{ ...dialogButtonStyle('secondary', isMobile), alignSelf: 'flex-start', gap: 8 }}>
+                  <KeyRound size={15} aria-hidden />{AUTH_COPY(pt).relogin}
+                </button>
+              </div>
+            )}
             {row.account && (
               <div data-account-agents style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, minHeight: isMobile ? 44 : undefined }}>
                 <span style={L}>{pt ? 'Uso por agentes' : 'Agent use'}</span>

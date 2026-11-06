@@ -12,6 +12,13 @@ type PlanAccount = {
   agentSchedule?: AgentSchedule; agentUse?: AgentUseView
   /** "Sign in again" can run for this account (any login state). */
   reloginable?: boolean
+  /** Server's login state and whether "Sign in again" fixes a BROKEN one (expired / signed out). */
+  login?: 'ok' | 'expired' | 'signed_out'; relogin?: boolean
+}
+
+/** PURE. Only an expired / signed-out login that Sign in again can fix; a working account never shows the button. */
+export function loginNeedsRelogin(a: { login?: string; relogin?: boolean }): boolean {
+  return (a.login === 'expired' || a.login === 'signed_out') && a.relogin === true
 }
 
 /** What a surface needs to draw one account's agent-use controls. */
@@ -23,6 +30,8 @@ export interface AgentUseControl {
   schedule?: AgentSchedule
   view?: AgentUseView
   reloginable: boolean
+  /** The login is expired / signed out AND a re-login can fix it: the only case the popup offers it. */
+  loginBroken: boolean
   /** Take the server's answer after a schedule save or a re-login. */
   applyAccount: (account: unknown) => void
 }
@@ -68,6 +77,7 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
       ...(account.agentSchedule ? { schedule: account.agentSchedule } : {}),
       ...(account.agentUse ? { view: account.agentUse } : {}),
       reloginable: account.reloginable === true,
+      loginBroken: loginNeedsRelogin(account),
       applyAccount: (next: unknown) => {
         const a = next as PlanAccount | null
         if (a && a.id === account.id) { revision.current++; setAccounts(prev => prev.map(x => x.id === a.id ? a : x)) }

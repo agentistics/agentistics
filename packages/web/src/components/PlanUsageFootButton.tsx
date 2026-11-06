@@ -31,6 +31,11 @@ export function anchorAbove(btn: { left: number; width: number }, viewportW: num
   return { left, width, caretLeft }
 }
 
+/** PURE. The popup never outgrows the room above its anchor (nor 560px): the list inside scrolls. */
+export function popMaxHeight(room: number): number {
+  return Math.max(160, Math.min(560, Math.floor(room) - EDGE))
+}
+
 /**
  * The sidebar footer's "Uso" button: hover or keyboard focus opens the plan-usage summary in a
  * portaled popover with a caret on the button; click opens the plan-usage modal. Icon only (so the five
@@ -100,14 +105,14 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: {
 
   let pop: React.ReactNode = null
   if (rect) {
-    const common: CSSProperties = { position: 'fixed', zIndex: 600, background: 'var(--bg-card)', border: '1px solid var(--ag-tint-4)', borderRadius: 12, boxShadow: 'var(--ag-shadow-menu)' }
+    const common: CSSProperties = { display: 'flex', flexDirection: 'column', position: 'fixed', zIndex: 600, background: 'var(--bg-card)', border: '1px solid var(--ag-tint-4)', borderRadius: 12, boxShadow: 'var(--ag-shadow-menu)' }
     const caret: CSSProperties = { position: 'absolute', width: CARET, height: CARET, background: 'var(--bg-card)', transform: 'rotate(45deg)' }
     const { left: popLeft, width: popW, caretLeft } = anchorAbove(rect, window.innerWidth)
     const style: CSSProperties = collapsed
       // Collapsed rail: opens to the RIGHT, caret on the left edge at the button's vertical middle.
-      ? { ...common, left: rect.right + CARET + 4, bottom: Math.max(8, window.innerHeight - rect.bottom - 8), maxWidth: POP_W + 20 }
+      ? { ...common, left: rect.right + CARET + 4, bottom: Math.max(8, window.innerHeight - rect.bottom - 8), maxWidth: POP_W + 20, maxHeight: popMaxHeight(window.innerHeight - Math.max(8, window.innerHeight - rect.bottom - 8)) }
       // Expanded: opens UPWARD, centred on the button and kept inside the viewport, caret under the button's centre.
-      : { ...common, left: popLeft, width: popW, bottom: window.innerHeight - rect.top + CARET + 2 }
+      : { ...common, left: popLeft, width: popW, bottom: window.innerHeight - rect.top + CARET + 2, maxHeight: popMaxHeight(rect.top - CARET - 2) }
     pop = createPortal(
       <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={style} onMouseEnter={open} onMouseLeave={closeSoon} onFocus={open} onBlur={closeSoon} onKeyDown={onPopKey}>
         <PlanUsageSummary onOpen={openModal} agentUse={agentUse} onRelogin={r => { close(); setRelogin(r) }} limits={snap.limits} registered={snap.registered} accountLabels={snap.accountLabels} now={snap.now} lang={lang} />

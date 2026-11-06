@@ -183,6 +183,35 @@ export async function hostForFleet(lang: CliLang): Promise<StartHost> {
   return hostFor(lang)
 }
 
+/**
+ * The small fleet slice used by Live Delivery. It deliberately stops at the host's already
+ * memoized session rows: building FleetPayload also reads preferences, task names, baselines and
+ * every presentation field needed by the full dashboard, although Live Delivery only needs the
+ * row identity/state/parent relationship. Keeping this door beside hostForFleet makes it impossible
+ * for the live route to accidentally grow a second fleet poller.
+ */
+export async function readLiveFleet(lang: CliLang): Promise<ControlSession[]> {
+  const hub = await fleetSessionHub()
+  const snapshot = hub.last()
+  if (liveFleetCache?.lang === lang && liveFleetCache.snapshot === snapshot) return liveFleetCache.rows
+  if (liveFleetInFlight?.lang === lang && liveFleetInFlight.snapshot === snapshot) return liveFleetInFlight.promise
+  const host = await hostForFleet(lang)
+  const promise = (async () => {
+    const frame = host.sessions ? await host.sessions() : null
+    const rows = frame?.sessions ?? []
+    const result = { lang, snapshot: hub.last(), rows }
+    liveFleetCache = result
+    return rows
+  })()
+  liveFleetInFlight = { lang, snapshot, promise }
+  try { return await promise } finally {
+    if (liveFleetInFlight?.promise === promise) liveFleetInFlight = null
+  }
+}
+
+let liveFleetCache: { lang: CliLang; snapshot: unknown; rows: ControlSession[] } | null = null
+let liveFleetInFlight: { lang: CliLang; snapshot: unknown; promise: Promise<ControlSession[]> } | null = null
+
 /** How long one fleet snapshot serves every route that only needs to find a row in it. */
 const SNAPSHOT_TTL_MS = 1_000
 

@@ -283,6 +283,8 @@ export interface TaskClaim {
 export interface TaskEvent {
   id: string
   taskId: string
+  /** The subtask this activity targets; absent means the delivery itself. */
+  subtaskId?: string
   at: string
   /** Who did it. Free text. */
   actor: string

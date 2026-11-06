@@ -8,6 +8,7 @@
 
 import { buildLive } from './task-live'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
+import { stat } from 'node:fs/promises'
 import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
 import {
   canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
@@ -38,6 +39,8 @@ import type { CommentKind, ThreadKind } from '@agentistics/core'
 import { chatAttachmentRef, compareBy, repoShortName, sanitizeCommentAttachments, sessionLabel, type ChatAttachmentRef } from '@agentistics/core'
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
 import type { TaskDetail, TaskListRow } from './task-report'
+import { onBookWrite } from './task-store'
+import { MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
 
 export interface TaskListReply {
   tasks: TaskListRow[]
@@ -58,6 +61,62 @@ export interface TaskDetailReply {
   excludedByFilter?: number
   /** Present only once the task has been delivered. */
   evidence?: DeliveryEvidence
+}
+
+type LiveBuildCache = { key: string; builtAtMs: number; reply: Awaited<ReturnType<typeof buildLive>> }
+let liveBuildCache: LiveBuildCache | null = null
+let liveBuildInFlight: { key: string; promise: Promise<LiveBuildCache> } | null = null
+const LIVE_REPLY_MAX_AGE_MS = 5_000
+
+/** The atomic rename gives the book a stable mtime/size version without reading its JSON twice. */
+async function fileVersion(file: string): Promise<string> {
+  try {
+    const s = await stat(file)
+    return `${s.mtimeMs}:${s.size}`
+  } catch {
+    return 'missing'
+  }
+}
+
+/** Both the book and registry feed the live line: sessions can change without a book write. */
+async function liveSourceVersion(): Promise<string> {
+  const [tasks, sessions] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE)])
+  return `${tasks}|${sessions}`
+}
+
+// A write is the fast invalidation path; the stat key also catches writes made by another process.
+onBookWrite(() => { liveBuildCache = null })
+
+async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
+  // Capture the source version BEFORE loading the world. A write during the build must not be
+  // stored under the newer version and then served as though it contained that write.
+  const key = await liveSourceVersion()
+  if (liveBuildCache?.key === key && Date.now() - liveBuildCache.builtAtMs < LIVE_REPLY_MAX_AGE_MS) return liveBuildCache.reply
+  if (liveBuildInFlight?.key === key) return (await liveBuildInFlight.promise).reply
+  const promise = (async () => {
+    const w = await loadTaskWorld()
+    const nowMs = Date.now()
+    const details = w.book.tasks.map(task => buildTaskDetail({
+      task,
+      attempts: w.book.attempts,
+      rows: w.rollupRows,
+      metas: w.metas,
+      costOf: w.costOf,
+      comments: [],
+      threads: [],
+      subtasks: w.book.subtasks.filter(t => t.taskId === task.id),
+      files: [],
+    }))
+    const labels = new Map(w.book.statuses.map(s => [s.id, s.label]))
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id) })
+    const result = { key, builtAtMs: Date.now(), reply }
+    liveBuildCache = result
+    return result
+  })()
+  liveBuildInFlight = { key, promise }
+  try { return (await promise).reply } finally {
+    if (liveBuildInFlight?.promise === promise) liveBuildInFlight = null
+  }
 }
 
 export async function listTasks(filter?: TaskFilter): Promise<TaskListReply> {
@@ -125,33 +184,27 @@ export async function showTask(
  * contributes nothing.
  */
 export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveView> {
-  const w = await loadTaskWorld()
   const nowMs = Date.now()
-  const details = w.book.tasks.map(task => buildTaskDetail({
-    task,
-    attempts: w.book.attempts,
-    rows: w.rollupRows,
-    metas: w.metas,
-    costOf: w.costOf,
-    comments: [],
-    threads: [],
-    subtasks: w.book.subtasks.filter(t => t.taskId === task.id),
-    files: [],
-  }))
-  const labels = new Map(w.book.statuses.map(s => [s.id, s.label]))
-  const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id) })
+  const replyPromise = liveReplyForBook()
   // The fleet and the stored roles are read WHERE the view is built, so the page and the MCP tool
   // answer from one source. A fleet that cannot be read costs the agent state, never the line.
   let rows: FleetRowLite[] = []
   let leaderIds = new Set<string>()
   try {
-    const { readFleet } = await import('./fleet-web')
+    const { readLiveFleet } = await import('./fleet-web')
     const { listRoles, defaultRoleDeps, roleOfRow } = await import('./session-roles')
-    const fleet = await readFleet('en')
-    rows = fleet.rows as unknown as FleetRowLite[]
+    const fleet = await readLiveFleet('en')
+    rows = fleet.map(r => ({
+      id: r.id, title: r.title, harness: r.harness, state: r.state,
+      ...(r.model ? { model: r.model } : {}),
+      ...(r.accountId ? { accountId: r.accountId } : {}),
+      ...(r.parentSessionId ? { parentSessionId: r.parentSessionId } : {}),
+      ...(r.lastLines ? { lastLines: r.lastLines } : {}),
+    }))
     const roles = await listRoles(await defaultRoleDeps())
-    leaderIds = new Set(fleet.rows.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
+    leaderIds = new Set(fleet.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
   } catch { /* no fleet: deliveries without live state */ }
+  const reply = await replyPromise
   return describeLive({ reply, rows, leaderIds, nowMs, filters })
 }
 

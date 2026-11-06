@@ -145,7 +145,7 @@ export function AreaRail({ lang, pathname, badges = {}, onNavigate, visibleSetti
               const active = pathname === to
               const Glyph = surfaceGlyph(s.icon)
               return (
-                <Tip key={s.id} label={s.label[lang]} show>
+                <Tip key={s.id} label={<>{s.label[lang]}{s.beta && <> <BetaTag what={s.label[lang]} lang={lang} /></>}</>} show>
                   <a href={to} data-engine-rail={s.id} aria-label={s.label[lang]} aria-current={active ? 'page' : undefined}
                     onClick={e => { e.preventDefault(); (onNavigate ?? navigate)(to) }}
                     style={{

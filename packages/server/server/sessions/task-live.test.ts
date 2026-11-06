@@ -115,4 +115,30 @@ describe('buildLive', () => {
     expect(r.deliveries).toHaveLength(1)
     expect(r.deliveries[0]).toMatchObject({ key: 't1', subtaskId: null, stage: 'running' })
   })
+  test('activity stays on its task or subtask card', () => {
+    const r = buildLive({
+      nowMs: NOW,
+      details: [detail({
+        subtasks: [sub('a', 'in_review'), sub('b', 'in_review')] as never,
+        sessions: [sess('task-s', null)] as never,
+      })],
+      events: [
+        { id: 'task', taskId: 't1', actor: 'owner', kind: 'comment', at: iso(NOW - 3 * H), detail: 'on the task' },
+        { id: 'a', taskId: 't1', actor: 'owner', kind: 'comment', at: iso(NOW - 2 * H), detail: 'on subtask "Sub a"' },
+        { id: 'b', taskId: 't1', actor: 'owner', kind: 'comment', at: iso(NOW - H), subtaskId: 'b', detail: 'explicit target' },
+      ],
+    })
+    const by = new Map(r.deliveries.map(d => [d.subtaskId, d.lastAction?.text]))
+    expect(by.get(null)).toBe('on the task')
+    expect(by.get('a')).toBe('on subtask "Sub a"')
+    expect(by.get('b')).toBe('explicit target')
+  })
+  test('activity titles containing newlines still identify their subtask', () => {
+    const title = 'Sub\nwith newline'
+    const r = buildLive({
+      nowMs: NOW, events: [{ id: 'newline', taskId: 't1', actor: 'owner', kind: 'comment', at: iso(NOW - H), detail: `on subtask "${title}"` }],
+      details: [detail({ subtasks: [sub('a', 'in_review', { title })] as never, sessions: [sess('s', 'a')] as never })],
+    })
+    expect(r.deliveries[0]?.lastAction?.text).toBe('on subtask "Sub')
+  })
 })

@@ -92,14 +92,15 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
 
 export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen, embedded = false, agentUse, onRelogin }: {
   /** The popup's per-account controls: ONLY the agent-use switch and "Sign in again" (never the schedule). */
-  agentUse?: ((harness: PlanLimits['harness'], account?: string) => { on: boolean; pending: boolean; onToggle: () => void; accountId: string; reloginable: boolean } | undefined) & { loaded?: boolean; accounts?: readonly { harness: PlanLimits['harness']; id: string; label?: string }[] }
+  agentUse?: ((harness: PlanLimits['harness'], account?: string) => { on: boolean; pending: boolean; onToggle: () => void; accountId: string; reloginable: boolean; loginBroken?: boolean } | undefined) & { loaded?: boolean; accounts?: readonly { harness: PlanLimits['harness']; id: string; label?: string }[] }
   onRelogin?: (r: { accountId: string; harness: PlanLimits['harness']; who: string }) => void
   onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang; /** Inside a card that already carries the title: fill its width, no own title or inset. */ embedded?: boolean }) {
   const rows = subscriptionRows(limits, registered, accountLabels, agentUse?.accounts)
   const apis = useApiUsage().items ?? []
   const sectioned = apis.length > 0
-  return <div data-plan-usage-summary style={{ width: '100%', maxWidth: embedded ? undefined : 344, boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+  return <div data-plan-usage-summary style={{ width: '100%', maxWidth: embedded ? undefined : 344, boxSizing: 'border-box', padding: embedded ? 0 : 10, display: 'flex', flexDirection: 'column', gap: 4, ...(embedded ? {} : { minHeight: 0, flex: '1 1 auto' }) }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '2px 4px 8px', fontSize: 11, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--text-secondary)' }}>{!embedded && <>◉ <span id="plan-usage-summary-title">{lang === 'pt' ? 'Uso dos planos' : 'Plan usage'}</span></>}<span style={{ marginLeft: 'auto', fontWeight: 500, letterSpacing: 0 }}>{lang === 'pt' ? '% usado' : '% used'}</span></div>
+    <div data-plan-usage-scroll className="ag-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 4, ...(embedded ? {} : { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }) }}>
     {sectioned && <SectionTitle>{accountsSectionTitle(lang)}</SectionTitle>}
     {rows.map((row, i) => {
       const control = agentUse?.(row.harness, row.account)
@@ -114,7 +115,7 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
             <ToggleSwitch on={control.on} disabled={control.pending} onToggle={control.onToggle} label={`${lang === 'pt' ? 'Uso por agentes' : 'Agent use'} · ${who}`} />
             {lang === 'pt' ? 'Uso por agentes' : 'Agent use'}
           </span>
-          {control.reloginable && onRelogin && <button type="button" data-plan-row-relogin={control.accountId} onClick={() => onRelogin({ accountId: control.accountId, harness: row.harness, who })}
+          {control.loginBroken && onRelogin && <button type="button" data-plan-row-relogin={control.accountId} onClick={() => onRelogin({ accountId: control.accountId, harness: row.harness, who })}
             style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 8, padding: '3px 9px', fontSize: 11.5, cursor: 'pointer' }}>
             <KeyRound size={12} aria-hidden />{lang === 'pt' ? 'Refazer login' : 'Sign in again'}
           </button>}
@@ -123,6 +124,7 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
     })}
     {sectioned && <><SectionTitle>{apiSectionTitle(lang)}</SectionTitle><ApiUsageRows items={apis} now={now} lang={lang} /></>}
     {rows.some(r => r.limits?.windows.some(w => currentUsedPct(w, now) >= 75)) && <div style={{ padding: '7px 4px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{rows.flatMap(r => (r.limits?.windows ?? []).filter(w => currentUsedPct(w, now) >= 75).slice(0, 1).map(w => <span key={`${r.harness}:${windowKey(w)}`} style={{ display: 'flex', alignItems: 'center', gap: 5 }}><LimitLevelIcon pct={currentUsedPct(w, now)} lang={lang} />{HARNESS_LABELS[r.harness]}: {windowLabel(w.kind, lang, w.scope)} {lang === 'pt' ? 'em' : 'at'} {Math.round(currentUsedPct(w, now))}% · {lang === 'pt' ? 'renova' : 'resets'} {fmtWhen(w.resetsAt, now, lang)}</span>))}</div>}
+    </div>
     <div style={{ borderTop: '1px solid var(--border)', padding: '8px 4px 4px', fontSize: 11.5, color: 'var(--text-tertiary)' }}>{lang === 'pt' ? 'Clique para ver tudo' : 'Click to see everything'} <button type="button" data-plan-usage-open onClick={onOpen} style={{ float: 'right', border: 0, background: 'transparent', padding: 0, font: 'inherit', fontWeight: 700, color: 'var(--anthropic-orange)', cursor: 'pointer' }}>{lang === 'pt' ? 'Abrir ›' : 'Open ›'}</button></div>
   </div>
 }

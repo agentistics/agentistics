@@ -10,6 +10,43 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Entrega ao vivo abre mais rápido, reaproveitando leituras enquanto nada mudou.',
+        en: 'Live Delivery opens faster by reusing reads while nothing has changed.',
+      },
+      {
+        pt: 'A janela de uso dos planos sempre cabe na tela, tem altura limitada e rola por dentro (com barra de rolagem nova), e o "Refazer login" só aparece quando o login da conta expirou.',
+        en: 'The plan usage popup always fits the screen, has a capped height and scrolls inside (with a new scrollbar), and "Sign in again" only shows when that account\'s login has expired.',
+      },
+      {
+        pt: 'Na Entrega ao vivo, a linha "↳ na subtarefa" de cada cartão mostra a última ação daquela subtarefa, não a da tarefa inteira.',
+        en: 'In Live Delivery, each card\'s "↳ on subtask" line shows that subtask\'s last action, not the whole task\'s.',
+      },
+      {
+        pt: 'Uso → APIs não esvazia mais a lista quando o serviço oscila; no iPhone o áudio da ligação libera no primeiro toque.',
+        en: 'Usage → APIs no longer empties the list when the service blips; on iPhone call audio unlocks on the first tap.',
+      },
+      {
+        pt: 'Uso → APIs: a chave da ElevenLabs agora se cadastra, troca e remove direto na linha da ElevenLabs, com o passo a passo, as permissões e o plano necessário.',
+        en: 'Usage → APIs: the ElevenLabs key is now added, changed and removed right on the ElevenLabs row, with the steps, permissions and plan it needs.',
+      },
+      {
+        pt: 'Ligações: etiqueta beta oficial, página acompanha o idioma do app e a amostra de voz mostra um carregando de verdade.',
+        en: 'Calls: official beta tag, the page follows the app language and the voice sample shows a real loading state.',
+      },
+      {
+        pt: 'Ligações: o globo não mostra mais o traçado pontilhado e tocar nele não interrompe a fala.',
+        en: 'Calls: the globe no longer shows the dotted trace, and tapping it does not interrupt the speech.',
+      },
+      {
+        pt: 'Ligações: quando a sessão termina a tarefa, a resposta agora é sempre falada (antes podia ficar presa em "Preparando áudio").',
+        en: 'Calls: when the session finishes its task, the answer is now always spoken (it could get stuck on "Preparing audio").',
+      },
+    ],
+  },
   '2.200.3': {
     features: [],
     fixes: [
