@@ -69,7 +69,8 @@ export function planShellOpen(f: ShellOpenFacts): ShellOpenPlan {
   if (!f.cwd) return { ok: false, reason: 'no-cwd' }
   if (!f.cwdExists) return { ok: false, reason: 'cwd-missing' }
   if (f.openCount >= SHELL_CAP) return { ok: false, reason: 'at-cap' }
-  return { ok: true, argv: f.platform === 'darwin'
-    ? [f.shell || '/bin/zsh', '-il']
-    : [f.shell || FALLBACK_SHELL], cwd: f.cwd }
+  const shell = f.shell || (f.platform === 'darwin' ? '/bin/zsh' : FALLBACK_SHELL)
+  // csh/tcsh reject combined `-il`; `-l` alone must be the only flag there.
+  const flags = f.platform !== 'darwin' ? [] : /(^|\/)t?csh$/.test(shell) ? ['-l'] : ['-il']
+  return { ok: true, argv: [shell, ...flags], cwd: f.cwd }
 }

@@ -24,6 +24,13 @@ describe('planShellOpen', () => {
       .toEqual({ ok: true, argv: [ok.shell!], cwd: '/home/u/proj' })
   })
 
+  test('csh and tcsh get only -l', () => {
+    expect(planShellOpen({ ...ok, platform: 'darwin', shell: '/bin/tcsh' }).ok && (planShellOpen({ ...ok, platform: 'darwin', shell: '/bin/tcsh' }) as { argv: string[] }).argv)
+      .toEqual(['/bin/tcsh', '-l'])
+    expect(planShellOpen({ ...ok, platform: 'darwin', shell: '/bin/csh' }))
+      .toEqual({ ok: true, argv: ['/bin/csh', '-l'], cwd: '/home/u/proj' })
+  })
+
   test('opens the user’s own shell in the session’s directory', () => {
     expect(planShellOpen(ok)).toEqual({ ok: true, argv: ['/usr/bin/zsh'], cwd: '/home/u/proj' })
   })

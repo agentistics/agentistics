@@ -144,7 +144,13 @@ export async function handleShellRoute(
     // says why.
     const started = performance.now()
     const rows = opts.targetRows ? await opts.targetRows() : (await host.sessions!()).sessions
-    const target = await resolveShellTarget(rows, body.sessionId, opts.nativeCwd)
+    let target = await resolveShellTarget(rows, body.sessionId, opts.nativeCwd)
+    // Detected (external) sessions live only in the fleet, not in the registry: fall back to the
+    // slow lookup before declaring the session unknown.
+    if (!target && opts.targetRows && host.sessions) {
+      const fleet = await host.sessions().catch(() => null)
+      target = await resolveShellTarget(fleet?.sessions ?? [], body.sessionId)
+    }
     const targetMs = performance.now() - started
     if (!target) return json({ error: 'unknown_session' }, 404)
 

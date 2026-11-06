@@ -44,13 +44,28 @@ describe('resolveShellTarget — the directory always comes from a record, never
 })
 
 
-test('opening resolves authoritative target records without walking the metric fleet', async () => {
+const post = (host: StartHost, sessionId: string, rows: { id: string; cwd?: string }[]) => {
+  const url = new URL('http://x/api/shell/open')
+  return handleShellRoute(new Request(url, { method: 'POST', body: JSON.stringify({ sessionId }) }), url, host, 'en', { targetRows: async () => rows })
+}
+
+test('a registry session resolves without walking the metric fleet', async () => {
   let fleetCalls = 0
   const host = { sessions: async () => { fleetCalls++; throw new Error('expensive fleet must not run') } } as unknown as StartHost
-  const url = new URL('http://x/api/shell/open')
-  const res = await handleShellRoute(new Request(url, {
-    method: 'POST', body: JSON.stringify({ sessionId: 'unknown' }),
-  }), url, host, 'en', { targetRows: async () => [] })
-  expect(res?.status).toBe(404)
+  const res = await post(host, 'reg-1', [{ id: 'reg-1' }])
+  expect(res?.status).toBe(200)
   expect(fleetCalls).toBe(0)
+})
+
+test('a detected-only session falls back to the fleet and opens', async () => {
+  let fleetCalls = 0
+  const host = { sessions: async () => { fleetCalls++; return { sessions: [{ id: 'ext-1' }] } } } as unknown as StartHost
+  const res = await post(host, 'ext-1', [])
+  expect(res?.status).toBe(200)
+  expect(fleetCalls).toBe(1)
+})
+
+test('unknown in registry and fleet is 404', async () => {
+  const host = { sessions: async () => ({ sessions: [] }) } as unknown as StartHost
+  expect((await post(host, 'nope', []))?.status).toBe(404)
 })
