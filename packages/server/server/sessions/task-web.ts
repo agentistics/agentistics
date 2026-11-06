@@ -40,7 +40,7 @@ import { chatAttachmentRef, compareBy, repoShortName, sanitizeCommentAttachments
 import { deleteTaskFile, deleteTaskFiles, readTaskFile, writeTaskFile } from './task-files'
 import type { TaskDetail, TaskListRow } from './task-report'
 import { onBookWrite } from './task-store'
-import { TASKS_FILE } from '../config'
+import { MANAGED_SESSIONS_FILE, TASKS_FILE } from '../config'
 
 export interface TaskListReply {
   tasks: TaskListRow[]
@@ -63,26 +63,35 @@ export interface TaskDetailReply {
   evidence?: DeliveryEvidence
 }
 
-type LiveBuildCache = { key: string; reply: Awaited<ReturnType<typeof buildLive>> }
+type LiveBuildCache = { key: string; builtAtMs: number; reply: Awaited<ReturnType<typeof buildLive>> }
 let liveBuildCache: LiveBuildCache | null = null
 let liveBuildInFlight: { key: string; promise: Promise<LiveBuildCache> } | null = null
+const LIVE_REPLY_MAX_AGE_MS = 5_000
 
 /** The atomic rename gives the book a stable mtime/size version without reading its JSON twice. */
-async function taskBookVersion(): Promise<string> {
+async function fileVersion(file: string): Promise<string> {
   try {
-    const s = await stat(TASKS_FILE)
+    const s = await stat(file)
     return `${s.mtimeMs}:${s.size}`
   } catch {
     return 'missing'
   }
 }
 
+/** Both the book and registry feed the live line: sessions can change without a book write. */
+async function liveSourceVersion(): Promise<string> {
+  const [tasks, sessions] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE)])
+  return `${tasks}|${sessions}`
+}
+
 // A write is the fast invalidation path; the stat key also catches writes made by another process.
 onBookWrite(() => { liveBuildCache = null })
 
 async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
-  const key = await taskBookVersion()
-  if (liveBuildCache?.key === key) return liveBuildCache.reply
+  // Capture the source version BEFORE loading the world. A write during the build must not be
+  // stored under the newer version and then served as though it contained that write.
+  const key = await liveSourceVersion()
+  if (liveBuildCache?.key === key && Date.now() - liveBuildCache.builtAtMs < LIVE_REPLY_MAX_AGE_MS) return liveBuildCache.reply
   if (liveBuildInFlight?.key === key) return (await liveBuildInFlight.promise).reply
   const promise = (async () => {
     const w = await loadTaskWorld()
@@ -100,7 +109,7 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
     }))
     const labels = new Map(w.book.statuses.map(s => [s.id, s.label]))
     const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id) })
-    const result = { key: await taskBookVersion(), reply }
+    const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
     return result
   })()
