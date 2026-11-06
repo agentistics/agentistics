@@ -3,7 +3,7 @@
  * "Sign in again" re-binds the SAME account (id, nickname, plan, agent switch kept) in its own folder.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AccountBudget } from '@agentistics/core'
@@ -284,5 +284,82 @@ describe('detectAuthInTail', () => {
 
   test('a harness whose refusal was never captured never raises it', () => {
     expect(detectAuthInTail('gemini', [refused('2026-10-30T10:01:01Z')]).auth).toBeNull()
+  })
+})
+
+describe('a sign-in that worked is never reported as failed (RELOGIN.NAYARA)', () => {
+  const NOT_DARWIN = process.platform !== 'darwin'
+  /** A relogin whose CLI the test drives by hand; `code` is typed through the real `reloginCode` path. */
+  async function drive(over: { exit?: number; leaveAlive?: boolean } = {}) {
+    const { store, id, root } = await setup()
+    await store.markLoginExpired(id, 5_000)
+    // The expired account's OLD token: written long before the code about to be pasted.
+    const longAgo = new Date(Date.now() - 3_600_000)
+    await utimes(join(root, '.credentials.json'), longAgo, longAgo)
+    let failure: ((r: 'login_failed', d?: string) => Promise<void>) | undefined
+    let exit!: (code: number) => void
+    const exited = new Promise<number>(r => { exit = r })
+    const login: NonNullable<AccountRootsDeps['login']> = async (req, onFailure, opts) => {
+      failure = onFailure as never
+      if (opts?.launch) await opts.launch(req)
+      const info: LoginInfo = { kind: LOGIN_ADAPTERS.claude!.kind, url: 'https://claude.ai/oauth/authorize', expiresAt: Date.now() + 900_000 }
+      return { ready: Promise.resolve(info), info: () => info, submit: async () => {}, stop: async () => {}, submitted: () => true }
+    }
+    const roots = createAccountRoots({
+      base: join(tmp, 'accounts'), flagOn: () => true, login,
+      loginOptions: { launch: async () => ({ read: async () => null, write: async () => {}, stop: async () => {}, exited }) },
+      probe: async () => NAYARA, registerMcp: async () => {}, audit: async () => {},
+      bind: (r, i) => store.bind(r, i), getAccount: x => store.byId(x), listAccounts: () => store.readAccounts(),
+    })
+    await roots.relogin(id)
+    await roots.reloginCode(id, 'PASTED-CODE')
+    return { roots, store, id, root, exit, fail: () => failure!('login_failed', 'still waiting after the code'), over }
+  }
+  const writeLogin = (root: string) => writeFile(join(root, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'test-not-a-token' } }))
+
+  test('a login written while the CLI is still alive binds (no exit needed)', async () => {
+    if (!NOT_DARWIN) return
+    const { roots, id, root } = await drive()
+    await Bun.sleep(5)
+    await roots.pollRelogins()
+    // The old token is older than the pasted code: not a new login.
+    expect(roots.reloginStatus(id)?.status).toBe('pending')
+    await writeLogin(root)
+    await roots.pollRelogins()
+    expect(roots.reloginStatus(id)).toEqual({ status: 'done', accountId: id, boundId: id, same: true })
+    roots.stopPoller()
+  })
+
+  test('a credential that appears AFTER the wait gave up turns the failure into success', async () => {
+    if (!NOT_DARWIN) return
+    const { roots, id, root, fail } = await drive()
+    await fail()
+    expect(roots.reloginStatus(id)).toMatchObject({ status: 'failed' })
+    await roots.pollRelogins()
+    expect(roots.reloginStatus(id)?.status).toBe('failed') // nothing new on disk yet
+    await writeLogin(root)
+    await roots.pollRelogins()
+    expect(roots.reloginStatus(id)).toEqual({ status: 'done', accountId: id, boundId: id, same: true })
+    roots.stopPoller()
+  })
+
+  test('a real failure leaves nothing on disk and stays failed (no false success)', async () => {
+    const { roots, id, exit, fail } = await drive()
+    exit(1)
+    await Bun.sleep(5)
+    await fail()
+    await roots.pollRelogins()
+    await roots.pollRelogins()
+    expect(roots.reloginStatus(id)).toMatchObject({ status: 'failed', error: 'login_failed' })
+    roots.stopPoller()
+  })
+
+  test('a CLI that ends with status 0 still binds, as before', async () => {
+    const { roots, id, exit } = await drive()
+    exit(0)
+    await Bun.sleep(5)
+    await roots.pollRelogins()
+    expect(roots.reloginStatus(id)).toEqual({ status: 'done', accountId: id, boundId: id, same: true })
+    roots.stopPoller()
   })
 })

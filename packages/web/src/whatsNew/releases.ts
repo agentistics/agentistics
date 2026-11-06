@@ -18,6 +18,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'A Claude account that lost its login (folder with no credential) now shows as "signed out" in the Usage popup, with the "Sign in again" button, instead of 0/0 rings; and the router no longer recommends it for new sessions.',
       },
       {
+        pt: 'Refazer login: se o login funcionou mas o app ainda não tinha visto a credencial, a tela não mostra mais "login falhou" — ela segue olhando e conclui sozinha quando a credencial aparece.',
+        en: 'Signing in again: if the login worked but the app had not yet seen the credential, the dialog no longer stays on "sign-in failed" — it keeps looking and finishes by itself once the credential appears.',
+      },
+      {
         pt: 'Na aba Encerradas, os grupos Dormindo, Finalizadas hoje e Antes de hoje agora têm seta para recolher e abrir (com a contagem quando recolhidos) e lembram o estado; "Antes de hoje" começa recolhido.',
         en: 'In the Ended tab, the Sleeping, Finished today and Before today groups now have a chevron to fold and unfold (with the count while folded) and remember their state; "Before today" starts folded.',
       },

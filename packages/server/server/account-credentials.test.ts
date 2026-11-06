@@ -35,3 +35,20 @@ describe('claudeCredentialState', () => {
     expect(claudeCredentialState('/r', { platform: 'linux', env: {}, read: () => { throw new Error('EACCES') } })).toBe('unknown')
   })
 })
+
+import { claudeCredentialWrittenSince } from './account-credentials'
+describe('claudeCredentialWrittenSince', () => {
+  const ok = () => JSON.stringify({ claudeAiOauth: { accessToken: 'x' } })
+  const base = { platform: 'linux' as const, env: {}, read: ok }
+  test('a credential newer than the pasted code is the new login; an older one is the old token', () => {
+    expect(claudeCredentialWrittenSince('/r', 10_000, { ...base, mtime: () => 12_000 })).toBe(true)
+    expect(claudeCredentialWrittenSince('/r', 10_000, { ...base, mtime: () => 9_000 })).toBe(true) // inside the 2 s clock slack
+    expect(claudeCredentialWrittenSince('/r', 10_000, { ...base, mtime: () => 5_000 })).toBe(false)
+    expect(claudeCredentialWrittenSince('/r', 10_000, { ...base, mtime: () => null })).toBe(false)
+  })
+  test('newer but empty / invalid is not a login, and macOS / env tokens prove nothing', () => {
+    expect(claudeCredentialWrittenSince('/r', 1, { ...base, read: () => '{}', mtime: () => 5 })).toBe(false)
+    expect(claudeCredentialWrittenSince('/r', 1, { ...base, platform: 'darwin', mtime: () => 5 })).toBe(false)
+    expect(claudeCredentialWrittenSince('/r', 1, { ...base, env: { CLAUDE_CODE_OAUTH_TOKEN: 't' }, mtime: () => 5 })).toBe(false)
+  })
+})
