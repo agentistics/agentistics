@@ -96,6 +96,7 @@ import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
 import { NotificationBell } from '../components/NotificationBell'
 import AwayPill from '../components/AwayPill'
+import LiveShortcut from '../components/tasks/LiveShortcut'
 import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
 import { HardwarePanel } from '../components/sessions/HardwarePanel'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
@@ -2249,6 +2250,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             exactly this. */}
         {/* Autonomous mode, same reasoning as the bell: the phone's only header here is this slot, and the
             owner switches away on from the phone — without it the state is invisible on this screen. */}
+        <LiveShortcut lang={pt ? 'pt' : 'en'} enabled={!ctx.isCentral && ctx.capabilities?.localShell !== false} />
         <AwayPill lang={pt ? 'pt' : 'en'} enabled={!ctx.isCentral && ctx.capabilities?.localShell !== false} />
         <NotificationBell lang={pt ? 'pt' : 'en'} buttonClassName="ag-tap-icon" buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
