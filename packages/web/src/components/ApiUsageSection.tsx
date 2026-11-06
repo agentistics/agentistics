@@ -20,13 +20,14 @@ export function SectionTitle({ children, id }: { children: string; id?: string }
 export function ApiUsageRow({ item, now, lang, bordered = true }: { item: ApiUsageItem; now: number; lang: Lang; bordered?: boolean }) {
   const pct = apiUsedPct(item)
   const bad = item.status === 'error' || item.status === 'no-permission'
-  return <div data-api-row={item.id} data-api-status={item.status} style={{ ...PLAN_ROW_GRID, padding: '8px 4px', borderTop: bordered ? '1px solid var(--border)' : undefined }}>
+  const tooltip = (item.status === 'no-key' || item.status === 'no-permission') && item.detail ? item.detail : undefined
+  return <div data-api-row={item.id} data-api-status={item.status} title={tooltip} style={{ ...PLAN_ROW_GRID, padding: '8px 4px', borderTop: bordered ? '1px solid var(--border)' : undefined }}>
     <KeyRound size={18} aria-hidden style={{ color: 'var(--text-secondary)' }} />
     <div style={{ minWidth: 0 }}>
       <b style={{ display: 'block', fontSize: 13, overflowWrap: 'anywhere' }}>{item.label}</b>
       {item.plan && <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>{item.plan}</span>}
       <span data-api-line style={{ display: 'block', fontSize: 11.5, color: bad ? 'var(--anthropic-orange)' : 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{apiRowLine(item, now, lang)}</span>
-      {item.detail && item.status !== 'ok' && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>{item.detail}</span>}
+      {item.detail && item.status === 'error' && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>{item.detail}</span>}
     </div>
     <div style={{ gridColumn: '3 / -1', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
       <PlanUsageRing pct={pct} size={36}>{pct === null ? '–' : Math.round(pct)}</PlanUsageRing>
