@@ -13,6 +13,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.200.0': {
     features: [
       {
+        pt: 'Formulários do OpenCode funcionam de ponta a ponta: perguntas em várias etapas, seleção múltipla e a opção "Outra" com texto livre chegam certinho ao modelo, e dá para cancelar.',
+        en: 'OpenCode forms work end to end: multi-step questions, multiple selection and the "Other" option with free text reach the model correctly, and you can cancel.',
+      },
+      {
         pt: 'Agentask saiu do beta.',
         en: 'Agentask is out of beta.',
       },
