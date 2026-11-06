@@ -13,6 +13,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.200.0': {
     features: [
       {
+        pt: 'Modo autônomo de ponta a ponta: o líder recebe um aviso quando um worker fica parado há 30 minutos, e a esteira leva cada entrega da sessão à revisão e à limpeza, sem marcar como concluída sozinha.',
+        en: 'End-to-end autonomous mode: the leader gets a notice when a worker has been idle for 30 minutes, and the pipeline takes each delivery from the session through review and cleanup, without marking it done on its own.',
+      },
+      {
         pt: 'Modo ligação em beta para todos: o botão de ligar e a página Ligações aparecem sem precisar ligar o modo experimental. A chave da ElevenLabs pode ser cadastrada direto no cartão Voz.',
         en: 'Call mode is now in beta for everyone: the call button and the Calls page show up without turning on experimental mode. The ElevenLabs key can be added right in the Voice card.',
       },

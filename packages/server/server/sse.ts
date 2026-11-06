@@ -387,3 +387,12 @@ export function broadcastAwayChanged(): void {
     try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
   }
 }
+
+/** Flow journals changed: an empty refresh signal, with no session/task text on the shared stream. */
+export function broadcastFlowsChanged(): void {
+  if (sseClients.size === 0) return
+  const payload = sseEncoder.encode('event: flows\ndata: {}\n\n')
+  for (const ctrl of [...sseClients]) {
+    try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
+  }
+}
