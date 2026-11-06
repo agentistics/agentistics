@@ -49,6 +49,7 @@ import { approvalIdentity } from '../../lib/approvalQuestion'
 import { dialogAnswersToRetire } from '../../lib/dialogAnswerEcho'
 import { ChatBubble, type ChatTurn } from './ChatBubble'
 import { ReasoningRow, useReasoningClock } from './ReasoningRow'
+import { enterSends } from '../../lib/composerEnter'
 import { WorkingNote } from './WorkingNote'
 import { ToolActivity } from './ToolActivity'
 import { chatActivityStore } from '../../lib/appFlags'
@@ -2392,7 +2393,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
     // `canPrompt` is checked HERE now rather than only on the field's `disabled`, which no longer
     // follows it — see the note on the textarea. This is where it belonged anyway: the rule is
     // about what may be DELIVERED, not about what may be typed.
-    if ((ownWords === '' && attached.length === 0) || sending) return
+    if (ownWords === '' && attached.length === 0) return
+    // The previous message is still on its way: SAY so and keep the draft — returning in silence is a key that looks broken.
+    if (sending) { setNotice(pt ? 'A mensagem anterior ainda está sendo enviada — a sua continua aqui; envie de novo em instantes.' : 'The previous message is still being sent — yours is kept here; send again in a moment.'); return }
     /**
      * A REFUSAL IS SAID, NEVER RETURNED IN SILENCE.
      *
@@ -3376,7 +3379,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                                   return
                                 }
                                 // Same rule as the main field: a phone's return breaks the line.
-                                if (e.key === 'Enter' && !e.shiftKey && !isMobile) { e.preventDefault(); void send(); return }
+                                if (enterSends({ key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode, isMobile })) { e.preventDefault(); void send(); return }
                                 if (e.key === 'Escape' && stopEnabled) { e.preventDefault(); void stopNow() }
                               }}
                             />
@@ -3568,7 +3571,7 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
                     // is a 44px target sitting right beside the field. On a hardware keyboard the
                     // rule is the opposite one and unchanged — enter sends, shift+enter breaks —
                     // and the picker above follows the same split for the same reason.
-                    if (e.key === 'Enter' && !e.shiftKey && !isMobile) { e.preventDefault(); void send() }
+                    if (enterSends({ key: e.key, shiftKey: e.shiftKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey, isComposing: e.nativeEvent.isComposing, keyCode: e.keyCode, isMobile })) { e.preventDefault(); void send() }
                     // The composer's own "esc": stops the CURRENT turn without touching the draft
                     // or the field's own ability to keep taking text — see `stopNow`.
                     if (e.key === 'Escape' && stopEnabled) { e.preventDefault(); void stopNow() }
