@@ -90,6 +90,19 @@ describe('popover summary', () => {
     expect(Lib.apiRowLine(items[0]!, NOW, 'en')).toBe('no key configured')
     expect(Lib.apiRowLine(items[1]!, NOW, 'en')).toBe('could not read the balance')
   })
+  test('permission and missing-key details are tooltip-only; errors keep visible detail', () => {
+    const items = Lib.parseApiUsage({ items: [
+      { id: 'k', label: 'K', status: 'no-key', unit: 'credits', detail: 'setup required' },
+      { id: 'p', label: 'P', status: 'no-permission', unit: 'credits', detail: 'permission denied' },
+      { id: 'e', label: 'E', status: 'error', unit: 'credits', detail: 'upstream unavailable' },
+    ] })
+    const el = render(h(Section, { items, now: NOW, lang: 'en' }))
+    expect(el.querySelector('[data-api-row="k"]')!.textContent).not.toContain('setup required')
+    expect(el.querySelector('[data-api-row="k"]')!.getAttribute('title')).toBe('setup required')
+    expect(el.querySelector('[data-api-row="p"]')!.textContent).not.toContain('permission denied')
+    expect(el.querySelector('[data-api-row="p"]')!.getAttribute('title')).toBe('permission denied')
+    expect(el.querySelector('[data-api-row="e"]')!.textContent).toContain('upstream unavailable')
+  })
 })
 
 describe('usage page section', () => {
@@ -114,5 +127,19 @@ describe('store', () => {
     render(h(Probe))
     await act(async () => { await new Promise(r => setTimeout(r, 20)) })
     expect(seen).toEqual([])
+  })
+  test('a later server failure preserves the last good list', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => calls++ === 0
+      ? Response.json({ items: [{ id: 'a', label: 'A', status: 'ok', unit: 'credits', used: 1, limit: 2 }] })
+      : new Response('down', { status: 503 })) as unknown as typeof fetch
+    Lib.__setApiUsageForTest(null)
+    let seen: unknown = 'unset'
+    function Probe() { seen = Lib.useApiUsage().items; return null }
+    render(h(Probe))
+    await act(async () => { await new Promise(r => setTimeout(r, 20)) })
+    expect(seen).toEqual([{ id: 'a', label: 'A', status: 'ok', unit: 'credits', used: 1, limit: 2 }])
+    await act(async () => { await Lib.__refreshApiUsageForTest() })
+    expect(seen).toEqual([{ id: 'a', label: 'A', status: 'ok', unit: 'credits', used: 1, limit: 2 }])
   })
 })

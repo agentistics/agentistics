@@ -29,6 +29,13 @@ const STATUSES: readonly ApiUsageStatus[] = ['ok', 'no-key', 'no-permission', 'e
 export const API_USAGE_URL = '/api/engine/x/api-usage'
 export const API_USAGE_POLL_MS = 60_000
 
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms)
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), ms)
+  return controller.signal
+}
+
 /** A tiny fixture shaped like the engine's answer: one item ok, one without permission. */
 export const API_USAGE_FIXTURE: { items: unknown[] } = {
   items: [
@@ -100,9 +107,10 @@ const emit = (next: ApiUsageSnapshot) => { snap = next; for (const l of listener
 
 async function refresh(): Promise<void> {
   try {
-    const r = await fetch(API_USAGE_URL, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
-    // 404 = community build / no engine route; any other refusal reads the same: no APIs to show.
-    if (!r.ok) { emit({ items: [] }); return }
+    const r = await fetch(API_USAGE_URL, { cache: 'no-store', signal: timeoutSignal(8_000) })
+    // 404 = community build. Before the first answer, any refusal gives the initial empty state;
+    // after a good answer, transient server failures must not erase what is already on screen.
+    if (!r.ok) { if (r.status === 404 || snap.items === null) emit({ items: [] }); return }
     emit({ items: parseApiUsage(await r.json()) })
   } catch {
     // A dropped connection keeps what is on screen; before the first answer there is simply nothing.
@@ -129,3 +137,4 @@ export function useApiUsage(): ApiUsageSnapshot {
 
 /** Tests / fixtures: put a list in place without the network. */
 export function __setApiUsageForTest(items: ApiUsageItem[] | null): void { emit({ items }) }
+export function __refreshApiUsageForTest(): Promise<void> { return refresh() }
