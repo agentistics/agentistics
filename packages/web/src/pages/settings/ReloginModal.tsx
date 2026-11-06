@@ -57,11 +57,17 @@ export function ReloginModal({ accountId, harness, who, lang, onClose, onDone }:
   useEffect(() => () => { if (!finished.current) void cancelRelogin(accountId) }, [accountId])
 
   // Follow the sign-in until the server re-binds the account (or says it failed).
+  // Metadata is refreshed by polling: depending on its object identity would immediately restart
+  // the effect on every response, flooding the server instead of waiting for POLL_MS.
+  const hasLogin = !!login
   useEffect(() => {
-    if (!login || bound || expired) return
+    if (!hasLogin || bound || expired) return
     let alive = true
+    let reading = false
     const tick = async () => {
-      const s = await readRelogin(accountId)
+      if (reading) return
+      reading = true
+      const s = await readRelogin(accountId).finally(() => { reading = false })
       if (!alive || !s) return
       if (s.status === 'pending') {
         if (s.login) setLogin(s.login)
@@ -79,7 +85,7 @@ export function ReloginModal({ accountId, harness, who, lang, onClose, onDone }:
     const timer = setInterval(() => { void tick() }, POLL_MS)
     void tick()
     return () => { alive = false; clearInterval(timer) }
-  }, [accountId, login, bound, expired, harness, who, pt])
+  }, [accountId, attempt, hasLogin, bound, expired, harness, who, pt])
 
   const submit = useCallback(async (code: string) => {
     setBusy(true); setError(null)
