@@ -116,6 +116,15 @@ export function minimizeWindow(state: DockState, id: string): DockState {
   return { ...state, windows: state.windows.map(w => (w.id === id ? { ...w, minimized: true } : w)) }
 }
 
+/**
+ * Close a window from the minimized list. A detached window has no X of its own (minimize is its only
+ * control), so this menu is the way to dispose of one — except while its session is on a call: closing
+ * would leave a live call nobody can see, so the window comes back up instead.
+ */
+export function closeMinimizedWindow(state: DockState, id: string, onCall: boolean): DockState {
+  return onCall ? openSession(state, id) : closeWindow(state, id)
+}
+
 export function closeWindow(state: DockState, id: string): DockState {
   return { ...state, windows: state.windows.filter(w => w.id !== id) }
 }

@@ -6,7 +6,7 @@ type Lang = 'pt' | 'en'
 const ORANGE = 'var(--anthropic-orange)'
 const ORANGE_DIM = 'var(--anthropic-orange-dim)'
 
-export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGoTo, onMinimize, onClose, responsive = false, frameRef, children }: {
+export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGoTo, onMinimize, onClose, canClose = true, responsive = false, frameRef, children }: {
   win: NayWindow
   lang: Lang
   title: string
@@ -17,6 +17,8 @@ export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGo
   onGoTo?: () => void
   onMinimize: () => void
   onClose: () => void
+  /** False while something in the window (a live call) must not be ended by closing it: only minimize remains. */
+  canClose?: boolean
   frameRef?: Ref<HTMLDivElement>
   responsive?: boolean
   children: ReactNode
@@ -78,7 +80,7 @@ export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGo
         {onGoTo && <LabelButton icon={<SquareArrowOutUpRight size={13} />} label={pt ? 'Ir para a sessão' : 'Go to session'}
           title={pt ? 'Abrir esta sessão na tela de Sessões' : 'Open this session in the Sessions workspace'} onClick={onGoTo} />}
         <IconButton label={pt ? 'Minimizar' : 'Minimize'} onClick={onMinimize} isMobile={mobile} largeTarget={mobile}><Minus size={14} /></IconButton>
-        <IconButton label={pt ? 'Fechar a janela' : 'Close the window'} onClick={onClose} isMobile={mobile} largeTarget={mobile}><X size={14} /></IconButton>
+        {canClose && <IconButton label={pt ? 'Fechar a janela' : 'Close the window'} onClick={onClose} isMobile={mobile} largeTarget={mobile}><X size={14} /></IconButton>}
       </header>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {children}

@@ -7,7 +7,8 @@
  * screen, until it is brought back or ends. The layout (`full` modal / `side` panel / `inline` above the
  * session composer / `page` on its own route) is host state the surface flips through its context.
  */
-import { useSyncExternalStore } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
+import { requestUndockSession } from './nayDockBridge'
 import { isValidSessionId, type EngineSurfaceInfo, type SurfaceIndicator, type SurfaceLayout } from './engineSurfaces'
 
 export interface OpenSurface {
@@ -115,13 +116,21 @@ export function minimizeEngineSurface(n: number): void {
   if (s?.layout === 'float') patch(n, { parked: true })
 }
 
-/** Leaving a session floats its kept-alive inline/side surface unless explicitly opted out. */
+/**
+ * Leaving a session floats its kept-alive inline/side surface unless explicitly opted out — except a
+ * composer surface that sat inline (a call): on desktop it goes to the session's DETACHED window, the
+ * existing Nay one, which adopts it into its own composer slot when it mounts (`resumeParkedInlineSurfaces`).
+ * Until then it is parked, never drawn as a popup. With no dock to take it (a phone) it floats as before.
+ */
 function floatAfterLeave(sessionId: string): void {
   queueMicrotask(() => {
     if ([...sessionViews.values()].includes(sessionId) || [...sideWants.values()].includes(sessionId) || [...slots.values()].some(v => v.sessionId === sessionId)) return
     for (const s of mounted) {
       if (s.sessionId === sessionId && !s.parked && s.keepAlive && s.surface.floatOnLeave !== false
-        && (s.layout === 'inline' || s.layout === 'side')) patch(s.nonce, { layout: 'float', leftLayout: s.layout })
+        && (s.layout === 'inline' || s.layout === 'side')) {
+        if (s.layout === 'inline' && s.surface.placement === 'composer' && requestUndockSession(sessionId)) patch(s.nonce, { parked: true, leftLayout: 'inline' })
+        else patch(s.nonce, { layout: 'float', leftLayout: s.layout })
+      }
     }
   })
 }
@@ -245,6 +254,15 @@ export function hasActiveComposerSurface(sessionId: string | null): boolean {
 }
 export function useHasActiveComposerSurface(sessionId: string | null): boolean {
   return useSyncExternalStore(subscribe, () => hasActiveComposerSurface(sessionId), () => false)
+}
+
+/** Ids of the sessions that have an active composer surface (a call) — for a window that must not be closed under it. */
+function activeComposerSessionKey(): string {
+  return [...new Set(mounted.filter(x => x.sessionId !== null && x.surface.placement === 'composer' && !!x.surface.activeLabel).map(x => x.sessionId as string))].sort().join('\n')
+}
+export function useActiveComposerSessionIds(): ReadonlySet<string> {
+  const key = useSyncExternalStore(subscribe, activeComposerSessionKey, () => '')
+  return useMemo(() => new Set(key ? key.split('\n') : []), [key])
 }
 
 const slots = new Map<string, { el: HTMLElement; sessionId: string }>()

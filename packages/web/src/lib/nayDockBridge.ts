@@ -1,9 +1,13 @@
 /** The small cross-component bridge used by session menus to ask NayDock to undock a session. */
 export const NAY_UNDOCK_SESSION = 'agentistics:nay-undock-session'
 
-export function requestUndockSession(id: string): void {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent(NAY_UNDOCK_SESSION, { detail: { id } }))
+/**
+ * Ask NayDock to give `id` a detached window. Returns whether a dock took the request (it cancels the
+ * event): none is listening on a phone, so the caller can fall back to what it did before.
+ */
+export function requestUndockSession(id: string): boolean {
+  if (typeof window === 'undefined') return false
+  return !window.dispatchEvent(new CustomEvent(NAY_UNDOCK_SESSION, { detail: { id }, cancelable: true }))
 }
 
 export function undockMenuEntry(pt: boolean) {
