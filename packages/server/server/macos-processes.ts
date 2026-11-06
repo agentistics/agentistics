@@ -135,3 +135,14 @@ export function cwdFromLsof(byPid: Map<number, string[]>, pid: number): string |
   const paths = byPid.get(pid)
   return paths && paths.length > 0 ? paths[0] : undefined
 }
+
+/**
+ * PURE (the resolver is injected). The executable a `ps -o comm=` path names, resolved the way Linux's
+ * `/proc/<pid>/exe` already is: an npm/nvm/volta install runs through a symlink (`…/bin/opencode` →
+ * `…/lib/node_modules/@opencode/cli/bin/opencode.exe`), and only the real path matches an install layout.
+ * A relative path, or one the resolver cannot answer, is returned unchanged.
+ */
+export function macExecutable(commPath: string, resolve: (path: string) => string | undefined): string {
+  if (!commPath.startsWith('/')) return commPath
+  return resolve(commPath) ?? commPath
+}

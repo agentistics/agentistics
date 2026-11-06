@@ -3,6 +3,7 @@ import {
   resolveOpenSessionIds, resolveLiveSnapshot, sessionIdFromArgv, harnessOf, sessionIdFromFdPaths,
   LIVE_ACTIVITY_WINDOW_MIN, LIVE_STARTUP_GRACE_MIN, harnessOfProcess, detectionUnavailable, isHarnessInfrastructure,
   belongsToServerEnvironment, installedHarnessAt, isNonInteractiveInvocation, EXTERNAL_MIN_LIFETIME_MS,
+  expandOpencodeTabs, debounceExternalRows,
 } from './live-sessions'
 import type { HarnessId, SessionMeta } from '@agentistics/core'
 
@@ -557,5 +558,33 @@ describe('opencode (1.19.5, measured 2026-10-31 under tmux)', () => {
     expect(sessionIdFromArgv(['opencode', `--session=${SES}`])).toBe(SES)
     expect(sessionIdFromArgv(['codex', '-s', 'workspace-write'])).toBeUndefined()
     expect(sessionIdFromArgv(['opencode', '-s', 'ses_short'])).toBeUndefined()
+  })
+})
+
+// OPENCODE.ATIVAS-TUI — one 2.x TUI process holds several sessions (its tabs); each becomes its own process record.
+describe('expandOpencodeTabs — one TUI, one record per open tab', () => {
+  const tui = { harness: 'opencode' as HarnessId, cwd: '/w', pid: 10, startedMs: 1, stdinIsTty: true }
+  const other = { harness: 'claude' as HarnessId, cwd: '/w', pid: 20, startedMs: 1 }
+
+  test('a TUI with three tabs becomes three records with the same pid and their own session', () => {
+    const out = expandOpencodeTabs([tui, other], new Map([[10, ['ses_a', 'ses_b', 'ses_c']]]))
+    expect(out.filter(p => p.pid === 10).map(p => p.sessionId)).toEqual(['ses_a', 'ses_b', 'ses_c'])
+    expect(out.filter(p => p.pid === 10).every(p => p.cwd === '/w' && p.startedMs === 1)).toBe(true)
+    expect(out).toContainEqual(other)
+  })
+
+  test('a process with no tabs record is left exactly as it was', () => {
+    expect(expandOpencodeTabs([tui, other], new Map())).toEqual([tui, other])
+  })
+})
+
+describe('debounceExternalRows — keyed by the session, not only the pid', () => {
+  test('two tabs of one TUI (same pid) both survive', () => {
+    const now = 1_000_000
+    const rows = [
+      { harness: 'opencode' as HarnessId, cwd: '/w', pid: 4242, startedMs: now - 60_000, sessionId: 'ses_a' },
+      { harness: 'opencode' as HarnessId, cwd: '/w', pid: 4242, startedMs: now - 60_000, sessionId: 'ses_b' },
+    ]
+    expect(debounceExternalRows(rows, now).map(r => r.sessionId).sort()).toEqual(['ses_a', 'ses_b'])
   })
 })

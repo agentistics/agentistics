@@ -15,14 +15,17 @@
  */
 
 import type { HarnessId } from '@agentistics/core'
+import { realpathSync } from 'node:fs'
 import {
-  harnessOfProcess, isNonInteractiveInvocation, sessionIdFromArgv, sessionIdFromFdPaths, type HarnessProcess,
+  harnessOf, harnessOfProcess, isNonInteractiveInvocation, sessionIdFromArgv, sessionIdFromFdPaths, type HarnessProcess,
 } from './live-sessions'
 import {
-  cwdFromLsof, parseLsofFields, parsePsList, processStartFromEtime, splitPsCommand,
+  cwdFromLsof, macExecutable, parseLsofFields, parsePsList, processStartFromEtime, splitPsCommand,
 } from './macos-processes'
 
 const JS_RUNTIME_COMMS = new Set(['node', 'bun', 'deno'])
+
+const realPath = (p: string): string | undefined => { try { return realpathSync(p) } catch { return undefined } }
 
 function run(argv: string[], timeoutMs = 4000): { ok: boolean; stdout: string } {
   try {
@@ -92,9 +95,21 @@ export function scanMacProcesses(nowMs: number = Date.now()): MacScanResult {
   // for a JS-runtime comm, so a runtime candidate is provisionally kept and resolved below; a comm
   // matching neither a known harness NOR a runtime is dropped here, before any lsof/ps call spends
   // a process on it.
+  // `ps` names the path the process was EXECUTED by — a symlink for an npm/nvm/volta install — while the install
+  // layouts are written against the real file (`/proc/<pid>/exe` on Linux). Resolved only for a name that is a
+  // harness at all, so the rest of the process table costs no syscall.
+  const exeOf = new Map<number, string>()
   const candidates = entries.filter(e => {
     const base = e.comm.slice(e.comm.lastIndexOf('/') + 1)
-    return JS_RUNTIME_COMMS.has(base) || harnessOfProcess(base, e.comm, [e.comm]) !== undefined
+    if (JS_RUNTIME_COMMS.has(base)) return true
+    if (harnessOf(base, e.comm) === undefined) return false
+    // The path as executed first (a Homebrew `/opt/homebrew/bin/<tool>` link is itself a known layout and would
+    // stop being one once resolved into the Cellar), the resolved file second.
+    if (harnessOfProcess(base, e.comm, [e.comm]) !== undefined) return true
+    const exe = macExecutable(e.comm, realPath)
+    if (exe === e.comm || harnessOfProcess(base, exe, [e.comm]) === undefined) return false
+    exeOf.set(e.pid, exe)
+    return true
   })
   if (candidates.length === 0) return { procs: [], psFailed: false, foreignPids, cwdDenied: false }
 
@@ -108,7 +123,7 @@ export function scanMacProcesses(nowMs: number = Date.now()): MacScanResult {
     const argv = fullArgv(entry.pid)
     if (!argv || argv.length === 0) continue // exited between the two reads
     const comm = entry.comm.slice(entry.comm.lastIndexOf('/') + 1)
-    const harness: HarnessId | undefined = harnessOfProcess(comm, entry.comm, argv)
+    const harness: HarnessId | undefined = harnessOfProcess(comm, exeOf.get(entry.pid) ?? entry.comm, argv)
     if (!harness) continue
     const stdinPath = cwdFromLsof(stdins, entry.pid)
     const stdinIsTty = stdinPath === undefined ? undefined : /^\/dev\/(ttys?\d*|pts\/)/.test(stdinPath)

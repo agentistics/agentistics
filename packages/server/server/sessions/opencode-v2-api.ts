@@ -15,7 +15,7 @@
  * is the candidate of two processes, or none yet → no answer. Everything is bounded (≈3 s) and never throws.
  */
 import { Database } from 'bun:sqlite'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { START_SKEW_MS, type OpencodeProcessRef } from './opencode-run-link'
 
@@ -92,6 +92,60 @@ export function linkOpencodeV2Processes(
   }
   const out = new Map<number, string>()
   for (const [pid, id] of candidateOf) if (claimants.get(id) === 1) out.set(pid, id)
+  return out
+}
+
+/**
+ * The TUI's OWN record of its open tabs — OPENCODE.ATIVAS-TUI, measured on 2.2.5 (2026-11-06, throwaway HOME).
+ *
+ * A 2.x TUI is ONE process holding SEVERAL sessions: each tab is a session (`ctrl+x n` opens one, `ctrl+x w` closes
+ * it), all in the same cwd. The process→session link above is one-to-one and refuses an ambiguity, so a TUI with
+ * three tabs had three candidates in its directory and got NO session at all — the fleet drew one anonymous
+ * "opencode in <dir>" row and none of the tabs. The TUI writes its tabs to
+ * `<state>/opencode/<channel>/tui/tabs.json` (`latest` for the npm release) as
+ * `{global:{tabs:[]}, cwd:{"<dir>":{tabs:[{sessionID,title}]}}}`, rewritten the moment a tab opens or closes.
+ * That is the harness stating which sessions are open, so a live TUI is linked to EVERY tab of its own cwd.
+ * `global` (no directory) is given to a TUI only when exactly one runs — otherwise nothing says whose it is.
+ */
+export interface OpencodeTabs { cwd: Map<string, string[]>; global: string[] }
+
+const tabIds = (v: unknown): string[] => {
+  const tabs = isObj(v) && Array.isArray(v.tabs) ? v.tabs : []
+  const out: string[] = []
+  for (const t of tabs) if (isObj(t) && typeof t.sessionID === 'string' && t.sessionID !== '' && !out.includes(t.sessionID)) out.push(t.sessionID)
+  return out
+}
+
+/** PURE. A `tabs.json` body → the open sessions per directory (tolerant: junk is an empty record). */
+export function parseOpencodeTabs(raw: string): OpencodeTabs {
+  const out: OpencodeTabs = { cwd: new Map(), global: [] }
+  let j: unknown
+  try { j = JSON.parse(raw) } catch { return out }
+  if (!isObj(j)) return out
+  out.global = tabIds(j.global)
+  if (isObj(j.cwd)) for (const [dir, v] of Object.entries(j.cwd)) { const ids = tabIds(v); if (ids.length > 0) out.cwd.set(dir, ids) }
+  return out
+}
+
+function mergeTabs(into: OpencodeTabs, from: OpencodeTabs): void {
+  for (const [dir, ids] of from.cwd) into.cwd.set(dir, [...new Set([...(into.cwd.get(dir) ?? []), ...ids])])
+  into.global = [...new Set([...into.global, ...from.global])]
+}
+
+/** PURE. The open tabs of each live TUI, by pid. A session a managed row drives (`taken`) is never offered;
+ *  a process without a terminal (`tty === false`) is not a TUI. */
+export function opencodeTabSessions(
+  procs: readonly OpencodeProcessRef[],
+  tabs: OpencodeTabs,
+  taken: ReadonlySet<string> = new Set(),
+): Map<number, string[]> {
+  const tuis = procs.filter(p => p.tty !== false)
+  const out = new Map<number, string[]>()
+  for (const p of tuis) {
+    const ids = [...(tabs.cwd.get(p.cwd) ?? []), ...(tuis.length === 1 ? tabs.global : [])].filter(id => !taken.has(id))
+    const uniq = [...new Set(ids)]
+    if (uniq.length > 0) out.set(p.pid, uniq)
+  }
   return out
 }
 
@@ -194,4 +248,17 @@ export async function readOpencodeV2ProcessSessions(procs: readonly OpencodeProc
   if (procs.length === 0) return new Map()
   const sessions = await readOpencodeV2Sessions(io)
   return sessions ? linkOpencodeV2Processes(procs, sessions, taken) : new Map()
+}
+
+/** Every channel's `tui/tabs.json` under the state dir, merged. Empty when there is none. Never throws. */
+export function readOpencodeTabs(stateDir: string): OpencodeTabs {
+  const out: OpencodeTabs = { cwd: new Map(), global: [] }
+  let channels: string[] = []
+  try { channels = readdirSync(stateDir) } catch { return out }
+  for (const ch of channels) {
+    let raw: string
+    try { raw = readFileSync(join(stateDir, ch, 'tui', 'tabs.json'), 'utf8') } catch { continue }
+    mergeTabs(out, parseOpencodeTabs(raw))
+  }
+  return out
 }
