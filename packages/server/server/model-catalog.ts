@@ -14,9 +14,11 @@
  */
 
 import { readdir, readFile } from 'node:fs/promises'
+import { statSync } from 'node:fs'
 import { join, delimiter } from 'node:path'
 import { HARNESS_ORDER, modelsFor, type HarnessId, type ModelOption } from '@agentistics/core'
 import { CODEX_DIR, HOME_DIR, KIMI_DIR } from './config'
+import { opencodePaths } from './opencode-paths'
 import { userSearchPath } from './sessions/user-path'
 import {
   parseAgyModels,
@@ -92,6 +94,21 @@ async function runCli(argv: string[]): Promise<string | null> {
   }
 }
 
+function fileStamp(path: string): string {
+  try { const st = statSync(path); return `${st.mtimeMs}:${st.size}` } catch { return '-' }
+}
+
+/**
+ * What decides which opencode providers are connected: `auth.json` (a pasted key) and the
+ * `opencode.json(c)` config (custom providers). Only mtime and size are read — never the contents,
+ * which hold keys. The database is deliberately NOT part of it: it changes on every message.
+ */
+export function opencodeAuthStamp(): string {
+  const dir = opencodePaths(process.env, HOME_DIR).dir
+  const cfg = join(process.env.XDG_CONFIG_HOME || join(HOME_DIR, '.config'), 'opencode')
+  return [join(dir, 'auth.json'), join(cfg, 'opencode.json'), join(cfg, 'opencode.jsonc')].map(fileStamp).join('|')
+}
+
 const CLAUDE_CATALOG_DIR = join(HOME_DIR, '.claude', 'cache', 'model-catalog')
 
 /** Where each harness publishes its list, if it does. ABSENT = no such list: table + free text. */
@@ -100,6 +117,13 @@ interface Source {
   cli?: string
   ttl: number
   read: Reader
+  /**
+   * A fingerprint of what the list DEPENDS ON besides the binary (opencode: which providers are
+   * connected). When it changes the cached list is void — `opencode models` lists only the
+   * providers that are authenticated, so a list read before a subscription was connected is a fact
+   * about an account that no longer exists, and the binary-only key kept it for the full TTL.
+   */
+  stamp?: () => string
   /** A PARTIAL list for when `read` says nothing (the CLI cannot run): offered with the typed-id box still open. */
   fallback?: Reader
 }
@@ -139,6 +163,7 @@ const READERS: Partial<Record<HarnessId, Source>> = {
   opencode: {
     cli: 'opencode',
     ttl: COMMAND_TTL_MS,
+    stamp: opencodeAuthStamp,
     read: async p => {
       const out = await runCli(['opencode', 'models'])
       return out === null ? null : parseOpencodeModels(out, { ...p, source: 'opencode models' })
@@ -157,7 +182,7 @@ const READERS: Partial<Record<HarnessId, Source>> = {
   },
 }
 
-interface Entry extends PlanEntry { models: ModelOption[] | null; partial: ModelOption[] | null; bin: string | null }
+interface Entry extends PlanEntry { models: ModelOption[] | null; partial: ModelOption[] | null; bin: string | null; stamp: string | null }
 const cache = new Map<HarnessId, Entry>()
 const inflight = new Map<HarnessId, Promise<void>>()
 let clock: () => number = Date.now
@@ -184,6 +209,15 @@ function currentEntry(harness: HarnessId): Entry | undefined {
     cache.delete(harness)
     return undefined
   }
+  // The same for the account: a different set of connected providers is a different list. The
+  // entry is KEPT (answered stale) when only the stamp moved — the refresh it starts replaces it —
+  // but flagged due by zeroing its age, so a just-connected subscription is read at once.
+  const stamp = READERS[harness]?.stamp?.() ?? null
+  if (entry && stamp !== entry.stamp) {
+    entry.stamp = stamp
+    entry.at = Number.NEGATIVE_INFINITY
+    entry.failures = 0
+  }
   return entry
 }
 
@@ -194,6 +228,7 @@ function refresh(harness: HarnessId): Promise<void> {
   if (running) return running
   const p = { verifiedAt: today(), source: '' }
   const bin = reader.cli ? resolveCli(reader.cli) : null
+  const stamp = reader.stamp?.() ?? null
   const job = reader.read(p)
     .catch(() => null)
     .then(async models => {
@@ -210,6 +245,7 @@ function refresh(harness: HarnessId): Promise<void> {
         models: models ?? prev?.models ?? null,
         partial: partial ?? prev?.partial ?? null,
         bin,
+        stamp,
       })
     })
     .finally(() => inflight.delete(harness))
@@ -261,7 +297,8 @@ const ORIGINAL_READERS: Partial<Record<HarnessId, Source>> = { ...READERS }
 /** Test seam: replace one harness's source (and the clock the TTLs are measured on). */
 export function setModelReaderForTests(harness: HarnessId, read: Reader, now?: () => number, fallback?: Reader): void {
   const cli = ORIGINAL_READERS[harness]?.cli
-  READERS[harness] = { ttl: COMMAND_TTL_MS, read, ...(cli ? { cli } : {}), ...(fallback ? { fallback } : {}) }
+  const stamp = ORIGINAL_READERS[harness]?.stamp
+  READERS[harness] = { ttl: COMMAND_TTL_MS, read, ...(cli ? { cli } : {}), ...(stamp ? { stamp } : {}), ...(fallback ? { fallback } : {}) }
   if (now) clock = now
 }
 

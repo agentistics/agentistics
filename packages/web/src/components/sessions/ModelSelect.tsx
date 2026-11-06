@@ -29,6 +29,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { modelDisplay } from '../../lib/wizardSteps'
 import { inputStyle } from './formBits'
 import { typedModelId } from '../../lib/chatModel'
+import { groupModels, trainsOnData } from '../../lib/modelGroups'
 
 export interface ModelSelectProps {
   lang: 'pt' | 'en'
@@ -63,7 +64,10 @@ export function ModelSelect({ lang, open, onOpenChange, value, onChange, options
   const chosen = modelDisplay(options, value)
   const rowHeight = isMobile ? 44 : undefined
 
-  const row = (key: string, selected: boolean, label: string, tag: string | null, pick: () => void) => (
+  const groups = groupModels(options)
+  const trainsLabel = pt ? 'treina com seus dados' : 'trains on your data'
+
+  const row = (key: string, selected: boolean, label: string, tag: string | null, pick: () => void, warn?: string) => (
     <button
       key={key}
       role="option"
@@ -132,10 +136,19 @@ export function ModelSelect({ lang, open, onOpenChange, value, onChange, options
               blank. It is also the row the picker opens on, so it may never be hard to find. */}
           {row('', value === '', unsetLabel, null, () => onChange(''))}
           <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
-          {options.map(o => {
-            const shown = modelDisplay(options, o.id)!
-            return row(o.id, o.id === value, shown.label, shown.id, () => onChange(o.id))
-          })}
+          {(groups ?? [{ provider: '', options }]).map(g => (
+            <div key={g.provider || '_'} role="group" aria-label={g.provider || undefined}>
+              {groups && g.provider && (
+                <div style={{ padding: '6px 10px 2px', fontSize: 10.5, letterSpacing: 0.4, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+                  {g.provider}
+                </div>
+              )}
+              {g.options.map(o => {
+                const shown = modelDisplay(options, o.id)!
+                return row(o.id, o.id === value, shown.label, shown.id, () => onChange(o.id), trainsOnData(o.id) ? trainsLabel : undefined)
+              })}
+            </div>
+          ))}
           {freeText && (
             <TypedModel lang={lang} onPick={id => { onChange(id); onOpenChange(false) }} />
           )}

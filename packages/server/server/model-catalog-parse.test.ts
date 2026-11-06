@@ -95,8 +95,15 @@ describe('parseOpencodeModels', () => {
     ])
   })
 
-  test('a line that is not an id (an error sentence) makes it no answer', () => {
+  test('an error sentence alone is no answer', () => {
     expect(parseOpencodeModels('Error: something went wrong\n', SRC)).toBeNull()
+  })
+
+  test('a notice beside the list does not void it (the free-only picker bug)', () => {
+    const out = 'Update available: 1.20.0\nopencode/big-pickle\nopencode-go/glm-5.3-flash\nopencode-go/muse-spark-1.2-contributor\n'
+    expect(parseOpencodeModels(out, SRC)?.map(m => m.id)).toEqual([
+      'opencode/big-pickle', 'opencode-go/glm-5.3-flash', 'opencode-go/muse-spark-1.2-contributor',
+    ])
   })
 })
 
@@ -184,6 +191,11 @@ describe('parseOpencodeConfigModels', () => {
     expect(parseOpencodeConfigModels(cfg, SRC)?.map(m => m.id)).toEqual([
       'upx/fable-5.1', 'upx/opus-5', 'ollama/qwen3:4b',
     ])
+  })
+
+  test('the plural `providers` key is read as well as the legacy `provider`', () => {
+    const doc = JSON.stringify({ providers: { upx: { models: { 'opus-5': {} } } }, provider: { ollama: { models: { 'qwen3:4b': {} } } } })
+    expect(parseOpencodeConfigModels(doc, SRC)?.map(m => m.id)).toEqual(['ollama/qwen3:4b', 'upx/opus-5'])
   })
 
   test('the default alone is a list (a provider declared elsewhere)', () => {
