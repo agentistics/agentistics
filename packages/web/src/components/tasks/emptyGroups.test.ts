@@ -40,9 +40,9 @@ describe('the setting', () => {
     expect(boardCopy('en').viewBar.hideEmpty).toBe('Hide empty groups')
     expect(boardCopy('pt').viewBar.hideEmpty).toBe('Ocultar grupos vazios')
   })
-  test('it is offered in the board\'s view settings and the table\'s, and applied by both', () => {
-    expect(src('BoardArrange.tsx')).toContain('<EmptyGroupsMenu')
-    expect(src('TaskTable.tsx')).toContain('<EmptyGroupsMenu')
+  test('it is offered in the one view panel, and applied by both the board and the table', () => {
+    expect(src('AgentaskToolbar.tsx')).toContain('data-opt')
+    expect(src('AgentaskToolbar.tsx')).toContain('onHideEmpty')
     expect(src('TaskTable.tsx')).toMatch(/dropEmpty\(/)
     expect(src('TaskBoard.tsx')).toContain('hiddenCols.has(col.status)')
     expect(readFileSync(join(import.meta.dir, '..', '..', 'pages', 'TasksPage.tsx'), 'utf8')).toContain('hideEmpty={hideEmpty}')
