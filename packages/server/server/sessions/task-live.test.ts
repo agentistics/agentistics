@@ -133,4 +133,12 @@ describe('buildLive', () => {
     expect(by.get('a')).toBe('on subtask "Sub a"')
     expect(by.get('b')).toBe('explicit target')
   })
+  test('activity titles containing newlines still identify their subtask', () => {
+    const title = 'Sub\nwith newline'
+    const r = buildLive({
+      nowMs: NOW, events: [{ id: 'newline', taskId: 't1', actor: 'owner', kind: 'comment', at: iso(NOW - H), detail: `on subtask "${title}"` }],
+      details: [detail({ subtasks: [sub('a', 'in_review', { title })] as never, sessions: [sess('s', 'a')] as never })],
+    })
+    expect(r.deliveries[0]?.lastAction?.text).toBe('on subtask "Sub')
+  })
 })

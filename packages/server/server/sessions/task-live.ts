@@ -172,7 +172,7 @@ function eventSubtaskId(e: TaskEvent, titles: ReadonlyMap<string, string>): stri
     if (target.kind === 'subtask' && typeof target.id === 'string' && target.id) return target.id
   }
   const detail = e.detail?.trim() ?? ''
-  const match = /^on subtask ["“](.*)["”]$/i.exec(detail)
+  const match = /^on subtask ["“]([\s\S]*)["”]$/i.exec(detail)
   if (!match) return null
   return titles.get(`${e.taskId}\0${match[1]}`) ?? null
 }
