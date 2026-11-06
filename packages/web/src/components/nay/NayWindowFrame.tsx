@@ -17,7 +17,7 @@ export function NayWindowFrame({ win, lang, title, onFocus, onMove, onDock, onGo
   onGoTo?: () => void
   onMinimize: () => void
   onClose: () => void
-  /** False while something in the window (a live call) must not be ended by closing it: only minimize remains. */
+  /** False for a detached window: it has no X of its own, minimize is its only control (the minimized menu disposes of it). */
   canClose?: boolean
   frameRef?: Ref<HTMLDivElement>
   responsive?: boolean

@@ -121,13 +121,24 @@ export function minimizeEngineSurface(n: number): void {
  * composer surface that sat inline (a call): on desktop it goes to the session's DETACHED window, the
  * existing Nay one, which adopts it into its own composer slot when it mounts (`resumeParkedInlineSurfaces`).
  * Until then it is parked, never drawn as a popup. With no dock to take it (a phone) it floats as before.
+ * While a Picture-in-Picture window is open, neither happens: that window is the pop-up.
  */
+/** A Document Picture-in-Picture window (the engine's pip.js) is open: it IS the pop-up already. */
+export function pipWindowOpen(): boolean {
+  const pip = (globalThis as { documentPictureInPicture?: { window?: { closed?: boolean } | null } }).documentPictureInPicture
+  const w = pip?.window
+  return !!w && w.closed !== true
+}
+
 function floatAfterLeave(sessionId: string): void {
   queueMicrotask(() => {
     if ([...sessionViews.values()].includes(sessionId) || [...sideWants.values()].includes(sessionId) || [...slots.values()].some(v => v.sessionId === sessionId)) return
     for (const s of mounted) {
       if (s.sessionId === sessionId && !s.parked && s.keepAlive && s.surface.floatOnLeave !== false
         && (s.layout === 'inline' || s.layout === 'side')) {
+        // A pop-up is already open (Chrome's PiP window): no second one — neither the detached window
+        // nor a float. The surface stays alive and keeps living in the PiP.
+        if (pipWindowOpen()) continue
         if (s.layout === 'inline' && s.surface.placement === 'composer' && requestUndockSession(sessionId)) patch(s.nonce, { parked: true, leftLayout: 'inline' })
         else patch(s.nonce, { layout: 'float', leftLayout: s.layout })
       }

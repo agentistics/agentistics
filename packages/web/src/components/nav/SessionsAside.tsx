@@ -716,7 +716,7 @@ export function SessionsAside({
     if (!menu) return
     const { id } = menu
     if (action === NAY_UNDOCK_SESSION) {
-      requestUndockSession(id)
+      requestUndockSession(id, { manual: true })
       setMenu(null)
       return
     }

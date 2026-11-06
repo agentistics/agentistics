@@ -51,7 +51,7 @@ import { NOTIFY_TOGGLE, notifyMenuExtras, useMutedKeys } from '../../lib/notifyM
 import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { LINK_TASK, NAY_COPY_ID, NAY_GO_TO, UNLINK_TASK, nayRowMenuEntries, type RowVerb } from '../../lib/rowMenu'
 import {
-  clampPanelSize, closeMinimizedWindow, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
+  applyUndockRequest, clampPanelSize, closeMinimizedWindow, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
   placeWindow, pruneDock, anchorDock, resizeAnchored, PANEL_DEFAULT, dockZIndex, type DockState, type NayWindow, type Size,
 } from '../../lib/nayDock'
 import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionChat'
@@ -250,13 +250,15 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   useEffect(() => {
     if (isMobile) return
     const onUndock = (event: Event) => {
-      const id = (event as CustomEvent<{ id?: unknown }>).detail?.id
+      const detail = (event as CustomEvent<{ id?: unknown; manual?: unknown }>).detail
+      const id = detail?.id
+      const manual = detail?.manual === true
       if (typeof id !== 'string' || !id) return
       // Taken: the caller (a call whose session view went away) parks its surface for this window.
       event.preventDefault()
-      // A minimized window already holds the session; it must not pop back open by itself.
-      if (dockRef.current.windows.some(w => w.id === id && w.minimized)) return
-      setDock(d => detachSession(d, id, viewport()))
+      // An AUTOMATIC request (a call left mid-session) must not pop a minimized window back open by
+      // itself; a MANUAL one (the menu's "Open undocked") is a person asking, so it restores it.
+      setDock(d => applyUndockRequest(d, id, viewport(), manual))
     }
     window.addEventListener(NAY_UNDOCK_SESSION, onUndock)
     return () => window.removeEventListener(NAY_UNDOCK_SESSION, onUndock)

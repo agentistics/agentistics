@@ -4,10 +4,14 @@ export const NAY_UNDOCK_SESSION = 'agentistics:nay-undock-session'
 /**
  * Ask NayDock to give `id` a detached window. Returns whether a dock took the request (it cancels the
  * event): none is listening on a phone, so the caller can fall back to what it did before.
+ *
+ * `manual` says a person asked (the session menu's "Open undocked"): a minimized window then comes
+ * back up. An automatic request (a call whose session view went away) leaves a minimized window
+ * minimized — it already holds the session and must not pop open by itself.
  */
-export function requestUndockSession(id: string): boolean {
+export function requestUndockSession(id: string, opts: { manual?: boolean } = {}): boolean {
   if (typeof window === 'undefined') return false
-  return !window.dispatchEvent(new CustomEvent(NAY_UNDOCK_SESSION, { detail: { id }, cancelable: true }))
+  return !window.dispatchEvent(new CustomEvent(NAY_UNDOCK_SESSION, { detail: { id, manual: opts.manual === true }, cancelable: true }))
 }
 
 export function undockMenuEntry(pt: boolean) {

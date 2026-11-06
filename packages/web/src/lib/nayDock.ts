@@ -107,6 +107,16 @@ export function detachSession(state: DockState, id: string, vp: Viewport): DockS
   }
 }
 
+/**
+ * An undock request for `id`. AUTOMATIC (a call left mid-session): a minimized window already holds the
+ * session and stays minimized. MANUAL (the session menu's "Open undocked"): a person asked, so a
+ * minimized window is restored.
+ */
+export function applyUndockRequest(state: DockState, id: string, vp: Viewport, manual: boolean): DockState {
+  if (!manual && state.windows.some(w => w.id === id && w.minimized)) return state
+  return detachSession(state, id, vp)
+}
+
 /** Bring a window's session back into the panel. */
 export function dockSession(state: DockState, id: string): DockState {
   return { open: true, panelSession: id, windows: state.windows.filter(w => w.id !== id) }
