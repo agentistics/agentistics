@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  currentLeaderId, namesParent, planHandoffReparent, planLeaderRoot, planTeamMove, rootIfLeader, ROOT_PATCH, spawnParentLink,
+  currentLeaderId, liveLeaderId, messageTargetFor, namesParent, planHandoffReparent, planLeaderRoot, planTeamMove, rootIfLeader, ROOT_PATCH, spawnParentLink,
   type TeamRow,
 } from './team-links'
 import { completeLeaderHandoff, teamOp } from './team-links-io'
@@ -183,5 +183,42 @@ describe('a spawn that lost AGENTOP_MANAGED_ID still finds its parent from the p
     )
     expect(found).toBe('agentop-web')
     expect(await callerSessionFromTree(async () => new Map(), async () => [], { pid: 300, parentOf: p => parents[p] })).toBeUndefined()
+  })
+})
+
+describe('messageTargetFor redirects only a retired leader to a live successor', () => {
+  const rows: TeamRow[] = [
+    { id: 'OLD', conversationId: 'cOld', endedAt: 'x', handoffTo: 'NEW' },
+    { id: 'NEW', conversationId: 'cNew' },
+  ]
+  test('retired original -> live successor (by id and by conversation id)', () => {
+    expect(messageTargetFor(rows, 'OLD')).toBe('NEW')
+    expect(messageTargetFor(rows, 'cOld')).toBe('NEW')
+  })
+  test('a dead successor (failed hand-off) leaves the message on the original', () => {
+    expect(messageTargetFor([{ id: 'OLD', endedAt: 'x', handoffTo: 'NEW' }, { id: 'NEW', endedAt: 'y' }], 'OLD')).toBe('OLD')
+    expect(liveLeaderId([{ id: 'OLD', handoffTo: 'NEW' }, { id: 'NEW', endedAt: 'y' }], 'OLD')).toBe('OLD')
+  })
+  test('an original still alive and in command is not redirected', () => {
+    expect(messageTargetFor([{ id: 'OLD', handoffTo: 'NEW' }, { id: 'NEW' }], 'OLD')).toBe('OLD')
+  })
+  test('never matches by title or label', () => {
+    const t = [{ id: 'OLD', endedAt: 'x', handoffTo: 'NEW', title: 'Leader' }, { id: 'NEW' }] as TeamRow[]
+    expect(messageTargetFor(t, 'Leader')).toBe('Leader')
+  })
+})
+
+describe('multi-hop chains', () => {
+  test('A -> B(retired) -> C(live) reaches C', () => {
+    const rows: TeamRow[] = [{ id: 'A', endedAt: 'x', handoffTo: 'B' }, { id: 'B', endedAt: 'x', handoffTo: 'C' }, { id: 'C' }]
+    expect(messageTargetFor(rows, 'A')).toBe('C')
+    expect(liveLeaderId(rows, 'A')).toBe('C')
+  })
+  test('A -> B(retired) with no live C stays on A', () => {
+    expect(liveLeaderId([{ id: 'A', endedAt: 'x', handoffTo: 'B' }, { id: 'B', endedAt: 'x' }], 'A')).toBe('A')
+  })
+  test('a retired reopen that handed on to a live row reaches the live one', () => {
+    const rows: TeamRow[] = [{ id: 'A', endedAt: 'x' }, { id: 'A2', endedAt: 'x', supersedes: 'A', handoffTo: 'C' }, { id: 'C' }]
+    expect(liveLeaderId(rows, 'A')).toBe('C')
   })
 })
