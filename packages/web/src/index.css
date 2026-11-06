@@ -742,6 +742,15 @@ textarea,
 
 /* The live marker's dot. It reports something happening NOW, and a static dot beside a static
    line is a label. Opacity only — a scaling dot moves the text beside it. */
+/* The bar along the foot of a transient notice (`ActionNotice`): full width, empty at the end of its 2 s. */
+/* A transient notice sits on the BOTTOM edge of the screen, above the phone's floating nav pill. */
+.ag-action-toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 1300; overflow: hidden;
+  width: min(420px, calc(100vw - 24px)); box-sizing: border-box;
+  border: 1px solid var(--border); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+@media (max-width: 767px) { .ag-action-toast { bottom: calc(var(--mobile-nav-h) + 12px); } }
+@keyframes ag-notice-shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @keyframes ag-hint-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 .ag-hint-pulse { animation: ag-hint-pulse 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .ag-hint-pulse { animation: none; } }

@@ -282,11 +282,15 @@ test('action feedback uses the session title, reserves space, and can be dismiss
   await act(async () => card.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 })))
   const kill = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(el => el.textContent === 'Encerrar')!
   await click(kill)
-  const notice = Array.from(host.querySelectorAll<HTMLElement>('[role="status"]')).find(el => el.textContent === 'Maestro encerrada.')!
+  // A short confirmation is a transient toast at the BOTTOM of the screen (on <body>), with a progress bar.
+  const notice = Array.from(document.querySelectorAll<HTMLElement>('[role="status"]')).find(el => el.textContent === 'Maestro encerrada.')!
   expect(notice).toBeDefined()
-  expect(notice.closest<HTMLElement>('[data-action-notice]')!.style.position).toBe('')
+  const toast = notice.closest<HTMLElement>('[data-action-notice]')!
+  expect(toast.classList.contains('ag-action-toast')).toBe(true)
+  expect(host.contains(toast)).toBe(false)
+  expect(toast.querySelector('[data-notice-progress]')).not.toBeNull()
   expect(notice.textContent).not.toContain('b4f46fa8d9')
-  await click(host.querySelector<HTMLElement>('[aria-label="Fechar aviso"]')!)
+  await click(document.querySelector<HTMLElement>('[aria-label="Fechar aviso"]')!)
   expect(notice.isConnected).toBe(false)
 }, 10000)
 

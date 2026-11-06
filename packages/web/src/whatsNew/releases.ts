@@ -34,6 +34,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'In the footer Usage popup, each ring (5 h session and week) shows when it resets, in your local time ("resets 6:40 PM", "resets Fri 9:00 AM"); it is left out when the time is unknown.',
       },
       {
+        pt: 'Avisos rápidos como "<sessão> encerrada." agora aparecem embaixo da tela, ficam no máximo 2 segundos com uma barrinha que vai esvaziando, e o X ainda fecha antes (passar o mouse por cima pausa). Avisos com detalhes continuam onde estavam até você fechar.',
+        en: 'Quick notices like "<session> ended." now appear at the bottom of the screen, stay at most 2 seconds with a bar that empties, and the X still closes them early (hovering pauses). Notices with details stay where they were until you close them.',
+      },
+      {
         pt: 'Na aba Encerradas, os grupos Dormindo, Finalizadas hoje e Antes de hoje agora têm seta para recolher e abrir (com a contagem quando recolhidos) e lembram o estado; "Antes de hoje" começa recolhido.',
         en: 'In the Ended tab, the Sleeping, Finished today and Before today groups now have a chevron to fold and unfold (with the count while folded) and remember their state; "Before today" starts folded.',
       },
