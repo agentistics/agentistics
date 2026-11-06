@@ -93,6 +93,16 @@ const RAW_KIND: Record<string, ActivityKind> = {
   update_plan: 'plan', update_topic: 'plan', manage_task: 'plan',
 }
 
+/**
+ * ACP's own `ToolKind` words, which an ACP-driven harness hands over in `canonical` when nothing mapped them to the shared
+ * vocabulary (OpenCode over ACP: `kind: "execute"`). Without this every such step was `other` — the running row read
+ * "execute, execute +6" and the finished one "Usou 8 ferramentas", saying nothing about what ran.
+ */
+const ACP_KIND: Record<string, ActivityKind> = {
+  execute: 'run', read: 'read', edit: 'edit', delete: 'edit', move: 'edit',
+  search: 'search', fetch: 'web', think: 'plan', switch_mode: 'plan',
+}
+
 const MCP = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$|^mcp_([a-z0-9-]+)_(.+)$/i
 
 /** Most frequent kind; ties keep first appearance, including unfinished steps. */
@@ -129,7 +139,7 @@ const MEMORY_PATH = /(^|\/)(memory|memories)\/[^/]+\.md$|\/MEMORY\.md$|(^|\/)GEM
 
 export function kindOf(call: ToolCallLike): ActivityKind {
   const name = call.canonical ?? call.name
-  let kind: ActivityKind = CANONICAL_KIND[name] ?? RAW_KIND[call.name] ?? RAW_KIND[name] ?? (MCP.test(call.name) ? 'mcp' : 'other')
+  let kind: ActivityKind = CANONICAL_KIND[name] ?? RAW_KIND[call.name] ?? RAW_KIND[name] ?? (call.canonical ? ACP_KIND[call.canonical] : undefined) ?? (MCP.test(call.name) ? 'mcp' : 'other')
   const detail = call.detail?.trim() ?? ''
   // A codex `exec` that is a patch IS an edit: the command is the only place that says so.
   if (kind === 'run' && /^apply_patch\b/.test(detail)) kind = 'edit'
