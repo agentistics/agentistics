@@ -871,6 +871,16 @@ export function SessionsAside({
    * session belongs to which team and which section; this component only draws.
    */
   const tab = useAsideTab()
+  // The "rest of the history is still loading" caveat is raised ONCE, as a quick notice, when the person
+  // ENTERS Encerradas (where partial results matter) — and only if it is still loading. It used to stand
+  // on every tab, over the list, for as long as the history took (owner, 2026-11-06).
+  const lastTab = useRef<string | null>(null)
+  useEffect(() => {
+    if (tab === 'ended' && lastTab.current !== 'ended' && historyLoading) {
+      setNotice(pt ? 'Carregando o resto das sessões — os resultados podem estar parciais por enquanto.' : 'Loading the remaining sessions — results may be partial for now.')
+    }
+    lastTab.current = tab
+  }, [tab, historyLoading, pt])
   const [extraId, setExtraId] = useState<string | null>(null)
   const extra = extraTabs?.find(t => t.id === extraId)
   useEffect(() => { if (extraId && !extraTabs?.some(t => t.id === extraId)) setExtraId(null) }, [extraId, extraTabs])
@@ -1810,11 +1820,6 @@ export function SessionsAside({
           Deliberately NOT `--accent-red`: nothing has failed in the seeded case, and in the stale
           case the machine being unreachable is a fact about the connection, not a fault in the
           fleet. Same reasoning the cockpit's central pill applies to `stale`. */}
-      {historyLoading && (
-        <div role="status" style={{ position: 'absolute', bottom: 8, left: 8, right: 8, zIndex: 3, padding: '8px 10px', borderRadius: 8, background: 'var(--bg-card)', border: '1px solid var(--border)', fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)' }}>
-          {pt ? 'Carregando o resto das sessões… Busca e filtros ainda podem ter resultados parciais.' : 'Loading the remaining sessions… Search and filters may still show partial results.'}
-        </div>
-      )}
       {stale && (
         <p role="status" style={{
           display: 'flex', alignItems: 'flex-start', gap: 6,
@@ -1845,7 +1850,7 @@ export function SessionsAside({
         ref={asideScrollRef}
         data-mobile-sessions-scroll={isMobile || undefined}
         className="ag-noscroll"
-        style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingBottom: historyLoading ? 96 : undefined, display: extra ? 'flex' : undefined, flexDirection: extra ? 'column' : undefined }}
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', display: extra ? 'flex' : undefined, flexDirection: extra ? 'column' : undefined }}
         onDragOverCapture={autoScrollDuringDrag}
         // LEAVING A FOLDER: a nested folder dragged by its body and dropped ANYWHERE that is not a
         // folder (blank space, a heading, the pinned band, the automatic sections) comes back out

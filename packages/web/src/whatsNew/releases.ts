@@ -38,6 +38,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Quick notices like "<session> ended." now appear at the bottom of the screen, stay at most 2 seconds with a bar that empties, and the X still closes them early (hovering pauses). Notices with details stay where they were until you close them.',
       },
       {
+        pt: 'O aviso "carregando o resto das sessões / resultados parciais" saiu da página de Sessões: ele aparece só como um aviso rápido (2 s) ao entrar em Encerradas, se ainda estiver carregando. Os avisos de carregamento (projetos, sessões e importação do histórico) não aparecem mais na página de Sessões; seguem nas outras páginas, como Métricas, enquanto carregam.',
+        en: 'The "loading the remaining sessions / partial results" warning is gone from the Sessions page: it shows only as a quick (2 s) notice when you enter Ended, if it is still loading. The loading notices (projects, sessions, history import) no longer show on the Sessions page; they stay on the other pages, like Metrics, while they load.',
+      },
+      {
         pt: 'Na aba Encerradas, os grupos Dormindo, Finalizadas hoje e Antes de hoje agora têm seta para recolher e abrir (com a contagem quando recolhidos) e lembram o estado; "Antes de hoje" começa recolhido.',
         en: 'In the Ended tab, the Sleeping, Finished today and Before today groups now have a chevron to fold and unfold (with the count while folded) and remember their state; "Before today" starts folded.',
       },
