@@ -5494,7 +5494,12 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
     // Another server answers on this port. The dedicated code, not 0 and not 1: a service manager
     // must neither restart this (it is not a crash — see service-exit.ts) nor record it as a clean
     // stop of a server that never ran.
-    console.error(`[server] Port ${PORT} is already in use by another agentop server — exiting (${EXIT_INSTANCE_HELD}). (${err instanceof Error ? err.message : String(err)})`)
+    // Name the holder rather than assume it is agentop (port-holder.ts): this server already holds
+    // the data-dir lock, so a second agentop server on this data dir cannot be the one.
+    const { findPortHolder, portHeldSentence, portOfListenError } = await import('./port-holder')
+    const detail = err instanceof Error ? err.message : String(err)
+    const port = portOfListenError(detail, PORT)
+    console.error(`[server] ${portHeldSentence(port, await findPortHolder(port).catch(() => undefined))} — exiting (${EXIT_INSTANCE_HELD}). (${detail})`)
     process.exit(EXIT_INSTANCE_HELD)
   }
   throw err

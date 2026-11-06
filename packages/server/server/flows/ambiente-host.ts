@@ -244,7 +244,7 @@ export function ambienteHostOps(deps: AmbienteDeps = defaultAmbienteDeps()) {
       const noAr = Number(inputOf(value).noAr ?? 0)
       if (deps.platform !== 'linux' || !deps.env.XDG_RUNTIME_DIR || !deps.hasSystemdRun()) return refuse('AMB_SEM_TETO', 'no systemd-run scope: the memory ceiling cannot be applied', ['systemd-run --user scope'])
       const avail = deps.memAvailable()
-      if (avail !== null && avail < runMinAvailableBytes()) return refuse('AMB_MEMORIA', `only ${(avail / 1024 ** 3).toFixed(1)} GB available`, ['3 GB available memory'])
+      if (avail !== null && avail < runMinAvailableBytes(deps.env)) return refuse('AMB_MEMORIA', `only ${(avail / 1024 ** 3).toFixed(1)} GB available`, ['3 GB available memory'])
       if (noAr >= AMBIENTE_MAX) return refuse('AMB_LIMITE', `${noAr} ambientes are already up`, ['a free ambiente slot'])
       if (insideHeavyLock(deps.env, deps.ancestors()) || deps.lockFds().length) return refuse('AMB_LOCK', 'the request came from inside a heavy job', ['request from outside heavy'])
       return { ok: true, availableBytes: avail }

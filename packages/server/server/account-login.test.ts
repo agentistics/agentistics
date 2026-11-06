@@ -7,7 +7,7 @@ import codexCapture from './fixtures/account-login/codex.json'
 import copilotCapture from './fixtures/account-login/copilot.json'
 import geminiPreamble from './fixtures/account-login/gemini.json'
 import geminiRetryCapture from './fixtures/account-login/gemini-url-invalid.json'
-import { claudeKeychainService, diagnoseLogin, LOGIN_ADAPTERS, stripLoginAnsi, loginRefusal, LoginFailure, maskLoginText, loginScreenSaid, parseLoginOutput, parsePaneDead, startAccountLogin, submitPasted, codeStillTyped, type LoginProcess, type LoginRequest } from './account-login'
+import { claudeKeychainService, diagnoseLogin, parseExitRecord, LOGIN_ADAPTERS, stripLoginAnsi, loginRefusal, LoginFailure, maskLoginText, loginScreenSaid, parseLoginOutput, parsePaneDead, startAccountLogin, submitPasted, codeStillTyped, type LoginProcess, type LoginRequest } from './account-login'
 import { createAccountRoots, rootEnv } from './account-roots'
 import { claudeProbeEnv, createHarnessAccounts } from './harness-accounts'
 
@@ -327,6 +327,13 @@ describe('CONTAS.LOGIN r3: the code is submitted, and a stuck or failed sign-in 
     expect(parsePaneDead('1 \n', false)).toBeNull()
     expect(parsePaneDead('1 \n', true)).toBe(1)
     expect(parsePaneDead('1 0', false)).toBe(0)
+  })
+  test('a probe wrapper\'s own exit record is read only once it is complete', () => {
+    expect(parseExitRecord('')).toBeNull()
+    expect(parseExitRecord('0')).toBeNull() // half-written: the newline is the end of the record
+    expect(parseExitRecord('0\n')).toBe(0)
+    expect(parseExitRecord('42\n')).toBe(42)
+    expect(parseExitRecord('x\n')).toBeNull()
   })
   test('a CLI still alive after the code fails with what its screen says, never waits forever', async () => {
     const cli = fakeCli([samples.claude])
