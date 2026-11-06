@@ -30,6 +30,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'Removed the "Autonomous-mode summary — I\'ve been away for more than 5 hours. Would you like Nay to prepare a summary?" notification.',
       },
       {
+        pt: 'No popup de Uso do rodapé, cada anel (Sessão 5 h e Semana) mostra embaixo o horário em que zera, no seu fuso ("zera 18:40", "zera sex 09:00"); some quando o horário não é conhecido.',
+        en: 'In the footer Usage popup, each ring (5 h session and week) shows when it resets, in your local time ("resets 6:40 PM", "resets Fri 9:00 AM"); it is left out when the time is unknown.',
+      },
+      {
         pt: 'Na aba Encerradas, os grupos Dormindo, Finalizadas hoje e Antes de hoje agora têm seta para recolher e abrir (com a contagem quando recolhidos) e lembram o estado; "Antes de hoje" começa recolhido.',
         en: 'In the Ended tab, the Sleeping, Finished today and Before today groups now have a chevron to fold and unfold (with the count while folded) and remember their state; "Before today" starts folded.',
       },
