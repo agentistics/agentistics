@@ -1343,6 +1343,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return await handleUserUiPrefs(req, CORS_HEADERS)
     }
 
+    if (url.pathname === '/api/opencode/auth' || url.pathname.startsWith('/api/opencode/auth/')) {
+      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
+      const { handleOpencodeAuthRequest } = await import('./opencode-auth-web')
+      return handleOpencodeAuthRequest(req, CORS_HEADERS)
+    }
+
     if (url.pathname === '/api/accounts' || url.pathname.startsWith('/api/accounts/')) {
       if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       const { handleAccountsRequest } = await import('./accounts-web')

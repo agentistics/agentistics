@@ -68,6 +68,9 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   // Registration writes device credentials and reads the sealed VAPID key, so every mobile-push
   // route is host-local power and must be refused when this machine's local capability is off.
   ['/api/mobile-push', 'localShell'],
+  // OpenCode provider connections WRITE a credential file (`auth.json`) on this host. Same gate as the
+  // account roots: it must be unreachable on an exposed instance whoever is signed in.
+  ['/api/opencode', 'localShell'],
   ['/api/harnesses', 'localChat'],
   // RES.1 — the process governor: reads every agentop process on the host, kills on request, and
   // registers helper processes. Host power, so the strictest capability.
