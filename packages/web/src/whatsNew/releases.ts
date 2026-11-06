@@ -17,7 +17,12 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         en: 'In the agent-use schedule, each day has an "All day" option, and there is a weekly ceiling: agents stop once the week reaches the % you set. The daily ceiling now reads clearly as "spend at most X% of the week on this day".',
       },
     ],
-    fixes: [],
+    fixes: [
+      {
+        pt: 'Nova sessão volta a mostrar os assistentes como antes; os não instalados aparecem apagados com o botão Instalar.',
+        en: 'New session shows the assistants as before again; the ones not installed appear dimmed with an Install button.',
+      },
+    ],
   },
   '2.200.5': {
     features: [
