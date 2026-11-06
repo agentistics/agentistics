@@ -70,7 +70,7 @@ import {
   attachSession, detachSession, fmtDuration, markTask, patchSubtask, removeComment, removeLink,
   removeSubtask,
   editTask, moveTask, setBlockedBy, uploadFile,
-  useTaskDetail, useTaskList, useTaskStatuses, useTaskTypes,
+  useTaskDetail, useTaskFullText, useTaskList, useTaskStatuses, useTaskTypes,
   type AttemptRollup, type AttemptView, type TaskDetail, type TaskFieldPatch, type TaskFile,
   type TaskListRow, type TaskRecord, type TasksError, type TaskStatus,
 } from '../lib/tasks'
@@ -96,7 +96,7 @@ function TaskList() {
   // range and the harness / project / repo chips scope which SESSIONS count toward each task, which
   // is what makes "what did this cost me last week" answerable.
   const { filters, lang } = useOutletContext<AppContext>()
-  const { rows, overview, excluded, error, reload } = useTaskList(filters)
+  const { rows, overview, excluded, error, partial, reload } = useTaskList(filters)
   const { statuses, reload: reloadStatuses } = useTaskStatuses()
   const { types, reload: reloadTypes } = useTaskTypes()
   const navigate = useNavigate()
@@ -177,13 +177,21 @@ function TaskList() {
     await reload()
   }
 
+  // A description is clipped in the list (`detailClipped`); searching reads the whole text, fetched
+  // once and silently the first time somebody types.
+  const needle = q.trim().toLowerCase()
+  const fullText = useTaskFullText(needle !== '' && Boolean(rows?.some(r => r.detailClipped)), filters)
+  /** Step two (the closed history) or the full descriptions are still on their way: an empty
+   *  search result is not yet an answer. */
+  const searchPending = needle !== '' && (partial || Boolean(rows?.some(r => r.detailClipped)) && fullText === null)
+  /** The board's true per-status sizes while only step one has arrived — counts right from the first paint. */
+  const statusTotals = partial ? overview?.statusCounts : undefined
   const shown = useMemo(() => {
-    const needle = q.trim().toLowerCase()
     if (!needle || !rows) return rows ?? []
     return rows.filter(r =>
       r.task.title.toLowerCase().includes(needle)
-      || (r.task.detail ?? '').toLowerCase().includes(needle))
-  }, [rows, q])
+      || (fullText?.get(r.task.id) ?? r.task.detail ?? '').toLowerCase().includes(needle))
+  }, [rows, needle, fullText])
 
 
   const seg = (active: boolean): React.CSSProperties => ({
@@ -195,7 +203,7 @@ function TaskList() {
   })
 
   const laneChips = boardColumns
-    .map(st => ({ status: st, count: shown.filter(r => r.task.status === st).length }))
+    .map(st => ({ status: st, count: (!needle ? statusTotals?.[st] : undefined) ?? shown.filter(r => r.task.status === st).length }))
   const activeLane = resolveLane(lane, laneChips)
   const [groupBy, setGroupBy] = useBoardPref('groupBy')
   const [storedTypeGroups, setTypeGroups] = useBoardPref('typeGroups')
@@ -419,7 +427,7 @@ function TaskList() {
 
       {view === 'live' && <LiveDelivery lang={lang} />}
 
-      {view !== 'overview' && view !== 'live' && rows !== null && shown.length === 0 && (
+      {view !== 'overview' && view !== 'live' && rows !== null && shown.length === 0 && !searchPending && (
         <EmptyNotice error={rows.length > 0 ? null : error} />
       )}
       {rows !== null && view === 'board' && shown.length > 0 && (
@@ -440,6 +448,7 @@ function TaskList() {
             wip={wip}
             columns={boardColumns}
             hideEmpty={hideEmpty}
+            statusTotals={needle ? undefined : statusTotals}
             statuses={statuses}
             sessions={fleet.sessions}
             onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
@@ -451,6 +460,7 @@ function TaskList() {
       {view === 'table' && (
         <TaskTable
           rows={shown}
+          statusTotals={needle ? undefined : statusTotals}
           lang={lang}
           statuses={statuses}
           types={types}

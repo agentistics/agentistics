@@ -2420,7 +2420,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/tasks' && req.method === 'GET') {
       const { listTasks } = await import('./sessions/task-web')
-      return json(await listTasks(taskFilterOf(url)))
+      // Two-step load (`task-list-window.ts`): `recent=1` is the open/recent rows, the plain call the
+      // rest; `full=1` keeps the whole description for the one caller that searches it.
+      return json(await listTasks(taskFilterOf(url), {
+        clip: url.searchParams.get('full') !== '1',
+        recent: url.searchParams.get('recent') === '1',
+      }))
     }
     // The LIVE DELIVERY line (`task-live.ts`). Matched before the generic `<ref>` GET, like `next`.
     if (url.pathname === '/api/tasks/live' && req.method === 'GET') {

@@ -7,6 +7,7 @@
  */
 import { buildLive } from '../server/sessions/task-live'
 import { buildTaskDetail } from '../server/sessions/task-report'
+import { conversationOwners } from '../server/sessions/task-conversations'
 import { loadTaskWorld } from '../server/sessions/task-source'
 import { readLiveFleet } from '../server/sessions/fleet-web'
 import { defaultRoleDeps, listRoles } from '../server/sessions/session-roles'
@@ -17,7 +18,9 @@ const rounded = (n: number) => Math.round(n * 10) / 10
 const started = clock()
 const world = await loadTaskWorld()
 const afterWorld = clock()
+const owners = conversationOwners(world.rollupRows)
 const details = world.book.tasks.map(task => buildTaskDetail({
+  owners,
   task,
   attempts: world.book.attempts,
   rows: world.rollupRows,
