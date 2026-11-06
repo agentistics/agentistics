@@ -10,6 +10,31 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Na janela de uso dos planos, o botão de ligar/desligar e o "Refazer login" aparecem sempre, até na primeira abertura.',
+        en: 'In the plan usage popup, the on/off switch and "Sign in again" always show up, even on the very first open.',
+      },
+      {
+        pt: 'Contas sem leitura de plano aparecem na janela de uso, com o botão e a agenda, todas com o mesmo aviso "sem leitura do plano".',
+        en: 'Accounts with no plan reading appear in the usage popup, with their switch and schedule, all with the same "no plan reading" note.',
+      },
+      {
+        pt: 'Ligar ou desligar uma conta por um caminho antigo agora respeita a agenda, em vez de ser desfeito no minuto seguinte.',
+        en: 'Switching an account on or off through an older route now respects the schedule instead of being undone a minute later.',
+      },
+      {
+        pt: 'Mexer no quadro de tarefas não recarrega mais todos os dados do painel, e uma sequência longa de alterações continua atualizando o quadro e a Entrega ao vivo.',
+        en: 'Editing the task board no longer reloads all dashboard data, and a long run of changes keeps the board and Live Delivery up to date.',
+      },
+      {
+        pt: 'Na Entrega ao vivo, o cartão sempre pousa no lugar certo, mesmo se o quadro rolar durante o voo.',
+        en: 'In Live Delivery the card always lands on its slot, even if the board scrolls mid-flight.',
+      },
+    ],
+  },
   '2.200.2': {
     features: [],
     fixes: [

@@ -70,6 +70,13 @@ function streak(layer: HTMLElement, a: { x: number; y: number }, b: { x: number;
   t.animate([{ opacity: 0.9 }, { opacity: 0 }], { duration: 420, easing: 'ease-out' }).onfinish = () => t.remove()
 }
 
+/** Pure target math of a flight: the offset from the origin box to the destination box. */
+export function flightGeometry(from: Box, to: Box): { dx: number; dy: number; arc: number; tilt: number } {
+  const dx = to.left - from.left, dy = to.top - from.top
+  const dist = Math.hypot(dx, dy)
+  return { dx, dy, arc: Math.min(70, 18 + dist * 0.07), tilt: Math.max(-4, Math.min(4, dx / 120)) }
+}
+
 /** Glide `el` (already at its destination, hidden by the caller) from `from` to where it is now. */
 export function flyCard(el: HTMLElement, from: Box, o: { fromColor: string; toColor: string; speed?: number }): Promise<void> {
   const to = box(el.getBoundingClientRect())
@@ -81,25 +88,40 @@ export function flyCard(el: HTMLElement, from: Box, o: { fromColor: string; toCo
   const layer = fxLayer()
   const g = ghostOf(el, from)
   layer.appendChild(g)
-  const dx = to.left - from.left, dy = to.top - from.top
-  const dist = Math.hypot(dx, dy), arc = Math.min(70, 18 + dist * 0.07), tilt = Math.max(-4, Math.min(4, dx / 120))
+  const geo = flightGeometry(from, to)
   const dur = o.speed && o.speed > 1 ? 620 : 980
   // The slot opens at the destination before the card arrives.
   const slot = document.createElement('div')
   slot.style.cssText = `position:fixed;left:${to.left}px;top:${to.top}px;width:${to.width}px;height:${to.height}px;border:1.5px dashed ${o.toColor};border-radius:10px;background:${o.toColor}14`
   layer.appendChild(slot)
   slot.animate([{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'scale(1)', offset: 0.35 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }], { duration: dur + 160, easing: 'ease-out' }).onfinish = () => slot.remove()
-  const lift = '0 22px 44px rgba(0,0,0,.5),0 0 0 1.5px '
-  const rest = '0 1px 2px rgba(0,0,0,.2),0 0 0 0 transparent'
-  const anim = g.animate([
-    { transform: 'translate(0,0) scale(1) rotate(0)', boxShadow: rest, offset: 0 },
-    { transform: `translate(0,-6px) scale(1.035) rotate(${-tilt * 0.4}deg)`, boxShadow: lift + o.fromColor, offset: 0.16 },
-    { transform: `translate(${dx * 0.5}px,${dy * 0.5 - arc}px) scale(1.05) rotate(${tilt}deg)`, boxShadow: lift + o.toColor, offset: 0.55 },
-    { transform: `translate(${dx}px,${dy}px) scale(1) rotate(0)`, boxShadow: rest, offset: 1 },
-  ], { duration: dur, easing: 'cubic-bezier(.45,.05,.2,1)', fill: 'forwards' })
+  const frames = (d: { dx: number; dy: number; arc: number; tilt: number }): Keyframe[] => {
+    const lift = '0 22px 44px rgba(0,0,0,.5),0 0 0 1.5px '
+    const rest = '0 1px 2px rgba(0,0,0,.2),0 0 0 0 transparent'
+    return [
+      { transform: 'translate(0,0) scale(1) rotate(0)', boxShadow: rest, offset: 0 },
+      { transform: `translate(0,-6px) scale(1.035) rotate(${-d.tilt * 0.4}deg)`, boxShadow: lift + o.fromColor, offset: 0.16 },
+      { transform: `translate(${d.dx * 0.5}px,${d.dy * 0.5 - d.arc}px) scale(1.05) rotate(${d.tilt}deg)`, boxShadow: lift + o.toColor, offset: 0.55 },
+      { transform: `translate(${d.dx}px,${d.dy}px) scale(1) rotate(0)`, boxShadow: rest, offset: 1 },
+    ]
+  }
+  const anim = g.animate(frames(geo), { duration: dur, easing: 'cubic-bezier(.45,.05,.2,1)', fill: 'forwards' })
+  // The board can scroll (or another card can open a slot) while this card is in the air: the
+  // destination is read again every frame and the flight is re-aimed, so it lands on its slot.
+  let aimed: Box = to
+  const retarget = () => {
+    if (!el.isConnected) return
+    const now = box(el.getBoundingClientRect())
+    if (Math.abs(now.left - aimed.left) < 1 && Math.abs(now.top - aimed.top) < 1) return
+    aimed = now
+    ;(anim.effect as KeyframeEffect | null)?.setKeyframes(frames(flightGeometry(from, now)))
+    slot.style.left = `${now.left}px`
+    slot.style.top = `${now.top}px`
+  }
   let last: { x: number; y: number } | null = null
   const follow = () => {
     if (!g.isConnected) return
+    retarget()
     const r = g.getBoundingClientRect(), p = { x: r.left + r.width / 2, y: r.top + r.height / 2 }
     if (last && Math.hypot(p.x - last.x, p.y - last.y) > 6) streak(layer, last, p, o.toColor, r.height * 0.55)
     last = p

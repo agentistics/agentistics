@@ -32,3 +32,12 @@ describe('intersects', () => {
     expect(intersects({ left: 700, top: 150, width: 100, height: 50 }, view)).toBe(false)
   })
 })
+
+import { flightGeometry } from './liveDeliveryFx'
+test('flightGeometry aims from the origin box to the (re-read) destination box', () => {
+  const from = { left: 100, top: 50, width: 200, height: 80 }
+  expect(flightGeometry(from, { ...from, left: 369, top: 483 })).toMatchObject({ dx: 269, dy: 433 })
+  // the board scrolled 150px mid-flight: the same origin now aims 150px further
+  expect(flightGeometry(from, { ...from, left: 519, top: 483 }).dx).toBe(419)
+  expect(flightGeometry(from, from)).toMatchObject({ dx: 0, dy: 0, tilt: 0 })
+})
