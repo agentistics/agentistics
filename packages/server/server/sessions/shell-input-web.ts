@@ -17,6 +17,7 @@
  * lower ones.
  */
 
+import { shellTmux as tmux } from './shell-tmux'
 import { readShells } from './shell-store'
 import { createShellTerminal, type TmuxRun } from './shell-terminal'
 import { nudgeShell } from './shell-stream-web'
@@ -25,19 +26,6 @@ import { encodeAck } from './input-protocol'
 
 /** A ceiling on concurrent shell write sockets, for the reason `MAX_INPUT_SOCKETS` exists. */
 export const MAX_SHELL_INPUT_SOCKETS = 32
-
-async function tmux(args: string[]): Promise<{ code: number; out: string; err: string }> {
-  try {
-    const p = Bun.spawn(['tmux', ...args], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' })
-    const [out, err] = await Promise.all([
-      new Response(p.stdout).text(),
-      new Response(p.stderr).text(),
-    ])
-    return { code: await p.exited, out, err }
-  } catch {
-    return { code: 127, out: '', err: '' }
-  }
-}
 
 const terminal = createShellTerminal(tmux as TmuxRun)
 
