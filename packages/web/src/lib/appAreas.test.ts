@@ -118,3 +118,14 @@ describe('area header landing', () => {
     expect(areaHeaderPath(area('metrics'))).toBe('/')
   })
 })
+
+describe('Agentask menu lands on its own view (F1)', () => {
+  test('Board links to /tasks/board, never the redirecting /tasks', () => {
+    const tasks = APP_AREAS.find(a => a.id === 'tasks')!
+    const paths = tasks.pages.map(p => p.path)
+    expect(paths).toContain('/tasks/board')
+    expect(paths).not.toContain('/tasks')
+    expect(tasks.pages[0]!.also).toContain('/tasks')
+    expect(new Set(paths).size).toBe(paths.length)
+  })
+})

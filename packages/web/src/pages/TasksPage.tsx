@@ -16,7 +16,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft, BarChart3, ClipboardList, ExternalLink, FileText, Link2,
   Filter, LayoutGrid, MessageSquare, Pencil, Plus, Rows3, Search, Settings2, Trash2, X, XCircle,
@@ -39,8 +39,9 @@ import { mobileBoardCopy } from '../components/tasks/boardCopyThreads'
 import { TaskTable } from '../components/tasks/TaskTable'
 import { SubtaskTable } from '../components/tasks/SubtaskTable'
 import {
-  DEFAULT_PREFS, useBoardPref,
+  DEFAULT_PREFS, useBoardPref, type BoardView as BoardViewId,
 } from '../components/tasks/boardPrefs'
+import { pathOfView, viewOfPath } from '../lib/tasksViewRoute'
 import { AgentaskToolbar, ViewPanel, type ViewActions, type ViewState } from '../components/tasks/AgentaskToolbar'
 import { isDefaultVisible, visibleStatuses, uniqueStatusLabels } from '../components/tasks/statusDefaults'
 import { DELIVERY_TABS, DeliveryDetail, type DeliveryTab } from '../components/tasks/DeliveryDetail'
@@ -107,9 +108,16 @@ function TaskList() {
   // resets itself on every back-press is a view nobody can stay in.
   // Read LIVE from the per-person store (`boardPrefs.ts`), not seeded once: on a device that opens
   // the board before the server answers, the arrangement lands as soon as it does.
-  const [storedView, setView] = useBoardPref('view')
+  const [storedView, setStoredView] = useBoardPref('view')
+  // Each view is its own route (`/tasks/live`, …) so the sidebar can link to it and light it up; plain
+  // `/tasks` keeps the stored choice. Picking a view inside the page navigates to its route.
+  const routedView = viewOfPath(useLocation().pathname)
+  const setView = (v: BoardViewId) => { setStoredView(v); navigate(pathOfView(v)) }
   // A phone with no stored choice opens on the kanban, not on the metrics.
-  const view = effectiveView(storedView, isMobile, hasStoredView())
+  const view = routedView ?? effectiveView(storedView, isMobile, hasStoredView())
+  // Bare `/tasks` is the entry: it lands on the view the person last used, so the sidebar lights it.
+  const bare = useLocation().pathname.replace(/\/+$/, '') === '/tasks'
+  useEffect(() => { if (bare) navigate(pathOfView(view), { replace: true }) }, [bare, view, navigate])
   const [lane, setLane] = useState<string | null>(null)
   const [sheet, setSheet] = useState(false)
   useEffect(() => {

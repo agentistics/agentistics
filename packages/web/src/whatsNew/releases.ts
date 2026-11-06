@@ -10,8 +10,55 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.5': {
+    features: [
+      {
+        pt: 'Atalho da Live Delivery no topo das Sessões: passe o mouse para ver a Live ao vivo num popup grande (no celular, toque para abrir uma folha), clique para ir à Live.',
+        en: 'Live Delivery shortcut in the Sessions top bar: hover for a big live preview (on a phone, tap for a sheet), click to open Live.',
+      },
+      {
+        pt: 'A Live agora abre com "só com agentes ativos" ligado, todas as tarefas e todas as etapas; cartões na fila ficam apagados e mostram a posição; modelo e conta em duas etiquetas; colunas maiores com barra de rolagem laranja.',
+        en: 'Live now opens with "only active agents" on, all tasks and all steps; queued cards are dimmed and show their place; model and account in two pills; wider columns with an orange scrollbar.',
+      },
+      {
+        pt: 'O menu do Agentask lista cada visão (Métricas, Quadro, Tabela, Live, Atividade) e destaca a ativa; os prazos estimados mostram só o horário aproximado, sem o selo de confiança.',
+        en: 'The Agentask menu lists every view (Metrics, Board, Table, Live, Activity) and highlights the active one; estimated deadlines show only the approximate time, with no confidence label.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'No Mac, a lista de sessões não trava mais o servidor: a leitura dos processos roda em segundo plano e é compartilhada, então a máquina volta a responder e encerrar ou abrir sessões funciona.',
+        en: 'On a Mac the session list no longer stalls the server: the process scan runs in the background and is shared, so the machine answers again and ending or opening sessions works.',
+      },
+      {
+        pt: 'No Mac, sessões abertas fora do agentistics (OpenCode e outras) voltam a aparecer, inclusive as instaladas em ~/.local/bin.',
+        en: 'On a Mac, sessions opened outside agentistics (OpenCode and others) show up again, including tools installed in ~/.local/bin.',
+      },
+      {
+        pt: 'OpenCode 2.x: a conversa de sessões novas é encontrada de novo (passagem de liderança, histórico), em vez de "o arquivo da conversa não foi encontrado".',
+        en: 'OpenCode 2.x: new sessions\' conversations are found again (leader hand-off, history) instead of "conversation file not found".',
+      },
+      {
+        pt: 'OpenCode 2.x: uma aba de outro terminal no mesmo diretório não troca mais a conversa de uma sessão aberta pelo agentistics.',
+        en: 'OpenCode 2.x: a tab from another terminal in the same folder no longer swaps the conversation of a session agentistics opened.',
+      },
+    ],
+  },
   '2.200.4': {
-    features: [],
+    features: [
+      {
+        pt: 'Atalho da Live Delivery no topo das Sessões: passe o mouse para ver a Live ao vivo num popup grande (no celular, toque para abrir uma folha), clique para ir à Live.',
+        en: 'Live Delivery shortcut in the Sessions top bar: hover for a big live preview (on a phone, tap for a sheet), click to open Live.',
+      },
+      {
+        pt: 'A Live agora abre com "só com agentes ativos" ligado, todas as tarefas e todas as etapas; cartões na fila ficam apagados e mostram a posição; modelo e conta em duas etiquetas; colunas maiores com barra de rolagem laranja.',
+        en: 'Live now opens with "only active agents" on, all tasks and all steps; queued cards are dimmed and show their place; model and account in two pills; wider columns with an orange scrollbar.',
+      },
+      {
+        pt: 'O menu do Agentask lista cada visão (Métricas, Quadro, Tabela, Live, Atividade) e destaca a ativa; os prazos estimados mostram só o horário aproximado, sem o selo de confiança.',
+        en: 'The Agentask menu lists every view (Metrics, Board, Table, Live, Activity) and highlights the active one; estimated deadlines show only the approximate time, with no confidence label.',
+      },
+    ],
     fixes: [
       {
         pt: 'Entrega ao vivo abre mais rápido, reaproveitando leituras enquanto nada mudou.',

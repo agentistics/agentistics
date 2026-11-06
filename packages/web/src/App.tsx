@@ -68,6 +68,7 @@ import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
 import { AwayChip, AwayDialogHost, awayMenuItems } from './components/sessions/AwayChip'
 import { useAway } from './lib/awayMode'
 import AwayPill from './components/AwayPill'
+import LiveShortcut from './components/tasks/LiveShortcut'
 import { HardwareModal } from './components/HardwareModal'
 import { AccountSwitchDialog, useSwitchInfo } from './components/sessions/AccountSwitch'
 import type { PlanUsageSession } from './components/PlanUsageSessionSwitch'
@@ -3311,6 +3312,7 @@ export default function AppLayout() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <MagnifierButton ctx={appCtx} />
         <HideLensesButton ctx={appCtx} />
+        <LiveShortcut lang={lang === 'pt' ? 'pt' : 'en'} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
         <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
         <EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} />
         <EngineSurfaceButtons placement="app-bar" sessionId={null} lang={lang === 'pt' ? 'pt' : 'en'} />

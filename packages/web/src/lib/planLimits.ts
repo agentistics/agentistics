@@ -20,6 +20,19 @@ import type { UsageBudgetRow } from './usagePlan'
  */
 export const accountLabelKey = (harness: string, account: string): string => `${harness}:${account}`
 
+/**
+ * PURE. The label a person gave an account, or the raw id only when nobody named it. Tries the
+ * harness-scoped key first, then any harness's label for that id (a live agent's harness id can differ in
+ * spelling from the registered one, and an account id is an opaque string nobody should read).
+ */
+export function accountDisplayName(labels: Record<string, string>, harness: string, account: string): string {
+  const exact = labels[accountLabelKey(harness, account)]
+  if (exact) return exact
+  const suffix = `:${account}`
+  for (const k of Object.keys(labels)) if (k.endsWith(suffix) && labels[k]) return labels[k]!
+  return account
+}
+
 export type RegisteredPlan = { harness: PlanLimits['harness']; plan: string; account?: string; accountLabel?: string }
 export interface PlanReadings {
   account: string

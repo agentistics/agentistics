@@ -166,7 +166,7 @@ export function installedHarnessAt(exePath: string, harness?: HarnessId): Harnes
     // other platforms ship `@opencode/cli-<platform>/bin/opencode`).
     [/\/node_modules\/@opencode\/cli(?:-[^/]+)?\/(?:.*\/)?bin\/opencode(?:\.exe)?$/, 'opencode'],
     [/\/\.local\/share\/gh\/copilot\/copilot$/, 'copilot'],
-    [/^(?:\/usr\/local|\/opt\/homebrew|\/home\/[^/]+\/\.local)\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi|opencode)$/, 'path-bin'],
+    [/^(?:\/usr\/local|\/opt\/homebrew|\/(?:home|Users)\/[^/]+\/\.local)\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi|opencode)$/, 'path-bin'],
   ]
   for (const [pattern, id] of known) {
     if (!pattern.test(normal)) continue
@@ -523,6 +523,13 @@ export interface HarnessProcess {
   pid?: number
   /** Whether stdin is a terminal; false is conclusive evidence of a one-shot invocation. */
   stdinIsTty?: boolean
+  /**
+   * MAC.OPENCODE-MUDO — `'tabs'` when `sessionId` came from opencode 2.x's `tui/tabs.json`. That record is keyed by
+   * DIRECTORY, not by process: every TUI in one cwd shows (and is credited with) every tab of that cwd, and a TUI that
+   * died keeps its tabs there. It is good enough to NAME an external row, never to MOVE a managed row off the
+   * conversation it was linked to (see `sessions-host.ts`).
+   */
+  sessionFrom?: 'tabs'
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -586,7 +593,12 @@ async function scanMacProcessesWithHarnessIndex(): Promise<{
   unavailable: LiveUnavailableReason | null
 }> {
   const { scanMacProcesses } = await import('./macos-processes-io')
-  const result = scanMacProcesses()
+  const t0 = performance.now()
+  const result = await scanMacProcesses()
+  // MAC.OPENCODE-MUDO: the one line the owner can send from a Mac when the fleet is slow — how long the sweep took
+  // and how much it found. Logged only when it is slow enough to matter.
+  const ms = Math.round(performance.now() - t0)
+  if (ms >= 2_000) console.warn(`[live-sessions] macOS process sweep took ${ms} ms (${result.procs.length} harness processes, ${result.foreignPids} total; psFailed=${result.psFailed}, cwdDenied=${result.cwdDenied})`)
   if (result.psFailed) return { procs: [], unavailable: 'no-ps' }
 
   try {
@@ -620,7 +632,7 @@ export function expandOpencodeTabs(procs: readonly HarnessProcess[], tabs: Reado
   for (const p of procs) {
     const ids = p.harness === 'opencode' && p.pid !== undefined ? tabs.get(p.pid) : undefined
     if (!ids || ids.length === 0) { out.push(p); continue }
-    for (const id of ids) out.push({ ...p, sessionId: id })
+    for (const id of ids) out.push({ ...p, sessionId: id, sessionFrom: 'tabs' })
   }
   return out
 }
@@ -671,7 +683,7 @@ export async function scanProcesses(): Promise<{
   procs: HarnessProcess[]
   unavailable: LiveUnavailableReason | null
 }> {
-  if (process.platform === 'darwin') return scanMacProcessesWithHarnessIndex()
+  if (process.platform === 'darwin') return sharedScanOf(scanMacProcessesWithHarnessIndex)
   if (process.platform !== 'linux') {
     return { procs: [], unavailable: detectionUnavailable({ platform: process.platform, procReadable: false, foreignPids: 0, cwdDenied: false }) }
   }
@@ -685,14 +697,27 @@ export async function scanProcesses(): Promise<{
  * in flight), which keeps the answer as live as a person can tell.
  */
 const SCAN_SHARE_MS = 1_000
-let sharedScan: { atMs: number; p: ReturnType<typeof scanLinuxProcesses> } | null = null
-function sharedLinuxScan(): ReturnType<typeof scanLinuxProcesses> {
-  const nowMs = Date.now()
-  if (sharedScan && nowMs - sharedScan.atMs < SCAN_SHARE_MS && nowMs >= sharedScan.atMs) return sharedScan.p
-  const p = scanLinuxProcesses()
+type ScanResult = { procs: HarnessProcess[]; unavailable: LiveUnavailableReason | null }
+let sharedScan: { atMs: number; p: Promise<ScanResult> } | null = null
+/**
+ * One sweep shared by every caller inside `SCAN_SHARE_MS` and by every caller while it is in flight — on BOTH
+ * platforms. MAC.OPENCODE-MUDO: the macOS sweep (`ps` + several `lsof`) was run once per caller, unshared, by the
+ * fleet poll, `/api/data`, the memory probe and the live claims alike; on a Mac each one costs seconds, so a poll
+ * that started a new sweep before the last one ended never caught up and the fleet stopped answering.
+ */
+export function sharedScanOf(scan: () => Promise<ScanResult>, nowMs: number = Date.now()): Promise<ScanResult> {
+  if (sharedScan && (nowMs - sharedScan.atMs < SCAN_SHARE_MS && nowMs >= sharedScan.atMs || inFlight.has(sharedScan.p))) return sharedScan.p
+  const p = scan()
   sharedScan = { atMs: nowMs, p }
-  void p.catch(() => { if (sharedScan?.p === p) sharedScan = null })
+  inFlight.add(p)
+  void p.then(() => { inFlight.delete(p) }, () => { inFlight.delete(p); if (sharedScan?.p === p) sharedScan = null })
   return p
+}
+const inFlight = new Set<Promise<ScanResult>>()
+/** Test seam: forget the shared sweep. */
+export function resetSharedScan(): void { sharedScan = null; inFlight.clear() }
+function sharedLinuxScan(): Promise<ScanResult> {
+  return sharedScanOf(() => scanLinuxProcesses())
 }
 
 /** Linux reader with an injectable procfs root so every process rule can be tested with fixtures. */

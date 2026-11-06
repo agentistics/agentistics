@@ -36,7 +36,7 @@ export interface LeaderRecord {
 export interface LiveReply { generatedAt: string; deliveries: LiveDeliveryRecord[]; leaders?: LeaderRecord[]; samples: number }
 
 export interface LiveAgent {
-  id: string; harness: string; model: string | null; accountId: string | null
+  id: string; harness: string; model: string | null; effort?: string | null; accountId: string | null
   state: FleetRow['state']; stateLabel: string
 }
 
@@ -70,7 +70,7 @@ export function joinLive(
     const agents: LiveAgent[] = d.sessionIds.flatMap(id => {
       const r = byId.get(id)
       return r && RUNNING_STATES.has(r.state) || r && (r.state === 'lost' || r.state === 'unknown')
-        ? [{ id: r.id, harness: r.harness, model: r.model ?? null, accountId: r.accountId ?? null, state: r.state, stateLabel: r.stateLabel }]
+        ? [{ id: r.id, harness: r.harness, model: r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null, state: r.state, stateLabel: r.stateLabel }]
         : []
     })
     const liveState = liveStateOf(agents)
@@ -84,6 +84,32 @@ export function joinLive(
 
 export interface LiveFilters { taskId: string | null; onlyActive: boolean }
 
+/** The Live view's defaults (LIVE.ATALHO): only pieces with active agents, every task, every step. */
+export type StageFilter = 'all' | LiveStage
+export const LIVE_DEFAULTS: { taskId: string | null; onlyActive: boolean; stage: StageFilter } = { taskId: null, onlyActive: true, stage: 'all' }
+
+/** A piece sitting in the queue column is waiting for a slot: it is drawn dimmed and never gets an ETA verdict. */
+export const isQueued = (c: LiveCard): boolean => c.d.stage === 'queue'
+
+/** 1-based place in the queue (oldest first by stage-since, then key); null when the card is not queued. */
+export function queuePosition(cards: readonly LiveCard[], c: LiveCard): number | null {
+  if (!isQueued(c)) return null
+  const q = cards.filter(isQueued).sort((a, b) =>
+    (a.d.stageSinceMs ?? Infinity) - (b.d.stageSinceMs ?? Infinity) || a.d.key.localeCompare(b.d.key))
+  const i = q.findIndex(x => x.d.key === c.d.key)
+  return i < 0 ? null : i + 1
+}
+
+/** The two pills of a card, one per line: [harness · model · effort] and [account · name]. Effort only when reported. */
+export function cardPills(c: LiveCard, accountOf: (a: LiveAgent) => string | null, accountWord: string): { runtime: string | null; account: string | null } {
+  const a = c.agents[0]
+  const harness = a ? a.harness : c.d.harnesses[0]
+  const model = a ? a.model : c.d.models[0]
+  const runtime = harness ? [harness, model, a?.effort].filter(Boolean).join(' · ') : null
+  const acc = a ? accountOf(a) : null
+  return { runtime, account: acc ? `${accountWord} · ${acc}` : null }
+}
+
 export function filterCards(cards: readonly LiveCard[], f: LiveFilters): LiveCard[] {
   return cards.filter(c =>
     (f.taskId === null || c.d.taskId === f.taskId)
@@ -93,6 +119,17 @@ export function filterCards(cards: readonly LiveCard[], f: LiveFilters): LiveCar
 export function byStage(cards: readonly LiveCard[]): Record<LiveStage, LiveCard[]> {
   const out = Object.fromEntries(LIVE_STAGES.map(s => [s, [] as LiveCard[]])) as Record<LiveStage, LiveCard[]>
   for (const c of cards) out[c.d.stage].push(c)
+  return out
+}
+
+/** PURE. Within each column the queued cards read 1st → last from the top; the rest keep their order, ahead of the queue. */
+export function orderQueueFirstUp(cols: Record<LiveStage, LiveCard[]>, all: readonly LiveCard[]): Record<LiveStage, LiveCard[]> {
+  const out = {} as Record<LiveStage, LiveCard[]>
+  for (const s of LIVE_STAGES) {
+    const list = cols[s]
+    const pos = (c: LiveCard) => queuePosition(all, c) ?? 0
+    out[s] = [...list.filter(c => !isQueued(c)), ...list.filter(isQueued).sort((a, b) => pos(a) - pos(b))]
+  }
   return out
 }
 
@@ -126,8 +163,6 @@ export const fmtClock = (ms: number): string => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-const CONF = { pt: { low: 'baixa', medium: 'média', high: 'alta' }, en: { low: 'low', medium: 'medium', high: 'high' } } as const
-
 /** The ETA line, and the sentence behind it (the title attribute): no number without its source. */
 export function etaText(eta: LiveEta, lang: 'pt' | 'en'): { line: string; title: string } {
   const pt = lang === 'pt'
@@ -145,10 +180,10 @@ export function etaText(eta: LiveEta, lang: 'pt' | 'en'): { line: string; title:
   const scope = eta.basis.scope === 'harness-model'
     ? `${eta.basis.harness} · ${eta.basis.model ?? ''}` : eta.basis.harness
   return {
-    line: `${pt ? 'prevista' : 'expected'} ${fmtClock(eta.atMs)} ±${pm >= 90 ? `${Math.round(pm / 60)}h` : `${pm}min`} · ${pt ? 'confiança' : 'confidence'} ${CONF[lang][eta.confidence]}`,
+    line: `${pt ? 'prevista' : 'expected'} ~${fmtClock(eta.atMs)}`,
     title: pt
-      ? `Mediana de ${eta.basis.n} entregas parecidas (${scope}): ${fmtSpan(eta.basis.medianMs)}.`
-      : `Median of ${eta.basis.n} similar deliveries (${scope}): ${fmtSpan(eta.basis.medianMs)}.`,
+      ? `Mediana de ${eta.basis.n} entregas parecidas (${scope}): ${fmtSpan(eta.basis.medianMs)} (margem ±${pm >= 90 ? `${Math.round(pm / 60)}h` : `${pm}min`}).`
+      : `Median of ${eta.basis.n} similar deliveries (${scope}): ${fmtSpan(eta.basis.medianMs)} (margin ±${pm >= 90 ? `${Math.round(pm / 60)}h` : `${pm}min`}).`,
   }
 }
 

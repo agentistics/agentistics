@@ -32,7 +32,7 @@ for (const lang of ['pt', 'en'] as const) {
     await act(async () => root!.render(createElement(Router, null,
       createElement(Tree, { lang, pathname: '/usage', variant }))))
     const usage = Array.from(document.querySelectorAll('a[href="/usage"]')).find(a => a.textContent?.startsWith(lang === 'pt' ? 'Uso' : 'Usage'))!
-    const tasks = document.querySelector('a[href="/tasks"]')!
+    const tasks = document.querySelector('a[href="/tasks"], a[href="/tasks/board"]')!
     const chip = usage.querySelector('span[title]') as HTMLElement
     expect(chip.textContent).toBe('beta')
     // Agentask left beta (2.199.0): its entry carries no chip at all.
