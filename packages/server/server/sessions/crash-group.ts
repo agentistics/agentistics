@@ -73,6 +73,24 @@ export const CRASH_WINDOW_MS = 2 * HEARTBEAT_MS
 /** How long a fall is news; older rows remain available individually in Ended. */
 export const CRASH_MAX_AGE_MS = 24 * 60 * 60_000
 
+/**
+ * How long a freshly registered row is presumed to still be getting its pane.
+ *
+ * `spawnManaged` writes the registry row FIRST (stamped with `lastSeenMs` at birth) and only then asks the
+ * backend for a pane — and a reopen of a structured opencode session spends seconds in that gap (the driver
+ * waits for `opencode serve` to answer). Any poll landing there read the row as "not in the backend, alive a
+ * moment ago": a FALL. MAC.OPENCODE r2, reported on a Mac (2026-11-06): clicking Reopen flashed the
+ * "reopen the sessions that fell" offer for the very row being opened, which then "reopened by itself" on the
+ * next poll, when its pane existed. A row inside this window is being born, never fallen.
+ */
+export const BORN_GRACE_MS = 30_000
+
+/** PURE. Is this row still inside its birth window (registered, pane possibly not created yet)? */
+export function isBeingBorn(entry: Pick<ManagedSession, 'createdAt'>, now: number, graceMs: number = BORN_GRACE_MS): boolean {
+  const born = Date.parse(entry.createdAt)
+  return Number.isFinite(born) && born <= now + graceMs && now - born < graceMs
+}
+
 export interface CrashGroup {
   /** When the fall happened, as the newest evidence of life among its members. */
   atMs: number
@@ -102,6 +120,8 @@ export function planCrashGroup(o: {
     if (e.endedAt) return false
     // The backend still has it: it is running, or it exited on its own. Either way nothing took it.
     if (o.backendIds.has(e.id)) return false
+    // Registered a moment ago: its pane may simply not exist yet. Being born is not falling.
+    if (isBeingBorn(e, now)) return false
     // No evidence it was ever alive under a build that records evidence. Excluded rather than
     // guessed at from `createdAt`, which says nothing about whether it was still open.
     return typeof e.lastSeenMs === 'number' && Number.isFinite(e.lastSeenMs)

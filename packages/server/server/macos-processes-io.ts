@@ -20,7 +20,7 @@ import {
   harnessOf, harnessOfProcess, isNonInteractiveInvocation, sessionIdFromArgv, sessionIdFromFdPaths, type HarnessProcess,
 } from './live-sessions'
 import {
-  cwdFromLsof, macExecutable, parseLsofFields, parsePsCommands, parsePsList, processStartFromEtime, splitPsCommand,
+  cwdFromLsof, executableFromLsofTxt, macExecutable, parseLsofFields, parsePsCommands, parsePsList, processStartFromEtime, splitPsCommand,
 } from './macos-processes'
 
 const JS_RUNTIME_COMMS = new Set(['node', 'bun', 'deno'])
@@ -103,6 +103,9 @@ export async function scanMacProcesses(nowMs: number = Date.now(), run: MacRun =
   // layouts are written against the real file (`/proc/<pid>/exe` on Linux). Resolved only for a name that is a
   // harness at all, so the rest of the process table costs no syscall.
   const exeOf = new Map<number, string>()
+  // MAC.OPENCODE r2 — a harness NAME with no path (`ps` printed argv[0] = `opencode`, typed in a shell): only the
+  // kernel knows which file it runs (see `executableFromLsofTxt`). Resolved below in ONE `lsof` for all of them.
+  const bareNamed: typeof entries = []
   const candidates = entries.filter(e => {
     const base = e.comm.slice(e.comm.lastIndexOf('/') + 1)
     if (JS_RUNTIME_COMMS.has(base)) return true
@@ -110,11 +113,21 @@ export async function scanMacProcesses(nowMs: number = Date.now(), run: MacRun =
     // The path as executed first (a Homebrew `/opt/homebrew/bin/<tool>` link is itself a known layout and would
     // stop being one once resolved into the Cellar), the resolved file second.
     if (harnessOfProcess(base, e.comm, [e.comm]) !== undefined) return true
+    if (!e.comm.startsWith('/')) { bareNamed.push(e); return false }
     const exe = macExecutable(e.comm, realPath)
     if (exe === e.comm || harnessOfProcess(base, exe, [e.comm]) === undefined) return false
     exeOf.set(e.pid, exe)
     return true
   })
+  if (bareNamed.length > 0) {
+    const txt = await fdFor(run, 'txt', bareNamed.map(e => e.pid))
+    for (const e of bareNamed) {
+      const exe = executableFromLsofTxt(txt, e.pid, e.comm, path => harnessOfProcess(e.comm, path, [e.comm]) !== undefined)
+      if (!exe) continue
+      exeOf.set(e.pid, exe)
+      candidates.push(e)
+    }
+  }
   if (candidates.length === 0) return { procs: [], psFailed: false, foreignPids, cwdDenied: false }
 
   const pids = candidates.map(c => c.pid)
