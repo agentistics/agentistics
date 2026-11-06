@@ -11,7 +11,16 @@ export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
   '2.200.4': {
-    features: [],
+    features: [
+      {
+        pt: 'Atalho da Live Delivery no topo das Sessões: passe o mouse para ver a Live ao vivo num popup grande (no celular, toque para abrir uma folha), clique para ir à Live.',
+        en: 'Live Delivery shortcut in the Sessions top bar: hover for a big live preview (on a phone, tap for a sheet), click to open Live.',
+      },
+      {
+        pt: 'A Live agora abre com "só com agentes ativos" ligado, todas as tarefas e todas as etapas; cartões na fila ficam apagados e mostram a posição; modelo e conta em duas etiquetas; colunas maiores com barra de rolagem laranja.',
+        en: 'Live now opens with "only active agents" on, all tasks and all steps; queued cards are dimmed and show their place; model and account in two pills; wider columns with an orange scrollbar.',
+      },
+    ],
     fixes: [
       {
         pt: 'A janela de uso dos planos sempre cabe na tela, tem altura limitada e rola por dentro (com barra de rolagem nova), e o "Refazer login" só aparece quando o login da conta expirou.',
