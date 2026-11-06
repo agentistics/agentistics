@@ -104,7 +104,7 @@ describe('Escape closes the top entry, always', () => {
       createElement(Select, { value: 'a', onChange() {}, options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }] })))
     const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Session actions"]')!
     act(() => trigger.click())
-    act(() => Array.from(host.querySelectorAll('button')).find(b => /away mode on this session/i.test(b.textContent ?? ''))!.click())
+    act(() => Array.from(host.querySelectorAll('button')).find(b => /autonomous mode on this session/i.test(b.textContent ?? ''))!.click())
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1)
     act(() => { host.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!.click() })
     expect(document.querySelector('[role="listbox"]')).toBeTruthy()

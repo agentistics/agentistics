@@ -1,5 +1,5 @@
 /**
- * away.ts — AWAY MODE on this machine: the owner is out, and every session started meanwhile is told
+ * away.ts — AUTONOMOUS MODE on this machine: the owner is out, and every session started meanwhile is told
  * so in its briefing (`awayBriefingLines`, @agentistics/core). Stored in `preferences.json` (key
  * `away`) because it is a fact about this machine's fleet, not about a browser.
  *
@@ -122,7 +122,7 @@ export async function flushAwayNotices(now: number, timeoutMs = AWAY_SEND_TIMEOU
 }
 function forThisSession(text: string): string {
   return text
-    .replace(/^\[agentistics · away mode is now (ON|OFF)\]/, '[agentistics · away mode is now $1 for this session]')
+    .replace(/^\[agentistics · autonomous mode is now (ON|OFF)\]/, '[agentistics · autonomous mode is now $1 for this session]')
     .replace('The owner is back:', 'The owner is back for this session:')
 }
 function queueAwayNotice(id: string, before: AwayState | null, after: AwayState | null, role: PendingAway['role'], send: PendingAway['send'], now: number, planLimits = false, perSession = false): void {

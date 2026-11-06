@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'bun:test'
-import { AWAY_NOTE_MAX, awayActive, awayBriefingLines, awayHandoffNote, awayTopCap, normalizeAwayInput, normalizeAwayNotice, parseAwayState, readAwaySpawn, resolveSpawnAway, sessionAwayNotice, sessionAwayState, type AwayState } from './awayMode'
+import { describe, expect, it, test } from 'bun:test'
+import { AWAY_NOTE_MAX, autonomousSpawnMode, awayActive, awayBriefingLines, awayHandoffNote, awayTopCap, normalizeAwayInput, normalizeAwayNotice, parseAwayState, readAwaySpawn, resolveSpawnAway, sessionAwayNotice, sessionAwayState, type AwayState } from './awayMode'
 
 const NOW = Date.parse('2026-10-12T03:00:00.000Z')
 const on = (o: Partial<AwayState> = {}): AwayState => ({ on: true, since: '2026-10-12T02:00:00.000Z', until: null, authorised: ['releases', 'workers'], maxWorkers: 6, topCaps: { claude: 2 }, ...o })
@@ -49,7 +49,7 @@ describe('awayBriefingLines', () => {
   it('leader lines: scope, pacing, quality, communication', () => {
     const lines = awayBriefingLines(on({ note: 'focus on QUAL', maxWorkers: 4, topCaps: { claude: 1, codex: 3 } }), 'leader', NOW)
     expect(lines).toHaveLength(4)
-    expect(lines[0]).toBe("AWAY MODE — the owner is away until they say they are back. Pre-authorised: publish releases the leader has approved (QA green); open worker sessions within the plan limits; owner's note: focus on QUAL. These authorisations stand in for the owner's approval wherever the rules below ask for it; anything outside them waits in the hand-off file for their return.")
+    expect(lines[0]).toBe("AUTONOMOUS MODE (until they say they are back) — decide and proceed without asking permission or questions. Pre-authorised: publish releases the leader has approved (QA green); open worker sessions within the plan limits; owner's note: focus on QUAL. These authorisations stand in for the owner's approval wherever the rules below ask for it — act on them without asking permission; anything outside them waits in the hand-off file for their return.")
     expect(lines[1]).toContain('Never run more than 4 workers at once; at most this many of them on a provider\'s top model tier at once: claude (Opus / Fable) ≤ 1, codex (top GPT tier) ≤ 3, any other provider ≤ 2')
     expect(lines[1]).toContain('free RAM drops under 2 GB')
     expect(lines[1]).toContain('mid tier: scoped implementation; light tier: probes')
@@ -73,7 +73,7 @@ describe('awayBriefingLines', () => {
   })
   it('worker line: report to the leader, not the owner', () => {
     const [l] = awayBriefingLines(on({ until: '2026-10-12T12:00:00.000Z' }), 'worker', NOW)
-    expect(l).toBe('AWAY MODE — the owner is away until 2026-10-12T12:00:00.000Z. Do not ask the owner anything: send questions, blocks and hand-backs to the session that started you (agentistics_session_message); with no such session, decide within your brief and record the decision.')
+    expect(l).toBe('AUTONOMOUS MODE (until 2026-10-12T12:00:00.000Z) — decide and proceed without asking permission or questions. Do not ask the owner anything: send questions, blocks and hand-backs to the session that started you (agentistics_session_message); with no such session, decide within your brief and record the decision.')
   })
   it('auto line names both paths; no authorisations says so', () => {
     const [l] = awayBriefingLines(on({ authorised: [] }), undefined, NOW)
@@ -155,9 +155,26 @@ describe('per-session away', () => {
   })
   it('the runtime notice is typed only when the effective state changes', () => {
     const off = parseAwayState(null)
-    expect(sessionAwayNotice(off, false, true, 'worker', NOW)).toContain('away mode is now ON for this session')
-    expect(sessionAwayNotice(off, true, false, 'worker', NOW)).toContain('away mode is now OFF for this session')
+    expect(sessionAwayNotice(off, false, true, 'worker', NOW)).toContain('autonomous mode is now ON for this session')
+    expect(sessionAwayNotice(off, true, false, 'worker', NOW)).toContain('autonomous mode is now OFF for this session')
     expect(sessionAwayNotice(off, true, true, 'worker', NOW)).toBeNull()
     expect(sessionAwayNotice(on(), true, false, 'worker', NOW)).toBeNull()
+  })
+})
+
+describe('autonomousSpawnMode', () => {
+  test('on: a new session is born in no-questions', () => {
+    expect(autonomousSpawnMode(undefined, true, true)).toEqual({ mode: 'no-questions', fromAutonomous: true })
+  })
+  test('an explicit mode wins, even "default"', () => {
+    expect(autonomousSpawnMode('plan', true, true)).toEqual({ mode: 'plan', fromAutonomous: false })
+    expect(autonomousSpawnMode('default', true, true)).toEqual({ mode: 'default', fromAutonomous: false })
+  })
+  test('off: the inherited/default mode is kept', () => {
+    expect(autonomousSpawnMode(undefined, false, true, 'accept-edits')).toEqual({ mode: 'accept-edits', fromAutonomous: false })
+    expect(autonomousSpawnMode(undefined, false, true)).toEqual({ mode: undefined, fromAutonomous: false })
+  })
+  test('a harness that cannot carry no-questions is left alone, never refused', () => {
+    expect(autonomousSpawnMode(undefined, true, false, 'plan')).toEqual({ mode: 'plan', fromAutonomous: false })
   })
 })

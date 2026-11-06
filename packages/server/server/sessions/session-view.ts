@@ -251,7 +251,7 @@ export interface SessionView {
   /** The managed id of the session that started this one — `ManagedSession.parentSessionId`. */
   parentSessionId?: string
   parentConversationId?: string
-  /** `ManagedSession.away` — per-session away mode. */
+  /** `ManagedSession.away` — per-session autonomous mode. */
   away?: boolean
   /** `ManagedSession.handoffSeq` — the leader hand-off generation. */
   handoffSeq?: number

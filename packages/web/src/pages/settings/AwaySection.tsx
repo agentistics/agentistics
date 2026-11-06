@@ -1,16 +1,15 @@
 /**
- * Settings → Sessions → Away mode. A `RowSwitch`: on opens the one activation dialog
+ * Settings → Sessions → Autonomous mode. A `RowSwitch`: on opens the one activation dialog
  * (`AwayModeDialog`), off asks for confirmation before clearing every own flag. Hidden where this server cannot drive sessions
- * (no `localShell`), because away mode only changes what sessions here are told.
+ * (no `localShell`), because autonomous mode only changes what sessions here are told.
  */
 import { AwayImpact } from '../../components/AwayImpact'
 import { ConfirmModal } from './primitives'
 import React, { useState } from 'react'
-import { Moon } from 'lucide-react'
 import { AWAY_AUTH_LABEL } from '@agentistics/core'
 import { RowSwitch, SectionHeader } from './primitives'
 import AwayModeDialog from '../../components/AwayModeDialog'
-import { awayUntilLabel, setAway, useAway } from '../../lib/awayMode'
+import { AUTONOMOUS_ICON, awayUntilLabel, setAway, useAway } from '../../lib/awayMode'
 
 export default function AwaySection({ lang, capable, embedded = false }: { lang: 'pt' | 'en'; capable: boolean; embedded?: boolean }) {
   const pt = lang === 'pt'
@@ -24,17 +23,17 @@ export default function AwaySection({ lang, capable, embedded = false }: { lang:
       : 'When on, sessions ask you nothing: leaders decide and record, workers report to their leader.')
   return (
     <>
-      {!embedded && <SectionHeader label={pt ? 'Modo ausente' : 'Away mode'} />}
+      {!embedded && <SectionHeader label={pt ? 'Modo autônomo' : 'Autonomous mode'} />}
       <RowSwitch wrap
         on={away.active}
         disabled={away.state === null}
-        icon={<Moon size={15} />}
-        label={pt ? 'Estou fora (dormindo, viajando)' : "I'm away (asleep, travelling)"}
+        icon={<AUTONOMOUS_ICON size={15} />}
+        label={pt ? 'Sessões trabalham sem pedir permissão' : "Sessions work without asking permission"}
         sub={sub}
         onToggle={() => { if (away.active) setConfirmOff(true); else setDialog(true) }}
       />
       <ConfirmModal open={confirmOff} tone="default" title={pt ? 'Voltou?' : 'Back?'}
-        message={pt ? 'Isto limpa o modo ausente de todas as sessões.' : 'This clears away mode for every session.'}
+        message={pt ? 'Isto limpa o modo autônomo de todas as sessões.' : 'This clears autonomous mode for every session.'}
         confirmLabel={pt ? 'Desligar' : 'Turn off'} cancelLabel={pt ? 'Cancelar' : 'Cancel'}
         onConfirm={() => { setConfirmOff(false); void setAway({ on: false }) }} onCancel={() => setConfirmOff(false)}>
         <AwayImpact pt={pt} open={confirmOff} />

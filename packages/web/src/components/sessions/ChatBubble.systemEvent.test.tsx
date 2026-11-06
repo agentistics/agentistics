@@ -94,7 +94,7 @@ test('without a session id there is no dead "Open check-in" button', () => {
 
 test('injected away turn renders the event row, not a bubble', () => {
   const html = renderToStaticMarkup(<ChatBubble turn={turn('[from agentistics · away]\nxyzzy-body-marker')} lang="en" harness="claude" />)
-  expect(html).toContain('Away mode updated')
+  expect(html).toContain('Autonomous mode updated')
   expect(html).toContain('aria-expanded="false"')
   expect(html).not.toContain('xyzzy-body-marker')
 })

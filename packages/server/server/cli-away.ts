@@ -1,6 +1,6 @@
 /**
  * `agentop away [status|on|off] [--until back|<N>h|<HH:MM>] [--allow releases,workers,merges]
- *  [--workers N] [--cap <harness>=N[,…]] [--note "…"]` — AWAY MODE from the terminal, and
+ *  [--workers N] [--cap <harness>=N[,…]] [--note "…"]` — AUTONOMOUS MODE from the terminal, and
  * `agentop away session <id|title> on|off` — one session's own flag (`/api/away/session`).
  *
  * It talks to the local server (`/api/away`) so the browser hears the change over SSE; when no
@@ -71,10 +71,10 @@ export function parseAwayArgs(args: readonly string[], now: number): AwayCommand
 }
 
 export function describeAway(s: AwayState, active: boolean): string {
-  if (!active) return 'away mode: off'
-  const until = s.until === null ? "until you're back" : `until ${new Date(s.until).toLocaleString()}`
+  if (!active) return 'autonomous mode: off'
+  const until = s.until === null ? "until turned off" : `until ${new Date(s.until).toLocaleString()}`
   const auth = s.authorised.length ? s.authorised.join(', ') : 'nothing'
-  return `away mode: ON ${until}\n  authorised: ${auth}\n  ceilings: ${s.maxWorkers} workers; ${topCapsText(s)}${s.note ? `\n  note: ${s.note}` : ''}`
+  return `autonomous mode: ON ${until}\n  authorised: ${auth}\n  ceilings: ${s.maxWorkers} workers; ${topCapsText(s)}${s.note ? `\n  note: ${s.note}` : ''}`
 }
 
 const USAGE = `usage: agentop away [status|on|off] [--until back|8h|90m|HH:MM] [--allow ${AWAY_AUTH_IDS.join(',')}|none] [--workers N] [--cap <harness>=N[,…]] [--note "…"]\n       agentop away session <id|title> on|off`

@@ -259,7 +259,7 @@ async function promptForLeader(c: CheckinConfig): Promise<string> {
   const groups = await (deps.readFechamento?.() ?? Promise.resolve(null)).catch(() => null)
   const prompt = promptFor(c) + (groups ? fechamentoLines(groups) : deliveredOpenLine(await (deps.readDeliveredOpen?.() ?? Promise.resolve([])).catch(() => [])))
   const away = awayActive(parseAwayState((await deps.readPreferences()).away), Date.now())
-  return away ? `${prompt}\nAWAY MODE — decide within the authorisations, record the decision, and never ask the owner; anything urgent goes as an away notice.` : prompt
+  return away ? `${prompt}\nAUTONOMOUS MODE — decide within the authorisations, record the decision, and never ask the owner; anything urgent goes as an away notice.` : prompt
 }
 export function due(s: CheckinState, now: number): boolean { return s.nextRunAt !== null && s.nextRunAt <= now && !pausedNow(s, now) }
 
@@ -404,7 +404,7 @@ export async function reportFromIdentity(session: string | null, round: CheckinR
   const roles = (await deps.readRolesDoc(deps.dataDir)).roles
   if (deps.roleOfRow(roles, row) !== 'leader') return null
   if (round.needs?.length && awayActive(parseAwayState((await deps.readPreferences()).away), Date.now())) {
-    return { error: 'Away mode is on: decide within the authorisations, record the decision, and use an away notice for anything urgent instead of asking the owner.' }
+    return { error: 'Autonomous mode is on: decide within the authorisations, record the decision, and use an away notice for anything urgent instead of asking the owner.' }
   }
   return report(row.conversationId ?? row.id, round)
 }

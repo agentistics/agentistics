@@ -41,7 +41,7 @@ export interface ContextInput {
   folder?: { path: string; siblings: readonly string[]; /** A top-level folder: its `siblings` are its sub-folders. */ top?: boolean }
   lang?: ContextLang
   toolNames?: readonly string[]
-  /** AWAY MODE as stored (`server/away.ts`); the line is printed only while it is active at `now`. */
+  /** AUTONOMOUS MODE as stored (`server/away.ts`); the line is printed only while it is active at `now`. */
   away?: AwayState
   /** The clock `away` is judged against (ms). Defaults to `Date.now()`; tests pass it. */
   now?: number
@@ -61,7 +61,7 @@ export interface ContextInput {
 }
 
 /** One line, stated once: who wins when two instructions disagree. */
-export const PRECEDENCE_LINE = 'Precedence when instructions disagree: the owner\'s direct word > away-mode authorisations > the brief you were given > CLAUDE.md/AGENTS.md > memory > this generic briefing and skills.'
+export const PRECEDENCE_LINE = 'Precedence when instructions disagree: the owner\'s direct word > autonomous-mode authorisations > the brief you were given > CLAUDE.md/AGENTS.md > memory > this generic briefing and skills.'
 
 /** The block is fenced so the chat UI can recognise it and render it collapsed. */
 export const CONTEXT_OPEN = '<agentistics-context>'
@@ -123,7 +123,7 @@ export function contextText(i: ContextInput): string {
     PRECEDENCE_LINE,
     'Tools — the "agentistics" MCP server gives you:',
     `- Tasks (Agentask): ${TOOL_GROUPS.Tasks.join(', ')} — plan, claim, edit, link, comment, coordinate, and close work.`,
-    `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, organise sidebar folders, and read or (leaders) set away mode.`,
+    `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, organise sidebar folders, and read or (leaders) set autonomous mode.`,
     METRICS_DASHBOARDS_LINE,
     briefingText(i.lang ?? 'en', { planLimitsAvailable: planLimits && !worker, away }),
     roleLine(i.role),
@@ -134,7 +134,7 @@ export function contextText(i: ContextInput): string {
     lines.push('Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title. If you replace another live leader on your task, pass its id as `retirePredecessor` so the server closes it when it goes quiet.')
     const how = '`agentop session <harness> --bg --cwd <dir> --name "<title>" --folder "<folder>" -p "<request>"` or `agentop session batch --task "<task>" --folder "<folder>" …` (`agentop session folders` lists them; omitted task, folder and approval mode inherit from a verified parent). Workers inherit the parent task, folder and approval mode, but need their own subtask when applicable. For leader succession run `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` from inside the old leader (it keeps your model and approval mode unless you pass `--model`/`--mode`, e.g. `--mode no-questions`); a leader prefix alone does not transfer its state. File each opened session on its subtask and in the task\'s folder. ' + SESSION_VERB_LINE
     lines.push(away
-      ? `Opening workers is pre-authorised within the away limits above (no per-session approval): ${how}`
+      ? `Opening workers is pre-authorised within the autonomous-mode limits above (no per-session approval): ${how}`
       : `Open other sessions only after the user explicitly approves: ${how}`)
     lines.push(`Model/harness balance: use the strongest model for design, coordination, and hard bugs; a mid model for clearly scoped implementation; a light model for probes/screenshots; QA must use a different model from the author. ${away || i.usageRulesSaved ? "Respect the user's saved usage rules." : "No usage rules are saved yet: before proposing sessions, ask the user once what plans, quotas, and preferences they allow."}`)
   }
@@ -173,7 +173,7 @@ export function contextText(i: ContextInput): string {
     ...(worker
       ? ['- Never start, delegate to or orchestrate another session or harness.']
       : away
-        ? ['- Start sessions only inside the away authorisations and limits above; anything outside them waits in the hand-off file.']
+        ? ['- Start sessions only inside the autonomous-mode authorisations and limits above; anything outside them waits in the hand-off file.']
         : ['- Never start, delegate to or orchestrate another session or harness on your own. You may SUGGEST it (which harness, why, what it would do); start it only after the user explicitly approves in this conversation.']),
     '- Secrets come from the vault: use vault://name references. Never ask the user to paste a key and never print a secret.',
     '- Ports 47291 and 47292 belong to agentistics: never start, stop or bind anything there; never run `agentop upgrade`; never restart the agentistics service.',

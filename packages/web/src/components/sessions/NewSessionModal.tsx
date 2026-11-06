@@ -208,8 +208,10 @@ export function NewSessionModal({
   const [effort, setEffort] = useState(restored?.effort ?? initialPreset?.effort ?? '')
   /** MODE.EVERYWHERE — the permission mode to start in; `default` = the harness's own configuration. */
   const [mode, setMode] = useState<CanonicalMode>('default')
+  /** True once the person picked a mode themselves: an explicit pick (even "default") beats autonomous mode. */
+  const [modePicked, setModePicked] = useState(false)
   const [sessionRole, setSessionRoleChoice] = useState<SessionRole | ''>('')
-  /** PER-SESSION AWAY MODE — this session alone is told the owner is out (`away: true` on the spawn). */
+  /** PER-SESSION AUTONOMOUS MODE — this session alone is told the owner is out (`away: true` on the spawn). */
   const [awayOn, setAwayOn] = useState(false)
   const awayGlobal = useAway()
   const [prompt, setPrompt] = useState(restored?.prompt ?? initialPreset?.prompt ?? '')
@@ -340,6 +342,9 @@ export function NewSessionModal({
     // A mode the NEW assistant cannot start in falls back to its default — never sent to be refused.
     setMode(m => (wizardHarness?.modes?.includes(m) ? m : 'default'))
   }, [wizardHarness])
+  /** AUTONOMOUS MODE: the mode this session will start in because autonomous mode is on and none was picked. */
+  const modeFromAutonomous = !modePicked && mode === 'default' && (awayOn || awayGlobal.active)
+  const effectiveMode: CanonicalMode = modeFromAutonomous && wizardHarness?.modes?.includes('no-questions') ? 'no-questions' : mode
 
   const ready = stepReady(step, draft, wizardHarness)
   const canStart = stepReady('review', draft, wizardHarness).ok && !busy
@@ -521,8 +526,9 @@ export function NewSessionModal({
       {visibleQuestions(wizardHarness).mode && (
         <ReviewRow label={pt ? 'Modo' : 'Mode'} value={
           <span style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {CANONICAL_MODE_TEXT[mode][pt ? 'pt' : 'en'].label}
-            {mode === 'no-questions' && <NoQuestionsWarning lang={pt ? 'pt' : 'en'} compact />}
+            {CANONICAL_MODE_TEXT[effectiveMode][pt ? 'pt' : 'en'].label}
+            {modeFromAutonomous && effectiveMode === 'no-questions' && <span data-testid="mode-from-autonomous" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt ? 'definido pelo modo autônomo' : 'set by autonomous mode'}</span>}
+            {effectiveMode === 'no-questions' && <NoQuestionsWarning lang={pt ? 'pt' : 'en'} compact />}
           </span>
         } />
       )}
@@ -535,7 +541,7 @@ export function NewSessionModal({
         return l ? <ReviewRow label={pt ? 'Limites' : 'Limits'} value={<span style={{ display: 'block', maxWidth: 260 }}><PlanLimitBars limits={l} now={planSnap.now} lang={lang} /></span>} /> : null
       })()}
       {harness && harness.id !== NATIVE_HARNESS_ID && (awayOn || awayGlobal.active) && (
-        <ReviewRow label={pt ? 'Modo ausente' : 'Away mode'} value={awayOn ? (pt ? 'Ligado nesta sessão' : 'On for this session') : (pt ? 'Ligado (global)' : 'On (global)')} />
+        <ReviewRow label={pt ? 'Modo autônomo' : 'Autonomous mode'} value={awayOn ? (pt ? 'Ligado nesta sessão' : 'On for this session') : (pt ? 'Ligado (global)' : 'On (global)')} />
       )}
       <ReviewRow label={pt ? 'Título' : 'Title'} value={label || null} />
       <ReviewRow label={pt ? 'Onde' : 'Where'} value={cwd || null} mono />
@@ -671,7 +677,7 @@ export function NewSessionModal({
           ...(model ? { model } : {}),
           ...(effort ? { effort } : {}),
           // `default` is the absence of a mode: the harness's own configuration decides.
-          ...(mode !== 'default' && wizardHarness?.modes?.includes(mode) ? { mode } : {}),
+          ...((mode !== 'default' || modePicked) && wizardHarness?.modes?.includes(mode) ? { mode } : {}),
           // Off is left absent (= inherit): a browser spawn has no parent, so it reads as off.
           ...(awayOn ? { away: true as const } : {}),
           // The paths go FIRST, each on its own line, then what was typed — the same order the
@@ -966,7 +972,12 @@ export function NewSessionModal({
               start in here. The composer's mode chip is the same control once the session runs. */}
           {visibleQuestions(wizardHarness).mode && (
             <Field label={pt ? 'Modo' : 'Mode'}>
-              <ModePicker modes={wizardHarness!.modes!} value={mode} lang={pt ? 'pt' : 'en'} onChange={v => { setMode(v); setDirty(true) }} />
+              <ModePicker modes={wizardHarness!.modes!} value={effectiveMode} lang={pt ? 'pt' : 'en'} onChange={v => { setMode(v); setModePicked(true); setDirty(true) }} />
+              {modeFromAutonomous && effectiveMode === 'no-questions' && (
+                <div data-testid="mode-from-autonomous" style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                  {pt ? 'Definido pelo modo autônomo — escolha outro modo para sobrescrever.' : 'Set by autonomous mode — pick another mode to override.'}
+                </div>
+              )}
             </Field>
           )}
 
@@ -984,15 +995,15 @@ export function NewSessionModal({
             />
           </Field>
 
-          {/* PER-SESSION AWAY MODE — the same PillPicker row as the session type. A native session is
+          {/* PER-SESSION AUTONOMOUS MODE — the same PillPicker row as the session type. A native session is
               the engine's, not a managed row, so it has no flag to carry it. */}
           {wizardHarness && wizardHarness.id !== NATIVE_HARNESS_ID && (
-            <Field label={pt ? 'Modo ausente' : 'Away mode'} hint={awayGlobal.active
-              ? (pt ? 'O modo ausente global já está ligado: esta sessão já vai saber que você está fora.' : 'Global away mode is already on: this session will know you are out either way.')
-              : (pt ? 'Ligado, só esta sessão sabe que você está fora: não pergunta nada, decide e registra (ou reporta a quem a abriu). As sessões que ela abrir herdam.'
-                : 'On, only this session knows you are out: it asks you nothing, decides and records (or reports to whoever started it). Sessions it starts inherit it.')}>
+            <Field label={pt ? 'Modo autônomo' : 'Autonomous mode'} hint={awayGlobal.active
+              ? (pt ? 'O modo autônomo global já está ligado: esta sessão já nasce sem perguntas e decide sozinha.' : 'Global autonomous mode is already on: this session is born with no questions and decides on its own.')
+              : (pt ? 'Ligado, só esta sessão é autônoma: nasce sem perguntas, não pede permissão, decide e registra (ou reporta a quem a abriu). As sessões que ela abrir herdam.'
+                : 'On, only this session is autonomous: born with no questions, asks no permission, decides and records (or reports to whoever started it). Sessions it starts inherit it.')}>
               <PillPicker
-                radioLabel={pt ? 'Modo ausente' : 'Away mode'}
+                radioLabel={pt ? 'Modo autônomo' : 'Autonomous mode'}
                 items={[
                   { key: 'off', label: pt ? 'Desligado' : 'Off', color: 'var(--text-tertiary)' },
                   { key: 'on', label: pt ? 'Ligado — não me pergunte' : "On — don't ask me", color: 'var(--anthropic-orange)', data: { away: 'on' } },

@@ -10,7 +10,7 @@
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, ChevronRight, Clock3, Info, List, Moon, Play, Search, X, Maximize2 } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Clock3, Info, List, Play, Search, X, Maximize2 } from 'lucide-react'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
 import { HARNESS_LABELS } from '../../lib/harness'
@@ -30,7 +30,7 @@ import { ToggleSwitch } from '../ToggleSwitch'
 import { clockLabel, formatNextRun, formatSkipped, useCheckin, type CheckinConfig, type CheckinRound } from '../../lib/checkin'
 import { RailSection } from '../tasks/RailSection'
 import { CheckinConfigControls } from './CheckinConfigControls'
-import { setSessionAway, useAway } from '../../lib/awayMode'
+import { AUTONOMOUS_ICON, setSessionAway, useAway } from '../../lib/awayMode'
 import { openCheckinModal, useCheckinModalRequest } from '../../lib/checkinModal'
 
 export interface LinkTarget { kind: 'parent' | 'child' | 'task'; key: string; label: string; harness?: string; state?: string; stateLabel?: string; startedAt?: number; path: string | null }
@@ -149,7 +149,7 @@ export function SessionCheckinCard({ sessionId, links, pt, isMobile = false, onG
 }
 
 /**
- * PER-SESSION AWAY MODE — the session's own switch (`PUT /api/away/session`), the product's one
+ * PER-SESSION AUTONOMOUS MODE — the session's own switch (`PUT /api/away/session`), the product's one
  * `ToggleSwitch`. The flag shown is the fleet row's; a click is optimistic until the next fleet push
  * carries it. With the global switch on, the session is away either way and the line says so.
  */
@@ -159,7 +159,7 @@ export function SessionAwayRow({ managedId, away, pt, isMobile = false }: { mana
   const [note, setNote] = useState<string | null>(null)
   useEffect(() => { setPending(null) }, [away, managedId])
   const on = pending ?? away
-  const label = pt ? 'Modo ausente nesta sessão' : 'Away mode on this session'
+  const label = pt ? 'Modo autônomo nesta sessão' : 'Autonomous mode on this session'
   const toggle = async () => {
     const next = !on
     setPending(next)
@@ -169,16 +169,16 @@ export function SessionAwayRow({ managedId, away, pt, isMobile = false }: { mana
     setNote(r.queued ? (pt ? 'A sessão será avisada em instantes.' : 'The session will be told shortly.') : null)
   }
   const sub = global.active
-    ? (pt ? 'O modo ausente global está ligado: esta sessão já sabe que você está fora.' : 'Global away mode is on: this session already knows you are out.')
+    ? (pt ? 'O modo autônomo global está ligado: esta sessão já trabalha de forma autônoma.' : 'Global autonomous mode is on: this session already works autonomously.')
     : on
       ? (pt ? 'Ela não pergunta nada a você; as sessões que ela abrir herdam.' : 'It asks you nothing; sessions it starts inherit it.')
-      : (pt ? 'Ligue para esta sessão decidir sozinha enquanto você está fora.' : 'Turn on to let this session decide on its own while you are out.')
+      : (pt ? 'Ligue para esta sessão decidir sozinha, sem pedir permissão.' : 'Turn on to let this session decide on its own without asking permission.')
   return (
     <div data-testid="session-away-row">
-      <div style={SECTION}>{pt ? 'Modo ausente' : 'Away mode'}</div>
+      <div style={SECTION}>{pt ? 'Modo autônomo' : 'Autonomous mode'}</div>
       <div style={{ ...CHECKIN_ROW, padding: '0 6px', minHeight: isMobile ? 44 : 28 }}>
-        <Moon size={15} style={{ color: on || global.active ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }} />
-        <span>{pt ? 'Estou fora para esta sessão' : "I'm away for this session"}</span>
+        <AUTONOMOUS_ICON size={15} style={{ color: on || global.active ? 'var(--anthropic-orange)' : 'var(--text-tertiary)' }} />
+        <span>{pt ? 'Autônomo nesta sessão' : "Autonomous on this session"}</span>
         <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
           <ToggleSwitch on={on} onToggle={() => { void toggle() }} label={label} tap={isMobile ? 44 : undefined} />
         </span>

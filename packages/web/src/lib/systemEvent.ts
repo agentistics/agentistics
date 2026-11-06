@@ -72,7 +72,7 @@ export function parseSystemEvent(raw: string): SystemEvent | null {
     if (what === 'surface' && agentBody === null) return null
     if (what === 'role') return { kind: 'role', body }
     if (what === 'check-in') return { kind: 'checkin', body }
-    if (what === 'away') return { kind: /away mode is now OFF/i.test(body) ? 'away-off' : 'away', body }
+    if (what === 'away') return { kind: /autonomous mode is now OFF/i.test(body) ? 'away-off' : 'away', body }
     if (what === 'question') return { kind: 'question', body }
     if (what === 'relay') return { kind: 'relay', body }
     // Fail closed: a header nobody listed is still agentistics talking, never the person.
@@ -106,8 +106,8 @@ export function systemEventLine(e: SystemEvent, pt: boolean, who?: string): stri
     case 'rename': return pt ? `Sessão renomeada para “${e.body}”` : `Session renamed to “${e.body}”`
     case 'role': return pt ? 'Papel da sessão atualizado' : 'Session role updated'
     case 'checkin': return pt ? 'Check-in da liderança · sistema' : 'Leadership check-in · system'
-    case 'away-off': return pt ? 'Modo ausente desligado nesta sessão' : 'Away mode turned off for this session'
-    case 'away': return pt ? 'Modo ausente atualizado' : 'Away mode updated'
+    case 'away-off': return pt ? 'Modo autônomo desligado nesta sessão' : 'Autonomous mode turned off for this session'
+    case 'away': return pt ? 'Modo autônomo atualizado' : 'Autonomous mode updated'
     case 'question': return pt ? 'Dica de passagem de contexto' : 'Context hand-off hint'
     case 'handback': return (pt ? 'Tarefa entregue' : 'Task handed back') + suffix
     case 'block': return (pt ? 'Sessão bloqueada' : 'Session blocked') + suffix

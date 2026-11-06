@@ -128,7 +128,7 @@ export interface Preferences {
    *  only ever narrow `CAPS.localShell`; see sessions/shell-gate.ts. Separate from `chatEnabled`
    *  because they are different powers: the chat runs a named assistant CLI, this runs anything. */
   shellEnabled?: boolean
-  /** AWAY MODE — the owner is out and sessions must not ask them (`server/away.ts`). Read through
+  /** AUTONOMOUS MODE — the owner is out and sessions must not ask them (`server/away.ts`). Read through
    *  `parseAwayState`/`awayActive` (@agentistics/core); written only by `setAway`. */
   away?: AwayState
   /** Server-owned away summary offer/delivery state. */

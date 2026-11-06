@@ -10,7 +10,7 @@ describe('areaOfPath', () => {
       expect(areaOfPath(path)?.area.id).toBe('sessions')
       expect(areaOfPath(path)?.page?.id).toBe(page)
       expect(isSessionsWorkspace(path)).toBe(false)
-      expect(searchAreas(page === 'leaders' ? 'Líderes' : page === 'handoffs' ? 'Passagens' : page === 'away' ? 'Away' : 'Check-ins', 'en').some(r => r.area.id === 'sessions' && r.page.path === path)).toBe(true)
+      expect(searchAreas(page === 'leaders' ? 'Líderes' : page === 'handoffs' ? 'Passagens' : page === 'away' ? 'Autonomous' : 'Check-ins', 'en').some(r => r.area.id === 'sessions' && r.page.path === path)).toBe(true)
     })
   }
   test('sessions and everything under it', () => {
@@ -80,7 +80,7 @@ describe('searchAreas', () => {
   test('accent-insensitive, both languages', () => {
     expect(searchAreas('historico', 'pt')).toEqual([])
     expect(APP_AREAS.find(a => a.id === 'usage')!.pages.map(p => p.id)).toEqual(['now'])
-    expect(searchAreas('away', 'pt').map(r => r.page.id)).toContain('away')
+    expect(searchAreas('autônomo', 'pt').map(r => r.page.id)).toContain('away')
   })
   test('empty query finds nothing', () => {
     expect(searchAreas('  ', 'pt')).toEqual([])

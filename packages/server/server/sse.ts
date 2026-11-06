@@ -379,7 +379,7 @@ export function broadcastSessionGroupsChanged(): void {
   }
 }
 
-/** Away mode changed (`server/away.ts`): an EMPTY signal — the browser re-reads `GET /api/away`. */
+/** Autonomous mode changed (`server/away.ts`): an EMPTY signal — the browser re-reads `GET /api/away`. */
 export function broadcastAwayChanged(): void {
   if (sseClients.size === 0) return
   const payload = sseEncoder.encode('event: away\ndata: {}\n\n')

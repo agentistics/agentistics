@@ -2324,7 +2324,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       if (out.reply.ok) void import('./sessions/fleet-web').then(m => m.kickFleet(out.reply.ok ? out.reply.id : undefined)).catch(() => {})
       return json(out.reply, out.status)
     }
-    // AWAY MODE — the owner is out; sessions started meanwhile are told so (`away.ts`). The browser and
+    // AUTONOMOUS MODE — the owner is out; sessions started meanwhile are told so (`away.ts`). The browser and
     // the CLI write it as the person; a session (MCP) must prove itself and be a leader.
     if (url.pathname === '/api/away' && req.method === 'GET') {
       const { readAwayView, defaultAwayDeps } = await import('./away')

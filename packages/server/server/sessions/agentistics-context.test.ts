@@ -281,17 +281,17 @@ describe('folders in the briefing', () => {
   })
 })
 
-describe('away mode in the briefing', () => {
+describe('autonomous mode in the briefing', () => {
   const NOW = Date.parse('2026-10-12T03:00:00.000Z')
   const away = { on: true, since: '2026-10-12T02:00:00.000Z', until: '2026-10-12T12:00:00.000Z', authorised: ['releases' as const], maxWorkers: 6, topCaps: {} }
   test('absent, off or expired: no line', () => {
-    expect(contextText({ ...base, now: NOW })).not.toContain('AWAY MODE')
-    expect(contextText({ ...base, now: NOW, away: { ...away, on: false } })).not.toContain('AWAY MODE')
-    expect(contextText({ ...base, now: Date.parse('2026-10-12T13:00:00Z'), away })).not.toContain('AWAY MODE')
+    expect(contextText({ ...base, now: NOW })).not.toContain('AUTONOMOUS MODE')
+    expect(contextText({ ...base, now: NOW, away: { ...away, on: false } })).not.toContain('AUTONOMOUS MODE')
+    expect(contextText({ ...base, now: Date.parse('2026-10-12T13:00:00Z'), away })).not.toContain('AUTONOMOUS MODE')
   })
   test('leader gets the decide-and-record line right after the role line', () => {
     const lines = contextText({ ...base, now: NOW, away, role: 'leader' }).split('\n')
-    const i = lines.findIndex(l => l.startsWith('AWAY MODE'))
+    const i = lines.findIndex(l => l.startsWith('AUTONOMOUS MODE'))
     expect(i).toBeGreaterThan(0)
     expect(lines[i - 1]).toContain('LEADER')
     expect(lines[i]).toContain('until 2026-10-12T12:00:00.000Z')
@@ -301,11 +301,11 @@ describe('away mode in the briefing', () => {
   test('on: pacing points at the plan-limits line already in the briefing (said once); off: every away line is gone', () => {
     const tools = [...CONTEXT_TOOL_NAMES]
     const onText = contextText({ ...base, now: NOW, away, role: 'leader', toolNames: tools })
-    expect(onText).toContain('Away pacing')
+    expect(onText).toContain('Autonomous pacing')
     expect(onText).toContain('apply the agentistics_plan_limits rule above')
     expect(onText.match(/5-hour window is at least 85%/g)).toHaveLength(1)
     const offText = contextText({ ...base, now: NOW, away: { ...away, on: false }, role: 'leader', toolNames: tools })
-    for (const w of ['AWAY MODE', 'Away pacing', 'Away quality', 'Away communication']) expect(offText).not.toContain(w)
+    for (const w of ['AUTONOMOUS MODE', 'Autonomous pacing', 'Autonomous quality', 'Autonomous communication']) expect(offText).not.toContain(w)
     expect(offText.match(/5-hour window is at least 85%/g)).toHaveLength(1)
   })
   test('worker is told to report to its leader, not the owner', () => {

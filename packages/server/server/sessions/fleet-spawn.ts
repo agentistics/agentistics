@@ -80,7 +80,7 @@ export interface FleetSpawnBody {
   mode?: unknown
   label?: unknown
   /**
-   * PER-SESSION AWAY MODE: `true`, `false` or `'inherit'` (absent = inherit a VERIFIED away parent's
+   * PER-SESSION AUTONOMOUS MODE: `true`, `false` or `'inherit'` (absent = inherit a VERIFIED away parent's
    * own flag). Read strictly — a truthy string must not switch it on, nor a falsy one off.
    */
   away?: unknown
@@ -120,7 +120,7 @@ export interface FleetSpawnPlan {
   label?: string
   /** A leader title prefix is an explicit leader-role request, shared with the CLI path. */
   role?: 'leader'
-  /** Per-session away mode as requested (absent = inherit). */
+  /** Per-session autonomous mode as requested (absent = inherit). */
   away?: AwaySpawnRequest
   /** Always false — see the header. */
   attach: false
