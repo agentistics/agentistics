@@ -208,8 +208,12 @@ describe('planFleetSpawn — MODE.EVERYWHERE', () => {
     const out = planFleetSpawn({ harness: 'claude', cwd: '/r', mode: 'no-questions' }, H)
     expect(out.ok && out.plan.mode).toBe('no-questions')
   })
-  it('"default" is the absence of a mode: nothing is passed', () => {
+  it('an EXPLICIT "default" rides the plan so autonomous mode cannot override it', () => {
     const out = planFleetSpawn({ harness: 'kimi', cwd: '/r', mode: 'default' }, H)
+    expect(out.ok && out.plan.mode).toBe('default')
+  })
+  it('no mode stated stays absent (autonomous mode may fill it)', () => {
+    const out = planFleetSpawn({ harness: 'kimi', cwd: '/r' }, H)
     expect(out.ok && out.plan.mode).toBeUndefined()
   })
   it('a mode this harness cannot start in here is REFUSED, never started in another', () => {

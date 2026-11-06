@@ -36,7 +36,7 @@ export function parseAwayArgs(args: readonly string[], now: number): AwayCommand
   if (verb === 'off') return { kind: 'set', body: { on: false } }
   if (verb === 'session') {
     const [target, sw] = rest
-    if (!target || (sw !== 'on' && sw !== 'off')) return { kind: 'error', message: 'usage: agentop away session <id|title> on|off' }
+    if (!target || (sw !== 'on' && sw !== 'off')) return { kind: 'error', message: 'usage: agentop away session <id|title> on|off (autonomous mode for one session)' }
     return { kind: 'session', body: { target, on: sw === 'on' } }
   }
   if (verb !== 'on') return { kind: 'error', message: `unknown verb "${verb}" — use status, on or off` }
@@ -113,8 +113,8 @@ export async function runAway(args: readonly string[]): Promise<number> {
 async function runSessionAway(body: { target: string; on: boolean }, port: number): Promise<number> {
   const say = (r: { ok: boolean; id?: string; away?: boolean; effective?: boolean; queued?: boolean; error?: string; message?: string }): number => {
     if (!r.ok) { console.error(`refused: ${r.error ?? 'unknown'}`); return 1 }
-    const eff = r.effective ? 'away (effective)' : 'not away'
-    console.log(`session ${r.id}: own away flag ${r.away ? 'ON' : 'OFF'} — now ${eff}${r.queued ? '; the session will be told after the quiet window' : r.message ? `; not told: ${r.message}` : ''}`)
+    const eff = r.effective ? 'autonomous (effective)' : 'not autonomous'
+    console.log(`session ${r.id}: own autonomous flag ${r.away ? 'ON' : 'OFF'} — now ${eff}${r.queued ? '; the session will be told after the quiet window' : r.message ? `; not told: ${r.message}` : ''}`)
     return 0
   }
   // A title or an id prefix is resolved HERE, against the same registry the server reads.

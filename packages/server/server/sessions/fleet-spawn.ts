@@ -216,7 +216,8 @@ export function planFleetSpawn(
   if (modeText !== undefined && (!isCanonicalMode(modeText) || (modeText !== 'default' && !(spec.modes ?? []).includes(modeText)))) {
     return { ok: false, reason: 'unknown_mode', detail: modeText }
   }
-  const mode = modeText !== undefined && modeText !== 'default' ? (modeText as CanonicalMode) : undefined
+  // An explicit "default" is KEPT: it is a choice that must beat autonomous mode (like CLI `--mode default`).
+  const mode = modeText !== undefined ? (modeText as CanonicalMode) : undefined
 
   const model = text(body.model)
   if (model && !spec.supportsModel) {

@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.199.0': {
+  '2.200.0': {
     features: [
       {
         pt: 'O "modo ausente" agora se chama "modo autônomo": ligado, as sessões trabalham sem pedir permissão e os líderes seguem em frente dentro do que você autorizou.',
