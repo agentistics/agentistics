@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { isSessionGoneError, SHELL_SOCKET } from './sessions/tmux-cli'
 import { findHarnessBinary, harnessSearchPath } from './sessions/user-path'
+import { AGENTISTICS_DATA_DIR } from './config'
+import { defaultClaudeConfigDir } from './default-claude-root'
 
 export type LoginKind = 'paste' | 'device'
 export type LoginError = 'login_unavailable' | 'login_timeout' | 'login_failed' | 'plaintext_refused' | 'invalid_code' | 'keychain_unreadable' | 'login_not_saved' | 'login_unreadable'
@@ -367,7 +369,7 @@ export async function runClaudeInLoginContext(root: string | null, argv: string[
   if (!executable) return { stdout: '', code: 127 }
   const name = `account-probe-${randomBytes(6).toString('hex')}`
   const probeRoot = root ?? await mkdtemp(join(tmpdir(), 'agentistics-claude-probe-'))
-  const configDir = root ?? process.env.CLAUDE_CONFIG_DIR
+  const configDir = root ?? defaultClaudeConfigDir(process.env, AGENTISTICS_DATA_DIR)
   const { bin, env } = await makeLoginEnvironment(probeRoot, configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}, `.${name}-bin`)
   // Keep the pane alive briefly after the command exits. A very fast fake/real CLI can disappear
   // between new-session and set-option; preserving the original exit status keeps diagnosis exact.

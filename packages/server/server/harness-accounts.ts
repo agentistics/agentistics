@@ -6,6 +6,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR } from './config'
+import { defaultClaudeConfigDir } from './default-claude-root'
 import { withFileLock } from './sessions/file-lock'
 import { ISOLATION_ENV } from './account-isolation'
 import { runClaudeInLoginContext } from './account-login'
@@ -115,7 +116,7 @@ async function readCopilotIdentity(file: string): Promise<AccountIdentity> {
 
 export { ISOLATION_ENV }
 const DEFAULT_ROOTS: Record<HarnessId, () => string> = {
-  claude: () => process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'),
+  claude: () => defaultClaudeConfigDir(process.env, AGENTISTICS_DATA_DIR) ?? join(homedir(), '.claude'),
   codex: () => process.env.CODEX_HOME ?? join(homedir(), '.codex'),
   copilot: () => process.env.COPILOT_HOME ?? join(homedir(), '.copilot'),
   gemini: () => process.env.GEMINI_CLI_HOME ?? join(homedir(), '.gemini'),
@@ -566,7 +567,11 @@ export function createHarnessAccounts(options: {
         if (!mutate) return matchIdentity(data, harness, root, found) ?? bound
           ?? { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now() }
         changed = true
-        return adopt(data, harness, root, found).account
+        const adopted = adopt(data, harness, root, found).account
+        // The default Claude login answered `loggedIn` right now: a mark left by an earlier refusal
+        // (or by a leaked account root) must not outlive that proof, or the owner re-logs in only to drop it.
+        if (harness === 'claude' && root === null) delete adopted.loginExpiredAt
+        return adopted
       })
       return { accounts, changed }
     }

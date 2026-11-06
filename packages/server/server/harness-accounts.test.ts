@@ -4,6 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readdir } from 'node:fs/promises'
 import { claudeSignedOut, SignedOutError, CLAUDE_PROBE_TIMEOUT_MS, codexIdentity, createHarnessAccounts, probeAccountIdentity, sameLogin, __setHarnessAccountsForTest, IDENTITY_PROBES, ISOLATION_ENV } from './harness-accounts'
+import { AGENTISTICS_DATA_DIR } from './config'
 import { runClaudeInLoginContext } from './account-login'
 import { handleAccountsRequest } from './accounts-web'
 import { routeCapability } from './capability-guard'
@@ -308,6 +309,55 @@ test('the default Claude root keeps the unsuffixed environment and falls back wi
     else process.env.CLAUDE_CONFIG_DIR = oldConfig
   }
 })
+
+/** A fake `claude` whose answer depends on whether CLAUDE_CONFIG_DIR reached it. */
+async function withFakeClaude<T>(leaked: string | undefined, run: () => Promise<T>): Promise<T> {
+  const bin = join(dir, 'bin')
+  await mkdir(bin)
+  await writeFile(join(bin, 'claude'), '#!/bin/sh\nif [ -n "$CLAUDE_CONFIG_DIR" ]; then printf \'{"loggedIn":true,"email":"managed@example.invalid"}\'; else printf \'{"loggedIn":true,"email":"default@example.invalid"}\'; fi\n')
+  await chmod(join(bin, 'claude'), 0o700)
+  const oldPath = process.env.PATH, oldConfig = process.env.CLAUDE_CONFIG_DIR
+  process.env.PATH = bin
+  if (leaked === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = leaked
+  try { return await run() } finally {
+    process.env.PATH = oldPath
+    if (oldConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = oldConfig
+  }
+}
+const LEAKED_ROOT = join(AGENTISTICS_DATA_DIR, 'accounts', 'claude', 'r_x')
+
+test('a leaked managed CLAUDE_CONFIG_DIR never reaches the default-root identity probe', async () => {
+  await withFakeClaude(LEAKED_ROOT, async () => {
+    const result = await runClaudeInLoginContext(null, ['claude', 'auth', 'status', '--json'])
+    expect(result.stdout).toContain('default@example.invalid')
+    const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: (h, r) => probeAccountIdentity(h, r) })
+    const principal = await store.current('claude', null)
+    expect(principal.label).toBe('default@example.invalid')
+    expect(principal.root).toBeNull()
+    expect((await store.readAccounts()).bindings['claude:']).toBe(principal.id)
+  })
+}, 30_000)
+
+test('a hand-set CLAUDE_CONFIG_DIR outside the managed folder still reaches the default-root probe', async () => {
+  await withFakeClaude('/work/claude', async () => {
+    expect((await runClaudeInLoginContext(null, ['claude', 'auth', 'status', '--json'])).stdout).toContain('managed@example.invalid')
+  })
+}, 30_000)
+
+test('the default-root probe that finds the login valid clears its loginExpiredAt; other roots keep theirs', async () => {
+  await withFakeClaude(undefined, async () => {
+    const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: (h, r) => probeAccountIdentity(h, r) })
+    const principal = await store.current('claude', null)
+    const other = await store.bind('/accounts/claude/r_o', { harness: 'claude', key: 'o', label: 'other@example.invalid' })
+    await store.markLoginExpired(principal.id, 5_000_000_000_000)
+    await store.markLoginExpired(other.account.id, 5_000_000_000_000)
+    expect((await store.byId(principal.id))?.loginExpiredAt).toBeDefined()
+    await store.forceProbe('claude', null)
+    await store.current('claude', null)
+    expect((await store.byId(principal.id))?.loginExpiredAt).toBeUndefined()
+    expect((await store.byId(other.account.id))?.loginExpiredAt).toBeDefined()
+  })
+}, 30_000)
 
 test('PATCH by id updates availability and nickname while retaining legacy PATCH support', async () => {
   const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => identity })

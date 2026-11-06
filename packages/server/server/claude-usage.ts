@@ -14,7 +14,8 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseClaudeUsageResponse, type PlanLimits } from '@agentistics/core'
-import { HOME_DIR } from './config'
+import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
+import { defaultClaudeConfigDir } from './default-claude-root'
 import { ingestFromRoot } from './plan-limits'
 
 export const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -23,7 +24,7 @@ const MAX_BACKOFF_MS = 30 * 60_000
 const EXPIRY_MARGIN_MS = 60_000
 
 export const claudeCredentialsFile = (): string =>
-  join(process.env.CLAUDE_CONFIG_DIR || join(HOME_DIR, '.claude'), '.credentials.json')
+  join(defaultClaudeConfigDir(process.env, AGENTISTICS_DATA_DIR) || join(HOME_DIR, '.claude'), '.credentials.json')
 
 /** An extra account root's credential file — the root IS that login's `CLAUDE_CONFIG_DIR`. */
 const readCredentialAt = (root: string): Promise<string | null> =>
@@ -69,6 +70,8 @@ export interface UsageDeps {
   accountRoots?: () => Promise<string[]>
   readCredentialAt?: (root: string) => Promise<string | null>
   ingest?: (limits: PlanLimits, root: string | null) => Promise<unknown>
+  /** Settles the default home's account binding before its reading is attributed. Default: the identity probe (skipped when `ingest` is injected). */
+  confirmDefaultBinding?: () => Promise<unknown>
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>
   now?: () => number
 }
@@ -105,8 +108,13 @@ export function startClaudeUsagePoll(deps: UsageDeps = {}): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
   const ingest = deps.ingest ?? ((l: PlanLimits, root: string | null) => ingestFromRoot(l, root))
+  const confirmDefaultBinding = deps.confirmDefaultBinding
+    ?? (deps.ingest ? async () => {} : async () => { await (await import('./harness-accounts')).current('claude', null) })
   const tick = async (): Promise<void> => {
     let limited = false
+    // The default home's reading is attributed by its binding: settle the binding (the identity probe)
+    // first, or the first read after a restart lands on a stale one.
+    await confirmDefaultBinding().catch(() => {})
     for (const root of [null, ...await claudeAccountRoots(deps)]) {
       const r = await fetchClaudeUsage(root === null ? deps : {
         ...deps,

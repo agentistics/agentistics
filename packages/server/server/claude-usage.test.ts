@@ -57,6 +57,22 @@ describe('fetchClaudeUsage', () => {
 })
 
 describe('startClaudeUsagePoll — every Claude login, each attributed by its own root', () => {
+  test('settles the default home binding before reading it, so the first read is not attributed to a stale one', async () => {
+    const order: string[] = []
+    let done!: () => void
+    const finished = new Promise<void>(r => { done = r })
+    const stop = startClaudeUsagePoll({
+      now: () => NOW,
+      readCredential: async () => cred(),
+      accountRoots: async () => [],
+      fetchImpl: async () => { order.push('fetch'); return new Response(usageBody, { status: 200 }) },
+      confirmDefaultBinding: async () => { order.push('confirm') },
+      ingest: async () => { order.push('ingest'); done() },
+    })
+    await finished
+    stop()
+    expect(order).toEqual(['confirm', 'fetch', 'ingest'])
+  })
   test('reads the default login AND each extra account root, ingesting each under its root', async () => {
     const OTHER = 'fake-token-of-the-second-login'
     const auths: string[] = []

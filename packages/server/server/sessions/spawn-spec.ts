@@ -64,6 +64,8 @@ import { isCanonicalMode, type CanonicalMode, type HarnessId } from '@agentistic
 import { HARNESS_PROCESS_TRANSCRIPTS, HARNESS_SESSION_SOURCES } from './harness-session-file'
 import { prependContext } from './agentistics-context'
 import { ISOLATION_ENV } from '../account-isolation'
+import { isManagedAccountRoot } from '../default-claude-root'
+import { AGENTISTICS_DATA_DIR } from '../config'
 import type { InitialPrompt, SpawnRequest, SpawnPlanResult, SpawnSpec } from './types'
 
 /** A canonical UUID. Local so this module stays free of the server's git helpers. */
@@ -532,7 +534,9 @@ export function planSpawn(req: SpawnRequest, capabilities: { codexNoDaemon?: boo
     plan: {
       argv,
       ...(env ? { env } : {}),
-      ...(req.account && req.account.root === null && isolation ? { unsetEnv: [isolation] } : {}),
+      ...(req.account && req.account.root === null && isolation ? { unsetEnv: [isolation] }
+        // No account named: the child inherits the server's env, and a leaked managed-account root there would run it on ANOTHER login than the default one.
+        : !req.account && req.harness === 'claude' && isManagedAccountRoot(process.env.CLAUDE_CONFIG_DIR, AGENTISTICS_DATA_DIR) ? { unsetEnv: ['CLAUDE_CONFIG_DIR'] } : {}),
       ...(contextFile ? { contextFile } : {}),
       ...(contextExtraFiles ? { contextExtraFiles } : {}),
       ...(req.context && !req.resumeId ? { contextVia } : {}),
