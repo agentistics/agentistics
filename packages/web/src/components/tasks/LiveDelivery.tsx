@@ -300,7 +300,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   }
 
   return (
-    <div style={{ display: 'grid', gap: 12, gridTemplateRows: 'auto minmax(0, 1fr)', height: compact ? '100%' : 'calc(100dvh - 190px)', minHeight: compact ? 0 : 420 }}>
+    <div style={{ display: 'grid', gap: 12, gridTemplateRows: 'auto minmax(0, 1fr)', height: compact ? '100%' : 'calc(100dvh / var(--ui-zoom, 1) - 190px)', minHeight: compact ? 0 : 420 }}>
       {header}
       <div ref={boardRef} className="ag-scroll" data-live-board style={{ display: 'flex', gap: 8, overflowX: 'auto', overflowY: 'auto', alignItems: 'flex-start', padding: '6px 2px 10px', minHeight: 0 }}>
         {visibleStages.map(s => {

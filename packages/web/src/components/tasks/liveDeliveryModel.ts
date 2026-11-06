@@ -152,8 +152,6 @@ export const fmtClock = (ms: number): string => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-const CONF = { pt: { low: 'baixa', medium: 'média', high: 'alta' }, en: { low: 'low', medium: 'medium', high: 'high' } } as const
-
 /** The ETA line, and the sentence behind it (the title attribute): no number without its source. */
 export function etaText(eta: LiveEta, lang: 'pt' | 'en'): { line: string; title: string } {
   const pt = lang === 'pt'
@@ -171,7 +169,7 @@ export function etaText(eta: LiveEta, lang: 'pt' | 'en'): { line: string; title:
   const scope = eta.basis.scope === 'harness-model'
     ? `${eta.basis.harness} · ${eta.basis.model ?? ''}` : eta.basis.harness
   return {
-    line: `${pt ? 'prevista' : 'expected'} ${fmtClock(eta.atMs)} ±${pm >= 90 ? `${Math.round(pm / 60)}h` : `${pm}min`} · ${pt ? 'confiança' : 'confidence'} ${CONF[lang][eta.confidence]}`,
+    line: `${pt ? 'prevista' : 'expected'} ${fmtClock(eta.atMs)} ±${pm >= 90 ? `${Math.round(pm / 60)}h` : `${pm}min`}`,
     title: pt
       ? `Mediana de ${eta.basis.n} entregas parecidas (${scope}): ${fmtSpan(eta.basis.medianMs)}.`
       : `Median of ${eta.basis.n} similar deliveries (${scope}): ${fmtSpan(eta.basis.medianMs)}.`,
