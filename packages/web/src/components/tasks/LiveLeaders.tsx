@@ -1,28 +1,32 @@
 /**
- * LiveLeaders — the LEADERS band of the Live view, apart from the delivery columns on purpose: a
- * leader follows and decides, it does not execute a delivery, so it is never a column card.
+ * LiveLeaders — the Líderes pill of the Live view (owner-approved preview real.html, item t).
  *
- * Shape (owner, preview real.html): the band starts CLOSED as one summary line — "2 líderes · 5
- * workers · 3 trabalhando · 1 bloqueado". Opened, it is one compact row per leader (name, how it is
- * and how its workers are counted, harness·model·effort·account·publication); clicking a leader opens
- * ITS workers, each a link to its session. Both folds animate (grid-template-rows) and respect
- * prefers-reduced-motion. A leader's open/closed choice is remembered.
+ * A compact pill next to the "Live Delivery" title: "Líderes N" and three dot counters (working /
+ * waiting / blocked) counted from the REAL worker states. Clicking it opens a dropdown OVER the board
+ * (400 px, it pushes no column) that closes on an outside click or Escape. Inside: one card per
+ * leader, COLLAPSED by default (dot, name, N workers, its own dot counters, publication estimate);
+ * opening one shows harness · model · effort · account and one plain ROW per worker (dot · short
+ * title · reason or time) — not pills. Clicking a worker row closes the dropdown and takes you to ITS
+ * card on the board; when your filters hide that card, the row says so instead of doing nothing.
+ *
+ * Leaders are not deliveries: they have no card on the board, which is why they live here.
  */
 
-import { useMemo, useState } from 'react'
-import { Crown } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, ChevronRight, Crown, CornerDownRight } from 'lucide-react'
 import { humanizeAction, plainLeaderName, shortTitle } from '@agentistics/core'
-import { useIsMobile } from '../../hooks/useIsMobile'
 import { accountDisplayName } from '../../lib/planLimits'
-import { SessionChip } from '../sessions/RoleChip'
-import { pill, surface } from './board'
+import { surface } from './board'
 import { fmtClock, fmtSpan, STAGE_LABEL, type LeaderRecord, type LeaderWorker, type RuntimeFacts, type WorkerWord } from './liveDeliveryModel'
-import { BLOCK_WORD, readOpenLeaders, workerWordOf, workerWordText, writeOpenLeaders } from './liveCardModel'
+import { BLOCK_WORD, leaderCounts, readOpenLeaders, workerWordOf, workerWordText, writeOpenLeaders, type LocateAnswer } from './liveCardModel'
 
 const WORD_ORDER: readonly WorkerWord[] = ['needs-you', 'working', 'blocked', 'awaiting-review', 'delivered', 'idle']
+const GREEN = 'var(--accent-green, #3ecf8e)'
+const BLOCKED = 'rgb(194,65,12)'
+const MUTED = 'var(--text-tertiary)'
 const WORD_COLOR: Record<WorkerWord, string> = {
-  'needs-you': 'var(--accent-red, #ff5f5f)', working: 'var(--accent-green, #3ecf8e)', blocked: 'var(--accent-red, #ff5f5f)',
-  'awaiting-review': 'var(--accent-purple, #b78bff)', delivered: 'var(--accent-blue, #4c9aff)', idle: 'var(--text-tertiary)',
+  working: GREEN, blocked: BLOCKED, 'needs-you': 'var(--accent-red, #ff5f5f)',
+  'awaiting-review': MUTED, delivered: MUTED, idle: MUTED,
 }
 const LEADER_STATE: Record<string, { pt: string; en: string }> = {
   'waiting-approval': { pt: 'precisa da sua aprovação', en: 'needs your approval' },
@@ -33,7 +37,7 @@ const LEADER_STATE: Record<string, { pt: string; en: string }> = {
   unknown: { pt: 'sem sinal', en: 'no signal' },
 }
 const leaderState = (s: string, pt: boolean) => LEADER_STATE[s]?.[pt ? 'pt' : 'en'] ?? s.replace(/-/g, ' ')
-const MUTED = 'var(--text-tertiary)'
+const reduce = (): boolean => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } }
 
 export const wordOfWorker = (w: LeaderWorker): WorkerWord => w.word ?? workerWordOf(w.state, w.stage)
 
@@ -42,15 +46,15 @@ export function workerCounts(ws: readonly LeaderWorker[]): { word: WorkerWord; n
   return WORD_ORDER.map(word => ({ word, n: ws.filter(w => wordOfWorker(w) === word).length })).filter(x => x.n > 0)
 }
 
-/** PURE: the band's closed line — "2 líderes · 5 workers · 3 trabalhando · 1 bloqueado". */
-export function bandSummary(leaders: readonly LeaderRecord[], pt: boolean): string {
-  const ws = leaders.flatMap(l => l.workers)
+/** PURE: the dropdown's first line — "5 workers: 2 trabalhando · 2 esperando · 1 bloqueado". */
+export function dropdownSummary(leaders: readonly LeaderRecord[], pt: boolean): string {
+  const c = leaderCounts(leaders)
   const parts = [
-    `${leaders.length} ${pt ? (leaders.length === 1 ? 'líder' : 'líderes') : (leaders.length === 1 ? 'leader' : 'leaders')}`,
-    `${ws.length} ${ws.length === 1 ? 'worker' : 'workers'}`,
-    ...workerCounts(ws).map(c => `${c.n} ${workerWordText(c.word, pt)}`),
-  ]
-  return parts.join(' · ')
+    c.working ? `${c.working} ${pt ? 'trabalhando' : 'working'}` : null,
+    c.waiting ? `${c.waiting} ${pt ? 'esperando' : 'waiting'}` : null,
+    c.blocked ? `${c.blocked} ${pt ? (c.blocked === 1 ? 'bloqueado' : 'bloqueados') : 'blocked'}` : null,
+  ].filter(Boolean)
+  return `${c.workers} ${c.workers === 1 ? 'worker' : 'workers'}${parts.length ? `: ${parts.join(' · ')}` : ''}`
 }
 
 /** The harness·model·effort of a leader, with the harness's own default marked when it was not asked for. */
@@ -78,105 +82,139 @@ export function workerInfo(w: LeaderWorker, nowMs: number, pt: boolean): string 
   }
 }
 
-const fold = (open: boolean): React.CSSProperties => ({ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows .22s ease' })
-const reduce = (): boolean => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } }
+const Dot = ({ color, size = 7 }: { color: string; size?: number }) => <i aria-hidden style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', background: color, flexShrink: 0 }} />
+const Counter = ({ color, n, title, size }: { color: string; n: number; title: string; size?: number }) => (
+  <span title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: size ? 3 : 4, color: color === BLOCKED ? BLOCKED : MUTED }}><Dot color={color} size={size} />{n}</span>
+)
 
-export function LiveLeaders({ leaders, runtime, accountLabels, nowMs, lang, onOpen }: {
+export function LiveLeaders({ leaders, runtime, accountLabels, nowMs, lang, locate, onLocate, onOpen }: {
   leaders: readonly LeaderRecord[]
   runtime?: Record<string, RuntimeFacts>
   accountLabels?: Record<string, string>
   nowMs: number
   lang: 'pt' | 'en'
+  /** Where a worker row leads (pure, decided by the board that knows what its filters show). */
+  locate: (w: LeaderWorker) => LocateAnswer
+  /** Take the board to that card (the board opens its column and scrolls to it). */
+  onLocate: (a: Extract<LocateAnswer, { kind: 'card' }>) => void
   onOpen: (sessionId: string) => void
 }) {
   const pt = lang === 'pt'
-  const mobile = useIsMobile()
-  const [band, setBand] = useState(false)
+  const [open, setOpen] = useState(false)
   const [openMap, setOpenMap] = useState(() => readOpenLeaders())
+  const [notes, setNotes] = useState<Record<string, string>>({})
+  const wrap = useRef<HTMLSpanElement>(null)
   const toggle = (id: string) => setOpenMap(m => { const n = { ...m, [id]: !m[id] }; writeOpenLeaders(n); return n })
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false) }
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', down)
+    document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
+  }, [open])
   const titleOf = useMemo(() => {
     const m = new Map<string, string>()
     for (const l of leaders) { m.set(l.id, l.title); for (const w of l.workers) m.set(w.id, w.title) }
     return (id: string) => m.get(id)
   }, [leaders])
   if (leaders.length === 0) return null
+  const counts = leaderCounts(leaders)
   const awaiting = leaders.reduce((n, l) => n + l.awaiting.length, 0)
-  const anim = reduce() ? { transition: 'none' } : {}
+
+  const pick = (w: LeaderWorker) => {
+    const a = locate(w)
+    if (a.kind === 'card') { setOpen(false); onLocate(a); return }
+    setNotes(n => ({ ...n, [w.id]: a.kind === 'filtered' ? (pt ? 'não está no quadro (filtro)' : 'not on the board (filtered out)') : (pt ? 'sem cartão no quadro' : 'no card on the board') }))
+  }
+
   return (
-    <section data-live-leaders data-open={band ? '1' : '0'} style={{ ...surface, padding: '6px 12px', display: 'grid' }}>
+    <span ref={wrap} data-live-leaders data-open={open ? '1' : '0'} style={{ position: 'relative', display: 'inline-block' }}>
       <button
-        type="button" id="live-leaders-head" aria-expanded={band} onClick={() => setBand(v => !v)} className="ag-tap"
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '2px 0', background: 'none', border: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12.5, color: 'var(--text-primary)', textAlign: 'left', minWidth: 0 }}
+        type="button" id="live-leaders-head" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(v => !v)} className="ag-tap"
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 28, padding: '0 10px', borderRadius: 999, border: '1px solid var(--accent-purple)', background: 'none', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer' }}
       >
-        <SessionChip color="var(--accent-purple)">{pt ? 'LÍDERES' : 'LEADERS'}</SessionChip>
-        <span data-live-leaders-summary style={{ color: MUTED, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: mobile ? 'normal' : 'nowrap' }}>{bandSummary(leaders, pt)}</span>
-        {awaiting > 0 && <span style={{ ...pill('var(--anthropic-orange)'), fontWeight: 600 }}>{awaiting} {pt ? 'aguardando decisão' : 'awaiting a decision'}</span>}
-        <span aria-hidden style={{ color: MUTED, transition: reduce() ? 'none' : 'transform .2s', transform: band ? 'rotate(180deg)' : 'none' }}>▾</span>
+        <span data-live-leaders-label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--accent-purple)', fontWeight: 600 }}><Crown size={12} aria-hidden />{pt ? 'Líderes' : 'Leaders'} {leaders.length}</span>
+        <span data-live-leaders-counts style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <Counter color={GREEN} n={counts.working} title={pt ? 'workers trabalhando' : 'workers working'} />
+          <Counter color={MUTED} n={counts.waiting} title={pt ? 'workers esperando' : 'workers waiting'} />
+          <Counter color={BLOCKED} n={counts.blocked} title={pt ? 'workers bloqueados' : 'workers blocked'} />
+        </span>
+        {awaiting > 0 && <span title={pt ? 'esperando uma decisão sua' : 'waiting for a decision from you'} style={{ color: 'var(--anthropic-orange-light)', fontWeight: 600 }}>{awaiting} {pt ? 'decisão' : 'decision'}</span>}
+        <ChevronDown size={13} aria-hidden style={{ color: MUTED, transition: reduce() ? 'none' : 'transform .2s', transform: open ? 'rotate(180deg)' : 'none' }} />
       </button>
-      <div style={{ ...fold(band), ...anim }}>
-        <div style={{ overflow: 'hidden', minHeight: 0 }}>
-          {band && leaders.map(l => (
-            <LeaderRow key={l.id} l={l} open={!!openMap[l.id]} onToggle={() => toggle(l.id)} runtime={runtime} accountLabels={accountLabels} nowMs={nowMs} pt={pt} mobile={mobile} titleOf={titleOf} onOpen={onOpen} />
-          ))}
-        </div>
+      <div
+        data-live-leaders-dropdown role="dialog" aria-label={pt ? 'Líderes' : 'Leaders'} aria-hidden={!open}
+        style={{
+          position: 'absolute', left: 0, top: 'calc(100% + 6px)', width: 'min(400px, calc(100vw / var(--ui-zoom, 1) - 24px))', zIndex: 30, display: 'grid', gap: 8, padding: 8,
+          ...surface, background: 'var(--bg-primary, #0d0d10)', boxShadow: '0 12px 32px rgba(0,0,0,.5)', boxSizing: 'border-box',
+          opacity: open ? 1 : 0, transform: open ? 'none' : 'translateY(-6px)', pointerEvents: open ? 'auto' : 'none', visibility: open ? 'visible' : 'hidden',
+          transition: reduce() ? 'none' : 'opacity .18s, transform .18s, visibility .18s',
+        }}
+      >
+        <span style={{ fontSize: 10.5, color: MUTED }}>{dropdownSummary(leaders, pt)} — {pt ? 'abra um líder; clique num worker para achar o cartão' : 'open a leader; click a worker to find its card'}</span>
+        {open && leaders.map(l => (
+          <LeaderCard key={l.id} l={l} open={!!openMap[l.id]} onToggle={() => toggle(l.id)} runtime={runtime} accountLabels={accountLabels}
+            nowMs={nowMs} pt={pt} titleOf={titleOf} onOpen={onOpen} onPick={pick} notes={notes} />
+        ))}
       </div>
-    </section>
+    </span>
   )
 }
 
-function LeaderRow({ l, open, onToggle, runtime, accountLabels, nowMs, pt, mobile, titleOf, onOpen }: {
+function LeaderCard({ l, open, onToggle, runtime, accountLabels, nowMs, pt, titleOf, onOpen, onPick, notes }: {
   l: LeaderRecord; open: boolean; onToggle: () => void; runtime?: Record<string, RuntimeFacts>; accountLabels?: Record<string, string>
-  nowMs: number; pt: boolean; mobile: boolean; titleOf: (id: string) => string | undefined; onOpen: (id: string) => void
+  nowMs: number; pt: boolean; titleOf: (id: string) => string | undefined; onOpen: (id: string) => void
+  onPick: (w: LeaderWorker) => void; notes: Record<string, string>
 }) {
-  const counts = workerCounts(l.workers)
+  const wc = leaderCounts([l])
   const name = plainLeaderName(l.title)
   const action = l.currentAction ? humanizeAction(l.currentAction, pt ? 'pt' : 'en', titleOf) : null
   const account = l.accountId && accountLabels ? accountDisplayName(accountLabels, l.harness, l.accountId) : null
-  const facts = [leaderRuntime(l, runtime, pt), account, l.publishEtaMs ? `${pt ? 'publicação' : 'publication'} ~${fmtClock(l.publishEtaMs)}` : null].filter(Boolean).join(' · ')
-  const dot = l.state === 'working' || l.state === 'running' ? 'var(--accent-green, #3ecf8e)' : l.state === 'waiting-approval' ? 'var(--accent-red, #ff5f5f)' : MUTED
-  const summary = [
-    leaderState(l.state, pt),
-    `${l.workers.length} ${l.workers.length === 1 ? 'worker' : 'workers'}`,
-    ...counts.map(c => `${c.n} ${workerWordText(c.word, pt)}`),
-  ].join(' · ')
+  const dot = l.state === 'working' || l.state === 'running' ? GREEN : l.state === 'waiting-approval' ? 'var(--accent-red, #ff5f5f)' : MUTED
+  const facts = [leaderRuntime(l, runtime, pt), account ? `${pt ? 'conta' : 'account'} ${account}` : null].filter(Boolean).join(' · ')
   return (
-    <div data-live-leader={l.id} data-open={open ? '1' : '0'} style={{ borderTop: '1px solid var(--border)', padding: '7px 2px', minWidth: 0 }}>
-      <button
-        type="button" aria-expanded={open} onClick={onToggle} className="ag-tap" title={l.title}
-        style={{ display: 'grid', gridTemplateColumns: mobile ? 'auto 1fr auto' : 'auto 1fr auto auto', gap: 10, alignItems: 'center', width: '100%', background: 'none', border: 0, padding: 0, cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontSize: 12, textAlign: 'left', minWidth: 0 }}
-      >
-        <b style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><Crown size={12} aria-hidden style={{ color: 'var(--accent-purple)' }} />{name}</b>
-        <span data-live-leader-summary style={{ color: MUTED, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: mobile ? 'normal' : 'nowrap' }}>
-          <span aria-hidden style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: dot, marginRight: 5 }} />{summary}
+    <div data-live-leader={l.id} data-open={open ? '1' : '0'} style={{ ...surface, padding: '7px 10px', minWidth: 0 }}>
+      <button type="button" aria-expanded={open} onClick={onToggle} className="ag-tap" title={`${l.title} — ${leaderState(l.state, pt)}`}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 0, padding: 0, cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontSize: 12.5, textAlign: 'left', minWidth: 0 }}>
+        <Dot color={dot} size={8} />
+        <b style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}><Crown size={12} aria-hidden style={{ color: 'var(--accent-purple)', flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span></b>
+        <span data-live-leader-workers style={{ color: MUTED, fontSize: 11, whiteSpace: 'nowrap' }}>{l.workers.length} {l.workers.length === 1 ? 'worker' : 'workers'}</span>
+        <span style={{ display: 'inline-flex', gap: 8, fontSize: 11 }}>
+          <Counter color={GREEN} n={wc.working} title={pt ? 'trabalhando' : 'working'} size={6} />
+          <Counter color={MUTED} n={wc.waiting} title={pt ? 'esperando' : 'waiting'} size={6} />
+          <Counter color={BLOCKED} n={wc.blocked} title={pt ? 'bloqueado' : 'blocked'} size={6} />
         </span>
-        {!mobile && <span data-live-pill="runtime" style={{ color: MUTED, fontSize: 11, whiteSpace: 'nowrap' }}>{facts}</span>}
-        <span aria-hidden style={{ color: MUTED, transition: reduce() ? 'none' : 'transform .2s', transform: open ? 'rotate(90deg)' : 'none' }}>▸</span>
+        {l.publishEtaMs ? <span data-live-publish title={pt ? 'estimativa de publicação do que seus workers executam' : 'estimated publication of what its workers run'} style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--anthropic-orange-light)', whiteSpace: 'nowrap' }}>{pt ? 'publica' : 'publishes'} ~{fmtClock(l.publishEtaMs)}</span> : <span style={{ marginLeft: 'auto' }} />}
+        <ChevronRight size={13} aria-hidden style={{ color: MUTED, flexShrink: 0, transition: reduce() ? 'none' : 'transform .2s', transform: open ? 'rotate(90deg)' : 'none' }} />
       </button>
-      {mobile && <div data-live-pill="runtime" style={{ color: MUTED, fontSize: 11, marginTop: 2, overflowWrap: 'anywhere' }}>{facts}</div>}
-      <div style={{ ...fold(open), ...(reduce() ? { transition: 'none' } : {}) }}>
-        <div style={{ overflow: 'hidden', minHeight: 0, paddingLeft: mobile ? 0 : 22 }}>
+      <div style={{ display: 'grid', gridTemplateRows: open ? '1fr' : '0fr', transition: reduce() ? 'none' : 'grid-template-rows .22s ease' }}>
+        <div style={{ overflow: 'hidden', minHeight: 0 }}>
           {open && (
-            <div data-live-leader-body style={{ display: 'grid', gap: 1, paddingTop: 4 }}>
-              {(l.taskTitle || action) && (
-                <div style={{ fontSize: 11, color: MUTED, padding: '2px 0 4px', overflowWrap: 'anywhere' }}>
-                  {l.taskTitle && <b style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{shortTitle(l.taskTitle, 60)}</b>}{action ? <>{l.taskTitle ? ' · ' : ''}↳ {action}</> : null}
-                </div>
-              )}
-              {l.workers.length === 0 && <span style={{ fontSize: 11.5, color: MUTED }}>{pt ? 'Nenhum worker vivo agora.' : 'No live worker right now.'}</span>}
-              {l.workers.map(w => (
-                <button key={w.id} type="button" onClick={() => onOpen(w.id)} className="ag-tap" title={w.title} data-live-worker={w.id}
-                  style={{ display: 'grid', gridTemplateColumns: mobile ? '82px 1fr' : '96px 1fr auto', gap: 8, fontSize: 11, padding: '3px 0', background: 'none', border: 0, cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', textAlign: 'left', minWidth: 0 }}>
-                  <span style={{ color: WORD_COLOR[wordOfWorker(w)] }}>{workerWordText(wordOfWorker(w), pt)}</span>
-                  <span style={{ overflowWrap: 'anywhere' }}>{shortTitle(w.subtask ?? w.title, 56)}</span>
-                  <span style={{ color: MUTED, gridColumn: mobile ? '2' : undefined }}>{workerInfo(w, nowMs, pt)}</span>
-                </button>
-              ))}
+            <div data-live-leader-body style={{ display: 'grid', gap: 1 }}>
+              <span data-live-pill="runtime" style={{ display: 'block', fontSize: 10.5, color: MUTED, padding: '5px 0 3px 16px', overflowWrap: 'anywhere' }}>{facts}</span>
+              {action && <span style={{ display: 'flex', gap: 5, fontSize: 10.5, color: MUTED, padding: '0 0 3px 16px', overflowWrap: 'anywhere' }}><CornerDownRight size={11} aria-hidden style={{ flexShrink: 0, marginTop: 1 }} /><span>{action}</span></span>}
+              {l.workers.length === 0 && <span style={{ fontSize: 11.5, color: MUTED, padding: '4px 0 4px 16px' }}>{pt ? 'Nenhum worker vivo agora.' : 'No live worker right now.'}</span>}
+              <div style={{ display: 'grid', gap: 1, paddingLeft: 10 }}>
+                {l.workers.map(w => {
+                  const word = wordOfWorker(w)
+                  const note = notes[w.id]
+                  return (
+                    <button key={w.id} type="button" onClick={() => onPick(w)} className="ag-tap" title={note ?? (pt ? 'mostrar no quadro' : 'show on the board')} data-live-worker={w.id} data-word={word}
+                      style={{ display: 'grid', gridTemplateColumns: '8px 1fr auto', gap: 8, alignItems: 'center', width: '100%', padding: '4px 6px', border: 0, borderRadius: 6, background: 'none', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 11.5, textAlign: 'left', cursor: 'pointer', minWidth: 0 }}>
+                      <Dot color={WORD_COLOR[word]} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortTitle(w.subtask ?? w.title, 56)}</span>
+                      <span data-live-worker-info style={{ color: note ? 'var(--anthropic-orange-light)' : MUTED, whiteSpace: 'nowrap', fontSize: 11 }}>{note ?? (workerInfo(w, nowMs, pt) || workerWordText(word, pt))}</span>
+                    </button>
+                  )
+                })}
+              </div>
               {l.awaiting.map(a => (
                 <button key={a.id} type="button" onClick={() => onOpen(a.id)} className="ag-tap"
-                  style={{ textAlign: 'left', fontFamily: 'inherit', fontSize: 12, color: 'var(--anthropic-orange-light)', background: 'var(--anthropic-orange-dim)', border: 0, borderRadius: 5, padding: '4px 8px', marginTop: 4, cursor: 'pointer', overflowWrap: 'anywhere' }}
+                  style={{ textAlign: 'left', fontFamily: 'inherit', fontSize: 12, color: 'var(--anthropic-orange-light)', background: 'var(--anthropic-orange-dim)', border: 0, borderRadius: 5, padding: '4px 8px', margin: '4px 0 0 10px', cursor: 'pointer', overflowWrap: 'anywhere' }}
                 >{pt ? 'decidir' : 'decide'}: {shortTitle(a.title, 60)}</button>
               ))}
-              <button type="button" onClick={() => onOpen(l.id)} className="ag-tap" style={{ justifySelf: 'start', marginTop: 3, background: 'none', border: 0, padding: '2px 0', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, color: 'var(--anthropic-orange-light)' }}>{pt ? 'abrir a sessão do líder' : 'open the leader\'s session'}</button>
+              <button type="button" onClick={() => onOpen(l.id)} className="ag-tap" style={{ justifySelf: 'start', margin: '3px 0 0 16px', background: 'none', border: 0, padding: '2px 0', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, color: 'var(--anthropic-orange-light)' }}>{pt ? 'abrir a sessão do líder' : 'open the leader\'s session'}</button>
             </div>
           )}
         </div>

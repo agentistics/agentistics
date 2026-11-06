@@ -13,6 +13,7 @@ import { useFleet } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { pathOfView } from '../../lib/tasksViewRoute'
 import { LiveDelivery } from './LiveDelivery'
+import { cachedLiveReply, prefetchLiveReply } from './useLiveDeliveries'
 import { HOVER_CLOSE_MS, HOVER_OPEN_MS, liveActivity, popoverClickGoes, shortcutLabel } from './liveShortcutModel'
 
 /** The session id when the page is a session (`/sessions/<id>`), else null. */
@@ -38,6 +39,12 @@ export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'e
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const clear = () => { if (openTimer.current) clearTimeout(openTimer.current); if (closeTimer.current) clearTimeout(closeTimer.current) }
   useEffect(() => clear, [])
+  // Read the line once the bar has settled, so the first hover opens on data instead of a spinner.
+  useEffect(() => {
+    if (!enabled) return
+    const t = setTimeout(() => { void prefetchLiveReply() }, 2000)
+    return () => clearTimeout(t)
+  }, [enabled])
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
@@ -47,7 +54,7 @@ export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'e
   if (!enabled) return null
 
   const go = () => { clear(); setOpen(false); navigate(pathOfView('live')) }
-  const enter = () => { if (isMobile) return; clear(); openTimer.current = setTimeout(() => setOpen(true), HOVER_OPEN_MS) }
+  const enter = () => { if (isMobile) return; clear(); if (!cachedLiveReply()) void prefetchLiveReply(); openTimer.current = setTimeout(() => setOpen(true), HOVER_OPEN_MS) }
   const leave = () => { if (isMobile) return; clear(); closeTimer.current = setTimeout(() => setOpen(false), HOVER_CLOSE_MS) }
   const fade = reduced() ? 'opacity .12s' : 'opacity .15s, transform .15s'
 

@@ -56,6 +56,8 @@ export interface LeaderWorker {
   state: string
   word: WorkerWord
   stage: LiveStage | null
+  /** The board card (`LiveDelivery.key`) this worker's piece is drawn as, so a row can locate it. */
+  cardKey: string | null
   subtask: string | null
   taskId: string | null
   stageSinceMs: number | null
@@ -185,7 +187,7 @@ export function describeLive(o: {
         const d = pieceOf.get(w.id)
         return {
           id: w.id, title: w.title, state: w.state, word: workerWord(w.state, d?.stage ?? null),
-          stage: d?.stage ?? null, subtask: d?.subtaskId ? d.title : null, taskId: d?.taskId ?? null,
+          stage: d?.stage ?? null, cardKey: d?.key ?? null, subtask: d?.subtaskId ? d.title : null, taskId: d?.taskId ?? null,
           stageSinceMs: d?.stageSinceMs ?? null, blockReason: d?.block?.reason ?? null, harness: w.harness, model: w.model ?? null, effort: w.effort ?? null,
         }
       }),

@@ -30,15 +30,16 @@ import {
   type StageFilter, type LiveCard, type LiveReply, type LiveStage,
 } from './liveDeliveryModel'
 import {
-  columnCollapsed, fitCount, lingering, stageBar, mergeGone, pack, planDepartures, readCollapsedPrefs, sinceWord,
-  snapshotOf, taskOfSession, taskOptions, writeCollapsedPrefs, type CollapsedPrefs, type BoardSnapshot, type Gone,
+  columnCollapsed, fitCount, GONE_LINGER_MS, locateWorker, stageBar, mergeGone, pack, planDepartures, readCollapsedPrefs, sinceWord,
+  snapshotOf, taskOfSession, taskOptions, writeCollapsedPrefs, type CollapsedPrefs, type BoardSnapshot, type Gone, type LocateAnswer,
 } from './liveCardModel'
 import { LiveCardView } from './LiveCardView'
 import { LiveLeaders } from './LiveLeaders'
+import type { LeaderWorker } from './liveDeliveryModel'
 import { LiveTaskFilter } from './LiveTaskFilter'
 import { PipPortal, requestPipWindow, type OpenedWindow } from './livePip'
 import { useLiveDeliveries } from './useLiveDeliveries'
-import { disintegrate, flashHeader, flyCard, intersects, recolorBar, reintegrate, ring, transitionKind, type Box } from './liveDeliveryFx'
+import { flashHeader, flyCard, intersects, recolorBar, ring, transitionKind, type Box } from './liveDeliveryFx'
 
 const reducedMotion = (): boolean => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } }
 
@@ -141,7 +142,6 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     snap.current = next
     if (departed.length) setGone(g => mergeGone(g, departed, Date.now()))
   }, [reply, shown, leaders, cards, filterSig, leaderIds, pt])
-  const lingeringNow = useMemo(() => lingering(gone, clock), [gone, clock])
   useEffect(() => {
     if (gone.length === 0) return
     const t = setInterval(() => { const n = Date.now(); setClock(n); setGone(g => mergeGone(g, [], n)) }, 1000)
@@ -213,8 +213,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         el.style.opacity = '0'
         const prevBar = stageBar(prev.stage, null).map(x => x.color)
         const back = () => { el.style.opacity = ''; ring(el, STAGE_LABEL[stage].color); recolorBar(el, prevBar) }
-        if (kind === 'merge-approved') void disintegrate(el, from).then(() => reintegrate(el)).then(back, back)
-        else void flyCard(el, from, { fromColor: STAGE_LABEL[prev.stage].color, toColor: STAGE_LABEL[stage].color }).then(back, back)
+        void flyCard(el, from, { fromColor: STAGE_LABEL[prev.stage].color, toColor: STAGE_LABEL[stage].color }).then(back, back)
       })
     }
     for (const f of flights) f()
@@ -236,6 +235,54 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     }
     stageOf.current = nextMap
   }, [shown])
+  // "← veio de <coluna> · agora": the card that moved says where it came from, for a few seconds.
+  const [moved, setMoved] = useState<Record<string, { from: LiveStage; atMs: number }>>({})
+  const prevStage = useRef(new Map<string, LiveStage>())
+  useEffect(() => {
+    const next = new Map<string, LiveStage>()
+    const fresh: Record<string, { from: LiveStage; atMs: number }> = {}
+    for (const c of shown) {
+      next.set(c.d.key, c.d.stage)
+      const was = prevStage.current.get(c.d.key)
+      if (was !== undefined && was !== c.d.stage) fresh[c.d.key] = { from: was, atMs: Date.now() }
+    }
+    prevStage.current = next
+    if (Object.keys(fresh).length === 0) return
+    setMoved(m => ({ ...m, ...fresh }))
+    const t = setTimeout(() => setMoved(m => {
+      const n = { ...m }
+      for (const k of Object.keys(fresh)) if (n[k]?.atMs === fresh[k]!.atMs) delete n[k]
+      return n
+    }), 5200)
+    return () => clearTimeout(t)
+  }, [shown])
+
+  // A worker row in the Líderes dropdown: open its column, bring its card into view, outline it for ~2 s.
+  const [locateReq, setLocateReq] = useState<{ key: string; stage: LiveStage; n: number } | null>(null)
+  const requestLocate = useCallback((a: Extract<LocateAnswer, { kind: 'card' }>) => {
+    setStageFilter(f => (f === 'all' || f === a.stage ? f : 'all'))
+    setPrefs(p => { if (p[a.stage] === false) return p; const n = { ...p, [a.stage]: false }; writeCollapsedPrefs(n); return n })
+    setLocateReq(r => ({ key: a.key, stage: a.stage, n: (r?.n ?? 0) + 1 }))
+  }, [])
+  useEffect(() => {
+    if (!locateReq) return
+    const root = boardRef.current
+    let frames = 0, expandedOnce = false, raf = 0
+    const tryFind = () => {
+      const el = root?.querySelector<HTMLElement>(`[data-live-card="${CSS.escape(locateReq.key)}"]`)
+      if (el) {
+        el.scrollIntoView?.({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center', inline: 'center' })
+        ring(el, 'var(--accent-purple)', 2000)
+        return
+      }
+      // Cut off by "+N": open that column's extra sub-columns once, then keep looking.
+      if (frames === 6 && !expandedOnce) { expandedOnce = true; setExpandedCols(m => ({ ...m, [locateReq.stage]: true })) }
+      if (frames++ < 40) raf = requestAnimationFrame(tryFind)
+    }
+    raf = requestAnimationFrame(tryFind)
+    return () => cancelAnimationFrame(raf)
+  }, [locateReq])
+
   const openExternal = useCallback(async () => {
     const r = await requestPipWindow({ width: 540, height: 680, fallbackUrl: `${window.location.origin}${pathOfView('live')}` })
     if (r.kind === 'pip') setPip(r)
@@ -260,7 +307,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const renderCard = (c: LiveCard, embedded = false) => (
     <LiveCardView
       key={c.d.key} c={c} cards={cards} nowMs={nowMs} pt={pt} fleet={fleet} accountLabels={accountLabels} runtime={reply.runtime}
-      leaderName={leaderOf(c)} role={roleOf(c)} mobile={isMobile} onOpen={open} embedded={embedded}
+      leaderName={leaderOf(c)} role={roleOf(c)} mobile={isMobile} onOpen={open} embedded={embedded} cameFrom={moved[c.d.key]?.from ?? null}
     />
   )
   const togglePub = (key: string) => setOpenPub(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n })
@@ -308,7 +355,8 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--anthropic-orange)' }} />{L.onlyActive}
       </button>
       {gone.length > 0 && (
-        <button type="button" className="ag-tap" data-live-gone-toggle aria-pressed={showGone} onClick={() => setShowGone(v => !v)} style={pillBtn(showGone)}>{L.recentLeft(gone.length)}</button>
+        <button type="button" className="ag-tap" data-live-gone-toggle data-fresh={gone.some(g => clock - g.atMs < GONE_LINGER_MS) ? '1' : '0'} aria-pressed={showGone} onClick={() => setShowGone(v => !v)}
+          style={{ ...pillBtn(showGone || gone.some(g => clock - g.atMs < GONE_LINGER_MS)), transition: reducedMotion() ? 'none' : 'background .4s, border-color .4s' }}>{L.recentLeft(gone.length)}</button>
       )}
       {!isMobile && !inPip && (
         <button type="button" className="ag-tap" data-live-external onClick={() => void openExternal()} disabled={pip?.kind === 'pip'} title={L.external} style={{ ...pillBtn(false), opacity: pip?.kind === 'pip' ? 0.5 : 1 }}>
@@ -320,11 +368,17 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
 
   const header = (
     <div style={{ display: 'grid', gap: 10 }}>
-      {!compact && !inPip && <LiveLeaders leaders={leaders} runtime={reply.runtime} accountLabels={accountLabels} nowMs={nowMs} lang={lang} onOpen={id => navigate(`/sessions/${encodeURIComponent(id)}`)} />}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 650 }}>
           <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-red, #ff5f5f)' }} />{L.title}
         </span>
+        {!compact && !inPip && (
+          <LiveLeaders
+            leaders={leaders} runtime={reply.runtime} accountLabels={accountLabels} nowMs={nowMs} lang={lang}
+            locate={(w: LeaderWorker) => locateWorker(w, shown, cards)} onLocate={a => requestLocate(a)}
+            onOpen={id => navigate(`/sessions/${encodeURIComponent(id)}`)}
+          />
+        )}
         <span data-live-summary style={{
           fontSize: 12, color: 'var(--text-tertiary)', flex: 1, minWidth: isMobile ? 0 : 220,
           ...(isMobile ? { flexBasis: '100%', order: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' } : {}),
@@ -345,12 +399,6 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       )}
     </div>
   )
-
-  const goneRows = lingeringNow.map(g => (
-    <div key={g.key} data-live-gone-line={g.key} role="status" style={{ ...surface, padding: '5px 8px', fontSize: 11, color: 'var(--text-tertiary)', borderStyle: 'dashed', overflowWrap: 'anywhere' }}>
-      <b style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{L.left}:</b> {g.title} — {g.reason} · {sinceWord(g.atMs, clock, pt)}
-    </div>
-  ))
 
   const pipPortal = pip?.kind === 'pip' ? (
     <PipPortal win={pip.win} onClose={() => setPip(null)}>
@@ -398,7 +446,6 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
                   <span style={{ ...microLabel, fontSize: 11 }}>{columns[s].length === 0 ? L.empty : columns[s].length}</span>
                 </header>
               )}
-              {s === 'published' && goneRows}
               {s === 'published' ? columns[s].map(renderPub) : columns[s].map(c => renderCard(c))}
             </section>
           ))}
@@ -423,9 +470,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
               setPrefs(next); writeCollapsedPrefs(next)
             }}
             render={s === 'published' ? renderPub : renderCard}
-            extra={s === 'published' && goneRows.length ? goneRows : null}
-            peek={s === 'published' && goneRows.length > 0}
-            sig={s === 'published' ? [...openPub].join(',') + lingeringNow.length : ''}
+            sig={s === 'published' ? [...openPub].join(',') : ''}
           />
         ))}
       </div>
@@ -439,17 +484,15 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
  * the cards that FIT the height and a "+N" that flows the rest into extra sub-columns to the right —
  * measured, not guessed, and never a vertical scroll bar.
  */
-function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, render, extra, sig, peek }: {
+function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, render, sig }: {
   stage: LiveStage; pt: boolean; cards: LiveCard[]; prefs: CollapsedPrefs; L: ReturnType<typeof copy>
-  /** Something just left the board and says so in this column: open it for a moment unless the person closed it on purpose. */
-  peek?: boolean
   expanded: boolean; onExpanded: (v: boolean) => void; onToggle: () => void
-  render: (c: LiveCard) => React.ReactNode; extra: React.ReactNode; sig: string
+  render: (c: LiveCard) => React.ReactNode; sig: string
 }) {
-  const collapsed = columnCollapsed(stage, cards.length, prefs) && !(peek && prefs[stage] === undefined)
+  const collapsed = columnCollapsed(stage, cards.length, prefs)
   const label = STAGE_LABEL[stage][pt ? 'pt' : 'en']
   const bodyRef = useRef<HTMLDivElement>(null)
-  const [m, setM] = useState<{ heights: number[]; avail: number; extraH: number } | null>(null)
+  const [m, setM] = useState<{ heights: number[]; avail: number } | null>(null)
   // Cards of a column that was just collapsed stay mounted for the width animation to play over them.
   const [lingerOpen, setLingerOpen] = useState(false)
   const wasCollapsed = useRef(collapsed)
@@ -475,8 +518,7 @@ function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, re
     if (!el) return
     const slots = Array.from(el.querySelectorAll<HTMLElement>('[data-live-slot]'))
     const heights = slots.map(x => x.getBoundingClientRect().height + CARD_GAP)
-    const extraH = el.querySelector<HTMLElement>('[data-live-extra]')?.getBoundingClientRect().height ?? 0
-    setM({ heights, avail: el.clientHeight, extraH: extraH > 0 ? extraH + CARD_GAP : 0 })
+    setM({ heights, avail: el.clientHeight })
   }, [m, collapsed, signature])
   useEffect(() => {
     // The height the column is given changes with the window and with the header above it.
@@ -488,12 +530,9 @@ function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, re
     return () => ro.disconnect()
   }, [collapsed])
 
-  const shownCount = m ? fitCount(m.heights, m.avail - m.extraH, MORE_H + CARD_GAP) : cards.length
+  const shownCount = m ? fitCount(m.heights, m.avail, MORE_H + CARD_GAP) : cards.length
   const cut = m !== null && shownCount < cards.length
-  // The standing "left the board" lines sit above the first sub-column: count them as a pseudo-card.
-  const packs = m && expanded && cut
-    ? (m.extraH > 0 ? pack([m.extraH, ...m.heights], m.avail).map(col => col.filter(i => i > 0).map(i => i - 1)) : pack(m.heights, m.avail))
-    : null
+  const packs = m && expanded && cut ? pack(m.heights, m.avail) : null
   const cols = packs ? packs.length : 1
   const width = collapsed ? COLLAPSED_W : cols * COL_W + (cols - 1) * COL_GAP
   const mountBody = !collapsed || lingerOpen
@@ -537,19 +576,17 @@ function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, re
         >
           {packs ? packs.map((idxs, k) => (
             <div key={k} data-live-subcol style={slotStyle}>
-              {k === 0 && extra && <div data-live-extra style={{ display: 'grid', gap: CARD_GAP }}>{extra}</div>}
               {idxs.map(i => slot(cards[i]!))}
             </div>
           )) : (
             <div style={slotStyle}>
-              {extra && <div data-live-extra style={{ display: 'grid', gap: CARD_GAP }}>{extra}</div>}
               {(m ? cards.slice(0, shownCount) : cards).map(slot)}
               {cut && (
                 <button type="button" data-live-more className="ag-tap" onClick={() => onExpanded(true)}
                   style={{ minHeight: MORE_H, borderRadius: 8, border: '1px dashed var(--border)', background: 'transparent', color: 'var(--anthropic-orange-light)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600 }}
                 >{L.more(cards.length - shownCount)}</button>
               )}
-              {cards.length === 0 && !extra && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>{L.empty}</span>}
+              {cards.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)', padding: '4px 6px' }}>{L.empty}</span>}
             </div>
           )}
         </div>

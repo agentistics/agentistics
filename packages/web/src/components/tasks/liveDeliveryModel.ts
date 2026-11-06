@@ -9,8 +9,8 @@
 
 import type { FleetRow } from '../../lib/fleet'
 
-export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'published'
-export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'published']
+export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
+export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published']
 
 export type LiveEta =
   | {
@@ -27,6 +27,8 @@ export type LivePublishEta =
   | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final' }
 export type BlockReason = 'dependencia' | 'pedido_de_bloqueio' | 'limite' | 'maquina' | 'externo' | 'decisao_do_dono'
 export interface LiveBlock { reason: BlockReason; text: string | null; unlocker: 'leader' | 'owner' | 'self'; originStage: LiveStage | null }
+/** The release signal of a piece in "CI · publicando" — stated by the delivery flow, only rendered here. */
+export interface LiveCiSignal { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null }
 export interface StageVisit { stage: LiveStage; enteredMs: number; ms: number }
 export type HiddenReason = 'no-live-session' | 'status-unplaced' | 'published-old' | 'queue-idle'
 export interface LiveHidden { key: string; taskId: string; title: string; stage: LiveStage | null; reason: HiddenReason }
@@ -39,12 +41,13 @@ export interface LiveDeliveryRecord {
   sessionIds: string[]; harnesses: string[]; models: string[]; eta: LiveEta
   efforts?: string[]; workMs?: number | null; trail?: StageVisit[]
   stageEta?: LiveStageEta; publishEta?: LivePublishEta; block?: LiveBlock | null
+  ci?: LiveCiSignal | null; step?: number | null
   lastAction: { text: string; atMs: number; kind?: string } | null; blockedReason: string | null; deliveredAtMs: number | null
 }
 export type WorkerWord = 'working' | 'needs-you' | 'blocked' | 'delivered' | 'awaiting-review' | 'idle'
 export interface LeaderWorker {
   id: string; title: string; state: string
-  word?: WorkerWord; stage?: LiveStage | null; subtask?: string | null; taskId?: string | null
+  word?: WorkerWord; stage?: LiveStage | null; cardKey?: string | null; subtask?: string | null; taskId?: string | null
   stageSinceMs?: number | null; blockReason?: BlockReason | null; harness?: string; model?: string | null; effort?: string | null
 }
 /** Mirror of the server's `LeaderView` (`task-live-view.ts`). Leaders are never deliveries. */
@@ -243,12 +246,13 @@ export function etaText(eta: LiveEta, lang: 'pt' | 'en'): { line: string; title:
 
 export const STAGE_LABEL: Record<LiveStage, { pt: string; en: string; color: string }> = {
   queue: { pt: 'Na fila', en: 'Queued', color: '#8b8b95' },
-  blocked: { pt: 'Bloqueado', en: 'Blocked', color: '#e5484d' },
+  blocked: { pt: 'Bloqueado', en: 'Blocked', color: '#c2410c' },
   running: { pt: 'Executando', en: 'Running', color: '#f5a623' },
   qa: { pt: 'Em QA', en: 'In QA', color: '#4c9aff' },
   adjust: { pt: 'Ajuste', en: 'Adjusting', color: '#ff5f5f' },
   leader: { pt: 'Revisão do líder', en: 'Leader review', color: '#b78bff' },
   merge: { pt: 'PR / merge', en: 'PR / merge', color: '#3ecf8e' },
+  ci: { pt: 'CI · publicando', en: 'CI · publishing', color: 'rgb(45,180,200)' },
   published: { pt: 'Publicado', en: 'Published', color: '#26b573' },
 }
 

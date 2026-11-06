@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  blockOf, buildLive, estimateStages, nextStageOf, stageTypicals, trailOf, type StageTypical, type StageVisit,
+  blockOf, buildLive, ciSignalOf, stageOfStatus, stepOf, estimateStages, nextStageOf, stageTypicals, trailOf, type StageTypical, type StageVisit,
 } from './task-live'
 import { describeLive, workerWord, type FleetRowLite } from './task-live-view'
 import type { TaskDetail } from './task-report'
@@ -81,10 +81,10 @@ describe('the stage trail and the two estimates', () => {
   test('next stage ETA = stage start + typical; publication sums the stages still ahead', () => {
     const e = estimateStages({
       stage: 'running', origin: null, sinceMs: NOW - 30 * MIN, nowMs: NOW,
-      typicals: { running: typ(2 * H), qa: typ(H), leader: typ(30 * MIN), merge: typ(20 * MIN) }, totalEta: { kind: 'none', reason: 'no-history' },
+      typicals: { running: typ(2 * H), qa: typ(H), leader: typ(30 * MIN), merge: typ(20 * MIN), ci: typ(10 * MIN) }, totalEta: { kind: 'none', reason: 'no-history' },
     })
     expect(e.stageEta).toMatchObject({ kind: 'estimate', atMs: NOW - 30 * MIN + 2 * H, nextStage: 'qa' })
-    expect(e.publishEta).toMatchObject({ kind: 'estimate', source: 'stages', atMs: NOW - 30 * MIN + 2 * H + H + 30 * MIN + 20 * MIN })
+    expect(e.publishEta).toMatchObject({ kind: 'estimate', source: 'stages', atMs: NOW - 30 * MIN + 2 * H + H + 30 * MIN + 20 * MIN + 10 * MIN })
   })
   test('a stage with no history says so; the whole-piece estimate answers publication and says where it came from', () => {
     const e = estimateStages({
@@ -102,7 +102,36 @@ describe('the stage trail and the two estimates', () => {
     expect(estimateStages({ stage: 'published', origin: null, sinceMs: NOW, nowMs: NOW, typicals: {}, totalEta: { kind: 'none', reason: 'no-history' } }).stageEta).toEqual({ kind: 'none', reason: 'final' })
     expect(nextStageOf('blocked', 'qa')).toBe('qa')
     expect(nextStageOf('adjust')).toBe('leader')
-    expect(nextStageOf('merge')).toBe('published')
+    expect(nextStageOf('merge')).toBe('ci')
+    expect(nextStageOf('ci')).toBe('published')
+  })
+})
+
+describe('CI · publicando and the per-stage step', () => {
+  test('a status worded CI · publicando is its own stage, between merge and published', () => {
+    expect(stageOfStatus('ci_gate', 'CI · publicando')).toBe('ci')
+    expect(stageOfStatus('s1', 'PR / merge')).toBe('merge')
+    expect(stageOfStatus('s2', 'Publicado')).toBe('published')
+  })
+  test('the signal is rendered from a field the flow states, never invented', () => {
+    expect(ciSignalOf({ releaseGreen: true, tag: 'v2.200.8', pr: 1351 })).toEqual({ mergedMain: true, releaseGreen: true, tagPublished: false, tag: 'v2.200.8', pr: 1351 })
+    expect(ciSignalOf(undefined)).toBeNull()
+    expect(ciSignalOf('x')).toBeNull()
+    const r = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [sub('a', 'ci_gate')] as never, sessions: [sess('s1', 'a')] as never })],
+    })
+    // an unplaced custom status without a label is not a stage; with the label it is, and carries an honest "not yet" signal
+    const r2 = buildLive({ nowMs: NOW, events: [], statusLabel: id => (id === 'ci_gate' ? 'CI · publicando' : undefined), details: [detail({ subtasks: [sub('a', 'ci_gate')] as never, sessions: [sess('s1', 'a')] as never })] })
+    expect(r.deliveries[0]!.stage).toBe('running') // live session fallback: not guessed into CI
+    expect(r2.deliveries[0]).toMatchObject({ stage: 'ci', ci: { mergedMain: true, releaseGreen: false, tagPublished: false } })
+  })
+  test('the step is the newest `step` event of THIS stage; nothing reported means null', () => {
+    const e = (id: string, at: number, to: string): TaskEvent => ({ id, taskId: 't1', actor: 'x', kind: 'step', at: iso(at), to })
+    expect(stepOf([e('1', NOW - H, '2'), e('2', NOW - 10 * MIN, '3')], NOW - 2 * H)).toBe(3)
+    expect(stepOf([e('1', NOW - 3 * H, '4')], NOW - 2 * H)).toBeNull() // from an earlier stage
+    expect(stepOf([], null)).toBeNull()
+    expect(stepOf([e('1', NOW, 'x')], null)).toBeNull()
   })
 })
 
@@ -134,21 +163,24 @@ describe('a card never leaves without a word (item r) — one test per path that
       expect.objectContaining({ key: 't1/a', reason: 'no-live-session', stage: 'running' }),
     ])
   })
-  test('a status nobody can place -> status-unplaced', () => {
-    expect(hiddenOf([sub('a', 'zebra')])).toEqual([expect.objectContaining({ reason: 'status-unplaced' })])
+  test('a status nobody can place -> status-unplaced (recent only; backlog/abandoned never)', () => {
+    expect(hiddenOf([sub('a', 'zebra', { updatedAt: iso(NOW - H) })])).toEqual([expect.objectContaining({ reason: 'status-unplaced' })])
+    expect(hiddenOf([sub('a', 'zebra', { updatedAt: iso(NOW - 40 * H) })])).toEqual([])
+    expect(hiddenOf([sub('a', 'abandoned', { updatedAt: iso(NOW - H) }), sub('b', 'backlog', { updatedAt: iso(NOW - H) })])).toEqual([])
   })
   test('published more than 24 h ago -> published-old (and a year-old one is not worth a line)', () => {
     const h = hiddenOf([sub('a', 'done', { deliveredAt: iso(NOW - 30 * H) }), sub('b', 'done', { deliveredAt: iso(NOW - 400 * 24 * H) })])
     expect(h.map(x => [x.key, x.reason])).toEqual([['t1/a', 'published-old']])
   })
   test('queue entry that lost its staged session -> queue-idle', () => {
-    expect(hiddenOf([sub('a', 'todo')])).toEqual([expect.objectContaining({ reason: 'queue-idle', stage: 'queue' })])
+    expect(hiddenOf([sub('a', 'todo', { updatedAt: iso(NOW - H) })])).toEqual([expect.objectContaining({ reason: 'queue-idle', stage: 'queue' })])
+    expect(hiddenOf([sub('a', 'todo', { updatedAt: iso(NOW - 30 * H) })])).toEqual([])
   })
   test('an on-the-line piece is never reported hidden', () => {
     expect(hiddenOf([sub('a', 'in_progress')], [sess('s1', 'a')])).toEqual([])
   })
   test('the reply is bounded', () => {
-    const subs = Array.from({ length: 400 }, (_, i) => sub(`x${i}`, 'in_progress'))
+    const subs = Array.from({ length: 400 }, (_, i) => sub(`x${i}`, 'in_progress', { updatedAt: iso(NOW - H) }))
     expect(hiddenOf(subs).length).toBe(300)
   })
 })

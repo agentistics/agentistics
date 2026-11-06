@@ -33,11 +33,11 @@ beforeAll(async () => {
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; document.body.innerHTML = '' })
 afterAll(async () => GlobalRegistrator.unregister())
 
-test('draws the eight stages, the cards in them, the summary and an honest "no estimate"', async () => {
+test('draws the nine stages, the cards in them, the summary and an honest "no estimate"', async () => {
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, props('en')))) })
   await act(async () => { await new Promise(r => setTimeout(r, 20)) })
-  expect(document.querySelectorAll('[data-live-column]').length).toBe(8)
+  expect(document.querySelectorAll('[data-live-column]').length).toBe(9)
   expect(document.querySelector('[data-live-column="running"] [data-live-card="t/a"]')).not.toBeNull()
   expect(document.querySelector('[data-live-column="qa"] [data-live-card="t/b"]')).not.toBeNull()
   expect(document.querySelector('[data-live-summary]')!.textContent).toContain('2 active deliveries')
@@ -57,24 +57,37 @@ test('"only with active agents" keeps the cards whose agent is alive', async () 
   expect(document.querySelectorAll('[data-live-card]').length).toBe(2) // both have live (waiting-approval counts as alive)
 })
 
-test('leaders are their own band, closed on one summary line, never a delivery card', async () => {
+test('Líderes is a compact pill with real counters; the dropdown opens over the board, leaders collapsed, workers as rows', async () => {
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
-  const withLeaders = { ...reply, leaders: [{ id: 'L', title: '[ LÍDER ] - Leader one', harness: 'claude', model: 'opus', effort: 'high', state: 'working', currentAction: '↳ {"message":{"to":"x","kind":"handback","from":"w"}}', workers: [{ id: 'w', title: 'worker a', state: 'working', stage: 'running', word: 'working' }, { id: 'w2', title: 'worker b', state: 'waiting', stage: 'leader' }], awaiting: [{ id: 'w', title: 'worker a' }] }] }
+  const withLeaders = { ...reply, leaders: [
+    { id: 'L', title: '[ LÍDER ] - Leader one', harness: 'claude', model: 'opus', effort: 'high', state: 'working', currentAction: '↳ {"message":{"to":"x","kind":"handback","from":"w"}}', workers: [{ id: 'w', title: 'worker a', state: 'working', stage: 'running', word: 'working', cardKey: 't/a', subtask: 'Piece A' }, { id: 'w2', title: 'worker b', state: 'waiting', stage: 'leader', cardKey: 't/b' }, { id: 'w3', title: 'worker c', state: 'waiting', stage: 'blocked', cardKey: 'gone/card' }], awaiting: [{ id: 'w', title: 'worker a' }] },
+    { id: 'L2', title: 'Second leader', harness: 'codex', model: null, state: 'waiting', currentAction: null, workers: [{ id: 'w', title: 'worker a', state: 'working', stage: 'running', word: 'working' }], awaiting: [] },
+  ] }
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: withLeaders as never }))) })
   const band = document.querySelector('[data-live-leaders]')!
   expect(band.getAttribute('data-open')).toBe('0')
-  expect(band.querySelector('[data-live-leaders-summary]')!.textContent).toBe('1 leader · 2 workers · 1 working · 1 awaiting review')
-  expect(band.textContent).toContain('1 awaiting a decision')
-  expect(band.querySelector('[data-live-leader]')).toBeNull()
-  await act(async () => (document.getElementById('live-leaders-head') as HTMLElement).click())
-  expect(band.textContent).toContain('Leader one')
-  expect(band.textContent).toContain('claude · opus · high')
-  expect(band.querySelector('[data-live-leader-body]')).toBeNull()
-  await act(async () => (band.querySelector('[data-live-leader] > button') as HTMLElement).click())
-  expect(band.querySelector('[data-live-leader-body]')!.textContent).toContain('handback from worker a')
-  expect(band.textContent).not.toContain('{"message"')
-  expect(band.querySelector('[data-live-worker="w2"]')!.textContent).toContain('awaiting review')
+  expect(band.querySelector('[data-live-leaders-label]')!.textContent).toBe('Leaders 2')
+  // one distinct worker is counted once, even when two leaders list it: 1 working, 2 waiting... w3 is blocked
+  expect(band.querySelector('[data-live-leaders-counts]')!.textContent).toBe('111')
   expect(document.querySelector('[data-live-column] [data-live-leader]')).toBeNull()
+  await act(async () => (document.getElementById('live-leaders-head') as HTMLElement).click())
+  expect(band.getAttribute('data-open')).toBe('1')
+  expect(band.textContent).toContain('3 workers: 1 working · 1 waiting · 1 blocked')
+  const card = band.querySelector('[data-live-leader="L"]')!
+  expect(card.getAttribute('data-open')).toBe('0')
+  expect(card.textContent).toContain('Leader one')
+  expect(card.querySelector('[data-live-leader-body]')).toBeNull()
+  await act(async () => (card.querySelector('button') as HTMLElement).click())
+  const body = card.querySelector('[data-live-leader-body]')!
+  expect(body.textContent).toContain('claude · opus · high')
+  expect(body.textContent).toContain('handback from worker a')
+  expect(body.textContent).not.toContain('{"message"')
+  // a worker whose card the filters hide says so in the row
+  await act(async () => (band.querySelector('[data-live-worker="w3"]') as HTMLElement).click())
+  expect(band.querySelector('[data-live-worker="w3"] [data-live-worker-info]')!.textContent).toBe('no card on the board')
+  // a worker with a card closes the dropdown
+  await act(async () => (band.querySelector('[data-live-worker="w"]') as HTMLElement).click())
+  expect(band.getAttribute('data-open')).toBe('0')
   expect(document.querySelectorAll('[data-live-card]').length).toBe(2)
 })
 
@@ -165,12 +178,12 @@ test('the card is option A: bar, time row, two estimates, no raw JSON in the las
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: { ...reply, deliveries: [d] } as never }))) })
   const card = document.querySelector('[data-live-card="t/a"]')!
-  expect(card.querySelectorAll('[data-live-bar] i').length).toBe(6)
+  expect(card.querySelectorAll('[data-live-bar] i').length).toBe(7)
   expect(card.querySelector('[data-live-time]')!.textContent).toContain('time in this stage 38 min')
   expect(card.querySelector('[data-live-time]')!.textContent).toContain('total 52 min')
   expect(card.querySelector('[data-live-eta="next"]')!.textContent).toContain('no estimate')
   expect(card.querySelector('[data-live-eta="publish"]')!.textContent).toContain('no estimate')
-  expect(card.querySelector('[data-live-last]')!.textContent).toBe('↳ handback from s1')
+  expect(card.querySelector('[data-live-last]')!.textContent).toBe('handback from s1')
   expect(card.querySelector('[data-live-pill="runtime"]')!.textContent!.startsWith('claude · opus')).toBe(true)
 })
 
@@ -187,19 +200,30 @@ test('Bloqueado is a column of its own: reason, who lifts it, how long', async (
   expect(blk.textContent).toContain('volta para: em qa')
 })
 
-test('a card that leaves the board says so — "saiu: <motivo> · há N s" — and the short list remembers it', async () => {
+test('a card that leaves the board is never silent: the "saíram há pouco" list says why (no ghost line in a column)', async () => {
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, props('pt')))) })
   const gone = { ...reply, deliveries: [reply.deliveries[1]!], hidden: [{ key: 't/a', taskId: 't', title: 'Piece A', stage: 'running', reason: 'no-live-session' }] }
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: gone as never }))) })
-  const line = document.querySelector('[data-live-gone-line="t/a"]')!
-  expect(line.textContent).toContain('saiu:')
-  expect(line.textContent).toContain('a sessão encerrou e a peça segue sem agente')
-  expect(line.textContent).toMatch(/há \d+ s/)
+  expect(document.querySelector('[data-live-gone-line]')).toBeNull()
   const toggle = document.querySelector('[data-live-gone-toggle]') as HTMLElement
   expect(toggle.textContent).toBe('saíram há pouco (1)')
+  expect(toggle.getAttribute('data-fresh')).toBe('1')
   await act(async () => toggle.click())
-  expect(document.querySelector('[data-live-gone-list]')!.textContent).toContain('Piece A')
+  const list = document.querySelector('[data-live-gone-list]')!
+  expect(list.textContent).toContain('Piece A')
+  expect(list.textContent).toContain('a sessão encerrou e a peça segue sem agente')
+  expect(list.textContent).toMatch(/há \d+ s/)
+})
+
+test('a card that moved says where it came from, for a few seconds', async () => {
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, props('pt')))) })
+  const mv = { ...reply, deliveries: [{ ...reply.deliveries[0]!, stage: 'qa' }, reply.deliveries[1]!] }
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: mv as never }))) })
+  const pill = document.querySelector('[data-live-card="t/a"] [data-live-came-from]')!
+  expect(pill.textContent).toBe('veio de Executando · agora')
+  expect(document.querySelector('[data-live-card="t/b"] [data-live-came-from]')).toBeNull()
 })
 
 test('"abrir janela externa" falls back to a small window where Document PiP does not exist', async () => {
@@ -212,4 +236,47 @@ test('"abrir janela externa" falls back to a small window where Document PiP doe
   expect(opened.length).toBe(1)
   expect(opened[0]).toContain('/tasks')
   ;(window as unknown as { open: unknown }).open = realOpen
+})
+
+test('CI · publicando: its own column, a signal checklist, a percent line; Publicado only on the flow\'s signal', async () => {
+  const ciCard = { ...reply.deliveries[0]!, key: 't/ci', stage: 'ci', ci: { mergedMain: true, releaseGreen: false, tagPublished: false, tag: 'v2.200.8', pr: 1351 } }
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: { ...reply, deliveries: [ciCard] } as never }))) })
+  const cols = Array.from(document.querySelectorAll('[data-live-column]')).map(c => c.getAttribute('data-live-column'))
+  expect(cols.slice(-3)).toEqual(['merge', 'ci', 'published'])
+  const card = document.querySelector('[data-live-column="ci"] [data-live-card="t/ci"]')!
+  const lines = Array.from(card.querySelectorAll('[data-ci-line]')).map(l => [l.getAttribute('data-ci-line'), l.getAttribute('data-done')])
+  expect(lines).toEqual([['merge', '1'], ['release', '0'], ['tag', '0']])
+  expect(card.querySelector('[data-live-cisig]')!.textContent).toContain('tag v2.200.8 publicada')
+  expect(card.querySelector('[data-live-pct]')!.textContent).toContain('33%')
+  expect(card.querySelector('[data-live-pct]')!.textContent).toContain('passo 2 de 3: publicação rodando')
+  const seg = Array.from(card.querySelectorAll('[data-live-bar] i')).find(i => i.getAttribute('data-seg') === 'cur') as HTMLElement
+  expect(seg.style.background).toContain('linear-gradient')
+})
+
+test('the percent line is hidden when the piece reported no step', async () => {
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, props('pt')))) })
+  expect(document.querySelector('[data-live-card="t/a"] [data-live-pct]')).toBeNull()
+  const withStep = { ...reply, deliveries: [{ ...reply.deliveries[0]!, step: 3 }] }
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: withStep as never }))) })
+  expect(document.querySelector('[data-live-card="t/a"] [data-live-pct]')!.textContent).toContain('40%')
+})
+
+test('no emoji anywhere in the Live (icons are drawn by the app\'s icon set)', async () => {
+  const rich = {
+    ...reply,
+    leaders: [{ id: 'L', title: 'Lead', harness: 'claude', model: 'opus', state: 'working', currentAction: 'x', workers: [{ id: 's1', title: 'w', state: 'waiting', stage: 'leader', cardKey: 't/b' }], awaiting: [] }],
+    deliveries: [
+      { ...reply.deliveries[0]!, step: 2, lastAction: { text: 'did a thing', atMs: 1 } },
+      { ...reply.deliveries[1]!, stage: 'leader', sessionIds: ['s1'] },
+      { ...reply.deliveries[0]!, key: 't/ci', stage: 'ci', ci: { mergedMain: true, releaseGreen: true, tagPublished: false, tag: null, pr: null } },
+    ],
+  }
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: rich as never, fleet: [rows[0]!, { ...rows[1]!, id: 's1', state: 'waiting' } as FleetRow] }))) })
+  await act(async () => (document.getElementById('live-leaders-head') as HTMLElement).click())
+  await act(async () => (document.querySelector('[data-live-leader] > button') as HTMLElement).click())
+  expect(document.body.textContent).not.toMatch(/[♛⏳⛔▶⧉✓◌↳←]/u)
+  expect(document.querySelectorAll('svg').length).toBeGreaterThan(3)
 })

@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import {
   blockLines, cardStateWord, chunk, pack, columnCollapsed, etaBoxes, fitCount, mergeGone, planDepartures, snapshotOf, stageBar,
   taskOfSession, taskOptions, timeRow, waitingReason, lingering, GONE_LINGER_MS, readCollapsedPrefs,
+  cardPercent, ciChecklist, leaderCounts, locateWorker, stagePercent,
 } from './liveCardModel'
+import { rollPlan } from './LiveOdometer'
 import { cardPills, filterCards, joinLive, LIVE_STAGES, type LiveAgent, type LiveDeliveryRecord, type RuntimeFacts } from './liveDeliveryModel'
 import type { FleetRow } from '../../lib/fleet'
 
@@ -41,6 +43,10 @@ describe('what a waiting card waits for (item i)', () => {
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'running' }, f), f, true)).toBe('esperando (sem motivo conhecido)')
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'running', lastAction: { text: 'x', atMs: 1, kind: 'handback' } }, f), f, true)).toBe('entregou, esperando o líder')
   })
+  test('a blocked card says why in its block, not in a second waiting line', () => {
+    const f = [row('s', 'waiting')]
+    expect(waitingReason(card({ sessionIds: ['s'], stage: 'blocked' }, f), f, true)).toBeNull()
+  })
   test('a working card waits for nothing', () => {
     const f = [row('s', 'working')]
     expect(waitingReason(card({ sessionIds: ['s'] }, f), f, true)).toBeNull()
@@ -50,16 +56,16 @@ describe('what a waiting card waits for (item i)', () => {
 describe('stage bar — active segment wears its column colour', () => {
   test('running = orange active, nothing done; QA = blue, two grey behind', () => {
     const r = stageBar('running', null)
-    expect(r.map(s => s.state)).toEqual(['done', 'cur', 'todo', 'todo', 'todo', 'todo'])
+    expect(r.map(s => s.state)).toEqual(['done', 'cur', 'todo', 'todo', 'todo', 'todo', 'todo'])
     expect(r[1]!.color).toBe('#f5a623')
     const q = stageBar('qa', null)
-    expect(q.map(s => s.state)).toEqual(['done', 'done', 'cur', 'todo', 'todo', 'todo'])
+    expect(q.map(s => s.state)).toEqual(['done', 'done', 'cur', 'todo', 'todo', 'todo', 'todo'])
     expect(q[2]!.color).toBe('#4c9aff')
     expect(q[0]!.color).toBe('#4b5563')
   })
   test('adjust sits on QA in red; blocked marks where it came from', () => {
     expect(stageBar('adjust', null)[2]).toMatchObject({ state: 'cur', color: '#ff5f5f' })
-    expect(stageBar('blocked', 'leader')[3]).toMatchObject({ state: 'cur', color: '#e5484d' })
+    expect(stageBar('blocked', 'leader')[3]).toMatchObject({ state: 'cur', color: '#c2410c' })
   })
 })
 
@@ -72,6 +78,8 @@ describe('time row — "total" is the card\'s work, never the task\'s age (item 
       expect(t.stageNo).toBe('2ª etapa')
     }
     expect(timeRow(card({ workMs: null }), NOW, true).total).toBe('total —')
+    expect(timeRow(card({ stage: 'published', workMs: 2 * H, deliveredAtMs: NOW }), NOW, true).total).toBe('total 2h')
+    expect(timeRow(card({ stage: 'published', deliveredAtMs: null }), NOW, true).inStage).toBe('publicado —')
   })
   test('the tooltip lists the stages it passed through', () => {
     const t = timeRow(card({ trail: [{ stage: 'running', enteredMs: 0, ms: 4 * H }, { stage: 'qa', enteredMs: 1, ms: 20 * MIN }] }), NOW, true)
@@ -237,5 +245,80 @@ describe('no card leaves in silence (item r) — a sentence per path', () => {
     expect(lingering(g, NOW + GONE_LINGER_MS)).toHaveLength(0)
     expect(mergeGone(g, [], NOW + 11 * MIN)).toHaveLength(0)
     expect(mergeGone(g, [], NOW + 5 * MIN)).toHaveLength(1)
+  })
+})
+
+describe('per-stage percent from fixed steps (item t4)', () => {
+  test('pct = (k-1)/n, rounded; the line shows the step in words', () => {
+    expect(stagePercent('running', 1, true)).toEqual({ pct: 0, step: 1, of: 5, label: 'lendo o pedido' })
+    expect(stagePercent('running', 3, true)).toEqual({ pct: 40, step: 3, of: 5, label: 'rodando os testes' })
+    expect(stagePercent('qa', 4, true)!.pct).toBe(75)
+    expect(stagePercent('leader', 2, false)).toMatchObject({ pct: 33, label: 'checking what was deleted' })
+    expect(stagePercent('merge', 3, true, true)).toMatchObject({ pct: 100, label: 'pronto' })
+  })
+  test('each stage has its fixed step count', () => {
+    const n = (s: Parameters<typeof stagePercent>[0]) => stagePercent(s, 1, true)!.of
+    expect([n('running'), n('qa'), n('adjust'), n('leader'), n('merge'), n('ci')]).toEqual([5, 4, 4, 3, 3, 3])
+  })
+  test('unknown is hidden, never invented: no report, no steps for the stage, nonsense', () => {
+    expect(stagePercent('running', null, true)).toBeNull()
+    expect(stagePercent('running', undefined, true)).toBeNull()
+    expect(stagePercent('queue', 2, true)).toBeNull()
+    expect(stagePercent('published', 2, true)).toBeNull()
+    expect(stagePercent('running', 0, true)).toBeNull()
+    expect(stagePercent('running', Number.NaN, true)).toBeNull()
+  })
+  test('a step past the end clamps to the last one', () => expect(stagePercent('merge', 9, true)).toMatchObject({ step: 3, pct: 67 }))
+  test('in CI the percent comes from the release signal, not from a reported step', () => {
+    const ci = (x: object) => ({ mergedMain: true, releaseGreen: false, tagPublished: false, tag: null, pr: null, ...x })
+    expect(cardPercent({ stage: 'ci', ci: ci({}), step: null }, true)).toMatchObject({ pct: 33, step: 2, label: 'publicação rodando' })
+    expect(cardPercent({ stage: 'ci', ci: ci({ releaseGreen: true }), step: null }, true)).toMatchObject({ pct: 67, step: 3 })
+    expect(cardPercent({ stage: 'ci', ci: ci({ releaseGreen: true, tagPublished: true }), step: null }, true)).toMatchObject({ pct: 100, label: 'pronto' })
+    expect(cardPercent({ stage: 'ci', ci: null, step: 2 }, true)).toBeNull()
+    expect(cardPercent({ stage: 'qa', ci: null, step: 2 }, true)).toMatchObject({ pct: 25 })
+  })
+  test('the odometer rolls only the digits that changed', () => {
+    expect(rollPlan('33%', '67%')).toEqual([{ char: '6', from: '3' }, { char: '7', from: '3' }, { char: '%', from: null }])
+    expect(rollPlan('9%', '10%')).toEqual([{ char: '1', from: ' ' }, { char: '0', from: '9' }, { char: '%', from: null }])
+    expect(rollPlan('50%', '50%').every(d => d.from === null)).toBe(true)
+  })
+})
+
+describe('CI · publicando checklist (item t2)', () => {
+  test('three signal lines, each done or pending, with the tag named when the flow states it', () => {
+    expect(ciChecklist({ mergedMain: true, releaseGreen: false, tagPublished: false, tag: 'v2.200.8' }, true)).toEqual([
+      { key: 'merge', done: true, text: 'merge no main' }, { key: 'release', done: false, text: 'release.yml terminou verde' }, { key: 'tag', done: false, text: 'tag v2.200.8 publicada' },
+    ])
+    expect(ciChecklist({ mergedMain: false, releaseGreen: false, tagPublished: false, tag: null }, false)[2]!.text).toBe('tag published')
+  })
+  test('CI sits between merge and published on the bar and in the waiting words', () => {
+    const bar = stageBar('ci', null)
+    expect(bar.map(s => s.stage)).toEqual(['queue', 'running', 'qa', 'leader', 'merge', 'ci', 'published'])
+    expect(bar[5]).toMatchObject({ state: 'cur', color: 'rgb(45,180,200)' })
+    const f = [row('s', 'waiting')]
+    expect(waitingReason(card({ sessionIds: ['s'], stage: 'ci' }, f), f, true)).toBe('esperando o sinal do release')
+  })
+})
+
+describe('Líderes pill counters (item t1) — real worker states, each worker once', () => {
+  const w = (id: string, state: string, stage: Parameters<typeof stageBar>[0] | null = null) => ({ id, state, stage })
+  test('3 leaders listing the same worker do not triple-count it', () => {
+    const c = leaderCounts([
+      { workers: [w('a', 'working', 'running'), w('b', 'waiting', 'leader'), w('c', 'waiting', 'blocked')] },
+      { workers: [w('a', 'working', 'running'), w('d', 'waiting', 'running')] },
+    ])
+    expect(c).toEqual({ working: 1, waiting: 2, blocked: 1, workers: 4 })
+  })
+  test('the three counters always add up to the workers', () => {
+    const c = leaderCounts([{ workers: [w('a', 'waiting-approval'), w('b', 'working'), w('c', 'waiting', 'qa')] }])
+    expect(c.working + c.waiting + c.blocked).toBe(c.workers)
+  })
+  test('a row leads to its card, says "filtered" when the filters hide it, and nothing otherwise', () => {
+    const all = joinLive([rec({ key: 'k1' }), rec({ key: 'k2' })], [])
+    const shown = all.filter(c => c.d.key === 'k1')
+    expect(locateWorker({ cardKey: 'k1' }, shown, all)).toEqual({ kind: 'card', key: 'k1', stage: 'running' })
+    expect(locateWorker({ cardKey: 'k2' }, shown, all)).toEqual({ kind: 'filtered' })
+    expect(locateWorker({ cardKey: 'zz' }, shown, all)).toEqual({ kind: 'none' })
+    expect(locateWorker({}, shown, all)).toEqual({ kind: 'none' })
   })
 })

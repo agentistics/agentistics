@@ -206,10 +206,14 @@ export function reintegrate(el: HTMLElement): Promise<void> {
 }
 
 /** What an arrival does, decided by the stages alone — a plain function so it is testable. */
-export type TransitionKind = 'merge-approved' | 'move' | 'none'
+/**
+ * `merge-approved` (particles) is gone: the owner dropped them (06/11) — every stage change, CI → Publicado
+ * included, is the same FLIP slide. The kind stays a type so a caller never sees a bare boolean.
+ */
+export type TransitionKind = 'move' | 'none'
 export function transitionKind(prev: string | undefined, next: string): TransitionKind {
   if (!prev || prev === next) return 'none'
-  return prev === 'merge' && next === 'published' ? 'merge-approved' : 'move'
+  return 'move'
 }
 
 /**

@@ -24,6 +24,23 @@ export const LIVE_CACHE_MAX_AGE_MS = 10 * 60_000
 export function cachedLiveReply(nowMs = Date.now()): LiveReply | null {
   return lastReply && nowMs - lastReply.atMs < LIVE_CACHE_MAX_AGE_MS ? lastReply.reply : null
 }
+/**
+ * Warm the cache before anyone asks: the Sessions bar calls this shortly after it mounts and again on
+ * hover intent, so the first open paints from the cache instead of waiting on the read. One read at a
+ * time, failures are silent (the view's own load reports them).
+ */
+let prefetching: Promise<void> | null = null
+export function prefetchLiveReply(): Promise<void> {
+  if (prefetching) return prefetching
+  prefetching = (async () => {
+    try {
+      const res = await fetch('/api/tasks/live')
+      if (res.ok) lastReply = { reply: await res.json() as LiveReply, atMs: Date.now() }
+    } catch { /* the view reports its own errors */ } finally { prefetching = null }
+  })()
+  return prefetching
+}
+
 /** Test hook. */
 export function resetLiveCache(): void { lastReply = null }
 

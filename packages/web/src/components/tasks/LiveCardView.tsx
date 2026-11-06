@@ -10,15 +10,17 @@
  */
 
 import React from 'react'
+import { ArrowLeft, Check, CircleDashed, Clock, CornerDownRight } from 'lucide-react'
 import type { FleetRow } from '../../lib/fleet'
 import { accountDisplayName } from '../../lib/planLimits'
 import { humanizeAction, shortTitle } from '@agentistics/core'
 import { RoleChip } from '../sessions/RoleChip'
 import { harnessColor, pill, surface } from './board'
 import {
-  cardPills, isQueued, queuePosition, STAGE_LABEL, type LiveCard, type RuntimeFacts,
+  cardPills, isQueued, queuePosition, STAGE_LABEL, type LiveCard, type LiveStage, type RuntimeFacts,
 } from './liveDeliveryModel'
-import { blockLines, cardStateWord, etaBoxes, stageBar, timeRow, waitingReason } from './liveCardModel'
+import { blockLines, cardPercent, cardStateWord, ciChecklist, etaBoxes, stageBar, timeRow, waitingReason } from './liveCardModel'
+import { LiveOdometer } from './LiveOdometer'
 
 const STATE_COLOR = {
   working: 'var(--accent-green, #3ecf8e)', waiting: 'var(--text-tertiary)',
@@ -39,6 +41,8 @@ export interface LiveCardViewProps {
   role: 'leader' | 'worker'
   mobile: boolean
   onOpen: (c: LiveCard) => void
+  /** The column it just came from: a small pill says so for a few seconds after a move. */
+  cameFrom?: LiveStage | null
   /** Inside the Publicado accordion the card is the expanded body of a row: no outer border radius games. */
   embedded?: boolean
 }
@@ -60,6 +64,8 @@ export function LiveCardView(p: LiveCardViewProps) {
   const last = d.lastAction ? humanizeAction(d.lastAction.text, pt ? 'pt' : 'en', titleOf) : null
   const ctx = [d.subtaskId ? d.taskTitle : null, p.leaderName ? `${pt ? 'líder' : 'leader'} ${p.leaderName}` : null].filter(Boolean).join(' · ')
   const stageColor = STAGE_LABEL[d.stage].color
+  const pct = cardPercent(d, pt)
+  const ci = d.stage === 'ci' && d.ci ? ciChecklist(d.ci, pt) : null
 
   return (
     <button
@@ -73,6 +79,11 @@ export function LiveCardView(p: LiveCardViewProps) {
         ...(p.embedded ? { borderTopLeftRadius: 0, borderTopRightRadius: 0, borderTop: 0 } : {}),
       }}
     >
+      {p.cameFrom && (
+        <span data-live-came-from style={{ display: 'inline-flex', alignItems: 'center', gap: 4, width: 'fit-content', fontSize: 10.5, padding: '2px 7px', borderRadius: 999, border: `1px solid ${stageColor}`, color: stageColor }}>
+          <ArrowLeft size={10} aria-hidden />{pt ? 'veio de' : 'came from'} {STAGE_LABEL[p.cameFrom][pt ? 'pt' : 'en']} · {pt ? 'agora' : 'now'}
+        </span>
+      )}
       <span title={d.title} data-live-title style={{ fontWeight: 650, fontSize: 12, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{shortTitle(d.title)}</span>
       {ctx && <span style={{ fontSize: 11, color: MUTED, overflowWrap: 'anywhere', lineHeight: 1.3 }}>{ctx}</span>}
 
@@ -82,7 +93,7 @@ export function LiveCardView(p: LiveCardViewProps) {
         <b data-live-state style={{ fontWeight: 600 }}>{stateWord}{agent && c.agents.length > 1 ? ` · ${c.agents.length}` : ''}</b>
         {queued && <span data-live-queued style={{ color: MUTED, letterSpacing: '.04em', fontSize: 10.5 }}>{pt ? 'NA FILA' : 'QUEUED'}{pos ? ` · ${pos}${pt ? 'º' : pos === 1 ? 'st' : pos === 2 ? 'nd' : pos === 3 ? 'rd' : 'th'}` : ''}</span>}
       </span>
-      {reason && <span data-live-reason style={{ fontSize: 11.5, color: 'var(--accent-yellow, #e5b341)', lineHeight: 1.3, overflowWrap: 'anywhere' }}>⏳ {reason}</span>}
+      {reason && <span data-live-reason style={{ display: 'flex', gap: 5, alignItems: 'flex-start', fontSize: 11.5, color: 'var(--accent-yellow, #e5b341)', lineHeight: 1.3, overflowWrap: 'anywhere' }}><Clock size={12} aria-hidden style={{ flexShrink: 0, marginTop: 1 }} /><span>{reason}</span></span>}
 
       {block && (
         <span data-live-block style={{ display: 'grid', gap: 1, fontSize: 11.5, padding: '5px 7px', borderRadius: 6, background: 'rgba(229,72,77,.10)', border: '1px solid rgba(229,72,77,.35)' }}>
@@ -103,8 +114,20 @@ export function LiveCardView(p: LiveCardViewProps) {
       {!queued && (
         <>
           <span aria-hidden data-live-bar style={{ display: 'flex', gap: 3, marginTop: 3 }}>
-            {bar.map(s => <i key={s.stage} data-seg={s.state} style={{ flex: 1, height: 5, borderRadius: 3, background: s.color, opacity: s.state === 'todo' ? 0.9 : 1 }} />)}
+            {bar.map(s => (
+              <i key={s.stage} data-seg={s.state} style={{
+                flex: 1, height: 5, borderRadius: 3, transition: 'background .4s ease',
+                background: s.state === 'cur' && pct ? `linear-gradient(to right, ${s.color} ${pct.pct}%, #2a2f3c ${pct.pct}%)` : s.color,
+                opacity: s.state === 'todo' ? 0.9 : 1,
+              }} />
+            ))}
           </span>
+          {pct && (
+            <span data-live-pct style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 11, color: MUTED }}>
+              <LiveOdometer value={pct.pct} color={stageColor} />
+              <span>{pt ? 'desta etapa' : 'of this stage'} · {pt ? 'passo' : 'step'} {pct.step} {pt ? 'de' : 'of'} {pct.of}: <span style={{ color: 'var(--text-secondary)' }}>{pct.label}</span></span>
+            </span>
+          )}
           <span data-live-time title={time.title} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10.5, color: MUTED, flexWrap: 'wrap' }}>
             <span style={{ color: stageColor === MUTED ? MUTED : undefined }}>{time.inStage}{time.stageNo ? ` (${time.stageNo})` : ''}</span>
             <span>{time.total}</span>
@@ -124,8 +147,18 @@ export function LiveCardView(p: LiveCardViewProps) {
         </span>
       )}
 
+      {ci && (
+        <span data-live-cisig style={{ display: 'grid', gap: 3, fontSize: 11, color: MUTED, background: 'var(--bg-elevated, rgba(255,255,255,.04))', borderRadius: 6, padding: '5px 8px' }}>
+          <span style={{ color: 'var(--text-secondary)' }}>{pt ? 'vai para Publicado sozinho quando chegar o sinal:' : 'moves to Published by itself when the signal arrives:'}</span>
+          {ci.map(l => (
+            <span key={l.key} data-ci-line={l.key} data-done={l.done ? '1' : '0'} style={{ display: 'flex', alignItems: 'center', gap: 5, color: l.done ? 'var(--accent-green, #26b573)' : MUTED }}>
+              {l.done ? <Check size={11} aria-hidden /> : <CircleDashed size={11} aria-hidden />}{l.text}
+            </span>
+          ))}
+        </span>
+      )}
       {last && !queued && (
-        <span title={pt ? 'última ação' : 'last action'} data-live-last style={{ paddingTop: 5, borderTop: '1px dashed var(--border)', fontSize: 11, color: MUTED, overflowWrap: 'anywhere' }}>↳ {last}</span>
+        <span title={pt ? 'última ação' : 'last action'} data-live-last style={{ display: 'flex', gap: 5, alignItems: 'flex-start', paddingTop: 5, borderTop: '1px dashed var(--border)', fontSize: 11, color: MUTED, overflowWrap: 'anywhere' }}><CornerDownRight size={11} aria-hidden style={{ flexShrink: 0, marginTop: 2 }} /><span>{last}</span></span>
       )}
     </button>
   )

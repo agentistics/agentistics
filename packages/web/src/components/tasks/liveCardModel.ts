@@ -62,6 +62,8 @@ function questionOf(row: FleetRow | undefined): string | null {
  */
 export function waitingReason(c: LiveCard, fleet: readonly FleetRow[], pt: Pt): string | null {
   if (isQueued(c)) return pt ? 'esperando vaga na máquina' : 'waiting for a machine slot'
+  // A blocked card says WHY in its own block (reason, who lifts it) — a second line would contradict it.
+  if (c.d.stage === 'blocked') return null
   if (c.liveState === 'needs-you') {
     const row = fleet.find(r => r.id === c.agents.find(a => a.state === 'waiting-approval')?.id)
     const q = questionOf(row)
@@ -72,6 +74,7 @@ export function waitingReason(c: LiveCard, fleet: readonly FleetRow[], pt: Pt): 
     case 'leader': return pt ? 'esperando revisão do líder' : 'waiting for the leader\'s review'
     case 'qa': return pt ? 'esperando a QA' : 'waiting for QA'
     case 'merge': return pt ? 'esperando o CI / merge' : 'waiting for CI / merge'
+    case 'ci': return pt ? 'esperando o sinal do release' : 'waiting for the release signal'
     case 'adjust': return pt ? 'esperando o ajuste' : 'waiting for the fix'
     default: break
   }
@@ -82,8 +85,8 @@ export function waitingReason(c: LiveCard, fleet: readonly FleetRow[], pt: Pt): 
 
 // ------------------------------------------------------------------------------------ stage bar
 
-/** The six marks of the way a piece travels. `adjust` sits on QA's mark (it is QA sending it back). */
-export const BAR_STAGES: readonly LiveStage[] = ['queue', 'running', 'qa', 'leader', 'merge', 'published']
+/** The seven marks of the way a piece travels. `adjust` sits on QA's mark (it is QA sending it back). */
+export const BAR_STAGES: readonly LiveStage[] = ['queue', 'running', 'qa', 'leader', 'merge', 'ci', 'published']
 
 export interface BarSegment { stage: LiveStage; state: 'done' | 'cur' | 'todo'; color: string }
 
@@ -96,6 +99,95 @@ export function stageBar(stage: LiveStage, origin: LiveStage | null | undefined)
     state: k < i ? 'done' as const : k === i ? 'cur' as const : 'todo' as const,
     color: k === i ? STAGE_LABEL[stage].color : k < i ? '#4b5563' : '#2a2f3c',
   }))
+}
+
+// ------------------------------------------------------------------------------------ per-stage percent
+
+/**
+ * The fixed, known steps inside each stage. A piece REPORTS which step it is on (a `step` event from the
+ * delivery flow); the words are ours, so a step number the flow states is always read the same way.
+ */
+export const STAGE_STEPS: Partial<Record<LiveStage, { pt: readonly string[]; en: readonly string[] }>> = {
+  running: {
+    pt: ['lendo o pedido', 'implementando', 'rodando os testes', 'salvando (commit)', 'entregando'],
+    en: ['reading the request', 'implementing', 'running the tests', 'saving (commit)', 'handing over'],
+  },
+  qa: {
+    pt: ['preparando o ambiente', 'testes automáticos', 'passada no navegador e Mac', 'relatório'],
+    en: ['preparing the environment', 'automatic tests', 'browser and Mac pass', 'report'],
+  },
+  adjust: {
+    pt: ['corrigindo', 'testes', 'salvando (commit)', 'devolvendo ao QA'],
+    en: ['fixing', 'tests', 'saving (commit)', 'handing back to QA'],
+  },
+  leader: {
+    pt: ['lendo as mudanças', 'conferindo o que foi apagado', 'decidindo'],
+    en: ['reading the changes', 'checking what was deleted', 'deciding'],
+  },
+  merge: { pt: ['abrindo o PR', 'checagens do PR', 'merge'], en: ['opening the PR', 'PR checks', 'merge'] },
+  ci: { pt: ['merge no main', 'publicação rodando', 'versão publicada'], en: ['merge on main', 'publication running', 'version published'] },
+}
+
+export interface StagePercent { pct: number; step: number; of: number; label: string }
+
+/**
+ * PURE: "<pct>% desta etapa · passo k de n: <step>". pct = (k-1)/n — a step you are ON is not done —
+ * and 100 once the last step is reported done. A stage with no fixed steps, or a piece that reported
+ * none, answers null: the line is hidden, never filled with a guess.
+ */
+export function stagePercent(stage: LiveStage, step: number | null | undefined, pt: Pt, done = false): StagePercent | null {
+  const steps = STAGE_STEPS[stage]?.[pt ? 'pt' : 'en']
+  if (!steps || step === null || step === undefined || !Number.isFinite(step) || step < 1) return null
+  const k = Math.min(Math.floor(step), steps.length)
+  return { pct: done ? 100 : Math.round((100 * (k - 1)) / steps.length), step: k, of: steps.length, label: done ? (pt ? 'pronto' : 'done') : steps[k - 1]! }
+}
+
+/** PURE: the percent line of a card — from the CI signal in CI, from the reported step elsewhere; null = hide. */
+export function cardPercent(d: Pick<LiveDeliveryRecord, 'stage' | 'ci' | 'step'>, pt: Pt): StagePercent | null {
+  if (d.stage === 'ci') {
+    if (!d.ci) return null
+    const step = !d.ci.mergedMain ? 1 : !d.ci.releaseGreen ? 2 : 3
+    return stagePercent('ci', step, pt, d.ci.tagPublished)
+  }
+  return stagePercent(d.stage, d.step, pt)
+}
+
+export interface CiLine { key: 'merge' | 'release' | 'tag'; done: boolean; text: string }
+
+/** PURE: the three-line signal checklist of a piece in CI · publicando. */
+export function ciChecklist(ci: { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null }, pt: Pt): CiLine[] {
+  return [
+    { key: 'merge', done: ci.mergedMain, text: pt ? 'merge no main' : 'merge on main' },
+    { key: 'release', done: ci.releaseGreen, text: pt ? 'release.yml terminou verde' : 'release.yml finished green' },
+    { key: 'tag', done: ci.tagPublished, text: ci.tag ? (pt ? `tag ${ci.tag} publicada` : `tag ${ci.tag} published`) : (pt ? 'tag publicada' : 'tag published') },
+  ]
+}
+
+// ------------------------------------------------------------------------------------ leaders pill
+
+export interface LeaderCounts { working: number; waiting: number; blocked: number; workers: number }
+
+/**
+ * PURE: the three dot counters of the Líderes pill, from the REAL worker list — one count per distinct
+ * worker (a worker listed under two leaders is one worker). The old strip counted per leader and said
+ * "3 active" with two.
+ */
+export function leaderCounts(leaders: readonly { workers: readonly { id: string; state: string; word?: WorkerWord; stage?: LiveStage | null }[] }[]): LeaderCounts {
+  const seen = new Map<string, WorkerWord>()
+  for (const l of leaders) for (const w of l.workers) if (!seen.has(w.id)) seen.set(w.id, w.word ?? workerWordOf(w.state, w.stage))
+  let working = 0, blocked = 0
+  for (const word of seen.values()) { if (word === 'working') working++; else if (word === 'blocked') blocked++ }
+  return { working, blocked, waiting: seen.size - working - blocked, workers: seen.size }
+}
+
+export type LocateAnswer = { kind: 'card'; key: string; stage: LiveStage } | { kind: 'filtered' } | { kind: 'none' }
+
+/** PURE: where a worker row leads — to its card, to "filtered out by your filters", or nowhere. */
+export function locateWorker(w: { cardKey?: string | null }, shown: readonly LiveCard[], all: readonly LiveCard[]): LocateAnswer {
+  if (!w.cardKey) return { kind: 'none' }
+  const hit = shown.find(c => c.d.key === w.cardKey)
+  if (hit) return { kind: 'card', key: hit.d.key, stage: hit.d.stage }
+  return all.some(c => c.d.key === w.cardKey) ? { kind: 'filtered' } : { kind: 'none' }
 }
 
 // ------------------------------------------------------------------------------------ time row
@@ -122,8 +214,11 @@ export function timeRow(c: LiveCard, nowMs: number, pt: Pt): TimeRow {
   const ord = (k: number) => pt ? `${k}ª` : `${k}${k === 1 ? 'st' : k === 2 ? 'nd' : k === 3 ? 'rd' : 'th'}`
   const lines = trail.map(v => `${stageName(v.stage, pt)} ${fmtSpan(v.ms)}`)
   return {
-    inStage: `${pt ? 'tempo nessa etapa' : 'time in this stage'} ${done ? '—' : fmtSpan(inStageMs)}`,
-    total: `${pt ? 'total' : 'total'} ${done ? '—' : fmtSpan(workMs)}`,
+    // A published card is not "in a stage" any more: it says when it was published, and what it cost in work.
+    inStage: done
+      ? `${pt ? 'publicado' : 'published'} ${d.deliveredAtMs ? fmtClock(d.deliveredAtMs) : '—'}`
+      : `${pt ? 'tempo nessa etapa' : 'time in this stage'} ${fmtSpan(inStageMs)}`,
+    total: `total ${fmtSpan(workMs)}`,
     stageNo: n > 0 ? (pt ? `${ord(n)} etapa` : `${ord(n)} stage`) : null,
     title: [
       pt ? '“Tempo nessa etapa”: há quanto tempo o cartão está nesta coluna.' : '“Time in this stage”: how long the card has been in this column.',

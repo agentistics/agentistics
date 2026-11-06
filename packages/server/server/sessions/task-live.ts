@@ -24,11 +24,11 @@ import { subtaskDone, type Subtask, type Task, type TaskEvent } from './task-mod
 import type { PieceTimes } from './task-times'
 import type { TaskDetail } from './task-report'
 
-export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'published'
-export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'published']
+export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
+export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published']
 
 /** The happy path a piece follows once it runs; `adjust` and `blocked` are detours that return to it. */
-export const HAPPY_PATH: readonly LiveStage[] = ['running', 'qa', 'leader', 'merge', 'published']
+export const HAPPY_PATH: readonly LiveStage[] = ['running', 'qa', 'leader', 'merge', 'ci', 'published']
 
 export const MIN_SAMPLES = 3
 /** A published piece stays on the line this long. */
@@ -65,6 +65,13 @@ export type LivePublishEta =
   | { kind: 'estimate'; atMs: number; source: 'stages' | 'total'; n: number; parts: { stage: LiveStage; medianMs: number }[] }
   | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final' }
 
+/**
+ * The release signal of a piece in "CI · publicando", exactly as the delivery flow states it. The
+ * Live only RENDERS it: the piece moves to Publicado when `releaseGreen` and `tagPublished` are both
+ * true, and the flow — not this view — decides that.
+ */
+export interface LiveCiSignal { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null }
+
 export interface LiveDelivery {
   /** `<taskId>` or `<taskId>/<subtaskId>` — stable across polls. */
   key: string
@@ -93,6 +100,10 @@ export interface LiveDelivery {
   stageEta: LiveStageEta
   publishEta: LivePublishEta
   block: LiveBlock | null
+  /** Only in the CI stage, and only when the flow stated it. */
+  ci: LiveCiSignal | null
+  /** The 1-based step the piece reported inside its CURRENT stage (a `step` event); null = nobody said, show nothing. */
+  step: number | null
   /** The newest thing the log says about this piece, short. Null when nothing is recorded. */
   lastAction: { text: string; atMs: number; kind?: string } | null
   blockedReason: string | null
@@ -133,6 +144,7 @@ export function stageOfStatus(status: string, label?: string): LiveStage | null 
   if (/\bqa\b|\btest/.test(t)) return 'qa'
   if (/ajust|adjust|\bfix|rework|retrab/.test(t)) return 'adjust'
   if (/review|revis/.test(t)) return 'leader'
+  if (/\bci\b|publicando|publishing/.test(t)) return 'ci'
   if (/merge|\bpr\b|pull.?request/.test(t)) return 'merge'
   if (/publish|publicad|releas|shipped/.test(t)) return 'published'
   if (/progress|andamento|doing|executando|running/.test(t)) return 'running'
@@ -216,6 +228,34 @@ export function blockOf(o: { text: string | null; dependsOn: number; originStage
   }
   const unlocker: LiveBlock['unlocker'] = reason === 'decisao_do_dono' ? 'owner' : reason === 'dependencia' ? 'self' : 'leader'
   return { reason, text, unlocker, originStage: o.originStage }
+}
+
+
+/** PURE: the CI signal a piece carries, trusted only in its exact shape. */
+export function ciSignalOf(raw: unknown): LiveCiSignal | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const b = (k: string) => o[k] === true
+  return {
+    mergedMain: o.mergedMain === undefined ? true : b('mergedMain'),
+    releaseGreen: b('releaseGreen'), tagPublished: b('tagPublished'),
+    tag: typeof o.tag === 'string' && o.tag ? o.tag : null,
+    pr: typeof o.pr === 'number' && Number.isFinite(o.pr) ? o.pr : null,
+  }
+}
+
+/** PURE: the newest reported step of the current stage, from `step` events recorded since the stage began. */
+export function stepOf(events: readonly TaskEvent[], sinceMs: number | null): number | null {
+  let best: { at: number; step: number } | null = null
+  for (const e of events) {
+    if (e.kind !== 'step') continue
+    const at = Date.parse(e.at)
+    const n = Number.parseInt(e.to ?? e.detail ?? '', 10)
+    if (!Number.isFinite(at) || !Number.isFinite(n) || n < 1) continue
+    if (sinceMs !== null && at < sinceMs) continue
+    if (!best || at >= best.at) best = { at, step: n }
+  }
+  return best?.step ?? null
 }
 
 // ------------------------------------------------------------------------------------ trail
@@ -383,6 +423,8 @@ function piecesOf(d: TaskDetail): Piece[] {
 
 /** The most hidden rows a reply carries — a bound, not a policy: the newest are the ones that just left. */
 export const HIDDEN_CAP = 300
+/** A piece untouched for longer than this was not on the board a moment ago, so its absence is not a departure. */
+export const RECENT_HIDDEN_MS = 6 * 3600_000
 
 /** PURE: details of the tasks → what the line shows now, plus the history the ETA rests on. */
 export function buildLive(o: {
@@ -438,16 +480,19 @@ export function buildLive(o: {
     const liveSessions = p.sessions.filter(s => s.live)
     if (stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'
     if (stage === null) stage = liveSessions.length > 0 ? 'running' : null
-    if (stage === null) { hide(p, null, 'status-unplaced'); continue }
+    // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,
+    // or a todo nobody staged, was never on the board and fills the reply with nothing anyone is missing.
+    const recent = o.nowMs - (ms(p.updatedAt) ?? 0) < RECENT_HIDDEN_MS
+    if (stage === null) { if (recent && p.status !== 'backlog' && p.status !== 'abandoned') hide(p, null, 'status-unplaced'); continue }
     const deliveredAtMs = ms(p.deliveredAt) ?? (stage === 'published' ? ms(p.updatedAt) : null)
     if (stage === 'published' && (deliveredAtMs === null || o.nowMs - deliveredAtMs > PUBLISHED_WINDOW_MS)) {
       // Recently expired only: a year of finished work is not a departure anybody is waiting to explain.
       if (deliveredAtMs !== null && o.nowMs - deliveredAtMs <= 3 * PUBLISHED_WINDOW_MS) hide(p, stage, 'published-old')
       continue
     }
-    const gate = stage === 'qa' || stage === 'adjust' || stage === 'leader' || stage === 'merge' || stage === 'blocked'
+    const gate = stage === 'qa' || stage === 'adjust' || stage === 'leader' || stage === 'merge' || stage === 'ci' || stage === 'blocked'
     const staged = p.sub?.stagedSession !== undefined
-    if (stage === 'queue' && !staged && liveSessions.length === 0) { hide(p, stage, 'queue-idle'); continue }
+    if (stage === 'queue' && !staged && liveSessions.length === 0) { if (recent && p.status !== 'backlog') hide(p, stage, 'queue-idle'); continue }
     if (stage === 'running' && liveSessions.length === 0 && !gate) { hide(p, stage, 'no-live-session'); continue }
     const subject = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
     const trail = trails.get(subject) ?? []
@@ -482,6 +527,8 @@ export function buildLive(o: {
       efforts: [...new Set(liveSessions.concat(p.sessions).map(s => s.effort).filter((m): m is string => !!m))],
       eta, workMs, trail, stageEta, publishEta,
       block: stage === 'blocked' ? blockOf({ text: p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
+      ci: stage === 'ci' ? (ciSignalOf((p.sub ?? p.task) && ((p.sub ?? p.task) as { ci?: unknown }).ci) ?? { mergedMain: true, releaseGreen: false, tagPublished: false, tag: null, pr: null }) : null,
+      step: stage === 'published' || stage === 'queue' ? null : stepOf(eventsBySubject.get(subject) ?? [], stageSinceMs),
       lastAction: ev ? { text: (ev.detail ?? ev.kind).split('\n')[0]!.slice(0, 120), atMs: ms(ev.at) ?? o.nowMs, kind: ev.kind } : null,
       blockedReason: p.blockedReason,
       deliveredAtMs: stage === 'published' ? deliveredAtMs : null,

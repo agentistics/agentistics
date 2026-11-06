@@ -15,8 +15,8 @@ describe('particleGrid', () => {
 })
 
 describe('transitionKind', () => {
-  test('only merge → published is the disintegration; other changes glide; none stays put', () => {
-    expect(transitionKind('merge', 'published')).toBe('merge-approved')
+  test('every stage change glides (no particles any more); none stays put', () => {
+    expect(transitionKind('ci', 'published')).toBe('move') // no particles: the same slide as every other move
     expect(transitionKind('running', 'qa')).toBe('move')
     expect(transitionKind('qa', 'qa')).toBe('none')
     expect(transitionKind(undefined, 'qa')).toBe('none')
