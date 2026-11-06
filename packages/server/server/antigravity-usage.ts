@@ -1,7 +1,7 @@
 /**
  * PLAN LIMITS — the Antigravity (agy) quota tap. agy keeps one weekly quota PER MODEL GROUP ("Gemini
  * models", "Claude and GPT models"); the CLI reads it from Google's `fetchAvailableModels`. This asks
- * the same call with the login agy already keeps in `antigravity-oauth-token`, parses it with
+ * the same call with agy's existing login (file first, Linux keyring if the file is absent), parses it with
  * `parseAntigravityModels` and ingests the record. Modelled on `claude-usage.ts`.
  *
  * The credential rules (same as claude's): read in-process on every poll, held in a local variable
@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import { parseAntigravityModels, type PlanLimits } from '@agentistics/core'
 import { ANTIGRAVITY_DIR, TEAM_CENTRAL } from './config'
 import { ingestFromRoot } from './plan-limits'
+import { readAntigravityCredential } from './antigravity-credential'
 
 export const ANTIGRAVITY_USAGE_POLL_MS = 5 * 60_000
 const MAX_BACKOFF_MS = 30 * 60_000
@@ -32,7 +33,6 @@ export type AntigravitySkip =
   | 'no-credential' | 'expired' | 'unknown-auth' | 'no-project' | 'no-agy' | 'http' | 'rate-limited' | 'unparseable' | 'network'
 export type AntigravityResult = { limits: PlanLimits } | { skip: AntigravitySkip }
 
-const tokenFile = (root: string): string => join(root, 'antigravity-oauth-token')
 const projectFile = (root: string): string => join(root, 'cache', 'default_project_id.txt')
 
 /**
@@ -122,7 +122,7 @@ export async function fetchAntigravityUsage(deps: AntigravityUsageDeps = {}): Pr
   const now = deps.now ?? Date.now
   const root = deps.root ?? ANTIGRAVITY_DIR
   if (!(await (deps.agyLive ?? defaultAgyLive)().catch(() => false))) return { skip: 'no-agy' }
-  const cred = antigravityAccessToken(await (deps.readToken ?? ((r: string) => readFile(tokenFile(r), 'utf8').catch(() => null)))(root), now())
+  const cred = antigravityAccessToken(await (deps.readToken ?? readAntigravityCredential)(root), now())
   if ('skip' in cred) return cred
   const projectId = ((await (deps.readProjectId ?? ((r: string) => readFile(projectFile(r), 'utf8').catch(() => null)))(root)) ?? '').trim()
   if (!projectId) return { skip: 'no-project' }

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { readAntigravityCredential } from './antigravity-credential'
 import type { PlanLimits } from '@agentistics/core'
 import { agyLiveFrom, antigravityAccessToken, fetchAntigravityUsage, startAntigravityUsagePoll, __resetAntigravityUsageForTest, type AntigravityUsageDeps } from './antigravity-usage'
 
@@ -128,7 +129,12 @@ describe('startAntigravityUsagePoll', () => {
     } finally { delete process.env.AGENTISTICS_ANTIGRAVITY_USAGE }
   })
   test('a tick ingests an antigravity record from the default root, and never contains the token', async () => {
-    const r = rig()
+    const r = rig({ readToken: root => readAntigravityCredential(root, {
+      platform: 'linux', defaultRoot: '/fake/agy',
+      readFile: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }) },
+      resolveExecutable: async () => '/fake/secret-tool',
+      run: async () => ({ code: 0, stdout: `[/1]\nsecret = ${cred()}\ncreated = fixture\n` }),
+    }) })
     const stop = startAntigravityUsagePoll(r.deps)
     await Bun.sleep(50)
     stop()
