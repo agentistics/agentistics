@@ -198,7 +198,7 @@ describe('store', () => {
     render(h(Probe))
     await act(async () => { await new Promise(r => setTimeout(r, 20)) })
     expect(seen).toEqual([{ id: 'a', label: 'A', status: 'ok', unit: 'credits', used: 1, limit: 2 }])
-    await act(async () => { await Lib.__refreshApiUsageForTest() })
+    await act(async () => { await Lib.refreshApiUsage() })
     expect(seen).toEqual([{ id: 'a', label: 'A', status: 'ok', unit: 'credits', used: 1, limit: 2 }])
   })
 })
