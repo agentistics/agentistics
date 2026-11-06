@@ -10,6 +10,21 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.201.0': {
+    features: [
+      {
+        pt: 'Nova conversa com a Nay num toque: escolha o assistente (cartões), o modelo, o esforço e a conta — "Automática" usa a conta com mais folga.',
+        en: 'Start a Nay chat in one tap: pick the assistant (cards), model, effort and account — "Automatic" uses the account with the most room.',
+      },
+      {
+        pt: 'A Nay agora roda só pelo motor do agentistics e agora fala como comandante e consultora: quadro, sessões, limites e métricas.',
+        en: 'Nay now runs only through the agentistics engine and speaks as commander and advisor: board, sessions, limits and metrics.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Se a conversa da Nay cair, você é avisado para reabrir — ela nunca vira um terminal sozinha. Sem o motor, a Nay diz que não está disponível.',
+        en: 'If a Nay conversation drops you are told to reopen it — it never turns into a terminal by itself. Without the engine, Nay says she is unavailable.',
   '2.200.4': {
     features: [],
     fixes: [

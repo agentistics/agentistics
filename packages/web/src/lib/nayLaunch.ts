@@ -8,9 +8,12 @@
  * flag, no model picker at all (`HarnessAnswer` from `/api/fleet/new`, built from `spawn-spec.ts`).
  */
 
+import { bindingPct, type PlanLimits } from '@agentistics/core'
 import type { HarnessAnswer } from './wizardSteps'
 
-export interface NayLaunchChoice { harness: string; model: string; effort: string }
+/** `account` is `''` for "Automática" (the account router picks the one with most room). It is a per-start
+ *  choice: it is not part of the saved Settings -> Chat defaults. */
+export interface NayLaunchChoice { harness: string; model: string; effort: string; account: string }
 
 export const NAY_DEFAULT_HARNESS = 'claude'
 
@@ -54,12 +57,14 @@ export function normalizeChoice(c: Partial<NayLaunchChoice>, harnesses: readonly
   const models = h?.models?.map(m => m.id) ?? h?.modelSuggestions ?? []
   const model = h?.supportsModel && c.model && (models.includes(c.model) || h.modelFreeText) ? c.model : ''
   const effort = h && c.effort && h.efforts.includes(c.effort) ? c.effort : ''
-  return { harness, model, effort }
+  // An account belongs to its harness; the field validates it against the accounts it can list.
+  const account = c.account && c.harness === harness ? c.account : ''
+  return { harness, model, effort, account }
 }
 
 /** Changing the harness clears the model and effort: they belonged to the previous one. */
 export function withHarness(c: NayLaunchChoice, harness: string): NayLaunchChoice {
-  return c.harness === harness ? c : { harness, model: '', effort: '' }
+  return c.harness === harness ? c : { harness, model: '', effort: '', account: '' }
 }
 
 /**
@@ -80,4 +85,46 @@ export function launchSummary(
   }
   if (run.effort) parts.push(run.effort)
   return parts.join(' · ')
+}
+
+
+export interface AccountChoice {
+  value: string
+  label: string
+  /** 0..100 of the binding window still free; `null` when no window is known. */
+  freePct: number | null
+  /** Under this the row says so in words — a bar alone does not. */
+  nearLimit: boolean
+}
+
+export const NEAR_LIMIT_FREE_PCT = 15
+
+const freeOf = (l: PlanLimits, now: number): number | null =>
+  l.windows.length === 0 ? null : Math.max(0, Math.min(100, Math.round(100 - bindingPct(l, now))))
+
+/**
+ * The accounts a harness can start on, for the Nay selector: the ones the plan-limits store knows,
+ * each with the room left. `auto` is the account router's pick — the one with most room — and it is
+ * the default, so a person who never opens the field gets what every other start gets.
+ * `labels` is `accountLabels` from `usePlanLimits` (key `harness:account`).
+ */
+export function accountChoices(
+  limits: readonly PlanLimits[] | null,
+  labels: Record<string, string>,
+  harness: string,
+  now: number,
+): { auto: AccountChoice | null; accounts: AccountChoice[] } {
+  const mine = (limits ?? []).filter(l => l.harness === harness)
+  const accounts = mine.map(l => {
+    const freePct = freeOf(l, now)
+    return {
+      value: l.account,
+      label: labels[`${harness}:${l.account}`] ?? l.label ?? l.plan ?? l.sourcePlan ?? l.account,
+      freePct,
+      nearLimit: freePct !== null && freePct < NEAR_LIMIT_FREE_PCT,
+    }
+  })
+  if (accounts.length === 0) return { auto: null, accounts }
+  const best = accounts.reduce((a, b) => ((b.freePct ?? -1) > (a.freePct ?? -1) ? b : a))
+  return { auto: { value: '', label: best.label, freePct: best.freePct, nearLimit: best.nearLimit }, accounts }
 }

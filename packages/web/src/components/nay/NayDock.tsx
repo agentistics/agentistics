@@ -275,7 +275,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
       // same Settings defaults itself, so an early tap starts exactly what the picker would show.
       const res = await fetch(`/api/fleet/nay?lang=${lang}`, {
         method: 'POST',
-        ...(launch ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(launch) } : {}),
+        ...(launch ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...launch, account: launch.account || undefined }) } : {}),
       })
       const out = await res.json().catch(() => null) as { ok?: boolean; message?: string; id?: string } | null
       if (out?.ok && out.id) {
@@ -610,7 +610,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                 launchLine={launch ? summaryOf(launch) : null}
                 pickerOpen={pickerOpen} onTogglePicker={() => setPickerOpen(o => !o)}
                 picker={launch && harnesses ? (
-                  <NayLaunchFields layout={isMobile ? 'stack' : 'compact'} pt={pt} harnesses={harnesses}
+                  <NayLaunchFields layout="card" pt={pt} harnesses={harnesses}
                     value={launch} onChange={setChoice} />
                 ) : null}
               />

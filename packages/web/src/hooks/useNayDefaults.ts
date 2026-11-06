@@ -24,7 +24,7 @@ function load(): Promise<void> {
     .then(r => (r.ok ? r.json() : {}) as Promise<{ chatHarness?: string; chatModel?: string; chatEffort?: string }>)
     .catch(() => ({}) as { chatHarness?: string; chatModel?: string; chatEffort?: string })
     .then(p => {
-      current = { harness: p.chatHarness ?? '', model: p.chatModel ?? '', effort: p.chatEffort ?? '' }
+      current = { harness: p.chatHarness ?? '', model: p.chatModel ?? '', effort: p.chatEffort ?? '', account: '' }
       emit()
     })
   return loading

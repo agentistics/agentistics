@@ -118,7 +118,7 @@ export async function resolveBackend(): Promise<SessionBackend> {
           console.warn(`[sessions] the Nay conversation ${id} dropped (${o.reason}); not relaunched in a terminal`)
           void import('../sse').then(m => m.broadcastNotification({
             type: 'warning', code: 'nay.dropped', meta: { id },
-            title: 'A conversa da Nay caiu', message: 'The Nay conversation dropped · A conversa da Nay caiu. Reabra a conversa no painel da Nay.',
+            title: 'The Nay conversation dropped', message: 'The Nay conversation was interrupted and was not reopened in a terminal. Reopen it from the Nay panel.',
           })).catch(() => {})
           return
         }

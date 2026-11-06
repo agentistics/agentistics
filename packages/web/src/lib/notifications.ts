@@ -69,6 +69,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Passagem sem conta com folga', message: 'Nenhuma conta tem folga agora: a passagem do líder abriu na conta com a janela que reabre primeiro, nunca na conta limitada do antecessor.' },
     en: { title: 'Hand-off with no account that has room', message: 'No account has room right now: the leader hand-off opened on the account whose window reopens first, never on the predecessor\'s limit-blocked one.' },
   },
+  'nay.dropped': {
+    pt: { title: 'A conversa da Nay caiu', message: 'A conversa da Nay foi interrompida e não foi reaberta em um terminal. Reabra a conversa no painel da Nay.' },
+    en: { title: 'The Nay conversation dropped', message: 'The Nay conversation was interrupted and was not reopened in a terminal. Reopen it from the Nay panel.' },
+  },
   'retire.done': {
     pt: { title: 'Sessão encerrada', message: 'A sessão {label} ({id}) foi encerrada.' },
     en: { title: 'Session retired', message: 'Session {label} ({id}) was retired.' },
