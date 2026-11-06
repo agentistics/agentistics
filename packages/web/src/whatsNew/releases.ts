@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.8': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Mac: o cofre volta a abrir. Antes ele se recusava a abrir porque tentava usar uma função que só existe no Linux para proteger a própria memória.',
+        en: 'Mac: the vault opens again. Before, it refused to open because it tried a function that only exists on Linux to protect its own memory.',
+      },
+      {
+        pt: 'A tela do cofre trancado só cita o Windows Hello (ou a chave de segurança) onde essa confirmação existe de verdade; no Mac ela diz apenas "o código".',
+        en: 'The locked-vault screen only mentions Windows Hello (or the security key) where that check really exists; on a Mac it says just "your code".',
+      },
+    ],
+  },
   '2.200.7': {
     features: [],
     fixes: [
