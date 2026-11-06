@@ -887,6 +887,8 @@ export function NewSessionModal({
               lang={lang}
               statuses={chatHarnesses}
               available={harnesses ?? []}
+              planLimits={planSnap.limits}
+              now={planSnap.now}
               selected={harness?.id ?? ''}
               mode="new"
               loading={chatHarnessesLoading || harnesses === null}

@@ -1,4 +1,4 @@
-import type { HarnessId } from '@agentistics/core'
+import { HARNESS_LABELS, HARNESS_ORDER, type HarnessId } from '@agentistics/core'
 import type { ChatDriver, HarnessChatStatus } from './types'
 import { claudeDriver } from './claude'
 import { codexDriver } from './codex'
@@ -9,7 +9,9 @@ import { readHarnessDefaults } from '../sessions/harness-defaults'
 import { readHarnessVersion } from '../sessions/harness-version'
 
 /**
- * Registry of all chat drivers in display order: claude, codex, gemini, copilot.
+ * Registry of chat drivers. The catalog endpoint also includes compatible harnesses without a
+ * Nay chat driver (Kimi, OpenCode, Hermes, etc.) so a surface never mistakes "not a chat driver"
+ * for "not a supported harness".
  */
 export const ALL_DRIVERS: ChatDriver[] = [claudeDriver, codexDriver, geminiDriver, copilotDriver]
 
@@ -32,14 +34,31 @@ export async function chatDefaultModel(harness: HarnessId): Promise<string> {
  * The models come from the ONE catalog every model picker reads (`model-catalog.ts`).
  */
 export async function chatHarnessStatus(): Promise<HarnessChatStatus[]> {
-  return Promise.all(ALL_DRIVERS.map(async d => {
-    const installed = d.isAvailable()
-    const authReady = d.authReady()
-    const version = installed ? await readHarnessVersion(d.id) : undefined
-    const catalog = await modelCatalog(d.id)
+  const byId = new Map(ALL_DRIVERS.map(d => [d.id, d]))
+  return Promise.all(HARNESS_ORDER.map(async id => {
+    const driver = byId.get(id)
+    const catalog = await modelCatalog(id)
+    if (!driver) {
+      return {
+        id,
+        label: HARNESS_LABELS[id],
+        installed: false,
+        authReady: false,
+        ready: false,
+        updateAvailable: false,
+        models: catalog.models.map(m => ({ id: m.id, label: m.label })),
+        modelsSource: catalog.source,
+        modelFreeText: catalog.freeText,
+        defaultModel: '',
+        setup: { note: 'This harness is supported by the catalog, but it has no Nay chat driver.' },
+      }
+    }
+    const installed = driver.isAvailable()
+    const authReady = driver.authReady()
+    const version = installed ? await readHarnessVersion(driver.id) : undefined
     return {
-      id: d.id,
-      label: d.label,
+      id,
+      label: driver.label,
       installed,
       authReady,
       ready: installed && authReady,
@@ -48,8 +67,8 @@ export async function chatHarnessStatus(): Promise<HarnessChatStatus[]> {
       models: catalog.models.map(m => ({ id: m.id, label: m.label })),
       modelsSource: catalog.source,
       modelFreeText: catalog.freeText,
-      defaultModel: await chatDefaultModel(d.id),
-      setup: d.setup,
+      defaultModel: await chatDefaultModel(driver.id),
+      setup: driver.setup,
     }
   }))
 }
