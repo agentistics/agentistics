@@ -75,6 +75,8 @@ export interface TaskSessionRow {
 
 export interface TaskListRow {
   task: Task
+  /** Set by the HTTP list when `task.detail` was cut to a card's worth (`task-list-window.ts`). */
+  detailClipped?: boolean
   attempts: number
   rollup: AttemptRollup
   /**
@@ -562,12 +564,15 @@ export function buildTaskDetail(o: {
   threads?: readonly TaskThread[]
   subtasks?: readonly Subtask[]
   files?: readonly TaskFile[]
+  /** `conversationOwners(rows)`, when the caller builds many details over the same rows (the live line
+   *  builds one per task: recomputing it for each was ~230 ms of a 136-task read). */
+  owners?: ReadonlyMap<string, string>
 }): TaskDetail {
   // ONE ROW PER CONVERSATION, decided ONCE and handed to everything below — the newest row of each
   // conversation, because it carries the current filing and the current liveness. Every figure and
   // every list on this detail reads the same set, so a conversation cannot be in the list and
   // missing from a bucket, or counted twice in the evidence block, or filed in two places.
-  const mine = distinctConversations(rowsOfTask(o.task, o.rows))
+  const mine = distinctConversations(rowsOfTask(o.task, o.rows, o.owners))
   const metas = mine
     .map(r => (r.conversationId ? o.metas.get(r.conversationId) : undefined))
     .filter((m): m is SessionMeta => m !== undefined)

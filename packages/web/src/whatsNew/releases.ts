@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.8': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Agentask abre bem mais rápido: as tarefas abertas e recentes chegam primeiro e o histórico fechado carrega por trás, sem a tela mexer.',
+        en: 'Agentask opens much faster: open and recent tasks arrive first and the closed history loads behind them, without the screen moving.',
+      },
+    ],
+  },
   '2.200.6': {
     features: [
       {

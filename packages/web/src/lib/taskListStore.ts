@@ -17,6 +17,8 @@ export interface TaskListEntry {
   overview: BoardOverview | null
   excluded: number
   error: TaskListError
+  /** True while `rows` is only step one of the split load (open + recent); the rest is on its way. */
+  partial?: boolean
 }
 
 /** Structural equality for JSON-shaped values; rows are plain data from `res.json()`. */
@@ -53,8 +55,8 @@ export function mergeEntry(prev: TaskListEntry | undefined, next: TaskListEntry)
   if (!prev) return next
   const rows = mergeRows(prev.rows, next.rows)
   const overview = same(prev.overview, next.overview) ? prev.overview : next.overview
-  if (rows === prev.rows && overview === prev.overview && prev.excluded === next.excluded && prev.error === next.error) return prev
-  return { rows, overview, excluded: next.excluded, error: next.error }
+  if (rows === prev.rows && overview === prev.overview && prev.excluded === next.excluded && prev.error === next.error && Boolean(prev.partial) === Boolean(next.partial)) return prev
+  return { rows, overview, excluded: next.excluded, error: next.error, ...(next.partial ? { partial: true } : {}) }
 }
 
 const entries = new Map<string, TaskListEntry>()

@@ -243,6 +243,8 @@ export interface BoardViewProps {
   columns?: readonly BoardStatus[]
   /** Hide columns with no card in any lane (a view choice; the picked columns are untouched). */
   hideEmpty?: boolean
+  /** Per-status totals while `rows` is only step one of the split load (see `TaskTableProps`). */
+  statusTotals?: Record<string, number>
   /** The board's LIVE status list (`lib/tasks.ts`'s `useTaskStatuses`) — `null` while it loads. */
   statuses: readonly TaskStatusDef[] | null
 }
@@ -317,8 +319,13 @@ export function BoardView(p: BoardViewProps) {
     }))
   }, [rows, p.lanes, p.sort, p.columnSort, p.columns, p.statuses])
   const hiddenCols = useMemo(
-    () => (p.hideEmpty ? emptyColumns(lanes, lanes.flatMap(l => l.columns.map(c => c.status))) : new Set<string>()),
-    [p.hideEmpty, lanes],
+    () => {
+      if (!p.hideEmpty) return new Set<string>()
+      const empty = emptyColumns(lanes, lanes.flatMap(l => l.columns.map(c => c.status)))
+      for (const st of [...empty]) if ((p.statusTotals?.[st] ?? 0) > 0) empty.delete(st)
+      return empty
+    },
+    [p.hideEmpty, lanes, p.statusTotals],
   )
 
   /** May a card be moved to a new POSITION in this column? Only under hand order — see `canReorderBy`. */
@@ -433,7 +440,7 @@ export function BoardView(p: BoardViewProps) {
                       isMobile={isMobile}
                     />
                     <span style={{ ...microLabel, fontSize: 11 }}>
-                      {col.rows.length}{limit !== undefined ? ` / ${limit}` : ''}
+                      {p.statusTotals?.[col.status] ?? col.rows.length}{limit !== undefined ? ` / ${limit}` : ''}
                     </span>
                     {over_ && (
                       // A WIP limit WARNS and never blocks: the limit is an agreement a team makes
