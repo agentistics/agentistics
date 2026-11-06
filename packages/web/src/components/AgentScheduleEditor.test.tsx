@@ -69,3 +69,24 @@ describe('the plan-usage modal card offers the schedule', () => {
     expect(html).toContain('Agenda · ligada')
   })
 })
+
+describe('all day + weekly ceiling in the editor', () => {
+  const full: AgentSchedule = { enabled: true, maxWeeklyPct: 60, days: { mon: { windows: [{ from: '09:00', to: '18:00' }], allDay: true, maxDailyPct: 20 } } }
+  const html = renderToStaticMarkup(<AgentScheduleEditor accountId="acc_1" who="x" schedule={full} lang="pt"
+    view={{ reason: 'in-window', on: true, dayUsedPct: 4, weekUsedPct: 30, maxDailyPct: 20, maxWeeklyPct: 60 }} />)
+  test('all-day hides the time inputs and the add-window button, keeps the daily ceiling', () => {
+    expect(html).toContain('data-agent-allday="mon"')
+    expect(html).not.toContain('data-agent-window')
+    expect(html).not.toContain('type="time"')
+    expect(html).not.toContain('>janela<')
+    expect(html).toContain('value="20"')
+    expect(html).toContain('Gastar no máximo')
+    expect(html).toContain('% da semana neste dia')
+  })
+  test('weekly ceiling field above the days, with the live reading', () => {
+    expect(html.indexOf('data-agent-weekly-cap')).toBeLessThan(html.indexOf('data-agent-day-editor'))
+    expect(html).toContain('Parar os agentes quando a semana chegar a')
+    expect(html).toContain('value="60"')
+    expect(html).toContain('semana em 30% agora')
+  })
+})

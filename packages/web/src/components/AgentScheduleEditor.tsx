@@ -11,11 +11,12 @@ import { Plus, X } from 'lucide-react'
 import { ToggleSwitch } from './ToggleSwitch'
 import { dialogButtonStyle } from '../pages/settings/primitives'
 import {
-  addWindow, agentUseReasonText, copyToSelected, DAY_SHORT, dailyUsageText, removeWindow, sameSchedule, scheduleProblem,
-  setDailyCap, setWindow, toggleDay, type AgentUseView,
+  addWindow, agentUseReasonText, copyToSelected, DAY_SHORT, dailyUsageText, dayReadingHint, removeWindow, sameSchedule, scheduleProblem,
+  setAllDay, setDailyCap, setWeeklyCap, setWindow, toggleDay, weekReadingHint, type AgentUseView,
 } from '../lib/agentScheduleView'
 
 type Lang = 'pt' | 'en'
+const TODAY_ID = (): AgentDay => (['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const)[new Date().getDay()]!
 
 /** The state badge: why the account is on or off for agents right now. */
 export function AgentUseBadge({ view, lang }: { view: AgentUseView; lang: Lang }) {
@@ -89,6 +90,14 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
           : 'Outside these hours the account is off for agents. Turning it on by hand overrides the schedule; turning it off returns to the schedule. A session already running is not stopped.')
         : (pt ? 'Desligada: o interruptor "Uso por agentes" decide sozinho, como antes.' : 'Off: the "Agent use" switch alone decides, as before.')}
     </p>
+    <label data-agent-weekly-cap style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-secondary)', opacity: draft.enabled ? 1 : 0.6 }}>
+      {pt ? 'Parar os agentes quando a semana chegar a' : 'Stop agents when the week reaches'}
+      <input type="number" inputMode="decimal" min={1} max={100} step={1} placeholder="—" aria-label={pt ? 'Teto da semana (% de uso semanal)' : 'Weekly ceiling (% of weekly usage)'}
+        value={draft.maxWeeklyPct ?? ''} onChange={e => { const v = e.target.value.trim(); setDraft(s => setWeeklyCap(s, v === '' ? undefined : Number(v))) }}
+        style={{ ...time, width: 64 }} />
+      %
+      {weekReadingHint(view, lang) && <span data-agent-week-hint style={{ color: 'var(--text-tertiary)', fontSize: 11.5 }}>{weekReadingHint(view, lang)}</span>}
+    </label>
     <div role="group" aria-label={pt ? 'Dias da semana' : 'Weekdays'} style={{ display: 'flex', flexWrap: 'wrap', gap: 6, opacity: draft.enabled ? 1 : 0.6 }}>
       {AGENT_DAYS.map(d => {
         const on = !!draft.days[d]
@@ -104,8 +113,15 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
     {selected.map(d => {
       const day = draft.days[d]!
       return <div key={d} data-agent-day-editor={d} style={{ borderTop: '1px solid var(--border)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, opacity: draft.enabled ? 1 : 0.6 }}>
-        <b style={{ fontSize: 12.5 }}>{DAY_SHORT[d][lang]}</b>
-        {day.windows.map((w, i) => <div key={i} data-agent-window style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}><div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <b style={{ fontSize: 12.5 }}>{DAY_SHORT[d][lang]}</b>
+          <button type="button" aria-pressed={!!day.allDay} data-agent-allday={d} onClick={() => { setFocusDay(d); setDraft(s => setAllDay(s, d, !day.allDay)) }}
+            style={{ ...small, borderRadius: 99, ...(day.allDay ? { border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange)', color: '#000', fontWeight: 650 } : {}) }}>
+            {pt ? 'Dia inteiro' : 'All day'}
+          </button>
+          {day.allDay && <span data-agent-allday-note style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{pt ? '00:00 – 24:00' : '00:00 – 24:00'}</span>}
+        </div>
+        {!day.allDay && day.windows.map((w, i) => <div key={i} data-agent-window style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}><div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', minWidth: 0 }}>
           <input type="time" step={60} aria-label={`${DAY_SHORT[d][lang]} · ${pt ? 'início' : 'from'} ${i + 1}`} value={w.from} onChange={e => { setFocusDay(d); setDraft(s => setWindow(s, d, i, { from: e.target.value })) }} style={time} />
           <span style={{ color: 'var(--text-tertiary)' }}>–</span>
           <input type="time" step={60} aria-label={`${DAY_SHORT[d][lang]} · ${pt ? 'fim' : 'to'} ${i + 1}`} value={w.to} onChange={e => { setFocusDay(d); setDraft(s => setWindow(s, d, i, { to: e.target.value })) }} style={time} />
@@ -113,16 +129,17 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
         </div>
           {w.to <= w.from && <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{pt ? 'termina no dia seguinte' : 'ends the next day'}</span>}
         </div>)}
-        {day.windows.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{pt ? 'Sem janela: o dia fica desligado.' : 'No window: the day stays off.'}</span>}
+        {!day.allDay && day.windows.length === 0 && <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{pt ? 'Sem janela: o dia fica desligado.' : 'No window: the day stays off.'}</span>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" onClick={() => setDraft(s => addWindow(s, d))} style={small}><Plus size={13} aria-hidden />{pt ? 'janela' : 'window'}</button>
+          {!day.allDay && <button type="button" onClick={() => setDraft(s => addWindow(s, d))} style={small}><Plus size={13} aria-hidden />{pt ? 'janela' : 'window'}</button>}
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
-            {pt ? 'Teto do dia' : 'Daily ceiling'}
+            {pt ? 'Gastar no máximo' : 'Spend at most'}
             <input type="number" inputMode="decimal" min={1} max={100} step={1} placeholder="—" aria-label={`${DAY_SHORT[d][lang]} · ${pt ? 'teto do dia (% da semana)' : 'daily ceiling (% of the week)'}`}
               value={day.maxDailyPct ?? ''} onChange={e => { const v = e.target.value.trim(); setDraft(s => setDailyCap(s, d, v === '' ? undefined : Number(v))) }}
               style={{ ...time, width: 64 }} />
-            {pt ? '% da semana' : '% of the week'}
+            {pt ? '% da semana neste dia' : '% of the week on this day'}
           </label>
+          {d === TODAY_ID() && dayReadingHint(view, lang) && <span data-agent-day-hint style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{dayReadingHint(view, lang)}</span>}
           {selected.length > 1 && <button type="button" data-agent-copy={d} onClick={() => setDraft(s => copyToSelected(s, d))} style={small}>{pt ? 'Copiar para os dias marcados' : 'Copy to the selected days'}</button>}
         </div>
       </div>
