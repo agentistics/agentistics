@@ -152,7 +152,7 @@ export function SessionLine({
         {...(openLabel ? { 'aria-label': openLabel } : {})}
         title={fell ? `${title} · ${pt ? 'esta sessão caiu' : 'this session fell'}` : title}
         style={{
-          flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8,
+          flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: 8,
           // Top-aligned in the row, with the padding that centres ONE title line in the minimum height:
           // a single-line row looks exactly as before, and a wrapped title grows DOWNWARD, so the role
           // icon (and the team chevron beside it) always sit on the FIRST line, never mid-card.
