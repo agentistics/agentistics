@@ -1687,6 +1687,10 @@ export function computeDerivedStats(
     const dailyActivityDates = new Set(filteredDailyActivity.map(d => d.date))
     const supplementByDay: Record<string, { messageCount: number; sessionCount: number; toolCallCount: number }> = {}
     for (const s of filteredSessions) {
+      // statsCache is Claude's history: only Claude sessions fill ITS gap days. Non-Claude sessions
+      // are added once, through `nonClaudeInRange`; letting them in here counted every one of them
+      // twice in the unfiltered view whenever its day was missing from the cache.
+      if ((s.harness ?? 'claude') !== 'claude') continue
       if (!isDateStr(s.start_time)) continue
       const day = format(parseISO(s.start_time), 'yyyy-MM-dd')
       if (dailyActivityDates.has(day)) continue // already covered by statsCache
