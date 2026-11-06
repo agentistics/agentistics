@@ -27,6 +27,7 @@ import {
 } from './harness-accounts'
 import { allHistory, dropHistory, moveHistory, pointOf, recordHistory, type HistoryPoint, __resetPlanHistoryForTest } from './plan-history'
 import { withFileLock } from './sessions/file-lock'
+import { agentUseView, type AgentUseView } from './agent-schedule-host'
 import { defaultHomeAccount, resolveSessionAccount } from './sessions/session-account'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
@@ -497,6 +498,12 @@ export async function syncPlanLimitsFromFile(): Promise<number> {
   return n
 }
 
+/** Every record held, after taking in what another process wrote (the agent-schedule evaluator reads the weekly window). */
+export async function storedPlanLimits(): Promise<PlanLimits[]> {
+  await syncPlanLimitsFromFile()
+  return Object.values(state.limits)
+}
+
 const fileWatchers = new Set<ReturnType<typeof fsWatch>>()
 
 /** The server watches the shared file so a record another process wrote reaches the browser at once. */
@@ -765,7 +772,7 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
   }
 }
 
-export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string; unassignedLive: number }
+export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string; unassignedLive: number; agentUse?: AgentUseView }
 
 export interface PlanLimitsPayload {
   /** Which harnesses can be spawned here; a harness hidden from agents is absent. */
@@ -929,6 +936,15 @@ export async function planLimitsPayload(
   const visibleBudgets = agentVisible(allBudgets, visibility)
   const shown = new Set(visibleBudgets)
   const hiddenFromAgents = allBudgets.filter(b => !shown.has(b))
+  // CONTAS.AGENDA-AGENTICA: each row says WHY its account is on or off for agents (schedule, manual).
+  {
+    const stored = Object.values(state.limits), at = new Date(nowMs)
+    for (const b of allBudgets) {
+      const rec = registry.accounts.find(a => a.id === canonicalAccountId(registry, b.account))
+      const view = rec ? agentUseView(rec, stored, at) : undefined
+      if (view) b.agentUse = view
+    }
+  }
   // Only rows agents may see compete, and only an account the registry says is the same login.
   const recordOf = (id: string) => registry.accounts.find(a => a.id === id)
   const sameAccount = (x: string, y: string) => {
