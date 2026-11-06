@@ -3,7 +3,7 @@
  * "Sign in again" re-binds the SAME account (id, nickname, plan, agent switch kept) in its own folder.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AccountBudget } from '@agentistics/core'
@@ -28,6 +28,8 @@ async function setup(probe: (h: string, root: string | null) => Promise<AccountI
   const store = createHarnessAccounts({ file: join(tmp, 'accounts.json'), probe: probe as never, now: () => clock })
   const root = join(tmp, 'accounts', 'claude', 'r_nay')
   await mkdir(root, { recursive: true, mode: 0o700 })
+  // A healthy login holds a credential in its folder (`account-credentials.ts` reads only its shape).
+  await writeFile(join(root, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'test-not-a-token' } }))
   const { account } = await store.bind(root, { harness: 'claude', ...NAYARA })
   await store.update(account.id, { nickname: 'Nayara', available: false })
   return { store, root, id: account.id, tick: (ms: number) => { clock += ms } }
@@ -88,6 +90,30 @@ describe('the registry mark', () => {
     const again = await store.readAccounts()
     expect(withLoginState(again.accounts, again)[0]).toMatchObject({ login: 'ok' })
     expect(withLoginState(again.accounts, again)[0]!.relogin).toBeUndefined()
+  })
+})
+
+describe('a root that lost its credential (RELOGIN.NAYARA)', () => {
+  test('a bound account whose folder holds no credential reads signed out and offers the re-login', async () => {
+    if (process.platform === 'darwin') return // the macOS login lives in the keychain: a missing file proves nothing there
+    const { store, id, root } = await setup()
+    await rm(join(root, '.credentials.json'))
+    const file = await store.readAccounts()
+    expect(withLoginState(file.accounts, file)[0]).toMatchObject({ id, login: 'signed_out', relogin: true })
+    // An empty file and one with no OAuth credential are the same finding.
+    await writeFile(join(root, '.credentials.json'), '')
+    expect(withLoginState(file.accounts, file)[0]).toMatchObject({ login: 'signed_out' })
+    await writeFile(join(root, '.credentials.json'), '{}')
+    expect(withLoginState(file.accounts, file)[0]).toMatchObject({ login: 'signed_out' })
+    // Signing in again writes it back, and the account reads ok.
+    await writeFile(join(root, '.credentials.json'), JSON.stringify({ claudeAiOauth: { refreshToken: 'x' } }))
+    expect(withLoginState(file.accounts, file)[0]).toMatchObject({ login: 'ok' })
+  })
+  test('a root that is not on disk proves nothing', async () => {
+    const { store, id, root } = await setup()
+    await rm(root, { recursive: true, force: true })
+    const file = await store.readAccounts()
+    expect(withLoginState(file.accounts, file).find(a => a.id === id)).toMatchObject({ login: 'ok' })
   })
 })
 

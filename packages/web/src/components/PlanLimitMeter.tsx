@@ -63,8 +63,10 @@ export const PLAN_ROW_GRID = { display: 'grid', gridTemplateColumns: 'auto 1fr a
  * (CONTA.LIMITES), so an account reads the same in both. `note` replaces the plan line (a reason the
  * row cannot be picked); `tag` leads the plan line ("Current"), so it never cuts the name.
  */
-export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note, tag, wrap = false }: {
+export function PlanUsageRowCells({ harness, name, plan, limits: reading, now, lang, note, tag, wrap = false, loginBroken = false }: {
   harness: PlanLimits['harness']; name: string; plan: string | undefined; limits: PlanLimits | null; now: number; lang: Lang
+  /** The account's login is expired or signed out: whatever reading it has is stale, so no rings (0/0 would read as "unused"). */
+  loginBroken?: boolean
   note?: ReactNode; tag?: ReactNode
   /** The picker: name and plan WRAP (never an ellipsis on the one fact that tells rows apart), the tag on its own line. */
   wrap?: boolean
@@ -72,7 +74,9 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
   const text = wrap
     ? { display: 'block', overflowWrap: 'anywhere' } as const
     : { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as const
-  const waiting = lang === 'pt' ? 'sem leitura do plano' : 'no plan reading'
+  // A reading of an account that cannot sign in is the last thing it said, not what it uses now.
+  const limits = loginBroken ? null : reading
+  const waiting = loginBroken ? (lang === 'pt' ? 'sem login' : 'signed out') : (lang === 'pt' ? 'sem leitura do plano' : 'no plan reading')
   return <>
     <HarnessMark harness={harness} size={20} />
     <div style={{ minWidth: 0 }}>
@@ -107,7 +111,7 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
       const who = subscriptionName(row.harness, row.accountLabel)
       return <div key={`${row.harness}:${i}`} style={{ borderTop: '1px solid var(--border)', padding: '8px 4px' }}>
         <div data-plan-row={row.harness} style={PLAN_ROW_GRID}>
-          <PlanUsageRowCells harness={row.harness} name={who} plan={row.plan} limits={row.limits} now={now} lang={lang} />
+          <PlanUsageRowCells harness={row.harness} name={who} plan={row.plan} limits={row.limits} now={now} lang={lang} loginBroken={control?.loginBroken === true} />
         </div>
         {!control && agentUse && agentUse.loaded === false && row.account && <div data-plan-row-controls-loading style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-tertiary)' }}>…</div>}
         {control && <div data-plan-row-controls={control.accountId} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)' }}>

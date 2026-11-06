@@ -14,6 +14,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     features: [],
     fixes: [
       {
+        pt: 'Uma conta do Claude que perdeu o login (pasta sem credencial) agora aparece como "sem login" no popup de Uso, com o botão "Refazer login", em vez de anéis 0/0; e o roteador não a recomenda mais para novas sessões.',
+        en: 'A Claude account that lost its login (folder with no credential) now shows as "signed out" in the Usage popup, with the "Sign in again" button, instead of 0/0 rings; and the router no longer recommends it for new sessions.',
+      },
+      {
         pt: 'Na aba Encerradas, os grupos Dormindo, Finalizadas hoje e Antes de hoje agora têm seta para recolher e abrir (com a contagem quando recolhidos) e lembram o estado; "Antes de hoje" começa recolhido.',
         en: 'In the Ended tab, the Sleeping, Finished today and Before today groups now have a chevron to fold and unfold (with the count while folded) and remember their state; "Before today" starts folded.',
       },
