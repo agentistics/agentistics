@@ -196,4 +196,3 @@ export function useApiUsage(): ApiUsageSnapshot {
 /** Tests / fixtures: put a list in place without the network. */
 export function __setApiUsageForTest(items: ApiUsageItem[] | null): void { emit({ items }) }
 export function refreshApiUsage(): Promise<void> { return refresh() }
-export function __refreshApiUsageForTest(): Promise<void> { return refreshApiUsage() }

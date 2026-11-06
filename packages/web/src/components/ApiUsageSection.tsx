@@ -66,6 +66,7 @@ function ApiKeyDialog({ item, lang, open, onClose, onChanged }: { item: ApiUsage
       if (!response.ok) { setError(typeof body?.error === 'string' ? body.error : (pt ? 'Não foi possível salvar a chave.' : 'Could not save the key.')); return }
       setKey('')
       if (!nextMissing.length && !nextUnverified.length) onChanged()
+      else void refreshApiUsage()
     } catch { setError(pt ? 'Não foi possível salvar a chave.' : 'Could not save the key.') }
     finally { setBusy(false) }
   }
