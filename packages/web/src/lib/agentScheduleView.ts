@@ -34,6 +34,19 @@ export function dayWindowsText(day: { windows: readonly AgentWindow[]; allDay?: 
   return day.windows.map(w => `${w.from}–${w.to}`).join(', ')
 }
 
+/** One line for a whole schedule: "seg, ter: dia inteiro · qua: 09:00–18:00". Empty when no day is set. */
+export function scheduleSummaryText(schedule: { days: Partial<Record<AgentDay, { windows: readonly AgentWindow[]; allDay?: boolean }>> } | undefined, lang: Lang): string {
+  if (!schedule) return ''
+  const groups = new Map<string, AgentDay[]>()
+  for (const d of Object.keys(DAY_SHORT) as AgentDay[]) {
+    const day = schedule.days[d]
+    if (!day) continue
+    const t = dayWindowsText(day, lang)
+    groups.set(t, [...(groups.get(t) ?? []), d])
+  }
+  return [...groups].map(([t, ds]) => `${ds.map(d => DAY_SHORT[d][lang]).join(', ')}: ${t || (lang === 'pt' ? 'sem janela' : 'no window')}`).join(' · ')
+}
+
 /** "today: 12% of 20% allowed" — null when there is no ceiling or nothing measurable. */
 export function dailyUsageText(view: AgentUseView, lang: Lang): string | null {
   if (view.maxDailyPct === undefined) return null

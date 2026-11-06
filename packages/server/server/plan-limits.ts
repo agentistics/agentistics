@@ -1015,7 +1015,31 @@ export async function planLimitsPayload(
       .filter(a => a.harness === h && !a.retired)
     return live.length > 0 && live.every(a => !a.available)
   }
-  const publicHarnesses = Object.fromEntries(Object.entries(spawnability).filter(([h]) => !hiddenOutright(h as HarnessId))) as Partial<Record<HarnessId, HarnessSpawnability>>
+  // F3: an all-OFF harness whose every account is off BY SCHEDULE is named, not spawnable, with the
+  // reason — "nothing right now" is not "nothing exists". A manual OFF still hides it outright.
+  const SCHEDULE_OFF: Partial<Record<string, string>> = {
+    'outside-window': 'outside its scheduled hours', 'day-off': 'a day off in its schedule',
+    'daily-cap': 'its daily ceiling was reached', 'weekly-cap': 'its weekly ceiling was reached',
+  }
+  const scheduleOffReason = (h: HarnessId): string | undefined => {
+    const ids = new Set(visibility.map(a => a.id))
+    const live = [...visibility, ...registry.accounts.filter(a => !ids.has(a.id))].filter(a => a.harness === h && !a.retired)
+    const at = new Date(nowMs), stored = Object.values(state.limits)
+    const reasons: string[] = []
+    for (const a of live) {
+      const rec = registry.accounts.find(r => r.id === a.id)
+      const r = rec ? SCHEDULE_OFF[agentUseView(rec, stored, at)?.reason ?? ''] : undefined
+      if (!r) return undefined
+      if (!reasons.includes(r)) reasons.push(r)
+    }
+    return reasons.length ? `every ${h} account is off for agents right now: ${reasons.join('; ')}` : undefined
+  }
+  const publicHarnesses: Partial<Record<HarnessId, HarnessSpawnability>> = {}
+  for (const [h, v] of Object.entries(spawnability) as [HarnessId, HarnessSpawnability][]) {
+    if (!hiddenOutright(h)) { publicHarnesses[h] = v; continue }
+    const why = scheduleOffReason(h)
+    if (why) publicHarnesses[h] = { spawnable: false, unavailableReason: why }
+  }
   return { harnesses: publicHarnesses, limits, registered, budgets, hiddenFromAgents, readings, freeSlots, freeSlotsByHarness, freeSlotsByAccount, unassignedLive, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }
 

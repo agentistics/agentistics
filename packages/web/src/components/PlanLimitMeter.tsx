@@ -13,7 +13,7 @@ import { createPortal } from 'react-dom'
 import { useState, type ReactNode } from 'react'
 import { CalendarClock, KeyRound } from 'lucide-react'
 import { AgentScheduleEditor, AgentUseBadge } from './AgentScheduleEditor'
-import type { AgentUseView } from '../lib/agentScheduleView'
+import { scheduleSummaryText, type AgentUseView } from '../lib/agentScheduleView'
 import { HARNESS_LABELS } from '../lib/harness'
 import { HarnessMark } from './sessions/HarnessMark'
 import {
@@ -92,7 +92,7 @@ export function PlanUsageRowCells({ harness, name, plan, limits, now, lang, note
 
 export function PlanUsageSummary({ limits, registered = [], accountLabels, now, lang, onOpen, embedded = false, agentUse, onRelogin }: {
   /** The popup's per-account controls: ONLY the agent-use switch and "Sign in again" (never the schedule). */
-  agentUse?: ((harness: PlanLimits['harness'], account?: string) => { on: boolean; pending: boolean; onToggle: () => void; accountId: string; reloginable: boolean; loginBroken?: boolean } | undefined) & { loaded?: boolean; accounts?: readonly { harness: PlanLimits['harness']; id: string; label?: string }[] }
+  agentUse?: ((harness: PlanLimits['harness'], account?: string) => { on: boolean; pending: boolean; onToggle: () => void; accountId: string; view?: AgentUseView; reloginable: boolean; loginBroken?: boolean } | undefined) & { loaded?: boolean; accounts?: readonly { harness: PlanLimits['harness']; id: string; label?: string }[] }
   onRelogin?: (r: { accountId: string; harness: PlanLimits['harness']; who: string }) => void
   onOpen?: () => void; limits: PlanLimits[] | null; registered?: RegisteredPlan[]; accountLabels?: Record<string, string>; now: number; lang: Lang; /** Inside a card that already carries the title: fill its width, no own title or inset. */ embedded?: boolean }) {
   const rows = subscriptionRows(limits, registered, accountLabels, agentUse?.accounts)
@@ -115,6 +115,7 @@ export function PlanUsageSummary({ limits, registered = [], accountLabels, now, 
             <ToggleSwitch on={control.on} disabled={control.pending} onToggle={control.onToggle} label={`${lang === 'pt' ? 'Uso por agentes' : 'Agent use'} · ${who}`} />
             {lang === 'pt' ? 'Uso por agentes' : 'Agent use'}
           </span>
+          {control.view && <AgentUseBadge view={control.view} lang={lang} />}
           {control.loginBroken && onRelogin && <button type="button" data-plan-row-relogin={control.accountId} onClick={() => onRelogin({ accountId: control.accountId, harness: row.harness, who })}
             style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 8, padding: '3px 9px', fontSize: 11.5, cursor: 'pointer' }}>
             <KeyRound size={12} aria-hidden />{lang === 'pt' ? 'Refazer login' : 'Sign in again'}
@@ -198,10 +199,11 @@ function AgentScheduleSection({ control, who, lang, isMobile }: { control: { acc
   const pt = lang === 'pt'
   const [open, setOpen] = useState(false)
   const active = !!control.schedule?.enabled
+  const summary = scheduleSummaryText(control.schedule, lang)
   return <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
     <button type="button" aria-expanded={open} data-agent-schedule-toggle onClick={() => setOpen(o => !o)}
       style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer', minHeight: isMobile ? 44 : undefined }}>
-      <CalendarClock size={13} aria-hidden />{pt ? 'Agenda' : 'Schedule'}{active ? (pt ? ' · ligada' : ' · on') : ''}{open ? ' ▴' : ' ▾'}
+      <CalendarClock size={13} aria-hidden />{pt ? 'Agenda' : 'Schedule'}{active ? (pt ? ' · ligada' : ' · on') : ''}{active && !open && summary ? <span data-agent-schedule-summary style={{ fontWeight: 400, color: 'var(--text-tertiary)' }}> · {summary}</span> : null}{open ? ' ▴' : ' ▾'}
     </button>
     {open && <div style={{ padding: 10, borderRadius: 10, background: 'var(--ag-tint-2)', minWidth: 0 }}>
       <AgentScheduleEditor accountId={control.accountId} who={who} schedule={control.schedule} view={control.view} lang={lang} isMobile={isMobile} onSaved={control.applyAccount} showBadge={false} />

@@ -11,7 +11,7 @@ import { Plus, X } from 'lucide-react'
 import { ToggleSwitch } from './ToggleSwitch'
 import { dialogButtonStyle } from '../pages/settings/primitives'
 import {
-  addWindow, agentUseReasonText, copyToSelected, DAY_SHORT, dailyUsageText, dayReadingHint, removeWindow, sameSchedule, scheduleProblem,
+  addWindow, agentUseReasonText, copyToSelected, DAY_SHORT, dailyUsageText, scheduleSummaryText, dayReadingHint, removeWindow, sameSchedule, scheduleProblem,
   setAllDay, setDailyCap, setWeeklyCap, setWindow, toggleDay, weekReadingHint, type AgentUseView,
 } from '../lib/agentScheduleView'
 
@@ -83,6 +83,7 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
       <ToggleSwitch on={draft.enabled} onToggle={() => setDraft(d => ({ ...d, enabled: !d.enabled }))} tap={tap}
         label={`${pt ? 'Agenda de uso por agentes' : 'Agent-use schedule'} · ${who}`} />
     </div>
+    {draft.enabled && scheduleSummaryText(draft, lang) && <span data-agent-schedule-line style={{ fontSize: 11.5, color: 'var(--text-tertiary)', overflowWrap: 'anywhere' }}>{scheduleSummaryText(draft, lang)}</span>}
     {showBadge && view && !dirty && <AgentUseBadge view={view} lang={lang} />}
     <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-tertiary)' }}>
       {draft.enabled
@@ -119,7 +120,6 @@ export function AgentScheduleEditor({ accountId, who, schedule, view, lang, isMo
             style={{ ...small, borderRadius: 99, ...(day.allDay ? { border: '1px solid var(--anthropic-orange)', background: 'var(--anthropic-orange)', color: '#000', fontWeight: 650 } : {}) }}>
             {pt ? 'Dia inteiro' : 'All day'}
           </button>
-          {day.allDay && <span data-agent-allday-note style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{pt ? '00:00 – 24:00' : '00:00 – 24:00'}</span>}
         </div>
         {!day.allDay && day.windows.map((w, i) => <div key={i} data-agent-window style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}><div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', minWidth: 0 }}>
           <input type="time" step={60} aria-label={`${DAY_SHORT[d][lang]} · ${pt ? 'início' : 'from'} ${i + 1}`} value={w.from} onChange={e => { setFocusDay(d); setDraft(s => setWindow(s, d, i, { from: e.target.value })) }} style={time} />
