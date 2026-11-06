@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  byStage, etaText, filterCards, fmtSpan, joinLive, liveStateOf, summarize,
+  byStage, orderQueueFirstUp, queuePosition, etaText, filterCards, fmtSpan, joinLive, liveStateOf, summarize,
   type LiveDeliveryRecord,
 } from './liveDeliveryModel'
 import type { FleetRow } from '../../lib/fleet'
@@ -81,5 +81,14 @@ describe('words', () => {
     expect(e.line).not.toMatch(/confian/i)
     expect(e.title).toContain('6 entregas parecidas')
     expect(e.title).toContain('claude · opus')
+  })
+})
+
+describe('queue order (F3)', () => {
+  test('queued cards read 1st first from the top of the column', () => {
+    const mk = (key: string, since: number) => ({ d: rec({ key, stage: 'queue', stageSinceMs: since }), agents: [], alert: false, liveState: 'idle' }) as never
+    const cards = [mk('c', 30), mk('a', 10), mk('b', 20)]
+    const cols = orderQueueFirstUp(byStage(cards), cards)
+    expect(cols.queue.map(c => queuePosition(cards, c))).toEqual([1, 2, 3])
   })
 })

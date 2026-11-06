@@ -15,12 +15,12 @@ import { useNavigate } from 'react-router-dom'
 import { useFleet, type FleetRow } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { usePlanLimits } from '../../lib/planLimits'
-import { accountLabelKey } from '../../lib/planLimits'
+import { accountDisplayName } from '../../lib/planLimits'
 import { Select } from '../../pages/settings/primitives'
 import { harnessColor, microLabel, pill, surface } from './board'
 import { SessionChip } from '../sessions/RoleChip'
 import {
-  LIVE_STAGES, LIVE_STATE_LABEL, STAGE_LABEL, byStage, etaText, filterCards, fmtSpan, joinLive, summarize,
+  LIVE_STAGES, LIVE_STATE_LABEL, orderQueueFirstUp, STAGE_LABEL, byStage, etaText, filterCards, fmtSpan, joinLive, summarize,
   fmtClock, LIVE_DEFAULTS, isQueued, queuePosition, cardPills, type StageFilter, type LeaderRecord, type LiveCard, type LiveReply, type LiveStage,
 } from './liveDeliveryModel'
 import { useLiveDeliveries } from './useLiveDeliveries'
@@ -84,7 +84,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
 
   const cards = useMemo(() => joinLive(reply?.deliveries ?? [], fleet), [reply, fleet])
   const shown = useMemo(() => filterCards(cards, { taskId, onlyActive }), [cards, taskId, onlyActive])
-  const columns = useMemo(() => byStage(shown), [shown])
+  const columns = useMemo(() => orderQueueFirstUp(byStage(shown), shown), [shown])
   const visibleStages = stageFilter === 'all' ? LIVE_STAGES : LIVE_STAGES.filter(s => s === stageFilter)
   const sum = useMemo(() => summarize(shown, nowMs), [shown, nowMs])
   const tasks = useMemo(() => {
@@ -174,7 +174,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     navigate(id ? `/sessions/${encodeURIComponent(id)}` : `/tasks/${encodeURIComponent(c.d.taskId)}`)
   }
   const accountOf = (a: LiveCard['agents'][number]) =>
-    a.accountId ? (accountLabels[accountLabelKey(a.harness, a.accountId)] ?? a.accountId) : null
+    a.accountId ? accountDisplayName(accountLabels, a.harness, a.accountId) : null
 
   const summaryLine = [
     L.deliveries(sum.deliveries), L.agents(sum.agentsWorking),

@@ -11,7 +11,20 @@ export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
   '2.200.5': {
-    features: [],
+    features: [
+      {
+        pt: 'Atalho da Live Delivery no topo das Sessões: passe o mouse para ver a Live ao vivo num popup grande (no celular, toque para abrir uma folha), clique para ir à Live.',
+        en: 'Live Delivery shortcut in the Sessions top bar: hover for a big live preview (on a phone, tap for a sheet), click to open Live.',
+      },
+      {
+        pt: 'A Live agora abre com "só com agentes ativos" ligado, todas as tarefas e todas as etapas; cartões na fila ficam apagados e mostram a posição; modelo e conta em duas etiquetas; colunas maiores com barra de rolagem laranja.',
+        en: 'Live now opens with "only active agents" on, all tasks and all steps; queued cards are dimmed and show their place; model and account in two pills; wider columns with an orange scrollbar.',
+      },
+      {
+        pt: 'O menu do Agentask lista cada visão (Métricas, Quadro, Tabela, Live, Atividade) e destaca a ativa; os prazos estimados mostram só o horário aproximado, sem o selo de confiança.',
+        en: 'The Agentask menu lists every view (Metrics, Board, Table, Live, Activity) and highlights the active one; estimated deadlines show only the approximate time, with no confidence label.',
+      },
+    ],
     fixes: [
       {
         pt: 'No Mac, a lista de sessões não trava mais o servidor: a leitura dos processos roda em segundo plano e é compartilhada, então a máquina volta a responder e encerrar ou abrir sessões funciona.',
