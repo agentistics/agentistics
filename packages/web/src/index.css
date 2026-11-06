@@ -746,6 +746,9 @@ textarea,
 .ag-hint-pulse { animation: ag-hint-pulse 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .ag-hint-pulse { animation: none; } }
 @media (prefers-reduced-motion: reduce) { .ag-working-spin { animation: none; } }
+/* The reasoning line's brain, while the model is still reasoning (the seconds beside it keep ticking under reduced motion). */
+.ag-reasoning-pulse { animation: ag-hint-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .ag-reasoning-pulse { animation: none; } }
 
 /* The phone's session panel (`Drawer side="left"`) holds cards built for a 344px popover. Inside
    one of its sections they take the section's width instead — an inline width only an !important

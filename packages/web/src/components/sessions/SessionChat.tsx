@@ -48,6 +48,7 @@ import { TypedModel } from './ModelSelect'
 import { approvalIdentity } from '../../lib/approvalQuestion'
 import { dialogAnswersToRetire } from '../../lib/dialogAnswerEcho'
 import { ChatBubble, type ChatTurn } from './ChatBubble'
+import { ReasoningRow, useReasoningClock } from './ReasoningRow'
 import { WorkingNote } from './WorkingNote'
 import { ToolActivity } from './ToolActivity'
 import { chatActivityStore } from '../../lib/appFlags'
@@ -1385,6 +1386,9 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
   const structuredText = source?.liveText ?? (adapter ? payload.liveText : undefined)
   const structuredReasoning = source?.liveReasoning ?? (adapter ? payload.liveReasoning : undefined)
  const composing = adapter ? payload.composing ?? null : null
+  // The live reasoning is a LINE, animated while the model is still reasoning (it stops being the newest thing once the answer starts).
+  const reasoningClock = useReasoningClock(Boolean(structuredReasoning), Boolean(structuredText), working)
+  const reasoningRunning = Boolean(structuredReasoning) && working && !structuredText
 
   // A turn just ENDED. The live bubble is gone the moment `working` drops, and the real one is up
   // to `CHAT_POLL_MS` away — a gap where neither source is showing the answer that just finished.
@@ -2712,8 +2716,11 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
               those as chat entries buried the sentences actually addressed to the user. */}
           {/* A SOURCE's live text is the model's own stream — exact, unlike a screen read — so it
               is drawn as the bubble it will become (`chatSource.ts`). */}
-          {(structuredText || structuredReasoning) && (
-            <ChatBubble turn={{ role: 'assistant', text: structuredText ?? '', ...(structuredReasoning ? { reasoning: structuredReasoning } : {}) }} lang={lang} harness={session.harness} sessionId={session.id} />
+          {structuredReasoning && (
+            <ReasoningRow text={structuredReasoning} running={reasoningRunning} clock={reasoningClock} lang={lang} />
+          )}
+          {structuredText && (
+            <ChatBubble turn={{ role: 'assistant', text: structuredText }} lang={lang} harness={session.harness} sessionId={session.id} />
           )}
 
           {showWorking && !liveActivity && (

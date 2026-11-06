@@ -58,19 +58,23 @@ describe('SessionChat with a ChatSource', () => {
   })
 })
 
-describe('ReasoningBlock — the native reasoning, collapsed above the answer', () => {
-  test('closed by default: the label shows, the reasoning text does not, the answer does', async () => {
+describe('the reasoning is an activity line — the native reasoning, closed above the answer', () => {
+  test('closed by default: the line shows, the reasoning text does not, the answer does', async () => {
     const { ChatBubble } = await import('./ChatBubble')
     const html = renderToStaticMarkup(<MemoryRouter><ChatBubble turn={{ role: 'assistant', text: 'The answer.', reasoning: 'secret plan' }} lang="pt" harness="agentistics" /></MemoryRouter>)
-    expect(html).toContain('Raciocínio')
+    expect(html).toContain('Raciocinou')
+    expect(html).toContain('data-running="false"')
     expect(html).toContain('aria-expanded="false"')
     expect(html).not.toContain('secret plan')
     expect(html).toContain('The answer.')
   })
-  test('the CLI transcript\'s `thinking` is still not drawn (that decision is untouched)', async () => {
+  test('the CLI transcript\'s `thinking` is still not drawn (that decision is untouched) — except OpenCode\'s, which streams it', async () => {
     const { ChatBubble } = await import('./ChatBubble')
-    const html = renderToStaticMarkup(<MemoryRouter><ChatBubble turn={{ role: 'assistant', text: 'ok', thinking: 'claude thought' }} lang="en" harness="claude" /></MemoryRouter>)
-    expect(html).not.toContain('reasoning-block')
+    const claude = renderToStaticMarkup(<MemoryRouter><ChatBubble turn={{ role: 'assistant', text: 'ok', thinking: 'claude thought' }} lang="en" harness="claude" /></MemoryRouter>)
+    expect(claude).not.toContain('reasoning-row')
+    const opencode = renderToStaticMarkup(<MemoryRouter><ChatBubble turn={{ role: 'assistant', text: 'ok', thinking: 'opencode thought' }} lang="en" harness="opencode" /></MemoryRouter>)
+    expect(opencode).toContain('Reasoned')
+    expect(opencode).not.toContain('opencode thought')
   })
 })
 
