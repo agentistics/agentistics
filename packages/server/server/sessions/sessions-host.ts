@@ -989,11 +989,17 @@ export function createSessionsPoller(o: {
         // A 2.x TUI with several tabs reports one record per tab under ONE pid (`expandOpencodeTabs`): that pane
         // drives no single conversation, so it links to none — never to whichever tab happened to be listed last.
         const several = new Set<number>()
+        // MAC.OPENCODE-MUDO: a tabs-derived id (`HarnessProcess.sessionFrom`) is keyed by DIRECTORY — a sibling TUI's
+        // tab, or a dead TUI's leftover, reads exactly like this pane's own. It may FILL a row that has no
+        // conversation yet; it never MOVES one, or a leader in a shared workspace is re-pointed at another session
+        // (its chat, composer and reopen then act on the wrong conversation, or on none).
+        const fromTabs = new Set<number>()
         for (const p of processes) {
           if (!SCAN_LINKED.has(p.harness) || !p.sessionId || p.pid === undefined) continue
           const held = scanned.get(p.pid)
           if (held !== undefined && held !== p.sessionId) several.add(p.pid)
           scanned.set(p.pid, p.sessionId)
+          if (p.sessionFrom === 'tabs') fromTabs.add(p.pid)
         }
         for (const pid of several) scanned.delete(pid)
         for (const m of registry) {
@@ -1001,6 +1007,7 @@ export function createSessionsPoller(o: {
           const pid = panePids?.get(m.id)
           const found = pid === undefined ? undefined : scanned.get(pid)
           if (!found || found === m.conversationId) continue
+          if (m.conversationId && fromTabs.has(pid!)) continue
           if (m.conversationId && !moveAllowed(m.id, found, live)) continue
           try {
             await o.recordConversation(m.id, found, 'assigned', 'process-log')

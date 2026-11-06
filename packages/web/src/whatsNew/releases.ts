@@ -10,6 +10,27 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.5': {
+    features: [],
+    fixes: [
+      {
+        pt: 'No Mac, a lista de sessões não trava mais o servidor: a leitura dos processos roda em segundo plano e é compartilhada, então a máquina volta a responder e encerrar ou abrir sessões funciona.',
+        en: 'On a Mac the session list no longer stalls the server: the process scan runs in the background and is shared, so the machine answers again and ending or opening sessions works.',
+      },
+      {
+        pt: 'No Mac, sessões abertas fora do agentistics (OpenCode e outras) voltam a aparecer, inclusive as instaladas em ~/.local/bin.',
+        en: 'On a Mac, sessions opened outside agentistics (OpenCode and others) show up again, including tools installed in ~/.local/bin.',
+      },
+      {
+        pt: 'OpenCode 2.x: a conversa de sessões novas é encontrada de novo (passagem de liderança, histórico), em vez de "o arquivo da conversa não foi encontrado".',
+        en: 'OpenCode 2.x: new sessions\' conversations are found again (leader hand-off, history) instead of "conversation file not found".',
+      },
+      {
+        pt: 'OpenCode 2.x: uma aba de outro terminal no mesmo diretório não troca mais a conversa de uma sessão aberta pelo agentistics.',
+        en: 'OpenCode 2.x: a tab from another terminal in the same folder no longer swaps the conversation of a session agentistics opened.',
+      },
+    ],
+  },
   '2.200.4': {
     features: [],
     fixes: [

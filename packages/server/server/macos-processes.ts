@@ -146,3 +146,18 @@ export function macExecutable(commPath: string, resolve: (path: string) => strin
   if (!commPath.startsWith('/')) return commPath
   return resolve(commPath) ?? commPath
 }
+
+/**
+ * PURE. One BULK `ps -ww -o pid=,command= -p <a,b,c>` answer → each pid's command line. MAC.OPENCODE-MUDO: the argv
+ * used to cost one synchronous `ps` per candidate (every node/bun/deno process on the machine is a candidate — each
+ * harness session's MCP servers alone are several), which blocked the server's event loop for seconds on every
+ * fleet poll on a Mac. A line that does not start with a pid is skipped.
+ */
+export function parsePsCommands(raw: string): Map<number, string> {
+  const out = new Map<number, string>()
+  for (const line of raw.split('\n')) {
+    const m = /^\s*(\d+)\s+(.+?)\s*$/.exec(line)
+    if (m) out.set(Number(m[1]), m[2]!)
+  }
+  return out
+}

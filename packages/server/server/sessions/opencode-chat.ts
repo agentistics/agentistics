@@ -74,3 +74,48 @@ export function parseOpencodeChat(messages: readonly OpencodeMessageRow[], parts
   }
   return turns
 }
+
+/** 2.x tool names → the 1.x names `parseOpencodeChat` and `canonicalTool` know (engine `api.ts` keeps the same table). */
+const TOOL_V1: Record<string, string> = { shell: 'bash', subagent: 'task' }
+/** 2.x tool status → 1.x (`streaming` is the input still arriving: 1.x called that `pending`). */
+const STATUS_V1: Record<string, string> = { streaming: 'pending', running: 'running', completed: 'completed', error: 'error' }
+
+/**
+ * PURE. OpenCode 2.x messages (`GET /api/session/{id}/message?order=asc`, measured on 2.2.5) → the 1.x message/part
+ * rows `parseOpencodeChat` reads. 2.x folds the parts into the assistant message's own `content[]` (`text`,
+ * `reasoning`, `tool`), and a `user` message carries its `text` directly; every other type (`idle`, `system`,
+ * `synthetic`, …) is opencode's own plumbing and is dropped, exactly as the 1.x reader drops synthetic parts.
+ * Without this, a session created after the 1.x → 2.x migration was "not found" by every host reader (the 1.x
+ * tables are frozen at the migration), which is what the hand-off briefing reported as "o arquivo da conversa não
+ * foi encontrado". Part ids are `<message id>:<index>`, stable across reads. Junk is skipped, never thrown on.
+ */
+export function chatRowsOfV2Messages(msgs: readonly unknown[]): { messages: OpencodeMessageRow[]; parts: OpencodePartRow[] } {
+  const messages: OpencodeMessageRow[] = []
+  const parts: OpencodePartRow[] = []
+  for (const raw of msgs) {
+    const m = obj(raw)
+    if (typeof m.id !== 'string') continue
+    const created = typeof obj(m.time).created === 'number' ? obj(m.time).created as number : 0
+    if (m.type === 'user') {
+      messages.push({ id: m.id, time_created: created, data: JSON.stringify({ role: 'user' }) })
+      if (typeof m.text === 'string' && m.text !== '') parts.push({ id: `${m.id}:0`, message_id: m.id, data: JSON.stringify({ type: 'text', text: m.text }) })
+      continue
+    }
+    if (m.type !== 'assistant') continue
+    messages.push({ id: m.id, time_created: created, data: JSON.stringify({ role: 'assistant' }) })
+    const content = Array.isArray(m.content) ? m.content : []
+    content.forEach((rc, i) => {
+      const c = obj(rc)
+      let data: Record<string, unknown> | null = null
+      if ((c.type === 'text' || c.type === 'reasoning') && typeof c.text === 'string') data = { type: c.type, text: c.text }
+      else if (c.type === 'tool' && typeof c.name === 'string') {
+        const st = obj(c.state)
+        const input = { ...obj(st.input) }
+        if (typeof input.path === 'string' && input.filePath === undefined) input.filePath = input.path
+        data = { type: 'tool', tool: TOOL_V1[c.name] ?? c.name, state: { status: STATUS_V1[String(st.status)] ?? st.status, input } }
+      }
+      if (data) parts.push({ id: `${m.id}:${i}`, message_id: m.id as string, data: JSON.stringify(data) })
+    })
+  }
+  return { messages, parts }
+}
