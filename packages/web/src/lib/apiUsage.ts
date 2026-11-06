@@ -17,6 +17,7 @@ export interface ApiUsageRequirement {
   level: { pt: string; en: string }
   required: boolean
 }
+export interface ApiUsageNote { pt: string; en: string }
 
 export interface ApiUsageConfig {
   kind: 'api-key'
@@ -27,6 +28,7 @@ export interface ApiUsageConfig {
   createUrl?: string
   pricingUrl?: string
   requirements?: ApiUsageRequirement[]
+  notes?: ApiUsageNote[]
 }
 
 export interface ApiUsageItem {
@@ -92,6 +94,10 @@ function configOf(v: unknown): ApiUsageConfig | undefined {
       return !!label && !!level && typeof label.pt === 'string' && typeof label.en === 'string' && typeof level.pt === 'string' && typeof level.en === 'string' && typeof x.required === 'boolean'
     }) as ApiUsageRequirement[]
     if (requirements.length) config.requirements = requirements
+  }
+  if (Array.isArray(c.notes)) {
+    const notes = c.notes.filter(n => n && typeof n === 'object' && typeof (n as { pt?: unknown }).pt === 'string' && typeof (n as { en?: unknown }).en === 'string') as ApiUsageNote[]
+    if (notes.length) config.notes = notes
   }
   return config
 }
@@ -189,4 +195,5 @@ export function useApiUsage(): ApiUsageSnapshot {
 
 /** Tests / fixtures: put a list in place without the network. */
 export function __setApiUsageForTest(items: ApiUsageItem[] | null): void { emit({ items }) }
-export function __refreshApiUsageForTest(): Promise<void> { return refresh() }
+export function refreshApiUsage(): Promise<void> { return refresh() }
+export function __refreshApiUsageForTest(): Promise<void> { return refreshApiUsage() }
