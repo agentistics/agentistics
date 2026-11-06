@@ -31,6 +31,7 @@ import type { ManagedSession, RetireRequest } from './types'
 import { withFileLock } from './file-lock'
 import { RefusalLog } from './refusal-log'
 import { withIdentityPreferences } from './session-identity-prefs'
+import { isServerProcess } from './shared-snapshot'
 
 /** Distinguishes two writes from the SAME process; the pid distinguishes the processes. */
 let writeSeq = 0
@@ -576,6 +577,7 @@ export function createSessionRegistry(file: string, deps: { lock?: typeof withFi
 
 /** The registry this machine actually uses. */
 const defaultRegistry = withIdentityPreferences(createSessionRegistry(MANAGED_SESSIONS_FILE), undefined, {
+  readRepair: isServerProcess,
   backgroundReadRepair: true,
   onReadRepair: async () => {
     const { broadcastSessionGroupsChanged } = await import('../sse')

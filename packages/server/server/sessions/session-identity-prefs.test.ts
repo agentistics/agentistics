@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Preferences } from '../preferences'
@@ -27,6 +27,7 @@ function fixture() {
       for (const [from, to] of links) {
         if (!roles[from]) continue
         roles[to] = roles[from]!
+        delete roles[from]
       }
     },
   }
@@ -62,7 +63,7 @@ describe('session identity preferences', () => {
     expect(f.prefs.pinnedSessions).toEqual(['conv', 'other'])
     expect(f.prefs.mutedSessions).toEqual(['conv'])
     expect(f.prefs.checkin).toEqual({ conv: { session: 'conv', intervalMin: 15 } })
-    expect(f.roles).toEqual({ mid: 'worker', conv: 'worker', other: 'leader' })
+    expect(f.roles).toEqual({ conv: 'worker', other: 'leader' })
     expect(f.prefs.ui).toEqual({ floatingPanels: { v: 1, sessions: { conv: { at: 5, windows: {} } } }, sessionTabs: true })
     await rekeySessionIdentities([row('mid', 'conv')], f.deps)
     expect(f.writes()).toBe(1)
@@ -191,4 +192,56 @@ test('writes during background repair wait for it, then repair their durable new
     expect(events).toEqual(['repair:old', 'refresh', 'repair:next'])
     expect((await raw.read())[0]!.conversationId).toBe('next')
   } finally { finish(); await rm(dir, { recursive: true, force: true }) }
+})
+
+
+test('short CLI reads skip startup repair and refresh while explicit writes still repair links', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'folder-rekey-'))
+  try {
+    const raw = createSessionRegistry(join(dir, 'sessions.json'))
+    await raw.add(row('mid', 'conv'))
+    let repairs = 0, refreshes = 0
+    let server = false
+    const registry = withIdentityPreferences(raw, async () => { repairs++ }, {
+      readRepair: () => server, backgroundReadRepair: true,
+      onReadRepair: () => { refreshes++ },
+    })
+    expect(await registry.read()).toEqual([row('mid', 'conv')])
+    await registry.read()
+    expect(repairs).toBe(0)
+    expect(refreshes).toBe(0)
+    await registry.patch('mid', { conversationId: 'next' })
+    expect(repairs).toBe(1)
+    expect(refreshes).toBe(0)
+    // Server role can be set after the registry module was imported.
+    server = true
+    await registry.read()
+    await registry.patch('mid', { label: 'wait for startup repair' })
+    expect(repairs).toBe(2)
+    expect(refreshes).toBe(1)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+
+test('production registry in a one-shot CLI does not migrate legacy roles on read', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'cli-registry-repair-'))
+  try {
+    await writeFile(join(dir, 'managed-sessions.json'), JSON.stringify([row('mid', 'conv')]))
+    const roles = JSON.stringify({ version: 1, migrated: true, roles: { mid: 'leader' } })
+    await writeFile(join(dir, 'session-roles.json'), roles)
+    const child = Bun.spawn([process.execPath, '--eval', `
+      const { readRegistry } = await import(${JSON.stringify(join(import.meta.dir, 'registry.ts'))});
+      console.log(JSON.stringify(await readRegistry()));
+    `], {
+      env: { ...process.env, AGENTISTICS_DIR: dir, SERVE_STATIC: '0' },
+      stdout: 'pipe', stderr: 'pipe',
+    })
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+    ])
+    expect(stderr).toBe('')
+    expect(code).toBe(0)
+    expect(JSON.parse(stdout)).toEqual([row('mid', 'conv')])
+    expect(await readFile(join(dir, 'session-roles.json'), 'utf8')).toBe(roles)
+  } finally { await rm(dir, { recursive: true, force: true }) }
 })

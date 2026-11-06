@@ -1,6 +1,6 @@
 /** Carry preferences across sessionIdentityKey's managed-id → conversation-id transition. */
 import { updatePreferences, type Preferences } from '../preferences'
-import { defaultRoleDeps, loadRoles, rekeyStoredRole } from './session-roles'
+import { rekeyStoredRoleBatch } from './session-roles'
 import { isServerProcess } from './shared-snapshot'
 import { PORT } from '../config'
 import type { SessionRegistry } from './registry'
@@ -13,15 +13,7 @@ export interface IdentityPrefsDeps {
 }
 const defaults: IdentityPrefsDeps = {
   update: updatePreferences,
-  roles: async links => {
-    const deps = await defaultRoleDeps()
-    const doc = await loadRoles(deps)
-    for (const [from, to] of links) {
-      if (doc.roles[from] || doc.lastDeliveredRole?.[from]) {
-        await rekeyStoredRole([from], [from, to], deps).catch(() => {})
-      }
-    }
-  },
+  roles: async links => { await rekeyStoredRoleBatch(links) },
   notify: async () => {
     if (isServerProcess()) {
       const { broadcastSessionGroupsChanged } = await import('../sse')
@@ -86,14 +78,19 @@ export async function rekeySessionIdentities(
 }
 
 /** The production registry's link boundary: all server/CLI writers share this wrapper.
- * The first read repairs old links once. Production reads let the repair finish in the background;
- * writes still await their own repair after the registry link is durable. Raw registry
+ * The server repairs old links once in the background; short-lived CLI readers skip that scan.
+ * Writes still await their own repair after the registry link is durable. Raw registry
  * operations stay independent of preferences (including tests and their temporary registries).
  */
 export function withIdentityPreferences(
   registry: SessionRegistry,
   rekey: (rows: readonly ConversationIdentity[]) => Promise<void> = rekeySessionIdentities,
-  options: { backgroundReadRepair?: boolean; onReadRepair?: () => void | Promise<void> } = {},
+  options: {
+    /** Evaluated on read: the server role can be set after the registry module is imported. */
+    readRepair?: () => boolean
+    backgroundReadRepair?: boolean
+    onReadRepair?: () => void | Promise<void>
+  } = {},
 ): SessionRegistry {
   const repair = (rows: readonly ConversationIdentity[]) => Promise.resolve().then(() => rekey(rows)).catch(() => {})
   let healed: Promise<void> | undefined
@@ -101,6 +98,7 @@ export function withIdentityPreferences(
     ...registry,
     async read() {
       const rows = await registry.read()
+      if (options.readRepair && !options.readRepair()) return rows
       healed ??= (() => {
         const started = performance.now()
         return repair(rows).finally(async () => {
