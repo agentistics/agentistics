@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.4': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A janela de uso dos planos sempre cabe na tela, tem altura limitada e rola por dentro (com barra de rolagem nova), e o "Refazer login" só aparece quando o login da conta expirou.',
+        en: 'The plan usage popup always fits the screen, has a capped height and scrolls inside (with a new scrollbar), and "Sign in again" only shows when that account\'s login has expired.',
+      },
+    ],
+  },
   '2.200.3': {
     features: [],
     fixes: [
