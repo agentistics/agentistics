@@ -746,6 +746,31 @@ export async function scanLinuxProcesses(procRoot = '/proc'): Promise<{
       for (const p of unlinked) { const id = linked.get(p.pid!); if (id) p.sessionId = id }
     } catch { /* best-effort: an unread log is an unlinked row, as before */ }
   }
+  // codex 0.161 holds `state_5.sqlite`, not the rollout, so an external TUI usually names no conversation by
+  // fd. Its own `threads` table does (`codex-thread-link.ts`): the thread created in this cwd at this
+  // process's start time. Same guard as opencode: only the real /proc, only unlinked processes.
+  if (procRoot === '/proc' && procs.some(p => p.harness === 'codex')) {
+    try {
+      const { dropWrapperParents } = await import('./sessions/codex-thread-link')
+      const { readCodexProcessSessions, codexStatePathOfPid } = await import('./sessions/codex-thread-log')
+      // The npm/bun wrapper (`codex.js`) outlives the native binary it spawned: one terminal, two "codex"
+      // processes. Keep the child — the row list and the link both want one.
+      const ppidOf = new Map<number, number>((table ?? []).map(r => [r.pid, r.ppid]))
+      const codex = procs.filter(p => p.harness === 'codex' && p.pid !== undefined)
+      const keep = new Set(dropWrapperParents(codex.map(p => ({ pid: p.pid!, ppid: ppidOf.get(p.pid!) }))).map(p => p.pid))
+      for (let i = procs.length - 1; i >= 0; i--) { const p = procs[i]!; if (p.harness === 'codex' && p.pid !== undefined && !keep.has(p.pid)) procs.splice(i, 1) }
+      const taken = new Set<string>()
+      try {
+        const { readRegistry } = await import('./sessions/registry')
+        for (const m of await readRegistry()) if (m.harness === 'codex' && m.conversationId) taken.add(m.conversationId)
+      } catch { /* no registry: nothing is excluded */ }
+      const all = procs.filter(p => p.harness === 'codex' && p.pid !== undefined)
+      const linked = await readCodexProcessSessions(all.map(p => ({
+        pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs, knownId: p.sessionId, statePath: codexStatePathOfPid(p.pid!),
+      })), undefined, taken)
+      for (const p of all) { if (p.sessionId) continue; const id = linked.get(p.pid!); if (id) p.sessionId = id }
+    } catch { /* best-effort: an unread state is an unlinked row, as before */ }
+  }
   const unavailable = procs.length > 0
     ? null
     : detectionUnavailable({ platform: 'linux', procReadable: true, foreignPids, cwdDenied })
