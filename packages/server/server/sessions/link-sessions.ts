@@ -48,18 +48,31 @@ export function linkManagedSessions(
 
   const claims = new Map<string, ManagedSession[]>()
 
+  // APP.LENTO: this ran a full scan of every session for every managed row — 3.000 × 5.000 with a
+  // `Date.parse` each, ~1 s of the event loop on EVERY data build (the build's `finalize` stage). The
+  // candidates are now looked up by (harness, directory). Both of the session's directories are keys,
+  // the same predicate the live panel uses (`sessionAtCwd`): a session that moved into a worktree
+  // records it as `current_cwd` while `project_path` stays at the root, and the managed session holds
+  // only the one directory it was started in. A session whose two directories are equal is indexed once.
+  const byPlace = new Map<string, { s: SessionMeta; at: number }[]>()
+  const add = (key: string, entry: { s: SessionMeta; at: number }) => {
+    const list = byPlace.get(key)
+    if (list) list.push(entry)
+    else byPlace.set(key, [entry])
+  }
+  for (const s of sessions) {
+    const at = Date.parse(s.start_time ?? '')
+    if (!Number.isFinite(at)) continue
+    const entry = { s, at }
+    if (typeof s.current_cwd === 'string') add(`${s.harness}\0${s.current_cwd}`, entry)
+    if (typeof s.project_path === 'string' && s.project_path !== s.current_cwd) add(`${s.harness}\0${s.project_path}`, entry)
+  }
+
   for (const { m, startedMs } of withStart) {
-    const candidates = sessions.filter(s => {
-      if (s.harness !== (m.harness as HarnessId)) return false
-      // Both of the session's directories count, the same predicate the live panel uses: a session
-      // that moved into a worktree records it as `current_cwd` while `project_path` stays at the
-      // root, and the managed session holds only the one directory it was started in.
-      if (!sessionAtCwd(s, m.cwd)) return false
-      const at = Date.parse(s.start_time ?? '')
-      if (!Number.isFinite(at)) return false
+    const candidates = (byPlace.get(`${m.harness as HarnessId}\0${m.cwd}`) ?? [])
+      .filter(({ s, at }) => sessionAtCwd(s, m.cwd) && at >= startedMs && at - startedMs <= windowMs)
       // Strictly after, and inside the window. A conversation that predates the start is not it.
-      return at >= startedMs && at - startedMs <= windowMs
-    })
+      .map(({ s }) => s)
 
     // Two conversations this session could be — refuse rather than take the closest. "Closest" is a
     // coin flip dressed as a rule when two assistants were opened in one directory minutes apart.

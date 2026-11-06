@@ -94,7 +94,31 @@ export function findConversation<C extends Pick<Conversation, 'sessionId' | 'nat
   pool: readonly C[],
   id: string,
 ): C | undefined {
-  return pool.find(c => c.sessionId === id) ?? pool.find(c => c.nativeId === id)
+  const index = indexOf(pool)
+  return (index.bySession.get(id) ?? index.byNative.get(id)) as C | undefined
+}
+
+/**
+ * APP.LENTO: `findConversation` was two linear scans, and the fleet poll calls it three times per
+ * managed row (`claimResume`, `reopenTargetFor`, `metricsOf`) — on a real machine 3.000 rows × 3.600
+ * conversations every five seconds, ~20 % of the server's CPU in the profile. The pool is now indexed
+ * ONCE per array (both ids, FIRST occurrence wins, exactly as `Array.find` did) and the index is
+ * rebuilt whenever the array's length changes, so a caller that appends to its pool is never
+ * answered from a stale index.
+ */
+type ConversationIndex = { length: number; bySession: Map<string, unknown>; byNative: Map<string, unknown> }
+const INDEXES = new WeakMap<readonly unknown[], ConversationIndex>()
+function indexOf(pool: readonly Pick<Conversation, 'sessionId' | 'nativeId'>[]): ConversationIndex {
+  const known = INDEXES.get(pool)
+  if (known && known.length === pool.length) return known
+  const bySession = new Map<string, unknown>(), byNative = new Map<string, unknown>()
+  for (const c of pool) {
+    if (!bySession.has(c.sessionId)) bySession.set(c.sessionId, c)
+    if (c.nativeId !== undefined && !byNative.has(c.nativeId)) byNative.set(c.nativeId, c)
+  }
+  const index = { length: pool.length, bySession, byNative }
+  INDEXES.set(pool, index)
+  return index
 }
 
 const CACHE_TTL_MS = 30_000

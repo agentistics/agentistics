@@ -122,3 +122,42 @@ describe('applySessionLabels', () => {
     expect(sessions[0]!.user_label).toBe('harness name')
   })
 })
+
+describe('linkManagedSessions — indexed lookup (APP.LENTO)', () => {
+  /** The pre-index implementation, kept as the reference the index must agree with. */
+  function bruteForce(ms: ManagedSession[], ss: SessionMeta[], windowMs = LINK_WINDOW_MS): Map<string, string> {
+    const claims = new Map<string, string[]>()
+    for (const m of ms) {
+      const startedMs = Date.parse(m.createdAt)
+      if (!Number.isFinite(startedMs)) continue
+      const c = ss.filter(s => s.harness === m.harness && (s.current_cwd === m.cwd || s.project_path === m.cwd)
+        && Number.isFinite(Date.parse(s.start_time ?? '')) && Date.parse(s.start_time) >= startedMs && Date.parse(s.start_time) - startedMs <= windowMs)
+      if (c.length !== 1) continue
+      claims.set(c[0]!.session_id, [...(claims.get(c[0]!.session_id) ?? []), m.id])
+    }
+    return new Map([...claims].filter(([, l]) => l.length === 1).map(([k, l]) => [k, l[0]!]))
+  }
+
+  it('agrees with the full scan on a random fleet, worktrees and equal directories included', () => {
+    let seed = 7
+    const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) % 2 ** 31; return seed % n }
+    const dirs = ['/a', '/b', '/a/wt', '/c', '/d', '/e', '/f', '/g']
+    const harnesses = ['claude', 'codex', 'gemini'] as const
+    const ms: ManagedSession[] = Array.from({ length: 300 }, (_, i) => managed({
+      id: `m${i}`, harness: harnesses[rnd(3)], cwd: dirs[rnd(8)]!, createdAt: new Date(T0 + rnd(40) * 3_600_000).toISOString(),
+    }))
+    const ss: SessionMeta[] = Array.from({ length: 120 }, (_, i) => {
+      const p = dirs[rnd(8)]!
+      return meta({ session_id: `s${i}`, harness: harnesses[rnd(3)], project_path: p, current_cwd: rnd(3) === 0 ? p : rnd(2) ? dirs[rnd(8)] : undefined,
+        start_time: rnd(20) === 0 ? 'garbage' : new Date(T0 + rnd(200 * 60) * 60_000).toISOString() })
+    })
+    const got = new Map([...linkManagedSessions(ms, ss)].map(([k, m]) => [k, m.id]))
+    expect(got).toEqual(bruteForce(ms, ss))
+    expect(got.size).toBeGreaterThan(0)
+  })
+
+  it('a session whose two directories are the same directory is one candidate, not two', () => {
+    const s = meta({ project_path: '/repo/a', current_cwd: '/repo/a' })
+    expect(linkManagedSessions([managed()], [s]).get('s1')?.id).toBe('m1')
+  })
+})

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { configFingerprint, createFingerprintMemo, findGitDirs, headFingerprint } from './git-fs'
@@ -95,6 +95,24 @@ describe('getGitRemote — spawns only when the config changed', () => {
     g(repo, 'remote', 'set-url', 'origin', 'https://github.com/o/new.git')
     expect(await getGitRemote(repo)).toBe('github.com/o/new')
     expect(gitMetaSpawnCount() - n0).toBe(2)
+  })
+  test('APP.LENTO: a config that cannot be fingerprinted, or a read that failed, is not asked again on every build', async () => {
+    clearGitStatsCache()
+    const inc = join(root, 'with-include'); mkdirSync(inc)
+    g(inc, 'init', '-q', '-b', 'main')
+    g(inc, 'remote', 'add', 'origin', 'https://github.com/o/inc.git')
+    writeFileSync(join(inc, '.git', 'config'), readFileSync(join(inc, '.git', 'config'), 'utf8') + '[include]\n\tpath = extra\n')
+    const n0 = gitMetaSpawnCount()
+    expect(await getGitRemote(inc)).toBe('github.com/o/inc')
+    expect(await getGitRemote(inc)).toBe('github.com/o/inc')
+    expect(gitMetaSpawnCount() - n0).toBe(1)
+    // A worktree whose gitdir is gone: git fails (exit 128), the caller gets undefined both times, one process.
+    const broken = join(root, 'broken-wt'); mkdirSync(broken)
+    writeFileSync(join(broken, '.git'), `gitdir: ${join(root, 'nowhere', '.git', 'worktrees', 'x')}\n`)
+    const n1 = gitMetaSpawnCount()
+    expect(await getGitRemote(broken)).toBeUndefined()
+    expect(await getGitRemote(broken)).toBeUndefined()
+    expect(gitMetaSpawnCount() - n1).toBe(1)
   })
   test('not a repository: no process at all', async () => {
     const n0 = gitMetaSpawnCount()

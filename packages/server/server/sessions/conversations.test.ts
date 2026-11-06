@@ -118,3 +118,17 @@ test('findConversation answers to either id, and the store key wins', () => {
   const shadow = toConversation(session({ harness: 'gemini', session_id: 'z', native_session_id: 'b' }))
   expect(findConversation([shadow, b], 'b')).toBe(b)
 })
+
+test('findConversation (indexed, APP.LENTO): first occurrence wins, and an appended pool is re-indexed', () => {
+  const pool: { sessionId: string; nativeId?: string; n: number }[] = [
+    { sessionId: 'x', n: 1 }, { sessionId: 'x', n: 2 }, { sessionId: 'y', nativeId: 'u', n: 3 }, { sessionId: 'z', nativeId: 'u', n: 4 },
+  ]
+  expect(findConversation(pool, 'x')?.n).toBe(1)
+  expect(findConversation(pool, 'u')?.n).toBe(3)
+  expect(findConversation(pool, 'late')).toBeUndefined()
+  pool.push({ sessionId: 'late', n: 5 })
+  expect(findConversation(pool, 'late')?.n).toBe(5)
+  // A store key that equals another row's native id still wins, as the two scans did.
+  pool.push({ sessionId: 'u', n: 6 })
+  expect(findConversation(pool, 'u')?.n).toBe(6)
+})
