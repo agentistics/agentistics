@@ -143,7 +143,7 @@ import { applyAccountToPlan } from './sessions/account-plan'
 import { ensureClaudeProjectTrusted } from './sessions/claude-trust'
 import { prependContext } from './sessions/agentistics-context'
 import { rootIfLeader } from './sessions/team-links'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor, storedRoleFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
@@ -1966,7 +1966,7 @@ async function spawnRow(a: {
   spawnedAt: string
   req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; parentSessionId?: string; parentConversationId?: string; mode?: CanonicalMode; inherit?: ManagedSession }
   pendingContext?: string
-  /** Per-session away mode, already resolved (explicit request, else inherited / the replaced row's). */
+  /** Per-session autonomous mode, already resolved (explicit request, else inherited / the replaced row's). */
   away?: boolean
   model?: string
   effort?: string
@@ -2086,7 +2086,7 @@ export async function spawnManaged(req: {
   spawnDoor?: 'engine'
   gateTaskId?: string
   gateSubtaskId?: string
-  /** Per-session away mode: on, off, or inherit a verified away parent's (absent = inherit). */
+  /** Per-session autonomous mode: on, off, or inherit a verified away parent's (absent = inherit). */
   away?: boolean | 'inherit'
   attemptId?: string
   /** The row this spawn REPLACES: its identity (`inheritedIdentity`) is born into the new row. */
@@ -2221,7 +2221,6 @@ export async function spawnManaged(req: {
   const launch = req.resumeId ? inheritedLaunch(req.inherit, req.harness) : {}
   const model = req.model ?? launch.model
   const effort = req.effort ?? launch.effort
-  const mode = req.mode ?? launch.mode
   // Minted BEFORE the plan: the agentistics context tells the harness its own session id.
   const id = newSessionId()
   const offeredConversationId = randomUUID()
@@ -2246,6 +2245,8 @@ export async function spawnManaged(req: {
   const away = req.away === undefined && req.inherit
     ? req.inherit.away === true
     : await resolveSpawnAwayFor(req.away, req.parentSessionId, req.parentVerified === true)
+  // AUTONOMOUS MODE: while on, the session is born in no-questions unless the caller named a mode.
+  const mode = (await resolveAutonomousMode(req.harness, req.mode, away, launch.mode)).mode
   // HANDOFF.RELAY: a leader hand-off's successor is briefed with what the owner said to the
   // predecessor and the predecessor's last reply, so a hand-off can never swallow an answer.
   const handoffParentRow = handoffParentForLink

@@ -32,6 +32,6 @@ export function hasStoredView(key = 'agentistics-task-board-v1'): boolean {
     const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(key)
     if (!raw) return false
     const v = (JSON.parse(raw) as { view?: unknown } | null)?.view
-    return v === 'overview' || v === 'board' || v === 'table'
+    return v === 'overview' || v === 'board' || v === 'table' || v === 'live'
   } catch { return false }
 }

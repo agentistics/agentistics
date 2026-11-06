@@ -58,7 +58,7 @@ function openFromMenu(pt = false) {
   const trigger = host.querySelector<HTMLButtonElement>(`button[aria-label="${pt ? 'Ações da sessão' : 'Session actions'}"]`)!
   expect(trigger).toBeTruthy()
   click(trigger)
-  const item = Array.from(host.querySelectorAll('button')).find(b => /away mode on this session|Modo ausente nesta sessão/i.test(b.textContent ?? ''))!
+  const item = Array.from(host.querySelectorAll('button')).find(b => /autonomous mode on this session|Modo autônomo nesta sessão/i.test(b.textContent ?? ''))!
   expect(item).toBeTruthy()
   click(item)
   return trigger
@@ -72,7 +72,7 @@ describe.each([['desktop', 1280], ['mobile', 390]])('away dialog from the real �
     expect(dialogs()).toHaveLength(1)
     const d = dialogs()[0]!
     expect(d.getAttribute('aria-modal')).toBe('true')
-    expect(document.getElementById(d.getAttribute('aria-labelledby')!)?.textContent).toMatch(/away mode|modo ausente/i)
+    expect(document.getElementById(d.getAttribute('aria-labelledby')!)?.textContent).toMatch(/autonomous mode|modo autônomo/i)
   })
 
   test('Tab on the last control wraps to the first, Shift+Tab on the first wraps to the last (and is cancelled)', () => {
@@ -134,7 +134,7 @@ describe('mobile: the away dialog inside the real session Drawer', () => {
         createElement(SessionActions, { inline: true, row, lang: 'en', act: act0, extra: awayMenuItems({ id: row.id, actionable: true, away: true }, false, false) }),
         createElement(AwayDialogHost)) }))
     await flush()
-    const item = Array.from(host.querySelectorAll('button')).find(b => /away mode on this session/i.test(b.textContent ?? ''))!
+    const item = Array.from(host.querySelectorAll('button')).find(b => /autonomous mode on this session/i.test(b.textContent ?? ''))!
     expect(item).toBeTruthy()
     item.focus()
     click(item)

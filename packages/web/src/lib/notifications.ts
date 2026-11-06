@@ -326,16 +326,16 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   // placeholders: the singular/plural noun, "and N more" and an optional "Frees ~X. " sentence are
   // WORDING, not a bare value, so `resolveNotification` fills them through
   // `idleSessionNoun`/`idleMoreSuffix`/`idleFreedSentence` before the generic pass ever sees them.
-  // AWAY MODE: a leader's notice to the owner while they are out (`POST /api/away/notice`) — the
+  // AUTONOMOUS MODE: a leader's notice to the owner while they are out (`POST /api/away/notice`) — the
   // warning or decision that cannot wait, sent instead of a question that would block the turn.
   // `{text}` is the leader's own sentence (secrets redacted by the server).
   'away.notice': {
-    pt: { title: 'Aviso do líder (modo ausente)', message: '{text}' },
-    en: { title: 'Leader notice (away mode)', message: '{text}' },
+    pt: { title: 'Aviso do líder (modo autônomo)', message: '{text}' },
+    en: { title: 'Leader notice (autonomous mode)', message: '{text}' },
   },
   'away.digest_offer': {
-    pt: { title: 'Resumo do modo ausente', message: 'Fiquei fora há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' },
-    en: { title: 'Away-mode summary', message: 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?' },
+    pt: { title: 'Resumo do modo autônomo', message: 'Fiquei ausente há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' },
+    en: { title: 'Autonomous-mode summary', message: 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?' },
   },
   'away.digest_failed': {
     pt: { title: 'Não foi possível abrir o resumo', message: 'Tente novamente em instantes.' },

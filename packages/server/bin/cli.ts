@@ -113,7 +113,7 @@ Commands:
   resources     Print the agentop processes on this machine, what each costs, and the alerts
   session       Start / list / attach assistant sessions (tmux-backed; --bg detaches);
                 'session ls' prints the cockpit's table of what is running
-  task          BETA — the delivery board: what each piece of work cost, in how many rounds
+  task          the delivery board: what each piece of work cost, in how many rounds
                 and across how many sessions ('task ls | show | deliver | abandon')
   hooks         Teach Claude Code to run work in parallel through agentop
                 (installs a skill + SessionStart/Stop hooks; explicit, reversible)
@@ -122,7 +122,7 @@ Commands:
                 exits — in an inbox, in another Claude session, and on your desktop
                 ('events watch' to subscribe, 'events status' to see who is watching)
   experimental  Turn every experimental feature on or off ('experimental enable|disable|status')
-  away          Away mode — the owner is out, sessions decide instead of asking ('away on|off|status')
+  away          Autonomous mode — sessions decide and proceed without asking permission ('away on|off|status')
   journal       The durable event journal: a read-only look ('journal status') and the
                 historical import of this machine's history into it ('journal import')
 __ENGINE_VERBS__

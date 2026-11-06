@@ -69,7 +69,7 @@ test('hidden backlog waits for return and receives its full dismissal time', asy
     expect(host.querySelector('[data-testid="notification-summary"]')).toBeNull()
     await act(async () => { await Bun.sleep(4800) })
     await act(async () => visibility(false))
-    expect(host.querySelector('[data-testid="notification-summary"]')!.textContent).toContain('20 updates while you were away')
+    expect(host.querySelector('[data-testid="notification-summary"]')!.textContent).toContain('20 updates in autonomous mode')
     expect(host.querySelectorAll('[data-testid="notification-toast"]')).toHaveLength(0)
     expect(store.readNotifications().filter(n => !n.read)).toHaveLength(20)
     await act(async () => { await Bun.sleep(4800) })
@@ -85,7 +85,7 @@ test('Nay and update records stay in bell without contributing to burst summarie
     expect(store.readNotifications()).toHaveLength(20)
   } finally { await close() }
 })
-test('global away mode also defers and aggregates updates until the owner returns', async () => {
+test('global autonomous mode also defers and aggregates updates until the owner returns', async () => {
   const { host, close } = await mount()
   const { refreshAway } = await import('../lib/awayMode')
   const previousFetch = globalThis.fetch
@@ -97,7 +97,7 @@ test('global away mode also defers and aggregates updates until the owner return
     expect(host.querySelector('[data-testid="notification-toast"]')).toBeNull()
     globalThis.fetch = previousFetch
     await act(async () => { await refreshAway() })
-    expect(host.querySelector('[data-testid="notification-summary"]')!.textContent).toContain('1 update while you were away')
+    expect(host.querySelector('[data-testid="notification-summary"]')!.textContent).toContain('1 update in autonomous mode')
   } finally { globalThis.fetch = previousFetch; await close() }
 })
 test('a delayed refresh received after returning still summarizes news dated during the absence', async () => {
@@ -110,7 +110,7 @@ test('a delayed refresh received after returning still summarizes news dated dur
     globalThis.fetch = (async () => Response.json([{ id: 'late-backlog', type: 'info', ts, read: false, title: 'Delayed' }])) as unknown as typeof fetch
     await act(async () => { await store.refreshNotifications() })
     expect(host.querySelector('[data-testid="notification-toast"]')).toBeNull()
-    expect(host.querySelector('[data-testid="notification-summary"]')!.textContent).toContain('1 update while you were away')
+    expect(host.querySelector('[data-testid="notification-summary"]')!.textContent).toContain('1 update in autonomous mode')
   } finally { globalThis.fetch = previousFetch; await close() }
 })
 test('summary opens one persistent bell panel even on a route without a header bell', async () => {

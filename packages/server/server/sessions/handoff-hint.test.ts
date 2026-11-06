@@ -207,7 +207,7 @@ describe('LEADER.HANDOFF.HINT', () => {
 
 describe("hand-off hint while away", () => {
   it('appends the away sentence when given', () => {
-    const t = handoffHintText({ id: 'x', level: 1, tokens: 150_000, fraction: 0.375 }, ' O dono está fora (modo ausente) até avisar que voltou: registre isso no handoff para o sucessor.')
+    const t = handoffHintText({ id: 'x', level: 1, tokens: 150_000, fraction: 0.375 }, ' O dono está fora (modo autônomo) até avisar que voltou: registre isso no handoff para o sucessor.')
     expect(t).toContain('`. O dono está fora')
   })
   it('sendHandoffHints passes the away note through', async () => {

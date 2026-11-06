@@ -212,7 +212,7 @@ describe('HANDOFF.RELAY — kill is best-effort (fix1 H1/M5)', () => {
     expect(comments).toHaveLength(1)
   })
 
-  it('fix2 M-B: with no task the owed text goes to the notice inbox, with or without away mode', async () => {
+  it('fix2 M-B: with no task the owed text goes to the notice inbox, with or without autonomous mode', async () => {
     const reg = [row({ handoffTo: 'next', handoffRelayedAt: cursor }), row({ id: 'next', conversationId: 'c2', endedAt: '2026-10-16T15:00:00.000Z' })]
     const notices: Array<[string, string]> = []
     const r = await flushBeforeKill('lead-1', async () => true, 'pt', { registry: reg, ...io(), comment, notify: (t, m) => { notices.push([t, m]); return true }, now: NOW })

@@ -43,7 +43,7 @@ export function summaryToast(summary: NonNullable<ToastQueue['summary']>, lang: 
   const count = summary.ids.length
   return { id: SUMMARY_ID, type: 'info', ts: 0, read: false,
     title: summary.away
-      ? (lang === 'pt' ? `${count} ${count === 1 ? 'novidade' : 'novidades'} enquanto você estava fora` : `${count} ${count === 1 ? 'update' : 'updates'} while you were away`)
+      ? (lang === 'pt' ? `${count} ${count === 1 ? 'novidade' : 'novidades'} no modo autônomo` : `${count} ${count === 1 ? 'update' : 'updates'} in autonomous mode`)
       : (lang === 'pt' ? `${hasOtherCards ? '+' : ''}${count} ${count === 1 ? 'novidade' : 'novidades'} — abrir no sino` : hasOtherCards ? `+${count} more — open the bell` : `${count} ${count === 1 ? 'update' : 'updates'} — open the bell`),
     message: summary.away ? (lang === 'pt' ? 'Abrir no sino' : 'Open the bell') : undefined,
   }

@@ -2247,7 +2247,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             44px mobile touch target coming from the invisible `.ag-tap-icon` hit zone (index.css)
             rather than a grown painted control — `NotificationBell.buttonClassName` exists for
             exactly this. */}
-        {/* Away mode, same reasoning as the bell: the phone's only header here is this slot, and the
+        {/* Autonomous mode, same reasoning as the bell: the phone's only header here is this slot, and the
             owner switches away on from the phone — without it the state is invisible on this screen. */}
         <AwayPill lang={pt ? 'pt' : 'en'} enabled={!ctx.isCentral && ctx.capabilities?.localShell !== false} />
         <NotificationBell lang={pt ? 'pt' : 'en'} buttonClassName="ag-tap-icon" buttonStyle={{

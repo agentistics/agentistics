@@ -379,10 +379,19 @@ export function broadcastSessionGroupsChanged(): void {
   }
 }
 
-/** Away mode changed (`server/away.ts`): an EMPTY signal — the browser re-reads `GET /api/away`. */
+/** Autonomous mode changed (`server/away.ts`): an EMPTY signal — the browser re-reads `GET /api/away`. */
 export function broadcastAwayChanged(): void {
   if (sseClients.size === 0) return
   const payload = sseEncoder.encode('event: away\ndata: {}\n\n')
+  for (const ctrl of [...sseClients]) {
+    try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
+  }
+}
+
+/** Flow journals changed: an empty refresh signal, with no session/task text on the shared stream. */
+export function broadcastFlowsChanged(): void {
+  if (sseClients.size === 0) return
+  const payload = sseEncoder.encode('event: flows\ndata: {}\n\n')
   for (const ctrl of [...sseClients]) {
     try { ctrl.enqueue(payload) } catch { sseClients.delete(ctrl) }
   }

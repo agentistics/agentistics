@@ -30,7 +30,6 @@ import {
 } from '../../lib/tasks'
 import { button, field, microLabel, pill, statusStyle, surface } from './board'
 import { boardCopy, statusLabel, type Lang } from './copy'
-import { BetaTag } from '../BetaTag'
 import { overlayPadding } from '../../lib/mobileOverlay'
 
 export interface TaskPickerPick {
@@ -122,7 +121,6 @@ export function TaskPicker(p: TaskPickerProps) {
         ><ArrowLeft size={13} /></button>
       )}
       <span style={microLabel}>{chosen ? copy.delivery : (p.title ?? copy.fileUnder)}</span>
-      <BetaTag what={copy.deliveries} />
       <span style={{ flex: 1 }} />
       <button
         onClick={p.onClose}

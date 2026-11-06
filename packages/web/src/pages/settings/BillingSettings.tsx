@@ -55,6 +55,7 @@ import {
 import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
 import { BillingAccountList, loginOff, type BillingRowView } from './AccountRow'
 import { ReloginModal } from './ReloginModal'
+import { AgentScheduleEditor } from '../../components/AgentScheduleEditor'
 import { AUTH_COPY } from '../../lib/accountRelogin'
 import {
   accountsNeedingPlan, billingRows, closeBefore, defaultStart, limitsForRow, planOptionsFor, detectedPlanId, planDraftWrites, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
@@ -217,7 +218,7 @@ export function BillingAccountsPanel() {
     const res = await toggleAvailability(mutator, a)
     setPending(h => { const n = new Set(h); n.delete(k); return n })
     if (res.status === 'ok') {
-      setAccounts(h => h.map(x => x.id === a.id && x.harness === a.harness ? { ...x, ...res.account } : x))
+      setAccounts(h => h.map(x => x.id === a.id && x.harness === a.harness ? { ...x, ...res.account, agentUse: res.account.agentUse } : x))
       setFailed(h => { const n = new Set(h); n.delete(k); return n })
     } else if (res.status === 'failed') setFailed(h => new Set(h).add(k))
   }
@@ -499,6 +500,12 @@ export function BillingAccountsPanel() {
                 <span style={L}>{pt ? 'Uso por agentes' : 'Agent use'}</span>
                 <Toggle on={row.account.available} disabled={pendingIds.has(row.key)} label={`${pt ? 'Agentes' : 'Agents'} · ${row.title}`}
                   onToggle={() => { if (row.account) void toggleAccount(row.account) }} />
+              </div>
+            )}
+            {row.account && row.account.id && (
+              <div data-account-schedule style={{ marginBottom: 14, padding: 12, borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', minWidth: 0 }}>
+                <AgentScheduleEditor accountId={row.account.id} who={row.title} schedule={row.account.agentSchedule} view={row.account.agentUse} lang={ctx.lang} isMobile={isMobile}
+                  onSaved={next => { const a = next as BillingAccount | null; if (a?.id) setAccounts(prev => prev.map(x => x.id === a.id ? { ...x, ...a, agentSchedule: a.agentSchedule, agentUse: a.agentUse } : x)) }} />
               </div>
             )}
             {row.limits && <div data-account-limits style={{ marginBottom: 12 }}><PlanLimitBars limits={row.limits} now={limitsNow} lang={ctx.lang} /></div>}

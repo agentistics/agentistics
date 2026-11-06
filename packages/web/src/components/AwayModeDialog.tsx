@@ -1,15 +1,14 @@
 /**
- * The ONE dialog away mode asks on activation: until when, what is pre-authorised, the worker
+ * The ONE dialog autonomous mode asks on activation: until when, what is pre-authorised, the worker
  * ceiling, a top-model ceiling for EVERY active provider (a reported limit or a registered plan —
  * what `agentistics_plan_limits` reads) and a free note — then it frees the person. Built only from
  * the settings primitives (`ConfirmModal`, `Select`, `Checkbox`, `FieldTextarea`); nothing hand-rolled.
  */
 import { AwayImpact } from './AwayImpact'
 import React, { useEffect, useState } from 'react'
-import { Moon } from 'lucide-react'
 import { AWAY_AUTH_IDS, AWAY_AUTH_LABEL, AWAY_DEFAULT_MAX_WORKERS, AWAY_DEFAULT_TOP_CAP, AWAY_MAX_CEILING, AWAY_NOTE_MAX, AWAY_TOP_MODEL, SURFACE_HARNESS_ORDER, type AwayAuthId, type AwayTopCaps, type HarnessId } from '@agentistics/core' // @native-gated: activeCapProviders keeps only harnesses AWAY_TOP_MODEL names
 import { Checkbox, ConfirmModal, FieldTextarea, Select } from '../pages/settings/primitives'
-import { activeCapProviders, setAway, UNTIL_CHOICES, untilChoiceLabel, untilFromChoice, useAway, type UntilChoice } from '../lib/awayMode'
+import { AUTONOMOUS_ICON, activeCapProviders, setAway, UNTIL_CHOICES, untilChoiceLabel, untilFromChoice, useAway, type UntilChoice } from '../lib/awayMode'
 import { usePlanLimits } from '../lib/planLimits'
 import { HARNESS_LABELS } from '../lib/harness'
 
@@ -40,7 +39,7 @@ export default function AwayModeDialog({ open, lang, onClose }: { open: boolean;
     })
     setBusy(false)
     if (r.ok) onClose()
-    else setError(pt ? `Não foi possível ligar o modo ausente (${r.error}).` : `Could not turn away mode on (${r.error}).`)
+    else setError(pt ? `Não foi possível ligar o modo autônomo (${r.error}).` : `Could not turn autonomous mode on (${r.error}).`)
   }
 
   const label = (t: string) => <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{t}</span>
@@ -48,11 +47,11 @@ export default function AwayModeDialog({ open, lang, onClose }: { open: boolean;
     <ConfirmModal
       open={open}
       tone="default"
-      icon={<Moon size={17} />}
-      title={pt ? 'Ligar o modo ausente' : 'Turn on away mode'}
+      icon={<AUTONOMOUS_ICON size={17} />}
+      title={pt ? 'Ligar o modo autônomo' : 'Turn on autonomous mode'}
       message={pt
-        ? 'As sessões passam a saber que você está fora: os líderes decidem dentro do que você autorizar, seguem o ritmo do plano e não param o turno com perguntas; os workers reportam ao líder.'
-        : 'Sessions will know you are out: leaders decide within what you authorise, pace by your plan and never stop a turn on a question; workers report to their leader.'}
+        ? 'As sessões nascem sem perguntas e passam a trabalhar de forma autônoma: os líderes decidem dentro do que você autorizar, seguem o ritmo do plano e não param o turno com perguntas; os workers reportam ao líder.'
+        : 'New sessions start in no-questions mode and work autonomously: leaders decide within what you authorise, pace by your plan and never stop a turn on a question; workers report to their leader.'}
       confirmLabel={busy ? (pt ? 'Ligando…' : 'Turning on…') : (pt ? 'Ligar' : 'Turn on')}
       cancelLabel={pt ? 'Cancelar' : 'Cancel'}
       onConfirm={() => { void confirm() }}

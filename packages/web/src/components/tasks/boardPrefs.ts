@@ -23,11 +23,12 @@ import type { BoardStatus, ColumnId } from './board'
 import { SUBTASK_COLUMNS, type SubtaskColumnId } from './subtaskColumnDefs'
 import { DEFAULT_SORT, type SortSpec } from '@agentistics/core'
 import { useSyncExternalStore } from 'react'
+import { DEFAULT_BOARD_PAGE_SIZE, readPageSize, type BoardPageSize } from './boardPaging'
 import { createSharedPref, PERSONAL_PREFS } from '../../lib/sharedPref'
 
 const KEY = 'agentistics-task-board-v1'
 
-export type BoardView = 'overview' | 'board' | 'table'
+export type BoardView = 'overview' | 'board' | 'table' | 'live'
 
 /** What the TABLE is grouped by — one or the other, per person. */
 export type GroupBy = 'status' | 'type'
@@ -75,12 +76,14 @@ export interface BoardPrefs {
   composeSubtaskProgress: boolean
   /** Which sections of the task detail's right rail are OPEN, by their stable id. */
   rail: Record<string, boolean>
+  /** Cards per page in every kanban column and list band (10/25/50/100), one choice per person. */
+  pageSize: BoardPageSize
 }
 
 /** The metrics view is the default, because "what did it cost" is the question the board answers. */
 export const DEFAULT_PREFS: BoardPrefs = {
   view: 'overview', sort: { key: 'priority', dir: 'asc' }, columnSort: {}, lanes: 'none', wip: {},
-  columns: null, subtaskColumns: null, columnWidths: {}, subtaskColumnWidths: {}, groups: null, groupBy: 'status', typeGroups: null, collapsed: [], hideEmpty: false, composeSubtaskProgress: true, rail: {},
+  columns: null, subtaskColumns: null, columnWidths: {}, subtaskColumnWidths: {}, groups: null, groupBy: 'status', typeGroups: null, collapsed: [], hideEmpty: false, composeSubtaskProgress: true, rail: {}, pageSize: DEFAULT_BOARD_PAGE_SIZE,
 }
 
 /**
@@ -129,7 +132,7 @@ function readColumnSort(v: unknown): Record<string, SortSpec> {
 // localStorage) falls back to the default rather than naming a view this build no longer has —
 // the same rule `readSort` and `statuses` already apply to a stale key.
 const isView = (v: unknown): v is BoardView =>
-  v === 'overview' || v === 'board' || v === 'table'
+  v === 'overview' || v === 'board' || v === 'table' || v === 'live'
 
 // The status vocabulary is an editable LIST now (`@agentistics/core`'s `taskStatus.ts`), so a
 // stored group/collapsed id can be any status a person has created — no longer just one of the
@@ -182,6 +185,7 @@ export function parseBoardPrefs(raw: unknown): BoardPrefs {
       ? Object.fromEntries(Object.entries(p.rail as Record<string, unknown>)
         .filter(([, v]) => typeof v === 'boolean')) as Record<string, boolean>
       : {},
+    pageSize: readPageSize(p.pageSize),
   }
 }
 

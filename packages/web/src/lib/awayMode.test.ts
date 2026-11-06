@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { activeCapProviders, awayUntilLabel, setSessionAway, untilFromChoice } from './awayMode'
 
-describe('away mode helpers', () => {
+describe('autonomous mode helpers', () => {
   const now = new Date(2026, 9, 11, 23, 50).getTime()
   it('maps choices to instants on the local clock', () => {
     expect(untilFromChoice('back', now)).toBeNull()
@@ -10,7 +10,7 @@ describe('away mode helpers', () => {
     expect([t.getDate(), t.getHours(), t.getMinutes()]).toEqual([12, 9, 0])
   })
   it('labels the until', () => {
-    expect(awayUntilLabel({ on: true, since: '', until: null, authorised: [], maxWorkers: 6, topCaps: {} }, 'en', now)).toBe("until you're back")
+    expect(awayUntilLabel({ on: true, since: '', until: null, authorised: [], maxWorkers: 6, topCaps: {} }, 'en', now)).toBe("until you turn it off")
     expect(awayUntilLabel({ on: true, since: '', until: new Date(now + 3_600_000).toISOString(), authorised: [], maxWorkers: 6, topCaps: {} }, 'pt', now)).toMatch(/^até /)
   })
 })

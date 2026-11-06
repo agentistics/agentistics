@@ -215,3 +215,29 @@ export function applyExperimental(preference: boolean | undefined, env: Env): st
   delete env[EXPERIMENTAL_APPLIED_OFF_ENV]
   return applied
 }
+
+/** Set while autonomous mode is what turned the flows on; holds the value to restore ('' = was unset). */
+export const AUTONOMOUS_FLOWS_PRIOR_ENV = 'AGENTISTICS_FLOWS_PRIOR'
+
+/**
+ * AUTONOMOUS MODE turns the deterministic flows on by default — they are what keeps work moving
+ * while nobody is asking permission. An EXPLICIT `AGENTISTICS_FLOWS` (either way) always wins, and
+ * switching autonomous mode off restores exactly what was there before. Pure over `env`; returns
+ * whether it changed anything.
+ */
+export function applyAutonomousFlows(active: boolean, env: Env): boolean {
+  const marked = env[AUTONOMOUS_FLOWS_PRIOR_ENV] !== undefined
+  if (active) {
+    if (marked) return false
+    if (explicit(env.AGENTISTICS_FLOWS)) return false
+    env[AUTONOMOUS_FLOWS_PRIOR_ENV] = ''
+    env.AGENTISTICS_FLOWS = '1'
+    return true
+  }
+  if (!marked) return false
+  const prior = env[AUTONOMOUS_FLOWS_PRIOR_ENV]!
+  if (prior === '') delete env.AGENTISTICS_FLOWS
+  else env.AGENTISTICS_FLOWS = prior
+  delete env[AUTONOMOUS_FLOWS_PRIOR_ENV]
+  return true
+}

@@ -1,5 +1,5 @@
 /**
- * awayMode.ts — PURE. "Away mode": the owner is out (asleep, travelling) and the fleet should carry
+ * awayMode.ts — PURE. "Autonomous mode": the owner is out (asleep, travelling) and the fleet should carry
  * on without asking them. The state is stored by the server (`server/away.ts`, preferences key
  * `away`); this module holds its shape, its validation and every word a session is told, so the
  * browser, the MCP door, the CLI and the spawn briefing cannot disagree.
@@ -206,7 +206,7 @@ const PLAN_LIMITS_RULE = 'before opening sessions read agentistics_plan_limits a
 /**
  * The briefing line(s) for a session being started while the owner is away. Empty when inactive —
  * a session started after `until` is never told the owner is out. A LEADER gets four lines (scope,
- * pacing, quality, communication): away mode must make a leader run the fleet at least as carefully
+ * pacing, quality, communication): autonomous mode must make a leader run the fleet at least as carefully
  * as when the owner is watching — never burn tokens without producing.
  */
 export function awayBriefingLines(
@@ -216,7 +216,7 @@ export function awayBriefingLines(
   o: AwayBriefingOptions = {},
 ): string[] {
   if (!s || !awayActive(s, now)) return []
-  const head = `AWAY MODE — the owner is away ${untilText(s)}.`
+  const head = `AUTONOMOUS MODE (${untilText(s)}) — decide and proceed without asking permission or questions.`
   if (role === 'leader') {
     const pacing = o.planLimitsInBriefing
       ? 'apply the agentistics_plan_limits rule above (cadence.parallel, paceStatus, 85% / 95%) before EVERY dispatch, not only the first'
@@ -225,10 +225,10 @@ export function awayBriefingLines(
       ? 'release only work that passed QA and that you approved, bundled into one release per batch'
       : 'releases wait for the owner'
     return [
-      `${head} Pre-authorised: ${authText(s)}. These authorisations stand in for the owner's approval wherever the rules below ask for it; anything outside them waits in the hand-off file for their return.`,
-      `Away pacing (do not burn tokens without producing): ${pacing}. Never run more than ${s.maxWorkers} workers at once; ${topCapsText(s)}; pause one worker when free RAM drops under ${AWAY_MIN_FREE_RAM_GB} GB. Pick each model by the task, per the model-balance rule (strongest tier: design, coordination, hard bugs; mid tier: scoped implementation; light tier: probes), on whichever provider has room.`,
-      `Away quality: QA by a different model from the author, tests only in throwaway runs (agentop run --rm); ${releases}.`,
-      "Away communication: never end a turn on a question to the owner — decide within the authorisations, record each decision (task comment or hand-off file) and keep going. A warning or decision that cannot wait goes to the owner as a notice (agentistics_session_away with `notice`, shown in their bell and Nay), never as a question that blocks the turn. At a hand-off, write in the hand-off file and in the successor's prompt that the owner is away and what is authorised (agentistics tells the successor too).",
+      `${head} Pre-authorised: ${authText(s)}. These authorisations stand in for the owner's approval wherever the rules below ask for it — act on them without asking permission; anything outside them waits in the hand-off file for their return.`,
+      `Autonomous pacing (do not burn tokens without producing): ${pacing}. Never run more than ${s.maxWorkers} workers at once; ${topCapsText(s)}; pause one worker when free RAM drops under ${AWAY_MIN_FREE_RAM_GB} GB. Pick each model by the task, per the model-balance rule (strongest tier: design, coordination, hard bugs; mid tier: scoped implementation; light tier: probes), on whichever provider has room.`,
+      `Autonomous quality: QA by a different model from the author, tests only in throwaway runs (agentop run --rm); ${releases}.`,
+      "Autonomous communication: never end a turn on a question to the owner — decide within the authorisations, record each decision (task comment or hand-off file) and keep going. A warning or decision that cannot wait goes to the owner as a notice (agentistics_session_away with `notice`, shown in their bell and Nay), never as a question that blocks the turn. At a hand-off, write in the hand-off file and in the successor's prompt that the owner is away and what is authorised (agentistics tells the successor too).",
     ]
   }
   if (role === 'worker') {
@@ -248,7 +248,7 @@ export function awayHandoffNote(s: AwayState | null | undefined, now: number): s
   const ok = s.authorised.length > 0 ? s.authorised.join(', ') : 'nada além das regras'
   const tops = HARNESS_ORDER.filter(h => s.topCaps[h] !== undefined).map(h => `${h} ${awayTopCap(s, h)}`)
   const top = `${tops.length > 0 ? `${tops.join(', ')}, demais ` : ''}${Math.min(AWAY_DEFAULT_TOP_CAP, s.maxWorkers)}`
-  return ` O dono está fora (modo ausente) ${ate}; autorizado: ${ok}; teto ${s.maxWorkers} workers / modelo de topo por provedor: ${top}. Escreva isso no handoff e no prompt do sucessor, e siga o ritmo do agentistics_plan_limits.`
+  return ` Modo autônomo ${ate}: decida e siga sem pedir permissão; autorizado: ${ok}; teto ${s.maxWorkers} workers / modelo de topo por provedor: ${top}. Escreva isso no handoff e no prompt do sucessor, e siga o ritmo do agentistics_plan_limits.`
 }
 
 export const AWAY_NOTICE_MAX = 500
@@ -262,7 +262,7 @@ export function normalizeAwayNotice(v: unknown): string | null {
 
 // ─── Per-session away ─────────────────────────────────────────────────────────────────────────
 //
-// The global switch above covers EVERY session; a session can also be put in away mode on its own
+// The global switch above covers EVERY session; a session can also be put in autonomous mode on its own
 // (`ManagedSession.away`, recorded in the registry so it survives a restart). The effective state
 // of one session is the global one while that is active, else its own flag.
 
@@ -289,7 +289,7 @@ export function resolveSpawnAway(req: AwaySpawnRequest | undefined, parent: { aw
 
 /**
  * What a session-only away state authorises when the global switch is off: opening workers within
- * the plan limits, nothing else. A session the owner put in away mode on purpose must be able to
+ * the plan limits, nothing else. A session the owner put in autonomous mode on purpose must be able to
  * keep going; releases and merges still wait for the owner (or the global switch).
  */
 export const SESSION_AWAY_AUTHORISED: AwayAuthId[] = ['workers']
@@ -322,8 +322,8 @@ export function sessionAwayNotice(
   const was = sessionAwayState(global, before, now) !== null
   const next = sessionAwayState(global, after, now)
   if (was === (next !== null)) return null
-  if (next) return ['[agentistics · away mode is now ON for this session]', ...awayBriefingLines(next, role, now, o)].join('\n')
-  return '[agentistics · away mode is now OFF for this session] The owner is back for this session: the away-mode instructions no longer apply — ask the owner as usual when a decision is theirs.'
+  if (next) return ['[agentistics · autonomous mode is now ON for this session]', ...awayBriefingLines(next, role, now, o)].join('\n')
+  return '[agentistics · autonomous mode is now OFF for this session] The owner is back for this session: the autonomous-mode instructions no longer apply — ask the owner as usual when a decision is theirs.'
 }
 
 // ─── Live notice: telling sessions ALREADY running ────────────────────────────────────────────
@@ -352,8 +352,26 @@ export function awayLiveNotice(
   const was = sessionAwayState(before, sessionAway, now)
   const next = sessionAwayState(after, sessionAway, now)
   if (!was && !next) return null
-  if (!next) return '[agentistics · away mode is now OFF] The owner is back: the away-mode instructions no longer apply — ask the owner as usual when a decision is theirs.'
-  if (!was) return ['[agentistics · away mode is now ON]', ...awayBriefingLines(next, role, now, o)].join('\n')
+  if (!next) return '[agentistics · autonomous mode is now OFF] The owner is back: the autonomous-mode instructions no longer apply — ask the owner as usual when a decision is theirs.'
+  if (!was) return ['[agentistics · autonomous mode is now ON]', ...awayBriefingLines(next, role, now, o)].join('\n')
   if (role !== 'leader' || awayStateSignature(was) === awayStateSignature(next)) return null
-  return ['[agentistics · away mode UPDATED]', ...awayBriefingLines(next, role, now, o)].join('\n')
+  return ['[agentistics · autonomous mode UPDATED]', ...awayBriefingLines(next, role, now, o)].join('\n')
+}
+
+/**
+ * AUTONOMOUS MODE (the owner's rename of autonomous mode, 2026-11-06): while it is on, a session is born in
+ * the canonical "no-questions" approval mode. An explicit mode from the caller always wins; a harness
+ * that cannot carry the mode (`canCarry` false) is left on its default rather than refused, because
+ * the owner never asked for that spawn to fail. `fromAutonomous` lets the New session form say where
+ * the mode came from.
+ */
+export function autonomousSpawnMode<M extends string>(
+  explicit: M | undefined,
+  autonomous: boolean,
+  canCarry: boolean,
+  inherited?: M,
+): { mode: M | 'no-questions' | undefined; fromAutonomous: boolean } {
+  if (explicit) return { mode: explicit, fromAutonomous: false }
+  if (autonomous && canCarry) return { mode: 'no-questions', fromAutonomous: true }
+  return { mode: inherited, fromAutonomous: false }
 }

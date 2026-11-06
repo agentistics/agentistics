@@ -360,28 +360,28 @@ describe('check-in agenda', () => {
     expect(prompts[0].text).toContain('old')
   })
 
-  test('away mode adds a no-owner line to the leader prompt', async () => {
+  test('autonomous mode adds a no-owner line to the leader prompt', async () => {
     reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
     preferences = { away: { on: true, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
     await putState(leader.conversationId, { intervalMin: 15 }, 1_000)
     await fireDue(1_000 + 15 * 60_000)
     expect(prompts[0].text.startsWith('[from agentistics · check-in]\n')).toBe(true)
     expect(prompts[0].text).toContain('decide within the authorisations, record the decision, and never ask the owner')
-    expect(promptFor(defaultConfig())).not.toContain('AWAY MODE')
+    expect(promptFor(defaultConfig())).not.toContain('AUTONOMOUS MODE')
   })
 
-  test('away mode refuses non-empty needs, but allows a needs-free report', async () => {
+  test('autonomous mode refuses non-empty needs, but allows a needs-free report', async () => {
     reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
     preferences = { away: { on: true, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
     const needs: CheckinNeed[] = [{ subject: 'disk', text: 'Disk is nearly full' }]
     const refused = await reportFromIdentity(leader.id, { state: 'needs_you', summary: 'Blocked', needs })
-    expect(refused).toEqual({ error: 'Away mode is on: decide within the authorisations, record the decision, and use an away notice for anything urgent instead of asking the owner.' })
+    expect(refused).toEqual({ error: 'Autonomous mode is on: decide within the authorisations, record the decision, and use an away notice for anything urgent instead of asking the owner.' })
     expect(preferences.checkin).toBeUndefined()
     const accepted = await reportFromIdentity(leader.id, { state: 'resolved', summary: 'Handled' })
     expect(accepted && 'last' in accepted ? accepted.last?.summary : '').toBe('Handled')
   })
 
-  test('away mode off keeps needs allowed', async () => {
+  test('autonomous mode off keeps needs allowed', async () => {
     reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
     preferences = { away: { on: false, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
     const needs: CheckinNeed[] = [{ subject: 'disk', text: 'Disk is nearly full' }]

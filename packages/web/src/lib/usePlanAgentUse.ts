@@ -1,10 +1,31 @@
 import { useEffect, useRef, useState } from 'react'
-import type { HarnessId } from '@agentistics/core'
+import type { AgentSchedule, HarnessId } from '@agentistics/core'
+import type { AgentUseView } from './agentScheduleView'
 import { subscribeEvent } from './eventStream'
 import { pushLocalNotification } from './notifications'
 import { createAccountMutator } from '../pages/settings/accountMutations'
 
-type PlanAccount = { id: string; harness: HarnessId; available: boolean; retired?: boolean }
+type PlanAccount = {
+  id: string; harness: HarnessId; available: boolean; retired?: boolean
+  label?: string; nickname?: string
+  /** The schedule (CONTAS.AGENDA-AGENTICA) and, while it is active, the effective state and why. */
+  agentSchedule?: AgentSchedule; agentUse?: AgentUseView
+  /** "Sign in again" can run for this account (any login state). */
+  reloginable?: boolean
+}
+
+/** What a surface needs to draw one account's agent-use controls. */
+export interface AgentUseControl {
+  on: boolean
+  pending: boolean
+  onToggle: () => void
+  accountId: string
+  schedule?: AgentSchedule
+  view?: AgentUseView
+  reloginable: boolean
+  /** Take the server's answer after a schedule save or a re-login. */
+  applyAccount: (account: unknown) => void
+}
 
 /** Availability comes from the registry, including accounts with no meter or hidden budgets. */
 export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
@@ -34,12 +55,20 @@ export function usePlanAgentUse(enabled: boolean, lang: 'pt' | 'en') {
     return () => { active = false; off(); connected() }
   }, [enabled, mutator])
 
-  return (harness: HarnessId, id?: string) => {
+  return (harness: HarnessId, id?: string): AgentUseControl | undefined => {
     const account = accounts.find(a => a.id && a.id === id && a.harness === harness && !a.retired)
     if (!enabled || !account) return undefined
     return {
       on: optimistic[account.id] ?? account.available,
       pending: Object.hasOwn(optimistic, account.id),
+      accountId: account.id,
+      ...(account.agentSchedule ? { schedule: account.agentSchedule } : {}),
+      ...(account.agentUse ? { view: account.agentUse } : {}),
+      reloginable: account.reloginable === true,
+      applyAccount: (next: unknown) => {
+        const a = next as PlanAccount | null
+        if (a && a.id === account.id) { revision.current++; setAccounts(prev => prev.map(x => x.id === a.id ? a : x)) }
+      },
       onToggle: async () => {
         if (mutator.has(account.id)) return
         revision.current++

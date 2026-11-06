@@ -291,6 +291,8 @@ if (!TEAM_CENTRAL) {
     void import('./claude-usage').then(m => m.startClaudeUsagePoll()).catch(() => {})
     // agy keeps one weekly quota per model group: read it while an agy process is alive.
     void import('./antigravity-usage').then(m => m.startAntigravityUsagePoll()).catch(() => {})
+    // CONTAS.AGENDA-AGENTICA: once a minute, each account's agent schedule writes its effective `available`.
+    void import('./agent-schedule-host').then(m => m.startAgentScheduleTicker()).catch(() => {})
     return pl.seedPlanLimits(sd.STRUCTURED_DIR)
   }).catch(err => console.warn('[plan-limits] seed failed:', String(err)))
 }
@@ -1423,11 +1425,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         return json({ sessions: Array.isArray(view) ? view : [] })
       }
       if (url.pathname === '/api/flows/run' && req.method === 'POST') {
-        const body = await req.json().catch(() => ({})) as { name?: unknown; inputs?: unknown }
+        const body = await req.json().catch(() => ({})) as { name?: unknown; inputs?: unknown; session?: { id?: unknown; token?: unknown } }
         if (typeof body.name !== 'string') return json({ error: 'bad_request', sentence: 'flow name is required' }, 400)
         const { flowRunInputs } = await import('./flows/status')
         const parsed = flowRunInputs(body.inputs)
         if (!parsed.ok) return json({ error: 'owner_credential_required', sentence: parsed.sentence }, 403)
+        if (body.name === 'pipeline-autonomo') {
+          const { verifySessionIdentity } = await import('./sessions/session-identity')
+          const actor = body.session ? await verifySessionIdentity(body.session.id, body.session.token) : null
+          if (!actor) return json({ error: 'unverified_sender', sentence: 'A verified managed session must advance the pipeline.' }, 403)
+          parsed.inputs.actorId = actor
+        }
         try { return json(await flowApi.run(body.name, parsed.inputs)) }
         catch (error) { return json({ error: 'flow_failed', sentence: String(error) }, 400) }
       }
@@ -2324,7 +2332,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       if (out.reply.ok) void import('./sessions/fleet-web').then(m => m.kickFleet(out.reply.ok ? out.reply.id : undefined)).catch(() => {})
       return json(out.reply, out.status)
     }
-    // AWAY MODE — the owner is out; sessions started meanwhile are told so (`away.ts`). The browser and
+    // AUTONOMOUS MODE — the owner is out; sessions started meanwhile are told so (`away.ts`). The browser and
     // the CLI write it as the person; a session (MCP) must prove itself and be a leader.
     if (url.pathname === '/api/away' && req.method === 'GET') {
       const { readAwayView, defaultAwayDeps } = await import('./away')
@@ -2413,6 +2421,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     if (url.pathname === '/api/tasks' && req.method === 'GET') {
       const { listTasks } = await import('./sessions/task-web')
       return json(await listTasks(taskFilterOf(url)))
+    }
+    // The LIVE DELIVERY line (`task-live.ts`). Matched before the generic `<ref>` GET, like `next`.
+    if (url.pathname === '/api/tasks/live' && req.method === 'GET') {
+      const { liveDeliveries } = await import('./sessions/task-web')
+      const { LIVE_STAGES } = await import('./sessions/task-live')
+      const stage = LIVE_STAGES.find(x => x === url.searchParams.get('stage'))
+      return json(await liveDeliveries({
+        ...(url.searchParams.get('task') ? { task: url.searchParams.get('task')! } : {}),
+        ...(stage ? { stage } : {}),
+        ...(url.searchParams.get('stalled') === '1' ? { stalledOnly: true } : {}),
+      }))
     }
     // The two ORCHESTRATION reads, matched before the generic `<ref>` GET below — otherwise
     // `next` and `activity` resolve as task references and answer 404 for a board that has them.

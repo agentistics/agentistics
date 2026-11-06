@@ -10,6 +10,68 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.0': {
+    features: [
+      {
+        pt: 'Formulários do OpenCode funcionam de ponta a ponta: perguntas em várias etapas, seleção múltipla e a opção "Outra" com texto livre chegam certinho ao modelo, e dá para cancelar.',
+        en: 'OpenCode forms work end to end: multi-step questions, multiple selection and the "Other" option with free text reach the model correctly, and you can cancel.',
+      },
+      {
+        pt: 'Agentask saiu do beta.',
+        en: 'Agentask is out of beta.',
+      },
+      {
+        pt: 'O quadro mostra 10 tarefas por página por coluna, e dá para escolher 10, 25, 50 ou 100. A escolha fica guardada por pessoa.',
+        en: 'The board shows 10 tasks per page per column, and you can choose 10, 25, 50 or 100. The choice is saved per person.',
+      },
+      {
+        pt: 'Nova visão Entrega ao vivo no Agentask: cada peça aparece na etapa em que está (fila, execução, QA, revisão, ajuste, publicado), com o agente, o tempo e a estimativa com fonte. Os líderes ficam numa faixa própria. Os cards deslizam entre as colunas, e um merge aprovado se desfaz em cinza e reaparece em verde em Publicado. A Nay também consulta essa visão.',
+        en: 'New Live Delivery view in Agentask: each piece appears at the stage it is in (queue, running, QA, review, rework, published), with the agent, the time and a sourced estimate. Leaders sit in their own lane. Cards slide between columns, and an approved merge crumbles to grey and reappears in green under Published. Nay can also look at this view.',
+      },
+      {
+        pt: 'Modo autônomo de ponta a ponta: o líder recebe um aviso quando um worker fica parado há 30 minutos, e a esteira leva cada entrega da sessão à revisão e à limpeza, sem marcar como concluída sozinha.',
+        en: 'End-to-end autonomous mode: the leader gets a notice when a worker has been idle for 30 minutes, and the pipeline takes each delivery from the session through review and cleanup, without marking it done on its own.',
+      },
+      {
+        pt: 'Modo ligação em beta para todos: o botão de ligar e a página Ligações aparecem sem precisar ligar o modo experimental. A chave da ElevenLabs pode ser cadastrada direto no cartão Voz.',
+        en: 'Call mode is now in beta for everyone: the call button and the Calls page show up without turning on experimental mode. The ElevenLabs key can be added right in the Voice card.',
+      },
+      {
+        pt: 'Escolha a voz da ElevenLabs pelo botão de voz da ligação, com amostra que não gasta crédito; o cartão Voz mostra quanto foi usado, quanto sobra e quando renova.',
+        en: 'Pick your ElevenLabs voice from the call voice button, with samples that cost no credits; the Voice card shows how much was used, what is left and when it renews.',
+      },
+      {
+        pt: 'Uso dos planos ganha as seções Contas e APIs: o saldo das chaves de API pagas aparece no painel e na página de uso.',
+        en: 'Plan usage now has Accounts and APIs sections: the balance of paid API keys shows in the panel and on the usage page.',
+      },
+      {
+        pt: 'Quadro de tarefas com uma barra só: busca, painel Visualização, filtros e as visões Métricas, Quadro e Tabela no mesmo lugar. Por padrão aparecem os status bloqueado, a fazer, em andamento, em revisão e concluído; os outros podem ser reexibidos.',
+        en: 'Task board with a single toolbar: search, the View panel, filters and the Metrics, Board and Table views in one place. By default the blocked, to do, in progress, in review and done statuses are shown; the others can be shown again.',
+      },
+      {
+        pt: 'Agenda das contas: cada conta pode ter dias, horários e um teto diário de uso pelos agentes. Fora da agenda, os agentes deixam a conta de lado; ligar ou desligar à mão continua valendo.',
+        en: 'Account schedule: each account can have days, hours and a daily usage ceiling for agents. Outside the schedule, agents leave the account alone; switching it on or off by hand still applies.',
+      },
+      {
+        pt: 'O "modo ausente" agora se chama "modo autônomo": ligado, as sessões trabalham sem pedir permissão e os líderes seguem em frente dentro do que você autorizou.',
+        en: 'Away mode is now "Autonomous mode": while it is on, sessions work without asking permission and leaders keep going within what you authorised.',
+      },
+      {
+        pt: 'Com o modo autônomo ligado, toda sessão nova (Nova sessão, linha de comando, MCP, passagem de líder) já nasce no modo "sem perguntas" — a menos que você escolha outro. A Nova sessão mostra de onde veio o modo.',
+        en: 'With autonomous mode on, every new session (New session, command line, MCP, leader hand-off) is born in "no questions" mode — unless you pick another. New session shows where the mode came from.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ligação entende português ou inglês sozinha, mesmo com o app em outro idioma, e responde no idioma falado.',
+        en: 'Calls detect whether you speak Portuguese or English on their own, even with the app in another language, and reply in the language spoken.',
+      },
+      {
+        pt: 'Página Ligações com uma ligação em andamento: o cartão mostra o nome da sessão em vez de "Sessão ?", e o botão "Voltar para a ligação" tem o ícone do tamanho certo.',
+        en: 'Calls page with a call in progress: the card shows the session name instead of "Session ?", and the "Back to the call" button has a properly sized icon.',
+      },
+    ],
+  },
   '2.199.0': {
     features: [
       {

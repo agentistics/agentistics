@@ -1,7 +1,7 @@
 /**
  * handoff-inherit.ts — what a leader hand-off's successor inherits from the predecessor.
  *
- * The task/subtask filing, the leader role and away mode are resolved at spawn; the sidebar folder is
+ * The task/subtask filing, the leader role and autonomous mode are resolved at spawn; the sidebar folder is
  * filed by the spawn-filing planner (`handoffGroupPatch` below is its idempotent backstop). This is
  * the rest of the places a leader is "set up": its PIN, its CHECK-IN agenda, its MUTE, its launch
  * flags (`handoffSpawnDefaults`: model/effort for the same harness), plus the TITLE rule (the successor keeps the predecessor's name) and the generation counter
