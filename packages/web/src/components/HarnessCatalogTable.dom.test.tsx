@@ -12,7 +12,7 @@ let host: HTMLDivElement | undefined
 
 const status = (overrides: Partial<HarnessChatStatus> = {}): HarnessChatStatus => ({
   id: 'codex', label: 'Codex', installed: true, authReady: true, ready: true,
-  models: [], defaultModel: '', setup: {}, ...overrides,
+  models: [], defaultModel: '', setup: {}, canInstall: true, ...overrides,
 })
 
 beforeAll(async () => {
@@ -52,10 +52,11 @@ test('non-installed row exposes Install but does not install by itself', async (
   expect(installs).toBe(1)
 })
 
-test('installed without readings says sem leitura and renders plan bars on its row', async () => {
+test('a limit source makes reading available even with zero sessions', async () => {
   const limits = { harness: 'codex', updatedAt: 1, windows: [{ kind: '5h', usedPct: 42, resetsAt: 2 }], source: 'test' } as unknown as PlanLimits
   await mount({ lang: 'pt', statuses: [status()], mode: 'new', planLimits: [limits], now: 1 })
-  expect(host!.textContent).toContain('Sem leitura')
+  expect(host!.querySelector('[data-catalog-reading]')!.textContent).toBe('Disponível')
+  expect(host!.querySelector('[data-catalog-usage]')!.textContent).toBe('Sem uso')
   expect(host!.querySelector('[data-plan-compact]')).not.toBeNull()
 })
 
@@ -75,4 +76,74 @@ test('Usage distinguishes not installed from installed without reading', async (
   const rows = Array.from(host!.querySelectorAll<HTMLElement>('[data-harness-row]'))
   expect(rows.find(r => r.dataset.harnessRow === 'codex')?.textContent).toContain('Não instalado')
   expect(rows.find(r => r.dataset.harnessRow === 'claude')?.textContent).toContain('Sem leitura')
+})
+
+for (const id of ['antigravity', 'kimi', 'opencode']) {
+  test(`${id} remains selectable when fleet detects it and catalog status is stale`, async () => {
+    let selected = ''
+    await mount({ lang: 'pt', statuses: [status({ id, installed: false })], available: [{ id, label: id }], mode: 'new', onSelect: (value: string) => { selected = value } })
+    expect(host!.querySelector('[data-catalog-installation]')!.textContent).toBe('Instalado')
+    const button = host!.querySelector<HTMLButtonElement>('button')!
+    expect(button.textContent).toBe('Selecionar')
+    await act(async () => button.click())
+    expect(selected).toBe(id)
+  })
+}
+
+test('sessions alone never imply a reading; Usage has four columns and no duplicate state or action', async () => {
+  await mount({ lang: 'en', statuses: [status()], usage: { codex: { sessions: 3 } }, mode: 'usage' })
+  expect(host!.querySelector('[data-catalog-reading]')!.textContent).toBe('No reading')
+  expect(host!.querySelector('[data-catalog-usage]')!.textContent).toBe('3 sessions')
+  expect(host!.querySelector('[data-catalog-action]')).toBeNull()
+  expect(host!.querySelector('[data-catalog-header]')!.children.length).toBe(4)
+  const row = host!.querySelector<HTMLElement>('[data-harness-row]')!
+  expect(row.children.length).toBe(4)
+  expect(row.style.textTransform).toBe('none')
+  expect(parseFloat(row.style.minWidth)).toBe(0)
+})
+
+for (const id of ['claude', 'codex', 'gemini', 'copilot', 'opencode']) {
+  test(`${id} with an integrated installer opens only on explicit action`, async () => {
+    let installs = 0
+    await mount({ lang: 'en', statuses: [status({ id, installed: false, canInstall: true })], mode: 'new', onInstall: () => { installs++ } })
+    expect(installs).toBe(0)
+    const button = host!.querySelector<HTMLButtonElement>('button')!
+    expect(button.textContent).toBe('Install')
+    await act(async () => button.click())
+    expect(installs).toBe(1)
+  })
+}
+for (const id of ['antigravity', 'kimi', 'hermes']) {
+  test(`${id} without an installer links official guidance and never invokes installation`, async () => {
+    let installs = 0
+    const docUrl = `https://official.example/${id}`
+    await mount({ lang: 'pt', statuses: [status({ id, installed: false, canInstall: false, setup: { docUrl } })], mode: 'new', onInstall: () => { installs++ } })
+    expect(host!.querySelector('button')).toBeNull()
+    const link = host!.querySelector('a')!
+    expect(link.textContent).toBe('Como instalar')
+    expect(link.getAttribute('href')).toBe(docUrl)
+    expect(installs).toBe(0)
+  })
+}
+
+test('mobile cards keep labelled installation, reading, usage and selection in each row', async () => {
+  const width = window.innerWidth
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+  try {
+    await mount({ lang: 'pt', statuses: [status()], available: [{ id: 'codex', label: 'Codex' }], mode: 'new' })
+    expect(host!.querySelector('[data-catalog-header]')).toBeNull()
+    const row = host!.querySelector<HTMLElement>('[data-harness-row]')!
+    expect(row.style.gridTemplateColumns).toBe('minmax(0, 1fr) 100px')
+    expect(row.textContent).toContain('Instalação: Instalado')
+    expect(row.textContent).toContain('Leitura: Sem leitura')
+    expect(row.textContent).toContain('Uso: Sem uso')
+    expect(row.querySelector('[data-catalog-action] button')!.textContent).toBe('Selecionar')
+  } finally { Object.defineProperty(window, 'innerWidth', { configurable: true, value: width }) }
+})
+
+
+test('historical usage readings are a source even without a current limit window', async () => {
+  await mount({ lang: 'en', statuses: [status()], readings: [{ harness: 'codex', points: [{ at: 1 }] }], mode: 'usage' })
+  expect(host!.querySelector('[data-catalog-reading]')!.textContent).toBe('Available')
+  expect(host!.querySelector('[data-catalog-usage]')!.textContent).toBe('No usage')
 })

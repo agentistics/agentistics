@@ -4089,7 +4089,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
 
     if (url.pathname === '/api/chat-harnesses' && req.method === 'GET') {
-      return new Response(JSON.stringify(await chatHarnessStatus()), {
+      return new Response(JSON.stringify(await chatHarnessStatus(url.searchParams.get('all') === '1')), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       })
     }

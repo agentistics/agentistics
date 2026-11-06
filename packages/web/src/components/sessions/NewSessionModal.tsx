@@ -154,7 +154,7 @@ export function NewSessionModal({
    * provider is its own answer on the first step; see `lib/nativeSession.ts`.
    */
   const { nativeRuntime } = useEngineCaps()
-  const { harnesses: chatHarnesses, loading: chatHarnessesLoading } = useChatHarnesses()
+  const { harnesses: chatHarnesses, loading: chatHarnessesLoading } = useChatHarnesses(true)
   const [nativeProvider, setNativeProvider] = useState(restored?.nativeProvider ?? '')
   const [providerOpen, setProviderOpen] = useState(false)
   const nativeOptions = useNativeProviders(nativeRuntime === true, nativeProvider, lang)
@@ -886,8 +886,9 @@ export function NewSessionModal({
             <HarnessCatalogTable
               lang={lang}
               statuses={chatHarnesses}
-              available={harnesses ?? []}
+              available={harnesses?.filter(h => h.installed !== false) ?? []}
               planLimits={planSnap.limits}
+              readings={planSnap.readings}
               now={planSnap.now}
               selected={harness?.id ?? ''}
               mode="new"
@@ -899,7 +900,7 @@ export function NewSessionModal({
             {retryable && <button type="button" onClick={retry} style={{ alignSelf: 'flex-start', padding: '7px 11px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>{pt ? 'Tentar de novo' : 'Try again'}</button>}
           </Field>
           <HarnessInstallDialog
-            target={installing ? { id: installing, label: harnesses?.find(h => h.id === installing)?.label ?? installing } : null}
+            target={installing ? { id: installing, label: chatHarnesses.find(h => h.id === installing)?.label ?? harnesses?.find(h => h.id === installing)?.label ?? installing } : null}
             pt={pt}
             onClose={() => setInstalling(null)}
             onDone={() => retry()}
