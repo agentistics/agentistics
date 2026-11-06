@@ -359,6 +359,19 @@ test('the default-root probe that finds the login valid clears its loginExpiredA
   })
 }, 30_000)
 
+test('a confirmed probe that changes nothing does not rewrite accounts.json', async () => {
+  await withFakeClaude(undefined, async () => {
+    const file = join(dir, 'accounts.json')
+    const store = createHarnessAccounts({ file, probe: (h, r) => probeAccountIdentity(h, r) })
+    await store.current('claude', null)
+    const first = (await stat(file)).mtimeMs
+    await Bun.sleep(20)
+    await store.current('claude', null)
+    await store.current('claude', null)
+    expect((await stat(file)).mtimeMs).toBe(first)
+  })
+}, 30_000)
+
 test('PATCH by id updates availability and nickname while retaining legacy PATCH support', async () => {
   const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async () => identity })
   __setHarnessAccountsForTest(store)

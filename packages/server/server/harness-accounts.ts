@@ -519,6 +519,7 @@ export function createHarnessAccounts(options: {
       throw error
     }
   }
+  const LAST_SEEN_STEP_MS = 60_000
   function adopt(data: AccountsFile, harness: HarnessId, root: string | null, detected: AccountIdentity, fresh = false) {
     const key = bindingKey(harness, root)
     const previous = data.accounts.find(a => a.id === data.bindings[key])
@@ -534,7 +535,8 @@ export function createHarnessAccounts(options: {
     // An e-mail label is the evidence `sameLogin` needs later; a probe that named only the org keeps it.
     if (!(harness === 'claude' && account.label.includes('@') && !detected.label.includes('@'))) account.label = detected.label
     if (detected.plan) account.plan = detected.plan
-    account.lastSeen = now()
+    // Refreshing every probe rewrote accounts.json on every usage tick; a minute of slack is plenty for "last seen".
+    if (now() - account.lastSeen >= LAST_SEEN_STEP_MS) account.lastSeen = now()
     account.retired = undefined
     // A sign-in that just FINISHED (`bind`) replaced whatever expired. A routine re-probe (`current`)
     // proves nothing: an expired token still names its owner, so the mark survives it.
@@ -555,7 +557,6 @@ export function createHarnessAccounts(options: {
       return { harness, ...await source, source }
     }))
     const resolveAll = (data: AccountsFile, mutate: boolean) => {
-      let changed = false
       const accounts = detected.map(({ harness, identity: found, confirmed, signedOut }) => {
         const bound = data.accounts.find(a => a.id === data.bindings[bindingKey(harness, root)])
         const out = signedOut ? { signedOut } : {}
@@ -566,14 +567,13 @@ export function createHarnessAccounts(options: {
         }
         if (!mutate) return matchIdentity(data, harness, root, found) ?? bound
           ?? { ...fallback(), id: '', harness, root, available: true, firstSeen: now(), lastSeen: now() }
-        changed = true
         const adopted = adopt(data, harness, root, found).account
         // The default Claude login answered `loggedIn` right now: a mark left by an earlier refusal
         // (or by a leaked account root) must not outlive that proof, or the owner re-logs in only to drop it.
         if (harness === 'claude' && root === null) delete adopted.loginExpiredAt
         return adopted
       })
-      return { accounts, changed }
+      return { accounts }
     }
     const done = (accounts: HarnessAccount[]) => legacy ? accounts : accounts[0]!
     const seen = await snapshot()
@@ -588,8 +588,10 @@ export function createHarnessAccounts(options: {
           const latest = cache.get(bindingKey(d.harness, root))
           if (latest?.settled && latest.identity !== d.source) { Object.assign(d, latest.settled, { source: latest.identity }); d.signedOut = latest.settled.signedOut }
         }
-        const { accounts, changed } = resolveAll(data, true)
-        if (changed) await write(data)
+        const before = JSON.stringify(data)
+        const { accounts } = resolveAll(data, true)
+        // Only a real difference is written: a confirmed probe that changed nothing must not touch the file.
+        if (JSON.stringify(data) !== before) await write(data)
         return accounts
       }))
     } catch (error) {

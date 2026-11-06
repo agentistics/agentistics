@@ -112,16 +112,20 @@ export function startClaudeUsagePoll(deps: UsageDeps = {}): () => void {
     ?? (deps.ingest ? async () => {} : async () => { await (await import('./harness-accounts')).current('claude', null) })
   const tick = async (): Promise<void> => {
     let limited = false
-    // The default home's reading is attributed by its binding: settle the binding (the identity probe)
-    // first, or the first read after a restart lands on a stale one.
-    await confirmDefaultBinding().catch(() => {})
     for (const root of [null, ...await claudeAccountRoots(deps)]) {
       const r = await fetchClaudeUsage(root === null ? deps : {
         ...deps,
         readCredential: () => (deps.readCredentialAt ?? readCredentialAt)(root),
       }).catch((): UsageResult => ({ skip: 'network' }))
       // Attributed by the ROOT it was read from: the default home's binding, or that root's account.
-      if ('limits' in r) await ingest(r.limits, root).catch(() => false)
+      if ('limits' in r) {
+        // The default home's reading is attributed by its binding: settle the binding (the identity
+        // probe) first, or the first read after a restart lands on a stale one. Asked only when there
+        // IS a reading to attribute (a machine with no credential never spawns the probe, so boot stays
+        // quiet), and bounded: a slow probe delays this reading, never the tick behind it.
+        if (root === null) await Promise.race([confirmDefaultBinding().catch(() => {}), new Promise<void>(res => { setTimeout(res, 1500).unref?.() })])
+        await ingest(r.limits, root).catch(() => false)
+      }
       if ('skip' in r && r.skip === 'rate-limited') limited = true
     }
     delay = limited ? Math.min(MAX_BACKOFF_MS, delay * 2) : CLAUDE_USAGE_POLL_MS

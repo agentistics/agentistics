@@ -57,7 +57,7 @@ describe('fetchClaudeUsage', () => {
 })
 
 describe('startClaudeUsagePoll — every Claude login, each attributed by its own root', () => {
-  test('settles the default home binding before reading it, so the first read is not attributed to a stale one', async () => {
+  test('settles the default home binding before attributing its reading (and only once there is one), so the first read is not attributed to a stale one', async () => {
     const order: string[] = []
     let done!: () => void
     const finished = new Promise<void>(r => { done = r })
@@ -71,7 +71,7 @@ describe('startClaudeUsagePoll — every Claude login, each attributed by its ow
     })
     await finished
     stop()
-    expect(order).toEqual(['confirm', 'fetch', 'ingest'])
+    expect(order).toEqual(['fetch', 'confirm', 'ingest'])
   })
   test('reads the default login AND each extra account root, ingesting each under its root', async () => {
     const OTHER = 'fake-token-of-the-second-login'
