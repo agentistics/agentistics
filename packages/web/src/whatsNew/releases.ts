@@ -25,6 +25,9 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       {
         pt: 'Se a conversa da Nay cair, você é avisado para reabrir — ela nunca vira um terminal sozinha. Sem o motor, a Nay diz que não está disponível.',
         en: 'If a Nay conversation drops you are told to reopen it — it never turns into a terminal by itself. Without the engine, Nay says she is unavailable.',
+      },
+    ],
+  },
   '2.200.4': {
     features: [],
     fixes: [

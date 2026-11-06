@@ -460,6 +460,7 @@ export function withStructured(base: SessionBackend, provider: StructuredProvide
       if (transport && durable) { durable.markEnding(req.id, 'refused'); await durable.terminate(req.id).catch(() => false); durable.remove(req.id) }
       // The harness's own build is the wall: a TUI would meet the same one, so tell the person instead of falling back.
       if (r.blocked) throw harnessBlockedNotice(harness, r.blocked)
+      console.warn(`[sessions] structured start of ${harness} refused: ${r.reason}`)
       return false
     }
     const session = transport ? recordingSession(r.session, transport) : r.session
