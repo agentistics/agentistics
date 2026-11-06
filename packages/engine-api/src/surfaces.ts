@@ -65,6 +65,8 @@ export interface EngineSurface {
   frameless?: boolean
   /** 1.19: kept-alive inline/side surfaces float when their session leaves; false opts out. */
   floatOnLeave?: boolean
+  /** 1.24, optional: the host marks the surface's entry with its own beta tag (it is still being tried out). */
+  beta?: boolean
 }
 
 /**
@@ -192,6 +194,7 @@ export type SurfaceRefusalReason =
   | 'bad-layout'
   | 'bad-frameless'
   | 'bad-float-on-leave'
+  | 'bad-beta'
   | 'bad-active'
 
 const ID = /^[a-z][a-z0-9-]{0,39}$/
@@ -243,6 +246,7 @@ export function surfaceRefusals(
       || (s.activeTone !== undefined && !(SURFACE_ACTIVE_TONES as readonly string[]).includes(s.activeTone))
       || (s.activeLabel !== undefined && !(al && labelOk(al.pt) && labelOk(al.en)))) out.push({ id, reason: 'bad-active' })
     if (s.floatOnLeave !== undefined && typeof s.floatOnLeave !== 'boolean') out.push({ id, reason: 'bad-float-on-leave' })
+    if (s.beta !== undefined && typeof s.beta !== 'boolean') out.push({ id, reason: 'bad-beta' })
     if (s.frameless !== undefined && typeof s.frameless !== 'boolean') out.push({ id, reason: 'bad-frameless' })
   }
   return out
