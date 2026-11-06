@@ -193,6 +193,8 @@ async function setAwayMutation(body: unknown, deps: AwayDeps): Promise<AwayReply
   if (!n.ok) return { ok: false, error: n.error, ...(n.detail !== undefined ? { detail: n.detail } : {}) }
   const before = parseAwayState(await deps.read().catch(() => AWAY_OFF))
   await deps.write(n.state)
+  // Autonomous mode keeps the deterministic flows running by default; off restores the previous state.
+  void import('@agentistics/core').then(c => c.applyAutonomousFlows(c.awayActive(n.state, now), process.env)).catch(() => {})
   if (deps.live) await notifyLiveSessions(before, n.state, deps.live, now, sender)
   return { ok: true, ...awayView(n.state, now) }
 }
