@@ -7,6 +7,7 @@
  */
 
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { BOARD_PAGE_SIZES, type BoardPage, type BoardPageSize } from './boardPaging'
 
 export function BoardPager(p: {
@@ -19,9 +20,10 @@ export function BoardPager(p: {
   compact?: boolean
 }) {
   const pt = p.lang === 'pt'
-  const h = 26
+  const mobile = useIsMobile()
+  const h = mobile ? 44 : 26
   const btn = (disabled: boolean): React.CSSProperties => ({
-    display: 'inline-grid', placeItems: 'center', minWidth: 26, height: h, padding: 0,
+    display: 'inline-grid', placeItems: 'center', minWidth: h, height: h, padding: 0,
     borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-elevated)',
     color: 'var(--text-secondary)', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.45 : 1,
     fontFamily: 'inherit',

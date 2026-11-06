@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Entrega ao vivo atualiza na hora quando uma tarefa muda de etapa, sem esperar o próximo ciclo.',
+        en: 'Live Delivery updates right away when a task changes stage, without waiting for the next cycle.',
+      },
+      {
+        pt: 'Entrega ao vivo cabe inteira numa tela de computador (as 7 etapas), então a animação de merge aparece sem rolar; em telas menores a coluna de destino entra na vista antes da animação.',
+        en: 'Live Delivery fits a desktop screen (all 7 stages), so the merge animation shows without scrolling; on smaller screens the destination column scrolls into view first.',
+      },
+      {
+        pt: 'No celular, a Entrega ao vivo abre na primeira etapa com tarefas, os botões de página ficam maiores e o Esc fecha a folha de visualização.',
+        en: 'On phones, Live Delivery opens on the first stage with tasks, the page buttons are larger and Esc closes the view sheet.',
+      },
+    ],
+  },
   '2.200.0': {
     features: [
       {
