@@ -167,6 +167,10 @@ export function installedHarnessAt(exePath: string, harness?: HarnessId): Harnes
     [/\/node_modules\/@opencode\/cli(?:-[^/]+)?\/(?:.*\/)?bin\/opencode(?:\.exe)?$/, 'opencode'],
     [/\/\.local\/share\/gh\/copilot\/copilot$/, 'copilot'],
     [/^(?:\/usr\/local|\/opt\/homebrew|\/(?:home|Users)\/[^/]+\/\.local)\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi|opencode)$/, 'path-bin'],
+    // MAC.OPENCODE r2: Homebrew installs the native binary in its CELLAR (`/opt/homebrew/Cellar/opencode/2.2.5/bin/opencode`,
+    // read from homebrew-core's `opencode.rb` 2.2.5: `bin.install …/bin/opencode`) and links `/opt/homebrew/bin/opencode` to it,
+    // so the executable a Mac reports (lsof's `txt`, `realpath`) is the Cellar path. Intel Macs use `/usr/local`, Linuxbrew its own prefix.
+    [/^(?:\/opt\/homebrew|\/usr\/local|\/home\/linuxbrew\/\.linuxbrew)\/Cellar\/[^/]+\/[^/]+\/bin\/(claude|codex|gemini|copilot|agy|antigravity|kimi|opencode)$/, 'path-bin'],
   ]
   for (const [pattern, id] of known) {
     if (!pattern.test(normal)) continue
@@ -652,7 +656,9 @@ async function linkOpencodeTuis(procs: HarnessProcess[]): Promise<void> {
     const taken = new Set<string>()
     try {
       const { readRegistry } = await import('./sessions/registry')
-      for (const m of await readRegistry()) if (m.harness === 'opencode' && m.conversationId) taken.add(m.conversationId)
+      // An ENDED row drives nothing: excluding its conversation hid the tab of a TUI the owner opened on it by hand
+      // (MAC.OPENCODE r2) — every conversation once reopened through agentop stayed "taken" forever.
+      for (const m of await readRegistry()) if (m.harness === 'opencode' && m.conversationId && !m.endedAt) taken.add(m.conversationId)
     } catch { /* no registry: nothing is excluded, as before */ }
     const refs = all.map(p => ({ pid: p.pid!, cwd: p.cwd, startedMs: p.startedMs, ...(p.stdinIsTty !== undefined ? { tty: p.stdinIsTty } : {}) }))
     const { opencodeV2Io, isOpencodeV2Now } = await import('./sessions/opencode-v2-io')

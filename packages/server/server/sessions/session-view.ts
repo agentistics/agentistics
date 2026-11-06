@@ -830,8 +830,12 @@ export function buildSessionViews(o: {
     // conversation a process is driving: a TUI started by hand beside a managed (ACP) session in the
     // same repository is another conversation, and the directory guess hid it as "closed". Cover it
     // only by the exact `ses_…` id both sides state.
+    // MAC.OPENCODE r2: and only by a row that is actually RUNNING, the rule every other harness follows below. A
+    // conversation the owner once reopened here keeps that (now exited / retired) row carrying its id, and the TUI he
+    // later opened on it in a terminal was hidden behind the dead row — the running process is the truth.
     if (p.harness === 'opencode') {
-      return p.sessionId !== undefined && managed.some(m => m.harness === 'opencode' && m.conversationId === p.sessionId)
+      return p.sessionId !== undefined && managed.some(m => m.harness === 'opencode' && m.conversationId === p.sessionId
+        && (m.status === 'running' || m.status === 'unregistered'))
     }
     return managed.some(m =>
       m.harness === p.harness &&

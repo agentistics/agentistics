@@ -161,3 +161,25 @@ export function parsePsCommands(raw: string): Map<number, string> {
   }
   return out
 }
+
+/**
+ * PURE. The EXECUTABLE of a process, from a `lsof -a -d txt -p <pids> -Fpn` answer — MAC.OPENCODE r2.
+ *
+ * macOS `ps -o comm=` prints argv[0] as the process was started, so a TUI launched by name from a shell (`opencode`,
+ * found on `$PATH` at `/opt/homebrew/bin/opencode`) reports the bare word `opencode` — not a path, so `macExecutable`
+ * had nothing to resolve and no install layout could be matched, and EVERY external opencode (claude, codex…) started
+ * that way was dropped from the fleet. Resolving the bare word against `$PATH` is not an option either: the server runs
+ * under launchd with `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. The kernel's own answer is the `txt` descriptor: the program
+ * file, already symlink-resolved. `txt` also lists every loaded library, so the one taken is the first whose basename IS
+ * the command's own name, else (an install named after its VERSION, `~/.local/share/claude/versions/2.1.x`) the first
+ * the caller's `accepts` recognises as an installation; none is `undefined` — unmatched rather than guessed.
+ */
+export function executableFromLsofTxt(
+  byPid: Map<number, string[]>, pid: number, comm: string, accepts: (path: string) => boolean = () => true,
+): string | undefined {
+  const base = comm.slice(comm.lastIndexOf('/') + 1)
+  const paths = (byPid.get(pid) ?? []).filter(p => p.startsWith('/'))
+  const named = paths.find(p => p.slice(p.lastIndexOf('/') + 1) === base)
+  if (named !== undefined) return accepts(named) ? named : undefined
+  return paths.find(accepts)
+}
