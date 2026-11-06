@@ -36,3 +36,10 @@ text). Without it the wait fires on any handback from that session, as before.
 Known experimental limits: waiting-poll history is process-local and its freshness
 still needs refinement; handback evidence is supplied by the caller; cleanup only
 previews. Independent QA and owner validation are required before release.
+
+### Autonomous delivery and stalled workers
+
+`sessao-parada` is enabled by default behind `AGENTISTICS_FLOWS=1`. The paired engine scans managed workers once a minute. After 30 minutes without observed activity, it sends a `block` message to the worker's current leader, including the last text, account-limit evidence, dirty-work state and recovery commands. It follows leader handoffs. Unknown observations do not prove inactivity; final handbacks suppress alerts, while intermediate handbacks are described. Episodes and delivery reservations survive restart; reminders are at least 30 minutes apart. Disable with `agentop flow disable sessao-parada`.
+
+`retomar-sessao` sends a prompt through the existing composer path. The leader can also choose an account with `agentistics_session_switch_account` (`resendPending: true`), use `fechar-entregue` after delivery, or ask the author to commit WIP and push before closing. No alert bypasses an approval dialog or commits dirty work automatically. `AGENTISTICS_STALLED_AFTER_MS` configures the timer threshold; it must be a positive finite number. First observation starts the idle clock, so a new monitor needs a full observation window.
+
