@@ -12,6 +12,7 @@ export const TOOL_LABELS: Record<string, string> = {
   agentistics_build_layout:      'Building layout',
   agentistics_component_catalog: 'Reading catalog',
   agentistics_export_pdf:        'Generating PDF',
+  agentistics_live_delivery:     'Checking live deliveries',
 
   // Codex tool types
   web_search_call:               'Web search',

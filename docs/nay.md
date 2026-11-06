@@ -109,6 +109,7 @@ Nay has every agentistics MCP tool (38 at the time of writing — see
 | "Which harness do I use most?" | `agentistics_harnesses` |
 | "How much did tag X cost?" | `agentistics_tags`, `agentistics_tag_detail` |
 | "What is on the board / what can I pick up?" | `agentistics_tasks`, `agentistics_task_next` |
+| "What is running / when does X ship / is anything stalled?" | `agentistics_live_delivery` |
 | "Put these sessions in a folder" | `agentistics_session_groups`, `agentistics_session_group_create` / `_edit` |
 | "Build me a cost overview layout" | `agentistics_component_catalog`, `agentistics_build_layout` |
 | "How much have I spent talking to you?" | `agentistics_projects`, filtered to `~/.agentistics/nay-chat` |

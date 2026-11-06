@@ -33,6 +33,7 @@ import {
   type CommentAttachment, type CommentPart,
 } from '../lib/commentBody'
 import { BoardView, MobileLane } from '../components/tasks/TaskBoard'
+import { LiveDelivery } from '../components/tasks/LiveDelivery'
 import { effectiveView, hasStoredView, resolveLane } from '../components/tasks/mobileLanes'
 import { mobileBoardCopy } from '../components/tasks/boardCopyThreads'
 import { TaskTable } from '../components/tasks/TaskTable'
@@ -303,6 +304,7 @@ function TaskList() {
                 <button style={{ ...seg(view === 'overview'), flex: 1 }} onClick={() => setView('overview')}><BarChart3 size={14} /> Metrics</button>
                 <button style={{ ...seg(view === 'board'), flex: 1 }} onClick={() => setView('board')}><LayoutGrid size={14} /> Board</button>
                 <button style={{ ...seg(view === 'table'), flex: 1 }} onClick={() => setView('table')}><Rows3 size={14} /> Table</button>
+                <button style={{ ...seg(view === 'live'), flex: 1 }} onClick={() => { setView('live'); setSheet(false) }}><LiveDot /> Live</button>
               </div>
             </div>
             <div style={{ display: 'grid', gap: 6 }}>
@@ -334,6 +336,9 @@ function TaskList() {
           </button>
           <button style={seg(view === 'table')} onClick={() => setView('table')}>
             <Rows3 size={14} /> Table
+          </button>
+          <button style={seg(view === 'live')} onClick={() => setView('live')}>
+            <LiveDot /> Live Delivery
           </button>
         </div>
         <button
@@ -431,7 +436,9 @@ function TaskList() {
 
       {view === 'overview' && overview && <BoardOverviewView o={overview} statuses={statuses} />}
 
-      {view !== 'overview' && rows !== null && shown.length === 0 && (
+      {view === 'live' && <LiveDelivery lang={lang} />}
+
+      {view !== 'overview' && view !== 'live' && rows !== null && shown.length === 0 && (
         <EmptyNotice error={rows.length > 0 ? null : error} />
       )}
       {rows !== null && view === 'board' && shown.length > 0 && (
@@ -550,6 +557,10 @@ function TaskList() {
 
 // ----------------------------------------------------------------------------- detail
 
+
+function LiveDot() {
+  return <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-red, #ff5f5f)', display: 'inline-block' }} />
+}
 
 function TaskDetailView({ id }: { id: string }) {
   const { filters, lang } = useOutletContext<AppContext>()

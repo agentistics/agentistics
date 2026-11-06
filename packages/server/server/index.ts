@@ -2414,6 +2414,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const { listTasks } = await import('./sessions/task-web')
       return json(await listTasks(taskFilterOf(url)))
     }
+    // The LIVE DELIVERY line (`task-live.ts`). Matched before the generic `<ref>` GET, like `next`.
+    if (url.pathname === '/api/tasks/live' && req.method === 'GET') {
+      const { liveDeliveries } = await import('./sessions/task-web')
+      const { LIVE_STAGES } = await import('./sessions/task-live')
+      const stage = LIVE_STAGES.find(x => x === url.searchParams.get('stage'))
+      return json(await liveDeliveries({
+        ...(url.searchParams.get('task') ? { task: url.searchParams.get('task')! } : {}),
+        ...(stage ? { stage } : {}),
+        ...(url.searchParams.get('stalled') === '1' ? { stalledOnly: true } : {}),
+      }))
+    }
     // The two ORCHESTRATION reads, matched before the generic `<ref>` GET below — otherwise
     // `next` and `activity` resolve as task references and answer 404 for a board that has them.
     if (url.pathname === '/api/tasks/next' && req.method === 'GET') {

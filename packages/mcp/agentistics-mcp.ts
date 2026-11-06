@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { liveDeliveryQuery } from "./live-delivery-args";
 import { flowStatusRunId } from './flow-status'
 import { sessionRoleBody } from "./session-role-args";
 import "./orphan-guard-boot";
@@ -488,6 +489,20 @@ const TOOLS: Tool[] = [
     inputSchema: {
       type: "object",
       properties: { ref: { type: "string" }, limit: { type: "number" } },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_live_delivery",
+    description:
+      "What is being DELIVERED right now — the Live Delivery line, the same source as the screen. Use it to answer \"what is running\", \"when does X ship\" and \"is anything stalled\". Returns a one-line `sentence`, a `summary` (active deliveries, agents working, stalled, the next delivery with an estimate), the active `deliveries` with their stage (queue, running, qa, adjust, leader, merge, published), the agents on each (harness, model, account, live state), time in the stage and in total, the ETA with its source and confidence (`kind: none` means there is NO estimate — say so, never invent a time), the last action, and the `leaders` band (each leader's current action, its workers and what waits on a decision — leaders are never deliveries). Filters: `task` (id or part of the title), `stage`, `stalledOnly`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "A task id or part of its title." },
+        stage: { type: "string", enum: ["queue", "running", "qa", "adjust", "leader", "merge", "published"] },
+        stalledOnly: { type: "boolean", description: "Only deliveries that need a person, lost an agent or are blocked." },
+      },
       required: [],
     },
   },
@@ -1146,6 +1161,10 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         if (a?.ref) q.set("task", String(a.ref));
         if (a?.limit) q.set("limit", String(a.limit));
         const body = await apiGet(`/api/tasks/activity${q.toString() ? `?${q}` : ""}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_live_delivery": {
+        const body = await apiGet(`/api/tasks/live${liveDeliveryQuery(args as any)}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_edit": {
