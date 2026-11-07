@@ -128,15 +128,23 @@ describe('HANDOFF.RELAY — IO with injected reader', () => {
     expect(failed).toMatchObject({ ok: false, delivered: false, reason: 'send-failed' })
     expect(patches).toHaveLength(0)
     const sentTo: string[] = []
-    const ok = await flushHandoffRelay(registry[0]!, registry, async to => { sentTo.push(to); return true }, io)
+    const registered: unknown[] = []
+    const ok = await flushHandoffRelay(registry[0]!, registry, async to => { sentTo.push(to); return true }, { ...io, ownerMessages: async (target, source, messages) => { registered.push({ target, source: source.id, messages }) } })
     expect(ok.delivered).toBe(true)
     expect(sentTo).toEqual(['next'])
+    expect(registered).toEqual([{ target: 'next', source: registry[0]!.id, messages: [{ at: later[7]!.at, text: 'e o motor?' }] }])
     expect(patches[0]).toMatchObject({ handoffRelayedAt: later[7]!.at, handoffRelayAwaiting: true })
   })
 
   it('follows a reopened successor to its live row', () => {
     const reg = [row({ id: 'next', conversationId: 'c2', endedAt: 'x' }), row({ id: 'next2', conversationId: 'c2' })]
     expect(successorRow(reg, 'next')?.id).toBe('next2')
+  })
+  it('the request bus retains the whole original owner turn when the briefing quote is truncated', async () => {
+    const text = 'Fix the queue. '.repeat(300)
+    const got = await captureHandoffRelay(row({}), async () => ({ turns: [t('user', text, 58)] }))
+    expect(got.owner?.[0]?.text).toBe(text.trim())
+    expect(got.section.length).toBeLessThan(text.length)
   })
 })
 

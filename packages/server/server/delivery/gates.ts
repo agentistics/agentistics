@@ -29,7 +29,7 @@ export function runningSessionIds(registry: ManagedSession[], backend: BackendSe
 }
 
 export interface StagedFact { prompt?: string; harness?: string; model?: string; effort?: string; account?: string; cwd?: string }
-export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; staged?: StagedFact; blockedBy: string[] }
+export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; parentGroupId?: string; staged?: StagedFact; blockedBy: string[] }
 export interface SessionFact {
   id: string; harness: string; model?: string; effort?: string; account?: string; taskId?: string; subtaskId?: string
   role?: string; label?: string; alive: boolean; cwd: string; worktree: boolean; rootPath?: string; createdAt?: string
@@ -385,7 +385,7 @@ export function defaultGateFacts(): GateFacts {
       const s = w.book.subtasks.find(x => x.id === id)
       if (!s) return null
       const st = s.stagedSession as (StagedFact & { prompt: string }) | undefined
-      return { id: s.id, taskId: s.taskId, title: s.title, status: s.status, groupMember: Boolean(s.parentGroupId), blockedBy: s.blockedBy ?? [], ...(st ? { staged: { prompt: st.prompt, harness: st.harness, model: st.model, effort: st.effort, account: st.account, cwd: st.cwd } } : {}) }
+      return { id: s.id, taskId: s.taskId, title: s.title, status: s.status, groupMember: Boolean(s.parentGroupId), ...(s.parentGroupId ? { parentGroupId: s.parentGroupId } : {}), blockedBy: s.blockedBy ?? [], ...(st ? { staged: { prompt: st.prompt, harness: st.harness, model: st.model, effort: st.effort, account: st.account, cwd: st.cwd } } : {}) }
     },
     sessions: async () => {
       const [{ readRegistry }, { readRolesDoc, roleOfRow }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('../sessions/registry'), import('../sessions/session-roles'), import('../config')])

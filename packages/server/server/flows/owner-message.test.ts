@@ -1,5 +1,6 @@
-import { expect, test } from 'bun:test'
-import { emitOwnerMessage, isOwnerComposerRequest, type OwnerMessageDeps } from './owner-message'
+import { expect, spyOn, test } from 'bun:test'
+import { emitOwnerMessage, emitRelayedOwnerMessages, enableOwnerRequestFlows, ownerMessageTarget, isOwnerComposerRequest, type OwnerMessageDeps } from './owner-message'
+import type { ManagedSession } from '../sessions/types'
 import { isOwnerTurn } from '../sessions/handoff-relay'
 import { contextText } from '../sessions/agentistics-context'
 
@@ -16,6 +17,76 @@ function deps(over: Partial<OwnerMessageDeps> = {}) {
   }
   return { d, events }
 }
+
+test('the shared composer records owner requests from TUI and HTTP only after confirmed delivery', async () => {
+  const owner = await import('./owner-message')
+  const fleet = await import('../sessions/fleet-web')
+  const { d, events } = deps()
+  const hook = spyOn(owner, 'defaultOwnerMessageDeps').mockReturnValue(d)
+  let sent = true
+  fleet.__setFleetHostForTest('en', {
+    sessions: async () => ({ sessions: [] }),
+    promptSession: async () => ({ ok: sent, message: sent ? 'sent' : 'failed' }),
+  } as never)
+  try {
+    expect((await fleet.runFleetAction('en', { action: 'prompt', id: 'lead', text: 'Fix the history column' })).ok).toBe(true)
+    expect(events).toHaveLength(1)
+    sent = false
+    await fleet.runFleetAction('en', { action: 'prompt', id: 'lead', text: 'not delivered' })
+    expect(events).toHaveLength(1)
+  } finally { hook.mockRestore(); fleet.__setFleetHostForTest('en', null) }
+})
+
+test('an accepted but unconfirmed composer send records its request only when the late delivery succeeds', async () => {
+  const owner = await import('./owner-message')
+  const fleet = await import('../sessions/fleet-web')
+  const { d, events } = deps()
+  const hook = spyOn(owner, 'defaultOwnerMessageDeps').mockReturnValue(d)
+  let finish!: (value: { ok: boolean; message: string }) => void
+  fleet.__setFleetHostForTest('en', {
+    sessions: async () => ({ sessions: [] }),
+    promptSession: () => new Promise(resolve => { finish = resolve }),
+  } as never)
+  try {
+    expect((await fleet.runFleetAction('en', { action: 'prompt', id: 'lead', text: 'Fix the percent display' })).ok).toBe(true)
+    expect(events).toHaveLength(0)
+    finish({ ok: true, message: 'delivered' })
+    for (let i = 0; i < 100 && events.length === 0; i++) await Bun.sleep(10)
+    expect(events).toHaveLength(1)
+  } finally { hook.mockRestore(); fleet.__setFleetHostForTest('en', null) }
+}, 8_000)
+
+test('mandatory request flows use the official switches, including when the general flag was on but both triggers were off', async () => {
+  const enabled = new Set<string>(), calls: string[][] = []
+  const command = { verb: 'flow' as const, summary: { en: '', pt: '' }, run: async (args: string[], io: { out(s: string): void }) => {
+    calls.push(args)
+    if (args[0] === 'ls') for (const name of ['pedido-do-dono', 'encaixe-do-pedido']) io.out(`${name}\t${enabled.has(name) ? 'enabled' : 'disabled'}`)
+    else enabled.add(args[1]!)
+    return 0
+  } }
+  await enableOwnerRequestFlows([command])
+  expect([...enabled]).toEqual(['pedido-do-dono', 'encaixe-do-pedido'])
+  await enableOwnerRequestFlows([command])
+  expect(calls.filter(c => c[0] === 'enable')).toHaveLength(2)
+})
+
+test('a trusted relay preserves the original conversation and time; ordinary session messages remain excluded', async () => {
+  const { d, events } = deps()
+  const source = { id: 'old', conversationId: 'original' }
+  const messages = [{ at: '2026-10-29T11:59:00.000Z', text: 'Move Ligações to the top' }, { text: '[from session x · handback]\nfinished' }]
+  await emitRelayedOwnerMessages('lead', source, messages, d)
+  await emitRelayedOwnerMessages('lead', source, messages, d)
+  expect(events).toHaveLength(2)
+  expect(events[0]!.id).toBe(events[1]!.id)
+  expect(events[0]!.payload).toMatchObject({ sessionId: 'lead', conversationId: 'original', at: messages[0]!.at, taskId: 't-1', channel: 'handoff-relay' })
+  await emitRelayedOwnerMessages('lead', source, messages, { ...d, recorded: async () => true })
+  expect(events).toHaveLength(2)
+})
+
+test('requests to a retired leader resolve through handoff and a reopened managed id, inheriting its task', () => {
+  const rows = [{ id: 'old', taskId: 't1', handoffTo: 'successor', endedAt: 'x' }, { id: 'successor', conversationId: 'conv', endedAt: 'x' }, { id: 'new-id', conversationId: 'conv' }] as ManagedSession[]
+  expect(ownerMessageTarget('old', rows)).toMatchObject({ id: 'new-id', taskId: 't1' })
+})
 
 test('H1.1: three owner messages emit three owner.message events; a [from session] relay and an <agent-message> emit none', async () => {
   const { d, events } = deps()
@@ -43,6 +114,7 @@ test('worker messages carry the worker role (the engine comments, no pedido); un
   expect(await emitOwnerMessage({ action: 'prompt', id: 'lead', text: 'x' }, { ...d, roleOf: async () => undefined })).toBe('no-role')
   expect(await emitOwnerMessage({ action: 'prompt', id: 'lead', text: 'x' }, { ...d, flowsOn: () => false })).toBe('flows-off')
   expect(events).toHaveLength(1)
+  expect(await emitOwnerMessage({ action: 'prompt', id: 'lead', text: 'x' }, { ...d, emit: async () => false })).toBe('no-engine')
 })
 
 test('H1.4: a leader briefing opens with PEDIDOS ABERTOS DO DONO; a worker briefing never carries it', () => {

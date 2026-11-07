@@ -21,8 +21,9 @@ import {
   EDGES, GATES, adoptPhase, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
   refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
 } from './machine'
-import { releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
+import { judgePredispatch, releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
+import { sharedQueueArea } from './queue-fit'
 
 export interface DeliveryBoard {
   /** Move the subtask's board status to the one this phase is shown under (created when missing). */
@@ -59,7 +60,11 @@ export interface DeliveryDeps {
   /** Squash-merges the delivery's PR (`agentop flow merge`). */
   merge?(r: DeliveryRecord): Promise<{ ok: true; mergeSha: string; pr: number } | { ok: false; message: string }>
   now(): number
+  /** Canonical ORQ.H1/H4 pedidos, read from the engine; null = temporarily unreadable. */
+  requests?(): Promise<OwnerRequestFact[] | null>
 }
+
+export interface OwnerRequestFact { id: string; taskId?: string; sessionId: string; text: string; at: string; state: string; linkedSubtaskIds: string[] }
 
 export type DeliveryReply =
   | { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; skipped?: unknown; gate?: GateVerdict }
@@ -346,9 +351,10 @@ export function createDeliveryService(d: DeliveryDeps) {
   }
 
   /** P4 — write the pre-dispatch (staged session) on the subtask and open its delivery at `fila`. */
-  const stage = async (subtaskId: string, draft: Record<string, unknown>, actor: string, opts: { leaderSessionId?: string; versionTarget?: string; pedidoId?: string } = {}): Promise<DeliveryReply> => {
+  const stage = async (subtaskId: string, draft: Record<string, unknown>, actor: string, opts: { leaderSessionId?: string; versionTarget?: string; pedidoId?: string; pedidoIds?: readonly string[] } = {}): Promise<DeliveryReply> => {
     const sub = await d.facts.subtask(subtaskId)
     if (!sub) return fail(404, 'no_such_subtask', `subtask ${subtaskId} does not exist on the board`)
+    if (sub.groupMember) return fail(422, 'subtask_in_group', 'stage the group, not its member')
     const merged = { ...(sub.staged ?? {}), ...draft }
     const written = await d.board.stage(subtaskId, merged)
     if (!written.ok) return fail(422, 'stage_refused', written.message ?? 'the board refused the staged session')
@@ -358,10 +364,30 @@ export function createDeliveryService(d: DeliveryDeps) {
     const v = await runGate('predispatch', got, d.facts)
     // A complete pre-dispatch also gets its EXPECTED SLOT read now, so "Na fila" shows a verdict instead of "not checked yet".
     const vaga = v.ok && got.phase === 'fila' ? await runGate('vaga', got, d.facts) : null
-    const after = await d.store.update(doc => { const c = doc.deliveries[subtaskId]!; delete c.dequeued; absorb(c, 'predispatch', v); if (vaga) absorb(c, 'vaga', vaga); return structuredClone(c) })
+    const after = await d.store.update(doc => {
+      const c = doc.deliveries[subtaskId]!
+      if (c.dequeued) {
+        c.revision++
+        c.history.push({ from: 'fila', to: 'fila', at: iso(d), actor, detail: 'restaged explicitly after dequeue', revision: c.revision })
+        delete c.dequeued
+      }
+      if (opts.pedidoId || opts.pedidoIds?.length) c.pedidoIds = [...new Set([...(c.pedidoIds ?? []), ...(opts.pedidoId ? [opts.pedidoId] : []), ...(opts.pedidoIds ?? [])])]
+      absorb(c, 'predispatch', v); if (vaga) absorb(c, 'vaga', vaga)
+      return structuredClone(c)
+    })
     await d.board.setPhaseStatus(subtaskId, after.phase).catch(() => undefined)
-    if (v.ok) await d.emit('subtarefa.preparada', { subtarefa: subtaskId, taskId: after.taskId, ...(opts.pedidoId ? { pedido: opts.pedidoId } : {}) }).catch(() => undefined)
-    return { ok: true, status: 200, record: after, warnings: v.ok ? [] : [`pre-dispatch still incomplete: ${v.reason}`], gate: v }
+    const warnings = v.ok ? [] : [`pre-dispatch still incomplete: ${v.reason}`]
+    const fits: Array<{ subtaskId: string; signals: string[] }> = []
+    if (v.ok && after.phase === 'fila') for (const r of Object.values((await d.store.read()).deliveries).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.subtaskId.localeCompare(b.subtaskId))) {
+      if (r.subtaskId === subtaskId || r.taskId !== after.taskId || r.phase !== 'fila' || r.dequeued) continue
+      const other = await d.facts.subtask(r.subtaskId).catch(() => null)
+      if (!other || other.groupMember || ['in_review', 'done', 'abandoned'].includes(other.status)) continue
+      const signals = sharedQueueArea(String(merged.prompt ?? ''), other.staged?.prompt ?? '')
+      if (signals.length) fits.push({ subtaskId: r.subtaskId, signals })
+    }
+    for (const fit of fits) warnings.push(`encaixe: ${fit.subtaskId} already queues the same area (${fit.signals.join(', ')}); extend its brief or join the pieces into a group with agentistics_task_subtask`)
+    if (v.ok) await d.emit('subtarefa.preparada', { subtarefa: subtaskId, taskId: after.taskId, ...(opts.pedidoId ? { pedido: opts.pedidoId } : {}), encaixe: fits }).catch(() => undefined)
+    return { ok: true, status: 200, record: after, warnings, gate: v }
   }
 
   /** `agentop flow stage run`: gates (predispatch + vaga) → spawn the staged session → executando. */
@@ -477,11 +503,83 @@ export function createDeliveryService(d: DeliveryDeps) {
     for (const r of Object.values((await d.store.read()).deliveries)) {
       if (r.dequeued) { await auditDequeue(r); continue }
       if (r.phase !== 'fila') continue
+      const folded = await foldGroupMember(r.subtaskId)
+      if (folded) { actions.push(`fold ${r.subtaskId}:${folded}`); continue }
       const status = await (d.facts.pieceStatus ? d.facts.pieceStatus(r.subtaskId) : d.facts.subtask(r.subtaskId).then(s => s?.status ?? null)).catch(() => undefined)
       if (status && ['in_review', 'done', 'abandoned'].includes(status)) {
         const out = await dequeue(r.subtaskId, `board status is ${status}; this piece is no longer queued`, 'flow:entrega')
         if (out.ok) actions.push(`dequeue ${r.subtaskId}`)
       }
+    }
+  }
+
+  /** A staged member's work is carried by its group; its old queue record remains only as audited history. */
+  const foldGroupMember = async (subtaskId: string): Promise<string | null> => {
+    const r = await d.store.get(subtaskId)
+    if (!r || r.phase !== 'fila' || r.dequeued) return null
+    const member = await d.facts.subtask(subtaskId)
+    if (!member?.parentGroupId) return null
+    if (['in_review', 'done', 'abandoned'].includes(member.status)) return null
+    const group = await d.facts.subtask(member.parentGroupId)
+    if (!group || group.taskId !== member.taskId || group.groupMember) return null
+    if (member.staged) {
+      const marker = `[group member ${subtaskId}]`
+      const brief = group.staged?.prompt ?? ''
+      const merged = { ...member.staged, ...group.staged, prompt: brief.includes(marker) ? brief : `${brief}\n\n${marker}\n${member.staged.prompt ?? ''}`.trim() }
+      const result = await stage(group.id, merged, 'flow:entrega', { ...(r.leaderSessionId ? { leaderSessionId: r.leaderSessionId } : {}), ...(r.pedidoIds?.length ? { pedidoIds: r.pedidoIds } : {}) })
+      if (!result.ok) return null
+    }
+    const out = await dequeue(subtaskId, `folded into group ${group.id}; the group owns its pre-dispatch`, 'flow:entrega')
+    return out.ok ? group.id : null
+  }
+
+  /** Ten minutes since the request itself, including a busy or replaced leader. Only cadence lives here. */
+  const watchRequests = async (sessions: SessionFact[] | null, actions: string[]) => {
+    if (!d.requests || !sessions) return
+    const requests = await d.requests().catch(() => null)
+    if (!requests) { actions.push('requests-unavailable'); return }
+    const pending = requests.filter(p => /^p-[\w-]{1,100}$/.test(p.id) && ['open', 'linked'].includes(p.state))
+    const liveIds = new Set(pending.map(p => p.id))
+    const doc = await d.store.read()
+    const obsolete = Object.keys(doc.requestReminders ?? {}).filter(id => !liveIds.has(id))
+    if (obsolete.length) await d.store.update(x => { for (const id of obsolete) delete x.requestReminders![id] })
+    const batches = new Map<string, OwnerRequestFact[]>()
+    for (const p of pending) {
+      if (!p.taskId || !Number.isFinite(Date.parse(p.at)) || d.now() - Date.parse(p.at) < 10 * 60_000) continue
+      const ids = [...new Set([...p.linkedSubtaskIds, ...Object.values(doc.deliveries).filter(r => r.pedidoIds?.includes(p.id) && !r.dequeued).map(r => r.subtaskId)])]
+      let missing = ids.length === 0
+      for (const id of ids) {
+        let sub = await d.facts.subtask(id).catch(() => null)
+        if (sub && ['in_review', 'done', 'abandoned'].includes(sub.status)) continue
+        if (sub?.parentGroupId) sub = await d.facts.subtask(sub.parentGroupId).catch(() => null)
+        if (sub && ['in_review', 'done', 'abandoned'].includes(sub.status)) continue
+        if (!sub || sub.taskId !== p.taskId || doc.deliveries[sub.id]?.dequeued || !judgePredispatch(sub).ok) missing = true
+      }
+      if (!missing) continue
+      const leader = leaderFor(sessions, p.taskId, '')
+      if (!leader) continue
+      const reserved = await d.store.update(x => {
+        const clocks = x.requestReminders ??= {}
+        const last = clocks[p.id]
+        if (last?.leaderSessionId === leader && last.at && d.now() - Date.parse(last.at) < 30 * 60_000) return false
+        if (last?.pendingAt && d.now() - Date.parse(last.pendingAt) < 60_000) return false
+        clocks[p.id] = { ...(last?.leaderSessionId === leader ? last : {}), pendingAt: iso(d), leaderSessionId: leader }
+        return true
+      })
+      if (reserved) { const list = batches.get(leader) ?? []; list.push(p); batches.set(leader, list) }
+    }
+    for (const [leader, pedidos] of batches) {
+      const body = `[entrega pedidos] Pedidos do dono sem pré-dispatch completo há pelo menos 10 min:\n${pedidos.map(p => `- ${p.id}: «${p.text}»`).join('\n')}\nCrie ou encaixe a subtarefa/grupo e prepare com agentistics_task_stage (prompt, harness, model, effort, account, pedidoId). Decida e registre; o dono não é chamado.`
+      const sent = await d.notify.session(leader, body).catch(() => false)
+      await d.store.update(x => {
+        for (const p of pedidos) {
+          const clock = x.requestReminders?.[p.id]
+          if (!clock || clock.leaderSessionId !== leader) continue
+          if (sent) clock.at = iso(d)
+          delete clock.pendingAt
+        }
+      })
+      actions.push(`${sent ? 'request-wake' : 'request-wake-failed'} ${leader}:${pedidos.map(p => p.id).join(',')}`)
     }
   }
   /** The live leader to chase for a task: the one filed on the piece itself, else the task's newest. Null = nobody to wake. */
@@ -654,6 +752,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     await cleanQueue(actions)
     // ONE read of the fleet and ONE read of the board's blocked pieces per tick; null = could not be read (never "none").
     const sessions = await d.facts.sessions().catch(() => null)
+    await watchRequests(sessions, actions)
     const blocked = d.facts.blockedSubtasks ? await d.facts.blockedSubtasks().catch(() => null) : null
     await reconcileAdopted(blocked, actions)
     await retryDeferredBoard(blocked, actions)
@@ -767,7 +866,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     // An unreadable store REFUSES the write (and keeps a copy of the file) instead of letting any verb replace it with an empty book.
     transition: safe((id: string, to: unknown, input: TransitionInput, actor: string) => transition(id, to, input, actor)),
     gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), step: safe(step),
-    stage: safe(stage), stageRun: safe(stageRun), dequeue: safe(dequeue), qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
+    stage: safe(stage), stageRun: safe(stageRun), dequeue: safe(dequeue), foldGroupMember, qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
   }
 }
 

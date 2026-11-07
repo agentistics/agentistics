@@ -18,6 +18,9 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     }, {
       pt: 'Peças em revisão ou concluídas saem da fila automaticamente; o líder também pode retirá-las com um motivo registrado.',
       en: 'Pieces under review or already finished leave the queue automatically; the leader can also withdraw them with a recorded reason.',
+    }, {
+      pt: 'Pedidos ao líder chegam à fila também pelo terminal e pelas passagens de sessão. Um pedido sem pré-dispatch cobra o líder após 10 minutos; peças na mesma área sugerem encaixe e grupos mantêm um único cartão.',
+      en: 'Requests reach the leader’s queue from the terminal and session handoffs too. A request without pre-dispatch reminds the leader after 10 minutes; work in the same area suggests a fit and groups keep one card.',
     }],
   },
   '2.201.1': {

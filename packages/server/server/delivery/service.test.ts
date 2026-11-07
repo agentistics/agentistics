@@ -6,6 +6,8 @@ import { createDeliveryService, type DeliveryDeps } from './service'
 import { createDeliveryStore } from './store'
 import { blockedPiecesOf, type BlockedSubtaskFact, type GateFacts, type SessionFact } from './gates'
 import type { DeliveryCi, Phase } from './machine'
+import { deliveryHostOps } from './host-ops'
+import { emitEvent } from './host'
 
 let dir: string
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'delivery-')) })
@@ -103,7 +105,7 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
     now: () => now,
     ...extra,
   })
-  return { svc, w, calls, advance: (ms: number) => { now += ms } }
+  return { svc, w, calls, facts, advance: (ms: number) => { now += ms } }
 }
 
 async function walkToQa(svc: ReturnType<typeof harness>['svc']) {
@@ -114,6 +116,91 @@ async function walkToQa(svc: ReturnType<typeof harness>['svc']) {
 }
 
 describe('delivery service', () => {
+  test('a delivery event does not deadlock the engine timer that is holding the serial event bus', async () => {
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    let emitted = false
+    try {
+      await emitEvent('subtarefa.preparada', { subtarefa: 'g1' }, { emit: async () => { emitted = true; await held } })
+      expect(emitted).toBe(true)
+    } finally { release() }
+  }, 1000)
+  test('extending an existing piece retains every explicit request link', async () => {
+    const requests = ['p-1', 'p-2'].map(id => ({ id, taskId: 't1', sessionId: 'old', text: id, at: '2026-11-07T01:00:00Z', state: 'open', linkedSubtaskIds: [] as string[] }))
+    const h = harness({}, { requests: async () => requests })
+    await h.svc.stage('s1', {}, 'leader', { pedidoId: 'p-1' })
+    await h.svc.stage('s1', {}, 'leader', { pedidoId: 'p-2' })
+    expect((await h.svc.get('s1'))?.pedidoIds).toEqual(['p-1', 'p-2'])
+    expect((await h.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
+  })
+  test('an unstaged request wakes a busy leader at 10 minutes, follows its replacement and retains cadence across restart', async () => {
+    const request = { id: 'p-1', taskId: 't1', sessionId: 'retired', text: 'Fix the history column', at: '2026-11-07T02:00:00.000Z', state: 'open', linkedSubtaskIds: [] as string[] }
+    const requests = async () => [request]
+    const h = harness({}, { requests })
+    h.advance(10 * 60_000 - 1)
+    expect((await h.svc.tick()).actions).toEqual([])
+    h.advance(1)
+    expect((await h.svc.tick()).actions).toContain('request-wake leader:p-1')
+    expect(h.calls.session[0]?.text).toContain('agentistics_task_stage')
+    expect(h.calls.owner).toEqual([])
+    h.w.sessions = [{ ...h.w.sessions[0]!, id: 'replacement' }]
+    h.advance(1)
+    expect((await h.svc.tick()).actions).toContain('request-wake replacement:p-1')
+    const restarted = harness({ sessions: h.w.sessions }, { requests })
+    restarted.advance(10 * 60_000 + 1)
+    expect((await restarted.svc.tick()).actions).toEqual([])
+    await restarted.svc.stage('s1', {}, 'replacement', { pedidoId: request.id })
+    restarted.advance(31 * 60_000)
+    expect((await restarted.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
+  })
+
+  test('failed request wakes retry; a linked member whose group is staged needs no reminder', async () => {
+    const request = { id: 'p-1', taskId: 't1', sessionId: 'old', text: 'Fix the queue', at: '2026-11-07T01:00:00.000Z', state: 'linked', linkedSubtaskIds: ['s1'] }
+    const h = harness({ wakeOk: false }, { requests: async () => [request] })
+    const base = h.facts.subtask
+    h.facts.subtask = async id => { const s = await base(id); return s ? { ...s, staged: undefined } : null }
+    expect((await h.svc.tick()).actions).toContain('request-wake-failed leader:p-1')
+    h.w.wakeOk = true
+    expect((await h.svc.tick()).actions).toContain('request-wake leader:p-1')
+    const original = (await base('s1'))!
+    h.facts.subtask = async id => id === 's1' ? { ...original, groupMember: true, parentGroupId: 'g1' } : id === 'g1' ? { ...original, id } : null
+    h.advance(31 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual([])
+    expect(h.calls.owner).toEqual([])
+    const ops = deliveryHostOps(async () => h.svc, () => h.facts)
+    expect(await ops['predispatch-completo']({ subtaskIds: ['s1'] })).toEqual({ ok: true, complete: ['s1'], incomplete: [] })
+  })
+
+  test('a staged member joining a group is folded into that group once', async () => {
+    const h = harness()
+    await h.svc.stage('s1', {}, 'leader')
+    const original = await h.facts.subtask('s1')
+    let groupDraft = { prompt: 'Group work', harness: 'claude', model: 'claude-opus-5-5', effort: 'high', account: 'acc_1' }
+    h.facts.subtask = async id => id === 's1' ? { ...original!, groupMember: true, parentGroupId: 'g1' }
+      : id === 'g1' ? { ...original!, id, title: 'Group', staged: groupDraft } : null
+    const tick = await h.svc.tick()
+    expect(tick.actions).toContain('fold s1:g1')
+    expect((await h.svc.get('s1'))?.dequeued?.reason).toContain('g1')
+    expect((await h.svc.get('g1'))?.phase).toBe('fila')
+    expect((await h.svc.list()).filter(r => r.phase === 'fila' && !r.dequeued).map(r => r.subtaskId)).toEqual(['g1'])
+    expect((await h.svc.tick()).actions).not.toContain('fold s1:g1')
+  })
+
+  test('staging proposes extending queued work in the same area, excluding withdrawn pieces', async () => {
+    const h = harness()
+    const base = h.facts.subtask
+    h.facts.subtask = async id => {
+      const sub = await base(id)
+      return sub ? { ...sub, staged: { ...sub.staged, prompt: `Fix packages/web/src/pages/LivePage.tsx for ${id}` } } : null
+    }
+    await h.svc.stage('s1', {}, 'leader')
+    const second = await h.svc.stage('s2', {}, 'leader')
+    expect(second.ok && second.warnings.join(' ')).toContain('encaixe: s1')
+    await h.svc.dequeue('s1', 'superseded', 'leader')
+    const again = await h.svc.stage('s2', {}, 'leader')
+    expect(again.ok && again.warnings.join(' ')).not.toContain('encaixe: s1')
+  })
+
   test.each(['in_review', 'done', 'abandoned'])('tick removes stale queued work when the board says %s, once with an audit comment', async status => {
     const h = harness()
     await h.svc.stage('s1', {}, 'leader')

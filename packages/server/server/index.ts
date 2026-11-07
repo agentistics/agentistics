@@ -3062,10 +3062,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         const { verifySessionIdentity } = await import('./sessions/session-identity')
         await markCallerVerified(body.value, verifySessionIdentity)
         const out = await runFleetAction(fleetLang(url.searchParams.get('lang')), body.value)
-        // ORQ.H1: the OWNER's composer message (no verified session caller) → `owner.message` for the flows.
-        if (out.ok && body.value.action === 'prompt') {
-          void import('./flows/owner-message').then(m => m.emitOwnerMessage(body.value, m.defaultOwnerMessageDeps())).catch(() => {})
-        }
         // An account refusal (reopen, group reopen, external continuation) keeps its status.
         const { spawnAccountStatus } = await import('./sessions/spawn-account')
         return new Response(JSON.stringify(out), {

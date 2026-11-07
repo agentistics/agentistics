@@ -101,6 +101,8 @@ export interface DeliveryRecord {
   phase: Phase
   /** Withdrawn from the queue; history and the draft remain, and only an explicit restage reopens it. */
   dequeued?: { at: string; actor: string; reason: string; commentedAt?: string }
+  /** Explicit link to the canonical engine pedido, retained even when its event bus is temporarily unavailable. */
+  pedidoIds?: string[]
   /** Where a block returns to. Present only while `phase === 'bloqueado'`. */
   origin?: Phase
   block?: DeliveryBlock
