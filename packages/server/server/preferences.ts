@@ -128,6 +128,8 @@ export interface Preferences {
    *  only ever narrow `CAPS.localShell`; see sessions/shell-gate.ts. Separate from `chatEnabled`
    *  because they are different powers: the chat runs a named assistant CLI, this runs anything. */
   shellEnabled?: boolean
+  /** The OpenCode subscription the person says they are on (`go` / `go-plus` / `go-teams` / `zen` / `none`) — no local file tells Go from Go Plus. Read by `opencode-usage.ts`. */
+  opencodePlan?: string
   /** AUTONOMOUS MODE — the owner is out and sessions must not ask them (`server/away.ts`). Read through
    *  `parseAwayState`/`awayActive` (@agentistics/core); written only by `setAway`. */
   away?: AwayState

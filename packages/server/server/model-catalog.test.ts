@@ -107,3 +107,26 @@ describe('the cached list belongs to ONE binary', () => {
     expect(calls).toBe(1)
   })
 })
+
+describe('the cached opencode list belongs to ONE set of connected providers', () => {
+  test('connecting a subscription (auth.json changes) voids the free-only list at once', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oc-auth-'))
+    const prev = process.env.OPENCODE_DIR
+    process.env.OPENCODE_DIR = dir
+    try {
+      let calls = 0
+      setModelReaderForTests('opencode', async () => (++calls === 1 ? [opt('opencode/big-pickle')] : [opt('opencode/big-pickle'), opt('opencode-go/glm-5.3-flash')]), () => 1)
+      await modelCatalog('opencode'); await Bun.sleep(5)
+      expect(peekModelCatalog('opencode').models.map(m => m.id)).toEqual(['opencode/big-pickle'])
+      expect(calls).toBe(1)
+      writeFileSync(join(dir, 'auth.json'), '{}') // a key was pasted
+      peekModelCatalog('opencode') // sees the new stamp and refreshes in the background
+      await Bun.sleep(10)
+      expect(calls).toBe(2)
+      expect(peekModelCatalog('opencode').models.map(m => m.id)).toEqual(['opencode/big-pickle', 'opencode-go/glm-5.3-flash'])
+    } finally {
+      if (prev === undefined) delete process.env.OPENCODE_DIR; else process.env.OPENCODE_DIR = prev
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
