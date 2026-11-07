@@ -9,7 +9,7 @@
  * `ConfirmModal`, `Checkbox`, `DialogActions`/`dialogButtonStyle` (settings primitives), the plan
  * list's `PlanUsageRowCells`, and the handoff band's notice styling (`handoffWarning.css`).
  */
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { KeyRound, Users, X } from 'lucide-react'
 import type { PlanLimits } from '@agentistics/core'
 import { Checkbox, ConfirmModal, DialogActions, dialogButtonStyle } from '../../pages/settings/primitives'
@@ -17,6 +17,7 @@ import { PLAN_ROW_GRID, PlanUsageRowCells } from '../PlanLimitMeter'
 import { usePlanLimits } from '../../lib/planLimits'
 import { accountDisplayName, defaultPick, pickerRows } from '../../lib/accountPicker'
 import { useIsMobile } from '../../hooks/useIsMobile'
+import { AgentisticsLoader } from '../AgentisticsLoader'
 import {
   canSwitch, fetchSwitchInfo, harnessName, noticeTitle, postSwitch, resetPhrase, showLimitNotice, showLimitOnly, type SwitchInfo,
 } from '../../lib/accountSwitch'
@@ -27,6 +28,9 @@ import { AUTH_COPY, authBar } from '../../lib/accountRelogin'
 import { ReloginModal } from '../../pages/settings/ReloginModal'
 import type { HarnessId } from '@agentistics/core'
 import './handoffWarning.css'
+
+/** The dialog's width: the app's mid-size dialog (login / handoff use 520–640), one column. */
+export const SWITCH_DIALOG_WIDTH = 560
 
 /** How often an open session asks whether its last turn hit a limit. A transcript tail read. */
 const POLL_MS = 15_000
@@ -68,11 +72,21 @@ function useSwitchFlow({ open, sessionId, info, lang, fromLimit, onDone }: {
 }) {
   const pt = lang === 'pt'
   const plan = usePlanLimits()
-  const rows = pickerRows(info, plan.limits, plan.now, pt ? 'pt' : 'en', plan.accountLabels)
-  const [pick, setPick] = useState('')
-  const pending = fromLimit ? info.limit?.pendingPreview : undefined
-  const [resend, setResend] = useState(true)
   const [busy, setBusy] = useState(false)
+  const liveRows = pickerRows(info, plan.limits, plan.now, pt ? 'pt' : 'en', plan.accountLabels)
+  const livePending = fromLimit ? info.limit?.pendingPreview : undefined
+  /*
+   * WHILE THE SWITCH RUNS the list and the question stay as they were when it was confirmed. The
+   * switch reopens the session on the other account, so the next info poll already reports the TARGET
+   * as the current account and no other option: the picker collapsed to one "Agora" row and the
+   * message fell back to "pick an account" under a progress line saying the switch was under way.
+   */
+  const frozen = useRef({ rows: liveRows, pending: livePending })
+  if (!busy) frozen.current = { rows: liveRows, pending: livePending }
+  const rows = busy ? frozen.current.rows : liveRows
+  const pending = busy ? frozen.current.pending : livePending
+  const [pick, setPick] = useState('')
+  const [resend, setResend] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // Set when the switch failed twice: the session WAS ended, and this is the row Reopen brings back.
   const [endedId, setEndedId] = useState<string | null>(null)
@@ -204,11 +218,14 @@ function SwitchExtras({ flow, lang }: { flow: SwitchFlow; lang: string }) {
       </div>
     )}
     {flow.busy && (
-      <p role="status" data-account-switch-progress style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>
-        {flow.handoff
-          ? (pt ? 'Iniciando a nova sessão… esta continua rodando até a nova estar de pé.' : 'Starting the new session… this one keeps running until the new one is up.')
-          : (pt ? 'Trocando de conta… a sessão é reaberta na outra conta; pode levar alguns segundos.' : 'Switching account… the session is reopening on the other account; this can take a few seconds.')}
-      </p>
+      <div role="status" data-account-switch-progress style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
+        <AgentisticsLoader size={18} />
+        <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+          {flow.handoff
+            ? (pt ? 'Iniciando a nova sessão… esta continua rodando até a nova estar de pé.' : 'Starting the new session… this one keeps running until the new one is up.')
+            : (pt ? 'Trocando de conta… a sessão é reaberta na outra conta; pode levar alguns segundos.' : 'Switching account… the session is reopening on the other account; this can take a few seconds.')}
+        </span>
+      </div>
     )}
     {flow.error && <p role="alert" style={{ margin: 0, fontSize: 12, color: 'var(--accent-red)', overflowWrap: 'anywhere' }}>{flow.error}</p>}
     {flow.endedId && (
@@ -247,7 +264,11 @@ export function AccountSwitchDialog({ open, sessionId, info, lang, fromLimit, on
       busy={flow.busy || !flow.chosen}
       lockCancel={flow.busy}
       mobileSheet
-      maxWidth={920}
+      maxWidth={SWITCH_DIALOG_WIDTH}
+      // One column at every width: the list sits under the question and the two buttons close the
+      // dialog at its right edge. The split (list as a right column) left the buttons stranded in
+      // the left half with the right half empty whenever the list was short.
+      splitFrom={Number.MAX_SAFE_INTEGER}
       aside={<AccountPicker flow={flow} lang={lang} />}
       focusPanel
       // Opened from inside the session pane, which sits under the sidebar: lift it to the page,

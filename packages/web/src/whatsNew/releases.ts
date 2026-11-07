@@ -10,6 +10,19 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.8': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A janela "Continuar em outra conta" ficou mais estreita e organizada: uma coluna só, botões alinhados à direita e, enquanto a troca acontece, a lista de contas continua visível com um indicador de progresso.',
+        en: 'The "Continue on another account" dialog is narrower and tidier: a single column, buttons aligned to the right and, while the switch runs, the account list stays visible with a progress indicator.',
+      },
+      {
+        pt: 'No chat, o aviso "pensando" (e "trabalhando") agora começa na mesma borda esquerda das linhas de comandos executados.',
+        en: 'In the chat, the "thinking" (and "working") line now starts at the same left edge as the executed-commands rows.',
+      },
+    ],
+  },
   '2.200.7': {
     features: [],
     fixes: [
