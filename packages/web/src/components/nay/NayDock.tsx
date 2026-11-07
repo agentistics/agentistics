@@ -83,6 +83,7 @@ import { cardStyleOf, clampFabPos, defaultFabPos, dockStyleOf, FAB_SIZE } from '
 import { setNayFabPrefs, useNayFabPrefs } from '../../lib/nayFabPrefsStore'
 import { createPersonalDoc, createSharedPref } from '../../lib/sharedPref'
 import { NAY_UNDOCK_SESSION } from '../../lib/nayDockBridge'
+import { useFabMenusExclusion } from '../../lib/nayFabMenus'
 
 const QuickVaultBody = lazy(() => import('../../pages/VaultPage').then(m => ({ default: m.QuickVaultBody })))
 
@@ -167,6 +168,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
     const o = v as Partial<Size>
     return typeof o?.w === 'number' && typeof o?.h === 'number' ? { w: o.w, h: o.h } : PANEL_DEFAULT
   }, PANEL_DEFAULT), viewport()))
+  const fabMenus = useFabMenusExclusion()
   const [starting, setStarting] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   /** Sessions just started here, and when — so the panel says "starting" rather than "not found". */
@@ -733,9 +735,10 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
         <NayFab prefs={fabPrefs} onPrefs={setFabPrefs} isMobile={isMobile} routeKey={inSession ? 'session' : 'app'}>
           {fab => (
             // Right-click / long-press / Shift+F10 on the button pops the vault icon above it (owner 2026-10-03).
-            <VaultFabPop lang={pt ? 'pt' : 'en'} isMobile={isMobile} suppressed={fab.dragging}
+            <VaultFabPop lang={pt ? 'pt' : 'en'} isMobile={isMobile} suppressed={fab.dragging} {...fabMenus.pop}
               call={callSurface ? { label: callFace.label, active: callState.active, onPress: () => { void placeCall() } } : null}>
             <MinimizedMenu
+              {...fabMenus.menu}
               longPress={false}
               pt={pt}
               items={minimized.map(w => ({ id: w.id, row: findSession(w.id) }))}

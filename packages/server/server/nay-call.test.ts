@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { vaultRequestAllowed } from './vault/http'
 import { REQUEST_TTL_MS, STALE_MS, STATE_MAX_BYTES, acceptReport, callSurfaceFrom, callView, dashboardRequest, handleStart, handleStateWrite, newNayCallStore, parseReport, requestStart, startStatus, type OriginCtx, type StartDeps } from './nay-call'
 
 const surfaces = [
@@ -112,14 +113,35 @@ const dash = { 'sec-fetch-site': 'same-origin' }
 const req = (method: string, path: string, body: string | undefined, headers: Record<string, string> = {}) =>
   new Request(`http://localhost:47292${path}`, { method, ...(body !== undefined ? { body } : {}), headers: { 'content-type': 'application/json', ...headers } })
 
-describe('dashboardRequest', () => {
-  test('only a page of the dashboard counts', () => {
-    expect(dashboardRequest({ secFetchSite: 'same-origin', origin: null }, ctx)).toBe(true)
-    expect(dashboardRequest({ secFetchSite: null, origin: 'http://localhost:47292' }, ctx)).toBe(true)
-    expect(dashboardRequest({ secFetchSite: null, origin: null }, ctx)).toBe(false)
-    expect(dashboardRequest({ secFetchSite: 'cross-site', origin: 'https://evil.example' }, ctx)).toBe(false)
-    expect(dashboardRequest({ secFetchSite: 'none', origin: null }, ctx)).toBe(false)
-    expect(dashboardRequest({ secFetchSite: null, origin: 'https://evil.example' }, ctx)).toBe(false)
+describe('dashboardRequest (the vault predicate itself)', () => {
+  const r = (headers: Record<string, string>, method = 'POST') => ({ method, headers: new Headers(headers) })
+  const json = { 'content-type': 'application/json' }
+  test('same-origin JSON counts; the Origin fallback only when Sec-Fetch-Site is absent', () => {
+    expect(dashboardRequest(r({ ...json, 'sec-fetch-site': 'same-origin' }), ctx)).toBe(true)
+    expect(dashboardRequest(r({ ...json, origin: 'http://localhost:47292' }), ctx)).toBe(true)
+    expect(dashboardRequest(r({ ...json }), ctx)).toBe(false)
+    expect(dashboardRequest(r({ ...json, origin: 'https://evil.example' }), ctx)).toBe(false)
+  })
+  test('same-site, cross-site (even with a matching Origin) and none are refused', () => {
+    for (const site of ['same-site', 'cross-site', 'none']) {
+      expect(dashboardRequest(r({ ...json, 'sec-fetch-site': site, origin: 'http://localhost:47292' }), ctx)).toBe(false)
+    }
+  })
+  test('a missing or non-JSON Content-Type is refused', () => {
+    expect(dashboardRequest(r({ 'sec-fetch-site': 'same-origin' }), ctx)).toBe(false)
+    expect(dashboardRequest(r({ 'content-type': 'text/plain', 'sec-fetch-site': 'same-origin' }), ctx)).toBe(false)
+  })
+  test('agrees with vaultRequestAllowed on every combination (no variant)', () => {
+    const sites = [null, 'same-origin', 'same-site', 'cross-site', 'none']
+    const origins = [null, 'http://localhost:47292', 'https://evil.example']
+    const cts = [null, 'application/json', 'text/plain']
+    for (const s of sites) for (const o of origins) for (const c of cts) {
+      const h: Record<string, string> = {}
+      if (s) h['sec-fetch-site'] = s
+      if (o) h.origin = o
+      if (c) h['content-type'] = c
+      expect(dashboardRequest(r(h), ctx)).toBe(vaultRequestAllowed(r(h), ctx.host, { allowlist: ctx.allowlist, dev: ctx.dev }).ok)
+    }
   })
 })
 
@@ -148,6 +170,25 @@ describe('route handlers (real Requests)', () => {
     expect(store.requestedAt).toBeNull()
     expect((await handleStart(req('POST', '/api/nay-call/start', body), store, surface, ctx, { ...base, verify: async () => 'm', roleOf: async () => 'leader' })).status).toBe(200)
     expect(store.requestedAt).toBe(T0)
+  })
+  const refused: Array<Record<string, string>> = [{ 'sec-fetch-site': 'same-site' }, { 'sec-fetch-site': 'cross-site', origin: 'http://localhost:47292' }, { 'sec-fetch-site': 'same-origin', 'content-type': 'text/plain' }]
+  test('N1: start from same-site, cross-site+Origin, or without a JSON Content-Type is refused (401), nothing queued', async () => {
+    for (const h of refused) {
+      const store = live()
+      const r = await handleStart(req('POST', '/api/nay-call/start', '{}', h), store, surface, ctx, base)
+      expect(r.status).toBe(401)
+      expect(store.requestedAt).toBeNull()
+    }
+  })
+  test('N1: PUT state from same-site, cross-site+Origin, or text/plain is 403 and changes nothing', async () => {
+    for (const h of refused) {
+      const store = live()
+      store.requestedAt = T0
+      const r = await handleStateWrite(req('PUT', '/api/nay-call/state', JSON.stringify({ active: true, sessionId: 'x', since: 1 }), h), store, ctx, T0 + 10)
+      expect(r.status).toBe(403)
+      expect(store.requestedAt).toBe(T0)
+      expect(store.report?.sessionId).toBeNull()
+    }
   })
   test('the dashboard (same-origin) can start', async () => {
     const store = live()

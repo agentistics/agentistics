@@ -68,11 +68,15 @@ export interface MinimizedMenuProps {
    * vault icon (`VaultFabPop`), so the list is reached there by its count badge instead.
    */
   longPress?: boolean
+  /** Reports every open/close, so the pop on the same button can yield (`lib/nayFabMenus.ts`). */
+  onOpenChange?: (open: boolean) => void
+  /** While true the list is closed — the right-click pop is open and the last one opened wins. Only the rising edge closes. */
+  closeWhen?: boolean
   /** The chat button itself; its click is wrapped so a long-press can swallow it. */
   renderButton: (p: { onClickCapture: (e: ReactMouseEvent) => void; onKeyDown: (e: ReactKeyboardEvent) => void; toggle: () => void }) => ReactNode
 }
 
-export function MinimizedMenu({ pt, items, onRestore, onClose, surfaceItems = [], onOpenChat, anchorStyle, suppressed = false, longPress = true, renderButton }: MinimizedMenuProps) {
+export function MinimizedMenu({ pt, items, onRestore, onClose, surfaceItems = [], onOpenChat, anchorStyle, suppressed = false, longPress = true, onOpenChange, closeWhen = false, renderButton }: MinimizedMenuProps) {
   const [open, setOpen] = useState(false)
   const [place, setPlace] = useState<MenuPlacement>({ vertical: 'above', horizontal: 'right' })
   const anchorRef = useRef<HTMLDivElement>(null)
@@ -93,6 +97,9 @@ export function MinimizedMenu({ pt, items, onRestore, onClose, surfaceItems = []
     if (closeTimer.current === null) closeTimer.current = window.setTimeout(() => { closeTimer.current = null; setOpen(false) }, HOVER_CLOSE_MS)
   }
 
+  useEffect(() => { onOpenChange?.(open) }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The right-click pop opened: it wins, the list yields (and its hover timers must not reopen it at once).
+  useEffect(() => { if (closeWhen) { clearTimers(); setOpen(false) } }, [closeWhen])
   // Nothing left to list closes the list, and so does picking the button up.
   useEffect(() => { if (count === 0) setOpen(false) }, [count])
   useEffect(() => {
