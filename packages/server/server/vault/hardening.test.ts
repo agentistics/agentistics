@@ -12,7 +12,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { refusalSentence, memoryProtector } from '@agentistics/vault'
-import { applyHardening, hardeningLines, yamaScope, type Libc } from './hardening'
+import { applyHardening, hardeningLines, libcSymbolNames, loadLibc, yamaScope, type Libc } from './hardening'
 import { __resetVaultForTests, __setHardeningForTests, ensureVaultOpen, initRunnerVault, notOpenRefusal, openRunnerVault, sealToFile, unlockVault, vaultStatus } from './service'
 
 const okLibc = (): Libc & { calls: string[] } => {
@@ -64,6 +64,45 @@ describe('applyHardening (pure)', () => {
     expect(yamaScope(() => { throw new Error('EACCES') })).toBe('unreadable')
     expect(hardeningLines(applyHardening('linux', okLibc(), () => null), 'en')).toEqual(['Yama ptrace protection is absent on this kernel; Agentistics relies on being non-dumpable (private memory, no core dumps).'])
     expect(hardeningLines(applyHardening('linux', okLibc(), () => '1'), 'en')).toEqual([])
+  })
+})
+
+describe('macOS hardening (fake Libc — never run against a real darwin libc here)', () => {
+  test('the darwin symbol list never asks for prctl (the Mac vault could not open because it did)', () => {
+    expect(libcSymbolNames('darwin')).not.toContain('prctl')
+    expect([...libcSymbolNames('darwin')].sort()).toEqual(['getrlimit', 'ptrace', 'setrlimit'])
+    expect(libcSymbolNames('linux')).toContain('prctl')
+    expect(libcSymbolNames('linux')).not.toContain('ptrace')
+  })
+  test('success: core limit first, then PT_DENY_ATTACH; the Linux-only calls are never used', () => {
+    const l = okLibc()
+    const r = applyHardening('darwin', {
+      ...l,
+      setNotDumpable() { l.calls.push('prctl-set'); return -1 },
+      getDumpable() { l.calls.push('prctl-get'); return -1 },
+    }, () => '1')
+    expect(r).toEqual({ state: 'ok', private: true, coreDumps: 'off', yama: null, reason: null })
+    expect(l.calls).toEqual(['setrlimit', 'getrlimit', 'deny'])
+  })
+  test('refused or unverifiable steps fail the whole, in words', () => {
+    const refused = applyHardening('darwin', { ...okLibc(), denyAttach: () => -1 }, () => null)
+    expect(refused).toMatchObject({ state: 'failed', private: false })
+    expect(refused.reason).toContain('PT_DENY_ATTACH')
+    const threw = applyHardening('darwin', { ...okLibc(), denyAttach: () => { throw new Error('boom') } }, () => null)
+    expect(threw.state).toBe('failed')
+    const noDeny = applyHardening('darwin', { ...okLibc(), denyAttach: undefined }, () => null)
+    expect(noDeny.state).toBe('failed')
+    expect(applyHardening('darwin', { ...okLibc(), setNoCore: () => -1 }, () => null).reason).toContain('setrlimit')
+    expect(applyHardening('darwin', { ...okLibc(), getCoreLimit: () => [0n, 9n] }, () => null).reason).toContain('read back')
+  })
+  test('a missing symbol is reported as the C library error, naming no Linux-only symbol', async () => {
+    const r = applyHardening('darwin', { error: 'Symbol "ptrace" not found' }, () => null)
+    expect(r).toMatchObject({ state: 'failed', private: false })
+    if (process.platform !== 'darwin') {
+      const real = await loadLibc('darwin') // no libSystem here: must fail as a load error, never throw
+      expect('error' in real).toBe(true)
+      expect((real as { error: string }).error).not.toContain('prctl')
+    }
   })
 })
 

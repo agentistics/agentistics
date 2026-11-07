@@ -107,6 +107,12 @@ export const VAULT_TEXT = {
     en: 'Your secrets are encrypted. Opening them needs your authenticator code.',
     pt: 'Seus segredos estão criptografados. Abri-los exige o código do seu autenticador.',
   },
+  // The lock screen's one sentence names the presence check THIS machine's vault really has: the
+  // wrappers the service reports (Windows Hello on Windows/WSL, a security key, or neither — macOS has
+  // no presence provider, its vault is the Keychain + the authenticator code). Never a hardcoded brand.
+  lockedSub_hello: { en: 'Your secrets are protected. Unlock with Windows Hello or your code.', pt: 'Seus segredos estão protegidos. Destrave com Windows Hello ou o código.' },
+  lockedSub_fido2: { en: 'Your secrets are protected. Unlock with your security key or your code.', pt: 'Seus segredos estão protegidos. Destrave com a sua chave de segurança ou o código.' },
+  lockedSub_code: { en: 'Your secrets are protected. Unlock with your code.', pt: 'Seus segredos estão protegidos. Destrave com o código.' },
   unlockWith_hello: { en: 'Unlock with Windows Hello', pt: 'Destravar com o Windows Hello' },
   unlockWith_fido2: { en: 'Unlock with your security key', pt: 'Destravar com a sua chave de segurança' },
   createVault: { en: 'Create the vault', pt: 'Criar o cofre' },
@@ -494,4 +500,11 @@ export function reasonKey(reason: string | undefined): VaultKey | null {
 export function orderItems<T extends { state: string }>(items: T[]): T[] {
   const rank = (s: string) => (s === 'pending' ? 0 : s === 'unreadable' ? 1 : 2)
   return [...items].sort((a, b) => rank(a.state) - rank(b.state))
+}
+
+/** PURE. Which lock-screen sentence applies, from the wrappers the service reports for this machine. */
+export function lockedSubKey(wrappers: readonly string[] | null | undefined): 'lockedSub_hello' | 'lockedSub_fido2' | 'lockedSub_code' {
+  if (wrappers?.includes('hello')) return 'lockedSub_hello'
+  if (wrappers?.includes('fido2')) return 'lockedSub_fido2'
+  return 'lockedSub_code'
 }
