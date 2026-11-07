@@ -474,9 +474,12 @@ export const RECENT_HIDDEN_MS = 6 * 3600_000
 /** What the Live reads off a delivery record (`delivery/machine.ts`), kept structural so this module stays pure. */
 export interface LiveDeliveryFacts {
   phase: string
+  dequeued?: { reason: string }
   origin?: string
   block?: { reason: string; text: string }
   ci?: unknown
+  /** When the release that shipped it was published (ISO) — the Publicado window starts here when the record says so. */
+  publishedAt?: string
   step?: number
   gates?: { vaga?: { ok: boolean; reason?: string; at: string } }
   revision?: number
@@ -609,8 +612,11 @@ export function buildLive(o: {
   const hide = (p: Piece, stage: LiveStage | null, reason: HiddenReason) => { hidden.push(entry(p, stage, reason)) }
   for (const p of candidates) {
     // A task-level piece (a task with no subtasks) is keyed by its TASK id in the delivery book, exactly as a subtask is by its own.
-    const rec = o.deliveries?.get(p.sub ? p.sub.id : p.task.id)
+    const stored = o.deliveries?.get(p.sub ? p.sub.id : p.task.id)
+    // A stale queue record must never override work the board already sent for review or closed.
+    const rec = stored?.dequeued || (stored?.phase === 'fila' && ['in_review', 'done', 'abandoned'].includes(p.status)) ? undefined : stored
     let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfStatus(p.status, o.statusLabel?.(p.status))
+    if (stored?.dequeued && stage === 'queue') { hide(p, stage, 'queue-idle'); continue }
     const liveSessions = p.sessions.filter(s => s.live)
     if (!rec && stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'
     if (stage === null) stage = liveSessions.length > 0 ? 'running' : null
@@ -625,7 +631,8 @@ export function buildLive(o: {
     // or a todo nobody staged, was never on the board and fills the reply with nothing anyone is missing.
     const recent = o.nowMs - (ms(p.updatedAt) ?? 0) < RECENT_HIDDEN_MS
     if (stage === null) { if (recent && p.status !== 'backlog' && p.status !== 'abandoned') hide(p, null, 'status-unplaced'); continue }
-    const deliveredAtMs = ms(p.deliveredAt) ?? (stage === 'published' ? ms(p.updatedAt) : null)
+    // A recorded release states its own publish time; the board's `deliveredAt` is only when the status moved (late runs: "now").
+    const deliveredAtMs = (rec?.publishedAt && stage === 'published' ? ms(rec.publishedAt) : null) ?? ms(p.deliveredAt) ?? (stage === 'published' ? ms(p.updatedAt) : null)
     if (stage === 'published' && (deliveredAtMs === null || o.nowMs - deliveredAtMs > PUBLISHED_WINDOW_MS)) {
       // Recently expired only: a year of finished work is not a departure anybody is waiting to explain.
       if (deliveredAtMs !== null && o.nowMs - deliveredAtMs <= 3 * PUBLISHED_WINDOW_MS) hide(p, stage, 'published-old')

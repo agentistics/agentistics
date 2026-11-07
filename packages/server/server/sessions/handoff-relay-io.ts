@@ -10,7 +10,7 @@
 import type { ChatTurn } from '@agentistics/core'
 import { transcriptReaderFor } from './harness-transcript'
 import {
-  forwardHasContent, forwardText, planForward, planRelay, relaySection, type RelayForward,
+  forwardHasContent, forwardText, isOwnerTurn, planForward, planRelay, relaySection, type RelayForward,
 } from './handoff-relay'
 import { stat } from 'node:fs/promises'
 import { cliStrings } from '../cli-i18n'
@@ -74,6 +74,21 @@ export interface CapturedRelay {
   section: string
   cursor?: string
   awaiting: boolean
+  /** Original turns, for the request bus; never reconstruct them from the rendered briefing. */
+  owner?: Array<{ text: string; at?: string }>
+  source?: { id: string; conversationId?: string; createdAt?: string }
+}
+
+/** The briefing truncates long quotes; request registration retains the original owner turn. */
+function originalOwners(turns: readonly ChatTurn[], selected: readonly { text: string; at?: string }[]): Array<{ text: string; at?: string }> {
+  const used = new Set<ChatTurn>()
+  return selected.map(message => {
+    const prefix = message.text.replace(/\s*\[…\]$/, '')
+    const original = turns.find(t => !used.has(t) && isOwnerTurn(t) && t.at === message.at && t.text.trim().startsWith(prefix))
+    if (!original) return message
+    used.add(original)
+    return { text: original.text.trim(), ...(original.at ? { at: original.at } : {}) }
+  })
 }
 
 /** The predecessor's owner messages + last reply, as the successor's briefing section. */
@@ -89,17 +104,30 @@ export async function captureHandoffRelay(
     section: relaySection(parent.id, relay),
     ...(relay.cursor ? { cursor: relay.cursor } : {}),
     awaiting: relay.unanswered,
+    owner: originalOwners(got.turns, relay.owner),
+    source: { id: parent.id, conversationId: parent.conversationId, createdAt: parent.createdAt },
   }
 }
 
 /** Link both rows once the successor exists: the injection above counts as delivered. */
-export async function recordHandoffLink(parentId: string, childId: string, captured: CapturedRelay | undefined, parentSeq?: number): Promise<void> {
-  await patchSession(parentId, {
+export async function recordHandoffLink(
+  parentId: string, childId: string, captured: CapturedRelay | undefined, parentSeq?: number,
+  io: { patch?: typeof patchSession; ownerMessages?: typeof import('../flows/owner-message').emitRelayedOwnerMessages } = {},
+): Promise<void> {
+  const patch = io.patch ?? patchSession
+  if (captured?.source && captured.owner?.length) {
+    try {
+      const register = io.ownerMessages ?? (await import('../flows/owner-message')).emitRelayedOwnerMessages
+      await register(childId, captured.source, captured.owner)
+    } catch { console.warn('[handoff] owner request registration failed; briefing delivery preserved') }
+  }
+  await patch(parentId, {
     handoffTo: childId,
+    // The briefing already delivered this snapshot, even if request registration failed.
     handoffRelayedAt: captured?.cursor ?? new Date().toISOString(),
     handoffRelayAwaiting: captured?.awaiting === true ? true : null,
   }).catch(() => false)
-  await patchSession(childId, { handoffFrom: parentId, handoffSeq: nextHandoffSeq(parentSeq) }).catch(() => false)
+  await patch(childId, { handoffFrom: parentId, handoffSeq: nextHandoffSeq(parentSeq) }).catch(() => false)
 }
 
 /**
@@ -140,7 +168,7 @@ export async function flushHandoffRelay(
   parent: ManagedSession,
   registry: readonly ManagedSession[],
   send: RelaySend,
-  io: { read?: (m: ManagedSession) => Promise<TurnsRead>; patch?: typeof patchSession } = {},
+  io: { read?: (m: ManagedSession) => Promise<TurnsRead>; patch?: typeof patchSession; ownerMessages?: (target: string, source: ManagedSession, messages: RelayForward['owner']) => Promise<void> } = {},
 ): Promise<FlushResult> {
   const patch = io.patch ?? patchSession
   const cursorMs = parent.handoffRelayedAt ? Date.parse(parent.handoffRelayedAt) : NaN
@@ -166,6 +194,10 @@ export async function flushHandoffRelay(
   const successor = successorRow(registry, parent.handoffTo)
   if (!successor) return { ok: false, delivered: false, reason: 'missing', owed: fwd }
   if (!successorAlive(successor)) return { ok: false, delivered: false, reason: 'dead', owed: fwd }
+  try {
+    const register = io.ownerMessages ?? (await import('../flows/owner-message')).emitRelayedOwnerMessages
+    await register(successor.id, parent, originalOwners(got.turns, fwd.owner))
+  } catch { console.warn('[handoff] owner request registration failed; forwarding to successor') }
   const sent = await send(successor.id, forwardText(parent.id, fwd)).catch(() => false)
   if (!sent) return { ok: false, delivered: false, reason: 'send-failed', owed: fwd }
   await patch(parent.id, cursorPatch).catch(() => false)

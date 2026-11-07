@@ -932,6 +932,11 @@ export async function patchSubtask(subtaskId: string, patch: {
     }
   }
 
+  if (nextParentGroupId && nextParentGroupId !== found.parentGroupId) {
+    // The join is already durable. Fold its former queue draft now; the minute tick retries a failed fold.
+    await (await import('../delivery/host')).deliveryService().foldGroupMember(subtaskId)
+      .catch(() => { console.warn('[delivery] group queue fold pending; the minute tick will retry') })
+  }
   return { ok: true }
 }
 

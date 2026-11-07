@@ -4,13 +4,14 @@
  * `{ refused, reason, missing }`, which the engine turns into the flow's own refusal.
  */
 import type { DeliveryReply } from './service'
+import { defaultGateFacts, judgePredispatch, type GateFacts } from './gates'
 
 const refuse = (reason: string, missing: string[] = []) => ({ refused: true, reason, missing })
 const rec = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {})
 const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : '')
 const answer = (r: DeliveryReply) => (r.ok ? { ok: true, phase: r.record.phase, revision: r.record.revision, ...(r.skipped ? { skipped: r.skipped } : {}) } : refuse(r.sentence, r.missing))
 
-export function deliveryHostOps(svc: () => Promise<import('./service').DeliveryService> = async () => (await import('./host')).deliveryService()) {
+export function deliveryHostOps(svc: () => Promise<import('./service').DeliveryService> = async () => (await import('./host')).deliveryService(), gateFacts: () => GateFacts = defaultGateFacts) {
   return {
     /** The minute tick: blocked pieces (wake / defer / dependency) and CI → publicado on evidence. */
     'entrega-vigia': async () => ({ ok: true, ...(await (await svc()).tick()) }),
@@ -46,9 +47,16 @@ export function deliveryHostOps(svc: () => Promise<import('./service').DeliveryS
     /** P4: which of these subtasks have a COMPLETE pre-dispatch (the demand flow reminds the leader about the rest). */
     'predispatch-completo': async (v: unknown) => {
       const ids = Array.isArray(rec(v).subtaskIds) ? (rec(v).subtaskIds as unknown[]).filter((x): x is string => typeof x === 'string') : []
-      const [{ defaultGateFacts, judgePredispatch }] = await Promise.all([import('./gates')])
-      const facts = defaultGateFacts()
-      const verdicts = await Promise.all(ids.map(async id => ({ id, ok: judgePredispatch(await facts.subtask(id).catch(() => null)).ok })))
+      const facts = gateFacts()
+      const verdicts = await Promise.all(ids.map(async id => {
+        let sub = await facts.subtask(id).catch(() => null)
+        if (sub && ['in_review', 'done', 'abandoned'].includes(sub.status)) return { id, ok: true }
+        if (sub?.parentGroupId) {
+          const group = await facts.subtask(sub.parentGroupId).catch(() => null)
+          sub = group?.taskId === sub.taskId ? group : null
+        }
+        return { id, ok: !!sub && (['in_review', 'done', 'abandoned'].includes(sub.status) || judgePredispatch(sub).ok) }
+      }))
       return { ok: true, complete: verdicts.filter(x => x.ok).map(x => x.id), incomplete: verdicts.filter(x => !x.ok).map(x => x.id) }
     },
   }

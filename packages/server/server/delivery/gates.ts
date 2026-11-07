@@ -12,15 +12,25 @@
  *   delecoes     the PR deletes no file outright (unless the leader allowed those paths, with a reason)
  *   mergeado     gh says the PR is MERGED, its merge commit is on origin/main and the PR head is the sha QA approved;
  *                the merge sha is read FROM THE PR, never from the caller
- *   release      release.yml for the merge sha = success AND the batch's version tag exists
+ *   release      the batch's version tag exists AND the release.yml run that produced it (the newest run whose commit the tag
+ *                contains) = success; the declared merge sha is information, read in the repository the release recorded
  *
  * The decision functions are pure over `GateFacts`; only `defaultGateFacts` touches the machine.
  * Darwin-safe: memory is the machine's AVAILABLE memory (`/proc/meminfo` on Linux, `vm_stat` on macOS), git/gh are plain argv.
  */
 import type { DeliveryCi, DeliveryRecord, GateName } from './machine'
+import { reconcileSessions } from '../sessions/session-ref'
+import type { BackendSession, ManagedSession } from '../sessions/types'
+
+/** The backend, also used by the fleet, proves liveness; a lost registry row reserves no slot. */
+export function runningSessionIds(registry: ManagedSession[], backend: BackendSession[]): Set<string> {
+  return new Set(reconcileSessions(registry, backend)
+    .filter(s => !s.managed?.endedAt && s.backend?.alive === true)
+    .map(s => s.id))
+}
 
 export interface StagedFact { prompt?: string; harness?: string; model?: string; effort?: string; account?: string; cwd?: string }
-export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; staged?: StagedFact; blockedBy: string[] }
+export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; parentGroupId?: string; staged?: StagedFact; blockedBy: string[] }
 export interface SessionFact {
   id: string; harness: string; model?: string; effort?: string; account?: string; taskId?: string; subtaskId?: string
   role?: string; label?: string; alive: boolean; cwd: string; worktree: boolean; rootPath?: string; createdAt?: string
@@ -83,6 +93,8 @@ export interface GateFacts {
   topCap(harness: string): Promise<number>
   git(cwd: string, args: string[]): Promise<string>
   gh(cwd: string, args: string[]): Promise<string>
+  /** The repository checkout this process runs in, for a piece with no author session on record (`flow release`). Null = none. */
+  repoCwd?(): Promise<string | null>
 }
 
 export interface GateVerdict {
@@ -204,17 +216,44 @@ export function judgeDeletions(files: ReadonlyArray<{ filename: string; status: 
   return unexpected.length ? no(`PR #${pr} deletes ${unexpected.length} file(s) outright: ${unexpected.slice(0, 8).join(', ')}`, unexpected.map(f => `deleção autorizada: ${f}`), evidence) : { ok: true, evidence, patch: { pr } }
 }
 
-/** PURE. The CI signal from the release run and the tag. Only both green is `ok`. */
-export function judgeRelease(o: { mergeSha?: string; runs: ReadonlyArray<{ databaseId?: number; status?: string; conclusion?: string; headSha?: string }>; tag: string | null; pr: number | null }): GateVerdict {
-  if (!o.mergeSha) return no('no merge sha recorded', ['sha do merge'])
-  const mine = o.runs.filter(r => r.headSha === o.mergeSha)
-  const green = mine.find(r => r.status === 'completed' && r.conclusion === 'success')
-  const ci: DeliveryCi = { mergedMain: true, releaseGreen: !!green, tagPublished: !!o.tag, tag: o.tag, pr: o.pr }
-  const evidence = { mergeSha: o.mergeSha, runs: mine.map(r => ({ id: r.databaseId, status: r.status, conclusion: r.conclusion })), tag: o.tag }
-  const failed = mine.find(r => r.status === 'completed' && r.conclusion !== 'success')
-  if (!green) return { ...no(failed && mine.every(r => r.status === 'completed') ? `release.yml failed for ${o.mergeSha.slice(0, 9)} (${failed.conclusion})` : `release.yml has not finished green for ${o.mergeSha.slice(0, 9)}`, ['release.yml verde'], evidence), patch: { ci } }
-  if (!o.tag) return { ...no('the release tag does not exist yet', ['tag publicada'], evidence), patch: { ci } }
-  return { ok: true, evidence, patch: { ci, tag: o.tag } }
+export interface ReleaseRun { databaseId?: number; status?: string; conclusion?: string; headSha?: string; updatedAt?: string }
+
+/**
+ * PURE. The CI signal from the release run and the tag. Only both green is `ok`.
+ *
+ * THE TAG IS THE RELEASE'S OWN EVIDENCE. Once `v<version>` exists, the judged run is the newest `release.yml` run whose
+ * commit the tag CONTAINS (`o.contained`, the first such run walking newest-first — computed by the gate): the run that
+ * produced the tag. The merge sha a leader declared is information only — a big squash commit whose own run failed and
+ * was fixed by a later commit (v2.201.0: db7bf2f red, 7cede91 green, tag after it) must not decide the release.
+ * Before the tag exists nothing is published: `declared` pieces wait; a legacy piece (merged by the flow itself) is
+ * still sent back when ITS merge commit's own run failed.
+ */
+export function judgeRelease(o: { mergeSha?: string; runs: ReadonlyArray<ReleaseRun>; contained?: ReadonlyArray<ReleaseRun>; tag: string | null; tagSha?: string | null; wanted?: string | null; declared?: boolean; pr: number | null }): GateVerdict {
+  if (!o.mergeSha && !o.tag) return no('no merge sha recorded', ['sha do merge'])
+  const mine = o.mergeSha ? o.runs.filter(r => r.headSha === o.mergeSha) : []
+  const mineGreen = mine.some(r => r.status === 'completed' && r.conclusion === 'success')
+  if (!o.tag) {
+    const ci: DeliveryCi = { mergedMain: true, releaseGreen: mineGreen, tagPublished: false, tag: null, pr: o.pr }
+    const evidence = { mergeSha: o.mergeSha, runs: mine.map(r => ({ id: r.databaseId, status: r.status, conclusion: r.conclusion })), tag: null }
+    const failed = mine.find(r => r.status === 'completed' && r.conclusion !== 'success')
+    if (!o.declared && !mineGreen) {
+      return { ...no(failed && mine.every(r => r.status === 'completed') ? `release.yml failed for ${o.mergeSha!.slice(0, 9)} (${failed.conclusion})` : `release.yml has not finished green for ${o.mergeSha!.slice(0, 9)}`, ['release.yml verde'], evidence), patch: { ci } }
+    }
+    // A declared piece never reads a failed run of some other commit as final: it waits for the tag.
+    return { ...no(`the release tag${o.wanted ? ` ${o.wanted}` : ''} does not exist yet`, ['tag publicada'], evidence), patch: { ci } }
+  }
+  const decisive = [...(o.contained ?? [])].sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0))[0]
+  const green = decisive && decisive.status === 'completed' && decisive.conclusion === 'success'
+  const ci: DeliveryCi = { mergedMain: true, releaseGreen: !!green, tagPublished: true, tag: o.tag, pr: o.pr }
+  const evidence = { mergeSha: o.mergeSha, tag: o.tag, tagSha: o.tagSha, runs: decisive ? [{ id: decisive.databaseId, head: decisive.headSha?.slice(0, 9), status: decisive.status, conclusion: decisive.conclusion }] : [] }
+  if (!decisive) return { ...no(`no release.yml run found for ${o.tag} (${(o.tagSha ?? '?').slice(0, 9)})`, ['release.yml verde'], evidence), patch: { ci } }
+  if (!green) {
+    const final = decisive.status === 'completed'
+    return { ...no(final ? `release.yml failed for ${o.tag} (${decisive.conclusion}, run ${decisive.databaseId ?? '?'})` : `release.yml has not finished green for ${o.tag}`, ['release.yml verde'], evidence), patch: { ci } }
+  }
+  // The release's own publish time: when the green run completed (the run creates the tag). Absent when gh did not say.
+  const publishedAt = decisive.updatedAt && Number.isFinite(Date.parse(decisive.updatedAt)) ? new Date(decisive.updatedAt).toISOString() : undefined
+  return { ok: true, evidence: { ...evidence, ...(publishedAt ? { publishedAt } : {}) }, patch: { ci, tag: o.tag, ...(publishedAt ? { publishedAt } : {}) } }
 }
 
 /** PURE: was the release FAILURE final (so the flow goes back to the leader), or is it still running? */
@@ -260,6 +299,13 @@ export function pickReleaseTag(tags: ReadonlyArray<{ name: string; sha: string }
 }
 
 const json = <T>(s: string, fallback: T): T => { try { return JSON.parse(s) as T } catch { return fallback } }
+
+// Only negative ancestry facts survive polls: commits and a resolved tag SHA are immutable. A new
+// first page restarts pagination (offsets may have shifted). Never cache a run's mutable verdict.
+interface ReleaseSearch { page: number; firstPage: string; checked: Map<string, boolean> }
+const releaseSearches = new WeakMap<GateFacts, Map<string, ReleaseSearch>>()
+const RELEASE_SEARCH_PAGES = 10
+const RELEASE_SEARCH_COMPARES = 150
 
 /** Run ONE gate against the record. Never throws: an unreachable source is a refusal naming it. */
 export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): Promise<GateVerdict> {
@@ -328,23 +374,101 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
       }
       case 'release': {
         const author = authorOf(r, await f.sessions())
-        const cwd = author?.rootPath ?? author?.cwd
+        // ONE REPOSITORY PER RELEASE. A piece declared by `agentop flow release` records the `owner/name` it was declared in
+        // (`releaseRepo`), and the gate asks gh THERE with explicit paths: the author session's checkout is irrelevant (a
+        // piece worked in the engine repo or the workspace must not ask the wrong repository and wait in `ci` forever), and
+        // so is the server's own cwd. A record with no `releaseRepo` (merged by the flow) keeps the author's checkout.
+        const slug = r.releaseRepo
+        const cwd = slug
+          ? (await f.repoCwd?.().catch(() => null)) ?? '.'
+          : author?.rootPath ?? author?.cwd ?? (await f.repoCwd?.().catch(() => null)) ?? undefined
         if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
-        if (!r.mergeSha) return no('no merge sha recorded', ['sha do merge'])
-        const runs = json<Array<{ databaseId?: number; status?: string; conclusion?: string; headSha?: string }>>(await f.gh(cwd, ['run', 'list', '--workflow', 'release.yml', '--commit', r.mergeSha, '--json', 'databaseId,status,conclusion,headSha', '--limit', '10']), [])
-        const tags = json<Array<{ name?: string; commit?: { sha?: string } }>>(await f.gh(cwd, ['api', 'repos/{owner}/{repo}/tags?per_page=30']).catch(() => '[]'), [])
+        const repoPath = slug ?? '{owner}/{repo}'
         const wanted = r.tag ?? (r.versionTarget && /^\d/.test(r.versionTarget) ? `v${r.versionTarget}` : null)
-        const list = (Array.isArray(tags) ? tags : []).flatMap(t => (t.name && t.commit?.sha ? [{ name: t.name, sha: t.commit.sha }] : []))
-        const relations = new Map<string, string | undefined>()
-        for (const t of list) {
-          if (wanted && t.name !== wanted) continue
-          if (t.sha === r.mergeSha) { relations.set(t.sha, 'identical'); continue }
-          const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/{owner}/{repo}/compare/${r.mergeSha}...${t.sha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
-          relations.set(t.sha, cmp.status)
-          if (!wanted && cmp.status !== 'ahead' && cmp.status !== 'identical') break
+        if (!r.mergeSha && !wanted) return no('no merge sha recorded', ['sha do merge'])
+        const runList = ['run', 'list', ...(slug ? ['-R', slug] : []), '--workflow', 'release.yml', '--json', 'databaseId,status,conclusion,headSha,updatedAt', '--limit', '50']
+        const runsRaw = json<ReleaseRun[]>(await f.gh(cwd, runList), [])
+        const runs = Array.isArray(runsRaw) ? runsRaw : []
+        // The tag by its EXACT name (never a page of the newest tags: a `vscode-v*` flood would push it off the page).
+        let tag: string | null = null
+        let tagSha: string | null = null
+        if (wanted) {
+          const ref = json<{ object?: { sha?: string; type?: string } }>(await f.gh(cwd, ['api', `repos/${repoPath}/git/ref/tags/${wanted}`]).catch(() => '{}'), {})
+          tagSha = ref.object?.sha ?? null
+          if (tagSha && ref.object?.type === 'tag') {
+            // An annotated tag points at a tag object: the commit is one hop further.
+            const obj = json<{ object?: { sha?: string } }>(await f.gh(cwd, ['api', `repos/${repoPath}/git/tags/${tagSha}`]).catch(() => '{}'), {})
+            tagSha = obj.object?.sha ?? null
+          }
+          if (tagSha) tag = wanted
+        } else if (r.mergeSha) {
+          const tags = json<Array<{ name?: string; commit?: { sha?: string } }>>(await f.gh(cwd, ['api', `repos/${repoPath}/tags?per_page=30`]).catch(() => '[]'), [])
+          const list = (Array.isArray(tags) ? tags : []).flatMap(t => (t.name && t.commit?.sha ? [{ name: t.name, sha: t.commit.sha }] : []))
+          const relations = new Map<string, string | undefined>()
+          for (const t of list) {
+            if (t.sha === r.mergeSha) { relations.set(t.sha, 'identical'); continue }
+            const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${repoPath}/compare/${r.mergeSha}...${t.sha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
+            relations.set(t.sha, cmp.status)
+            if (cmp.status !== 'ahead' && cmp.status !== 'identical') break
+          }
+          tag = pickReleaseTag(list, null, r.mergeSha, sha => relations.get(sha))
+          tagSha = list.find(t => t.name === tag)?.sha ?? null
         }
-        const tag = pickReleaseTag(list, wanted, r.mergeSha, sha => relations.get(sha))
-        return judgeRelease({ mergeSha: r.mergeSha, runs: Array.isArray(runs) ? runs : [], tag, pr: r.pr ?? null })
+        // The run that produced the tag: walking the runs newest-first, the first whose commit the tag contains.
+        let contained: ReleaseRun[] | undefined
+        if (tag && tagSha) {
+          let searches = releaseSearches.get(f)
+          if (!searches) { searches = new Map(); releaseSearches.set(f, searches) }
+          const key = `${cwd}:${repoPath}:${tag}:${tagSha}`
+          const firstPage = JSON.stringify(runs)
+          let search = searches.get(key)
+          if (!search || search.firstPage !== firstPage) {
+            search = { page: 1, firstPage, checked: new Map() }
+            searches.set(key, search)
+            if (searches.size > 100) searches.delete(searches.keys().next().value!)
+          }
+          const checked = search.checked
+          let pageRuns = runs
+          let page = 1
+          let pages = 1
+          let compares = 0
+          let searched = 0
+          while (true) {
+            const newestFirst = [...pageRuns].filter(x => x.headSha).sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0))
+            for (const run of newestFirst) {
+              const sha = run.headSha!
+              searched += 1
+              if (!checked.has(sha)) {
+                if (sha === tagSha) checked.set(sha, true)
+                else {
+                  if (compares >= RELEASE_SEARCH_COMPARES) {
+                    search.page = page
+                    return no(`release run search paused after ${searched - 1} runs (${compares} comparisons); resumes at page ${page} next poll`, ['release.yml verde'], { searched: searched - 1, nextPage: page })
+                  }
+                  compares += 1
+                  const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${repoPath}/compare/${sha}...${tagSha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
+                  if (!cmp.status) {
+                    search.page = page
+                    return no(`release run ancestry could not be read after ${searched} runs; retry page ${page}`, ['fonte de evidência acessível'], { searched, nextPage: page })
+                  }
+                  checked.set(sha, cmp.status === 'ahead' || cmp.status === 'identical')
+                  if (checked.size > 5000) checked.delete(checked.keys().next().value!)
+                }
+              }
+              if (checked.get(sha)) { contained = [run]; break }
+            }
+            if (contained || pageRuns.length < 50) { searches.delete(key); break }
+            // Recheck page one on every poll, then resume the immutable non-containing prefix already searched.
+            page = page === 1 && search.page > 1 ? search.page : page + 1
+            search.page = page
+            if (pages >= RELEASE_SEARCH_PAGES) return no(`release run search paused after ${searched} runs (${pages} pages); resumes at page ${page} next poll`, ['release.yml verde'], { searched, nextPage: page })
+            pages += 1
+            const older = json<{ workflow_runs?: Array<{ id?: number; status?: string; conclusion?: string | null; head_sha?: string; updated_at?: string }> }>(await f.gh(cwd, ['api', `repos/${repoPath}/actions/workflows/release.yml/runs?per_page=50&page=${page}`]), {})
+            pageRuns = (older.workflow_runs ?? []).map(x => ({ databaseId: x.id, status: x.status, conclusion: x.conclusion ?? undefined, headSha: x.head_sha, updatedAt: x.updated_at }))
+            runs.push(...pageRuns)
+          }
+        }
+        return judgeRelease({ mergeSha: r.mergeSha, runs, ...(contained ? { contained } : {}), tag, tagSha, wanted, declared: Boolean(r.declaredRelease), pr: r.pr ?? null })
       }
     }
   } catch (error) {
@@ -376,11 +500,13 @@ export function defaultGateFacts(): GateFacts {
       const s = w.book.subtasks.find(x => x.id === id)
       if (!s) return null
       const st = s.stagedSession as (StagedFact & { prompt: string }) | undefined
-      return { id: s.id, taskId: s.taskId, title: s.title, status: s.status, groupMember: Boolean(s.parentGroupId), blockedBy: s.blockedBy ?? [], ...(st ? { staged: { prompt: st.prompt, harness: st.harness, model: st.model, effort: st.effort, account: st.account, cwd: st.cwd } } : {}) }
+      return { id: s.id, taskId: s.taskId, title: s.title, status: s.status, groupMember: Boolean(s.parentGroupId), ...(s.parentGroupId ? { parentGroupId: s.parentGroupId } : {}), blockedBy: s.blockedBy ?? [], ...(st ? { staged: { prompt: st.prompt, harness: st.harness, model: st.model, effort: st.effort, account: st.account, cwd: st.cwd } } : {}) }
     },
     sessions: async () => {
       const [{ readRegistry }, { readRolesDoc, roleOfRow }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('../sessions/registry'), import('../sessions/session-roles'), import('../config')])
-      const [registry, doc] = await Promise.all([readRegistry(), readRolesDoc(AGENTISTICS_DATA_DIR)])
+      const { resolveBackend } = await import('../sessions/index')
+      const [registry, doc, backend] = await Promise.all([readRegistry(), readRolesDoc(AGENTISTICS_DATA_DIR), (await resolveBackend()).list()])
+      const running = runningSessionIds(registry, backend)
       return registry.map(m => ({
         id: m.id, harness: m.harness, cwd: m.cwd, worktree: m.repo?.worktree === true,
         ...(m.repo?.rootPath ? { rootPath: m.repo.rootPath } : {}),
@@ -388,9 +514,7 @@ export function defaultGateFacts(): GateFacts {
         ...(m.taskId ? { taskId: m.taskId } : {}), ...(m.subtaskId ? { subtaskId: m.subtaskId } : {}),
         ...(m.label ? { label: m.label } : {}), ...(m.createdAt ? { createdAt: m.createdAt } : {}),
         role: roleOfRow(doc.roles, { id: m.id, conversationId: m.conversationId }) ?? (m.leader ? 'leader' : 'worker'),
-        // The registry's own end stamp: a session killed or exited is not running (a reboot's `lost` rows keep no stamp
-        // and count as running until reconciled — the conservative direction for a capacity gate).
-        alive: !m.endedAt,
+        alive: running.has(m.id),
       }))
     },
     budgets: async () => {
@@ -406,5 +530,6 @@ export function defaultGateFacts(): GateFacts {
     },
     git: (cwd, args) => run('git', cwd, args),
     gh: (cwd, args) => run('gh', cwd, args),
+    repoCwd: async () => (await run('git', process.cwd(), ['rev-parse', '--show-toplevel'])).trim() || null,
   }
 }

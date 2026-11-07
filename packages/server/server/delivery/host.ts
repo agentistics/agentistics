@@ -8,6 +8,15 @@ import { defaultGateFacts } from './gates'
 import { createDeliveryStore } from './store'
 import { PHASE_STATUS, type DeliveryRecord, type Phase } from './machine'
 
+/** Uses the same pedidos view as the leader briefing and the existing MCP flow reader. */
+export async function readOwnerRequests(): Promise<import('./service').OwnerRequestFact[] | null> {
+  const { prepareOwnerRequestFlows } = await import('../flows/owner-message')
+  if (!(await prepareOwnerRequestFlows())) return []
+  const { engine } = await import('../engine/load')
+  const view = await engine()?.flows?.read?.('pedidos', {}) as { pedidos?: import('./service').OwnerRequestFact[] } | null | undefined
+  return Array.isArray(view?.pedidos) ? view.pedidos : null
+}
+
 /** The Live stage each phase must read as, so a created status is found again by the same reading. */
 const LIVE_STAGE: Record<Phase, string> = {
   fila: 'queue', executando: 'running', qa: 'qa', ajuste: 'adjust', revisao_lider: 'leader', pr_merge: 'merge', ci: 'ci', publicado: 'published', bloqueado: 'blocked',
@@ -83,10 +92,12 @@ export async function deliveryAutonomous(leaderSessionId?: string): Promise<bool
   return (row as { away?: boolean } | undefined)?.away === true
 }
 
-async function emitEvent(type: string, payload: Record<string, unknown>) {
+export async function emitEvent(type: string, payload: Record<string, unknown>, bus?: { emit?(event: { type: string; id: string; payload: Record<string, unknown> }): Promise<unknown> }) {
   try {
-    const { engine } = await import('../engine/load')
-    await engine()?.flows?.emit?.({ type, id: `${type}:${String(payload.subtarefa ?? '')}:${Date.now()}`, payload })
+    const flows = bus ?? (await import('../engine/load')).engine()?.flows
+    // The engine's delivery timer already holds its serial bus while calling this service.
+    // Queue courtesy events without waiting on that same bus; the delivery record is durable first.
+    void flows?.emit?.({ type, id: `${type}:${String(payload.subtarefa ?? '')}:${Date.now()}`, payload }).catch(() => {})
   } catch { /* the record is authoritative; the bus is a courtesy */ }
   try { (await import('../sse')).broadcastFlowsChanged() } catch { /* a CLI has no SSE */ }
 }
@@ -132,7 +143,7 @@ export function deliveryService(overrides: Partial<DeliveryDeps> = {}): Delivery
   if (cached && Object.keys(overrides).length === 0) return cached
   const svc = createDeliveryService({
     store: createDeliveryStore(), facts: defaultGateFacts(), board: defaultDeliveryBoard(), notify: defaultDeliveryNotify(),
-    autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, now: () => Date.now(), ...overrides,
+    autonomous: deliveryAutonomous, emit: emitEvent, spawn: spawnStaged, merge: mergePr, requests: readOwnerRequests, now: () => Date.now(), ...overrides,
   })
   if (Object.keys(overrides).length === 0) cached = svc
   return svc

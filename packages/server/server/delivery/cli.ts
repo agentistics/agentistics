@@ -12,6 +12,9 @@
  *   agentop flow merge --subtask S [--batch <version>]
  *   agentop flow block --subtask S --reason R --text …  |  agentop flow unblock --subtask S [--detail …]
  *   agentop flow approve --subtask S --phase P --decision approve|reject [--note …]   (the owner only)
+ *   agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …
+ *                                  the leader DECLARES what a release contains: each piece → ci (legacy pieces adopted), and → publicado
+ *                                  as soon as release.yml is green and the tag exists, with the release's own publish time. Idempotent.
  *   agentop flow tick
  *   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
  *
@@ -19,7 +22,7 @@
  * without the experimental flows flag. The actor is the managed session this runs in (`AGENTOP_MANAGED_ID`),
  * else the owner at their own terminal.
  */
-import type { DeliveryReply } from './service'
+import type { DeliveryReply, DeliveryService } from './service'
 
 /** What `agentop flow --help` prints about the delivery verbs (they live here, not in the engine, so the engine's help never lists them). */
 export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subtask walks fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado; any skipped phase is refused)
@@ -33,7 +36,9 @@ export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subt
   agentop flow wait qa-verdict --subtask S            prints APROVADO|REPROVADO (exit 3 = none yet; never waits)
   agentop flow merge --subtask S [--batch <version>]  deletions gate, squash merge, then ci (the merge is verified on the host)
   agentop flow block --subtask S --reason R --text …  |  agentop flow unblock --subtask S [--detail …]   (unblock: the leader; an owner decision: the owner)
+  agentop flow dequeue --subtask S --reason …          withdraw a queued piece, with an audit reason (leader only)
   agentop flow approve --subtask S --phase P --decision approve|reject [--note …]   (the owner only — the answer to a human gate)
+  agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …   declare what the release contains (→ ci, → publicado when release.yml is green and the tag exists)
   agentop flow tick                                   the minute watch (blocks, ci → publicado)
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
 
@@ -41,7 +46,7 @@ Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usa
 Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
 `
 
-export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'approve', 'tick'] as const
+export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'approve', 'release', 'tick'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
@@ -80,10 +85,9 @@ function report(r: DeliveryReply, io: Io): number {
   return r.status === 400 ? 2 : 1
 }
 
-export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env: Record<string, string | undefined> = process.env): Promise<number> {
+export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env: Record<string, string | undefined> = process.env, service?: DeliveryService): Promise<number> {
   if (argv[0] === 'help' || argv[0] === '--help' || argv[0] === '-h') { io.out(DELIVERY_FLOW_HELP.trimEnd()); return 0 }
-  const { deliveryService } = await import('./host')
-  const svc = deliveryService()
+  const svc = service ?? (await import('./host')).deliveryService()
   const actor = env.AGENTOP_MANAGED_ID || 'owner'
   const isTaskStage = argv[0] === 'task-stage'
   const { pos, flags } = parseFlags(isTaskStage ? argv.slice(1) : argv)
@@ -134,7 +138,14 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
     }
     case 'block': if (!needSub()) return 2; return report(await svc.block(sub!, flags.reason, flags.text ?? '', actor), io)
     case 'unblock': if (!needSub()) return 2; return report(await svc.unblock(sub!, actor, flags.detail), io)
+    case 'dequeue': if (!needSub()) return 2; return report(await svc.dequeue(sub!, flags.reason, actor), io)
     case 'approve': if (!needSub()) return 2; return report(await svc.approve(sub!, flags.phase, flags.decision, flags.note, !env.AGENTOP_MANAGED_ID), io)
+    case 'release': {
+      const subs = argv.flatMap((a, i) => (a === '--subtask' && argv[i + 1] && !argv[i + 1]!.startsWith('--') ? [argv[i + 1]!] : []))
+      const r = await svc.release({ version: flags.version, mergeSha: flags.mergeSha, ...(flags.repo ? { repo: flags.repo } : {}), subtaskIds: subs }, actor)
+      if (r.ok) { io.out(JSON.stringify({ ok: true, version: r.version, tag: r.tag, mergeSha: r.mergeSha, ...(r.publishedAt ? { publishedAt: r.publishedAt } : {}), pieces: r.pieces, warnings: r.warnings }, null, 2)); return 0 }
+      return report(r, io)
+    }
     case 'tick': io.out(JSON.stringify(await svc.tick(), null, 2)); return 0
     default: io.err('unknown delivery verb'); return 2
   }

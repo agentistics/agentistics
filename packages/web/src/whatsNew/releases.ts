@@ -10,6 +10,22 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.201.2': {
+    features: [],
+    fixes: [{
+      pt: 'Sessões perdidas ou encerradas deixam de ocupar vagas para iniciar as peças da fila.',
+      en: 'Lost or ended sessions no longer occupy slots needed to start queued work.',
+    }, {
+      pt: 'Peças em revisão ou concluídas saem da fila automaticamente; o líder também pode retirá-las com um motivo registrado.',
+      en: 'Pieces under review or already finished leave the queue automatically; the leader can also withdraw them with a recorded reason.',
+    }, {
+      pt: 'Pedidos ao líder chegam à fila também pelo terminal e pelas passagens de sessão. Um pedido sem pré-dispatch cobra o líder após 10 minutos; peças na mesma área sugerem encaixe e grupos mantêm um único cartão.',
+      en: 'Requests reach the leader’s queue from the terminal and session handoffs too. A request without pre-dispatch reminds the leader after 10 minutes; work in the same area suggests a fit and groups keep one card.',
+    }, {
+      pt: 'A Live agora mostra em "Publicado" as peças de uma versão que entrou como um único commit grande: o líder declara o conteúdo do release (agentop flow release) e as peças vão a Publicado quando a versão sai verde, em vez de o app adivinhar pelo git. A prova é a própria tag da versão, no repositório do release, mesmo quando o commit do merge teve uma execução vermelha corrigida depois.',
+      en: 'Live now shows in "Published" the pieces of a version that landed as one big commit: the leader declares the release contents (agentop flow release) and the pieces move to Published once the version ships green, instead of the app guessing from git. The proof is the version\'s own tag, in the release\'s repository, even when the merge commit had a red run that a later commit fixed.',
+    }],
+  },
   '2.201.1': {
     features: [],
     fixes: [

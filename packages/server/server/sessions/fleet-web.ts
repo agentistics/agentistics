@@ -790,6 +790,11 @@ async function runFleetActionOnce(
       // queue it records the composer fingerprint, so the chat shows this turn as the person's own
       // message even when the harness stored it as a paste (`recordComposerMessage`).
       const record = async () => {
+        // The common CONFIRMED send path: web, TUI and late acknowledgements all record the request once.
+        try {
+          const m = await import('../flows/owner-message')
+          await m.emitOwnerMessage(req, m.defaultOwnerMessageDeps(), { at: new Date(sentAtMs).toISOString() })
+        } catch { console.warn('[owner-request] confirmed message could not be recorded; check the official request flows') }
         if (req.handoff === true) await patchSession(req.id, { handoffRequestedAt: new Date(sentAtMs).toISOString() })
         await recordComposerMessage(req.id, text)
         void (async () => {

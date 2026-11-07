@@ -268,6 +268,17 @@ describe('FLUXO.ENTREGA-DSL: the Live is a projection of the delivery record', (
     expect(q.staged).toEqual({ harness: 'codex', model: 'gpt-5.5', effort: 'high', account: 'acc_2' })
     expect(q.slot).toMatchObject({ ok: false })
   })
+  test('a dequeued piece is absent from queue even though its draft is kept; review overrides a stale fila record immediately', () => {
+    const draft = { prompt: 'p', harness: 'codex' }
+    const view = (status: string, dequeued?: { reason: string }) => buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [sub('a', status, { stagedSession: draft })] as never, sessions: [] })],
+      deliveries: new Map([['a', { phase: 'fila', ...(dequeued ? { dequeued } : {}) }]]),
+    })
+    expect(view('todo', { reason: 'superseded' }).deliveries).toHaveLength(0)
+    expect(view('in_review').deliveries[0]?.stage).toBe('leader')
+    expect(view('abandoned').deliveries).toHaveLength(0)
+  })
   test('BLOQUEIO.ORFAO r3 · a TASK-level record (keyed by the task id) decides the stage of a task with no subtasks, as a subtask record does', () => {
     // The board still reads `blocked` (e.g. the deferral could not write it) but the record says the piece is back in the queue.
     const q = buildLive({

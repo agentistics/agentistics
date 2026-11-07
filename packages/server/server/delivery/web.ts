@@ -40,6 +40,12 @@ export async function deliveryRequest(method: string, path: string, body: Record
   if (proof && !session) return { status: 403, body: { error: 'unverified_sender', sentence: 'the session identity could not be verified' } }
   const actor = session ?? 'owner'
   if (rest === 'tick') return { status: 200, body: await d.service.tick() }
+  if (rest === 'release') {
+    const r = await d.service.release({ version: body.version, mergeSha: body.mergeSha, repo: body.repo, subtaskIds: body.subtaskIds }, actor)
+    return r.ok
+      ? { status: 200, body: { ok: true, version: r.version, tag: r.tag, mergeSha: r.mergeSha, ...(r.publishedAt ? { publishedAt: r.publishedAt } : {}), pieces: r.pieces, warnings: r.warnings } }
+      : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing, ...(r.record ? { record: r.record } : {}) } }
+  }
   let subtaskId: string
   try { subtaskId = decodeURIComponent(rest) } catch { return { status: 400, body: { error: 'bad_subtask' } } }
   if (subtaskId.includes('/')) return { status: 404, body: { error: 'not_found' } }
@@ -55,6 +61,7 @@ export async function deliveryRequest(method: string, path: string, body: Record
     case 'gate': return out(await d.service.gate(subtaskId, body.name, actor))
     case 'block': return out(await d.service.block(subtaskId, body.reason, String(body.text ?? body.detail ?? ''), actor))
     case 'unblock': return out(await d.service.unblock(subtaskId, actor, str(body.detail), body.to))
+    case 'dequeue': return out(await d.service.dequeue(subtaskId, body.reason, actor))
     case 'approve': return out(await d.service.approve(subtaskId, body.phase, body.decision, str(body.note), session === null))
     case 'configure': return out(await d.service.configure(subtaskId, (body.patch ?? {}) as Record<string, unknown>, actor))
     case 'step': return out(await d.service.step(subtaskId, body.step, actor))
@@ -68,6 +75,6 @@ export async function deliveryRequest(method: string, path: string, body: Record
     }
     case 'stage-run': return out(await d.service.stageRun(subtaskId, actor))
     case 'merge': return out(await d.service.merge(subtaskId, actor))
-    default: return { status: 400, body: { error: 'bad_action', sentence: 'action must be one of phase, gate, block, unblock, approve, configure, step, stage, stage-run, merge' } }
+    default: return { status: 400, body: { error: 'bad_action', sentence: 'action must be one of phase, gate, block, unblock, dequeue, approve, configure, step, stage, stage-run, merge' } }
   }
 }
