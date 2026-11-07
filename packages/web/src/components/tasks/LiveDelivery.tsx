@@ -41,11 +41,15 @@ import { LiveColumn } from './LiveColumn'
 import { LiveLeaders } from './LiveLeaders'
 import type { LeaderWorker } from './liveDeliveryModel'
 import { LiveTaskFilter } from './LiveTaskFilter'
+import { dayLabel, groupHistory } from './liveHistoryModel'
+import { sessionLinks } from './liveSessionLinks'
 import { LiveToolbar } from './LiveToolbar'
-import { PipPortal, requestPipWindow, type OpenedWindow } from './livePip'
+import { requestPipWindow } from './livePip'
+import { registerPip, usePip } from './livePipStore'
 import { useLiveDeliveries } from './useLiveDeliveries'
 import { flashHeader, flyCard, intersects, recolorBar, ring, transitionKind, type Box } from './liveDeliveryFx'
 
+const HISTORY_COLOR = '#6b7280'
 const reducedMotion = (): boolean => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } }
 
 /** Every word the Live draws, in both languages — nothing on this screen is written inline in a component. */
@@ -59,6 +63,7 @@ export const copy = (pt: boolean) => pt ? {
   loading: 'Carregando entregas…', none: 'Nenhuma entrega ativa agora.',
   delivered: 'publicado', allSteps: 'Todas as etapas', external: 'Janela externa', externalTip: 'Abrir a esteira numa janela externa', externalBlocked: 'O navegador bloqueou a janela externa.',
   collapse: 'Recolher coluna', expand: 'Abrir coluna',
+  history: 'Histórico', publishedNote: 'Os cartões ficam 24 h aqui; depois vão para o Histórico.',
   searchColumn: 'Buscar nesta coluna…', noMatch: 'Nenhum cartão corresponde.', clearSearch: 'Limpar',
   archivedBtn: (n: number) => `Revisões antigas · ${n}`, archivedNote: 'Em revisão há mais de 72 h, sem sessão viva e sem commit publicado conhecido — saíram da coluna “Revisão do líder”.', archivedMore: (n: number) => `e mais ${n}`,
   left: 'saiu', recentLeft: (n: number) => `saíram há pouco (${n})`, noneLeft: 'Ninguém saiu do quadro nos últimos minutos.',
@@ -72,17 +77,18 @@ export const copy = (pt: boolean) => pt ? {
   loading: 'Loading deliveries…', none: 'No active delivery right now.',
   delivered: 'published', allSteps: 'All steps', external: 'External window', externalTip: 'Open the line in an external window', externalBlocked: 'The browser blocked the external window.',
   collapse: 'Collapse column', expand: 'Open column',
+  history: 'History', publishedNote: 'Cards stay here for 24 h, then move to History.',
   searchColumn: 'Search this column…', noMatch: 'No card matches.', clearSearch: 'Clear',
   archivedBtn: (n: number) => `Older reviews · ${n}`, archivedNote: 'In review for over 72 h, no live session and no known published commit — they left the “Leader review” column.', archivedMore: (n: number) => `and ${n} more`,
   left: 'left', recentLeft: (n: number) => `left recently (${n})`, noneLeft: 'Nothing left the board in the last minutes.',
 }
 
 /** The hooks wrapper: the shared fleet stream, the plan-limits account labels and the live read model. */
-export function LiveDelivery({ lang, compact, focusSessionId, inPip }: { lang: 'pt' | 'en'; compact?: boolean; focusSessionId?: string | null; inPip?: boolean }) {
+export function LiveDelivery({ lang, compact, focusSessionId, inPip, initialTaskIds }: { lang: 'pt' | 'en'; compact?: boolean; focusSessionId?: string | null; inPip?: boolean; initialTaskIds?: readonly string[] }) {
   const { fleet } = useFleet(lang)
   const plan = usePlanLimits()
   const { reply, error, nowMs } = useLiveDeliveries(fleet.sessions)
-  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} compact={compact} focusSessionId={focusSessionId} inPip={inPip} />
+  return <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet.sessions} accountLabels={plan.accountLabels} compact={compact} focusSessionId={focusSessionId} inPip={inPip} initialTaskIds={initialTaskIds} />
 }
 
 export interface LiveDeliveryViewProps {
@@ -118,7 +124,6 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   // Each column's own search text (the field appears when more than three cards are out of view).
   const [queries, setQueries] = useState<Partial<Record<LiveStage, string>>>({})
   const [openPub, setOpenPub] = useState<ReadonlySet<string>>(new Set())
-  const [pip, setPip] = useState<OpenedWindow | null>(null)
   const [pipNote, setPipNote] = useState(false)
   const [gone, setGone] = useState<Gone[]>([])
   const [showGone, setShowGone] = useState(false)
@@ -128,6 +133,13 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const cards = useMemo(() => joinLive(reply?.deliveries ?? [], fleet), [reply, fleet])
   const shown = useMemo(() => filterCards(cards, { taskIds, onlyActive, showQueue }), [cards, taskIds, onlyActive, showQueue])
   const columns = useMemo(() => orderColumns(byStage(shown), sort), [shown, sort])
+  // The Histórico column: pieces published more than 24 h ago. ALWAYS closed when the screen opens (not saved), opens on click.
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyQuery, setHistoryQuery] = useState('')
+  const historyCards = useMemo(
+    () => joinLive(reply?.history ?? [], fleet).filter(c => taskIds.length === 0 || taskIds.includes(c.d.taskId)),
+    [reply, fleet, taskIds],
+  )
   const visibleStages = stageFilter === 'all' ? LIVE_STAGES : LIVE_STAGES.filter(s => s === stageFilter)
   const sum = useMemo(() => summarize(shown, nowMs), [shown, nowMs])
   const options = useMemo(() => taskOptions(cards, nowMs), [cards, nowMs])
@@ -326,12 +338,14 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     return () => cancelAnimationFrame(raf)
   }, [locateReq])
 
+  // The window belongs to `livePipStore` (and is drawn by `LivePipHost`), never to this component: this one
+  // unmounts when the popover closes or the route changes, and used to take the window with it.
+  const pip = usePip()
   const openExternal = useCallback(async () => {
     const r = await requestPipWindow({ width: 540, height: 680, fallbackUrl: `${window.location.origin}${pathOfView('live')}` })
-    if (r.kind === 'pip') setPip(r)
+    if (r.kind === 'pip') registerPip(r.win, taskIds)
     else if (r.kind === 'blocked') setPipNote(true)
-  }, [])
-  useEffect(() => () => { setPip(p => { if (p?.kind === 'pip') try { p.win.close() } catch { /* already closed */ } return null }) }, [])
+  }, [taskIds])
 
   if (error === 'refused') return <Note text={L.refused} />
   if (reply === null && error !== 'down') return <CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" />
@@ -339,6 +353,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
 
   const open = (c: LiveCard) => {
     const id = c.agents[0]?.id ?? c.d.sessionIds[0]
+    if (inPip) { try { window.focus() } catch { /* not allowed */ } }
     navigate(id ? `/sessions/${encodeURIComponent(id)}` : `/tasks/${encodeURIComponent(c.d.taskId)}`)
   }
   const leaderOf = (c: LiveCard): string | null => {
@@ -347,9 +362,15 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     return l ? plainLeaderName(l.title) : null
   }
   const roleOf = (c: LiveCard): 'leader' | 'worker' => (c.agents.some(a => leaderIds.has(a.id)) ? 'leader' : 'worker')
+  const openSession = (id: string) => {
+    // From the external window the main window is where the session opens: bring it forward.
+    if (inPip) { try { window.focus() } catch { /* not allowed */ } }
+    navigate(`/sessions/${encodeURIComponent(id)}`)
+  }
   const renderCard = (c: LiveCard, embedded = false) => (
     <div key={c.d.key} style={{ display: 'grid', gap: 4, minWidth: 0 }}>
       <LiveCardView
+        links={sessionLinks(c, fleet, leaders)} onOpenSession={openSession}
         c={c} cards={cards} nowMs={nowMs} pt={pt} fleet={fleet} accountLabels={accountLabels} runtime={reply.runtime}
         leaderName={leaderOf(c)} role={roleOf(c)} mobile={isMobile} onOpen={open} embedded={embedded} sort={sort} cameFrom={moved[c.d.key]?.from ?? null}
       />
@@ -376,6 +397,33 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       </div>
     )
   }
+  const historyOrdered = groupHistory(historyCards, nowMs, pt).flatMap(g => g.cards)
+  const historyHeading = (c: LiveCard, prev: LiveCard | undefined): string | null => {
+    const label = dayLabel(c.d.deliveredAtMs ?? 0, nowMs, pt)
+    return !prev || dayLabel(prev.d.deliveredAtMs ?? 0, nowMs, pt) !== label ? label : null
+  }
+  // Phone: one more section under the stages, closed until tapped, same accordion rows as Publicado.
+  const renderHistoryMobile = () => historyOrdered.length === 0 ? null : (
+    <section data-live-column="history" data-collapsed={historyOpen ? '0' : '1'} style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+      <header
+        role="button" tabIndex={0} aria-expanded={historyOpen} data-live-colhead onClick={() => setHistoryOpen(v => !v)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setHistoryOpen(v => !v) } }}
+        style={{ borderTop: `3px solid ${HISTORY_COLOR}`, padding: '10px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', minHeight: 44, cursor: 'pointer' }}
+      >
+        <span style={{ fontWeight: 700, fontSize: 13 }}>{L.history}</span>
+        <span style={{ ...microLabel, fontSize: 11 }}>{historyOrdered.length} {historyOpen ? '▴' : '▾'}</span>
+      </header>
+      {historyOpen && historyOrdered.map((c, i) => {
+        const h = historyHeading(c, historyOrdered[i - 1])
+        return (
+          <React.Fragment key={c.d.key}>
+            {h && <span data-live-group-head style={{ ...microLabel, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.05em' }}>{h}</span>}
+            {renderPub(c)}
+          </React.Fragment>
+        )
+      })}
+    </section>
+  )
   // The short line under the title: how many pieces and agents. The ETA and "updated live" are the tooltip.
   const summaryLine = [L.deliveries(sum.deliveries), L.agents(sum.agentsWorking)].join(' · ')
   const summaryTitle = [sum.nextEtaMs !== null ? L.next(fmtClock(sum.nextEtaMs)) : L.noNext, L.live].join(' · ')
@@ -397,7 +445,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         <button type="button" className="ag-tap" data-live-archived-toggle aria-pressed={showArchived} onClick={() => setShowArchived(v => !v)} title={L.archivedNote} style={pillBtn(showArchived)}>{L.archivedBtn(reply!.archivedTotal!)}</button>
       )}
       {!isMobile && !inPip && (
-        <button type="button" className="ag-tap" data-live-external onClick={() => void openExternal()} disabled={pip?.kind === 'pip'} title={L.externalTip} style={{ ...pillBtn(false), opacity: pip?.kind === 'pip' ? 0.5 : 1 }}>
+        <button type="button" className="ag-tap" data-live-external onClick={() => void openExternal()} disabled={pip !== null} title={L.externalTip} style={{ ...pillBtn(false), opacity: pip !== null ? 0.5 : 1 }}>
           <ExternalLink size={13} aria-hidden />{L.external}
         </button>
       )}
@@ -447,13 +495,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     </div>
   )
 
-  const pipPortal = pip?.kind === 'pip' ? (
-    <PipPortal win={pip.win} onClose={() => setPip(null)}>
-      <LiveDeliveryView lang={lang} reply={reply} error={error} nowMs={nowMs} fleet={fleet} accountLabels={accountLabels} compact inPip initialTaskIds={taskIds} />
-    </PipPortal>
-  ) : null
-
-  if (reply.deliveries.length === 0 && leaders.length === 0 && gone.length === 0) return <div style={{ display: 'grid', gap: 12 }}>{header}<Note text={L.none} />{pipPortal}</div>
+  if (reply.deliveries.length === 0 && leaders.length === 0 && gone.length === 0 && historyCards.length === 0) return <div style={{ display: 'grid', gap: 12 }}>{header}<Note text={L.none} /></div>
 
   if (isMobile) {
     const chip = (active: boolean): React.CSSProperties => ({
@@ -496,8 +538,8 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
               {s === 'published' ? columns[s].map(renderPub) : columns[s].map(c => renderCard(c))}
             </section>
           ))}
+          {renderHistoryMobile()}
         </div>
-        {pipPortal}
       </div>
     )
   }
@@ -518,10 +560,20 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
               setPrefs(next); writeCollapsedPrefs(next)
             }}
             render={s === 'published' ? renderPub : renderCard}
+            note={s === 'published' ? L.publishedNote : undefined}
           />
         ))}
+        {stageFilter === 'all' && historyOrdered.length > 0 && (
+          <LiveColumn
+            key="history" stage="published" pt={pt} cards={historyOrdered} collapsed={!historyOpen}
+            override={{ id: 'history', label: L.history, color: HISTORY_COLOR }}
+            words={{ empty: L.empty, collapse: L.collapse, expand: L.expand, searchPlaceholder: L.searchColumn, noMatch: L.noMatch, clear: L.clearSearch }}
+            query={historyQuery} onQuery={setHistoryQuery}
+            onToggle={() => setHistoryOpen(v => !v)}
+            render={renderPub} groupHeading={historyHeading}
+          />
+        )}
       </div>
-      {pipPortal}
     </div>
   )
 }

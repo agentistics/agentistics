@@ -70,6 +70,8 @@ export interface LeaderRecord {
 }
 export interface LiveReply {
   generatedAt: string; deliveries: LiveDeliveryRecord[]; leaders?: LeaderRecord[]; samples: number
+  /** Published more than 24 h ago (the Histórico column); absent from an older server. */
+  history?: LiveDeliveryRecord[]
   hidden?: LiveHidden[]; archived?: LiveHidden[]; archivedTotal?: number; sessionTasks?: Record<string, string>; runtime?: Record<string, RuntimeFacts>
 }
 

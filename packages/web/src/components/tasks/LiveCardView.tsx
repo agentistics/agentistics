@@ -10,7 +10,7 @@
  */
 
 import React from 'react'
-import { ArrowLeft, Check, CircleDashed, Clock, CornerDownRight } from 'lucide-react'
+import { ArrowLeft, Check, CircleDashed, Clock, CornerDownRight, ExternalLink } from 'lucide-react'
 import type { FleetRow } from '../../lib/fleet'
 import { accountDisplayName } from '../../lib/planLimits'
 import { describeLastAction, shortTitle } from '@agentistics/core'
@@ -23,6 +23,7 @@ import {
 } from './liveDeliveryModel'
 import { blockLines, cardPercent, cardStateWord, ciChecklist, etaBoxes, queueLines, stageBar, timeRow, waitingReason } from './liveCardModel'
 import { LiveOdometer } from './LiveOdometer'
+import { openSessionWord, SESSION_LINK_WORD, type SessionLink } from './liveSessionLinks'
 
 const STATE_COLOR = {
   working: 'var(--accent-green, #3ecf8e)', waiting: 'var(--text-tertiary)',
@@ -49,6 +50,9 @@ export interface LiveCardViewProps {
   embedded?: boolean
   /** The order the columns are drawn in — a queued card's "1º / 2º" is its place in THAT order. */
   sort?: LiveSortId
+  /** "abrir sessão" links (author / QA / leader). The card itself is a button, so each link is a role=link span. */
+  links?: readonly SessionLink[]
+  onOpenSession?: (id: string) => void
 }
 
 export function LiveCardView(p: LiveCardViewProps) {
@@ -166,6 +170,19 @@ export function LiveCardView(p: LiveCardViewProps) {
             <span key={l.key} data-ci-line={l.key} data-done={l.done ? '1' : '0'} style={{ display: 'flex', alignItems: 'center', gap: 5, color: l.done ? 'var(--accent-green, #26b573)' : MUTED }}>
               {l.done ? <Check size={11} aria-hidden /> : <CircleDashed size={11} aria-hidden />}{l.text}
             </span>
+          ))}
+        </span>
+      )}
+      {p.links && p.links.length > 0 && p.onOpenSession && (
+        <span data-live-session-links style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', paddingTop: 5, borderTop: '1px dashed var(--border)' }}>
+          {p.links.map(l => (
+            <span
+              key={l.id} role="link" tabIndex={0} data-live-session-link={l.role}
+              aria-label={`${openSessionWord(pt)} — ${SESSION_LINK_WORD[l.role][pt ? 'pt' : 'en']}`}
+              onClick={e => { e.stopPropagation(); p.onOpenSession!(l.id) }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); p.onOpenSession!(l.id) } }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--anthropic-orange-light)', cursor: 'pointer', minHeight: mobile ? 32 : undefined, textDecoration: 'underline', textUnderlineOffset: 2 }}
+            ><ExternalLink size={11} aria-hidden />{SESSION_LINK_WORD[l.role][pt ? 'pt' : 'en']} · {openSessionWord(pt)}</span>
           ))}
         </span>
       )}

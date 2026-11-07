@@ -69,6 +69,7 @@ import { AwayChip, AwayDialogHost, awayMenuItems } from './components/sessions/A
 import { useAway } from './lib/awayMode'
 import AwayPill from './components/AwayPill'
 import LiveShortcut from './components/tasks/LiveShortcut'
+import { LivePipHost } from './components/tasks/LivePipHost'
 import { HardwareModal } from './components/HardwareModal'
 import { AccountSwitchDialog, useSwitchInfo } from './components/sessions/AccountSwitch'
 import type { PlanUsageSession } from './components/PlanUsageSessionSwitch'
@@ -4631,6 +4632,8 @@ export default function AppLayout() {
       {retryImportModal}
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />
+      {/* The Live's external window belongs to the app, not to the popover that opened it. */}
+      <LivePipHost lang={lang === 'pt' ? 'pt' : 'en'} />
       <CheckinModalHost lang={lang === 'pt' ? 'pt' : 'en'} />
       <AwayDialogHost />
       <EngineSurfaceHost />
