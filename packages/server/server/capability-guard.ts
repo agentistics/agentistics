@@ -116,6 +116,9 @@ const PREFIXES: ReadonlyArray<readonly [string, keyof Capabilities]> = [
   ['/api/session-roles', 'localShell'],
   ['/api/session-team', 'localShell'],
   ['/api/away', 'localShell'],
+  // The "call Nay" button's mirror for agents: reports/starts a voice call the BROWSER hosts, so it drives
+  // the owner's microphone and screen — host power, refused on a central like the session routes.
+  ['/api/nay-call', 'localShell'],
   // The leaders' check-in agenda: resolves sessions against THIS machine's fleet and types the
   // check-in prompt into them, so it rides the same capability as the session routes above.
   ['/api/checkin', 'localShell'],

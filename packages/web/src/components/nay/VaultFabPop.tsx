@@ -15,6 +15,7 @@
 import { useEscapeOwner } from '../../lib/overlayStack'
 import { Suspense, lazy, useEffect, useReducer, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { Phone } from 'lucide-react'
 import { VaultGlyph as Vault } from '../vault/VaultGlyph'
 import {
   VAULT_FAB_INITIAL, VAULT_LONG_PRESS_MS, VAULT_PRESS_SLOP, closeVaultPanel, isContextMenuKey, vaultFabMotion, vaultFabReduce, vaultIconMounted,
@@ -33,11 +34,20 @@ function prefersReducedMotion(): boolean {
 type Action = VaultFabEvent | { type: 'panel-closed' }
 const reducer = (s: VaultFabState, a: Action): VaultFabState => (a.type === 'panel-closed' ? closeVaultPanel(s) : vaultFabReduce(s, a))
 
-export function VaultFabPop({ lang, isMobile, suppressed, children }: {
+/** The "call Nay" button, to the LEFT of the vault icon. Absent (`null`) wherever there is no voice call to place. */
+export interface FabCallButton {
+  label: string
+  /** A call is in progress: the button reads "back to the call" and wears the filled face. */
+  active: boolean
+  onPress: () => void
+}
+
+export function VaultFabPop({ lang, isMobile, suppressed, call = null, children }: {
   lang: 'en' | 'pt'
   isMobile: boolean
   /** The button is being dragged: the icon goes, and nothing may summon it. */
   suppressed: boolean
+  call?: FabCallButton | null
   children: ReactNode
 }) {
   const [s, dispatch] = useReducer(reducer, VAULT_FAB_INITIAL)
@@ -164,6 +174,30 @@ export function VaultFabPop({ lang, isMobile, suppressed, children }: {
           }}
         >
           <Vault size={20} strokeWidth={1.9} />
+        </button>
+      )}
+      {call && vaultIconMounted(s) && (
+        <button
+          type="button"
+          data-nay-call-fab
+          data-phase={s.phase}
+          data-active={call.active ? 'true' : undefined}
+          aria-label={call.label}
+          title={call.label}
+          tabIndex={s.phase === 'shown' ? 0 : -1}
+          disabled={s.phase !== 'shown'}
+          onClick={e => { e.stopPropagation(); dispatch({ type: 'dismiss' }); call.onPress() }}
+          onContextMenu={e => e.preventDefault()}
+          style={{
+            position: 'absolute', left: '50%', marginLeft: -ICON / 2 - ICON - 10, bottom: 'calc(100% + 12px)', width: ICON, height: ICON,
+            borderRadius: 14, border: '1.5px solid var(--anthropic-orange)',
+            background: call.active ? 'var(--anthropic-orange)' : 'var(--bg-surface)', color: call.active ? '#fff' : 'var(--anthropic-orange)',
+            display: 'grid', placeItems: 'center', padding: 0, cursor: 'pointer', boxShadow: '0 8px 22px rgba(0,0,0,0.32)',
+            animation: s.phase === 'shown' ? motion.enter : motion.leave, transformOrigin: '50% 100%',
+            pointerEvents: s.phase === 'shown' ? 'auto' : 'none', zIndex: 1, touchAction: 'manipulation',
+          }}
+        >
+          <Phone size={20} strokeWidth={1.9} aria-hidden />
         </button>
       )}
       {s.panel && typeof document !== 'undefined' && createPortal(

@@ -746,6 +746,16 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_nay_call",
+    description:
+      "The \"Call Nay\" button of the Nay chat button's right-click pop, for agents — the same source as the button. `action: \"status\"` (default) reports `available` (a voice-call surface is announced by the engine: false on a community build, with the voice kill switch, or with an engine without voice — then the button does not exist), `browser` (a dashboard tab answered in the last 20 s), and `call` = {active, parked, sessionId, since} — the call in progress, the one the top-bar pill shows; `call` is null when no browser is reporting (unknown, NOT \"no call\"). `action: \"start\"` asks the owner's open dashboard to press the same button (a new call on the open or newest Nay conversation, or \"back to the call\" when one is parked); it is refused with `no_voice` or `no_browser` (never queued for later), and only a LEADER session may start one (`leader_only`) because it opens the owner's microphone. Returns `already: true` when a call is already active.",
+    inputSchema: {
+      type: "object",
+      properties: { action: { type: "string", enum: ["status", "start"], description: "status (default) reads; start asks the dashboard to place the call." } },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_checkin_report",
     description: "Report the leadership check-in round. The owner reads it and is NOT technical: every field is a short plain-language sentence naming things by what they do — no session ids, commit hashes, PR numbers, ports, limit percentages or internal codenames unless the owner must act on one; a health row only when something needs attention, said in words. Include a concise headline (<=140 chars), delivered items, in-progress items with stage and expected release, next steps, and health rows (sessions/memory, limits, releases, MCP, handoff). Keep summary as the fallback for older/short rounds. The server records the round, updates the agenda, and adds a checkin activity event to the filed task.",
     inputSchema: {
@@ -1369,6 +1379,13 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           ...(a.topCaps !== undefined ? { topCaps: a.topCaps } : {}),
           session: sessionProof(process.env),
         });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_nay_call": {
+        const a = args as any;
+        const body = a?.action === "start"
+          ? await apiSend("POST", "/api/nay-call/start", { session: sessionProof(process.env) })
+          : await apiGet("/api/nay-call");
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_session_message": {
