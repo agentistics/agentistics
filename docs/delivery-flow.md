@@ -50,9 +50,21 @@ minute) moves `ci → publicado` on the release signal and keeps blocks moving.
 Closed reasons: `dependencia` (lifts itself when its sibling finishes), `pedido_de_bloqueio`,
 `limite`, `maquina`, `externo`, `fora_das_autorizacoes`. Everything but a dependency is the
 leader's to lift; the leader is woken on entry and every 30 minutes, and past two hours the piece is
-DEFERRED to the next batch (recorded, wakes stop; it stays blocked until lifted). With autonomous
-mode on, reason 6 is deferred at once — the leader does not perform the action and nobody calls the
-owner. Only with autonomous mode OFF does it become `decisao_do_dono`, sent to the owner.
+DEFERRED to the next batch: it LEAVES Bloqueado for `fila` (Na fila, board status To do) with
+`versionTarget = next`, the block kept in the record as history, a comment "adiada para o próximo
+lote (bloqueio de N h: motivo)" and one last wake of the leader — a card is never parked in Bloqueado
+with nobody chasing it. With autonomous mode on, reason 6 is deferred the same way (the leader does not
+perform the action and nobody calls the owner). Only with autonomous mode OFF does it become
+`decisao_do_dono`, sent to the owner.
+
+The vigia also chases blocks the flow never made (BLOQUEIO.ORFAO): every piece the board holds in
+`blocked` and the Live shows — a subtask, a GROUP (a blocked member counts for its group; a member is
+never a delivery of its own) or a task with no subtasks (keyed by the task id) — is ADOPTED at
+`bloqueado` (`adopted: 'board'`), at most 20 per tick, oldest first. One tick sends ONE message per
+leader listing the pieces (not one per piece); a leader that died is replaced by the live one before
+the wake, and a wake that did not reach anybody is stamped (`lastWakeAttemptAt`) so it waits its 30
+minutes instead of retrying every minute. An adopted piece the board moved to done/abandoned leaves
+the flow quietly (the record is dropped); one the board unblocked returns to its origin phase.
 
 ## Human gates
 

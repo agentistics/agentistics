@@ -73,6 +73,8 @@ export interface DeliveryBlock {
   unlocker: 'self' | 'leader' | 'owner'
   /** Last time the leader (or, autonomous OFF + decisao_do_dono, the owner) was woken for it. */
   lastWakeAt?: string
+  /** The last time a wake was TRIED and did not reach anybody — a failed wake is not retried every minute, it waits its cadence too. */
+  lastWakeAttemptAt?: string
   wakes?: number
   /** Set once the piece was deferred to the next batch (reason 6 under autonomous, or > 2 h). */
   deferredAt?: string
@@ -100,6 +102,12 @@ export interface DeliveryRecord {
   /** Release batch this piece ships in (`2.200.8`, …); `next` after a deferral. */
   versionTarget?: string
   leaderSessionId?: string
+  /**
+   * `board` = this record was created by the vigia's ADOPTION of a piece the board already held in `blocked` (BLOQUEIO.ORFAO),
+   * not by a flow transition. Only such a record is reconciled against the board's own status each tick: the board is the
+   * only witness of a block the flow never made.
+   */
+  adopted?: 'board'
   authorSessionId?: string
   authorModel?: string
   qaSessionId?: string
@@ -383,8 +391,10 @@ export function planWatch(records: readonly DeliveryRecord[], o: { nowMs: number
     if (b.reason === 'decisao_do_dono' && o.autonomous) { out.push({ kind: 'convert-owner-block', subtaskId: r.subtaskId }); continue }
     if (b.deferredAt) continue
     if (age > BLOCK_DEFER_AFTER_MS && b.reason !== 'decisao_do_dono') { out.push({ kind: 'defer', subtaskId: r.subtaskId, reason: b.reason, ageMs: age }); continue }
-    const last = Date.parse(b.lastWakeAt ?? b.since)
-    if (b.reason !== 'dependencia' && (!b.lastWakeAt || o.nowMs - last >= BLOCK_WAKE_EVERY_MS)) out.push({ kind: 'wake-leader', subtaskId: r.subtaskId, reason: b.reason, ageMs: age, text: b.text })
+    // A wake that was only ATTEMPTED counts for the cadence too: a dead leader is retried every 30 min, not every minute.
+    const stamps = [b.lastWakeAt, b.lastWakeAttemptAt].map(s => Date.parse(s ?? '')).filter(Number.isFinite)
+    const last = stamps.length > 0 ? Math.max(...stamps) : NaN
+    if (b.reason !== 'dependencia' && (stamps.length === 0 || o.nowMs - last >= BLOCK_WAKE_EVERY_MS)) out.push({ kind: 'wake-leader', subtaskId: r.subtaskId, reason: b.reason, ageMs: age, text: b.text })
   }
   return out
 }

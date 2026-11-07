@@ -13,6 +13,13 @@ const LIVE_STAGE: Record<Phase, string> = {
   fila: 'queue', executando: 'running', qa: 'qa', ajuste: 'adjust', revisao_lider: 'leader', pr_merge: 'merge', ci: 'ci', publicado: 'published', bloqueado: 'blocked',
 }
 
+/** True when `id` names a TASK that no subtask shares the id with (the vigia keys a task-level piece by its task id). */
+async function isTaskPiece(id: string): Promise<boolean> {
+  const { loadTaskWorld } = await import('../sessions/task-source')
+  const { book } = await loadTaskWorld()
+  return !book.subtasks.some(s => s.id === id) && book.tasks.some(t => t.id === id)
+}
+
 export function defaultDeliveryBoard(): DeliveryBoard {
   const web = () => import('../sessions/task-web')
   return {
@@ -27,15 +34,21 @@ export function defaultDeliveryBoard(): DeliveryBoard {
         if (!made.ok) return { ok: false, message: made.message }
         id = made.status.id
       }
+      // A TASK-level piece (BLOQUEIO.ORFAO: a blocked task with no subtasks) is keyed by the task id and moves the task itself.
+      if (await isTaskPiece(subtaskId)) {
+        const moved = await m.markTask(subtaskId, id as never, 'flow:entrega')
+        return moved.ok ? { ok: true } : { ok: false, message: moved.message }
+      }
       const out = await m.patchSubtask(subtaskId, { status: id as never })
       return out.ok ? { ok: true } : { ok: false, message: out.message }
     },
     async setCi(subtaskId, ci) { await (await web()).setSubtaskCi(subtaskId, ci) },
     async logStep(taskId, subtaskId, step, actor) { await (await web()).logSubtaskStep(taskId, subtaskId, step, actor) },
-    async comment(taskId, subtaskId, body) { await (await web()).addComment(taskId, { author: 'flow:entrega', body, subtaskId }) },
+    async comment(taskId, subtaskId, body) { await (await web()).addComment(taskId, { author: 'flow:entrega', body, ...(subtaskId === taskId ? {} : { subtaskId }) }) },
     async subtaskFinished(subtaskId) {
       const { loadTaskWorld } = await import('../sessions/task-source')
-      return (await loadTaskWorld()).book.subtasks.find(s => s.id === subtaskId)?.status === 'done'
+      const { book } = await loadTaskWorld()
+      return (book.subtasks.find(s => s.id === subtaskId) ?? book.tasks.find(t => t.id === subtaskId))?.status === 'done'
     },
     async stage(subtaskId, draft) {
       const { normalizeStagedSession } = await import('@agentistics/core')
