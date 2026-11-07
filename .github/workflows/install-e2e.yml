@@ -87,7 +87,7 @@ jobs:
       WEB_PORT: 28192
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: install-e2e-assets
           path: e2e-assets
@@ -240,7 +240,7 @@ jobs:
       - name: Install Alpine dependencies
         run: apk add --no-cache bash zsh curl jq python3 nodejs npm tmux git
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: install-e2e-assets
           path: e2e-assets
