@@ -8,6 +8,7 @@ import { OPENCODE_DB_PATH, OPENCODE_DIR } from '../config'
 import { harnessEnabled, type HarnessAdapter } from './types'
 import { createFileMemo, registerMemo, versionOf } from './file-memo'
 import { setOpencodeReadIssue } from './opencode-status'
+import { configModels, mergeModels, parseJsonc } from './opencode-models'
 import { generationOfTables, loadOpencodeV2, opencodeStateDirFor, opencodeTables, readServiceRecord } from './opencode-v2'
 import { parseOpencodeSession, type OpencodeSessionRow, type OpencodeMessageRow, type OpencodePartRow, type OpencodeModels } from './opencode-parse'
 
@@ -78,23 +79,44 @@ let lastV2: SessionMeta[] = []
 
 const memo = registerMemo(createFileMemo<SessionMeta[]>(4))
 
+/** Every file a window may be read from, in precedence order (first cache hit wins; configs merge, later wins). */
+export function opencodeModelSources(env: Readonly<Record<string, string | undefined>> = process.env, home: string = homedir()) {
+  const cacheHome = env.XDG_CACHE_HOME || join(home, '.cache')
+  const configHome = env.XDG_CONFIG_HOME || join(home, '.config')
+  // macOS: OpenCode follows xdg-basedir (`~/.cache`), but a Homebrew/app build may use the platform dir.
+  const cache = [join(cacheHome, 'opencode', 'models.json'), join(home, 'Library', 'Caches', 'opencode', 'models.json')]
+  const config = [
+    join(configHome, 'opencode', 'opencode.json'), join(configHome, 'opencode', 'opencode.jsonc'),
+    ...(env.OPENCODE_CONFIG ? [env.OPENCODE_CONFIG] : []),
+  ]
+  return { cache, config, all: [...cache, ...config] }
+}
+
 const stateDir = () => opencodeStateDirFor(OPENCODE_DB_PATH, process.env)
 
 export const opencodeAdapter: HarnessAdapter = {
   id: 'opencode', dataRoot: OPENCODE_DIR,
   isAvailable: () => harnessEnabled('opencode') && (existsSync(OPENCODE_DB_PATH) || readServiceRecord(stateDir()) !== null),
   async loadSessions() {
-    // OpenCode's models.dev cache, when exposed, supplies per-route windows. No network or fake cap.
+    // A route's window comes from OpenCode's models.dev cache AND the user's own opencode.json (which
+    // alone can state one for a custom/local route). No network and no invented cap.
     // Source: opencode v1.17.9 packages/core/src/models-dev.ts (Global.Path.cache/models.json).
-    const path = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'opencode', 'models.json')
-    const modelsVersion = await versionOf([path])
+    const paths = opencodeModelSources()
+    const modelsVersion = await versionOf(paths.all)
     const readModels = async (): Promise<OpencodeModels> => {
-      try { const d = JSON.parse(await readFile(path, 'utf8')); if (d && typeof d === 'object' && !Array.isArray(d)) return d } catch { /* optional */ }
-      return {}
+      let catalog: OpencodeModels = {}
+      for (const path of paths.cache) {
+        try { const d = JSON.parse(await readFile(path, 'utf8')); if (d && typeof d === 'object' && !Array.isArray(d)) { catalog = d; break } } catch { /* optional */ }
+      }
+      let config: OpencodeModels = {}
+      for (const path of paths.config) {
+        try { config = mergeModels(config, configModels(parseJsonc(await readFile(path, 'utf8')))) } catch { /* optional */ }
+      }
+      return mergeModels(catalog, config)
     }
     const tables = existsSync(OPENCODE_DB_PATH) ? opencodeTables(OPENCODE_DB_PATH) : null
     if (tables && generationOfTables(tables) === 'v1') {
-      const version = await versionOf([OPENCODE_DB_PATH, `${OPENCODE_DB_PATH}-wal`, path])
+      const version = await versionOf([OPENCODE_DB_PATH, `${OPENCODE_DB_PATH}-wal`, ...paths.all])
       const sessions = await memo.get(OPENCODE_DB_PATH, version, async () => loadOpencodeAny(OPENCODE_DB_PATH, stateDir(), await readModels(), modelsVersion))
       return sessions.map(s => ({ ...s }))
     }

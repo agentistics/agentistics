@@ -45,7 +45,7 @@ export function parseOpencodeSession(
   const hours: number[] = [], timestamps: string[] = []
   let input = 0, output = 0, read = 0, write = 0, users = 0, assistants = 0, sawUsage = false
   let model: string | undefined, context: number | undefined, window: number | undefined
-  let latest = -1, firstPrompt = ''
+  let latest = -1, latestContext = -1, firstPrompt = ''
   const text = new Map<string, string>()
   for (const p of [...parts].sort((a, b) => a.time_created - b.time_created || a.id.localeCompare(b.id))) {
     const d = json(p.data)
@@ -81,9 +81,17 @@ export function parseOpencodeSession(
     if (end >= latest) {
       latest = end
       model = raw ? id : undefined
-      // In getUsage, input is normalized inputTokens minus both cache counters. Their sum
-      // reconstructs contextTokens, never the session lifetime total or response output.
-      context = i + r + w || undefined
+    }
+    // The gauge is the LAST turn that actually measured a context. OpenCode writes an aborted or
+    // failed turn with `completed` set and every counter 0 (measured on 1.19.5: the newest
+    // assistant message of 9 of 28 real sessions), and letting that row win blanked the ring and the
+    // leader's counter for a conversation that had 150k tokens of context a turn earlier. In
+    // getUsage, input is normalized inputTokens minus both cache counters, so their sum
+    // reconstructs contextTokens — never the session lifetime total or response output.
+    const measured = i + r + w
+    if (measured > 0 && end >= latestContext) {
+      latestContext = end
+      context = measured
       const limit = models[provider]?.models?.[raw]?.limit?.context
       window = num(limit) || undefined
     }
