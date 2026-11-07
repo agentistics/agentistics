@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { liveDeliveryQuery } from "./live-delivery-args";
 import { deliveryCalendarQuery } from "./delivery-calendar-args";
+import { deliveryMetricsQuery } from "./delivery-metrics-args";
 import { flowStatusRunId } from './flow-status'
 import { sessionRoleBody } from "./session-role-args";
 import "./orphan-guard-boot";
@@ -532,6 +533,27 @@ const TOOLS: Tool[] = [
         all: { type: "boolean", description: "Include pieces of tasks not being worked on now (history)." },
         confirmedOnly: { type: "boolean", description: "Only published pieces or those with a medium/high-confidence estimate." },
         format: { type: "string", enum: ["json", "ics"] },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_delivery_metrics",
+    description:
+      "BETA. The DELIVERY EVOLUTION numbers — how the deliveries move through the line: the same source, filters and rules as the \"Evolução de entregas\" screen (`agentop flow evolucao` prints the same). Returns `summary` (`n`, `published`, `leadP50Ms`/`leadP90Ms` from the owner's request — or, when no request is linked, from the queue — to the published release; `qaN`/`qaRejected`/`qaRejectionRate`; `adjustAvg`; `etaN`/`etaHits`/`etaRate`/`noEta`; `costUSD`/`costPerPublishedUSD`/`costKnown`/`tokens`; `blockedNow`/`blockedAny`/`blockMs`; `stageAvgMs` per stage), `prior` (the same numbers for the window just before, or null), `perWeek`, `groups` (the same metrics bucketed by `groupBy` day|week|version|model — BRT days), `funnel` (per stage: how many reached it, how many are there now, median/average time), `bottleneck` (the stage holding most of the time, and the time in it per author model), `qaByAuthor` (QA rejection rate per AUTHOR model), `etaPoints` (predicted × real, only for deliveries that had a prediction recorded), `blocks` (time and count per block reason), `costByAuthor` / `costByHarness`, `queue` (oldest waiting), `rows` (the deliveries behind the numbers, newest first, capped at 500 — `rowsTotal` is the full count) and `options` (the values the filters can take). NOTHING IS INVENTED: a rate or time nobody could measure is `null` — say \"not measured\", never 0; an ETA hit rate exists only for deliveries whose prediction was recorded when the work was dispatched (`noEta` counts the rest). Times are ms; day arguments are BRT days (America/Sao_Paulo). The period filter applies to the day a delivery was published (or, while open, requested). Filters: `from`/`to` (yyyy-MM-dd or ISO), `harness`, `version` (`none` = no version), `stage` (the stage it is in NOW), `model` (author model; `none` = unknown), `qa` (first_pass, rejected_once, rejected_many, pending), `priority`, `task` (id or part of the title), `groupBy`.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "Start of the period: yyyy-MM-dd (BRT) or an ISO instant." },
+        to: { type: "string", description: "End of the period (inclusive)." },
+        harness: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "A harness id (claude, codex, …), `none`, or a list." },
+        version: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "A release version (2.202.0), `none` for deliveries with no version, or a list." },
+        stage: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "queue, blocked, running, qa, adjust, leader, merge, ci, published — the stage the delivery is in now." },
+        model: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "The AUTHOR model, `none`, or a list." },
+        qa: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "first_pass, rejected_once, rejected_many, pending." },
+        priority: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "urgent, high, medium, low." },
+        task: { type: "string", description: "A task id or part of its title." },
+        groupBy: { type: "string", enum: ["day", "week", "version", "model"], description: "How `groups` is bucketed (default day; a long range falls back to week)." },
       },
       required: [],
     },
@@ -1256,6 +1278,10 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const q = deliveryCalendarQuery(args as any);
         if ((args as any)?.format === "ics") return { content: [{ type: "text", text: await apiGetText(`/api/deliveries/calendar${q}`) }] };
         const body = await apiGet(`/api/deliveries/calendar${q}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_delivery_metrics": {
+        const body = await apiGet(`/api/deliveries/metrics${deliveryMetricsQuery(args as any)}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_edit": {

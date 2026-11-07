@@ -43,13 +43,15 @@ export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subt
   agentop flow tick                                   the minute watch (blocks, ci → publicado)
   agentop flow calendario [--task T] [--subtask S] [--version V] [--stage a,b] [--harness H] [--priority P] [--from d] [--to d] [--all] [--confirmed]
                                                       the Delivery calendar as JSON (read-only; same source as the screen and the MCP tool). Dates yyyy-MM-dd are BRT days.
+  agentop flow evolucao [--from d] [--to d] [--harness H] [--version V|none] [--stage a,b] [--model M|none] [--qa first_pass,rejected_once,rejected_many,pending] [--priority P] [--task T] [--group-by day|week|version|model]
+                                                      the Delivery evolution numbers as JSON (read-only; same source as the screen and agentistics_delivery_metrics).
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
 
 Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usage, 3 no verdict yet.
 Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
 `
 
-export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'approve', 'release', 'tick', 'calendario'] as const
+export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'approve', 'release', 'tick', 'calendario', 'evolucao'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
@@ -73,6 +75,16 @@ export function parseFlags(args: readonly string[]): { pos: string[]; flags: Rec
     flags[key] = next; i++
   }
   return { pos, flags }
+}
+
+/** PURE: `agentop flow evolucao` flags → the query string `metricFiltersOf` reads (the route's and the MCP tool's contract). */
+export function evolutionQuery(flags: Record<string, string>): URLSearchParams {
+  const q = new URLSearchParams()
+  for (const key of ['from', 'to', 'harness', 'version', 'stage', 'model', 'qa', 'priority', 'task', 'groupBy'] as const) {
+    const v = flags[key]
+    if (v && v !== 'true') q.set(key, v)
+  }
+  return q
 }
 
 type Io = { out(line: string): void; err(line: string): void }
@@ -157,6 +169,11 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
       if (flags.all === 'true') q.set('all', '1')
       if (flags.confirmed === 'true') q.set('confirmed', '1')
       io.out(JSON.stringify(answerCalendar(await deliveryCalendar(), calendarFiltersOf(q)), null, 2)); return 0
+    }
+    case 'evolucao': {
+      // The Delivery evolution numbers, filtered — the same read the screen and `agentistics_delivery_metrics` use. Read-only.
+      const { deliveryMetrics, metricFiltersOf } = await import('./metrics')
+      io.out(JSON.stringify(await deliveryMetrics(metricFiltersOf(evolutionQuery(flags))), null, 2)); return 0
     }
     case 'tick': io.out(JSON.stringify(await svc.tick(), null, 2)); return 0
     default: io.err('unknown delivery verb'); return 2

@@ -1439,6 +1439,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
       return json(filtered)
     }
+    // EVOLUCAO.ENTREGAS — "Evolução de entregas": the delivery metrics' read (`delivery/metrics.ts`). The screen, the
+    // MCP tool `agentistics_delivery_metrics` and `agentop flow evolucao` all read THIS, with the same filters.
+    if (url.pathname === '/api/deliveries/metrics' && req.method === 'GET') {
+      const { deliveryMetrics, metricFiltersOf } = await import('./delivery/metrics')
+      return json(await deliveryMetrics(metricFiltersOf(url.searchParams)))
+    }
     if (url.pathname === '/api/deliveries' || url.pathname.startsWith('/api/deliveries/')) {
       const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }] = await Promise.all([
         import('./delivery/web'), import('./delivery/host'), import('./sessions/session-identity'),
