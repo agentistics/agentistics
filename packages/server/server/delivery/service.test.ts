@@ -114,6 +114,43 @@ async function walkToQa(svc: ReturnType<typeof harness>['svc']) {
 }
 
 describe('delivery service', () => {
+  test.each(['in_review', 'done', 'abandoned'])('tick removes stale queued work when the board says %s, once with an audit comment', async status => {
+    const h = harness()
+    await h.svc.stage('s1', {}, 'leader')
+    h.w.status = status
+    expect((await h.svc.transition('s1', 'executando', {}, 'leader')).ok).toBe(false)
+    expect((await h.svc.stageRun('s1', 'leader')).ok).toBe(false)
+    expect((await h.svc.tick()).actions).toContain('dequeue s1')
+    expect((await h.svc.get('s1'))!.dequeued?.reason).toContain(status)
+    expect(h.calls.comments).toHaveLength(1)
+    expect(h.calls.status).toHaveLength(1) // staging only; cleanup never rewrites the board
+    expect((await h.svc.tick()).actions).not.toContain('dequeue s1')
+    expect(h.calls.comments).toHaveLength(1)
+    expect(h.calls.owner).toHaveLength(0)
+  })
+
+  test('dequeue requires the task leader and a reason; preserves the record and refuses dispatch until restaged', async () => {
+    const h = harness()
+    await h.svc.stage('s1', {}, 'leader')
+    expect((await h.svc.dequeue('s1', 'superseded', 'author')).ok).toBe(false)
+    expect((await h.svc.dequeue('s1', '', 'leader')).ok).toBe(false)
+    expect((await h.svc.dequeue('s1', 'superseded by another piece', 'leader')).ok).toBe(true)
+    expect((await h.svc.get('s1'))!.dequeued).toMatchObject({ actor: 'leader', reason: 'superseded by another piece' })
+    expect(h.calls.comments).toHaveLength(1)
+    expect((await h.svc.stageRun('s1', 'leader')).ok).toBe(false)
+    expect((await h.svc.transition('s1', 'executando', {}, 'leader')).ok).toBe(false)
+    expect((await h.svc.dequeue('s1', 'superseded by another piece', 'leader')).ok).toBe(true)
+    expect(h.calls.comments).toHaveLength(1)
+    expect((await h.svc.stage('s1', {}, 'leader')).ok).toBe(true)
+    expect((await h.svc.get('s1'))!.dequeued).toBeUndefined()
+  })
+
+  test('dequeue refuses work that has started', async () => {
+    const h = harness()
+    await h.svc.transition('s1', 'executando', {}, 'leader')
+    expect((await h.svc.dequeue('s1', 'stop', 'leader')).ok).toBe(false)
+  })
+
   test('happy path end to end, gates run by the transition itself, every phase visited', async () => {
     const { svc, w, calls, advance } = harness()
     await walkToQa(svc)

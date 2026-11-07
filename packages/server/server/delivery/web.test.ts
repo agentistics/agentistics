@@ -10,7 +10,7 @@ function fakeService() {
   const svc = {
     list: async () => [rec], get: async (id: string) => (id === 's1' ? rec : null), tick: async () => ({ actions: [] }),
     transition: ok('transition'), gate: ok('gate'), block: ok('block'), unblock: ok('unblock'), approve: ok('approve'), configure: ok('configure'),
-    step: ok('step'), stage: ok('stage'), stageRun: ok('stageRun'), merge: ok('merge'),
+    step: ok('step'), stage: ok('stage'), stageRun: ok('stageRun'), dequeue: ok('dequeue'), merge: ok('merge'),
   } as unknown as DeliveryService
   return { svc, calls }
 }
@@ -40,11 +40,28 @@ describe('/api/deliveries', () => {
     const { svc } = fakeService()
     expect((await deliveryRequest('POST', '/api/deliveries/s1', { action: 'skip' }, { service: svc, verify })).status).toBe(400)
   })
+  test('dequeue forwards the free-text reason and verified actor; forged proof refuses', async () => {
+    const { svc, calls } = fakeService()
+    const body = { action: 'dequeue', reason: 'already delivered', session: { id: 'w1', token: 'good' } }
+    expect((await deliveryRequest('POST', '/api/deliveries/s1', body, { service: svc, verify })).status).toBe(200)
+    expect(calls.at(-1)).toEqual({ fn: 'dequeue', args: ['s1', 'already delivered', 'w1'] })
+    body.session.token = 'bad'
+    expect((await deliveryRequest('POST', '/api/deliveries/s1', body, { service: svc, verify })).status).toBe(403)
+  })
 })
 
 describe('delivery CLI parsing', () => {
+  test('dequeue CLI calls the shared service with reason and managed actor', async () => {
+    const { runDeliveryCli } = await import('./cli')
+    const { svc, calls } = fakeService()
+    const out: string[] = []
+    expect(await runDeliveryCli(['dequeue', '--subtask', 's1', '--reason', 'already delivered'], { out: l => out.push(l), err: l => out.push(l) }, { AGENTOP_MANAGED_ID: 'leader' }, svc)).toBe(0)
+    expect(calls.at(-1)).toEqual({ fn: 'dequeue', args: ['s1', 'already delivered', 'leader'] })
+    expect(await runDeliveryCli(['dequeue', '--reason', 'x'], { out: () => {}, err: () => {} }, {}, svc)).toBe(2)
+  })
   test('delivery verbs are recognised, the engine keeps its own', () => {
     expect(isDeliveryFlowVerb(['gate', 'salvo'])).toBe(true)
+    expect(isDeliveryFlowVerb(['dequeue', '--subtask', 's1', '--reason', 'delivered'])).toBe(true)
     expect(isDeliveryFlowVerb(['stage', 'run'])).toBe(true)
     expect(isDeliveryFlowVerb(['qa', 'open'])).toBe(true)
     expect(isDeliveryFlowVerb(['wait', 'qa-verdict'])).toBe(true)

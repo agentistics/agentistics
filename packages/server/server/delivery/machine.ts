@@ -99,6 +99,8 @@ export interface DeliveryRecord {
   subtaskId: string
   taskId: string
   phase: Phase
+  /** Withdrawn from the queue; history and the draft remain, and only an explicit restage reopens it. */
+  dequeued?: { at: string; actor: string; reason: string; commentedAt?: string }
   /** Where a block returns to. Present only while `phase === 'bloqueado'`. */
   origin?: Phase
   block?: DeliveryBlock

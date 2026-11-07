@@ -15,6 +15,9 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     fixes: [{
       pt: 'Sessões perdidas ou encerradas deixam de ocupar vagas para iniciar as peças da fila.',
       en: 'Lost or ended sessions no longer occupy slots needed to start queued work.',
+    }, {
+      pt: 'Peças em revisão ou concluídas saem da fila automaticamente; o líder também pode retirá-las com um motivo registrado.',
+      en: 'Pieces under review or already finished leave the queue automatically; the leader can also withdraw them with a recorded reason.',
     }],
   },
   '2.201.1': {

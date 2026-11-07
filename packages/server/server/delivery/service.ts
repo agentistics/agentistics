@@ -170,7 +170,12 @@ export function createDeliveryService(d: DeliveryDeps) {
   const transition = async (subtaskId: string, to: unknown, input: TransitionInput, actor: string, known?: ReadonlyMap<GateName, GateVerdict>): Promise<DeliveryReply> => {
     const got = await ensure(subtaskId)
     if (isReply(got)) return got
+    if (got.dequeued) return fail(422, 'fora_da_fila', 'this piece was dequeued; stage it explicitly before starting it again', [], got)
     if (!isPhase(to)) return fail(400, 'fase_desconhecida', `unknown phase ${String(to)}`)
+    if (got.phase === 'fila' && to === 'executando') {
+      const sub = await d.facts.subtask(subtaskId)
+      if (sub && ['in_review', 'done', 'abandoned'].includes(sub.status)) return fail(422, 'fora_da_fila', `board status is ${sub.status}; this piece is no longer queued`, [], got)
+    }
     const edge = EDGES[`${got.phase}>${to}`]
     // Gates are run fresh by the transition itself (outside the lock), so a caller never brings proof. `known` is the tick's
     // own verdict from the same instant (the `release` gate it already ran), never anything a caller states.
@@ -353,7 +358,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     const v = await runGate('predispatch', got, d.facts)
     // A complete pre-dispatch also gets its EXPECTED SLOT read now, so "Na fila" shows a verdict instead of "not checked yet".
     const vaga = v.ok && got.phase === 'fila' ? await runGate('vaga', got, d.facts) : null
-    const after = await d.store.update(doc => { const c = doc.deliveries[subtaskId]!; absorb(c, 'predispatch', v); if (vaga) absorb(c, 'vaga', vaga); return structuredClone(c) })
+    const after = await d.store.update(doc => { const c = doc.deliveries[subtaskId]!; delete c.dequeued; absorb(c, 'predispatch', v); if (vaga) absorb(c, 'vaga', vaga); return structuredClone(c) })
     await d.board.setPhaseStatus(subtaskId, after.phase).catch(() => undefined)
     if (v.ok) await d.emit('subtarefa.preparada', { subtarefa: subtaskId, taskId: after.taskId, ...(opts.pedidoId ? { pedido: opts.pedidoId } : {}) }).catch(() => undefined)
     return { ok: true, status: 200, record: after, warnings: v.ok ? [] : [`pre-dispatch still incomplete: ${v.reason}`], gate: v }
@@ -363,13 +368,15 @@ export function createDeliveryService(d: DeliveryDeps) {
   const stageRun = async (subtaskId: string, actor: string): Promise<DeliveryReply> => {
     const got = await ensure(subtaskId)
     if (isReply(got)) return got
+    if (got.dequeued) return fail(422, 'fora_da_fila', 'this piece was dequeued; stage it explicitly before starting it again', [], got)
     if (got.phase !== 'fila') return fail(422, 'fase_pulada', `stage run starts a delivery from fila; this one is in ${got.phase}`)
+    const sub = await d.facts.subtask(subtaskId)
+    if (sub && ['in_review', 'done', 'abandoned'].includes(sub.status)) return fail(422, 'fora_da_fila', `board status is ${sub.status}; this piece is no longer queued`, [], got)
     if (!d.spawn) return fail(501, 'sem_spawn', 'this host cannot start sessions')
     for (const g of ['predispatch', 'vaga'] as const) {
       const v = await runGate(g, got, d.facts)
       if (!v.ok) { await d.store.update(doc => absorb(doc.deliveries[subtaskId]!, g, v)); return fail(422, 'portao', `${g}: ${v.reason}`, v.missing ?? []) }
     }
-    const sub = await d.facts.subtask(subtaskId)
     const spawned = await d.spawn(got, { ...(sub?.staged ?? {}) })
     if (!spawned.ok) return fail(422, 'spawn_failed', spawned.message)
     await d.store.update(doc => { doc.deliveries[subtaskId]!.authorSessionId = spawned.sessionId })
@@ -434,6 +441,48 @@ export function createDeliveryService(d: DeliveryDeps) {
     const run = tickChain.then(guarded, guarded)
     tickChain = run.catch(() => undefined)
     return run
+  }
+
+  /** A withdrawal keeps its evidence, without pretending that work ran or a release was published. */
+  const auditDequeue = async (r: DeliveryRecord): Promise<boolean> => {
+    if (!r.dequeued || r.dequeued.commentedAt) return true
+    try {
+      await d.board.comment(r.taskId, r.subtaskId, `[fluxo entrega] fora da fila (${r.dequeued.actor}): ${r.dequeued.reason}`)
+      await d.store.update(doc => { const c = doc.deliveries[r.subtaskId]; if (c?.dequeued?.at === r.dequeued!.at) c.dequeued.commentedAt = iso(d) })
+      return true
+    } catch { return false } // the next tick retries the missing audit comment
+  }
+
+  const dequeue = async (subtaskId: string, reason: unknown, actor: string): Promise<DeliveryReply> => {
+    if (typeof reason !== 'string' || !reason.trim()) return fail(400, 'faltando', 'dequeue requires a reason', ['reason'])
+    const got = await d.store.get(subtaskId)
+    if (!got) return fail(404, 'no_delivery', 'this piece has no delivery record')
+    if (!(await leads(got, actor))) return fail(403, 'leader_only', 'only the task leader or owner may dequeue a piece')
+    if (got.phase !== 'fila') return fail(422, 'fase_pulada', 'only a queued piece can be dequeued', [], got)
+    const after = await d.store.update(doc => {
+      const c = doc.deliveries[subtaskId]!
+      if (c.phase !== 'fila' || c.dequeued) return structuredClone(c)
+      c.dequeued = { at: iso(d), actor, reason: reason.trim() }
+      c.updatedAt = iso(d); c.revision++
+      c.history.push({ from: 'fila', to: 'fila', at: iso(d), actor, detail: `dequeue: ${reason.trim()}`, revision: c.revision })
+      return structuredClone(c)
+    })
+    if (after.phase !== 'fila') return fail(409, 'revisao_obsoleta', 'the delivery started meanwhile', [], after)
+    const audited = await auditDequeue(after)
+    await d.emit('entrega.retirada', { subtarefa: subtaskId, taskId: after.taskId, reason: after.dequeued?.reason }).catch(() => undefined)
+    return { ok: true, status: 200, record: (await d.store.get(subtaskId))!, warnings: audited ? [] : ['audit comment pending; the next tick will retry'] }
+  }
+
+  const cleanQueue = async (actions: string[]) => {
+    for (const r of Object.values((await d.store.read()).deliveries)) {
+      if (r.dequeued) { await auditDequeue(r); continue }
+      if (r.phase !== 'fila') continue
+      const status = await (d.facts.pieceStatus ? d.facts.pieceStatus(r.subtaskId) : d.facts.subtask(r.subtaskId).then(s => s?.status ?? null)).catch(() => undefined)
+      if (status && ['in_review', 'done', 'abandoned'].includes(status)) {
+        const out = await dequeue(r.subtaskId, `board status is ${status}; this piece is no longer queued`, 'flow:entrega')
+        if (out.ok) actions.push(`dequeue ${r.subtaskId}`)
+      }
+    }
   }
   /** The live leader to chase for a task: the one filed on the piece itself, else the task's newest. Null = nobody to wake. */
   const leaderFor = (sessions: readonly SessionFact[], taskId: string, subtaskId: string): string | null => {
@@ -602,6 +651,7 @@ export function createDeliveryService(d: DeliveryDeps) {
 
   const tickOnce = async (): Promise<{ actions: string[] }> => {
     const actions: string[] = []
+    await cleanQueue(actions)
     // ONE read of the fleet and ONE read of the board's blocked pieces per tick; null = could not be read (never "none").
     const sessions = await d.facts.sessions().catch(() => null)
     const blocked = d.facts.blockedSubtasks ? await d.facts.blockedSubtasks().catch(() => null) : null
@@ -620,7 +670,7 @@ export function createDeliveryService(d: DeliveryDeps) {
       }
     }
     doc = await d.store.read()
-    const records = Object.values(doc.deliveries)
+    const records = Object.values(doc.deliveries).filter(r => !r.dequeued)
     const autonomous = await d.autonomous().catch(() => true)
     const finished = new Map<string, boolean>()
     for (const r of records) {
@@ -717,7 +767,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     // An unreadable store REFUSES the write (and keeps a copy of the file) instead of letting any verb replace it with an empty book.
     transition: safe((id: string, to: unknown, input: TransitionInput, actor: string) => transition(id, to, input, actor)),
     gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), step: safe(step),
-    stage: safe(stage), stageRun: safe(stageRun), qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
+    stage: safe(stage), stageRun: safe(stageRun), dequeue: safe(dequeue), qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
   }
 }
 

@@ -474,6 +474,7 @@ export const RECENT_HIDDEN_MS = 6 * 3600_000
 /** What the Live reads off a delivery record (`delivery/machine.ts`), kept structural so this module stays pure. */
 export interface LiveDeliveryFacts {
   phase: string
+  dequeued?: { reason: string }
   origin?: string
   block?: { reason: string; text: string }
   ci?: unknown
@@ -609,8 +610,11 @@ export function buildLive(o: {
   const hide = (p: Piece, stage: LiveStage | null, reason: HiddenReason) => { hidden.push(entry(p, stage, reason)) }
   for (const p of candidates) {
     // A task-level piece (a task with no subtasks) is keyed by its TASK id in the delivery book, exactly as a subtask is by its own.
-    const rec = o.deliveries?.get(p.sub ? p.sub.id : p.task.id)
+    const stored = o.deliveries?.get(p.sub ? p.sub.id : p.task.id)
+    // A stale queue record must never override work the board already sent for review or closed.
+    const rec = stored?.dequeued || (stored?.phase === 'fila' && ['in_review', 'done', 'abandoned'].includes(p.status)) ? undefined : stored
     let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfStatus(p.status, o.statusLabel?.(p.status))
+    if (stored?.dequeued && stage === 'queue') { hide(p, stage, 'queue-idle'); continue }
     const liveSessions = p.sessions.filter(s => s.live)
     if (!rec && stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'
     if (stage === null) stage = liveSessions.length > 0 ? 'running' : null
