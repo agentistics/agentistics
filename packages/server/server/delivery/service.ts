@@ -21,7 +21,7 @@ import {
   EDGES, GATES, adoptPhase, isGate, isPhase, newDelivery, planBlock, planTransition, planUnblock, planWatch,
   refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
 } from './machine'
-import { releaseFailed, runGate, type GateFacts, type GateVerdict } from './gates'
+import { releaseFailed, runGate, type GateFacts, type GateVerdict, type SessionFact } from './gates'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 
 export interface DeliveryBoard {
@@ -424,10 +424,67 @@ export function createDeliveryService(d: DeliveryDeps) {
     tickChain = run.catch(() => undefined)
     return run
   }
+  /** The live leader to chase for a task: the one filed on the piece itself, else the task's newest. Null = nobody to wake. */
+  const leaderFor = async (taskId: string, subtaskId: string): Promise<string | null> => {
+    const sessions = await d.facts.sessions().catch(() => [] as SessionFact[])
+    const mine = sessions.filter(s => s.alive && s.role === 'leader' && s.taskId === taskId)
+    const byNewest = (a: SessionFact, b: SessionFact) => (Date.parse(b.createdAt ?? '') || 0) - (Date.parse(a.createdAt ?? '') || 0)
+    return [...mine.filter(s => s.subtaskId === subtaskId).sort(byNewest), ...mine.sort(byNewest)][0]?.id ?? null
+  }
+
+  /**
+   * BLOQUEIO.ORFAO — a subtask the BOARD holds in `blocked` with no delivery record (set before the flow existed, or by hand)
+   * was invisible to the vigia, so nobody ever chased it. It is ADOPTED here at `bloqueado`, once, and from then on `planWatch`
+   * treats it like any flow piece: the leader is woken every 30 min and the piece is deferred after 2 h (the block's `since` is
+   * the board's own timestamp, so an old one is deferred on the very tick that adopts it). A piece with no live leader is said
+   * ONCE (a comment on the subtask and one informational bell) instead of waking into the void. Nothing is asked of the owner.
+   */
+  const adoptOrphans = async (actions: string[]): Promise<void> => {
+    if (!d.facts.blockedSubtasks) return
+    const blocked = await d.facts.blockedSubtasks().catch(() => [])
+    if (blocked.length === 0) return
+    const have = (await d.store.read()).deliveries
+    for (const b of blocked) {
+      if (have[b.id] || !SUB_ID.test(b.id) || !Number.isFinite(Date.parse(b.since))) continue
+      const open: string[] = []
+      for (const dep of b.blockedBy) if (!(have[dep]?.phase === 'publicado' || await d.board.subtaskFinished(dep).catch(() => false))) open.push(dep)
+      const reason = open.length > 0 ? 'dependencia' as const : 'pedido_de_bloqueio' as const
+      const text = b.reason?.trim() || (open.length > 0 ? `aguardando ${open.join(', ')}` : 'bloqueada no quadro antes do fluxo de entrega, sem motivo registrado')
+      const leader = await leaderFor(b.taskId, b.id)
+      const at = iso(d)
+      const adopted = await d.store.update(doc => {
+        if (doc.deliveries[b.id]) return false
+        const r = newDelivery({ subtaskId: b.id, taskId: b.taskId, at, ...(leader ? { leaderSessionId: leader } : {}) })
+        r.phase = 'bloqueado'
+        r.origin = 'fila'
+        r.revision = 2
+        r.block = { reason, text, since: b.since, unlocker: unlockerOf(reason), wakes: 0 }
+        r.history = [{ from: 'fila', to: 'bloqueado', at, actor: 'flow:entrega', detail: `adotada: a subtarefa já estava bloqueada no quadro (${reason}): ${text}`, revision: 2 }]
+        doc.deliveries[b.id] = r
+        return true
+      })
+      if (!adopted) continue
+      actions.push(`adopt ${b.id}`)
+      if (leader) { await d.board.comment(b.taskId, b.id, `[fluxo entrega] subtarefa bloqueada no quadro adotada pelo fluxo (${reason}): o líder será lembrado a cada 30 min e a peça é adiada depois de 2 h.`).catch(() => undefined); continue }
+      if (reason === 'dependencia') continue
+      await d.board.comment(b.taskId, b.id, '[fluxo entrega] subtarefa bloqueada no quadro adotada pelo fluxo, mas a tarefa não tem líder vivo para cobrar: reabra ou nomeie um líder. A peça será adiada para o próximo lote depois de 2 h.').catch(() => undefined)
+      await d.notify.owner(`Bloqueio sem líder: ${b.id} (${b.title}) está bloqueada no quadro e a tarefa não tem líder vivo para cobrar.`, 'aviso').catch(() => undefined)
+      actions.push(`no-leader ${b.id}`)
+    }
+  }
+
   const tickOnce = async (): Promise<{ actions: string[] }> => {
-    const doc = await d.store.read()
-    const records = Object.values(doc.deliveries)
     const actions: string[] = []
+    await adoptOrphans(actions)
+    let doc = await d.store.read()
+    // A blocked piece adopted with nobody to wake picks a leader up as soon as one exists.
+    for (const r of Object.values(doc.deliveries)) {
+      if (r.phase !== 'bloqueado' || r.leaderSessionId || r.block?.unlocker !== 'leader') continue
+      const leader = await leaderFor(r.taskId, r.subtaskId)
+      if (leader) await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && !c.leaderSessionId) c.leaderSessionId = leader })
+    }
+    doc = await d.store.read()
+    const records = Object.values(doc.deliveries)
     const autonomous = await d.autonomous().catch(() => true)
     const finished = new Map<string, boolean>()
     for (const r of records) {

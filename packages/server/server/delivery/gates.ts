@@ -27,8 +27,13 @@ export interface SessionFact {
 }
 export interface BudgetFact { harness: string; account: string; fiveHourPct: number; weekPct: number; stale: boolean }
 
+/** A board subtask sitting in `blocked` — what the vigia needs to adopt one that has no delivery record. */
+export interface BlockedSubtaskFact { id: string; taskId: string; title: string; blockedBy: string[]; groupMember: boolean; since: string; reason?: string }
+
 export interface GateFacts {
   subtask(id: string): Promise<SubtaskFact | null>
+  /** Every subtask the board holds in `blocked`. Optional: a host that cannot list them simply adopts none. */
+  blockedSubtasks?(): Promise<BlockedSubtaskFact[]>
   sessions(): Promise<SessionFact[]>
   budgets(): Promise<BudgetFact[]>
   memoryBytes(): Promise<number | null>
@@ -314,6 +319,13 @@ export function defaultGateFacts(): GateFacts {
     return (await promisify(execFile)(cmd, cmd === 'git' ? ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, ...args] : args, { cwd, timeout: 20_000, env: gitEnv(), maxBuffer: 8 * 1024 * 1024 })).stdout
   }
   return {
+    blockedSubtasks: async () => {
+      const { loadTaskWorld } = await import('../sessions/task-source')
+      const w = await loadTaskWorld()
+      return w.book.subtasks.filter(s => s.status === 'blocked').map(s => ({
+        id: s.id, taskId: s.taskId, title: s.title, blockedBy: s.blockedBy ?? [], groupMember: Boolean(s.parentGroupId), since: s.updatedAt,
+      }))
+    },
     subtask: async id => {
       const { loadTaskWorld } = await import('../sessions/task-source')
       const w = await loadTaskWorld()

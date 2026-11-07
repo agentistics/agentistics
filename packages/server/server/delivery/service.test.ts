@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createDeliveryService, type DeliveryDeps } from './service'
 import { createDeliveryStore } from './store'
-import type { GateFacts, SessionFact } from './gates'
+import type { BlockedSubtaskFact, GateFacts, SessionFact } from './gates'
 import type { DeliveryCi, Phase } from './machine'
 
 let dir: string
@@ -26,6 +26,8 @@ interface World {
   remoteHead?: string
   /** The board status the subtask is found in. */
   status?: string
+  /** Board subtasks held in `blocked` (BLOQUEIO.ORFAO). */
+  blocked?: BlockedSubtaskFact[]
   /** false = the leader cannot be reached. */
   wakeOk?: boolean
   /** gh failure for the check-runs read. */
@@ -47,6 +49,7 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
     ...over,
   }
   const facts: GateFacts = {
+    blockedSubtasks: async () => w.blocked ?? [],
     subtask: async id => (id === 's1' || id === 's2' ? { id, taskId: 't1', title: id, status: w.status ?? 'todo', groupMember: false, blockedBy: id === 's2' ? ['s1'] : [], staged: { prompt: 'do it', harness: 'claude', model: 'claude-opus-5-5', effort: 'high', account: 'acc_1', cwd: '/r' } } : null),
     sessions: async () => w.sessions,
     budgets: async () => [{ harness: 'claude', account: 'acc_1', fiveHourPct: 20, weekPct: 30, stale: false }],
@@ -532,5 +535,92 @@ describe('M6 — the queue shows its expected slot', () => {
     const vaga = (await h.svc.get('s1'))!.gates.vaga!
     expect(vaga.ok).toBe(false)
     expect(vaga.reason).toContain('3 GB')
+  })
+})
+
+describe('BLOQUEIO.ORFAO — a board-blocked piece with no delivery record is chased like any other', () => {
+  const orphan = (over: Partial<BlockedSubtaskFact> = {}): BlockedSubtaskFact => ({ id: 's9', taskId: 't1', title: 'peça antiga', blockedBy: [], groupMember: false, since: '2026-11-07T01:50:00Z', ...over })
+
+  test('adopted at bloqueado, the leader woken, then deferred after 2 h; a second tick is a no-op', async () => {
+    const h = harness({ blocked: [orphan()] })
+    const first = await h.svc.tick()
+    expect(first.actions).toContain('adopt s9')
+    const rec = (await h.svc.get('s9'))!
+    expect(rec).toMatchObject({ phase: 'bloqueado', leaderSessionId: 'leader', block: { reason: 'pedido_de_bloqueio', unlocker: 'leader', since: '2026-11-07T01:50:00Z' } })
+    // Woken on the adopting tick (no lastWakeAt yet), and told in a comment.
+    expect(first.actions).toContain('wake s9')
+    expect(h.calls.session.filter(c => c.id === 'leader' && c.text.includes('[entrega s9]'))).toHaveLength(1)
+    const commentsAfterFirst = h.calls.comments.length
+    // The same minute again: nothing adopted, nobody woken, no new comment.
+    const second = await h.svc.tick()
+    expect(second.actions).toEqual([])
+    expect(h.calls.comments.length).toBe(commentsAfterFirst)
+    expect(h.calls.session.filter(c => c.text.includes('[entrega s9]'))).toHaveLength(1)
+    // Past 30 min the leader is woken again; past 2 h the piece is deferred (once).
+    h.advance(31 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual(['wake s9'])
+    h.advance(95 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual(['defer s9'])
+    expect((await h.svc.get('s9'))!.block!.deferredAt).toBeTruthy()
+    expect((await h.svc.tick()).actions).toEqual([])
+    expect(h.calls.emits.filter(e => e.type === 'entrega.adiada')).toHaveLength(1)
+    // The owner is never called, in autonomous mode or any other.
+    expect(h.calls.owner).toEqual([])
+  })
+
+  test('a thirteen-day-old block is deferred on the very tick that adopts it', async () => {
+    const h = harness({ blocked: [orphan({ since: '2026-10-25T12:00:00Z' })] })
+    const t = await h.svc.tick()
+    expect(t.actions).toEqual(['adopt s9', 'defer s9'])
+    expect(h.calls.comments.some(c => c.includes('ADIADA'))).toBe(true)
+  })
+
+  test('a leaderless task gets one comment and one warning, never a loop', async () => {
+    const h = harness({ blocked: [orphan()], sessions: [{ id: 'worker', harness: 'claude', role: 'worker', alive: true, cwd: '/r', worktree: false, taskId: 't1' }] })
+    expect((await h.svc.tick()).actions).toEqual(['adopt s9', 'no-leader s9', 'wake-failed s9'])
+    expect(h.calls.comments.filter(c => c.includes('não tem líder vivo'))).toHaveLength(1)
+    expect(h.calls.owner).toEqual([expect.objectContaining({ kind: 'aviso' })])
+    expect(h.calls.session).toEqual([])
+    // Every later tick stays silent: no comment, no bell.
+    const again = await h.svc.tick()
+    expect(again.actions.every(a => a.startsWith('wake-failed'))).toBe(true)
+    expect(h.calls.comments.filter(c => c.includes('não tem líder vivo'))).toHaveLength(1)
+    expect(h.calls.owner).toHaveLength(1)
+  })
+
+  test('a leader that shows up later is picked up by the next tick', async () => {
+    const h = harness({ blocked: [orphan()], sessions: [] })
+    await h.svc.tick()
+    expect((await h.svc.get('s9'))!.leaderSessionId).toBeUndefined()
+    h.w.sessions = [{ id: 'leader2', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1', createdAt: '2026-11-07T02:00:00Z' }]
+    h.advance(31 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual(['wake s9'])
+    expect(h.calls.session.at(-1)!.id).toBe('leader2')
+  })
+
+  test('the leader filed on the piece wins over the task\'s newest leader', async () => {
+    const h = harness({ blocked: [orphan()], sessions: [
+      { id: 'newest', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1', createdAt: '2026-11-07T01:59:00Z' },
+      { id: 'filed', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1', subtaskId: 's9', createdAt: '2026-11-07T01:00:00Z' },
+      { id: 'dead', harness: 'claude', role: 'leader', alive: false, cwd: '/r', worktree: false, taskId: 't1', subtaskId: 's9', createdAt: '2026-11-07T01:58:00Z' },
+    ] })
+    await h.svc.tick()
+    expect((await h.svc.get('s9'))!.leaderSessionId).toBe('filed')
+  })
+
+  test('a piece that already has a record is never re-adopted or touched', async () => {
+    const h = harness({ blocked: [orphan({ id: 's1', since: '2026-10-25T12:00:00Z' })] })
+    await h.svc.ensure('s1')
+    const before = (await h.svc.get('s1'))!
+    expect((await h.svc.tick()).actions).toEqual([])
+    expect(await h.svc.get('s1')).toEqual(before)
+  })
+
+  test('an unfinished dependency is adopted as dependencia: the leader is not nagged, and it unblocks by itself', async () => {
+    const h = harness({ blocked: [orphan({ id: 's2', blockedBy: ['s1'] })], status: 'todo' })
+    const t = await h.svc.tick()
+    expect(t.actions).toEqual(['adopt s2'])
+    expect((await h.svc.get('s2'))!.block).toMatchObject({ reason: 'dependencia', unlocker: 'self' })
+    expect(h.calls.session).toEqual([])
   })
 })
