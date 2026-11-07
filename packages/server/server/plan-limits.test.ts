@@ -20,6 +20,7 @@ const fx = (n: string) => readFileSync(join(import.meta.dir, '../../core/src/__f
 let dir = ''
 let savedPath: string | undefined
 let savedHome: string | undefined
+let savedClaudeConfigDir: string | undefined
 beforeEach(() => {
   __resetPlanLimitsForTest()
   resetHarnessSpawnability()
@@ -31,6 +32,12 @@ beforeEach(() => {
   savedHome = process.env.HOME
   process.env.PATH = dir
   process.env.HOME = dir
+  // The default account's login is judged by its root's credential file (`accountCredentialBroken`),
+  // and with no CLAUDE_CONFIG_DIR that root is the REAL `~/.claude` (HOME_DIR is read at import, so
+  // the HOME swap above does not reach it). Point it at a folder that does not exist: "unknown",
+  // never the owner's login, and the same answer on every machine.
+  savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
+  process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude-default-absent')
   for (const bin of ['claude', 'codex']) {
     writeFileSync(join(dir, bin), '#!/bin/sh\nexit 0\n')
     chmodSync(join(dir, bin), 0o755)
@@ -40,6 +47,8 @@ beforeEach(() => {
 afterEach(() => {
   process.env.PATH = savedPath
   process.env.HOME = savedHome
+  if (savedClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+  else process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir
   resetHarnessSpawnability()
   setPlanLimitsSink(null)
   __setManagedLookupForTest(null)
