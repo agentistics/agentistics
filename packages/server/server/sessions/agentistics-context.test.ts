@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { HARNESS_ORDER } from '@agentistics/core'
+import { AUTONOMOUS_ON_RULE, HARNESS_ORDER } from '@agentistics/core'
 import {
   CONTEXT_CLOSE, CONTEXT_HEADER, CONTEXT_LABEL, CONTEXT_OPEN, CONTEXT_SENT_NOTE, contextBlock, contextText, splitContextBlock, stripContextTurns,
   type ContextInput,
@@ -296,7 +296,17 @@ describe('autonomous mode in the briefing', () => {
     expect(lines[i - 1]).toContain('LEADER')
     expect(lines[i]).toContain('until 2026-10-12T12:00:00.000Z')
     expect(lines[i]).toContain('publish releases the leader has approved')
-    expect(lines.slice(i, i + 4).join('\n')).toContain('never end a turn on a question to the owner')
+    expect(lines.slice(i, i + 4).join('\n')).not.toContain('ask the owner')
+  })
+  test('the ON rule is printed exactly once per session (leader and worker, en and pt)', () => {
+    for (const role of ['leader', 'worker'] as const) {
+      for (const lang of ['en', 'pt'] as const) {
+        const text = contextText({ ...base, now: NOW, away, role, lang })
+        expect(text.split(AUTONOMOUS_ON_RULE[lang]).length - 1).toBe(1)
+        // The English rule also reaches a pt session through the away lines only if it is not already in the briefing.
+        expect(text.split(AUTONOMOUS_ON_RULE.en).length - 1).toBe(lang === 'en' ? 1 : 0)
+      }
+    }
   })
   test('on: pacing points at the plan-limits line already in the briefing (said once); off: every away line is gone', () => {
     const tools = [...CONTEXT_TOOL_NAMES]
@@ -310,7 +320,9 @@ describe('autonomous mode in the briefing', () => {
   })
   test('worker is told to report to its leader, not the owner', () => {
     const t = contextText({ ...base, now: NOW, away, role: 'worker', parentId: 'p1' })
-    expect(t).toContain('Do not ask the owner anything')
+    expect(t).toContain('report ONLY to your leader')
+    expect(t).not.toContain('ask the owner')
+    expect(t).not.toContain('wait for approval')
   })
 })
 

@@ -128,7 +128,7 @@ export function contextText(i: ContextInput): string {
     METRICS_DASHBOARDS_LINE,
     briefingText(i.lang ?? 'en', { planLimitsAvailable: planLimits && !worker, away }),
     roleLine(i.role),
-    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits }),
+    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits, ruleInBriefing: true }),
     ...flowLines(i.lang ?? 'en', i.role, !!i.taskId),
   ]
   if (i.role !== 'worker') {
@@ -179,14 +179,17 @@ export function contextText(i: ContextInput): string {
     '- Secrets come from the vault: use vault://name references. Never ask the user to paste a key and never print a secret.',
     '- Ports 47291 and 47292 belong to agentistics: never start, stop or bind anything there; never run `agentop upgrade`; never restart the agentistics service.',
     '- Never open public tunnels (ngrok, cloudflared, etc.) to this machine.',
-    `- Do not delete, move or rewrite files outside ${i.cwd} without asking.`,
+    away
+      ? `- Do not delete, move or rewrite files outside ${i.cwd}; defer safely and record the decision instead of addressing the owner.`
+      : `- Do not delete, move or rewrite files outside ${i.cwd} without asking.`,
   )
   if (!worker) lines.push(
-    "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
+    away
+      ? "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove). Defer anything you did not create and record it for the owner's return."
+      : "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
   )
-  lines.push(away
-    ? '- Decisions are yours within the authorisations: record them, never wait on a question.'
-    : '- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.')
+  // The autonomous-mode rule is said once, in the briefing paragraph above — not repeated here.
+  if (!away) lines.push('- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.')
   return lines.join('\n')
 }
 

@@ -515,7 +515,7 @@ export type HandoffGateAnswer = { ok: true } | { ok: false; reason: string; bloc
  */
 export async function handoffGateViaServer(taskId: string, o: { fetch?: typeof fetch; port?: number } = {}): Promise<HandoffGateAnswer> {
   const port = o.port ?? (await import('../config')).PORT
-  const cannot = (why: string): HandoffGateAnswer => ({ ok: false, reason: `could not check the task's uncommitted work with the agentistics server (${why}); start it, or ask the owner to force the hand-off`, blocking: [] })
+  const cannot = (why: string): HandoffGateAnswer => ({ ok: false, reason: `could not check the task's uncommitted work with the agentistics server (${why}); start it and retry; if it stays down, defer the hand-off and record it on the task`, blocking: [] })
   let res: Response
   try {
     res = await (o.fetch ?? fetch)(`http://127.0.0.1:${port}/api/flows/run`, {

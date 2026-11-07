@@ -150,12 +150,13 @@ for (const lang of ['pt', 'en'] as const) test(`embedded check-in defaults have 
   expect(html).not.toContain(lang === 'pt' ? 'Check-in dos líderes' : 'Leader check-ins')
 })
 
-test('away authorization reads as a sentence in both languages', () => {
+test('autonomous mode is one switch: no authorisation list, ceilings or until picker on the page', () => {
   try {
     __setAwayForTest({ ...AWAY_OFF, on: true, authorised: ['releases', 'workers', 'merges'] })
     for (const lang of ['pt', 'en'] as const) {
       const html = atWidth(390, () => renderToStaticMarkup(<AwayContent lang={lang} capable />))
-      expect(html).toContain(lang === 'pt' ? 'releases que o líder aprovar, abrir sessões de workers, merge de PRs' : 'releases the leader approves, open worker sessions, merge PRs')
+      expect(html).toContain(lang === 'pt' ? 'Líderes decidem e registram; workers reportam ao líder.' : 'Leaders decide and record; workers report to their leader.')
+      expect(html).not.toContain(lang === 'pt' ? 'releases que o líder aprovar' : 'releases the leader approves')
     }
   } finally { __setAwayForTest(null) }
 })

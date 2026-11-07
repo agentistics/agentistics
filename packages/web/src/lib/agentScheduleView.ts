@@ -3,17 +3,14 @@
  * (CONTAS.AGENDA-AGENTICA). The rule itself is `@agentistics/core` `agentSchedule.ts`; the effective
  * state and its reason arrive from the server (`GET /api/accounts` → `agentUse`).
  */
-import { AGENT_DAYS, type AgentDay, type AgentSchedule, type AgentUseReason, type AgentWindow } from '@agentistics/core'
+import { AGENT_DAYS, DAY_SHORT, dayWindowsText, scheduleSummaryText, type AgentDay, type AgentSchedule, type AgentUseReason, type AgentWindow } from '@agentistics/core'
 
 type Lang = 'pt' | 'en'
 
 /** What `GET /api/accounts` adds to an account with an active schedule. */
 export interface AgentUseView { reason: AgentUseReason; on: boolean; dayUsedPct: number | null; maxDailyPct?: number; weekUsedPct?: number | null; maxWeeklyPct?: number }
 
-export const DAY_SHORT: Record<AgentDay, { pt: string; en: string }> = {
-  mon: { pt: 'seg', en: 'Mon' }, tue: { pt: 'ter', en: 'Tue' }, wed: { pt: 'qua', en: 'Wed' }, thu: { pt: 'qui', en: 'Thu' },
-  fri: { pt: 'sex', en: 'Fri' }, sat: { pt: 'sáb', en: 'Sat' }, sun: { pt: 'dom', en: 'Sun' },
-}
+export { DAY_SHORT, dayWindowsText, scheduleSummaryText }
 
 const REASON: Record<AgentUseReason, { pt: string; en: string }> = {
   'no-schedule': { pt: 'Sem agenda', en: 'No schedule' },
@@ -27,25 +24,6 @@ const REASON: Record<AgentUseReason, { pt: string; en: string }> = {
 }
 
 export function agentUseReasonText(reason: AgentUseReason, lang: Lang): string { return REASON[reason][lang] }
-
-/** Summary of a day's hours for plan popups and agenda lines: "dia inteiro" instead of 00:00–24:00. */
-export function dayWindowsText(day: { windows: readonly AgentWindow[]; allDay?: boolean }, lang: Lang): string {
-  if (day.allDay) return lang === 'pt' ? 'dia inteiro' : 'all day'
-  return day.windows.map(w => `${w.from}–${w.to}`).join(', ')
-}
-
-/** One line for a whole schedule: "seg, ter: dia inteiro · qua: 09:00–18:00". Empty when no day is set. */
-export function scheduleSummaryText(schedule: { days: Partial<Record<AgentDay, { windows: readonly AgentWindow[]; allDay?: boolean }>> } | undefined, lang: Lang): string {
-  if (!schedule) return ''
-  const groups = new Map<string, AgentDay[]>()
-  for (const d of Object.keys(DAY_SHORT) as AgentDay[]) {
-    const day = schedule.days[d]
-    if (!day) continue
-    const t = dayWindowsText(day, lang)
-    groups.set(t, [...(groups.get(t) ?? []), d])
-  }
-  return [...groups].map(([t, ds]) => `${ds.map(d => DAY_SHORT[d][lang]).join(', ')}: ${t || (lang === 'pt' ? 'sem janela' : 'no window')}`).join(' · ')
-}
 
 /** "today: 12% of 20% allowed" — null when there is no ceiling or nothing measurable. */
 export function dailyUsageText(view: AgentUseView, lang: Lang): string | null {

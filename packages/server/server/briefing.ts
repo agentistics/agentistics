@@ -6,9 +6,9 @@
  */
 import { join } from 'node:path'
 import { flowBriefing } from './briefing-flow'
-import type { HarnessId } from '@agentistics/core'
+import { AUTONOMOUS_APPROVAL_RULE, AUTONOMOUS_ON_RULE, type HarnessId } from '@agentistics/core'
 
-export const BRIEFING_VERSION = 3
+export const BRIEFING_VERSION = 4
 export const MANAGED_OPEN = '<!-- agentistics-managed-briefing: v'
 export const MANAGED_CLOSE = '<!-- /agentistics-managed-briefing -->'
 export const PLAN_LIMITS_TOOL = 'agentistics_plan_limits'
@@ -72,11 +72,12 @@ export const BRIEFING_SKILL_NAMES = [
 
 export function briefingText(lang: 'en' | 'pt' = 'en', o: { planLimitsAvailable?: boolean; away?: boolean } = {}): string {
   let text = lang === 'pt' ? BRIEFING_PT : common
-  // Autonomous mode overrides "ask the person": the owner is not there to answer.
+  // Autonomous mode overrides "ask the person": the owner is not there to answer. This is the one
+  // place a session reads the rule (the away head and the closing bullet leave it out).
   if (o.away) {
     text = lang === 'pt'
-      ? text.replace('Pergunte à pessoa na conversa quando uma decisão for necessária.', 'Modo autônomo: decida e siga sem pedir permissão; decisões vão para a sessão que iniciou esta ou para o registro da tarefa, não para o dono.')
-      : text.replace('Ask the person in the conversation when a decision is needed.', 'Autonomous mode: decide and proceed without asking permission; decisions go to the session that started you or to the task record, not to the owner.')
+      ? text.replace('Pergunte à pessoa na conversa quando uma decisão for necessária.', AUTONOMOUS_ON_RULE.pt)
+      : text.replace('Ask the person in the conversation when a decision is needed.', AUTONOMOUS_ON_RULE.en)
   }
   const limits = o.planLimitsAvailable
     ? lang === 'pt'
@@ -96,12 +97,12 @@ const skills: readonly BriefingSkill[] = [
   {
     name: 'agentistics-board-agentask',
     description: 'Use when planning, filing, updating, or delivering work on the Agentask board.',
-    body: '# Agentask board\nCall the task and status/type listing tools before making assumptions. Claim work, file the current session, and put comments on the subtask where the work happens. A task is not done because a command passed: leave it in review until the owner validates it.',
+    body: '# Agentask board\nCall the task and status/type listing tools before making assumptions. Claim work, file the current session, and put comments on the subtask where the work happens. A task is not done because a command passed: with the owner present, leave it in review until the owner validates it. ' + AUTONOMOUS_APPROVAL_RULE.en,
   },
   {
     name: 'agentistics-sessions-hand-offs',
     description: 'Use when starting workers, coordinating parent and child sessions, or handing work over.',
-    body: '# Sessions and hand-offs\nOpen other sessions only after explicit approval, unless autonomous mode pre-authorises it. Give each worker a complete prompt, task, subtask, done criteria, and files it must not touch. A worker reports with agentistics_session_message(kind=handback|block|question); the product moves a filed subtask to review on handback. A leader hand-off started from the CLI uses `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` (from inside the old leader): the successor inherits folder, pin, title, check-in, role, away and approval mode. Workers inherit the verified parent task, folder and approval mode; pass their own subtask.',
+    body: '# Sessions and hand-offs\nOpen other sessions only after explicit approval, unless autonomous mode pre-authorises it (then act within the authorisations and never wait for the owner). Give each worker a complete prompt, task, subtask, done criteria, and files it must not touch. A worker reports with agentistics_session_message(kind=handback|block|question); the product moves a filed subtask to review on handback. A leader hand-off started from the CLI uses `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` (from inside the old leader): the successor inherits folder, pin, title, check-in, role, away and approval mode. Workers inherit the verified parent task, folder and approval mode; pass their own subtask.',
   },
   {
     name: 'agentistics-vault',
@@ -111,7 +112,7 @@ const skills: readonly BriefingSkill[] = [
   {
     name: 'agentistics-qa-releases',
     description: 'Use when validating a delivery, preparing a release, or reviewing another harness output.',
-    body: '# QA and releases\nQA is independent: use a different harness/model than the author. Test in agentop run --rm with throwaway HOME and ports, inspect desktop and 390px mobile when UI changes, and attach evidence to the task. A release is published only after QA and owner validation; do not mark work done automatically.',
+    body: '# QA and releases\nQA is independent: use a different harness/model than the author. Test in agentop run --rm with throwaway HOME and ports, inspect desktop and 390px mobile when UI changes, and attach evidence to the task. With the owner present, a release is published only after QA and owner validation; do not mark work done automatically. ' + AUTONOMOUS_APPROVAL_RULE.en,
   },
 ]
 
