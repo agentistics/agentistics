@@ -246,8 +246,13 @@ export function createDeliveryService(d: DeliveryDeps) {
     const b = after.block!
     let woke = false
     if (b.reason === 'decisao_do_dono') await d.notify.owner(`Precisa da sua decisão: ${subtaskId} — ${b.text}`, 'decisao').catch(() => undefined)
-    else if (b.reason === 'fora_das_autorizacoes') woke = await wake(after, `bloqueio fora das autorizações (${b.text}). Modo autônomo: NÃO faça a ação; a peça foi adiada para o próximo lote — escolha o caminho seguro e registre.`, warnings)
-    else if (b.reason !== 'dependencia') woke = await wake(after, `bloqueada (${b.reason}): ${b.text}. Quem destrava: o líder. Destrave com agentistics_task_phase action=unblock.`, warnings)
+    else if (b.reason === 'fora_das_autorizacoes') {
+      // Autonomous mode: the safe path is decided NOW — the piece LEAVES Bloqueado for the next batch's queue (never parked there).
+      const moved = await deferOut(after, `[fluxo entrega] bloqueio fora das autorizações: peça adiada para o próximo lote (bloqueio de 0 h: ${b.text}); voltou para a fila e o bloqueio fica no histórico. Registro do líder; o dono não foi chamado.`).catch(() => false)
+      if (!moved) warnings.push('the piece could not be moved out of Bloqueado')
+      woke = await wake(after, `bloqueio fora das autorizações (${b.text}). Modo autônomo: NÃO faça a ação; a peça foi adiada para o próximo lote e voltou para a fila — escolha o caminho seguro e registre.`, warnings)
+      return { ok: true, status: 200, record: (await d.store.get(subtaskId)) ?? after, warnings }
+    } else if (b.reason !== 'dependencia') woke = await wake(after, `bloqueada (${b.reason}): ${b.text}. Quem destrava: o líder. Destrave com agentistics_task_phase action=unblock.`, warnings)
     // The cadence is stamped only for a wake that REACHED the leader: a dead leader is not "woken" (the next tick tries again).
     if (woke) await d.store.update(doc => { const c = doc.deliveries[subtaskId]; if (c?.block && b.reason !== 'dependencia') { c.block.lastWakeAt = iso(d); c.block.wakes = (c.block.wakes ?? 0) + 1 } })
     return { ok: true, status: 200, record: after, warnings }

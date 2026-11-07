@@ -245,6 +245,23 @@ describe('delivery service', () => {
     expect(calls.owner).toEqual([])
   })
 
+  test('autonomous ON: an out-of-authorisation block is never parked in Bloqueado — fila, next batch, board todo, one comment, one wake', async () => {
+    const { svc, calls, advance } = harness()
+    await walkToQa(svc)
+    const woken = calls.session.length
+    const comments = calls.comments.length
+    const b = await svc.block('s1', 'fora_das_autorizacoes', 'spend money', 'leader')
+    expect(b.ok && b.record).toMatchObject({ phase: 'fila', versionTarget: 'next', block: { reason: 'fora_das_autorizacoes', text: 'spend money', deferredAt: expect.any(String) } })
+    expect((await svc.get('s1'))!.origin).toBeUndefined()
+    expect(calls.status.at(-1)).toEqual({ id: 's1', phase: 'fila' })
+    expect(calls.comments.slice(comments).filter(c => c.includes('adiada para o próximo lote'))).toHaveLength(1)
+    expect(calls.session.slice(woken).filter(c => c.id === 'leader' && c.text.includes('adiada'))).toHaveLength(1)
+    expect(calls.owner).toEqual([])
+    // Nothing chases it afterwards.
+    advance(3 * 3600_000)
+    expect((await svc.tick()).actions).toEqual([])
+  })
+
   test('autonomous OFF: an owner decision reaches the owner as a decision', async () => {
     const { svc, calls } = harness({ autonomous: false })
     await walkToQa(svc)
