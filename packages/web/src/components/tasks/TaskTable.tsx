@@ -655,6 +655,9 @@ export interface TaskTableProps {
   lang?: 'pt' | 'en'
   /** Details already fetched for expanded rows — subtasks come from here. */
   details: Map<string, TaskDetail>
+  /** The board's per-status totals while `rows` is only step one of the split load: a status group
+   *  shows its TRUE size from the first paint, and is not dropped as empty before its rows arrive. */
+  statusTotals?: Record<string, number>
   onOpen: (id: string) => void
   onStatus: (ref: string, status: TaskStatus) => void
   onPriority?: (ref: string, priority: TaskPriorityId) => void
@@ -970,7 +973,7 @@ export function TaskTable(p: TaskTableProps) {
     groupsShown
       .map(st => groups.find(g => g.key === st))
       .filter((g): g is typeof groups[number] => g !== undefined),
-    g => g.rows.length, hideEmpty,
+    g => (groupBy !== 'type' ? p.statusTotals?.[g.key] : undefined) ?? g.rows.length, hideEmpty,
   )
 
   // The selection that ACTS is the one on screen: a row in a hidden or folded group, filtered out by
@@ -1113,7 +1116,7 @@ export function TaskTable(p: TaskTableProps) {
               <span style={{ fontSize: 12.5, fontWeight: 700, color: s.color }}>
                 {g.label}
               </span>
-              <span style={{ ...microLabel, fontSize: 11 }}>{g.rows.length}</span>
+              <span style={{ ...microLabel, fontSize: 11 }}>{(groupBy !== 'type' ? p.statusTotals?.[g.key] : undefined) ?? g.rows.length}</span>
             </div>
 
             {!isFolded && (

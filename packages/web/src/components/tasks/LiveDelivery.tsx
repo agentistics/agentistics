@@ -12,6 +12,7 @@
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { CenteredLoader } from '../CenteredLoader'
 import { useFleet, type FleetRow } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { usePlanLimits } from '../../lib/planLimits'
@@ -167,7 +168,9 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   })
 
   if (error === 'refused') return <Note text={L.refused} />
-  if (reply === null) return <Note text={error === 'down' ? L.down : L.loading} />
+  // The app's one loader (`CenteredLoader`), never a loose "loading…" line.
+  if (reply === null && error !== 'down') return <CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" />
+  if (reply === null) return <Note text={L.down} />
 
   const open = (c: LiveCard) => {
     const id = c.agents[0]?.id ?? c.d.sessionIds[0]

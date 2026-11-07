@@ -14,12 +14,14 @@ import {
   canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
 } from '@agentistics/core'
 import { loadTaskWorld } from './task-source'
+import { conversationOwners } from './task-conversations'
 import { historicalLinkId, nativeLinkId, type HistoricalSession, type NativeSessionLink, type NativeSessionUsage } from './task-model'
 import { sanitizeNativeUsage } from './task-native'
 import { planConversationFiling } from './task-historical'
 import { buildTaskDetail, buildTaskList, findTask, rowsOfTask, subtaskHasSession } from './task-report'
 import { planDeliveryEvidence, type DeliveryEvidence } from './task-evidence'
 import { buildBoardOverview, type BoardOverview } from './task-overview'
+import { clipDetails, recentRows } from './task-list-window'
 import { scopeMetas, type TaskFilter } from './task-filter'
 import { getCommitsInWindow } from '../git'
 import { readPreferences, writePreferences } from '../preferences'
@@ -53,6 +55,10 @@ export interface TaskListReply {
    * zero — the figure is smaller and nothing on screen says why.
    */
   excludedByFilter: number
+  /** Every task the filter keeps — the same figure in both steps of a split load. */
+  total?: number
+  /** True when `tasks` is only the recent/open step; the rest follows from the same route. */
+  partial?: boolean
 }
 
 export interface TaskDetailReply {
@@ -96,7 +102,9 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
   const promise = (async () => {
     const w = await loadTaskWorld()
     const nowMs = Date.now()
+    const owners = conversationOwners(w.rollupRows)
     const details = w.book.tasks.map(task => buildTaskDetail({
+      owners,
       task,
       attempts: w.book.attempts,
       rows: w.rollupRows,
@@ -119,26 +127,84 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
   }
 }
 
-export async function listTasks(filter?: TaskFilter): Promise<TaskListReply> {
+export interface ListTasksOptions {
+  /** Step one of the split load: open tasks + anything touched in the last two days. */
+  recent?: boolean
+  /** The HTTP list cuts each description to a card's worth; callers that want the text omit this. */
+  clip?: boolean
+}
+
+type ListCacheEntry = { key: string; builtAtMs: number; reply: TaskListReply }
+const listCache = new Map<string, ListCacheEntry>()
+const listInFlight = new Map<string, { key: string; promise: Promise<ListCacheEntry> }>()
+const LIST_CACHE_KEYS = 8
+
+// A build already in flight must not be joined by a read that follows the write (same key, same
+// mtime and size would otherwise hand it the pre-write reply).
+let listGeneration = 0
+onBookWrite(() => { listGeneration++; listCache.clear(); listInFlight.clear() })
+
+async function buildListReply(filter?: TaskFilter): Promise<TaskListReply> {
   const w = await loadTaskWorld()
   const scoped = scopeMetas(w.metas, filter)
+  const tasks = buildTaskList({
+    tasks: w.book.tasks,
+    attempts: w.book.attempts,
+    rows: w.rollupRows,
+    metas: scoped.metas,
+    costOf: w.costOf,
+    comments: w.book.comments,
+    threads: w.book.threads,
+    subtasks: w.book.subtasks,
+    files: w.book.files,
+  })
   return {
-    tasks: buildTaskList({
-      tasks: w.book.tasks,
-      attempts: w.book.attempts,
-      rows: w.rollupRows,
-      metas: scoped.metas,
-      costOf: w.costOf,
-      comments: w.book.comments,
-      threads: w.book.threads,
-      subtasks: w.book.subtasks,
-      files: w.book.files,
-    }),
+    tasks,
     overview: buildBoardOverview({
       tasks: w.book.tasks, rows: w.rollupRows, metas: scoped.metas, costOf: w.costOf,
       statusIds: w.book.statuses.map(s => s.id),
     }),
     excludedByFilter: scoped.excluded,
+    total: tasks.length,
+  }
+}
+
+/**
+ * The list, cached the way the live line is (`liveReplyForBook`): keyed by the book + registry
+ * versions and the filter, the key taken BEFORE the world is read, at most `LIVE_REPLY_MAX_AGE_MS`
+ * old (sessions move the cost figures without a book write), and one build shared by concurrent
+ * callers. A book write drops every entry at once.
+ */
+async function cachedListReply(filter?: TaskFilter): Promise<TaskListReply> {
+  const filterKey = JSON.stringify(filter ?? {})
+  const key = `${await liveSourceVersion()}|${filterKey}`
+  const hit = listCache.get(filterKey)
+  if (hit?.key === key && Date.now() - hit.builtAtMs < LIVE_REPLY_MAX_AGE_MS) return hit.reply
+  const flying = listInFlight.get(filterKey)
+  if (flying?.key === key) return (await flying.promise).reply
+  const generation = listGeneration
+  const promise = (async () => {
+    const entry: ListCacheEntry = { key, builtAtMs: Date.now(), reply: await buildListReply(filter) }
+    // A write that landed while this was building made it stale whatever its key says.
+    if (generation !== listGeneration) return entry
+    listCache.set(filterKey, entry)
+    while (listCache.size > LIST_CACHE_KEYS) listCache.delete(listCache.keys().next().value as string)
+    return entry
+  })()
+  listInFlight.set(filterKey, { key, promise })
+  try { return (await promise).reply } finally {
+    if (listInFlight.get(filterKey)?.promise === promise) listInFlight.delete(filterKey)
+  }
+}
+
+export async function listTasks(filter?: TaskFilter, opts: ListTasksOptions = {}): Promise<TaskListReply> {
+  const full = await cachedListReply(filter)
+  if (!opts.recent && !opts.clip) return full
+  const base = opts.recent ? recentRows(full.tasks, Date.now()) : full.tasks
+  return {
+    ...full,
+    tasks: opts.clip ? clipDetails(base) : base,
+    ...(opts.recent ? { partial: true } : {}),
   }
 }
 

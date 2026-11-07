@@ -247,6 +247,8 @@ export interface BoardOverview {
 
 export interface TaskListRow {
   task: TaskRecord
+  /** The list cut `task.detail` to a card's worth; the whole text is `useTaskFullText` / the detail route. */
+  detailClipped?: boolean
   attempts: number
   rollup: AttemptRollup
   /** `commentsBySubtask` is each subtask's/group's THREAD size (a group includes its members');
@@ -483,6 +485,54 @@ export function taskQuery(filters: Filters | undefined): string {
   return q ? `?${q}` : ''
 }
 
+/** Append one query parameter to a `taskQuery` string (`''` or `?a=b`). */
+function withParam(q: string, param: string): string {
+  return q ? `${q}&${param}` : `?${param}`
+}
+
+async function fetchTaskList(q: string): Promise<TaskListEntry> {
+  try {
+    const res = await fetch(`/api/tasks${withParam(q, 'clip=1')}`)
+    if (res.status === 403 || res.status === 404) return { rows: [], overview: null, excluded: 0, error: 'refused' }
+    if (!res.ok) return { rows: [], overview: null, excluded: 0, error: 'down' }
+    const body = await res.json() as {
+      tasks: TaskListRow[]; overview: BoardOverview; excludedByFilter?: number; partial?: boolean
+    }
+    return {
+      rows: body.tasks ?? [], overview: body.overview ?? null, excluded: body.excludedByFilter ?? 0, error: null,
+      ...(body.partial ? { partial: true } : {}),
+    }
+  } catch {
+    return { rows: [], overview: null, excluded: 0, error: 'down' }
+  }
+}
+
+const fullTextCache = new Map<string, Map<string, string>>()
+const fullTextFlying = new Map<string, Promise<void>>()
+
+/**
+ * The whole description of every task, for the search box only. The list carries a card's worth of
+ * each (`detailClipped`), so a needle that lives deeper in a description needs the text — fetched
+ * once, silently, the first time somebody searches, and kept for the page's life.
+ */
+export function useTaskFullText(active: boolean, filters?: Filters): Map<string, string> | null {
+  const q = useMemo(() => taskQuery(filters), [filters])
+  const [, bump] = useState(0)
+  useEffect(() => {
+    if (!active || fullTextCache.has(q) || fullTextFlying.has(q)) return
+    const p = (async () => {
+      try {
+        const res = await fetch(`/api/tasks${withParam(q, 'full=1')}`)
+        if (!res.ok) return
+        const body = await res.json() as { tasks: TaskListRow[] }
+        fullTextCache.set(q, new Map((body.tasks ?? []).map(r => [r.task.id, r.task.detail ?? ''])))
+      } catch { /* the clipped text still answers; the search just matches less */ }
+    })().finally(() => { fullTextFlying.delete(q); bump(n => n + 1) })
+    fullTextFlying.set(q, p)
+  }, [active, q])
+  return fullTextCache.get(q) ?? null
+}
+
 export function useTaskList(filters?: Filters) {
   const q = useMemo(() => taskQuery(filters), [filters])
   // Stale-while-revalidate (`taskListStore.ts`): a cached list renders at once, and the fetch below
@@ -493,20 +543,14 @@ export function useTaskList(filters?: Filters) {
   )
 
   const load = useCallback(async () => {
-    let next: TaskListEntry
-    try {
-      const res = await fetch(`/api/tasks${q}`)
-      if (res.status === 403 || res.status === 404) next = { rows: [], overview: null, excluded: 0, error: 'refused' }
-      else if (!res.ok) next = { rows: [], overview: null, excluded: 0, error: 'down' }
-      else {
-        const body = await res.json() as {
-          tasks: TaskListRow[]; overview: BoardOverview; excludedByFilter?: number
-        }
-        next = { rows: body.tasks ?? [], overview: body.overview ?? null, excluded: body.excludedByFilter ?? 0, error: null }
-      }
-    } catch {
-      next = { rows: [], overview: null, excluded: 0, error: 'down' }
+    // A COLD open (nothing cached for this query) is split in two steps the person never sees: the
+    // open + recently-touched rows first, with the whole board's totals already in `overview`, then
+    // the closed history merged in behind them. A warm one renders its cache and just revalidates.
+    if (peekTaskList(q) === undefined) {
+      const first = await fetchTaskList(withParam(q, 'recent=1'))
+      if (!first.error && first.partial) putTaskList(q, first)
     }
+    const next = await fetchTaskList(q)
     // A failed refresh must not blank a board that is already on screen.
     const cached = peekTaskList(q)
     if (next.error && cached && cached.rows.length > 0) return
@@ -530,6 +574,7 @@ export function useTaskList(filters?: Filters) {
     overview: entry?.overview ?? null,
     excluded: entry?.excluded ?? 0,
     error: entry?.error ?? null,
+    partial: entry?.partial ?? false,
     reload: load,
   }
 }
