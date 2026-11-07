@@ -746,7 +746,7 @@ textarea,
 /* A transient notice sits on the BOTTOM edge of the screen, above the phone's floating nav pill. */
 .ag-action-toast {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: 20px; z-index: 1300; overflow: hidden;
-  width: min(420px, calc(100vw - 24px)); box-sizing: border-box;
+  width: min(420px, calc(100vw / var(--ui-zoom, 1) - 24px)); box-sizing: border-box;
   border: 1px solid var(--border); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
 }
 @media (max-width: 767px) { .ag-action-toast { bottom: calc(var(--mobile-nav-h) + 12px); } }
