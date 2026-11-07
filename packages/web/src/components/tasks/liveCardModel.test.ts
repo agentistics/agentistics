@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  blockLines, cardStateWord, chunk, pack, columnCollapsed, etaBoxes, fitCount, mergeGone, planDepartures, snapshotOf, stageBar,
+  blockLines, cardStateWord, chunk, pack, columnCollapsed, etaBoxes, fitCount, flowColumns, revealScrollLeft, mergeGone, planDepartures, snapshotOf, stageBar,
   taskOfSession, taskOptions, timeRow, waitingReason, lingering, GONE_LINGER_MS, readCollapsedPrefs,
   cardPercent, ciChecklist, leaderCounts, locateWorker, stagePercent,
 } from './liveCardModel'
@@ -132,9 +132,9 @@ describe('harness · model · effort on every card (item e)', () => {
     expect(p.split(' · ').length).toBeGreaterThanOrEqual(h === 'gemini' || h === 'opencode' || h === 'hermes' ? 2 : 3)
   })
   test('the live agent wins, then the registry facts, then the default marked as such', () => {
-    expect(cardPills(cardOf('claude', [agent('claude', { model: 'sonnet', effort: 'max' })]), accountOf, 'conta', runtime, true).runtime).toBe('claude · sonnet · max')
-    expect(cardPills(cardOf('claude', [], { models: ['opus'], efforts: ['low'] }), accountOf, 'conta', runtime, true).runtime).toBe('claude · opus · low')
-    expect(cardPills(cardOf('claude', []), accountOf, 'conta', runtime, true).runtime).toBe('claude · opus (padrão) · high (padrão)')
+    expect(cardPills(cardOf('claude', [agent('claude', { model: 'sonnet', effort: 'max' })]), accountOf, 'conta', runtime, true).runtime).toBe('claude · Sonnet 5 · max')
+    expect(cardPills(cardOf('claude', [], { models: ['opus'], efforts: ['low'] }), accountOf, 'conta', runtime, true).runtime).toBe('claude · Opus 5 · low')
+    expect(cardPills(cardOf('claude', []), accountOf, 'conta', runtime, true).runtime).toBe('claude · Opus 5 (padrão) · high (padrão)')
     expect(cardPills(cardOf('gemini', []), accountOf, 'conta', runtime, true).runtime).toBe('gemini · modelo padrão')
   })
 })
@@ -192,11 +192,47 @@ describe('columns: today\'s layout plus Publicado collapsed; the user\'s choice 
 })
 
 describe('fit and chunk — no vertical scrollbar, ever', () => {
-  test('all fit -> all; otherwise as many as leave room for the +N control; never zero', () => {
+  test('all fit -> all; otherwise as many as leave room for the +N control', () => {
     expect(fitCount([100, 100, 100], 400, 30)).toBe(3)
     expect(fitCount([100, 100, 100, 100], 300, 30)).toBe(2)
-    expect(fitCount([500, 500], 300, 30)).toBe(1)
     expect(fitCount([], 300, 30)).toBe(0)
+  })
+  test('HIGH 2: the +N is never sacrificed — when even the first card leaves no room for it, no card is forced in', () => {
+    // 4 cards of 320 in a column of 560 (the popover's): one card leaves 240 < the 38 px the control needs? it does not
+    // fit alongside, so the old `max(1, k)` drew the card and cut the "+3" below the edge.
+    expect(fitCount([320, 320, 320, 320], 340, 38)).toBe(0)
+    expect(fitCount([300, 300, 300], 560, 38)).toBe(1)
+    // every card shown + the control must fit the room, whatever the answer
+    for (const [hs, avail] of [[[320, 320, 320, 320], 340], [[100, 200, 300], 450], [[500, 500], 300]] as const) {
+      const k = fitCount(hs, avail, 38)
+      const used = hs.slice(0, k).reduce((a, h) => a + h, 0)
+      expect(k === hs.length || used + 38 <= avail).toBe(true)
+    }
+  })
+  test('a column holding one card taller than the room still shows it — there is nothing to cut', () => {
+    expect(fitCount([500], 300, 38)).toBe(1)
+  })
+  test('revealScrollLeft reaches a card past the right edge, horizontally only, and never past the content', () => {
+    // QA MED 6: the card ended at x=1365 on a board ending at 1223 and scrollLeft moved only 30
+    const left = revealScrollLeft({ scrollLeft: 30, viewLeft: 100, viewWidth: 1100, cardLeft: 1085, cardWidth: 280, scrollWidth: 1700 })
+    expect(left).toBeGreaterThan(30)
+    const rel = 1085 - 100 + 30 - left
+    expect(rel).toBeGreaterThanOrEqual(0)
+    expect(rel + 280).toBeLessThanOrEqual(1100)
+    expect(revealScrollLeft({ scrollLeft: 0, viewLeft: 0, viewWidth: 1000, cardLeft: 10, cardWidth: 280, scrollWidth: 2000 })).toBe(0)
+    expect(revealScrollLeft({ scrollLeft: 0, viewLeft: 0, viewWidth: 1000, cardLeft: 1900, cardWidth: 280, scrollWidth: 2000 })).toBe(1000)
+  })
+  test('LOW 12: 246 cards become a bounded number of columns — full cards first, then one-line rows, none dropped', () => {
+    const heights = Array.from({ length: 246 }, () => 330)
+    const { full, compact } = flowColumns(heights, 560, 8, 30)
+    expect(full).toHaveLength(8)
+    expect(compact.length).toBeLessThan(15) // not 246 sub-columns
+    const seen = [...full.flat(), ...compact.flat()].sort((a, b) => a - b)
+    expect(seen).toEqual(heights.map((_, i) => i)) // every card exactly once
+    expect(compact.every(c => c.length <= Math.floor(560 / 30))).toBe(true)
+  })
+  test('a short column has no compact rows', () => {
+    expect(flowColumns([200, 200, 200, 200], 450, 8, 30).compact).toEqual([])
   })
   test('pack fills sub-columns by their real heights and never drops a tall card', () => {
     expect(pack([100, 100, 100, 100, 100], 250)).toEqual([[0, 1], [2, 3], [4]])

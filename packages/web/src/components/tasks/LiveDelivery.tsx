@@ -18,19 +18,20 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ExternalLink } from 'lucide-react'
-import { plainLeaderName } from '@agentistics/core'
+import { plainLeaderName, shortTitle } from '@agentistics/core'
 import { CenteredLoader } from '../CenteredLoader'
 import { useFleet, type FleetRow } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { usePlanLimits } from '../../lib/planLimits'
 import { pathOfView } from '../../lib/tasksViewRoute'
+import { fitHeight, holdPageFit, reserveBelow } from '../../lib/pageFit'
 import { microLabel, surface } from './board'
 import {
   LIVE_STAGES, orderQueueFirstUp, STAGE_LABEL, byStage, filterCards, fmtClock, fmtSpan, joinLive, summarize, LIVE_DEFAULTS,
   type StageFilter, type LiveCard, type LiveReply, type LiveStage,
 } from './liveDeliveryModel'
 import {
-  columnCollapsed, fitCount, GONE_LINGER_MS, locateWorker, stageBar, mergeGone, pack, planDepartures, readCollapsedPrefs, sinceWord,
+  columnCollapsed, fitCount, flowColumns, GONE_LINGER_MS, locateWorker, revealScrollLeft, stageBar, mergeGone, pack, planDepartures, readCollapsedPrefs, sinceWord,
   snapshotOf, taskOfSession, taskOptions, writeCollapsedPrefs, type CollapsedPrefs, type BoardSnapshot, type Gone, type LocateAnswer,
 } from './liveCardModel'
 import { LiveCardView } from './LiveCardView'
@@ -45,6 +46,12 @@ import { flashHeader, flyCard, intersects, recolorBar, ring, transitionKind, typ
 const reducedMotion = (): boolean => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } }
 
 const COL_W = 280, COL_GAP = 8, COLLAPSED_W = 40, MORE_H = 30, CARD_GAP = 8
+/**
+ * An expanded column flows its cards into sub-columns to the right. Past this many FULL-card sub-columns the rest
+ * are one-line rows (QA LOW 12: 246 cards made 246 sub-columns, 72 188 px wide) — still every one of them, still
+ * clickable, still only a horizontal scroll.
+ */
+const MAX_FULL_SUBCOLS = 8, COMPACT_W = 230, ROW_H = 26
 
 const copy = (pt: boolean) => pt ? {
   title: 'Live Delivery', onlyActive: 'só com agentes ativos',
@@ -56,6 +63,7 @@ const copy = (pt: boolean) => pt ? {
   loading: 'Carregando entregas…', none: 'Nenhuma entrega ativa agora.',
   delivered: 'publicado', allSteps: 'Todas as etapas', external: 'abrir janela externa', externalBlocked: 'O navegador bloqueou a janela externa.',
   more: (n: number) => `+${n}`, less: 'menos', collapse: 'Recolher coluna', expand: 'Abrir coluna',
+  archivedBtn: (n: number) => `Revisões antigas · ${n}`, archivedNote: 'Em revisão há mais de 72 h, sem sessão viva e sem commit publicado conhecido — saíram da coluna “Revisão do líder”.', archivedMore: (n: number) => `e mais ${n}`,
   left: 'saiu', recentLeft: (n: number) => `saíram há pouco (${n})`, noneLeft: 'Ninguém saiu do quadro nos últimos minutos.',
 } : {
   title: 'Live Delivery', onlyActive: 'only with active agents',
@@ -67,6 +75,7 @@ const copy = (pt: boolean) => pt ? {
   loading: 'Loading deliveries…', none: 'No active delivery right now.',
   delivered: 'published', allSteps: 'All steps', external: 'open in a window', externalBlocked: 'The browser blocked the external window.',
   more: (n: number) => `+${n}`, less: 'less', collapse: 'Collapse column', expand: 'Open column',
+  archivedBtn: (n: number) => `Older reviews · ${n}`, archivedNote: 'In review for over 72 h, no live session and no known published commit — they left the “Leader review” column.', archivedMore: (n: number) => `and ${n} more`,
   left: 'left', recentLeft: (n: number) => `left recently (${n})`, noneLeft: 'Nothing left the board in the last minutes.',
 }
 
@@ -111,6 +120,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   const [pipNote, setPipNote] = useState(false)
   const [gone, setGone] = useState<Gone[]>([])
   const [showGone, setShowGone] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
   const [clock, setClock] = useState(() => Date.now())
 
   const cards = useMemo(() => joinLive(reply?.deliveries ?? [], fleet), [reply, fleet])
@@ -158,12 +168,30 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     if (compact || isMobile) return
     const measure = () => {
       const el = wrapRef.current
-      const win = el?.ownerDocument.defaultView ?? window
-      if (el) setFitH(Math.max(420, Math.floor(win.innerHeight / (Number(getComputedStyle(win.document.documentElement).getPropertyValue('--ui-zoom')) || 1) - el.getBoundingClientRect().top - 16)))
+      if (!el) return
+      const win = el.ownerDocument.defaultView ?? window
+      // Inside the app the board fills what is LEFT of the page's own scroller (HIGH 1: measuring against the
+      // window ignored the footer and the panel frame, so the page scrolled 380 px). In an external window
+      // there is no scroller and the window is the box.
+      const scroller = el.closest<HTMLElement>('[data-page-scroller]')
+      const top = el.getBoundingClientRect().top
+      if (scroller) {
+        // Everything BELOW the board inside the scroller: each ancestor's bottom padding and border (the panel frame's 18 px AND the page's 24 px — measuring only the outer one left the page 17 px over).
+        const ancestors: CSSStyleDeclaration[] = []
+        for (let a = el.parentElement; a && a !== scroller; a = a.parentElement) ancestors.push(getComputedStyle(a))
+        const reserve = reserveBelow(ancestors)
+        setFitH(fitHeight({ scrollerBottom: scroller.getBoundingClientRect().bottom, boardTop: top, reserve, min: 360 }))
+      } else {
+        setFitH(fitHeight({ scrollerBottom: win.innerHeight / (Number(getComputedStyle(win.document.documentElement).getPropertyValue('--ui-zoom')) || 1), boardTop: top, reserve: 16, min: 420 }))
+      }
     }
     measure()
+    const scroller = wrapRef.current?.closest<HTMLElement>('[data-page-scroller]')
+    const ro = typeof ResizeObserver !== 'undefined' && scroller ? new ResizeObserver(measure) : null
+    if (scroller) { ro?.observe(scroller); if (scroller.firstElementChild) ro?.observe(scroller.firstElementChild) }
+    const release = scroller ? holdPageFit() : () => {}
     window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
+    return () => { window.removeEventListener('resize', measure); ro?.disconnect(); release() }
   }, [compact, isMobile, reply === null])
   useEffect(() => {
     const el = chipRowRef.current?.querySelector<HTMLElement>(`[data-chip="${stageFilter}"]`)
@@ -270,9 +298,13 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     const root = boardRef.current
     let frames = 0, expandedOnce = false, raf = 0
     const tryFind = () => {
-      const el = root?.querySelector<HTMLElement>(`[data-live-card="${CSS.escape(locateReq.key)}"]`)
+      const el = root?.querySelector<HTMLElement>(`[data-live-card="${CSS.escape(locateReq.key)}"], [data-live-compact="${CSS.escape(locateReq.key)}"]`)
       if (el) {
-        el.scrollIntoView?.({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'center', inline: 'center' })
+        // Horizontal only, on the BOARD's own scroller: the page must not move (QA MED 6, and HIGH 1's no-vertical-scroll rule).
+        if (root) {
+          const v = root.getBoundingClientRect(), c = el.getBoundingClientRect()
+          root.scrollTo?.({ left: revealScrollLeft({ scrollLeft: root.scrollLeft, viewLeft: v.left, viewWidth: v.width, cardLeft: c.left, cardWidth: c.width, scrollWidth: root.scrollWidth }), behavior: reducedMotion() ? 'auto' : 'smooth' })
+        }
         ring(el, 'var(--accent-purple)', 2000)
         return
       }
@@ -335,6 +367,14 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
     )
   }
   const cardsOf = (s: LiveStage) => columns[s]
+  // One line per card for the overflow of a huge column: where it is, who runs it, and a way in.
+  const renderCompact = (c: LiveCard) => (
+    <button type="button" data-live-compact={c.d.key} onClick={() => open(c)} title={c.d.title}
+      style={{ ...surface, display: 'flex', alignItems: 'center', gap: 6, width: '100%', boxSizing: 'border-box', height: ROW_H, padding: '0 8px', cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontSize: 11.5, textAlign: 'left', minWidth: 0 }}>
+      <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: c.liveState === 'working' ? 'var(--accent-green, #3ecf8e)' : c.liveState === 'needs-you' ? 'var(--accent-red, #ff5f5f)' : 'var(--text-tertiary)' }} />
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortTitle(c.d.title, 40)}</span>
+    </button>
+  )
 
   const summaryLine = [
     L.deliveries(sum.deliveries), L.agents(sum.agentsWorking),
@@ -350,7 +390,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   })
   const filters = (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
-      <LiveTaskFilter options={options} chosen={taskIds} onChange={setTaskIds} pt={pt} />
+      <LiveTaskFilter options={options} chosen={taskIds} onChange={setTaskIds} pt={pt} mobile={isMobile} />
       {!isMobile && <button
         type="button" className="ag-tap" aria-pressed={stageFilter === 'all'} data-live-allsteps onClick={() => setStageFilter(stageFilter === 'all' ? (LIVE_STAGES.find(s => columns[s].length > 0) ?? 'running') : 'all')}
         style={pillBtn(stageFilter === 'all')}
@@ -361,6 +401,9 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       {gone.length > 0 && (
         <button type="button" className="ag-tap" data-live-gone-toggle data-fresh={gone.some(g => clock - g.atMs < GONE_LINGER_MS) ? '1' : '0'} aria-pressed={showGone} onClick={() => setShowGone(v => !v)}
           style={{ ...pillBtn(showGone || gone.some(g => clock - g.atMs < GONE_LINGER_MS)), transition: reducedMotion() ? 'none' : 'background .4s, border-color .4s' }}>{L.recentLeft(gone.length)}</button>
+      )}
+      {(reply?.archivedTotal ?? 0) > 0 && (
+        <button type="button" className="ag-tap" data-live-archived-toggle aria-pressed={showArchived} onClick={() => setShowArchived(v => !v)} title={L.archivedNote} style={{ ...pillBtn(showArchived), minHeight: isMobile ? 44 : 30 }}>{L.archivedBtn(reply!.archivedTotal!)}</button>
       )}
       {!isMobile && !inPip && (
         <button type="button" className="ag-tap" data-live-external onClick={() => void openExternal()} disabled={pip?.kind === 'pip'} title={L.external} style={{ ...pillBtn(false), opacity: pip?.kind === 'pip' ? 0.5 : 1 }}>
@@ -376,21 +419,35 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 650 }}>
           <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-red, #ff5f5f)' }} />{L.title}
         </span>
+        <span data-live-summary style={{
+          fontSize: 12, color: 'var(--text-tertiary)', flex: isMobile ? undefined : '0 1 auto', minWidth: isMobile ? 0 : 220,
+          ...(isMobile ? { flexBasis: '100%', order: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' } : {}),
+        }}>{summaryLine}</span>
+        {/* The Líderes button follows the summary, as in the approved preview (QA MED 8). */}
         {!compact && !inPip && (
           <LiveLeaders
-            leaders={leaders} runtime={reply.runtime} accountLabels={accountLabels} nowMs={nowMs} lang={lang}
+            leaders={leaders} runtime={reply.runtime} accountLabels={accountLabels} nowMs={nowMs} lang={lang} mobile={isMobile}
             locate={(w: LeaderWorker) => locateWorker(w, shown, cards)} onLocate={a => requestLocate(a)}
             onOpen={id => navigate(`/sessions/${encodeURIComponent(id)}`)}
           />
         )}
-        <span data-live-summary style={{
-          fontSize: 12, color: 'var(--text-tertiary)', flex: 1, minWidth: isMobile ? 0 : 220,
-          ...(isMobile ? { flexBasis: '100%', order: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' } : {}),
-        }}>{summaryLine}</span>
+        {!isMobile && <span style={{ flex: 1 }} />}
         {!isMobile && filters}
       </div>
       {isMobile && filters}
       {pipNote && <span role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{L.externalBlocked}</span>}
+      {showArchived && (reply?.archived?.length ?? 0) > 0 && (
+        <div data-live-archived-list style={{ ...surface, padding: '8px 10px', display: 'grid', gap: 5, fontSize: 11.5 }}>
+          <span style={{ color: 'var(--text-tertiary)' }}>{L.archivedNote}</span>
+          <span style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 10px', maxHeight: isMobile ? undefined : 66, overflow: 'hidden' }}>
+            {reply!.archived!.map(a => (
+              <button key={a.key} type="button" data-live-archived={a.key} onClick={() => navigate(`/tasks/${encodeURIComponent(a.taskId)}`)} title={a.title}
+                style={{ background: 'none', border: 0, padding: 0, minHeight: isMobile ? 44 : undefined, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5, color: 'var(--text-secondary)', textAlign: 'left' }}>{shortTitle(a.title, 38)}</button>
+            ))}
+            {(reply!.archivedTotal ?? 0) > reply!.archived!.length && <span style={{ color: 'var(--text-tertiary)' }}>{L.archivedMore(reply!.archivedTotal! - reply!.archived!.length)}</span>}
+          </span>
+        </div>
+      )}
       {showGone && (
         <ul data-live-gone-list style={{ ...surface, listStyle: 'none', margin: 0, padding: '8px 10px', display: 'grid', gap: 3, fontSize: 11.5 }}>
           {gone.length === 0 && <li style={{ color: 'var(--text-tertiary)' }}>{L.noneLeft}</li>}
@@ -473,7 +530,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
               const next = { ...prefs, [s]: !was }
               setPrefs(next); writeCollapsedPrefs(next)
             }}
-            render={s === 'published' ? renderPub : renderCard}
+            render={s === 'published' ? renderPub : renderCard} renderCompact={renderCompact}
             sig={s === 'published' ? [...openPub].join(',') : ''}
           />
         ))}
@@ -488,10 +545,10 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
  * the cards that FIT the height and a "+N" that flows the rest into extra sub-columns to the right —
  * measured, not guessed, and never a vertical scroll bar.
  */
-function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, render, sig }: {
+function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, render, renderCompact, sig }: {
   stage: LiveStage; pt: boolean; cards: LiveCard[]; prefs: CollapsedPrefs; L: ReturnType<typeof copy>
   expanded: boolean; onExpanded: (v: boolean) => void; onToggle: () => void
-  render: (c: LiveCard) => React.ReactNode; sig: string
+  render: (c: LiveCard) => React.ReactNode; renderCompact: (c: LiveCard) => React.ReactNode; sig: string
 }) {
   const collapsed = columnCollapsed(stage, cards.length, prefs)
   const label = STAGE_LABEL[stage][pt ? 'pt' : 'en']
@@ -534,11 +591,15 @@ function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, re
     return () => ro.disconnect()
   }, [collapsed])
 
-  const shownCount = m ? fitCount(m.heights, m.avail, MORE_H + CARD_GAP) : cards.length
+  // An unlaid-out body (no height at all: a hidden tab, a test DOM) says nothing about fit — show everything rather than cut by a measurement that is not one.
+  const shownCount = m && m.avail > 0 ? fitCount(m.heights, m.avail, MORE_H + CARD_GAP) : cards.length
   const cut = m !== null && shownCount < cards.length
-  const packs = m && expanded && cut ? pack(m.heights, m.avail) : null
+  // Full cards fill the first sub-columns; what is left becomes one-line rows (never dropped, never a vertical scroll).
+  const flow = m && expanded && cut ? flowColumns(m.heights, m.avail, MAX_FULL_SUBCOLS, ROW_H + 4) : null
+  const packs = flow ? flow.full : null
+  const compactCols = flow ? flow.compact : []
   const cols = packs ? packs.length : 1
-  const width = collapsed ? COLLAPSED_W : cols * COL_W + (cols - 1) * COL_GAP
+  const width = collapsed ? COLLAPSED_W : cols * COL_W + compactCols.length * COMPACT_W + (cols + compactCols.length - 1) * COL_GAP
   const mountBody = !collapsed || lingerOpen
   const slot = (c: LiveCard) => <div key={c.d.key} data-live-slot style={{ minWidth: 0 }}>{render(c)}</div>
   const slotStyle: React.CSSProperties = { display: 'grid', gap: CARD_GAP, alignContent: 'start', minWidth: 0, width: COL_W, flex: '0 0 auto' }
@@ -568,6 +629,7 @@ function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, re
               style={{ background: 'none', border: 0, color: 'var(--anthropic-orange-light)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11 }}>{L.less}</button>
           )}
           <span style={{ ...microLabel, fontSize: 11 }}>{cards.length}</span>
+          {!collapsed && <span aria-hidden data-live-colchev style={{ ...microLabel, fontSize: 13, lineHeight: 1 }}>‹</span>}
         </span>
       </header>
       {mountBody && (
@@ -578,11 +640,15 @@ function Column({ stage, pt, cards, prefs, L, expanded, onExpanded, onToggle, re
             opacity: collapsed ? 0 : 1, transition: reducedMotion() ? 'none' : 'opacity .15s ease', pointerEvents: collapsed ? 'none' : undefined,
           }}
         >
-          {packs ? packs.map((idxs, k) => (
+          {packs ? [...packs.map((idxs, k) => (
             <div key={k} data-live-subcol style={slotStyle}>
               {idxs.map(i => slot(cards[i]!))}
             </div>
-          )) : (
+          )), ...compactCols.map((idxs, k) => (
+            <div key={`c${k}`} data-live-subcol data-compact="1" style={{ ...slotStyle, width: COMPACT_W, gap: 4 }}>
+              {idxs.map(i => <div key={cards[i]!.d.key} style={{ minWidth: 0 }}>{renderCompact(cards[i]!)}</div>)}
+            </div>
+          ))] : (
             <div style={slotStyle}>
               {(m ? cards.slice(0, shownCount) : cards).map(slot)}
               {cut && (

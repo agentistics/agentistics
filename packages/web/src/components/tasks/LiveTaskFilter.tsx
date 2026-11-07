@@ -28,11 +28,12 @@ export function pickerOptions(options: readonly TaskOption[], chosen: readonly s
   ]
 }
 
-export function LiveTaskFilter({ options, chosen, onChange, pt }: {
+export function LiveTaskFilter({ options, chosen, onChange, pt, mobile }: {
   options: readonly TaskOption[]
   chosen: readonly string[]
   onChange: (ids: string[]) => void
   pt: boolean
+  mobile?: boolean
 }) {
   const opts = useMemo(() => pickerOptions(options, chosen, pt), [options, chosen, pt])
   const labelOf = (id: string) => options.find(o => o.value === id)?.label ?? id
@@ -55,8 +56,12 @@ export function LiveTaskFilter({ options, chosen, onChange, pt }: {
           <button
             type="button" aria-label={pt ? `Tirar ${labelOf(id)}` : `Remove ${labelOf(id)}`} data-live-chip-remove
             onClick={() => onChange(chosen.filter(x => x !== id))}
-            style={{ display: 'inline-flex', background: 'none', border: 0, padding: 0, cursor: 'pointer', color: 'inherit' }}
-          ><X size={11} aria-hidden /></button>
+            style={{ display: 'inline-flex', position: 'relative', background: 'none', border: 0, padding: 0, cursor: 'pointer', color: 'inherit' }}
+          >
+            <X size={11} aria-hidden />
+            {/* The glyph stays 11 px; on a phone the TARGET is a 45 px box around it (QA LOW 11). */}
+            {mobile && <span aria-hidden data-live-chip-hit style={{ position: 'absolute', inset: -17 }} />}
+          </button>
         </span>
       ))}
     </div>

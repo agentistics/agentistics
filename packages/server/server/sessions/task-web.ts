@@ -6,7 +6,9 @@
  * delivery cost", and the two would drift.
  */
 
-import { buildLive } from './task-live'
+import { buildLive, legacyReviewShaPieces } from './task-live'
+import { dirsForShas } from './release-repos'
+import { publishedAmong } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import { stat } from 'node:fs/promises'
 import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
@@ -104,6 +106,9 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
     const w = await loadTaskWorld()
     const nowMs = Date.now()
     const owners = conversationOwners(w.rollupRows)
+    // Comments are only the SOURCE of a legacy piece's delivered commit (its handback): the subtask-level ones, grouped once.
+    const commentsOfTask = new Map<string, typeof w.book.comments>()
+    for (const c of w.book.comments) if (c.subtaskId) { const l = commentsOfTask.get(c.taskId); if (l) l.push(c); else commentsOfTask.set(c.taskId, [c]) }
     const details = w.book.tasks.map(task => buildTaskDetail({
       owners,
       task,
@@ -111,7 +116,7 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
       rows: w.rollupRows,
       metas: w.metas,
       costOf: w.costOf,
-      comments: [],
+      comments: commentsOfTask.get(task.id) ?? [],
       threads: [],
       subtasks: w.book.subtasks.filter(t => t.taskId === task.id),
       files: [],
@@ -124,7 +129,17 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
         return new Map(Object.entries((await createDeliveryStore().read()).deliveries))
       } catch { return new Map() }
     })()
-    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries })
+    // Which clones to ask is per commit: the server does not run inside a checkout, so the repositories come from the
+    // sessions' own directories, the task's repository and the repositories agentistics knows (`release-repos.ts`).
+    const pieces = legacyReviewShaPieces(details, w.book.events, deliveries)
+    const taskById = new Map(w.book.tasks.map(t => [t.id, t]))
+    const dirsFor = dirsForShas({
+      pieces,
+      rowsOf: id => { const t = taskById.get(id); return t ? rowsOfTask(t, w.rollupRows, owners) : [] },
+      metas: w.metas.values(),
+    })
+    const publishedShas = publishedAmong([...pieces.keys()], nowMs, undefined, dirsFor)
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
     return result
@@ -271,6 +286,7 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     rows = fleet.map(r => ({
       id: r.id, title: r.title, harness: r.harness, state: r.state,
       ...(r.model ? { model: r.model } : {}),
+      ...(r.observedModel ? { observedModel: r.observedModel } : {}),
       ...(r.effort ? { effort: r.effort } : {}),
       ...(r.accountId ? { accountId: r.accountId } : {}),
       ...(r.parentSessionId ? { parentSessionId: r.parentSessionId } : {}),

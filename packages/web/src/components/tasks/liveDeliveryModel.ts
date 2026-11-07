@@ -8,6 +8,7 @@
  */
 
 import type { FleetRow } from '../../lib/fleet'
+import { modelDisplay } from '../../lib/modelDisplay'
 
 export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
 export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published']
@@ -30,8 +31,8 @@ export interface LiveBlock { reason: BlockReason; text: string | null; unlocker:
 /** The release signal of a piece in "CI · publicando" — stated by the delivery flow, only rendered here. */
 export interface LiveCiSignal { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null }
 export interface StageVisit { stage: LiveStage; enteredMs: number; ms: number }
-export type HiddenReason = 'no-live-session' | 'status-unplaced' | 'published-old' | 'queue-idle'
-export interface LiveHidden { key: string; taskId: string; title: string; stage: LiveStage | null; reason: HiddenReason }
+export type HiddenReason = 'no-live-session' | 'status-unplaced' | 'published-old' | 'queue-idle' | 'legacy-review-old'
+export interface LiveHidden { key: string; taskId: string; title: string; stage: LiveStage | null; reason: HiddenReason; atMs?: number | null }
 export interface RuntimeFacts { model?: string; effort?: string; effortConcept: boolean }
 
 /** Mirror of the server's `LiveDelivery` (`task-live.ts`). The newer fields are optional: an older server omits them. */
@@ -42,7 +43,7 @@ export interface LiveDeliveryRecord {
   efforts?: string[]; workMs?: number | null; trail?: StageVisit[]
   stageEta?: LiveStageEta; publishEta?: LivePublishEta; block?: LiveBlock | null
   ci?: LiveCiSignal | null; step?: number | null
-  lastAction: { text: string; atMs: number; kind?: string } | null; blockedReason: string | null; deliveredAtMs: number | null
+  lastAction: { text: string; atMs: number; kind?: string; from?: string; to?: string } | null; blockedReason: string | null; deliveredAtMs: number | null
   /** FLUXO.ENTREGA-DSL: the pre-dispatch a queued piece starts with, and the vaga gate's last verdict. */
   staged?: { harness: string | null; model: string | null; effort: string | null; account: string | null } | null
   slot?: { ok: boolean; reason: string | null; at: string } | null
@@ -66,7 +67,7 @@ export interface LeaderRecord {
 }
 export interface LiveReply {
   generatedAt: string; deliveries: LiveDeliveryRecord[]; leaders?: LeaderRecord[]; samples: number
-  hidden?: LiveHidden[]; sessionTasks?: Record<string, string>; runtime?: Record<string, RuntimeFacts>
+  hidden?: LiveHidden[]; archived?: LiveHidden[]; archivedTotal?: number; sessionTasks?: Record<string, string>; runtime?: Record<string, RuntimeFacts>
 }
 
 export interface LiveAgent {
@@ -166,7 +167,8 @@ export function cardPills(
   const effort = a?.effort ?? c.d.efforts?.[0] ?? null
   const parts = [
     harness,
-    model ?? (facts?.model ? `${facts.model} (${dflt})` : (pt ? 'modelo padrão' : 'default model')),
+    // A person reads "Opus 5.5", not the transcript's "claude-opus-5-5" (owner's approved preview, QA MED 8).
+    (model ? modelDisplay(harness, model) : null) ?? (facts?.model ? `${modelDisplay(harness, facts.model) ?? facts.model} (${dflt})` : (pt ? 'modelo padrão' : 'default model')),
     effort ?? (facts?.effortConcept === false ? null : facts?.effort ? `${facts.effort} (${dflt})` : facts?.effortConcept ? (pt ? 'esforço padrão' : 'default effort') : null),
   ].filter((x): x is string => !!x)
   const acc = a ? accountOf(a) : null

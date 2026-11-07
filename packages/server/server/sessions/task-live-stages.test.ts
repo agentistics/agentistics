@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  awaitingApprovalOf, blockOf, buildLive, ciSignalOf, stageOfStatus, stepOf, estimateStages, nextStageOf, stageTypicals, trailOf, type StageTypical, type StageVisit,
+  ARCHIVED_CAP, HIDDEN_CAP, awaitingApprovalOf, blockOf, buildLive, ciSignalOf, estimateEta, legacyReviewShas, shasIn, stageOfStatus, stepOf, estimateStages, nextStageOf, stageTypicals, trailOf, type StageTypical, type StageVisit,
 } from './task-live'
 import { describeLive, workerWord, type FleetRowLite } from './task-live-view'
 import type { TaskDetail } from './task-report'
@@ -38,8 +38,25 @@ describe('"total" is the piece\'s real work, never the task\'s age', () => {
       })],
     })
     const d = r.deliveries[0]!
-    expect(d.workMs).toBe(90 * MIN)
+    // MED 4: the book alone proves nothing runs — wall time appears only through a live fleet agent (describeLive).
+    expect(d.workMs).toBeNull()
     expect(d.startedAtMs).toBe(NOW - 90 * MIN)
+    const live = describeLive({ reply: r, rows: [{ id: 's1', title: 's', harness: 'claude', state: 'working' }], leaderIds: new Set(), nowMs: NOW })
+    expect(live.deliveries[0]!.workMs).toBe(90 * MIN)
+    const gone = describeLive({ reply: r, rows: [], leaderIds: new Set(), nowMs: NOW })
+    expect(gone.deliveries[0]!.workMs).toBeNull()
+  })
+  test('MED 4: a forgotten session the book thinks open for 33 days reads no total', () => {
+    const r = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({
+        subtasks: [sub('f', 'in_progress')] as never,
+        sessions: [sess('old', 'f', { createdAt: iso(NOW - 33 * 24 * H) })] as never,
+      })],
+    })
+    expect(r.deliveries[0]!.workMs).toBeNull()
+    const v = describeLive({ reply: r, rows: [], leaderIds: new Set(), nowMs: NOW })
+    expect(v.deliveries[0]!.workMs).toBeNull()
   })
   test('a piece with no session falls back to nothing, not to the task\'s 52 days', () => {
     const r = buildLive({
@@ -187,7 +204,7 @@ describe('a card never leaves without a word (item r) — one test per path that
 
 describe('the leaders band', () => {
   const row = (id: string, state: string, x: Partial<FleetRowLite> = {}): FleetRowLite => ({ id, title: id, harness: 'claude', state, ...x })
-  const reply = (ds: object[]) => ({ generatedAt: 'x', deliveries: ds as never, samples: 0, hidden: [], sessionTasks: {} })
+  const reply = (ds: object[]) => ({ generatedAt: 'x', deliveries: ds as never, samples: 0, hidden: [], archived: [], archivedTotal: 0, sessionTasks: {} })
   test('the last action is a sentence, never JSON, and the leader carries its effort', () => {
     const v = describeLive({
       reply: reply([]),
@@ -250,6 +267,94 @@ describe('FLUXO.ENTREGA-DSL: the Live is a projection of the delivery record', (
     expect(q.stage).toBe('queue')
     expect(q.staged).toEqual({ harness: 'codex', model: 'gpt-5.5', effort: 'high', account: 'acc_2' })
     expect(q.slot).toMatchObject({ ok: false })
+  })
+})
+
+describe('estimates never contradict each other (MED 5)', () => {
+  const typ = (medianMs: number): StageTypical => ({ medianMs, p75Ms: medianMs * 2, n: 5 })
+  test('publication is never before the next stage when the stage sum is unknowable', () => {
+    // `leader` has history, `merge`/`ci` do not -> publication falls back to the whole-piece estimate, which
+    // used to land 30 min BEFORE the next-stage estimate.
+    const r = estimateStages({
+      stage: 'leader', origin: null, sinceMs: NOW - 10 * MIN, nowMs: NOW, typicals: { leader: typ(60 * MIN) },
+      totalEta: { kind: 'estimate', atMs: NOW + 30 * MIN, plusMinusMs: 1, confidence: 'low', basis: { n: 4, scope: 'harness', harness: 'claude', model: null, medianMs: 1 } },
+    })
+    expect(r.stageEta.kind).toBe('estimate')
+    expect(r.publishEta.kind).toBe('estimate')
+    if (r.stageEta.kind === 'estimate' && r.publishEta.kind === 'estimate') expect(r.publishEta.atMs).toBeGreaterThanOrEqual(r.stageEta.atMs)
+  })
+  test('past the median it says slower than usual, never "now"', () => {
+    const r = estimateStages({
+      stage: 'leader', origin: null, sinceMs: NOW - 70 * MIN, nowMs: NOW, typicals: { leader: typ(60 * MIN) },
+      totalEta: { kind: 'estimate', atMs: NOW, plusMinusMs: 1, confidence: 'low', basis: { n: 4, scope: 'harness', harness: 'claude', model: null, medianMs: 1 } },
+    })
+    expect(r.stageEta).toMatchObject({ kind: 'none', reason: 'beyond-range' })
+    expect(r.publishEta).toMatchObject({ kind: 'none', reason: 'beyond-range' })
+  })
+  test('the whole-piece estimate is none (not "now") once the piece is past the median', () => {
+    const samples = [1, 2, 3].map(i => ({ harness: 'claude', model: 'opus', durationMs: i * H }))
+    expect(estimateEta({ nowMs: NOW, startedAtMs: NOW - 3 * H, harness: 'claude', model: 'opus', samples })).toMatchObject({ kind: 'none', reason: 'beyond-range' })
+    const ok = estimateEta({ nowMs: NOW, startedAtMs: NOW - 30 * MIN, harness: 'claude', model: 'opus', samples })
+    expect(ok.kind === 'estimate' && ok.atMs > NOW).toBe(true)
+  })
+})
+
+describe('Publicado from a release tag, and the legacy review archive (HIGH 3)', () => {
+  const reviewSub = (id: string, ageH: number, extra: object = {}) => sub(id, 'in_review', { updatedAt: iso(NOW - ageH * H), ...extra })
+  test('shasIn reads a commit id the piece names and ignores a hex-looking word', () => {
+    expect(shasIn('delivered in commit 41C546605 on the branch')).toEqual(['41c546605'])
+    expect(shasIn('the decade deadbeef is a word')).toEqual([])
+    expect(shasIn('sha: abcdef0123456789abcdef0123456789abcdef01')).toEqual(['abcdef0123456789abcdef0123456789abcdef01'])
+  })
+  test('a legacy in_review piece whose commit a release tag contains is Publicado', () => {
+    const details = [detail({ subtasks: [reviewSub('p', 5, { notes: 'handback: sha 41c546605' })] as never, sessions: [] })]
+    expect(legacyReviewShas(details, [])).toEqual(['41c546605'])
+    const r = buildLive({ nowMs: NOW, events: [], details, publishedShas: new Set(['41c546605']) })
+    expect(r.deliveries[0]).toMatchObject({ stage: 'published', status: 'in_review' })
+    const not = buildLive({ nowMs: NOW, events: [], details, publishedShas: new Set() })
+    expect(not.deliveries[0]).toMatchObject({ stage: 'leader' })
+  })
+  test('the delivered commit named in the subtask handback COMMENT counts (the real board keeps it there); a second sha beside an unpublished one does not publish', () => {
+    const comment = (body: string, at: number) => ({ id: `c${at}`, taskId: 't1', subtaskId: 'p', author: 'w', body, createdAt: iso(NOW - at * H) })
+    const mk = (comments: object[]) => [detail({ subtasks: [reviewSub('p', 5)] as never, sessions: [], comments: comments as never })]
+    const details = mk([comment('old note: sha 1111111a', 9), comment('handback ok — commit db490b75, rebased on commit 41c546605', 6)])
+    expect(legacyReviewShas(details, []).sort()).toEqual(['41c546605', 'db490b75']) // the OLDER comment's sha is not read
+    expect(buildLive({ nowMs: NOW, events: [], details, publishedShas: new Set(['db490b75', '41c546605']) }).deliveries[0]).toMatchObject({ stage: 'published' })
+    // only the second one is in a tag -> the delivered commit is not -> still review
+    expect(buildLive({ nowMs: NOW, events: [], details, publishedShas: new Set(['41c546605']) }).deliveries[0]).toMatchObject({ stage: 'leader' })
+    // an OLDER comment's sha does not publish a newer handback that names another commit
+    expect(buildLive({ nowMs: NOW, events: [], details, publishedShas: new Set(['1111111a']) }).deliveries[0]).toMatchObject({ stage: 'leader' })
+  })
+  test('old legacy review cards with no live session and no published commit leave the column — counted and listed, never silent', () => {
+    const subs = Array.from({ length: 80 }, (_, i) => reviewSub(`o${i}`, 100 + i))
+    const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: subs as never, sessions: [] })] })
+    expect(r.deliveries).toHaveLength(0)
+    expect(r.archivedTotal).toBe(80)
+    expect(r.archived).toHaveLength(ARCHIVED_CAP)
+    expect(r.archived[0]).toMatchObject({ reason: 'legacy-review-old', title: 'Sub o0' })
+  })
+  test('a fresh review card, or one with a live session, stays in Revisão do líder; a delivery record exempts it', () => {
+    const details = [detail({
+      subtasks: [reviewSub('fresh', 5), reviewSub('alive', 200), reviewSub('flow', 200)] as never,
+      sessions: [sess('s', 'alive')] as never,
+    })]
+    const r = buildLive({ nowMs: NOW, events: [], details, deliveries: new Map([['flow', { phase: 'revisao_lider' }]]) })
+    expect(r.deliveries.map(d => d.subtaskId).sort()).toEqual(['alive', 'flow', 'fresh'])
+    expect(r.archivedTotal).toBe(0)
+  })
+})
+
+describe('hidden is bounded NEWEST first, and a stale no-live-session piece is not a departure (LOW 14)', () => {
+  test('the cap keeps the most recent', () => {
+    const subs = Array.from({ length: HIDDEN_CAP + 20 }, (_, i) => sub(`n${i}`, 'in_progress', { updatedAt: iso(NOW - (i + 1) * 1000) }))
+    const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: subs as never, sessions: [] })] })
+    expect(r.hidden).toHaveLength(HIDDEN_CAP)
+    expect(r.hidden[0]!.title).toBe('Sub n0')
+    expect(r.hidden.some(h => h.title === `Sub n${HIDDEN_CAP + 19}`)).toBe(false)
+  })
+  test('a piece untouched for days with no live session is not listed as having just left', () => {
+    const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [sub('x', 'in_progress', { updatedAt: iso(NOW - 3 * 24 * H) })] as never, sessions: [] })] })
+    expect(r.hidden).toHaveLength(0)
   })
 })
 

@@ -18,6 +18,8 @@ export interface FleetRowLite {
   title: string
   harness: string
   model?: string
+  /** The model the transcript says answered — the composer's own source; outranks `model` (only what was asked for). */
+  observedModel?: string
   /** The effort the session was started with (registry). */
   effort?: string
   accountId?: string
@@ -94,6 +96,8 @@ export interface LiveView {
   generatedAt: string
   samples: number
   hidden: LiveReply['hidden']
+  archived: LiveReply['archived']
+  archivedTotal: number
   sessionTasks: LiveReply['sessionTasks']
   runtime: Record<string, RuntimeFacts>
   summary: {
@@ -148,14 +152,18 @@ export function describeLive(o: {
     const agents: LiveAgentView[] = d.sessionIds.flatMap(id => {
       const r = byId.get(id)
       return r && (ALIVE.has(r.state) || DOWN.has(r.state))
-        ? [{ id: r.id, harness: r.harness, model: r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null, state: r.state }]
+        ? [{ id: r.id, harness: r.harness, model: r.observedModel ?? r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null, state: r.state }]
         : []
     })
     const liveState = liveStateOf(agents)
     const stalled = liveState === 'needs-you' || liveState === 'down'
       || (d.stage === 'adjust' && d.blockedReason !== null)
       || (d.sessionIds.length > 0 && agents.length === 0 && (d.stage === 'running' || d.stage === 'qa'))
-    return { ...d, agents, liveState, stalled }
+    // MEASURED work only: the book's `activeMinutes`, or — when nothing was measured — the span of a session the
+    // FLEET shows alive right now. A session the book thinks open while no agent runs counts nothing.
+    const alive = agents.some(a => ALIVE.has(a.state))
+    const workMs = d.workMs ?? (alive && d.startedAtMs !== null ? Math.max(0, o.nowMs - d.startedAtMs) : null)
+    return { ...d, workMs, agents, liveState, stalled }
   })
   const needle = f.task?.trim().toLowerCase()
   // A piece whose only sessions are LEADERS is the leader's own filing, not delivery work: the leader
@@ -179,7 +187,7 @@ export function describeLive(o: {
     const pubs = workers.flatMap(w => { const d = pieceOf.get(w.id); return d && d.publishEta.kind === 'estimate' ? [d.publishEta.atMs] : [] })
     const taskId = [...pieceOf.values()].find(d => d.sessionIds.includes(r.id))?.taskId ?? o.reply.sessionTasks?.[r.id] ?? null
     return {
-      id: r.id, title: r.title, harness: r.harness, model: r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null,
+      id: r.id, title: r.title, harness: r.harness, model: r.observedModel ?? r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null,
       state: r.state, createdMs: r.createdMs ?? null, taskId, taskTitle: r.task ?? null,
       currentAction: lastLine(r.lastLines, lang, titleOf),
       publishEtaMs: pubs.length ? Math.max(...pubs) : null,
@@ -188,7 +196,7 @@ export function describeLive(o: {
         return {
           id: w.id, title: w.title, state: w.state, word: workerWord(w.state, d?.stage ?? null),
           stage: d?.stage ?? null, cardKey: d?.key ?? null, subtask: d?.subtaskId ? d.title : null, taskId: d?.taskId ?? null,
-          stageSinceMs: d?.stageSinceMs ?? null, blockReason: d?.block?.reason ?? null, harness: w.harness, model: w.model ?? null, effort: w.effort ?? null,
+          stageSinceMs: d?.stageSinceMs ?? null, blockReason: d?.block?.reason ?? null, harness: w.harness, model: w.observedModel ?? w.model ?? null, effort: w.effort ?? null,
         }
       }),
       awaiting,
@@ -197,7 +205,7 @@ export function describeLive(o: {
 
   return {
     generatedAt: o.reply.generatedAt, samples: o.reply.samples,
-    hidden: o.reply.hidden ?? [], sessionTasks: o.reply.sessionTasks ?? {}, runtime: o.runtime ?? {},
+    hidden: o.reply.hidden ?? [], archived: o.reply.archived ?? [], archivedTotal: o.reply.archivedTotal ?? 0, sessionTasks: o.reply.sessionTasks ?? {}, runtime: o.runtime ?? {},
     summary: {
       deliveries: active.length,
       agentsWorking: new Set(active.flatMap(d => d.agents.filter(a => a.state === 'working').map(a => a.id))).size,

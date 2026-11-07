@@ -79,7 +79,7 @@ test('Líderes is a compact pill with real counters; the dropdown opens over the
   expect(card.querySelector('[data-live-leader-body]')).toBeNull()
   await act(async () => (card.querySelector('button') as HTMLElement).click())
   const body = card.querySelector('[data-live-leader-body]')!
-  expect(body.textContent).toContain('claude · opus · high')
+  expect(body.textContent).toContain('claude · Opus 5 · high')
   expect(body.textContent).toContain('handback from worker a')
   expect(body.textContent).not.toContain('{"message"')
   // a worker whose card the filters hide says so in the row
@@ -184,7 +184,7 @@ test('the card is option A: bar, time row, two estimates, no raw JSON in the las
   expect(card.querySelector('[data-live-eta="next"]')!.textContent).toContain('no estimate')
   expect(card.querySelector('[data-live-eta="publish"]')!.textContent).toContain('no estimate')
   expect(card.querySelector('[data-live-last]')!.textContent).toBe('handback from s1')
-  expect(card.querySelector('[data-live-pill="runtime"]')!.textContent!.startsWith('claude · opus')).toBe(true)
+  expect(card.querySelector('[data-live-pill="runtime"]')!.textContent!.startsWith('claude · Opus')).toBe(true)
 })
 
 test('Bloqueado is a column of its own: reason, who lifts it, how long', async () => {
@@ -279,4 +279,125 @@ test('no emoji anywhere in the Live (icons are drawn by the app\'s icon set)', a
   await act(async () => (document.querySelector('[data-live-leader] > button') as HTMLElement).click())
   expect(document.body.textContent).not.toMatch(/[♛⏳⛔▶⧉✓◌↳←]/u)
   expect(document.querySelectorAll('svg').length).toBeGreaterThan(3)
+})
+
+test('MED 8: the card matches the approved preview — one plain grey runtime line, an orange publication box, "‹" on open headers, Líderes after the summary', async () => {
+  const d = { ...reply.deliveries[0]!, workMs: 1, stageEta: { kind: 'estimate', atMs: Date.now() + 3600_000, medianMs: 1, n: 3, nextStage: 'qa' }, publishEta: { kind: 'estimate', atMs: Date.now() + 7200_000, source: 'stages', n: 3, parts: [] } }
+  const withLeader = { ...reply, deliveries: [d], leaders: [{ id: 'L', title: 'Motor', harness: 'claude', model: 'claude-opus-5-5', state: 'working', currentAction: null, workers: [], awaiting: [] }] }
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: withLeader as never, accountLabels: {} }))) })
+  const card = document.querySelector('[data-live-card="t/a"]')!
+  const pills = card.querySelectorAll('[data-live-pill]')
+  expect(pills.length).toBe(1)
+  const line = pills[0] as HTMLElement
+  expect(line.textContent).toBe('claude · Opus 5')
+  expect(line.textContent).not.toContain('claude-opus')
+  expect(line.style.border).toBe('')
+  expect(line.style.borderRadius).toBe('')
+  expect((card.querySelector('[data-live-eta="publish"]') as HTMLElement).style.background).toContain('anthropic-orange-dim')
+  expect((card.querySelector('[data-live-eta="next"]') as HTMLElement).style.background).not.toContain('anthropic-orange')
+  expect(document.querySelector('[data-live-column="running"] [data-live-colhead] [data-live-colchev]')!.textContent).toBe('‹')
+  const summary = document.querySelector('[data-live-summary]')!, leaders = document.querySelector('[data-live-leaders]')!
+  expect(summary.compareDocumentPosition(leaders) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})
+
+test('MED 7: the last action is said in the UI language, not as `on subtask "<title>"`', async () => {
+  const d = { ...reply.deliveries[0]!, lastAction: { text: 'on subtask "Piece A"', atMs: 1, kind: 'comment' } }
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: { ...reply, deliveries: [d] } as never }))) })
+  expect(document.querySelector('[data-live-last]')!.textContent).toBe('comentou na subtarefa')
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: { ...reply, deliveries: [d] } as never }))) })
+  expect(document.querySelector('[data-live-last]')!.textContent).toBe('commented on the subtask')
+})
+
+test('HIGH 3: old legacy reviews are not 246 cards — they are one counted, listed, explained button; nothing is silent', async () => {
+  const archived = Array.from({ length: 3 }, (_, i) => ({ key: `t/o${i}`, taskId: 't', title: `Old review ${i}`, stage: 'leader', reason: 'legacy-review-old', atMs: 1 }))
+  const r = { ...reply, deliveries: [], archived, archivedTotal: 246 }
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: r as never }))) })
+  const btn = document.querySelector('[data-live-archived-toggle]') as HTMLElement
+  expect(btn.textContent).toBe('Older reviews · 246')
+  expect(document.querySelector('[data-live-archived-list]')).toBeNull()
+  await act(async () => btn.click())
+  const list = document.querySelector('[data-live-archived-list]')!
+  expect(list.textContent).toContain('over 72 h')
+  expect(list.querySelectorAll('[data-live-archived]').length).toBe(3)
+  expect(list.textContent).toContain('and 243 more')
+})
+
+test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remove control are 44 px targets', async () => {
+  const { LiveLeaders } = await import('./LiveLeaders')
+  const { LiveTaskFilter } = await import('./LiveTaskFilter')
+  const leader = { id: 'L', title: 'Motor', harness: 'claude', model: null, state: 'working', currentAction: null, workers: [{ id: 'w', title: 'w', state: 'working', stage: 'running', word: 'working', cardKey: 't/a' }], awaiting: [] }
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  const mk = (mobile: boolean) => createElement(Router, null,
+    createElement(LiveLeaders, { leaders: [leader] as never, nowMs: Date.now(), lang: 'pt', locate: () => ({ kind: 'none' as const }), onLocate: () => {}, onOpen: () => {}, mobile }),
+    createElement(LiveTaskFilter, { options: [{ value: 't', label: 'Task', recent: true, live: 1 }], chosen: ['t'], onChange: () => {}, pt: true, mobile }))
+  await act(async () => { root!.render(mk(true)) })
+  expect((document.querySelector('#live-leaders-head') as HTMLElement).style.minHeight).toBe('44px')
+  await act(async () => (document.querySelector('#live-leaders-head') as HTMLElement).click())
+  // the open/closed memory is per leader and persists across tests: open it only when it is not already
+  if (document.querySelector('[data-live-leader]')!.getAttribute('data-open') !== '1') await act(async () => ((document.querySelector('[data-live-leader] button')) as HTMLElement).click())
+  expect((document.querySelector('[data-live-worker="w"]') as HTMLElement).style.minHeight).toBe('44px')
+  expect(document.querySelector('[data-live-chip-hit]')).not.toBeNull()
+  await act(async () => { root!.render(mk(false)) })
+  expect((document.querySelector('#live-leaders-head') as HTMLElement).style.minHeight).toBe('28px')
+  expect(document.querySelector('[data-live-chip-hit]')).toBeNull()
+})
+
+test('HIGH 2 (real screen): a queue card\'s own slot line is not a column slot — the fit measures cards, not the "vaga:" lines inside them', async () => {
+  const q = (k: string) => ({ ...reply.deliveries[0]!, key: `t/${k}`, subtaskId: k, stage: 'queue', staged: { harness: 'codex', model: 'gpt-5.5', effort: 'high' }, slot: { ok: false, reason: 'sem vaga', at: new Date().toISOString() } })
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: { ...reply, deliveries: [q('q1'), q('q2'), q('q3')] } as never }))) })
+  const col = document.querySelector('[data-live-column="queue"]')!
+  expect(col.querySelectorAll('[data-live-card]').length).toBe(3)
+  expect(col.querySelectorAll('[data-live-queue-slot]').length).toBe(3)
+  expect(col.querySelectorAll('[data-live-slot]').length).toBe(3)
+})
+
+test('MED 6 (live worker fixture): clicking a worker in the leaders strip scrolls the BOARD sideways to its card and never moves the page', async () => {
+  const proto = HTMLElement.prototype as unknown as Record<string, unknown>
+  const had = { rect: proto.getBoundingClientRect, sw: Object.getOwnPropertyDescriptor(proto, 'scrollWidth'), st: proto.scrollTo }
+  const boardScrolls: { left?: number }[] = []
+  const pageScrolls: unknown[] = []
+  const intoView: unknown[] = []
+  // happy-dom has no layout: the board is 1000 wide inside a 3000 wide scroller and the target card sits far to the right.
+  proto.getBoundingClientRect = function (this: HTMLElement) {
+    const card = this.hasAttribute('data-live-card')
+    return { left: card ? 1700 : 0, top: 0, width: card ? 300 : 1000, height: 200, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}) }
+  }
+  Object.defineProperty(proto, 'scrollWidth', { configurable: true, get: () => 3000 })
+  proto.scrollTo = function (o: { left?: number }) { boardScrolls.push(o) }
+  const realWinScroll = window.scrollTo
+  window.scrollTo = ((...a: unknown[]) => { pageScrolls.push(a) }) as never
+  const realIntoView = Element.prototype.scrollIntoView
+  Element.prototype.scrollIntoView = function (this: Element) { intoView.push(this) } as never
+  try {
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    const withLeader = { ...reply, leaders: [
+      { id: 'L', title: 'Motor', harness: 'claude', model: 'claude-opus-5-5', state: 'working', currentAction: null, workers: [{ id: 'w2', title: 'worker b', state: 'working', stage: 'qa', word: 'working', cardKey: 't/b', subtask: 'Piece B' }], awaiting: [] },
+    ] }
+    await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: withLeader as never }))) })
+    await act(async () => (document.getElementById('live-leaders-head') as HTMLElement).click())
+    const leader = document.querySelector('[data-live-leader="L"]')!
+    if (leader.getAttribute('data-open') !== '1') await act(async () => (leader.querySelector('button') as HTMLElement).click())
+    const worker = document.querySelector('[data-live-worker="w2"]') as HTMLElement
+    expect(worker).not.toBeNull()
+    expect(worker.querySelector('[data-live-worker-info]')!.textContent).not.toBe('no card on the board')
+    boardScrolls.length = 0
+    await act(async () => { worker.click(); await new Promise(r => setTimeout(r, 120)) })
+    // the dropdown closed and the board was asked to bring the card into view horizontally: 1700 - (1000 - 300) / 2 = 1350
+    expect(document.querySelector('[data-live-leaders]')!.getAttribute('data-open')).toBe('0')
+    expect(boardScrolls.length).toBeGreaterThan(0)
+    expect(boardScrolls[boardScrolls.length - 1]!.left).toBe(1350)
+    // ... and nothing scrolled the page: neither window.scrollTo nor an element scrollIntoView on the card
+    expect(pageScrolls).toEqual([])
+    expect(intoView.filter(e => (e as HTMLElement).hasAttribute?.('data-live-card'))).toEqual([])
+  } finally {
+    proto.getBoundingClientRect = had.rect
+    if (had.sw) Object.defineProperty(proto, 'scrollWidth', had.sw); else delete proto.scrollWidth
+    proto.scrollTo = had.st
+    window.scrollTo = realWinScroll
+    Element.prototype.scrollIntoView = realIntoView
+  }
 })
