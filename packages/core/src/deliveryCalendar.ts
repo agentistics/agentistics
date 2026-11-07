@@ -33,6 +33,9 @@ export type CalEta =
   | { kind: 'estimate'; atMs: number; confidence: CalConfidence | null }
   | { kind: 'none'; reason: string | null }
 
+/** One real visit to a stage, from the activity log; `ms` runs to now for the stage the piece is in. */
+export interface CalVisit { stage: CalStage; enteredMs: number; ms: number }
+
 export interface CalPiece {
   /** `<taskId>` or `<taskId>/<subtaskId>`. */
   key: string
@@ -50,6 +53,8 @@ export interface CalPiece {
   active: boolean
   startedAtMs: number | null
   stageSinceMs: number | null
+  /** The stages the piece really went through, oldest first — what the schedule's coloured bars are drawn from. */
+  trail: CalVisit[]
   /** Expected time of leaving the current stage. */
   stageEta: CalEta
   /** Expected time of reaching Publicado. */
@@ -103,12 +108,22 @@ export interface CalLiveInput {
   stageSinceMs: number | null
   harnesses: readonly string[]
   models: readonly string[]
+  trail?: readonly CalVisit[]
   eta: { kind: 'estimate'; confidence: CalConfidence } | { kind: 'none'; reason?: string }
   stageEta: { kind: 'estimate'; atMs: number } | { kind: 'none'; reason?: string }
   publishEta: { kind: 'estimate'; atMs: number } | { kind: 'none'; reason?: string }
   deliveredAtMs: number | null
 }
-export interface CalRecordInput { subtaskId: string; taskId: string; phase: string; versionTarget?: string; publishedAt?: string; tag?: string }
+export interface CalRecordInput {
+  subtaskId: string; taskId: string; phase: string; versionTarget?: string; publishedAt?: string; tag?: string
+  /** ISO of the record's first and latest phase moves (its history) — when the piece began and entered this phase. */
+  firstAt?: string; lastAt?: string
+}
+
+/** The Live stage each delivery phase reads as (`delivery/host.ts` LIVE_STAGE) — a record with no Live card still has one. */
+const PHASE_STAGE: Record<string, CalStage> = {
+  fila: 'queue', executando: 'running', qa: 'qa', ajuste: 'adjust', revisao_lider: 'leader', pr_merge: 'merge', ci: 'ci', publicado: 'published', bloqueado: 'blocked',
+}
 export interface CalTaskInput { id: string; title: string; status: string; priority?: string; dueDate?: string }
 export interface CalSubtaskInput { id: string; taskId: string; title: string }
 export interface CalResetInput { harness: string; account: string; label: string; window: '5h' | 'week'; resetsAt: number }
@@ -160,7 +175,7 @@ export function buildCalendar(o: {
       harness: l.harnesses[0] ?? null, model: l.models[0] ?? null,
       priority: toPriority(task?.priority),
       active: !published,
-      startedAtMs: l.startedAtMs, stageSinceMs: l.stageSinceMs,
+      startedAtMs: l.startedAtMs, stageSinceMs: l.stageSinceMs, trail: l.trail ? l.trail.map(v => ({ ...v })) : [],
       stageEta: published ? { kind: 'none', reason: 'final' } : eta(l.stageEta, confidence),
       publishEta, publishedAtMs, dueDate,
       confirmed: published || (publishEta.kind === 'estimate' && publishEta.confidence !== null && RANK[publishEta.confidence] >= RANK.medium),
@@ -172,14 +187,31 @@ export function buildCalendar(o: {
   // which version, which is what the calendar's history needs.
   for (const r of o.records) {
     const key = `${r.taskId}/${r.subtaskId}`
+    if (seen.has(key)) continue
     const publishedAtMs = parseMs(r.publishedAt)
-    if (seen.has(key) || r.phase !== 'publicado' || publishedAtMs === null) continue
     const task = taskById.get(r.taskId)
+    const stage = PHASE_STAGE[r.phase]
+    if (stage && stage !== 'published') {
+      // A piece the delivery flow tracks (it has a phase, maybe a version) that the Live line does not draw — planned
+      // work with no session yet. It belongs on a calendar, but with NO estimate: the Live model produced none.
+      seen.add(key)
+      pieces.push({
+        key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
+        title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage, version: pickVersion(r.versionTarget),
+        harness: null, model: null, priority: toPriority(task?.priority), active: task?.status === 'in_progress',
+        startedAtMs: parseMs(r.firstAt), stageSinceMs: parseMs(r.lastAt), trail: [],
+        stageEta: { kind: 'none', reason: 'not-started' }, publishEta: { kind: 'none', reason: 'not-started' },
+        publishedAtMs: null, dueDate: task?.dueDate ?? null, confirmed: false,
+        late: task?.dueDate !== undefined && task.dueDate < today,
+      })
+      continue
+    }
+    if (r.phase !== 'publicado' || publishedAtMs === null) continue
     pieces.push({
       key, taskId: r.taskId, taskTitle: task?.title ?? r.taskId, subtaskId: r.subtaskId,
       title: subById.get(r.subtaskId)?.title ?? r.subtaskId, stage: 'published', version: pickVersion(r.versionTarget),
       harness: null, model: null, priority: toPriority(task?.priority), active: false,
-      startedAtMs: null, stageSinceMs: null,
+      startedAtMs: null, stageSinceMs: null, trail: [],
       stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' },
       publishedAtMs, dueDate: task?.dueDate ?? null, confirmed: true, late: false,
     })

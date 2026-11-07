@@ -61,6 +61,16 @@ describe('buildCalendar', () => {
     expect(p.version).toBe('2.200.6')
     expect(p.active).toBe(false)
   })
+  test('a record the Live line does not draw (planned work, no session) is still a piece — with NO estimate', () => {
+    const r = buildCalendar({
+      nowMs: NOW, lives: [],
+      records: [{ subtaskId: 'p', taskId: 't1', phase: 'executando', versionTarget: '2.203.0', firstAt: '2026-11-07T10:00:00.000Z', lastAt: '2026-11-07T12:00:00.000Z' }],
+      tasks: [{ id: 't1', title: 'Esteira', status: 'in_progress', priority: 'high' }], subtasks: [{ id: 'p', taskId: 't1', title: 'Peça p' }], resets: [],
+    })
+    expect(r.pieces[0]).toMatchObject({ key: 't1/p', title: 'Peça p', stage: 'running', version: '2.203.0', active: true, publishedAtMs: null, startedAtMs: Date.parse('2026-11-07T10:00:00.000Z') })
+    expect(r.pieces[0]!.publishEta.kind).toBe('none')
+    expect(r.versions[0]).toMatchObject({ version: '2.203.0', state: 'planned', atMs: null, basis: 'none' })
+  })
   test('`next` is a deferral, not a version', () => {
     expect(c.versions.some(v => v.version === 'next')).toBe(false)
   })
@@ -96,7 +106,7 @@ describe('filterCalendar', () => {
   const c = base()
   test('default = tasks being worked on: only active pieces, and versions that carry one', () => {
     const v = filterCalendar(c)
-    expect(v.pieces.map(p => p.key).sort()).toEqual(['t1/a', 't1/b'])
+    expect(v.pieces.map(p => p.key).sort()).toEqual(['t1/a', 't1/b', 't1/dflt'])
     // 2.201.1 and 2.200.6 are history: context, kept while nothing narrows by piece.
     expect(v.versions.map(x => x.version)).toEqual(['2.200.6', '2.201.1', '2.202.0'])
   })

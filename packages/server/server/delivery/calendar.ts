@@ -33,6 +33,7 @@ export async function readCalendarSources(): Promise<CalendarSources> {
     key: d.key, taskId: d.taskId, taskTitle: d.taskTitle, subtaskId: d.subtaskId, title: d.title,
     stage: d.stage as CalStage, startedAtMs: d.startedAtMs, stageSinceMs: d.stageSinceMs,
     harnesses: d.harnesses, models: d.models,
+    trail: d.trail.map(v => ({ stage: v.stage as CalStage, enteredMs: v.enteredMs, ms: v.ms })),
     eta: d.eta.kind === 'estimate' ? { kind: 'estimate', confidence: d.eta.confidence } : { kind: 'none', reason: d.eta.reason },
     stageEta: d.stageEta.kind === 'estimate' ? { kind: 'estimate', atMs: d.stageEta.atMs } : { kind: 'none', reason: d.stageEta.reason },
     publishEta: d.publishEta.kind === 'estimate' ? { kind: 'estimate', atMs: d.publishEta.atMs } : { kind: 'none', reason: d.publishEta.reason },
@@ -45,6 +46,8 @@ export async function readCalendarSources(): Promise<CalendarSources> {
       ...(r.versionTarget ? { versionTarget: r.versionTarget } : {}),
       ...(r.publishedAt ? { publishedAt: r.publishedAt } : {}),
       ...(r.tag ? { tag: r.tag } : {}),
+      ...(r.history[0] ? { firstAt: r.history[0].at } : {}),
+      ...(r.history.length ? { lastAt: r.history[r.history.length - 1]!.at } : {}),
     })),
     tasks: world.book.tasks.map(t => ({
       id: t.id, title: t.title, status: t.status,
