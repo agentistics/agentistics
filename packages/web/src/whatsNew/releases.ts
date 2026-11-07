@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.203.0': {
+    features: [
+      {
+        pt: 'Nova página BETA "Calendário de entregas" (Agentask → Calendário): as próximas versões em cartões no topo, e abaixo Mês (versões como fitas), Semana, Dia (por hora, com as renovações das contas) e Cronograma (versões em cima, peças por prioridade embaixo, linha do "agora"). Por padrão mostra só as tarefas em andamento; filtre por tarefa, etapa, versão, harness e prioridade, ou só as confirmadas. Onde a Live não consegue estimar, o calendário diz "sem estimativa" em vez de inventar um horário. No celular vira uma agenda por dia. Dá para exportar a visão filtrada em .ics, e os agentes consultam o mesmo calendário pela ferramenta agentistics_delivery_calendar ou por agentop flow calendario.',
+        en: 'New BETA page "Delivery calendar" (Agentask → Calendar): the next versions as cards on top, and below Month (versions as ribbons), Week, Day (by the hour, with the accounts renewals) and Schedule (versions on top, pieces by priority below, a "now" line). By default it shows only the tasks being worked on; filter by task, stage, version, harness and priority, or only the confirmed ones. Where the Live line cannot estimate, the calendar says "no estimate" instead of inventing a time. On a phone it becomes an agenda by day. You can export the filtered view as .ics, and agents read the same calendar through the agentistics_delivery_calendar tool or agentop flow calendario.',
+      },
+    ],
+    fixes: [],
+  },
   '2.201.2': {
     features: [],
     fixes: [{
