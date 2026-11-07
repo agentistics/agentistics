@@ -252,6 +252,32 @@ export function stepVerb(step: ActivityStep, pt: boolean): string {
   return L(step.status === 'running' ? w.doing : w.done, pt)
 }
 
+/**
+ * OPENCODE.SESSAO — what the folded text under a step IS, named for it: an edit carries its diff, a todo list its checklist,
+ * a subagent its answer, a read the file's contents. "output" under all of them made a diff read as something a command printed.
+ */
+export function outputLabel(kind: ActivityKind, pt: boolean): string {
+  switch (kind) {
+    case 'edit': case 'write': case 'memory': return pt ? 'alterações' : 'changes'
+    case 'plan': return pt ? 'lista' : 'list'
+    case 'delegate': return pt ? 'resposta' : 'answer'
+    case 'read': return pt ? 'conteúdo' : 'contents'
+    default: return pt ? 'saída' : 'output'
+  }
+}
+
+export type OutputMark = 'add' | 'del' | 'hunk' | null
+/**
+ * PURE. A change's lines, each marked `add` (`+`), `del` (`-`) or `hunk` (`@@`), so the diff can be read as one — only for a
+ * step that CHANGED something (edit / write / memory): a command that prints `-rw-r--r--` is not a deletion. null otherwise.
+ */
+export function outputLines(kind: ActivityKind, output: string): Array<{ text: string; mark: OutputMark }> | null {
+  if (kind !== 'edit' && kind !== 'write' && kind !== 'memory') return null
+  const lines = output.split('\n')
+  if (!lines.some(l => /^[+-]/.test(l))) return null
+  return lines.map(text => ({ text, mark: text.startsWith('@@') ? 'hunk' : text.startsWith('+') ? 'add' : text.startsWith('-') ? 'del' : null }))
+}
+
 /** At most this many phrases before "and N more" — the line must stay ONE line. */
 export const MAX_PHRASES = 3
 

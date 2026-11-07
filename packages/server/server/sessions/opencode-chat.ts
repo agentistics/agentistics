@@ -50,14 +50,16 @@ export function parseOpencodeChat(messages: readonly OpencodeMessageRow[], parts
         const st = obj(d.state)
         const input = obj(st.input)
         const canonical = canonicalTool('opencode', d.tool)
-        const detail = toolDetailOf(input)
         const file = typeof input.filePath === 'string' ? input.filePath : typeof input.filepath === 'string' ? input.filepath : null
+        // A file tool's detail is its path (the files panel and the live feed read a write/edit by it), `filepath` included.
+        const detail = (file && WRITE_TOOLS.has(d.tool) ? file : null) ?? toolDetailOf(input)
         tools.push({
           name: d.tool,
           ...(canonical !== d.tool ? { canonical } : {}),
           ...(st.status === 'error' ? { failed: true } : {}),
           ...(detail ? { detail } : {}),
-          ...(file && WRITE_TOOLS.has(d.tool) ? { writes: [file] } : {}),
+          // No `writes` for a file tool (OPENCODE.SESSAO): `writes` is for files a SHELL command wrote; with the path also in
+          // `detail` every edit counted twice and an edit of an existing file was filed as a NEW one.
           ref: p.id,
         })
       }
