@@ -59,6 +59,21 @@ describe('vigia-desempenho host ops', () => {
     expect(writes).toEqual([]); expect(notices).toEqual([])
   })
 
+  test('dry run wired the way the flow wires it (the sample output fed to the capture) writes no profile and sends no notice', async () => {
+    // three breaching samples arrive in ONE run: the dry run decides to fire, and must still do nothing.
+    const { d, writes, notices } = deps([{}], { samples: () => Array.from({ length: 3 }, (_, k) => ({ at: k, cpuPct: 5, rssMB: 1, loopLagMaxMs: 900, routes: {} })) })
+    const ops = perfWatchHostOps(d)
+    const last = await ops['amostrar-desempenho']({ dryRun: true })
+    expect((last as { fire: unknown[] }).fire.length).toBe(1)
+    expect((last as { dryRun: boolean }).dryRun).toBe(true)
+    expect(await ops['capturar-desempenho'](last)).toMatchObject({ captured: null, reason: 'dry run' })
+    expect(writes).toEqual([]); expect(notices).toEqual([])
+    // and a dry run does not advance the state: the same three samples still fire for real afterwards
+    const real = await ops['amostrar-desempenho']({}) as { fire: unknown[]; dryRun: boolean }
+    expect(real.dryRun).toBe(false)
+    expect(real.fire.length).toBe(1)
+  })
+
   test('off refuses in words, never a silent success', async () => {
     const { d } = deps([{}], { off: () => true })
     expect(await perfWatchHostOps(d)['amostrar-desempenho']({})).toMatchObject({ refused: true })

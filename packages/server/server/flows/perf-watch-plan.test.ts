@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { DEFAULT_PERF_BUDGETS, describeBreach, emptyPerfWatchState, evaluatePerf, p95, routeBucket, type PerfSample } from './perf-watch-plan'
+import { DEFAULT_PERF_BUDGETS, NOTICE_GAP_MS, RECOVER_SAMPLES, SAMPLE_EVERY_MS, describeBreach, emptyPerfWatchState, evaluatePerf, p95, routeBucket, type PerfSample } from './perf-watch-plan'
 
 const sample = (o: Partial<PerfSample> = {}): PerfSample => ({ at: 0, cpuPct: 5, rssMB: 500, loopLagMaxMs: 20, routes: {}, ...o })
 
@@ -16,15 +16,53 @@ describe('evaluatePerf', () => {
     expect(fires).toEqual([0, 0, 0, 0, 0, 1, 0, 0, 0])
   })
 
-  test('recovering clears the episode; breaking again fires again', () => {
+  test('only RECOVER_SAMPLES calm samples in a row end the episode; breaking again after the gap fires again', () => {
     let st = emptyPerfWatchState()
-    for (let i = 0; i < 3; i++) st = evaluatePerf(st, sample({ loopLagMaxMs: 900 })).state
+    let at = 0
+    const next = (v: number) => { const r = evaluatePerf(st, sample({ at, loopLagMaxMs: v })); st = r.state; at += SAMPLE_EVERY_MS; return r }
+    for (let i = 0; i < 3; i++) next(900)
     expect(st.fired).toEqual(['loopLagMaxMs'])
-    st = evaluatePerf(st, sample({ loopLagMaxMs: 10 })).state
+    for (let i = 0; i < RECOVER_SAMPLES - 1; i++) next(10)
+    expect(st.fired).toEqual(['loopLagMaxMs'])
+    next(10)
     expect(st.fired).toEqual([])
     expect(st.streaks.loopLagMaxMs).toBeUndefined()
-    const again = [1, 2, 3].map(() => { const r = evaluatePerf(st, sample({ loopLagMaxMs: 900 })); st = r.state; return r.fire.length })
-    expect(again).toEqual([0, 0, 1])
+    // a new episode inside the notice gap is held back…
+    const early = [1, 2, 3].map(() => next(900).fire.length)
+    expect(early).toEqual([0, 0, 0])
+    // …and fires once the gap has passed while it is still broken.
+    at += NOTICE_GAP_MS
+    expect(next(900).fire.map(b => b.key)).toEqual(['loopLagMaxMs'])
+  })
+
+  test('a calm sample inside a busy stretch does not end the episode (the oscillating CPU of the QA repro)', () => {
+    let st = emptyPerfWatchState()
+    let notices = 0
+    const SAMPLES = (8 * 3_600_000) / SAMPLE_EVERY_MS
+    for (let i = 0; i < SAMPLES; i++) {
+      // 6 samples at 40 % then 1 at 10 %, repeating, for 8 hours of 30 s samples.
+      const r = evaluatePerf(st, sample({ at: i * SAMPLE_EVERY_MS, cpuPct: i % 7 === 6 ? 10 : 40 }))
+      st = r.state
+      notices += r.fire.length
+    }
+    expect(notices).toBe(1)
+  })
+
+  test('a budget never fires twice inside NOTICE_GAP_MS, however the episodes fall', () => {
+    let st = emptyPerfWatchState()
+    const stamps: number[] = []
+    const SAMPLES = (8 * 3_600_000) / SAMPLE_EVERY_MS
+    for (let i = 0; i < SAMPLES; i++) {
+      // 6 over, then a full recovery (RECOVER_SAMPLES under): every cycle is a genuinely new episode.
+      const phase = i % (6 + RECOVER_SAMPLES)
+      const at = i * SAMPLE_EVERY_MS
+      const r = evaluatePerf(st, sample({ at, cpuPct: phase < 6 ? 40 : 10 }))
+      st = r.state
+      if (r.fire.length) stamps.push(at)
+    }
+    expect(stamps.length).toBeGreaterThan(1)
+    expect(stamps.length).toBeLessThanOrEqual(Math.ceil(8 * 60 / 30) + 1)
+    for (let i = 1; i < stamps.length; i++) expect(stamps[i]! - stamps[i - 1]!).toBeGreaterThanOrEqual(NOTICE_GAP_MS)
   })
 
   test('one slow sample in between good ones is not a breach', () => {

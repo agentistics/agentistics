@@ -19,12 +19,12 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AGENTISTICS_DATA_DIR } from '../config'
-import { DEFAULT_PERF_BUDGETS, SAMPLE_EVERY_MS, describeBreach, emptyPerfWatchState, evaluatePerf, p95, routeBucket, type PerfBreach, type PerfSample, type PerfWatchState } from './perf-watch-plan'
+import { DEFAULT_PERF_BUDGETS, NOTICE_GAP_MS, SAMPLE_EVERY_MS, describeBreach, emptyPerfWatchState, evaluatePerf, p95, routeBucket, type PerfBreach, type PerfSample, type PerfWatchState } from './perf-watch-plan'
 
 export const PERF_DIR = join(AGENTISTICS_DATA_DIR, 'perf')
 export const PROFILE_MS = 10_000
 export const KEEP = 10
-export const CAPTURE_GAP_MS = 30 * 60_000
+export const CAPTURE_GAP_MS = NOTICE_GAP_MS
 const LAG_TICK_MS = 250
 const MAX_WINDOW = 5000
 
@@ -141,7 +141,8 @@ export function perfWatchHostOps(d: PerfWatchDeps = defaultPerfWatchDeps()) {
       let over: PerfBreach[] = []
       for (const s of samples) { const r = evaluatePerf(st, s); st = r.state; over = r.over; fire.push(...r.fire) }
       if (rec(value).dryRun !== true) state = st
-      return { ok: true, samples: samples.length, last: samples.at(-1), over, fire }
+      // `dryRun` is echoed so a flow that wires `capturar-desempenho` to this output stays dry end to end.
+      return { ok: true, samples: samples.length, last: samples.at(-1), over, fire, dryRun: rec(value).dryRun === true }
     },
     'capturar-desempenho': async (value: unknown) => {
       if (d.off()) return refuse('the performance watch is off (AGENTISTICS_PERF_WATCH=0)')

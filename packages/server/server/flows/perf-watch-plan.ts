@@ -11,7 +11,10 @@
  * - A budget counts as broken only after `streak` CONSECUTIVE samples over it — one slow build or one
  *   cold request is not a regression, and a notice that cries wolf is one nobody reads.
  * - It FIRES ONCE per episode: a budget that stays broken does not notify again until it has
- *   recovered (one sample under) and broken again.
+ *   RECOVERED — `RECOVER_SAMPLES` consecutive samples under it, because one good sample inside a
+ *   busy-but-not-broken stretch is noise, not recovery (8 h of "6 over, 1 under" raised 137 notices).
+ * - And never twice for one budget inside `NOTICE_GAP_MS`, whatever the episodes did: the notice is
+ *   informational and a person reads one every half hour at most.
  * - A latency with no request in the window is `null` — "nobody asked" — never a 0 that would read as
  *   fast, and never a breach.
  * - It never restarts, stops or changes anything. It measures, keeps a profile and tells.
@@ -56,14 +59,23 @@ export const DEFAULT_PERF_BUDGETS: PerfBudgets = {
   },
 }
 
+/** Consecutive samples under budget that end an episode (5 × 30 s = 2.5 min). */
+export const RECOVER_SAMPLES = 5
+/** Minimum gap between two notices for the same budget key. */
+export const NOTICE_GAP_MS = 30 * 60_000
+
 export interface PerfWatchState {
   /** Consecutive samples over budget, per budget key (`cpuPct`, `loopLagMaxMs`, `route:<path>`). */
   streaks: Record<string, number>
   /** Budget keys that have fired in the current episode (cleared when the budget recovers). */
   fired: string[]
+  /** Consecutive samples under budget since a fired budget last broke; ends the episode at `RECOVER_SAMPLES`. */
+  calm: Record<string, number>
+  /** When each budget key last fired a notice (sample time, ms). */
+  lastFire: Record<string, number>
 }
 
-export const emptyPerfWatchState = (): PerfWatchState => ({ streaks: {}, fired: [] })
+export const emptyPerfWatchState = (): PerfWatchState => ({ streaks: {}, fired: [], calm: {}, lastFire: {} })
 
 export interface PerfBreach { key: string; value: number; max: number; streak: number }
 
@@ -80,19 +92,30 @@ export function evaluatePerf(state: PerfWatchState, sample: PerfSample, budgets:
   ]
   const streaks: Record<string, number> = {}
   const fired = new Set(state.fired)
+  const calm: Record<string, number> = { ...state.calm }
+  const lastFire: Record<string, number> = { ...state.lastFire }
   const over: PerfBreach[] = []
   const fire: PerfBreach[] = []
   for (const { key, value, budget } of checks) {
     // No request in the window: the route says nothing either way — the streak is kept, not broken.
     if (value === null || !Number.isFinite(value)) { if (state.streaks[key]) streaks[key] = state.streaks[key]!; continue }
-    if (value <= budget.max) { fired.delete(key); continue }
+    if (value <= budget.max) {
+      if (fired.has(key)) {
+        const n = (calm[key] ?? 0) + 1
+        if (n >= RECOVER_SAMPLES) { fired.delete(key); delete calm[key] } else calm[key] = n
+      }
+      continue
+    }
+    delete calm[key]
     const streak = (state.streaks[key] ?? 0) + 1
     streaks[key] = streak
     const breach = { key, value, max: budget.max, streak }
     over.push(breach)
-    if (streak >= budget.streak && !fired.has(key)) { fire.push(breach); fired.add(key) }
+    if (streak >= budget.streak && !fired.has(key) && sample.at - (lastFire[key] ?? -Infinity) >= NOTICE_GAP_MS) {
+      fire.push(breach); fired.add(key); lastFire[key] = sample.at
+    }
   }
-  return { state: { streaks, fired: [...fired] }, over, fire }
+  return { state: { streaks, fired: [...fired], calm, lastFire }, over, fire }
 }
 
 /** PURE: p95 of a window of latencies; null when empty. */
