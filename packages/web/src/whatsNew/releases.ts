@@ -10,6 +10,20 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.202.0': {
+    features: [
+      {
+        pt: 'A Esteira de entregas ao vivo ganhou uma barra de filtros clara (filtros de um lado, visão e ações do outro), “Apenas ativas” e “Exibir itens na fila”, e uma ordenação que mostra primeiro o que tem a prioridade mais alta — cada cartão traz a prioridade da tarefa. As colunas empilham os cartões na vertical, rolam sozinhas e ganham uma busca quando passam de três cartões fora da vista; “Executando” virou “Em desenvolvimento” e “Em QA” virou “QA”. O motivo de um cartão esperar vaga agora vem em palavras simples, e o seletor de tarefas ficou mais largo e sem texto por cima de texto. Os assistentes também enxergam a prioridade e os mesmos filtros pelo MCP.',
+        en: 'The Live Delivery line gets a clear filter bar (filters on one side, view and actions on the other), “Only active” and “Show queued items”, and an order that lists the highest priority first — every card shows its task’s priority. Columns stack their cards vertically, scroll on their own and gain a search once more than three cards are out of view; “Running” became “In development” and “In QA” became “QA”. Why a card waits for a slot now reads in plain words, and the task picker is wider with no text on top of text. Assistants see the priority and the same filters through MCP too.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Peças na fila não somem mais por causa do filtro de agentes: “ativo” agora quer dizer “está numa coluna do fluxo”, não “tem agente rodando”.',
+        en: 'Queued pieces no longer vanish behind the agents filter: “active” now means “sits in a flow column”, not “has a running agent”.',
+      },
+    ],
+  },
   '2.201.1': {
     features: [],
     fixes: [

@@ -20,7 +20,7 @@
  *    similar pieces, or a piece already past the typical range, answers `none` with the reason.
  */
 
-import { subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
+import { migratePriority, subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
 import type { PieceTimes } from './task-times'
 import type { TaskDetail } from './task-report'
 
@@ -107,6 +107,11 @@ export interface LiveDelivery {
   /** The newest thing the log says about this piece, short. Null when nothing is recorded. */
   lastAction: { text: string; atMs: number; kind?: string; from?: string; to?: string } | null
   blockedReason: string | null
+  /**
+   * The Agentask priority of the piece (urgent | high | medium | low) — the TASK's; a subtask carries none of its own, so
+   * it inherits the task's. Never `none`: an unset priority reads as `low` everywhere (`migratePriority`).
+   */
+  priority: 'urgent' | 'high' | 'medium' | 'low'
   /** Set once a published piece leaves the line. */
   deliveredAtMs: number | null
   /**
@@ -677,6 +682,7 @@ export function buildLive(o: {
         ...(ev.from ? { from: ev.from } : {}), ...(ev.to ? { to: ev.to } : {}),
       } : null,
       blockedReason: p.blockedReason,
+      priority: migratePriority(p.task.priority) as LiveDelivery['priority'],
       deliveredAtMs: stage === 'published' ? deliveredAtMs : null,
       staged: p.sub?.stagedSession ? {
         harness: p.sub.stagedSession.harness ?? null, model: p.sub.stagedSession.model ?? null,

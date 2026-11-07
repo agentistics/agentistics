@@ -48,13 +48,19 @@ test('draws the nine stages, the cards in them, the summary and an honest "no es
   expect(document.querySelector('[data-live-card="t/a"]')!.getAttribute('data-alert')).toBeNull()
 })
 
-test('"only with active agents" keeps the cards whose agent is alive', async () => {
+test('"Apenas ativas" is ON by default and keeps the flow cards; turning it off hides them (and it is remembered)', async () => {
+  localStorage.clear()
   const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, props('pt')))) })
   await act(async () => { await new Promise(r => setTimeout(r, 20)) })
-  const toggle = Array.from(document.querySelectorAll('button[aria-pressed]')).find(b => b.textContent?.includes('só com agentes ativos')) as HTMLElement
+  const toggle = document.querySelector('[data-live-only-active]') as HTMLElement
+  expect(toggle.textContent).toContain('Apenas ativas')
+  expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  expect(document.querySelectorAll('[data-live-card]').length).toBe(2)
   await act(async () => toggle.click())
-  expect(document.querySelectorAll('[data-live-card]').length).toBe(2) // both have live (waiting-approval counts as alive)
+  expect(document.querySelectorAll('[data-live-card]').length).toBe(0)
+  expect(JSON.parse(localStorage.getItem('agentistics.live.view.v1')!)).toMatchObject({ onlyActive: false, showQueue: true })
+  localStorage.clear()
 })
 
 test('Líderes is a compact pill with real counters; the dropdown opens over the board, leaders collapsed, workers as rows', async () => {
@@ -197,7 +203,7 @@ test('Bloqueado is a column of its own: reason, who lifts it, how long', async (
   expect(blk.textContent).toContain('bloqueado por: limite de uso / login')
   expect(blk.textContent).toContain('quem destrava: líder')
   expect(blk.textContent).toContain('há 42 min')
-  expect(blk.textContent).toContain('volta para: em qa')
+  expect(blk.textContent).toContain('volta para: qa')
 })
 
 test('a card that leaves the board is never silent: the "saíram há pouco" list says why (no ghost line in a column)', async () => {
@@ -222,7 +228,7 @@ test('a card that moved says where it came from, for a few seconds', async () =>
   const mv = { ...reply, deliveries: [{ ...reply.deliveries[0]!, stage: 'qa' }, reply.deliveries[1]!] }
   await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: mv as never }))) })
   const pill = document.querySelector('[data-live-card="t/a"] [data-live-came-from]')!
-  expect(pill.textContent).toBe('veio de Executando · agora')
+  expect(pill.textContent).toBe('veio de Em desenvolvimento · agora')
   expect(document.querySelector('[data-live-card="t/b"] [data-live-came-from]')).toBeNull()
 })
 

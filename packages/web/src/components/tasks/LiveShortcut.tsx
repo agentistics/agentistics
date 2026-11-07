@@ -88,7 +88,7 @@ export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'e
       <>
         {button}
         {open && createPortal(
-          <div role="dialog" aria-modal="true" aria-label="Live Delivery" data-live-sheet style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'flex-end' }}>
+          <div role="dialog" aria-modal="true" aria-label={pt ? 'Esteira de entregas ao vivo' : 'Live Delivery'} data-live-sheet style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'flex-end' }}>
             <div onClick={() => setOpen(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.5)' }} />
             <div style={{
               position: 'relative', width: '100%', maxHeight: 'calc(86dvh / var(--ui-zoom, 1))', display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)',
@@ -103,7 +103,7 @@ export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'e
                 <button type="button" className="ag-tap" onClick={go} style={{
                   width: '100%', minHeight: 44, borderRadius: 10, border: 0, background: 'var(--anthropic-orange)', color: '#fff',
                   fontFamily: 'inherit', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-                }}>{pt ? 'Abrir Live Delivery' : 'Open Live Delivery'}</button>
+                }}>{pt ? 'Abrir esteira de entregas' : 'Open Live Delivery'}</button>
               </div>
             </div>
           </div>, document.body)}
@@ -116,7 +116,7 @@ export default function LiveShortcut({ lang, enabled = true }: { lang: 'pt' | 'e
       {button}
       {open && (
         <div
-          role="dialog" aria-label="Live Delivery" data-live-popover
+          role="dialog" aria-label={pt ? 'Esteira de entregas ao vivo' : 'Live Delivery'} data-live-popover
           onClick={e => { if (popoverClickGoes(e.target as HTMLElement)) go() }}
           style={{
             position: 'absolute', top: '100%', right: 0, paddingTop: 8, zIndex: 900, animation: 'none', transition: fade,

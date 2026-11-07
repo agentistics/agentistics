@@ -9,7 +9,7 @@
  * a decision). A worker belongs to a leader through the `parentSessionId` the registry recorded.
  */
 
-import { humanizeAction, plainLeaderName, type LiveLang } from '@agentistics/core'
+import { humanizeAction, liveComparator, LIVE_SORT_DEFAULT, plainLeaderName, stageVisible, type LiveLang, type LiveSortId } from '@agentistics/core'
 import { LIVE_STAGES, type LiveDelivery, type LiveReply, type LiveStage } from './task-live'
 
 /** The slice of a fleet row this module reads (a `ControlSession` satisfies it). */
@@ -132,7 +132,11 @@ export function workerWord(state: string, stage: LiveStage | null): WorkerWord {
   return 'idle'
 }
 
-export interface LiveFilters { task?: string; stage?: LiveStage; stalledOnly?: boolean }
+/**
+ * The screen's own switches, answered by the same rules (`@agentistics/core` `liveBoard.ts`): `onlyActive` and
+ * `showQueue` default to ON (everything shown); `sort` orders each stage's cards (default: highest priority first).
+ */
+export interface LiveFilters { task?: string; stage?: LiveStage; stalledOnly?: boolean; onlyActive?: boolean; showQueue?: boolean; sort?: LiveSortId }
 
 export function describeLive(o: {
   reply: LiveReply
@@ -169,10 +173,15 @@ export function describeLive(o: {
   // A piece whose only sessions are LEADERS is the leader's own filing, not delivery work: the leader
   // has its card in the band, and a column card would show the task's age as "total".
   const leaderOnly = (d: LiveDeliveryView) => d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
+  const flow = { onlyActive: f.onlyActive ?? true, showQueue: f.showQueue ?? true }
+  const cmp = liveComparator(f.sort ?? LIVE_SORT_DEFAULT)
   const deliveries = all.filter(d => !leaderOnly(d)).filter(d =>
     (!needle || d.taskId === f.task || d.taskTitle.toLowerCase().includes(needle))
     && (!f.stage || d.stage === f.stage)
+    && stageVisible(d.stage, flow)
     && (!f.stalledOnly || d.stalled))
+    // Stage by stage, as the screen's columns are; within a stage the chosen order.
+    .sort((a, b) => LIVE_STAGES.indexOf(a.stage) - LIVE_STAGES.indexOf(b.stage) || cmp(a, b))
 
   const active = deliveries.filter(d => d.stage !== 'published')
   const etas = active.flatMap(d => d.eta.kind === 'estimate' && d.eta.atMs >= o.nowMs
