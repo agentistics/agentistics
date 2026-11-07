@@ -112,7 +112,7 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
     now: () => now,
     ...extra,
   })
-  return { svc, w, calls, advance: (ms: number) => { now += ms } }
+  return { svc, w, calls, facts, advance: (ms: number) => { now += ms } }
 }
 
 async function walkToQa(svc: ReturnType<typeof harness>['svc']) {
@@ -882,6 +882,71 @@ describe('PUBLICADO.MANIFESTO r2 — the sha, the batch write, the blocked piece
     await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
     const r = await h.svc.release({ version: '2.202.0', mergeSha: 'b202b202b202b202b202b202b202b202b202b202', subtaskIds: ['s1'] }, 'leader')
     expect(r.ok && r.warnings.join(' ')).toMatch(/waiting in ci for 2\.201\.0/)
+  })
+})
+
+describe('PUBLICADO.MANIFESTO independent r2 QA regressions', () => {
+  // Known regressions: keep hooks runnable without hiding the failures. PUBLICADO_QA_RED=1
+  // runs ordinary assertions for the QA reproduction; remove this wrapper when fixing them.
+  const regression = process.env.PUBLICADO_QA_RED === '1' ? test : test.failing
+  const SHA = '7cede914231f98f6ae477fbdae082a89fc4ac5c7'
+  const RELEASE = { version: '2.201.0', mergeSha: SHA, subtaskIds: ['s1', 's2'] }
+  const GREEN = { databaseId: 42364227357, status: 'completed', conclusion: 'success', headSha: SHA, updatedAt: '2026-11-07T10:43:20Z' }
+  const TAG = [{ name: 'v2.201.0', commit: { sha: '1bc12c52efe373089747197429f6e67013ff819e' } }]
+
+  for (const status of ['done', 'abandoned', 'blocked']) {
+    regression(`QA: already-published ${status} piece still refuses the entire declaration`, async () => {
+      const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG })
+      await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+      const subtask = h.facts.subtask
+      h.facts.subtask = async id => {
+        const sub = await subtask(id)
+        return sub && id === 's1' ? { ...sub, status } : sub
+      }
+      const reply = await h.svc.release(RELEASE, 'leader')
+      expect(reply.ok).toBe(false)
+      expect(!reply.ok && reply.code).toBe(status === 'blocked' ? 'bloqueada' : 'peca_encerrada')
+      expect(await h.svc.get('s2')).toBeNull()
+    })
+  }
+
+  regression('QA: I/O failure during immediate publication must not leave a half-published release', async () => {
+    const real = createDeliveryStore(join(dir, 'deliveries.json'))
+    let writes = 0
+    const flaky: typeof real = {
+      ...real,
+      update: async fn => {
+        writes += 1
+        if (writes === 3) throw new Error('EIO: injected third store write')
+        return real.update(fn)
+      },
+    }
+    const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG }, { store: flaky })
+    const reply = await h.svc.release(RELEASE, 'leader')
+    expect(!reply.ok && reply.code).toBe('store_erro')
+    const phases = await Promise.all(RELEASE.subtaskIds.map(async id => (await real.get(id))?.phase ?? null))
+    expect(phases).toEqual([null, null])
+    expect(h.calls.status).toEqual([])
+  })
+
+  regression('QA: an exact existing tag must still find its green run behind 16 later releases', async () => {
+    const later = Array.from({ length: 16 }, (_, i) => ({
+      databaseId: 500 + i, status: 'completed', conclusion: 'success',
+      headSha: (i + 1).toString(16).padStart(40, '0'),
+      updatedAt: new Date(Date.parse('2026-11-08T10:00:00Z') + i * 60_000).toISOString(),
+    }))
+    const h = harness({ status: 'in_review', tags: TAG, releaseRuns: [...later, GREEN], notContained: later.map(r => r.headSha) })
+    const reply = await h.svc.release(RELEASE, 'leader')
+    expect(reply.ok && reply.pieces.map(p => p.phase)).toEqual(['publicado', 'publicado'])
+    expect(reply.ok && reply.publishedAt).toBe('2026-11-07T10:43:20.000Z')
+  })
+
+  regression('QA: changing repository after publication cannot silently reuse the old repository evidence', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG })
+    await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    const reply = await h.svc.release({ ...RELEASE, repo: 'acme/widgets', subtaskIds: ['s1'] }, 'leader')
+    expect(reply.ok).toBe(false)
+    expect((await h.svc.get('s1'))!.releaseRepo).toBe('agentistics/agentistics')
   })
 })
 
