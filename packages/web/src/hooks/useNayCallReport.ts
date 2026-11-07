@@ -18,6 +18,8 @@ export function useNayCallReport(available: boolean, state: NayCallState, onStar
   const latest = useRef(state)
   latest.current = state
   const send = useRef<() => void>(() => {})
+  const sentKey = useRef('')
+  const keyOf = (s: NayCallState) => `${s.active}|${s.parked}|${s.sessionId}|${s.since}`
 
   useEffect(() => {
     if (!available || typeof fetch !== 'function') return
@@ -25,6 +27,7 @@ export function useNayCallReport(available: boolean, state: NayCallState, onStar
     send.current = () => {
       if (!live || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return
       const s = latest.current
+      sentKey.current = keyOf(s)
       void fetch('/api/nay-call/state', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active: s.active, parked: s.parked, sessionId: s.sessionId, since: s.since }),
@@ -40,5 +43,5 @@ export function useNayCallReport(available: boolean, state: NayCallState, onStar
   }, [available])
 
   // A change is reported at once, not at the next beat.
-  useEffect(() => { if (available) send.current() }, [available, state.active, state.parked, state.sessionId, state.since])
+  useEffect(() => { if (available && keyOf(latest.current) !== sentKey.current) send.current() }, [available, state.active, state.parked, state.sessionId, state.since])
 }

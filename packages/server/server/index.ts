@@ -2381,13 +2381,13 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
     }
     if (url.pathname === '/api/nay-call/state' && req.method === 'PUT') {
       const nc = await import('./nay-call')
-      const out = nc.acceptReport(nc.nayCallStore(), await req.json().catch(() => null), Date.now())
-      return json(out, out.ok ? 200 : 400)
+      const out = await nc.handleStateWrite(req, nc.nayCallStore(), { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC }, Date.now())
+      return json(out.body, out.status)
     }
     if (url.pathname === '/api/nay-call/start' && req.method === 'POST') {
       await loadEngine()
       const nc = await import('./nay-call')
-      const out = await nc.requestStart(nc.nayCallStore(), nc.callSurfaceFrom(engineSurfacesFor(engine()?.manifest.surfaces, process.env)), await req.json().catch(() => ({})), {
+      const out = await nc.handleStart(req, nc.nayCallStore(), nc.callSurfaceFrom(engineSurfacesFor(engine()?.manifest.surfaces, process.env)), { host: url.host, allowlist: ALLOWED_ORIGINS, dev: !SERVE_STATIC }, {
         verify: async (id, token) => (await import('./sessions/session-identity')).verifySessionIdentity(id, token),
         roleOf: async managedId => {
           const { readRegistry } = await import('./sessions/registry')
@@ -2397,7 +2397,7 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
         },
         now: () => Date.now(),
       })
-      return json(out, nc.startStatus(out))
+      return json(out.body, out.status)
     }
     // PER-SESSION AWAY — one session's own flag (`ManagedSession.away`); the person or a verified leader.
     if (url.pathname === '/api/away/session' && req.method === 'PUT') {
