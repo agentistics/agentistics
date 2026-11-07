@@ -10,6 +10,24 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.200.8': {
+    features: [
+      {
+        pt: 'OpenCode: conecte OpenCode Go, Zen ou outro provedor em Ajustes → Cobrança com o link do console e a chave colada; a chave vai para o lugar certo do OpenCode sem aparecer em nenhum registro.',
+        en: 'OpenCode: connect OpenCode Go, Zen or another provider in Settings → Billing with the console link and a pasted key; the key goes to the right place in OpenCode and appears in no log.',
+      },
+      {
+        pt: 'OpenCode Go: o plano e o preço aparecem junto das contas, com anéis de 5 horas, semana e mês em dólares por modelo (estimado a partir do custo de cada resposta). Escolha o seu plano se ele não puder ser deduzido.',
+        en: 'OpenCode Go: the plan and price show beside your accounts, with 5-hour, week and month rings in dollars per model (estimated from each response\'s cost). Pick your plan if it cannot be inferred.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Nova sessão do OpenCode: o seletor lista todos os modelos dos provedores conectados (Go, Zen e os seus), agrupados por provedor, e atualiza sozinho quando você conecta uma chave. Modelos que treinam com seus dados vêm marcados.',
+        en: 'New OpenCode session: the picker lists every model of the connected providers (Go, Zen and yours), grouped by provider, and refreshes by itself when you connect a key. Models that train on your data are marked.',
+      },
+    ],
+  },
   '2.200.7': {
     features: [],
     fixes: [
