@@ -257,7 +257,12 @@ export function etaBoxes(d: LiveDeliveryRecord, pt: Pt): [EtaBox, EtaBox] | null
     }
   }
   let second: EtaBox
-  if (pub?.kind === 'estimate') {
+  if (pub?.kind === 'none' && pub.reason === 'beyond-range') {
+    second = {
+      label: pt ? 'publicação' : 'publication', value: pt ? 'mais demorado que o normal' : 'slower than usual', tone: 'late',
+      title: pt ? 'Já passou do intervalo normal; não há número honesto (nunca mostramos “agora”).' : 'It is past the normal range; there is no honest number (we never show "now").',
+    }
+  } else if (pub?.kind === 'estimate') {
     const parts = pub.parts.map(p => `${stageName(p.stage, pt)} ${fmtSpan(p.medianMs)}`)
     second = {
       label: pt ? 'publicação' : 'publication', value: `~${fmtClock(pub.atMs)}`, tone: 'ok',
@@ -381,7 +386,12 @@ export function writeOpenLeaders(p: Record<string, boolean>, storage: Pick<Stora
 /**
  * PURE: how many cards fit a column. `heights` are the measured cards (gap included), `avail` the
  * room under the column header, `reserve` what the "+N" control needs when something is cut.
- * Always at least one card, so a column never shows only a "+N".
+ *
+ * The "+N" is NEVER sacrificed: when not even the first card leaves room for it, the answer is 0 and the
+ * column shows the control alone (it expands into the cards). The old "always at least one card" forced the
+ * first card in and the control fell below the column's edge, where `overflow:hidden` cut it — cards that
+ * vanished with no way to reach them (QA HIGH 2). A column holding ONE card that is itself taller than the
+ * room keeps showing it (clipped): there is nothing to cut, so there is no control to lose.
  */
 export function fitCount(heights: readonly number[], avail: number, reserve: number): number {
   const total = heights.reduce((a, h) => a + h, 0)
@@ -391,7 +401,19 @@ export function fitCount(heights: readonly number[], avail: number, reserve: num
     if (used + h > avail - reserve) break
     used += h; k++
   }
-  return Math.max(1, k)
+  return heights.length === 1 ? 1 : k
+}
+
+/**
+ * PURE: the board's `scrollLeft` that puts a card fully in view with the least movement (centred when it
+ * fits, flush to the nearest edge otherwise). Both rects share one coordinate space. Horizontal ONLY: the
+ * old `scrollIntoView({block:'center'})` also scrolled the page's own scroller vertically (QA MED 6), and a
+ * card that sits past the board's right edge was not even reached (scrollLeft 30 of 142 needed).
+ */
+export function revealScrollLeft(o: { scrollLeft: number; viewLeft: number; viewWidth: number; cardLeft: number; cardWidth: number; scrollWidth: number }): number {
+  const rel = o.cardLeft - o.viewLeft + o.scrollLeft
+  const want = o.cardWidth >= o.viewWidth ? rel : rel - (o.viewWidth - o.cardWidth) / 2
+  return Math.max(0, Math.min(Math.round(want), Math.max(0, o.scrollWidth - o.viewWidth)))
 }
 
 /**
@@ -406,6 +428,17 @@ export function pack(heights: readonly number[], avail: number): number[][] {
     if (!cur || used + h > avail) { cols.push([i]); used = h } else { cur.push(i); used += h }
   })
   return cols
+}
+
+/**
+ * PURE: where an expanded column's cards go. The first `maxFull` sub-columns hold FULL cards (packed by their
+ * measured heights); every card past them becomes a one-line row, `rowH` tall, packed into as many extra
+ * sub-columns as `avail` allows. Every index appears exactly once — a 246-card column used to be 246 sub-columns
+ * (QA LOW 12) and is now a bounded number of full ones plus a few dozen rows per column.
+ */
+export function flowColumns(heights: readonly number[], avail: number, maxFull: number, rowH: number): { full: number[][]; compact: number[][] } {
+  const all = pack(heights, avail)
+  return { full: all.slice(0, maxFull), compact: chunk(all.slice(maxFull).flat(), Math.max(1, Math.floor(avail / rowH))) }
 }
 
 /** PURE: split into the sub-columns an expanded column flows into (horizontal growth, never a scrollbar). */
@@ -429,6 +462,7 @@ const HIDDEN_WORD: Record<HiddenReason, { pt: string; en: string }> = {
   'status-unplaced': { pt: 'status sem etapa reconhecida', en: 'status with no known stage' },
   'published-old': { pt: 'publicado há mais de 24 h', en: 'published over 24 h ago' },
   'queue-idle': { pt: 'saiu da fila (sessão em espera removida)', en: 'left the queue (staged session removed)' },
+  'legacy-review-old': { pt: 'em revisão há mais de 72 h, sem sessão viva e sem commit publicado', en: 'in review for over 72 h, no live session and no published commit' },
 }
 export const hiddenWord = (r: HiddenReason, pt: Pt): string => HIDDEN_WORD[r][pt ? 'pt' : 'en']
 

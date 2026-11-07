@@ -34,7 +34,7 @@ test('queued cards are recognised and numbered oldest first', () => {
 test('pills: runtime with effort only when reported, account on its own line', () => {
   const ag = (effort: string | null) => [{ id: 's', harness: 'claude', model: 'claude-opus-5-5', effort, accountId: 'x', state: 'working', stateLabel: '' }] as never
   const acc = () => 'Principal'
-  expect(cardPills(card('k', 'running', 1, ag('high')), acc, 'account')).toEqual({ runtime: 'claude · claude-opus-5-5 · high', account: 'account · Principal' })
-  expect(cardPills(card('k', 'running', 1, ag(null)), acc, 'account').runtime).toBe('claude · claude-opus-5-5')
+  expect(cardPills(card('k', 'running', 1, ag('high')), acc, 'account')).toEqual({ runtime: 'claude · Opus 5.5 · high', account: 'account · Principal' })
+  expect(cardPills(card('k', 'running', 1, ag(null)), acc, 'account').runtime).toBe('claude · Opus 5.5')
   expect(cardPills(card('k', 'queue', 1, [], ['codex'], ['gpt']), () => null, 'account')).toEqual({ runtime: 'codex · gpt', account: null })
 })

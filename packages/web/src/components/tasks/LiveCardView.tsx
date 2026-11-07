@@ -13,9 +13,9 @@ import React from 'react'
 import { ArrowLeft, Check, CircleDashed, Clock, CornerDownRight } from 'lucide-react'
 import type { FleetRow } from '../../lib/fleet'
 import { accountDisplayName } from '../../lib/planLimits'
-import { humanizeAction, shortTitle } from '@agentistics/core'
+import { describeLastAction, shortTitle } from '@agentistics/core'
 import { RoleChip } from '../sessions/RoleChip'
-import { harnessColor, pill, surface } from './board'
+import { surface } from './board'
 import {
   cardPills, isQueued, queuePosition, STAGE_LABEL, type LiveCard, type LiveStage, type RuntimeFacts,
 } from './liveDeliveryModel'
@@ -61,7 +61,7 @@ export function LiveCardView(p: LiveCardViewProps) {
   const boxes = etaBoxes(d, pt)
   const block = d.block ? blockLines(d.block, d.stageSinceMs, nowMs, pt) : null
   const titleOf = (id: string) => p.fleet.find(r => r.id === id)?.title
-  const last = d.lastAction ? humanizeAction(d.lastAction.text, pt ? 'pt' : 'en', titleOf) : null
+  const last = describeLastAction(d.lastAction, pt ? 'pt' : 'en', titleOf)
   const ctx = [d.subtaskId ? d.taskTitle : null, p.leaderName ? `${pt ? 'líder' : 'leader'} ${p.leaderName}` : null].filter(Boolean).join(' · ')
   const stageColor = STAGE_LABEL[d.stage].color
   const pct = cardPercent(d, pt)
@@ -106,9 +106,10 @@ export function LiveCardView(p: LiveCardViewProps) {
       {d.blockedReason && !block && <span style={{ fontSize: 11, color: 'var(--accent-red, #ff5f5f)', overflowWrap: 'anywhere' }}>{d.blockedReason}</span>}
 
       {(pills.runtime || pills.account) && (
-        <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 0 }}>
-          {pills.runtime && <span data-live-pill="runtime" style={{ ...pill(harnessColor(agent?.harness ?? d.harnesses[0] ?? '')), maxWidth: '100%', overflowWrap: 'anywhere', whiteSpace: 'normal' }}>{pills.runtime}</span>}
-          {pills.account && <span data-live-pill="account" style={{ ...pill(), maxWidth: '100%', overflowWrap: 'anywhere', whiteSpace: 'normal' }}>{pills.account}</span>}
+        // ONE plain grey line — "claude · sonnet · high · conta Vini" — exactly as the approved preview draws it; the
+        // two coloured, bordered pills this replaced were the QA's MED 8.
+        <span data-live-pill="runtime" style={{ fontSize: 11, color: MUTED, overflowWrap: 'anywhere', lineHeight: 1.3 }}>
+          {[pills.runtime, pills.account].filter(Boolean).join(' · ')}
         </span>
       )}
 
@@ -142,9 +143,10 @@ export function LiveCardView(p: LiveCardViewProps) {
       {boxes && !queued && (
         <span data-live-etas style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
           {boxes.map((b, i) => (
-            <span key={i} title={b.title} data-live-eta={i === 0 ? 'next' : 'publish'} data-tone={b.tone} style={{ background: 'var(--bg-elevated, rgba(255,255,255,.04))', borderRadius: 6, padding: '4px 7px', minWidth: 0 }}>
+            // The publication box is ORANGE in the approved preview (the time everything is leading to); the next-stage box stays neutral.
+            <span key={i} title={b.title} data-live-eta={i === 0 ? 'next' : 'publish'} data-tone={b.tone} style={{ background: i === 1 ? 'var(--anthropic-orange-dim)' : 'var(--bg-elevated, rgba(255,255,255,.04))', borderRadius: 6, padding: '4px 7px', minWidth: 0 }}>
               <small style={{ display: 'block', fontSize: 9.5, color: MUTED, lineHeight: 1.25 }}>{b.label}</small>
-              <b style={{ fontSize: b.tone === 'late' ? 10.5 : 12, fontWeight: 600, lineHeight: 1.25, color: b.tone === 'late' ? 'var(--accent-yellow, #e5b341)' : b.tone === 'none' ? MUTED : undefined, overflowWrap: 'anywhere' }}>{b.value}</b>
+              <b style={{ fontSize: b.tone === 'late' ? 10.5 : 12, fontWeight: 600, lineHeight: 1.25, color: b.tone === 'late' ? 'var(--accent-yellow, #e5b341)' : b.tone === 'none' ? MUTED : i === 1 ? 'var(--anthropic-orange-light)' : undefined, overflowWrap: 'anywhere' }}>{b.value}</b>
             </span>
           ))}
         </span>

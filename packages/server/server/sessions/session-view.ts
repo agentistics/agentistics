@@ -231,6 +231,8 @@ export interface SessionView {
   resume?: { sessionId: string; title: string }
   /** Metrics of the conversation behind this row, when it has any. Absent is never zero. */
   tokens?: number
+  /** The model the conversation's own transcript says ANSWERED ("claude-opus-5-5") — what the composer names, as opposed to `model`, which is only what was asked for at spawn. */
+  observedModel?: string
   /** SS-05: the four counters, and the person's turn count — absent where not recorded. */
   tokenParts?: import('./conversations').TokenParts
   turns?: number
@@ -762,6 +764,7 @@ export function buildSessionViews(o: {
         ? claimResume(r.managed, harness, own?.sessionId)
         : {}),
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
+      ...(conv?.model ? { observedModel: conv.model } : {}),
       ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
       ...(conv?.turns ? { turns: conv.turns } : {}),
       ...(conv?.calls ? { calls: conv.calls } : {}),

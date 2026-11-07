@@ -102,3 +102,50 @@ export function shortTitle(title: string, max = 60): string {
 /** Strip the "[ LÍDER ] - " decoration a leader session's title carries. */
 export const plainLeaderName = (title: string): string =>
   title.replace(/^\s*\[\s*L[ÍI]DER\s*\]\s*[-–—:]?\s*/i, '').trim() || title
+
+// ------------------------------------------------------------------------------------ last action
+
+/** The statuses the book names itself, as words — an invented one is shown as it was typed. */
+const STATUS_WORD: Record<string, { pt: string; en: string }> = {
+  backlog: { pt: 'backlog', en: 'backlog' }, todo: { pt: 'a fazer', en: 'to do' },
+  in_progress: { pt: 'em andamento', en: 'in progress' }, in_review: { pt: 'em revisão', en: 'in review' },
+  blocked: { pt: 'bloqueado', en: 'blocked' }, done: { pt: 'concluído', en: 'done' }, abandoned: { pt: 'abandonado', en: 'abandoned' },
+}
+const statusWord = (s: string | undefined, pt: boolean): string => (s ? STATUS_WORD[s]?.[pt ? 'pt' : 'en'] ?? s.replace(/_/g, ' ') : '?')
+
+/**
+ * The newest thing the activity log says about a piece, as ONE sentence in the person's language — the
+ * ACTION, not the record's own label. The log keeps `comment` events as `on subtask "<title>"`, which in a
+ * Portuguese UI was English and merely repeated the card's own title (QA MED 7); a status move, a claim or a
+ * session filing each has its own sentence. A kind this does not know falls back to `humanizeAction` of the
+ * detail, so nothing is invented and JSON still never reaches a screen.
+ */
+export function describeLastAction(
+  a: { text: string; kind?: string; from?: string; to?: string } | null | undefined,
+  lang: LiveLang,
+  titleOf?: (id: string) => string | undefined,
+): string | null {
+  if (!a) return null
+  const pt = lang === 'pt'
+  switch (a.kind) {
+    case 'comment': {
+      const m = /^on subtask\s+["“]([\s\S]*)["”]$/i.exec(a.text.trim())
+      if (m || !a.text.trim() || a.text.trim() === 'comment') return pt ? 'comentou na subtarefa' : 'commented on the subtask'
+      return (pt ? 'comentou: ' : 'commented: ') + (humanizeAction(a.text, lang, titleOf) ?? '')
+    }
+    case 'status': return pt ? `mudou de ${statusWord(a.from, true)} para ${statusWord(a.to, true)}` : `moved from ${statusWord(a.from, false)} to ${statusWord(a.to, false)}`
+    case 'claim': return pt ? 'assumiu a tarefa' : 'claimed the task'
+    case 'release': return pt ? 'liberou a tarefa' : 'released the task'
+    case 'session': return pt ? `anexou uma sessão${a.text && a.text !== 'session' ? ` (${a.text})` : ''}` : `filed a session${a.text && a.text !== 'session' ? ` (${a.text})` : ''}`
+    case 'priority': return pt ? `mudou a prioridade para ${a.to ?? '?'}` : `set the priority to ${a.to ?? '?'}`
+    case 'step': return pt ? `passo ${a.to ?? a.text}` : `step ${a.to ?? a.text}`
+    case 'checkin': {
+      try {
+        const o = JSON.parse(a.text) as { summary?: unknown }
+        if (typeof o.summary === 'string' && o.summary.trim()) return (pt ? 'check-in: ' : 'check-in: ') + o.summary.trim().split('\n')[0]!.slice(0, 120)
+      } catch { /* not JSON: fall through to the plain text */ }
+      return pt ? 'fez um check-in' : 'checked in'
+    }
+    default: return humanizeAction(a.text, lang, titleOf)
+  }
+}

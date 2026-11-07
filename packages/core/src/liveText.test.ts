@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { humanizeAction, looksLikeJson, plainLeaderName, shortTitle } from './liveText'
+import { describeLastAction, humanizeAction, looksLikeJson, plainLeaderName, shortTitle } from './liveText'
 
 const titles: Record<string, string> = { w1: 'LIVE.LIDERES · cartões dos líderes' }
 const titleOf = (id: string) => titles[id]
@@ -48,4 +48,26 @@ describe('shortTitle', () => {
 test('plainLeaderName strips the decoration', () => {
   expect(plainLeaderName('[ LÍDER ] - Motor')).toBe('Motor')
   expect(plainLeaderName('Motor')).toBe('Motor')
+})
+
+describe('describeLastAction — the action, in the UI language (QA MED 7)', () => {
+  test('a comment event says what happened, not `on subtask "<title>"`', () => {
+    const a = { kind: 'comment', text: 'on subtask "Fatia 4 — Importação do Notion"' }
+    expect(describeLastAction(a, 'pt')).toBe('comentou na subtarefa')
+    expect(describeLastAction(a, 'en')).toBe('commented on the subtask')
+    expect(describeLastAction(a, 'pt')).not.toContain('Fatia 4')
+  })
+  test('status, claim, session, priority and a check-in each have their own sentence', () => {
+    expect(describeLastAction({ kind: 'status', text: 'status', from: 'in_review', to: 'in_progress' }, 'pt')).toBe('mudou de em revisão para em andamento')
+    expect(describeLastAction({ kind: 'status', text: 'status', from: 'todo', to: 'qa_pass' }, 'en')).toBe('moved from to do to qa pass')
+    expect(describeLastAction({ kind: 'claim', text: 'claim' }, 'pt')).toBe('assumiu a tarefa')
+    expect(describeLastAction({ kind: 'session', text: 'claude' }, 'en')).toBe('filed a session (claude)')
+    expect(describeLastAction({ kind: 'priority', text: 'priority', to: 'high' }, 'en')).toBe('set the priority to high')
+    expect(describeLastAction({ kind: 'checkin', text: '{"sessionId":"x","state":"ok","summary":"2.193 saiu"}' }, 'pt')).toBe('check-in: 2.193 saiu')
+  })
+  test('an unknown kind falls back to the detail, and JSON never reaches the screen', () => {
+    expect(describeLastAction({ kind: 'weird', text: 'rodando a suíte' }, 'pt')).toBe('rodando a suíte')
+    expect(describeLastAction({ kind: 'weird', text: '{"message":{"kind":"handback","from":"s1"}}' }, 'en', id => (id === 's1' ? 'Worker' : undefined))).toBe('handback from Worker')
+    expect(describeLastAction(null, 'pt')).toBeNull()
+  })
 })

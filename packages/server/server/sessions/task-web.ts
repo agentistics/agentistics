@@ -6,7 +6,8 @@
  * delivery cost", and the two would drift.
  */
 
-import { buildLive } from './task-live'
+import { buildLive, legacyReviewShas } from './task-live'
+import { publishedAmong } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import { stat } from 'node:fs/promises'
 import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
@@ -124,7 +125,8 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
         return new Map(Object.entries((await createDeliveryStore().read()).deliveries))
       } catch { return new Map() }
     })()
-    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries })
+    const publishedShas = publishedAmong(legacyReviewShas(details, w.book.events, deliveries), nowMs)
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
     return result
@@ -271,6 +273,7 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     rows = fleet.map(r => ({
       id: r.id, title: r.title, harness: r.harness, state: r.state,
       ...(r.model ? { model: r.model } : {}),
+      ...(r.observedModel ? { observedModel: r.observedModel } : {}),
       ...(r.effort ? { effort: r.effort } : {}),
       ...(r.accountId ? { accountId: r.accountId } : {}),
       ...(r.parentSessionId ? { parentSessionId: r.parentSessionId } : {}),

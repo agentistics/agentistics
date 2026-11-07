@@ -290,6 +290,7 @@ export function toControlSession(
     ...(v.fell ? { fell: true as const } : {}),
     // Already formatted, because formatting is a presentation concern the host owns for everything
     // else it hands over — and `fmt`/`fmtCost` are the shared helpers the dashboard uses.
+    ...(v.observedModel ? { observedModel: v.observedModel } : {}),
     ...(v.tokens !== undefined ? { tokens: fmt(v.tokens) } : {}),
     // SS-05: each counter formatted, `null` where the harness did not record it (said N/A, never 0).
     ...(v.tokenParts ? { tokenParts: {

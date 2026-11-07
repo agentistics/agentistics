@@ -12,11 +12,12 @@
  * Leaders are not deliveries: they have no card on the board, which is why they live here.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Crown, CornerDownRight } from 'lucide-react'
 import { humanizeAction, plainLeaderName, shortTitle } from '@agentistics/core'
 import { accountDisplayName } from '../../lib/planLimits'
 import { surface } from './board'
+import { modelDisplay } from '../../lib/modelDisplay'
 import { fmtClock, fmtSpan, STAGE_LABEL, type LeaderRecord, type LeaderWorker, type RuntimeFacts, type WorkerWord } from './liveDeliveryModel'
 import { BLOCK_WORD, leaderCounts, readOpenLeaders, workerWordOf, workerWordText, writeOpenLeaders, type LocateAnswer } from './liveCardModel'
 
@@ -38,6 +39,15 @@ const LEADER_STATE: Record<string, { pt: string; en: string }> = {
 }
 const leaderState = (s: string, pt: boolean) => LEADER_STATE[s]?.[pt ? 'pt' : 'en'] ?? s.replace(/-/g, ' ')
 const reduce = (): boolean => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false } }
+
+const EDGE = 12
+/** PURE: the dropdown's width — 400 px, or what the screen leaves. */
+export const dropdownWidth = (viewport: number): number => Math.max(220, Math.min(400, viewport - 2 * EDGE))
+/** PURE: how far left of its button the dropdown must start so its right edge stays on screen (never pushes it off the left). */
+export function dropdownShift(o: { viewport: number; left: number; width: number }): number {
+  const overflow = o.left + o.width - (o.viewport - EDGE)
+  return overflow > 0 ? -Math.min(overflow, Math.max(0, o.left - EDGE)) : 0
+}
 
 export const wordOfWorker = (w: LeaderWorker): WorkerWord => w.word ?? workerWordOf(w.state, w.stage)
 
@@ -63,7 +73,7 @@ export function leaderRuntime(l: LeaderRecord, runtime: Record<string, RuntimeFa
   const dflt = pt ? 'padrão' : 'default'
   return [
     l.harness,
-    l.model ?? (f?.model ? `${f.model} (${dflt})` : (pt ? 'modelo padrão' : 'default model')),
+    (l.model ? modelDisplay(l.harness, l.model) : null) ?? (f?.model ? `${modelDisplay(l.harness, f.model) ?? f.model} (${dflt})` : (pt ? 'modelo padrão' : 'default model')),
     l.effort ?? (f?.effortConcept === false ? null : f?.effort ? `${f.effort} (${dflt})` : f?.effortConcept ? (pt ? 'esforço padrão' : 'default effort') : null),
   ].filter(Boolean).join(' · ')
 }
@@ -87,7 +97,7 @@ const Counter = ({ color, n, title, size }: { color: string; n: number; title: s
   <span title={title} style={{ display: 'inline-flex', alignItems: 'center', gap: size ? 3 : 4, color: color === BLOCKED ? BLOCKED : MUTED }}><Dot color={color} size={size} />{n}</span>
 )
 
-export function LiveLeaders({ leaders, runtime, accountLabels, nowMs, lang, locate, onLocate, onOpen }: {
+export function LiveLeaders({ leaders, runtime, accountLabels, nowMs, lang, locate, onLocate, onOpen, mobile }: {
   leaders: readonly LeaderRecord[]
   runtime?: Record<string, RuntimeFacts>
   accountLabels?: Record<string, string>
@@ -98,9 +108,12 @@ export function LiveLeaders({ leaders, runtime, accountLabels, nowMs, lang, loca
   /** Take the board to that card (the board opens its column and scrolls to it). */
   onLocate: (a: Extract<LocateAnswer, { kind: 'card' }>) => void
   onOpen: (sessionId: string) => void
+  /** Phone: 44 px targets and a dropdown that stays inside the screen. */
+  mobile?: boolean
 }) {
   const pt = lang === 'pt'
   const [open, setOpen] = useState(false)
+  const [shift, setShift] = useState(0)
   const [openMap, setOpenMap] = useState(() => readOpenLeaders())
   const [notes, setNotes] = useState<Record<string, string>>({})
   const wrap = useRef<HTMLSpanElement>(null)
@@ -118,6 +131,20 @@ export function LiveLeaders({ leaders, runtime, accountLabels, nowMs, lang, loca
     for (const l of leaders) { m.set(l.id, l.title); for (const w of l.workers) m.set(w.id, w.title) }
     return (id: string) => m.get(id)
   }, [leaders])
+  // The dropdown opens under its button; wherever the button sits, the box must stay inside the screen (QA LOW 10:
+  // at 390 px it started at x=28 and ended at 394).
+  useLayoutEffect(() => {
+    if (!open || !wrap.current) return
+    const place = () => {
+      const w = wrap.current
+      if (!w) return
+      const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom')) || 1
+      setShift(dropdownShift({ viewport: window.innerWidth / zoom, left: w.getBoundingClientRect().left, width: dropdownWidth(window.innerWidth / zoom) }))
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
+  }, [open])
   if (leaders.length === 0) return null
   const counts = leaderCounts(leaders)
   const awaiting = leaders.reduce((n, l) => n + l.awaiting.length, 0)
@@ -132,7 +159,7 @@ export function LiveLeaders({ leaders, runtime, accountLabels, nowMs, lang, loca
     <span ref={wrap} data-live-leaders data-open={open ? '1' : '0'} style={{ position: 'relative', display: 'inline-block' }}>
       <button
         type="button" id="live-leaders-head" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(v => !v)} className="ag-tap"
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 28, padding: '0 10px', borderRadius: 999, border: '1px solid var(--accent-purple)', background: 'none', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer' }}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: mobile ? 44 : 28, padding: '0 10px', borderRadius: 999, border: '1px solid var(--accent-purple)', background: 'none', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 12, cursor: 'pointer' }}
       >
         <span data-live-leaders-label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'var(--accent-purple)', fontWeight: 600 }}><Crown size={12} aria-hidden />{pt ? 'Líderes' : 'Leaders'} {leaders.length}</span>
         <span data-live-leaders-counts style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -146,7 +173,7 @@ export function LiveLeaders({ leaders, runtime, accountLabels, nowMs, lang, loca
       <div
         data-live-leaders-dropdown role="dialog" aria-label={pt ? 'Líderes' : 'Leaders'} aria-hidden={!open}
         style={{
-          position: 'absolute', left: 0, top: 'calc(100% + 6px)', width: 'min(400px, calc(100vw / var(--ui-zoom, 1) - 24px))', zIndex: 30, display: 'grid', gap: 8, padding: 8,
+          position: 'absolute', left: shift, top: 'calc(100% + 6px)', width: 'min(400px, calc(100vw / var(--ui-zoom, 1) - 24px))', zIndex: 30, display: 'grid', gap: 8, padding: 8,
           ...surface, background: 'var(--bg-primary, #0d0d10)', boxShadow: '0 12px 32px rgba(0,0,0,.5)', boxSizing: 'border-box',
           opacity: open ? 1 : 0, transform: open ? 'none' : 'translateY(-6px)', pointerEvents: open ? 'auto' : 'none', visibility: open ? 'visible' : 'hidden',
           transition: reduce() ? 'none' : 'opacity .18s, transform .18s, visibility .18s',
@@ -155,17 +182,17 @@ export function LiveLeaders({ leaders, runtime, accountLabels, nowMs, lang, loca
         <span style={{ fontSize: 10.5, color: MUTED }}>{dropdownSummary(leaders, pt)} — {pt ? 'abra um líder; clique num worker para achar o cartão' : 'open a leader; click a worker to find its card'}</span>
         {open && leaders.map(l => (
           <LeaderCard key={l.id} l={l} open={!!openMap[l.id]} onToggle={() => toggle(l.id)} runtime={runtime} accountLabels={accountLabels}
-            nowMs={nowMs} pt={pt} titleOf={titleOf} onOpen={onOpen} onPick={pick} notes={notes} />
+            nowMs={nowMs} pt={pt} titleOf={titleOf} onOpen={onOpen} onPick={pick} notes={notes} mobile={!!mobile} />
         ))}
       </div>
     </span>
   )
 }
 
-function LeaderCard({ l, open, onToggle, runtime, accountLabels, nowMs, pt, titleOf, onOpen, onPick, notes }: {
+function LeaderCard({ l, open, onToggle, runtime, accountLabels, nowMs, pt, titleOf, onOpen, onPick, notes, mobile }: {
   l: LeaderRecord; open: boolean; onToggle: () => void; runtime?: Record<string, RuntimeFacts>; accountLabels?: Record<string, string>
   nowMs: number; pt: boolean; titleOf: (id: string) => string | undefined; onOpen: (id: string) => void
-  onPick: (w: LeaderWorker) => void; notes: Record<string, string>
+  onPick: (w: LeaderWorker) => void; notes: Record<string, string>; mobile: boolean
 }) {
   const wc = leaderCounts([l])
   const name = plainLeaderName(l.title)
@@ -176,7 +203,7 @@ function LeaderCard({ l, open, onToggle, runtime, accountLabels, nowMs, pt, titl
   return (
     <div data-live-leader={l.id} data-open={open ? '1' : '0'} style={{ ...surface, padding: '7px 10px', minWidth: 0 }}>
       <button type="button" aria-expanded={open} onClick={onToggle} className="ag-tap" title={`${l.title} — ${leaderState(l.state, pt)}`}
-        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', background: 'none', border: 0, padding: 0, cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontSize: 12.5, textAlign: 'left', minWidth: 0 }}>
+        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: mobile ? 44 : undefined, background: 'none', border: 0, padding: 0, cursor: 'pointer', fontFamily: 'inherit', color: 'var(--text-primary)', fontSize: 12.5, textAlign: 'left', minWidth: 0 }}>
         <Dot color={dot} size={8} />
         <b style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}><Crown size={12} aria-hidden style={{ color: 'var(--accent-purple)', flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span></b>
         <span data-live-leader-workers style={{ color: MUTED, fontSize: 11, whiteSpace: 'nowrap' }}>{l.workers.length} {l.workers.length === 1 ? 'worker' : 'workers'}</span>
@@ -201,7 +228,7 @@ function LeaderCard({ l, open, onToggle, runtime, accountLabels, nowMs, pt, titl
                   const note = notes[w.id]
                   return (
                     <button key={w.id} type="button" onClick={() => onPick(w)} className="ag-tap" title={note ?? (pt ? 'mostrar no quadro' : 'show on the board')} data-live-worker={w.id} data-word={word}
-                      style={{ display: 'grid', gridTemplateColumns: '8px 1fr auto', gap: 8, alignItems: 'center', width: '100%', padding: '4px 6px', border: 0, borderRadius: 6, background: 'none', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 11.5, textAlign: 'left', cursor: 'pointer', minWidth: 0 }}>
+                      style={{ display: 'grid', gridTemplateColumns: '8px 1fr auto', gap: 8, alignItems: 'center', width: '100%', minHeight: mobile ? 44 : undefined, padding: '4px 6px', border: 0, borderRadius: 6, background: 'none', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 11.5, textAlign: 'left', cursor: 'pointer', minWidth: 0 }}>
                       <Dot color={WORD_COLOR[word]} />
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shortTitle(w.subtask ?? w.title, 56)}</span>
                       <span data-live-worker-info style={{ color: note ? 'var(--anthropic-orange-light)' : MUTED, whiteSpace: 'nowrap', fontSize: 11 }}>{note ?? (workerInfo(w, nowMs, pt) || workerWordText(word, pt))}</span>
@@ -211,10 +238,10 @@ function LeaderCard({ l, open, onToggle, runtime, accountLabels, nowMs, pt, titl
               </div>
               {l.awaiting.map(a => (
                 <button key={a.id} type="button" onClick={() => onOpen(a.id)} className="ag-tap"
-                  style={{ textAlign: 'left', fontFamily: 'inherit', fontSize: 12, color: 'var(--anthropic-orange-light)', background: 'var(--anthropic-orange-dim)', border: 0, borderRadius: 5, padding: '4px 8px', margin: '4px 0 0 10px', cursor: 'pointer', overflowWrap: 'anywhere' }}
+                  style={{ textAlign: 'left', fontFamily: 'inherit', fontSize: 12, color: 'var(--anthropic-orange-light)', background: 'var(--anthropic-orange-dim)', border: 0, borderRadius: 5, padding: '4px 8px', minHeight: mobile ? 44 : undefined, margin: '4px 0 0 10px', cursor: 'pointer', overflowWrap: 'anywhere' }}
                 >{pt ? 'decidir' : 'decide'}: {shortTitle(a.title, 60)}</button>
               ))}
-              <button type="button" onClick={() => onOpen(l.id)} className="ag-tap" style={{ justifySelf: 'start', margin: '3px 0 0 16px', background: 'none', border: 0, padding: '2px 0', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, color: 'var(--anthropic-orange-light)' }}>{pt ? 'abrir a sessão do líder' : 'open the leader\'s session'}</button>
+              <button type="button" onClick={() => onOpen(l.id)} className="ag-tap" style={{ justifySelf: 'start', margin: '3px 0 0 16px', minHeight: mobile ? 44 : undefined, background: 'none', border: 0, padding: '2px 0', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, color: 'var(--anthropic-orange-light)' }}>{pt ? 'abrir a sessão do líder' : 'open the leader\'s session'}</button>
             </div>
           )}
         </div>

@@ -816,6 +816,8 @@ export interface ControlSession {
    * question about a set — so the host hands the answer down rather than the screen inferring one.
    */
   fell?: boolean
+  /** The model the conversation's transcript says answered (raw id), when this row's conversation is exactly linked. */
+  observedModel?: string
   /** Already-formatted token count, when this row's conversation has metrics. */
   tokens?: string
   /** SS-05: the four counters, formatted; `null` = not recorded by the harness (drawn N/A). */
