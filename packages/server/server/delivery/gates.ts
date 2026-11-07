@@ -18,6 +18,15 @@
  * Darwin-safe: memory is the machine's AVAILABLE memory (`/proc/meminfo` on Linux, `vm_stat` on macOS), git/gh are plain argv.
  */
 import type { DeliveryCi, DeliveryRecord, GateName } from './machine'
+import { reconcileSessions } from '../sessions/session-ref'
+import type { BackendSession, ManagedSession } from '../sessions/types'
+
+/** The backend, also used by the fleet, proves liveness; a lost registry row reserves no slot. */
+export function runningSessionIds(registry: ManagedSession[], backend: BackendSession[]): Set<string> {
+  return new Set(reconcileSessions(registry, backend)
+    .filter(s => !s.managed?.endedAt && s.backend?.alive === true)
+    .map(s => s.id))
+}
 
 export interface StagedFact { prompt?: string; harness?: string; model?: string; effort?: string; account?: string; cwd?: string }
 export interface SubtaskFact { id: string; taskId: string; title: string; status: string; groupMember: boolean; staged?: StagedFact; blockedBy: string[] }
@@ -380,7 +389,9 @@ export function defaultGateFacts(): GateFacts {
     },
     sessions: async () => {
       const [{ readRegistry }, { readRolesDoc, roleOfRow }, { AGENTISTICS_DATA_DIR }] = await Promise.all([import('../sessions/registry'), import('../sessions/session-roles'), import('../config')])
-      const [registry, doc] = await Promise.all([readRegistry(), readRolesDoc(AGENTISTICS_DATA_DIR)])
+      const { resolveBackend } = await import('../sessions/index')
+      const [registry, doc, backend] = await Promise.all([readRegistry(), readRolesDoc(AGENTISTICS_DATA_DIR), (await resolveBackend()).list()])
+      const running = runningSessionIds(registry, backend)
       return registry.map(m => ({
         id: m.id, harness: m.harness, cwd: m.cwd, worktree: m.repo?.worktree === true,
         ...(m.repo?.rootPath ? { rootPath: m.repo.rootPath } : {}),
@@ -388,9 +399,7 @@ export function defaultGateFacts(): GateFacts {
         ...(m.taskId ? { taskId: m.taskId } : {}), ...(m.subtaskId ? { subtaskId: m.subtaskId } : {}),
         ...(m.label ? { label: m.label } : {}), ...(m.createdAt ? { createdAt: m.createdAt } : {}),
         role: roleOfRow(doc.roles, { id: m.id, conversationId: m.conversationId }) ?? (m.leader ? 'leader' : 'worker'),
-        // The registry's own end stamp: a session killed or exited is not running (a reboot's `lost` rows keep no stamp
-        // and count as running until reconciled — the conservative direction for a capacity gate).
-        alive: !m.endedAt,
+        alive: running.has(m.id),
       }))
     },
     budgets: async () => {

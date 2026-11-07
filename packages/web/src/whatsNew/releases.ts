@@ -10,6 +10,13 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.201.2': {
+    features: [],
+    fixes: [{
+      pt: 'Sessões perdidas ou encerradas deixam de ocupar vagas para iniciar as peças da fila.',
+      en: 'Lost or ended sessions no longer occupy slots needed to start queued work.',
+    }],
+  },
   '2.201.1': {
     features: [],
     fixes: [
