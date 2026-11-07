@@ -15,6 +15,7 @@ import { handleUpgradeRoute, upgradableHint, versionWithRestart } from './upgrad
 import { compressResponse, negotiateEncoding } from './http-compress'
 import { encodedBody, etagMatches, versionOf } from './data-response-cache'
 import { slimApiResponse, slimSerialized } from './data-slim'
+import { recordRequestLatency } from './flows/perf-watch'
 import { buildApiResponse, buildApiResponseForClient, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, peekApiResponse, serializedData } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
@@ -549,9 +550,13 @@ async function handleRequest(req: Request, server: Server<WSData>): Promise<Resp
     applyBaselineHeaders(unroutable, { tls: TEAM_TLS, dev: !SERVE_STATIC, isApi: true, embed: false })
     return unroutable
   }
+  const startedMs = performance.now()
   const res = await handleRequestInner(req, server)
   if (!res) return res // WebSocket upgrade handed off
-  const isApi = new URL(req.url).pathname.startsWith('/api/')
+  const pathname = new URL(req.url).pathname
+  // APP.LENTO: the REAL latency of every answered request feeds `vigia-desempenho` (flows/perf-watch.ts).
+  recordRequestLatency(pathname, performance.now() - startedMs)
+  const isApi = pathname.startsWith('/api/')
   // `embed` — may an editor frame this dashboard? Only on a `local` profile: the machine's own
   // dashboard, bound to 127.0.0.1, which is the only deployment where the thing doing the framing
   // is the user's own VS Code window rather than someone else's page. The allowance itself is a

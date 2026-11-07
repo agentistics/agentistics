@@ -44,6 +44,19 @@ afterAll(() => { globalThis.fetch = realFetch })
 beforeEach(() => { stubFetch(); respond = () => [] })
 
 describe('loading from the server', () => {
+  test('APP.LENTO: an identical answer keeps the list identity (no re-render for nothing); a change does not', async () => {
+    respond = () => [note('a'), note('b')]
+    const s = await freshStore()
+    await s.refreshNotifications()
+    const first = s.readNotifications()
+    await s.refreshNotifications()
+    expect(s.readNotifications()).toBe(first)
+    respond = () => [note('a', { read: true }), note('b')]
+    await s.refreshNotifications()
+    expect(s.readNotifications()).not.toBe(first)
+    expect(s.readNotifications()[0]!.read).toBe(true)
+  })
+
   test('refresh pulls the history and fills the cache', async () => {
     respond = () => [note('a'), note('b')]
     const s = await freshStore()

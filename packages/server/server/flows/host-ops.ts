@@ -8,6 +8,7 @@ import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
 import { ambienteHostOps } from './ambiente-host'
 import { processHostOps } from './process-ops'
 import { stalledHostOps } from './stalled-host'
+import { perfWatchHostOps } from './perf-watch'
 import { pipelineHostOps } from './pipeline-host'
 
 const exec = promisify(execFile)
@@ -448,6 +449,8 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
     ...dockerHostOps(dockerDeps),
     ...processHostOps(),
     ...stalledHostOps(),
+    // APP.LENTO: `vigia-desempenho` — sample this process, keep a profile and tell once when a budget stays broken.
+    ...perfWatchHostOps(),
     ...pipelineHostOps(),
     'alvo-trabalho': async (value: unknown) => {
       const id = sessionOf(value)

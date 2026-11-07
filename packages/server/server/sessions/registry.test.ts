@@ -22,6 +22,18 @@ const session = (id: string) => ({
 })
 
 describe('createSessionRegistry', () => {
+  it('a caller editing what read() returned never reaches the kept copy (APP.LENTO)', async () => {
+    const reg = createSessionRegistry(file)
+    await reg.add({ ...session('a'), label: 'kept', repo: { repo: 'r', worktree: false } } as never)
+    const first = await reg.read()
+    first[0]!.label = 'edited'
+    first[0]!.repo!.repo = 'edited'
+    const second = await reg.read()
+    expect(second[0]!.label).toBe('kept')
+    expect(second[0]!.repo!.repo).toBe('r')
+    expect(second).toEqual(await createSessionRegistry(file).read())
+  })
+
   it('records kill before the pane disappears, including while the backend is still confirming', async () => {
     const reg = createSessionRegistry(file)
     await reg.add({ ...session('killed'), lastSeenMs: Date.now() })

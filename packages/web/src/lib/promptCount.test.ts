@@ -66,3 +66,14 @@ describe('promptCountLabel', () => {
     expect(promptCountLabel('x'.repeat(10480), 'pt')).toBe('10.480 caracteres')
   })
 })
+
+describe('promptCharCount agrees with iterating code points', () => {
+  it('on pairs, lone surrogates in either position, flags and ZWJ sequences', () => {
+    const samples = ['', 'a', '🙂', '🇧🇷', '👨‍👩‍👧', '\ud83d', '\ude42', '\ud83dx', 'x\ud83d', '\ude42\ud83d', '\ud83d🙂', 'a🙂b🙂', 'não 🙂\n🙂']
+    for (const s of samples) {
+      let ref = 0
+      for (const _ of s) ref++
+      expect(promptCharCount(s)).toBe(ref)
+    }
+  })
+})

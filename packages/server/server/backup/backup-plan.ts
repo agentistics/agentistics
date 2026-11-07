@@ -290,6 +290,13 @@ const CROSS_HARNESS_SECRETS: ExcludeRule[] = [
     why: 'Pending prompt echoes are a bounded display queue. They expire or retire when the transcript accounts for them; prompt text may contain user content, so it is not carried in a machine backup.',
   },
   {
+    pattern: '.agentistics/perf', match: 'prefix', reason: 'regenerable',
+    restoreWith: 'nothing — `vigia-desempenho` takes a fresh profile the next time a budget stays broken',
+    why: 'The CPU profiles `vigia-desempenho` keeps (the newest ten) as evidence of one slow moment on '
+      + 'THIS machine. Megabytes each, meaningful only next to that machine\'s own incident, and a new '
+      + 'one is taken when it happens again.',
+  },
+  {
     pattern: '.agentistics/restore-state.json', match: 'prefix', reason: 'runtime',
     restoreWith: 'nothing — `agentop restore --repos` writes its own',
     why: 'The resumable plan of a restore in progress. Carrying one INTO an archive would have a '
