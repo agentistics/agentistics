@@ -86,6 +86,8 @@ test('FLUXO.ENTREGA-DSL audit: the pedidos escalation to the owner is skipped wh
     const out = await ops['aviso-ao-dono']({ text: 'Pedido p-1 sem dono' }, { step: 'h1-lembrar' })
     expect(out).toEqual(away ? { ok: true, skipped: 'pulado: modo autônomo' } : { ok: true })
     expect(notices).toEqual(away ? [] : ['Pedido p-1 sem dono'])
+    // L3: a wait that ended with no leader to tell falls back to the owner — also skipped while autonomous mode is on.
+    expect(await ops['aviso-ao-dono']({ text: 'A espera w-1 disparou' }, { step: 'wait-ended' })).toEqual(away ? { ok: true, skipped: 'pulado: modo autônomo' } : { ok: true })
     // An informational notice from another flow (an environment's MCP failure) is not a decision request: it always goes.
     expect(await ops['aviso-ao-dono']({ text: 'AMB_MCP' }, { step: 'ambiente-aviso-dono' })).toEqual({ ok: true })
   }

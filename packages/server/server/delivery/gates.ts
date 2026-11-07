@@ -5,13 +5,17 @@
  *
  *   predispatch  harness, model, effort, account, brief/prompt on the subtask's staged session
  *   vaga         plan_limits (5 h < 85 %, week < 95 %) + 4-worker machine ceiling + top tier per provider + ≥ 3 GB free
- *   salvo        the author's HEAD is on origin (ls-remote), the tree is clean, and no check run on it failed
- *   qa-modelo    the QA session's model ≠ the author's (from the registry); never Sonnet over Sonnet
+ *   salvo        the author's HEAD is on origin (ls-remote), the tree is clean, and EVERY check run on it concluded green
+ *                (failed, still pending or absent all refuse)
+ *   qa-modelo    the QA session's model ≠ the author's (from the registry, both sessions filed on THIS subtask); never Sonnet over Sonnet
+ *   cabeca       the pushed branch still sits at the sha QA tested (ls-remote, read now)
  *   delecoes     the PR deletes no file outright (unless the leader allowed those paths, with a reason)
- *   release      release.yml for the merge sha = success AND the version tag exists
+ *   mergeado     gh says the PR is MERGED, its merge commit is on origin/main and the PR head is the sha QA approved;
+ *                the merge sha is read FROM THE PR, never from the caller
+ *   release      release.yml for the merge sha = success AND the batch's version tag exists
  *
  * The decision functions are pure over `GateFacts`; only `defaultGateFacts` touches the machine.
- * Darwin-safe: memory comes from `os.freemem()` off Linux, git/gh are plain argv.
+ * Darwin-safe: memory is the machine's AVAILABLE memory (`/proc/meminfo` on Linux, `vm_stat` on macOS), git/gh are plain argv.
  */
 import type { DeliveryCi, DeliveryRecord, GateName } from './machine'
 
@@ -68,17 +72,32 @@ export function modelFamily(model: string | undefined): string {
   return m
 }
 
-/** PURE: the delivery's author — the recorded one, else the newest worker filed on the subtask that is not a QA. */
+/**
+ * PURE: a session may stand for the author or the QA of THIS delivery only when the registry files it on this very
+ * subtask and it is not the leader. The ids recorded on the delivery come from the host (`qaOpen`, `stageRun`, `salvo`)
+ * and are re-checked against the registry here, so a recorded id that points at some other subtask's session counts for nothing.
+ */
+const filedHere = (r: DeliveryRecord, s: SessionFact) => s.subtaskId === r.subtaskId && s.role !== 'leader'
+
+/** PURE: the delivery's author — the recorded one (when filed here), else the newest worker filed on the subtask that is not a QA. */
 export function authorOf(r: DeliveryRecord, sessions: readonly SessionFact[]): SessionFact | null {
-  if (r.authorSessionId) return sessions.find(s => s.id === r.authorSessionId) ?? null
-  const filed = sessions.filter(s => s.subtaskId === r.subtaskId && s.role !== 'leader' && !QA_LABEL.test(s.label ?? '') && s.id !== r.qaSessionId)
+  if (r.authorSessionId) {
+    const rec = sessions.find(s => s.id === r.authorSessionId)
+    if (rec && filedHere(r, rec)) return rec
+    return null
+  }
+  const filed = sessions.filter(s => filedHere(r, s) && !QA_LABEL.test(s.label ?? '') && s.id !== r.qaSessionId)
   return filed.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))[0] ?? null
 }
 
-/** PURE: the QA session — the recorded one, else the newest session filed on the subtask whose name says QA. */
+/** PURE: the QA session — the recorded one (when filed here), else the newest session filed on the subtask whose name says QA. */
 export function qaOf(r: DeliveryRecord, sessions: readonly SessionFact[]): SessionFact | null {
-  if (r.qaSessionId) return sessions.find(s => s.id === r.qaSessionId) ?? null
-  const filed = sessions.filter(s => s.subtaskId === r.subtaskId && QA_LABEL.test(s.label ?? ''))
+  if (r.qaSessionId) {
+    const rec = sessions.find(s => s.id === r.qaSessionId)
+    if (rec && filedHere(r, rec)) return rec
+    return null
+  }
+  const filed = sessions.filter(s => filedHere(r, s) && QA_LABEL.test(s.label ?? ''))
   return filed.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))[0] ?? null
 }
 
@@ -156,6 +175,43 @@ export function releaseFailed(v: GateVerdict): boolean {
   return !v.ok && /failed/.test(v.reason ?? '')
 }
 
+/** PURE. Judge the salvo check runs: every one concluded green (success/skipped/neutral). Failed, pending and absent all refuse. */
+export function judgeChecks(runs: ReadonlyArray<{ name?: string; status?: string; conclusion?: string | null }>, head: string): GateVerdict | null {
+  if (!runs.length) return no(`no check run exists yet on ${head.slice(0, 9)} — CI has not started; wait for it`, ['checagens verdes'], { head })
+  const failed = runs.filter(c => c.conclusion && !['success', 'skipped', 'neutral'].includes(c.conclusion))
+  if (failed.length) return no(`check runs failed on ${head.slice(0, 9)}: ${failed.map(c => c.name).join(', ')}`, ['checagens verdes'], { head })
+  const pending = runs.filter(c => !c.conclusion)
+  if (pending.length) return no(`check runs still pending on ${head.slice(0, 9)}: ${pending.map(c => c.name).join(', ')}`, ['checagens concluídas'], { head })
+  return null
+}
+
+/** PURE. The PR as gh states it: MERGED, with a merge commit, from the head QA approved. */
+export function judgeMerged(o: { view: { number?: number; state?: string; headRefOid?: string; mergeCommit?: { oid?: string } | null }; qaSha?: string; onMain: boolean | null }): GateVerdict {
+  const v = o.view
+  if (v.state !== 'MERGED') return no(`PR #${v.number ?? '?'} is ${v.state ?? 'unknown'}, not merged`, ['PR mergeado'], { pr: v.number, state: v.state })
+  const oid = v.mergeCommit?.oid
+  if (!oid) return no(`PR #${v.number} is merged but gh reports no merge commit`, ['sha do merge'], { pr: v.number })
+  if (o.qaSha && v.headRefOid && v.headRefOid !== o.qaSha) return no(`PR #${v.number} merged head ${v.headRefOid.slice(0, 9)}, not the sha QA approved (${o.qaSha.slice(0, 9)})`, ['mesmo sha do QA'], { pr: v.number, head: v.headRefOid, qaSha: o.qaSha })
+  if (o.onMain !== true) return no(`merge commit ${oid.slice(0, 9)} is not on origin/main${o.onMain === null ? ' (could not be verified)' : ''}`, ['merge em origin/main'], { pr: v.number, mergeSha: oid })
+  return { ok: true, evidence: { pr: v.number, mergeSha: oid, head: v.headRefOid, onMain: true }, patch: { pr: v.number, mergeSha: oid } }
+}
+
+/**
+ * PURE. The tag of THIS batch among the repository's tags (newest first). With a wanted tag it must be that one and
+ * contain the merge. Without one, it is the OLDEST tag that contains the merge (the first release that shipped it):
+ * walking newest to oldest, the run of tags that are `ahead` of / `identical` to the merge sha ends at the first tag that is not.
+ */
+export function pickReleaseTag(tags: ReadonlyArray<{ name: string; sha: string }>, wanted: string | null, mergeSha: string, relation: (sha: string) => string | undefined): string | null {
+  let found: string | null = null
+  for (const t of tags) {
+    if (wanted && t.name !== wanted) continue
+    const rel = t.sha === mergeSha ? 'identical' : relation(t.sha)
+    if (rel === 'ahead' || rel === 'identical') { found = t.name; if (wanted) return found; continue }
+    if (!wanted) break
+  }
+  return found
+}
+
 const json = <T>(s: string, fallback: T): T => { try { return JSON.parse(s) as T } catch { return fallback } }
 
 /** Run ONE gate against the record. Never throws: an unreachable source is a refusal naming it. */
@@ -183,11 +239,20 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
         if (!branch || branch === 'main' || branch === 'dev') return no('a feature branch is required', ['branch de feature'], { head })
         const remote = (await text(['ls-remote', 'origin', `refs/heads/${branch}`])).split(/\s/)[0]
         if (remote !== head) return no(`HEAD ${head.slice(0, 9)} is not on origin/${branch}`, ['push do HEAD'], { head, branch, remote: remote || null })
-        const runs = json<{ check_runs?: Array<{ name?: string; conclusion?: string | null }> }>(await f.gh(author.rootPath ?? author.cwd, ['api', `repos/{owner}/{repo}/commits/${head}/check-runs`]).catch(() => '{}'), {})
-        const failed = (runs.check_runs ?? []).filter(c => c.conclusion && !['success', 'skipped', 'neutral'].includes(c.conclusion))
-        if (failed.length) return no(`check runs failed on ${head.slice(0, 9)}: ${failed.map(c => c.name).join(', ')}`, ['checagens verdes'], { head, branch })
-        const checks = (runs.check_runs ?? []).length ? ((runs.check_runs ?? []).every(c => c.conclusion) ? 'passed' : 'pending') : 'none'
-        return { ok: true, evidence: { head, branch, pushed: 'ls-remote', checks, hook: 'pre-commit enforced on every commit; no failing check run' }, patch: { headSha: head, branch, authorSessionId: author.id, ...(author.model ? { authorModel: author.model } : {}) } }
+        let runs: { check_runs?: Array<{ name?: string; status?: string; conclusion?: string | null }> }
+        try { runs = JSON.parse(await f.gh(author.rootPath ?? author.cwd, ['api', `repos/{owner}/{repo}/commits/${head}/check-runs`])) } catch (e) { return no(`the check runs of ${head.slice(0, 9)} could not be read (${e instanceof Error ? e.message.split('\n')[0] : String(e)})`, ['fonte de evidência acessível'], { head, branch }) }
+        const checkRuns = runs.check_runs ?? []
+        const bad = judgeChecks(checkRuns, head)
+        if (bad) return { ...bad, evidence: { ...bad.evidence, branch } }
+        return { ok: true, evidence: { head, branch, pushed: 'ls-remote', checks: 'passed', checkRuns: checkRuns.map(c => `${c.name}:${c.conclusion}`) }, patch: { headSha: head, branch, authorSessionId: author.id, ...(author.model ? { authorModel: author.model } : {}) } }
+      }
+      case 'cabeca': {
+        const author = authorOf(r, await f.sessions())
+        if (!author) return no('no author session is filed on this subtask', ['sessão autora'])
+        if (!r.branch || !r.qaSha) return no('no branch / QA sha recorded for this delivery', ['branch e sha do QA'])
+        const remote = (await f.git(author.cwd, ['ls-remote', 'origin', `refs/heads/${r.branch}`])).trim().split(/\s/)[0]
+        if (remote !== r.qaSha) return no(`origin/${r.branch} is at ${remote ? remote.slice(0, 9) : '(missing)'}, not the sha QA tested (${r.qaSha.slice(0, 9)}) — go back through ajuste → qa`, ['HEAD igual ao do QA'], { branch: r.branch, remote: remote || null, qaSha: r.qaSha })
+        return { ok: true, evidence: { branch: r.branch, head: remote, qaSha: r.qaSha } }
       }
       case 'delecoes': {
         const author = authorOf(r, await f.sessions())
@@ -199,23 +264,39 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
         const files = json<Array<{ filename: string; status: string }>>(await f.gh(cwd, ['api', '--paginate', `repos/{owner}/{repo}/pulls/${pr}/files?per_page=100`]), [])
         return judgeDeletions(Array.isArray(files) ? files : [], r.allowDeletions?.paths ?? [], pr)
       }
+      case 'mergeado': {
+        const author = authorOf(r, await f.sessions())
+        const cwd = author?.rootPath ?? author?.cwd
+        if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
+        const ref = r.pr ? String(r.pr) : r.branch
+        if (!ref) return no('no PR or branch recorded', ['PR'])
+        const view = json<{ number?: number; state?: string; headRefOid?: string; mergeCommit?: { oid?: string } | null }>(await f.gh(cwd, ['pr', 'view', ref, '--json', 'number,state,headRefOid,mergeCommit']), {})
+        let onMain: boolean | null = null
+        const oid = view.mergeCommit?.oid
+        if (view.state === 'MERGED' && oid) {
+          const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/{owner}/{repo}/compare/${oid}...main`, '--jq', '{status: .status}']).catch(() => '{}'), {})
+          onMain = cmp.status === 'ahead' || cmp.status === 'identical' ? true : cmp.status ? false : null
+        }
+        return judgeMerged({ view, ...(r.qaSha ? { qaSha: r.qaSha } : {}), onMain })
+      }
       case 'release': {
         const author = authorOf(r, await f.sessions())
         const cwd = author?.rootPath ?? author?.cwd
         if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
         if (!r.mergeSha) return no('no merge sha recorded', ['sha do merge'])
         const runs = json<Array<{ databaseId?: number; status?: string; conclusion?: string; headSha?: string }>>(await f.gh(cwd, ['run', 'list', '--workflow', 'release.yml', '--commit', r.mergeSha, '--json', 'databaseId,status,conclusion,headSha', '--limit', '10']), [])
-        let tag: string | null = null
         const tags = json<Array<{ name?: string; commit?: { sha?: string } }>>(await f.gh(cwd, ['api', 'repos/{owner}/{repo}/tags?per_page=30']).catch(() => '[]'), [])
         const wanted = r.tag ?? (r.versionTarget && /^\d/.test(r.versionTarget) ? `v${r.versionTarget}` : null)
-        for (const t of Array.isArray(tags) ? tags : []) {
-          if (!t.name || !t.commit?.sha) continue
+        const list = (Array.isArray(tags) ? tags : []).flatMap(t => (t.name && t.commit?.sha ? [{ name: t.name, sha: t.commit.sha }] : []))
+        const relations = new Map<string, string | undefined>()
+        for (const t of list) {
           if (wanted && t.name !== wanted) continue
-          if (t.commit.sha === r.mergeSha) { tag = t.name; break }
-          const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/{owner}/{repo}/compare/${r.mergeSha}...${t.commit.sha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
-          if (cmp.status === 'ahead' || cmp.status === 'identical') { tag = t.name; break }
-          if (!wanted) break
+          if (t.sha === r.mergeSha) { relations.set(t.sha, 'identical'); continue }
+          const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/{owner}/{repo}/compare/${r.mergeSha}...${t.sha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
+          relations.set(t.sha, cmp.status)
+          if (!wanted && cmp.status !== 'ahead' && cmp.status !== 'identical') break
         }
+        const tag = pickReleaseTag(list, wanted, r.mergeSha, sha => relations.get(sha))
         return judgeRelease({ mergeSha: r.mergeSha, runs: Array.isArray(runs) ? runs : [], tag, pr: r.pr ?? null })
       }
     }
@@ -261,11 +342,7 @@ export function defaultGateFacts(): GateFacts {
       const rows = (await planLimitsPayload((await readPreferences()).billing, Date.now())).budgets
       return rows.map(b => ({ harness: b.harness, account: (b as { account?: string }).account ?? 'default', fiveHourPct: b.fiveHourPct, weekPct: b.weekPct, stale: b.stale }))
     },
-    memoryBytes: async () => {
-      const { freemem } = await import('node:os')
-      if (process.platform !== 'linux') return freemem()
-      return (await import('../cli-run')).memAvailableBytes()
-    },
+    memoryBytes: async () => (await import('../cli-run')).memAvailableAnyBytes(),
     topCap: async harness => {
       const [{ readPreferences }, core] = await Promise.all([import('../preferences'), import('@agentistics/core')])
       const state = core.parseAwayState((await readPreferences() as { away?: unknown }).away)

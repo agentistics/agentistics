@@ -25,8 +25,12 @@ export const PHASES = ['fila', 'executando', 'qa', 'ajuste', 'revisao_lider', 'p
 export type Phase = (typeof PHASES)[number]
 export const isPhase = (v: unknown): v is Phase => (PHASES as readonly unknown[]).includes(v)
 
-/** The six host-checked gates (P2). `agentop flow gate <name>` runs exactly one. */
-export const GATES = ['predispatch', 'vaga', 'salvo', 'qa-modelo', 'delecoes', 'release'] as const
+/**
+ * The host-checked gates. `agentop flow gate <name>` runs exactly one. `cabeca` (the pushed branch still sits at the
+ * sha QA tested) and `mergeado` (the PR is MERGED on the host and the merge commit is on origin/main) read the machine
+ * themselves — a sha the caller states is never proof.
+ */
+export const GATES = ['predispatch', 'vaga', 'salvo', 'qa-modelo', 'cabeca', 'delecoes', 'mergeado', 'release'] as const
 export type GateName = (typeof GATES)[number]
 export const isGate = (v: unknown): v is GateName => (GATES as readonly unknown[]).includes(v)
 
@@ -115,6 +119,8 @@ export interface DeliveryRecord {
   /** Phases the owner must approve before the delivery enters them (autonomous OFF only). Default: none. */
   humanGates: Phase[]
   approvals: Partial<Record<Phase, OwnerApproval>>
+  /** The delivery revision at which the owner was last ASKED to approve each human gate — one bell per (phase, revision). */
+  asked?: Partial<Record<Phase, number>>
   skips: HumanGateSkip[]
   /** Paths the leader allowed the PR to delete outright, with the reason (the `delecoes` gate reads it). */
   allowDeletions?: { paths: string[]; reason: string }
@@ -125,13 +131,33 @@ export interface DeliveryRecord {
   updatedAt: string
 }
 
-export function newDelivery(o: { subtaskId: string; taskId: string; at: string; humanGates?: readonly Phase[]; versionTarget?: string; leaderSessionId?: string }): DeliveryRecord {
+/**
+ * PURE. The phase a subtask ALREADY on the board is adopted into when its delivery record is first created (a piece
+ * started before this flow existed re-entering at `fila` would be walked through the start again). Only phases whose
+ * board status is unambiguous are adopted; `done` is not adopted as `publicado` (nobody proved a release), it stays `fila`.
+ */
+export function adoptPhase(statusId: string | undefined): Phase {
+  switch (statusId) {
+    case 'in_progress': return 'executando'
+    case 'qa': return 'qa'
+    case 'ajuste': return 'ajuste'
+    case 'in_review': return 'revisao_lider'
+    case 'pr_merge': return 'pr_merge'
+    case 'ci': return 'ci'
+    default: return 'fila'
+  }
+}
+
+export function newDelivery(o: { subtaskId: string; taskId: string; at: string; humanGates?: readonly Phase[]; versionTarget?: string; leaderSessionId?: string; phase?: Phase }): DeliveryRecord {
+  const phase = o.phase && o.phase !== 'bloqueado' ? o.phase : 'fila'
   return {
-    subtaskId: o.subtaskId, taskId: o.taskId, phase: 'fila', revision: 1,
+    subtaskId: o.subtaskId, taskId: o.taskId, phase, revision: 1,
     ...(o.versionTarget ? { versionTarget: o.versionTarget } : {}),
     ...(o.leaderSessionId ? { leaderSessionId: o.leaderSessionId } : {}),
     gates: {}, humanGates: [...new Set(o.humanGates ?? [])].filter(p => p !== 'fila' && p !== 'bloqueado'),
-    approvals: {}, skips: [], history: [], createdAt: o.at, updatedAt: o.at,
+    approvals: {}, skips: [],
+    history: phase === 'fila' ? [] : [{ from: 'fila', to: phase, at: o.at, actor: 'flow:entrega', detail: `adotada: a subtarefa já estava em ${phase} no quadro quando o fluxo a conheceu`, revision: 1 }],
+    createdAt: o.at, updatedAt: o.at,
   }
 }
 
@@ -142,6 +168,7 @@ export interface TransitionInput {
   findings?: string
   /** The sha the leader reviewed. */
   reviewedSha?: string
+  /** IGNORED: the merge sha is read from the PR on the host (`mergeado` gate), never taken from the caller. Kept so older callers still parse. */
   mergeSha?: string
 }
 
@@ -162,6 +189,7 @@ export const EDGES: Readonly<Record<string, Edge>> = {
     needs: [
       (_r, i) => (i.verdict === 'APROVADO' ? null : 'um relatório de QA com veredito APROVADO'),
       (r, i) => (i.findings?.trim() || r.qa?.findings ? null : 'a evidência do QA (findings)'),
+      (r) => (r.headSha ? null : 'um HEAD verificado pelo portão salvo (rode o portão salvo antes do veredito)'),
     ],
   },
   'qa>ajuste': {
@@ -173,7 +201,7 @@ export const EDGES: Readonly<Record<string, Edge>> = {
   },
   'ajuste>qa': { gates: ['salvo'], needs: [] },
   'revisao_lider>pr_merge': {
-    gates: [],
+    gates: ['cabeca'],
     needs: [
       (r, i) => (r.qaSha ? null : 'um sha aprovado pelo QA'),
       (r, i) => (i.reviewedSha && r.qaSha && i.reviewedSha === r.qaSha ? null : `a revisão do líder do mesmo sha do QA (${r.qaSha ?? '?'})`),
@@ -181,7 +209,7 @@ export const EDGES: Readonly<Record<string, Edge>> = {
     ],
   },
   'revisao_lider>ajuste': { gates: [], needs: [detail('o pedido de mudança do líder (detail)')] },
-  'pr_merge>ci': { gates: ['delecoes'], needs: [(r, i) => (i.mergeSha?.trim() || r.mergeSha ? null : 'o sha do merge no main')] },
+  'pr_merge>ci': { gates: ['delecoes', 'mergeado'], needs: [(r) => (r.mergeSha ? null : 'o sha do merge no main (lido do PR pelo portão mergeado)')] },
   'pr_merge>revisao_lider': { gates: [], needs: [detail('o motivo da falha do merge (checagem, conflito ou deleção)')] },
   'ci>publicado': { gates: ['release'], needs: [] },
   'ci>revisao_lider': { gates: [], needs: [detail('o motivo da falha da publicação')] },
@@ -267,7 +295,7 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
   if (r.phase === 'revisao_lider') next.review = { sha: input.reviewedSha ?? '', decision: to === 'pr_merge' ? 'ok' : 'ajustar', detail: d, at: ctx.at, by: ctx.actor }
   if (to === 'ajuste') { delete next.qaSha; delete next.mergeSha; delete next.ci }
   if (to === 'ci') {
-    next.mergeSha = input.mergeSha?.trim() || r.mergeSha
+    next.mergeSha = r.mergeSha
     next.ci = { mergedMain: true, releaseGreen: false, tagPublished: false, tag: r.tag ?? null, pr: r.pr ?? null }
   }
   if (r.phase === 'pr_merge' && to === 'revisao_lider') { delete next.mergeSha; delete next.ci }

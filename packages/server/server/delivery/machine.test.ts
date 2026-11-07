@@ -16,7 +16,9 @@ function sitting(phase: Phase, extra: Partial<DeliveryRecord> = {}): DeliveryRec
   if (phase === 'ci' || phase === 'pr_merge') r.qaSha = 'abc'
   Object.assign(r, extra)
   const ok = (g: GateName) => ({ ok: true, at, revision: r.revision })
-  for (const g of ['predispatch', 'vaga', 'salvo', 'qa-modelo', 'delecoes', 'release'] as GateName[]) r.gates[g] = ok(g)
+  for (const g of ['predispatch', 'vaga', 'salvo', 'qa-modelo', 'cabeca', 'delecoes', 'mergeado', 'release'] as GateName[]) r.gates[g] = ok(g)
+  // The `mergeado` gate establishes the merge sha from the PR; a record sitting in pr_merge carries it as the gate would have left it.
+  if (phase === 'pr_merge') r.mergeSha = 'm1'
   return r
 }
 
@@ -25,7 +27,6 @@ const inputFor: Record<string, TransitionInput> = {
   'qa>ajuste': { verdict: 'REPROVADO', findings: 'button misaligned' },
   'revisao_lider>pr_merge': { reviewedSha: 'abc' },
   'revisao_lider>ajuste': { detail: 'rename the flag' },
-  'pr_merge>ci': { mergeSha: 'm1' },
   'pr_merge>revisao_lider': { detail: 'merge conflict' },
   'ci>revisao_lider': { detail: 'release.yml failed' },
 }
@@ -103,6 +104,22 @@ test('leader review must cover the very sha QA approved', () => {
   expect(plan.ok).toBe(false)
   const moved = planTransition(sitting('revisao_lider', { headSha: 'new' }), 'pr_merge', { reviewedSha: 'abc' }, ctx())
   expect(!moved.ok && moved.sentence).toContain('HEAD mudou')
+})
+
+test('the merge sha comes from the record (the mergeado gate), never from the caller', () => {
+  const bare = sitting('pr_merge'); delete bare.mergeSha
+  const refused = planTransition(bare, 'ci', { mergeSha: 'caller-made-up' }, ctx())
+  expect(!refused.ok && refused.sentence).toContain('sha do merge')
+  const ok = planTransition(sitting('pr_merge'), 'ci', { mergeSha: 'caller-made-up' }, ctx())
+  expect(ok.ok && ok.next.mergeSha).toBe('m1')
+  const stale = sitting('pr_merge'); stale.gates.mergeado = { ok: true, at, revision: 0 }
+  expect(planTransition(stale, 'ci', {}, ctx()).ok).toBe(false)
+})
+
+test('qa → revisao_lider needs a HEAD the salvo gate verified', () => {
+  const r = sitting('qa'); delete r.headSha
+  const plan = planTransition(r, 'revisao_lider', inputFor['qa>revisao_lider']!, ctx())
+  expect(!plan.ok && plan.sentence).toContain('salvo')
 })
 
 describe('block', () => {

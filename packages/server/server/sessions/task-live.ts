@@ -118,6 +118,8 @@ export interface LiveDelivery {
   slot?: { ok: boolean; reason: string | null; at: string } | null
   /** The delivery record's own phase (the state machine), when the piece has one — the stage is its projection. */
   phase?: string | null
+  /** A human gate the owner was ASKED about and has not answered at this revision (autonomous mode OFF). The Live card offers approve / reject for it. */
+  awaitingApproval?: { phase: string } | null
 }
 
 /** A piece the line considered and left off, with the reason — so a card never disappears without a word. */
@@ -473,6 +475,21 @@ export interface LiveDeliveryFacts {
   ci?: unknown
   step?: number
   gates?: { vaga?: { ok: boolean; reason?: string; at: string } }
+  revision?: number
+  humanGates?: string[]
+  asked?: Record<string, number>
+  approvals?: Record<string, { revision: number; decision: string }>
+}
+
+/** PURE: the human gate of this record waiting on an answer — asked at the CURRENT revision, not yet answered at it. */
+export function awaitingApprovalOf(rec: LiveDeliveryFacts | undefined): { phase: string } | null {
+  if (!rec?.humanGates?.length || rec.revision === undefined) return null
+  for (const phase of rec.humanGates) {
+    if (rec.asked?.[phase] !== rec.revision) continue
+    if (rec.approvals?.[phase]?.revision === rec.revision) continue
+    return { phase }
+  }
+  return null
 }
 
 /** PURE: the Live stage a delivery phase projects to. */
@@ -636,6 +653,7 @@ export function buildLive(o: {
       } : null,
       slot: rec?.gates?.vaga ? { ok: rec.gates.vaga.ok, reason: rec.gates.vaga.reason ?? null, at: rec.gates.vaga.at } : null,
       phase: rec?.phase ?? null,
+      awaitingApproval: awaitingApprovalOf(rec),
     })
   }
   deliveries.sort((a, b) => (b.stageSinceMs ?? 0) - (a.stageSinceMs ?? 0))

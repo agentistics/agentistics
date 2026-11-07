@@ -21,11 +21,32 @@
  */
 import type { DeliveryReply } from './service'
 
+/** What `agentop flow --help` prints about the delivery verbs (they live here, not in the engine, so the engine's help never lists them). */
+export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subtask walks fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado; any skipped phase is refused)
+
+  agentop flow gate <predispatch|vaga|salvo|qa-modelo|cabeca|delecoes|mergeado|release> --subtask S
+  agentop flow phase <to> --subtask S [--verdict APROVADO|REPROVADO] [--findings …] [--reviewed-sha …] [--detail …]
+  agentop flow entrega [--subtask S]                  read one delivery, or list them
+  agentop flow stage run --subtask S                  predispatch + vaga, start the staged session → executando
+  agentop flow qa open --subtask S --harness H --model M [--account A] [--prompt …]
+  agentop flow ajustes open --subtask S
+  agentop flow wait qa-verdict --subtask S            prints APROVADO|REPROVADO (exit 3 = none yet; never waits)
+  agentop flow merge --subtask S [--batch <version>]  deletions gate, squash merge, then ci (the merge is verified on the host)
+  agentop flow block --subtask S --reason R --text …  |  agentop flow unblock --subtask S [--detail …]   (unblock: the leader; an owner decision: the owner)
+  agentop flow approve --subtask S --phase P --decision approve|reject [--note …]   (the owner only — the answer to a human gate)
+  agentop flow tick                                   the minute watch (blocks, ci → publicado)
+  agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
+
+Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usage, 3 no verdict yet.
+Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
+`
+
 export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'approve', 'tick'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
   const v = args[0]
+  if (v === 'help' || v === '--help' || v === '-h') return args.length === 1
   if (v === 'stage') return args[1] === 'run'
   if (v === 'qa' || v === 'ajustes') return args[1] === 'open'
   if (v === 'wait') return args[1] === 'qa-verdict'
@@ -60,6 +81,7 @@ function report(r: DeliveryReply, io: Io): number {
 }
 
 export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env: Record<string, string | undefined> = process.env): Promise<number> {
+  if (argv[0] === 'help' || argv[0] === '--help' || argv[0] === '-h') { io.out(DELIVERY_FLOW_HELP.trimEnd()); return 0 }
   const { deliveryService } = await import('./host')
   const svc = deliveryService()
   const actor = env.AGENTOP_MANAGED_ID || 'owner'
