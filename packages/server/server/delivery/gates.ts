@@ -27,8 +27,55 @@ export interface SessionFact {
 }
 export interface BudgetFact { harness: string; account: string; fiveHourPct: number; weekPct: number; stale: boolean }
 
+/**
+ * A PIECE the board holds blocked, as the Live shows it — what the vigia needs to adopt one that has no delivery record.
+ * `id` is the subtask id, a GROUP's id (a blocked member counts for its group, never as a delivery of its own), or a TASK id
+ * for a task with no subtasks (the Live's task-level card). `groupMember` is true only if a host leaks a member through:
+ * the vigia refuses to adopt it.
+ */
+export interface BlockedSubtaskFact { id: string; taskId: string; title: string; blockedBy: string[]; groupMember: boolean; since: string; reason?: string }
+
+/** The board slice `blockedPiecesOf` reads (structural, so a test needs no book). */
+export interface BlockedBook {
+  tasks: ReadonlyArray<{ id: string; title: string; status: string; updatedAt: string; blockedReason?: string; blockedBy?: string[] }>
+  subtasks: ReadonlyArray<{ id: string; taskId: string; title: string; status: string; updatedAt: string; isGroup?: boolean; parentGroupId?: string; blockedBy?: string[] }>
+}
+
+const CLOSED = (status: string) => status === 'done' || status === 'abandoned'
+
+/**
+ * PURE. The blocked pieces the Live shows, one per card: a blocked subtask; a GROUP whose own status is blocked or that holds a
+ * blocked member (the member's block counts for the group — a member has no card and no delivery of its own); and a blocked
+ * TASK that has no subtasks (its own card). Closed pieces never appear. Oldest block first.
+ */
+export function blockedPiecesOf(book: BlockedBook): BlockedSubtaskFact[] {
+  const out = new Map<string, BlockedSubtaskFact>()
+  const subtasksOf = (taskId: string) => book.subtasks.filter(s => s.taskId === taskId)
+  for (const s of book.subtasks) {
+    if (s.parentGroupId || s.status !== 'blocked') continue
+    out.set(s.id, { id: s.id, taskId: s.taskId, title: s.title, blockedBy: s.blockedBy ?? [], groupMember: false, since: s.updatedAt })
+  }
+  for (const m of book.subtasks) {
+    if (!m.parentGroupId || m.status !== 'blocked') continue
+    const g = book.subtasks.find(x => x.id === m.parentGroupId)
+    if (!g || CLOSED(g.status)) continue
+    const have = out.get(g.id)
+    if (have) { if (Date.parse(m.updatedAt) < Date.parse(have.since)) have.since = m.updatedAt; continue }
+    out.set(g.id, { id: g.id, taskId: g.taskId, title: g.title, blockedBy: g.blockedBy ?? [], groupMember: false, since: m.updatedAt, reason: `um membro do grupo está bloqueado: ${m.title}` })
+  }
+  for (const t of book.tasks) {
+    if (t.status !== 'blocked' || subtasksOf(t.id).some(s => !s.parentGroupId)) continue
+    out.set(t.id, { id: t.id, taskId: t.id, title: t.title, blockedBy: t.blockedBy ?? [], groupMember: false, since: t.updatedAt, ...(t.blockedReason?.trim() ? { reason: t.blockedReason.trim() } : {}) })
+  }
+  return [...out.values()].sort((a, b) => (Date.parse(a.since) || 0) - (Date.parse(b.since) || 0) || a.id.localeCompare(b.id))
+}
+
 export interface GateFacts {
   subtask(id: string): Promise<SubtaskFact | null>
+  /** Every piece the board holds in `blocked` (see `BlockedSubtaskFact`). Optional: a host that cannot list them simply adopts none. */
+  blockedSubtasks?(): Promise<BlockedSubtaskFact[]>
+  /** The board status of a piece that is a subtask, a group OR a task; null = it no longer exists. Falls back to `subtask(id)`. */
+  pieceStatus?(id: string): Promise<string | null>
   sessions(): Promise<SessionFact[]>
   budgets(): Promise<BudgetFact[]>
   memoryBytes(): Promise<number | null>
@@ -314,6 +361,15 @@ export function defaultGateFacts(): GateFacts {
     return (await promisify(execFile)(cmd, cmd === 'git' ? ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, ...args] : args, { cwd, timeout: 20_000, env: gitEnv(), maxBuffer: 8 * 1024 * 1024 })).stdout
   }
   return {
+    blockedSubtasks: async () => {
+      const { loadTaskWorld } = await import('../sessions/task-source')
+      return blockedPiecesOf((await loadTaskWorld()).book)
+    },
+    pieceStatus: async id => {
+      const { loadTaskWorld } = await import('../sessions/task-source')
+      const { book } = await loadTaskWorld()
+      return book.subtasks.find(s => s.id === id)?.status ?? book.tasks.find(t => t.id === id)?.status ?? null
+    },
     subtask: async id => {
       const { loadTaskWorld } = await import('../sessions/task-source')
       const w = await loadTaskWorld()

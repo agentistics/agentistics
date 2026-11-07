@@ -73,9 +73,15 @@ export interface DeliveryBlock {
   unlocker: 'self' | 'leader' | 'owner'
   /** Last time the leader (or, autonomous OFF + decisao_do_dono, the owner) was woken for it. */
   lastWakeAt?: string
+  /** The last time a wake was TRIED and did not reach anybody — a failed wake is not retried every minute, it waits its cadence too. */
+  lastWakeAttemptAt?: string
   wakes?: number
   /** Set once the piece was deferred to the next batch (reason 6 under autonomous, or > 2 h). */
   deferredAt?: string
+  /** The deferral could not move the BOARD piece to the queue: the next tick re-applies it (once per tick, silently) until it lands. */
+  boardMovePending?: boolean
+  /** How many ticks already retried that board move; the retry is capped, then dropped with one notice. */
+  boardMoveTries?: number
 }
 
 export interface QaVerdict { verdict: 'APROVADO' | 'REPROVADO'; findings: string; sha: string; qaSessionId?: string; at: string }
@@ -100,6 +106,12 @@ export interface DeliveryRecord {
   /** Release batch this piece ships in (`2.200.8`, …); `next` after a deferral. */
   versionTarget?: string
   leaderSessionId?: string
+  /**
+   * `board` = this record was created by the vigia's ADOPTION of a piece the board already held in `blocked` (BLOQUEIO.ORFAO),
+   * not by a flow transition. Only such a record is reconciled against the board's own status each tick: the board is the
+   * only witness of a block the flow never made.
+   */
+  adopted?: 'board'
   authorSessionId?: string
   authorModel?: string
   qaSessionId?: string
@@ -285,6 +297,7 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
   next.revision = r.revision + 1
   next.updatedAt = ctx.at
   delete next.step
+  delete next.adopted // a real flow transition: this is a delivery now, never a mere adoption (BLOQUEIO.ORFAO r3)
   if (skipped) next.skips = [...next.skips, skipped]
   const d = input.detail?.trim() ?? ''
   if (r.phase === 'qa') {
@@ -318,6 +331,7 @@ export function planBlock(r: DeliveryRecord, reason: unknown, text: string, ctx:
   next.revision = r.revision + 1
   next.updatedAt = ctx.at
   delete next.step
+  delete next.adopted // a block the flow itself made is not the board's orphan any more
   next.block = {
     reason: recorded, text: text.trim(), since: ctx.at, unlocker: unlockerOf(recorded), wakes: 0,
     // Reason 6 with the owner away: the leader does NOT perform the action — the safe path is decided now.
@@ -326,6 +340,18 @@ export function planBlock(r: DeliveryRecord, reason: unknown, text: string, ctx:
   if (recorded === 'fora_das_autorizacoes') next.versionTarget = 'next'
   next.history = [...r.history, { from: r.phase, to: 'bloqueado', at: ctx.at, actor: ctx.actor, detail: `${recorded}: ${text.trim()}`, revision: next.revision }]
   return { ok: true, next, skipped: null }
+}
+
+/**
+ * PURE. Is this `adopted: 'board'` record still ONLY an adoption (BLOQUEIO.ORFAO)? It stops being one the moment it has history in a
+ * real phase, evidence (head sha, gates, sessions, PR) or the machine's own marker was cleared: such a record is a delivery, and the
+ * board going done/abandoned/missing must never delete it.
+ */
+export function isPureAdoption(r: DeliveryRecord): boolean {
+  if (r.adopted !== 'board') return false
+  if (r.headSha || r.branch || r.pr || r.mergeSha || r.authorSessionId || r.qaSessionId || r.qa || r.review || Object.keys(r.gates ?? {}).length > 0) return false
+  const bookkeeping = (p: string) => p === 'fila' || p === 'bloqueado'
+  return r.history.every(h => bookkeeping(h.from) && bookkeeping(h.to))
 }
 
 /** PURE. Leave `bloqueado` — ALWAYS to the stored origin, never anywhere else. */
@@ -338,6 +364,7 @@ export function planUnblock(r: DeliveryRecord, ctx: { at: string; actor: string;
   next.updatedAt = ctx.at
   delete next.origin
   delete next.block
+  if (next.phase !== 'fila') delete next.adopted // unblocked into a real phase: no longer a pure adoption
   next.history = [...r.history, { from: 'bloqueado', to: r.origin, at: ctx.at, actor: ctx.actor, detail: ctx.detail?.trim() || 'desbloqueado', revision: next.revision }]
   return { ok: true, next, skipped: null }
 }
@@ -383,8 +410,10 @@ export function planWatch(records: readonly DeliveryRecord[], o: { nowMs: number
     if (b.reason === 'decisao_do_dono' && o.autonomous) { out.push({ kind: 'convert-owner-block', subtaskId: r.subtaskId }); continue }
     if (b.deferredAt) continue
     if (age > BLOCK_DEFER_AFTER_MS && b.reason !== 'decisao_do_dono') { out.push({ kind: 'defer', subtaskId: r.subtaskId, reason: b.reason, ageMs: age }); continue }
-    const last = Date.parse(b.lastWakeAt ?? b.since)
-    if (b.reason !== 'dependencia' && (!b.lastWakeAt || o.nowMs - last >= BLOCK_WAKE_EVERY_MS)) out.push({ kind: 'wake-leader', subtaskId: r.subtaskId, reason: b.reason, ageMs: age, text: b.text })
+    // A wake that was only ATTEMPTED counts for the cadence too: a dead leader is retried every 30 min, not every minute.
+    const stamps = [b.lastWakeAt, b.lastWakeAttemptAt].map(s => Date.parse(s ?? '')).filter(Number.isFinite)
+    const last = stamps.length > 0 ? Math.max(...stamps) : NaN
+    if (b.reason !== 'dependencia' && (stamps.length === 0 || o.nowMs - last >= BLOCK_WAKE_EVERY_MS)) out.push({ kind: 'wake-leader', subtaskId: r.subtaskId, reason: b.reason, ageMs: age, text: b.text })
   }
   return out
 }

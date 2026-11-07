@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.201.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Um cartão bloqueado no quadro não fica mais parado sem ninguém cobrar: o fluxo de entrega cobra o líder e adia a peça depois de 2 h, como as outras.',
+        en: 'A card blocked on the board no longer sits there with nobody chasing it: the delivery flow reminds the leader and defers the piece after 2 h, like the others.',
+      },
+    ],
+  },
   '2.201.0': {
     features: [
       {

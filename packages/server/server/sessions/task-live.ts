@@ -558,7 +558,7 @@ export function legacyReviewShaPieces(details: readonly TaskDetail[], events: re
   const { eventsBySubject } = indexEvents(details, events)
   const out = new Map<string, ShaPiece[]>()
   for (const d of details) for (const p of piecesOf(d)) {
-    if (p.status !== 'in_review' || (p.sub && deliveries?.has(p.sub.id))) continue
+    if (p.status !== 'in_review' || deliveries?.has(p.sub ? p.sub.id : p.task.id)) continue
     const piece: ShaPiece = { taskId: p.task.id, subtaskId: p.sub?.id ?? null, ...(p.task.repo ? { repo: p.task.repo } : {}) }
     for (const g of legacyShaGroups(p, eventsBySubject.get(p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id))) for (const sha of g) {
       const l = out.get(sha)
@@ -608,7 +608,8 @@ export function buildLive(o: {
     ({ key: p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id, taskId: p.task.id, title: p.sub?.title ?? p.task.title, stage, reason, atMs: ms(p.updatedAt) })
   const hide = (p: Piece, stage: LiveStage | null, reason: HiddenReason) => { hidden.push(entry(p, stage, reason)) }
   for (const p of candidates) {
-    const rec = p.sub ? o.deliveries?.get(p.sub.id) : undefined
+    // A task-level piece (a task with no subtasks) is keyed by its TASK id in the delivery book, exactly as a subtask is by its own.
+    const rec = o.deliveries?.get(p.sub ? p.sub.id : p.task.id)
     let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfStatus(p.status, o.statusLabel?.(p.status))
     const liveSessions = p.sessions.filter(s => s.live)
     if (!rec && stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'

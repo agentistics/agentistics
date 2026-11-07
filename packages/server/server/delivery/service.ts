@@ -18,10 +18,10 @@
  * deferred by the leader, and the only owner-facing output is the INFORMATIONAL "publicado" notice.
  */
 import {
-  EDGES, GATES, adoptPhase, isGate, isPhase, newDelivery, planBlock, planTransition, planUnblock, planWatch,
+  EDGES, GATES, adoptPhase, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
   refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
 } from './machine'
-import { releaseFailed, runGate, type GateFacts, type GateVerdict } from './gates'
+import { releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 
 export interface DeliveryBoard {
@@ -77,6 +77,12 @@ const STEP_ON_GATE: Partial<Record<`${Phase}:${GateName}`, number>> = {
   'executando:salvo': 4, 'ajuste:salvo': 3, 'qa:qa-modelo': 2, 'revisao_lider:delecoes': 2, 'pr_merge:delecoes': 2,
 }
 
+/** A tick adopts at most this many board-blocked pieces; the rest come on the next ticks (oldest block first). */
+const ADOPT_PER_TICK = 20
+/** Ticks a deferral's board move is retried before it is given up on (one notice, no loop). */
+const BOARD_MOVE_MAX_TRIES = 10
+/** How many pieces one leader message lists; the rest is a count. */
+const WAKE_LIST_MAX = 5
 const RELEASE_POLL_MIN_MS = 60_000
 const RELEASE_POLL_MAX_MS = 10 * 60_000
 const QUEUE_SLOT_REFRESH_MS = 5 * 60_000
@@ -242,8 +248,13 @@ export function createDeliveryService(d: DeliveryDeps) {
     const b = after.block!
     let woke = false
     if (b.reason === 'decisao_do_dono') await d.notify.owner(`Precisa da sua decisão: ${subtaskId} — ${b.text}`, 'decisao').catch(() => undefined)
-    else if (b.reason === 'fora_das_autorizacoes') woke = await wake(after, `bloqueio fora das autorizações (${b.text}). Modo autônomo: NÃO faça a ação; a peça foi adiada para o próximo lote — escolha o caminho seguro e registre.`, warnings)
-    else if (b.reason !== 'dependencia') woke = await wake(after, `bloqueada (${b.reason}): ${b.text}. Quem destrava: o líder. Destrave com agentistics_task_phase action=unblock.`, warnings)
+    else if (b.reason === 'fora_das_autorizacoes') {
+      // Autonomous mode: the safe path is decided NOW — the piece LEAVES Bloqueado for the next batch's queue (never parked there).
+      const moved = await deferOut(after, `[fluxo entrega] bloqueio fora das autorizações: peça adiada para o próximo lote (bloqueio de 0 h: ${b.text}); voltou para a fila e o bloqueio fica no histórico. Registro do líder; o dono não foi chamado.`).catch(() => false)
+      if (!moved) warnings.push('the piece could not be moved out of Bloqueado')
+      woke = await wake(after, `bloqueio fora das autorizações (${b.text}). Modo autônomo: NÃO faça a ação; a peça foi adiada para o próximo lote e voltou para a fila — escolha o caminho seguro e registre.`, warnings)
+      return { ok: true, status: 200, record: (await d.store.get(subtaskId)) ?? after, warnings }
+    } else if (b.reason !== 'dependencia') woke = await wake(after, `bloqueada (${b.reason}): ${b.text}. Quem destrava: o líder. Destrave com agentistics_task_phase action=unblock.`, warnings)
     // The cadence is stamped only for a wake that REACHED the leader: a dead leader is not "woken" (the next tick tries again).
     if (woke) await d.store.update(doc => { const c = doc.deliveries[subtaskId]; if (c?.block && b.reason !== 'dependencia') { c.block.lastWakeAt = iso(d); c.block.wakes = (c.block.wakes ?? 0) + 1 } })
     return { ok: true, status: 200, record: after, warnings }
@@ -424,40 +435,251 @@ export function createDeliveryService(d: DeliveryDeps) {
     tickChain = run.catch(() => undefined)
     return run
   }
-  const tickOnce = async (): Promise<{ actions: string[] }> => {
+  /** The live leader to chase for a task: the one filed on the piece itself, else the task's newest. Null = nobody to wake. */
+  const leaderFor = (sessions: readonly SessionFact[], taskId: string, subtaskId: string): string | null => {
+    const mine =sessions.filter(s => s.alive && s.role === 'leader' && s.taskId === taskId)
+    const byNewest = (a: SessionFact, b: SessionFact) => (Date.parse(b.createdAt ?? '') || 0) - (Date.parse(a.createdAt ?? '') || 0)
+    return [...mine.filter(s => s.subtaskId === subtaskId).sort(byNewest), ...mine.sort(byNewest)][0]?.id ?? null
+  }
+
+  /**
+   * BLOQUEIO.ORFAO — a subtask the BOARD holds in `blocked` with no delivery record (set before the flow existed, or by hand)
+   * was invisible to the vigia, so nobody ever chased it. It is ADOPTED here at `bloqueado`, once, and from then on `planWatch`
+   * treats it like any flow piece: the leader is woken every 30 min and the piece is deferred after 2 h (the block's `since` is
+   * the board's own timestamp, so an old one is deferred on the very tick that adopts it). A piece with no live leader is said
+   * ONCE (a comment on the subtask and one informational bell) instead of waking into the void. Nothing is asked of the owner.
+   */
+  const adoptOrphans = async (blocked: readonly BlockedSubtaskFact[], sessions: readonly SessionFact[] | null, actions: string[]): Promise<void> => {
+    if (blocked.length === 0) return
+    const have = (await d.store.read()).deliveries
+    // A group MEMBER is never a delivery of its own (the Live shows no card for it, predispatch refuses it): a host that lets
+    // one through is ignored here, and its block reaches the group through the host's `blockedSubtasks` (gates.ts).
+    // A deferred adopted piece that the board blocked AGAIN since is chased afresh; anything else with a record is left alone.
+    const stale = (b: BlockedSubtaskFact) => {
+      const r = have[b.id]
+      const deferredAt = Date.parse(r?.block?.deferredAt ?? '')
+      return r?.adopted === 'board' && r.phase === 'fila' && Number.isFinite(deferredAt) && Date.parse(b.since) > deferredAt
+    }
+    const todo = blocked.filter(b => !b.groupMember && (!have[b.id] || stale(b)) && SUB_ID.test(b.id) && Number.isFinite(Date.parse(b.since)))
+      .sort((a, b) => Date.parse(a.since) - Date.parse(b.since)).slice(0, ADOPT_PER_TICK)
+    if (todo.length === 0) return
+    const plans: Array<{ b: BlockedSubtaskFact; reason: 'dependencia' | 'pedido_de_bloqueio'; text: string; leader: string | null }> = []
+    for (const b of todo) {
+      const open: string[] = []
+      for (const dep of b.blockedBy) if (!(have[dep]?.phase === 'publicado' || await d.board.subtaskFinished(dep).catch(() => false))) open.push(dep)
+      const reason = open.length > 0 ? 'dependencia' as const : 'pedido_de_bloqueio' as const
+      const text = b.reason?.trim() || (open.length > 0 ? `aguardando ${open.join(', ')}` : 'bloqueada no quadro antes do fluxo de entrega, sem motivo registrado')
+      plans.push({ b, reason, text, leader: sessions ? leaderFor(sessions, b.taskId, b.id) : null })
+    }
+    const at = iso(d)
+    // ONE write for the whole batch (the document is rewritten once, not once per piece).
+    const adopted = new Set(await d.store.update(doc => {
+      const done: string[] = []
+      for (const { b, reason, text, leader } of plans) {
+        if (doc.deliveries[b.id] && !(doc.deliveries[b.id]!.adopted === 'board' && doc.deliveries[b.id]!.phase === 'fila')) continue
+        const r = newDelivery({ subtaskId: b.id, taskId: b.taskId, at, ...(leader ? { leaderSessionId: leader } : {}) })
+        r.phase = 'bloqueado'
+        r.origin = 'fila'
+        r.revision = (doc.deliveries[b.id]?.revision ?? 1) + 1
+        r.adopted = 'board'
+        r.block = { reason, text, since: b.since, unlocker: unlockerOf(reason), wakes: 0 }
+        r.history = [...(doc.deliveries[b.id]?.history ?? []), { from: 'fila', to: 'bloqueado', at, actor: 'flow:entrega', detail: `adotada: a peça já estava bloqueada no quadro (${reason}): ${text}`, revision: r.revision }]
+        doc.deliveries[b.id] = r
+        done.push(b.id)
+      }
+      return done
+    }))
+    const noLeader: string[] = []
+    for (const { b, reason, leader } of plans) {
+      if (!adopted.has(b.id)) continue
+      actions.push(`adopt ${b.id}`)
+      if (leader) { await d.board.comment(b.taskId, b.id, `[fluxo entrega] peça bloqueada no quadro adotada pelo fluxo (${reason}): o líder será lembrado a cada 30 min e a peça é adiada depois de 2 h.`).catch(() => undefined); continue }
+      if (reason === 'dependencia') continue
+      await d.board.comment(b.taskId, b.id, '[fluxo entrega] peça bloqueada no quadro adotada pelo fluxo, mas a tarefa não tem líder vivo para cobrar: reabra ou nomeie um líder. A peça será adiada para o próximo lote depois de 2 h.').catch(() => undefined)
+      noLeader.push(`${b.id} (${b.title})`)
+      actions.push(`no-leader ${b.id}`)
+    }
+    // ONE informational bell for the whole batch, never one per piece.
+    if (noLeader.length > 0) await d.notify.owner(`Bloqueio sem líder: ${noLeader.length === 1 ? `${noLeader[0]} está bloqueada` : `${noLeader.length} peças estão bloqueadas (${noLeader.slice(0, 3).join('; ')}${noLeader.length > 3 ? '; …' : ''})`} no quadro e a tarefa não tem líder vivo para cobrar.`, 'aviso').catch(() => undefined)
+  }
+
+  /**
+   * A piece the vigia ADOPTED stops being chased the moment the board stops blocking it: done/abandoned (or gone) leaves the flow
+   * quietly — the record was never a delivery, it is dropped — and any other status releases the block back to its origin phase,
+   * exactly as an unblock does, without touching the status the person chose on the board.
+   */
+  const reconcileAdopted = async (blocked: readonly BlockedSubtaskFact[] | null, actions: string[]): Promise<void> => {
+    if (blocked === null) return // the board could not be read: keep chasing, never drop on a failed read
+    const stillBlocked = new Set(blocked.map(b => b.id))
     const doc = await d.store.read()
-    const records = Object.values(doc.deliveries)
+    for (const r of Object.values(doc.deliveries)) {
+      if (r.adopted !== 'board' || r.phase !== 'bloqueado' || stillBlocked.has(r.subtaskId)) continue
+      // A record that has since entered the real flow (history in a real phase, a head sha, gates…) is a delivery, not an adoption:
+      // clear the marker and leave it to the normal flow rules — never delete real history because the board moved on.
+      if (!isPureAdoption(r)) { await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && !isPureAdoption(c)) delete c.adopted }); continue }
+      const status = await (d.facts.pieceStatus ? d.facts.pieceStatus(r.subtaskId) : d.facts.subtask(r.subtaskId).then(s => s?.status ?? null)).catch(() => undefined)
+      if (status === undefined) continue // the status could not be read either: next tick
+      if (status === null || status === 'done' || status === 'abandoned') { await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && isPureAdoption(c)) delete x.deliveries[r.subtaskId] }); continue }
+      // The board released it: a PURE adoption was never a delivery, so the record is DELETED (not parked in `fila`). A leftover
+      // record would hide a later board block from `adoptOrphans` and override the board's real status on the Live.
+      const dropped = await d.store.update(x => {
+        const cur = x.deliveries[r.subtaskId]
+        if (!cur || cur.phase !== 'bloqueado' || !isPureAdoption(cur)) return false
+        delete x.deliveries[r.subtaskId]
+        return true
+      })
+      if (!dropped) continue
+      await d.board.comment(r.taskId, r.subtaskId, '[fluxo entrega] a peça saiu de Bloqueado no quadro: o fluxo parou de cobrar.').catch(() => undefined)
+      await d.emit('entrega.destravada', { subtarefa: r.subtaskId, fase: 'fila' }).catch(() => undefined)
+      actions.push(`released ${r.subtaskId}`)
+    }
+  }
+
+  /**
+   * Past the 2 h (or when an owner decision becomes the leader's) a blocked piece LEAVES Bloqueado for the queue of the next batch:
+   * back to `fila` with `versionTarget='next'`, the block kept as history (`deferredAt`). Parking it in Bloqueado with a flag
+   * left the card on the board for ever with nobody chasing it.
+   */
+  const deferOut = async (r: DeliveryRecord, comment: string): Promise<boolean> => {
+    // The record FOLLOWS the board: a piece the person already closed there is never moved back to To do, never chased and never
+    // announced. A pure adoption is dropped (it was never a delivery); a record with real history leaves Bloqueado quietly, so the
+    // watch stops, and keeps its history. A status that cannot be read means "not now": the next tick tries again.
+    const status = await (d.facts.pieceStatus ? d.facts.pieceStatus(r.subtaskId) : d.facts.subtask(r.subtaskId).then(s => s?.status ?? null)).catch(() => undefined)
+    if (status === undefined) return false
+    const closedOnBoard = status === 'done' || status === 'abandoned'
+    const moved = await d.store.update(x => {
+      const c = x.deliveries[r.subtaskId]
+      if (!c?.block || c.phase !== 'bloqueado') return false
+      if (closedOnBoard && isPureAdoption(c)) { delete x.deliveries[r.subtaskId]; return false }
+      const at = iso(d)
+      c.block.deferredAt = at
+      c.versionTarget = 'next'
+      c.history = [...c.history, { from: 'bloqueado', to: 'fila', at, actor: 'flow:entrega', detail: `adiada para o próximo lote (estava em ${c.origin ?? 'fila'}): ${c.block.text}`, revision: c.revision + 1 }]
+      c.phase = 'fila'
+      c.revision += 1
+      c.updatedAt = at
+      delete c.origin
+      delete c.step
+      return true
+    })
+    if (!moved || closedOnBoard) return false
+    // The board move is best-effort, but a miss is REMEMBERED: the record is out of Bloqueado and so no longer watched, and a Live
+    // card that kept reading the blocked board status would be the orphan this whole feature exists to end. `retryDeferredBoard`
+    // re-applies it on the next tick.
+    const wrote = await d.board.setPhaseStatus(r.subtaskId, 'fila').then(o => o.ok, () => false)
+    if (!wrote) await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) c.block.boardMovePending = true }).catch(() => undefined)
+    await d.board.comment(r.taskId, r.subtaskId, comment).catch(() => undefined)
+    return true
+  }
+
+  /**
+   * A deferral whose BOARD write failed leaves a record in `fila` (unwatched) over a piece the board still shows `blocked`. Re-apply
+   * the move once per tick — no comment, no wake, no new message — until it lands, or until the board stops blocking the piece.
+   */
+  const retryDeferredBoard = async (blocked: readonly BlockedSubtaskFact[] | null, actions: string[]): Promise<void> => {
+    if (blocked === null) return
+    const stillBlocked = new Set(blocked.map(b => b.id))
+    const doc = await d.store.read()
+    for (const r of Object.values(doc.deliveries)) {
+      if (r.phase !== 'fila' || !r.block?.boardMovePending) continue
+      const done = !stillBlocked.has(r.subtaskId) || await d.board.setPhaseStatus(r.subtaskId, 'fila').then(o => o.ok, () => false)
+      if (!done) {
+        // A refusal that never changes must not become a write per minute for ever: after the cap the flag is dropped and ONE
+        // informational notice goes to the leader (the owner's bell when there is none). Nothing else is sent, nothing loops.
+        const tries = (r.block.boardMoveTries ?? 0) + 1
+        if (tries < BOARD_MOVE_MAX_TRIES) { await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) c.block.boardMoveTries = tries }); continue }
+        await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) { delete c.block.boardMovePending; delete c.block.boardMoveTries } })
+        const text = `[entrega ${r.subtaskId}] a peça foi adiada, mas o quadro recusou mover o cartão para a fila (${tries} tentativas): ele continua em Bloqueado no quadro e o fluxo parou de tentar. Mova-o à mão.`
+        const reached = r.leaderSessionId ? await d.notify.session(r.leaderSessionId, text).catch(() => false) : false
+        if (!reached) await d.notify.owner(`Peça ${r.subtaskId} adiada, mas o quadro recusou mover o cartão: continua em Bloqueado.`, 'aviso').catch(() => undefined)
+        actions.push(`requeue-gave-up ${r.subtaskId}`)
+        continue
+      }
+      await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) { delete c.block.boardMovePending; delete c.block.boardMoveTries } })
+      if (stillBlocked.has(r.subtaskId)) actions.push(`requeue ${r.subtaskId}`)
+    }
+  }
+
+  const tickOnce = async (): Promise<{ actions: string[] }> => {
     const actions: string[] = []
+    // ONE read of the fleet and ONE read of the board's blocked pieces per tick; null = could not be read (never "none").
+    const sessions = await d.facts.sessions().catch(() => null)
+    const blocked = d.facts.blockedSubtasks ? await d.facts.blockedSubtasks().catch(() => null) : null
+    await reconcileAdopted(blocked, actions)
+    await retryDeferredBoard(blocked, actions)
+    await adoptOrphans(blocked ?? [], sessions, actions)
+    let doc = await d.store.read()
+    // A blocked piece with no leader picks one up as soon as one exists, and one whose leader DIED is handed to the live one
+    // (the same rule as adoption). With no live candidate the recorded leader stays: the wake is tried and its failure stamped.
+    if (sessions) {
+      for (const r of Object.values(doc.deliveries)) {
+        if (r.phase !== 'bloqueado' || r.block?.unlocker !== 'leader') continue
+        if (r.leaderSessionId && sessions.some(s => s.id === r.leaderSessionId && s.alive)) continue
+        const leader = leaderFor(sessions, r.taskId, r.subtaskId)
+        if (leader && leader !== r.leaderSessionId) await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c) c.leaderSessionId = leader })
+      }
+    }
+    doc = await d.store.read()
+    const records = Object.values(doc.deliveries)
     const autonomous = await d.autonomous().catch(() => true)
     const finished = new Map<string, boolean>()
     for (const r of records) {
       if (r.phase !== 'bloqueado' || r.block?.reason !== 'dependencia') continue
       const sub = await d.facts.subtask(r.subtaskId).catch(() => null)
-      const blockers = sub?.blockedBy ?? []
+      // A TASK-level piece is no subtask: its dependencies come from the board's blocked-piece fact (BLOQUEIO.ORFAO r3).
+      const blockers = sub?.blockedBy ?? (blocked ?? []).find(b => b.id === r.subtaskId)?.blockedBy ?? []
       const all = await Promise.all(blockers.map(async id => doc.deliveries[id]?.phase === 'publicado' || await d.board.subtaskFinished(id).catch(() => false)))
       finished.set(r.subtaskId, blockers.length > 0 && all.every(Boolean))
     }
+    // ONE message per leader per tick, however many pieces they have blocked (a backlog of 60 is one nudge, not 60).
+    const titles = new Map((blocked ?? []).map(b => [b.id, b.title] as const))
+    const batches = new Map<string, Array<{ r: DeliveryRecord; kind: 'wake' | 'defer' | 'convert'; text: string }>>()
+    const orphans: Array<{ r: DeliveryRecord; kind: 'wake' | 'defer' | 'convert' }> = []
+    const enqueue = (r: DeliveryRecord, kind: 'wake' | 'defer' | 'convert', text: string) => {
+      if (!r.leaderSessionId) { orphans.push({ r, kind }); return }
+      const list = batches.get(r.leaderSessionId) ?? []
+      list.push({ r, kind, text })
+      batches.set(r.leaderSessionId, list)
+    }
     for (const a of planWatch(records, { nowMs: d.now(), autonomous, dependencyDone: r => finished.get(r.subtaskId) === true })) {
       const r = doc.deliveries[a.subtaskId]!
-      const warnings: string[] = []
       if (a.kind === 'unblock-dependency') { await unblock(a.subtaskId, 'flow:entrega', 'dependência concluída'); actions.push(`unblock ${a.subtaskId}`); continue }
       if (a.kind === 'convert-owner-block') {
-        await d.store.update(x => { const c = x.deliveries[a.subtaskId]; if (c?.block) { c.block.reason = 'fora_das_autorizacoes'; c.block.unlocker = 'leader'; c.block.deferredAt = iso(d); c.versionTarget = 'next' } })
-        await d.board.comment(r.taskId, r.subtaskId, '[fluxo entrega] modo autônomo ligado: a decisão pendente do dono passou ao líder — peça adiada para o próximo lote (caminho seguro).').catch(() => undefined)
-        await wake(r, 'modo autônomo: a decisão que esperava o dono agora é sua — a peça foi adiada para o próximo lote; escolha o caminho seguro e registre.', warnings)
+        await d.store.update(x => { const c = x.deliveries[a.subtaskId]; if (c?.block) { c.block.reason = 'fora_das_autorizacoes'; c.block.unlocker = 'leader' } })
+        const hours = Math.max(0, Math.round((d.now() - Date.parse(r.block?.since ?? '')) / 3600_000)) || 0
+        if (await deferOut(r, `[fluxo entrega] modo autônomo ligado: a decisão pendente do dono passou ao líder — peça adiada para o próximo lote (bloqueio de ${hours} h: ${r.block?.text ?? ''}); voltou para a fila e o bloqueio fica no histórico.`)) {
+          enqueue(r, 'convert', 'modo autônomo: a decisão que esperava o dono agora é sua — a peça foi adiada para o próximo lote; escolha o caminho seguro e registre.')
+        }
         actions.push(`convert ${a.subtaskId}`); continue
       }
       if (a.kind === 'defer') {
-        await d.store.update(x => { const c = x.deliveries[a.subtaskId]; if (c?.block) { c.block.deferredAt = iso(d); c.versionTarget = 'next' } })
-        await d.board.comment(r.taskId, r.subtaskId, `[fluxo entrega] bloqueio (${a.reason}) há mais de 2 h: peça ADIADA para o próximo lote. Registro do líder; o dono não foi chamado.`).catch(() => undefined)
-        await d.emit('entrega.adiada', { subtarefa: a.subtaskId, motivo: a.reason }).catch(() => undefined)
-        await wake(r, `bloqueio (${a.reason}) passou de 2 h: a peça foi adiada para o próximo lote. Registre a decisão e siga com a fila.`, warnings)
-        actions.push(`defer ${a.subtaskId}`); continue
+        const hours = Math.round(a.ageMs / 3600_000)
+        if (await deferOut(r, `[fluxo entrega] bloqueio (${a.reason}) há mais de 2 h: peça ADIADA — adiada para o próximo lote (bloqueio de ${hours} h: ${r.block?.text ?? ''}). Voltou para a fila (Na fila) e o bloqueio fica no histórico. Registro do líder; o dono não foi chamado.`)) {
+          await d.emit('entrega.adiada', { subtarefa: a.subtaskId, motivo: a.reason }).catch(() => undefined)
+          enqueue(r, 'defer', `bloqueio (${a.reason}) passou de 2 h: a peça foi adiada para o próximo lote e voltou para a fila. Registre a decisão e siga com a fila.`)
+          actions.push(`defer ${a.subtaskId}`)
+        }
+        continue
       }
-      const woke = await wake(r, `continua bloqueada (${a.reason}, há ${Math.round(a.ageMs / 60_000)} min): ${a.text}. Destrave ou registre o caminho; > 2 h a peça é adiada.`, warnings)
-      if (!woke) { actions.push(`wake-failed ${a.subtaskId}`); continue }
-      await d.store.update(x => { const c = x.deliveries[a.subtaskId]; if (c?.block) { c.block.lastWakeAt = iso(d); c.block.wakes = (c.block.wakes ?? 0) + 1 } })
-      actions.push(`wake ${a.subtaskId}`)
+      enqueue(r, 'wake', `continua bloqueada (${a.reason}, há ${Math.round(a.ageMs / 60_000)} min): ${a.text}. Destrave ou registre o caminho; > 2 h a peça é adiada.`)
+    }
+    const attempted = async (ids: string[]) => { if (ids.length > 0) await d.store.update(x => { for (const id of ids) { const c = x.deliveries[id]; if (c?.block) c.block.lastWakeAttemptAt = iso(d) } }) }
+    // Nobody to wake: say so (the failure is stamped, so the next try waits its 30 minutes instead of repeating every minute).
+    for (const o of orphans.filter(x => x.kind === 'wake')) actions.push(`wake-failed ${o.r.subtaskId}`)
+    await attempted(orphans.filter(x => x.kind === 'wake').map(x => x.r.subtaskId))
+    for (const [leader, items] of batches) {
+      const text = items.length === 1
+        ? `[entrega ${items[0]!.r.subtaskId}] ${items[0]!.text}`
+        : `[entrega bloqueios] ${items.length} peças bloqueadas precisam de você (destrave com agentistics_task_phase action=unblock, ou registre o caminho; > 2 h a peça é adiada para o próximo lote e volta para a fila):\n${items.slice(0, WAKE_LIST_MAX).map(i => `- ${[i.r.subtaskId, titles.get(i.r.subtaskId)].filter(Boolean).join(' ')} (${i.kind === 'wake' ? i.r.block?.reason ?? '' : 'adiada'}): ${i.r.block?.text ?? ''}`).join('\n')}${items.length > WAKE_LIST_MAX ? `\n… e mais ${items.length - WAKE_LIST_MAX}.` : ''}`
+      const reached = await d.notify.session(leader, text).catch(() => false)
+      const wakes = items.filter(i => i.kind === 'wake')
+      if (!reached) {
+        for (const i of wakes) actions.push(`wake-failed ${i.r.subtaskId}`)
+        await attempted(wakes.map(i => i.r.subtaskId))
+        continue
+      }
+      if (wakes.length > 0) await d.store.update(x => { for (const i of wakes) { const c = x.deliveries[i.r.subtaskId]; if (c?.block) { c.block.lastWakeAt = iso(d); c.block.wakes = (c.block.wakes ?? 0) + 1 } } })
+      for (const i of wakes) actions.push(`wake ${i.r.subtaskId}`)
     }
     // The queue's expected slot, kept fresh: a queued piece with a complete pre-dispatch re-reads `vaga` every few minutes
     // (information for the card — never a transition).

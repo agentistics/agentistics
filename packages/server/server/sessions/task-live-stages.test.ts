@@ -268,6 +268,25 @@ describe('FLUXO.ENTREGA-DSL: the Live is a projection of the delivery record', (
     expect(q.staged).toEqual({ harness: 'codex', model: 'gpt-5.5', effort: 'high', account: 'acc_2' })
     expect(q.slot).toMatchObject({ ok: false })
   })
+  test('BLOQUEIO.ORFAO r3 · a TASK-level record (keyed by the task id) decides the stage of a task with no subtasks, as a subtask record does', () => {
+    // The board still reads `blocked` (e.g. the deferral could not write it) but the record says the piece is back in the queue.
+    const q = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [], sessions: [sess('s1', null)] as never }, { status: 'blocked', blockedReason: 'esperando a chave' })],
+      deliveries: new Map([['t1', { phase: 'fila' }]]),
+    }).deliveries.find(d => d.subtaskId === null)!
+    expect(q.stage).toBe('queue')
+    expect(q.phase).toBe('fila')
+    // and the same record in a real block carries its own reason, not the board's
+    const b = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [], sessions: [] }, { status: 'blocked' })],
+      deliveries: new Map([['t1', { phase: 'bloqueado', origin: 'fila', block: { reason: 'externo', text: 'CI fora do ar' } }]]),
+    }).deliveries.find(d => d.subtaskId === null)!
+    expect(b.stage).toBe('blocked')
+    expect(b.block).toMatchObject({ originStage: 'queue' })
+    expect(b.phase).toBe('bloqueado')
+  })
 })
 
 describe('estimates never contradict each other (MED 5)', () => {
@@ -368,5 +387,29 @@ describe('M5 — a human gate waiting on the owner is projected to the card', ()
     expect(awaitingApprovalOf({ ...base, asked: { pr_merge: 3 } })).toBeNull()
     expect(awaitingApprovalOf({ ...base, asked: { pr_merge: 4 }, approvals: { pr_merge: { revision: 4, decision: 'approve' } } })).toBeNull()
     expect(awaitingApprovalOf(undefined)).toBeNull()
+  })
+})
+
+describe('HOSTILE r3 re-QA (Opus) — BLOQUEIO.ORFAO, the Live side', () => {
+  // LOW-1 (r3 re-QA): leader decision r4 — documented, not fixed in this batch.
+  test.skip('HQ6 · a blocked TASK the Live shows as its own card (subtasks + a live direct session) is a piece the vigia discovers', async () => {
+    const { blockedPiecesOf } = await import('../delivery/gates')
+    const r = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [sub('a', 'todo')] as never, sessions: [sess('d', null)] as never }, { status: 'blocked', blockedReason: 'esperando a chave' })],
+    })
+    const card = r.deliveries.find(d => d.subtaskId === null)
+    expect(card?.stage).toBe('blocked') // the Live shows a Bloqueado card for the task itself
+    const found = blockedPiecesOf({
+      tasks: [{ id: 't1', title: 'Task one', status: 'blocked', updatedAt: iso(NOW - 30 * H), blockedReason: 'esperando a chave' }],
+      subtasks: [{ id: 'a', taskId: 't1', title: 'Sub a', status: 'todo', updatedAt: iso(NOW - 2 * H) }],
+    })
+    expect(found.map(p => p.id)).toContain('t1')
+  })
+
+  test('HQ7 · a pure adoption the board released to In review leaves NO record behind, so the Live shows the board status (a review card)', () => {
+    // r4: reconcileAdopted DELETES the pure adoption on release (service.test.ts covers it); with no record the Live reads the board.
+    const control = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [sub('a', 'in_review')] as never, sessions: [] })] })
+    expect(control.deliveries.find(d => d.subtaskId === 'a')?.stage).toBe('leader')
   })
 })
