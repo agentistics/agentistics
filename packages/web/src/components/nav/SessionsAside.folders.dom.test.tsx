@@ -501,8 +501,15 @@ for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
 }
 
 // ENCERRADAS.COLAPSAR — the headings of the Encerradas tab fold like every other group.
+// "Finished today" is the reader's local calendar day, so the fixture may not say "one hour ago":
+// between 00:00 and 01:00 that is yesterday and the row would (correctly) land in "older".
+// Midway between local midnight and now is always today, at any hour the suite runs.
+const endedTodayAt = () => {
+  const midnight = new Date().setHours(0, 0, 0, 0)
+  return midnight + Math.floor((Date.now() - midnight) / 2)
+}
 const endedFleet = () => [
-  { ...row('slept', 'closed'), endedAt: Date.now() - 3_600_000 },
+  { ...row('slept', 'closed'), endedAt: endedTodayAt() },
   { ...row('pin-ended', 'closed'), endedAt: Date.now() - 7_200_000 },
   { ...row('old-one', 'closed'), endedAt: Date.now() - 33 * 86_400_000 },
   { ...row('old-two', 'exited'), endedAt: Date.now() - 40 * 86_400_000 },
