@@ -102,7 +102,9 @@ export function withIdentityPreferences(
       healed ??= (() => {
         const started = performance.now()
         return repair(rows).finally(async () => {
-          if (options.backgroundReadRepair) console.log(`[boot-fleet] identity repair (background): ${Math.round(performance.now() - started)} ms`)
+          // stderr: a timing diagnostic that lands AFTER the caller has moved on (the repair is not
+          // awaited), so on stdout it could follow a CLI verb's or a test script's JSON output.
+          if (options.backgroundReadRepair) console.error(`[boot-fleet] identity repair (background): ${Math.round(performance.now() - started)} ms`)
           await Promise.resolve().then(options.onReadRepair).catch(() => {})
         })
       })()
