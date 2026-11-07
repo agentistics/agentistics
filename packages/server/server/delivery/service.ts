@@ -65,12 +65,16 @@ export interface DeliveryDeps {
 }
 
 export interface OwnerRequestFact { id: string; taskId?: string; sessionId: string; text: string; at: string; state: string; linkedSubtaskIds: string[] }
+export interface ReleasePiece { subtaskId: string; phase: Phase; /** false = it was already declared for this very release and nothing was touched. */ changed: boolean }
+export type ReleaseReply =
+  | { ok: true; status: 200; version: string; tag: string; mergeSha: string; pieces: ReleasePiece[]; publishedAt?: string; warnings: string[] }
+  | Extract<DeliveryReply, { ok: false }>
 
 export type DeliveryReply =
   | { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; skipped?: unknown; gate?: GateVerdict }
   | { ok: false; status: number; code: string; sentence: string; missing: string[]; record?: DeliveryRecord; gate?: GateVerdict }
 
-const fail = (status: number, code: string, sentence: string, missing: string[] = [], record?: DeliveryRecord): DeliveryReply => ({ ok: false, status, code, sentence, missing, ...(record ? { record } : {}) })
+const fail = (status: number, code: string, sentence: string, missing: string[] = [], record?: DeliveryRecord): Extract<DeliveryReply, { ok: false }> => ({ ok: false, status, code, sentence, missing, ...(record ? { record } : {}) })
 const refused = (p: TransitionRefusal, record?: DeliveryRecord): DeliveryReply => fail(refusalStatus(p), p.code, p.sentence, p.missing, record)
 const iso = (d: DeliveryDeps) => new Date(d.now()).toISOString()
 const SUB_ID = /^[A-Za-z0-9_.:-]{1,120}$/
@@ -88,6 +92,10 @@ const ADOPT_PER_TICK = 20
 const BOARD_MOVE_MAX_TRIES = 10
 /** How many pieces one leader message lists; the rest is a count. */
 const WAKE_LIST_MAX = 5
+
+/** The repository a release belongs to when `flow release` is not given `--repo`. */
+export const DEFAULT_RELEASE_REPO = 'agentistics/agentistics'
+
 const RELEASE_POLL_MIN_MS = 60_000
 const RELEASE_POLL_MAX_MS = 10 * 60_000
 const QUEUE_SLOT_REFRESH_MS = 5 * 60_000
@@ -454,6 +462,152 @@ export function createDeliveryService(d: DeliveryDeps) {
     if (!m.ok) return transition(subtaskId, 'revisao_lider', { detail: `merge falhou: ${m.message}` }, actor)
     await d.store.update(doc => { doc.deliveries[subtaskId]!.pr = m.pr })
     return transition(subtaskId, 'ci', { mergeSha: m.mergeSha, detail: `PR #${m.pr} mergeado (${m.mergeSha.slice(0, 9)})` }, actor)
+  }
+
+  /**
+   * `agentop flow release`: a leader DECLARES what a release contains. The Live used to guess it from git (worker shas,
+   * patch-ids) and a release assembled from ~15 merged branches with conflict fixes, squashed into one commit, almost
+   * never matched. Each named subtask gets its delivery record (a legacy piece is ADOPTED, like `ensure` does), the
+   * version and the main merge sha, and is put in `ci`; when the tag is already published and green the same call moves
+   * it to `publicado` (otherwise the minute tick does), with `publishedAt` = the release's own publish time.
+   *
+   * ALL-OR-NOTHING on validation and persistence: final records land in one atomic write before effects. Idempotent: a
+   * piece already published for this very version + merge sha + repository is left as it is. The release EVIDENCE is still read from
+   * the host (gh): the caller states which pieces, never that it is green.
+   */
+  const release = async (o: { version: unknown; mergeSha: unknown; subtaskIds: unknown; repo?: unknown }, actor: string): Promise<ReleaseReply> => {
+    const version = typeof o.version === 'string' ? o.version.trim().replace(/^v/, '') : ''
+    if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version)) return fail(400, 'bad_version', 'version must look like 2.201.0')
+    const rawSha = typeof o.mergeSha === 'string' ? o.mergeSha.trim().toLowerCase() : ''
+    if (!/^[0-9a-f]{7,40}$/.test(rawSha)) return fail(400, 'bad_merge_sha', 'merge-sha must be the commit on main that carries the release (7–40 hex characters)')
+    // ONE repository per release: recorded on every piece, read by the release gate (the author sessions' checkouts are irrelevant).
+    const repoIn = typeof o.repo === 'string' ? o.repo.trim() : ''
+    if (repoIn && !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repoIn)) return fail(400, 'bad_repo', 'repo must look like owner/name')
+    const repo = repoIn || DEFAULT_RELEASE_REPO
+    const ids = Array.isArray(o.subtaskIds) ? [...new Set(o.subtaskIds.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean))] : []
+    if (!ids.length) return fail(400, 'no_subtasks', 'name at least one subtask of the release (--subtask S, repeated)', ['subtarefas'])
+    const bad = ids.find(id => !SUB_ID.test(id))
+    if (bad) return fail(400, 'bad_subtask', `invalid subtask id ${bad}`)
+    const tag = `v${version}`
+
+    // The FULL sha is stored (a short one never matches a gh headSha). A short one is resolved by git, then by gh, and is
+    // REFUSED when neither resolves it to 40 characters — never stored as the unmatchable string it was typed as.
+    let mergeSha = rawSha
+    if (rawSha.length < 40) {
+      const cwd = (await d.facts.repoCwd?.().catch(() => null)) ?? '.'
+      const viaGit = (await d.facts.git(cwd, ['rev-parse', '--verify', `${rawSha}^{commit}`]).catch(() => '')).trim().toLowerCase()
+      let full = /^[0-9a-f]{40}$/.test(viaGit) && viaGit.startsWith(rawSha) ? viaGit : ''
+      if (!full) {
+        const viaGh = (await d.facts.gh(cwd, ['api', `repos/${repo}/commits/${rawSha}`, '--jq', '.sha']).catch(() => '')).trim().toLowerCase()
+        full = /^[0-9a-f]{40}$/.test(viaGh) && viaGh.startsWith(rawSha) ? viaGh : ''
+      }
+      if (!full) return fail(422, 'sha_nao_resolve', `merge-sha ${rawSha} does not resolve to a 40-character commit in ${repo}: pass the full sha`, ['sha completo'])
+      mergeSha = full
+    }
+
+    // ---- validate everything first
+    const sessions = await d.facts.sessions().catch(() => [])
+    const leaderTask = sessions.find(x => x.id === actor && x.role === 'leader')?.taskId
+    let expectedTask = leaderTask
+    const plan: Array<{ id: string; have: DeliveryRecord | null; taskId: string; subStatus?: string }> = []
+    for (const id of ids) {
+      const have = await d.store.get(id)
+      const sub = await d.facts.subtask(id)
+      if (!sub && !have) return fail(404, 'no_such_subtask', `subtask ${id} does not exist on the board`)
+      const taskId = have?.taskId ?? sub!.taskId
+      expectedTask ??= taskId
+      if (taskId !== expectedTask) return fail(422, 'outra_tarefa', `subtask ${id} belongs to task ${taskId}, not ${expectedTask}: one release declaration names the pieces of one task`, [`subtarefa de ${expectedTask}`], have ?? undefined)
+      // A blocked piece is refused whether the flow knows it (a record in `bloqueado`) or only the board does (a legacy piece, no record yet).
+      if (have?.phase === 'bloqueado' || sub?.status === 'blocked') return fail(422, 'bloqueada', `${id} is blocked (${have?.block?.reason ?? 'blocked on the board'}): unblock it before declaring it in a release`, ['desbloqueio'], have ?? undefined)
+      const samePublished = have?.phase === 'publicado' && have.versionTarget === version && have.mergeSha?.toLowerCase() === mergeSha && have.releaseRepo === repo
+      // Publishing itself sets the board to done. That status must allow a retry of THIS release.
+      if (sub?.status === 'abandoned' || (sub?.status === 'done' && !samePublished)) return fail(422, 'peca_encerrada', `${id} is ${sub.status} on the board: a finished or given-up piece is not part of a release`, [], have ?? undefined)
+      if (have?.phase === 'publicado' && (have.versionTarget !== version || have.mergeSha?.toLowerCase() !== mergeSha || have.releaseRepo !== repo)) {
+        return fail(422, 'ja_publicada', `${id} is already published (${have.tag ?? have.versionTarget ?? '?'} in ${have.releaseRepo ?? 'unknown repository'}); version, commit and repository must match`, [], have)
+      }
+      plan.push({ id, have, taskId, subStatus: sub?.status })
+    }
+    const isLeaderSession = sessions.some(x => x.id === actor && x.role === 'leader')
+    for (const p of plan) {
+      const may = p.have ? await leads(p.have, actor) : actor === 'owner' || actor.startsWith('flow:') || (isLeaderSession && leaderTask === p.taskId)
+      if (!may) return fail(403, 'so_o_lider', 'only the leader of the task (or the owner) declares a release', [], p.have ?? undefined)
+    }
+
+    // ---- write: the WHOLE batch in ONE store update (one file write), so it lands entirely or not at all. A refusal that
+    // can only be seen under the lock (a record that moved meanwhile) also refuses the whole batch, before any write.
+    const warnings: string[] = []
+    const at = iso(d)
+    const declared = { version, mergeSha, repo, at, by: actor }
+    // Prepare records and read the shared evidence BEFORE committing anything. Declaration, gate evidence and
+    // publication all land in the same atomic file replacement; no effects escape an unsuccessful write.
+    const drafts: Array<{ id: string; before: DeliveryRecord; after: DeliveryRecord; changed: boolean; transitions: Array<{ before: DeliveryRecord; after: DeliveryRecord }>; askOwner?: boolean }> = []
+    for (const p of plan) {
+      const cur = p.have ?? newDelivery({ subtaskId: p.id, taskId: p.taskId, at, phase: adoptPhase(p.subStatus), versionTarget: version, ...(isLeaderSession ? { leaderSessionId: actor } : {}) })
+      if (cur.phase === 'publicado' || (cur.phase === 'ci' && cur.mergeSha?.toLowerCase() === mergeSha && cur.versionTarget === version && cur.tag === tag && cur.releaseRepo === repo)) {
+        drafts.push({ id: p.id, before: cur, after: structuredClone(cur), changed: false, transitions: [] })
+        continue
+      }
+      const next = structuredClone(cur)
+      next.history = [...cur.history, { from: cur.phase, to: 'ci', at, actor, detail: `release v${version} declarada por ${actor} (merge ${mergeSha.slice(0, 9)}, ${repo})`, revision: cur.revision + 1 }]
+      next.phase = 'ci'; next.revision = cur.revision + 1; next.updatedAt = at
+      next.versionTarget = version; next.mergeSha = mergeSha; next.tag = tag; next.releaseRepo = repo; next.declaredRelease = declared
+      next.ci = { mergedMain: true, releaseGreen: false, tagPublished: false, tag, pr: cur.pr ?? null }
+      delete next.origin; delete next.block; delete next.step; delete next.publishedAt; delete next.releaseFailNotice
+      drafts.push({ id: p.id, before: cur, after: next, changed: true, transitions: [{ before: cur, after: next }] })
+    }
+    const waiting = drafts.filter(x => x.after.phase === 'ci')
+    const v = waiting.length ? await runGate('release', waiting[0]!.after, d.facts) : undefined
+    if (v?.ok) {
+      const autonomous = await autonomousNow(isLeaderSession ? actor : waiting[0]!.after.leaderSessionId, warnings)
+      for (const x of waiting) {
+        absorb(x.after, 'release', v)
+        const published = planTransition(x.after, 'publicado', { detail: `release v${version} verde e tag ${tag} publicada` }, { at, actor, autonomous })
+        if (!published.ok) {
+          // Refusing publication never discards a valid declaration: it remains in ci for approval/the tick.
+          warnings.push(`${x.id} not published: ${published.code}: ${published.sentence}`)
+          if (published.code === 'aguardando_dono' && !autonomous && x.after.asked?.publicado !== x.after.revision) {
+            (x.after.asked ??= {}).publicado = x.after.revision
+            x.askOwner = true
+          }
+          continue
+        }
+        x.transitions.push({ before: x.after, after: published.next })
+        x.after = published.next
+        x.changed = true
+      }
+    } else if (v) {
+      for (const x of waiting) absorb(x.after, 'release', v)
+      if (releaseFailed(v)) {
+        warnings.push(`not published: ${v.reason ?? 'the tag run failed'} — the pieces stay in ci; fix the release and re-run, the minute tick publishes them when it is green`)
+        for (const x of waiting) x.after.releaseFailNotice = { at, reason: v.reason ?? 'release.yml failed' }
+      } else warnings.push(`not published yet: ${v.reason ?? 'release evidence missing'} — the minute tick moves ci → publicado when it is`)
+    }
+    const batch = await d.store.update(doc => {
+      for (const p of plan) {
+        const cur = doc.deliveries[p.id]
+        if (p.have ? cur?.revision !== p.have.revision : Boolean(cur)) return { kind: 'moved' as const, id: p.id, cur: cur ?? null }
+      }
+      for (const x of drafts) {
+        // A concurrent retry may have asked at this same ci revision while we read gh.
+        if (x.askOwner && doc.deliveries[x.id]?.asked?.publicado === x.after.revision) x.askOwner = false
+        doc.deliveries[x.id] = x.after
+      }
+      return { kind: 'ok' as const }
+    })
+    if (batch.kind === 'moved') return fail(409, 'revisao_obsoleta', `${batch.id} moved meanwhile; nothing was written — run the release again`, [], batch.cur ?? undefined)
+    const pieces: ReleasePiece[] = []
+    for (const x of drafts) {
+      pieces.push({ subtaskId: x.id, phase: x.after.phase, changed: x.changed })
+      if (x.askOwner) await d.notify.owner(`Aprovação pedida: ${x.id} quer entrar em publicado (portão humano). Aprove ou reprove no cartão da Live (botão), ou com: agentop flow approve --subtask ${x.id} --phase publicado --decision approve|reject.`, 'decisao').catch(e => warnings.push(`owner notice: ${String(e)}`))
+      if (!x.transitions.length && JSON.stringify(x.before.ci) !== JSON.stringify(x.after.ci)) await d.board.setCi(x.id, x.after.ci ?? null).catch(e => warnings.push(`ci signal: ${String(e)}`))
+      if (!x.changed) continue
+      // The leader is trusted to name the pieces; say so when one never left the queue or was already waiting on another release.
+      if (x.before.phase === 'fila') warnings.push(`${x.id} never left the queue (it was never worked through the flow) — declared anyway`)
+      if (x.before.phase === 'ci' && x.before.versionTarget && x.before.versionTarget !== version) warnings.push(`${x.id} was waiting in ci for ${x.before.versionTarget} — now declared in ${version}`)
+      for (const t of x.transitions) await effects(t.before, t.after, actor, warnings)
+    }
+    const publishedAt = drafts.find(x => x.after.phase === 'publicado')?.after.publishedAt
+    return { ok: true, status: 200, version, tag, mergeSha, pieces, ...(publishedAt ? { publishedAt } : {}), warnings }
   }
 
   /**
@@ -838,17 +992,32 @@ export function createDeliveryService(d: DeliveryDeps) {
       const v = await runGate('vaga', r, d.facts)
       await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && c.phase === 'fila') { c.gates.vaga = { ok: v.ok, at: iso(d), revision: c.revision, ...(v.evidence ? { evidence: v.evidence } : {}), ...(v.reason ? { reason: v.reason } : {}), ...(v.missing?.length ? { missing: v.missing } : {}) } } })
     }
+    const releaseVerdicts = new Map<string, GateVerdict>()
     for (const r of records.filter(x => x.phase === 'ci')) {
       // Back off the gh polling: a piece that has sat in `ci` a while is polled less often (a tenth of its age, 1..10 min).
+      const warnings: string[] = []
       const lastRun = r.gates.release && r.gates.release.revision === r.revision ? Date.parse(r.gates.release.at) : NaN
       const enteredCi = Date.parse(r.history.at(-1)?.at ?? r.updatedAt)
       const backoff = Math.min(RELEASE_POLL_MAX_MS, Math.max(RELEASE_POLL_MIN_MS, Number.isFinite(enteredCi) ? (d.now() - enteredCi) / 10 : 0))
       if (Number.isFinite(lastRun) && d.now() - lastRun < backoff) continue
-      const v = await runGate('release', r, d.facts)
+      // Siblings declared in the same repository/release share one bounded search per tick.
+      const releaseKey = JSON.stringify([r.releaseRepo ?? r.subtaskId, r.tag, r.versionTarget, r.mergeSha, r.pr, Boolean(r.declaredRelease)])
+      let v = releaseVerdicts.get(releaseKey)
+      if (!v) { v = await runGate('release', r, d.facts); releaseVerdicts.set(releaseKey, v) }
       if (v.ok) {
         // The verdict just obtained is handed to the transition (one gh poll per piece per tick, not two).
         const out = await transition(r.subtaskId, 'publicado', { detail: 'release.yml verde e tag publicada' }, 'flow:entrega', new Map([['release', v]]))
         actions.push(`publish ${r.subtaskId}:${out.ok}`)
+      } else if (releaseFailed(v) && r.declaredRelease) {
+        // A piece the leader DECLARED is never sent back to the review by the tick: its release is not a PR merge the flow
+        // made, and the leader already knows what is in it. The tag's own run is red, so it stays in `ci` with the reason,
+        // and the leader is woken ONCE (`releaseFailNotice`); a later green run publishes it.
+        await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && c.phase === 'ci' && c.revision === r.revision) absorb(c, 'release', v) })
+        if (v.patch?.ci && JSON.stringify(v.patch.ci) !== JSON.stringify(r.ci)) await d.board.setCi(r.subtaskId, v.patch.ci).catch(() => undefined)
+        if (r.releaseFailNotice) { actions.push(`release-failed-stays ${r.subtaskId}`); continue }
+        const woke = await wake(r, `a release.yml da tag declarada falhou (${v.reason ?? 'execução vermelha'}); a peça fica em ci até a execução ficar verde. Corrija a release e rode agentop flow release de novo, ou mova a peça.`, warnings)
+        if (woke) await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && c.phase === 'ci') c.releaseFailNotice = { at: iso(d), reason: v.reason ?? 'release.yml failed' } })
+        actions.push(`release-failed-notified ${r.subtaskId}:${woke}`)
       } else if (releaseFailed(v)) { const out = await transition(r.subtaskId, 'revisao_lider', { detail: v.reason ?? 'release falhou' }, 'flow:entrega'); actions.push(`release-failed ${r.subtaskId}:${out.ok}`) }
       else {
         const changed = v.patch?.ci && JSON.stringify(v.patch.ci) !== JSON.stringify(r.ci)
@@ -866,6 +1035,13 @@ export function createDeliveryService(d: DeliveryDeps) {
     // An unreadable store REFUSES the write (and keeps a copy of the file) instead of letting any verb replace it with an empty book.
     transition: safe((id: string, to: unknown, input: TransitionInput, actor: string) => transition(id, to, input, actor)),
     gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), step: safe(step),
+    // An I/O error on the batch write is a clean, structured refusal (the single store write landed entirely or not at all), never an uncaught throw.
+    release: async (o: { version: unknown; mergeSha: unknown; subtaskIds: unknown; repo?: unknown }, actor: string): Promise<ReleaseReply> => {
+      try { return await release(o, actor) } catch (e) {
+        if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
+        return fail(500, 'store_erro', `the release could not be written (${e instanceof Error ? e.message.split('\n')[0] : String(e)}); the batch write is all-or-nothing and the verb is idempotent — run it again`) as Extract<DeliveryReply, { ok: false }>
+      }
+    },
     stage: safe(stage), stageRun: safe(stageRun), dequeue: safe(dequeue), foldGroupMember, qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
   }
 }

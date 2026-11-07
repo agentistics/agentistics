@@ -131,6 +131,21 @@ export interface DeliveryRecord {
   mergeSha?: string
   tag?: string
   ci?: DeliveryCi
+  /**
+   * When the release that shipped this piece was published (ISO) — the green `release.yml` run's completion, read by the
+   * `release` gate. The Live's 24 h Publicado window starts HERE, not at the moment the flow noticed, so a release
+   * declared hours late still shows the piece for the rest of its window.
+   */
+  publishedAt?: string
+  /**
+   * `owner/name` — the repository the release was declared in (`flow release --repo`). The `release` gate asks gh THERE and
+   * ignores any session's checkout: one release is one repository, whatever worktree a piece's author happened to run in.
+   */
+  releaseRepo?: string
+  /** Present only for a piece the leader DECLARED through `flow release`. The tick never sends such a piece back to the review. */
+  declaredRelease?: { version: string; mergeSha: string; repo: string; at: string; by: string }
+  /** The tag's own release run was red: the leader was told once (ISO + reason); the piece stays in `ci` until it is green. */
+  releaseFailNotice?: { at: string; reason: string }
   gates: Partial<Record<GateName, GateResult>>
   /** Phases the owner must approve before the delivery enters them (autonomous OFF only). Default: none. */
   humanGates: Phase[]
@@ -310,7 +325,7 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
     else delete next.qaSha
   }
   if (r.phase === 'revisao_lider') next.review = { sha: input.reviewedSha ?? '', decision: to === 'pr_merge' ? 'ok' : 'ajustar', detail: d, at: ctx.at, by: ctx.actor }
-  if (to === 'ajuste') { delete next.qaSha; delete next.mergeSha; delete next.ci }
+  if (to === 'ajuste') { delete next.qaSha; delete next.mergeSha; delete next.ci; delete next.publishedAt }
   if (to === 'ci') {
     next.mergeSha = r.mergeSha
     next.ci = { mergedMain: true, releaseGreen: false, tagPublished: false, tag: r.tag ?? null, pr: r.pr ?? null }
