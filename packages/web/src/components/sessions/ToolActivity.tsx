@@ -19,7 +19,7 @@ import { SystemLine, SYS_LINK, SYS_TEXT } from './ChatBubble'
 import { ActivityIcon } from './ActivityIcon'
 import { openArtifacts } from '../../lib/artifactsStore'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { fmtSpan, groupSpanMs, stepVerb, summarize, type ActivityGroup, type ActivityStep } from '../../lib/toolActivity'
+import { fmtSpan, groupSpanMs, outputLabel, outputLines, stepVerb, summarize, type ActivityGroup, type ActivityStep } from '../../lib/toolActivity'
 
 export type ToolActivityVariant = 'divider' | 'inline' | 'live'
 
@@ -83,7 +83,8 @@ function StepRow({ step, pt }: { step: ActivityStep; pt: boolean }) {
  */
 function StepWithOutput({ step, pt, isMobile, main }: { step: ActivityStep; pt: boolean; isMobile: boolean; main: React.ReactNode }) {
   const [open, setOpen] = useState(false)
-  const label = pt ? 'saída' : 'output'
+  const label = outputLabel(step.kind, pt)
+  const diff = step.output ? outputLines(step.kind, step.output) : null
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
@@ -107,7 +108,12 @@ function StepWithOutput({ step, pt, isMobile, main }: { step: ActivityStep; pt: 
           // command's output is ordinary text — painting all of it in the fault colour drowns the line that matters.
           color: 'var(--text-secondary)',
           background: 'var(--bg-base, transparent)', border: '1px solid var(--border)', borderRadius: 6,
-        }}>{step.output}</pre>
+        }}>{diff
+          // A change reads as a diff: added lines green, removed red, the hunk header dim — the step's own colours, never a fault.
+          ? diff.map((l, i) => (
+              <span key={i} data-mark={l.mark ?? undefined} style={{ display: 'block', color: l.mark === 'add' ? 'var(--accent-green, #22c55e)' : l.mark === 'del' ? 'var(--accent-red, #ef4444)' : l.mark === 'hunk' ? 'var(--text-tertiary, var(--text-secondary))' : undefined }}>{l.text || ' '}</span>
+            ))
+          : step.output}</pre>
       )}
     </div>
   )
