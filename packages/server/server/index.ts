@@ -1424,6 +1424,21 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     // FLUXO.ENTREGA-DSL — the delivery state machine (`delivery/`). Not behind the flows flag: refusing a skipped
     // phase is the point, so the door exists on every build; the engine's timer and flows are what the flag adds.
+    // CALENDARIO.ENTREGAS — the Delivery calendar's read (`delivery/calendar.ts`): the screen, the MCP tool and
+    // `agentop flow calendario` all read THIS. Matched before the generic `<subtaskId>` GET below, or `calendar`
+    // resolves as a subtask reference and answers 404. `?format=ics` is the same filtered view as an .ics file;
+    // without filters in the query the reply is the whole calendar (the screen filters in the browser).
+    if (url.pathname === '/api/deliveries/calendar' && req.method === 'GET') {
+      const { deliveryCalendar, answerCalendar, calendarFiltersOf } = await import('./delivery/calendar')
+      const reply = await deliveryCalendar()
+      const filtered = url.searchParams.get('filter') === '0' ? reply : answerCalendar(reply, calendarFiltersOf(url.searchParams))
+      if (url.searchParams.get('format') === 'ics') {
+        const [{ filterCalendar, calendarToIcs }] = [await import('@agentistics/core')]
+        const body = calendarToIcs(filterCalendar(reply, calendarFiltersOf(url.searchParams)), reply.nowMs)
+        return new Response(body, { status: 200, headers: { ...CORS_HEADERS, 'Content-Type': 'text/calendar; charset=utf-8', 'Content-Disposition': 'attachment; filename="entregas.ics"' } })
+      }
+      return json(filtered)
+    }
     if (url.pathname === '/api/deliveries' || url.pathname.startsWith('/api/deliveries/')) {
       const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }] = await Promise.all([
         import('./delivery/web'), import('./delivery/host'), import('./sessions/session-identity'),

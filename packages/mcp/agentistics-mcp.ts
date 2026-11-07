@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { liveDeliveryQuery } from "./live-delivery-args";
+import { deliveryCalendarQuery } from "./delivery-calendar-args";
 import { flowStatusRunId } from './flow-status'
 import { sessionRoleBody } from "./session-role-args";
 import "./orphan-guard-boot";
@@ -103,6 +104,12 @@ async function apiGet(path: string) {
   const res = await fetch(`${API}${path}`);
   if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}`);
   return res.json();
+}
+
+async function apiGetText(path: string) {
+  const res = await fetch(`${API}${path}`);
+  if (!res.ok) throw new Error(`agentistics API ${path} → HTTP ${res.status}`);
+  return res.text();
 }
 
 const LEGACY_TOOLS: Record<ProjectedTool, (data: any, harness?: string) => unknown> = {
@@ -503,6 +510,28 @@ const TOOLS: Tool[] = [
         task: { type: "string", description: "A task id or part of its title." },
         stage: { type: "string", enum: ["queue", "running", "qa", "adjust", "leader", "merge", "published"] },
         stalledOnly: { type: "boolean", description: "Only deliveries that need a person, lost an agent or are blocked." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_delivery_calendar",
+    description:
+      "BETA. The DELIVERY CALENDAR — when each piece of work started, when it is expected to ship, which release version it rides and when a version really went out; the same source and rules as the \"Calendário de entregas\" screen (`agentop flow calendario` prints the same). Returns `pieces` (task, subtask, stage, `version`, harness/model, priority, `startedAtMs`, `stageEta` and `publishEta` — `kind: none` means there is NO estimate: say so, never invent a time — `publishedAtMs`, `dueDate`, `confirmed`, `late`), `versions` (each with `state` published|planned, `atMs` = the real publication or the LATEST piece estimate, `basis` published|estimate|partial|none, the pieces and the count per stage) and `marks` (an account's usage window renewing, a task's due day). Times are epoch ms; day arguments are BRT days (America/Sao_Paulo). By default only pieces of tasks being worked on now; pass `all` for the history too. Filters: `task` (id or part of the title), `subtask`, `version` (one or a list), `stage`, `harness`, `priority`, `from`/`to` (yyyy-MM-dd or an ISO instant — keeps what touches the period), `confirmedOnly` (published or a medium/high-confidence estimate). `format: \"ics\"` returns the filtered view as an .ics file instead of JSON.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "A task id or part of its title." },
+        subtask: { type: "string", description: "A subtask id." },
+        version: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "A release version (2.202.0) or a list." },
+        stage: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "queue, blocked, running, qa, adjust, leader, merge, ci, published — one or a list." },
+        harness: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
+        priority: { anyOf: [{ type: "string" }, { type: "array", items: { type: "string" } }], description: "urgent, high, medium, low." },
+        from: { type: "string", description: "Start of the period: yyyy-MM-dd (BRT) or an ISO instant." },
+        to: { type: "string", description: "End of the period (inclusive)." },
+        all: { type: "boolean", description: "Include pieces of tasks not being worked on now (history)." },
+        confirmedOnly: { type: "boolean", description: "Only published pieces or those with a medium/high-confidence estimate." },
+        format: { type: "string", enum: ["json", "ics"] },
       },
       required: [],
     },
@@ -1221,6 +1250,12 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
       case "agentistics_live_delivery": {
         const body = await apiGet(`/api/tasks/live${liveDeliveryQuery(args as any)}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_delivery_calendar": {
+        const q = deliveryCalendarQuery(args as any);
+        if ((args as any)?.format === "ics") return { content: [{ type: "text", text: await apiGetText(`/api/deliveries/calendar${q}`) }] };
+        const body = await apiGet(`/api/deliveries/calendar${q}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_edit": {
