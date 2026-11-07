@@ -46,11 +46,31 @@ async function availablePort(): Promise<number> {
   return port
 }
 
-function runCli(home: string, args: string[]) {
+/**
+ * A run name no other process on this machine is using. `agentop run` derives the systemd scope unit from the name
+ * (`agentistics-throwaway-<name>.scope`), and a unit is MACHINE-global: a fixed `test-exitlog` collides with another
+ * suite run (a second session's hook, a previous run whose scope is still draining) — `systemd-run` then answers
+ * "Unit … already exists" (exit 1), and the other run's cleanup `systemctl stop`s the unit that is now OURS.
+ */
+let runSeq = 0
+const uniqueName = (base: string) => `${base}-${process.pid}-${Date.now().toString(36)}-${runSeq++}`
+
+/**
+ * The env of a spawned `agentop run`. These tests assert run semantics (exit code, cleanup, signals) on trivial
+ * commands, so the two machine-wide GATES are switched off for them: `AGENTISTICS_HEAVY_JOB=1` (the run is "already
+ * inside the heavy lock", so `true`/`sleep` do not queue behind another session's `tsc` on /tmp/agentistics-heavy.lock
+ * — in the full pre-commit suite that wait is minutes, not a bug in the run) and `AGENTISTICS_RUN_NO_WAIT=1` (the
+ * memory wait; mem-guard.test.ts covers the decision itself). Both are exactly what the run's own children inherit.
+ */
+function runEnv(home: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return { ...process.env, HOME: home, USERPROFILE: home, AGENTISTICS_HEAVY_JOB: '1', AGENTISTICS_RUN_NO_WAIT: '1', ...extra }
+}
+
+function runCli(home: string, args: string[], extraEnv: Record<string, string> = {}) {
   return new Promise<{ code: number | null; out: string }>(resolve => {
     const child = spawn(process.execPath, ['packages/server/bin/cli.ts', 'run', ...args], {
       cwd: join(import.meta.dir, '../../..'),
-      env: { ...process.env, HOME: home, USERPROFILE: home },
+      env: runEnv(home, extraEnv),
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let out = ''
@@ -107,10 +127,12 @@ describe('agentop run --rm', () => {
   })
 
   test('state.tmp is removed when the command cannot be spawned', async () => {
-    const before = new Set(readdirSync('/tmp').filter(n => n.startsWith('agr-')))
-    const { code } = await runCli(testHome, ['--rm', '--', '/nonexistent/bin/xyz'])
+    // /tmp is shared with every other run on the machine (other sessions' hooks, other suites): diffing ALL `agr-*` dirs
+    // blamed this run for a neighbour's live scratch dir. The tag makes this run's dir the only one that matches.
+    const tag = `st${process.pid}${Date.now().toString(36)}`.slice(0, 12)
+    const { code } = await runCli(testHome, ['--rm', '--name', uniqueName('test-tmp'), '--', '/nonexistent/bin/xyz'], { AGENTISTICS_RUN_TMP_TAG: tag })
     expect(code).not.toBe(0)
-    expect(readdirSync('/tmp').filter(n => n.startsWith('agr-') && !before.has(n))).toEqual([])
+    expect(readdirSync('/tmp').filter(n => n.startsWith(`agr-${tag}-`))).toEqual([])
   })
 
   test('children of a run that holds the heavy lock are told so', () => {
@@ -223,35 +245,35 @@ describe('agentop run --rm', () => {
     const realFile = join(home, '.claude.json')
     await Bun.write(realFile, '{"real":true}')
     const before = statSync(realFile).mtimeMs
-    const result = await runCli(home, ['--rm', '--name', 'test-cleanup', '--ttl', '30s', '--', 'sh', '-c', 'test -d "$HOME/.agentistics" && test -d "$HOME/.claude"'])
+    const result = await runCli(home, ['--rm', '--name', uniqueName('test-cleanup'), '--ttl', '30s', '--', 'sh', '-c', 'test -d "$HOME/.agentistics" && test -d "$HOME/.claude"'])
     expect(result.code).toBe(0)
     expect(statSync(realFile).mtimeMs).toBe(before)
     expect(result.out).toContain('removed')
     expect(result.out).toContain('api:')
     expect(result.out).toContain('web:')
-  }, 15_000)
+  }, 30_000)
 
   integration('TTL kills a command and still removes its home', async () => {
     const home = mkdtempSync(join(tmpdir(), 'agentop-run-ttl-'))
-    const result = await runCli(home, ['--rm', '--name', 'test-ttl', '--ttl', '1s', '--', 'sleep', '30'])
+    const result = await runCli(home, ['--rm', '--name', uniqueName('test-ttl'), '--ttl', '1s', '--', 'sleep', '30'])
     expect(result.code).not.toBe(0)
     const lines = result.out.split('\n')
     const removed = lines.find(line => line.startsWith('removed '))
     expect(removed).toBeTruthy()
     const removedHome = removed!.slice('removed '.length)
     expect(() => readFileSync(join(removedHome, '.agentistics', 'missing'))).toThrow()
-  }, 10_000)
+  }, 30_000)
 
   integration('records the command\'s exit code in the log BEFORE the cleanup line', async () => {
     const home = mkdtempSync(join(tmpdir(), 'agentop-run-exit-'))
-    const result = await runCli(home, ['--rm', '--name', 'test-exitlog', '--ttl', '30s', '--', 'sh', '-c', 'exit 7'])
+    const result = await runCli(home, ['--rm', '--name', uniqueName('test-exitlog'), '--ttl', '30s', '--', 'sh', '-c', 'exit 7'])
     expect(result.code).toBe(7)
     const lines = result.out.split('\n')
     const exitAt = lines.findIndex(l => l === 'exit 7')
     const removedAt = lines.findIndex(l => l.startsWith('removed '))
     expect(exitAt).toBeGreaterThanOrEqual(0)
     expect(exitAt).toBeLessThan(removedAt)
-  }, 15_000)
+  }, 30_000)
 
   integration('a registered run with a dead pid never blocks: its state is pruned and its ports are free', async () => {
     const base = await availablePair()
@@ -285,29 +307,35 @@ describe('agentop run --rm', () => {
   integration('refuses a --port-offset that lands on the real ports', async () => {
     const home = mkdtempSync(join(tmpdir(), 'agentop-run-offset-'))
     for (const offset of ['0', '1']) {
-      const result = await runCli(home, ['--rm', '--name', `test-offset-${offset}`, '--port-offset', offset, '--', 'true'])
+      const result = await runCli(home, ['--rm', '--name', uniqueName(`test-offset-${offset}`), '--port-offset', offset, '--', 'true'])
       expect(result.code).toBe(2)
       expect(result.out).toContain('refused')
     }
-  }, 15_000)
+  }, 30_000)
 
   integration('SIGTERM stops the command and removes the throwaway home before exiting', async () => {
     const home = mkdtempSync(join(tmpdir(), 'agentop-run-sig-'))
-    const child = spawn(process.execPath, ['packages/server/bin/cli.ts', 'run', '--rm', '--name', 'test-sig', '--', 'sleep', '30'], {
+    const child = spawn(process.execPath, ['packages/server/bin/cli.ts', 'run', '--rm', '--name', uniqueName('test-sig'), '--', 'sleep', '30'], {
       cwd: join(import.meta.dir, '../../..'),
-      env: { ...process.env, HOME: home, USERPROFILE: home },
+      env: runEnv(home),
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let out = ''
     child.stdout.on('data', data => { out += data })
     child.stderr.on('data', data => { out += data })
     const exited = new Promise<number | null>(resolve => child.once('exit', code => resolve(code)))
-    for (let i = 0; i < 100 && !out.includes('stop:'); i++) await Bun.sleep(100)
-    await Bun.sleep(500)
+    // `stop:` is printed after the child is spawned and the run's signal handlers are installed in the same tick. What it
+    // does NOT say is that `sleep` is running yet: under systemd that is `systemd-run`'s own "Running scope as unit"
+    // line. Wait for facts (bounded, generously — a loaded machine starts bun in seconds), not a fixed 500 ms nap; where
+    // there is no systemd the marker never comes and the bound is what lets the test go on.
+    const waitFor = async (marker: string, ms: number) => { for (let t = 0; t < ms && !out.includes(marker); t += 50) await Bun.sleep(50) }
+    await waitFor('stop:', 10_000)
+    await waitFor('Running scope as unit', 3_000)
     child.kill('SIGTERM')
-    expect(await exited).toBe(143)
+    const code = await exited
+    if (code !== 143) throw new Error(`expected exit 143, got ${code}\n${out}`)
     expect(out).toContain('removed ')
-  }, 15_000)
+  }, 30_000)
 })
 
 describe('agentop run --help', () => {
