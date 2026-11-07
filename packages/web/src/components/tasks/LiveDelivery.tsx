@@ -37,6 +37,7 @@ import {
 import type { LiveSortId } from '@agentistics/core'
 import { LiveCardView } from './LiveCardView'
 import { LiveApprove } from './LiveApprove'
+import { LiveQueuePriority } from './LiveQueuePriority'
 import { LiveColumn } from './LiveColumn'
 import { LiveLeaders } from './LiveLeaders'
 import type { LeaderWorker } from './liveDeliveryModel'
@@ -374,6 +375,7 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         c={c} cards={cards} nowMs={nowMs} pt={pt} fleet={fleet} accountLabels={accountLabels} runtime={reply.runtime}
         leaderName={leaderOf(c)} role={roleOf(c)} mobile={isMobile} onOpen={open} embedded={embedded} sort={sort} cameFrom={moved[c.d.key]?.from ?? null}
       />
+      {c.d.stage === 'queue' && !embedded && <LiveQueuePriority taskId={c.d.taskId} priority={c.d.priority} pt={pt} />}
       {c.d.awaitingApproval && c.d.subtaskId && <LiveApprove subtaskId={c.d.subtaskId} phase={c.d.awaitingApproval.phase} pt={pt} mobile={isMobile} />}
     </div>
   )

@@ -73,6 +73,9 @@ export const AGENT_TOOL_NAMES = [
   // FLUXO.ENTREGA-DSL (2)
   'agentistics_task_phase',
   'agentistics_task_stage',
+  // FILA.PRIORIDADE (2)
+  'agentistics_task_queue',
+  'agentistics_task_queue_answer',
   // Session groups (3)
   'agentistics_session_groups',
   'agentistics_session_group_create',
@@ -183,6 +186,14 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_task_stage: {
     ...TASKS, risk: 'W', routes: ['POST /api/deliveries/:subtask'],
     reason: 'writes the pre-dispatch (staged session draft) on a subtask and opens its delivery in the queue; nothing starts until stage-run passes the predispatch and vaga gates',
+  },
+  agentistics_task_queue: {
+    ...TASKS, risk: 'R', routes: ['GET /api/deliveries/queue/:task'],
+    reason: 'reads the delivery queue in leaving order with every fact the Fila tab shows (priority, pre-dispatch, slot verdict, hold, open question, notes); read only',
+  },
+  agentistics_task_queue_answer: {
+    ...TASKS, risk: 'W', routes: ['POST /api/deliveries/:subtask', 'POST /api/deliveries/queue-next'],
+    reason: 'answers the queue question (sim opens the session through the same claim-guarded stage run; nao/agendar keep the piece queued with a recorded reason); leader of the task or owner only, every decision is a comment on the subtask',
   },
   agentistics_wait: {
     ...GROUPS, risk: 'W', routes: ['POST /api/flows/wait'],

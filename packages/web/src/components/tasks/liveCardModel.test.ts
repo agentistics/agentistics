@@ -348,9 +348,9 @@ describe('queueLines (FLUXO.ENTREGA-DSL "Na fila")', () => {
   test('pre-dispatch line and slot, nothing guessed', async () => {
     const { queueLines } = await import('./liveCardModel')
     expect(queueLines({ staged: { harness: 'claude', model: 'opus', effort: 'high', account: 'acc_1' }, slot: { ok: true, reason: null, at: '' } }, true, () => 'pessoal'))
-      .toEqual({ staged: 'claude · opus · high · conta pessoal', slot: 'vaga: livre agora', slotOk: true, slotRaw: null })
+      .toEqual({ staged: 'claude · opus · high · conta pessoal', slot: 'vaga: livre agora', slotOk: true, slotRaw: null, wait: null })
     expect(queueLines({ staged: { harness: 'claude', model: null, effort: null, account: null }, slot: null }, false).staged).toBe('claude')
-    expect(queueLines({ staged: null, slot: null }, true)).toEqual({ staged: null, slot: null, slotOk: null, slotRaw: null })
+    expect(queueLines({ staged: null, slot: null }, true)).toEqual({ staged: null, slot: null, slotOk: null, slotRaw: null, wait: null })
     // an account nobody can name is left out — the raw `acc_…` id is not something a person reads
     expect(queueLines({ staged: { harness: 'codex', model: 'm', effort: null, account: 'acc_9f3a21' }, slot: null }, true, (_h, a) => a).staged).toBe('codex · m')
   })

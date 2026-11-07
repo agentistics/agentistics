@@ -159,7 +159,7 @@ export function questionText(f: QuestionFacts): string {
     `Há vaga e o próximo da fila é "${f.title}" (${f.subtaskId}), ${f.position}º de ${f.total}, prioridade ${PRIORITY_PT[f.priority] ?? f.priority}.`,
     agent ? `Vai abrir: ${agent}.` : null,
     `Por que ele: ${f.why}`,
-    'Responda com agentistics_queue_answer (ou `agentop flow fila responder --subtask ' + f.subtaskId + ' "<resposta>"`):',
+    'Responda com agentistics_task_queue_answer (ou `agentop flow fila responder --subtask ' + f.subtaskId + ' "<resposta>"`):',
     '  sim                       abre a sessão agora',
     '  nao <motivo>              fica na fila com o motivo no cartão; o fluxo passa ao próximo',
     '  agendar <ISO> <motivo>    fica na fila e só volta a ser candidato nessa hora',

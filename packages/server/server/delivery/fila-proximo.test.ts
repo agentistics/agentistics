@@ -7,6 +7,7 @@ import { createDeliveryStore } from './store'
 import type { GateFacts, SessionFact, SubtaskFact } from './gates'
 import { ASK_TIMEOUT_MS, holdState, orderQueue, parseQueueAnswer, planQueue, QUEUE_HEADER, reminderDue, startClaimLive, type QueueItem } from './fila-proximo'
 import { kickQueueNext } from './queue-kick'
+import { runDeliveryCli } from './cli'
 
 const NOW = Date.parse('2026-11-07T18:00:00Z')
 
@@ -369,6 +370,31 @@ describe('fila-proximo — the flow', () => {
     await t.svc.queueNext()
     expect(t.asks()).toHaveLength(1)
     expect(t.asks()[0]!.text).toContain('Peça a')
+  })
+
+  test('the CLI reads the queue and answers it: `agentop flow fila`, `fila responder`, `fila proximo`', async () => {
+    const t = setup()
+    await t.queue(['a', 'c'])
+    const lines: string[] = [], errs: string[] = []
+    const io = { out: (l: string) => lines.push(l), err: (l: string) => errs.push(l) }
+    const env = { AGENTOP_MANAGED_ID: 'lead1' }
+    expect(await runDeliveryCli(['fila', 'proximo'], io, env, t.svc)).toBe(0)
+    expect(t.asks()).toHaveLength(1)
+    lines.length = 0
+    expect(await runDeliveryCli(['fila', '--task', 't1'], io, env, t.svc)).toBe(0)
+    expect(lines[0]).toContain('urgent')
+    expect(lines[0]).toContain('c')
+    expect(lines[0]).toContain('pergunta aberta')
+    expect(lines[1]).toContain('na fila')
+    expect(await runDeliveryCli(['fila', 'responder', '--subtask', 'c', 'nao', 'ainda', 'não'], io, env, t.svc)).toBe(0)
+    expect((await t.svc.get('c'))?.queueHold?.reason).toBe('ainda não')
+    expect(await runDeliveryCli(['fila', 'responder', '--subtask', 'c'], io, env, t.svc)).toBe(2)
+    expect(await runDeliveryCli(['fila', 'responder', '--subtask', 'c', 'agendar', 'amanhã'], io, env, t.svc)).toBe(2)
+    expect(errs.join('\n')).toContain('agendar needs an ISO date-time')
+    expect(await runDeliveryCli(['fila', 'responder', '--subtask', 'a', 'sim'], io, { AGENTOP_MANAGED_ID: 'lead2' }, t.svc)).toBe(1)
+    expect(await runDeliveryCli(['fila', 'responder', '--subtask', 'a', 'sim'], io, env, t.svc)).toBe(0)
+    expect(t.calls.spawned).toEqual(['a'])
+    expect(await runDeliveryCli(['fila', 'nonsense'], io, env, t.svc)).toBe(2)
   })
 
   test('the kick coalesces a burst of ended sessions into one run, then one more for what arrived meanwhile', async () => {

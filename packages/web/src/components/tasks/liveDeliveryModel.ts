@@ -53,6 +53,8 @@ export interface LiveDeliveryRecord {
   phase?: string | null
   /** A human gate the owner was asked about and has not answered: the card offers approve / reject. */
   awaitingApproval?: { phase: string } | null
+  /** FILA.PRIORIDADE (a queued piece only): the leader's `nao`/`agendar`, the open question, an approval waiting for a slot. */
+  queue?: { hold: { kind: 'nao' | 'agendar'; reason: string; until: string | null; by: string; atMs: number | null } | null; asking: boolean; approved: boolean } | null
 }
 export type WorkerWord = 'working' | 'needs-you' | 'blocked' | 'delivered' | 'awaiting-review' | 'idle'
 export interface LeaderWorker {
