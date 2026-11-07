@@ -95,12 +95,40 @@ export interface DeliveryCi { mergedMain: boolean; releaseGreen: boolean; tagPub
 export interface DeliveryHistoryEntry { from: Phase; to: Phase; at: string; actor: string; detail: string; revision: number }
 
 /** The delivery record: one per subtask, the single source of truth the Live is a projection of. */
+/** The leader's open question: is this queued piece allowed to start now? */
+export interface QueueAsk {
+  at: string
+  leaderSessionId?: string
+  /** The question reached the leader's composer; false = retried each tick until it does (or the timeout decides). */
+  delivered: boolean
+  /** Last reminder (autonomous OFF only): the flow keeps waiting and reminds every 10 min. */
+  remindedAt?: string
+  /** `sim` given (by the leader, or by the 10 min timeout in autonomous mode): start when the slot gate passes. */
+  approved?: { at: string; actor: string; auto: boolean }
+  /** Claimed under the store lock right before the session is spawned — two ticks never open two sessions. */
+  startingAt?: string
+}
+export interface QueueHold {
+  kind: 'nao' | 'agendar'
+  reason: string
+  at: string
+  actor: string
+  /** `agendar`: ISO instant the piece becomes a candidate again. */
+  until?: string
+}
+
 export interface DeliveryRecord {
   subtaskId: string
   taskId: string
   phase: Phase
   /** Withdrawn from the queue; history and the draft remain, and only an explicit restage reopens it. */
   dequeued?: { at: string; actor: string; reason: string; commentedAt?: string }
+  /** FILA.PRIORIDADE — the question put to the leader before this queued piece leaves the queue (see `fila-proximo.ts`). */
+  queueAsk?: QueueAsk
+  /** FILA.PRIORIDADE — the leader's `nao` / `agendar`: the piece stays queued and is not a candidate while this holds. */
+  queueHold?: QueueHold
+  /** FILA.PRIORIDADE — how the piece left the queue (the link to the session it opened), kept so the Fila tab can still point at it. */
+  queueStarted?: { at: string; actor: string; auto: boolean; sessionId: string }
   /** Explicit link to the canonical engine pedido, retained even when its event bus is temporarily unavailable. */
   pedidoIds?: string[]
   /** Where a block returns to. Present only while `phase === 'bloqueado'`. */
@@ -316,6 +344,8 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
   next.revision = r.revision + 1
   next.updatedAt = ctx.at
   delete next.step
+  delete next.queueAsk // the queue's question and hold belong to the piece's time in `fila`
+  delete next.queueHold
   delete next.adopted // a real flow transition: this is a delivery now, never a mere adoption (BLOQUEIO.ORFAO r3)
   if (skipped) next.skips = [...next.skips, skipped]
   const d = input.detail?.trim() ?? ''

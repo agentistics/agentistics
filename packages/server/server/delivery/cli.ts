@@ -37,6 +37,9 @@ export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subt
   agentop flow merge --subtask S [--batch <version>]  deletions gate, squash merge, then ci (the merge is verified on the host)
   agentop flow block --subtask S --reason R --text …  |  agentop flow unblock --subtask S [--detail …]   (unblock: the leader; an owner decision: the owner)
   agentop flow dequeue --subtask S --reason …          withdraw a queued piece, with an audit reason (leader only)
+  agentop flow fila [--task T] [--json]                the queue in leaving order (priority, then arrival), with holds and open questions
+  agentop flow fila responder --subtask S "sim" | "nao <motivo>" | "agendar <ISO> <motivo>"   answer the queue's question (leader or owner)
+  agentop flow fila proximo                            run the queue flow now (a worker ended)
   agentop flow approve --subtask S --phase P --decision approve|reject [--note …]   (the owner only — the answer to a human gate)
   agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …   declare what the release contains (→ ci, → publicado when release.yml is green and the tag exists)
   agentop flow tick                                   the minute watch (blocks, ci → publicado)
@@ -46,7 +49,7 @@ Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usa
 Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
 `
 
-export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'approve', 'release', 'tick'] as const
+export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'dequeue', 'fila', 'approve', 'release', 'tick'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
@@ -145,6 +148,26 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
       const r = await svc.release({ version: flags.version, mergeSha: flags.mergeSha, ...(flags.repo ? { repo: flags.repo } : {}), subtaskIds: subs }, actor)
       if (r.ok) { io.out(JSON.stringify({ ok: true, version: r.version, tag: r.tag, mergeSha: r.mergeSha, ...(r.publishedAt ? { publishedAt: r.publishedAt } : {}), pieces: r.pieces, warnings: r.warnings }, null, 2)); return 0 }
       return report(r, io)
+    }
+    case 'fila': {
+      // FILA.PRIORIDADE — `fila` reads the queue in leaving order; `fila responder` answers the leader's question; `fila proximo` runs the flow now.
+      const sub2 = pos[1]
+      if (sub2 === 'responder') {
+        if (!needSub()) return 2
+        const answer = pos.slice(2).join(' ').trim()
+        if (!answer) { io.err('usage: agentop flow fila responder --subtask S "sim" | "nao <motivo>" | "agendar <ISO> <motivo>"'); return 2 }
+        return report(await svc.answerQueue(sub!, answer, actor), io)
+      }
+      if (sub2 === 'proximo') { io.out(JSON.stringify(await svc.queueNext(), null, 2)); return 0 }
+      if (sub2 !== undefined) { io.err('usage: agentop flow fila [--task T] | fila responder --subtask S "<resposta>" | fila proximo'); return 2 }
+      const view = await svc.queueView(flags.task)
+      if (flags.json === 'true') { io.out(JSON.stringify(view, null, 2)); return 0 }
+      for (const i of view.items) {
+        const state = i.ask ? (i.ask.approved ? 'aprovada' : 'pergunta aberta') : i.hold?.active ? (i.hold.kind === 'nao' ? `não: ${i.hold.reason}` : `agendada ${i.hold.until}`) : 'na fila'
+        io.out(`${i.position}\t${i.priority}\t${i.subtaskId}\t${i.title}\t${[i.predispatch.harness, i.predispatch.model, i.predispatch.effort].filter(Boolean).join('/')}\t${state}`)
+      }
+      if (view.items.length === 0) io.out('a fila está vazia')
+      return 0
     }
     case 'tick': io.out(JSON.stringify(await svc.tick(), null, 2)); return 0
     default: io.err('unknown delivery verb'); return 2
