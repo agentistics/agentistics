@@ -57,7 +57,10 @@ export function opencodeTurns(messages: readonly MsgRow[], parts: readonly PartR
         const canonical = canonicalTool('opencode', d.tool)
         tools.push({
           name: d.tool, ...(canonical !== d.tool ? { canonical } : {}), ...(st.status === 'error' ? { failed: true } : {}),
-          ...(file ? { detail: file, writes: ['write', 'edit'].includes(d.tool) ? [file] : [] } : {}), ref: p.id,
+          // The path is the DETAIL of a write/edit, which is how the files panel and the live feed read a file tool. Also
+          // listing it under `writes` (meant for files a SHELL command wrote) counted every edit twice and filed an edit of an
+          // existing file as a NEW one (OPENCODE.SESSAO).
+          ...(file ? { detail: file } : {}), ref: p.id,
         })
       }
     }

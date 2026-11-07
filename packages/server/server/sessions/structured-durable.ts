@@ -341,6 +341,10 @@ export function durableStore(root: string, relay: RelayCommand = relayCommand())
     try { const c = (JSON.parse(raw) as { child?: unknown }).child; return typeof c === 'number' && c > 1 ? c : null } catch { return null }
   }
   const isAlive = (id: string): boolean => {
+    // APP.LENTO: the fleet poll asks this of EVERY row (3.000 on a real machine, every 5 s), and almost
+    // none has a record — each then paid ~5 synchronous reads that failed with a thrown error. With no
+    // directory every branch below answers false, so one `existsSync` gives the same answer.
+    if (!existsSync(dirOf(id))) return false
     if (foreign(id)) return false
     const k = lastGen(id)
     if (relayLive(id, k)) return true

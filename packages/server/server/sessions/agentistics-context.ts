@@ -86,6 +86,7 @@ const TOOL_GROUPS = {
     'agentistics_task_types', 'agentistics_task_type_edit', 'agentistics_task_status_edit', 'agentistics_task_comment',
     'agentistics_task_subtask', 'agentistics_task_link', 'agentistics_task_blocked_by', 'agentistics_task_next',
     'agentistics_task_claim', 'agentistics_task_activity', 'agentistics_task_edit', 'agentistics_task_session', 'agentistics_task_delete',
+    'agentistics_task_phase', 'agentistics_task_stage',
   ],
   Sessions: ['agentistics_sessions', 'agentistics_session_groups', 'agentistics_session_group_create', 'agentistics_session_group_edit', 'agentistics_session_notify', 'agentistics_session_message', 'agentistics_session_role', 'agentistics_session_away', 'agentistics_session_switch_account', 'agentistics_checkin_report'],
   Metrics: ['agentistics_live_delivery', 'agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_plan_limits', 'agentistics_tags', 'agentistics_tag_detail', 'agentistics_flow_run', 'agentistics_flow_status', 'agentistics_wait'],
@@ -127,7 +128,7 @@ export function contextText(i: ContextInput): string {
     METRICS_DASHBOARDS_LINE,
     briefingText(i.lang ?? 'en', { planLimitsAvailable: planLimits && !worker, away }),
     roleLine(i.role),
-    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits }),
+    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits, ruleInBriefing: true }),
     ...flowLines(i.lang ?? 'en', i.role, !!i.taskId),
   ]
   if (i.role !== 'worker') {
@@ -178,14 +179,17 @@ export function contextText(i: ContextInput): string {
     '- Secrets come from the vault: use vault://name references. Never ask the user to paste a key and never print a secret.',
     '- Ports 47291 and 47292 belong to agentistics: never start, stop or bind anything there; never run `agentop upgrade`; never restart the agentistics service.',
     '- Never open public tunnels (ngrok, cloudflared, etc.) to this machine.',
-    `- Do not delete, move or rewrite files outside ${i.cwd} without asking.`,
+    away
+      ? `- Do not delete, move or rewrite files outside ${i.cwd}; defer safely and record the decision instead of addressing the owner.`
+      : `- Do not delete, move or rewrite files outside ${i.cwd} without asking.`,
   )
   if (!worker) lines.push(
-    "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
+    away
+      ? "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove). Defer anything you did not create and record it for the owner's return."
+      : "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
   )
-  lines.push(away
-    ? '- Decisions are yours within the authorisations: record them, never wait on a question.'
-    : '- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.')
+  // The autonomous-mode rule is said once, in the briefing paragraph above — not repeated here.
+  if (!away) lines.push('- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.')
   return lines.join('\n')
 }
 

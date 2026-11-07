@@ -267,13 +267,15 @@ function PhoneUnlock({ facts, lang, isMobile, onOpened }: { facts: PhoneFacts; l
  * The whole unlock, for any screen: reads the vault's state and where it is opened from, and calls
  * `onOpened` once the vault is open (at once, if it already is).
  */
-export function VaultUnlock({ lang, isMobile, onOpened, center, onAction, btn, onBusy }: { lang: Lang; isMobile: boolean; onOpened: () => void; center?: boolean; onAction?: (a: UiAction) => void; btn?: React.CSSProperties; onBusy?: (busy: boolean) => void }) {
+export function VaultUnlock({ lang, isMobile, onOpened, center, onAction, btn, onBusy, onWrappers }: { lang: Lang; isMobile: boolean; onOpened: () => void; center?: boolean; onAction?: (a: UiAction) => void; btn?: React.CSSProperties; onBusy?: (busy: boolean) => void; onWrappers?: (wrappers: string[]) => void }) {
   const [view, setView] = useState<VaultView | null>(null)
   const [facts, setFacts] = useState<PhoneFacts | null>(null)
   const [failed, setFailed] = useState(false)
   // A caller's inline arrow must not re-run the load on every render.
   const opened = useRef(onOpened)
   opened.current = onOpened
+  const wrappersCb = useRef(onWrappers)
+  wrappersCb.current = onWrappers
   const done = useCallback(() => opened.current(), [])
   useEffect(() => {
     let alive = true
@@ -281,6 +283,7 @@ export function VaultUnlock({ lang, isMobile, onOpened, center, onAction, btn, o
       if (!alive) return
       if (v.kind === 'failed' || !f.ok) { setFailed(true); return }
       if (v.view.state === 'open') { done(); return }
+      wrappersCb.current?.(v.view.wrappers)
       setView(v.view); setFacts(f)
     })
     return () => { alive = false }

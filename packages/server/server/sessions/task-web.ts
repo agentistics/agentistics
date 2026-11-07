@@ -6,7 +6,9 @@
  * delivery cost", and the two would drift.
  */
 
-import { buildLive } from './task-live'
+import { buildLive, legacyReviewShaPieces } from './task-live'
+import { dirsForShas } from './release-repos'
+import { publishedAmong } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import { stat } from 'node:fs/promises'
 import type { StagedSessionDraft, TaskStatusDef, TaskTypeDef } from '@agentistics/core'
@@ -14,12 +16,14 @@ import {
   canDeleteStatus, canDeleteType, isKnownStatusId, isKnownTypeId, isValidTypeColor, nextTypeId, sortTaskTypes, isValidStatusColor, nextStatusId, sortTaskStatuses,
 } from '@agentistics/core'
 import { loadTaskWorld } from './task-source'
+import { conversationOwners } from './task-conversations'
 import { historicalLinkId, nativeLinkId, type HistoricalSession, type NativeSessionLink, type NativeSessionUsage } from './task-model'
 import { sanitizeNativeUsage } from './task-native'
 import { planConversationFiling } from './task-historical'
 import { buildTaskDetail, buildTaskList, findTask, rowsOfTask, subtaskHasSession } from './task-report'
 import { planDeliveryEvidence, type DeliveryEvidence } from './task-evidence'
 import { buildBoardOverview, type BoardOverview } from './task-overview'
+import { clipDetails, recentRows } from './task-list-window'
 import { scopeMetas, type TaskFilter } from './task-filter'
 import { getCommitsInWindow } from '../git'
 import { readPreferences, writePreferences } from '../preferences'
@@ -27,7 +31,7 @@ import {
   isGroupMember, legacyTaskId, marksStart, migratePriority, newCommentId, newEventId, newFileId,
   newLinkId, newSubtaskId, newTaskId, statusAfterAllSubtasksDone, statusAfterAttach, statusAfterHandback,
   statusAfterSubtaskProgress, subtaskDone,
-  type Task, type TaskEvent, type TaskStatus,
+  type Subtask, type Task, type TaskEvent, type TaskStatus,
 } from './task-model'
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
 import { LEADER_ONLY_MESSAGE, checkParentGroup, directFilingAllowed, planAttach, sanitizeSubtaskBlockedBy } from './task-attach'
@@ -53,6 +57,10 @@ export interface TaskListReply {
    * zero — the figure is smaller and nothing on screen says why.
    */
   excludedByFilter: number
+  /** Every task the filter keeps — the same figure in both steps of a split load. */
+  total?: number
+  /** True when `tasks` is only the recent/open step; the rest follows from the same route. */
+  partial?: boolean
 }
 
 export interface TaskDetailReply {
@@ -80,8 +88,9 @@ async function fileVersion(file: string): Promise<string> {
 
 /** Both the book and registry feed the live line: sessions can change without a book write. */
 async function liveSourceVersion(): Promise<string> {
-  const [tasks, sessions] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE)])
-  return `${tasks}|${sessions}`
+  const { defaultDeliveriesPath } = await import('../delivery/store')
+  const [tasks, sessions, deliveries] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE), fileVersion(defaultDeliveriesPath())])
+  return `${tasks}|${sessions}|${deliveries}`
 }
 
 // A write is the fast invalidation path; the stat key also catches writes made by another process.
@@ -96,19 +105,41 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
   const promise = (async () => {
     const w = await loadTaskWorld()
     const nowMs = Date.now()
+    const owners = conversationOwners(w.rollupRows)
+    // Comments are only the SOURCE of a legacy piece's delivered commit (its handback): the subtask-level ones, grouped once.
+    const commentsOfTask = new Map<string, typeof w.book.comments>()
+    for (const c of w.book.comments) if (c.subtaskId) { const l = commentsOfTask.get(c.taskId); if (l) l.push(c); else commentsOfTask.set(c.taskId, [c]) }
     const details = w.book.tasks.map(task => buildTaskDetail({
+      owners,
       task,
       attempts: w.book.attempts,
       rows: w.rollupRows,
       metas: w.metas,
       costOf: w.costOf,
-      comments: [],
+      comments: commentsOfTask.get(task.id) ?? [],
       threads: [],
       subtasks: w.book.subtasks.filter(t => t.taskId === task.id),
       files: [],
     }))
     const labels = new Map(w.book.statuses.map(s => [s.id, s.label]))
-    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id) })
+    // FLUXO.ENTREGA-DSL: the delivery records are the state machine; the Live is their projection.
+    const deliveries = await (async () => {
+      try {
+        const { createDeliveryStore } = await import('../delivery/store')
+        return new Map(Object.entries((await createDeliveryStore().read()).deliveries))
+      } catch { return new Map() }
+    })()
+    // Which clones to ask is per commit: the server does not run inside a checkout, so the repositories come from the
+    // sessions' own directories, the task's repository and the repositories agentistics knows (`release-repos.ts`).
+    const pieces = legacyReviewShaPieces(details, w.book.events, deliveries)
+    const taskById = new Map(w.book.tasks.map(t => [t.id, t]))
+    const dirsFor = dirsForShas({
+      pieces,
+      rowsOf: id => { const t = taskById.get(id); return t ? rowsOfTask(t, w.rollupRows, owners) : [] },
+      metas: w.metas.values(),
+    })
+    const publishedShas = publishedAmong([...pieces.keys()], nowMs, undefined, dirsFor)
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
     return result
@@ -119,26 +150,84 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
   }
 }
 
-export async function listTasks(filter?: TaskFilter): Promise<TaskListReply> {
+export interface ListTasksOptions {
+  /** Step one of the split load: open tasks + anything touched in the last two days. */
+  recent?: boolean
+  /** The HTTP list cuts each description to a card's worth; callers that want the text omit this. */
+  clip?: boolean
+}
+
+type ListCacheEntry = { key: string; builtAtMs: number; reply: TaskListReply }
+const listCache = new Map<string, ListCacheEntry>()
+const listInFlight = new Map<string, { key: string; promise: Promise<ListCacheEntry> }>()
+const LIST_CACHE_KEYS = 8
+
+// A build already in flight must not be joined by a read that follows the write (same key, same
+// mtime and size would otherwise hand it the pre-write reply).
+let listGeneration = 0
+onBookWrite(() => { listGeneration++; listCache.clear(); listInFlight.clear() })
+
+async function buildListReply(filter?: TaskFilter): Promise<TaskListReply> {
   const w = await loadTaskWorld()
   const scoped = scopeMetas(w.metas, filter)
+  const tasks = buildTaskList({
+    tasks: w.book.tasks,
+    attempts: w.book.attempts,
+    rows: w.rollupRows,
+    metas: scoped.metas,
+    costOf: w.costOf,
+    comments: w.book.comments,
+    threads: w.book.threads,
+    subtasks: w.book.subtasks,
+    files: w.book.files,
+  })
   return {
-    tasks: buildTaskList({
-      tasks: w.book.tasks,
-      attempts: w.book.attempts,
-      rows: w.rollupRows,
-      metas: scoped.metas,
-      costOf: w.costOf,
-      comments: w.book.comments,
-      threads: w.book.threads,
-      subtasks: w.book.subtasks,
-      files: w.book.files,
-    }),
+    tasks,
     overview: buildBoardOverview({
       tasks: w.book.tasks, rows: w.rollupRows, metas: scoped.metas, costOf: w.costOf,
       statusIds: w.book.statuses.map(s => s.id),
     }),
     excludedByFilter: scoped.excluded,
+    total: tasks.length,
+  }
+}
+
+/**
+ * The list, cached the way the live line is (`liveReplyForBook`): keyed by the book + registry
+ * versions and the filter, the key taken BEFORE the world is read, at most `LIVE_REPLY_MAX_AGE_MS`
+ * old (sessions move the cost figures without a book write), and one build shared by concurrent
+ * callers. A book write drops every entry at once.
+ */
+async function cachedListReply(filter?: TaskFilter): Promise<TaskListReply> {
+  const filterKey = JSON.stringify(filter ?? {})
+  const key = `${await liveSourceVersion()}|${filterKey}`
+  const hit = listCache.get(filterKey)
+  if (hit?.key === key && Date.now() - hit.builtAtMs < LIVE_REPLY_MAX_AGE_MS) return hit.reply
+  const flying = listInFlight.get(filterKey)
+  if (flying?.key === key) return (await flying.promise).reply
+  const generation = listGeneration
+  const promise = (async () => {
+    const entry: ListCacheEntry = { key, builtAtMs: Date.now(), reply: await buildListReply(filter) }
+    // A write that landed while this was building made it stale whatever its key says.
+    if (generation !== listGeneration) return entry
+    listCache.set(filterKey, entry)
+    while (listCache.size > LIST_CACHE_KEYS) listCache.delete(listCache.keys().next().value as string)
+    return entry
+  })()
+  listInFlight.set(filterKey, { key, promise })
+  try { return (await promise).reply } finally {
+    if (listInFlight.get(filterKey)?.promise === promise) listInFlight.delete(filterKey)
+  }
+}
+
+export async function listTasks(filter?: TaskFilter, opts: ListTasksOptions = {}): Promise<TaskListReply> {
+  const full = await cachedListReply(filter)
+  if (!opts.recent && !opts.clip) return full
+  const base = opts.recent ? recentRows(full.tasks, Date.now()) : full.tasks
+  return {
+    ...full,
+    tasks: opts.clip ? clipDetails(base) : base,
+    ...(opts.recent ? { partial: true } : {}),
   }
 }
 
@@ -197,15 +286,21 @@ export async function liveDeliveries(filters: LiveFilters = {}): Promise<LiveVie
     rows = fleet.map(r => ({
       id: r.id, title: r.title, harness: r.harness, state: r.state,
       ...(r.model ? { model: r.model } : {}),
+      ...(r.observedModel ? { observedModel: r.observedModel } : {}),
+      ...(r.effort ? { effort: r.effort } : {}),
       ...(r.accountId ? { accountId: r.accountId } : {}),
       ...(r.parentSessionId ? { parentSessionId: r.parentSessionId } : {}),
       ...(r.lastLines ? { lastLines: r.lastLines } : {}),
+      ...(r.task ? { task: r.task } : {}),
+      ...(typeof r.startedAt === 'number' ? { createdMs: r.startedAt } : {}),
     }))
     const roles = await listRoles(await defaultRoleDeps())
     leaderIds = new Set(fleet.filter(r => roleOfRow(roles, r) === 'leader').map(r => r.id))
   } catch { /* no fleet: deliveries without live state */ }
   const reply = await replyPromise
-  return describeLive({ reply, rows, leaderIds, nowMs, filters })
+  const { liveRuntimeFacts } = await import('./live-runtime')
+  const runtime = await liveRuntimeFacts(nowMs).catch(() => ({}))
+  return describeLive({ reply, rows, leaderIds, nowMs, filters, runtime })
 }
 
 /** Create a task. Title is required; a description is not — a task nobody described is a task. */
@@ -1663,4 +1758,25 @@ export async function deleteType(id: string): Promise<
   if (!check.ok) return { ok: false, message: 'in_use', usageCount }
   await w.store.removeType(id)
   return { ok: true }
+}
+
+/**
+ * FLUXO.ENTREGA-DSL — the delivery flow writes the CI · publicando signal onto the subtask (`null` clears it).
+ * Flow-only: no route lets a person set it, because the Live moves a card to Publicado on it.
+ */
+export async function setSubtaskCi(subtaskId: string, ci: Subtask['ci'] | null): Promise<boolean> {
+  const w = await loadTaskWorld()
+  const found = w.book.subtasks.find(t => t.id === subtaskId)
+  if (!found) return false
+  const next: Subtask = { ...found, updatedAt: found.updatedAt }
+  if (ci) next.ci = ci
+  else delete next.ci
+  await w.store.upsertSubtask(next)
+  return true
+}
+
+/** FLUXO.ENTREGA-DSL — a `step` activity event (`to` = the 1-based step of the current phase), read by `task-live.ts`. */
+export async function logSubtaskStep(taskId: string, subtaskId: string, step: number, actor: string): Promise<void> {
+  const w = await loadTaskWorld()
+  await w.store.logEvents([{ ...event(taskId, actor, 'step', { to: String(step), detail: `passo ${step}` }), subtaskId }])
 }

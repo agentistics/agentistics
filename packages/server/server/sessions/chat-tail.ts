@@ -60,6 +60,7 @@ const pathMemo = createTranscriptPathMemo()
 /** Reset the memo. Tests only. */
 export function forgetChatTailPaths(): void {
   pathMemo.clear()
+  scanIndexes.clear()
 }
 
 /**
@@ -77,16 +78,49 @@ async function exists(path: string): Promise<boolean> {
   try { await stat(path); return true } catch { return false }
 }
 
-/** Find `<sessionId>.jsonl` under `projectsDir`, scanning every project directory once. */
-async function scanForTranscript(sessionId: string, projectsDir: string): Promise<string | null> {
+/**
+ * APP.LENTO: one listing of every project directory, shared by every scan that runs inside
+ * `SCAN_INDEX_MS`. The scan used to `stat` `<dir>/<id>.jsonl` in each of the ~300 project directories
+ * PER missing conversation, so a fleet holding a few dozen rows whose transcripts were not where their
+ * cwd says (a moved worktree, a file Claude's 30-day cleanup took) cost thousands of `stat`s every
+ * poll — ~5 % of the server's CPU in the profile. Now the misses of one poll share one listing, and a
+ * listing older than a second is taken again before a miss is answered, so a transcript that moved is
+ * found on the very call that looks for it, exactly as before (a miss here is remembered for 30 s by
+ * `transcript-path-memo.ts`, so answering from a stale listing would cost the chat half a minute).
+ */
+export const SCAN_INDEX_MS = 1_000
+const scanIndexes = new Map<string, { at: number; files: Map<string, string> }>()
+async function listTranscripts(projectsDir: string): Promise<Map<string, string> | null> {
   let dirs: string[]
   try { dirs = await readdir(projectsDir) } catch { return null }
+  const files = new Map<string, string>()
   for (const dir of dirs) {
-    const candidate = join(projectsDir, dir, `${sessionId}.jsonl`)
-    if (await exists(candidate)) return candidate
+    let names: string[]
+    try { names = await readdir(join(projectsDir, dir)) } catch { continue }
+    // First directory wins, as the per-id scan's own iteration order did.
+    for (const name of names) if (name.endsWith('.jsonl') && !files.has(name)) files.set(name, join(projectsDir, dir, name))
   }
-  return null
+  return files
 }
+
+/** Find `<sessionId>.jsonl` under `projectsDir` through the shared listing. */
+async function scanForTranscript(sessionId: string, projectsDir: string, now = Date.now()): Promise<string | null> {
+  const name = `${sessionId}.jsonl`
+  let index = scanIndexes.get(projectsDir)
+  const fresh = index && now - index.at < SCAN_INDEX_MS
+  let hit = fresh ? index!.files.get(name) : undefined
+  if (hit && !await exists(hit)) hit = undefined
+  if (!hit && !fresh) {
+    const files = await listTranscripts(projectsDir)
+    if (!files) return null
+    index = { at: now, files }
+    scanIndexes.set(projectsDir, index)
+    hit = files.get(name)
+  }
+  return hit && await exists(hit) ? hit : null
+}
+/** Reset the shared listing. Tests only. */
+export function forgetTranscriptListing(): void { scanIndexes.clear() }
 
 /**
  * The absolute path to a live Claude conversation's transcript, or `null` when it cannot be found.
@@ -122,7 +156,7 @@ export async function resolveChatTranscriptPath(
       const p = join(projectsDir, encodeProjectDir(cwd), `${sessionId}.jsonl`)
       return await exists(p) ? p : null
     },
-    scan: () => scanForTranscript(sessionId, projectsDir),
+    scan: () => scanForTranscript(sessionId, projectsDir, now),
     now,
   })
 }

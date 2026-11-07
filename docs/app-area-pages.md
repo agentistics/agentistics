@@ -42,8 +42,8 @@ remain in each session's check-in panel.
 Hand-offs reserves its page for HANDOFF.CONFIG (`t-49f70edb75`) with a plain explanatory
 sentence and no configuration controls. Autonomous mode composes the existing settings
 switch, activation dialog, return confirmation and fleet impact. The top-bar away pill
-links to this page. Existing settings URLs remain usable; digest offers and their
-answers remain in the notification bell, using the existing away digest flow.
+links to this page. Existing settings URLs remain usable. (The "summary of the autonomous
+mode" notification offer was removed on 2026-11-06 at the owner's request.)
 
 ## Usage and activity presentation
 

@@ -46,6 +46,31 @@ export function handoffSessionLimit(harness: HarnessId, session: Pick<ManagedSes
   return id ? mine.find(l => canonicalAccountId(accounts, l.account) === canonicalAccountId(accounts, id)) : undefined
 }
 
+/**
+ * What a walk of the journal keeps between calls (APP.LENTO). The events table carries no index on
+ * `type` (schema.ts, A1.7), so `WHERE type = ?` read the WHOLE journal — 327 MB on a real machine —
+ * every 30 s the quota panel sampled, and every `run.started` since the journal began was decoded
+ * again each time: ~11 % of the server's CPU in the profile. `rowid` is AUTOINCREMENT, so rows are
+ * only ever appended above the last one seen, and a DELETE bumps the journal's `epoch` — so a walk
+ * resumes from the last rowid while the file and its epoch are the ones it read, and starts over
+ * otherwise. What it keeps is the FACT (the run's conversation, the response's cost cell), never an
+ * account: attribution is re-evaluated on every call because bindings change.
+ */
+interface BilledWalk {
+  path: string
+  ino: number
+  epoch: number | null
+  version: number
+  lastRowid: number
+  /** The earliest `occurred_at` (ms) the kept responses cover; an earlier window starts over. */
+  floor: number
+  runs: Map<string, { harness: HarnessId; conversationId: string }>
+  completed: { runId: string; at: number; sourceRef: string; cell: ReturnType<typeof emptyCostCell>; model: string }[]
+}
+let billedWalk: BilledWalk | null = null
+/** Test seam: forget the kept walk. */
+export function resetBilledWalk(): void { billedWalk = null }
+
 /** Includes closed/unmanaged conversations; coarse lifetime imports cannot supply window spend. */
 export async function readBilledReplies(accounts: AccountsFile, managed: readonly ManagedSession[], limits: readonly PlanLimits[], path = JOURNAL_PATH): Promise<BilledReply[]> {
   if (!existsSync(path)) return []
@@ -54,6 +79,10 @@ export async function readBilledReplies(accounts: AccountsFile, managed: readonl
   try {
     db.exec('PRAGMA busy_timeout = 5000')
     const version = (db.query('PRAGMA user_version').get() as { user_version: number }).user_version
+    const since = Math.min(Date.now(), ...limits.flatMap(l => l.windows.map(w => w.resetsAt - (w.kind === '5h' ? 5 * 3600_000 : 7 * 24 * 3600_000))))
+    const ino = await stat(path).then(st => st.ino).catch(() => -1)
+    let epoch: number | null = null
+    try { epoch = Number((db.query("SELECT v FROM journal_state WHERE k = 'epoch'").get() as { v: string } | null)?.v ?? 0) } catch { epoch = null }
     const strings = new Map<number, string>()
     const lookup = (id: number) => {
       if (!strings.has(id)) strings.set(id, (db.query('SELECT s FROM event_strings WHERE id = ?').get(id) as { s: string }).s)
@@ -63,29 +92,46 @@ export async function readBilledReplies(accounts: AccountsFile, managed: readonl
     const event = (r: unknown) => rowToEvent(version >= 2 ? decodeRow(r as StoredRow, lookup) : r as JournalRow)
     let walked = 0
     const yieldOccasionally = async () => { if (++walked % 250 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0)) }
-    const runs = new Map<string, { harness: HarnessId; conversationId: string }>()
+    // Resume only a v2 walk of THIS file, at THIS epoch, covering this window. Anything else reads from the start.
+    const resumable = version >= 2 && epoch !== null && billedWalk !== null && billedWalk.path === path && billedWalk.ino === ino
+      && billedWalk.epoch === epoch && billedWalk.version === version && since >= billedWalk.floor
+    const walk: BilledWalk = resumable ? billedWalk! : { path, ino, epoch, version, lastRowid: 0, floor: since, runs: new Map(), completed: [] }
     const started = key('run.started')
-    if (started !== undefined) for (const row of db.query('SELECT * FROM events WHERE type = ?').iterate(started)) {
-      await yieldOccasionally()
-      const e = event(row) as AgentisticsEvent<'run.started'>
-      if (e.runId && e.data.conversationId) runs.set(e.runId, { harness: e.data.harness as HarnessId, conversationId: e.data.conversationId })
+    const completed = key('model.completed')
+    const types = [started, completed].filter((t): t is NonNullable<typeof t> => t !== undefined)
+    if (types.length > 0) {
+      const sinceArg = version >= 2 ? walk.floor : new Date(walk.floor).toISOString()
+      const sql = `SELECT rowid AS _rowid, * FROM events WHERE rowid > ? AND type IN (${types.map(() => '?').join(',')}) ORDER BY rowid`
+      for (const row of db.query(sql).iterate(walk.lastRowid, ...types)) {
+        await yieldOccasionally()
+        const rowid = (row as { _rowid: number })._rowid
+        if (rowid > walk.lastRowid) walk.lastRowid = rowid
+        const type = (row as { type: unknown }).type
+        if (type === started) {
+          const e = event(row) as AgentisticsEvent<'run.started'>
+          if (e.runId && e.data.conversationId) walk.runs.set(e.runId, { harness: e.data.harness as HarnessId, conversationId: e.data.conversationId })
+          continue
+        }
+        const occurred = (row as { occurred_at: unknown }).occurred_at
+        if (version >= 2 ? Number(occurred) < (sinceArg as number) : String(occurred) < (sinceArg as string)) continue
+        const e = event(row) as AgentisticsEvent<'model.completed'>
+        if (e.source.id === IMPORT_STORE_SOURCE_ID || e.data.replayed || !e.runId) continue
+        const cell = emptyCostCell()
+        foldCostResponse(cell, e)
+        walk.completed.push({ runId: e.runId, at: Date.parse(e.occurredAt), sourceRef: e.provenance.sourceRef ?? '', cell, model: pricingModelOf(e) })
+      }
     }
+    // A later, narrower window drops what fell out of it; the floor follows so a walk never claims more than it holds.
+    if (since > walk.floor) { walk.completed = walk.completed.filter(c => c.at >= since); walk.floor = since }
+    billedWalk = version >= 2 && epoch !== null ? walk : null
     const replies: BilledReply[] = []
     const attribution = new Map<string, string | undefined>()
-    const since = Math.min(Date.now(), ...limits.flatMap(l => l.windows.map(w => w.resetsAt - (w.kind === '5h' ? 5 * 3600_000 : 7 * 24 * 3600_000))))
-    const completed = key('model.completed')
-    if (completed !== undefined) for (const row of db.query('SELECT * FROM events WHERE type = ? AND occurred_at >= ?').iterate(completed, version >= 2 ? since : new Date(since).toISOString())) {
-      await yieldOccasionally()
-      const e = event(row) as AgentisticsEvent<'model.completed'>
-      if (e.source.id === IMPORT_STORE_SOURCE_ID || e.data.replayed) continue
-      const run = e.runId ? runs.get(e.runId) : undefined
+    for (const c of walk.completed) {
+      const run = walk.runs.get(c.runId)
       if (!run) continue
-      const cell = emptyCostCell()
-      foldCostResponse(cell, e)
-      const attributionKey = replyKey(run.harness, run.conversationId) + ':' + (e.provenance.sourceRef ?? '').replace(/:\d+$/, '')
-      if (!attribution.has(attributionKey)) attribution.set(attributionKey, accountForReply(run.harness, run.conversationId, e.provenance.sourceRef, accounts, managed, limits))
-      replies.push({ ...run, account: attribution.get(attributionKey),
-        at: Date.parse(e.occurredAt), model: pricingModelOf(e), costUSD: priceCell(cell, pricingModelOf(e)).costUSD })
+      const attributionKey = replyKey(run.harness, run.conversationId) + ':' + c.sourceRef.replace(/:\d+$/, '')
+      if (!attribution.has(attributionKey)) attribution.set(attributionKey, accountForReply(run.harness, run.conversationId, c.sourceRef || undefined, accounts, managed, limits))
+      replies.push({ ...run, account: attribution.get(attributionKey), at: c.at, model: c.model, costUSD: priceCell(c.cell, c.model).costUSD })
     }
     return replies
   } finally { db.close() }

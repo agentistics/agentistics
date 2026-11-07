@@ -9,7 +9,7 @@ import { readFleet as realReadFleet, runFleetAction as realRunFleetAction } from
 import { loadTaskWorld as realLoadTaskWorld } from './sessions/task-source'
 import { newEventId as realNewEventId, type TaskEvent } from './sessions/task-model'
 import { sseEncoder, sseClients as realSseClients } from './sse'
-import { awayActive, planBudget, planPace, parseAwayState, windowRenewed, type HarnessId, type PlanLimits, type PlanBudget, type PlanPace } from '@agentistics/core'
+import { planBudget, planPace, parseAwayState, sessionAwayState, windowRenewed, type HarnessId, type PlanLimits, type PlanBudget, type PlanPace } from '@agentistics/core'
 import { harnessEnabled } from './adapters/types'
 import { createHash } from 'node:crypto'
 import { isClosedRow } from './sessions/fleet-events'
@@ -230,9 +230,11 @@ export function mergeConfig(base: CheckinConfig, patch: Partial<CheckinConfig>):
 }
 /** The report is read by the owner, who is not technical: the round is useless if it reads like a log. */
 export const PLAIN_REPORT = 'O relatório é lido pelo dono, que não é técnico: escreva como um recado curto em linguagem simples — o que ficou pronto, o que precisa dele (se algo) e o que vem a seguir. Sem ids de sessão, hashes, números de PR, portas, porcentagens de limite ou apelidos internos, a não ser que ele precise agir sobre um deles; chame cada coisa pelo que ela faz.'
-export function promptFor(c: CheckinConfig): string {
+/** The same report instruction while autonomous mode is ON: nothing in it is addressed to, or waits for, the owner. */
+export const PLAIN_REPORT_AUTONOMOUS = 'O relatório fica registrado na tarefa e é lido depois: escreva como um recado curto em linguagem simples — o que ficou pronto, o que você decidiu, o que foi adiado por estar fora das autorizações e o que vem a seguir. Não peça nada ao dono e não escreva pedidos de decisão: nada aqui espera por ele. Sem ids de sessão, hashes, números de PR, portas, porcentagens de limite ou apelidos internos; chame cada coisa pelo que ela faz.'
+export function promptFor(c: CheckinConfig, autonomous = false): string {
   const items = c.checklist.filter(x => x.enabled).map(x => `- ${labels[x.id]}`).join('\n')
-  return `[from agentistics · check-in]\nFaça o check-in da liderança agora.\n${items}\n\n${PLAIN_REPORT}\nQuando terminar, chame agentistics_checkin_report.`
+  return `[from agentistics · check-in]\nFaça o check-in da liderança agora.\n${items}\n\n${autonomous ? PLAIN_REPORT_AUTONOMOUS : PLAIN_REPORT}\nQuando terminar, chame agentistics_checkin_report.`
 }
 export interface DeliveredOpen { sessionId: string; handbackAt: string; lastRun?: { status: string; reason?: string } }
 /** PURE. The check-in line naming the workers that delivered but are still open (and why, when a close was refused). */
@@ -248,18 +250,21 @@ const nameOf = (i: FechamentoItem) => i.sessionId
  * PURE. F5.b — the three plain groups of workers that delivered, each only when it has someone: still open, ready to
  * clean, and NOT saved (with why). Empty = ''. The leader acts through the flows; nothing here closes or removes anything.
  */
-export function fechamentoLines(f: Fechamento): string {
+export function fechamentoLines(f: Fechamento, autonomous = false): string {
   const lines: string[] = []
   if (f.naoSalvos.length) lines.push(`Trabalho NÃO salvo (não feche nem limpe; peça ao worker para salvar): ${f.naoSalvos.map(i => `${nameOf(i)} — ${i.reason ?? 'motivo não registrado'}${i.missing?.length ? ` (falta: ${i.missing.join(', ')})` : ''}`).join('; ')}.`)
   if (f.abertos.length) lines.push(`Entregaram e seguem abertos: ${f.abertos.map(i => i.reason ? `${nameOf(i)} (${i.reason})` : nameOf(i)).join('; ')}. Feche cada um com agentistics_flow_run name=fechar-entregue {sessionId} — ele só fecha se estiver parado, limpo e salvo; uma recusa diz o que falta.`)
-  if (f.prontosParaLimpar.length) lines.push(`Prontos para limpar (já fechados, a pasta de trabalho ainda existe): ${f.prontosParaLimpar.map(nameOf).join('; ')}. Limpe com agentistics_flow_run name=limpeza-real {sessionId} se o dono liberou a limpeza.`)
+  if (f.prontosParaLimpar.length) lines.push(`Prontos para limpar (já fechados, a pasta de trabalho ainda existe): ${f.prontosParaLimpar.map(nameOf).join('; ')}. Limpe com agentistics_flow_run name=limpeza-real {sessionId}${autonomous ? ' dentro das autorizações; fora delas, adie a limpeza e registre na tarefa.' : ' se o dono liberou a limpeza.'}`)
   return lines.length ? `\n${lines.join('\n')}` : ''
 }
-async function promptForLeader(c: CheckinConfig): Promise<string> {
+/** Whether autonomous mode covers THIS session: the global switch, or the session's own flag. */
+async function autonomousFor(row: { away?: boolean }, now = Date.now()): Promise<boolean> {
+  return sessionAwayState(parseAwayState((await deps.readPreferences()).away), row.away, now) !== null
+}
+async function promptForLeader(c: CheckinConfig, autonomous: boolean): Promise<string> {
   const groups = await (deps.readFechamento?.() ?? Promise.resolve(null)).catch(() => null)
-  const prompt = promptFor(c) + (groups ? fechamentoLines(groups) : deliveredOpenLine(await (deps.readDeliveredOpen?.() ?? Promise.resolve([])).catch(() => [])))
-  const away = awayActive(parseAwayState((await deps.readPreferences()).away), Date.now())
-  return away ? `${prompt}\nAUTONOMOUS MODE — decide within the authorisations, record the decision, and never ask the owner; anything urgent goes as an away notice.` : prompt
+  const prompt = promptFor(c, autonomous) + (groups ? fechamentoLines(groups, autonomous) : deliveredOpenLine(await (deps.readDeliveredOpen?.() ?? Promise.resolve([])).catch(() => [])))
+  return autonomous ? `${prompt}\nAUTONOMOUS MODE — decide within the authorisations, record the decision, and never ask the owner; anything urgent goes as an away notice.` : prompt
 }
 export function due(s: CheckinState, now: number): boolean { return s.nextRunAt !== null && s.nextRunAt <= now && !pausedNow(s, now) }
 
@@ -403,7 +408,9 @@ export async function reportFromIdentity(session: string | null, round: CheckinR
   if (!row) return null
   const roles = (await deps.readRolesDoc(deps.dataDir)).roles
   if (deps.roleOfRow(roles, row) !== 'leader') return null
-  if (round.needs?.length && awayActive(parseAwayState((await deps.readPreferences()).away), Date.now())) {
+  // Both the `needs` list and the bare `needs_you` state are a question to the owner; refused for the
+  // session's EFFECTIVE autonomous mode (global switch or its own flag), not the global switch alone.
+  if ((round.needs?.length || round.state === 'needs_you') && await autonomousFor(row)) {
     return { error: 'Autonomous mode is on: decide within the authorisations, record the decision, and use an away notice for anything urgent instead of asking the owner.' }
   }
   return report(row.conversationId ?? row.id, round)
@@ -462,7 +469,12 @@ export async function fireDue(now = Date.now()): Promise<string[]> {
     try {
       const state = await stateFor(row.conversationId ?? row.id, now); if (!due(state, now)) continue
       const existing = (await allStored())[state.session]
-      if (existing?.pending) await recordReport(state.session, { state: 'needs_you', summary: 'check-in sem resposta' }, now)
+      const autonomous = await autonomousFor(row, now)
+      // An unanswered round is a fact worth recording; while autonomous mode is on it is informational (a warning
+      // in health), never `needs_you` — nothing in that mode waits on, or is addressed to, the owner.
+      if (existing?.pending) await recordReport(state.session, autonomous
+        ? { state: 'ok', summary: 'check-in sem resposta', health: [{ label: 'check-in', value: 'sem resposta', state: 'warn' }] }
+        : { state: 'needs_you', summary: 'check-in sem resposta' }, now)
       const currentFingerprint = await fingerprint(row, state, rows, now)
       const liveWorker = liveWorkers(rows, roles)
       const heartbeat = liveWorker && (existing?.lastFiredAt == null || now - existing.lastFiredAt >= HEARTBEAT_MS)
@@ -474,7 +486,7 @@ export async function fireDue(now = Date.now()): Promise<string[]> {
         emit(publicState((await allStored())[state.session]!))
         continue
       }
-      const next = await promptForLeader(state).then(text => deps.runFleetAction('pt', { action: 'prompt', id: row.id, text })).catch(() => ({ ok: false }))
+      const next = await promptForLeader(state, autonomous).then(text => deps.runFleetAction('pt', { action: 'prompt', id: row.id, text })).catch(() => ({ ok: false }))
       await updateStored(all => {
         const latest = all[state.session] ?? state
         const updated = { ...latest, ...(next.ok ? { fingerprint: currentFingerprint, lastFiredAt: now, pending: true } : {}) }
@@ -499,7 +511,7 @@ export async function runNow(session: string, now = Date.now()): Promise<boolean
   try {
     const state = await stateFor(row.conversationId ?? row.id, now)
     const currentFingerprint = await fingerprint(row, state, rows, now)
-    const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state) })
+    const result = await deps.runFleetAction('pt', { action: 'prompt', id: row.id, text: await promptForLeader(state, await autonomousFor(row, now)) })
     if (!result.ok) return false
     await updateStored(all => { all[state.session] = { ...all[state.session], ...state, fingerprint: currentFingerprint, lastFiredAt: now, nextRunAt: nextRun(now, state), pending: true } })
     emit(publicState((await allStored())[state.session]!))

@@ -45,6 +45,11 @@ export interface StagedSessionDraft {
   cwd?: string
   model?: string
   effort?: string
+  /**
+   * The ACCOUNT the session runs under (`ManagedSession.accountId`, PLAN.ACCOUNTS) — FLUXO.ENTREGA-DSL's
+   * pre-dispatch gate requires it, because the `vaga` gate reads that account's plan_limits.
+   */
+  account?: string
 }
 
 /** Past this, a compose panel is not something anyone reviews before firing — well above what a
@@ -69,6 +74,7 @@ export interface StagedSessionDraftInput {
   cwd?: string
   model?: string
   effort?: string
+  account?: string
 }
 
 export function validateStagedSessionDraft(
@@ -98,6 +104,7 @@ export function normalizeStagedSession(raw: unknown): StagedSessionDraft | undef
   const harness = trimmedOrUndefined(r.harness)
   const model = trimmedOrUndefined(r.model)
   const effort = trimmedOrUndefined(r.effort)
+  const account = trimmedOrUndefined(r.account)
   const attachmentIds = Array.isArray(r.attachmentIds)
     ? [...new Set(r.attachmentIds.filter((x): x is string => typeof x === 'string' && x.length > 0))]
       .slice(0, MAX_STAGED_ATTACHMENTS)
@@ -109,6 +116,7 @@ export function normalizeStagedSession(raw: unknown): StagedSessionDraft | undef
     ...(cwd ? { cwd } : {}),
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
+    ...(account ? { account } : {}),
   }
 }
 

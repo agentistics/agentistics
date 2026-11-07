@@ -231,6 +231,8 @@ export interface SessionView {
   resume?: { sessionId: string; title: string }
   /** Metrics of the conversation behind this row, when it has any. Absent is never zero. */
   tokens?: number
+  /** The model the conversation's own transcript says ANSWERED ("claude-opus-5-5") — what the composer names, as opposed to `model`, which is only what was asked for at spawn. */
+  observedModel?: string
   /** SS-05: the four counters, and the person's turn count — absent where not recorded. */
   tokenParts?: import('./conversations').TokenParts
   turns?: number
@@ -762,6 +764,7 @@ export function buildSessionViews(o: {
         ? claimResume(r.managed, harness, own?.sessionId)
         : {}),
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
+      ...(conv?.model ? { observedModel: conv.model } : {}),
       ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
       ...(conv?.turns ? { turns: conv.turns } : {}),
       ...(conv?.calls ? { calls: conv.calls } : {}),
@@ -960,8 +963,12 @@ export function buildSessionViews(o: {
   // was running. "Some sessions do not appear" and "some appear twice" were the same bug, seen
   // from its two ends.
   const coveredConv = new Set<string>()
+  // APP.LENTO: a map, not `managed.find` per row — 3.000 × 3.000 comparisons every poll on a real
+  // fleet (6 % of the server's CPU). First occurrence wins, as `find` did.
+  const managedById = new Map<string, SessionView>()
+  for (const v of managed) if (!managedById.has(v.id)) managedById.set(v.id, v)
   for (const r of o.reconciled) {
-    const m = managed.find(v => v.id === r.id)
+    const m = managedById.get(r.id)
     // `exited` and `lost` rows cover nothing: their work IS over, and the conversation belongs in
     // history where it can be reopened.
     if (!m || (m.status !== 'running' && m.status !== 'unregistered')) continue

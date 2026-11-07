@@ -6,9 +6,10 @@ const NOW = 1_000_000
 const d = (over: Partial<LiveDelivery>): LiveDelivery => ({
   key: 't/a', taskId: 't', taskTitle: 'Task', subtaskId: 'a', title: 'Piece', status: 'in_progress', stage: 'running',
   stageSinceMs: 0, startedAtMs: 0, sessionIds: [], harnesses: [], models: [], eta: { kind: 'none', reason: 'no-history' },
-  lastAction: null, blockedReason: null, deliveredAtMs: null, ...over,
+  lastAction: null, blockedReason: null, deliveredAtMs: null,
+  workMs: null, efforts: [], trail: [], stageEta: { kind: 'none', reason: 'no-history' }, publishEta: { kind: 'none', reason: 'no-history' }, block: null, ci: null, step: null, ...over,
 })
-const reply = (ds: LiveDelivery[]): LiveReply => ({ generatedAt: 'x', deliveries: ds, samples: 0 })
+const reply = (ds: LiveDelivery[]): LiveReply => ({ generatedAt: 'x', deliveries: ds, samples: 0, hidden: [], archived: [], archivedTotal: 0, sessionTasks: {} })
 const row = (id: string, state: string, x: Partial<FleetRowLite> = {}): FleetRowLite => ({ id, title: id, harness: 'claude', state, ...x })
 
 describe('describeLive', () => {
@@ -50,5 +51,25 @@ describe('describeLive', () => {
   test('sentence says what is known and does not invent an ETA', () => {
     const v = describeLive({ reply: reply([d({ sessionIds: ['a'] })]), rows: [row('a', 'working')], leaderIds: new Set(), nowMs: NOW })
     expect(liveSentence(v, NOW)).toBe('1 active delivery · 1 agent working · none stalled · no delivery has an estimate yet')
+  })
+})
+
+describe('the leader model is the transcript\'s, not the harness default (MED 9)', () => {
+  test('observedModel outranks the spawn model on leaders, workers and agents', () => {
+    const v = describeLive({
+      reply: reply([d({ key: 'k', sessionIds: ['w'] })]),
+      rows: [
+        row('L', 'working', { model: 'opus[1m]', observedModel: 'claude-opus-5-5' }),
+        row('w', 'working', { parentSessionId: 'L', model: 'sonnet', observedModel: 'claude-sonnet-5-5' }),
+      ],
+      leaderIds: new Set(['L']), nowMs: NOW,
+    })
+    expect(v.leaders[0]!.model).toBe('claude-opus-5-5')
+    expect(v.leaders[0]!.workers[0]!.model).toBe('claude-sonnet-5-5')
+    expect(v.deliveries[0]!.agents[0]!.model).toBe('claude-sonnet-5-5')
+  })
+  test('with no observation the registry model stays, and none stays null', () => {
+    const v = describeLive({ reply: reply([]), rows: [row('L', 'working', { model: 'opus' }), row('M', 'working')], leaderIds: new Set(['L', 'M']), nowMs: NOW })
+    expect(v.leaders.map(l => l.model)).toEqual(['opus', null])
   })
 })

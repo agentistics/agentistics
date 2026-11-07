@@ -18,6 +18,7 @@ import { resolveSessionAccount, sessionAccountRow } from './session-account'
 import { accountLabel, listSwitchTargets, readTailProbe, syncLoginExpiry } from './account-switch-io'
 import { accountLoginState } from '../harness-accounts'
 import { spawnRowsOf } from './spawn-account-io'
+import { accountCredentialBroken } from '../account-credentials'
 import type { AuthState } from './account-switch'
 import { reloginSupported } from '../account-roots'
 import type { SwitchUnavailableReason } from './account-switch'
@@ -69,11 +70,12 @@ async function authOf(accountId: string | undefined, refused: AuthState | null):
   const file = await readAccounts().catch(() => null)
   const account = file?.accounts.find(a => a.id === accountId)
   if (!account || account.retired) return null
-  const bound = spawnRowsOf(file!).find(r => r.id === accountId)?.bound ?? false
+  const row = spawnRowsOf(file!).find(r => r.id === accountId)
+  const bound = row?.bound ?? false
   // A refusal written before the last finished sign-in is the old token's: the login works now.
   const live = refused && !(account.loginRenewedAt !== undefined && (refused.at ?? 0) <= account.loginRenewedAt) ? refused : null
   refused = live
-  const state = refused ? 'expired' : accountLoginState(account, bound)
+  const state = refused ? 'expired' : accountLoginState(account, bound, bound ? accountCredentialBroken(account, row?.root ?? null) : false)
   if (state !== 'expired' && state !== 'signed_out') return null
   return {
     accountId, state, relogin: reloginSupported(account),

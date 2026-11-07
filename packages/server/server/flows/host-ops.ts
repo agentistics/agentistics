@@ -8,7 +8,9 @@ import { sessaoComPapelHostOp } from '../sessions/spawn-gate'
 import { ambienteHostOps } from './ambiente-host'
 import { processHostOps } from './process-ops'
 import { stalledHostOps } from './stalled-host'
+import { perfWatchHostOps } from './perf-watch'
 import { pipelineHostOps } from './pipeline-host'
+import { deliveryHostOps } from '../delivery/host-ops'
 
 const exec = promisify(execFile)
 /**
@@ -309,6 +311,11 @@ export interface TriggerHostDeps {
   prompt(rowId: string, text: string): Promise<{ ok: boolean; message?: string; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
   /** The owner-facing away notice (bell, Nay toast, phone push) — `away.notice`. */
   awayNotice(text: string): Promise<boolean>
+  /**
+   * Autonomous mode now (FLUXO.ENTREGA-DSL audit, owner 07/11 ~00:00Z). Optional so older test doubles keep working;
+   * absent = read from preferences.
+   */
+  autonomous?(): Promise<boolean>
   /** End a managed session — the same kill `agentop session kill` and the fleet's kill verb run. */
   kill(rowId: string): Promise<{ ok: boolean; message?: string }>
 }
@@ -382,9 +389,16 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps(),
   /** session + flow + text → when it was last delivered. The same reason is not typed into the same session twice in an hour. */
   const nudged = new Map<string, number>()
   return {
-    'aviso-ao-dono': async (value: unknown) => {
+    'aviso-ao-dono': async (value: unknown, ctx?: { step?: string }) => {
       const text = typeof inputOf(value).text === 'string' ? (inputOf(value).text as string).trim() : ''
       if (!text) return refuse('an away notice needs text', ['text'])
+      // The pedidos reminder's 3rd step ESCALATES to the owner (a request nobody took) — a human step; so does a wait whose
+      // owner session ended with no leader to tell (`wait-ended`). The board note still records both. While autonomous
+      // mode is on it is skipped here too, so an engine built before the audit cannot call the owner either.
+      if (ctx?.step === 'h1-lembrar' || ctx?.step === 'wait-ended') {
+        const away = deps.autonomous ? await deps.autonomous().catch(() => true) : await (await import('../delivery/host')).deliveryAutonomous().catch(() => true)
+        if (away) return { ok: true, skipped: 'pulado: modo autônomo' }
+      }
       return (await deps.awayNotice(text)) ? { ok: true } : refuse('the away notice could not be raised', ['owner notification'])
     },
     'sessoes-gerenciadas': async () => {
@@ -448,7 +462,11 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
     ...dockerHostOps(dockerDeps),
     ...processHostOps(),
     ...stalledHostOps(),
+    // APP.LENTO: `vigia-desempenho` — sample this process, keep a profile and tell once when a budget stays broken.
+    ...perfWatchHostOps(),
     ...pipelineHostOps(),
+    // FLUXO.ENTREGA-DSL — the delivery state machine's doors for the engine's entrega/demanda/bloqueio flows.
+    ...deliveryHostOps(),
     'alvo-trabalho': async (value: unknown) => {
       const id = sessionOf(value)
       return id ? workTarget(id, workDeps) : refuse('session id is required', ['sessionId'])

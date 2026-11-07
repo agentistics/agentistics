@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { VAULT_TEXT, kindKey, orderItems, reasonKey, stateKey, vt, type VaultKey } from './vaultText'
+import { VAULT_TEXT, kindKey, lockedSubKey, orderItems, reasonKey, stateKey, vt, type VaultKey } from './vaultText'
 
 test('every key has both languages, non-empty', () => {
   for (const [k, v] of Object.entries(VAULT_TEXT)) {
@@ -44,4 +44,15 @@ test('"Presence" is called "Personal confirmation" everywhere the page says it',
   expect(vt('sec_presence', 'en')).toBe('Personal confirmation')
   expect(vt('sec_presence_d', 'pt')).toBe('Windows Hello (PIN, digital ou rosto) ou uma chave de segurança: prova que é você mesmo no computador.')
   for (const [k, v] of Object.entries(VAULT_TEXT)) expect(v.pt, k).not.toMatch(/[Pp]resença/)
+})
+
+test('the lock-screen sentence names the presence check the machine really has (a Mac has none)', () => {
+  expect(lockedSubKey(['hello', 'authenticator'])).toBe('lockedSub_hello')
+  expect(lockedSubKey(['fido2'])).toBe('lockedSub_fido2')
+  for (const w of [['keychain'], [], null, undefined]) {
+    const k = lockedSubKey(w)
+    expect(k).toBe('lockedSub_code')
+    expect(vt(k, 'en')).not.toContain('Windows Hello')
+    expect(vt(k, 'pt')).not.toContain('Windows Hello')
+  }
 })

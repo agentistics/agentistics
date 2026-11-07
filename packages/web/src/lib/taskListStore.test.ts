@@ -61,3 +61,23 @@ describe('store', () => {
     expect(mergeEntry(p, entry([row('a')]))).toBe(p)
   })
 })
+
+describe('the split load (partial step one, then the rest)', () => {
+  test('step two keeps the identity of every row step one already delivered, and clears partial', () => {
+    const first = { ...entry([row('a'), row('c')]), partial: true }
+    putTaskList('q', first)
+    const kept = peekTaskList('q')!.rows
+    expect(peekTaskList('q')!.partial).toBe(true)
+    putTaskList('q', entry([row('a'), row('b'), row('c')]))
+    const now = peekTaskList('q')!
+    expect(now.partial).toBeUndefined()
+    expect(now.rows.map(r => r.task.id)).toEqual(['a', 'b', 'c'])
+    expect(now.rows[0]).toBe(kept[0]!)
+    expect(now.rows[2]).toBe(kept[1]!)
+  })
+  test('a partial flag change alone is a change, an identical partial is not', () => {
+    const p = { ...entry([row('a')]), partial: true }
+    expect(mergeEntry(p, { ...entry([row('a')]), partial: true })).toBe(p)
+    expect(mergeEntry(p, entry([row('a')]))).not.toBe(p)
+  })
+})

@@ -171,8 +171,12 @@ export function resolveGroupRows<T>(
   rows: readonly T[],
   keyOf: (row: T) => string,
 ): T[] {
+  // One pass over the rows, then a lookup per key: `rows.find` per key was keys × rows on every fleet
+  // frame (~3.000 rows here). FIRST occurrence wins, exactly as `find` did.
+  const byKey = new Map<string, T>()
+  for (const r of rows) { const k = keyOf(r); if (!byKey.has(k)) byKey.set(k, r) }
   return group.sessionKeys
-    .map(k => rows.find(r => keyOf(r) === k))
+    .map(k => byKey.get(k))
     .filter((r): r is T => r !== undefined)
 }
 

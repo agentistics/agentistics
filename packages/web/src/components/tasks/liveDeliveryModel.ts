@@ -8,9 +8,10 @@
  */
 
 import type { FleetRow } from '../../lib/fleet'
+import { modelDisplay } from '../../lib/modelDisplay'
 
-export type LiveStage = 'queue' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'published'
-export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'running', 'qa', 'adjust', 'leader', 'merge', 'published']
+export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
+export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published']
 
 export type LiveEta =
   | {
@@ -19,21 +20,55 @@ export type LiveEta =
     }
   | { kind: 'none'; reason: 'no-history' | 'not-started' | 'beyond-range' }
 
-/** Mirror of the server's `LiveDelivery` (`task-live.ts`). */
+export type LiveStageEta =
+  | { kind: 'estimate'; atMs: number; medianMs: number; n: number; nextStage: LiveStage | null }
+  | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final'; typicalMs?: number; n?: number }
+export type LivePublishEta =
+  | { kind: 'estimate'; atMs: number; source: 'stages' | 'total'; n: number; parts: { stage: LiveStage; medianMs: number }[] }
+  | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final' }
+export type BlockReason = 'dependencia' | 'pedido_de_bloqueio' | 'limite' | 'maquina' | 'externo' | 'fora_das_autorizacoes' | 'decisao_do_dono'
+export interface LiveBlock { reason: BlockReason; text: string | null; unlocker: 'leader' | 'owner' | 'self'; originStage: LiveStage | null }
+/** The release signal of a piece in "CI · publicando" — stated by the delivery flow, only rendered here. */
+export interface LiveCiSignal { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null }
+export interface StageVisit { stage: LiveStage; enteredMs: number; ms: number }
+export type HiddenReason = 'no-live-session' | 'status-unplaced' | 'published-old' | 'queue-idle' | 'legacy-review-old'
+export interface LiveHidden { key: string; taskId: string; title: string; stage: LiveStage | null; reason: HiddenReason; atMs?: number | null }
+export interface RuntimeFacts { model?: string; effort?: string; effortConcept: boolean }
+
+/** Mirror of the server's `LiveDelivery` (`task-live.ts`). The newer fields are optional: an older server omits them. */
 export interface LiveDeliveryRecord {
   key: string; taskId: string; taskTitle: string; subtaskId: string | null; title: string
   status: string; stage: LiveStage; stageSinceMs: number | null; startedAtMs: number | null
   sessionIds: string[]; harnesses: string[]; models: string[]; eta: LiveEta
-  lastAction: { text: string; atMs: number } | null; blockedReason: string | null; deliveredAtMs: number | null
+  efforts?: string[]; workMs?: number | null; trail?: StageVisit[]
+  stageEta?: LiveStageEta; publishEta?: LivePublishEta; block?: LiveBlock | null
+  ci?: LiveCiSignal | null; step?: number | null
+  lastAction: { text: string; atMs: number; kind?: string; from?: string; to?: string } | null; blockedReason: string | null; deliveredAtMs: number | null
+  /** FLUXO.ENTREGA-DSL: the pre-dispatch a queued piece starts with, and the vaga gate's last verdict. */
+  staged?: { harness: string | null; model: string | null; effort: string | null; account: string | null } | null
+  slot?: { ok: boolean; reason: string | null; at: string } | null
+  phase?: string | null
+  /** A human gate the owner was asked about and has not answered: the card offers approve / reject. */
+  awaitingApproval?: { phase: string } | null
+}
+export type WorkerWord = 'working' | 'needs-you' | 'blocked' | 'delivered' | 'awaiting-review' | 'idle'
+export interface LeaderWorker {
+  id: string; title: string; state: string
+  word?: WorkerWord; stage?: LiveStage | null; cardKey?: string | null; subtask?: string | null; taskId?: string | null
+  stageSinceMs?: number | null; blockReason?: BlockReason | null; harness?: string; model?: string | null; effort?: string | null
 }
 /** Mirror of the server's `LeaderView` (`task-live-view.ts`). Leaders are never deliveries. */
 export interface LeaderRecord {
-  id: string; title: string; harness: string; model: string | null; state: string
-  currentAction: string | null
-  workers: { id: string; title: string; state: string }[]
+  id: string; title: string; harness: string; model: string | null; effort?: string | null; accountId?: string | null; state: string
+  createdMs?: number | null; taskId?: string | null; taskTitle?: string | null
+  currentAction: string | null; publishEtaMs?: number | null
+  workers: LeaderWorker[]
   awaiting: { id: string; title: string }[]
 }
-export interface LiveReply { generatedAt: string; deliveries: LiveDeliveryRecord[]; leaders?: LeaderRecord[]; samples: number }
+export interface LiveReply {
+  generatedAt: string; deliveries: LiveDeliveryRecord[]; leaders?: LeaderRecord[]; samples: number
+  hidden?: LiveHidden[]; archived?: LiveHidden[]; archivedTotal?: number; sessionTasks?: Record<string, string>; runtime?: Record<string, RuntimeFacts>
+}
 
 export interface LiveAgent {
   id: string; harness: string; model: string | null; effort?: string | null; accountId: string | null
@@ -82,11 +117,22 @@ export function joinLive(
   })
 }
 
-export interface LiveFilters { taskId: string | null; onlyActive: boolean }
+export interface LiveFilters {
+  /** Tasks to show; empty = every task. Several at once (the Live task filter is multi-select). */
+  taskIds: readonly string[]
+  onlyActive: boolean
+}
 
 /** The Live view's defaults (LIVE.ATALHO): only pieces with active agents, every task, every step. */
 export type StageFilter = 'all' | LiveStage
-export const LIVE_DEFAULTS: { taskId: string | null; onlyActive: boolean; stage: StageFilter } = { taskId: null, onlyActive: true, stage: 'all' }
+export const LIVE_DEFAULTS: { taskIds: readonly string[]; onlyActive: boolean; stage: StageFilter } = { taskIds: [], onlyActive: true, stage: 'all' }
+
+/**
+ * "Only with active agents" narrows the work in flight. It must NOT hide a piece that is finished
+ * (Publicado) or parked on purpose (Bloqueado): neither has a live agent by definition, so the
+ * switch emptied the Publicado column the moment any filter was on.
+ */
+export const EXEMPT_FROM_ACTIVE: ReadonlySet<LiveStage> = new Set(['published', 'blocked'])
 
 /** A piece sitting in the queue column is waiting for a slot: it is drawn dimmed and never gets an ETA verdict. */
 export const isQueued = (c: LiveCard): boolean => c.d.stage === 'queue'
@@ -100,20 +146,39 @@ export function queuePosition(cards: readonly LiveCard[], c: LiveCard): number |
   return i < 0 ? null : i + 1
 }
 
-/** The two pills of a card, one per line: [harness · model · effort] and [account · name]. Effort only when reported. */
-export function cardPills(c: LiveCard, accountOf: (a: LiveAgent) => string | null, accountWord: string): { runtime: string | null; account: string | null } {
+/**
+ * The two pills of a card: [harness · model · effort] and [account · name].
+ *
+ * EVERY harness shows all three parts. The live agent's own row wins; a card with no live agent reads
+ * the registry facts the server carried (`models`/`efforts`); and a session started with no flags
+ * shows the harness's own default (`runtime`) marked as such. Only a harness with no effort concept
+ * at all omits the effort part — never one that merely was not asked.
+ */
+export function cardPills(
+  c: LiveCard, accountOf: (a: LiveAgent) => string | null, accountWord: string,
+  runtime?: Record<string, RuntimeFacts>, pt = true,
+): { runtime: string | null; account: string | null } {
   const a = c.agents[0]
   const harness = a ? a.harness : c.d.harnesses[0]
-  const model = a ? a.model : c.d.models[0]
-  const runtime = harness ? [harness, model, a?.effort].filter(Boolean).join(' · ') : null
+  if (!harness) return { runtime: null, account: null }
+  const facts = runtime?.[harness]
+  const dflt = pt ? 'padrão' : 'default'
+  const model = a?.model ?? c.d.models[0] ?? null
+  const effort = a?.effort ?? c.d.efforts?.[0] ?? null
+  const parts = [
+    harness,
+    // A person reads "Opus 5.5", not the transcript's "claude-opus-5-5" (owner's approved preview, QA MED 8).
+    (model ? modelDisplay(harness, model) : null) ?? (facts?.model ? `${modelDisplay(harness, facts.model) ?? facts.model} (${dflt})` : (pt ? 'modelo padrão' : 'default model')),
+    effort ?? (facts?.effortConcept === false ? null : facts?.effort ? `${facts.effort} (${dflt})` : facts?.effortConcept ? (pt ? 'esforço padrão' : 'default effort') : null),
+  ].filter((x): x is string => !!x)
   const acc = a ? accountOf(a) : null
-  return { runtime, account: acc ? `${accountWord} · ${acc}` : null }
+  return { runtime: parts.join(' · '), account: acc ? `${accountWord} · ${acc}` : null }
 }
 
 export function filterCards(cards: readonly LiveCard[], f: LiveFilters): LiveCard[] {
   return cards.filter(c =>
-    (f.taskId === null || c.d.taskId === f.taskId)
-    && (!f.onlyActive || c.agents.some(a => RUNNING_STATES.has(a.state))))
+    (f.taskIds.length === 0 || f.taskIds.includes(c.d.taskId))
+    && (!f.onlyActive || EXEMPT_FROM_ACTIVE.has(c.d.stage) || c.agents.some(a => RUNNING_STATES.has(a.state))))
 }
 
 export function byStage(cards: readonly LiveCard[]): Record<LiveStage, LiveCard[]> {
@@ -189,11 +254,13 @@ export function etaText(eta: LiveEta, lang: 'pt' | 'en'): { line: string; title:
 
 export const STAGE_LABEL: Record<LiveStage, { pt: string; en: string; color: string }> = {
   queue: { pt: 'Na fila', en: 'Queued', color: '#8b8b95' },
+  blocked: { pt: 'Bloqueado', en: 'Blocked', color: '#c2410c' },
   running: { pt: 'Executando', en: 'Running', color: '#f5a623' },
   qa: { pt: 'Em QA', en: 'In QA', color: '#4c9aff' },
   adjust: { pt: 'Ajuste', en: 'Adjusting', color: '#ff5f5f' },
   leader: { pt: 'Revisão do líder', en: 'Leader review', color: '#b78bff' },
   merge: { pt: 'PR / merge', en: 'PR / merge', color: '#3ecf8e' },
+  ci: { pt: 'CI · publicando', en: 'CI · publishing', color: 'rgb(45,180,200)' },
   published: { pt: 'Publicado', en: 'Published', color: '#26b573' },
 }
 

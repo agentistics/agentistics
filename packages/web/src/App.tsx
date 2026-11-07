@@ -1963,6 +1963,10 @@ export default function AppLayout() {
   const [retryImportOpen, setRetryImportOpen] = useState(false)
   const loadingNoticeSeen = useRef({ startup: false, journal: false })
   useEffect(() => {
+    // "Still loading / figures may be incomplete" is never raised on the Sessions page (owner,
+    // 2026-11-06): there the one place partial data matters — Encerradas — says so itself, once, as a
+    // quick notice. Everywhere else (the Metrics page and the rest) it stays while the load is running.
+    if (inSessionsWorkspace) return
     const startupNotice = startupLoadingNotification(startup, lang === 'pt' ? 'pt' : 'en')
     if (startupNotice) {
       loadingNoticeSeen.current.startup = true
@@ -1979,7 +1983,7 @@ export default function AppLayout() {
       pushNotification({ type: 'success', title: lang === 'pt' ? 'Importação concluída' : 'Import complete', message: lang === 'pt' ? 'O histórico foi importado.' : 'The history was imported.', meta: { notificationKey: 'loading.journal', loadingKind: 'journal', state: 'done' } })
       loadingNoticeSeen.current.journal = false
     }
-  }, [startup, teamSession?.journalBackfill, lang])
+  }, [startup, teamSession?.journalBackfill, lang, inSessionsWorkspace])
   useEffect(() => {
     const openRetry = () => setRetryImportOpen(true)
     window.addEventListener('agentistics:retry-journal-import', openRetry)

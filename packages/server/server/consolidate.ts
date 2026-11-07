@@ -172,7 +172,9 @@ export async function loadConsolidated(opts: { skipIds?: ReadonlySet<string> } =
     if (byId.has(s.session_id) || opts.skipIds?.has(s.session_id)) continue
     byId.set(s.session_id, { ...s })
   }
-  if (cold) console.log(`[boot-history] consolidated: ${map.size} records in ${Math.round(performance.now() - started)} ms`)
+  // stderr: a timing diagnostic, and this runs inside CLI verbs whose STDOUT is their output
+  // (`agentop session ls --json`, every out-of-process test that parses its last stdout line).
+  if (cold) console.error(`[boot-history] consolidated: ${map.size} records in ${Math.round(performance.now() - started)} ms`)
   return byId
 }
 

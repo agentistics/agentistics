@@ -579,6 +579,12 @@ export interface Subtask {
    * tree that MAY hold a session, so it may hold a draft too.
    */
   stagedSession?: StagedSessionDraft
+  /**
+   * FLUXO.ENTREGA-DSL — the CI · publicando signal the delivery flow wrote (`delivery/service.ts`), exactly
+   * the shape `task-live.ts`'s `ciSignalOf` reads. Written by the flow only, never by a person; absent = the
+   * flow said nothing, which the Live renders as nothing.
+   */
+  ci?: { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null }
 }
 
 /**
@@ -793,8 +799,18 @@ export function newEventId(): string {
  * near-duplicate.
  */
 export function legacyTaskId(name: string): string {
-  return `legacy-${shortHex(name)}`
+  // MEMOIZED: `rowsOfTask` asks this for every row of every task (136 tasks x 3000 rows = 400k
+  // sha256 calls, ~0.7 s of a /api/tasks read on a real book) while the distinct names are a few
+  // hundred. Bounded so a hand-edited book of unique names cannot grow it without limit.
+  const hit = legacyIdMemo.get(name)
+  if (hit !== undefined) return hit
+  const id = `legacy-${shortHex(name)}`
+  if (legacyIdMemo.size >= LEGACY_ID_MEMO_MAX) legacyIdMemo.clear()
+  legacyIdMemo.set(name, id)
+  return id
 }
+const legacyIdMemo = new Map<string, string>()
+const LEGACY_ID_MEMO_MAX = 20_000
 
 /**
  * Every legacy task name, as Tasks.

@@ -89,8 +89,20 @@ export function applyHardening(platform: HardeningPlatform, libc: Libc | { error
 
 const PR_GET_DUMPABLE = 3
 const PR_SET_DUMPABLE = 4
+/** RLIMIT_CORE is 4 on Linux AND on macOS (<sys/resource.h>); `rlim_t` is a u64 on both, so `struct rlimit` is two u64. */
 const RLIMIT_CORE = 4
+/** <sys/ptrace.h> on macOS. */
 const PT_DENY_ATTACH = 31
+
+/**
+ * PURE. The C symbols each platform's library must export. They are DIFFERENT sets on purpose:
+ * `prctl` exists only on Linux, and asking `dlopen` for a symbol the library lacks fails the WHOLE
+ * load (macOS: `Symbol "prctl" not found in "/usr/lib/libSystem.B.dylib"`) before the platform's
+ * own step ever runs — the vault then refused to open on every Mac. `ptrace` is darwin-only here.
+ */
+export function libcSymbolNames(platform: 'linux' | 'darwin'): readonly string[] {
+  return platform === 'linux' ? ['prctl', 'setrlimit', 'getrlimit'] : ['ptrace', 'setrlimit', 'getrlimit']
+}
 
 /** The `bun:ffi` edge. Never throws: a library that will not load is `{error}`. */
 export async function loadLibc(platform: HardeningPlatform): Promise<Libc | { error: string }> {
@@ -98,26 +110,39 @@ export async function loadLibc(platform: HardeningPlatform): Promise<Libc | { er
   try {
     const { dlopen, FFIType, ptr } = await import('bun:ffi')
     const name = platform === 'linux' ? 'libc.so.6' : '/usr/lib/libSystem.B.dylib'
-    const lib = dlopen(name, {
-      prctl: { args: [FFIType.i32, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.u64], returns: FFIType.i32 },
+    const rlimit = {
       setrlimit: { args: [FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
       getrlimit: { args: [FFIType.i32, FFIType.ptr], returns: FFIType.i32 },
-      ...(platform === 'darwin' ? { ptrace: { args: [FFIType.i32, FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 } } : {}),
-    } as const)
+    } as const
+    const lib = platform === 'linux'
+      ? dlopen(name, {
+        prctl: { args: [FFIType.i32, FFIType.u64, FFIType.u64, FFIType.u64, FFIType.u64], returns: FFIType.i32 },
+        ...rlimit,
+      } as const)
+      : dlopen(name, {
+        ptrace: { args: [FFIType.i32, FFIType.i32, FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+        ...rlimit,
+      } as const)
     const s = lib.symbols as unknown as Record<string, (...a: unknown[]) => number>
-    return {
-      setNotDumpable: () => s.prctl!(PR_SET_DUMPABLE, 0n, 0n, 0n, 0n),
-      getDumpable: () => s.prctl!(PR_GET_DUMPABLE, 0n, 0n, 0n, 0n),
+    const core = {
       setNoCore: () => {
-        // struct rlimit { rlim_t cur; rlim_t max } — two 64-bit counts on every 64-bit Linux/macOS.
         const r = new BigUint64Array([0n, 0n])
         return s.setrlimit!(RLIMIT_CORE, ptr(r))
       },
-      getCoreLimit: () => {
+      getCoreLimit: (): [bigint, bigint] | null => {
         const r = new BigUint64Array([1n, 1n])
         return s.getrlimit!(RLIMIT_CORE, ptr(r)) === 0 ? [r[0]!, r[1]!] : null
       },
-      ...(platform === 'darwin' ? { denyAttach: () => s.ptrace!(PT_DENY_ATTACH, 0, null, 0) } : {}),
+    }
+    if (platform === 'darwin') {
+      // The Linux-only entries have no meaning here and are never reached (applyHardening takes the
+      // PT_DENY_ATTACH branch); they answer "failed", not a thrown TypeError, if somebody ever does.
+      return { ...core, setNotDumpable: () => -1, getDumpable: () => -1, denyAttach: () => s.ptrace!(PT_DENY_ATTACH, 0, null, 0) }
+    }
+    return {
+      ...core,
+      setNotDumpable: () => s.prctl!(PR_SET_DUMPABLE, 0n, 0n, 0n, 0n),
+      getDumpable: () => s.prctl!(PR_GET_DUMPABLE, 0n, 0n, 0n, 0n),
     }
   } catch (err) {
     return { error: (err as Error)?.message?.split('\n')[0]?.slice(0, 120) ?? 'dlopen failed' }

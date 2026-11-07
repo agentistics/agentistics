@@ -35,6 +35,7 @@ import {
 import { BoardView, MobileLane } from '../components/tasks/TaskBoard'
 import { LiveDelivery } from '../components/tasks/LiveDelivery'
 import { effectiveView, hasStoredView, resolveLane } from '../components/tasks/mobileLanes'
+import { planPartial, rowsForPlan } from '../components/tasks/partialPlan'
 import { mobileBoardCopy } from '../components/tasks/boardCopyThreads'
 import { TaskTable } from '../components/tasks/TaskTable'
 import { SubtaskTable } from '../components/tasks/SubtaskTable'
@@ -71,7 +72,7 @@ import {
   attachSession, detachSession, fmtDuration, markTask, patchSubtask, removeComment, removeLink,
   removeSubtask,
   editTask, moveTask, setBlockedBy, uploadFile,
-  useTaskDetail, useTaskList, useTaskStatuses, useTaskTypes,
+  useTaskDetail, useTaskFullText, useTaskList, useTaskStatuses, useTaskTypes,
   type AttemptRollup, type AttemptView, type TaskDetail, type TaskFieldPatch, type TaskFile,
   type TaskListRow, type TaskRecord, type TasksError, type TaskStatus,
 } from '../lib/tasks'
@@ -97,7 +98,7 @@ function TaskList() {
   // range and the harness / project / repo chips scope which SESSIONS count toward each task, which
   // is what makes "what did this cost me last week" answerable.
   const { filters, lang } = useOutletContext<AppContext>()
-  const { rows, overview, excluded, error, reload } = useTaskList(filters)
+  const { rows: listRows, overview, excluded, error, partial, reload } = useTaskList(filters)
   const { statuses, reload: reloadStatuses } = useTaskStatuses()
   const { types, reload: reloadTypes } = useTaskTypes()
   const navigate = useNavigate()
@@ -145,6 +146,14 @@ function TaskList() {
   const [hideEmpty, setHideEmpty] = useBoardPref('hideEmpty')
   const [composeSubtaskProgress, setComposeSubtaskProgress] = useBoardPref('composeSubtaskProgress')
   const boardColumns = useMemo(() => visibleStatuses(storedGroups, statuses), [storedGroups, statuses])
+  const [groupBy, setGroupBy] = useBoardPref('groupBy')
+  // While only step one of the split load is here, a view draws only what step two cannot move
+  // (`partialPlan.ts`): the closed history is never drawn half-way, and a view it would reshuffle
+  // waits for the whole list. The row-reading code below only ever sees the result.
+  const plan = planPartial({
+    partial, view, groupBy, lanes: isMobile ? 'none' : lanes, statusOrder: liveStatusOrder(statuses),
+  })
+  const rows = useMemo(() => rowsForPlan(listRows, plan), [listRows, plan])
   /**
    * The tasks on their way to `blocked`, waiting on the dialog's answer.
    *
@@ -185,13 +194,21 @@ function TaskList() {
     await reload()
   }
 
+  // A description is clipped in the list (`detailClipped`); searching reads the whole text, fetched
+  // once and silently the first time somebody types.
+  const needle = q.trim().toLowerCase()
+  const fullText = useTaskFullText(needle !== '' && Boolean(rows?.some(r => r.detailClipped)), filters)
+  /** Step two (the closed history) or the full descriptions are still on their way: an empty
+   *  search result is not yet an answer. */
+  const searchPending = needle !== '' && (partial || Boolean(rows?.some(r => r.detailClipped)) && fullText === null)
+  /** The board's true per-status sizes while only step one has arrived — counts right from the first paint. */
+  const statusTotals = partial ? overview?.statusCounts : undefined
   const shown = useMemo(() => {
-    const needle = q.trim().toLowerCase()
     if (!needle || !rows) return rows ?? []
     return rows.filter(r =>
       r.task.title.toLowerCase().includes(needle)
-      || (r.task.detail ?? '').toLowerCase().includes(needle))
-  }, [rows, q])
+      || (fullText?.get(r.task.id) ?? r.task.detail ?? '').toLowerCase().includes(needle))
+  }, [rows, needle, fullText])
 
 
   const seg = (active: boolean): React.CSSProperties => ({
@@ -203,9 +220,8 @@ function TaskList() {
   })
 
   const laneChips = boardColumns
-    .map(st => ({ status: st, count: shown.filter(r => r.task.status === st).length }))
+    .map(st => ({ status: st, count: (!needle ? statusTotals?.[st] : undefined) ?? shown.filter(r => r.task.status === st).length }))
   const activeLane = resolveLane(lane, laneChips)
-  const [groupBy, setGroupBy] = useBoardPref('groupBy')
   const [storedTypeGroups, setTypeGroups] = useBoardPref('typeGroups')
   const onTypes = view === 'table' && groupBy === 'type'
   const typeItems = useMemo(() => [
@@ -217,9 +233,9 @@ function TaskList() {
     const names = uniqueStatusLabels(statuses)
     return liveStatusOrder(statuses).map(id => ({
       id, label: names[id] ?? m[id]?.label ?? id, color: m[id]?.color ?? 'var(--text-tertiary)',
-      count: shown.filter(r => r.task.status === id).length,
+      count: (!needle ? statusTotals?.[id] : undefined) ?? shown.filter(r => r.task.status === id).length,
     }))
-  }, [statuses, shown])
+  }, [statuses, shown, needle, statusTotals])
   const viewState: ViewState = {
     view, items: onTypes ? typeItems : statusItems,
     shown: onTypes ? (storedTypeGroups ?? typeItems.map(i => i.id)) : boardColumns,
@@ -427,7 +443,7 @@ function TaskList() {
 
       {view === 'live' && <LiveDelivery lang={lang} />}
 
-      {view !== 'overview' && view !== 'live' && rows !== null && shown.length === 0 && (
+      {view !== 'overview' && view !== 'live' && rows !== null && shown.length === 0 && !searchPending && (
         <EmptyNotice error={rows.length > 0 ? null : error} />
       )}
       {rows !== null && view === 'board' && shown.length > 0 && (
@@ -448,6 +464,7 @@ function TaskList() {
             wip={wip}
             columns={boardColumns}
             hideEmpty={hideEmpty}
+            statusTotals={needle ? undefined : statusTotals}
             statuses={statuses}
             sessions={fleet.sessions}
             onOpen={id => navigate(`/tasks/${encodeURIComponent(id)}`)}
@@ -459,6 +476,7 @@ function TaskList() {
       {view === 'table' && (
         <TaskTable
           rows={shown}
+          statusTotals={needle ? undefined : statusTotals}
           lang={lang}
           statuses={statuses}
           types={types}

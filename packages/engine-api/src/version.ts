@@ -211,6 +211,10 @@
  * surface's entry; a non-boolean is refused (`bad-beta`). Same minor: `SurfaceMountContext.lang` is live and the optional
  * `onLangChange(fn)` tells a mounted surface the app's language changed (a keep-alive page redraws, never remounts). Additive only: a host that predates it ignores the
  * field, so an engine built against 1.24 still works there (the entry just carries no tag).
+ * Same minor (OPENCODE.TRAVA-FORM, 2.200.8): the `grow` chat delta's optional `back` (grow the turn that many places before
+ * the last, so a note appended while a tool runs is never overwritten) and `EngineChatTurn.tools[].output` (what the call
+ * printed, trimmed by the source). Both additive: an older host ignores them — it keeps growing the last turn, which is the
+ * pre-fix behaviour, and shows no output — so they ride 1.24 rather than refusing a mixed fleet.
  */
 export const ENGINE_API_VERSION = '1.24.0'
 

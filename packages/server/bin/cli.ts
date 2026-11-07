@@ -456,6 +456,13 @@ if (command === 'restore') {
   process.exit(code)
 }
 
+// FLUXO.ENTREGA-DSL — the delivery verbs (`flow gate|phase|stage run|qa open|merge|…`) are the host's, not the engine's:
+// they run against the delivery records in-process, with or without the experimental flows flag.
+if (command === 'flow') {
+  const delivery = await import('../server/delivery/cli.ts')
+  if (delivery.isDeliveryFlowVerb(args)) process.exit(await delivery.runDeliveryCli(args))
+}
+
 // The engine's verbs — recognised by every build, run by the engine when it offers them, and
 // answered in a sentence (exit 2) when it does not (`engine/cli.ts`).
 if (command === 'code' || command === 'provider' || command === 'ingest' || command === 'flow') {

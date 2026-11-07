@@ -15,6 +15,7 @@ import { handleUpgradeRoute, upgradableHint, versionWithRestart } from './upgrad
 import { compressResponse, negotiateEncoding } from './http-compress'
 import { encodedBody, etagMatches, versionOf } from './data-response-cache'
 import { slimApiResponse, slimSerialized } from './data-slim'
+import { recordRequestLatency } from './flows/perf-watch'
 import { buildApiResponse, buildApiResponseForClient, buildApiResponseStream, invalidateCache, loadDataSnapshot, prepareQuickPayload, peekApiResponse, serializedData } from './data'
 import { readPreferences, writePreferences, redactPreferences, guardTeamConnectionsWipe, PreferencesLockTimeoutError, type Preferences } from './preferences'
 import {
@@ -155,7 +156,6 @@ import { stateFor as checkinState, putState as putCheckin, reportFromIdentity as
 import { discoverProjectDisks } from './disk-picker'
 import { allowedRoots, createFolderStatus, createProjectFolder, listFolders, rootListing } from './fs-folders'
 import { forgetProjects } from './sessions/project-source'
-import { startAwayDigestTimer } from './away-digest'
 
 // ---------------------------------------------------------------------------
 // Reads the first `cwd` field found in a JSONL session file.
@@ -291,6 +291,8 @@ if (!TEAM_CENTRAL) {
     void import('./claude-usage').then(m => m.startClaudeUsagePoll()).catch(() => {})
     // agy keeps one weekly quota per model group: read it while an agy process is alive.
     void import('./antigravity-usage').then(m => m.startAntigravityUsagePoll()).catch(() => {})
+    // OpenCode Go: the allowance its responses counted, estimated from the cost OpenCode stamps on each.
+    void import('./opencode-usage').then(m => m.startOpencodeUsagePoll()).catch(() => {})
     // CONTAS.AGENDA-AGENTICA: once a minute, each account's agent schedule writes its effective `available`.
     void import('./agent-schedule-host').then(m => m.startAgentScheduleTicker()).catch(() => {})
     return pl.seedPlanLimits(sd.STRUCTURED_DIR)
@@ -549,9 +551,13 @@ async function handleRequest(req: Request, server: Server<WSData>): Promise<Resp
     applyBaselineHeaders(unroutable, { tls: TEAM_TLS, dev: !SERVE_STATIC, isApi: true, embed: false })
     return unroutable
   }
+  const startedMs = performance.now()
   const res = await handleRequestInner(req, server)
   if (!res) return res // WebSocket upgrade handed off
-  const isApi = new URL(req.url).pathname.startsWith('/api/')
+  const pathname = new URL(req.url).pathname
+  // APP.LENTO: the REAL latency of every answered request feeds `vigia-desempenho` (flows/perf-watch.ts).
+  recordRequestLatency(pathname, performance.now() - startedMs)
+  const isApi = pathname.startsWith('/api/')
   // `embed` — may an editor frame this dashboard? Only on a `local` profile: the machine's own
   // dashboard, bound to 127.0.0.1, which is the only deployment where the thing doing the framing
   // is the user's own VS Code window rather than someone else's page. The allowance itself is a
@@ -1343,6 +1349,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return await handleUserUiPrefs(req, CORS_HEADERS)
     }
 
+    if (url.pathname.startsWith('/api/opencode/')) {
+      if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
+      const { handleOpencodeRequest } = await import('./opencode-web')
+      return handleOpencodeRequest(req, CORS_HEADERS)
+    }
+
     if (url.pathname === '/api/accounts' || url.pathname.startsWith('/api/accounts/')) {
       if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
       const { handleAccountsRequest } = await import('./accounts-web')
@@ -1408,6 +1420,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
           status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         })
       }
+    }
+
+    // FLUXO.ENTREGA-DSL — the delivery state machine (`delivery/`). Not behind the flows flag: refusing a skipped
+    // phase is the point, so the door exists on every build; the engine's timer and flows are what the flag adds.
+    if (url.pathname === '/api/deliveries' || url.pathname.startsWith('/api/deliveries/')) {
+      const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }] = await Promise.all([
+        import('./delivery/web'), import('./delivery/host'), import('./sessions/session-identity'),
+      ])
+      const body = req.method === 'POST' ? await req.json().catch(() => ({})) as Record<string, unknown> : {}
+      const out = await deliveryRequest(req.method, url.pathname, body, { service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token) })
+      return json(out.body, out.status)
     }
 
     // Experimental deterministic flows. The engine owns execution and durable run records;
@@ -2365,12 +2388,6 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       const out = await sendAwayNotice(body, await defaultAwayDeps())
       return json(out, awayStatus(out))
     }
-    if (url.pathname === '/api/away/digest/answer' && req.method === 'POST') {
-      const body = await req.json().catch(() => ({})) as { answer?: unknown; bucket?: unknown; since?: unknown; lang?: unknown }
-      const { answerAwayDigest } = await import('./away-digest')
-      const out = await answerAwayDigest(body.answer, body.bucket, body.lang === 'pt' ? 'pt' : 'en', Date.now(), body.since)
-      return json(out, out.ok ? 200 : out.error === 'stale' || out.error === 'not_away' ? 409 : 400)
-    }
     // USER SESSION GROUPS — the door the MCP tools use to organise sessions (see
     // `sessions/session-groups-web.ts`). Matched before `/api/tasks`; it shares no path with it.
     if (url.pathname === '/api/session-groups' && req.method === 'GET') {
@@ -2420,7 +2437,12 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
 
     if (url.pathname === '/api/tasks' && req.method === 'GET') {
       const { listTasks } = await import('./sessions/task-web')
-      return json(await listTasks(taskFilterOf(url)))
+      const { listOptionsOf } = await import('./sessions/task-list-window')
+      // Two-step load (`task-list-window.ts`): `recent=1` is the open/recent rows, the plain call the
+      // rest. Descriptions are cut to a card's worth ONLY for the caller that asks (`clip=1`, the web
+      // list): the CLI and the MCP tools read the board to learn what to DO, and a brief cut at 400
+      // characters is a brief half read. `full=1` still wins over `clip=1`.
+      return json(await listTasks(taskFilterOf(url), listOptionsOf(url.searchParams)))
     }
     // The LIVE DELIVERY line (`task-live.ts`). Matched before the generic `<ref>` GET, like `next`.
     if (url.pathname === '/api/tasks/live' && req.method === 'GET') {
@@ -5344,7 +5366,11 @@ startHostAllowlistRefresh()
 // PORT (47291) is always the api + mcp endpoint.
 Bun.serve<WSData>({ hostname: '0.0.0.0', port: PORT, idleTimeout: 60, maxRequestBodySize: LIMITS.ingestBodyBytes, websocket: _wsHandlers, fetch: handleCompressed })
 startCheckinTimer()
-startAwayDigestTimer()
+// Scheduled autonomous mode: at each window edge, tell the running sessions and refresh the browsers.
+void import('./away').then(async m => m.startAwayScheduleTimer(() => {
+  void import('./sse').then(sse => sse.broadcastAwayChanged()).catch(() => {})
+  void import('./sessions/fleet-web').then(f => f.kickFleet()).catch(() => {})
+})).catch(() => {})
 // Binary mode also serves the web dashboard on WEB_PORT (47292) — that's the URL you open.
 // Same handler → the SPA's same-origin `/api/*` calls resolve against 47292 and just work,
 // while 47291 stays the dedicated api + mcp port.
@@ -5472,6 +5498,16 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
     })().catch(err => console.error('[agentask] queued thread replies:', err instanceof Error ? err.message : String(err)))
       .finally(() => { flushing = false })
   }, 30_000).unref()
+  // FLUXO.ENTREGA-DSL — the delivery watch (CI → publicado on the release signal; blocked pieces: wake the leader every
+  // 30 min, defer after 2 h, dependencies lift themselves). Runs here on every build, not only behind the experimental
+  // flows flag: non-blocking is a property of the flow, so the tick cannot depend on an opt-in. The engine's own
+  // `entrega-vigiar` timer calls the SAME `tick`, which is serialised in this process, so two ticks never double a wake.
+  // One small file read per minute when nothing is in CI or blocked.
+  setInterval(() => {
+    void import('./delivery/host').then(m => m.deliveryService().tick())
+      .then(r => { if (r.actions.length) console.log(`[entrega] ${r.actions.join(', ')}`) })
+      .catch(err => console.error('[entrega] tick:', err instanceof Error ? err.message : String(err)))
+  }, 60_000).unref()
   // CONTA.AUTO — a session stopped at its account's usage limit moves, once per limit episode, to another account of the
   // same harness that has room (`sessions/auto-switch.ts`). Off with the Settings switch or without multiple accounts;
   // a tick does nothing when no session is limit-blocked (one registry read + the tail of each live transcript).

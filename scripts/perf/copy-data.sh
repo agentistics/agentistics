@@ -21,7 +21,7 @@ copy .local/share/opencode --exclude 'auth.json'
 copy .agentistics \
   --exclude 'vault' --exclude 'provider-keys' --exclude '*.sealed' --exclude 'backups' --exclude 'backups.jsonl' \
   --exclude 'archive' --exclude 'central' --exclude 'connections' --exclude 'team*' --exclude '*.corrupt-*' \
-  --exclude '*.pre-*' --exclude 'run' --exclude 'instance.lock' --exclude 'preferences.json' --exclude 'agentop-server.log'
+  --exclude '*.pre-*' --exclude 'run' --exclude 'structured' --exclude 'flows/bundles' --exclude 'heavy' --exclude '*.sock' --exclude 'instance.lock' --exclude 'server.lock' --exclude 'preferences.json' --exclude 'agentop-server.log'
 if [ -f "$HOME/.agentistics/preferences.json" ]; then
   bun -e "const p=JSON.parse(await Bun.file(process.argv[1]).text()); delete p.team; await Bun.write(process.argv[2], JSON.stringify(p,null,2))" \
     "$HOME/.agentistics/preferences.json" "$DEST/.agentistics/preferences.json"

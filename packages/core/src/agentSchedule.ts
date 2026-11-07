@@ -206,3 +206,33 @@ export function defaultAgentSchedule(): AgentSchedule {
   const day = (): AgentDaySchedule => ({ windows: [{ from: '09:00', to: '18:00' }] })
   return { enabled: false, days: { mon: day(), tue: day(), wed: day(), thu: day(), fri: day() } }
 }
+
+/** Short weekday names, both languages — shared by every schedule summary (account agenda and autonomous mode). */
+export const DAY_SHORT: Record<AgentDay, { pt: string; en: string }> = {
+  mon: { pt: 'seg', en: 'Mon' }, tue: { pt: 'ter', en: 'Tue' }, wed: { pt: 'qua', en: 'Wed' }, thu: { pt: 'qui', en: 'Thu' },
+  fri: { pt: 'sex', en: 'Fri' }, sat: { pt: 'sáb', en: 'Sat' }, sun: { pt: 'dom', en: 'Sun' },
+}
+
+/** Summary of a day's hours for plan popups and agenda lines: "dia inteiro" instead of 00:00–24:00. */
+export function dayWindowsText(day: { windows: readonly AgentWindow[]; allDay?: boolean }, lang: 'pt' | 'en'): string {
+  if (day.allDay) return lang === 'pt' ? 'dia inteiro' : 'all day'
+  return day.windows.map(w => `${w.from}–${w.to}`).join(', ')
+}
+
+/** One line for a whole schedule: "seg, ter: dia inteiro · qua: 09:00–18:00". Empty when no day is set. */
+export function scheduleSummaryText(schedule: { days: Partial<Record<AgentDay, { windows: readonly AgentWindow[]; allDay?: boolean }>> } | undefined, lang: 'pt' | 'en'): string {
+  if (!schedule) return ''
+  const groups = new Map<string, AgentDay[]>()
+  for (const d of Object.keys(DAY_SHORT) as AgentDay[]) {
+    const day = schedule.days[d]
+    if (!day) continue
+    const t = dayWindowsText(day, lang)
+    groups.set(t, [...(groups.get(t) ?? []), d])
+  }
+  return [...groups].map(([t, ds]) => `${ds.map(d => DAY_SHORT[d][lang]).join(', ')}: ${t || (lang === 'pt' ? 'sem janela' : 'no window')}`).join(' · ')
+}
+
+/** True when at least one selected day can ever be ON (all day, or a window). A schedule that cannot is a mistake, not a choice. */
+export function scheduleCanBeOn(s: AgentSchedule): boolean {
+  return Object.values(s.days).some(d => !!d && (d.allDay === true || d.windows.length > 0))
+}

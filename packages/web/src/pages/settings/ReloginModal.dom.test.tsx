@@ -9,6 +9,7 @@ const originalFetch = globalThis.fetch
 const originalInterval = globalThis.setInterval, originalClear = globalThis.clearInterval
 let root: Root, host: HTMLDivElement
 let poll: (() => void) | undefined
+let latePoll: (() => void) | undefined
 let reads: number, starts: number, cancels: number
 let status: 'pending' | 'failed' | 'done'
 let refuse: boolean
@@ -24,13 +25,15 @@ beforeAll(async () => {
 })
 afterAll(async () => { await GlobalRegistrator.unregister() })
 beforeEach(() => {
-  reads = starts = cancels = 0; status = 'pending'; refuse = false; poll = undefined; readWait = undefined
+  reads = starts = cancels = 0; status = 'pending'; refuse = false; poll = undefined; latePoll = undefined; readWait = undefined
   globalThis.setInterval = ((fn: () => void, ms: number, ...args: unknown[]) => {
     if (ms === 2000) { poll = fn; return -9876 }
+    if (ms === 4000) { latePoll = fn; return -9877 }
     return originalInterval(fn, ms, ...args)
   }) as typeof setInterval
   globalThis.clearInterval = ((id: ReturnType<typeof setInterval>) => {
     if (Number(id) === -9876) { poll = undefined; return }
+    if (Number(id) === -9877) { latePoll = undefined; return }
     originalClear(id)
   }) as typeof clearInterval
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
@@ -107,4 +110,29 @@ test('slow status responses never overlap when the polling timer ticks', async (
   expect(reads).toBe(1)
   await tick()
   expect(reads).toBe(2)
+})
+
+test('a login that shows up after the server declared failure still finishes, and clears the error (RELOGIN.NAYARA)', async () => {
+  const completed: unknown[] = []
+  await mount(out => { completed.push(out) })
+  status = 'failed'; await tick()
+  expect(host.querySelector('[role="alert"]')).not.toBeNull()
+  expect(host.querySelector('[data-login-retry]')).not.toBeNull()
+  expect(latePoll).toBeDefined()
+  // The credential lands; the server flips the very same attempt to done.
+  status = 'done'
+  await act(async () => { latePoll?.() }); await flush()
+  expect(completed).toEqual([{ same: true, boundId: 'acc_test' }])
+  expect(host.querySelector('[role="alert"]')).toBeNull()
+  expect(host.querySelector('[data-login-retry]')).toBeNull()
+  expect(host.querySelector('[data-login-step="done"]')).not.toBeNull()
+  expect(latePoll).toBeUndefined()
+})
+
+test('a real failure stays failed while the late look finds nothing', async () => {
+  await mount()
+  status = 'failed'; await tick()
+  await act(async () => { latePoll?.() }); await flush()
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('Sign-in did not finish')
+  expect(host.querySelector('[data-login-retry]')).not.toBeNull()
 })

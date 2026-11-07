@@ -30,6 +30,8 @@ export interface ToolCallLike {
   ref?: string
   /** PROPOSED: the call's `tool_result` reported an error. Not on `ChatTurn` yet — see the options doc. */
   failed?: boolean
+  /** What the call printed, already trimmed to its tail by the source (`ChatTurn.tools[].output`). */
+  output?: string
 }
 
 export interface TurnLike {
@@ -50,6 +52,8 @@ export interface ActivityStep {
   detail?: string
   ref?: string
   status: StepStatus
+  /** What the step printed (a command's output), when the source carried it. Shown collapsed under the row. */
+  output?: string
 }
 
 export interface ActivityGroup {
@@ -93,6 +97,16 @@ const RAW_KIND: Record<string, ActivityKind> = {
   update_plan: 'plan', update_topic: 'plan', manage_task: 'plan',
 }
 
+/**
+ * ACP's own `ToolKind` words, which an ACP-driven harness hands over in `canonical` when nothing mapped them to the shared
+ * vocabulary (OpenCode over ACP: `kind: "execute"`). Without this every such step was `other` — the running row read
+ * "execute, execute +6" and the finished one "Usou 8 ferramentas", saying nothing about what ran.
+ */
+const ACP_KIND: Record<string, ActivityKind> = {
+  execute: 'run', read: 'read', edit: 'edit', delete: 'edit', move: 'edit',
+  search: 'search', fetch: 'web', think: 'plan', switch_mode: 'plan',
+}
+
 const MCP = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$|^mcp_([a-z0-9-]+)_(.+)$/i
 
 /** Most frequent kind; ties keep first appearance, including unfinished steps. */
@@ -129,7 +143,7 @@ const MEMORY_PATH = /(^|\/)(memory|memories)\/[^/]+\.md$|\/MEMORY\.md$|(^|\/)GEM
 
 export function kindOf(call: ToolCallLike): ActivityKind {
   const name = call.canonical ?? call.name
-  let kind: ActivityKind = CANONICAL_KIND[name] ?? RAW_KIND[call.name] ?? RAW_KIND[name] ?? (MCP.test(call.name) ? 'mcp' : 'other')
+  let kind: ActivityKind = CANONICAL_KIND[name] ?? RAW_KIND[call.name] ?? RAW_KIND[name] ?? (call.canonical ? ACP_KIND[call.canonical] : undefined) ?? (MCP.test(call.name) ? 'mcp' : 'other')
   const detail = call.detail?.trim() ?? ''
   // A codex `exec` that is a patch IS an edit: the command is the only place that says so.
   if (kind === 'run' && /^apply_patch\b/.test(detail)) kind = 'edit'
@@ -238,6 +252,32 @@ export function stepVerb(step: ActivityStep, pt: boolean): string {
   return L(step.status === 'running' ? w.doing : w.done, pt)
 }
 
+/**
+ * OPENCODE.SESSAO — what the folded text under a step IS, named for it: an edit carries its diff, a todo list its checklist,
+ * a subagent its answer, a read the file's contents. "output" under all of them made a diff read as something a command printed.
+ */
+export function outputLabel(kind: ActivityKind, pt: boolean): string {
+  switch (kind) {
+    case 'edit': case 'write': case 'memory': return pt ? 'alterações' : 'changes'
+    case 'plan': return pt ? 'lista' : 'list'
+    case 'delegate': return pt ? 'resposta' : 'answer'
+    case 'read': return pt ? 'conteúdo' : 'contents'
+    default: return pt ? 'saída' : 'output'
+  }
+}
+
+export type OutputMark = 'add' | 'del' | 'hunk' | null
+/**
+ * PURE. A change's lines, each marked `add` (`+`), `del` (`-`) or `hunk` (`@@`), so the diff can be read as one — only for a
+ * step that CHANGED something (edit / write / memory): a command that prints `-rw-r--r--` is not a deletion. null otherwise.
+ */
+export function outputLines(kind: ActivityKind, output: string): Array<{ text: string; mark: OutputMark }> | null {
+  if (kind !== 'edit' && kind !== 'write' && kind !== 'memory') return null
+  const lines = output.split('\n')
+  if (!lines.some(l => /^[+-]/.test(l))) return null
+  return lines.map(text => ({ text, mark: text.startsWith('@@') ? 'hunk' : text.startsWith('+') ? 'add' : text.startsWith('-') ? 'del' : null }))
+}
+
 /** At most this many phrases before "and N more" — the line must stay ONE line. */
 export const MAX_PHRASES = 3
 
@@ -314,6 +354,7 @@ export function stepsOfTurn(turn: TurnLike): ActivityStep[] {
     return {
       kind, name: c.name, object: objectOf(c, kind),
       ...(c.detail ? { detail: c.detail } : {}), ...(c.ref ? { ref: c.ref } : {}),
+      ...(c.output ? { output: c.output } : {}),
       status: c.failed ? 'error' : running ? 'running' : 'done',
     }
   })

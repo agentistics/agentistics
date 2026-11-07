@@ -568,6 +568,52 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: { ref: { type: "string" } }, required: ["ref"] },
   },
   {
+    name: "agentistics_task_phase",
+    description:
+      "FLUXO.ENTREGA-DSL — read or move a DELIVERY (one subtask) through its fixed phases: fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado, plus bloqueado (from any phase, back to the stored origin only). Any transition outside that table is REFUSED (422 `fase_pulada`) with a sentence naming what is missing — executando → revisao_lider, ajuste → revisao_lider and every other skip included. The gates each edge needs are run BY THE SERVER from evidence (predispatch, vaga, salvo = sha on origin per ls-remote, qa-modelo = QA model ≠ author model from the registry and never Sonnet over Sonnet, cabeca = the pushed branch is still at the sha QA tested, delecoes = no file deleted outright by the PR, mergeado = gh says the PR is MERGED, the merge commit is on origin/main and the PR head is the sha QA approved — the merge sha is READ FROM THE PR, never from you, release = release.yml green for the merge sha AND the batch's tag exists); salvo needs every check run on the pushed head to have concluded green (pending or absent refuse); you never pass proof. `action`: `get` (default; omit `subtaskId` to list every delivery) | `phase` (`to` + what that edge reads: `verdict` APROVADO/REPROVADO + `findings` from qa, `reviewedSha` = the sha QA approved for revisao_lider → pr_merge, `detail` for a request for change or a failure reason) | `gate` (`name`: run ONE gate and record its evidence) | `block` (`reason` one of dependencia, pedido_de_bloqueio, limite, maquina, externo, fora_das_autorizacoes; `text`) | `unblock` (`detail`; the leader of the task or the owner — an owner-decision block only the owner) | `step` (`step` 1..9: the step of the current phase, for the Live %) | `configure` (the LEADER of the task or the owner only; `patch`: versionTarget, humanGates [phases needing the owner's approval — skipped and recorded as 'pulado: modo autônomo' while autonomous mode is on], leaderSessionId, pr, tag, allowDeletions {paths, reason}; the QA and author sessions are never settable — the host records them from the sessions it opened and the registry) | `approve` (`phase`, `decision` approve|reject, `note`: answers a human gate the owner was ASKED about; a session identity is deliberately not sent, the owner answers through this same door as the Live card button and `agentop flow approve`) | `stage-run` (predispatch + vaga gates, then start the staged session and move to executando) | `merge` (delecoes gate, squash-merge the PR, move to ci; a failure goes back to revisao_lider). In autonomous mode nothing here ever asks or waits for the owner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "step", "configure", "approve", "stage-run", "merge"] },
+        subtaskId: { type: "string" },
+        to: { type: "string", enum: ["executando", "qa", "ajuste", "revisao_lider", "pr_merge", "ci", "publicado"] },
+        verdict: { type: "string", enum: ["APROVADO", "REPROVADO"] },
+        findings: { type: "string" },
+        reviewedSha: { type: "string" },
+        detail: { type: "string" },
+        name: { type: "string", enum: ["predispatch", "vaga", "salvo", "qa-modelo", "cabeca", "delecoes", "mergeado", "release"] },
+        phase: { type: "string", description: "approve: the phase whose human gate is answered" },
+        decision: { type: "string", enum: ["approve", "reject"] },
+        note: { type: "string" },
+        reason: { type: "string", enum: ["dependencia", "pedido_de_bloqueio", "limite", "maquina", "externo", "fora_das_autorizacoes"] },
+        text: { type: "string" },
+        step: { type: "number" },
+        patch: { type: "object" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_task_stage",
+    description:
+      "FLUXO.ENTREGA-DSL pre-dispatch — write the STAGED SESSION on a subtask (prompt/brief, harness, model, effort, account, cwd) and open its delivery in `fila` (\"Na fila\"). A leader receiving a request from the owner stages it in the SAME turn: the demand flow reminds the leader (never the owner) after 10 minutes of an owner request with no staged subtask. The fields merge over what the subtask already holds, and the predispatch gate is checked right away (the reply says what is still missing). Nothing starts here — `agentistics_task_phase action=stage-run` starts it once the vaga gate passes. `pedidoId` links the owner request this answers.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subtaskId: { type: "string" },
+        prompt: { type: "string" },
+        harness: { type: "string" },
+        model: { type: "string" },
+        effort: { type: "string" },
+        account: { type: "string" },
+        cwd: { type: "string" },
+        versionTarget: { type: "string" },
+        pedidoId: { type: "string" },
+      },
+      required: ["subtaskId"],
+    },
+  },
+  {
     name: "agentistics_session_groups",
     description:
       "List the user's SESSION GROUPS — the named folders in the Sessions sidebar (\"Saved to later\", \"Pelvie\", …) — with the sessions in each. A group is how a person keeps a fleet of assistants organised; every session belongs to at most one. Each member carries its `id` (the managed session id you can pass to the other tools), `title`, `state` and `harness` when the session is on this machine right now, or only its `key` when it is gone. Call this BEFORE creating a group, so you file a session under an existing one instead of making a near-duplicate. Only works on a machine, not on a central (a central has no local sessions to organise).",
@@ -682,7 +728,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_session_away",
     description:
-      "Read or switch AUTONOMOUS MODE, or send the owner a notice while autonomous — the fleet works on its own, without asking permission or questions (the owner may be asleep or travelling). While it is on, every new session is born in the no-questions approval mode unless its caller names a mode. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `on: false` switches it off. Every session started while it is active is told in its briefing. With `target` (a session's managed id or conversation id) `on` switches THAT session's own autonomous mode instead — it alone is told the owner is out, even with the global switch off, and a running one is told the change; sessions it starts inherit it. Ceilings are per PROVIDER: `topCaps` maps a harness (claude, codex, gemini, copilot, antigravity, kimi, opencode) to how many workers may run on its top model tier at once. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
+      "Read or switch AUTONOMOUS MODE, or send the owner a notice while autonomous — the fleet works on its own, without asking permission or questions (the owner may be asleep or travelling). While it is on, every new session is born in the no-questions approval mode unless its caller names a mode. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `schedule` makes it SCHEDULED instead of open-ended: `{enabled:true, days:{mon:{windows:[{from:\"09:00\",to:\"18:00\"}]}, tue:{windows:[],allDay:true}}}` (local clock, weekdays mon…sun, hour windows per day, `allDay` = whole day) — it is on only inside those windows. Omitted `authorised` = all three. `on: false` switches it off. Every session started while it is active is told in its briefing. With `target` (a session's managed id or conversation id) `on` switches THAT session's own autonomous mode instead — it alone is told the owner is out, even with the global switch off, and a running one is told the change; sessions it starts inherit it. Ceilings are per PROVIDER: `topCaps` maps a harness (claude, codex, gemini, copilot, antigravity, kimi, opencode) to how many workers may run on its top model tier at once. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
     inputSchema: {
       type: "object",
       properties: {
@@ -690,8 +736,9 @@ const TOOLS: Tool[] = [
         until: { type: "string", description: "ISO instant the autonomous period ends. Omit for 'until I turn it off'." },
         authorised: { type: "array", items: { type: "string", enum: ["releases", "workers", "merges"] } },
         note: { type: "string", description: "Free text from the owner (max 500 chars)." },
-        maxWorkers: { type: "number", description: "Ceiling of worker sessions at once while autonomous (default 6)." },
-        topCaps: { type: "object", additionalProperties: { type: "number" }, description: "Per provider (harness id → number): ceiling of workers on that provider's top model tier at once (Opus, top GPT tier, Gemini Pro, …). A provider with no entry gets 2." },
+        schedule: { type: "object", description: "Optional agenda: {enabled:true, days:{<mon|tue|wed|thu|fri|sat|sun>:{windows:[{from:'HH:MM',to:'HH:MM'}], allDay?:true}}}. Autonomous mode is on only inside the windows (machine-local time; to<=from crosses midnight). Omit for 'until I turn it off'." },
+        maxWorkers: { type: "number", description: "Ceiling of worker sessions at once while autonomous (default 4)." },
+        topCaps: { type: "object", additionalProperties: { type: "number" }, description: "Per provider (harness id → number): ceiling of workers on that provider's top model tier at once (Opus, top GPT tier, Gemini Pro, …). A provider with no entry gets 1." },
         target: { type: "string", description: "A session's managed id or conversation id: switch only that session's own autonomous mode (with `on`)." },
         notice: { type: "string", description: "While autonomous: a warning or decision that cannot wait, sent to the owner's bell/Nay as a notice (max 500 chars) instead of a question that blocks your turn. Leaders only; ignores the other fields." },
       },
@@ -1211,6 +1258,33 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiSend("DELETE", `/api/tasks/${encodeURIComponent(ref)}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
+      case "agentistics_task_phase": {
+        const a = (args ?? {}) as any;
+        const action = typeof a.action === "string" ? a.action : "get";
+        if (action === "get") {
+          const body = a.subtaskId
+            ? await apiGet(`/api/deliveries/${encodeURIComponent(String(a.subtaskId))}`)
+            : await apiGet("/api/deliveries");
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (typeof a.subtaskId !== "string" || !a.subtaskId) throw new Error("subtaskId is required");
+        const { subtaskId, action: _a, ...rest } = a;
+        // `approve` is the OWNER's answer to a human gate: no session identity travels with it (the server reads "no session proof" as the owner).
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(subtaskId)}`, { ...rest, action, ...(action === "approve" ? {} : { session: sessionProof(process.env) }) });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_stage": {
+        const a = (args ?? {}) as any;
+        if (typeof a.subtaskId !== "string" || !a.subtaskId) throw new Error("subtaskId is required");
+        const draft: Record<string, unknown> = {};
+        for (const k of ["prompt", "harness", "model", "effort", "account", "cwd"]) if (typeof a[k] === "string" && a[k].trim()) draft[k] = a[k];
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(a.subtaskId)}`, {
+          action: "stage", draft, session: sessionProof(process.env),
+          ...(typeof a.versionTarget === "string" ? { versionTarget: a.versionTarget } : {}),
+          ...(typeof a.pedidoId === "string" ? { pedidoId: a.pedidoId } : {}),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
       case "agentistics_session_groups": {
         const body = await apiGet("/api/session-groups");
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
@@ -1288,6 +1362,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiSend("PUT", "/api/away", {
           on: a.on,
           ...(a.until !== undefined ? { until: a.until } : {}),
+          ...(a.schedule !== undefined ? { schedule: a.schedule } : {}),
           ...(a.authorised !== undefined ? { authorised: a.authorised } : {}),
           ...(a.note !== undefined ? { note: a.note } : {}),
           ...(a.maxWorkers !== undefined ? { maxWorkers: a.maxWorkers } : {}),

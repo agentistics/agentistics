@@ -50,6 +50,8 @@ export interface TaskSessionRow {
   createdAt: string
   endedAt?: string
   label?: string
+  /** The reasoning effort the session was started with (registry), when one was asked for. */
+  effort?: string
   conversationId?: string
   /**
    * True for a conversation filed on the board with NO session behind it (`HistoricalSession`): its
@@ -75,6 +77,8 @@ export interface TaskSessionRow {
 
 export interface TaskListRow {
   task: Task
+  /** Set by the HTTP list when `task.detail` was cut to a card's worth (`task-list-window.ts`). */
+  detailClipped?: boolean
   attempts: number
   rollup: AttemptRollup
   /**
@@ -159,10 +163,32 @@ export function rowsOfTask<R extends BoardRow>(
   rows: readonly R[],
   owners: ReadonlyMap<string, string> = conversationOwners(rows),
 ): R[] {
-  return rows.filter(r =>
-    (r.taskId === task.id
-      || (r.task !== undefined && legacyTaskId(r.task) === task.id))
-    && (!r.conversationId || owners.get(r.conversationId) === task.id))
+  return (rowsByTask(rows).get(task.id) ?? []).filter(r => !r.conversationId || owners.get(r.conversationId) === task.id)
+}
+
+/**
+ * The registry bucketed by the task each row NAMES (its `taskId`, or the id derived from its legacy
+ * `task` name), in registry order. `rowsOfTask` used to scan every row for every task — 136 tasks x
+ * 3000 rows — which was ~100 ms of a 230 ms live-line build on the real book. A row naming two
+ * different tasks (an id AND a legacy name that derive differently) sits in both buckets, exactly as
+ * the scan matched it for both. Memoized on the array: one board read hands the same rows to every
+ * task, and the length guard rebuilds for a caller that grew its own array.
+ */
+const bucketMemo = new WeakMap<readonly unknown[], { length: number; byTask: Map<string, unknown[]> }>()
+function rowsByTask<R extends BoardRow>(rows: readonly R[]): Map<string, R[]> {
+  const hit = bucketMemo.get(rows)
+  if (hit && hit.length === rows.length) return hit.byTask as Map<string, R[]>
+  const byTask = new Map<string, R[]>()
+  const put = (id: string, r: R) => { const l = byTask.get(id); if (l) l.push(r); else byTask.set(id, [r]) }
+  for (const r of rows) {
+    if (r.taskId !== undefined) put(r.taskId, r)
+    if (r.task !== undefined) {
+      const legacy = legacyTaskId(r.task)
+      if (legacy !== r.taskId) put(legacy, r)
+    }
+  }
+  bucketMemo.set(rows, { length: rows.length, byTask })
+  return byTask
 }
 
 // The rule lives in `task-conversations.ts` (see there); re-exported so this module stays the one
@@ -562,12 +588,15 @@ export function buildTaskDetail(o: {
   threads?: readonly TaskThread[]
   subtasks?: readonly Subtask[]
   files?: readonly TaskFile[]
+  /** `conversationOwners(rows)`, when the caller builds many details over the same rows (the live line
+   *  builds one per task: recomputing it for each was ~230 ms of a 136-task read). */
+  owners?: ReadonlyMap<string, string>
 }): TaskDetail {
   // ONE ROW PER CONVERSATION, decided ONCE and handed to everything below — the newest row of each
   // conversation, because it carries the current filing and the current liveness. Every figure and
   // every list on this detail reads the same set, so a conversation cannot be in the list and
   // missing from a bucket, or counted twice in the evidence block, or filed in two places.
-  const mine = distinctConversations(rowsOfTask(o.task, o.rows))
+  const mine = distinctConversations(rowsOfTask(o.task, o.rows, o.owners))
   const metas = mine
     .map(r => (r.conversationId ? o.metas.get(r.conversationId) : undefined))
     .filter((m): m is SessionMeta => m !== undefined)
@@ -612,6 +641,7 @@ export function buildTaskDetail(o: {
         createdAt: r.createdAt,
         ...(r.endedAt ? { endedAt: r.endedAt } : {}),
         ...(r.label ? { label: r.label } : {}),
+        ...(typeof (r as { effort?: unknown }).effort === 'string' ? { effort: (r as { effort: string }).effort } : {}),
         ...(r.conversationId ? { conversationId: r.conversationId } : {}),
         ...(isHistoricalRow(r) ? { historical: true } : {}),
         ...(isNativeRow(r) ? { native: true } : {}),

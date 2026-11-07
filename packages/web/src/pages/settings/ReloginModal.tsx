@@ -11,6 +11,8 @@ import { addErrorText, attemptIsOver, type Lang, type RootRowView } from './addA
 import { AUTH_COPY, cancelRelogin, readRelogin, sendReloginCode, startRelogin, type LoginInfoView } from '../../lib/accountRelogin'
 
 const POLL_MS = 2000
+/** After a server-declared failure: how often to look for a login that arrives late (the server watches for 5 min). */
+const LATE_POLL_MS = 4000
 
 export function ReloginModal({ accountId, harness, who, lang, onClose, onDone }: {
   accountId: string
@@ -32,6 +34,10 @@ export function ReloginModal({ accountId, harness, who, lang, onClose, onDone }:
   const [error, setError] = useState<string | null>(null)
   const [expired, setExpired] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  // The server declared the sign-in failed. A login that shows up on disk a moment later still binds (the
+  // server keeps watching for LATE_LOGIN_MS), so this screen keeps asking at a slow cadence — otherwise a
+  // sign-in that visibly worked stays under "did not finish" and "Try again".
+  const [failedAtServer, setFailedAtServer] = useState(false)
   const finished = useRef(false)
   const onDoneRef = useRef(onDone)
   onDoneRef.current = onDone
@@ -40,7 +46,7 @@ export function ReloginModal({ accountId, harness, who, lang, onClose, onDone }:
   useEffect(() => {
     let alive = true
     const ctrl = new AbortController()
-    setBusy(true); setError(null); setExpired(false); setSubmitted(false); setLogin(undefined)
+    setBusy(true); setError(null); setExpired(false); setSubmitted(false); setLogin(undefined); setFailedAtServer(false)
     void startRelogin(accountId, ctrl.signal).then(out => {
       if (!alive) return
       setBusy(false)
@@ -55,6 +61,26 @@ export function ReloginModal({ accountId, harness, who, lang, onClose, onDone }:
     return () => { alive = false; ctrl.abort() }
   }, [accountId, attempt, pt])
   useEffect(() => () => { if (!finished.current) void cancelRelogin(accountId) }, [accountId])
+
+  const finishDone = useCallback((s: { same: boolean; boundId: string }) => {
+    finished.current = true
+    setError(null); setExpired(false); setFailedAtServer(false)
+    setSame(s.same)
+    setBound({ harness, root: '', status: 'bound', accountId: s.boundId, label: who })
+    onDoneRef.current?.({ same: s.same, boundId: s.boundId })
+  }, [harness, who])
+
+  // After a server-side failure: keep looking, slowly, for the login that arrives late.
+  useEffect(() => {
+    if (!failedAtServer || bound) return
+    let alive = true, reading = false
+    const timer = setInterval(() => {
+      if (reading) return
+      reading = true
+      void readRelogin(accountId).then(s => { if (alive && s?.status === 'done') finishDone(s) }).finally(() => { reading = false })
+    }, LATE_POLL_MS)
+    return () => { alive = false; clearInterval(timer) }
+  }, [failedAtServer, bound, accountId, finishDone])
 
   // Follow the sign-in until the server re-binds the account (or says it failed).
   // Metadata is refreshed by polling: depending on its object identity would immediately restart
@@ -74,13 +100,10 @@ export function ReloginModal({ accountId, harness, who, lang, onClose, onDone }:
         if (s.login?.error === 'invalid_code') { setSubmitted(false); setError(addErrorText({ error: 'invalid_code' }, pt)) }
         return
       }
-      if (s.status === 'failed') { setExpired(true); setError(addErrorText({ error: s.error }, pt)); return }
+      if (s.status === 'failed') { setExpired(true); setFailedAtServer(true); setError(addErrorText({ error: s.error }, pt)); return }
       // Only an explicit `done` finishes: an answer this screen does not know is no proof of a sign-in.
       if (s.status !== 'done') return
-      finished.current = true
-      setSame(s.same)
-      setBound({ harness, root: '', status: 'bound', accountId: s.boundId, label: who })
-      onDoneRef.current?.({ same: s.same, boundId: s.boundId })
+      finishDone(s)
     }
     const timer = setInterval(() => { void tick() }, POLL_MS)
     void tick()

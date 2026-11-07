@@ -5,6 +5,7 @@ import { VaultSafe, SAFE_OPEN_MS, SAFE_WIDTH_DESKTOP, SAFE_WIDTH_MOBILE, type Sa
 import { VaultCodeClock } from './VaultCodeClock'
 import { refreshVaultWatch } from '../../lib/vaultWatch'
 import { codeComplete, type UiAction } from '../../lib/vaultApi'
+import { lockedSubKey, vt } from '../../lib/vaultText'
 import { Err } from '../MfaSetup'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
 
@@ -12,7 +13,6 @@ type Lang = 'pt' | 'en'
 
 const WORDS = {
   lockedTitle: { en: 'Vault locked', pt: 'Cofre trancado' },
-  lockedSub: { en: 'Your secrets are protected. Unlock with Windows Hello or your code.', pt: 'Seus segredos estão protegidos. Destrave com Windows Hello ou o código.' },
   unlockingTitle: { en: 'Unlocking…', pt: 'Destravando…' },
   unlockingSub: { en: 'Confirm on this computer, or enter the code.', pt: 'Confirme neste computador ou digite o código.' },
   openTitle: { en: 'Vault open', pt: 'Cofre aberto' },
@@ -45,6 +45,8 @@ export function VaultStage({ lang, isMobile, fromOpen, onOpened, compact, onActi
 }) {
   const [busy, setBusy] = useState(false)
   const [opening, setOpening] = useState(false)
+  // Until the service has said which presence check this machine has, the sentence names none.
+  const [wrappers, setWrappers] = useState<string[] | null>(null)
   const done = useRef(onOpened)
   done.current = onOpened
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -58,10 +60,10 @@ export function VaultStage({ lang, isMobile, fromOpen, onOpened, compact, onActi
   const phase: SafePhase = opening ? 'opening' : busy ? 'unlocking' : 'locked'
   const w = (k: keyof typeof WORDS) => WORDS[k][lang]
   const title = opening ? w('openTitle') : busy ? w('unlockingTitle') : w('lockedTitle')
-  const sub = opening ? w('openSub') : busy ? w('unlockingSub') : w('lockedSub')
+  const sub = opening ? w('openSub') : busy ? w('unlockingSub') : vt(lockedSubKey(wrappers), lang)
   return (
     <StageFrame isMobile={isMobile} compact={compact} phase={phase} fromOpen={fromOpen} label={w('lockedTitle')} title={title} sub={sub}>
-      {!opening && <VaultUnlock lang={lang} isMobile={isMobile} center onOpened={opened} onBusy={setBusy} {...(onAction ? { onAction } : {})} />}
+      {!opening && <VaultUnlock lang={lang} isMobile={isMobile} center onOpened={opened} onBusy={setBusy} onWrappers={setWrappers} {...(onAction ? { onAction } : {})} />}
       {!opening && !busy && <VaultCodeClock lang={lang} center style={{ marginTop: 12 }} />}
       {!opening && !busy && extra}
     </StageFrame>

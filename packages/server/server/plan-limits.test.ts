@@ -20,6 +20,7 @@ const fx = (n: string) => readFileSync(join(import.meta.dir, '../../core/src/__f
 let dir = ''
 let savedPath: string | undefined
 let savedHome: string | undefined
+let savedClaudeConfigDir: string | undefined
 beforeEach(() => {
   __resetPlanLimitsForTest()
   resetHarnessSpawnability()
@@ -31,6 +32,12 @@ beforeEach(() => {
   savedHome = process.env.HOME
   process.env.PATH = dir
   process.env.HOME = dir
+  // The default account's login is judged by its root's credential file (`accountCredentialBroken`),
+  // and with no CLAUDE_CONFIG_DIR that root is the REAL `~/.claude` (HOME_DIR is read at import, so
+  // the HOME swap above does not reach it). Point it at a folder that does not exist: "unknown",
+  // never the owner's login, and the same answer on every machine.
+  savedClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
+  process.env.CLAUDE_CONFIG_DIR = join(dir, 'claude-default-absent')
   for (const bin of ['claude', 'codex']) {
     writeFileSync(join(dir, bin), '#!/bin/sh\nexit 0\n')
     chmodSync(join(dir, bin), 0o755)
@@ -40,6 +47,8 @@ beforeEach(() => {
 afterEach(() => {
   process.env.PATH = savedPath
   process.env.HOME = savedHome
+  if (savedClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+  else process.env.CLAUDE_CONFIG_DIR = savedClaudeConfigDir
   resetHarnessSpawnability()
   setPlanLimitsSink(null)
   __setManagedLookupForTest(null)
@@ -1161,6 +1170,32 @@ test('two real Claude Max accounts both keep capacity and routing, even when one
   expect(body.freeSlotsByAccount[b.id]).toBeGreaterThan(0)
   const rec = routeRecommendation(body.budgets, 'lead')
   expect(rec.account).toBe(b.id)
+})
+
+
+test('an account whose root lost its credential is not spawnable and is never recommended (RELOGIN.NAYARA)', async () => {
+  if (process.platform === 'darwin') return // keychain login: a missing file proves nothing there
+  const root = join(dir, 'accounts', 'claude', 'r_nay')
+  mkdirSync(root, { recursive: true })
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async (_h, r) => r === null
+    ? { key: `${ORG}:a@example.invalid`, label: 'a@example.invalid' } : { key: `${ORG}:nay@example.invalid`, label: 'nay@example.invalid' } })
+  __setHarnessAccountsForTest(store)
+  await store.current('claude')
+  const nay = (await store.bind(root, { harness: 'claude', key: `${ORG}:nay@example.invalid`, label: 'nay@example.invalid' })).account
+  await store.setNickname(nay.id, 'Nayara')
+  const now = Date.now()
+  // Her meter is a STALE reading of an account with plenty of room: the trap the router fell into.
+  await ingestPlanLimits({ harness: 'claude', account: nay.id, plan: 'Claude Pro', source: 'claude-usage-api', updatedAt: now - 3 * 3_600_000,
+    windows: [{ kind: '5h', usedPct: 0, resetsAt: now + 3_600_000 }, { kind: 'week', usedPct: 0, resetsAt: now + 86_400_000 }] })
+  const row = async () => (await planLimitsPayload(undefined, now)).budgets.find(r => r.account === nay.id)!
+  const gone = await row()
+  expect(gone.spawnable).toBe(false)
+  expect(gone.unavailableReason).toContain('no login')
+  expect(gone.freeSlots).toBe(0)
+  expect(routeRecommendation((await planLimitsPayload(undefined, now)).budgets, 'lead').account).not.toBe(nay.id)
+  // Signing in again writes the credential back: the account is routable again.
+  writeFileSync(join(root, '.credentials.json'), JSON.stringify({ claudeAiOauth: { refreshToken: 'x' } }))
+  expect((await row()).spawnable).not.toBe(false)
 })
 
 

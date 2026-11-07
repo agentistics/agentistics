@@ -140,12 +140,14 @@ export function parseAgyModels(stdout: string, p: CatalogProvenance): ModelOptio
 const MODEL_ID = /^[\w.:@-]+(?:\/[\w.:@[\]-]+)+$/
 
 /**
- * `opencode models`: one `provider/model` id per line, no display name. ANY line that is not an id
- * makes the whole answer void — a list half made of an error message is worse than the table.
+ * `opencode models`: one `provider/model` id per line, no display name. Lines that are not an id are
+ * DROPPED, not fatal: opencode prints update notices and warnings beside the list, and voiding the
+ * whole answer for one of them sent the picker to the free-only fallback table even though the CLI
+ * had listed every model of the connected subscription. A line that is not an id can never become a
+ * model, so an answer with NO id in it is still no answer (an error sentence alone yields null).
  */
 export function parseOpencodeModels(stdout: string, p: CatalogProvenance): ModelOption[] | null {
-  const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean)
-  if (lines.some(l => !MODEL_ID.test(l))) return null
+  const lines = stdout.split('\n').map(l => l.trim()).filter(l => MODEL_ID.test(l))
   return nonEmpty(uniq(lines.map(id => option(id, id, p))))
 }
 
@@ -161,8 +163,11 @@ export function parseOpencodeConfigModels(json: string, p: CatalogProvenance): M
   if (!isRecord(doc)) return null
   const ids: string[] = []
   if (typeof doc.model === 'string' && MODEL_ID.test(doc.model.trim())) ids.push(doc.model.trim())
-  if (isRecord(doc.provider)) {
-    for (const [prov, def] of Object.entries(doc.provider)) {
+  // `provider` is the legacy key and `providers` the newer one; a config may carry either or both.
+  for (const key of ['provider', 'providers'] as const) {
+    const block = doc[key]
+    if (!isRecord(block)) continue
+    for (const [prov, def] of Object.entries(block)) {
       if (!isRecord(def) || !isRecord(def.models)) continue
       for (const name of Object.keys(def.models)) {
         const id = `${prov}/${name}`

@@ -23,6 +23,8 @@ beforeAll(async () => {
   GlobalRegistrator.register({ width: 1200, height: 800 })
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never
+  // The progress loader animates through the Web Animations API; happy-dom's cancel() rejects an unhandled promise.
+  ;(Element.prototype as unknown as { animate: unknown }).animate = undefined
   // The plan-limits store follows the shared SSE stream; nothing streams here.
   ;(globalThis as { EventSource?: unknown }).EventSource = class { addEventListener() {} removeEventListener() {} close() {} }
   ;(globalThis as { fetch?: unknown }).fetch = async (url: string, init?: RequestInit) => {
@@ -342,26 +344,20 @@ describe('AccountSwitchDialog — layout', () => {
   }
   const props = (info: SwitchInfo) => ({ open: true, sessionId: 'm1', info, lang: 'en', fromLimit: true, onClose: () => {}, onSwitched: () => {} })
 
-  test('wide viewport: texts and actions on the left, the account list alone in a right column that scrolls', async () => {
+  test('wide viewport: ONE column at the standard width — message, list, then the buttons closing the dialog on the right', async () => {
     window.innerWidth = 1440
     const { root } = await mount(createElement(mod.AccountSwitchDialog, props(many)))
     const dialog = document.querySelector('[role="dialog"]') as HTMLElement
-    expect(dialog.getAttribute('data-confirm-layout')).toBe('split')
-    expect(dialog.style.display).toBe('grid')
-    const main = dialog.querySelector('[data-confirm-main]') as HTMLElement
+    // Never the split: the list as a right column left the buttons stranded in the left half.
+    expect(dialog.getAttribute('data-confirm-layout')).toBe('stacked')
+    expect(dialog.style.display).not.toBe('grid')
+    expect(dialog.style.maxWidth).toBe(`${mod.SWITCH_DIALOG_WIDTH}px`)
+    expect(mod.SWITCH_DIALOG_WIDTH).toBeLessThanOrEqual(640)
     const aside = dialog.querySelector('[data-confirm-aside]') as HTMLElement
-    expect(main.contains(dialog.querySelector('#' + CSS.escape(dialog.getAttribute('aria-labelledby')!)))).toBe(true)
-    expect(main.textContent).toContain('fix the bug')
-    expect(main.querySelector('[data-dialog-footer]')).not.toBeNull()
-    expect(main.querySelector('[role="radiogroup"]')).toBeNull()
     expect(aside.querySelectorAll('[data-account-row]').length).toBe(10)
     expect(aside.style.overflowY).toBe('auto')
     expect(dialog.style.overflowY).toBe('hidden')
-    // The aside is the scroll container and its height is bounded by the viewport, not by its content.
-    expect(aside.style.maxHeight).toContain('dvh')
-    expect(parseInt(aside.style.minHeight || '0')).toBe(0)
-    expect(main.style.maxHeight).toBe(aside.style.maxHeight)
-    // Reading order is the stacked one: rows, then the checkbox, then the buttons.
+    // Reading order: rows, then the checkbox, then the buttons.
     const order = Array.from(dialog.querySelectorAll('[data-account-row], [role="checkbox"], [data-dialog-footer] button'))
     const firstRow = order.findIndex(e => e.hasAttribute('data-account-row'))
     const box = order.findIndex(e => e.getAttribute('role') === 'checkbox')
@@ -369,7 +365,34 @@ describe('AccountSwitchDialog — layout', () => {
     expect(firstRow).toBe(0)
     expect(box).toBeGreaterThan(firstRow)
     expect(btn).toBeGreaterThan(box)
+    expect((dialog.querySelector('[data-dialog-footer]') as HTMLElement).style.justifyContent).toBe('flex-end')
     await act(async () => { root.unmount() })
+  })
+
+  test('while the switch runs the list and the question stay as confirmed, with the loader beside the progress line', async () => {
+    window.innerWidth = 1440
+    let release: (v: unknown) => void = () => {}
+    const prev = globalThis.fetch
+    ;(globalThis as { fetch?: unknown }).fetch = async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith('/api/fleet/switch-account') && init?.method === 'POST') return new Promise(res => { release = () => res(json(postReply)) })
+      return (prev as typeof fetch)(url, init)
+    }
+    const view = (info: SwitchInfo) => createElement(mod.AccountSwitchDialog, props(info))
+    const { host, root } = await mount(view(limited))
+    const rowsBefore = document.querySelectorAll('[data-account-row]').length
+    const question = (document.querySelector('[role="dialog"] p') as HTMLElement).textContent
+    await act(async () => { (document.querySelector('[data-dialog-footer] button:last-child') as HTMLElement).click() })
+    // The poll now reports the session on the TARGET account, with nowhere else to go.
+    await act(async () => { root.render(view({ ...limited, current: { id: 'acc_b', label: 'b@x.com', harness: 'claude' }, options: [] })) })
+    expect(document.querySelectorAll('[data-account-row]').length).toBe(rowsBefore)
+    expect((document.querySelector('[role="dialog"] p') as HTMLElement).textContent).toBe(question)
+    const progress = document.querySelector('[data-account-switch-progress]') as HTMLElement
+    expect(progress.querySelector('svg')).not.toBeNull()
+    expect(progress.textContent).toContain('Switching account')
+    globalThis.fetch = prev
+    await act(async () => { release(null); await new Promise(r => setTimeout(r, 20)) })
+    await act(async () => { root.unmount() })
+    host.remove()
   })
 
   test('while the switch runs Cancel is disabled and Escape does not close', async () => {

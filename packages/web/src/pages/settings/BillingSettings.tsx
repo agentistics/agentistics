@@ -63,6 +63,7 @@ import {
 } from './accountBilling'
 import { createAccountMutator } from './accountMutations'
 import AddAccount from './AddAccount'
+import OpenCodeProviders from './OpenCodeProviders'
 import { addErrorText } from './addAccountLogic'
 import { accountLabelKey, fmtWhen, usePlanLimits } from '../../lib/planLimits'
 import { hasMeasuredPace } from '../../lib/usagePlan'
@@ -417,6 +418,7 @@ export function BillingAccountsPanel() {
           onClose={() => { setRelogin(null); reloadAccounts() }} onDone={() => reloadAccounts()} />
       )}
       <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
+      <OpenCodeProviders lang={ctx.lang} show={harnesses.includes('opencode')} onChanged={reloadAccounts} />
       {removeError && <div role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--accent-red)' }}>{removeError}</div>}
 
       {/* Accounts that load late must not list every account timeline as stray for a moment. */}

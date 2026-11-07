@@ -3,6 +3,7 @@ import { installedLoginHarnesses } from './account-login'
 import { accountRoots, reloginRoot, reloginSupported, type AccountRootsDeps } from './account-roots'
 import { accountLoginState, listHarnessAccounts, readAccounts, setAccountAvailable, updateAccount, type HarnessAccount } from './harness-accounts'
 import { spawnRowsOf } from './sessions/spawn-account-io'
+import { accountCredentialBroken } from './account-credentials'
 import { parseAgentSchedule, type AgentSchedule, type PlanLimits } from '@agentistics/core'
 import { agentUseView, setAccountAgentSchedule, toggleAccountAgentUse, type AgentUseView } from './agent-schedule-host'
 
@@ -154,7 +155,8 @@ export function withLoginState(
   const rows = spawnRowsOf(file)
   return accounts.map(a => {
     if (!a.id) return a
-    const login = accountLoginState(a, rows.find(r => r.id === a.id)?.bound ?? false)
+    const row = rows.find(r => r.id === a.id)
+    const login = accountLoginState(a, row?.bound ?? false, row?.bound ? accountCredentialBroken(a, row.root) : false)
     if (!login) return a
     const supported = reloginSupported({ ...a, root: reloginRoot(file, a) })
     // `relogin` keeps its meaning (a broken login that "Sign in again" fixes); `reloginable` is the

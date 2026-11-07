@@ -221,6 +221,7 @@ export const SOURCE_LABEL: Record<PlanLimitSource, { pt: string; en: string }> =
   'codex-rollout': { pt: 'registro da sessão do Codex', en: 'Codex session log' },
   'codex-app-server': { pt: 'protocolo do Codex', en: 'Codex protocol' },
   'antigravity-quota-api': { pt: 'cota do Antigravity', en: 'Antigravity quota' },
+  'opencode-cost-estimate': { pt: 'custo das respostas do OpenCode (estimado)', en: 'OpenCode response costs (estimated)' },
 }
 
 /** "12 min", "3 h 05", "2 d 4 h". */
@@ -239,6 +240,16 @@ export function fmtWhen(ms: number, now: number, lang: Lang): string {
   if (new Date(now).toDateString() === d.toDateString()) return time
   const day = d.toLocaleDateString(lang === 'pt' ? 'pt-BR' : 'en-US', ms - now < 7 * 86_400_000 ? { weekday: 'short' } : { day: '2-digit', month: '2-digit' })
   return `${day.replace('.', '')} ${time}`
+}
+
+/**
+ * The one-line reset under a ring of the usage popup: "zera 18:40" / "zera sex 09:00" (local time),
+ * `null` when it is not known — a window already renewed has no reset the reading can state, and a
+ * missing or non-finite `resetsAt` says nothing. Never a guessed time.
+ */
+export function ringResetPhrase(w: PlanLimitWindow, now: number, lang: Lang): string | null {
+  if (windowRenewed(w, now) || !Number.isFinite(w.resetsAt) || w.resetsAt <= now) return null
+  return `${lang === 'pt' ? 'zera' : 'resets'} ${fmtWhen(w.resetsAt, now, lang)}`
 }
 
 /** "renova 14:30 (em 2 h 10)" / "renovou" */

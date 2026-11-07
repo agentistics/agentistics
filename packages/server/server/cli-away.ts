@@ -40,7 +40,7 @@ export function parseAwayArgs(args: readonly string[], now: number): AwayCommand
     return { kind: 'session', body: { target, on: sw === 'on' } }
   }
   if (verb !== 'on') return { kind: 'error', message: `unknown verb "${verb}" — use status, on or off` }
-  const body: Record<string, unknown> = { on: true, authorised: ['releases', 'workers'] }
+  const body: Record<string, unknown> = { on: true }
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i]
     const val = rest[i + 1]

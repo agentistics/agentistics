@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { AWAY_COOLDOWN_MS, AWAY_QUIET_MS, AWAY_SEND_TIMEOUT_MS, flushAwayNotices, awayStatus, readAwayView, resetAwayLiveDedupe, sendAwayNotice, sessionAwayStatus, setAway, setSessionAway, awaySessionRows, type AwaySessionRow, type AwayDeps, type SessionAwayDeps } from './away'
+import { AWAY_COOLDOWN_MS, AWAY_QUIET_MS, AWAY_SEND_TIMEOUT_MS, flushAwayNotices, resetAwayScheduleTick, runAwayScheduleTick, awayStatus, readAwayView, resetAwayLiveDedupe, sendAwayNotice, sessionAwayStatus, setAway, setSessionAway, awaySessionRows, type AwaySessionRow, type AwayDeps, type SessionAwayDeps } from './away'
 import { routeCapability } from './capability-guard'
 
 const NOW = Date.now()
-afterEach(() => resetAwayLiveDedupe())
+afterEach(() => { resetAwayLiveDedupe(); resetAwayScheduleTick() })
 function deps(over: Partial<AwayDeps> = {}) {
   let stored: unknown
   const d: AwayDeps = {
@@ -19,7 +19,7 @@ function deps(over: Partial<AwayDeps> = {}) {
 
 describe('away routes', () => {
   it('reads off by default', async () => {
-    expect(await readAwayView(deps().d)).toEqual({ state: { on: false, since: '', until: null, authorised: [], maxWorkers: 6, topCaps: {} }, active: false })
+    expect(await readAwayView(deps().d)).toEqual({ state: { on: false, since: '', until: null, authorised: [], maxWorkers: 4, topCaps: {} }, active: false })
   })
   it('counts 4 waiting + 4 working + 89 running-truthy lost rows as 8, matching notice recipients', async () => {
     const rows: AwaySessionRow[] = [
@@ -124,7 +124,7 @@ describe('per-session away route', () => {
     await flushAwayNotices(NOW + AWAY_QUIET_MS)
     expect(patched).toEqual([['s1', true]])
     expect(typed[0]![1]).toContain('autonomous mode is now ON for this session')
-    expect(typed[0]![1]).toContain('Do not ask the owner anything')
+    expect(typed[0]![1]).toContain('never ask, wait for, or address the owner')
   })
   it('switching off tells the session; a stopped one is only recorded', async () => {
     const a = sdeps([{ id: 's1', away: true, state: 'waiting', running: true }])
@@ -366,5 +366,62 @@ describe('away delivery fan-out — a dead session never holds the others', () =
     expect(await flushAwayNotices(NOW + 2 * AWAY_QUIET_MS - 1, 20)).toBe(0)
     expect(await flushAwayNotices(NOW + 2 * AWAY_QUIET_MS, 20)).toBe(1)
     expect(typed.filter(id => id === 'dead')).toEqual(['dead'])
+  })
+})
+
+
+describe('scheduled autonomous mode — window edges', () => {
+  // Local-clock instants: 2026-11-02 is a Monday; the schedule is Mondays 09:00–18:00.
+  const at = (h: number, mi = 0) => new Date(2026, 10, 2, h, mi, 0, 0).getTime()
+  const body = { on: true, schedule: { enabled: true, days: { mon: { windows: [{ from: '09:00', to: '18:00' }] } } } }
+  function fleet() {
+    const typed: { id: string; text: string }[] = []
+    const rows: AwaySessionRow[] = [{ id: 'lead', state: 'working', running: true }, { id: 'w1', state: 'waiting', running: true }]
+    const live = { rows: async () => rows, roleOf: async (id: string) => (id === 'lead' ? 'leader' as const : 'worker' as const), prompt: async (id: string, text: string) => { typed.push({ id, text }); return { ok: true } } }
+    return { typed, live }
+  }
+
+  it('turning it on OUTSIDE a window tells nobody; the window opening then tells everyone running, once', async () => {
+    const { typed, live } = fleet()
+    let clock = at(7)
+    const { d } = deps({ now: () => clock, live })
+    await setAway(body, d)                                   // 07:00 — not yet active
+    expect(await runAwayScheduleTick(d, clock)).toBeNull()    // first look after the write: no edge
+    await flushAwayNotices(clock + AWAY_QUIET_MS)
+    expect(typed).toEqual([])
+
+    clock = at(9, 0)
+    expect(await runAwayScheduleTick(d, clock)).toBe('on')
+    expect(await flushAwayNotices(clock + AWAY_QUIET_MS)).toBe(2)
+    expect(typed.map(t => t.id).sort()).toEqual(['lead', 'w1'])
+    expect(typed[0]!.text).toContain('autonomous mode is now ON')
+
+    expect(await runAwayScheduleTick(d, at(12))).toBeNull()   // still inside: nothing new
+  })
+
+  it('the window closing switches it off for the running sessions and says so', async () => {
+    const { typed, live } = fleet()
+    let clock = at(10)
+    const { d } = deps({ now: () => clock, live })
+    await setAway(body, d)                                   // 10:00 — active
+    await flushAwayNotices(clock + AWAY_QUIET_MS)
+    typed.length = 0
+    resetAwayLiveDedupe()
+    clock = at(18, 0)
+    expect(await runAwayScheduleTick(d, clock)).toBe('off')
+    expect(await flushAwayNotices(clock + AWAY_QUIET_MS)).toBe(2)
+    expect(typed[0]!.text).toContain('autonomous mode is now OFF')
+  })
+
+  it('an unscheduled state never produces an edge', async () => {
+    const { d } = deps({ now: () => at(10), live: fleet().live })
+    await setAway({ on: true }, d)
+    expect(await runAwayScheduleTick(d, at(10))).toBeNull()
+    expect(await runAwayScheduleTick(d, at(23))).toBeNull()
+  })
+
+  it('refuses a schedule with no usable day', async () => {
+    const { d } = deps()
+    expect(await setAway({ on: true, schedule: { enabled: true, days: {} } }, d)).toEqual({ ok: false, error: 'empty_schedule' })
   })
 })

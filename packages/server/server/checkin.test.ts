@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
 import { planBudget, planPace, type PlanLimits } from '@agentistics/core'
 import {
-  checkinAccountLimits, checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, deliveredOpenLine, fechamentoLines, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
+  checkinAccountLimits, checkinActivity, checkinLimitInputs, checkinDefaultFollowers, inheritsDefaults, defaultConfig, anyDue, due, fireDue, mergeConfig, nextRun, promptFor, PLAIN_REPORT_AUTONOMOUS, deliveredOpenLine, fechamentoLines, putState, recordReport, reportFromIdentity, setCheckinDeps, stateFor,
   runNow, checkinTick, resetCheckinSweep, type CheckinAction, type FechamentoItem, type CheckinDeps, type CheckinNeed, validateCheckinRound,
 } from './checkin'
 
@@ -379,6 +379,58 @@ describe('check-in agenda', () => {
     expect(preferences.checkin).toBeUndefined()
     const accepted = await reportFromIdentity(leader.id, { state: 'resolved', summary: 'Handled' })
     expect(accepted && 'last' in accepted ? accepted.last?.summary : '').toBe('Handled')
+  })
+
+  test('autonomous mode refuses the bare needs_you state too (no needs list)', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    preferences = { away: { on: true, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
+    const refused = await reportFromIdentity(leader.id, { state: 'needs_you', summary: 'Waiting for the owner' })
+    expect(refused && 'error' in refused).toBe(true)
+    expect(preferences.checkin).toBeUndefined()
+  })
+
+  test('a session in its OWN autonomous mode (global switch off) is refused too', async () => {
+    reset(); roles = { [leader.conversationId]: 'leader' }
+    rows = [{ ...leader, away: true }]
+    preferences = { away: { on: false, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
+    const refused = await reportFromIdentity(leader.id, { state: 'needs_you', summary: 'Blocked', needs: [{ subject: 'disk', text: 'full' }] })
+    expect(refused && 'error' in refused).toBe(true)
+    // The same report from a session that is not away at all goes through.
+    rows = [leader]
+    const accepted = await reportFromIdentity(leader.id, { state: 'needs_you', summary: 'Blocked' })
+    expect(accepted && 'last' in accepted ? accepted.last?.state : '').toBe('needs_you')
+  })
+
+  test('an unanswered round is written as needs_you only while autonomous mode is off', async () => {
+    for (const on of [true, false]) {
+      reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+      preferences = { away: { on, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
+      await putState(leader.conversationId, { intervalMin: 15 }, 1_000)
+      expect(await runNow(leader.conversationId, 1_000)).toBe(true) // leaves the round pending
+      await fireDue(1_000 + 16 * 60_000)
+      const last = (await stateFor(leader.conversationId, 1_000 + 16 * 60_000)).last
+      expect(last?.summary).toBe('check-in sem resposta')
+      expect(last?.state).toBe(on ? 'ok' : 'needs_you')
+      if (on) expect(last?.health?.[0]?.state).toBe('warn')
+    }
+  })
+
+  test('while autonomous mode is on, the report instruction and the cleanup line are not addressed to the owner', async () => {
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    preferences = { away: { on: true, until: null, authorised: [], maxWorkers: 6, topCaps: {} } }
+    setCheckinDeps({ ...testDeps, readFechamento: async () => ({ abertos: [], naoSalvos: [], prontosParaLimpar: [{ sessionId: 'old', handbackAt: 'x' }] }) })
+    expect(await runNow(leader.conversationId, 1_000)).toBe(true)
+    const text = prompts[0].text as string
+    expect(text).toContain(PLAIN_REPORT_AUTONOMOUS)
+    expect(text).not.toContain('o que precisa dele')
+    expect(text).not.toContain('se o dono liberou')
+    expect(text).toContain('dentro das autorizações')
+    // Off: the original owner-facing wording is untouched.
+    reset(); rows = [leader]; roles = { [leader.conversationId]: 'leader' }
+    setCheckinDeps({ ...testDeps, readFechamento: async () => ({ abertos: [], naoSalvos: [], prontosParaLimpar: [{ sessionId: 'old', handbackAt: 'x' }] }) })
+    expect(await runNow(leader.conversationId, 1_000)).toBe(true)
+    expect(prompts[0].text).toContain('o que precisa dele')
+    expect(prompts[0].text).toContain('se o dono liberou a limpeza')
   })
 
   test('autonomous mode off keeps needs allowed', async () => {

@@ -1,6 +1,6 @@
 import { EngineSurfaceNayBadge } from '../EngineSurfaceNayBadge'
 import { useEngineSurfaces } from '../../hooks/useEngineSurfaces'
-import { endEngineSurfaceFromHost, openEngineSurface, resumeEngineSurface, useMountedEngineSurfaces } from '../../lib/engineSurfaceHost'
+import { endEngineSurfaceFromHost, openEngineSurface, resumeEngineSurface, useActiveComposerSessionIds, useMountedEngineSurfaces } from '../../lib/engineSurfaceHost'
 import { EngineSurfaceNaySlot } from '../EngineSurfaceHost'
 import { NayWindowFrame, IconButton, LabelButton } from './NayWindowFrame'
 /**
@@ -51,7 +51,7 @@ import { NOTIFY_TOGGLE, notifyMenuExtras, useMutedKeys } from '../../lib/notifyM
 import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { LINK_TASK, NAY_COPY_ID, NAY_GO_TO, UNLINK_TASK, nayRowMenuEntries, type RowVerb } from '../../lib/rowMenu'
 import {
-  clampPanelSize, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
+  applyUndockRequest, clampPanelSize, closeMinimizedWindow, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
   placeWindow, pruneDock, anchorDock, resizeAnchored, PANEL_DEFAULT, dockZIndex, type DockState, type NayWindow, type Size,
 } from '../../lib/nayDock'
 import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionChat'
@@ -147,6 +147,9 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   }))
   const engineTabs = useEngineSurfaces('nay-sessions')
   const mountedSurfaces = useMountedEngineSurfaces()
+  const callSessions = useActiveComposerSessionIds()
+  const dockRef = useRef(dock)
+  dockRef.current = dock
   const minimizedSurfaces = mountedSurfaces.filter(s => s.parked && s.layout === 'float')
   const [tab, setTab] = useState<Tab>(() => tabStore.get())
   useEffect(() => subscribeNayRequests(requested => {
@@ -247,8 +250,15 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   useEffect(() => {
     if (isMobile) return
     const onUndock = (event: Event) => {
-      const id = (event as CustomEvent<{ id?: unknown }>).detail?.id
-      if (typeof id === 'string' && id) setDock(d => detachSession(d, id, viewport()))
+      const detail = (event as CustomEvent<{ id?: unknown; manual?: unknown }>).detail
+      const id = detail?.id
+      const manual = detail?.manual === true
+      if (typeof id !== 'string' || !id) return
+      // Taken: the caller (a call whose session view went away) parks its surface for this window.
+      event.preventDefault()
+      // An AUTOMATIC request (a call left mid-session) must not pop a minimized window back open by
+      // itself; a MANUAL one (the menu's "Open undocked") is a person asking, so it restores it.
+      setDock(d => applyUndockRequest(d, id, viewport(), manual))
     }
     window.addEventListener(NAY_UNDOCK_SESSION, onUndock)
     return () => window.removeEventListener(NAY_UNDOCK_SESSION, onUndock)
@@ -690,6 +700,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           onGoTo={() => goToSession(w.id)}
           onMinimize={() => setDock(d => minimizeWindow(d, w.id))}
           onClose={() => setDock(d => closeWindow(d, w.id))}
+          canClose={false}
         >
           {renderSession(w.id, next => setDock(d => ({
             ...d, windows: d.windows.map(x => (x.id === w.id ? { ...x, id: next } : x)),
@@ -708,7 +719,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
               pt={pt}
               items={minimized.map(w => ({ id: w.id, row: findSession(w.id) }))}
               onRestore={id => setDock(d => openSession(d, id))}
-              onClose={id => setDock(d => closeWindow(d, id))}
+              onClose={id => setDock(d => closeMinimizedWindow(d, id, callSessions.has(id)))}
               surfaceItems={minimizedSurfaces.map(s => ({
                 id: String(s.nonce),
                 label: s.indicator?.label[lang] ?? s.surface.label[lang],

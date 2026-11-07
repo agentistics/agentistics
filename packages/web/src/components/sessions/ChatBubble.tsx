@@ -1,4 +1,6 @@
 import { SurfaceTurnBadge } from '../SurfaceTurnBadge'
+import { ReasoningRow } from './ReasoningRow'
+import { EMPTY_REASONING_CLOCK } from '../../lib/reasoningRow'
 /**
  * ChatBubble — one turn of a session's conversation.
  *
@@ -271,35 +273,12 @@ function PastedBlock({ text, pt }: { text: string; pt: boolean }) {
   )
 }
 
-/** The model's reasoning, folded above its answer — `PastedBlock`'s shape, closed until asked. */
+/**
+ * The model's reasoning above its answer: the activity-line shape (`ReasoningRow`), closed until asked. A turn that is already
+ * over has no measured span here — the live turn's seconds belong to the line drawn while it streamed.
+ */
 export function ReasoningBlock({ text, pt }: { text: string; pt: boolean }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div data-testid="reasoning-block" style={{
-      margin: '2px 0 6px', border: '1px solid var(--border-subtle)', borderRadius: 8,
-      background: 'var(--bg-elevated)', overflow: 'hidden', minWidth: 0,
-    }}>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        aria-expanded={open}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6, width: '100%', minHeight: 32,
-          padding: '4px 10px', background: 'transparent', border: 'none', cursor: 'pointer',
-          color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 11.5, textAlign: 'left',
-        }}
-      >
-        <ChevronDown size={12} style={{ flexShrink: 0, transform: open ? 'none' : 'rotate(-90deg)' }} />
-        <span style={{ fontWeight: 600 }}>{pt ? 'Raciocínio' : 'Reasoning'}</span>
-      </button>
-      {open && (
-        <div style={{
-          padding: '0 10px 8px', fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-secondary)',
-          whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 360, overflowY: 'auto',
-        }}>{text}</div>
-      )}
-    </div>
-  )
+  return <ReasoningRow text={text} running={false} clock={EMPTY_REASONING_CLOCK} lang={pt ? 'pt' : 'en'} />
 }
 
 /** Quiet text-only controls of a system line: no capsule, no fill, the muted text token. */
@@ -608,6 +587,10 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
     return <SystemNote note={turn.system} noteRef={turn.systemRef} pt={pt} {...(sessionId ? { sessionId } : {})} />
   }
 
+  // The reasoning a bubble shows: the native runtime's own channel, or — for OpenCode, whose ACP stream states its thinking turn by
+  // turn — the turn's `thinking`, so the line that said "Raciocinando…" does not vanish when the answer lands. Every other CLI's
+  // `thinking` stays undrawn (the decision in this file's header).
+  const reasoningShown = (turn.reasoning?.trim() || (harness === 'opencode' ? turn.thinking?.trim() : '') || '')
   const color = (HARNESS_COLORS as Record<string, string>)[harness] ?? 'var(--text-secondary)'
   const name = (HARNESS_LABELS as Record<string, string>)[harness] ?? harness
 
@@ -979,8 +962,8 @@ const ChatBubbleInner = memo(function ChatBubbleInner({ turn, lang, harness, ses
           </div>
         )}
 
-        {turn.role === 'assistant' && turn.reasoning && turn.reasoning.trim() !== '' && (
-          <ReasoningBlock text={turn.reasoning.trim()} pt={pt} />
+        {turn.role === 'assistant' && reasoningShown !== '' && (
+          <ReasoningBlock text={reasoningShown} pt={pt} />
         )}
 
         {text.trim() !== '' && (

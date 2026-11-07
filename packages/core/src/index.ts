@@ -99,6 +99,7 @@ export * from './chatTurn'
 export { applyFleetWire, historicalWireRow, expandFleetView, readCompactFleetResponse, followFleet, type FleetWire, type FleetWireDelta } from './fleetStream'
 export { applyDataPatch, planDataPatch, dataSessionKey, type DataPatch } from './dataPatch'
 export * from './planLimits'
+export * from './opencodeGo'
 export * from './awayMode'
 export * from './newProject'
 export * from './injectedHeader'
@@ -108,3 +109,4 @@ export type { CleanKind, CleanWebItem, CleanScanLog, CleanScanState, CleanWebPla
 
 export * from './flowRunId'
 export * from './agentSchedule'
+export * from './liveText'

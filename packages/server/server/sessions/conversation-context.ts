@@ -6,7 +6,7 @@ import { HARNESS_CAPABILITIES, resolveContextWindow, type HarnessId, type Sessio
 import { claudeTranscriptState } from '../transcript-state'
 import { createFileMemo, versionOf } from '../adapters/file-memo'
 import { transcriptReaderFor } from './harness-transcript'
-import { toConversation, findConversation, type Conversation } from './conversations'
+import { toConversation, type Conversation } from './conversations'
 import { readTailWindow } from './transcript-window'
 import { parseCodexRollout } from '../adapters/codex-parse'
 import { parseGeminiChat } from '../adapters/gemini-parse'
@@ -74,6 +74,25 @@ export async function refreshConversationContexts(
   },
 ): Promise<Conversation[]> {
   const result = [...history]
+  // APP.LENTO: the position of each conversation by (harness, either id), FIRST occurrence wins —
+  // what `findConversation(result.filter(c => c.harness === h), id)` answered, without copying and
+  // scanning the whole history once per row on every fleet poll.
+  const at = new Map<string, number>()
+  const place = (c: Conversation, i: number) => {
+    const k = `${c.harness}\0${c.sessionId}`
+    if (!at.has(k)) at.set(k, i)
+  }
+  const placeNative = (c: Conversation, i: number) => {
+    if (c.nativeId === undefined) return
+    const k = `${c.harness}\0\0${c.nativeId}`
+    if (!at.has(k)) at.set(k, i)
+  }
+  result.forEach(place); result.forEach(placeNative)
+  const previousOf = (harness: HarnessId, id: string): number | undefined => at.get(`${harness}\0${id}`) ?? at.get(`${harness}\0\0${id}`)
+  const store = (i: number | undefined, next: Conversation) => {
+    if (i !== undefined) { result[i] = next; return }
+    result.push(next); place(next, result.length - 1); placeNative(next, result.length - 1)
+  }
   const seen = new Set<string>()
   let opencode: Promise<SessionMeta[]> | undefined
   for (const row of rows) {
@@ -88,18 +107,14 @@ export async function refreshConversationContexts(
       if (row.harness === 'opencode') {
         const sessions = await (opencode ??= loadOpencode())
         const meta = sessions.find(s => s.session_id === id)
-        if (meta) {
-          const previous = findConversation(result.filter(c => c.harness === row.harness), id)
-          const next = toConversation(meta)
-          if (previous) result[result.indexOf(previous)] = next
-          else result.push(next)
-        }
+        if (meta) store(previousOf(row.harness, id), toConversation(meta))
         continue
       }
       const reader = readerFor(row.harness)
       const path = await reader?.resolve({ conversationId: id, cwd: row.cwd })
       if (!path) continue
-      const previous = findConversation(result.filter(c => c.harness === row.harness), id)
+      const previousAt = previousOf(row.harness, id)
+      const previous = previousAt === undefined ? undefined : result[previousAt]
       const sample = await readContext(row.harness, path, previous?.model ?? row.model)
       if (!sample?.tokens) continue
       const model = sample.model ?? previous?.model ?? row.model
@@ -112,8 +127,7 @@ export async function refreshConversationContexts(
         }),
         contextTokens: sample.tokens, contextWindow: window,
       }
-      if (previous) result[result.indexOf(previous)] = next
-      else result.push(next)
+      store(previousAt, next)
     } catch { /* An unreadable transcript costs its live reading, never the fleet. */ }
   }
   return result

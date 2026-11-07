@@ -26,6 +26,10 @@ beforeAll(async () => {
   GlobalRegistrator.register({ width: 1200, height: 800 })
   ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   window.matchMedia = (() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as never
+  // The switch dialog's busy loader animates through the Web Animations API; happy-dom's cancel()
+  // rejects the finished promise WITHOUT marking it handled (the spec marks it), so unmounting the
+  // loader raised an unhandled rejection. Same stub as AccountSwitch.dom.test.tsx.
+  ;(Element.prototype as unknown as { animate: unknown }).animate = undefined
   ;(globalThis as { EventSource?: unknown }).EventSource = class { addEventListener() {} removeEventListener() {} close() {} }
   globalThis.fetch = (async (url: string, init?: RequestInit) => {
     const path = String(url)
