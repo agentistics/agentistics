@@ -24,7 +24,7 @@ import { NayWindowFrame, IconButton, LabelButton } from './NayWindowFrame'
 
 import { EngineSurfaceButtons } from '../EngineSurfaceButtons'
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { requestPlanUsageModal } from '../../lib/planUsageModalRequests'
+import { requestUsagePage } from '../../lib/usagePageRequests'
 import { subscribeNayRequests } from '../../lib/nayDockRequests'
 import { ArrowLeft, Loader2, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
 import { isNayCwd, nayPlacementRows, planNayPlacement, sessionIdentityKey, type Filters, type SessionMeta } from '@agentistics/core'
@@ -677,7 +677,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
       <VaultExpiryNotice lang={lang} />
       <VaultUseRequestCard lang={lang} />
       <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1}
-        onOpenLimits={requestPlanUsageModal} noticeHost={dock.open ? noticeHost : null} />
+        onOpenLimits={requestUsagePage} noticeHost={dock.open ? noticeHost : null} />
       {!dock.open && sessionAlerts.length === 0 && renderUpdatePrompt?.('float')}
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
       {echoStyle && [0, 1].map(i => (

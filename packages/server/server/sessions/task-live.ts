@@ -20,7 +20,7 @@
  *    similar pieces, or a piece already past the typical range, answers `none` with the reason.
  */
 
-import { subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
+import { migratePriority, subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
 import type { PieceTimes } from './task-times'
 import type { TaskDetail } from './task-report'
 
@@ -33,6 +33,10 @@ export const HAPPY_PATH: readonly LiveStage[] = ['running', 'qa', 'leader', 'mer
 export const MIN_SAMPLES = 3
 /** A published piece stays on the line this long. */
 export const PUBLISHED_WINDOW_MS = 24 * 3600_000
+/** The Histórico column lists published pieces older than the Publicado window, up to this many days back… */
+export const HISTORY_DAYS = 30
+/** …and at most this many pieces (the newest). */
+export const HISTORY_CAP = 150
 
 export type LiveEta =
   | {
@@ -107,6 +111,11 @@ export interface LiveDelivery {
   /** The newest thing the log says about this piece, short. Null when nothing is recorded. */
   lastAction: { text: string; atMs: number; kind?: string; from?: string; to?: string } | null
   blockedReason: string | null
+  /**
+   * The Agentask priority of the piece (urgent | high | medium | low) — the TASK's; a subtask carries none of its own, so
+   * it inherits the task's. Never `none`: an unset priority reads as `low` everywhere (`migratePriority`).
+   */
+  priority: 'urgent' | 'high' | 'medium' | 'low'
   /** Set once a published piece leaves the line. */
   deliveredAtMs: number | null
   /**
@@ -129,6 +138,8 @@ export interface LiveHidden { key: string; taskId: string; title: string; stage:
 export interface LiveReply {
   generatedAt: string
   deliveries: LiveDelivery[]
+  /** Published more than 24 h ago (≤ HISTORY_DAYS days, ≤ HISTORY_CAP pieces), newest first — the Histórico column. */
+  history?: LiveDelivery[]
   /** Pieces left off the line and why (bounded, NEWEST first — the ones that just left are the ones somebody asks about). */
   hidden: LiveHidden[]
   /**
@@ -605,6 +616,7 @@ export function buildLive(o: {
   const typicals = stageTypicals([...trails.values()])
 
   const deliveries: LiveDelivery[] = []
+  const history: LiveDelivery[] = []
   const hidden: LiveHidden[] = []
   const archived: LiveHidden[] = []
   const entry = (p: Piece, stage: LiveStage | null, reason: HiddenReason): LiveHidden =>
@@ -633,10 +645,12 @@ export function buildLive(o: {
     if (stage === null) { if (recent && p.status !== 'backlog' && p.status !== 'abandoned') hide(p, null, 'status-unplaced'); continue }
     // A recorded release states its own publish time; the board's `deliveredAt` is only when the status moved (late runs: "now").
     const deliveredAtMs = (rec?.publishedAt && stage === 'published' ? ms(rec.publishedAt) : null) ?? ms(p.deliveredAt) ?? (stage === 'published' ? ms(p.updatedAt) : null)
-    if (stage === 'published' && (deliveredAtMs === null || o.nowMs - deliveredAtMs > PUBLISHED_WINDOW_MS)) {
+    const oldPublished = stage === 'published' && (deliveredAtMs === null || o.nowMs - deliveredAtMs > PUBLISHED_WINDOW_MS)
+    if (oldPublished) {
       // Recently expired only: a year of finished work is not a departure anybody is waiting to explain.
       if (deliveredAtMs !== null && o.nowMs - deliveredAtMs <= 3 * PUBLISHED_WINDOW_MS) hide(p, stage, 'published-old')
-      continue
+      // It leaves Publicado, but not the board: the Histórico column keeps the last HISTORY_DAYS days.
+      if (deliveredAtMs === null || o.nowMs - deliveredAtMs > HISTORY_DAYS * PUBLISHED_WINDOW_MS) continue
     }
     const gate = stage === 'qa' || stage === 'adjust' || stage === 'leader' || stage === 'merge' || stage === 'ci' || stage === 'blocked'
     const staged = p.sub?.stagedSession !== undefined
@@ -663,7 +677,7 @@ export function buildLive(o: {
     const eta = stage === 'published' ? { kind: 'none', reason: 'not-started' } as const
       : estimateEta({ nowMs: o.nowMs, startedAtMs, harness, model, samples })
     const { stageEta, publishEta } = estimateStages({ stage, origin: originStage, sinceMs: stageSinceMs, nowMs: o.nowMs, typicals, totalEta: eta })
-    deliveries.push({
+    ;(oldPublished ? history : deliveries).push({
       key: subject,
       taskId: p.task.id, taskTitle: p.task.title,
       subtaskId: p.sub?.id ?? null,
@@ -684,6 +698,7 @@ export function buildLive(o: {
         ...(ev.from ? { from: ev.from } : {}), ...(ev.to ? { to: ev.to } : {}),
       } : null,
       blockedReason: p.blockedReason,
+      priority: migratePriority(p.task.priority) as LiveDelivery['priority'],
       deliveredAtMs: stage === 'published' ? deliveredAtMs : null,
       staged: p.sub?.stagedSession ? {
         harness: p.sub.stagedSession.harness ?? null, model: p.sub.stagedSession.model ?? null,
@@ -698,7 +713,9 @@ export function buildLive(o: {
   const sessionTasks: Record<string, string> = {}
   for (const d of o.details) for (const s of d.sessions) if (!s.historical && !s.endedAt) sessionTasks[s.id] = d.task.id
   return {
-    generatedAt: new Date(o.nowMs).toISOString(), deliveries, samples: samples.length, sessionTasks,
+    generatedAt: new Date(o.nowMs).toISOString(), deliveries,
+    history: history.sort((a, b) => (b.deliveredAtMs ?? 0) - (a.deliveredAtMs ?? 0)).slice(0, HISTORY_CAP),
+    samples: samples.length, sessionTasks,
     hidden: hidden.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, HIDDEN_CAP),
     archived: archived.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, ARCHIVED_CAP), archivedTotal: archived.length,
   }

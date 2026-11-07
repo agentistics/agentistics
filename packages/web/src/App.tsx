@@ -64,17 +64,13 @@ import { HideLensesButton } from './components/a11y/HideLensesButton'
 import { MagnifierButton } from './components/a11y/MagnifierButton'
 import { NotificationBell } from './components/NotificationBell'
 import { AgentisticsLoader } from './components/AgentisticsLoader'
-import { VaultHeaderButton } from './components/vault/VaultHeaderButton'
+import { TopBarGroup } from './components/nav/TopBarGroup'
 import { AwayChip, AwayDialogHost, awayMenuItems } from './components/sessions/AwayChip'
 import { useAway } from './lib/awayMode'
-import AwayPill from './components/AwayPill'
-import LiveShortcut from './components/tasks/LiveShortcut'
+import { LivePipHost } from './components/tasks/LivePipHost'
 import { HardwareModal } from './components/HardwareModal'
-import { AccountSwitchDialog, useSwitchInfo } from './components/sessions/AccountSwitch'
-import type { PlanUsageSession } from './components/PlanUsageSessionSwitch'
-import { accountLabelKey, usePlanLimits } from './lib/planLimits'
-import { PlanUsageModal } from './components/PlanUsageModal'
-import { subscribePlanUsageModal } from './lib/planUsageModalRequests'
+import { usePlanLimits } from './lib/planLimits'
+import { subscribeUsagePage } from './lib/usagePageRequests'
 import { CleanDialog } from './components/CleanDialog'
 import { useNotificationStream } from './hooks/useNotificationStream'
 import { pushNotification } from './lib/notifications'
@@ -547,7 +543,7 @@ function CollapsedTip({ label, show, children }: { label: string; show: boolean;
 function SideNav({
   lang, harnesses, isCentral, hasWorkflows, collapsed, width, onResize, onCommitWidth, onToggle,
   theme, onToggleTheme, onToggleLang, onExport, principal, sessionsFilters, sessionsActiveOnly,
-  filtersOpen, filtersCount, onToggleFilters, filtersButtonRef, openSession,
+  filtersOpen, filtersCount, onToggleFilters, filtersButtonRef,
 }: {
   lang: Lang; harnesses?: SurfaceHarnessId[]; isCentral?: boolean; hasWorkflows?: boolean
   collapsed: boolean; onToggle: () => void
@@ -557,8 +553,6 @@ function SideNav({
   onCommitWidth: (w: number) => void
   theme: Theme; onToggleTheme: () => void; onToggleLang: () => void; onExport: () => void
   principal?: IamAccount
-  /** The session already resolved by the shell for the Plan usage surfaces. */
-  openSession?: PlanUsageSession
   /** The SAME filters/switch the shared header's `FiltersBar` edits — see `App.tsx`'s own state.
    *  `SideNav` only reads them, to hand to `SessionsAside`; it owns neither. */
   sessionsFilters: Filters
@@ -752,7 +746,7 @@ function SideNav({
             <FileDown size={15} />{!collapsed && <span style={{ fontSize: 11, marginLeft: 4 }}>PDF</span>}
           </button>
         </CollapsedTip>
-        {!isCentral && <PlanUsageFootButton lang={pt ? 'pt' : 'en'} collapsed={collapsed} footBtn={footBtn} openSession={openSession} />}
+        {!isCentral && <PlanUsageFootButton lang={pt ? 'pt' : 'en'} collapsed={collapsed} footBtn={footBtn} />}
       </div>
     </div>
   )
@@ -2763,31 +2757,9 @@ export default function AppLayout() {
   // is asked from wherever you are and then dismissed. Desktop opens it from the header icon;
   // mobile from the "More" sheet, where every other header action lives.
   const [hardwareOpen, setHardwareOpen] = useState(false)
-  const [planUsageOpen, setPlanUsageOpen] = useState(false)
-  const [usageSwitchInfo] = useSwitchInfo(selectedFleetSession?.id, lang)
-  const usagePlan = usePlanLimits()
-  const [usageSwitchTarget, setUsageSwitchTarget] = useState<{
-    session: ControlSession; info: NonNullable<typeof usageSwitchInfo>
-  } | null>(null)
-  const openUsageSession: PlanUsageSession | undefined = selectedFleetSession ? {
-    id: selectedFleetSession.id,
-    title: selectedFleetSession.title,
-    accountLabel: (usageSwitchInfo?.current?.id ? usagePlan.accountLabels[accountLabelKey(usageSwitchInfo.current.harness ?? '', usageSwitchInfo.current.id)] : undefined)
-      ?? usageSwitchInfo?.current?.label ?? (lang === 'pt' ? 'não identificada' : 'unidentified'),
-    info: usageSwitchInfo,
-    onSwitch: () => { if (usageSwitchInfo) setUsageSwitchTarget({ session: selectedFleetSession, info: usageSwitchInfo }) },
-  } : undefined
-  const onUsageSwitched = (id: string) => {
-    const from = usageSwitchTarget?.session
-    setUsageSwitchTarget(null)
-    setPlanUsageOpen(false)
-    if (sessionTabsOn && from && from.conversationId === undefined) {
-      setOpenTabs('main', replaceTab(getOpenTabs('main'), from.id, id))
-    }
-    const r = reopenedSessionRoute(id, from ? { id: from.id, harness: from.harness, title: from.title } : undefined)
-    navigate(splitActive ? splitHref(replaceInPane(readSplitRoute(selectedSessionId, splitSearch), 'main', id), splitSearch) : r.path, r.options)
-  }
-  useEffect(() => subscribePlanUsageModal(() => setPlanUsageOpen(true)), [])
+  // "Open the plan usage" (foot button, session drawer, Nay card) is a trip to the Uso page — there is
+  // no modal. Switching a session's account stays in the composer and in "Continue on another account".
+  useEffect(() => subscribeUsagePage(() => navigate('/usage')), [navigate])
   // Collapsible "fleet stats" tab below the header (updated/members/machines/teams/projects/repos).
   // **CLOSED BY DEFAULT ON A PHONE, OPEN ON THE DESKTOP** — one preference, two defaults. A stored
   // choice wins on both (it is shared on purpose, so it survives a resize); this is only what
@@ -3316,11 +3288,9 @@ export default function AppLayout() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <MagnifierButton ctx={appCtx} />
         <HideLensesButton ctx={appCtx} />
-        <LiveShortcut lang={lang === 'pt' ? 'pt' : 'en'} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
-        <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
         <EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} />
         <EngineSurfaceButtons placement="app-bar" sessionId={null} lang={lang === 'pt' ? 'pt' : 'en'} />
-        <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
+        <TopBarGroup lang={lang === 'pt' ? 'pt' : 'en'} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} onOpenHardware={() => setHardwareOpen(true)} />
         <NotificationBell lang={lang} buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 32, height: 32, borderRadius: 8,
@@ -3706,21 +3676,9 @@ export default function AppLayout() {
         )}
         {/* Hardware — an overlay, beside the other header actions rather than in the sidebar,
             because it is a question about this machine and not a place to go. */}
-        <button
-          onClick={() => setHardwareOpen(true)}
-          title={lang === 'pt' ? 'Recursos de hardware' : 'Hardware resources'}
-          aria-label={lang === 'pt' ? 'Recursos de hardware' : 'Hardware resources'}
-          aria-haspopup="dialog"
-          style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer', transition: 'all 0.15s' }}
-          onMouseEnter={e => { const t = e.currentTarget as HTMLButtonElement; t.style.color = 'var(--text-primary)'; t.style.borderColor = 'var(--text-tertiary)' }}
-          onMouseLeave={e => { const t = e.currentTarget as HTMLButtonElement; t.style.color = 'var(--text-tertiary)'; t.style.borderColor = 'var(--border)' }}
-        >
-          <Cpu size={14} />
-        </button>
-        <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
         <EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} />
         <EngineSurfaceButtons placement="app-bar" sessionId={null} lang={lang === 'pt' ? 'pt' : 'en'} />
-        <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
+        <TopBarGroup lang={lang === 'pt' ? 'pt' : 'en'} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} onOpenHardware={() => setHardwareOpen(true)} />
         <NotificationBell lang={lang} buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 32, height: 32, borderRadius: 8,
@@ -4143,7 +4101,6 @@ export default function AppLayout() {
         onToggleLang={() => { const next = lang === 'pt' ? 'en' : 'pt'; setLang(next); if (next === 'pt') setCurrency('BRL'); else if (currency === 'BRL') setCurrency('USD') }}
         onExport={() => navigate('/export')}
         principal={iam?.account}
-        openSession={openUsageSession}
         sessionsFilters={filters}
         sessionsActiveOnly={activeOnly}
         filtersOpen={sessionsFiltersOpen}
@@ -4201,10 +4158,9 @@ export default function AppLayout() {
               {data?.healthIssues && data.healthIssues.length > 0 && (
                 <HealthWarnings issues={data.healthIssues} lang={lang} />
               )}
-              <AwayPill lang={lang} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} />
         <EngineSurfaceIndicators lang={lang === 'pt' ? 'pt' : 'en'} />
         <EngineSurfaceButtons placement="app-bar" sessionId={null} lang={lang === 'pt' ? 'pt' : 'en'} />
-        <VaultHeaderButton lang={lang} enabled={!isCentral} buttonStyle={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer' }} />
+              <TopBarGroup lang={lang === 'pt' ? 'pt' : 'en'} enabled={!isCentral && teamSession?.capabilities?.localShell !== false} onOpenHardware={() => setHardwareOpen(true)} />
               <NotificationBell lang={lang} buttonStyle={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 32, height: 32, borderRadius: 8,
@@ -4568,8 +4524,6 @@ export default function AppLayout() {
         />
       )}
 
-      {usageSwitchTarget && <AccountSwitchDialog open sessionId={usageSwitchTarget.session.id} info={usageSwitchTarget.info} lang={lang} fromLimit={false} onClose={() => setUsageSwitchTarget(null)} onSwitched={onUsageSwitched} />}
-      {planUsageOpen && <PlanUsageModal lang={lang === 'pt' ? 'pt' : 'en'} onClose={() => setPlanUsageOpen(false)} openSession={openUsageSession} switchDialogOpen={usageSwitchTarget !== null} />}
       {hardwareOpen && <HardwareModal lang={lang} onClose={() => setHardwareOpen(false)} />}
       <CleanDialog lang={lang === 'pt' ? 'pt' : 'en'} open={cleanOpen} onClose={() => setCleanOpen(false)} />
 
@@ -4631,6 +4585,8 @@ export default function AppLayout() {
       {retryImportModal}
       {/* Global notification toasts (auto-dismiss with an exit animation; history in the bell) */}
       <NotificationToasts lang={lang} />
+      {/* The Live's external window belongs to the app, not to the popover that opened it. */}
+      <LivePipHost lang={lang === 'pt' ? 'pt' : 'en'} />
       <CheckinModalHost lang={lang === 'pt' ? 'pt' : 'en'} />
       <AwayDialogHost />
       <EngineSurfaceHost />

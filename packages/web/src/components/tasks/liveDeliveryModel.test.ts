@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  byStage, orderQueueFirstUp, queuePosition, etaText, filterCards, fmtSpan, joinLive, liveStateOf, summarize,
-  type LiveDeliveryRecord,
+  byStage, orderColumns, queuePosition, etaText, filterCards, fmtSpan, joinLive, liveStateOf, summarize,
+  type LiveCard, type LiveDeliveryRecord,
 } from './liveDeliveryModel'
 import type { FleetRow } from '../../lib/fleet'
 
@@ -53,11 +53,27 @@ describe('filters, grouping, summary', () => {
     rec({ key: '2', taskId: 'B', sessionIds: [], stage: 'leader' }),
     rec({ key: '3', taskId: 'B', sessionIds: ['c'], stage: 'published', deliveredAtMs: 1 }),
   ], [row('a', 'working'), row('c', 'exited')])
-  test('only-active keeps cards with an agent alive; a task filter narrows', () => {
-    // Publicado is exempt from the agent switch: a finished piece has no live agent by definition.
-    expect(filterCards(cards, { taskIds: [], onlyActive: true }).map(c => c.d.key)).toEqual(['1', '3'])
-    expect(filterCards(cards, { taskIds: ['B'], onlyActive: false }).map(c => c.d.key)).toEqual(['2', '3'])
-    expect(filterCards(cards, { taskIds: ['A', 'B'], onlyActive: true }).map(c => c.d.key)).toEqual(['1', '3'])
+  test('"apenas ativas" is about the flow, not about a live agent: a card in ANY flow column survives it', () => {
+    // Owner 07/11: "active" = the card sits in a flow column. The old rule demanded a RUNNING session, so the review card '2' (no agent) vanished.
+    expect(filterCards(cards, { taskIds: [], onlyActive: true }).map(c => c.d.key)).toEqual(['1', '2', '3'])
+    expect(filterCards(cards, { taskIds: ['B'], onlyActive: false, showQueue: true }).map(c => c.d.key)).toEqual([])
+    expect(filterCards(cards, { taskIds: ['A', 'B'], onlyActive: true }).map(c => c.d.key)).toEqual(['1', '2', '3'])
+  })
+  test('the four combinations of "apenas ativas" x "exibir itens na fila"', () => {
+    const mk = (key: string, stage: LiveDeliveryRecord['stage']) => rec({ key, stage })
+    const all = joinLive([mk('q', 'queue'), mk('b', 'blocked'), mk('r', 'running'), mk('qa', 'qa'), mk('l', 'leader'), mk('m', 'merge'), mk('c', 'ci'), mk('p', 'published')], [])
+    const keys = (onlyActive: boolean, showQueue: boolean) => filterCards(all, { taskIds: [], onlyActive, showQueue }).map(c => c.d.key)
+    const after = ['b', 'r', 'qa', 'l', 'm', 'c', 'p']
+    expect(keys(true, true)).toEqual(['q', ...after])            // both on (the default): everything in the flow
+    expect(keys(true, false)).toEqual(after)                       // active only: Bloqueado onward, queue hidden
+    expect(keys(false, true)).toEqual(['q'])                       // queue only
+    expect(keys(false, false)).toEqual([])                         // neither
+  })
+  test('a queued piece NEVER has an agent and is still shown by the default switches (print ee004953)', () => {
+    const q = joinLive([rec({ key: 'q', stage: 'queue', sessionIds: [] })], [])
+    expect(filterCards(q, { taskIds: [], onlyActive: true, showQueue: true })).toHaveLength(1)
+    // an older caller that knows no `showQueue` keeps the queue visible
+    expect(filterCards(q, { taskIds: [], onlyActive: true })).toHaveLength(1)
   })
   test('stages group and the summary ignores published', () => {
     expect(byStage(cards).leader).toHaveLength(1)
@@ -86,11 +102,24 @@ describe('words', () => {
   })
 })
 
-describe('queue order (F3)', () => {
-  test('queued cards read 1st first from the top of the column', () => {
-    const mk = (key: string, since: number) => ({ d: rec({ key, stage: 'queue', stageSinceMs: since }), agents: [], alert: false, liveState: 'idle' }) as never
+describe('column order', () => {
+  const mk = (key: string, since: number, priority?: string, stage: LiveDeliveryRecord['stage'] = 'queue') =>
+    ({ d: rec({ key, stage, stageSinceMs: since, ...(priority ? { priority } : {}) }), agents: [], alert: false, liveState: 'idle' }) as never as LiveCard
+  test('by time in the stage, queued cards read 1st first from the top of the column', () => {
     const cards = [mk('c', 30), mk('a', 10), mk('b', 20)]
-    const cols = orderQueueFirstUp(byStage(cards), cards)
+    const cols = orderColumns(byStage(cards), 'time-in-stage')
     expect(cols.queue.map(c => queuePosition(cards, c))).toEqual([1, 2, 3])
+  })
+  test('DEFAULT: every column lists the highest priority first, a tie goes to the longest in the stage', () => {
+    const cards = [mk('low-old', 1, 'low'), mk('urgent-new', 90, 'urgent'), mk('high-old', 5, 'high'), mk('high-new', 50, 'high'), mk('none', 0), mk('run-low', 3, 'low', 'running'), mk('run-urgent', 80, 'urgent', 'running')]
+    const cols = orderColumns(byStage(cards), 'priority')
+    expect(cols.queue.map(c => c.d.key)).toEqual(['urgent-new', 'high-old', 'high-new', 'none', 'low-old'])
+    expect(cols.running.map(c => c.d.key)).toEqual(['run-urgent', 'run-low'])
+  })
+  test('"most recent" puts the newest arrival first; the position shown follows the chosen order', () => {
+    const cards = [mk('a', 10), mk('b', 30), mk('c', 20)]
+    const cols = orderColumns(byStage(cards), 'recent')
+    expect(cols.queue.map(c => c.d.key)).toEqual(['b', 'c', 'a'])
+    expect(cols.queue.map(c => queuePosition(cards, c, 'recent'))).toEqual([1, 2, 3])
   })
 })

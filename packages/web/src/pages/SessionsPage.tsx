@@ -33,7 +33,7 @@ import { sessionStats } from '../lib/sessionStats'
 import { usePlanLimits, worstUsedPct } from '../lib/planLimits'
 import { PlanUsageRing } from '../components/PlanLimitMeter'
 import { TaskProgressChip } from '../components/tasks/TaskProgressChip'
-import { requestPlanUsageModal } from '../lib/planUsageModalRequests'
+import { requestUsagePage } from '../lib/usagePageRequests'
 import { drawerEntryOnTop, sessionDrawerDot, SESSION_DRAWER_STATE } from '../lib/sessionDrawer'
 import {
   useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
@@ -95,8 +95,7 @@ import { ChatSelectionOverlay } from '../components/sessions/ChatSelectionBar'
 import { MagnifierButton } from '../components/a11y/MagnifierButton'
 import { HideLensesButton } from '../components/a11y/HideLensesButton'
 import { NotificationBell } from '../components/NotificationBell'
-import AwayPill from '../components/AwayPill'
-import LiveShortcut from '../components/tasks/LiveShortcut'
+import { TopBarGroup } from '../components/nav/TopBarGroup'
 import { ArtifactsAside } from '../components/sessions/ArtifactsAside'
 import { HardwarePanel } from '../components/sessions/HardwarePanel'
 import { UnsavedChangesGuard } from '../components/sessions/UnsavedChangesGuard'
@@ -1433,7 +1432,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
       onTaskChanged={refresh}
       // The "Usage limits" card (with the account switch) lives in the Metrics tab on desktop; the phone
       // has it in the drawer, so it is not handed down there.
-      {...(!isMobile ? { limitsCard: { onSwitched: (id: string) => goToReopened(id), onOpenAll: requestPlanUsageModal } } : {})}
+      {...(!isMobile ? { limitsCard: { onSwitched: (id: string) => goToReopened(id), onOpenAll: requestUsagePage } } : {})}
       // See `sessionMetrics`: present exactly when the store has a record, which is the same fact
       // that decides whether the metrics card offers its link.
       {...(sessionMetrics ? { metrics: sessionMetrics } : {})}
@@ -2250,8 +2249,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             exactly this. */}
         {/* Autonomous mode, same reasoning as the bell: the phone's only header here is this slot, and the
             owner switches away on from the phone — without it the state is invisible on this screen. */}
-        <LiveShortcut lang={pt ? 'pt' : 'en'} enabled={!ctx.isCentral && ctx.capabilities?.localShell !== false} />
-        <AwayPill lang={pt ? 'pt' : 'en'} enabled={!ctx.isCentral && ctx.capabilities?.localShell !== false} />
+        <TopBarGroup lang={pt ? 'pt' : 'en'} enabled={!ctx.isCentral && ctx.capabilities?.localShell !== false} />
         <NotificationBell lang={pt ? 'pt' : 'en'} buttonClassName="ag-tap-icon" buttonStyle={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 32, height: 32, borderRadius: 8,
@@ -3026,7 +3024,7 @@ function SessionsPageBody({ pane, sessionId, splitRoute, publishesRightEdge }: S
             sessionId={selected.id}
             lang={tPt}
             onSwitched={id => { setSessionDrawer(false); goToReopened(id) }}
-            onOpenAll={() => { closeSessionDrawer(); requestPlanUsageModal() }}
+            onOpenAll={() => { closeSessionDrawer(); requestUsagePage() }}
           />
         ), { open: drawerLimitsOpen, toggle: () => setDrawerLimitsOpen(v => !v) })}
 
