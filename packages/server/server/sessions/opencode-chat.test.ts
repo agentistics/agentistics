@@ -37,7 +37,8 @@ describe('parseOpencodeChat', () => {
   })
   test('tools keep opencode\'s names, carry the shared one, the file written and a shell summary', () => {
     expect(turns[1]!.thinking).toBe('I will write it')
-    expect(turns[1]!.tools).toEqual([{ name: 'write', canonical: 'Write', detail: '/p/b.txt', writes: ['/p/b.txt'], ref: 'prt_4' }])
+    // OPENCODE.SESSAO: the path is the detail only — `writes` beside it counted the file twice.
+    expect(turns[1]!.tools).toEqual([{ name: 'write', canonical: 'Write', detail: '/p/b.txt', ref: 'prt_4' }])
     const bash = turns[2]!.tools![0]!
     expect(bash.name).toBe('bash')
     expect(bash.failed).toBe(true)
@@ -147,7 +148,7 @@ describe('opencode 2.x sessions (session_v2 + the service API)', () => {
     const turns = (await readOpencodeChat(`${db}#${V2}`, source))!
     expect(turns.map(t => [t.role, t.text])).toEqual([['user', 'WRITE_PROBE please'], ['assistant', ''], ['assistant', 'DONE']])
     expect(turns[1]!.tools).toEqual([
-      { name: 'write', canonical: 'Write', detail: '/w/probe-out.txt', writes: ['/w/probe-out.txt'], ref: 'msg_a1:0' },
+      { name: 'write', canonical: 'Write', detail: '/w/probe-out.txt', ref: 'msg_a1:0' },
       expect.objectContaining({ name: 'bash', failed: true, detail: 'ls -la', ref: 'msg_a1:1' }),
     ])
     expect(turns[2]!.thinking).toBe('checking')
