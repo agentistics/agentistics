@@ -77,11 +77,12 @@ export async function handlePhoneHttp(c: PhoneHttpCtx): Promise<Response | null>
     return reply(r)
   }
   if (path === '/api/vault/phone/unlock') {
-    if (b.kind !== 'device' && b.kind !== 'passkey') return reply(bad())
-    if (b.kind === 'passkey' && !secure) return reply(notSecure())
-    const code = codeOf(b)
-    // The code is ALWAYS asked from a phone — before anything is unwrapped, so nothing waits for it.
-    if (!code) return reply(fail('stepup-required', 'Type the code from your authenticator app.', 'Digite o código do seu app autenticador.'))
+    // COFRE.DESBLOQUEIO (owner, 2026-11-07): a phone opens the vault with its BIOMETRICS (the passkey's
+    // PRF secret) and nothing else. The "device key + code" way is gone with the authenticator code: a
+    // key kept in a browser's storage, alone, is not a person.
+    if (b.kind === 'device') return reply(fail('device-key-retired', 'Opening with a stored key is no longer offered. Open the vault with this phone\'s biometrics (its passkey).', 'Abrir com uma chave guardada não é mais oferecido. Abra o cofre com a digital deste celular (a passkey dele).'))
+    if (b.kind !== 'passkey') return reply(bad())
+    if (!secure) return reply(notSecure())
     const guard = await gate.phoneUnlockGuard()
     if (guard) return reply(guard)
     const s = await phone.stageFromPhone(session, b)
@@ -89,11 +90,8 @@ export async function handlePhoneHttp(c: PhoneHttpCtx): Promise<Response | null>
       vaultAudit({ type: 'vault.phone-unlock-failed' })
       return reply('sentence' in s && s.sentence ? s as { ok: false; code: string; sentence: string } : phoneFail(s.code))
     }
-    if (s.state === 'open') return reply({ ok: true, state: 'open' })
-    const done = await gate.completeUnlock(code, { audit: false })
-    if (!done.ok) { vaultAudit({ type: 'vault.phone-unlock-failed' }); return reply(done) }
     vaultAudit({ type: 'vault.unlock', device: (await phoneLabel(s.id)) ?? (pt() ? 'celular' : 'phone') })
-    // The code just verified is the step-up too (owner 2026-10-03): the list asks nothing more.
+    // The biometric that just opened it is the step-up too: the list asks nothing more.
     return reply({ ok: true, state: 'open', grant: gate.mintGrant(session, 'read') })
   }
 

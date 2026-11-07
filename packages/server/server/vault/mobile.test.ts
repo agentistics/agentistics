@@ -9,7 +9,7 @@ import { createHash, generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { b64url, base32Decode, hotp, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
+import { b64url, type Protector, type ProtectorId, type UnwrapResult } from '@agentistics/vault'
 import { __resetVaultForTests, __setVaultClockForTests, sealToFile, autoLockRemainingMs } from './service'
 import { __resetGateForTests } from './gate'
 import { __resetPersonalForTests } from './personal'
@@ -33,8 +33,8 @@ function fake(id: ProtectorId): Fake {
 
 let T = 1_800_000_000_000
 const clock = () => T
-let seed: Uint8Array
-const codeAt = () => hotp(seed, Math.floor(T / 1000 / 30))
+// COFRE.DESBLOQUEIO (2026-11-07): no authenticator. A code still sent is ignored, never a proof.
+const codeAt = () => '123456'
 const next = () => { T += 30_000 }
 let hello = fake('hello'), dpapi = fake('dpapi')
 
@@ -90,9 +90,7 @@ beforeEach(async () => {
   __setVaultClockForTests(clock); __resetGateForTests(clock); __resetPersonalForTests(clock); __resetMobileForTests(clock); __resetPhoneForTests(clock)
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('x'))
   await http('POST', '/api/vault/local-proof')
-  seed = base32Decode((await http('POST', '/api/vault/authenticator/begin')).json.secret)
-  await http('POST', '/api/vault/authenticator/confirm', { code: codeAt() }); next()
-  await http('POST', '/api/vault/presence/enroll', { protector: 'hello', code: codeAt() }); next()
+  await http('POST', '/api/vault/presence/enroll', { protector: 'hello' }); next()
   const r = await http('POST', '/api/vault/recovery/begin')
   await http('POST', '/api/vault/recovery/confirm', { typed: (r.json.positions as number[]).map(p => (r.json.words as string[])[p - 1]!) }); next()
   itemId = (await http('POST', '/api/vault/personal', { item: { kind: 'login', name: 'Banco', fields: { login: 'me', password: 'MARKER-pw' } }, code: codeAt() })).json.meta.id
@@ -159,7 +157,7 @@ test('keep-open on the phone: passkey alone, single use, action bound, no host H
 })
 
 describe('registering a phone passkey', () => {
-  test('needs the code AND Windows Hello on the computer; a plain-http page is refused', async () => {
+  test('needs Windows Hello on the computer (no code any more); a plain-http page is refused', async () => {
     expect((await http('POST', '/api/vault/personal/mobile/register/begin', { code: codeAt() }, PHONE_HTTP)).json.code).toBe('insecure-context')
     const g0 = hello.gestures
     expect((await http('POST', '/api/vault/personal/mobile/register/begin', {}, PHONE)).json.code).toBe('not-approved')
@@ -198,18 +196,14 @@ describe('a passkey token is single use and bound to the action', () => {
   })
 })
 
-describe('the opt-in code window', () => {
-  test('turned on only from the computer (code + Hello); then a fresh code reveals for 30 s — reveals only', async () => {
+describe('COFRE.DESBLOQUEIO — the code window is gone with the code', () => {
+  test('it cannot be turned on, and a code never reveals from the phone', async () => {
     expect((await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true, code: codeAt() }, PHONE)).json.code).toBe('desktop-only')
-    expect((await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true, code: codeAt() })).json.ok).toBe(true)
-    next()
-    expect((await http('POST', '/api/vault/personal/reveal', { id: itemId, field: 'password' }, PHONE)).status).toBe(401)
-    expect((await http('POST', '/api/vault/personal/reveal', { id: itemId, field: 'password', code: codeAt() }, PHONE)).json.value).toBe('MARKER-pw')
-    expect((await http('POST', '/api/vault/personal/reveal', { id: itemId, field: 'login' }, PHONE)).json.value).toBe('me')
-    // never edit by code from the phone
+    expect((await http('POST', '/api/vault/personal/mobile/code-reveal', { enabled: true, code: codeAt() })).json.code).toBe('code-retired')
+    const r = await http('POST', '/api/vault/personal/reveal', { id: itemId, field: 'password', code: codeAt() }, PHONE)
+    expect(r.json.code).toBe('mobile-gesture-required')
+    expect(r.json.value).toBeUndefined()
     expect((await http('POST', '/api/vault/personal/edit', { id: itemId, expectedVersion: 1, item: { kind: 'login', name: 'Y' }, code: codeAt() }, PHONE)).json.ok).toBe(false)
-    T += 31_000
-    expect((await http('POST', '/api/vault/personal/reveal', { id: itemId, field: 'login' }, PHONE)).status).toBe(401)
   })
   test('removing a passkey is the computer\'s', async () => {
     await registerPhone()

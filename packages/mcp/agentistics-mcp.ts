@@ -27,6 +27,7 @@ import { sessionProof } from "./session-proof.js";
 import { nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
 import { planLimitsTool } from "./plan-limits-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
+import { vaultStatusTool } from "./vault-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -969,6 +970,12 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "agentistics_vault_status",
+    description:
+      "How this machine's vault is protected — never what it holds. Returns the state (open/locked/uninitialized…), the ways to confirm it is you already in use (touchid = Touch ID or the Mac password, hello = Windows Hello, password = the vault's own password, fido2 = a security key), the ways this machine offers (a security key only when its tools are present, marked advanced), whether an old app-code record is still on disk (it is no longer asked; it is deleted once a way to confirm is chosen), whether the 24-word recovery key exists, the auto-lock minutes, and the vault-password rules (the same table the page and the server enforce). Setting up, unlocking and confirming are the person's: on the /vault page or with `agentop vault` — never pass a vault password or recovery words through a tool.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "agentistics_tag_detail",
     description:
       "Get full detail for one tag by name or id: aggregate totals plus per-source breakdown and distributions (top projects, models, harnesses, repos, members/users), daily activity series, and the active date window. Call agentistics_tags first to find the id/name.",
@@ -1685,6 +1692,15 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           window: t.window ?? null,
         }));
         return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
+      }
+
+      case "agentistics_vault_status": {
+        // Raw fetch, not apiGet: an open vault whose list owes a proof answers 401 WITH its view, and
+        // that view is exactly what this tool reduces. Anything else non-2xx is an error.
+        const res = await fetch(`${API}/api/vault`);
+        const body = await res.json().catch(() => ({})) as any;
+        if (!res.ok && !(body && typeof body === "object" && body.view)) throw new Error(`GET /api/vault → HTTP ${res.status}`);
+        return text(vaultStatusTool(body));
       }
 
       case "agentistics_tag_detail": {

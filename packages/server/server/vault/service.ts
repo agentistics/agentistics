@@ -32,7 +32,10 @@ import {
   makeHandle, parseVaultJson, RUNNER_VAULT_DIR, type RunnerHandle,
   helloProtector, fido2Protector, effectiveUnlockPolicy, unlockNeedsCode, finishRetirement, recoveryProtector, hasPresence, isPresenceId, presenceCode,
   presenceSentence, AutoLockClock, AUTO_LOCK_DEFAULT_MIN, WEBAUTHN_BRIDGE_VERIFIED,
+  touchIdProtector, vaultPasswordProtector, unlockMethodsFor, FIDO2_TOOL_PATHS, passwordFailure, type UnlockMethodOffer,
 } from '@agentistics/vault'
+import { checkVaultPassword } from '@agentistics/core'
+import { currentVaultPassword } from './password-context'
 import { AGENTISTICS_DATA_DIR } from '../config'
 import { underTest } from '../data-dir'
 import { realProtectorIo, realSecretFs } from './io'
@@ -181,6 +184,10 @@ let _autoInit: { strict: Protector; delaysMs: number[] } | { candidates: Protect
 export function protectorById(id: ProtectorId, passphrase?: string, dir: string = vaultDir()): Protector | null {
   const o = id !== 'passphrase' ? _override?.find(p => p.id === id) : undefined
   if (o) return o
+  // Under test, a REAL gesture protector is never built: it would raise a real dialog on the machine
+  // running the suite (Windows Hello through WSL interop, a macOS prompt, a key blinking). A test that
+  // wants one installs a fake. (The vault password needs no device and stays real, over a temp dir.)
+  if (!realMode() && (id === 'hello' || id === 'fido2' || id === 'touchid')) return null
   switch (id) {
     case 'keychain': return keychainProtector(io())
     case 'dpapi': return dpapiProtector({ io: io(), vaultDir: dir, wsl: isWsl() })
@@ -190,32 +197,49 @@ export function protectorById(id: ProtectorId, passphrase?: string, dir: string 
     case 'memory': return realMode() ? null : memoryProtector()
     case 'hello': return platform() === 'win32' || isWsl() ? helloProtector({ io: io(), vaultDir: dir, wsl: isWsl() }) : null
     case 'fido2': return fido2Protector({ io: io(), vaultDir: dir, transport: platform() === 'win32' || isWsl() ? 'webauthn' : 'cli', wsl: isWsl() })
+    case 'touchid': return platform() === 'darwin' ? touchIdProtector({ io: io(), vaultDir: dir, lang: vaultLang() }) : null
+    // The vault's own password (COFRE.DESBLOQUEIO): the request in flight carries it, or nobody does.
+    case 'password': return vaultPasswordProtector({
+      io: io(), vaultDir: dir, password: passphrase ?? currentVaultPassword(),
+      check: pw => checkVaultPassword(pw).ok, params: _scryptForTests,
+    })
     // Without the words in hand it can only be REMOVED (rotation); opening goes through `recover`.
     case 'recovery': return recoveryProtector({ io: io(), vaultDir: dir })
   }
 }
 
 /**
- * SECRETS.4 §3.4: the presence protectors to offer at ENROLMENT, in order. Never probed at service
- * start — a probe costs the user gestures. macOS gets FIDO2 only (Secure Enclave is deferred, Q1); a
- * headless box or a container gets none and stays on its OS protector (or passphrase).
+ * COFRE.DESBLOQUEIO (owner, 2026-11-07): the ways of confirming "it is you" this machine offers, best
+ * first — `unlockMethodsFor` (pure) decides. Touch ID / the Mac password on macOS, Windows Hello on
+ * Windows and WSL, the vault's own password everywhere, and a FIDO2 key ONLY where its tools are present
+ * (it used to be the Mac's sole offer, and failed for want of libfido2). Never probed at service start —
+ * a probe can cost the user a gesture.
  */
+export function unlockMethodOffers(): UnlockMethodOffer[] {
+  if (!realMode()) {
+    // Under test: the presence fakes a test installed, plus the vault password (offered everywhere, for real).
+    const ids = (_override ?? []).map(p => p.id).filter(id => isPresenceId(id) && !_soonForTests.includes(id))
+    if (!ids.includes('password')) ids.push('password')
+    return ids.map(id => ({ id: id as UnlockMethodOffer['id'], advanced: id === 'fido2' }))
+  }
+  const fido2Tools = (platform() === 'darwin' || platform() === 'linux')
+    && ['fido2-token', 'fido2-cred', 'fido2-assert'].every(t => FIDO2_TOOL_PATHS(t).some(p => existsSync(p)) || Bun.which(t) !== null)
+  return unlockMethodsFor({ platform: platform(), wsl: isWsl(), fido2Tools, webauthnVerified: WEBAUTHN_BRIDGE_VERIFIED })
+}
+
+/** The presence protectors to offer at ENROLMENT, in order (the offers above, as protectors). */
 export function presenceCandidates(): Protector[] {
-  const soon = presenceSoon()
-  if (!realMode()) return _override?.filter(p => (p.id === 'hello' || p.id === 'fido2') && !soon.includes(p.id)) ?? []
-  const ids: ProtectorId[] = platform() === 'win32' || isWsl() ? ['hello', 'fido2'] : platform() === 'linux' || platform() === 'darwin' ? ['fido2'] : []
-  return ids.filter(id => !soon.includes(id)).map(id => protectorById(id)).filter((p): p is Protector => p !== null)
+  return unlockMethodOffers().map(m => protectorById(m.id)).filter((p): p is Protector => p !== null)
 }
 
 /**
- * v2.98.1 (the owner's machine): presence kinds this platform HAS but this build cannot offer yet. On
- * Windows / WSL a security key goes through the webauthn.dll bridge, whose struct layouts are not yet
- * verified on real hardware (fido2.ts `WEBAUTHN_BRIDGE_VERIFIED`), so it is never OFFERED there: the
- * page shows it as "coming soon" instead of letting it fail with an internal sentence.
+ * Kinds this platform has but this build does not offer yet. Since 2026-11-07 a method that is not
+ * ready is simply not offered (owner: the security key "only appears if libfido2/webauthn are present"),
+ * so this is empty outside tests; kept so the page and the gate keep their one shape.
  */
 export function presenceSoon(): ProtectorId[] {
   if (!realMode()) return _soonForTests
-  return (platform() === 'win32' || isWsl()) && !WEBAUTHN_BRIDGE_VERIFIED ? ['fido2'] : []
+  return []
 }
 let _soonForTests: ProtectorId[] = []
 
@@ -356,6 +380,8 @@ function protectorsFor(vault: VaultJson | null, passphrase?: string, dir: string
 export function presenceWord(id: ProtectorId | null | undefined, lang: Lang = vaultLang()): string {
   if (id === 'hello') return 'Windows Hello'
   if (id === 'fido2') return lang === 'pt' ? 'sua chave de segurança' : 'your security key'
+  if (id === 'touchid') return lang === 'pt' ? 'o Touch ID (ou a senha do Mac)' : 'Touch ID (or the Mac password)'
+  if (id === 'password') return lang === 'pt' ? 'a senha do cofre' : 'the vault password'
   return lang === 'pt' ? 'a sua confirmação pessoal' : 'your personal confirmation'
 }
 
@@ -674,7 +700,50 @@ function adopt(s: OpenState): Opened | null {
   return _opened
 }
 
+// ── the vault password's wrong-try pause (COFRE.DESBLOQUEIO) — shared by the unlock and every confirmation ──
+
+const PASSWORD_FREE_TRIES = 5
+const PASSWORD_PAUSE_MS = 60_000
+const PASSWORD_PAUSE_MAX_MS = 60 * 60_000
+let _pw: { wrong: number; pausedUntil: number } = { wrong: 0, pausedUntil: 0 }
+
+/**
+ * PURE. The pause after `wrong` consecutive wrong passwords: none within the first five, then a minute,
+ * doubling every further five, capped at an hour. scrypt already costs ~0.3 s and 128 MiB per try; the
+ * pause is for a person-sized guess list, and it is never a lockout — the 24 words always open the vault.
+ */
+export function passwordPauseMs(wrong: number): number {
+  if (wrong < PASSWORD_FREE_TRIES) return 0
+  const rounds = Math.floor(wrong / PASSWORD_FREE_TRIES) - 1
+  return Math.min(PASSWORD_PAUSE_MAX_MS, PASSWORD_PAUSE_MS * 2 ** rounds)
+}
+/** A refusal while the password is paused, else null. */
+export function passwordPaused(): { ok: false; code: string; sentence: string } | null {
+  if (_now() >= _pw.pausedUntil) return null
+  const lang = vaultLang()
+  const left = Math.max(1, Math.ceil((_pw.pausedUntil - _now()) / 60_000))
+  return refused('password-paused', lang === 'pt'
+    ? `Muitas senhas erradas. Tente de novo em ${left} min — ou abra o cofre com as 24 palavras.`
+    : `Too many wrong passwords. Try again in ${left} min — or open the vault with your 24 words.`)
+}
+/** Count one password outcome: a right one resets the count; a wrong one may start a pause. */
+export function notePasswordResult(ok: boolean): void {
+  if (ok) { _pw = { wrong: 0, pausedUntil: 0 }; return }
+  _pw.wrong += 1
+  if (_pw.wrong % PASSWORD_FREE_TRIES === 0) _pw.pausedUntil = _now() + passwordPauseMs(_pw.wrong)
+  vaultAudit({ type: 'vault.password-failed' })
+}
+export function passwordRefusal(kind: 'password-required' | 'password-wrong'): { ok: false; code: string; sentence: string } {
+  const pt = vaultLang() === 'pt'
+  return kind === 'password-required'
+    ? refused('password-required', pt ? 'Digite a senha do cofre para confirmar que é você.' : 'Type the vault password to confirm it is you.')
+    : refused('password-wrong', pt ? 'Essa não é a senha do cofre. Nada foi aberto.' : 'That is not the vault password. Nothing was opened.')
+}
+
 function presenceRefusal(s: Extract<OpenState, { state: 'locked' | 'protector-lost' }>): { ok: false; code: string; sentence: string } {
+  const pw = passwordFailure(s.reason)
+  if (pw === 'password-required') return passwordRefusal('password-required')
+  if (pw === 'password-wrong') { notePasswordResult(false); return passwordPaused() ?? passwordRefusal('password-wrong') }
   const code = presenceCode(s.reason)
   const word = presenceWord(s.protector)
   if (code) return { ok: false, code, sentence: presenceSentence(code, vaultLang(), word, s.reason) }
@@ -731,24 +800,21 @@ export async function unlockWithGesture(passphrase?: string, fresh?: { session: 
   if (_role !== 'holder') return refused('service-only', sentence('service-only'))
   if ((await hardenThisProcess()).state === 'failed') return refused('hardening-failed', sentence('hardening-failed', { reason: _hardening?.reason ?? '' }))
   abandonPending()
+  const paused = passphrase === undefined && currentVaultPassword() !== undefined ? passwordPaused() : null
+  if (paused) return paused
   const s = await tryOpen(passphrase, { presence: true })
+  if (s.state === 'open' && s.via === 'password') notePasswordResult(true)
   if (s.state === 'open') {
     const freshToken = mintFresh(hasPresence(s.vault) ? fresh : undefined)
     const withFresh = freshToken ? { fresh: freshToken } : {}
-    if (hasPresence(s.vault) && s.vault.stepup) await restoreUnlockWindow(s.dek, s.kid)
-    if (hasPresence(s.vault) && s.vault.stepup && unlockNeedsCode(effectiveUnlockPolicy(s.vault.unlockPolicy), _unlockWindowAnchorMs, _now())) {
-      const opened: Opened = { kid: s.kid, dek: s.dek, vault: s.vault, via: s.via }
-      const timer = setTimeout(() => abandonPending(), PENDING_STEPUP_MS)
-      ;(timer as { unref?: () => void }).unref?.()
-      _pending = { opened, expiresMs: _now() + PENDING_STEPUP_MS, timer }
-      return { ok: true, state: 'pending-stepup', expiresInMs: PENDING_STEPUP_MS, ...withFresh }
-    }
+    // COFRE.DESBLOQUEIO (owner, 2026-11-07): the authenticator code is never asked again. The person's
+    // proof — Touch ID, Windows Hello, a key, the vault password — opens it; a vault that still records
+    // an authenticator opens the same way (the record is dropped when a new method is set up).
     adopt(s)
     _lockedBy = 'start'
     await finishPendingRekey(s.kid)
     void runMigrations()
-    // The gesture alone opened it under the unlock policy ("Hello only", or inside the per-day window).
-    if (hasPresence(s.vault) && s.vault.stepup) vaultAudit({ type: 'vault.unlock' })
+    if (hasPresence(s.vault)) vaultAudit({ type: 'vault.unlock' })
     return { ok: true, state: 'open', ...withFresh }
   }
   _last = s
@@ -772,19 +838,18 @@ export async function stagePhoneUnlock(unwrap: (kid: string) => Uint8Array | nul
   let vault: VaultJson | null = null
   if (raw) { try { vault = JSON.parse(new TextDecoder().decode(raw)) as VaultJson } catch { vault = null } }
   if (!vault || typeof vault.kid !== 'string') return refused('uninitialized', sentence('uninitialized'))
-  if (!vault.stepup) return refused('phone-needs-code', vaultLang() === 'pt'
-    ? 'Abrir o cofre pelo celular pede o código do autenticador, e ele ainda não foi configurado. Configure-o no computador.'
-    : 'Opening the vault from a phone asks for the authenticator code, which is not set up yet. Set it up on the computer.')
   const dek = unwrap(vault.kid)
   if (!dek) return refused('phone-key-refused', vaultLang() === 'pt'
     ? 'A chave deste celular não abriu o cofre. Se o cofre trocou de chave, aprove este celular de novo no computador.'
     : 'This phone\'s key did not open the vault. If the vault changed its key, approve this phone again on the computer.')
   abandonPending()
+  // COFRE.DESBLOQUEIO (owner, 2026-11-07): no authenticator code after the phone's biometrics — the
+  // passkey's PRF secret (a biometric gesture on the phone) IS the proof, and it opens the vault.
   const via = (vault.wrappers.find(w => isPresenceId(w.type))?.type ?? vault.wrappers[0]?.type ?? 'memory') as ProtectorId
-  const timer = setTimeout(() => abandonPending(), PENDING_STEPUP_MS)
-  ;(timer as { unref?: () => void }).unref?.()
-  _pending = { opened: { kid: vault.kid, dek, vault, via }, expiresMs: _now() + PENDING_STEPUP_MS, timer }
-  return { ok: true, state: 'pending-stepup' }
+  adopt({ state: 'open', kid: vault.kid, dek, vault, via })
+  _lockedBy = 'start'
+  void runMigrations()
+  return { ok: true, state: 'open' }
 }
 
 /** The DEK waiting for its code, or null (expired ones are zeroed here). */
@@ -836,7 +901,9 @@ export async function openWithRecovery(entropy: Uint8Array): Promise<{ ok: true 
   adopt({ state: 'open', kid: vault.kid, dek: u.dek, vault, via: 'recovery' })
   await finishPendingRekey(vault.kid)
   dropUnlockWindow()
-  _recoveryTodo = new Set<RecoveryStep>([...(hasPresence(vault) || vault.requirePresence ? ['presence' as const] : []), 'authenticator', 'recovery'])
+  // COFRE.DESBLOQUEIO (2026-11-07): the authenticator is no longer a step — a new way of confirming
+  // (presence) and new recovery words are what a recovered vault still owes.
+  _recoveryTodo = new Set<RecoveryStep>([...(hasPresence(vault) || vault.requirePresence ? ['presence' as const] : []), 'recovery'])
   vaultAudit({ type: 'vault.recovered' })
   return { ok: true }
 }
@@ -1143,7 +1210,7 @@ export type VaultAuditType =
   | 'vault.migrated' | 'vault.plaintext-pending' | 'vault.migration-failed'
   | 'vault.init' | 'vault.rekey' | 'vault.reset' | 'vault.add-passphrase'
   | 'vault.stepup-failed' | 'vault.stepup-frozen' | 'vault.auto-locked' | 'vault.auto-lock-extended' | 'vault.recovered' | 'vault.recover-failed'
-  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-confirm-each-use' | 'vault.set-unlock-policy' | 'vault.set-auth-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-reveal-refused' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.personal-use-asked' | 'vault.personal-use-approved' | 'vault.personal-use-denied' | 'vault.personal-use-expired' | 'vault.personal-use-cancelled' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
+  | 'vault.disable-presence' | 'vault.require-presence' | 'vault.enroll-authenticator' | 'vault.authenticator-retired' | 'vault.password-failed' | 'vault.rotate-recovery' | 'vault.enroll-presence' | 'vault.presence-held' | 'vault.local-proof' | 'vault.recover-page' | 'vault.set-auto-lock' | 'vault.set-confirm-each-use' | 'vault.set-unlock-policy' | 'vault.set-auth-policy' | 'vault.unlock' | 'vault.personal-create' | 'vault.personal-edit' | 'vault.personal-reveal' | 'vault.personal-reveal-refused' | 'vault.personal-trash' | 'vault.personal-restore' | 'vault.personal-restore-version' | 'vault.personal-purge' | 'vault.personal-group' | 'vault.personal-import' | 'vault.personal-passkey-add' | 'vault.personal-passkey-remove' | 'vault.personal-code-reveal' | 'vault.personal-grant' | 'vault.personal-use' | 'vault.personal-use-asked' | 'vault.personal-use-approved' | 'vault.personal-use-denied' | 'vault.personal-use-expired' | 'vault.personal-use-cancelled' | 'vault.bundle-staged' | 'vault.bundle-restored' | 'vault.bundle-built' | 'vault.bundle-wiped'
   | 'vault.phone-enrol-request' | 'vault.phone-enrol-approve' | 'vault.phone-enrol-deny' | 'vault.phone-key-add' | 'vault.phone-key-remove' | 'vault.phone-unlock-failed'
 
 /** `device` is the label the owner gave a phone ('opened from Pixel') — never a key, an id or a secret. */

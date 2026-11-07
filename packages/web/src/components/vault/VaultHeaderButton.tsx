@@ -1,8 +1,7 @@
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Clock3, Lock, LockOpen } from 'lucide-react'
+import { Lock, LockOpen } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { useCodeCountdown } from './VaultCodeClock'
 import { vaultBadgeOf, vaultLockWord } from '../../lib/vaultGlyph'
 import { useVaultWatch } from '../../lib/vaultWatch'
 import { VaultGlyph } from './VaultGlyph'
@@ -14,14 +13,12 @@ import { VaultGlyph } from './VaultGlyph'
  * ALWAYS the header's neutral colour — never orange, not even on /vault (owner, 2026-10-05) — which follows the vault live (`useVaultWatch`). The tooltip names the state too, so the
  * colour never carries it alone. A click goes to /vault. Absent on a central, whose /api/vault is 404.
  *
- * VAULT.UX-R2: the hover tooltip is the app's themed one (the same card the collapsed sidebar uses), and
- * under the state it carries the code clock — "Código do autenticador pedido de novo em 5 h 12 min".
+ * VAULT.UX-R2: the hover tooltip is the app's themed one (the same card the collapsed sidebar uses).
  */
 export function VaultHeaderButton({ lang, buttonStyle, enabled = true }: { lang: 'pt' | 'en'; buttonStyle: React.CSSProperties; enabled?: boolean }) {
   const pt = lang === 'pt'
   const navigate = useNavigate()
   const lock = useVaultWatch(enabled).lock
-  const clock = useCodeCountdown(lang, enabled)
   const ref = useRef<HTMLButtonElement>(null)
   const [tip, setTip] = useState<{ top: number; right: number } | null>(null)
   if (!enabled) return null
@@ -29,7 +26,7 @@ export function VaultHeaderButton({ lang, buttonStyle, enabled = true }: { lang:
   const label = `${pt ? 'Cofre' : 'Vault'} — ${word}`
   const badge = vaultBadgeOf(lock)
   return (
-    <button ref={ref} type="button" data-vault-header data-lock={lock} className="ag-tap-icon" aria-label={clock ? `${label}. ${clock}` : label}
+    <button ref={ref} type="button" data-vault-header data-lock={lock} className="ag-tap-icon" aria-label={label}
       onClick={() => { setTip(null); navigate('/vault') }}
       onMouseEnter={() => { const r = ref.current?.getBoundingClientRect(); if (r) setTip({ top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) }) }}
       onMouseLeave={() => setTip(null)} onBlur={() => setTip(null)}
@@ -53,11 +50,6 @@ export function VaultHeaderButton({ lang, buttonStyle, enabled = true }: { lang:
           boxShadow: '0 6px 20px rgba(0,0,0,0.35)', zIndex: 500, pointerEvents: 'none',
         }}>
           <div>{label}</div>
-          {clock && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3, fontWeight: 500, color: 'var(--text-secondary)' }}>
-              <Clock3 size={12} aria-hidden /> {clock}
-            </div>
-          )}
         </div>,
         document.body,
       )}

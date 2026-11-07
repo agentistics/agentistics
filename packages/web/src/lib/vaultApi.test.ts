@@ -1,7 +1,8 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import {
-  clampAutoLock, cleanCode, codeComplete, forgetGrant, gateFor, grantAlive, minutesLeft, missingSteps, needsTypedCode, parseAutoLockInput,
-  rememberGrant, remainingMs, wordRows, wizardPlan, gestureStep, howStep2, parseUnlockHours, askWords, sectionBadge, howNow, howConfirms, primarySection,
+  clampAutoLock, forgetGrant, gateFor, grantAlive, minutesLeft, missingSteps, parseAutoLockInput,
+  rememberGrant, remainingMs, wordRows, wizardPlan, gestureStep, howStep2, askWords, sectionBadge, howNow, howConfirms, primarySection,
+  confirmsWithPasswordOnly, wantsVaultPassword, setVaultPasswordPrompt,
 } from './vaultApi'
 import { VAULT_TEXT, presenceKey, vt, vtf } from './vaultText'
 
@@ -11,7 +12,6 @@ const gates = {
   'disable-presence': { code: true, gesture: true, grant: false },
   'lock-local': { code: false, gesture: false, grant: false },
 }
-const auth = { enrolledAt: 'x', lastUsedAt: null, failures: 0, pausedUntil: null, frozen: false }
 
 describe('auto-lock input (§5.1: 5–480 whole minutes, no "never")', () => {
   test('parses digits only', () => {
@@ -44,19 +44,13 @@ describe('the countdown', () => {
   })
 })
 
-describe('gates — read from the SERVER table, then narrowed by what this vault has', () => {
-  test('the code is asked only once an authenticator is enrolled; the gesture only with presence', () => {
-    expect(gateFor({ gates, authenticator: null, presence: false }, 'lock')).toMatchObject({ code: false, gesture: false })
-    expect(gateFor({ gates, authenticator: auth, presence: false }, 'disable-presence')).toMatchObject({ code: true, gesture: false })
-    expect(gateFor({ gates, authenticator: auth, presence: true }, 'disable-presence')).toMatchObject({ code: true, gesture: true, grant: false })
-    expect(gateFor({ gates, authenticator: auth, presence: true }, 'unknown-action')).toEqual({ code: false, gesture: false, grant: false })
-    expect(gateFor({ gates, authenticator: auth, presence: true }, 'lock-local')).toMatchObject({ code: false, gesture: false })
-  })
-  test('a live grant stands in for a typed code only where the row allows it', () => {
-    expect(needsTypedCode({ code: true, grant: true }, true)).toBe(false)
-    expect(needsTypedCode({ code: true, grant: true }, false)).toBe(true)
-    expect(needsTypedCode({ code: true, grant: false }, true)).toBe(true) // destructive: fresh every time
-    expect(needsTypedCode({ code: false, grant: true }, false)).toBe(false)
+describe('gates — COFRE.DESBLOQUEIO: no code is ever typed; a proof row asks the confirmation', () => {
+  test('never a code; a row that used to ask the code now asks the confirmation, once there is one', () => {
+    expect(gateFor({ gates, presence: false }, 'lock')).toEqual({ code: false, gesture: false, grant: true })
+    expect(gateFor({ gates, presence: true }, 'lock')).toEqual({ code: false, gesture: true, grant: true })
+    expect(gateFor({ gates, presence: true }, 'disable-presence')).toEqual({ code: false, gesture: true, grant: false })
+    expect(gateFor({ gates, presence: true }, 'unknown-action')).toEqual({ code: false, gesture: false, grant: false })
+    expect(gateFor({ gates, presence: true }, 'lock-local')).toMatchObject({ code: false, gesture: false })
   })
   test('the grant lives in memory for 5 minutes minus a margin, and forgetting it is immediate', () => {
     forgetGrant()
@@ -70,31 +64,25 @@ describe('gates — read from the SERVER table, then narrowed by what this vault
 })
 
 describe('what the wizard still has to do', () => {
-  const none = { authenticator: null, recoveryCreatedAt: null, presence: false, presenceAvailable: ['hello'] }
-  test('fresh: authenticator, presence, recovery — the recovery key LAST (leader decision 2)', () => {
-    expect(missingSteps(none)).toEqual(['authenticator', 'presence', 'recovery'])
+  const none = { recoveryCreatedAt: null, presence: false, presenceAvailable: ['password'] }
+  test('fresh: the way to confirm, then the recovery key LAST (leader decision 2) — never an authenticator', () => {
+    expect(missingSteps(none)).toEqual(['presence', 'recovery'])
   })
-  test('no presence device: the step is not offered (never offered and failing)', () => {
-    expect(missingSteps({ ...none, presenceAvailable: [] })).toEqual(['authenticator', 'recovery'])
+  test('nothing offered (an old server): the step is not offered (never offered and failing)', () => {
+    expect(missingSteps({ ...none, presenceAvailable: [] })).toEqual(['recovery'])
   })
   test('done: nothing', () => {
-    expect(missingSteps({ authenticator: auth, recoveryCreatedAt: 'x', presence: true, presenceAvailable: ['hello'] })).toEqual([])
+    expect(missingSteps({ recoveryCreatedAt: 'x', presence: true, presenceAvailable: ['hello'] })).toEqual([])
   })
 })
 
-describe('the 24 words and the code field', () => {
+describe('the 24 words', () => {
   test('6 rows of 4, numbered 1..24 in reading order', () => {
     const rows = wordRows(Array.from({ length: 24 }, (_, i) => `w${i + 1}`))
     expect(rows).toHaveLength(6)
     expect(rows.every(r => r.length === 4)).toBe(true)
     expect(rows.flat().map(w => w.n)).toEqual(Array.from({ length: 24 }, (_, i) => i + 1))
     expect(rows[5]![3]).toEqual({ n: 24, word: 'w24' })
-  })
-  test('a code is digits only, at most 6; complete means exactly 6', () => {
-    expect(cleanCode('12 34-56789')).toBe('123456')
-    expect(codeComplete('123456')).toBe(true)
-    expect(codeComplete('12345')).toBe(false)
-    expect(codeComplete('12345a')).toBe(false)
   })
 })
 
@@ -110,9 +98,11 @@ describe('words', () => {
       expect(ph(v.en), k).toBe(ph(v.pt))
     }
   })
-  test('the presence word follows the wrapper the vault holds', () => {
+  test('the confirmation word follows the wrapper the vault holds — a gesture first', () => {
     expect(vt(presenceKey(['hello', 'recovery']), 'en')).toBe('Windows Hello')
     expect(vt(presenceKey(['fido2']), 'pt')).toBe('sua chave de segurança')
+    expect(vt(presenceKey(['touchid', 'password']), 'pt')).toBe('o Touch ID (ou a senha do Mac)')
+    expect(vt(presenceKey(['password']), 'en')).toBe('the vault password')
     expect(vt(presenceKey(['dpapi']), 'en')).toBe('your personal confirmation')
   })
   test('the recovery screen says the two things it must: keep it offline, and no copy', () => {
@@ -123,14 +113,14 @@ describe('words', () => {
   })
 })
 
-describe('the one-go flow and the tooltips (owner feedback 2026-10-02)', () => {
-  test('a fresh machine runs the device check FIRST, then authenticator → presence → recovery', () => {
-    expect(wizardPlan(['authenticator', 'presence', 'recovery'])).toEqual(['probe', 'authenticator', 'presence', 'recovery'])
+describe('the one-go flow and the tooltips', () => {
+  test('a resume runs the steps as they are; nothing to do is nothing', () => {
+    expect(wizardPlan(['presence', 'recovery'])).toEqual(['presence', 'recovery'])
+    expect(wizardPlan([])).toEqual([])
   })
-  test('a first page enrolment asks the setup code FIRST — before the device check and any gesture (owner 2026-10-02)', () => {
-    expect(wizardPlan(['authenticator', 'presence', 'recovery'], true)).toEqual(['setup', 'probe', 'authenticator', 'presence', 'recovery'])
-    expect(wizardPlan(['authenticator', 'recovery'], true)).toEqual(['setup', 'authenticator', 'recovery'])
-    expect(wizardPlan(['authenticator', 'presence', 'recovery'], false)[0]).toBe('probe')
+  test('a first page enrolment asks the setup code FIRST — before any confirmation is raised', () => {
+    expect(wizardPlan(['presence', 'recovery'], true)).toEqual(['setup', 'presence', 'recovery'])
+    expect(wizardPlan(['recovery'], true)).toEqual(['setup', 'recovery'])
     expect(wizardPlan([], true)).toEqual([])
   })
   test('the setup step is a calm step with its own words, in both languages', () => {
@@ -139,28 +129,16 @@ describe('the one-go flow and the tooltips (owner feedback 2026-10-02)', () => {
         expect(vt(k, lang).length).toBeGreaterThan(0)
       }
     }
-    expect(vt('wiz_setup_intro', 'pt')).toContain('Nada é pedido ao Windows Hello')
-    expect(vt('wiz_setup_intro', 'en')).toContain('Nothing is asked of Windows Hello')
-  })
-  test('a resume has no probe (the presence enrolment is its own double gesture); no presence device, no probe', () => {
-    expect(wizardPlan(['presence', 'recovery'])).toEqual(['presence', 'recovery'])
-    expect(wizardPlan(['authenticator', 'recovery'])).toEqual(['authenticator', 'recovery'])
-    expect(wizardPlan([])).toEqual([])
   })
   const words = { code: 'your code', presence: 'Windows Hello', and: ' and ', asks: 'Will ask for: {what}', nothing: 'Nothing more is asked.' }
   test('a tooltip names exactly what the gate row asks', () => {
-    expect(askWords({ code: true, gesture: true }, words)).toBe('Will ask for: your code and Windows Hello')
-    expect(askWords({ code: true, gesture: false }, words)).toBe('Will ask for: your code')
     expect(askWords({ code: false, gesture: true }, words)).toBe('Will ask for: Windows Hello')
     expect(askWords({ code: false, gesture: false }, words)).toBe('Nothing more is asked.')
   })
   test('the owner’s wording is in place, in both languages', () => {
-    expect(vt('pres_off', 'pt')).toBe('Desligada. Hoje o cofre abre sozinho quando o agentistics liga, sem pedir sua digital/PIN.')
-    expect(vt('pres_turnOn', 'pt')).toBe('Exigir Windows Hello')
     expect(vt('rec_create', 'pt')).toBe('Criar chave de recuperação')
     expect(vt('rec_new', 'pt')).toBe('Gerar uma nova (a antiga para de valer)')
     expect(vt('sec_hardening', 'pt')).toBe('Proteção da memória')
-    expect(vt('auth_explain', 'pt')).toBe('O código do app é pedido para abrir o cofre e para mudar estas configurações.')
     expect(vt('rec_lost', 'pt')).toContain('Recuperar com as 24 palavras')
     expect(vt('rec_create', 'en')).not.toBe(vt('rec_create', 'pt'))
   })
@@ -168,26 +146,32 @@ describe('the one-go flow and the tooltips (owner feedback 2026-10-02)', () => {
 
 // ── review M1 / S2: what the page SENDS ─────────────────────────────────────────────────────────
 
-import { authenticatorBegin, cleanSetupCode, setupCodeComplete, unlockGesture } from './vaultApi'
+import { cleanSetupCode, presenceEnrol, presenceProbe, setupCodeComplete, unlockGesture } from './vaultApi'
 
 describe('review M1/S2 — the dashboard\'s vault requests', () => {
   const seen: { url: string; init: RequestInit }[] = []
   const realFetch = globalThis.fetch
-  const capture = () => {
+  afterEach(() => { globalThis.fetch = realFetch; setVaultPasswordPrompt(null) })
+  const capture = (answers: object[] = [{ ok: true }]) => {
     seen.length = 0
-    globalThis.fetch = (async (url: string, init: RequestInit) => { seen.push({ url, init }); return new Response('{"ok":true}') }) as unknown as typeof fetch
+    let i = 0
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      seen.push({ url, init })
+      const a = answers[Math.min(i++, answers.length - 1)]
+      return new Response(JSON.stringify(a), { status: (a as { ok?: boolean }).ok ? 200 : 401 })
+    }) as unknown as typeof fetch
   }
   test('every POST is JSON, even one with nothing to say (the server refuses any other type)', async () => {
     capture()
-    try { await unlockGesture() } finally { globalThis.fetch = realFetch }
+    await unlockGesture()
     const h = seen[0]!.init.headers as Record<string, string>
     expect(h['Content-Type']).toBe('application/json')
     expect(seen[0]!.init.body).toBe('{}')
   })
-  test('the setup code travels in the begin body when one is given', async () => {
+  test('the setup code travels in the probe body when one is given', async () => {
     capture()
-    try { await authenticatorBegin(undefined, '12345678') } finally { globalThis.fetch = realFetch }
-    expect(JSON.parse(String(seen[0]!.init.body))).toEqual({ setupCode: '12345678' })
+    await presenceProbe('password', '12345678')
+    expect(JSON.parse(String(seen[0]!.init.body))).toEqual({ protector: 'password', setupCode: '12345678' })
   })
   test('the setup code field keeps 8 digits and ignores spaces and dashes', () => {
     expect(cleanSetupCode('1234 5678')).toBe('12345678')
@@ -199,22 +183,54 @@ describe('review M1/S2 — the dashboard\'s vault requests', () => {
     expect(vt('wiz_setup_why', 'en')).toContain('agentop vault setup-code')
     expect(vt('wiz_setup_why', 'pt')).toContain('agentop vault setup-code')
   })
+  test('a new vault password travels in its own header, never in the body or the URL', async () => {
+    capture()
+    const pw = 'Abc!def#1xyz'
+    await presenceEnrol('password', { password: pw })
+    const req = seen[0]!
+    expect((req.init.headers as Record<string, string>)['x-vault-password']).toBe(pw)
+    expect(String(req.init.body)).not.toContain(pw)
+    expect(req.url).not.toContain(pw)
+  })
+  test('password-required: the one prompt is asked, and the request is sent again with the header', async () => {
+    capture([{ ok: false, code: 'password-required', sentence: 's' }, { ok: true, state: 'open' }])
+    const asked: { retry: boolean; sentence: string }[] = []
+    setVaultPasswordPrompt(async a => { asked.push(a); return 'Abc!def#1xyz' })
+    const r = await unlockGesture()
+    expect(r.ok).toBe(true)
+    expect(asked).toEqual([{ retry: false, sentence: 's' }])
+    expect(seen).toHaveLength(2)
+    expect((seen[0]!.init.headers as Record<string, string>)['x-vault-password']).toBeUndefined()
+    expect((seen[1]!.init.headers as Record<string, string>)['x-vault-password']).toBe('Abc!def#1xyz')
+  })
+  test('a wrong password asks again as a retry, at most three times; cancelling stops at once', async () => {
+    capture([{ ok: false, code: 'password-wrong', sentence: 'w' }])
+    let n = 0
+    setVaultPasswordPrompt(async a => { n++; expect(a.retry).toBe(true); return 'nope' })
+    expect((await unlockGesture()).ok).toBe(false)
+    expect(n).toBe(3)
+    capture([{ ok: false, code: 'password-required', sentence: 's' }])
+    setVaultPasswordPrompt(async () => null)
+    const r = await unlockGesture()
+    expect(r.ok ? 'ok' : r.code).toBe('password-required')
+    expect(seen).toHaveLength(1)
+  })
+  test('only the two password codes raise the prompt', () => {
+    expect(wantsVaultPassword({ json: { ok: false, code: 'password-required' } })).toBe(true)
+    expect(wantsVaultPassword({ json: { ok: false, code: 'password-wrong' } })).toBe(true)
+    expect(wantsVaultPassword({ json: { ok: false, code: 'stepup-required' } })).toBe(false)
+    expect(wantsVaultPassword({ json: { ok: true, code: 'password-required' } })).toBe(false)
+    expect(wantsVaultPassword(null)).toBe(false)
+  })
 })
 
 describe('VAULT.UX2 — what a glance says', () => {
-  const base = { authenticator: null, presence: false, presenceAvailable: ['hello'], recoveryCreatedAt: null, hardening: null }
-  test('missing setup is a "!" (warn); presence the machine can have is only "recommended"; one it cannot have is "not available"', () => {
-    expect(sectionBadge(base, 'authenticator')).toEqual({ tone: 'warn', key: 'badge_missing' })
+  const base = { presence: false, presenceAvailable: ['hello'], recoveryCreatedAt: null, hardening: null }
+  test('a missing way to confirm is a "!" (it is what protects the vault); none offered is "not available"', () => {
+    expect(sectionBadge(base, 'presence')).toEqual({ tone: 'warn', key: 'badge_missing' })
     expect(sectionBadge(base, 'recovery')).toEqual({ tone: 'warn', key: 'badge_missing' })
-    expect(sectionBadge(base, 'presence')).toEqual({ tone: 'rec', key: 'badge_recommended' })
     expect(sectionBadge({ ...base, presenceAvailable: [] }, 'presence')).toEqual({ tone: 'off', key: 'badge_na' })
-  })
-  test('configured is ✓; a frozen or paused authenticator is attention, not configured', () => {
-    const a = { enrolledAt: 'x', lastUsedAt: null, failures: 0, pausedUntil: null, frozen: false }
-    expect(sectionBadge({ ...base, authenticator: a, presence: true, recoveryCreatedAt: 'y' }, 'authenticator').tone).toBe('ok')
-    expect(sectionBadge({ ...base, authenticator: a, presence: true, recoveryCreatedAt: 'y' }, 'presence').key).toBe('badge_on')
-    expect(sectionBadge({ ...base, authenticator: { ...a, frozen: true } }, 'authenticator')).toEqual({ tone: 'warn', key: 'badge_attention' })
-    expect(sectionBadge({ ...base, authenticator: { ...a, pausedUntil: 'z' } }, 'authenticator').key).toBe('badge_attention')
+    expect(sectionBadge({ ...base, presence: true }, 'presence').key).toBe('badge_on')
   })
   test('memory protection: only claimed when verified; a failure or a leak is attention; Windows (limited) is stated, not praised', () => {
     const h = (o: object) => ({ state: 'ok', private: true, coreDumps: 'off', yama: null, lines: [], ...o }) as never
@@ -233,16 +249,21 @@ describe('VAULT.UX2 — what a glance says', () => {
     expect(howNow({ state: 'locked', pendingStepup: false })).toBe(0)
     expect(howNow({ state: 'locked', pendingStepup: true })).toBe(1)
     expect(howNow({ state: 'open', pendingStepup: false })).toBe(2)
-    const a = { enrolledAt: 'x', lastUsedAt: null, failures: 0, pausedUntil: null, frozen: false }
-    expect(howConfirms({ authenticator: null, presence: false })).toBe('nothing')
-    expect(howConfirms({ authenticator: a, presence: false })).toBe('code')
-    expect(howConfirms({ authenticator: a, presence: true })).toBe('both')
+    expect(howConfirms({ presence: false })).toBe('nothing')
+    expect(howConfirms({ presence: true })).toBe('proof')
+    expect(howStep2({ presence: true }).key).toBe('how2_proof')
+    expect(howStep2({ presence: false }).key).toBe('how2_nothing')
   })
   test('exactly ONE primary action: the first missing step, and none while the banner carries it', () => {
-    expect(primarySection(['authenticator', 'recovery', 'presence'], false)).toBe('authenticator')
-    expect(primarySection(['recovery', 'presence'], false)).toBe('recovery')
-    expect(primarySection(['authenticator'], true)).toBeNull()
+    expect(primarySection(['presence', 'recovery'], false)).toBe('presence')
+    expect(primarySection(['recovery'], false)).toBe('recovery')
+    expect(primarySection(['presence'], true)).toBeNull()
     expect(primarySection([], false)).toBeNull()
+  })
+  test('the page asks inline only for a vault that confirms with its password alone', () => {
+    expect(confirmsWithPasswordOnly({ wrappers: ['keychain', 'password'] })).toBe(true)
+    expect(confirmsWithPasswordOnly({ wrappers: ['password', 'touchid'] })).toBe(false)
+    expect(confirmsWithPasswordOnly({ wrappers: ['hello'] })).toBe(false)
   })
 })
 
@@ -257,36 +278,8 @@ describe('live gesture progress (owner 2026-10-02)', () => {
   test('the counts are said with the number, in both languages', () => {
     expect(vt('wiz_pres_checkHello', 'pt')).toContain('não pede nada')
     expect(vtf('wiz_pres_enrolHello', 'pt', { n: 2 })).toContain('2 vezes')
-    expect(vtf('wiz_pres_enrolHello', 'pt', { n: 2 })).toContain('cada abertura pede uma vez')
     expect(vtf('wiz_gesture_progress', 'pt', { i: 1, n: 2 })).toBe('Confirmação 1 de 2')
     expect(vtf('wiz_gesture_progress', 'en', { i: 2, n: 3 })).toBe('Confirmation 2 of 3')
-    expect(vt('wiz_pres_checkHello', 'pt')).not.toContain('duas vezes')
-  })
-})
-
-describe('the unlock policy on the page (owner decision 2026-10-02)', () => {
-  const both = { authenticator: auth, presence: true }
-  test('step 2 of "how your vault works" states the CURRENT mode', () => {
-    expect(howStep2({ ...both })).toEqual({ key: 'how2_daily', hours: 12 }) // absent = the default
-    expect(howStep2({ ...both, unlockPolicy: { mode: 'daily', hours: 8, chosen: true, codeNextUnlock: true, windowEndsAt: null } })).toEqual({ key: 'how2_daily', hours: 8 })
-    expect(howStep2({ ...both, unlockPolicy: { mode: 'always', hours: 12, chosen: true, codeNextUnlock: true, windowEndsAt: null } }).key).toBe('how2_always')
-    expect(howStep2({ ...both, unlockPolicy: { mode: 'hello-only', hours: 12, chosen: true, codeNextUnlock: false, windowEndsAt: null } }).key).toBe('how2_helloOnly')
-    expect(howStep2({ authenticator: auth, presence: false }).key).toBe('how2_code')
-    expect(howStep2({ authenticator: null, presence: false }).key).toBe('how2_nothing')
-  })
-  test('the copy names the mode in both languages', () => {
-    expect(vtf('how2_daily', 'pt', { presence: 'o Windows Hello', hours: 12 })).toBe('o Windows Hello e o código na primeira abertura do dia; depois disso, por 12 h, só o Windows Hello.')
-    expect(vtf('how2_always', 'en', { presence: 'Windows Hello' })).toContain('every time')
-    expect(vtf('how2_helloOnly', 'pt', { presence: 'o Windows Hello' })).toContain('O código ainda é pedido')
-    for (const k of ['sec_unlock', 'unlock_daily', 'unlock_daily_d', 'unlock_always', 'unlock_always_d', 'unlock_helloOnly', 'unlock_helloOnly_d', 'unlock_hours', 'unlock_reset'] as const) {
-      expect(vt(k, 'en').length).toBeGreaterThan(0); expect(vt(k, 'pt').length).toBeGreaterThan(0)
-    }
-  })
-  test('the window is 1–24 whole hours', () => {
-    expect(parseUnlockHours('12')).toBe(12)
-    expect(parseUnlockHours('1')).toBe(1)
-    expect(parseUnlockHours('24')).toBe(24)
-    for (const bad of ['0', '25', '', 'x', '1.5', '100']) expect(parseUnlockHours(bad)).toBeNull()
   })
 })
 
@@ -294,23 +287,23 @@ describe('the unlock policy on the page (owner decision 2026-10-02)', () => {
 import { addableKinds, recoverySteps, splitWords } from './vaultApi'
 
 describe('v2.98.1: what the page offers', () => {
-  test('a loopback page with a presence device starts with ONE gesture instead of the setup code', () => {
-    expect(wizardPlan(['authenticator', 'presence', 'recovery'], true, true)).toEqual(['local', 'probe', 'authenticator', 'presence', 'recovery'])
-    expect(wizardPlan(['authenticator', 'recovery'], true, false)[0]).toBe('setup')
-    expect(wizardPlan(['authenticator'], false, true)).toEqual(['authenticator'])
+  test('a loopback page with a gesture method starts with ONE gesture instead of the setup code', () => {
+    expect(wizardPlan(['presence', 'recovery'], true, true)).toEqual(['local', 'presence', 'recovery'])
+    expect(wizardPlan(['presence', 'recovery'], true, false)[0]).toBe('setup')
+    expect(wizardPlan(['presence'], false, true)).toEqual(['presence'])
   })
-  test('presence ON: only kinds that are offered AND not enrolled can be added — never Hello again', () => {
+  test('presence ON: only kinds that are offered AND not enrolled can be added — never the same one again', () => {
     expect(addableKinds({ presenceAvailable: ['hello'], wrappers: ['hello', 'recovery'] })).toEqual([])
-    expect(addableKinds({ presenceAvailable: ['hello', 'fido2'], wrappers: ['hello'] })).toEqual(['fido2'])
-    expect(addableKinds({ presenceAvailable: ['fido2'], wrappers: ['fido2'] })).toEqual([])
+    expect(addableKinds({ presenceAvailable: ['hello', 'password', 'fido2'], wrappers: ['hello'] })).toEqual(['password', 'fido2'])
+    expect(addableKinds({ presenceAvailable: ['touchid', 'password'], wrappers: ['password'] })).toEqual(['touchid'])
   })
   test('the 24 words from a paste, numbered or not', () => {
     expect(splitWords('1. Abandon 2. ability\n3) able')).toEqual(['abandon', 'ability', 'able'])
     expect(splitWords('a, b; c   d')).toEqual(['a', 'b', 'c', 'd'])
     expect(splitWords('x '.repeat(30)).length).toBe(24)
   })
-  test('after a page recovery the wizard runs what the server still owes, in order', () => {
-    expect(recoverySteps(['recovery', 'authenticator', 'presence'])).toEqual(['authenticator', 'presence', 'recovery'])
+  test('after a page recovery the wizard runs what the server still owes, in order — an old "authenticator" is dropped', () => {
+    expect(recoverySteps(['recovery', 'authenticator', 'presence'])).toEqual(['presence', 'recovery'])
     expect(recoverySteps(null)).toEqual([])
   })
 })
