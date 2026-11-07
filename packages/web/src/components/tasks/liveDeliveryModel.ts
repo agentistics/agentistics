@@ -43,6 +43,8 @@ export interface LiveDeliveryRecord {
   efforts?: string[]; workMs?: number | null; trail?: StageVisit[]
   stageEta?: LiveStageEta; publishEta?: LivePublishEta; block?: LiveBlock | null
   ci?: LiveCiSignal | null; step?: number | null
+  /** Where `step` came from: stated by the worker/flow (`reported`) or read off observed facts (`signals`, named by `stepSignal`). */
+  stepSource?: 'reported' | 'signals' | null; stepSignal?: string | null
   lastAction: { text: string; atMs: number; kind?: string; from?: string; to?: string } | null; blockedReason: string | null; deliveredAtMs: number | null
   /** FLUXO.ENTREGA-DSL: the pre-dispatch a queued piece starts with, and the vaga gate's last verdict. */
   staged?: { harness: string | null; model: string | null; effort: string | null; account: string | null } | null

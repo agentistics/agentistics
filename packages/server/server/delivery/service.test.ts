@@ -285,6 +285,21 @@ describe('delivery service', () => {
     expect(calls.owner).toEqual([expect.objectContaining({ kind: 'aviso' })])
   })
 
+  test('a step report on a piece with NO delivery record writes only the board event — nothing is adopted into the flow', async () => {
+    const { svc, calls } = harness()
+    expect(await svc.get('s1')).toBeNull()
+    expect(await svc.stepEvent('s1', 3, 'worker')).toEqual({ ok: true, status: 200, step: 3, recorded: 'event' })
+    expect(calls.steps).toEqual([3])
+    expect(await svc.get('s1')).toBeNull()
+  })
+  test('the record-less step report refuses a bad number and an unknown subtask', async () => {
+    const { svc, calls } = harness()
+    expect(await svc.stepEvent('s1', 0, 'worker')).toMatchObject({ ok: false, status: 400, code: 'bad_step' })
+    expect(await svc.stepEvent('s1', 2.5, 'worker')).toMatchObject({ ok: false, code: 'bad_step' })
+    expect(await svc.stepEvent('nope', 2, 'worker')).toMatchObject({ ok: false, status: 404, code: 'no_such_subtask' })
+    expect(calls.steps).toEqual([])
+  })
+
   test('QA with the same model as the author is refused', async () => {
     const { svc, w } = harness()
     await walkToQa(svc)

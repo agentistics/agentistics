@@ -10,6 +10,13 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.202.0': {
+    features: [],
+    fixes: [{
+      pt: 'Os cartões da Live agora mostram a porcentagem da etapa (“passo 2 de 5: implementando”), lida de fatos reais: sessão aberta, primeira edição, testes rodando, commit no ramo, entrega da sessão e os portões da QA, revisão e merge. Sem sinal, a linha continua escondida — nada é chutado.',
+      en: 'Live cards now show the stage percentage (“step 2 of 5: implementing”), read from real facts: session open, first edit, tests running, a commit on the branch, the session’s handback and the QA, review and merge gates. With no signal the line stays hidden — nothing is guessed.',
+    }],
+  },
   '2.201.2': {
     features: [],
     fixes: [{

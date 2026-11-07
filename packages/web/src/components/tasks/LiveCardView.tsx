@@ -19,7 +19,7 @@ import { surface } from './board'
 import {
   cardPills, isQueued, queuePosition, STAGE_LABEL, type LiveCard, type LiveStage, type RuntimeFacts,
 } from './liveDeliveryModel'
-import { blockLines, cardPercent, cardStateWord, ciChecklist, etaBoxes, queueLines, stageBar, timeRow, waitingReason } from './liveCardModel'
+import { blockLines, cardPercent, cardStateWord, stepSourceNote, ciChecklist, etaBoxes, queueLines, stageBar, timeRow, waitingReason } from './liveCardModel'
 import { LiveOdometer } from './LiveOdometer'
 
 const STATE_COLOR = {
@@ -125,7 +125,7 @@ export function LiveCardView(p: LiveCardViewProps) {
             ))}
           </span>
           {pct && (
-            <span data-live-pct style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 11, color: MUTED }}>
+            <span data-live-pct title={stepSourceNote(d, pt) ?? undefined} style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 11, color: MUTED }}>
               <LiveOdometer value={pct.pct} color={stageColor} />
               <span>{pt ? 'desta etapa' : 'of this stage'} · {pt ? 'passo' : 'step'} {pct.step} {pt ? 'de' : 'of'} {pct.of}: <span style={{ color: 'var(--text-secondary)' }}>{pct.label}</span></span>
             </span>

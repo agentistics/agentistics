@@ -20,6 +20,9 @@ describe("agentistics_live_delivery", () => {
     const block = src.slice(at, at + 2500);
     expect(block).toContain("never invent a time");
     expect(block).toContain("leaders");
+    // The step inside the stage is readable with its source, so an agent reads what the card shows.
+    expect(block).toContain("stepSource");
+    expect(block).toContain("stepSignal");
     expect(block).not.toContain("BETA");
     expect(src).toContain("liveDeliveryQuery(args as any)");
   });

@@ -152,6 +152,31 @@ export function cardPercent(d: Pick<LiveDeliveryRecord, 'stage' | 'ci' | 'step'>
   return stagePercent(d.stage, d.step, pt)
 }
 
+const SIGNAL_WORD: Record<string, { pt: string; en: string }> = {
+  session: { pt: 'a sessão está aberta', en: 'the session is open' },
+  edit: { pt: 'a sessão editou arquivos', en: 'the session edited files' },
+  tests: { pt: 'a sessão rodou testes', en: 'the session ran tests' },
+  commit: { pt: 'houve um commit no ramo da peça', en: 'there is a commit on the piece\'s branch' },
+  handback: { pt: 'a sessão entregou (handback)', en: 'the session handed back' },
+  browser: { pt: 'a QA abriu o navegador', en: 'QA drove a browser' },
+  verdict: { pt: 'o veredito da QA foi registrado', en: 'the QA verdict is recorded' },
+  'deletions-gate': { pt: 'o portão de apagados rodou', en: 'the deletions gate ran' },
+  review: { pt: 'a decisão do líder foi registrada', en: 'the leader\'s decision is recorded' },
+  pr: { pt: 'o PR existe', en: 'the PR exists' },
+  merged: { pt: 'o PR foi mergeado', en: 'the PR is merged' },
+  stage: { pt: 'a peça entrou nesta etapa', en: 'the piece entered this stage' },
+}
+
+/** PURE: where the shown step comes from, in words — "relatado pelo worker" or the observed fact. Null = nothing to say. */
+export function stepSourceNote(d: Pick<LiveDeliveryRecord, 'stepSource' | 'stepSignal'>, pt: Pt): string | null {
+  if (d.stepSource === 'reported') return pt ? 'passo relatado pelo worker ou pelo fluxo' : 'step reported by the worker or the flow'
+  if (d.stepSource === 'signals') {
+    const w = d.stepSignal ? SIGNAL_WORD[d.stepSignal]?.[pt ? 'pt' : 'en'] : undefined
+    return pt ? `passo lido de fatos observados${w ? `: ${w}` : ''}` : `step read from observed facts${w ? `: ${w}` : ''}`
+  }
+  return null
+}
+
 export interface CiLine { key: 'merge' | 'release' | 'tag'; done: boolean; text: string }
 
 /** PURE: the three-line signal checklist of a piece in CI · publicando. */
