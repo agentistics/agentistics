@@ -42,12 +42,16 @@ export interface FabCallButton {
   onPress: () => void
 }
 
-export function VaultFabPop({ lang, isMobile, suppressed, call = null, children }: {
+export function VaultFabPop({ lang, isMobile, suppressed, call = null, onShownChange, dismissWhen = false, children }: {
   lang: 'en' | 'pt'
   isMobile: boolean
   /** The button is being dragged: the icon goes, and nothing may summon it. */
   suppressed: boolean
   call?: FabCallButton | null
+  /** Reports whether the icons are up, so the "Minimizadas" list on the same button can yield (`lib/nayFabMenus.ts`). */
+  onShownChange?: (shown: boolean) => void
+  /** While true the pop sinks — the minimized list opened and the last one opened wins. */
+  dismissWhen?: boolean
   children: ReactNode
 }) {
   const [s, dispatch] = useReducer(reducer, VAULT_FAB_INITIAL)
@@ -74,6 +78,9 @@ export function VaultFabPop({ lang, isMobile, suppressed, call = null, children 
     if (s.phase !== 'shown') setRipple(n => n + 1)
     dispatch({ type: 'summon' })
   }
+
+  useEffect(() => { onShownChange?.(s.phase === 'shown') }, [s.phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (dismissWhen) dispatch({ type: 'dismiss' }) }, [dismissWhen])
 
   // A drag of the button takes the icon away.
   useEffect(() => { if (suppressed) { cancelPress(); dispatch({ type: 'dismiss' }) } }, [suppressed])

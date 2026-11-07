@@ -25,7 +25,7 @@
  * browser page from an agent's HTTP client, exactly as `csrf.ts` does; they are not a secret. The leader
  * proof has the same stated limit as every other `session` proof (`session-identity.ts`).
  */
-import { originAllowed } from './cors'
+import { vaultRequestAllowed } from './vault/http'
 
 export const STALE_MS = 20_000
 /** A start request nobody collected in this long is forgotten. */
@@ -150,21 +150,21 @@ export function startStatus(r: StartReply | { ok: false; error: 'bad_report' }):
 export interface OriginCtx { host: string; allowlist: string[]; dev: boolean }
 
 /**
- * PURE. Did this request come from a page of the dashboard? A browser stamps `Sec-Fetch-Site` itself (a page
- * script cannot set it): `same-origin` is the dashboard. Without it (an older browser) the `Origin` must be this
- * server's own or an allowlisted one. A request with neither — curl, a worker's HTTP client, the MCP — is NOT
- * the dashboard. `none` (an address-bar navigation) is not a fetch from a page and does not count.
+ * PURE. Did this request come from a page of the dashboard? It is EXACTLY the vault's predicate
+ * (`vaultRequestAllowed`, `vault/http.ts`), not a variant: `Content-Type: application/json` required, and
+ * `Sec-Fetch-Site: same-origin` (or, only when that header is absent, an `Origin` that is this host / allowlisted).
+ * Every other `Sec-Fetch-Site` value (`same-site`, `cross-site`, `none`) is refused.
+ *
+ * ACCEPTED THREAT MODEL, the same as the vault's: this is browser provenance, not authentication. A local
+ * process of the same user that forges `Sec-Fetch-Site`/`Origin` passes here exactly as it passes there.
+ * What it stops is a web page (cross-site, text/plain "simple" POSTs) and a client sending neither header.
+ * Only for non-GET requests (the predicate waves GET through; the two callers are PUT and POST).
  */
-export function dashboardRequest(h: { secFetchSite: string | null; origin: string | null }, ctx: OriginCtx): boolean {
-  if (h.secFetchSite === 'same-origin') return true
-  if (h.secFetchSite !== null && h.secFetchSite !== 'same-site' && h.secFetchSite !== 'cross-site') return false
-  const o = h.origin
-  if (!o) return false
-  return o === `https://${ctx.host}` || o === `http://${ctx.host}` || originAllowed(o, ctx.allowlist, ctx.dev)
+export function dashboardRequest(req: { method: string; headers: Headers }, ctx: OriginCtx): boolean {
+  return vaultRequestAllowed(req, ctx.host, { allowlist: ctx.allowlist, dev: ctx.dev }).ok
 }
 
-const dashboardOf = (req: Request, ctx: OriginCtx): boolean =>
-  dashboardRequest({ secFetchSite: req.headers.get('sec-fetch-site'), origin: req.headers.get('origin') }, ctx)
+const dashboardOf = (req: Request, ctx: OriginCtx): boolean => dashboardRequest(req, ctx)
 
 /** A state report is a few fields; anything bigger is not one. */
 export const STATE_MAX_BYTES = 1024
