@@ -1290,9 +1290,27 @@ export function SessionChat({ session, row, lang, act: actProp, onArtifacts, onR
    * `'auto'` before reading `scrollHeight` is required: skip it and a field that GREW once can only
    * ever read its own (already tall) scrollHeight back, so deleting text never shrinks it again.
    */
+  const lastFit = useRef({ len: 0, newlines: 0, maxH: 0 })
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
+    /*
+     * ONE character typed onto a draft with the same line breaks can only GROW the field, so the
+     * reset-to-`auto` below (two style writes around a forced layout — per keystroke, of the whole
+     * page) is skipped for it: if the content still fits the box, nothing is written at all; if a line
+     * just wrapped, the box is set to the new height without the reset. Everything else — a deletion, a
+     * paste, a line break, the ceiling moving, the first fit — takes the full path, which is the only
+     * one that can SHRINK the field. Measured on a 880-key typing run: this effect was the largest
+     * single function of the typing path (~0.6 ms per key, more in WebKit).
+     */
+    const nl = (draft.match(/\n/g) ?? []).length
+    const prev = lastFit.current
+    lastFit.current = { len: draft.length, newlines: nl, maxH: maxComposerH }
+    if (prev.len > 0 && draft.length === prev.len + 1 && nl === prev.newlines && maxComposerH === prev.maxH && el.style.height !== '') {
+      if (el.scrollHeight > el.clientHeight) el.style.height = `${Math.min(el.scrollHeight, maxComposerH)}px`
+      setComposerOverflows(el.scrollHeight > maxComposerH + 1)
+      return
+    }
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, maxComposerH)}px`
     // The scrollbar only once the draft is past the ceiling. Under the text-size zoom the measured

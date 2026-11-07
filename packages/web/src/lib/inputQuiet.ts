@@ -9,9 +9,15 @@
  * person typing waits until the input has been quiet for `QUIET_MS`, and never longer than
  * `MAX_WAIT_MS` (so a long dictation cannot freeze the numbers indefinitely). Several refreshes that
  * arrive while waiting collapse into one: only the latest is rendered.
+ *
+ * The ceiling was 8 s and that was the next thing measured: a person typing for a minute straight (the
+ * browser profile types 20 sentences back to back) had the held patch forced in every 8 s, and each
+ * forced landing was a 100–700 ms derivation in the middle of a sentence — the long tasks that were
+ * left once everything else was fixed. Nobody types a minute without a 0.9 s breath, so the ceiling is
+ * now a safety net for a stuck "typing" state (a held key, a runaway dictation), not a cadence.
  */
 export const QUIET_MS = 900
-export const MAX_WAIT_MS = 8_000
+export const MAX_WAIT_MS = 90_000
 
 /** PURE: how long a queued render must still wait (0 = now). */
 export function quietDelay(now: number, lastInputAt: number, queuedAt: number, quietMs = QUIET_MS, maxWaitMs = MAX_WAIT_MS): number {

@@ -148,14 +148,30 @@ export function dedupeEnded<R extends TeamRow>(rows: readonly R[]): R[] {
   const end = (r: R) => r.endedAt ?? r.startedAt ?? -Infinity
   const ended = rows.filter(r => !isLive(r.state)).sort((a, b) => end(b) - end(a))
   const drop = new Set<R>()
-  const kept: R[] = []
+  /*
+   * "Is there an earlier-kept row that is this one's twin?" is asked once per ended row, and on a
+   * machine with thousands of stored sessions the old `kept.find(...)` made it quadratic — measured
+   * at ~120 ms per render of the aside, repeated on every fleet frame while somebody typed. The
+   * rule is unchanged; it is answered from three indexes over what has been kept so far:
+   *  - a conversation id is the proof of identity when BOTH rows carry one;
+   *  - otherwise (either side unlinked) the same title within TWIN_WINDOW_MS.
+   * So a linked row matches a kept row by id, or an UNLINKED kept row by title and time; an unlinked
+   * row matches ANY kept row by title and time.
+   */
+  const keptCids = new Set<string>()
+  const keptByTitle = new Map<string, number[]>()
+  const keptUnlinkedByTitle = new Map<string, number[]>()
+  const near = (times: number[] | undefined, t: number) => !!times && times.some(k => Math.abs(k - t) <= TWIN_WINDOW_MS)
+  const push = (m: Map<string, number[]>, title: string, t: number) => { const l = m.get(title); if (l) l.push(t); else m.set(title, [t]) }
   for (const r of ended) {
-    const twin = kept.find(k =>
-      (cidOf(r) && cidOf(k)
-        ? cidOf(r) === cidOf(k)
-        : k.title === r.title && Math.abs(end(k) - end(r)) <= TWIN_WINDOW_MS))
-    if (twin) drop.add(r)
-    else kept.push(r)
+    const cid = cidOf(r)
+    const t = end(r)
+    const twin = cid
+      ? keptCids.has(cid) || near(keptUnlinkedByTitle.get(r.title), t)
+      : near(keptByTitle.get(r.title), t)
+    if (twin) { drop.add(r); continue }
+    if (cid) keptCids.add(cid); else push(keptUnlinkedByTitle, r.title, t)
+    push(keptByTitle, r.title, t)
   }
   return rows.filter(r => !drop.has(r))
 }
