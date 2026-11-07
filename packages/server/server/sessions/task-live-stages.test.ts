@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  blockOf, buildLive, ciSignalOf, stageOfStatus, stepOf, estimateStages, nextStageOf, stageTypicals, trailOf, type StageTypical, type StageVisit,
+  awaitingApprovalOf, blockOf, buildLive, ciSignalOf, stageOfStatus, stepOf, estimateStages, nextStageOf, stageTypicals, trailOf, type StageTypical, type StageVisit,
 } from './task-live'
 import { describeLive, workerWord, type FleetRowLite } from './task-live-view'
 import type { TaskDetail } from './task-report'
@@ -250,5 +250,18 @@ describe('FLUXO.ENTREGA-DSL: the Live is a projection of the delivery record', (
     expect(q.stage).toBe('queue')
     expect(q.staged).toEqual({ harness: 'codex', model: 'gpt-5.5', effort: 'high', account: 'acc_2' })
     expect(q.slot).toMatchObject({ ok: false })
+  })
+})
+
+describe('M5 — a human gate waiting on the owner is projected to the card', () => {
+  const base = { phase: 'revisao_lider', revision: 4, humanGates: ['pr_merge'] }
+  test('asked at this revision and unanswered → the card carries it', () => {
+    expect(awaitingApprovalOf({ ...base, asked: { pr_merge: 4 } })).toEqual({ phase: 'pr_merge' })
+  })
+  test('never asked, asked at an older revision, or already answered → nothing', () => {
+    expect(awaitingApprovalOf({ ...base })).toBeNull()
+    expect(awaitingApprovalOf({ ...base, asked: { pr_merge: 3 } })).toBeNull()
+    expect(awaitingApprovalOf({ ...base, asked: { pr_merge: 4 }, approvals: { pr_merge: { revision: 4, decision: 'approve' } } })).toBeNull()
+    expect(awaitingApprovalOf(undefined)).toBeNull()
   })
 })

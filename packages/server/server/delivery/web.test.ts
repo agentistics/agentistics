@@ -52,6 +52,14 @@ describe('delivery CLI parsing', () => {
     expect(isDeliveryFlowVerb(['status', 'abc'])).toBe(false)
     expect(isDeliveryFlowVerb(['ls'])).toBe(false)
   })
+  test('L4: `flow --help` lists the delivery verbs', async () => {
+    expect(isDeliveryFlowVerb(['--help'])).toBe(true)
+    const { runDeliveryCli, DELIVERY_FLOW_HELP } = await import('./cli')
+    const out: string[] = []
+    expect(await runDeliveryCli(['--help'], { out: l => out.push(l), err: () => {} }, {})).toBe(0)
+    expect(out.join('\n')).toContain('agentop flow gate')
+    for (const g of ['cabeca', 'mergeado']) expect(DELIVERY_FLOW_HELP).toContain(g)
+  })
   test('flags', () => {
     expect(parseFlags(['phase', 'ci', '--subtask', 's1', '--merge-sha', 'abc', '--dry'])).toEqual({ pos: ['phase', 'ci'], flags: { subtask: 's1', mergeSha: 'abc', dry: 'true' } })
   })

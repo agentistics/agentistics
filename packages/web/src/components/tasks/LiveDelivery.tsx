@@ -34,6 +34,7 @@ import {
   snapshotOf, taskOfSession, taskOptions, writeCollapsedPrefs, type CollapsedPrefs, type BoardSnapshot, type Gone, type LocateAnswer,
 } from './liveCardModel'
 import { LiveCardView } from './LiveCardView'
+import { LiveApprove } from './LiveApprove'
 import { LiveLeaders } from './LiveLeaders'
 import type { LeaderWorker } from './liveDeliveryModel'
 import { LiveTaskFilter } from './LiveTaskFilter'
@@ -305,10 +306,13 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
   }
   const roleOf = (c: LiveCard): 'leader' | 'worker' => (c.agents.some(a => leaderIds.has(a.id)) ? 'leader' : 'worker')
   const renderCard = (c: LiveCard, embedded = false) => (
-    <LiveCardView
-      key={c.d.key} c={c} cards={cards} nowMs={nowMs} pt={pt} fleet={fleet} accountLabels={accountLabels} runtime={reply.runtime}
-      leaderName={leaderOf(c)} role={roleOf(c)} mobile={isMobile} onOpen={open} embedded={embedded} cameFrom={moved[c.d.key]?.from ?? null}
-    />
+    <div key={c.d.key} style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+      <LiveCardView
+        c={c} cards={cards} nowMs={nowMs} pt={pt} fleet={fleet} accountLabels={accountLabels} runtime={reply.runtime}
+        leaderName={leaderOf(c)} role={roleOf(c)} mobile={isMobile} onOpen={open} embedded={embedded} cameFrom={moved[c.d.key]?.from ?? null}
+      />
+      {c.d.awaitingApproval && c.d.subtaskId && <LiveApprove subtaskId={c.d.subtaskId} phase={c.d.awaitingApproval.phase} pt={pt} mobile={isMobile} />}
+    </div>
   )
   const togglePub = (key: string) => setOpenPub(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n })
   const renderPub = (c: LiveCard) => {

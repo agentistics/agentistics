@@ -391,9 +391,10 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps(),
     'aviso-ao-dono': async (value: unknown, ctx?: { step?: string }) => {
       const text = typeof inputOf(value).text === 'string' ? (inputOf(value).text as string).trim() : ''
       if (!text) return refuse('an away notice needs text', ['text'])
-      // The pedidos reminder's 3rd step ESCALATES to the owner (a request nobody took) — a human step. While autonomous
+      // The pedidos reminder's 3rd step ESCALATES to the owner (a request nobody took) — a human step; so does a wait whose
+      // owner session ended with no leader to tell (`wait-ended`). The board note still records both. While autonomous
       // mode is on it is skipped here too, so an engine built before the audit cannot call the owner either.
-      if (ctx?.step === 'h1-lembrar') {
+      if (ctx?.step === 'h1-lembrar' || ctx?.step === 'wait-ended') {
         const away = deps.autonomous ? await deps.autonomous().catch(() => true) : await (await import('../delivery/host')).deliveryAutonomous().catch(() => true)
         if (away) return { ok: true, skipped: 'pulado: modo autônomo' }
       }

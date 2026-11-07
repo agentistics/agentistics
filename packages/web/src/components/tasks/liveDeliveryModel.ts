@@ -47,6 +47,8 @@ export interface LiveDeliveryRecord {
   staged?: { harness: string | null; model: string | null; effort: string | null; account: string | null } | null
   slot?: { ok: boolean; reason: string | null; at: string } | null
   phase?: string | null
+  /** A human gate the owner was asked about and has not answered: the card offers approve / reject. */
+  awaitingApproval?: { phase: string } | null
 }
 export type WorkerWord = 'working' | 'needs-you' | 'blocked' | 'delivered' | 'awaiting-review' | 'idle'
 export interface LeaderWorker {

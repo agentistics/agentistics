@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { freemem, homedir, tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { createServer } from 'node:net'
 import { gitEnv } from './backup/repo-probe'
@@ -395,6 +395,36 @@ export function memAvailableBytes(): number | null {
     const m = /^MemAvailable:\s+(\d+) kB/m.exec(readFileSync('/proc/meminfo', 'utf8'))
     return m ? Number(m[1]) * 1024 : null
   } catch { return null }
+}
+
+/**
+ * PURE. Available memory from macOS `vm_stat` output: free + inactive + speculative + purgeable pages, times the page size
+ * the header states. `os.freemem()` on macOS counts only the FREE pages, so a healthy Mac routinely reports under 3 GB —
+ * the inactive/cached pages are reclaimable and are what "available" means on Linux's `MemAvailable`.
+ */
+export function parseVmStat(text: string): number | null {
+  const size = /page size of (\d+) bytes/.exec(text)
+  if (!size) return null
+  const pages = (label: string) => { const m = new RegExp(`^${label}:\\s+(\\d+)\\.?`, 'm').exec(text); return m ? Number(m[1]) : 0 }
+  const free = pages('Pages free'), inactive = pages('Pages inactive'), speculative = pages('Pages speculative'), purgeable = pages('Pages purgeable')
+  if (!free && !inactive) return null
+  return (free + inactive + speculative + purgeable) * Number(size[1])
+}
+
+/**
+ * The machine's AVAILABLE memory on any platform: `MemAvailable` on Linux, `vm_stat` on macOS (see `parseVmStat`),
+ * `os.freemem()` elsewhere. null = unmeasured.
+ */
+export function memAvailableAnyBytes(): number | null {
+  if (process.platform === 'linux') return memAvailableBytes()
+  if (process.platform === 'darwin') {
+    try {
+      const out = execFileSync('vm_stat', [], { encoding: 'utf8', timeout: 3000 })
+      const n = parseVmStat(out)
+      if (n !== null) return n
+    } catch { /* fall through to freemem */ }
+  }
+  try { return freemem() } catch { return null }
 }
 
 /**

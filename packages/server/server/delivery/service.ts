@@ -18,11 +18,11 @@
  * deferred by the leader, and the only owner-facing output is the INFORMATIONAL "publicado" notice.
  */
 import {
-  EDGES, GATES, PHASE_STATUS, isGate, isPhase, newDelivery, planBlock, planTransition, planUnblock, planWatch,
-  refusalStatus, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
+  EDGES, GATES, adoptPhase, isGate, isPhase, newDelivery, planBlock, planTransition, planUnblock, planWatch,
+  refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
 } from './machine'
 import { releaseFailed, runGate, type GateFacts, type GateVerdict } from './gates'
-import type { DeliveryStore } from './store'
+import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 
 export interface DeliveryBoard {
   /** Move the subtask's board status to the one this phase is shown under (created when missing). */
@@ -77,6 +77,14 @@ const STEP_ON_GATE: Partial<Record<`${Phase}:${GateName}`, number>> = {
   'executando:salvo': 4, 'ajuste:salvo': 3, 'qa:qa-modelo': 2, 'revisao_lider:delecoes': 2, 'pr_merge:delecoes': 2,
 }
 
+const RELEASE_POLL_MIN_MS = 60_000
+const RELEASE_POLL_MAX_MS = 10 * 60_000
+const QUEUE_SLOT_REFRESH_MS = 5 * 60_000
+
+const safe = <A extends unknown[]>(fn: (...a: A) => Promise<DeliveryReply>) => async (...a: A): Promise<DeliveryReply> => {
+  try { return await fn(...a) } catch (e) { if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message); throw e }
+}
+
 export function createDeliveryService(d: DeliveryDeps) {
   /** The record, created at `fila` on first use (a subtask that exists on the board). */
   const ensure = async (subtaskId: string, o: { versionTarget?: string; humanGates?: Phase[]; leaderSessionId?: string } = {}): Promise<DeliveryRecord | DeliveryReply> => {
@@ -85,10 +93,28 @@ export function createDeliveryService(d: DeliveryDeps) {
     if (have) return have
     const sub = await d.facts.subtask(subtaskId)
     if (!sub) return fail(404, 'no_such_subtask', `subtask ${subtaskId} does not exist on the board`)
+    // A piece already past the queue on the board (every 2.200.8 piece started before this flow) is ADOPTED at its phase.
+    const phase = adoptPhase(sub.status)
     return d.store.update(doc => {
-      doc.deliveries[subtaskId] ??= newDelivery({ subtaskId, taskId: sub.taskId, at: iso(d), ...o })
+      doc.deliveries[subtaskId] ??= newDelivery({ subtaskId, taskId: sub.taskId, at: iso(d), phase, ...o })
       return doc.deliveries[subtaskId]!
     })
+  }
+
+  /** Autonomous mode now. An unreadable preference reads as ON (asking someone who is away is the error) — and SAYS so. */
+  const autonomousNow = async (leader: string | undefined, warnings: string[]): Promise<boolean> => {
+    try { return await d.autonomous(leader) } catch (e) {
+      warnings.push(`autonomous mode could not be read (${e instanceof Error ? e.message.split('\n')[0] : String(e)}) — treated as ON`)
+      return true
+    }
+  }
+
+  /** The owner (no session proof), the flow engine itself, the recorded leader, or a leader session of this delivery's task. */
+  const leads = async (r: DeliveryRecord, actor: string): Promise<boolean> => {
+    if (actor === 'owner' || actor.startsWith('flow:')) return true
+    if (r.leaderSessionId && actor === r.leaderSessionId) return true
+    const sessions = await d.facts.sessions().catch(() => [])
+    return sessions.some(x => x.id === actor && x.role === 'leader' && x.taskId === r.taskId)
   }
   const isReply = (v: DeliveryRecord | DeliveryReply): v is DeliveryReply => 'status' in v && 'ok' in v
 
@@ -99,9 +125,11 @@ export function createDeliveryService(d: DeliveryDeps) {
     r.updatedAt = iso(d)
   }
 
-  const wake = async (r: DeliveryRecord, text: string, warnings: string[]) => {
-    if (!r.leaderSessionId) { warnings.push('no leader recorded on this delivery — nobody was woken'); return }
-    if (!(await d.notify.session(r.leaderSessionId, `[entrega ${r.subtaskId}] ${text}`).catch(() => false))) warnings.push(`the leader ${r.leaderSessionId} could not be woken`)
+  /** Types into the leader's composer. true = delivered; a failed wake is a warning AND false, so a cadence is never stamped for it. */
+  const wake = async (r: DeliveryRecord, text: string, warnings: string[]): Promise<boolean> => {
+    if (!r.leaderSessionId) { warnings.push('no leader recorded on this delivery — nobody was woken'); return false }
+    if (!(await d.notify.session(r.leaderSessionId, `[entrega ${r.subtaskId}] ${text}`).catch(() => false))) { warnings.push(`the leader ${r.leaderSessionId} could not be woken`); return false }
+    return true
   }
 
   /** The effects of a stored transition. Never throws; failures become warnings. */
@@ -133,16 +161,17 @@ export function createDeliveryService(d: DeliveryDeps) {
     }
   }
 
-  const transition = async (subtaskId: string, to: unknown, input: TransitionInput, actor: string): Promise<DeliveryReply> => {
+  const transition = async (subtaskId: string, to: unknown, input: TransitionInput, actor: string, known?: ReadonlyMap<GateName, GateVerdict>): Promise<DeliveryReply> => {
     const got = await ensure(subtaskId)
     if (isReply(got)) return got
     if (!isPhase(to)) return fail(400, 'fase_desconhecida', `unknown phase ${String(to)}`)
     const edge = EDGES[`${got.phase}>${to}`]
-    // Gates are run fresh by the transition itself (outside the lock), so a caller never brings proof.
+    // Gates are run fresh by the transition itself (outside the lock), so a caller never brings proof. `known` is the tick's
+    // own verdict from the same instant (the `release` gate it already ran), never anything a caller states.
     const verdicts = new Map<GateName, GateVerdict>()
-    if (edge) for (const g of edge.gates) verdicts.set(g, await runGate(g, got, d.facts))
-    const autonomous = await d.autonomous(got.leaderSessionId).catch(() => true)
+    if (edge) for (const g of edge.gates) verdicts.set(g, known?.get(g) ?? await runGate(g, got, d.facts))
     const warnings: string[] = []
+    const autonomous = await autonomousNow(got.leaderSessionId, warnings)
     const out = await d.store.update(doc => {
       const cur = doc.deliveries[subtaskId]
       if (!cur) return { kind: 'gone' as const }
@@ -156,7 +185,20 @@ export function createDeliveryService(d: DeliveryDeps) {
     if (out.kind === 'gone') return fail(404, 'no_delivery', 'the delivery record vanished')
     if (out.kind === 'moved') return fail(409, 'revisao_obsoleta', `the delivery moved meanwhile (now ${out.cur.phase}, rev ${out.cur.revision}); read it again`, [], out.cur)
     if (out.kind === 'refused') {
-      if (out.plan.code === 'aguardando_dono' && !autonomous) await d.notify.owner(`Aprovação pedida: ${subtaskId} quer entrar em ${String(to)} (portão humano). Aprove ou reprove em Agentask.`, 'decisao').catch(() => undefined)
+      if (out.plan.code === 'aguardando_dono' && !autonomous) {
+        // ONE bell per (subtask, phase, revision): a retried transition is the same question, not a new one.
+        const first = await d.store.update(doc => {
+          const c = doc.deliveries[subtaskId]
+          if (!c) return false
+          const asked = (c.asked ??= {})
+          if (asked[to] === c.revision) return false
+          asked[to] = c.revision
+          return true
+        })
+        if (first) await d.notify.owner(`Aprovação pedida: ${subtaskId} quer entrar em ${String(to)} (portão humano). Aprove ou reprove no cartão da Live (botão), ou com: agentop flow approve --subtask ${subtaskId} --phase ${String(to)} --decision approve|reject.`, 'decisao').catch(() => undefined)
+        const fresh = await d.store.get(subtaskId)
+        return refused(out.plan, fresh ?? out.cur)
+      }
       return refused(out.plan, out.cur)
     }
     await effects(out.before, out.after, actor, warnings)
@@ -185,7 +227,8 @@ export function createDeliveryService(d: DeliveryDeps) {
   const block = async (subtaskId: string, reason: unknown, text: string, actor: string): Promise<DeliveryReply> => {
     const got = await ensure(subtaskId)
     if (isReply(got)) return got
-    const autonomous = await d.autonomous(got.leaderSessionId).catch(() => true)
+    const blockWarnings: string[] = []
+    const autonomous = await autonomousNow(got.leaderSessionId, blockWarnings)
     const out = await d.store.update(doc => {
       const cur = doc.deliveries[subtaskId]!
       const plan = planBlock(cur, reason, text, { at: iso(d), actor, autonomous })
@@ -194,19 +237,30 @@ export function createDeliveryService(d: DeliveryDeps) {
     })
     if (!out.plan.ok) return refused(out.plan, out.before)
     const after = out.plan.next
-    const warnings: string[] = []
+    const warnings: string[] = [...blockWarnings]
     await effects(out.before, after, actor, warnings)
     const b = after.block!
+    let woke = false
     if (b.reason === 'decisao_do_dono') await d.notify.owner(`Precisa da sua decisão: ${subtaskId} — ${b.text}`, 'decisao').catch(() => undefined)
-    else if (b.reason === 'fora_das_autorizacoes') await wake(after, `bloqueio fora das autorizações (${b.text}). Modo autônomo: NÃO faça a ação; a peça foi adiada para o próximo lote — escolha o caminho seguro e registre.`, warnings)
-    else if (b.reason !== 'dependencia') await wake(after, `bloqueada (${b.reason}): ${b.text}. Quem destrava: o líder. Destrave com agentistics_task_phase action=unblock.`, warnings)
-    await d.store.update(doc => { const c = doc.deliveries[subtaskId]; if (c?.block && b.reason !== 'dependencia') { c.block.lastWakeAt = iso(d); c.block.wakes = (c.block.wakes ?? 0) + 1 } })
+    else if (b.reason === 'fora_das_autorizacoes') woke = await wake(after, `bloqueio fora das autorizações (${b.text}). Modo autônomo: NÃO faça a ação; a peça foi adiada para o próximo lote — escolha o caminho seguro e registre.`, warnings)
+    else if (b.reason !== 'dependencia') woke = await wake(after, `bloqueada (${b.reason}): ${b.text}. Quem destrava: o líder. Destrave com agentistics_task_phase action=unblock.`, warnings)
+    // The cadence is stamped only for a wake that REACHED the leader: a dead leader is not "woken" (the next tick tries again).
+    if (woke) await d.store.update(doc => { const c = doc.deliveries[subtaskId]; if (c?.block && b.reason !== 'dependencia') { c.block.lastWakeAt = iso(d); c.block.wakes = (c.block.wakes ?? 0) + 1 } })
     return { ok: true, status: 200, record: after, warnings }
   }
 
   const unblock = async (subtaskId: string, actor: string, detail?: string, to?: unknown): Promise<DeliveryReply> => {
     const got = await d.store.get(subtaskId)
     if (!got) return fail(404, 'no_delivery', `no delivery record for ${subtaskId}`)
+    if (got.block) {
+      // Who lifts a block is part of the block (spec §Bloqueio): the leader, the owner for a decision only the owner can take
+      // (autonomous OFF — with it ON that decision is the leader's safe path), and the flow itself for a finished dependency.
+      const autonomous = await d.autonomous(got.leaderSessionId).catch(() => true)
+      const who = unlockerOf(got.block.reason)
+      if (who === 'owner' && !autonomous) {
+        if (actor !== 'owner') return fail(403, 'so_o_dono', 'only the owner lifts a block waiting on an owner decision (a session cannot)', [], got)
+      } else if (!(await leads(got, actor))) return fail(403, 'so_o_lider', 'only the leader of the task (or the owner) lifts a block', [], got)
+    }
     const out = await d.store.update(doc => {
       const cur = doc.deliveries[subtaskId]!
       const plan = planUnblock(cur, { at: iso(d), actor, ...(detail ? { detail } : {}), ...(to !== undefined ? { to } : {}) })
@@ -228,6 +282,8 @@ export function createDeliveryService(d: DeliveryDeps) {
     const got = await d.store.get(subtaskId)
     if (!got) return fail(404, 'no_delivery', `no delivery record for ${subtaskId}`)
     if (!got.humanGates.includes(phase)) return fail(422, 'sem_portao_humano', `${phase} has no human gate on this delivery`)
+    // Only a question that was ASKED is answered: the transition raised it (autonomous OFF) at this revision.
+    if (got.asked?.[phase] !== got.revision) return fail(409, 'nao_perguntado', `the owner was not asked to approve entering ${phase} at this revision — the leader's transition to ${phase} asks first`, [], got)
     const after = await d.store.update(doc => {
       const cur = doc.deliveries[subtaskId]!
       cur.approvals[phase] = { decision, at: iso(d), revision: cur.revision, ...(note ? { note } : {}) }
@@ -244,6 +300,9 @@ export function createDeliveryService(d: DeliveryDeps) {
   const configure = async (subtaskId: string, patch: Record<string, unknown>, actor: string): Promise<DeliveryReply> => {
     const got = await ensure(subtaskId)
     if (isReply(got)) return got
+    // The leader (or the owner) owns these settings: version target, human gates, deletions, leader, PR, tag.
+    // `qaSessionId` / `authorSessionId` are NOT settings: the host records them from the sessions it opened / the registry.
+    if (!(await leads(got, actor))) return fail(403, 'so_o_lider', 'only the leader of the task (or the owner) configures a delivery', [], got)
     const after = await d.store.update(doc => {
       const cur = doc.deliveries[subtaskId]!
       if (typeof patch.versionTarget === 'string' && patch.versionTarget.trim()) cur.versionTarget = patch.versionTarget.trim()
@@ -251,8 +310,6 @@ export function createDeliveryService(d: DeliveryDeps) {
       if (typeof patch.leaderSessionId === 'string' && SUB_ID.test(patch.leaderSessionId)) cur.leaderSessionId = patch.leaderSessionId
       if (typeof patch.pr === 'number' && Number.isInteger(patch.pr) && patch.pr > 0) cur.pr = patch.pr
       if (typeof patch.tag === 'string' && /^v?\d[\w.-]*$/.test(patch.tag)) cur.tag = patch.tag
-      if (typeof patch.qaSessionId === 'string' && SUB_ID.test(patch.qaSessionId)) cur.qaSessionId = patch.qaSessionId
-      if (typeof patch.authorSessionId === 'string' && SUB_ID.test(patch.authorSessionId)) cur.authorSessionId = patch.authorSessionId
       const del = patch.allowDeletions as { paths?: unknown; reason?: unknown } | undefined
       if (del && Array.isArray(del.paths) && typeof del.reason === 'string' && del.reason.trim()) cur.allowDeletions = { paths: del.paths.filter((p): p is string => typeof p === 'string'), reason: del.reason.trim() }
       cur.updatedAt = iso(d)
@@ -283,7 +340,9 @@ export function createDeliveryService(d: DeliveryDeps) {
     if (isReply(got)) return got
     if (opts.leaderSessionId && !got.leaderSessionId) await d.store.update(doc => { doc.deliveries[subtaskId]!.leaderSessionId = opts.leaderSessionId })
     const v = await runGate('predispatch', got, d.facts)
-    const after = await d.store.update(doc => { const c = doc.deliveries[subtaskId]!; absorb(c, 'predispatch', v); return structuredClone(c) })
+    // A complete pre-dispatch also gets its EXPECTED SLOT read now, so "Na fila" shows a verdict instead of "not checked yet".
+    const vaga = v.ok && got.phase === 'fila' ? await runGate('vaga', got, d.facts) : null
+    const after = await d.store.update(doc => { const c = doc.deliveries[subtaskId]!; absorb(c, 'predispatch', v); if (vaga) absorb(c, 'vaga', vaga); return structuredClone(c) })
     await d.board.setPhaseStatus(subtaskId, after.phase).catch(() => undefined)
     if (v.ok) await d.emit('subtarefa.preparada', { subtarefa: subtaskId, taskId: after.taskId, ...(opts.pedidoId ? { pedido: opts.pedidoId } : {}) }).catch(() => undefined)
     return { ok: true, status: 200, record: after, warnings: v.ok ? [] : [`pre-dispatch still incomplete: ${v.reason}`], gate: v }
@@ -360,7 +419,8 @@ export function createDeliveryService(d: DeliveryDeps) {
    */
   let tickChain: Promise<unknown> = Promise.resolve()
   const tick = (): Promise<{ actions: string[] }> => {
-    const run = tickChain.then(tickOnce, tickOnce)
+    const guarded = async () => { try { return await tickOnce() } catch (e) { if (e instanceof DeliveryStoreUnreadable) return { actions: [`store-unreadable: ${e.message}`] }; throw e } }
+    const run = tickChain.then(guarded, guarded)
     tickChain = run.catch(() => undefined)
     return run
   }
@@ -394,17 +454,35 @@ export function createDeliveryService(d: DeliveryDeps) {
         await wake(r, `bloqueio (${a.reason}) passou de 2 h: a peça foi adiada para o próximo lote. Registre a decisão e siga com a fila.`, warnings)
         actions.push(`defer ${a.subtaskId}`); continue
       }
-      await wake(r, `continua bloqueada (${a.reason}, há ${Math.round(a.ageMs / 60_000)} min): ${a.text}. Destrave ou registre o caminho; > 2 h a peça é adiada.`, warnings)
+      const woke = await wake(r, `continua bloqueada (${a.reason}, há ${Math.round(a.ageMs / 60_000)} min): ${a.text}. Destrave ou registre o caminho; > 2 h a peça é adiada.`, warnings)
+      if (!woke) { actions.push(`wake-failed ${a.subtaskId}`); continue }
       await d.store.update(x => { const c = x.deliveries[a.subtaskId]; if (c?.block) { c.block.lastWakeAt = iso(d); c.block.wakes = (c.block.wakes ?? 0) + 1 } })
       actions.push(`wake ${a.subtaskId}`)
     }
+    // The queue's expected slot, kept fresh: a queued piece with a complete pre-dispatch re-reads `vaga` every few minutes
+    // (information for the card — never a transition).
+    for (const r of records.filter(x => x.phase === 'fila' && x.gates.predispatch?.ok)) {
+      const last = r.gates.vaga ? Date.parse(r.gates.vaga.at) : NaN
+      if (Number.isFinite(last) && d.now() - last < QUEUE_SLOT_REFRESH_MS) continue
+      const v = await runGate('vaga', r, d.facts)
+      await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && c.phase === 'fila') { c.gates.vaga = { ok: v.ok, at: iso(d), revision: c.revision, ...(v.evidence ? { evidence: v.evidence } : {}), ...(v.reason ? { reason: v.reason } : {}), ...(v.missing?.length ? { missing: v.missing } : {}) } } })
+    }
     for (const r of records.filter(x => x.phase === 'ci')) {
+      // Back off the gh polling: a piece that has sat in `ci` a while is polled less often (a tenth of its age, 1..10 min).
+      const lastRun = r.gates.release && r.gates.release.revision === r.revision ? Date.parse(r.gates.release.at) : NaN
+      const enteredCi = Date.parse(r.history.at(-1)?.at ?? r.updatedAt)
+      const backoff = Math.min(RELEASE_POLL_MAX_MS, Math.max(RELEASE_POLL_MIN_MS, Number.isFinite(enteredCi) ? (d.now() - enteredCi) / 10 : 0))
+      if (Number.isFinite(lastRun) && d.now() - lastRun < backoff) continue
       const v = await runGate('release', r, d.facts)
-      if (v.ok) { const out = await transition(r.subtaskId, 'publicado', { detail: 'release.yml verde e tag publicada' }, 'flow:entrega'); actions.push(`publish ${r.subtaskId}:${out.ok}`) }
-      else if (releaseFailed(v)) { const out = await transition(r.subtaskId, 'revisao_lider', { detail: v.reason ?? 'release falhou' }, 'flow:entrega'); actions.push(`release-failed ${r.subtaskId}:${out.ok}`) }
-      else if (v.patch?.ci && JSON.stringify(v.patch.ci) !== JSON.stringify(r.ci)) {
-        await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && c.phase === 'ci') c.ci = v.patch!.ci })
-        await d.board.setCi(r.subtaskId, v.patch.ci).catch(() => undefined)
+      if (v.ok) {
+        // The verdict just obtained is handed to the transition (one gh poll per piece per tick, not two).
+        const out = await transition(r.subtaskId, 'publicado', { detail: 'release.yml verde e tag publicada' }, 'flow:entrega', new Map([['release', v]]))
+        actions.push(`publish ${r.subtaskId}:${out.ok}`)
+      } else if (releaseFailed(v)) { const out = await transition(r.subtaskId, 'revisao_lider', { detail: v.reason ?? 'release falhou' }, 'flow:entrega'); actions.push(`release-failed ${r.subtaskId}:${out.ok}`) }
+      else {
+        const changed = v.patch?.ci && JSON.stringify(v.patch.ci) !== JSON.stringify(r.ci)
+        await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && c.phase === 'ci' && c.revision === r.revision) absorb(c, 'release', v) })
+        if (changed) await d.board.setCi(r.subtaskId, v.patch!.ci!).catch(() => undefined)
       }
     }
     return { actions }
@@ -413,7 +491,11 @@ export function createDeliveryService(d: DeliveryDeps) {
   return {
     get: (id: string) => d.store.get(id),
     list: async () => Object.values((await d.store.read()).deliveries),
-    ensure, transition, gate, block, unblock, approve, configure, step, stage, stageRun, qaOpen, ajustesOpen, merge, tick,
+    ensure,
+    // An unreadable store REFUSES the write (and keeps a copy of the file) instead of letting any verb replace it with an empty book.
+    transition: safe((id: string, to: unknown, input: TransitionInput, actor: string) => transition(id, to, input, actor)),
+    gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), step: safe(step),
+    stage: safe(stage), stageRun: safe(stageRun), qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
   }
 }
 
