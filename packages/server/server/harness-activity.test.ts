@@ -90,3 +90,13 @@ test('names measured 2026-10-16 map for codex, copilot, gemini and agy (kimi alr
   expect(canonicalTool('kimi', 'Bash')).toBe('Bash')
   expect(canonicalTool('kimi', 'frobnicate')).toBe('frobnicate')
 })
+
+test('OPENCODE.SESSAO — opencode\'s own tool names (1.19.5 over ACP, 2.x renames) map to the shared vocabulary', () => {
+  expect(canonicalTool('opencode', 'todowrite')).toBe('TodoWrite')
+  expect(canonicalTool('opencode', 'task')).toBe('Task')
+  expect(canonicalTool('opencode', 'subagent')).toBe('Task')
+  expect(canonicalTool('opencode', 'list')).toBe('LS')
+  expect(canonicalTool('opencode', 'multiedit')).toBe('MultiEdit')
+  expect(canonicalTool('opencode', 'webfetch')).toBe('WebFetch')
+  expect(canonicalTool('opencode', 'websearch')).toBe('WebSearch')
+})

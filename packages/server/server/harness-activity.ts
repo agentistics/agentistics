@@ -115,6 +115,17 @@ const TOOL_ALIASES: Record<string, string> = {
   update_plan: 'TodoWrite',
   update_topic: 'TodoWrite',
   manage_task: 'TodoWrite',
+  // opencode's own names, measured over ACP on 1.19.5 (2026-11-07, throwaway HOME) plus its 2.x renames. Without them its
+  // todo list read as a bare "todowrite" and its subagent as a generic tool, and the Tools page counted them apart.
+  todowrite: 'TodoWrite',
+  task: 'Task',
+  subagent: 'Task',
+  list: 'LS',
+  multiedit: 'MultiEdit',
+  patch: 'Edit',
+  codesearch: 'Grep',
+  webfetch: 'WebFetch',
+  websearch: 'WebSearch',
 }
 
 /** The shared name for a harness's tool, or the name itself when nothing maps it. */
