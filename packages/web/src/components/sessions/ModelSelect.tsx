@@ -24,7 +24,7 @@
  * closes the dialog itself.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronDown } from 'lucide-react'
+import { Check, ChevronDown, TriangleAlert } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { modelDisplay } from '../../lib/wizardSteps'
 import { inputStyle } from './formBits'
@@ -92,6 +92,20 @@ export function ModelSelect({ lang, open, onOpenChange, value, onChange, options
       </span>
       {/* The id, and only when it is not already the label — `modelDisplay`'s rule. */}
       {tag && <ModelId id={tag} />}
+      {/* Owner rule: a model that trains on the user's data is never presented as safe. */}
+      {warn && (
+        <span
+          data-model-warning
+          title={warn}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+            fontSize: 10.5, color: 'var(--accent-amber, #d97706)',
+          }}
+        >
+          <TriangleAlert size={11} aria-hidden />
+          {warn}
+        </span>
+      )}
     </button>
   )
 

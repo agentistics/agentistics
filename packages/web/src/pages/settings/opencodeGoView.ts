@@ -1,5 +1,5 @@
 /**
- * PURE view model of the OpenCode plan + allowance card (Settings → Billing → OpenCode providers).
+ * PURE view model of the OpenCode plan + allowance card (Usage → Accounts → OpenCode providers).
  * It turns the `/api/opencode/usage` answer into words and rows; it holds no rule about the plan itself
  * (`@agentistics/core` `opencodeGo.ts` does) and draws nothing.
  */

@@ -13,8 +13,8 @@ export const RELEASES: Record<string, ReleaseNotes> = {
   '2.200.8': {
     features: [
       {
-        pt: 'OpenCode: conecte OpenCode Go, Zen ou outro provedor em Ajustes → Cobrança com o link do console e a chave colada; a chave vai para o lugar certo do OpenCode sem aparecer em nenhum registro.',
-        en: 'OpenCode: connect OpenCode Go, Zen or another provider in Settings → Billing with the console link and a pasted key; the key goes to the right place in OpenCode and appears in no log.',
+        pt: 'OpenCode: conecte OpenCode Go, Zen ou outro provedor em Uso → Contas com o link do console e a chave colada; a chave vai para o lugar certo do OpenCode sem aparecer em nenhum registro.',
+        en: 'OpenCode: connect OpenCode Go, Zen or another provider in Usage → Accounts with the console link and a pasted key; the key goes to the right place in OpenCode and appears in no log.',
       },
       {
         pt: 'OpenCode Go: o plano e o preço aparecem junto das contas, com anéis de 5 horas, semana e mês em dólares por modelo (estimado a partir do custo de cada resposta). Escolha o seu plano se ele não puder ser deduzido.',

@@ -1,4 +1,4 @@
-/** Settings → Billing: connect OpenCode providers (Go, Zen, bring-your-own) by link + pasted key. */
+/** Usage → Accounts (the panel Settings → Billing redirects to): connect OpenCode providers (Go, Zen, bring-your-own) by link + pasted key. */
 import React, { useCallback, useEffect, useState } from 'react'
 import { ExternalLink, X } from 'lucide-react'
 import { useIsMobile } from '../../hooks/useIsMobile'

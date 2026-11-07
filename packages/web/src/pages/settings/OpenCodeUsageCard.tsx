@@ -1,4 +1,4 @@
-/** Settings → Billing → OpenCode: the plan, its price and the (estimated) use of the Go allowance in dollars. */
+/** Usage → Accounts → OpenCode: the plan, its price and the (estimated) use of the Go allowance in dollars. */
 import React, { useCallback, useEffect, useState } from 'react'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { MetricNote } from '../../components/MetricNote'

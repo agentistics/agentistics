@@ -1,4 +1,4 @@
-/** PURE: the words and the ordering of the OpenCode provider connection dialog (Settings → Billing). */
+/** PURE: the words and the ordering of the OpenCode provider connection dialog (Usage → Accounts). */
 
 export interface OcProvider { id: string; label: string; url: string; kind: 'go' | 'zen' | 'byo' }
 export interface OcConnected { id: string; label: string; type: string }
