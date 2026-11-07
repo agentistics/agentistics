@@ -75,6 +75,22 @@ test('trigger host ops: the managed-session universe and a nudge through the com
   expect(notices).toEqual(['Pedido p-1 sem dono'])
 })
 
+test('FLUXO.ENTREGA-DSL audit: the pedidos escalation to the owner is skipped while autonomous mode is on, kept when off', async () => {
+  for (const away of [true, false]) {
+    const notices: string[] = []
+    const ops = triggerHostOps({
+      registry: async () => [], rows: async () => [], roles: async () => () => undefined,
+      prompt: async () => ({ ok: true }), awayNotice: async text => { notices.push(text); return true }, kill: async () => ({ ok: true }),
+      autonomous: async () => away,
+    })
+    const out = await ops['aviso-ao-dono']({ text: 'Pedido p-1 sem dono' }, { step: 'h1-lembrar' })
+    expect(out).toEqual(away ? { ok: true, skipped: 'pulado: modo autônomo' } : { ok: true })
+    expect(notices).toEqual(away ? [] : ['Pedido p-1 sem dono'])
+    // An informational notice from another flow (an environment's MCP failure) is not a decision request: it always goes.
+    expect(await ops['aviso-ao-dono']({ text: 'AMB_MCP' }, { step: 'ambiente-aviso-dono' })).toEqual({ ok: true })
+  }
+})
+
 test('QA10: roles are re-read for every universe snapshot — a promotion and a demotion count at once', async () => {
   let stored: Record<string, string> = {}
   const ops = triggerHostOps({

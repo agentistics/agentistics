@@ -20,6 +20,14 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'A faixa LÍDERES vem recolhida em uma linha de resumo; aberta, mostra uma linha por líder e, ao clicar, os workers dele.',
         en: 'The LEADERS band starts closed on one summary line; opened, it shows one row per leader and, on click, its workers.',
       },
+      {
+        pt: 'Fluxo de entrega obrigatório: toda subtarefa passa por Na fila → Executando → QA → (Ajustes ⇄ QA) → Revisão do líder → PR/merge → CI · publicando → Publicado, e o servidor recusa qualquer salto (por exemplo Executando → Revisão) dizendo o que falta. Cada passagem é checada por evidência — pré-dispatch completo, vaga (limites do plano, até 4 workers, memória), commit enviado, QA em outro modelo (nunca Sonnet sobre Sonnet), PR sem arquivo apagado por engano, release verde com a tag — e a Live mostra exatamente esse estado. Merge ou publicação que falha volta para a revisão do líder. Bloqueios têm motivo fechado, voltam para a etapa de origem e lembram o líder a cada 30 min; passadas 2 h a peça é adiada para o próximo lote. Novos: agentistics_task_phase, agentistics_task_stage, agentop flow gate|phase|merge e agentop task stage.',
+        en: 'Mandatory delivery flow: every subtask goes Queued → Running → QA → (Adjustments ⇄ QA) → Leader review → PR/merge → CI · publishing → Published, and the server refuses any skip (e.g. Running → Review), saying what is missing. Each step is checked from evidence — complete pre-dispatch, a slot (plan limits, at most 4 workers, memory), the commit pushed, QA by another model (never Sonnet over Sonnet), a PR deleting no file by accident, a green release with its tag — and Live shows exactly that state. A failed merge or release goes back to the leader review. Blocks have a closed reason, return to the stage they came from and remind the leader every 30 min; after 2 h the piece is deferred to the next batch. New: agentistics_task_phase, agentistics_task_stage, agentop flow gate|phase|merge and agentop task stage.',
+      },
+      {
+        pt: 'Pré-dispatch: o cartão "Na fila" mostra assistente · modelo · esforço · conta e a vaga esperada. Com o modo autônomo ligado nenhum fluxo chama nem espera o dono — passos que pediriam aprovação são pulados e registrados ("pulado: modo autônomo") e o líder decide; com ele desligado, um fluxo pode ter portões humanos (por exemplo aprovar antes do PR/merge), desligados por padrão.',
+        en: 'Pre-dispatch: the "Queued" card shows assistant · model · effort · account and the expected slot. With autonomous mode on no flow calls or waits for the owner — steps that would ask for approval are skipped and recorded ("skipped: autonomous mode") and the leader decides; with it off, a flow may have human gates (e.g. approve before PR/merge), off by default.',
+      },
     ],
     fixes: [
       {
