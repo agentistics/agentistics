@@ -298,7 +298,10 @@ export const BLOCK_WORD: Record<LiveBlock['reason'], { pt: string; en: string }>
  */
 export function queueLines(d: Pick<LiveDeliveryRecord, 'staged' | 'slot'>, pt: Pt, accountName?: (harness: string, account: string) => string): { staged: string | null; slot: string | null; slotOk: boolean | null; slotRaw: string | null } {
   const s = d.staged
-  const staged = s ? [s.harness, s.model, s.effort, s.account ? `${pt ? 'conta' : 'account'} ${s.harness && accountName ? accountName(s.harness, s.account) : s.account}` : null].filter(Boolean).join(' · ') || null : null
+  // The account is said by NAME; one the resolver cannot name (it hands the raw `acc_…` id back) is left out rather than shown as an id.
+  const accountWord = s?.account ? (s.harness && accountName ? accountName(s.harness, s.account) : s.account) : null
+  const accountPart = accountWord && accountWord !== s?.account && !/^acc_/i.test(accountWord) ? `${pt ? 'conta' : 'account'} ${accountWord}` : null
+  const staged = s ? [s.harness, s.model, s.effort, accountPart].filter(Boolean).join(' · ') || null : null
   if (!d.slot) return { staged, slot: s ? (pt ? 'vaga: ainda não checada' : 'slot: not checked yet') : null, slotOk: null, slotRaw: null }
   // The gate's own sentence is English, carries account ids and is for the log: the card says it in a few plain words,
   // and the raw text stays in the tooltip (`slotRaw`) for whoever needs the detail.

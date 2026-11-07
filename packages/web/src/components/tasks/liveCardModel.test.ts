@@ -351,6 +351,8 @@ describe('queueLines (FLUXO.ENTREGA-DSL "Na fila")', () => {
       .toEqual({ staged: 'claude · opus · high · conta pessoal', slot: 'vaga: livre agora', slotOk: true, slotRaw: null })
     expect(queueLines({ staged: { harness: 'claude', model: null, effort: null, account: null }, slot: null }, false).staged).toBe('claude')
     expect(queueLines({ staged: null, slot: null }, true)).toEqual({ staged: null, slot: null, slotOk: null, slotRaw: null })
+    // an account nobody can name is left out — the raw `acc_…` id is not something a person reads
+    expect(queueLines({ staged: { harness: 'codex', model: 'm', effort: null, account: 'acc_9f3a21' }, slot: null }, true, (_h, a) => a).staged).toBe('codex · m')
   })
   test('a refused slot reads in plain words and keeps the raw gate text only for the tooltip (print c304a58f)', async () => {
     const { queueLines } = await import('./liveCardModel')
