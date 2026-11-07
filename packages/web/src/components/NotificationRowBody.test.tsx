@@ -2,12 +2,12 @@ import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { NotificationRowBody } from './NotificationBell'
 
-const base = { pt: false, title: 'T', message: 'MSG', isJournalFailed: false, isClean: false, isAwayDigest: false, digestBusy: false, onAnswer: () => {}, onRetryJournal: () => {}, onClean: () => {} }
+const base = { pt: false, title: 'T', message: 'MSG', isJournalFailed: false, isClean: false, onRetryJournal: () => {}, onClean: () => {} }
 
-test('digest, journal retry and cleanup actions all render after the message', () => {
-  const html = renderToStaticMarkup(<NotificationRowBody {...base} isJournalFailed isClean isAwayDigest />)
+test('journal retry and cleanup actions both render after the message', () => {
+  const html = renderToStaticMarkup(<NotificationRowBody {...base} isJournalFailed isClean />)
   const msg = html.indexOf('bell-message')
-  for (const id of ['bell-journal-retry', 'bell-clean-action', 'away-digest-actions']) {
+  for (const id of ['bell-journal-retry', 'bell-clean-action']) {
     expect(html.indexOf(id)).toBeGreaterThan(msg)
   }
 })

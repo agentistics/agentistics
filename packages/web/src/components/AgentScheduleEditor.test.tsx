@@ -44,6 +44,18 @@ describe('the popup draws only the switch and "Sign in again"', () => {
     expect(html).toContain('aria-checked="false"')
     expect(html).toContain('Refazer login')
   })
+  test('a signed-out account draws "sem login", not stale 0/0 rings (RELOGIN.NAYARA)', () => {
+    expect(html).toContain('sem login')
+    expect(html).not.toContain('Semana')
+    const en = renderToStaticMarkup(<PlanUsageSummary limits={[limits]} now={NOW} lang="en"
+      agentUse={() => ({ on: false, pending: false, onToggle: () => {}, accountId: 'acc_1', reloginable: true, loginBroken: true })} onRelogin={() => {}} />)
+    expect(en).toContain('signed out')
+    // The same account while its login works keeps its rings.
+    const ok = renderToStaticMarkup(<PlanUsageSummary limits={[limits]} now={NOW} lang="pt"
+      agentUse={() => ({ on: true, pending: false, onToggle: () => {}, accountId: 'acc_1', reloginable: true, loginBroken: false })} onRelogin={() => {}} />)
+    expect(ok).not.toContain('sem login')
+    expect(ok).toContain('Semana')
+  })
   test('no schedule in the popup', () => {
     expect(html).not.toContain('data-agent-schedule')
     expect(html).not.toContain('data-agent-day')

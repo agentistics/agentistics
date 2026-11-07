@@ -23,10 +23,12 @@ import {
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, HERMES_DIR, KIMI_DIR, OPENCODE_DIR } from './config'
 import {
-  bind, byId, canonicalAccountId, forceProbe, sameLogin, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
+  accountLoginState, bind, byId, canonicalAccountId, forceProbe, sameLogin, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
 } from './harness-accounts'
 import { allHistory, dropHistory, moveHistory, pointOf, recordHistory, type HistoryPoint, __resetPlanHistoryForTest } from './plan-history'
 import { withFileLock } from './sessions/file-lock'
+import { spawnRowsOf } from './sessions/spawn-account-io'
+import { accountCredentialBroken } from './account-credentials'
 import { agentUseView, type AgentUseView } from './agent-schedule-host'
 import { defaultHomeAccount, resolveSessionAccount } from './sessions/session-account'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
@@ -938,11 +940,23 @@ export async function planLimitsPayload(
   const hiddenFromAgents = allBudgets.filter(b => !shown.has(b))
   // CONTAS.AGENDA-AGENTICA: each row says WHY its account is on or off for agents (schedule, manual).
   {
-    const stored = Object.values(state.limits), at = new Date(nowMs)
+    const stored = Object.values(state.limits), at = new Date(nowMs), spawnRows = spawnRowsOf(registry)
     for (const b of allBudgets) {
       const rec = registry.accounts.find(a => a.id === canonicalAccountId(registry, b.account))
       const view = rec ? agentUseView(rec, stored, at) : undefined
       if (view) b.agentUse = view
+      // A login that is gone (signed out, expired, or a root whose credential file is missing / empty /
+      // invalid) cannot take a session: the router must not recommend it, and the row says why.
+      const row = rec ? spawnRows.find(r => r.id === rec.id) : undefined
+      const login = rec ? accountLoginState(rec, row?.bound ?? false, row?.bound ? accountCredentialBroken(rec, row.root) : false) : undefined
+      if (login === 'expired' || login === 'signed_out') {
+        b.spawnable = false
+        b.unavailableReason = login === 'expired'
+          ? `${b.accountLabel}'s login expired: sign in again to use it`
+          : `${b.accountLabel} has no login: sign in again to use it`
+        b.freeSlots = 0
+        b.suggestedParallel = 0
+      }
     }
   }
   // Only rows agents may see compete, and only an account the registry says is the same login.

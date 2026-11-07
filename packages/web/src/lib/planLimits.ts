@@ -242,6 +242,16 @@ export function fmtWhen(ms: number, now: number, lang: Lang): string {
   return `${day.replace('.', '')} ${time}`
 }
 
+/**
+ * The one-line reset under a ring of the usage popup: "zera 18:40" / "zera sex 09:00" (local time),
+ * `null` when it is not known — a window already renewed has no reset the reading can state, and a
+ * missing or non-finite `resetsAt` says nothing. Never a guessed time.
+ */
+export function ringResetPhrase(w: PlanLimitWindow, now: number, lang: Lang): string | null {
+  if (windowRenewed(w, now) || !Number.isFinite(w.resetsAt) || w.resetsAt <= now) return null
+  return `${lang === 'pt' ? 'zera' : 'resets'} ${fmtWhen(w.resetsAt, now, lang)}`
+}
+
 /** "renova 14:30 (em 2 h 10)" / "renovou" */
 export function resetPhrase(w: PlanLimitWindow, now: number, lang: Lang): string {
   if (windowRenewed(w, now)) return lang === 'pt' ? 'renovado — sem leitura desde então' : 'renewed — no reading since'

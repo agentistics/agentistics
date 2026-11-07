@@ -1164,6 +1164,32 @@ test('two real Claude Max accounts both keep capacity and routing, even when one
 })
 
 
+test('an account whose root lost its credential is not spawnable and is never recommended (RELOGIN.NAYARA)', async () => {
+  if (process.platform === 'darwin') return // keychain login: a missing file proves nothing there
+  const root = join(dir, 'accounts', 'claude', 'r_nay')
+  mkdirSync(root, { recursive: true })
+  const store = createHarnessAccounts({ file: join(dir, 'accounts.json'), probe: async (_h, r) => r === null
+    ? { key: `${ORG}:a@example.invalid`, label: 'a@example.invalid' } : { key: `${ORG}:nay@example.invalid`, label: 'nay@example.invalid' } })
+  __setHarnessAccountsForTest(store)
+  await store.current('claude')
+  const nay = (await store.bind(root, { harness: 'claude', key: `${ORG}:nay@example.invalid`, label: 'nay@example.invalid' })).account
+  await store.setNickname(nay.id, 'Nayara')
+  const now = Date.now()
+  // Her meter is a STALE reading of an account with plenty of room: the trap the router fell into.
+  await ingestPlanLimits({ harness: 'claude', account: nay.id, plan: 'Claude Pro', source: 'claude-usage-api', updatedAt: now - 3 * 3_600_000,
+    windows: [{ kind: '5h', usedPct: 0, resetsAt: now + 3_600_000 }, { kind: 'week', usedPct: 0, resetsAt: now + 86_400_000 }] })
+  const row = async () => (await planLimitsPayload(undefined, now)).budgets.find(r => r.account === nay.id)!
+  const gone = await row()
+  expect(gone.spawnable).toBe(false)
+  expect(gone.unavailableReason).toContain('no login')
+  expect(gone.freeSlots).toBe(0)
+  expect(routeRecommendation((await planLimitsPayload(undefined, now)).budgets, 'lead').account).not.toBe(nay.id)
+  // Signing in again writes the credential back: the account is routable again.
+  writeFileSync(join(root, '.credentials.json'), JSON.stringify({ claudeAiOauth: { refreshToken: 'x' } }))
+  expect((await row()).spawnable).not.toBe(false)
+})
+
+
 test('a newer reading published under a folded id while the move is pending is kept, not deleted', async () => {
   const now = Date.now()
   writeDuplicateRegistry(now)

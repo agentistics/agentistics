@@ -759,10 +759,12 @@ export const clearLoginExpired = (id: string) => store.clearLoginExpired(id)
 export type AccountLoginState = 'ok' | 'expired' | 'signed_out'
 export function accountLoginState(
   a: Pick<HarnessAccount, 'retired' | 'loginExpiredAt' | 'signedOut'>, bound: boolean,
+  /** The root's credential file is missing / empty / invalid (`account-credentials.ts`): the login is gone even though no probe said so. */
+  credentialBroken = false,
 ): AccountLoginState | undefined {
   if (a.retired) return undefined
   if (a.loginExpiredAt !== undefined) return 'expired'
-  if (!bound || a.signedOut) return 'signed_out'
+  if (!bound || a.signedOut || credentialBroken) return 'signed_out'
   return 'ok'
 }
 

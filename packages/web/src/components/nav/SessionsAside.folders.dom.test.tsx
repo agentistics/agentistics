@@ -8,6 +8,7 @@ import type { Filters } from '@agentistics/core'
 let createRoot: typeof import('react-dom/client').createRoot
 let MemoryRouter: typeof import('react-router-dom').MemoryRouter
 let SessionsAside: typeof import('./SessionsAside').SessionsAside
+let TITLE_CLAMP: typeof import('./SessionLine').TITLE_CLAMP
 let loadSharedPrefs: typeof import('../../lib/sharedPref').loadSharedPrefs
 let writePrefs: typeof import('../../lib/sessionsAsidePrefs').writeAsideGroupPrefs
 let readPrefs: typeof import('../../lib/sessionsAsidePrefs').readAsideGroupPrefs
@@ -59,6 +60,7 @@ beforeAll(async () => {
   createRoot = (await import('react-dom/client')).createRoot
   MemoryRouter = (await import('react-router-dom')).MemoryRouter
   SessionsAside = (await import('./SessionsAside')).SessionsAside
+  TITLE_CLAMP = (await import('./SessionLine')).TITLE_CLAMP
   loadSharedPrefs = (await import('../../lib/sharedPref')).loadSharedPrefs
   const asidePrefs = await import('../../lib/sessionsAsidePrefs')
   writePrefs = asidePrefs.writeAsideGroupPrefs
@@ -280,11 +282,15 @@ test('action feedback uses the session title, reserves space, and can be dismiss
   await act(async () => card.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 })))
   const kill = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(el => el.textContent === 'Encerrar')!
   await click(kill)
-  const notice = Array.from(host.querySelectorAll<HTMLElement>('[role="status"]')).find(el => el.textContent === 'Maestro encerrada.')!
+  // A short confirmation is a transient toast at the BOTTOM of the screen (on <body>), with a progress bar.
+  const notice = Array.from(document.querySelectorAll<HTMLElement>('[role="status"]')).find(el => el.textContent === 'Maestro encerrada.')!
   expect(notice).toBeDefined()
-  expect(notice.closest<HTMLElement>('[data-action-notice]')!.style.position).toBe('')
+  const toast = notice.closest<HTMLElement>('[data-action-notice]')!
+  expect(toast.classList.contains('ag-action-toast')).toBe(true)
+  expect(host.contains(toast)).toBe(false)
+  expect(toast.querySelector('[data-notice-progress]')).not.toBeNull()
   expect(notice.textContent).not.toContain('b4f46fa8d9')
-  await click(host.querySelector<HTMLElement>('[aria-label="Fechar aviso"]')!)
+  await click(document.querySelector<HTMLElement>('[aria-label="Fechar aviso"]')!)
   expect(notice.isConnected).toBe(false)
 }, 10000)
 
@@ -429,7 +435,7 @@ for (const state of ['closed', 'exited', 'lost'] as const) test(`ended ${state} 
     rowsById={new Map([[session.id, { verbs }]])} /></MemoryRouter>))
   // The old row is in Ended, outside the recent recovery group.
   expect(host.querySelector('[data-fell-banner]')).toBeNull()
-  await click(host.querySelector<HTMLElement>('[data-ended-all]')!)
+  await click(host.querySelector<HTMLElement>('[data-ended-toggle="older"]')!)
   const line = host.querySelector<HTMLElement>('[data-session-line]')!
   await act(async () => line.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 })))
   const labels = Array.from(document.querySelectorAll('[role="menuitem"]')).map(el => el.textContent)
@@ -493,3 +499,70 @@ for (const width of [1280, 390]) for (const lang of ['en', 'pt'] as const) {
     await act(async () => { state.resetEngineSurfaceHostForTests() })
   })
 }
+
+// ENCERRADAS.COLAPSAR — the headings of the Encerradas tab fold like every other group.
+// "Finished today" is the reader's local calendar day, so the fixture may not say "one hour ago":
+// between 00:00 and 01:00 that is yesterday and the row would (correctly) land in "older".
+// Midway between local midnight and now is always today, at any hour the suite runs.
+const endedTodayAt = () => {
+  const midnight = new Date().setHours(0, 0, 0, 0)
+  return midnight + Math.floor((Date.now() - midnight) / 2)
+}
+const endedFleet = () => [
+  { ...row('slept', 'closed'), endedAt: endedTodayAt() },
+  { ...row('pin-ended', 'closed'), endedAt: Date.now() - 7_200_000 },
+  { ...row('old-one', 'closed'), endedAt: Date.now() - 33 * 86_400_000 },
+  { ...row('old-two', 'exited'), endedAt: Date.now() - 40 * 86_400_000 },
+]
+const endedHead = (id: string) => host.querySelector<HTMLButtonElement>(`[data-ended-toggle="${id}"]`)
+const endedLines = (section: string) => host.querySelectorAll(`[data-ended-section="${section}"] [data-session-line]`).length
+
+for (const width of [1280, 390]) test(`Encerradas headings fold, show a count when folded, and remember it (${width}px)`, async () => {
+  act(() => writePrefs({ tab: 'ended', foldedEndedSections: ['older'] }))
+  await render(endedFleet(), width, 'pt')
+  // Default: sleeping + today expanded, "Antes de hoje" folded with its count.
+  const older = endedHead('older')!
+  expect(older.getAttribute('aria-expanded')).toBe('false')
+  expect(older.querySelector('[data-ended-count]')?.textContent).toBe('2')
+  expect(endedHead('sleeping')!.getAttribute('aria-expanded')).toBe('true')
+  expect(endedHead('today')!.getAttribute('aria-expanded')).toBe('true')
+  expect(endedHead('today')!.querySelector('[data-ended-count]')).toBeNull()
+  expect(endedLines('finished')).toBe(1)
+  await click(older)
+  expect(older.getAttribute('aria-expanded')).toBe('true')
+  expect(endedLines('finished')).toBe(3)
+  expect(readPrefs().foldedEndedSections).toEqual([])
+  // Fold "today" too: its rows go, its count appears, and the choice is stored.
+  await click(endedHead('today')!)
+  expect(endedHead('today')!.getAttribute('aria-expanded')).toBe('false')
+  expect(endedHead('today')!.querySelector('[data-ended-count]')?.textContent).toBe('1')
+  expect(endedLines('finished')).toBe(2)
+  expect(readPrefs().foldedEndedSections).toEqual(['today'])
+  // A reload (fresh mount) reads the stored state, not the default.
+  await act(async () => root.unmount())
+  root = createRoot(host)
+  await render(endedFleet(), width, 'pt')
+  expect(endedHead('older')!.getAttribute('aria-expanded')).toBe('true')
+  expect(endedHead('today')!.getAttribute('aria-expanded')).toBe('false')
+  // The heading is a real <button>: keyboard activation is the browser's click.
+  expect(endedHead('sleeping')!.tagName).toBe('BUTTON')
+  expect(endedHead('sleeping')!.getAttribute('type')).toBe('button')
+})
+
+// ROW.TITLE-CLAMP — a long title takes at most two lines and ends in "…", never split mid-word.
+for (const width of [1280, 390]) test(`a long session title is clamped to two lines with its full text on hover (${width}px)`, async () => {
+  act(() => writePrefs({ tab: 'active', foldedTeams: [] }))
+  const long = 'MODO.AUTONOMO-SIMPLES · só liga/desliga + agenda igual à de uso (Sonnet high) e mais um pedaço grande de texto'
+  await render([{ ...row('long-one', 'working'), title: long }], width, 'pt')
+  const title = host.querySelector<HTMLElement>('[data-line-title]')!
+  expect(title).not.toBeNull()
+  // happy-dom drops the prefixed pair from `style`; the browsers get it from this very object.
+  expect(TITLE_CLAMP).toMatchObject({ display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2, lineClamp: 2 })
+  expect(title.style.cssText).toContain('line-clamp: 2')
+  expect(title.style.overflow).toBe('hidden')
+  expect(title.style.overflowWrap).toBe('break-word') // never `anywhere`: that split words in the middle
+  // The whole title stays reachable (hover) and copyable: the break opportunities add no characters.
+  expect(title.closest('[data-session-open]')!.getAttribute('title')).toBe(long)
+  expect(title.textContent).toBe(long)
+  expect(title.querySelectorAll('wbr').length).toBeGreaterThan(0)
+})
