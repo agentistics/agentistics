@@ -236,30 +236,62 @@ export async function offerAwayDigest(now = Date.now()): Promise<void> {
   try { await offerRun } finally { offerRun = null }
 }
 
-async function offerAwayDigestLocked(now: number): Promise<void> {
-  const { readPreferences, updatePreferences } = await import('./preferences')
-  const prefs = await readPreferences()
+/** How many entries each digest section holds — the informational summary states counts, never content. */
+export function awayDigestCounts(digest: Record<string, unknown>): { tasks: number; sessions: number; checkIns: number; notices: number; releases: number } {
+  const n = (v: unknown): number => Array.isArray(v) ? v.length : 0
+  return { tasks: n(digest.tasks), sessions: n(digest.sessions), checkIns: n(digest.checkIns), notices: n(digest.awayNotices), releases: n(digest.releases) }
+}
+
+export interface AwayDigestOfferDeps {
+  read: () => Promise<{ away?: AwayState; awayDigest?: AwayDigestState; lang?: string }>
+  update: (mutate: PreferencesMutator) => Promise<unknown>
+  build: (away: AwayState, now: number) => Promise<Record<string, unknown>>
+  notify: (code: string, meta: Record<string, unknown>) => void
+  push: (title: string, body: string) => void
+}
+
+/**
+ * The digest only exists WHILE autonomous mode is on (`awayDigestWindow` is null otherwise), so the gate cannot
+ * be "skip while on" — that deletes the feature. While on it is an INFORMATIONAL summary: a notice carrying the
+ * counts, no yes/no offer, no Nay session waiting for an answer, and delivery is recorded (`lastDeliveredAt`)
+ * so the next summary starts where this one ended.
+ */
+export async function offerAwayDigestWithDeps(deps: AwayDigestOfferDeps, now: number): Promise<void> {
+  const prefs = await deps.read()
   const away = parseAwayState(prefs.away ?? AWAY_OFF)
-  // Autonomous mode is not a prompt channel: the owner is unavailable, so never create the
-  // yes/no digest offer (or a Nay session waiting for that answer). The task/check-in records and
-  // leader notices remain available for the owner's later review.
-  if (awayActive(away, now)) return
   const bucket = awayDigestOfferDue(away, prefs.awayDigest, now)
   if (bucket === null) return
   let claimed = false
-  await updatePreferences(cur => {
+  await deps.update(cur => {
     const currentAway = parseAwayState(cur.away ?? AWAY_OFF)
     if (currentAway.since !== away.since) return undefined
     if (awayDigestOfferDue(currentAway, cur.awayDigest, now) !== bucket) return undefined
     claimed = true
-    return { awayDigest: awayDigestOfferState(away.since, bucket, cur.awayDigest) }
+    return { awayDigest: { ...awayDigestOfferState(away.since, bucket, cur.awayDigest), lastDeliveredAt: now } }
   })
   if (!claimed) return
+  const counts = awayDigestCounts(await deps.build(away, now).catch(() => ({})))
+  const pt = prefs.lang === 'pt'
+  deps.notify('away.digest', { bucket, since: away.since, ...counts, notificationKey: `away.digest:${away.since}:${bucket}` })
+  deps.push(
+    pt ? 'Agentistics · Resumo do modo autônomo' : 'Agentistics · Autonomous-mode summary',
+    pt
+      ? `Enquanto o modo autônomo esteve ligado: ${counts.tasks} tarefas movidas, ${counts.sessions} sessões, ${counts.checkIns} check-ins, ${counts.releases} releases. Só informativo.`
+      : `While autonomous mode was on: ${counts.tasks} tasks moved, ${counts.sessions} sessions, ${counts.checkIns} check-ins, ${counts.releases} releases. Informational only.`,
+  )
+}
+
+async function offerAwayDigestLocked(now: number): Promise<void> {
+  const { readPreferences, updatePreferences } = await import('./preferences')
   const { broadcastNotification } = await import('./sse')
   const { sendMobileNotice, readMobileSubscriptions, webPushTransport } = await import('./events/mobile-push')
-  const pt = prefs.lang === 'pt'
-  broadcastNotification({ type: 'info', code: 'away.digest_offer', meta: { bucket, since: away.since, notificationKey: `away.digest:${away.since}:${bucket}` } })
-  void sendMobileNotice(pt ? 'Agentistics · Resumo do modo autônomo' : 'Agentistics · Autonomous-mode summary', pt ? 'Fiquei fora há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' : 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?', await readMobileSubscriptions(), webPushTransport).catch(() => {})
+  await offerAwayDigestWithDeps({
+    read: async () => readPreferences(),
+    update: updatePreferences,
+    build: buildAwayDigest,
+    notify: (code, meta) => broadcastNotification({ type: 'info', code, meta }),
+    push: (title, body) => { void readMobileSubscriptions().then(subs => sendMobileNotice(title, body, subs, webPushTransport)).catch(() => {}) },
+  }, now)
 }
 
 let timer: ReturnType<typeof setInterval> | null = null

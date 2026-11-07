@@ -253,12 +253,26 @@ export interface AwayBriefingOptions {
   /** True when the briefing already carries the plan-limits rule (agentistics_plan_limits is
    *  available): the away line then POINTS at it instead of repeating it. */
   planLimitsInBriefing?: boolean
+  /** True when the briefing text already carries `AUTONOMOUS_ON_RULE` (`briefingText` with away): the head
+   *  then leaves it out, so a session reads the rule once. Live notices have no briefing and keep it. */
+  ruleInBriefing?: boolean
 }
 
 /** The communication contract shared by every autonomous-mode briefing surface. */
 export const AUTONOMOUS_ON_RULE = {
   en: 'The owner is unavailable while autonomous mode is on: never ask, wait for, or address the owner. Leaders decide within the authorisations, record decisions on the task, and safely defer anything outside them; owner notices are informational only and never block.',
   pt: 'O dono está indisponível enquanto o modo autônomo está ligado: nunca pergunte, espere ou se dirija ao dono. Líderes decidem dentro das autorizações, registram decisões na tarefa e adiam com segurança o que estiver fora delas; avisos ao dono são apenas informativos e nunca bloqueiam.',
+} as const
+
+/**
+ * Who approves, while autonomous mode is on — the ONE wording the always-installed managed skills and
+ * the leader's live briefing share (the skills cannot vary with the mode, so they quote this text and
+ * keep the OFF behaviour beside it). The BOARD rule is unchanged by the mode: only the owner
+ * marks work done.
+ */
+export const AUTONOMOUS_APPROVAL_RULE = {
+  en: 'While autonomous mode is ON the owner is not consulted: the leader approves after QA by a different model, within the authorisations, and records the approval on the task; anything outside the authorisations is deferred and recorded. The board still never marks work done without the owner.',
+  pt: 'Enquanto o modo autônomo está LIGADO o dono não é consultado: o líder aprova depois do QA por outro modelo, dentro das autorizações, e registra a aprovação na tarefa; o que estiver fora das autorizações é adiado e registrado. O quadro continua sem marcar nada como concluído sem o dono.',
 } as const
 
 /** The plan-limits rule, worded as the base briefing words it (`briefing.ts`) — used only when the
@@ -278,7 +292,7 @@ export function awayBriefingLines(
   o: AwayBriefingOptions = {},
 ): string[] {
   if (!s || !awayActive(s, now)) return []
-  const head = `AUTONOMOUS MODE (${untilText(s)}) — ${AUTONOMOUS_ON_RULE.en}`
+  const head = `AUTONOMOUS MODE (${untilText(s)}).${o.ruleInBriefing ? '' : ` ${AUTONOMOUS_ON_RULE.en}`}`
   if (role === 'leader') {
     const pacing = o.planLimitsInBriefing
       ? 'apply the agentistics_plan_limits rule above (cadence.parallel, paceStatus, 85% / 95%) before EVERY dispatch, not only the first'
@@ -310,7 +324,7 @@ export function awayHandoffNote(s: AwayState | null | undefined, now: number): s
   const ok = s.authorised.length > 0 ? s.authorised.join(', ') : 'nada além das regras'
   const tops = HARNESS_ORDER.filter(h => s.topCaps[h] !== undefined).map(h => `${h} ${awayTopCap(s, h)}`)
   const top = `${tops.length > 0 ? `${tops.join(', ')}, demais ` : ''}${Math.min(AWAY_DEFAULT_TOP_CAP, s.maxWorkers)}`
-  return ` Modo autônomo ${ate}: decida e siga sem pedir permissão; autorizado: ${ok}; teto ${s.maxWorkers} workers / modelo de topo por provedor: ${top}. Escreva isso no handoff e no prompt do sucessor, e siga o ritmo do agentistics_plan_limits.`
+  return ` Modo autônomo ${ate}. ${AUTONOMOUS_ON_RULE.pt} autorizado: ${ok}; teto ${s.maxWorkers} workers / modelo de topo por provedor: ${top}. Escreva isso no handoff e no prompt do sucessor, e siga o ritmo do agentistics_plan_limits.`
 }
 
 export const AWAY_NOTICE_MAX = 500
@@ -352,7 +366,7 @@ export function resolveSpawnAway(req: AwaySpawnRequest | undefined, parent: { aw
 /**
  * What a session-only away state authorises when the global switch is off: opening workers within
  * the plan limits, nothing else. A session the owner put in autonomous mode on purpose must be able to
- * keep going; releases and merges still wait for the owner (or the global switch).
+ * keep going; releases stay deferred (and recorded) unless the global switch authorises them — never a wait for the owner.
  */
 export const SESSION_AWAY_AUTHORISED: AwayAuthId[] = ['workers']
 
@@ -400,7 +414,7 @@ export function awayStateSignature(s: AwayState | null): string {
  * The line typed into a RUNNING session when the GLOBAL switch (or what it authorises) changes, or
  * null when this session has nothing new to hear. A leader hears
  * every change of its effective state: on, off, or a different authorisation/until/ceiling. A
- * worker's briefing carries only "do not ask the owner", so it hears the on/off flips and nothing
+ * worker briefing carries only the communication rule (report to the leader, never address the owner), so it hears the on/off flips and nothing
  * else — an edit to what the leaders may do does not touch it. Pure: both states are passed in.
  */
 export function awayLiveNotice(

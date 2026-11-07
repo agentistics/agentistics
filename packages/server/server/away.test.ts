@@ -124,7 +124,7 @@ describe('per-session away route', () => {
     await flushAwayNotices(NOW + AWAY_QUIET_MS)
     expect(patched).toEqual([['s1', true]])
     expect(typed[0]![1]).toContain('autonomous mode is now ON for this session')
-    expect(typed[0]![1]).toContain('Do not ask the owner anything')
+    expect(typed[0]![1]).toContain('never ask, wait for, or address the owner')
   })
   it('switching off tells the session; a stopped one is only recorded', async () => {
     const a = sdeps([{ id: 's1', away: true, state: 'waiting', running: true }])

@@ -49,7 +49,7 @@ describe('awayBriefingLines', () => {
   it('leader lines: scope, pacing, quality, communication', () => {
     const lines = awayBriefingLines(on({ note: 'focus on QUAL', maxWorkers: 4, topCaps: { claude: 1, codex: 3 } }), 'leader', NOW)
     expect(lines).toHaveLength(4)
-    expect(lines[0]).toBe(`AUTONOMOUS MODE (until they say they are back) — ${AUTONOMOUS_ON_RULE.en} Pre-authorised: publish releases the leader has approved (QA green); open worker sessions within the plan limits; owner's note: focus on QUAL. Act directly within those authorisations; anything outside them is DEFERRED safely in the hand-off file for the owner's return.`)
+    expect(lines[0]).toBe(`AUTONOMOUS MODE (until they say they are back). ${AUTONOMOUS_ON_RULE.en} Pre-authorised: publish releases the leader has approved (QA green); open worker sessions within the plan limits; owner's note: focus on QUAL. Act directly within those authorisations; anything outside them is DEFERRED safely in the hand-off file for the owner's return.`)
     expect(lines[1]).toContain('Never run more than 4 workers at once; at most this many of them on a provider\'s top model tier at once: claude (Opus / Fable) ≤ 1, codex (top GPT tier) ≤ 3, any other provider ≤ 1')
     expect(lines[1]).toContain('free RAM drops under 2 GB')
     expect(lines[1]).toContain('mid tier: scoped implementation; light tier: probes')
@@ -73,7 +73,7 @@ describe('awayBriefingLines', () => {
   })
   it('worker line: report to the leader, not the owner', () => {
     const [l] = awayBriefingLines(on({ until: '2026-10-12T12:00:00.000Z' }), 'worker', NOW)
-    expect(l).toBe(`AUTONOMOUS MODE (until 2026-10-12T12:00:00.000Z) — ${AUTONOMOUS_ON_RULE.en} Worker communication: report ONLY to your leader through agentistics_session_message. Send blocks and hand-backs there; never address the owner and never end a turn on a question. With no leader, decide within your brief and record the decision.`)
+    expect(l).toBe(`AUTONOMOUS MODE (until 2026-10-12T12:00:00.000Z). ${AUTONOMOUS_ON_RULE.en} Worker communication: report ONLY to your leader through agentistics_session_message. Send blocks and hand-backs there; never address the owner and never end a turn on a question. With no leader, decide within your brief and record the decision.`)
   })
   it('auto line names both paths; no authorisations says so', () => {
     const [l] = awayBriefingLines(on({ authorised: [] }), undefined, NOW)
@@ -85,6 +85,21 @@ describe('awayBriefingLines', () => {
     for (const forbidden of ['ask the owner', 'wait for the owner', 'wait for approval', 'confirm first', 'pergunte ao dono']) {
       expect(text).not.toContain(forbidden)
     }
+  })
+})
+
+describe('one wording for the ON rule', () => {
+  it('the hand-off hint quotes the pt rule instead of its own older wording', () => {
+    const note = awayHandoffNote(on(), NOW)
+    expect(note).toContain(AUTONOMOUS_ON_RULE.pt)
+    expect(note).not.toContain('sem pedir permissão')
+  })
+  it('the away head carries the rule, unless the briefing already did (said once)', () => {
+    const head = (o?: { ruleInBriefing?: boolean }) => awayBriefingLines(on(), 'worker', NOW, o).join('\n')
+    expect(head()).toContain(AUTONOMOUS_ON_RULE.en)
+    expect(head({ ruleInBriefing: true })).not.toContain(AUTONOMOUS_ON_RULE.en)
+    expect(head({ ruleInBriefing: true })).toStartWith('AUTONOMOUS MODE (')
+    expect(head()).not.toContain('— The owner')
   })
 })
 

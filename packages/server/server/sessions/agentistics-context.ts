@@ -11,7 +11,7 @@
 
 import { flowLines } from '../briefing-flow'
 export { flowLines }
-import { AUTONOMOUS_ON_RULE, awayActive, awayBriefingLines, HARNESS_ORDER, roleLine, type AwayState } from '@agentistics/core'
+import { awayActive, awayBriefingLines, HARNESS_ORDER, roleLine, type AwayState } from '@agentistics/core'
 import { HANDOFF_TAKEOVER_LINE } from './handoff-template'
 import { briefingText, PLAN_LIMITS_TOOL } from '../briefing'
 
@@ -127,7 +127,7 @@ export function contextText(i: ContextInput): string {
     METRICS_DASHBOARDS_LINE,
     briefingText(i.lang ?? 'en', { planLimitsAvailable: planLimits && !worker, away }),
     roleLine(i.role),
-    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits }),
+    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits, ruleInBriefing: true }),
     ...flowLines(i.lang ?? 'en', i.role, !!i.taskId),
   ]
   if (i.role !== 'worker') {
@@ -187,9 +187,8 @@ export function contextText(i: ContextInput): string {
       ? "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove). Defer anything you did not create and record it for the owner's return."
       : "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
   )
-  lines.push(away
-    ? `- ${AUTONOMOUS_ON_RULE.en} Report to the session that started you when you are a worker; leaders record decisions on the task.`
-    : '- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.')
+  // The autonomous-mode rule is said once, in the briefing paragraph above — not repeated here.
+  if (!away) lines.push('- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.')
   return lines.join('\n')
 }
 

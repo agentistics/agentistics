@@ -40,13 +40,14 @@ import type { FleetState } from '../../lib/fleet'
 import { versionedAsset } from '../../lib/brand'
 import { HARNESS_COLORS, HARNESS_LABELS } from '../../lib/harness'
 import {
-  cardPlacement, cardWidth, formatSpan, formatWaiting, parseSnooze, snoozeError, SNOOZE_PRESETS, type CardPlacement, type NayAlert,
+  cardAnswerActions, cardPlacement, cardWidth, formatSpan, formatWaiting, parseSnooze, snoozeError, SNOOZE_PRESETS, type CardPlacement, type NayAlert,
 } from '../../lib/nayNotify'
 import { echoOpacities, followSettled, initFollow, landImpulse, NO_FADE, renderDock, restingTransform, stepFollow, type DockFollowState, type DockFrame } from '../../lib/nayDockFollow'
 import { NAY_NOTIFY_CARD_Z } from '../../lib/zLayers'
 import type { AnchorRect, Size } from '../../lib/nayDock'
 import { getFabLive, subscribeFabLive } from '../../lib/nayFabLive'
 import { FAB_SIZE, type NayFabStyle } from '../../lib/nayFab'
+import { useAway } from '../../lib/awayMode'
 import { dismissAlert, snoozeAlert, useNayAlerts, useNayShock } from '../../lib/nayNotifyStore'
 import { playEnter, playExit, type EnterHandle, playShock, prefersReducedMotion } from '../../lib/nayNotifyAnim'
 import { getNotificationSettings, subscribeNotificationSettings, type NotificationSettings } from '../../lib/sessionNotifications'
@@ -176,6 +177,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
   const vault = alert?.kind === 'vault-expiry'
   const embedded = vault && !!noticeHost
   const settings = useSettings()
+  const answers = cardAnswerActions(useAway().active)
   const shock = useNayShock()
   const { pathname } = useLocation()
   const navigate = useNavigate()
@@ -652,7 +654,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
               {pt ? `Continuar no ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}` : `Continue in ${HARNESS_LABELS[alert.limit.alt as HarnessId] ?? alert.limit.alt}`}
             </button>
           )}
-          {!alert.demo && !alert.limit && !alert.clean && !ck && !vault && (
+          {answers.reply && !alert.demo && !alert.limit && !alert.clean && !ck && !vault && (
             <button type="button" style={btn} onClick={() => void close(() => { dismissAlert(alert.key); onReply(alert.sessionId) })}>
               {pt ? 'Responder' : 'Reply'}
             </button>
@@ -676,7 +678,7 @@ export function NayNotifyCard({ lang, isMobile, rows, finishedTasks, act, fabSty
               <BellOff size={14} />
             </button>
           )}
-          {alert.kind === 'approval' && !alert.demo && !ck && (
+          {answers.approve && alert.kind === 'approval' && !alert.demo && !ck && (
             <button type="button" style={primary} onClick={() => setDrawer(d => (d === 'approve' ? null : 'approve'))}>{pt ? 'Aprovar…' : 'Approve…'}</button>
           )}
           <button type="button" style={{ ...btn, background: 'transparent' }} onClick={() => setDrawer(d => (d === 'snooze' || d === 'snooze-custom' ? null : 'snooze'))}>

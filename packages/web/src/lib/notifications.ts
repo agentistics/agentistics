@@ -333,6 +333,11 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Aviso do líder (modo autônomo)', message: '{text}' },
     en: { title: 'Leader notice (autonomous mode)', message: '{text}' },
   },
+  // The summary while autonomous mode is ON: informational only (counts, no question, no action).
+  'away.digest': {
+    pt: { title: 'Resumo do modo autônomo', message: 'Enquanto o modo autônomo esteve ligado: {tasks} tarefas movidas, {sessions} sessões, {checkIns} check-ins, {releases} releases. Só informativo.' },
+    en: { title: 'Autonomous-mode summary', message: 'While autonomous mode was on: {tasks} tasks moved, {sessions} sessions, {checkIns} check-ins, {releases} releases. Informational only.' },
+  },
   'away.digest_offer': {
     pt: { title: 'Resumo do modo autônomo', message: 'Fiquei ausente há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' },
     en: { title: 'Autonomous-mode summary', message: 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?' },
