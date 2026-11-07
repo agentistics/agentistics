@@ -20,12 +20,15 @@
  *    similar pieces, or a piece already past the typical range, answers `none` with the reason.
  */
 
-import type { Subtask, Task, TaskEvent } from './task-model'
+import { subtaskDone, type Subtask, type Task, type TaskEvent } from './task-model'
 import type { PieceTimes } from './task-times'
 import type { TaskDetail } from './task-report'
 
-export type LiveStage = 'queue' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'published'
-export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'running', 'qa', 'adjust', 'leader', 'merge', 'published']
+export type LiveStage = 'queue' | 'blocked' | 'running' | 'qa' | 'adjust' | 'leader' | 'merge' | 'ci' | 'published'
+export const LIVE_STAGES: readonly LiveStage[] = ['queue', 'blocked', 'running', 'qa', 'adjust', 'leader', 'merge', 'ci', 'published']
+
+/** The happy path a piece follows once it runs; `adjust` and `blocked` are detours that return to it. */
+export const HAPPY_PATH: readonly LiveStage[] = ['running', 'qa', 'leader', 'merge', 'ci', 'published']
 
 export const MIN_SAMPLES = 3
 /** A published piece stays on the line this long. */
@@ -40,6 +43,34 @@ export type LiveEta =
       basis: { n: number; scope: 'harness-model' | 'harness'; harness: string; model: string | null; medianMs: number }
     }
   | { kind: 'none'; reason: 'no-history' | 'not-started' | 'beyond-range' }
+
+/** Why a piece is blocked (fluxo-entrega-dsl §Bloqueio) and who can lift it. */
+export type BlockReason = 'dependencia' | 'pedido_de_bloqueio' | 'limite' | 'maquina' | 'externo' | 'fora_das_autorizacoes' | 'decisao_do_dono'
+export interface LiveBlock {
+  reason: BlockReason
+  /** The reason as the book states it, when it says more than the code. */
+  text: string | null
+  unlocker: 'leader' | 'owner' | 'self'
+  /** The stage it returns to, when the activity log says where it came from. */
+  originStage: LiveStage | null
+}
+
+/** One visit to a stage, from the activity log. `ms` runs to now for the stage the piece is in. */
+export interface StageVisit { stage: LiveStage; enteredMs: number; ms: number }
+
+export type LiveStageEta =
+  | { kind: 'estimate'; atMs: number; medianMs: number; n: number; nextStage: LiveStage | null }
+  | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final'; typicalMs?: number; n?: number }
+export type LivePublishEta =
+  | { kind: 'estimate'; atMs: number; source: 'stages' | 'total'; n: number; parts: { stage: LiveStage; medianMs: number }[] }
+  | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final' }
+
+/**
+ * The release signal of a piece in "CI · publicando", exactly as the delivery flow states it. The
+ * Live only RENDERS it: the piece moves to Publicado when `releaseGreen` and `tagPublished` are both
+ * true, and the flow — not this view — decides that.
+ */
+export interface LiveCiSignal { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null }
 
 export interface LiveDelivery {
   /** `<taskId>` or `<taskId>/<subtaskId>` — stable across polls. */
@@ -59,16 +90,49 @@ export interface LiveDelivery {
   harnesses: string[]
   models: string[]
   eta: LiveEta
+  /** Real work of THIS piece (union of its sessions' active time), never the task's age. Null when unmeasured. */
+  workMs: number | null
+  /** Reasoning efforts the piece's sessions ran with, when the harness has the concept. */
+  efforts: string[]
+  /** Stage visits from the activity log, oldest first. Empty when the log has none. */
+  trail: StageVisit[]
+  /** Estimated time to LEAVE the current stage, and when the piece reaches Publicado. */
+  stageEta: LiveStageEta
+  publishEta: LivePublishEta
+  block: LiveBlock | null
+  /** Only in the CI stage, and only when the flow stated it. */
+  ci: LiveCiSignal | null
+  /** The 1-based step the piece reported inside its CURRENT stage (a `step` event); null = nobody said, show nothing. */
+  step: number | null
   /** The newest thing the log says about this piece, short. Null when nothing is recorded. */
-  lastAction: { text: string; atMs: number } | null
+  lastAction: { text: string; atMs: number; kind?: string } | null
   blockedReason: string | null
   /** Set once a published piece leaves the line. */
   deliveredAtMs: number | null
+  /**
+   * FLUXO.ENTREGA-DSL: the pre-dispatch the piece will start with ("Na fila": harness · model · effort · account),
+   * read off the subtask's staged session. Absent fields are null — never guessed.
+   */
+  staged?: { harness: string | null; model: string | null; effort: string | null; account: string | null } | null
+  /** The `vaga` gate's last verdict on the delivery record — the expected slot. Null = not checked yet. */
+  slot?: { ok: boolean; reason: string | null; at: string } | null
+  /** The delivery record's own phase (the state machine), when the piece has one — the stage is its projection. */
+  phase?: string | null
+  /** A human gate the owner was ASKED about and has not answered at this revision (autonomous mode OFF). The Live card offers approve / reject for it. */
+  awaitingApproval?: { phase: string } | null
 }
+
+/** A piece the line considered and left off, with the reason — so a card never disappears without a word. */
+export type HiddenReason = 'no-live-session' | 'status-unplaced' | 'published-old' | 'queue-idle'
+export interface LiveHidden { key: string; taskId: string; title: string; stage: LiveStage | null; reason: HiddenReason }
 
 export interface LiveReply {
   generatedAt: string
   deliveries: LiveDelivery[]
+  /** Pieces left off the line and why (bounded). */
+  hidden: LiveHidden[]
+  /** Live session id -> the task it is filed on, so a view can ask "which task is this session's". */
+  sessionTasks: Record<string, string>
   /** How many delivered pieces fed the ETA — shown so "no estimate" is explainable. */
   samples: number
 }
@@ -82,7 +146,7 @@ export function stageOfStatus(status: string, label?: string): LiveStage | null 
   switch (status) {
     case 'todo': return 'queue'
     case 'in_progress': return 'running'
-    case 'blocked': return 'adjust'
+    case 'blocked': return 'blocked'
     case 'in_review': return 'leader'
     case 'done': return 'published'
     default: break
@@ -91,6 +155,7 @@ export function stageOfStatus(status: string, label?: string): LiveStage | null 
   if (/\bqa\b|\btest/.test(t)) return 'qa'
   if (/ajust|adjust|\bfix|rework|retrab/.test(t)) return 'adjust'
   if (/review|revis/.test(t)) return 'leader'
+  if (/\bci\b|publicando|publishing/.test(t)) return 'ci'
   if (/merge|\bpr\b|pull.?request/.test(t)) return 'merge'
   if (/publish|publicad|releas|shipped/.test(t)) return 'published'
   if (/progress|andamento|doing|executando|running/.test(t)) return 'running'
@@ -100,7 +165,7 @@ export function stageOfStatus(status: string, label?: string): LiveStage | null 
 
 const QA_NAME = /(^|[^a-z])qa([^a-z]|$)|\bquality\b/i
 
-interface PieceSession { id: string; harness: string; model: string | null; label?: string; live: boolean }
+interface PieceSession { id: string; harness: string; model: string | null; effort?: string; label?: string; live: boolean; startMs: number | null }
 
 // ---------------------------------------------------------------------------------- ETA
 
@@ -144,6 +209,155 @@ export function estimateEta(o: {
   }
 }
 
+
+// ------------------------------------------------------------------------------------ blocks
+
+const BLOCK_CODES: readonly BlockReason[] = ['dependencia', 'pedido_de_bloqueio', 'limite', 'maquina', 'externo', 'fora_das_autorizacoes', 'decisao_do_dono']
+
+/**
+ * PURE: the block a piece sits in. A reason written as `<code>: text` is exact; otherwise the words
+ * are matched (the rules worker will stamp the code, this reads either). A sibling dependency is its
+ * own reason and unblocks by itself; everything the rules do not reserve for the owner is the leader's.
+ */
+export function blockOf(o: { text: string | null; dependsOn: number; originStage: LiveStage | null }): LiveBlock {
+  const raw = (o.text ?? '').trim()
+  const coded = /^([a-z_]+)\s*[:\-–]\s*([\s\S]*)$/i.exec(raw)
+  let reason: BlockReason | null = null
+  let text: string | null = raw || null
+  if (coded && BLOCK_CODES.includes(coded[1]!.toLowerCase() as BlockReason)) {
+    reason = coded[1]!.toLowerCase() as BlockReason
+    text = coded[2]!.trim() || null
+  }
+  if (!reason && o.dependsOn > 0) reason = 'dependencia'
+  if (!reason) {
+    const t = raw.toLowerCase()
+    if (/limite|limit|quota|login|rate/.test(t)) reason = 'limite'
+    else if (/mem[oó]ria|m[aá]quina|machine|\block\b|\bram\b/.test(t)) reason = 'maquina'
+    else if (/\bci\b|github|infra|release|externo|external/.test(t)) reason = 'externo'
+    else if (/dono|owner|apple|credencial|credential|assinatura|pagamento|payment/.test(t)) reason = 'decisao_do_dono'
+    else reason = 'pedido_de_bloqueio'
+  }
+  const unlocker: LiveBlock['unlocker'] = reason === 'decisao_do_dono' ? 'owner' : reason === 'dependencia' ? 'self' : 'leader'
+  return { reason, text, unlocker, originStage: o.originStage }
+}
+
+
+/** PURE: the CI signal a piece carries, trusted only in its exact shape. */
+export function ciSignalOf(raw: unknown): LiveCiSignal | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const b = (k: string) => o[k] === true
+  return {
+    mergedMain: o.mergedMain === undefined ? true : b('mergedMain'),
+    releaseGreen: b('releaseGreen'), tagPublished: b('tagPublished'),
+    tag: typeof o.tag === 'string' && o.tag ? o.tag : null,
+    pr: typeof o.pr === 'number' && Number.isFinite(o.pr) ? o.pr : null,
+  }
+}
+
+/** PURE: the newest reported step of the current stage, from `step` events recorded since the stage began. */
+export function stepOf(events: readonly TaskEvent[], sinceMs: number | null): number | null {
+  let best: { at: number; step: number } | null = null
+  for (const e of events) {
+    if (e.kind !== 'step') continue
+    const at = Date.parse(e.at)
+    const n = Number.parseInt(e.to ?? e.detail ?? '', 10)
+    if (!Number.isFinite(at) || !Number.isFinite(n) || n < 1) continue
+    if (sinceMs !== null && at < sinceMs) continue
+    if (!best || at >= best.at) best = { at, step: n }
+  }
+  return best?.step ?? null
+}
+
+// ------------------------------------------------------------------------------------ trail
+
+/** PURE: the stage visits of one piece from its `status` events (oldest first); the last runs to `nowMs`. */
+export function trailOf(
+  events: readonly TaskEvent[], nowMs: number, statusLabel?: (id: string) => string | undefined,
+): StageVisit[] {
+  const moves = events
+    .filter(e => e.kind === 'status' && e.to)
+    .map(e => ({ at: ms(e.at), stage: stageOfStatus(e.to!, statusLabel?.(e.to!)) }))
+    .filter((m): m is { at: number; stage: LiveStage } => m.at !== null && m.stage !== null)
+    .sort((a, b) => a.at - b.at)
+  const visits: StageVisit[] = []
+  for (const m of moves) {
+    const last = visits[visits.length - 1]
+    if (last && last.stage === m.stage) continue
+    if (last) last.ms = Math.max(0, m.at - last.enteredMs)
+    visits.push({ stage: m.stage, enteredMs: m.at, ms: 0 })
+  }
+  const tail = visits[visits.length - 1]
+  if (tail) tail.ms = Math.max(0, nowMs - tail.enteredMs)
+  return visits
+}
+
+export interface StageTypical { medianMs: number; p75Ms: number; n: number }
+
+/** PURE: how long pieces typically sit in each stage, from the CLOSED visits of every piece. */
+export function stageTypicals(trails: readonly (readonly StageVisit[])[]): Partial<Record<LiveStage, StageTypical>> {
+  const by = new Map<LiveStage, number[]>()
+  for (const t of trails) {
+    for (let i = 0; i < t.length - 1; i++) {
+      const v = t[i]!
+      if (v.ms > 0) by.set(v.stage, [...(by.get(v.stage) ?? []), v.ms])
+    }
+  }
+  const out: Partial<Record<LiveStage, StageTypical>> = {}
+  for (const [stage, xs] of by) {
+    if (xs.length < MIN_SAMPLES) continue
+    const sorted = [...xs].sort((a, b) => a - b)
+    out[stage] = { medianMs: Math.round(quantile(sorted, 0.5)), p75Ms: Math.round(quantile(sorted, 0.75)), n: sorted.length }
+  }
+  return out
+}
+
+/** The stage a piece goes to next on the happy path; a detour returns to where it came from. */
+export function nextStageOf(stage: LiveStage, origin: LiveStage | null = null): LiveStage | null {
+  if (stage === 'published') return null
+  if (stage === 'queue') return 'running'
+  if (stage === 'blocked') return origin ?? 'running'
+  if (stage === 'adjust') return 'leader'
+  const i = HAPPY_PATH.indexOf(stage)
+  return i >= 0 ? HAPPY_PATH[i + 1] ?? null : null
+}
+
+/** PURE: the two estimates a card shows — leaving this stage, and reaching Publicado. */
+export function estimateStages(o: {
+  stage: LiveStage; origin: LiveStage | null; sinceMs: number | null; nowMs: number
+  typicals: Partial<Record<LiveStage, StageTypical>>; totalEta: LiveEta
+}): { stageEta: LiveStageEta; publishEta: LivePublishEta } {
+  const { stage, nowMs } = o
+  if (stage === 'published') return { stageEta: { kind: 'none', reason: 'final' }, publishEta: { kind: 'none', reason: 'final' } }
+  const next = nextStageOf(stage, o.origin)
+  if (o.sinceMs === null) return { stageEta: { kind: 'none', reason: 'not-started' }, publishEta: totalOnly(o.totalEta) }
+  const here = o.typicals[stage]
+  const elapsed = nowMs - o.sinceMs
+  let stageEta: LiveStageEta
+  if (!here) stageEta = { kind: 'none', reason: 'no-history' }
+  else if (elapsed > here.p75Ms) stageEta = { kind: 'none', reason: 'beyond-range', typicalMs: here.medianMs, n: here.n }
+  else stageEta = { kind: 'estimate', atMs: o.sinceMs + Math.max(here.medianMs, elapsed), medianMs: here.medianMs, n: here.n, nextStage: next }
+
+  // Publication: the rest of the current stage plus every stage still ahead; any stage with no
+  // history makes the sum unknowable, so the whole-piece estimate answers instead (and says so).
+  const ahead: LiveStage[] = []
+  for (let s: LiveStage | null = next; s && s !== 'published'; s = nextStageOf(s, null)) ahead.push(s)
+  const parts = ahead.map(s => ({ stage: s, medianMs: o.typicals[s]?.medianMs ?? NaN }))
+  if (stageEta.kind === 'estimate' && parts.every(p => Number.isFinite(p.medianMs))) {
+    const n = Math.min(here!.n, ...ahead.map(s => o.typicals[s]!.n))
+    return {
+      stageEta,
+      publishEta: { kind: 'estimate', atMs: stageEta.atMs + parts.reduce((a, p) => a + p.medianMs, 0), source: 'stages', n, parts },
+    }
+  }
+  return { stageEta, publishEta: totalOnly(o.totalEta) }
+}
+
+function totalOnly(eta: LiveEta): LivePublishEta {
+  if (eta.kind === 'estimate') return { kind: 'estimate', atMs: eta.atMs, source: 'total', n: eta.basis.n, parts: [] }
+  return { kind: 'none', reason: eta.reason }
+}
+
 const dominant = (xs: readonly string[]): string | null => {
   const n = new Map<string, number>()
   for (const x of xs) n.set(x, (n.get(x) ?? 0) + 1)
@@ -161,6 +375,8 @@ interface Piece {
   times: PieceTimes | undefined
   sessions: PieceSession[]
   blockedReason: string | null
+  /** Unfinished dependencies (sibling subtasks / blocking tasks) the book names. */
+  dependsOn: number
 }
 
 /** Resolve the target carried by newer activity records and by the older human-readable detail. */
@@ -188,7 +404,8 @@ function piecesOf(d: TaskDetail): Piece[] {
       .filter(s => (s.subtaskId ?? null) === subtaskId && !s.historical)
       .map(s => ({
         id: s.id, harness: s.harness, model: s.model, ...(s.label ? { label: s.label } : {}),
-        live: !s.endedAt,
+        ...(s.effort ? { effort: s.effort } : {}),
+        live: !s.endedAt, startMs: ms(s.createdAt),
       }))
   const timesOf = (id: string | null) => d.subtaskRollups.find(r => r.id === id)?.times
   const subs = d.subtasks.filter(s => !s.parentGroupId)
@@ -197,6 +414,7 @@ function piecesOf(d: TaskDetail): Piece[] {
     ...(s.deliveredAt ? { deliveredAt: s.deliveredAt } : {}),
     times: timesOf(s.id), sessions: sessionsOf(s.id),
     blockedReason: null,
+    dependsOn: (s.blockedBy ?? []).filter(id => d.subtasks.some(x => x.id === id && !subtaskDone(x.status))).length,
   }))
   // Sessions filed on the task itself stand for a piece of their own; a task with NO subtasks is
   // that piece. A task that has subtasks and also direct sessions gets the extra piece only while
@@ -208,9 +426,45 @@ function piecesOf(d: TaskDetail): Piece[] {
       ...(d.task.deliveredAt ? { deliveredAt: d.task.deliveredAt } : {}),
       times: timesOf(null) ?? d.times, sessions: direct,
       blockedReason: d.task.blockedReason ?? null,
+      dependsOn: (d.task.blockedBy ?? []).length,
     })
   }
   return out
+}
+
+/** The most hidden rows a reply carries — a bound, not a policy: the newest are the ones that just left. */
+export const HIDDEN_CAP = 300
+/** A piece untouched for longer than this was not on the board a moment ago, so its absence is not a departure. */
+export const RECENT_HIDDEN_MS = 6 * 3600_000
+
+/** What the Live reads off a delivery record (`delivery/machine.ts`), kept structural so this module stays pure. */
+export interface LiveDeliveryFacts {
+  phase: string
+  origin?: string
+  block?: { reason: string; text: string }
+  ci?: unknown
+  step?: number
+  gates?: { vaga?: { ok: boolean; reason?: string; at: string } }
+  revision?: number
+  humanGates?: string[]
+  asked?: Record<string, number>
+  approvals?: Record<string, { revision: number; decision: string }>
+}
+
+/** PURE: the human gate of this record waiting on an answer — asked at the CURRENT revision, not yet answered at it. */
+export function awaitingApprovalOf(rec: LiveDeliveryFacts | undefined): { phase: string } | null {
+  if (!rec?.humanGates?.length || rec.revision === undefined) return null
+  for (const phase of rec.humanGates) {
+    if (rec.asked?.[phase] !== rec.revision) continue
+    if (rec.approvals?.[phase]?.revision === rec.revision) continue
+    return { phase }
+  }
+  return null
+}
+
+/** PURE: the Live stage a delivery phase projects to. */
+export const PHASE_STAGE: Readonly<Record<string, LiveStage>> = {
+  fila: 'queue', executando: 'running', qa: 'qa', ajuste: 'adjust', revisao_lider: 'leader', pr_merge: 'merge', ci: 'ci', publicado: 'published', bloqueado: 'blocked',
 }
 
 /** PURE: details of the tasks → what the line shows now, plus the history the ETA rests on. */
@@ -220,6 +474,8 @@ export function buildLive(o: {
   nowMs: number
   /** id → label of the board's status vocabulary, for statuses people invented. */
   statusLabel?: (id: string) => string | undefined
+  /** FLUXO.ENTREGA-DSL delivery records by subtask id: when one exists its PHASE decides the stage. */
+  deliveries?: ReadonlyMap<string, LiveDeliveryFacts>
 }): LiveReply {
   const samples: Sample[] = []
   const candidates: Piece[] = []
@@ -240,55 +496,102 @@ export function buildLive(o: {
   const subtaskTitles = new Map<string, string>()
   for (const d of o.details) for (const sub of d.subtasks) {
     const key = `${sub.taskId}\0${sub.title}`
-    // Ambiguous titles cannot safely identify an activity target; explicit event ids still work.
     if (subtaskTitles.has(key)) subtaskTitles.set(key, '')
     else subtaskTitles.set(key, sub.id)
   }
   const lastBySubject = new Map<string, TaskEvent>()
+  const eventsBySubject = new Map<string, TaskEvent[]>()
   for (const e of o.events) {
     const subtaskId = eventSubtaskId(e, subtaskTitles)
     const subject = subtaskId ? `${e.taskId}/${subtaskId}` : e.taskId
     const prev = lastBySubject.get(subject)
     if (!prev || e.at >= prev.at) lastBySubject.set(subject, e)
+    const list = eventsBySubject.get(subject)
+    if (list) list.push(e); else eventsBySubject.set(subject, [e])
   }
+  const trails = new Map<string, StageVisit[]>()
+  for (const [subject, list] of eventsBySubject) trails.set(subject, trailOf(list, o.nowMs, o.statusLabel))
+  const typicals = stageTypicals([...trails.values()])
 
   const deliveries: LiveDelivery[] = []
+  const hidden: LiveHidden[] = []
+  const hide = (p: Piece, stage: LiveStage | null, reason: HiddenReason) => {
+    hidden.push({ key: p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id, taskId: p.task.id, title: p.sub?.title ?? p.task.title, stage, reason })
+  }
   for (const p of candidates) {
-    let stage = stageOfStatus(p.status, o.statusLabel?.(p.status))
+    const rec = p.sub ? o.deliveries?.get(p.sub.id) : undefined
+    let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfStatus(p.status, o.statusLabel?.(p.status))
     const liveSessions = p.sessions.filter(s => s.live)
-    if (stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'
+    if (!rec && stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'
     if (stage === null) stage = liveSessions.length > 0 ? 'running' : null
-    if (stage === null) continue
+    // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,
+    // or a todo nobody staged, was never on the board and fills the reply with nothing anyone is missing.
+    const recent = o.nowMs - (ms(p.updatedAt) ?? 0) < RECENT_HIDDEN_MS
+    if (stage === null) { if (recent && p.status !== 'backlog' && p.status !== 'abandoned') hide(p, null, 'status-unplaced'); continue }
     const deliveredAtMs = ms(p.deliveredAt) ?? (stage === 'published' ? ms(p.updatedAt) : null)
-    if (stage === 'published' && (deliveredAtMs === null || o.nowMs - deliveredAtMs > PUBLISHED_WINDOW_MS)) continue
-    // An "active" delivery has a live agent or sits at a gate. A todo piece with nothing staged and
-    // nothing alive is the main board's business, not the line's.
-    const gate = stage === 'qa' || stage === 'adjust' || stage === 'leader' || stage === 'merge'
+    if (stage === 'published' && (deliveredAtMs === null || o.nowMs - deliveredAtMs > PUBLISHED_WINDOW_MS)) {
+      // Recently expired only: a year of finished work is not a departure anybody is waiting to explain.
+      if (deliveredAtMs !== null && o.nowMs - deliveredAtMs <= 3 * PUBLISHED_WINDOW_MS) hide(p, stage, 'published-old')
+      continue
+    }
+    const gate = stage === 'qa' || stage === 'adjust' || stage === 'leader' || stage === 'merge' || stage === 'ci' || stage === 'blocked'
     const staged = p.sub?.stagedSession !== undefined
-    if (stage === 'queue' && !staged && liveSessions.length === 0) continue
-    if (stage === 'running' && liveSessions.length === 0 && !gate) continue
-    const startedAtMs = ms(p.times?.startedAt) ?? ms(p.sub?.startedAt ?? p.task.startedAt)
+    if (stage === 'queue' && !staged && liveSessions.length === 0) { if (recent && p.status !== 'backlog') hide(p, stage, 'queue-idle'); continue }
+    if (stage === 'running' && liveSessions.length === 0 && !gate) { hide(p, stage, 'no-live-session'); continue }
+    const subject = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
+    const trail = trails.get(subject) ?? []
+    // The newest visit is the stage the book says now; when the log is empty or stale for it, the
+    // status stamp is the only witness and the trail is left to say what it knows.
+    const stageSinceMs = ms(p.updatedAt)
+    const originStage = stage === 'blocked'
+      ? (rec?.origin ? PHASE_STAGE[rec.origin] ?? null : ([...trail].reverse().find(v => v.stage !== 'blocked')?.stage ?? null))
+      : null
+    // THE REAL WORK OF THIS PIECE: its sessions' active time. Never the task's age (a 52-day-old task
+    // with a 4-hour piece is a 4-hour piece) and never the status stamp, which is the task's.
+    const spans = p.sessions.map(s => s.startMs).filter((n): n is number => n !== null)
+    const startedAtMs = p.times?.source === 'sessions' ? ms(p.times.startedAt) : (spans.length ? Math.min(...spans) : ms(p.sub?.startedAt))
+    const workMs = p.times?.activeMinutes != null
+      ? Math.round(p.times.activeMinutes * 60_000)
+      : liveSessions.length > 0 && startedAtMs !== null ? Math.max(0, o.nowMs - startedAtMs) : null
     const harness = dominant(liveSessions.concat(p.sessions).map(s => s.harness))
     const model = dominant(liveSessions.concat(p.sessions).map(s => s.model).filter((m): m is string => !!m))
-    const ev = lastBySubject.get(p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id)
+    const ev = lastBySubject.get(subject)
+    const eta = stage === 'published' ? { kind: 'none', reason: 'not-started' } as const
+      : estimateEta({ nowMs: o.nowMs, startedAtMs, harness, model, samples })
+    const { stageEta, publishEta } = estimateStages({ stage, origin: originStage, sinceMs: stageSinceMs, nowMs: o.nowMs, typicals, totalEta: eta })
     deliveries.push({
-      key: p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id,
+      key: subject,
       taskId: p.task.id, taskTitle: p.task.title,
       subtaskId: p.sub?.id ?? null,
       title: p.sub?.title ?? p.task.title,
       status: p.status, stage,
-      stageSinceMs: ms(p.updatedAt),
+      stageSinceMs,
       startedAtMs,
       sessionIds: liveSessions.map(s => s.id),
       harnesses: [...new Set(liveSessions.concat(p.sessions).map(s => s.harness))],
       models: [...new Set(liveSessions.concat(p.sessions).map(s => s.model).filter((m): m is string => !!m))],
-      eta: stage === 'published' ? { kind: 'none', reason: 'not-started' }
-        : estimateEta({ nowMs: o.nowMs, startedAtMs, harness, model, samples }),
-      lastAction: ev ? { text: (ev.detail ?? ev.kind).split('\n')[0]!.slice(0, 120), atMs: ms(ev.at) ?? o.nowMs } : null,
+      efforts: [...new Set(liveSessions.concat(p.sessions).map(s => s.effort).filter((m): m is string => !!m))],
+      eta, workMs, trail, stageEta, publishEta,
+      block: stage === 'blocked' ? blockOf({ text: rec?.block ? `${rec.block.reason}: ${rec.block.text}` : p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
+      ci: stage === 'ci' ? (ciSignalOf(rec?.ci ?? ((p.sub ?? p.task) as { ci?: unknown }).ci) ?? { mergedMain: true, releaseGreen: false, tagPublished: false, tag: null, pr: null }) : null,
+      step: stage === 'published' || stage === 'queue' ? null : stepOf(eventsBySubject.get(subject) ?? [], stageSinceMs),
+      lastAction: ev ? { text: (ev.detail ?? ev.kind).split('\n')[0]!.slice(0, 120), atMs: ms(ev.at) ?? o.nowMs, kind: ev.kind } : null,
       blockedReason: p.blockedReason,
       deliveredAtMs: stage === 'published' ? deliveredAtMs : null,
+      staged: p.sub?.stagedSession ? {
+        harness: p.sub.stagedSession.harness ?? null, model: p.sub.stagedSession.model ?? null,
+        effort: p.sub.stagedSession.effort ?? null, account: p.sub.stagedSession.account ?? null,
+      } : null,
+      slot: rec?.gates?.vaga ? { ok: rec.gates.vaga.ok, reason: rec.gates.vaga.reason ?? null, at: rec.gates.vaga.at } : null,
+      phase: rec?.phase ?? null,
+      awaitingApproval: awaitingApprovalOf(rec),
     })
   }
   deliveries.sort((a, b) => (b.stageSinceMs ?? 0) - (a.stageSinceMs ?? 0))
-  return { generatedAt: new Date(o.nowMs).toISOString(), deliveries, samples: samples.length }
+  const sessionTasks: Record<string, string> = {}
+  for (const d of o.details) for (const s of d.sessions) if (!s.historical && !s.endedAt) sessionTasks[s.id] = d.task.id
+  return {
+    generatedAt: new Date(o.nowMs).toISOString(), deliveries, samples: samples.length, sessionTasks,
+    hidden: hidden.slice(0, HIDDEN_CAP),
+  }
 }

@@ -1,6 +1,5 @@
 /** Evidence for pipeline transitions. Caller-supplied push/PR booleans are never proof. */
 import { execFile } from 'node:child_process'
-import { freemem } from 'node:os'
 import { promisify } from 'node:util'
 import { gitEnv } from '../backup/repo-probe'
 
@@ -28,7 +27,7 @@ export function defaultPipelineHostDeps(): PipelineHostDeps {
     },
     git: async (cwd, args) => (await exec('git', ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-C', cwd, ...args], { timeout: 15_000, env: gitEnv() })).stdout,
     pr: async (cwd, branch) => JSON.parse((await exec('gh', ['pr', 'view', branch, '--json', 'url,headRefOid,state,mergeable,statusCheckRollup,mergeCommit'], { cwd, timeout: 15_000, env: gitEnv() })).stdout),
-    memory: async () => process.platform === 'linux' ? (await import('../cli-run')).memAvailableBytes() : freemem(),
+    memory: async () => (await import('../cli-run')).memAvailableAnyBytes(),
     release: async (cwd, runId) => JSON.parse((await exec('gh', ['api', `repos/{owner}/{repo}/actions/runs/${runId}`], { cwd, timeout: 15_000, env: gitEnv() })).stdout),
   }
 }

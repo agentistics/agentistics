@@ -1415,6 +1415,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // FLUXO.ENTREGA-DSL — the delivery state machine (`delivery/`). Not behind the flows flag: refusing a skipped
+    // phase is the point, so the door exists on every build; the engine's timer and flows are what the flag adds.
+    if (url.pathname === '/api/deliveries' || url.pathname.startsWith('/api/deliveries/')) {
+      const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }] = await Promise.all([
+        import('./delivery/web'), import('./delivery/host'), import('./sessions/session-identity'),
+      ])
+      const body = req.method === 'POST' ? await req.json().catch(() => ({})) as Record<string, unknown> : {}
+      const out = await deliveryRequest(req.method, url.pathname, body, { service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token) })
+      return json(out.body, out.status)
+    }
+
     // Experimental deterministic flows. The engine owns execution and durable run records;
     // this thin host door only applies the flag/build gates and forwards typed requests.
     if (url.pathname === '/api/flows' || url.pathname.startsWith('/api/flows/')) {
@@ -5482,6 +5493,16 @@ if (!TEAM_CENTRAL && CAPS.localShell) {
     })().catch(err => console.error('[agentask] queued thread replies:', err instanceof Error ? err.message : String(err)))
       .finally(() => { flushing = false })
   }, 30_000).unref()
+  // FLUXO.ENTREGA-DSL — the delivery watch (CI → publicado on the release signal; blocked pieces: wake the leader every
+  // 30 min, defer after 2 h, dependencies lift themselves). Runs here on every build, not only behind the experimental
+  // flows flag: non-blocking is a property of the flow, so the tick cannot depend on an opt-in. The engine's own
+  // `entrega-vigiar` timer calls the SAME `tick`, which is serialised in this process, so two ticks never double a wake.
+  // One small file read per minute when nothing is in CI or blocked.
+  setInterval(() => {
+    void import('./delivery/host').then(m => m.deliveryService().tick())
+      .then(r => { if (r.actions.length) console.log(`[entrega] ${r.actions.join(', ')}`) })
+      .catch(err => console.error('[entrega] tick:', err instanceof Error ? err.message : String(err)))
+  }, 60_000).unref()
   // CONTA.AUTO — a session stopped at its account's usage limit moves, once per limit episode, to another account of the
   // same harness that has room (`sessions/auto-switch.ts`). Off with the Settings switch or without multiple accounts;
   // a tick does nothing when no session is limit-blocked (one registry read + the tail of each live transcript).

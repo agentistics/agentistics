@@ -468,6 +468,8 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
     // this whitelist parses it back. `normalizeStagedSession` is total and never repairs a
     // half-read draft, the same rule `normalizeSessionPresets` applies to a saved preset.
     ...(normalizeStagedSession(t.stagedSession) ? { stagedSession: normalizeStagedSession(t.stagedSession)! } : {}),
+    // FLUXO.ENTREGA-DSL — the delivery flow's CI signal; same whitelist reason as the fields above.
+    ...(t.ci && typeof t.ci === 'object' ? { ci: sanitizeCi(t.ci) } : {}),
   }
 }
 
@@ -1029,5 +1031,15 @@ export function createTaskStore(file: string): TaskStore {
         return true
       })
     },
+  }
+}
+
+/** The CI signal exactly as `task-live.ts` trusts it: booleans, a tag string or null, a PR number or null. */
+function sanitizeCi(raw: unknown): { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null } {
+  const o = raw as Record<string, unknown>
+  return {
+    mergedMain: o.mergedMain === true, releaseGreen: o.releaseGreen === true, tagPublished: o.tagPublished === true,
+    tag: typeof o.tag === 'string' && o.tag ? o.tag : null,
+    pr: typeof o.pr === 'number' && Number.isFinite(o.pr) ? o.pr : null,
   }
 }

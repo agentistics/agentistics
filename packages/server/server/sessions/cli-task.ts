@@ -184,6 +184,8 @@ function printHelp(): void {
   agentop task abandon <ref>   mark it given up on (no evidence attached)
   agentop task share <ref>     let it travel to this machine's centrals
   agentop task unshare <ref>   keep it on this machine (the default: absent means NOT shared)
+  agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
+                               the pre-dispatch: stage the session a subtask starts with (Na fila)
 
   --json  machine-readable output
 
@@ -192,6 +194,8 @@ A task is started by filing sessions under one:
 }
 
 export async function runTask(argv: string[]): Promise<number> {
+  // FLUXO.ENTREGA-DSL P4: the pre-dispatch (staged session) of a subtask.
+  if (argv[0] === 'stage') return (await import('../delivery/cli')).runDeliveryCli(['task-stage', ...argv.slice(1)])
   const cmd: TaskCommand = parseTaskArgs(argv)
   switch (cmd.kind) {
     case 'help': printHelp(); return 0

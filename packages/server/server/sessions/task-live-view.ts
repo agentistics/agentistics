@@ -9,6 +9,7 @@
  * a decision). A worker belongs to a leader through the `parentSessionId` the registry recorded.
  */
 
+import { humanizeAction, plainLeaderName, type LiveLang } from '@agentistics/core'
 import { LIVE_STAGES, type LiveDelivery, type LiveReply, type LiveStage } from './task-live'
 
 /** The slice of a fleet row this module reads (a `ControlSession` satisfies it). */
@@ -17,18 +18,27 @@ export interface FleetRowLite {
   title: string
   harness: string
   model?: string
+  /** The effort the session was started with (registry). */
+  effort?: string
   accountId?: string
   state: string
   parentSessionId?: string
   lastLines?: string[]
+  /** The title of the task the row is filed on. */
+  task?: string
+  /** When the session was created, ms. */
+  createdMs?: number
 }
+
+/** What a harness will use with nothing passed, and whether it has an effort concept at all. */
+export interface RuntimeFacts { model?: string; effort?: string; effortConcept: boolean }
 
 export type LiveState = 'working' | 'waiting' | 'needs-you' | 'down' | 'none'
 
 const ALIVE = new Set(['working', 'waiting', 'waiting-approval'])
 const DOWN = new Set(['lost', 'unknown'])
 
-export interface LiveAgentView { id: string; harness: string; model: string | null; accountId: string | null; state: string }
+export interface LiveAgentView { id: string; harness: string; model: string | null; effort: string | null; accountId: string | null; state: string }
 
 export interface LiveDeliveryView extends LiveDelivery {
   agents: LiveAgentView[]
@@ -37,15 +47,45 @@ export interface LiveDeliveryView extends LiveDelivery {
   stalled: boolean
 }
 
+/** How a worker reads: its own words, from its state AND where its piece sits. */
+export type WorkerWord = 'working' | 'needs-you' | 'blocked' | 'delivered' | 'awaiting-review' | 'idle'
+
+export interface LeaderWorker {
+  id: string
+  title: string
+  state: string
+  word: WorkerWord
+  stage: LiveStage | null
+  /** The board card (`LiveDelivery.key`) this worker's piece is drawn as, so a row can locate it. */
+  cardKey: string | null
+  subtask: string | null
+  taskId: string | null
+  stageSinceMs: number | null
+  /** Why its piece is blocked, when it is — the card says it in words. */
+  blockReason: string | null
+  harness: string
+  model: string | null
+  effort: string | null
+}
+
 export interface LeaderView {
   id: string
   title: string
   harness: string
   model: string | null
+  effort: string | null
+  accountId: string | null
   state: string
-  /** The last thing on its screen, trimmed — what it is doing now. Null when nothing is captured. */
+  /** Seconds-old truth about the session itself: when it was created. */
+  createdMs: number | null
+  /** The task the leader is filed on. */
+  taskId: string | null
+  taskTitle: string | null
+  /** The last thing on its screen as a SENTENCE — never raw JSON. Null when nothing is captured. */
   currentAction: string | null
-  workers: { id: string; title: string; state: string }[]
+  /** Latest estimated publication across the pieces its workers run; null when none has an estimate. */
+  publishEtaMs: number | null
+  workers: LeaderWorker[]
   /** Items a person has to decide: this leader or one of its workers sits on a dialog. */
   awaiting: { id: string; title: string }[]
 }
@@ -53,6 +93,9 @@ export interface LeaderView {
 export interface LiveView {
   generatedAt: string
   samples: number
+  hidden: LiveReply['hidden']
+  sessionTasks: LiveReply['sessionTasks']
+  runtime: Record<string, RuntimeFacts>
   summary: {
     deliveries: number; agentsWorking: number; stalled: number
     nextEta: { atMs: number; title: string; confidence: string } | null
@@ -69,9 +112,20 @@ function liveStateOf(agents: readonly LiveAgentView[]): LiveState {
   return 'down'
 }
 
-const lastLine = (lines: readonly string[] | undefined): string | null => {
+/** The newest line on the screen that is not furniture, as a sentence (never JSON). */
+export const lastLine = (lines: readonly string[] | undefined, lang: LiveLang = 'pt', titleOf?: (id: string) => string | undefined): string | null => {
   const l = (lines ?? []).map(x => x.trim()).filter(Boolean).pop()
-  return l ? l.slice(0, 140) : null
+  return l ? humanizeAction(l, lang, titleOf) : null
+}
+
+/** PURE. A worker's state in its own words: `waiting` is idle at its prompt, which is NOT "waiting for you". */
+export function workerWord(state: string, stage: LiveStage | null): WorkerWord {
+  if (state === 'waiting-approval') return 'needs-you'
+  if (stage === 'blocked') return 'blocked'
+  if (state === 'working') return 'working'
+  if (stage === 'leader') return 'awaiting-review'
+  if (stage === 'qa' || stage === 'merge' || stage === 'published') return 'delivered'
+  return 'idle'
 }
 
 export interface LiveFilters { task?: string; stage?: LiveStage; stalledOnly?: boolean }
@@ -83,14 +137,18 @@ export function describeLive(o: {
   leaderIds: ReadonlySet<string>
   nowMs: number
   filters?: LiveFilters
+  lang?: LiveLang
+  runtime?: Record<string, RuntimeFacts>
 }): LiveView {
+  const lang = o.lang ?? 'pt'
   const byId = new Map(o.rows.map(r => [r.id, r]))
+  const titleOf = (id: string) => { const t = byId.get(id)?.title; return t ? plainLeaderName(t) : undefined }
   const f = o.filters ?? {}
   const all: LiveDeliveryView[] = o.reply.deliveries.map(d => {
     const agents: LiveAgentView[] = d.sessionIds.flatMap(id => {
       const r = byId.get(id)
       return r && (ALIVE.has(r.state) || DOWN.has(r.state))
-        ? [{ id: r.id, harness: r.harness, model: r.model ?? null, accountId: r.accountId ?? null, state: r.state }]
+        ? [{ id: r.id, harness: r.harness, model: r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null, state: r.state }]
         : []
     })
     const liveState = liveStateOf(agents)
@@ -100,7 +158,10 @@ export function describeLive(o: {
     return { ...d, agents, liveState, stalled }
   })
   const needle = f.task?.trim().toLowerCase()
-  const deliveries = all.filter(d =>
+  // A piece whose only sessions are LEADERS is the leader's own filing, not delivery work: the leader
+  // has its card in the band, and a column card would show the task's age as "total".
+  const leaderOnly = (d: LiveDeliveryView) => d.sessionIds.length > 0 && d.sessionIds.every(id => o.leaderIds.has(id))
+  const deliveries = all.filter(d => !leaderOnly(d)).filter(d =>
     (!needle || d.taskId === f.task || d.taskTitle.toLowerCase().includes(needle))
     && (!f.stage || d.stage === f.stage)
     && (!f.stalledOnly || d.stalled))
@@ -110,18 +171,33 @@ export function describeLive(o: {
     ? [{ atMs: d.eta.atMs, title: d.title, confidence: d.eta.confidence }] : [])
   etas.sort((a, b) => a.atMs - b.atMs)
 
+  const pieceOf = new Map<string, LiveDeliveryView>()
+  for (const d of all) for (const id of d.sessionIds) pieceOf.set(id, d)
   const leaders: LeaderView[] = o.rows.filter(r => o.leaderIds.has(r.id) && (ALIVE.has(r.state) || DOWN.has(r.state))).map(r => {
     const workers = o.rows.filter(w => w.parentSessionId === r.id && !o.leaderIds.has(w.id) && ALIVE.has(w.state))
     const awaiting = [r, ...workers].filter(x => x.state === 'waiting-approval').map(x => ({ id: x.id, title: x.title }))
+    const pubs = workers.flatMap(w => { const d = pieceOf.get(w.id); return d && d.publishEta.kind === 'estimate' ? [d.publishEta.atMs] : [] })
+    const taskId = [...pieceOf.values()].find(d => d.sessionIds.includes(r.id))?.taskId ?? o.reply.sessionTasks?.[r.id] ?? null
     return {
-      id: r.id, title: r.title, harness: r.harness, model: r.model ?? null, state: r.state,
-      currentAction: lastLine(r.lastLines),
-      workers: workers.map(w => ({ id: w.id, title: w.title, state: w.state })), awaiting,
+      id: r.id, title: r.title, harness: r.harness, model: r.model ?? null, effort: r.effort ?? null, accountId: r.accountId ?? null,
+      state: r.state, createdMs: r.createdMs ?? null, taskId, taskTitle: r.task ?? null,
+      currentAction: lastLine(r.lastLines, lang, titleOf),
+      publishEtaMs: pubs.length ? Math.max(...pubs) : null,
+      workers: workers.map(w => {
+        const d = pieceOf.get(w.id)
+        return {
+          id: w.id, title: w.title, state: w.state, word: workerWord(w.state, d?.stage ?? null),
+          stage: d?.stage ?? null, cardKey: d?.key ?? null, subtask: d?.subtaskId ? d.title : null, taskId: d?.taskId ?? null,
+          stageSinceMs: d?.stageSinceMs ?? null, blockReason: d?.block?.reason ?? null, harness: w.harness, model: w.model ?? null, effort: w.effort ?? null,
+        }
+      }),
+      awaiting,
     }
   })
 
   return {
     generatedAt: o.reply.generatedAt, samples: o.reply.samples,
+    hidden: o.reply.hidden ?? [], sessionTasks: o.reply.sessionTasks ?? {}, runtime: o.runtime ?? {},
     summary: {
       deliveries: active.length,
       agentsWorking: new Set(active.flatMap(d => d.agents.filter(a => a.state === 'working').map(a => a.id))).size,

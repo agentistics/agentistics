@@ -10,7 +10,7 @@ describe('stageOfStatus', () => {
   test('protected ids map to their stage', () => {
     expect(stageOfStatus('todo')).toBe('queue')
     expect(stageOfStatus('in_progress')).toBe('running')
-    expect(stageOfStatus('blocked')).toBe('adjust')
+    expect(stageOfStatus('blocked')).toBe('blocked')
     expect(stageOfStatus('in_review')).toBe('leader')
     expect(stageOfStatus('done')).toBe('published')
   })
