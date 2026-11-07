@@ -1016,3 +1016,34 @@ describe('PUBLICADO.MANIFESTO r2 — the HTTP door passes --repo; auth unchanged
     expect((await h.svc.get('s1'))!.releaseRepo).toBe('acme/widgets')
   })
 })
+
+describe('PUBLICADO.MANIFESTO independent r3 QA regressions', () => {
+  // Expected-failure by default so commit hooks stay green; PUBLICADO_QA_RED=1 runs them as ordinary failing tests.
+  const qaTest = process.env.PUBLICADO_QA_RED ? test : test.failing
+  const SHA = '7cede914231f98f6ae477fbdae082a89fc4ac5c7'
+  const RELEASE = { version: '2.201.0', mergeSha: SHA, subtaskIds: ['s1', 's2'] }
+  const GREEN = { databaseId: 42364227357, status: 'completed', conclusion: 'success', headSha: SHA, updatedAt: '2026-11-07T10:43:20Z' }
+  const TAG = [{ name: 'v2.201.0', commit: { sha: '1bc12c52efe373089747197429f6e67013ff819e' } }]
+
+  qaTest('QA r3: re-running the same release after the flow itself set the board to done is idempotent', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG })
+    const first = await h.svc.release(RELEASE, 'leader')
+    expect(first.ok && first.pieces.map(p => p.phase)).toEqual(['publicado', 'publicado'])
+    // publicado is shown on the board as `done` (PHASE_STATUS.publicado) — the flow's own effect, not a person's edit.
+    const sub = h.facts.subtask
+    h.facts.subtask = async id => { const s = await sub(id); return s ? { ...s, status: 'done' } : s }
+    const again = await h.svc.release(RELEASE, 'leader')
+    expect(again.ok).toBe(true)
+    expect(again.ok && again.pieces.map(p => p.changed)).toEqual([false, false])
+  })
+
+  qaTest('QA r3: a human gate on publicado must not discard the declaration (non-autonomous owner present)', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG, autonomous: false })
+    await h.svc.ensure('s1')
+    await h.svc.configure('s1', { humanGates: ['publicado'] }, 'leader')
+    const reply = await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    // Declared (ci) and waiting for the owner, as r2 did — not a 409 that writes nothing and cannot ever be retried to success.
+    expect(reply.ok).toBe(true)
+    expect((await h.svc.get('s1'))!.phase).toBe('ci')
+  })
+})
