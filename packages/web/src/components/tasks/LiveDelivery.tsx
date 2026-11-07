@@ -24,7 +24,7 @@ import { useFleet, type FleetRow } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { usePlanLimits } from '../../lib/planLimits'
 import { pathOfView } from '../../lib/tasksViewRoute'
-import { fitHeight, holdPageFit } from '../../lib/pageFit'
+import { fitHeight, holdPageFit, reserveBelow } from '../../lib/pageFit'
 import { microLabel, surface } from './board'
 import {
   LIVE_STAGES, orderQueueFirstUp, STAGE_LABEL, byStage, filterCards, fmtClock, fmtSpan, joinLive, summarize, LIVE_DEFAULTS,
@@ -176,8 +176,11 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       const scroller = el.closest<HTMLElement>('[data-page-scroller]')
       const top = el.getBoundingClientRect().top
       if (scroller) {
-        const inner = scroller.firstElementChild instanceof HTMLElement ? getComputedStyle(scroller.firstElementChild) : null
-        setFitH(fitHeight({ scrollerBottom: scroller.getBoundingClientRect().bottom, boardTop: top, reserve: parseFloat(inner?.paddingBottom ?? '') || 0, min: 360 }))
+        // Everything BELOW the board inside the scroller: each ancestor's bottom padding and border (the panel frame's 18 px AND the page's 24 px — measuring only the outer one left the page 17 px over).
+        const ancestors: CSSStyleDeclaration[] = []
+        for (let a = el.parentElement; a && a !== scroller; a = a.parentElement) ancestors.push(getComputedStyle(a))
+        const reserve = reserveBelow(ancestors)
+        setFitH(fitHeight({ scrollerBottom: scroller.getBoundingClientRect().bottom, boardTop: top, reserve, min: 360 }))
       } else {
         setFitH(fitHeight({ scrollerBottom: win.innerHeight / (Number(getComputedStyle(win.document.documentElement).getPropertyValue('--ui-zoom')) || 1), boardTop: top, reserve: 16, min: 420 }))
       }

@@ -344,3 +344,13 @@ test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remo
   expect((document.querySelector('#live-leaders-head') as HTMLElement).style.minHeight).toBe('28px')
   expect(document.querySelector('[data-live-chip-hit]')).toBeNull()
 })
+
+test('HIGH 2 (real screen): a queue card\'s own slot line is not a column slot — the fit measures cards, not the "vaga:" lines inside them', async () => {
+  const q = (k: string) => ({ ...reply.deliveries[0]!, key: `t/${k}`, subtaskId: k, stage: 'queue', staged: { harness: 'codex', model: 'gpt-5.5', effort: 'high' }, slot: { ok: false, reason: 'sem vaga', at: new Date().toISOString() } })
+  const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('pt'), reply: { ...reply, deliveries: [q('q1'), q('q2'), q('q3')] } as never }))) })
+  const col = document.querySelector('[data-live-column="queue"]')!
+  expect(col.querySelectorAll('[data-live-card]').length).toBe(3)
+  expect(col.querySelectorAll('[data-live-queue-slot]').length).toBe(3)
+  expect(col.querySelectorAll('[data-live-slot]').length).toBe(3)
+})

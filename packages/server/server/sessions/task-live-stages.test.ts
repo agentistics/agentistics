@@ -314,6 +314,17 @@ describe('Publicado from a release tag, and the legacy review archive (HIGH 3)',
     const not = buildLive({ nowMs: NOW, events: [], details, publishedShas: new Set() })
     expect(not.deliveries[0]).toMatchObject({ stage: 'leader' })
   })
+  test('the delivered commit named in the subtask handback COMMENT counts (the real board keeps it there); a second sha beside an unpublished one does not publish', () => {
+    const comment = (body: string, at: number) => ({ id: `c${at}`, taskId: 't1', subtaskId: 'p', author: 'w', body, createdAt: iso(NOW - at * H) })
+    const mk = (comments: object[]) => [detail({ subtasks: [reviewSub('p', 5)] as never, sessions: [], comments: comments as never })]
+    const details = mk([comment('old note: sha 1111111a', 9), comment('handback ok — commit db490b75, rebased on commit 41c546605', 6)])
+    expect(legacyReviewShas(details, []).sort()).toEqual(['41c546605', 'db490b75']) // the OLDER comment's sha is not read
+    expect(buildLive({ nowMs: NOW, events: [], details, publishedShas: new Set(['db490b75', '41c546605']) }).deliveries[0]).toMatchObject({ stage: 'published' })
+    // only the second one is in a tag -> the delivered commit is not -> still review
+    expect(buildLive({ nowMs: NOW, events: [], details, publishedShas: new Set(['41c546605']) }).deliveries[0]).toMatchObject({ stage: 'leader' })
+    // an OLDER comment's sha does not publish a newer handback that names another commit
+    expect(buildLive({ nowMs: NOW, events: [], details, publishedShas: new Set(['1111111a']) }).deliveries[0]).toMatchObject({ stage: 'leader' })
+  })
   test('old legacy review cards with no live session and no published commit leave the column — counted and listed, never silent', () => {
     const subs = Array.from({ length: 80 }, (_, i) => reviewSub(`o${i}`, 100 + i))
     const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: subs as never, sessions: [] })] })

@@ -44,6 +44,15 @@ export function usePageFit(): boolean {
  * space, so the page's own zoom never enters; `reserve` is the scroller content's bottom padding.
  * Floors, and takes a pixel off, so rounding can never be the thing that makes the page scroll.
  */
+/**
+ * PURE: what lies BELOW a box inside the scroller — the bottom padding and border of EVERY ancestor between it and
+ * the scroller. Measuring only the outermost one left the page 17 px taller than its panel on the real screen
+ * (the panel frame's own 18 px was missed), a vertical scroll the owner forbade.
+ */
+export function reserveBelow(ancestors: readonly { paddingBottom: string; borderBottomWidth: string }[]): number {
+  return ancestors.reduce((sum, a) => sum + (parseFloat(a.paddingBottom) || 0) + (parseFloat(a.borderBottomWidth) || 0), 0)
+}
+
 export function fitHeight(o: { scrollerBottom: number; boardTop: number; reserve: number; min: number }): number {
   return Math.max(o.min, Math.floor(o.scrollerBottom - o.boardTop - o.reserve) - 1)
 }

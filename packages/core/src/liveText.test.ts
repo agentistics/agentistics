@@ -57,6 +57,11 @@ describe('describeLastAction — the action, in the UI language (QA MED 7)', () 
     expect(describeLastAction(a, 'en')).toBe('commented on the subtask')
     expect(describeLastAction(a, 'pt')).not.toContain('Fatia 4')
   })
+  test('a comment on a subtask whose title holds quotes and was cut (no closing quote) is still the action, not the title', () => {
+    const a = { kind: 'comment', text: 'on subtask "TASKS.PERF · dono 06/11: "o loading das tasks tá MUITO lento" — GET /api/tasks 1,3–1,8 s / 279 KB no servidor real (2.200.3); mesma receita' }
+    expect(describeLastAction(a, 'pt')).toBe('comentou na subtarefa')
+    expect(describeLastAction(a, 'en')).toBe('commented on the subtask')
+  })
   test('status, claim, session, priority and a check-in each have their own sentence', () => {
     expect(describeLastAction({ kind: 'status', text: 'status', from: 'in_review', to: 'in_progress' }, 'pt')).toBe('mudou de em revisão para em andamento')
     expect(describeLastAction({ kind: 'status', text: 'status', from: 'todo', to: 'qa_pass' }, 'en')).toBe('moved from to do to qa pass')

@@ -129,7 +129,8 @@ export function describeLastAction(
   const pt = lang === 'pt'
   switch (a.kind) {
     case 'comment': {
-      const m = /^on subtask\s+["“]([\s\S]*)["”]$/i.exec(a.text.trim())
+      // A PREFIX test: the title inside may hold quotes of its own and the reply cuts the text, so the closing quote is not guaranteed.
+      const m = /^on subtask\s+["“]/i.exec(a.text.trim())
       if (m || !a.text.trim() || a.text.trim() === 'comment') return pt ? 'comentou na subtarefa' : 'commented on the subtask'
       return (pt ? 'comentou: ' : 'commented: ') + (humanizeAction(a.text, lang, titleOf) ?? '')
     }

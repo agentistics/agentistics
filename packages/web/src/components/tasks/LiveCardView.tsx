@@ -137,7 +137,7 @@ export function LiveCardView(p: LiveCardViewProps) {
         </>
       )}
       {queue?.staged && <span data-live-staged style={{ fontSize: 11, color: 'var(--text-secondary)', overflowWrap: 'anywhere', lineHeight: 1.3 }}>{queue.staged}</span>}
-      {queue?.slot && <span data-live-slot style={{ fontSize: 10.5, color: queue.slotOk === false ? 'var(--accent-yellow, #e5b341)' : MUTED, overflowWrap: 'anywhere' }}>{queue.slot}</span>}
+      {queue?.slot && <span data-live-queue-slot style={{ fontSize: 10.5, color: queue.slotOk === false ? 'var(--accent-yellow, #e5b341)' : MUTED, overflowWrap: 'anywhere' }}>{queue.slot}</span>}
       {queued && <span data-live-time title={time.title} style={{ fontSize: 10.5, color: MUTED }}>{time.inStage}</span>}
 
       {boxes && !queued && (

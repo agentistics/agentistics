@@ -394,6 +394,8 @@ interface Piece {
   blockedReason: string | null
   /** Unfinished dependencies (sibling subtasks / blocking tasks) the book names. */
   dependsOn: number
+  /** The task's comments (each with its own `subtaskId`) — the real data keeps a legacy piece's delivered commit in its handback comment. */
+  comments: readonly { subtaskId?: string; body: string; createdAt: string }[]
 }
 
 /** Resolve the target carried by newer activity records and by the older human-readable detail. */
@@ -432,6 +434,7 @@ function piecesOf(d: TaskDetail): Piece[] {
     times: timesOf(s.id), sessions: sessionsOf(s.id),
     blockedReason: null,
     dependsOn: (s.blockedBy ?? []).filter(id => d.subtasks.some(x => x.id === id && !subtaskDone(x.status))).length,
+    comments: d.comments,
   }))
   // Sessions filed on the task itself stand for a piece of their own; a task with NO subtasks is
   // that piece. A task that has subtasks and also direct sessions gets the extra piece only while
@@ -444,6 +447,7 @@ function piecesOf(d: TaskDetail): Piece[] {
       times: timesOf(null) ?? d.times, sessions: direct,
       blockedReason: d.task.blockedReason ?? null,
       dependsOn: (d.task.blockedBy ?? []).length,
+      comments: d.comments,
     })
   }
   return out
@@ -519,9 +523,23 @@ function indexEvents(details: readonly TaskDetail[], events: readonly TaskEvent[
   return { lastBySubject, eventsBySubject }
 }
 
-/** The commit ids a LEGACY review piece (status `in_review`, no delivery record) names in its notes and log. */
-function legacyShasOf(p: Piece, events: readonly TaskEvent[] | undefined): string[] {
-  return [...new Set([...shasIn(p.sub?.notes), ...(events ?? []).flatMap(e => shasIn(e.detail))])]
+/**
+ * The commit ids a LEGACY review piece (status `in_review`, no delivery record) names, as GROUPS: the piece is
+ * published when ANY group is wholly inside a published release tag. A sha in the notes or in one log line is a
+ * group of its own; the NEWEST comment on the piece that names any commit (its handback — the real data keeps the
+ * delivered commit there, not in the notes) is one group, so a "base <sha>" beside the delivered one cannot
+ * publish a piece whose own commit is not in a tag.
+ */
+function legacyShaGroups(p: Piece, events: readonly TaskEvent[] | undefined): string[][] {
+  const groups: string[][] = [...shasIn(p.sub?.notes), ...(events ?? []).flatMap(e => shasIn(e.detail))].map(s => [s])
+  let newest: { at: string; shas: string[] } | null = null
+  for (const c of p.comments) {
+    if ((c.subtaskId ?? null) !== (p.sub?.id ?? null)) continue
+    const shas = shasIn(c.body)
+    if (shas.length > 0 && (!newest || c.createdAt >= newest.at)) newest = { at: c.createdAt, shas }
+  }
+  if (newest) groups.push(newest.shas)
+  return groups
 }
 
 /**
@@ -533,7 +551,7 @@ export function legacyReviewShas(details: readonly TaskDetail[], events: readonl
   const out = new Set<string>()
   for (const d of details) for (const p of piecesOf(d)) {
     if (p.status !== 'in_review' || (p.sub && deliveries?.has(p.sub.id))) continue
-    for (const sha of legacyShasOf(p, eventsBySubject.get(p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id))) out.add(sha)
+    for (const g of legacyShaGroups(p, eventsBySubject.get(p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id))) for (const sha of g) out.add(sha)
   }
   return [...out]
 }
@@ -587,7 +605,7 @@ export function buildLive(o: {
     // with no such commit and nothing alive for 72 h it is not review work any more — it is listed apart, never dropped.
     if (!rec && stage === 'leader' && p.status === 'in_review') {
       const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
-      if (legacyShasOf(p, eventsBySubject.get(subj)).some(sha => o.publishedShas?.has(sha))) stage = 'published'
+      if (legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) stage = 'published'
       else if (liveSessions.length === 0 && o.nowMs - (ms(p.updatedAt) ?? o.nowMs) > LEGACY_REVIEW_MS) { archived.push(entry(p, 'leader', 'legacy-review-old')); continue }
     }
     // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,
