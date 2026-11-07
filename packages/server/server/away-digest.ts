@@ -240,6 +240,10 @@ async function offerAwayDigestLocked(now: number): Promise<void> {
   const { readPreferences, updatePreferences } = await import('./preferences')
   const prefs = await readPreferences()
   const away = parseAwayState(prefs.away ?? AWAY_OFF)
+  // Autonomous mode is not a prompt channel: the owner is unavailable, so never create the
+  // yes/no digest offer (or a Nay session waiting for that answer). The task/check-in records and
+  // leader notices remain available for the owner's later review.
+  if (awayActive(away, now)) return
   const bucket = awayDigestOfferDue(away, prefs.awayDigest, now)
   if (bucket === null) return
   let claimed = false

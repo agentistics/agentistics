@@ -48,6 +48,10 @@ describe('managed briefing source', () => {
     expect(briefingText('pt')).toContain('in_progress → in_review → done')
     expect(briefingText('pt')).toContain('Habilidades gerenciadas instaladas:')
     expect(briefingText('pt', { planLimitsAvailable: true })).toContain('Antes de abrir sessões')
+    expect(briefingText('en', { away: true })).toContain('never ask, wait for, or address the owner')
+    expect(briefingText('en', { away: true })).not.toContain('Ask the person in the conversation')
+    expect(briefingText('pt', { away: true })).toContain('nunca pergunte, espere ou se dirija ao dono')
+    expect(briefingText('pt', { away: true })).not.toContain('Pergunte à pessoa na conversa')
   })
 
   test('installer detects plan limits from the actual tool list', async () => {

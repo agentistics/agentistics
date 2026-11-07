@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from 'bun:test'
-import { AWAY_NOTE_MAX, autonomousSpawnMode, awayActive, awayBriefingLines, awayHandoffNote, awayTopCap, normalizeAwayInput, normalizeAwayNotice, parseAwayState, readAwaySpawn, resolveSpawnAway, sessionAwayNotice, sessionAwayState, type AwayState } from './awayMode'
+import { AUTONOMOUS_ON_RULE, AWAY_NOTE_MAX, autonomousSpawnMode, awayActive, awayBriefingLines, awayHandoffNote, awayTopCap, normalizeAwayInput, normalizeAwayNotice, parseAwayState, readAwaySpawn, resolveSpawnAway, sessionAwayNotice, sessionAwayState, type AwayState } from './awayMode'
 
 const NOW = Date.parse('2026-10-12T03:00:00.000Z')
 const on = (o: Partial<AwayState> = {}): AwayState => ({ on: true, since: '2026-10-12T02:00:00.000Z', until: null, authorised: ['releases', 'workers'], maxWorkers: 6, topCaps: { claude: 2 }, ...o })
@@ -49,16 +49,16 @@ describe('awayBriefingLines', () => {
   it('leader lines: scope, pacing, quality, communication', () => {
     const lines = awayBriefingLines(on({ note: 'focus on QUAL', maxWorkers: 4, topCaps: { claude: 1, codex: 3 } }), 'leader', NOW)
     expect(lines).toHaveLength(4)
-    expect(lines[0]).toBe("AUTONOMOUS MODE (until they say they are back) — decide and proceed without asking permission or questions. Pre-authorised: publish releases the leader has approved (QA green); open worker sessions within the plan limits; owner's note: focus on QUAL. These authorisations stand in for the owner's approval wherever the rules below ask for it — act on them without asking permission; anything outside them waits in the hand-off file for their return.")
+    expect(lines[0]).toBe(`AUTONOMOUS MODE (until they say they are back) — ${AUTONOMOUS_ON_RULE.en} Pre-authorised: publish releases the leader has approved (QA green); open worker sessions within the plan limits; owner's note: focus on QUAL. Act directly within those authorisations; anything outside them is DEFERRED safely in the hand-off file for the owner's return.`)
     expect(lines[1]).toContain('Never run more than 4 workers at once; at most this many of them on a provider\'s top model tier at once: claude (Opus / Fable) ≤ 1, codex (top GPT tier) ≤ 3, any other provider ≤ 1')
     expect(lines[1]).toContain('free RAM drops under 2 GB')
     expect(lines[1]).toContain('mid tier: scoped implementation; light tier: probes')
     expect(lines[1]).not.toContain('Opus:')
     expect(lines[2]).toContain('QA by a different model from the author, tests only in throwaway runs (agentop run --rm)')
     expect(lines[2]).toContain('bundled into one release per batch')
-    expect(lines[3]).toContain('never end a turn on a question to the owner')
+    expect(lines[3]).toContain('never end a turn on a question')
     expect(lines[3]).toContain('agentistics_session_away with `notice`')
-    expect(lines[3]).toContain("in the successor's prompt that the owner is away")
+    expect(lines[3]).toContain("in the successor's prompt what is authorised")
   })
   it('pacing points at the briefing rule when it is there, and states it in full when it is not', () => {
     const pointed = awayBriefingLines(on(), 'leader', NOW, { planLimitsInBriefing: true })[1]!
@@ -68,17 +68,23 @@ describe('awayBriefingLines', () => {
     expect(full).toContain('keep cadence.parallel workers running; if paceStatus is under, pull work from the queue; hold only when the 5-hour window is at least 85%')
     expect(full).toContain('weekly quota is not a brake unless it is at least 95%')
   })
-  it('without the releases authorisation, releases wait for the owner', () => {
-    expect(awayBriefingLines(on({ authorised: ['workers'] }), 'leader', NOW)[2]).toContain('releases wait for the owner')
+  it('without the releases authorisation, releases are safely deferred', () => {
+    expect(awayBriefingLines(on({ authorised: ['workers'] }), 'leader', NOW)[2]).toContain('releases are DEFERRED safely')
   })
   it('worker line: report to the leader, not the owner', () => {
     const [l] = awayBriefingLines(on({ until: '2026-10-12T12:00:00.000Z' }), 'worker', NOW)
-    expect(l).toBe('AUTONOMOUS MODE (until 2026-10-12T12:00:00.000Z) — decide and proceed without asking permission or questions. Do not ask the owner anything: send questions, blocks and hand-backs to the session that started you (agentistics_session_message); with no such session, decide within your brief and record the decision.')
+    expect(l).toBe(`AUTONOMOUS MODE (until 2026-10-12T12:00:00.000Z) — ${AUTONOMOUS_ON_RULE.en} Worker communication: report ONLY to your leader through agentistics_session_message. Send blocks and hand-backs there; never address the owner and never end a turn on a question. With no leader, decide within your brief and record the decision.`)
   })
   it('auto line names both paths; no authorisations says so', () => {
     const [l] = awayBriefingLines(on({ authorised: [] }), undefined, NOW)
     expect(l).toContain('Pre-authorised: nothing beyond the rules below.')
-    expect(l).toContain('otherwise report to the session that started you')
+    expect(l).toContain('otherwise report ONLY to the session that started you')
+  })
+  it('ON text never creates an owner question or approval wait', () => {
+    const text = awayBriefingLines(on({ authorised: [] }), 'leader', NOW).join('\n').toLowerCase()
+    for (const forbidden of ['ask the owner', 'wait for the owner', 'wait for approval', 'confirm first', 'pergunte ao dono']) {
+      expect(text).not.toContain(forbidden)
+    }
   })
 })
 
@@ -151,7 +157,7 @@ describe('per-session away', () => {
   })
   it('a session-only away briefing tells a worker not to ask the owner', () => {
     const [l] = awayBriefingLines(sessionAwayState(null, true, NOW), 'worker', NOW)
-    expect(l).toContain('Do not ask the owner anything')
+    expect(l).toContain('never address the owner')
   })
   it('the runtime notice is typed only when the effective state changes', () => {
     const off = parseAwayState(null)

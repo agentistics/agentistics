@@ -296,7 +296,8 @@ describe('autonomous mode in the briefing', () => {
     expect(lines[i - 1]).toContain('LEADER')
     expect(lines[i]).toContain('until 2026-10-12T12:00:00.000Z')
     expect(lines[i]).toContain('publish releases the leader has approved')
-    expect(lines.slice(i, i + 4).join('\n')).toContain('never end a turn on a question to the owner')
+    expect(lines.slice(i, i + 4).join('\n')).toContain('owner notices are informational only and never block')
+    expect(lines.slice(i, i + 4).join('\n')).not.toContain('ask the owner')
   })
   test('on: pacing points at the plan-limits line already in the briefing (said once); off: every away line is gone', () => {
     const tools = [...CONTEXT_TOOL_NAMES]
@@ -310,7 +311,9 @@ describe('autonomous mode in the briefing', () => {
   })
   test('worker is told to report to its leader, not the owner', () => {
     const t = contextText({ ...base, now: NOW, away, role: 'worker', parentId: 'p1' })
-    expect(t).toContain('Do not ask the owner anything')
+    expect(t).toContain('report ONLY to your leader')
+    expect(t).not.toContain('ask the owner')
+    expect(t).not.toContain('wait for approval')
   })
 })
 

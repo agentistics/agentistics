@@ -6,7 +6,7 @@
  */
 import { join } from 'node:path'
 import { flowBriefing } from './briefing-flow'
-import type { HarnessId } from '@agentistics/core'
+import { AUTONOMOUS_ON_RULE, type HarnessId } from '@agentistics/core'
 
 export const BRIEFING_VERSION = 3
 export const MANAGED_OPEN = '<!-- agentistics-managed-briefing: v'
@@ -75,8 +75,8 @@ export function briefingText(lang: 'en' | 'pt' = 'en', o: { planLimitsAvailable?
   // Autonomous mode overrides "ask the person": the owner is not there to answer.
   if (o.away) {
     text = lang === 'pt'
-      ? text.replace('Pergunte à pessoa na conversa quando uma decisão for necessária.', 'Modo autônomo: decida e siga sem pedir permissão; decisões vão para a sessão que iniciou esta ou para o registro da tarefa, não para o dono.')
-      : text.replace('Ask the person in the conversation when a decision is needed.', 'Autonomous mode: decide and proceed without asking permission; decisions go to the session that started you or to the task record, not to the owner.')
+      ? text.replace('Pergunte à pessoa na conversa quando uma decisão for necessária.', AUTONOMOUS_ON_RULE.pt)
+      : text.replace('Ask the person in the conversation when a decision is needed.', AUTONOMOUS_ON_RULE.en)
   }
   const limits = o.planLimitsAvailable
     ? lang === 'pt'
