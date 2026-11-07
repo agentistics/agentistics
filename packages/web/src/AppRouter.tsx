@@ -23,6 +23,7 @@ const VaultPage = lazy(() => import('./pages/VaultPage'))
 const TasksPage = lazy(() => import('./pages/TasksPage'))
 const TaskActivityPage = lazy(() => import('./pages/TaskActivityPage'))
 const DeliveryCalendarPage = lazy(() => import('./pages/DeliveryCalendarPage'))
+const DeliveryEvolutionPage = lazy(() => import('./pages/DeliveryEvolutionPage'))
 const ActionsPage = lazy(() => import('./pages/ActionsPage'))
 const TagDetailPage = lazy(() => import('./pages/TagDetailPage'))
 const ToolsPage = lazy(() => import('./pages/ToolsPage'))
@@ -108,6 +109,7 @@ export default function AppRouter() {
           <Route path="tasks/table" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
           <Route path="tasks/live" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
           <Route path="tasks/calendar" element={<Suspense fallback={<PageFallback />}><DeliveryCalendarPage /></Suspense>} />
+          <Route path="delivery-evolution" element={<Suspense fallback={<PageFallback />}><DeliveryEvolutionPage /></Suspense>} />
           <Route path="tasks/activity" element={<Suspense fallback={<PageFallback />}><TaskActivityPage /></Suspense>} />
           <Route path="tasks/:id" element={<Suspense fallback={<PageFallback />}><TasksPage /></Suspense>} />
           <Route path="tags" element={<Suspense fallback={<PageFallback />}><TagsPage /></Suspense>} />

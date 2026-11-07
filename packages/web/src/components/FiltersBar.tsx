@@ -11,6 +11,7 @@ import type { MemberPresence } from '@agentistics/core'
 import { DatePicker } from './DatePicker'
 import { format } from 'date-fns'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { extraActive, extraActiveCount, pickExtra, type ExtraFilters } from '../lib/extraFilters'
 
 interface Props {
   /**
@@ -26,6 +27,9 @@ interface Props {
    */
   activeOnly?: boolean
   onActiveOnlyChange?: (on: boolean) => void
+
+  /** Page-specific dimensions (see `lib/extraFilters.ts`): drawn in this bar's own + Filter menu, chip rows, count and clear — only on the page that passes them. */
+  extra?: ExtraFilters
 
   filters: Filters
   onChange: (f: Filters) => void
@@ -199,7 +203,7 @@ const SEARCH_INPUT: React.CSSProperties = {
   borderRadius: 6, padding: '6px 8px 6px 26px', outline: 'none',
 }
 
-export function FiltersBar({ only, filters, onChange, projects, sessionCountByProject, models, modelGroups, modelsInProject, users, harnesses, presence, lang, compact, hideClearAll = false, summary, teams, machines, tags, canFilterMembers = true, onCreateTagFromFilters, activeOnly, onActiveOnlyChange, costBasis = "api", onCostBasisChange, costBasisReady = false, onCostBasisSetup, hideDateRange = false, inline = false, dateCompact = false, activeFiltersIcon = false, addFilterIcon = false, harnessesOutOfView }: Props) {
+export function FiltersBar({ only, extra, filters, onChange, projects, sessionCountByProject, models, modelGroups, modelsInProject, users, harnesses, presence, lang, compact, hideClearAll = false, summary, teams, machines, tags, canFilterMembers = true, onCreateTagFromFilters, activeOnly, onActiveOnlyChange, costBasis = "api", onCostBasisChange, costBasisReady = false, onCostBasisSetup, hideDateRange = false, inline = false, dateCompact = false, activeFiltersIcon = false, addFilterIcon = false, harnessesOutOfView }: Props) {
   // Fall back to a single unlabeled group when modelGroups isn't provided.
   const groups: { harness: SurfaceHarnessId | null; models: string[] }[] =
     modelGroups && modelGroups.length > 0
@@ -213,8 +217,9 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
   const [teamQuery, setTeamQuery] = useState('')
   const [machineQuery, setMachineQuery] = useState('')
   const [tagQuery, setTagQuery] = useState('')
+  const [extraQuery, setExtraQuery] = useState('')
   // "+ Filter" menu: pick a dimension → open its value picker. One open at a time.
-  type Dimension = 'members' | 'harnesses' | 'presence' | 'repos' | 'models' | 'teams' | 'machines' | 'tags' | 'activeOnly'
+  type Dimension = 'members' | 'harnesses' | 'presence' | 'repos' | 'models' | 'teams' | 'machines' | 'tags' | 'activeOnly' | `extra:${string}`
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [openPicker, setOpenPicker] = useState<Dimension | null>(null)
   // Desktop: collapse the active-filter chip rows (mobile has its own whole-bar minimize).
@@ -304,12 +309,13 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
       projects: [], models: [], teams: [], machines: [],
     })
     onActiveOnlyChange?.(false)
+    extra?.clear()
   }
 
   // Number of dimensions currently active — shown as the badge on the "+ Filter" button. THE ONE
   // count: the Sessions workspace's collapsed Filtros trigger reads the same function, so the two
   // badges can never drift apart from each other.
-  const activeFilterCount = countActiveFilters(filters, Boolean(onActiveOnlyChange && activeOnly))
+  const activeFilterCount = countActiveFilters(filters, Boolean(onActiveOnlyChange && activeOnly)) + extraActiveCount(extra)
 
   // Outside click closes the "+ Filter" menu and any open dimension picker together.
   useEffect(() => {
@@ -504,6 +510,26 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
               })()}
             </ChipRow>
           </AnimatedRow>
+          {/* Page-specific dimensions: one labelled row each, like every other dimension. */}
+          {extra?.dims.map(d => (
+            <AnimatedRow key={`extra:${d.id}`} show={extraActive(d)}>
+              <ChipRow label={d.label}>
+                {extraActive(d) && d.selected.map(v => {
+                  const o = d.options.find(x => x.value === v)
+                  const label = o?.label ?? v
+                  return (
+                    <FilterChip key={`${d.id}:${v}`} title={label} removeTitle={lang === 'pt' ? 'Remover filtro' : 'Remove filter'}
+                      onRemove={() => d.onChange(d.mode === 'multi' ? d.selected.filter(x => x !== v) : d.neutral !== undefined ? [d.neutral] : [])}>
+                      {o?.color
+                        ? <span style={{ width: 7, height: 7, borderRadius: '50%', background: o.color, flexShrink: 0 }} />
+                        : <SlidersHorizontal size={10} style={{ flexShrink: 0 }} />}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+                    </FilterChip>
+                  )
+                })}
+              </ChipRow>
+            </AnimatedRow>
+          ))}
     </div>
   )
 
@@ -1015,6 +1041,16 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
                   onClick={() => setOpenPicker('models')}
                 />
               )}
+              {/* Page-specific dimensions: present only on the page that handed them over (`extra`). */}
+              {extra?.dims.map(d => (
+                <MenuItem
+                  key={`extra:${d.id}`}
+                  icon={<SlidersHorizontal size={13} />}
+                  label={d.label}
+                  active={extraActive(d)}
+                  onClick={() => { setExtraQuery(''); setOpenPicker(`extra:${d.id}`) }}
+                />
+              ))}
               {/* The popover no longer holds the chips: they are in the BAR now, beside this
                   button, because a filter you have to open a menu to see is a filter you cannot
                   see. What stays here is the menu of dimensions to ADD. */}
@@ -1248,6 +1284,39 @@ export function FiltersBar({ only, filters, onChange, projects, sessionCountByPr
                   )}
                 </>
               )}
+
+              {/* A page-specific dimension (multi or single choice). */}
+              {openPicker?.startsWith('extra:') && (() => {
+                const d = extra?.dims.find(x => `extra:${x.id}` === openPicker)
+                if (!d) return null
+                const q = extraQuery.trim().toLowerCase()
+                const list = q ? d.options.filter(o => o.label.toLowerCase().includes(q)) : d.options
+                return (
+                  <>
+                    {d.searchable && (
+                      <div style={{ position: 'relative', padding: '0 2px 6px' }}>
+                        <Search size={12} style={{ position: 'absolute', left: 10, top: 9, color: 'var(--text-tertiary)' }} />
+                        <input value={extraQuery} onChange={e => setExtraQuery(e.target.value)} placeholder={lang === 'pt' ? 'Buscar…' : 'Search…'} style={SEARCH_INPUT} />
+                      </div>
+                    )}
+                    <div style={{ maxHeight: 240, overflowY: 'auto' }}>
+                      {list.map(o => (
+                        <PickerRow
+                          key={o.value}
+                          selected={d.selected.includes(o.value)}
+                          {...(o.color ? { dotColor: o.color } : {})}
+                          label={o.label}
+                          onClick={() => d.onChange(pickExtra(d, o.value))}
+                        />
+                      ))}
+                      {list.length === 0 && <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--text-tertiary)' }}>{lang === 'pt' ? 'Nada para escolher' : 'Nothing to choose'}</div>}
+                    </div>
+                    {extraActive(d) && (
+                      <ClearFooter onClick={() => d.onChange(d.neutral !== undefined ? [d.neutral] : [])} label={lang === 'pt' ? `Limpar ${d.label.toLowerCase()}` : `Clear ${d.label.toLowerCase()}`} />
+                    )}
+                  </>
+                )
+              })()}
 
               {/* Presence (single) */}
               {openPicker === 'presence' && presence && (

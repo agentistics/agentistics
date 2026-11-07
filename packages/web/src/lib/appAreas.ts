@@ -49,6 +49,7 @@ export const APP_AREAS: readonly Area[] = [
     { id: 'tools', path: '/tools', labelPt: 'Ferramentas', labelEn: 'Tools' },
     { id: 'custom', path: '/custom', labelPt: 'Personalizado', labelEn: 'Custom' },
     { id: 'tags', path: '/tags', labelPt: 'Tags', labelEn: 'Tags' },
+    { id: 'delivery-evolution', path: '/delivery-evolution', labelPt: 'Evolução de entregas', labelEn: 'Delivery evolution', beta: true },
   ] },
   { id: 'sessions', icon: 'terminal', labelPt: 'Sessões', labelEn: 'Sessions', pages: [
     { id: 'workspace', path: '/sessions', labelPt: 'Lista', labelEn: 'List' },

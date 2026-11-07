@@ -148,6 +148,7 @@ import { ChangePasswordSelf } from './components/ChangePasswordSelf'
 import { MfaSetup } from './components/MfaSetup'
 import { StepUpPrompt } from './components/StepUpPrompt'
 import { HARNESS_LABELS } from './lib/harness'
+import { useEvolutionExtra } from './lib/evolutionFilters'
 import { PlanUsageFootButton } from './components/PlanUsageFootButton'
 import { format, parseISO, parse } from 'date-fns'
 import { fleetFilterOptions, filterFleet, SESSION_FILTER_DIMS } from './lib/fleetFilter'
@@ -1003,6 +1004,9 @@ export default function AppLayout() {
     typeof window === 'undefined' ? null : window.localStorage,
     typeof navigator === 'undefined' ? undefined : navigator.language,
   ))
+  // "Evolução de entregas" is the one page whose numbers react to more than the shared dimensions: its extra ones ride this bar.
+  const evolutionRoute = location.pathname === '/delivery-evolution'
+  const evolutionExtra = useEvolutionExtra(lang === 'pt' ? 'pt' : 'en')
   const { fleet: headerFleet, act: headerFleetAct, unsupported: headerFleetUnsupported } = useFleet(lang === 'pt' ? 'pt' : 'en')
   const { data, loading, error, loadError, offline, startup, refetch } = useData(headerFleet.rows.some(row => row.state === 'working'))
   // A local mirror of the language, for the one sentence the boot splash may say before the bundle
@@ -3644,7 +3648,8 @@ export default function AppLayout() {
           dateCompact={stripFit.date === 'compact'}
           activeFiltersIcon={stripFit.activeFilters === 'icon'}
           addFilterIcon={stripFit.addFilter === 'icon'}
-          only={filterDimsForRoute}
+          only={evolutionRoute ? ['harnesses'] : filterDimsForRoute}
+          extra={evolutionRoute ? evolutionExtra : undefined}
           // THE SWITCH BELONGS ON BOTH PAGES — the user asked for exactly that, and Task 8 put it
           // inside the + Filter menu so it reads as a dimension rather than a pill beside them.
           // The sessions strip carried it and this one did not, which would have left "active
@@ -4261,7 +4266,8 @@ export default function AppLayout() {
             >
               <div style={{ overflow: (filtersCollapsed || filtersClip) ? 'hidden' : 'visible', minHeight: 0 }}>
                 <FiltersBar
-                  only={filterDimsForRoute}
+                  only={evolutionRoute ? ['harnesses'] : filterDimsForRoute}
+                  extra={evolutionRoute ? evolutionExtra : undefined}
                   costBasis={costBasis}
                   onCostBasisChange={isCentral ? undefined : setCostBasis}
                   costBasisReady={billingReady.ready && planBasis.basis !== null}
