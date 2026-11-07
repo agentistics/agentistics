@@ -389,3 +389,27 @@ describe('M5 — a human gate waiting on the owner is projected to the card', ()
     expect(awaitingApprovalOf(undefined)).toBeNull()
   })
 })
+
+describe('HOSTILE r3 re-QA (Opus) — BLOQUEIO.ORFAO, the Live side', () => {
+  // LOW-1 (r3 re-QA): leader decision r4 — documented, not fixed in this batch.
+  test.skip('HQ6 · a blocked TASK the Live shows as its own card (subtasks + a live direct session) is a piece the vigia discovers', async () => {
+    const { blockedPiecesOf } = await import('../delivery/gates')
+    const r = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [sub('a', 'todo')] as never, sessions: [sess('d', null)] as never }, { status: 'blocked', blockedReason: 'esperando a chave' })],
+    })
+    const card = r.deliveries.find(d => d.subtaskId === null)
+    expect(card?.stage).toBe('blocked') // the Live shows a Bloqueado card for the task itself
+    const found = blockedPiecesOf({
+      tasks: [{ id: 't1', title: 'Task one', status: 'blocked', updatedAt: iso(NOW - 30 * H), blockedReason: 'esperando a chave' }],
+      subtasks: [{ id: 'a', taskId: 't1', title: 'Sub a', status: 'todo', updatedAt: iso(NOW - 2 * H) }],
+    })
+    expect(found.map(p => p.id)).toContain('t1')
+  })
+
+  test('HQ7 · a pure adoption the board released to In review leaves NO record behind, so the Live shows the board status (a review card)', () => {
+    // r4: reconcileAdopted DELETES the pure adoption on release (service.test.ts covers it); with no record the Live reads the board.
+    const control = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [sub('a', 'in_review')] as never, sessions: [] })] })
+    expect(control.deliveries.find(d => d.subtaskId === 'a')?.stage).toBe('leader')
+  })
+})

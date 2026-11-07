@@ -771,15 +771,14 @@ describe('BLOQUEIO.ORFAO — a board-blocked piece with no delivery record is ch
     }
   })
 
-  test('3 · an adopted piece unblocked on the board returns to its origin phase and the board status is left as the person set it', async () => {
+  test('3 · an adopted piece unblocked on the board is dropped (no leftover record) and the board status is left as the person set it', async () => {
     const h = harness({ blocked: [orphan({ id: 's1' })] })
     await h.svc.tick()
     h.w.blocked = []
     h.w.status = 'in_progress'
     h.advance(31 * 60_000)
     expect((await h.svc.tick()).actions).toEqual(['released s1'])
-    expect(await h.svc.get('s1')).toMatchObject({ phase: 'fila' })
-    expect((await h.svc.get('s1'))!.block).toBeUndefined()
+    expect(await h.svc.get('s1')).toBeNull()
     expect(h.calls.status).toEqual([])
     expect(h.calls.session).toHaveLength(1)
   })
@@ -950,6 +949,38 @@ describe('BLOQUEIO.ORFAO — a board-blocked piece with no delivery record is ch
     expect(h.calls.session.length).toBe(wakes)
   })
 
+  test('r4 · a board move the board keeps refusing is retried a capped number of ticks, then dropped with ONE notice (no loop)', async () => {
+    const h = harness({ blocked: [orphan({ id: 't7', taskId: 't7', title: 'tarefa sozinha', since: '2026-11-07T01:00:00Z' })], sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't7' }] })
+    await h.svc.tick()
+    h.w.boardWriteFails = true
+    h.advance(2 * 3600_000)
+    expect((await h.svc.tick()).actions).toEqual(['defer t7'])
+    const wakes = h.calls.session.length, comments = h.calls.comments.length
+    let gaveUp = 0
+    for (let i = 0; i < 30; i++) {
+      h.advance(60_000)
+      gaveUp += (await h.svc.tick()).actions.filter(a => a === 'requeue-gave-up t7').length
+    }
+    expect(gaveUp).toBe(1)
+    expect((await h.svc.get('t7'))!.block!.boardMovePending).toBeUndefined()
+    expect(h.calls.session.length).toBe(wakes + 1) // exactly one notice to the leader
+    expect(h.calls.comments.length).toBe(comments)
+    const writes = h.calls.status.length
+    h.advance(60_000)
+    await h.svc.tick()
+    expect(h.calls.status.length).toBe(writes) // no more writes after the cap
+  })
+
+  test('r4 · a pure adoption the board releases to In review is dropped, and a later board block is adopted afresh', async () => {
+    const h = harness({ blocked: [orphan({ id: 's1' })] })
+    await h.svc.tick()
+    h.w.blocked = []
+    h.w.status = 'in_review'
+    h.advance(60_000)
+    expect((await h.svc.tick()).actions).toEqual(['released s1'])
+    expect(await h.svc.get('s1')).toBeNull()
+  })
+
   test('r3 · 3 · a blocked task keeps its blockedBy: discovery carries it, and adoption waits for the dependency instead of waking the leader', async () => {
     const t = { id: 't7', title: 't7', status: 'blocked', updatedAt: '2026-11-07T01:50:00Z', blockedBy: ['t0'] }
     const [piece] = blockedPiecesOf({ tasks: [t], subtasks: [] })
@@ -963,5 +994,96 @@ describe('BLOQUEIO.ORFAO — a board-blocked piece with no delivery record is ch
     h.advance(60_000)
     expect((await h.svc.tick()).actions).toContain('unblock t7')
     expect((await h.svc.get('t7'))!.phase).toBe('fila')
+  })
+})
+
+describe('HOSTILE r3 re-QA (Opus) — BLOQUEIO.ORFAO', () => {
+  const orphan = (over: Partial<BlockedSubtaskFact> = {}): BlockedSubtaskFact => ({ id: 's9', taskId: 't1', title: 'peça antiga', blockedBy: [], groupMember: false, since: '2026-11-07T01:50:00Z', ...over })
+
+  test('HQ1 · a real flow block whose board piece the person CLOSED is never reopened on the board by the 2 h deferral', async () => {
+    const h = harness()
+    await walkToQa(h.svc)
+    expect((await h.svc.block('s1', 'externo', 'CI fora do ar', 'leader')).ok).toBe(true)
+    h.w.status = 'done' // the person closed it on the board
+    const before = h.calls.status.length
+    h.advance(2 * 3600_000 + 60_000)
+    await h.svc.tick()
+    expect(h.calls.status.slice(before).filter(s => s.id === 's1')).toEqual([])
+  })
+
+  test('HQ1b · same through adoption: adopt → unblock → real flow → block → board done → deferral must not reopen it', async () => {
+    const h = harness({ blocked: [orphan({ id: 's1' })] })
+    await h.svc.tick()
+    expect((await h.svc.unblock('s1', 'leader')).ok).toBe(true)
+    await walkToQa(h.svc)
+    expect((await h.svc.block('s1', 'externo', 'preso', 'leader')).ok).toBe(true)
+    h.w.blocked = []
+    h.w.status = 'done'
+    await h.svc.tick()
+    expect(await h.svc.get('s1')).not.toBeNull() // r3 fix holds: real history kept
+    const before = h.calls.status.length
+    h.advance(2 * 3600_000 + 60_000)
+    await h.svc.tick()
+    expect((await h.svc.get('s1'))!.headSha).toBe('abc123')
+    expect(h.calls.status.slice(before).filter(s => s.id === 's1')).toEqual([])
+  })
+
+  test('HQ2 · a pure adoption released by the board, then blocked on the board AGAIN, is chased afresh', async () => {
+    const h = harness({ blocked: [orphan({ id: 's1' })] })
+    await h.svc.tick()
+    h.w.blocked = []
+    h.w.status = 'todo'
+    h.advance(60_000)
+    expect((await h.svc.tick()).actions).toEqual(['released s1'])
+    h.advance(3600_000) // 03:01
+    h.w.status = 'blocked'
+    h.w.blocked = [orphan({ id: 's1', since: '2026-11-07T03:00:00Z' })]
+    const t = await h.svc.tick()
+    expect(t.actions).toContain('adopt s1')
+    expect((await h.svc.get('s1'))!.phase).toBe('bloqueado')
+  })
+
+  test('HQ3 · boardMovePending: the board piece goes done meanwhile → the flag clears, no write, nothing said (expected to pass)', async () => {
+    const h = harness({ blocked: [orphan({ id: 't7', taskId: 't7', title: 'tarefa sozinha', since: '2026-11-07T01:00:00Z' })], sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't7' }] })
+    await h.svc.tick()
+    h.w.boardWriteFails = true
+    h.advance(2 * 3600_000)
+    expect((await h.svc.tick()).actions).toEqual(['defer t7'])
+    expect((await h.svc.get('t7'))!.block!.boardMovePending).toBe(true)
+    const writes = h.calls.status.length, comments = h.calls.comments.length, wakes = h.calls.session.length
+    h.w.blocked = [] // closed on the board
+    h.advance(60_000)
+    expect((await h.svc.tick()).actions).toEqual([])
+    expect((await h.svc.get('t7'))!.block!.boardMovePending).toBeUndefined()
+    expect(h.calls.status.length).toBe(writes)
+    expect(h.calls.comments.length).toBe(comments)
+    expect(h.calls.session.length).toBe(wakes)
+  })
+
+  test('HQ4 · pure → real → defers again → board done: record kept, no adoption marker, never dropped (expected to pass)', async () => {
+    const h = harness({ blocked: [orphan({ id: 's1' })] })
+    await h.svc.tick()
+    expect((await h.svc.unblock('s1', 'leader')).ok).toBe(true)
+    await walkToQa(h.svc)
+    expect((await h.svc.block('s1', 'externo', 'preso', 'leader')).ok).toBe(true)
+    h.w.blocked = []
+    h.advance(2 * 3600_000 + 60_000)
+    expect((await h.svc.tick()).actions).toContain('defer s1')
+    const r = (await h.svc.get('s1'))!
+    expect(r).toMatchObject({ phase: 'fila', versionTarget: 'next', headSha: 'abc123' })
+    expect(r.adopted).toBeUndefined()
+    h.w.status = 'done'
+    h.advance(60_000)
+    await h.svc.tick()
+    expect(await h.svc.get('s1')).not.toBeNull()
+  })
+
+  // LOW-2 (r3 re-QA): a dependency-blocked adoption deferred after 2 h. Leader decision r4: leave as is (the deferral rule predates
+  // this branch); the pre-dispatch gap is documented, not fixed here.
+  test.skip('HQ5 · a piece adopted on an UNFINISHED dependency is not put back in the queue (board To do) while that dependency is open', async () => {
+    const h = harness({ blocked: [orphan({ id: 's2', blockedBy: ['s1'], since: '2026-10-25T12:00:00Z' })] })
+    await h.svc.tick()
+    expect(h.calls.status.filter(s => s.id === 's2')).toEqual([])
+    expect((await h.svc.get('s2'))!.phase).toBe('bloqueado')
   })
 })

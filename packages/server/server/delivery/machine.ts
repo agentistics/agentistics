@@ -80,6 +80,8 @@ export interface DeliveryBlock {
   deferredAt?: string
   /** The deferral could not move the BOARD piece to the queue: the next tick re-applies it (once per tick, silently) until it lands. */
   boardMovePending?: boolean
+  /** How many ticks already retried that board move; the retry is capped, then dropped with one notice. */
+  boardMoveTries?: number
 }
 
 export interface QaVerdict { verdict: 'APROVADO' | 'REPROVADO'; findings: string; sha: string; qaSessionId?: string; at: string }

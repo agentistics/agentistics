@@ -79,6 +79,8 @@ const STEP_ON_GATE: Partial<Record<`${Phase}:${GateName}`, number>> = {
 
 /** A tick adopts at most this many board-blocked pieces; the rest come on the next ticks (oldest block first). */
 const ADOPT_PER_TICK = 20
+/** Ticks a deferral's board move is retried before it is given up on (one notice, no loop). */
+const BOARD_MOVE_MAX_TRIES = 10
 /** How many pieces one leader message lists; the rest is a count. */
 const WAKE_LIST_MAX = 5
 const RELEASE_POLL_MIN_MS = 60_000
@@ -518,16 +520,17 @@ export function createDeliveryService(d: DeliveryDeps) {
       const status = await (d.facts.pieceStatus ? d.facts.pieceStatus(r.subtaskId) : d.facts.subtask(r.subtaskId).then(s => s?.status ?? null)).catch(() => undefined)
       if (status === undefined) continue // the status could not be read either: next tick
       if (status === null || status === 'done' || status === 'abandoned') { await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && isPureAdoption(c)) delete x.deliveries[r.subtaskId] }); continue }
-      const out = await d.store.update(x => {
+      // The board released it: a PURE adoption was never a delivery, so the record is DELETED (not parked in `fila`). A leftover
+      // record would hide a later board block from `adoptOrphans` and override the board's real status on the Live.
+      const dropped = await d.store.update(x => {
         const cur = x.deliveries[r.subtaskId]
-        if (!cur || cur.phase !== 'bloqueado') return null
-        const plan = planUnblock(cur, { at: iso(d), actor: 'flow:entrega', detail: 'desbloqueada no quadro' })
-        if (plan.ok) x.deliveries[r.subtaskId] = plan.next
-        return plan.ok ? plan.next : null
+        if (!cur || cur.phase !== 'bloqueado' || !isPureAdoption(cur)) return false
+        delete x.deliveries[r.subtaskId]
+        return true
       })
-      if (!out) continue
+      if (!dropped) continue
       await d.board.comment(r.taskId, r.subtaskId, '[fluxo entrega] a peça saiu de Bloqueado no quadro: o fluxo parou de cobrar.').catch(() => undefined)
-      await d.emit('entrega.destravada', { subtarefa: r.subtaskId, fase: out.phase }).catch(() => undefined)
+      await d.emit('entrega.destravada', { subtarefa: r.subtaskId, fase: 'fila' }).catch(() => undefined)
       actions.push(`released ${r.subtaskId}`)
     }
   }
@@ -538,9 +541,16 @@ export function createDeliveryService(d: DeliveryDeps) {
    * left the card on the board for ever with nobody chasing it.
    */
   const deferOut = async (r: DeliveryRecord, comment: string): Promise<boolean> => {
+    // The record FOLLOWS the board: a piece the person already closed there is never moved back to To do, never chased and never
+    // announced. A pure adoption is dropped (it was never a delivery); a record with real history leaves Bloqueado quietly, so the
+    // watch stops, and keeps its history. A status that cannot be read means "not now": the next tick tries again.
+    const status = await (d.facts.pieceStatus ? d.facts.pieceStatus(r.subtaskId) : d.facts.subtask(r.subtaskId).then(s => s?.status ?? null)).catch(() => undefined)
+    if (status === undefined) return false
+    const closedOnBoard = status === 'done' || status === 'abandoned'
     const moved = await d.store.update(x => {
       const c = x.deliveries[r.subtaskId]
       if (!c?.block || c.phase !== 'bloqueado') return false
+      if (closedOnBoard && isPureAdoption(c)) { delete x.deliveries[r.subtaskId]; return false }
       const at = iso(d)
       c.block.deferredAt = at
       c.versionTarget = 'next'
@@ -552,7 +562,7 @@ export function createDeliveryService(d: DeliveryDeps) {
       delete c.step
       return true
     })
-    if (!moved) return false
+    if (!moved || closedOnBoard) return false
     // The board move is best-effort, but a miss is REMEMBERED: the record is out of Bloqueado and so no longer watched, and a Live
     // card that kept reading the blocked board status would be the orphan this whole feature exists to end. `retryDeferredBoard`
     // re-applies it on the next tick.
@@ -573,8 +583,19 @@ export function createDeliveryService(d: DeliveryDeps) {
     for (const r of Object.values(doc.deliveries)) {
       if (r.phase !== 'fila' || !r.block?.boardMovePending) continue
       const done = !stillBlocked.has(r.subtaskId) || await d.board.setPhaseStatus(r.subtaskId, 'fila').then(o => o.ok, () => false)
-      if (!done) continue
-      await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) delete c.block.boardMovePending })
+      if (!done) {
+        // A refusal that never changes must not become a write per minute for ever: after the cap the flag is dropped and ONE
+        // informational notice goes to the leader (the owner's bell when there is none). Nothing else is sent, nothing loops.
+        const tries = (r.block.boardMoveTries ?? 0) + 1
+        if (tries < BOARD_MOVE_MAX_TRIES) { await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) c.block.boardMoveTries = tries }); continue }
+        await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) { delete c.block.boardMovePending; delete c.block.boardMoveTries } })
+        const text = `[entrega ${r.subtaskId}] a peça foi adiada, mas o quadro recusou mover o cartão para a fila (${tries} tentativas): ele continua em Bloqueado no quadro e o fluxo parou de tentar. Mova-o à mão.`
+        const reached = r.leaderSessionId ? await d.notify.session(r.leaderSessionId, text).catch(() => false) : false
+        if (!reached) await d.notify.owner(`Peça ${r.subtaskId} adiada, mas o quadro recusou mover o cartão: continua em Bloqueado.`, 'aviso').catch(() => undefined)
+        actions.push(`requeue-gave-up ${r.subtaskId}`)
+        continue
+      }
+      await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) { delete c.block.boardMovePending; delete c.block.boardMoveTries } })
       if (stillBlocked.has(r.subtaskId)) actions.push(`requeue ${r.subtaskId}`)
     }
   }
