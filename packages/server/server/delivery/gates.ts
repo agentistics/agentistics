@@ -244,6 +244,13 @@ export function pickReleaseTag(tags: ReadonlyArray<{ name: string; sha: string }
 
 const json = <T>(s: string, fallback: T): T => { try { return JSON.parse(s) as T } catch { return fallback } }
 
+// Only negative ancestry facts survive polls: commits and a resolved tag SHA are immutable. A new
+// first page restarts pagination (offsets may have shifted). Never cache a run's mutable verdict.
+interface ReleaseSearch { page: number; firstPage: string; checked: Map<string, boolean> }
+const releaseSearches = new WeakMap<GateFacts, Map<string, ReleaseSearch>>()
+const RELEASE_SEARCH_PAGES = 10
+const RELEASE_SEARCH_COMPARES = 150
+
 /** Run ONE gate against the record. Never throws: an unreachable source is a refusal naming it. */
 export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): Promise<GateVerdict> {
   try {
@@ -354,26 +361,52 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
         // The run that produced the tag: walking the runs newest-first, the first whose commit the tag contains.
         let contained: ReleaseRun[] | undefined
         if (tag && tagSha) {
-          const checked = new Map<string, boolean>()
+          let searches = releaseSearches.get(f)
+          if (!searches) { searches = new Map(); releaseSearches.set(f, searches) }
+          const key = `${cwd}:${repoPath}:${tag}:${tagSha}`
+          const firstPage = JSON.stringify(runs)
+          let search = searches.get(key)
+          if (!search || search.firstPage !== firstPage) {
+            search = { page: 1, firstPage, checked: new Map() }
+            searches.set(key, search)
+            if (searches.size > 100) searches.delete(searches.keys().next().value!)
+          }
+          const checked = search.checked
           let pageRuns = runs
           let page = 1
+          let pages = 1
+          let compares = 0
+          let searched = 0
           while (true) {
             const newestFirst = [...pageRuns].filter(x => x.headSha).sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0))
             for (const run of newestFirst) {
               const sha = run.headSha!
+              searched += 1
               if (!checked.has(sha)) {
                 if (sha === tagSha) checked.set(sha, true)
                 else {
+                  if (compares >= RELEASE_SEARCH_COMPARES) {
+                    search.page = page
+                    return no(`release run search paused after ${searched - 1} runs (${compares} comparisons); resumes at page ${page} next poll`, ['release.yml verde'], { searched: searched - 1, nextPage: page })
+                  }
+                  compares += 1
                   const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${repoPath}/compare/${sha}...${tagSha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
+                  if (!cmp.status) {
+                    search.page = page
+                    return no(`release run ancestry could not be read after ${searched} runs; retry page ${page}`, ['fonte de evidência acessível'], { searched, nextPage: page })
+                  }
                   checked.set(sha, cmp.status === 'ahead' || cmp.status === 'identical')
+                  if (checked.size > 5000) checked.delete(checked.keys().next().value!)
                 }
               }
               if (checked.get(sha)) { contained = [run]; break }
             }
-            if (contained || pageRuns.length < 50) break
-            // gh run list has no page flag. Continue through the workflow API until the tag's run or the end,
-            // rather than making a historical release permanently unreachable behind a fixed search limit.
-            page += 1
+            if (contained || pageRuns.length < 50) { searches.delete(key); break }
+            // Recheck page one on every poll, then resume the immutable non-containing prefix already searched.
+            page = page === 1 && search.page > 1 ? search.page : page + 1
+            search.page = page
+            if (pages >= RELEASE_SEARCH_PAGES) return no(`release run search paused after ${searched} runs (${pages} pages); resumes at page ${page} next poll`, ['release.yml verde'], { searched, nextPage: page })
+            pages += 1
             const older = json<{ workflow_runs?: Array<{ id?: number; status?: string; conclusion?: string | null; head_sha?: string; updated_at?: string }> }>(await f.gh(cwd, ['api', `repos/${repoPath}/actions/workflows/release.yml/runs?per_page=50&page=${page}`]), {})
             pageRuns = (older.workflow_runs ?? []).map(x => ({ databaseId: x.id, status: x.status, conclusion: x.conclusion ?? undefined, headSha: x.head_sha, updatedAt: x.updated_at }))
             runs.push(...pageRuns)

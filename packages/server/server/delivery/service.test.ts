@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createDeliveryService, type DeliveryDeps } from './service'
 import { createDeliveryStore } from './store'
 import type { GateFacts, SessionFact } from './gates'
-import type { DeliveryCi, Phase } from './machine'
+import { PHASE_STATUS, type DeliveryCi, type Phase } from './machine'
 
 let dir: string
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'delivery-')) })
@@ -26,6 +26,8 @@ interface World {
   remoteHead?: string
   /** The board status the subtask is found in. */
   status?: string
+  /** Model the host's board projection, including publicado → done. */
+  projectPhaseStatus?: boolean
   /** false = the leader cannot be reached. */
   wakeOk?: boolean
   /** gh failure for the check-runs read. */
@@ -41,6 +43,7 @@ interface World {
 }
 
 function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
+  const statuses = new Map<string, string>()
   const w: World = {
     autonomous: true,
     sessions: [
@@ -53,7 +56,7 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
     ...over,
   }
   const facts: GateFacts = {
-    subtask: async id => (id === 's1' || id === 's2' || id === 's3' ? { id, taskId: id === 's3' ? 't2' : 't1', title: id, status: w.status ?? 'todo', groupMember: false, blockedBy: id === 's2' ? ['s1'] : [], staged: { prompt: 'do it', harness: 'claude', model: 'claude-opus-5-5', effort: 'high', account: 'acc_1', cwd: '/r' } } : null),
+    subtask: async id => (id === 's1' || id === 's2' || id === 's3' ? { id, taskId: id === 's3' ? 't2' : 't1', title: id, status: statuses.get(id) ?? w.status ?? 'todo', groupMember: false, blockedBy: id === 's2' ? ['s1'] : [], staged: { prompt: 'do it', harness: 'claude', model: 'claude-opus-5-5', effort: 'high', account: 'acc_1', cwd: '/r' } } : null),
     sessions: async () => w.sessions,
     budgets: async () => [{ harness: 'claude', account: 'acc_1', fiveHourPct: 20, weekPct: 30, stale: false }],
     memoryBytes: async () => w.memory,
@@ -95,7 +98,7 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
     store: createDeliveryStore(join(dir, 'deliveries.json')),
     facts,
     board: {
-      setPhaseStatus: async (id, phase) => { calls.status.push({ id, phase }); return { ok: true } },
+      setPhaseStatus: async (id, phase) => { calls.status.push({ id, phase }); if (w.projectPhaseStatus) statuses.set(id, PHASE_STATUS[phase].id); return { ok: true } },
       setCi: async (_id, ci) => { calls.ci.push(ci) },
       logStep: async (_t, _s, n) => { calls.steps.push(n) },
       comment: async (_t, _s, body) => { calls.comments.push(body) },
@@ -891,7 +894,7 @@ describe('PUBLICADO.MANIFESTO independent r2 QA regressions', () => {
   const GREEN = { databaseId: 42364227357, status: 'completed', conclusion: 'success', headSha: SHA, updatedAt: '2026-11-07T10:43:20Z' }
   const TAG = [{ name: 'v2.201.0', commit: { sha: '1bc12c52efe373089747197429f6e67013ff819e' } }]
 
-  for (const status of ['done', 'abandoned', 'blocked']) {
+  for (const status of ['abandoned', 'blocked']) {
     test(`QA: already-published ${status} piece still refuses the entire declaration`, async () => {
       const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG })
       await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
@@ -1014,5 +1017,170 @@ describe('PUBLICADO.MANIFESTO r2 — the HTTP door passes --repo; auth unchanged
     const ok = await deliveryRequest('POST', '/api/deliveries/release', { ...body, session: { id: 'leader', token: 'good' } }, { service: h.svc, verify })
     expect(ok.status).toBe(200)
     expect((await h.svc.get('s1'))!.releaseRepo).toBe('acme/widgets')
+  })
+})
+
+describe('PUBLICADO.MANIFESTO independent r3 QA regressions', () => {
+  const SHA = '7cede914231f98f6ae477fbdae082a89fc4ac5c7'
+  const RELEASE = { version: '2.201.0', mergeSha: SHA, subtaskIds: ['s1', 's2'] }
+  const GREEN = { databaseId: 42364227357, status: 'completed', conclusion: 'success', headSha: SHA, updatedAt: '2026-11-07T10:43:20Z' }
+  const TAG = [{ name: 'v2.201.0', commit: { sha: '1bc12c52efe373089747197429f6e67013ff819e' } }]
+
+  test('QA r3: re-running the same release after the flow itself set the board to done is idempotent', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG, projectPhaseStatus: true })
+    const first = await h.svc.release(RELEASE, 'leader')
+    expect(first.ok && first.pieces.map(p => p.phase)).toEqual(['publicado', 'publicado'])
+    expect((await h.facts.subtask('s1'))!.status).toBe('done')
+    expect((await h.facts.subtask('s2'))!.status).toBe('done')
+    const effects = structuredClone(h.calls)
+    const again = await h.svc.release(RELEASE, 'leader')
+    expect(again.ok).toBe(true)
+    expect(again.ok && again.pieces.map(p => p.changed)).toEqual([false, false])
+    expect(h.calls).toEqual(effects)
+  })
+
+  test('QA r3: a human gate on publicado must not discard the declaration (non-autonomous owner present)', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG, autonomous: false })
+    await h.svc.ensure('s1')
+    await h.svc.configure('s1', { humanGates: ['publicado'] }, 'leader')
+    const reply = await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    expect(reply.ok).toBe(true)
+    expect((await h.svc.get('s1'))!.phase).toBe('ci')
+    expect(reply.ok && reply.warnings.join(' ')).toContain('aguardando_dono')
+    expect(h.calls.owner.filter(x => x.kind === 'decisao')).toHaveLength(1)
+    await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    h.advance(11 * 60_000)
+    await h.svc.tick()
+    expect(h.calls.owner.filter(x => x.kind === 'decisao')).toHaveLength(1)
+    await h.svc.approve('s1', 'publicado', 'approve', undefined, true)
+    h.advance(11 * 60_000)
+    await h.svc.tick()
+    expect((await h.svc.get('s1'))!.phase).toBe('publicado')
+  })
+})
+
+describe('PUBLICADO.MANIFESTO r4 — bounded polling and transition effects', () => {
+  const SHA = '7cede914231f98f6ae477fbdae082a89fc4ac5c7'
+  const RELEASE = { version: '2.201.0', mergeSha: SHA, subtaskIds: ['s1', 's2'] }
+  const GREEN = { databaseId: 42, status: 'completed', conclusion: 'success', headSha: SHA, updatedAt: '2026-11-07T10:43:20Z' }
+  const TAG = [{ name: 'v2.201.0', commit: { sha: '1bc12c52efe373089747197429f6e67013ff819e' } }]
+
+  function history(h: ReturnType<typeof harness>, runs: World['releaseRuns']) {
+    const gh = h.facts.gh
+    const pages: number[] = []
+    h.facts.gh = async (cwd, args) => {
+      if ((args[1] ?? '').includes('/actions/workflows/')) {
+        const page = Number(new URLSearchParams(args[1]!.split('?')[1]).get('page'))
+        pages.push(page)
+        return JSON.stringify({ workflow_runs: runs.slice((page - 1) * 50, page * 50).map(r => ({ id: r.databaseId, head_sha: r.headSha, status: r.status, conclusion: r.conclusion, updated_at: r.updatedAt })) })
+      }
+      return gh(cwd, args)
+    }
+    return pages
+  }
+
+  test('a bounded comparison budget resumes an old tag next tick and siblings share the poll', async () => {
+    const later = Array.from({ length: 200 }, (_, i) => ({ ...GREEN, databaseId: 500 + i, headSha: (i + 1).toString(16).padStart(40, '0') }))
+    const h = harness({ status: 'in_review', tags: TAG, releaseRuns: later.slice(0, 50), notContained: later.map(x => x.headSha) })
+    history(h, [...later, GREEN])
+    const declared = await h.svc.release(RELEASE, 'leader')
+    expect(declared.ok && declared.pieces.map(x => x.phase)).toEqual(['ci', 'ci'])
+    expect(declared.ok && declared.warnings.join(' ')).toContain('search paused')
+    expect(h.calls.gh.filter(x => x.includes('/compare/'))).toHaveLength(150)
+    h.calls.gh.length = 0
+    h.advance(11 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual(['publish s1:true', 'publish s2:true'])
+    expect(h.calls.gh.filter(x => x.startsWith('run list'))).toHaveLength(1)
+    expect(h.calls.gh.filter(x => x.includes('/compare/'))).toHaveLength(51)
+    expect((await h.svc.get('s2'))!.publishedAt).toBe('2026-11-07T10:43:20.000Z')
+  })
+
+  test('pagination itself is bounded, resumes past ten pages and notices new decisive red runs', async () => {
+    const later = Array.from({ length: 550 }, (_, i) => ({ ...GREEN, databaseId: 500 + i, headSha: 'f'.repeat(40) }))
+    const h = harness({ status: 'in_review', tags: TAG, releaseRuns: later.slice(0, 50), notContained: ['f'.repeat(40)] })
+    const pages = history(h, [...later, GREEN])
+    const declared = await h.svc.release(RELEASE, 'leader')
+    expect(declared.ok && declared.pieces.map(x => x.phase)).toEqual(['ci', 'ci'])
+    expect(pages).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10])
+    h.advance(11 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual(['publish s1:true', 'publish s2:true'])
+    expect(pages.slice(9)).toEqual([11, 12])
+
+    // A changed first page invalidates the cursor. The new red run wins over the old green one.
+    const fresh = harness({ status: 'in_review', tags: TAG, releaseRuns: later.slice(0, 50), notContained: ['f'.repeat(40)] }, { store: createDeliveryStore(join(dir, 'fresh.json')) })
+    history(fresh, [...later, GREEN])
+    await fresh.svc.release(RELEASE, 'leader')
+    fresh.w.releaseRuns = [{ ...GREEN, databaseId: 9999, conclusion: 'failure' }]
+    fresh.advance(11 * 60_000)
+    await fresh.svc.tick()
+    expect((await fresh.svc.get('s1'))!.phase).toBe('ci')
+    expect((await fresh.svc.get('s1'))!.releaseFailNotice).toBeDefined()
+  })
+
+  test('one gated piece waits in ci while its sibling publishes; effects occur once per actual transition', async () => {
+    const h = harness({ status: 'todo', tags: TAG, releaseRuns: [GREEN], autonomous: false })
+    await h.svc.ensure('s1')
+    await h.svc.configure('s1', { humanGates: ['publicado'] }, 'leader')
+    h.calls.comments.length = 0
+    const reply = await h.svc.release(RELEASE, 'leader')
+    expect(reply.ok && reply.pieces.map(x => x.phase)).toEqual(['ci', 'publicado'])
+    expect(h.calls.comments.map(x => x.match(/\] (.*?) \(rev/)?.[1])).toEqual(['fila → ci', 'fila → ci', 'ci → publicado'])
+    expect(h.calls.status.map(x => x.phase)).toEqual(['ci', 'ci', 'publicado'])
+    expect(h.calls.emits).toHaveLength(3)
+    expect(h.calls.owner.map(x => x.kind)).toEqual(['decisao', 'aviso'])
+    const effects = structuredClone(h.calls)
+    await h.svc.release(RELEASE, 'leader')
+    for (const key of ['comments', 'status', 'emits', 'owner', 'ci'] as const) expect(h.calls[key]).toEqual(effects[key])
+  })
+
+  test('done only allows an exact published identity and can add a new sibling to that release', async () => {
+    const h = harness({ status: 'in_review', tags: TAG, releaseRuns: [GREEN], projectPhaseStatus: true })
+    await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    const extended = await h.svc.release(RELEASE, 'leader')
+    expect(extended.ok && extended.pieces.map(x => x.changed)).toEqual([false, true])
+    for (const mismatch of [{ version: '2.202.0' }, { mergeSha: 'f'.repeat(40) }, { repo: 'acme/widgets' }]) {
+      const reply = await h.svc.release({ ...RELEASE, ...mismatch }, 'leader')
+      expect(!reply.ok && reply.code).toBe('peca_encerrada')
+    }
+  })
+
+  test('concurrent retries at the same ci revision ring a human publication gate once', async () => {
+    const h = harness({ status: 'in_review', autonomous: false })
+    await h.svc.ensure('s1')
+    await h.svc.configure('s1', { humanGates: ['publicado'] }, 'leader')
+    const release = { ...RELEASE, subtaskIds: ['s1'] }
+    await h.svc.release(release, 'leader')
+    h.w.releaseRuns = [GREEN]; h.w.tags = TAG
+    let arrivals = 0
+    let ready!: () => void
+    const bothReading = new Promise<void>(resolve => { ready = resolve })
+    const gh = h.facts.gh
+    h.facts.gh = async (cwd, args) => {
+      if (args[0] === 'run') {
+        if (++arrivals === 2) ready()
+        await bothReading
+      }
+      return gh(cwd, args)
+    }
+    const replies = await Promise.all([h.svc.release(release, 'leader'), h.svc.release(release, 'leader')])
+    expect(replies.every(x => x.ok)).toBe(true)
+    expect((await h.svc.get('s1'))!.phase).toBe('ci')
+    expect(h.calls.owner.filter(x => x.kind === 'decisao')).toHaveLength(1)
+  })
+
+  test('a failed gated declaration writes no asked stamp and rings no bell', async () => {
+    const real = createDeliveryStore(join(dir, 'deliveries.json'))
+    let fail = false
+    const store: typeof real = { ...real, update: fn => fail ? Promise.reject(new Error('EIO')) : real.update(fn) }
+    const h = harness({ status: 'in_review', autonomous: false, tags: TAG, releaseRuns: [GREEN] }, { store })
+    await h.svc.ensure('s1')
+    await h.svc.configure('s1', { humanGates: ['publicado'] }, 'leader')
+    const before = await real.read()
+    const effects = structuredClone(h.calls)
+    fail = true
+    const reply = await h.svc.release(RELEASE, 'leader')
+    expect(!reply.ok && reply.code).toBe('store_erro')
+    expect(await real.read()).toEqual(before)
+    for (const key of ['comments', 'status', 'emits', 'owner', 'ci'] as const) expect(h.calls[key]).toEqual(effects[key])
   })
 })

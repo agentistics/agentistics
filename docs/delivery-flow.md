@@ -54,19 +54,26 @@ board status), `versionTarget`, `mergeSha` and `tag` (`v<version>`) are set and 
 `release.yml` is already green for that sha and the tag exists, the same call moves it to `publicado`;
 otherwise the minute tick does. `publishedAt` is the green run's completion — the Live's 24 h Publicado
 window starts there, so declaring late does not restart it. The host still reads the release evidence from
-gh; the caller names the pieces, never that it is green. A `done`/`abandoned`, unknown, blocked or
+gh; the caller names the pieces, never that it is green. A `done` (unless already published for this same
+version, SHA and repository), `abandoned`, unknown, blocked or
 other-task piece refuses the whole batch before anything is written; a piece already published in another
 release is refused; a second run for the same release changes nothing. Pieces with no record at all keep
 the old git guess as the fallback.
 
 The repository defaults to `agentistics/agentistics`; pass `--repo owner/name` to declare another one.
-Published idempotency requires the same version, full merge SHA and repository, and still refuses board
-statuses `done`, `abandoned` and `blocked`. The host looks up the exact tag and walks workflow run pages
-until it finds that tag's run or reaches the end, without a fixed commit search limit.
+Published idempotency requires the same version, full merge SHA and repository. The flow itself sets
+published pieces to `done` on the board, so that status allows an exact retry; `abandoned` and `blocked`
+still refuse it. The host looks up the exact tag and searches at most 10 run pages and 150 ancestry
+comparisons per poll. An unfinished search reports its progress and resumes next poll; a changed first
+page restarts the cursor. Negative ancestry facts are cached by repository and resolved tag SHA, while
+run verdicts are read fresh. Pieces of one release share the search in each tick.
 
 Declaration and immediate publication are prepared together, then committed for the entire batch in one
 atomic store write. A write error leaves every piece unchanged and emits no board updates, comments or
 notifications. Board and notification effects run only after that commit and report failures as warnings.
+Each actual transition gets its own effect/comment (`→ ci`, then `ci → publicado`), including immediate
+publication. A human publication gate keeps the declaration in `ci`, reports the refusal as a warning,
+and rings the owner's bell once per revision. Approval and a later tick/retry finish publication.
 
 ## Non-blocking
 
