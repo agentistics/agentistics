@@ -24,6 +24,12 @@ original owner text, conversation and timestamp; ordinary agent messages remain 
 retired target follows its handoff/reopened row, and the spawn-time leader flag fills in only
 when no saved role exists.
 
+Request registration is best effort: a flow or engine failure never prevents the handoff relay
+from forwarding owner text to the successor. The relay cursor tracks delivered conversation,
+including the spawn briefing, independently of request registration. Failed registration does
+not rewind that cursor or replay turns already included in the briefing; failed sends still
+leave their cursor unchanged for a later delivery attempt.
+
 The general flows flag and the individual engine switches are separate: `pedido-do-dono` and
 `encaixe-do-pedido` were off by default in the engine. The mandatory request path and delivery
 tick enable them through the existing official `flow enable` command. The autonomous-mode boot

@@ -110,18 +110,24 @@ export async function captureHandoffRelay(
 }
 
 /** Link both rows once the successor exists: the injection above counts as delivered. */
-export async function recordHandoffLink(parentId: string, childId: string, captured: CapturedRelay | undefined, parentSeq?: number): Promise<void> {
-  let requestsRecorded = true
+export async function recordHandoffLink(
+  parentId: string, childId: string, captured: CapturedRelay | undefined, parentSeq?: number,
+  io: { patch?: typeof patchSession; ownerMessages?: typeof import('../flows/owner-message').emitRelayedOwnerMessages } = {},
+): Promise<void> {
+  const patch = io.patch ?? patchSession
   if (captured?.source && captured.owner?.length) {
-    try { await (await import('../flows/owner-message')).emitRelayedOwnerMessages(childId, captured.source, captured.owner) }
-    catch { requestsRecorded = false; console.warn('[handoff] owner request registration pending; the relay will retry') }
+    try {
+      const register = io.ownerMessages ?? (await import('../flows/owner-message')).emitRelayedOwnerMessages
+      await register(childId, captured.source, captured.owner)
+    } catch { console.warn('[handoff] owner request registration failed; briefing delivery preserved') }
   }
-  await patchSession(parentId, {
+  await patch(parentId, {
     handoffTo: childId,
-    handoffRelayedAt: requestsRecorded ? captured?.cursor ?? new Date().toISOString() : captured?.source?.createdAt ?? '1970-01-01T00:00:00.000Z',
+    // The briefing already delivered this snapshot, even if request registration failed.
+    handoffRelayedAt: captured?.cursor ?? new Date().toISOString(),
     handoffRelayAwaiting: captured?.awaiting === true ? true : null,
   }).catch(() => false)
-  await patchSession(childId, { handoffFrom: parentId, handoffSeq: nextHandoffSeq(parentSeq) }).catch(() => false)
+  await patch(childId, { handoffFrom: parentId, handoffSeq: nextHandoffSeq(parentSeq) }).catch(() => false)
 }
 
 /**
@@ -188,8 +194,10 @@ export async function flushHandoffRelay(
   const successor = successorRow(registry, parent.handoffTo)
   if (!successor) return { ok: false, delivered: false, reason: 'missing', owed: fwd }
   if (!successorAlive(successor)) return { ok: false, delivered: false, reason: 'dead', owed: fwd }
-  const register = io.ownerMessages ?? (await import('../flows/owner-message')).emitRelayedOwnerMessages
-  await register(successor.id, parent, originalOwners(got.turns, fwd.owner))
+  try {
+    const register = io.ownerMessages ?? (await import('../flows/owner-message')).emitRelayedOwnerMessages
+    await register(successor.id, parent, originalOwners(got.turns, fwd.owner))
+  } catch { console.warn('[handoff] owner request registration failed; forwarding to successor') }
   const sent = await send(successor.id, forwardText(parent.id, fwd)).catch(() => false)
   if (!sent) return { ok: false, delivered: false, reason: 'send-failed', owed: fwd }
   await patch(parent.id, cursorPatch).catch(() => false)
