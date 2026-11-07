@@ -216,7 +216,14 @@
  * printed, trimmed by the source). Both additive: an older host ignores them — it keeps growing the last turn, which is the
  * pre-fix behaviour, and shows no output — so they ride 1.24 rather than refusing a mixed fleet.
  */
-export const ENGINE_API_VERSION = '1.24.0'
+/**
+ * 1.25.0 — VOZ.SESSAO: `EngineFleet.openVoiceSession` (optional), `EngineVoiceSpawn` / `EngineVoiceSpawnResult`: a call with
+ * the Nay is a managed session of the host (the owner's own: no consent list, no `requestedBy`, no task), spoken to through a
+ * handle that types the owner's words WITHOUT the surface header, and ended with `fleet.stop` — so it appears among the ended
+ * sessions and reopens with its whole conversation. Additive only: a host that predates it answers no such member, and the
+ * engine keeps its private conversation; an engine built against 1.24 never asks.
+ */
+export const ENGINE_API_VERSION = '1.25.0'
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 

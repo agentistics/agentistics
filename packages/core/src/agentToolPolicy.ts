@@ -85,6 +85,7 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_session_role',
   'agentistics_session_away',
   'agentistics_session_switch_account',
+  'agentistics_session_nay_calls',
   // Metrics (6)
   'agentistics_summary',
   'agentistics_harnesses',
@@ -203,6 +204,11 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_session_switch_account: {
     ...GROUPS, risk: 'W', routes: ['GET /api/fleet/switch-account', 'POST /api/fleet/switch-account'],
     reason: 'continues a session on another account of the same harness: the conversation is copied (never moved) and resumed under the same id; an agent may only target accounts that are on for agents',
+  },
+  agentistics_session_nay_calls: {
+    ...GROUPS, risk: 'W',
+    routes: ['GET /api/engine/x/voice/calls', 'GET /api/engine/x/voice/calls/:id', 'GET /api/fleet', 'POST /api/fleet/act'],
+    reason: 'reads the owner\'s calls with the Nay (list, transcript) and reopens an ENDED call session through the fleet\'s own resume verb; reopening is undone by ending the session again, and a live session is refused',
   },
   // ------------------------------------------------------------------ Metrics
   agentistics_summary: { ...DATA, capability: 'localTranscripts', host: true, risk: 'R', routes: ['GET /api/data', 'GET /api/runtime/metrics'], reason: 'reads computed metrics' },

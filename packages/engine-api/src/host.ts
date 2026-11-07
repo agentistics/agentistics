@@ -12,7 +12,7 @@
  */
 import type { CapabilityName, EngineEvent, EngineSessionActivity, HarnessId } from './mirrors'
 import type { ReuseSurface } from './reuse'
-import type { EngineStructuredSessions } from './structured'
+import type { EngineStructuredSessions, StructuredMcpServer, StructuredSessionHandle } from './structured'
 
 /** Where an append's answer is read. A host's richer result is assignable to it. */
 export interface ProviderAppendResult {
@@ -130,6 +130,44 @@ export type EngineDelegateSpawnResult =
   | { ok: true; managedId: string }
   | { ok: false; code: EngineDelegateRefusal; sentence: string }
 
+/**
+ * 1.25 — a session of the OWNER'S voice: a call with the Nay becomes a managed session of the host, so it shows in the
+ * fleet while it lives and — once the call ends — among the ended ones, where it reopens with its whole conversation.
+ * It is the owner's own (never an agent's): no consent list, no `requestedBy`, no task. Only the host decides where it
+ * runs; the engine says WHAT it is (`instructions`, `mcp`) and speaks through the returned handle.
+ */
+export interface EngineVoiceSpawn {
+  harness: HarnessId
+  /** Absolute. */
+  cwd: string
+  model: string
+  effort?: 'low' | 'medium' | 'high'
+  /** The session's name in the fleet (e.g. "Ligação com a Nay · 07/11 15:30"). */
+  label: string
+  /** The opening context, through the harness's official channel (same shape as `StructuredSpawn.instructions`). */
+  instructions?: { text: string; block: string }
+  /** Extra MCP servers for the session (the live browser). Never carries a secret in `env`. */
+  mcp?: readonly StructuredMcpServer[]
+  /** The language of the owner's screen, for the sentences a driver writes into the chat. */
+  lang?: 'en' | 'pt'
+}
+
+/** `unavailable`: this host cannot run a voice session (no structured driver for the harness); `memory_budget`: admission refused it; `refused`: any other refusal, in the sentence. */
+export type EngineVoiceRefusal = 'unavailable' | 'memory_budget' | 'refused'
+
+export type EngineVoiceSpawnResult =
+  | {
+    ok: true
+    managedId: string
+    /**
+     * The door on the session for the call. It is the OWNER's voice: `send` and `submit` are typed WITHOUT the
+     * `[from agentistics · surface]` header, so the transcribed words read in the conversation as what the owner said.
+     * `follow` and `cancel` are the usual ones. It dies when the session ends (`fleet.stop`, or the process going).
+     */
+    session: StructuredSessionHandle
+  }
+  | { ok: false; code: EngineVoiceRefusal; sentence: string }
+
 /** The host's fleet, as an engine may follow it (1.4) — and, from 1.7, delegate to (B6.2). */
 export interface EngineFleet {
   /** Confirmed transitions only. Returns unsubscribe. A callback that throws is logged, never fatal. */
@@ -143,7 +181,12 @@ export interface EngineFleet {
   delegateSpawn?(req: EngineDelegateSpawn): Promise<EngineDelegateSpawnResult>
   /** 1.7 — the session's latest assistant reply (its handback), and whether it is still live. */
   lastReply?(managedId: string): Promise<{ ok: true; text: string; live: boolean } | { ok: false; reason: string }>
-  /** 1.7 — ends a session this engine started. */
+  /**
+   * 1.25 (optional) — opens the OWNER's voice session (see `EngineVoiceSpawn`). A host without it simply offers no
+   * visible call session: the engine keeps its private conversation, exactly as before.
+   */
+  openVoiceSession?(req: EngineVoiceSpawn): Promise<EngineVoiceSpawnResult>
+  /** 1.7 — ends a session this engine started (a voice session too: it then shows among the ended ones and reopens). */
   stop?(managedId: string): Promise<void>
 }
 

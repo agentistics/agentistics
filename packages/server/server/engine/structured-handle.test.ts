@@ -210,3 +210,39 @@ describe('the keyed members (ADAPTER.LIMITES E7)', () => {
     expect(r.keyed).toEqual([])
   })
 })
+
+describe('engine-api 1.25: the owner\'s voice session door', () => {
+  test('V1. its turns are typed WITHOUT the surface header (the owner said them); the engine\'s own get() still wears it', async () => {
+    const r = rig()
+    const v = r.host.voice('v1')!
+    expect(v.live).toBe(true)
+    expect(await v.send('olá Nay')).toBe(true)
+    await v.submit!({ requestId: 'r1', idempotencyKey: 'k-voice-1', text: 'segundo pedido' })
+    await v.amend!('r1', 'corrigindo', 'k-voice-2')
+    expect(r.sent).toEqual(['olá Nay'])
+    expect(r.keyed).toEqual(['submit:v1:r1:k-voice-1:segundo pedido', 'amend:v1:r1:k-voice-2:corrigindo'])
+    expect(r.sent.concat(r.keyed).some(t => t.includes(SURFACE_TURN_HEADER))).toBe(false)
+    // an engine door on the same id (get) is the ordinary one: header on
+    await r.host.engine.get('v1')!.send('de uma superfície')
+    expect(r.sent.at(-1)).toBe(`${SURFACE_TURN_HEADER}\nde uma superfície`)
+  })
+  test('V2. the owner\'s voice text reads as the OWNER\'s in the conversation (no injected header to parse)', async () => {
+    const r = rig()
+    await r.host.voice('v2')!.send('quero ver as tarefas')
+    expect(parseInjectedHeader(r.sent[0]!)).toBeNull()
+  })
+  test('V3. it dies with the session (alive false → live false) and stays dead', async () => {
+    const r = rig()
+    const v = r.host.voice('v3')!
+    r.state.alive = false
+    expect(await v.send('x')).toBe(false)
+    expect(v.live).toBe(false)
+    r.state.alive = true
+    expect(await v.send('x')).toBe(false)
+  })
+  test('V4. nothing but the five verbs-and-members of the ordinary handle: no list, no other session', () => {
+    const r = rig()
+    expect(Object.keys(r.host.voice('v4')!).sort()).toEqual(['amend', 'cancel', 'cancelRequest', 'follow', 'limits', 'live', 'requestState', 'send', 'submit'])
+    expect(r.host.voice('')).toBeNull()
+  })
+})

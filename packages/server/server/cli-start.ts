@@ -137,7 +137,7 @@ import { SessionNotice, sessionActionError } from './sessions/action-error'
 import { SPAWN_SPECS, planSpawn, tuiStartModes } from './sessions/spawn-spec'
 import { spawnCapabilities } from './sessions/codex-capabilities'
 import { readHarnessVersion } from './sessions/harness-version'
-import { answerStructured, reopenOrigin, spawnOriginOf, structuredIntentOf } from './sessions/structured-route'
+import { answerStructured, reopenOrigin, spawnOriginOf, structuredIntentOf, voiceStructuredIntent } from './sessions/structured-route'
 import { agentisticsMcpLaunch } from './mcp-launch'
 import { applyAccountToPlan } from './sessions/account-plan'
 import { ensureClaudeProjectTrusted } from './sessions/claude-trust'
@@ -1964,7 +1964,7 @@ function linkProcessConversationSoon(id: string, harness: HarnessId): void {
 async function spawnRow(a: {
   id: string
   spawnedAt: string
-  req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; parentSessionId?: string; parentConversationId?: string; mode?: CanonicalMode; inherit?: ManagedSession }
+  req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; parentSessionId?: string; parentConversationId?: string; mode?: CanonicalMode; inherit?: ManagedSession; voice?: unknown }
   pendingContext?: string
   /** Per-session autonomous mode, already resolved (explicit request, else inherited / the replaced row's). */
   away?: boolean
@@ -1990,6 +1990,7 @@ async function spawnRow(a: {
     ...(effort ? { effort } : {}),
     ...(req.mode ? { mode: req.mode } : {}),
     ...(req.label ? { label: req.label } : {}),
+    ...(req.voice ? { origin: 'voice' as const } : {}),
     ...(req.task ? { task: req.task } : {}),
     // Stamped at SPAWN — the one moment the association is a fact. See `ManagedSession.taskId`.
     ...(req.taskId ? { taskId: req.taskId } : {}),
@@ -2084,6 +2085,11 @@ export async function spawnManaged(req: {
   role?: 'leader' | 'worker'
   /** DSL.TIPO-SESSAO — an agent's delegation through the engine (`engine-delegate.ts`): gate door `engine`. */
   spawnDoor?: 'engine'
+  /**
+   * engine-api 1.25 — the OWNER'S voice session (a call with the Nay): STRUCTURED only (a TUI is refused, never started), opened
+   * with the engine's own context and MCP servers instead of the host's briefing, the row marked `origin: 'voice'`.
+   */
+  voice?: { instructions?: { text: string; block: string }; mcp?: readonly import('@agentistics/engine-api').StructuredMcpServer[] }
   gateTaskId?: string
   gateSubtaskId?: string
   /** Per-session autonomous mode: on, off, or inherit a verified away parent's (absent = inherit). */
@@ -2374,14 +2380,14 @@ export async function spawnManaged(req: {
         ? { initialPrompt: { ...planned.plan.initialPrompt, ...(rulesFor(req.harness) ? { rules: rulesFor(req.harness)! } : {}) } }
         : {}),
       // F2.0 — the same spawn in a structured driver's terms; tmux ignores it (`structured-backend.ts`).
-      structured: structuredIntentOf({ ...req, ...(mode ? { mode } : {}), origin: spawnOriginOf(req.origin, req.attach) }, {
+      structured: (intent => req.voice ? voiceStructuredIntent(intent, req.voice) : intent)(structuredIntentOf({ ...req, ...(mode ? { mode } : {}), origin: spawnOriginOf(req.origin, req.attach) }, {
         model, effort, ctx, mcp: { ...agentisticsMcpLaunch(), env: { AGENTISTICS_API: `http://localhost:${PORT}` } },
         // The language of the screen that asked (the host is built per request language): QA F2.
         lang: lang === 'pt' ? 'pt' : 'en',
         // The driver applies it only where its declaration says the protocol assigns ids; the row is
         // linked by what the protocol then STATES (`onConversation`), never by this offer.
         conversationId: offeredConversationId,
-      }),
+      })),
       ...(planned.plan.modeNeedsProtocol ? { modeNeedsProtocol: planned.plan.modeNeedsProtocol } : {}),
     })
   } catch (e) {
@@ -2404,6 +2410,13 @@ export async function spawnManaged(req: {
       : req.harness === 'codex' ? codexStartupFailure(await readHarnessVersion('codex'), died.status)
       : died.message ? s.sessDiedAtSpawn(died.message) : s.sessDiedAtSpawnStatus(died.status)
     return { ok: false, message }
+  }
+  // A voice session is spoken to through the structured protocol and nothing else: a harness that came up as a TUI (no driver,
+  // the flag off) is stopped and the start refused — the engine then keeps its private conversation.
+  if (req.voice && backend.isStructured?.(id) !== true) {
+    await backend.kill(id).catch(() => {})
+    await removeSession(id).catch(() => {})
+    return { ok: false, message: lang === 'pt' ? 'Este computador não abre esta conversa de voz pelo protocolo estruturado do harness.' : 'This machine cannot open the voice conversation over the harness\'s structured protocol.' }
   }
   if (bornRole) await markRoleDelivered([planned.plan.conversationId, id], bornRole)
   // DSL.TIPO-SESSAO — the row is born with the gate's role or the spawn is undone (never a session without its role).
@@ -5150,6 +5163,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
         ...(chosen.accountId ? { accountId: chosen.accountId } : {}),
         ...(req.callerVerified ? { callerVerified: true } : {}),
         ...(req.spawnDoor ? { spawnDoor: req.spawnDoor } : {}),
+        ...(req.voice ? { voice: req.voice } : {}),
         ...(req.gateTaskId ? { gateTaskId: req.gateTaskId } : {}),
         ...(req.gateSubtaskId ? { gateSubtaskId: req.gateSubtaskId } : {}),
       }, S(), lang).then(afterStart)

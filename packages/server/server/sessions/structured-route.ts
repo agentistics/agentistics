@@ -18,7 +18,7 @@
  *
  * A refusal from either structured route falls back to tmux with the same request (the composite's job).
  */
-import type { CanonicalMode, HarnessId, StructuredAnswer, StructuredAttention, StructuredDriverId } from '@agentistics/engine-api'
+import type { CanonicalMode, HarnessId, StructuredAnswer, StructuredAttention, StructuredDriverId, StructuredMcpServer } from '@agentistics/engine-api'
 import type { StructuredIntent } from './types'
 
 /**
@@ -134,6 +134,22 @@ export function structuredIntentOf(
     ...(o.ctx && !req.resumeId && !req.forkOf ? { instructions: { text: o.ctx.text, block: o.ctx.block } } : {}),
     ...(o.mcp ? { mcp: [{ name: 'agentistics', command: o.mcp.command, args: [...o.mcp.args], ...(o.mcp.env ? { env: o.mcp.env } : {}) }] } : {}),
     ...(o.lang ? { lang: o.lang } : {}),
+  }
+}
+
+/**
+ * PURE. The structured intent of an OWNER'S VOICE session (engine-api 1.25): the engine's own opening context and MCP servers
+ * stand in for the host's briefing and its `agentistics` server — the Nay is a speaker, not a worker with the board in hand.
+ */
+export function voiceStructuredIntent(
+  intent: StructuredIntent,
+  voice: { instructions?: { text: string; block: string }; mcp?: readonly StructuredMcpServer[] },
+): StructuredIntent {
+  const { instructions: _i, mcp: _m, ...rest } = intent
+  return {
+    ...rest,
+    ...(voice.instructions ? { instructions: voice.instructions } : {}),
+    ...(voice.mcp && voice.mcp.length ? { mcp: [...voice.mcp] } : {}),
   }
 }
 

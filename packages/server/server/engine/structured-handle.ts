@@ -52,7 +52,7 @@ export interface HandleDeps {
 const NOOP = () => {}
 
 /** What a handle is bound to: a session, and the thing whose end ends the handle. */
-interface Binding { id: string; open(): boolean; owned: boolean }
+interface Binding { id: string; open(): boolean; owned: boolean; /** engine-api 1.25: the OWNER's voice session — its turns are typed WITHOUT the surface header. */ voice?: true }
 
 interface Internal { handle: StructuredSessionHandle; kill(): void }
 const bySocket = new WeakMap<object, Internal>()
@@ -78,6 +78,8 @@ function makeHandle(d: HandleDeps, b: Binding): Internal {
     return valid()
   }
   const backend = async () => { try { return await d.backend() } catch { return null } }
+  /** What is typed for a turn: a surface's words wear the header; the owner's own voice (1.25) does not. */
+  const typed = (text: string) => (b.voice ? text : `${SURFACE_TURN_HEADER}\n${text}`)
   const textFits = (text: unknown): text is string => typeof text === 'string' && text.trim().length > 0 && Buffer.byteLength(text) <= MAX_SURFACE_TURN_BYTES
   /** The backend, when the handle is valid, the session alive and STRUCTURED (a tmux fallback is not this door). */
   const structuredBackend = async () => {
@@ -120,7 +122,7 @@ function makeHandle(d: HandleDeps, b: Binding): Internal {
         if (!be.isStructured?.(b.id) || !be.chatOf?.(b.id)) return false
         // A request is open: a turn now would race the answer the person is being asked for.
         if (be.attentionOf?.(b.id)) return false
-        return await be.sendText(b.id, `${SURFACE_TURN_HEADER}\n${text}`)
+        return await be.sendText(b.id, typed(text))
       } catch { return false }
     },
     // 1.21 (E7) — keyed members, structured sessions only; null = not possible here (invalid handle, not structured, the
@@ -129,14 +131,14 @@ function makeHandle(d: HandleDeps, b: Binding): Internal {
       try {
         if (!r || !textFits(r.text) || typeof r.requestId !== 'string' || !validIdempotencyKey(r.idempotencyKey)) return null
         const be = await structuredBackend()
-        return be?.submitRequest ? await be.submitRequest(b.id, { ...r, text: `${SURFACE_TURN_HEADER}\n${r.text}` }) : null
+        return be?.submitRequest ? await be.submitRequest(b.id, { ...r, text: typed(r.text) }) : null
       } catch { return null }
     },
     async amend(requestId, text, key) {
       try {
         if (!textFits(text) || typeof requestId !== 'string' || !validIdempotencyKey(key)) return null
         const be = await structuredBackend()
-        return be?.amendRequest ? await be.amendRequest(b.id, requestId, `${SURFACE_TURN_HEADER}\n${text}`, key) : null
+        return be?.amendRequest ? await be.amendRequest(b.id, requestId, typed(text), key) : null
       } catch { return null }
     },
     async cancelRequest(requestId, key) {
@@ -176,6 +178,11 @@ function makeHandle(d: HandleDeps, b: Binding): Internal {
 export interface StructuredSessionsHost {
   /** `host.structuredSessions`: engine-started sessions only. */
   engine: EngineStructuredSessions
+  /**
+   * engine-api 1.25 — the door on the OWNER's voice session this host just opened (`fleet.openVoiceSession`): like `engine.get`, but its
+   * turns are typed WITHOUT the surface header. Only the host's own delegate calls it, with the id it just spawned; it is never on the wire.
+   */
+  voice(id: string): StructuredSessionHandle | null
   /** `EngineSocket.structured` for one accepted socket: its declared session, bound to it. */
   forSocket(entry: Pick<EngineSocketEntry, 'sessionId' | 'closed'>): () => StructuredSessionHandle | null
   /** The socket closed: its handles die and release their subscriptions. */
@@ -189,6 +196,11 @@ export function createStructuredSessions(d: HandleDeps): StructuredSessionsHost 
         if (typeof id !== 'string' || !engineOpened.has(id)) return null
         return makeHandle(d, { id, open: () => engineOpened.has(id), owned: true }).handle
       },
+    },
+    voice(id) {
+      if (typeof id !== 'string' || id.length === 0) return null
+      markEngineOpened(id)
+      return makeHandle(d, { id, open: () => engineOpened.has(id), owned: true, voice: true }).handle
     },
     forSocket(entry) {
       return () => {

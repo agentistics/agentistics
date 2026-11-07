@@ -68,3 +68,59 @@ describe('delegation members', () => {
     expect(await createDelegateMembers(deps({ chat: async () => { throw new Error('x') } })).lastReply('m-1')).toEqual({ ok: false, reason: 'unreadable' })
   })
 })
+
+describe('engine-api 1.25: the owner\'s voice session (openVoiceSession)', () => {
+  const voiceReq = { harness: 'claude' as const, cwd: '/nay', model: 'haiku', effort: 'low' as const, label: 'Ligação com a Nay · 07/11 15:30', instructions: { text: 'T', block: '<call-context>T</call-context>' }, mcp: [{ name: 'browse', command: 'bun', args: ['x'] }], lang: 'pt' as const }
+  const handle = { live: true } as never
+  function vdeps(over: Partial<DelegateDeps> = {}, vover: Partial<NonNullable<DelegateDeps['voice']>> = {}) {
+    const log: string[] = []
+    const bodies: unknown[] = []
+    const d = deps({
+      kill: async id => { log.push(`kill:${id}`) },
+      voice: {
+        spawn: async b => { bodies.push(b); log.push('spawn'); return { ok: true, message: 'started', id: 'v-1' } },
+        handle: id => { log.push(`handle:${id}`); return handle },
+        mute: async (id, on) => { log.push(`mute:${id}:${on}`) },
+        ...vover,
+      },
+      ...over,
+    })
+    return { d, log, bodies }
+  }
+
+  test('opens the owner\'s session: NO consent list, no requestedBy, no task, no board filing; muted while the call lives; the handle is returned', async () => {
+    const { d, log, bodies } = vdeps({ allowed: async () => [] })
+    const r = await createDelegateMembers(d).openVoiceSession(voiceReq)
+    expect(r).toEqual({ ok: true, managedId: 'v-1', session: handle })
+    expect(log).toEqual(['spawn', 'handle:v-1', 'mute:v-1:true'])
+    expect(bodies[0]).toMatchObject({ harness: 'claude', cwd: '/nay', label: 'Ligação com a Nay · 07/11 15:30', model: 'haiku', voice: { instructions: { text: 'T' }, mcp: [{ name: 'browse' }] } })
+    expect(JSON.stringify(bodies[0])).not.toContain('requestedBy')
+    expect(d.log).toEqual([]) // no `file`
+  })
+
+  test('a host with no voice deps, or a harness not installed here, refuses `unavailable` and starts nothing', async () => {
+    expect(await createDelegateMembers(deps()).openVoiceSession(voiceReq)).toMatchObject({ ok: false, code: 'unavailable' })
+    const { d, log } = vdeps({ startable: async () => ['codex'] })
+    expect(await createDelegateMembers(d).openVoiceSession(voiceReq)).toMatchObject({ ok: false, code: 'unavailable' })
+    expect(log).toEqual([])
+  })
+
+  test('a refused start passes the host\'s sentence; memory admission keeps its own code; a throw is a refusal, never a crash', async () => {
+    const a = vdeps({}, { spawn: async () => ({ ok: false, message: 'no room', code: 'memory_budget' }) })
+    expect(await createDelegateMembers(a.d).openVoiceSession(voiceReq)).toEqual({ ok: false, code: 'memory_budget', sentence: 'no room' })
+    const b = vdeps({}, { spawn: async () => { throw new Error('boom') } })
+    expect(await createDelegateMembers(b.d).openVoiceSession(voiceReq)).toEqual({ ok: false, code: 'refused', sentence: 'boom' })
+  })
+
+  test('a session that started but cannot be reached is stopped (never a live session off the call)', async () => {
+    const { d, log } = vdeps({}, { handle: () => null })
+    expect(await createDelegateMembers(d).openVoiceSession(voiceReq)).toMatchObject({ ok: false, code: 'refused' })
+    expect(log).toContain('kill:v-1')
+  })
+
+  test('stop un-mutes THEN ends the session (it then shows among the ended ones, reopenable)', async () => {
+    const { d, log } = vdeps()
+    await createDelegateMembers(d).stop('v-1')
+    expect(log).toEqual(['mute:v-1:false', 'kill:v-1'])
+  })
+})

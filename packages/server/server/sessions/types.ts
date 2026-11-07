@@ -341,6 +341,11 @@ export interface ManagedSession {
   id: string
   harness: HarnessId
   cwd: string
+  /**
+   * 1.25 — `voice`: the owner's call with the Nay, opened through `fleet.openVoiceSession` (`engine-delegate.ts`). The row is
+   * an ordinary managed session in every other way — listed while it lives, among the ended ones after, reopenable.
+   */
+  origin?: 'voice'
   /** ISO string: this is a local JSON store, where ISO is the correct representation. */
   createdAt: string
   /** Requested approval policy; separate from the briefing role. */
