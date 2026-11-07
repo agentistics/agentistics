@@ -16,6 +16,10 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'O raciocínio do modelo agora é uma linha como as de atividade: um cérebro que pulsa com "Raciocinando… · 12 s" enquanto ele pensa e vira "Raciocinou · 12 s" quando termina — clique para ler o texto. Vale para qualquer assistente que envia o raciocínio.',
         en: 'The model\'s reasoning is now a line like the activity ones: a pulsing brain reading "Reasoning… · 12 s" while it thinks, then "Reasoned · 12 s" when done — click to read the text. It applies to every assistant that sends its reasoning.',
       },
+      {
+        pt: 'OpenCode dentro da sessão como o Claude: cada passo diz o que é (criou um arquivo, editou, executou, buscou, delegou), a lista de tarefas aparece com o progresso ("2/3 · item atual") e os itens marcados, uma edição mostra as alterações em cores, um subagente mostra a resposta — e os arquivos criados entram no painel de arquivos e no Live.',
+        en: 'OpenCode inside the session like Claude: every step says what it is (created a file, edited, ran, searched, delegated), the todo list shows its progress ("2/3 · current item") and the checked items, an edit shows its changes in colour, a subagent shows its answer — and the files it creates reach the files panel and Live.',
+      },
     ],
     fixes: [
       {
@@ -33,6 +37,14 @@ export const RELEASES: Record<string, ReleaseNotes> = {
       {
         pt: 'No compositor, Cmd+Enter (ou Ctrl+Enter) sempre envia, mesmo numa janela estreita; um Enter que só confirma um acento não envia mais a palavra pela metade; e um envio recusado agora diz por quê em vez de ficar mudo.',
         en: 'In the composer, Cmd+Enter (or Ctrl+Enter) always sends, even in a narrow window; an Enter that only confirms an accent no longer sends a half-written word; and a refused send now says why instead of staying silent.',
+      },
+      {
+        pt: 'OpenCode: o que ele diz antes e depois de uma ferramenta vira dois parágrafos, em vez de uma frase grudada ("juntos.Você"); e uma conversa reaberta mostra cada passo como foi mostrado ao vivo.',
+        en: 'OpenCode: what it says before and after a tool becomes two paragraphs instead of one glued sentence ("together.You"); and a reopened conversation shows each step as it was shown live.',
+      },
+      {
+        pt: 'OpenCode: uma edição num arquivo que já existia não aparece mais como arquivo novo, nem contada duas vezes, no painel de arquivos.',
+        en: 'OpenCode: an edit to a file that already existed no longer shows up as a new file, nor counted twice, in the files panel.',
       },
     ],
   },
