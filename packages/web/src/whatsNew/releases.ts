@@ -10,7 +10,7 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.200.8': {
+  '2.201.0': {
     features: [
       {
         pt: 'O agentistics agora vigia o próprio desempenho: se ficar lento por alguns minutos, guarda um retrato do que estava pesando e avisa você uma vez, dizendo o que passou do limite. Não reinicia nada.',
