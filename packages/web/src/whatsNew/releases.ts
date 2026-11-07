@@ -16,6 +16,14 @@ export const RELEASES: Record<string, ReleaseNotes> = {
         pt: 'A Esteira de entregas ao vivo ganhou uma barra de filtros clara (filtros de um lado, visão e ações do outro), “Apenas ativas” e “Exibir itens na fila”, e uma ordenação que mostra primeiro o que tem a prioridade mais alta — cada cartão traz a prioridade da tarefa. As colunas empilham os cartões na vertical, rolam sozinhas e ganham uma busca quando passam de três cartões fora da vista; “Executando” virou “Em desenvolvimento” e “Em QA” virou “QA”. O motivo de um cartão esperar vaga agora vem em palavras simples, e o seletor de tarefas ficou mais largo e sem texto por cima de texto. Os assistentes também enxergam a prioridade e os mesmos filtros pelo MCP.',
         en: 'The Live Delivery line gets a clear filter bar (filters on one side, view and actions on the other), “Only active” and “Show queued items”, and an order that lists the highest priority first — every card shows its task’s priority. Columns stack their cards vertically, scroll on their own and gain a search once more than three cards are out of view; “Running” became “In development” and “In QA” became “QA”. Why a card waits for a slot now reads in plain words, and the task picker is wider with no text on top of text. Assistants see the priority and the same filters through MCP too.',
       },
+      {
+        pt: 'A Esteira ganhou a coluna Histórico (sempre recolhida, abre num clique) com as publicações de mais de 24 h, e cada cartão tem links para abrir a sessão do autor, do QA e do líder.',
+        en: 'The Live line gets a History column (always collapsed, one click to open) with what was published over 24 h ago, and every card links to the author, QA and leader sessions.',
+      },
+      {
+        pt: 'Hardware, Modo autônomo, Cofre, Esteira de entregas e Ligações agora ficam num botão só no topo; ele fica laranja quando há atividade. A janela “Uso dos planos” saiu: contas e APIs estão na página Uso.',
+        en: 'Hardware, Autonomous mode, Vault, Live Delivery and Calls now sit behind one button in the top bar, which turns orange when something is going on. The “Plan usage” window is gone: accounts and APIs live on the Usage page.',
+      },
     ],
     fixes: [
       {

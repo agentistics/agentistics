@@ -19,7 +19,7 @@ describe("agentistics_live_delivery", () => {
   test("the tool documents the switches, the sort and the priority field", () => {
     const src = readFileSync(join(import.meta.dir, "agentistics-mcp.ts"), "utf8");
     const block = src.slice(src.indexOf('name: "agentistics_live_delivery"'), src.indexOf('name: "agentistics_task_edit"'));
-    for (const word of ["onlyActive", "showQueue", "sort", "priority", "Em desenvolvimento"]) expect(block).toContain(word);
+    for (const word of ["onlyActive", "showQueue", "sort", "priority", "Em desenvolvimento", "`history`", "Histórico"]) expect(block).toContain(word);
   });
   test("an unknown stage is dropped rather than forwarded", () => {
     expect(liveDeliveryQuery({ stage: "nonsense" })).toBe("");

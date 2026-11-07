@@ -84,7 +84,8 @@ export function TopBarGroup({ lang, enabled = true, onOpenHardware }: { lang: 'p
   const button = (
     <button ref={btn} type="button" className="ag-tap-icon" data-topbar-group data-accent={accented ? 'true' : undefined}
       aria-label={full} title={full} aria-haspopup="menu" aria-expanded={open}
-      onClick={() => setOpen(v => !v)}
+      // Desktop: hovering already opened it, so the click that follows must keep it open, not toggle it shut.
+      onClick={() => setOpen(v => (isMobile ? !v : true))}
       onFocus={e => { if (isMobile) return; if (skipFocusOpen.current) { skipFocusOpen.current = false; return }; let visible = false; try { visible = e.currentTarget.matches(':focus-visible') } catch { /* keep closed */ } if (visible) enter() }}
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, flexShrink: 0, cursor: 'pointer',
