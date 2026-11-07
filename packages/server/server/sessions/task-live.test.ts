@@ -95,6 +95,20 @@ describe('buildLive', () => {
     })
     expect(r.deliveries.map(d => d.subtaskId)).toEqual(['fresh'])
   })
+  test('QA hostile: the 24 h window edges by the release clock — 23h59 in, 24h01 out but listed as published-old, 30 h out', () => {
+    const d = detail({
+      subtasks: [sub('in', 'done', { deliveredAt: iso(NOW - 1000) }), sub('edge', 'done', { deliveredAt: iso(NOW - 1000) }), sub('old', 'done', { deliveredAt: iso(NOW - 1000) })] as never,
+      sessions: [],
+    })
+    const deliveries = new Map([
+      ['in', { phase: 'publicado', publishedAt: iso(NOW - 24 * H + 60_000) }],
+      ['edge', { phase: 'publicado', publishedAt: iso(NOW - 24 * H - 60_000) }],
+      ['old', { phase: 'publicado', publishedAt: iso(NOW - 30 * H) }],
+    ])
+    const r = buildLive({ nowMs: NOW, events: [], details: [d], deliveries, publishedShas: new Set() })
+    expect(r.deliveries.map(x => x.subtaskId)).toEqual(['in'])
+    expect(r.hidden.filter(x => x.reason === 'published-old').map(x => x.key.split('/')[1]).sort()).toEqual(['edge', 'old'])
+  })
   test('PUBLICADO.MANIFESTO: a recorded piece released 2 h ago is Publicado even though the git guess says no — and its window starts at the RELEASE, not at the status move', () => {
     const d = detail({
       // The board moved the status "now" (late run) while the release itself was 20 h ago: the record's publishedAt decides.

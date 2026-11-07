@@ -10,12 +10,12 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
-  '2.201.1': {
+  '2.201.2': {
     features: [],
     fixes: [
       {
-        pt: 'A Live agora mostra em "Publicado" as peças de uma versão que entrou como um único commit grande: o líder declara o conteúdo do release (agentop flow release) e as peças vão a Publicado quando a versão sai verde, em vez de o app adivinhar pelo git.',
-        en: 'Live now shows in "Published" the pieces of a version that landed as one big commit: the leader declares the release contents (agentop flow release) and the pieces move to Published once the version ships green, instead of the app guessing from git.',
+        pt: 'A Live agora mostra em "Publicado" as peças de uma versão que entrou como um único commit grande: o líder declara o conteúdo do release (agentop flow release) e as peças vão a Publicado quando a versão sai verde, em vez de o app adivinhar pelo git. A prova é a própria tag da versão, no repositório do release, mesmo quando o commit do merge teve uma execução vermelha corrigida depois.',
+        en: 'Live now shows in "Published" the pieces of a version that landed as one big commit: the leader declares the release contents (agentop flow release) and the pieces move to Published once the version ships green, instead of the app guessing from git. The proof is the version\'s own tag, in the release\'s repository, even when the merge commit had a red run that a later commit fixed.',
       },
     ],
   },

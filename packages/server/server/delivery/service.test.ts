@@ -32,6 +32,12 @@ interface World {
   checksError?: boolean
   head: string
   memory: number
+  /** `gh run list` only answers when it is pointed at THIS repository (`-R owner/name`); another one has no release.yml runs. */
+  runsRepo?: string
+  /** Commit shas the tag does NOT contain (`compare/<sha>...<tag>` answers diverged): later releases' runs. */
+  notContained?: string[]
+  /** short sha → the full one git resolves it to (`rev-parse --verify <sha>^{commit}`). */
+  fullShas?: Record<string, string>
 }
 
 function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
@@ -53,6 +59,7 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
     memoryBytes: async () => w.memory,
     topCap: async () => 2,
     git: async (_cwd, args) => {
+      if (args[0] === 'rev-parse' && args[1] === '--verify') { const full = w.fullShas?.[args[2]!.replace('^{commit}', '')]; if (full) return `${full}\n`; throw new Error('fatal: Needed a single revision') }
       if (args[0] === 'rev-parse') return `${w.head}\n`
       if (args[0] === 'status') return ''
       if (args[0] === 'symbolic-ref') return 'feat/x\n'
@@ -63,18 +70,26 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
     gh: async (_cwd, args) => {
       const a = args.join(' ')
       calls.gh.push(a)
+      calls.ghCwd.push(_cwd)
       if (a.includes('check-runs') && w.checksError) throw new Error('gh: HTTP 502')
       if (a.includes('check-runs')) return JSON.stringify({ check_runs: w.checkRuns })
       if (a.includes('/files')) return JSON.stringify(w.prFiles)
-      if (a.startsWith('run list')) return JSON.stringify(w.releaseRuns)
+      if (a.startsWith('run list')) return JSON.stringify(w.runsRepo && !a.includes(`-R ${w.runsRepo}`) ? [] : w.releaseRuns)
+      // gh api repos/<o>/<r>/git/ref/tags/<name>: the tag by its exact name (404 → gh exits non-zero).
+      if (a.includes('/git/ref/tags/')) {
+        if (w.runsRepo && !a.includes(`repos/${w.runsRepo}/`)) throw new Error('gh: HTTP 404')
+        const t = w.tags.find(x => a.endsWith(`/git/ref/tags/${x.name}`))
+        if (!t) throw new Error('gh: HTTP 404')
+        return JSON.stringify({ ref: `refs/tags/${t.name}`, object: { sha: t.commit.sha, type: 'commit' } })
+      }
       if (a.includes('/tags')) return JSON.stringify(w.tags)
       if (a.includes('/compare/') && a.includes('...main')) return JSON.stringify({ status: w.onMain })
-      if (a.includes('/compare/')) return JSON.stringify({ status: 'ahead' })
+      if (a.includes('/compare/')) return JSON.stringify({ status: w.notContained?.some(s => a.includes(`/compare/${s}...`)) ? 'diverged' : 'ahead' })
       if (a.startsWith('pr view')) return JSON.stringify(w.pr)
       return '{}'
     },
   }
-  const calls = { gh: [] as string[], owner: [] as Array<{ text: string; kind: string }>, session: [] as Array<{ id: string; text: string }>, status: [] as Array<{ id: string; phase: Phase }>, ci: [] as Array<DeliveryCi | null>, steps: [] as number[], emits: [] as Array<{ type: string; payload: Record<string, unknown> }>, comments: [] as string[] }
+  const calls = { gh: [] as string[], ghCwd: [] as string[], owner: [] as Array<{ text: string; kind: string }>, session: [] as Array<{ id: string; text: string }>, status: [] as Array<{ id: string; phase: Phase }>, ci: [] as Array<DeliveryCi | null>, steps: [] as number[], emits: [] as Array<{ type: string; payload: Record<string, unknown> }>, comments: [] as string[] }
   let now = Date.parse('2026-11-07T02:00:00Z')
   const svc = createDeliveryService({
     store: createDeliveryStore(join(dir, 'deliveries.json')),
@@ -537,8 +552,8 @@ describe('M6 — the queue shows its expected slot', () => {
 })
 
 describe('PUBLICADO.MANIFESTO — the release says what it published', () => {
-  const RELEASE = { version: '2.201.0', mergeSha: 'a201a201' }
-  const GREEN = { databaseId: 9, status: 'completed', conclusion: 'success', headSha: 'a201a201', updatedAt: '2026-11-07T00:10:00Z' }
+  const RELEASE = { version: '2.201.0', mergeSha: 'a201a201a201a201a201a201a201a201a201a201' }
+  const GREEN = { databaseId: 9, status: 'completed', conclusion: 'success', headSha: 'a201a201a201a201a201a201a201a201a201a201', updatedAt: '2026-11-07T00:10:00Z' }
   const TAG = [{ name: 'v2.201.0', commit: { sha: 'tag201' } }]
 
   test('a legacy in_review piece → release → ci, then publicado on tag evidence (tick), stamped with the release time', async () => {
@@ -551,7 +566,7 @@ describe('PUBLICADO.MANIFESTO — the release says what it published', () => {
     expect(r.pieces).toEqual([{ subtaskId: 's1', phase: 'ci', changed: true }, { subtaskId: 's2', phase: 'ci', changed: true }])
     expect(r.warnings.join(' ')).toContain('not published yet')
     const rec = (await h.svc.get('s1'))!
-    expect(rec).toMatchObject({ phase: 'ci', versionTarget: '2.201.0', mergeSha: 'a201a201', tag: 'v2.201.0', taskId: 't1' })
+    expect(rec).toMatchObject({ phase: 'ci', versionTarget: '2.201.0', mergeSha: 'a201a201a201a201a201a201a201a201a201a201', tag: 'v2.201.0', taskId: 't1' })
     expect(rec.history.map(x => x.to)).toEqual(['revisao_lider', 'ci'])
     expect(h.calls.status.filter(s => s.phase === 'ci').map(s => s.id)).toEqual(['s1', 's2'])
     // The release goes green and the tag appears: the minute tick publishes BOTH.
@@ -617,7 +632,7 @@ describe('PUBLICADO.MANIFESTO — the release says what it published', () => {
     expect(await h.svc.get('s1')).toBeNull()
     expect(h.calls.status).toEqual([])
 
-    expect((await h.svc.release({ version: 'x', mergeSha: 'a201a201', subtaskIds: ['s1'] }, 'leader') as { code?: string }).code).toBe('bad_version')
+    expect((await h.svc.release({ version: 'x', mergeSha: 'a201a201a201a201a201a201a201a201a201a201', subtaskIds: ['s1'] }, 'leader') as { code?: string }).code).toBe('bad_version')
     expect((await h.svc.release({ version: '2.201.0', mergeSha: 'nothex!', subtaskIds: ['s1'] }, 'leader') as { code?: string }).code).toBe('bad_merge_sha')
     expect((await h.svc.release({ ...RELEASE, subtaskIds: [] }, 'leader') as { code?: string }).code).toBe('no_subtasks')
     const stranger = await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'author')
@@ -628,17 +643,261 @@ describe('PUBLICADO.MANIFESTO — the release says what it published', () => {
   test('a published piece cannot be declared in ANOTHER release; a blocked one must be unblocked first', async () => {
     const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG })
     await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
-    const other = await h.svc.release({ version: '2.202.0', mergeSha: 'b202b202', subtaskIds: ['s1'] }, 'leader')
+    const other = await h.svc.release({ version: '2.202.0', mergeSha: 'b202b202b202b202b202b202b202b202b202b202', subtaskIds: ['s1'] }, 'leader')
     expect(!other.ok && other.code).toBe('ja_publicada')
     await h.svc.block('s2', 'externo', 'waiting on a vendor', 'leader')
     const blocked = await h.svc.release({ ...RELEASE, subtaskIds: ['s2'] }, 'leader')
     expect(!blocked.ok && blocked.code).toBe('bloqueada')
   })
 
-  test('a release run that FAILED is not published: the piece waits in ci and the tick sends it back', async () => {
+  test("the tag's own run FAILED: not published, the piece stays in ci with the reason and the tick NEVER sends it back (one wake only)", async () => {
     const h = harness({ status: 'in_review', releaseRuns: [{ ...GREEN, conclusion: 'failure' }], tags: TAG })
     const r = await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
     expect(r.ok && r.pieces[0]!.phase).toBe('ci')
+    expect(r.ok && r.warnings.join(' ')).toContain('release.yml failed for v2.201.0')
     expect((await h.svc.get('s1'))!.publishedAt).toBeUndefined()
+    for (let i = 0; i < 4; i++) { h.advance(11 * 60_000); await h.svc.tick() }
+    const rec = (await h.svc.get('s1'))!
+    expect(rec.phase).toBe('ci')
+    expect(rec.releaseFailNotice?.reason).toContain('failed')
+    expect(rec.gates.release?.ok).toBe(false)
+    // The verb told the leader (the caller) already: the tick adds no wake for a failure that was already reported.
+    expect(h.calls.session.filter(s => s.text.includes('release.yml'))).toHaveLength(0)
+    // Fixed later: the next green run publishes it.
+    h.w.releaseRuns = [{ ...GREEN, databaseId: 10, updatedAt: '2026-11-07T01:30:00Z' }]
+    h.advance(11 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual(['publish s1:true'])
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// PUBLICADO.MANIFESTO r2 — the QA findings. Real data (gh, read-only, 2026-11-07): release.yml for v2.201.0 FAILED on
+// the feat squash db7bf2f (run 42362240091) and went GREEN on the follow-up 7cede91 (run 42364227357, ended
+// 10:43:20Z); the tag v2.201.0 sits on the bump commit 1bc12c5, ahead of both.
+// ---------------------------------------------------------------------------------------------------------------
+describe('PUBLICADO.MANIFESTO r2 — the tag is the evidence', () => {
+  const SQUASH = 'db7bf2f38386bbc43e6ae9b7285896248e381ea8'
+  const FIX = '7cede914231f98f6ae477fbdae082a89fc4ac5c7'
+  const NEXT = 'c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00'
+  const REAL_RUNS = [
+    { databaseId: 42364227357, status: 'completed', conclusion: 'success', headSha: FIX, updatedAt: '2026-11-07T10:43:20Z' },
+    { databaseId: 42362240091, status: 'completed', conclusion: 'failure', headSha: SQUASH, updatedAt: '2026-11-07T10:14:51Z' },
+  ]
+  const REAL_TAG = [{ name: 'v2.201.0', commit: { sha: '1bc12c52efe373089747197429f6e67013ff819e' } }]
+  const REPO = 'agentistics/agentistics'
+
+  test('the v2.201.0 shape: declared with the squash whose run is RED → publicado on the tag run, publishedAt = the end of the green run', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: REAL_RUNS, tags: REAL_TAG })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: SQUASH, subtaskIds: ['s1', 's2'] }, 'leader')
+    expect(r.ok && r.pieces.map(p => p.phase)).toEqual(['publicado', 'publicado'])
+    expect(r.ok && r.publishedAt).toBe('2026-11-07T10:43:20.000Z')
+    for (const id of ['s1', 's2']) {
+      const rec = (await h.svc.get(id))!
+      expect(rec.publishedAt).toBe('2026-11-07T10:43:20.000Z')
+      expect(rec.mergeSha).toBe(SQUASH) // information only, stored as declared
+    }
+  })
+
+  test('declared with the green sha works the same; the merge sha is not the criterion', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: REAL_RUNS, tags: REAL_TAG })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    expect(r.ok && r.pieces[0]!.phase).toBe('publicado')
+  })
+
+  test('even a sha unrelated to the run (a later commit) declares fine: only the tag decides', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: REAL_RUNS, tags: REAL_TAG })
+    const o = await h.svc.release({ version: '2.201.0', mergeSha: NEXT, subtaskIds: ['s1'] }, 'leader')
+    expect(o.ok && o.pieces[0]!.phase).toBe('publicado')
+  })
+
+  test('no tag yet: the piece waits in ci — a red run of ANOTHER commit never demotes a declared piece, tick after tick', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [REAL_RUNS[1]!], tags: [] })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: SQUASH, subtaskIds: ['s1', 's2'] }, 'leader')
+    expect(r.ok && r.pieces.map(p => p.phase)).toEqual(['ci', 'ci'])
+    expect(r.ok && r.warnings.join(' ')).toContain('tag v2.201.0 does not exist yet')
+    for (let i = 0; i < 4; i++) { h.advance(11 * 60_000); expect((await h.svc.tick()).actions).toEqual([]) }
+    expect((await h.svc.get('s1'))!.phase).toBe('ci')
+    expect(h.calls.session.filter(s => s.text.includes('falhou'))).toHaveLength(0)
+    // The tag appears with its green run: the tick publishes both, stamped with the run's end.
+    h.w.releaseRuns = REAL_RUNS
+    h.w.tags = REAL_TAG
+    h.advance(11 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual(['publish s1:true', 'publish s2:true'])
+    expect((await h.svc.get('s2'))!.publishedAt).toBe('2026-11-07T10:43:20.000Z')
+  })
+
+  test("the tag's run is the NEWEST run it contains: a later release's run (tag does not contain it) is ignored, a red newer one is not", async () => {
+    // A later release's red run is not part of this tag: it must not decide v2.201.0.
+    const later = { databaseId: 99, status: 'completed', conclusion: 'failure', headSha: NEXT, updatedAt: '2026-11-08T09:00:00Z' }
+    const h = harness({ status: 'in_review', releaseRuns: [later, ...REAL_RUNS], tags: REAL_TAG, notContained: [NEXT] })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: SQUASH, subtaskIds: ['s1'] }, 'leader')
+    expect(r.ok && r.pieces[0]!.phase).toBe('publicado')
+  })
+
+  test('a RED run newer than the green one that the tag DOES contain is the tag\'s own run: not published', async () => {
+    const later = { databaseId: 99, status: 'completed', conclusion: 'failure', headSha: NEXT, updatedAt: '2026-11-08T09:00:00Z' }
+    const red = harness({ status: 'in_review', releaseRuns: [later, ...REAL_RUNS], tags: REAL_TAG })
+    const r2 = await red.svc.release({ version: '2.201.0', mergeSha: SQUASH, subtaskIds: ['s1'] }, 'leader')
+    expect(r2.ok && r2.pieces[0]!.phase).toBe('ci')
+  })
+
+  test('the tag run still in progress → waits quietly (no failure, no wake)', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [{ ...REAL_RUNS[0]!, status: 'in_progress', conclusion: '' }], tags: REAL_TAG })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    expect(r.ok && r.pieces[0]!.phase).toBe('ci')
+    expect(r.ok && r.warnings.join(' ')).toContain('not finished')
+    h.advance(11 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual([])
+    expect((await h.svc.get('s1'))!.releaseFailNotice).toBeUndefined()
+  })
+
+  test("a red tag run found by the TICK wakes the leader exactly once and keeps the piece in ci", async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [], tags: REAL_TAG })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    expect(r.ok && r.pieces[0]!.phase).toBe('ci') // tag exists, no run yet
+    h.w.releaseRuns = [{ ...REAL_RUNS[0]!, conclusion: 'failure' }]
+    h.advance(11 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual(['release-failed-notified s1:true'])
+    expect(h.calls.session.filter(s => s.id === 'leader' && s.text.includes('release.yml'))).toHaveLength(1)
+    for (let i = 0; i < 3; i++) { h.advance(11 * 60_000); expect((await h.svc.tick()).actions).toEqual(['release-failed-stays s1']) }
+    expect(h.calls.session.filter(s => s.id === 'leader' && s.text.includes('release.yml'))).toHaveLength(1)
+    expect((await h.svc.get('s1'))!.phase).toBe('ci')
+  })
+
+  test('the tick reads the tag by its exact name — not a page of the newest tags', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: REAL_RUNS, tags: REAL_TAG })
+    await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    expect(h.calls.gh.some(c => c.includes('/git/ref/tags/v2.201.0'))).toBe(true)
+    expect(h.calls.gh.some(c => c.includes('tags?per_page'))).toBe(false)
+  })
+})
+
+describe('PUBLICADO.MANIFESTO r2 — one repository per release', () => {
+  const FIX = '7cede914231f98f6ae477fbdae082a89fc4ac5c7'
+  const RUN = [{ databaseId: 42364227357, status: 'completed', conclusion: 'success', headSha: FIX, updatedAt: '2026-11-07T10:43:20Z' }]
+  const TAG = [{ name: 'v2.201.0', commit: { sha: '1bc12c52efe373089747197429f6e67013ff819e' } }]
+
+  test("a piece whose newest author session worked in ANOTHER repo still publishes, and all the pieces of the call get the same verdict", async () => {
+    const h = harness({ status: 'in_review', releaseRuns: RUN, tags: TAG, runsRepo: 'agentistics/agentistics' })
+    // s2's newest filed session worked in the engine checkout (188 such rows on this machine).
+    h.w.sessions.push({ id: 'author2', harness: 'claude', model: 'claude-opus-5-5', role: 'worker', alive: false, cwd: '/engine/.wt/b', worktree: true, rootPath: '/engine', taskId: 't1', subtaskId: 's2', label: 'impl2', createdAt: '2026-11-07T00:30:00Z' })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1', 's2'] }, 'leader')
+    expect(r.ok && r.pieces.map(p => p.phase)).toEqual(['publicado', 'publicado'])
+    expect(h.calls.gh.filter(c => c.startsWith('run list'))).toHaveLength(1) // computed ONCE
+    expect(h.calls.ghCwd.every(c => c !== '/engine')).toBe(true)
+    expect(h.calls.gh.filter(c => c.startsWith('run list')).every(c => c.includes('-R agentistics/agentistics'))).toBe(true)
+  })
+
+  test('the repository is recorded on every piece (default and --repo), validated, and the tick (later) reads it there too', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [], tags: [], runsRepo: 'acme/widgets' })
+    const bad = await h.svc.release({ version: '2.201.0', mergeSha: FIX, repo: 'not a repo', subtaskIds: ['s1'] }, 'leader')
+    expect(!bad.ok && bad.code).toBe('bad_repo')
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: FIX, repo: 'acme/widgets', subtaskIds: ['s1', 's2'] }, 'leader')
+    expect(r.ok).toBe(true)
+    for (const id of ['s1', 's2']) expect((await h.svc.get(id))!.releaseRepo).toBe('acme/widgets')
+    h.w.releaseRuns = RUN; h.w.tags = TAG
+    h.w.sessions.push({ id: 'author2', harness: 'claude', model: 'x', role: 'worker', alive: false, cwd: '/engine/.wt/b', worktree: true, rootPath: '/engine', taskId: 't1', subtaskId: 's2', label: 'impl2', createdAt: '2026-11-07T00:30:00Z' })
+    h.advance(11 * 60_000)
+    expect((await h.svc.tick()).actions).toEqual(['publish s1:true', 'publish s2:true'])
+  })
+
+  test('with no --repo the default agentistics/agentistics is recorded', async () => {
+    const h = harness({ status: 'in_review' })
+    await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    expect((await h.svc.get('s1'))!.releaseRepo).toBe('agentistics/agentistics')
+  })
+
+  test('re-declaring in another repository is a change; the same repository is idempotent', async () => {
+    const h = harness({ status: 'in_review' })
+    await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    const same = await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    expect(same.ok && same.pieces[0]!.changed).toBe(false)
+    const moved = await h.svc.release({ version: '2.201.0', mergeSha: FIX, repo: 'acme/widgets', subtaskIds: ['s1'] }, 'leader')
+    expect(moved.ok && moved.pieces[0]!.changed).toBe(true)
+  })
+})
+
+describe('PUBLICADO.MANIFESTO r2 — the sha, the batch write, the blocked piece', () => {
+  const FIX = '7cede914231f98f6ae477fbdae082a89fc4ac5c7'
+
+  test('a SHORT sha is resolved to the full 40 characters by git and stored in full', async () => {
+    const h = harness({ status: 'in_review', fullShas: { '7cede91': FIX } })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: '7CEDE91', subtaskIds: ['s1'] }, 'leader')
+    expect(r.ok && r.mergeSha).toBe(FIX)
+    expect((await h.svc.get('s1'))!.mergeSha).toBe(FIX)
+  })
+
+  test('a sha that does not resolve to 40 characters is refused with a sentence and writes nothing', async () => {
+    const h = harness({ status: 'in_review' })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: 'deadbee', subtaskIds: ['s1'] }, 'leader')
+    expect(!r.ok && r.code).toBe('sha_nao_resolve')
+    expect(!r.ok && r.sentence).toContain('40-character')
+    expect(await h.svc.get('s1')).toBeNull()
+    expect(h.calls.status).toEqual([])
+  })
+
+  test('the batch is ONE store write: an I/O error mid-run changes NOTHING and returns a clean error (no throw), a re-run completes', async () => {
+    const real = createDeliveryStore(join(dir, 'deliveries.json'))
+    let writes = 0
+    let failAt = 1
+    const flaky = { path: real.path, read: () => real.read(), get: (id: string) => real.get(id), update: <T>(fn: (doc: Parameters<typeof real.update>[0] extends (d: infer D) => unknown ? D : never) => T | Promise<T>) => { writes += 1; if (writes === failAt) return Promise.reject(new Error('EIO: disk full')); return real.update(fn as never) as Promise<T> } }
+    const h = harness({ status: 'in_review' }, { store: flaky as never })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1', 's2'] }, 'leader')
+    expect(!r.ok && r.code).toBe('store_erro')
+    expect(!r.ok && r.sentence).toContain('EIO')
+    expect(await h.svc.get('s1')).toBeNull()
+    expect(await h.svc.get('s2')).toBeNull()
+    expect(h.calls.status.length + h.calls.comments.length + h.calls.ci.length).toBe(0)
+    failAt = -1
+    const again = await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1', 's2'] }, 'leader')
+    expect(again.ok && again.pieces.map(p => [p.subtaskId, p.phase, p.changed])).toEqual([['s1', 'ci', true], ['s2', 'ci', true]])
+  })
+
+  test('the whole batch lands in a single write (one store.update for the declaration)', async () => {
+    const real = createDeliveryStore(join(dir, 'deliveries.json'))
+    let writes = 0
+    const counting = { path: real.path, read: () => real.read(), get: (id: string) => real.get(id), update: <T>(fn: (doc: Parameters<typeof real.update>[0] extends (d: infer D) => unknown ? D : never) => T | Promise<T>) => { writes += 1; return real.update(fn as never) as Promise<T> } }
+    const h = harness({ status: 'in_review' }, { store: counting as never })
+    await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1', 's2'] }, 'leader')
+    expect(writes).toBe(1)
+  })
+
+  test("a legacy piece BLOCKED on the board (no record yet) is refused as bloqueada — and a done one with a record too", async () => {
+    const h = harness({ status: 'blocked' })
+    const r = await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    expect(!r.ok && r.code).toBe('bloqueada')
+    expect(await h.svc.get('s1')).toBeNull()
+    const doneWithRecord = harness({ status: 'in_review' })
+    await doneWithRecord.svc.ensure('s1')
+    doneWithRecord.w.status = 'done'
+    const d = await doneWithRecord.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    expect(!d.ok && d.code).toBe('peca_encerrada')
+  })
+
+  test('a piece that never left the queue, and one waiting for ANOTHER version, are declared WITH a warning', async () => {
+    const todo = harness({ status: 'todo' })
+    const t = await todo.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    expect(t.ok && t.warnings.join(' ')).toContain('never left the queue')
+    const h = harness({ status: 'in_review' })
+    await h.svc.release({ version: '2.201.0', mergeSha: FIX, subtaskIds: ['s1'] }, 'leader')
+    const r = await h.svc.release({ version: '2.202.0', mergeSha: 'b202b202b202b202b202b202b202b202b202b202', subtaskIds: ['s1'] }, 'leader')
+    expect(r.ok && r.warnings.join(' ')).toMatch(/waiting in ci for 2\.201\.0/)
+  })
+})
+
+describe('PUBLICADO.MANIFESTO r2 — the HTTP door passes --repo; auth unchanged', () => {
+  const body = { version: '2.201.0', mergeSha: '7cede914231f98f6ae477fbdae082a89fc4ac5c7', repo: 'acme/widgets', subtaskIds: ['s1'] }
+  test('POST /api/deliveries/release records the repo; a forged proof is 403; a verified non-leader is 403 with nothing written', async () => {
+    const { deliveryRequest } = await import('./web')
+    const h = harness({ status: 'in_review' })
+    const verify = async (id: unknown, token: unknown) => (token === 'good' ? String(id) : null)
+    const forged = await deliveryRequest('POST', '/api/deliveries/release', { ...body, session: { id: 'leader', token: 'bad' } }, { service: h.svc, verify })
+    expect(forged.status).toBe(403)
+    const worker = await deliveryRequest('POST', '/api/deliveries/release', { ...body, session: { id: 'author', token: 'good' } }, { service: h.svc, verify })
+    expect(worker.status).toBe(403)
+    expect(await h.svc.get('s1')).toBeNull()
+    const ok = await deliveryRequest('POST', '/api/deliveries/release', { ...body, session: { id: 'leader', token: 'good' } }, { service: h.svc, verify })
+    expect(ok.status).toBe(200)
+    expect((await h.svc.get('s1'))!.releaseRepo).toBe('acme/widgets')
   })
 })

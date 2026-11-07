@@ -12,7 +12,7 @@
  *   agentop flow merge --subtask S [--batch <version>]
  *   agentop flow block --subtask S --reason R --text …  |  agentop flow unblock --subtask S [--detail …]
  *   agentop flow approve --subtask S --phase P --decision approve|reject [--note …]   (the owner only)
- *   agentop flow release --version <x.y.z> --merge-sha <main sha> --subtask S1 --subtask S2 …
+ *   agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …
  *                                  the leader DECLARES what a release contains: each piece → ci (legacy pieces adopted), and → publicado
  *                                  as soon as release.yml is green and the tag exists, with the release's own publish time. Idempotent.
  *   agentop flow tick
@@ -37,7 +37,7 @@ export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subt
   agentop flow merge --subtask S [--batch <version>]  deletions gate, squash merge, then ci (the merge is verified on the host)
   agentop flow block --subtask S --reason R --text …  |  agentop flow unblock --subtask S [--detail …]   (unblock: the leader; an owner decision: the owner)
   agentop flow approve --subtask S --phase P --decision approve|reject [--note …]   (the owner only — the answer to a human gate)
-  agentop flow release --version <x.y.z> --merge-sha <main sha> --subtask S1 --subtask S2 …   declare what the release contains (→ ci, → publicado when release.yml is green and the tag exists)
+  agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …   declare what the release contains (→ ci, → publicado when release.yml is green and the tag exists)
   agentop flow tick                                   the minute watch (blocks, ci → publicado)
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
 
@@ -141,7 +141,7 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
     case 'approve': if (!needSub()) return 2; return report(await svc.approve(sub!, flags.phase, flags.decision, flags.note, !env.AGENTOP_MANAGED_ID), io)
     case 'release': {
       const subs = argv.flatMap((a, i) => (a === '--subtask' && argv[i + 1] && !argv[i + 1]!.startsWith('--') ? [argv[i + 1]!] : []))
-      const r = await svc.release({ version: flags.version, mergeSha: flags.mergeSha, subtaskIds: subs }, actor)
+      const r = await svc.release({ version: flags.version, mergeSha: flags.mergeSha, ...(flags.repo ? { repo: flags.repo } : {}), subtaskIds: subs }, actor)
       if (r.ok) { io.out(JSON.stringify({ ok: true, version: r.version, tag: r.tag, mergeSha: r.mergeSha, ...(r.publishedAt ? { publishedAt: r.publishedAt } : {}), pieces: r.pieces, warnings: r.warnings }, null, 2)); return 0 }
       return report(r, io)
     }

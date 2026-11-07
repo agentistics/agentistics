@@ -121,6 +121,15 @@ export interface DeliveryRecord {
    * declared hours late still shows the piece for the rest of its window.
    */
   publishedAt?: string
+  /**
+   * `owner/name` — the repository the release was declared in (`flow release --repo`). The `release` gate asks gh THERE and
+   * ignores any session's checkout: one release is one repository, whatever worktree a piece's author happened to run in.
+   */
+  releaseRepo?: string
+  /** Present only for a piece the leader DECLARED through `flow release`. The tick never sends such a piece back to the review. */
+  declaredRelease?: { version: string; mergeSha: string; repo: string; at: string; by: string }
+  /** The tag's own release run was red: the leader was told once (ISO + reason); the piece stays in `ci` until it is green. */
+  releaseFailNotice?: { at: string; reason: string }
   gates: Partial<Record<GateName, GateResult>>
   /** Phases the owner must approve before the delivery enters them (autonomous OFF only). Default: none. */
   humanGates: Phase[]

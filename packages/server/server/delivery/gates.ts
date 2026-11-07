@@ -12,7 +12,8 @@
  *   delecoes     the PR deletes no file outright (unless the leader allowed those paths, with a reason)
  *   mergeado     gh says the PR is MERGED, its merge commit is on origin/main and the PR head is the sha QA approved;
  *                the merge sha is read FROM THE PR, never from the caller
- *   release      release.yml for the merge sha = success AND the batch's version tag exists
+ *   release      the batch's version tag exists AND the release.yml run that produced it (the newest run whose commit the tag
+ *                contains) = success; the declared merge sha is information, read in the repository the release recorded
  *
  * The decision functions are pure over `GateFacts`; only `defaultGateFacts` touches the machine.
  * Darwin-safe: memory is the machine's AVAILABLE memory (`/proc/meminfo` on Linux, `vm_stat` on macOS), git/gh are plain argv.
@@ -159,18 +160,43 @@ export function judgeDeletions(files: ReadonlyArray<{ filename: string; status: 
   return unexpected.length ? no(`PR #${pr} deletes ${unexpected.length} file(s) outright: ${unexpected.slice(0, 8).join(', ')}`, unexpected.map(f => `deleção autorizada: ${f}`), evidence) : { ok: true, evidence, patch: { pr } }
 }
 
-/** PURE. The CI signal from the release run and the tag. Only both green is `ok`. */
-export function judgeRelease(o: { mergeSha?: string; runs: ReadonlyArray<{ databaseId?: number; status?: string; conclusion?: string; headSha?: string; updatedAt?: string }>; tag: string | null; pr: number | null }): GateVerdict {
-  if (!o.mergeSha) return no('no merge sha recorded', ['sha do merge'])
-  const mine = o.runs.filter(r => r.headSha === o.mergeSha)
-  const green = mine.find(r => r.status === 'completed' && r.conclusion === 'success')
-  const ci: DeliveryCi = { mergedMain: true, releaseGreen: !!green, tagPublished: !!o.tag, tag: o.tag, pr: o.pr }
-  const evidence = { mergeSha: o.mergeSha, runs: mine.map(r => ({ id: r.databaseId, status: r.status, conclusion: r.conclusion })), tag: o.tag }
-  const failed = mine.find(r => r.status === 'completed' && r.conclusion !== 'success')
-  if (!green) return { ...no(failed && mine.every(r => r.status === 'completed') ? `release.yml failed for ${o.mergeSha.slice(0, 9)} (${failed.conclusion})` : `release.yml has not finished green for ${o.mergeSha.slice(0, 9)}`, ['release.yml verde'], evidence), patch: { ci } }
-  if (!o.tag) return { ...no('the release tag does not exist yet', ['tag publicada'], evidence), patch: { ci } }
+export interface ReleaseRun { databaseId?: number; status?: string; conclusion?: string; headSha?: string; updatedAt?: string }
+
+/**
+ * PURE. The CI signal from the release run and the tag. Only both green is `ok`.
+ *
+ * THE TAG IS THE RELEASE'S OWN EVIDENCE. Once `v<version>` exists, the judged run is the newest `release.yml` run whose
+ * commit the tag CONTAINS (`o.contained`, the first such run walking newest-first — computed by the gate): the run that
+ * produced the tag. The merge sha a leader declared is information only — a big squash commit whose own run failed and
+ * was fixed by a later commit (v2.201.0: db7bf2f red, 7cede91 green, tag after it) must not decide the release.
+ * Before the tag exists nothing is published: `declared` pieces wait; a legacy piece (merged by the flow itself) is
+ * still sent back when ITS merge commit's own run failed.
+ */
+export function judgeRelease(o: { mergeSha?: string; runs: ReadonlyArray<ReleaseRun>; contained?: ReadonlyArray<ReleaseRun>; tag: string | null; tagSha?: string | null; wanted?: string | null; declared?: boolean; pr: number | null }): GateVerdict {
+  if (!o.mergeSha && !o.tag) return no('no merge sha recorded', ['sha do merge'])
+  const mine = o.mergeSha ? o.runs.filter(r => r.headSha === o.mergeSha) : []
+  const mineGreen = mine.some(r => r.status === 'completed' && r.conclusion === 'success')
+  if (!o.tag) {
+    const ci: DeliveryCi = { mergedMain: true, releaseGreen: mineGreen, tagPublished: false, tag: null, pr: o.pr }
+    const evidence = { mergeSha: o.mergeSha, runs: mine.map(r => ({ id: r.databaseId, status: r.status, conclusion: r.conclusion })), tag: null }
+    const failed = mine.find(r => r.status === 'completed' && r.conclusion !== 'success')
+    if (!o.declared && !mineGreen) {
+      return { ...no(failed && mine.every(r => r.status === 'completed') ? `release.yml failed for ${o.mergeSha!.slice(0, 9)} (${failed.conclusion})` : `release.yml has not finished green for ${o.mergeSha!.slice(0, 9)}`, ['release.yml verde'], evidence), patch: { ci } }
+    }
+    // A declared piece never reads a failed run of some other commit as final: it waits for the tag.
+    return { ...no(`the release tag${o.wanted ? ` ${o.wanted}` : ''} does not exist yet`, ['tag publicada'], evidence), patch: { ci } }
+  }
+  const decisive = [...(o.contained ?? [])].sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0))[0]
+  const green = decisive && decisive.status === 'completed' && decisive.conclusion === 'success'
+  const ci: DeliveryCi = { mergedMain: true, releaseGreen: !!green, tagPublished: true, tag: o.tag, pr: o.pr }
+  const evidence = { mergeSha: o.mergeSha, tag: o.tag, tagSha: o.tagSha, runs: decisive ? [{ id: decisive.databaseId, head: decisive.headSha?.slice(0, 9), status: decisive.status, conclusion: decisive.conclusion }] : [] }
+  if (!decisive) return { ...no(`no release.yml run found for ${o.tag} (${(o.tagSha ?? '?').slice(0, 9)})`, ['release.yml verde'], evidence), patch: { ci } }
+  if (!green) {
+    const final = decisive.status === 'completed'
+    return { ...no(final ? `release.yml failed for ${o.tag} (${decisive.conclusion}, run ${decisive.databaseId ?? '?'})` : `release.yml has not finished green for ${o.tag}`, ['release.yml verde'], evidence), patch: { ci } }
+  }
   // The release's own publish time: when the green run completed (the run creates the tag). Absent when gh did not say.
-  const publishedAt = green.updatedAt && Number.isFinite(Date.parse(green.updatedAt)) ? new Date(green.updatedAt).toISOString() : undefined
+  const publishedAt = decisive.updatedAt && Number.isFinite(Date.parse(decisive.updatedAt)) ? new Date(decisive.updatedAt).toISOString() : undefined
   return { ok: true, evidence: { ...evidence, ...(publishedAt ? { publishedAt } : {}) }, patch: { ci, tag: o.tag, ...(publishedAt ? { publishedAt } : {}) } }
 }
 
@@ -285,25 +311,65 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
       }
       case 'release': {
         const author = authorOf(r, await f.sessions())
-        // A piece declared by `agentop flow release` may have no author session at all (it predates the flow): the checkout
-        // the verb ran in is the repository then.
-        const cwd = author?.rootPath ?? author?.cwd ?? (await f.repoCwd?.().catch(() => null)) ?? undefined
+        // ONE REPOSITORY PER RELEASE. A piece declared by `agentop flow release` records the `owner/name` it was declared in
+        // (`releaseRepo`), and the gate asks gh THERE with explicit paths: the author session's checkout is irrelevant (a
+        // piece worked in the engine repo or the workspace must not ask the wrong repository and wait in `ci` forever), and
+        // so is the server's own cwd. A record with no `releaseRepo` (merged by the flow) keeps the author's checkout.
+        const slug = r.releaseRepo
+        const cwd = slug
+          ? (await f.repoCwd?.().catch(() => null)) ?? '.'
+          : author?.rootPath ?? author?.cwd ?? (await f.repoCwd?.().catch(() => null)) ?? undefined
         if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
-        if (!r.mergeSha) return no('no merge sha recorded', ['sha do merge'])
-        const runs = json<Array<{ databaseId?: number; status?: string; conclusion?: string; headSha?: string; updatedAt?: string }>>(await f.gh(cwd, ['run', 'list', '--workflow', 'release.yml', '--commit', r.mergeSha, '--json', 'databaseId,status,conclusion,headSha,updatedAt', '--limit', '10']), [])
-        const tags = json<Array<{ name?: string; commit?: { sha?: string } }>>(await f.gh(cwd, ['api', 'repos/{owner}/{repo}/tags?per_page=30']).catch(() => '[]'), [])
+        const repoPath = slug ?? '{owner}/{repo}'
         const wanted = r.tag ?? (r.versionTarget && /^\d/.test(r.versionTarget) ? `v${r.versionTarget}` : null)
-        const list = (Array.isArray(tags) ? tags : []).flatMap(t => (t.name && t.commit?.sha ? [{ name: t.name, sha: t.commit.sha }] : []))
-        const relations = new Map<string, string | undefined>()
-        for (const t of list) {
-          if (wanted && t.name !== wanted) continue
-          if (t.sha === r.mergeSha) { relations.set(t.sha, 'identical'); continue }
-          const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/{owner}/{repo}/compare/${r.mergeSha}...${t.sha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
-          relations.set(t.sha, cmp.status)
-          if (!wanted && cmp.status !== 'ahead' && cmp.status !== 'identical') break
+        if (!r.mergeSha && !wanted) return no('no merge sha recorded', ['sha do merge'])
+        const runList = ['run', 'list', ...(slug ? ['-R', slug] : []), '--workflow', 'release.yml', '--json', 'databaseId,status,conclusion,headSha,updatedAt', '--limit', '50']
+        const runsRaw = json<ReleaseRun[]>(await f.gh(cwd, runList), [])
+        const runs = Array.isArray(runsRaw) ? runsRaw : []
+        // The tag by its EXACT name (never a page of the newest tags: a `vscode-v*` flood would push it off the page).
+        let tag: string | null = null
+        let tagSha: string | null = null
+        if (wanted) {
+          const ref = json<{ object?: { sha?: string; type?: string } }>(await f.gh(cwd, ['api', `repos/${repoPath}/git/ref/tags/${wanted}`]).catch(() => '{}'), {})
+          tagSha = ref.object?.sha ?? null
+          if (tagSha && ref.object?.type === 'tag') {
+            // An annotated tag points at a tag object: the commit is one hop further.
+            const obj = json<{ object?: { sha?: string } }>(await f.gh(cwd, ['api', `repos/${repoPath}/git/tags/${tagSha}`]).catch(() => '{}'), {})
+            tagSha = obj.object?.sha ?? null
+          }
+          if (tagSha) tag = wanted
+        } else if (r.mergeSha) {
+          const tags = json<Array<{ name?: string; commit?: { sha?: string } }>>(await f.gh(cwd, ['api', `repos/${repoPath}/tags?per_page=30`]).catch(() => '[]'), [])
+          const list = (Array.isArray(tags) ? tags : []).flatMap(t => (t.name && t.commit?.sha ? [{ name: t.name, sha: t.commit.sha }] : []))
+          const relations = new Map<string, string | undefined>()
+          for (const t of list) {
+            if (t.sha === r.mergeSha) { relations.set(t.sha, 'identical'); continue }
+            const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${repoPath}/compare/${r.mergeSha}...${t.sha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
+            relations.set(t.sha, cmp.status)
+            if (cmp.status !== 'ahead' && cmp.status !== 'identical') break
+          }
+          tag = pickReleaseTag(list, null, r.mergeSha, sha => relations.get(sha))
+          tagSha = list.find(t => t.name === tag)?.sha ?? null
         }
-        const tag = pickReleaseTag(list, wanted, r.mergeSha, sha => relations.get(sha))
-        return judgeRelease({ mergeSha: r.mergeSha, runs: Array.isArray(runs) ? runs : [], tag, pr: r.pr ?? null })
+        // The run that produced the tag: walking the runs newest-first, the first whose commit the tag contains.
+        let contained: ReleaseRun[] | undefined
+        if (tag && tagSha) {
+          const checked = new Map<string, boolean>()
+          const newestFirst = [...runs].filter(x => x.headSha).sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0))
+          for (const run of newestFirst) {
+            const sha = run.headSha!
+            if (!checked.has(sha)) {
+              if (checked.size >= 15) break
+              if (sha === tagSha) checked.set(sha, true)
+              else {
+                const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${repoPath}/compare/${sha}...${tagSha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
+                checked.set(sha, cmp.status === 'ahead' || cmp.status === 'identical')
+              }
+            }
+            if (checked.get(sha)) { contained = [run]; break }
+          }
+        }
+        return judgeRelease({ mergeSha: r.mergeSha, runs, ...(contained ? { contained } : {}), tag, tagSha, wanted, declared: Boolean(r.declaredRelease), pr: r.pr ?? null })
       }
     }
   } catch (error) {
