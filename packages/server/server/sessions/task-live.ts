@@ -477,6 +477,8 @@ export interface LiveDeliveryFacts {
   origin?: string
   block?: { reason: string; text: string }
   ci?: unknown
+  /** When the release that shipped it was published (ISO) — the Publicado window starts here when the record says so. */
+  publishedAt?: string
   step?: number
   gates?: { vaga?: { ok: boolean; reason?: string; at: string } }
   revision?: number
@@ -624,7 +626,8 @@ export function buildLive(o: {
     // or a todo nobody staged, was never on the board and fills the reply with nothing anyone is missing.
     const recent = o.nowMs - (ms(p.updatedAt) ?? 0) < RECENT_HIDDEN_MS
     if (stage === null) { if (recent && p.status !== 'backlog' && p.status !== 'abandoned') hide(p, null, 'status-unplaced'); continue }
-    const deliveredAtMs = ms(p.deliveredAt) ?? (stage === 'published' ? ms(p.updatedAt) : null)
+    // A recorded release states its own publish time; the board's `deliveredAt` is only when the status moved (late runs: "now").
+    const deliveredAtMs = (rec?.publishedAt && stage === 'published' ? ms(rec.publishedAt) : null) ?? ms(p.deliveredAt) ?? (stage === 'published' ? ms(p.updatedAt) : null)
     if (stage === 'published' && (deliveredAtMs === null || o.nowMs - deliveredAtMs > PUBLISHED_WINDOW_MS)) {
       // Recently expired only: a year of finished work is not a departure anybody is waiting to explain.
       if (deliveredAtMs !== null && o.nowMs - deliveredAtMs <= 3 * PUBLISHED_WINDOW_MS) hide(p, stage, 'published-old')

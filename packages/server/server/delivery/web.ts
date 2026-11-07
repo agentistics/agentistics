@@ -40,6 +40,12 @@ export async function deliveryRequest(method: string, path: string, body: Record
   if (proof && !session) return { status: 403, body: { error: 'unverified_sender', sentence: 'the session identity could not be verified' } }
   const actor = session ?? 'owner'
   if (rest === 'tick') return { status: 200, body: await d.service.tick() }
+  if (rest === 'release') {
+    const r = await d.service.release({ version: body.version, mergeSha: body.mergeSha, subtaskIds: body.subtaskIds }, actor)
+    return r.ok
+      ? { status: 200, body: { ok: true, version: r.version, tag: r.tag, mergeSha: r.mergeSha, ...(r.publishedAt ? { publishedAt: r.publishedAt } : {}), pieces: r.pieces, warnings: r.warnings } }
+      : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing, ...(r.record ? { record: r.record } : {}) } }
+  }
   let subtaskId: string
   try { subtaskId = decodeURIComponent(rest) } catch { return { status: 400, body: { error: 'bad_subtask' } } }
   if (subtaskId.includes('/')) return { status: 404, body: { error: 'not_found' } }

@@ -61,11 +61,16 @@ export interface DeliveryDeps {
   now(): number
 }
 
+export interface ReleasePiece { subtaskId: string; phase: Phase; /** false = it was already declared for this very release and nothing was touched. */ changed: boolean }
+export type ReleaseReply =
+  | { ok: true; status: 200; version: string; tag: string; mergeSha: string; pieces: ReleasePiece[]; publishedAt?: string; warnings: string[] }
+  | Extract<DeliveryReply, { ok: false }>
+
 export type DeliveryReply =
   | { ok: true; status: 200; record: DeliveryRecord; warnings: string[]; skipped?: unknown; gate?: GateVerdict }
   | { ok: false; status: number; code: string; sentence: string; missing: string[]; record?: DeliveryRecord; gate?: GateVerdict }
 
-const fail = (status: number, code: string, sentence: string, missing: string[] = [], record?: DeliveryRecord): DeliveryReply => ({ ok: false, status, code, sentence, missing, ...(record ? { record } : {}) })
+const fail = (status: number, code: string, sentence: string, missing: string[] = [], record?: DeliveryRecord): Extract<DeliveryReply, { ok: false }> => ({ ok: false, status, code, sentence, missing, ...(record ? { record } : {}) })
 const refused = (p: TransitionRefusal, record?: DeliveryRecord): DeliveryReply => fail(refusalStatus(p), p.code, p.sentence, p.missing, record)
 const iso = (d: DeliveryDeps) => new Date(d.now()).toISOString()
 const SUB_ID = /^[A-Za-z0-9_.:-]{1,120}$/
@@ -413,6 +418,102 @@ export function createDeliveryService(d: DeliveryDeps) {
   }
 
   /**
+   * `agentop flow release`: a leader DECLARES what a release contains. The Live used to guess it from git (worker shas,
+   * patch-ids) and a release assembled from ~15 merged branches with conflict fixes, squashed into one commit, almost
+   * never matched. Each named subtask gets its delivery record (a legacy piece is ADOPTED, like `ensure` does), the
+   * version and the main merge sha, and is put in `ci`; when the tag is already published and green the same call moves
+   * it to `publicado` (otherwise the minute tick does), with `publishedAt` = the release's own publish time.
+   *
+   * ALL-OR-NOTHING on validation: one refused subtask refuses the batch before anything is written. Idempotent: a piece
+   * already declared for this very version + merge sha is left exactly as it is. The release EVIDENCE is still read from
+   * the host (gh): the caller states which pieces, never that it is green.
+   */
+  const release = async (o: { version: unknown; mergeSha: unknown; subtaskIds: unknown }, actor: string): Promise<ReleaseReply> => {
+    const version = typeof o.version === 'string' ? o.version.trim().replace(/^v/, '') : ''
+    if (!/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version)) return fail(400, 'bad_version', 'version must look like 2.201.0')
+    const mergeSha = typeof o.mergeSha === 'string' ? o.mergeSha.trim().toLowerCase() : ''
+    if (!/^[0-9a-f]{7,40}$/.test(mergeSha)) return fail(400, 'bad_merge_sha', 'merge-sha must be the commit on main that carries the release (7–40 hex characters)')
+    const ids = Array.isArray(o.subtaskIds) ? [...new Set(o.subtaskIds.filter((x): x is string => typeof x === 'string').map(x => x.trim()).filter(Boolean))] : []
+    if (!ids.length) return fail(400, 'no_subtasks', 'name at least one subtask of the release (--subtask S, repeated)', ['subtarefas'])
+    const bad = ids.find(id => !SUB_ID.test(id))
+    if (bad) return fail(400, 'bad_subtask', `invalid subtask id ${bad}`)
+    const tag = `v${version}`
+
+    // ---- validate everything first
+    const sessions = await d.facts.sessions().catch(() => [])
+    const leaderTask = sessions.find(x => x.id === actor && x.role === 'leader')?.taskId
+    let expectedTask = leaderTask
+    const plan: Array<{ id: string; have: DeliveryRecord | null; taskId: string }> = []
+    for (const id of ids) {
+      const have = await d.store.get(id)
+      const sub = await d.facts.subtask(id)
+      if (!sub && !have) return fail(404, 'no_such_subtask', `subtask ${id} does not exist on the board`)
+      const taskId = have?.taskId ?? sub!.taskId
+      expectedTask ??= taskId
+      if (taskId !== expectedTask) return fail(422, 'outra_tarefa', `subtask ${id} belongs to task ${taskId}, not ${expectedTask}: one release declaration names the pieces of one task`, [`subtarefa de ${expectedTask}`], have ?? undefined)
+      if (have?.phase === 'publicado') {
+        if (have.versionTarget === version && have.mergeSha?.toLowerCase() === mergeSha) { plan.push({ id, have, taskId }); continue }
+        return fail(422, 'ja_publicada', `${id} is already published (${have.tag ?? have.ci?.tag ?? have.versionTarget ?? '?'}); it cannot be declared in another release`, [], have)
+      }
+      if (have?.phase === 'bloqueado') return fail(422, 'bloqueada', `${id} is blocked (${have.block?.reason ?? '?'}): unblock it before declaring it in a release`, ['desbloqueio'], have)
+      if (!have && sub && (sub.status === 'done' || sub.status === 'abandoned')) return fail(422, 'peca_encerrada', `${id} is ${sub.status} on the board: a finished or given-up piece is not part of a release`, [], undefined)
+      plan.push({ id, have, taskId })
+    }
+    const isLeaderSession = sessions.some(x => x.id === actor && x.role === 'leader')
+    for (const p of plan) {
+      const may = p.have ? await leads(p.have, actor) : actor === 'owner' || actor.startsWith('flow:') || (isLeaderSession && leaderTask === p.taskId)
+      if (!may) return fail(403, 'so_o_lider', 'only the leader of the task (or the owner) declares a release', [], p.have ?? undefined)
+    }
+
+    // ---- write
+    const warnings: string[] = []
+    const pieces: ReleasePiece[] = []
+    for (const p of plan) {
+      const got = p.have ?? await ensure(p.id, { versionTarget: version, ...(isLeaderSession ? { leaderSessionId: actor } : {}) })
+      if (isReply(got)) return got as Extract<DeliveryReply, { ok: false }>
+      if (got.phase === 'publicado' || (got.phase === 'ci' && got.mergeSha?.toLowerCase() === mergeSha && got.versionTarget === version && got.tag === tag)) {
+        pieces.push({ subtaskId: p.id, phase: got.phase, changed: false })
+        continue
+      }
+      const out = await d.store.update(doc => {
+        const cur = doc.deliveries[p.id]!
+        if (cur.revision !== got.revision) return { kind: 'moved' as const, cur }
+        const at = iso(d)
+        const next = structuredClone(cur)
+        next.history = [...cur.history, { from: cur.phase, to: 'ci', at, actor, detail: `release v${version} declarada por ${actor} (merge ${mergeSha.slice(0, 9)})`, revision: cur.revision + 1 }]
+        next.phase = 'ci'; next.revision = cur.revision + 1; next.updatedAt = at
+        next.versionTarget = version; next.mergeSha = mergeSha; next.tag = tag
+        next.ci = { mergedMain: true, releaseGreen: false, tagPublished: false, tag, pr: cur.pr ?? null }
+        delete next.origin; delete next.block; delete next.step; delete next.publishedAt
+        doc.deliveries[p.id] = next
+        return { kind: 'ok' as const, before: cur, after: next }
+      })
+      if (out.kind === 'moved') return fail(409, 'revisao_obsoleta', `${p.id} moved meanwhile (now ${out.cur.phase}, rev ${out.cur.revision}); run the release again`, [], out.cur)
+      await effects(out.before, out.after, actor, warnings)
+      pieces.push({ subtaskId: p.id, phase: 'ci', changed: true })
+    }
+
+    // ---- publish now when the evidence is already there (the tick does it otherwise). One gh read for the whole batch:
+    // the verdict depends only on the merge sha and the tag, which every piece shares.
+    const waiting = pieces.filter(x => x.phase === 'ci')
+    if (waiting.length) {
+      const first = (await d.store.get(waiting[0]!.subtaskId))!
+      const v = await runGate('release', first, d.facts)
+      if (v.ok) {
+        for (const w of waiting) {
+          const out = await transition(w.subtaskId, 'publicado', { detail: `release v${version} verde e tag ${tag} publicada` }, actor, new Map([['release', v]]))
+          if (out.ok) { w.phase = 'publicado'; warnings.push(...out.warnings) } else warnings.push(`${w.subtaskId}: ${out.sentence}`)
+        }
+      } else {
+        warnings.push(`not published yet: ${v.reason ?? 'release evidence missing'} — the minute tick moves ci → publicado when it is`)
+        if (v.patch?.ci) for (const w of waiting) await d.board.setCi(w.subtaskId, v.patch.ci).catch(() => undefined)
+      }
+    }
+    const publishedAt = pieces.find(x => x.phase === 'publicado') ? (await d.store.get(pieces.find(x => x.phase === 'publicado')!.subtaskId))?.publishedAt : undefined
+    return { ok: true, status: 200, version, tag, mergeSha, pieces, ...(publishedAt ? { publishedAt } : {}), warnings }
+  }
+
+  /**
    * The minute tick: blocked pieces, and CI → publicado on evidence. Idempotent, and SERIALISED in the process: the
    * server's own interval and the engine's `entrega-vigiar` timer both call it, and a second tick must read the
    * `lastWakeAt` the first one wrote rather than wake the leader twice.
@@ -495,6 +596,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     // An unreadable store REFUSES the write (and keeps a copy of the file) instead of letting any verb replace it with an empty book.
     transition: safe((id: string, to: unknown, input: TransitionInput, actor: string) => transition(id, to, input, actor)),
     gate: safe(gate), block: safe(block), unblock: safe(unblock), approve: safe(approve), configure: safe(configure), step: safe(step),
+    release: async (o: { version: unknown; mergeSha: unknown; subtaskIds: unknown }, actor: string): Promise<ReleaseReply> => { try { return await release(o, actor) } catch (e) { if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>; throw e } },
     stage: safe(stage), stageRun: safe(stageRun), qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,
   }
 }

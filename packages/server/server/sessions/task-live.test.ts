@@ -95,6 +95,25 @@ describe('buildLive', () => {
     })
     expect(r.deliveries.map(d => d.subtaskId)).toEqual(['fresh'])
   })
+  test('PUBLICADO.MANIFESTO: a recorded piece released 2 h ago is Publicado even though the git guess says no — and its window starts at the RELEASE, not at the status move', () => {
+    const d = detail({
+      // The board moved the status "now" (late run) while the release itself was 20 h ago: the record's publishedAt decides.
+      subtasks: [sub('rec', 'done', { deliveredAt: iso(NOW - 10_000) }), sub('late', 'done', { deliveredAt: iso(NOW - 1000) }), sub('legacy', 'in_review')] as never,
+      sessions: [],
+    })
+    const deliveries = new Map([
+      ['rec', { phase: 'publicado', publishedAt: iso(NOW - 2 * H) }],
+      ['late', { phase: 'publicado', publishedAt: iso(NOW - 30 * H) }],
+    ])
+    const r = buildLive({ nowMs: NOW, events: [], details: [d], deliveries, publishedShas: new Set() })
+    const rec = r.deliveries.find(x => x.subtaskId === 'rec')!
+    expect(rec.stage).toBe('published')
+    expect(rec.deliveredAtMs).toBe(NOW - 2 * H)
+    // 30 h ago by the release's own clock: outside the 24 h window although the status moved a second ago.
+    expect(r.deliveries.find(x => x.subtaskId === 'late')).toBeUndefined()
+    // No record → still the (failing) git guess: the legacy piece is not Publicado.
+    expect(r.deliveries.find(x => x.subtaskId === 'legacy')?.stage).toBe('leader')
+  })
   test('history feeds the ETA: five delivered pieces give a live piece a ranged estimate', () => {
     const done = [1, 2, 3, 4, 5].map(i => sub(`d${i}`, 'done', { deliveredAt: iso(NOW - 40 * H) }))
     const rollups = done.map((d, i) => ({ id: d.id, times: { startedAt: iso(NOW - 50 * H), completedAt: iso(NOW - 40 * H), durationMs: (i + 1) * H, activeMinutes: 1, source: 'sessions' } }))

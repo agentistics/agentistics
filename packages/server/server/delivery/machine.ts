@@ -115,6 +115,12 @@ export interface DeliveryRecord {
   mergeSha?: string
   tag?: string
   ci?: DeliveryCi
+  /**
+   * When the release that shipped this piece was published (ISO) — the green `release.yml` run's completion, read by the
+   * `release` gate. The Live's 24 h Publicado window starts HERE, not at the moment the flow noticed, so a release
+   * declared hours late still shows the piece for the rest of its window.
+   */
+  publishedAt?: string
   gates: Partial<Record<GateName, GateResult>>
   /** Phases the owner must approve before the delivery enters them (autonomous OFF only). Default: none. */
   humanGates: Phase[]
@@ -293,7 +299,7 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
     else delete next.qaSha
   }
   if (r.phase === 'revisao_lider') next.review = { sha: input.reviewedSha ?? '', decision: to === 'pr_merge' ? 'ok' : 'ajustar', detail: d, at: ctx.at, by: ctx.actor }
-  if (to === 'ajuste') { delete next.qaSha; delete next.mergeSha; delete next.ci }
+  if (to === 'ajuste') { delete next.qaSha; delete next.mergeSha; delete next.ci; delete next.publishedAt }
   if (to === 'ci') {
     next.mergeSha = r.mergeSha
     next.ci = { mergedMain: true, releaseGreen: false, tagPublished: false, tag: r.tag ?? null, pr: r.pr ?? null }

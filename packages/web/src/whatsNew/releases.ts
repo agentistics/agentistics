@@ -10,6 +10,15 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.201.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'A Live agora mostra em "Publicado" as peças de uma versão que entrou como um único commit grande: o líder declara o conteúdo do release (agentop flow release) e as peças vão a Publicado quando a versão sai verde, em vez de o app adivinhar pelo git.',
+        en: 'Live now shows in "Published" the pieces of a version that landed as one big commit: the leader declares the release contents (agentop flow release) and the pieces move to Published once the version ships green, instead of the app guessing from git.',
+      },
+    ],
+  },
   '2.201.0': {
     features: [
       {

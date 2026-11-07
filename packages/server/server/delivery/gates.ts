@@ -36,6 +36,8 @@ export interface GateFacts {
   topCap(harness: string): Promise<number>
   git(cwd: string, args: string[]): Promise<string>
   gh(cwd: string, args: string[]): Promise<string>
+  /** The repository checkout this process runs in, for a piece with no author session on record (`flow release`). Null = none. */
+  repoCwd?(): Promise<string | null>
 }
 
 export interface GateVerdict {
@@ -158,7 +160,7 @@ export function judgeDeletions(files: ReadonlyArray<{ filename: string; status: 
 }
 
 /** PURE. The CI signal from the release run and the tag. Only both green is `ok`. */
-export function judgeRelease(o: { mergeSha?: string; runs: ReadonlyArray<{ databaseId?: number; status?: string; conclusion?: string; headSha?: string }>; tag: string | null; pr: number | null }): GateVerdict {
+export function judgeRelease(o: { mergeSha?: string; runs: ReadonlyArray<{ databaseId?: number; status?: string; conclusion?: string; headSha?: string; updatedAt?: string }>; tag: string | null; pr: number | null }): GateVerdict {
   if (!o.mergeSha) return no('no merge sha recorded', ['sha do merge'])
   const mine = o.runs.filter(r => r.headSha === o.mergeSha)
   const green = mine.find(r => r.status === 'completed' && r.conclusion === 'success')
@@ -167,7 +169,9 @@ export function judgeRelease(o: { mergeSha?: string; runs: ReadonlyArray<{ datab
   const failed = mine.find(r => r.status === 'completed' && r.conclusion !== 'success')
   if (!green) return { ...no(failed && mine.every(r => r.status === 'completed') ? `release.yml failed for ${o.mergeSha.slice(0, 9)} (${failed.conclusion})` : `release.yml has not finished green for ${o.mergeSha.slice(0, 9)}`, ['release.yml verde'], evidence), patch: { ci } }
   if (!o.tag) return { ...no('the release tag does not exist yet', ['tag publicada'], evidence), patch: { ci } }
-  return { ok: true, evidence, patch: { ci, tag: o.tag } }
+  // The release's own publish time: when the green run completed (the run creates the tag). Absent when gh did not say.
+  const publishedAt = green.updatedAt && Number.isFinite(Date.parse(green.updatedAt)) ? new Date(green.updatedAt).toISOString() : undefined
+  return { ok: true, evidence: { ...evidence, ...(publishedAt ? { publishedAt } : {}) }, patch: { ci, tag: o.tag, ...(publishedAt ? { publishedAt } : {}) } }
 }
 
 /** PURE: was the release FAILURE final (so the flow goes back to the leader), or is it still running? */
@@ -281,10 +285,12 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
       }
       case 'release': {
         const author = authorOf(r, await f.sessions())
-        const cwd = author?.rootPath ?? author?.cwd
+        // A piece declared by `agentop flow release` may have no author session at all (it predates the flow): the checkout
+        // the verb ran in is the repository then.
+        const cwd = author?.rootPath ?? author?.cwd ?? (await f.repoCwd?.().catch(() => null)) ?? undefined
         if (!cwd) return no('the repository of the delivery is not known', ['repositório'])
         if (!r.mergeSha) return no('no merge sha recorded', ['sha do merge'])
-        const runs = json<Array<{ databaseId?: number; status?: string; conclusion?: string; headSha?: string }>>(await f.gh(cwd, ['run', 'list', '--workflow', 'release.yml', '--commit', r.mergeSha, '--json', 'databaseId,status,conclusion,headSha', '--limit', '10']), [])
+        const runs = json<Array<{ databaseId?: number; status?: string; conclusion?: string; headSha?: string; updatedAt?: string }>>(await f.gh(cwd, ['run', 'list', '--workflow', 'release.yml', '--commit', r.mergeSha, '--json', 'databaseId,status,conclusion,headSha,updatedAt', '--limit', '10']), [])
         const tags = json<Array<{ name?: string; commit?: { sha?: string } }>>(await f.gh(cwd, ['api', 'repos/{owner}/{repo}/tags?per_page=30']).catch(() => '[]'), [])
         const wanted = r.tag ?? (r.versionTarget && /^\d/.test(r.versionTarget) ? `v${r.versionTarget}` : null)
         const list = (Array.isArray(tags) ? tags : []).flatMap(t => (t.name && t.commit?.sha ? [{ name: t.name, sha: t.commit.sha }] : []))
@@ -350,5 +356,6 @@ export function defaultGateFacts(): GateFacts {
     },
     git: (cwd, args) => run('git', cwd, args),
     gh: (cwd, args) => run('gh', cwd, args),
+    repoCwd: async () => (await run('git', process.cwd(), ['rev-parse', '--show-toplevel'])).trim() || null,
   }
 }

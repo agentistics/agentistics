@@ -14,7 +14,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }))
 interface World {
   autonomous: boolean
   sessions: SessionFact[]
-  releaseRuns: Array<{ databaseId: number; status: string; conclusion: string; headSha: string }>
+  releaseRuns: Array<{ databaseId: number; status: string; conclusion: string; headSha: string; updatedAt?: string }>
   tags: Array<{ name: string; commit: { sha: string } }>
   prFiles: Array<{ filename: string; status: string }>
   checkRuns: Array<{ name: string; conclusion: string | null }>
@@ -47,7 +47,7 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
     ...over,
   }
   const facts: GateFacts = {
-    subtask: async id => (id === 's1' || id === 's2' ? { id, taskId: 't1', title: id, status: w.status ?? 'todo', groupMember: false, blockedBy: id === 's2' ? ['s1'] : [], staged: { prompt: 'do it', harness: 'claude', model: 'claude-opus-5-5', effort: 'high', account: 'acc_1', cwd: '/r' } } : null),
+    subtask: async id => (id === 's1' || id === 's2' || id === 's3' ? { id, taskId: id === 's3' ? 't2' : 't1', title: id, status: w.status ?? 'todo', groupMember: false, blockedBy: id === 's2' ? ['s1'] : [], staged: { prompt: 'do it', harness: 'claude', model: 'claude-opus-5-5', effort: 'high', account: 'acc_1', cwd: '/r' } } : null),
     sessions: async () => w.sessions,
     budgets: async () => [{ harness: 'claude', account: 'acc_1', fiveHourPct: 20, weekPct: 30, stale: false }],
     memoryBytes: async () => w.memory,
@@ -59,6 +59,7 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
       if (args[0] === 'ls-remote') return `${w.remoteHead ?? w.head}\trefs/heads/feat/x\n`
       return ''
     },
+    repoCwd: async () => '/r',
     gh: async (_cwd, args) => {
       const a = args.join(' ')
       calls.gh.push(a)
@@ -532,5 +533,112 @@ describe('M6 — the queue shows its expected slot', () => {
     const vaga = (await h.svc.get('s1'))!.gates.vaga!
     expect(vaga.ok).toBe(false)
     expect(vaga.reason).toContain('3 GB')
+  })
+})
+
+describe('PUBLICADO.MANIFESTO — the release says what it published', () => {
+  const RELEASE = { version: '2.201.0', mergeSha: 'a201a201' }
+  const GREEN = { databaseId: 9, status: 'completed', conclusion: 'success', headSha: 'a201a201', updatedAt: '2026-11-07T00:10:00Z' }
+  const TAG = [{ name: 'v2.201.0', commit: { sha: 'tag201' } }]
+
+  test('a legacy in_review piece → release → ci, then publicado on tag evidence (tick), stamped with the release time', async () => {
+    const h = harness({ status: 'in_review' })
+    expect(await h.svc.get('s1')).toBeNull()
+    const r = await h.svc.release({ ...RELEASE, subtaskIds: ['s1', 's2'] }, 'leader')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    // No green run and no tag yet: both pieces wait in ci, adopted from the board and declared in the release.
+    expect(r.pieces).toEqual([{ subtaskId: 's1', phase: 'ci', changed: true }, { subtaskId: 's2', phase: 'ci', changed: true }])
+    expect(r.warnings.join(' ')).toContain('not published yet')
+    const rec = (await h.svc.get('s1'))!
+    expect(rec).toMatchObject({ phase: 'ci', versionTarget: '2.201.0', mergeSha: 'a201a201', tag: 'v2.201.0', taskId: 't1' })
+    expect(rec.history.map(x => x.to)).toEqual(['revisao_lider', 'ci'])
+    expect(h.calls.status.filter(s => s.phase === 'ci').map(s => s.id)).toEqual(['s1', 's2'])
+    // The release goes green and the tag appears: the minute tick publishes BOTH.
+    h.advance(61_000)
+    h.w.releaseRuns = [GREEN]
+    h.w.tags = TAG
+    expect((await h.svc.tick()).actions).toEqual(['publish s1:true', 'publish s2:true'])
+    for (const id of ['s1', 's2']) {
+      const done = (await h.svc.get(id))!
+      expect(done.phase).toBe('publicado')
+      expect(done.publishedAt).toBe('2026-11-07T00:10:00.000Z')
+    }
+  })
+
+  test('the tag is already published and green → publicado at once, with the RELEASE time (not now)', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG })
+    const r = await h.svc.release({ ...RELEASE, subtaskIds: ['s1', 's2'] }, 'leader')
+    expect(r.ok && r.pieces.map(p => p.phase)).toEqual(['publicado', 'publicado'])
+    expect(r.ok && r.publishedAt).toBe('2026-11-07T00:10:00.000Z')
+    const rec = (await h.svc.get('s2'))!
+    // Declared at 02:00, released at 00:10: the 24 h window starts at the release.
+    expect(rec.publishedAt).toBe('2026-11-07T00:10:00.000Z')
+    expect(rec.ci).toEqual({ mergedMain: true, releaseGreen: true, tagPublished: true, tag: 'v2.201.0', pr: null })
+    expect(rec.history.map(x => x.to)).toEqual(['revisao_lider', 'ci', 'publicado'])
+    // ONE gh read of the release for the whole batch.
+    expect(h.calls.gh.filter(c => c.startsWith('run list'))).toHaveLength(1)
+  })
+
+  test('idempotent: a second run changes nothing (revision, history, board writes)', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG })
+    await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    const before = JSON.stringify(await h.svc.get('s1'))
+    const writes = h.calls.status.length + h.calls.comments.length
+    const again = await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    expect(again.ok && again.pieces).toEqual([{ subtaskId: 's1', phase: 'publicado', changed: false }])
+    expect(JSON.stringify(await h.svc.get('s1'))).toBe(before)
+    expect(h.calls.status.length + h.calls.comments.length).toBe(writes)
+  })
+
+  test('a piece waiting in ci for the same release is left alone by a second run', async () => {
+    const h = harness({ status: 'in_review' })
+    await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    const rev = (await h.svc.get('s1'))!.revision
+    const again = await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    expect(again.ok && again.pieces[0]).toEqual({ subtaskId: 's1', phase: 'ci', changed: false })
+    expect((await h.svc.get('s1'))!.revision).toBe(rev)
+  })
+
+  test('refusals: done piece, unknown piece, another task, bad input, not the leader — and a refused batch writes NOTHING', async () => {
+    const done = harness({ status: 'done' })
+    const d = await done.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    expect(!d.ok && d.code).toBe('peca_encerrada')
+    expect(await done.svc.get('s1')).toBeNull()
+    const abandoned = harness({ status: 'abandoned' })
+    expect((await abandoned.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader') as { code?: string }).code).toBe('peca_encerrada')
+
+    const h = harness({ status: 'in_review' })
+    const unknown = await h.svc.release({ ...RELEASE, subtaskIds: ['s1', 'nope'] }, 'leader')
+    expect(!unknown.ok && unknown.status).toBe(404)
+    const other = await h.svc.release({ ...RELEASE, subtaskIds: ['s1', 's3'] }, 'leader')
+    expect(!other.ok && other.code).toBe('outra_tarefa')
+    // s1 was valid in both refused batches and still has no record: validation comes before any write.
+    expect(await h.svc.get('s1')).toBeNull()
+    expect(h.calls.status).toEqual([])
+
+    expect((await h.svc.release({ version: 'x', mergeSha: 'a201a201', subtaskIds: ['s1'] }, 'leader') as { code?: string }).code).toBe('bad_version')
+    expect((await h.svc.release({ version: '2.201.0', mergeSha: 'nothex!', subtaskIds: ['s1'] }, 'leader') as { code?: string }).code).toBe('bad_merge_sha')
+    expect((await h.svc.release({ ...RELEASE, subtaskIds: [] }, 'leader') as { code?: string }).code).toBe('no_subtasks')
+    const stranger = await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'author')
+    expect(!stranger.ok && stranger.status).toBe(403)
+    expect(await h.svc.get('s1')).toBeNull()
+  })
+
+  test('a published piece cannot be declared in ANOTHER release; a blocked one must be unblocked first', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [GREEN], tags: TAG })
+    await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    const other = await h.svc.release({ version: '2.202.0', mergeSha: 'b202b202', subtaskIds: ['s1'] }, 'leader')
+    expect(!other.ok && other.code).toBe('ja_publicada')
+    await h.svc.block('s2', 'externo', 'waiting on a vendor', 'leader')
+    const blocked = await h.svc.release({ ...RELEASE, subtaskIds: ['s2'] }, 'leader')
+    expect(!blocked.ok && blocked.code).toBe('bloqueada')
+  })
+
+  test('a release run that FAILED is not published: the piece waits in ci and the tick sends it back', async () => {
+    const h = harness({ status: 'in_review', releaseRuns: [{ ...GREEN, conclusion: 'failure' }], tags: TAG })
+    const r = await h.svc.release({ ...RELEASE, subtaskIds: ['s1'] }, 'leader')
+    expect(r.ok && r.pieces[0]!.phase).toBe('ci')
+    expect((await h.svc.get('s1'))!.publishedAt).toBeUndefined()
   })
 })
