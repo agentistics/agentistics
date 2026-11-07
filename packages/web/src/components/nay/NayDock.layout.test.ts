@@ -15,7 +15,7 @@ test('Nay tabs get a full wrapping row and 44px targets without clipped labels',
   expect(tabs).toContain("whiteSpace: 'normal'")
   expect(tabs).not.toContain('ellipsis')
   expect(tabs).toContain("pt ? 'Sessões' : 'Sessions'")
-  expect(tabs).toContain("pt ? 'Limites' : 'Limits'")
+  expect(tabs).not.toContain("'Limites'")
 })
 
 test('every mobile dock tab shares physical 44px controls, including settings, close and change', () => {
@@ -30,11 +30,12 @@ test('every mobile dock tab shares physical 44px controls, including settings, c
   expect(launch).toContain("whiteSpace: 'normal'")
 })
 
-test('engine sections belong inside Sessions; the four top-level tabs stay unchanged', () => {
+test('engine sections (Ligações) sit in the dock tab strip, at the top, not inside Sessions (owner 07/11)', () => {
   const tabs = source.slice(source.indexOf('<div role="tablist"'), source.indexOf('<DockSettings pt='))
-  expect(tabs).toContain('DOCK_TABS.map')
-  expect(tabs).not.toContain('engineTabs')
+  expect(tabs).toContain('dockTabs.map')
+  expect(tabs).toContain('openEngineSurface(engine.surface')
   const sessions = source.slice(source.indexOf('<SessionsAside'), source.indexOf('onGoToSession={goToSession}', source.indexOf('<SessionsAside')))
-  expect(sessions).toContain('extraTabs={engineTabs.map')
+  expect(sessions).not.toContain('extraTabs')
   expect(source).toContain("useEngineSurfaces('nay-sessions')")
+  expect(source).toContain('<EngineSurfaceNaySlot surfaceId={tab.slice(')
 })

@@ -22,9 +22,8 @@ export interface GroupFacts {
   vault: VaultLockState
   liveWorking: number
   liveWaiting: number
-  /** `Ligações` is announced by the engine for the `rail` placement; absent with no voice (kill switch). */
-  callsSurface: { id: string; label: string; beta: boolean } | null
-  callActive: boolean
+  /** Every surface the engine announces for the `rail` placement (`Ligações`); none with no voice (kill switch). */
+  callsSurfaces: readonly { id: string; label: string; beta: boolean; active: boolean }[]
 }
 
 export interface GroupRow {
@@ -35,7 +34,7 @@ export interface GroupRow {
   /** Rows that are the activity the button's colour reports. */
   active: boolean
   beta?: boolean
-  /** The engine surface behind a `calls` row. */
+  /** The engine surface behind a `calls` row (one row per announced `rail` surface). */
   surfaceId?: string
 }
 
@@ -60,10 +59,10 @@ export function groupRows(f: GroupFacts): GroupRow[] {
       state: liveStateLine(f.liveWorking, f.liveWaiting, f.pt), active: f.liveWorking + f.liveWaiting > 0,
     })
   }
-  if (f.callsSurface) {
+  for (const c of f.callsSurfaces) {
     rows.push({
-      id: 'calls', label: f.callsSurface.label, beta: f.callsSurface.beta, surfaceId: f.callsSurface.id, active: f.callActive,
-      state: f.callActive ? (f.pt ? 'em ligação' : 'in a call') : (f.pt ? 'sem ligação' : 'no call'),
+      id: 'calls', label: c.label, beta: c.beta, surfaceId: c.id, active: c.active,
+      state: c.active ? (f.pt ? 'em ligação' : 'in a call') : (f.pt ? 'sem ligação' : 'no call'),
     })
   }
   return rows

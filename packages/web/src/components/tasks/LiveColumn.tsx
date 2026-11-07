@@ -103,6 +103,11 @@ export function LiveColumn({ stage, pt, cards, collapsed, words, query, onQuery,
           {!collapsed && <span aria-hidden data-live-colchev style={{ ...microLabel, fontSize: 13, lineHeight: 1 }}>‹</span>}
         </span>
       </header>
+      {/* Collapsed, the strip is 40 px wide: the same line is turned on its side so it is still READ, not only hovered. */}
+      {note && collapsed && (
+        <span data-live-col-note="collapsed" title={note} onClick={onToggle}
+          style={{ writingMode: 'vertical-rl', fontSize: 10.5, lineHeight: 1.3, color: 'var(--text-tertiary)', flex: '1 1 0', minHeight: 0, overflow: 'hidden', textOverflow: 'ellipsis', alignSelf: 'center', cursor: 'pointer' }}>{note}</span>
+      )}
       {note && !collapsed && <span data-live-col-note style={{ fontSize: 10.5, color: 'var(--text-tertiary)', lineHeight: 1.3, padding: '0 4px', flexShrink: 0 }}>{note}</span>}
       {showSearch && (
         <SearchField

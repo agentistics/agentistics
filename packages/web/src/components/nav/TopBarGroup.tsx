@@ -7,7 +7,7 @@
  * orange — the accent border and icon the autonomous-mode button wears — while something in the group is
  * going on, and stays neutral otherwise. The bell stays outside, to the right.
  */
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Cpu, LayoutGrid, Phone, Radio, type LucideIcon } from 'lucide-react'
 import { AUTONOMOUS_ICON, awayUntilLabel, useAway } from '../../lib/awayMode'
@@ -19,11 +19,12 @@ import { useMountedEngineSurfaces } from '../../lib/engineSurfaceHost'
 import { useVaultWatch } from '../../lib/vaultWatch'
 import { pathOfView } from '../../lib/tasksViewRoute'
 import { liveActivity } from '../tasks/liveShortcutModel'
+import { LivePreview, sessionIdOfPath } from '../tasks/LivePreview'
 import { BetaTag } from '../BetaTag'
 import { BottomSheet } from '../BottomSheet'
 import { VaultGlyph } from '../vault/VaultGlyph'
 import { surfaceGlyph } from '../EngineSurfaceButtons'
-import { groupAccented, groupRows, type GroupRow, type GroupRowId } from './topBarGroupModel'
+import { groupAccented, groupRows, type GroupRow } from './topBarGroupModel'
 
 const HOVER_CLOSE_MS = 180
 
@@ -36,10 +37,14 @@ export function TopBarGroup({ lang, enabled = true, onOpenHardware }: { lang: 'p
   const lock = useVaultWatch(enabled).lock
   const { fleet } = useFleet(lang, enabled)
   const act = liveActivity(fleet.sessions)
-  const calls = useEngineSurfaces('rail')[0]
+  const rails = useEngineSurfaces('rail')
   const mounted = useMountedEngineSurfaces()
-  const callActive = !!calls && mounted.some(m => m.surface.id === calls.id && m.indicator)
   const [open, setOpen] = useState(false)
+  // Inside a session the Live row opens a preview over it instead of leaving it (LIVE.ATALHO).
+  const focusSessionId = sessionIdOfPath(pathname)
+  const [liveOpen, setLiveOpen] = useState(false)
+  const closeLive = useCallback(() => setLiveOpen(false), [])
+  useEffect(() => { if (!focusSessionId) setLiveOpen(false) }, [focusSessionId])
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const btn = useRef<HTMLButtonElement>(null)
   const skipFocusOpen = useRef(false)
@@ -57,29 +62,30 @@ export function TopBarGroup({ lang, enabled = true, onOpenHardware }: { lang: 'p
     pt, hasHardware: !!onOpenHardware, host: enabled,
     awayActive: away.active && !!away.state, awayUntil: away.state ? awayUntilLabel(away.state, lang, Date.now()) : undefined,
     vault: lock, liveWorking: act.working, liveWaiting: act.waiting,
-    callsSurface: calls ? { id: calls.id, label: calls.label[lang], beta: !!calls.beta } : null, callActive,
-  }), [pt, lang, onOpenHardware, enabled, away.active, away.state, lock, act.working, act.waiting, calls, callActive])
+    callsSurfaces: rails.map(r => ({ id: r.id, label: r.label[lang], beta: !!r.beta, active: mounted.some(m => m.surface.id === r.id && m.indicator) })),
+  }), [pt, lang, onOpenHardware, enabled, away.active, away.state, lock, act.working, act.waiting, rails, mounted])
   if (rows.length === 0) return null
 
   const accented = groupAccented(rows)
-  const go = (id: GroupRowId) => {
+  const go = (row: GroupRow) => {
     cancel(); setOpen(false)
-    if (id === 'hardware') onOpenHardware?.()
-    else if (id === 'autonomous') navigate('/leadership/away')
-    else if (id === 'vault') navigate('/vault')
-    else if (id === 'live') navigate(pathOfView('live'))
-    else if (calls) navigate(surfacePagePath(calls.id))
+    if (row.id === 'hardware') onOpenHardware?.()
+    else if (row.id === 'autonomous') navigate('/leadership/away')
+    else if (row.id === 'vault') navigate('/vault')
+    else if (row.id === 'live') { if (focusSessionId) setLiveOpen(true); else navigate(pathOfView('live')) }
+    else if (row.surfaceId) navigate(surfacePagePath(row.surfaceId))
   }
   const label = pt ? 'Atalhos da barra' : 'Bar shortcuts'
   const full = accented ? `${label} — ${rows.filter(r => r.active).map(r => `${r.label}: ${r.state}`).join('; ')}` : label
   const enter = () => { if (isMobile) return; cancel(); setOpen(true) }
   const leave = () => { if (isMobile) return; cancel(); closeTimer.current = setTimeout(() => setOpen(false), HOVER_CLOSE_MS) }
-  const glyph = (id: GroupRowId): LucideIcon | null => id === 'hardware' ? Cpu : id === 'autonomous' ? AUTONOMOUS_ICON : id === 'live' ? Radio
-    : id === 'calls' ? (surfaceGlyph(calls?.icon) ?? Phone) : null
-  const hrefOf = (id: GroupRowId): string | undefined => id === 'autonomous' ? '/leadership/away' : id === 'vault' ? '/vault'
-    : id === 'live' ? pathOfView('live') : id === 'calls' && calls ? surfacePagePath(calls.id) : undefined
-  const rowEls = rows.map(r => <GroupRowButton key={r.id} row={r} Icon={glyph(r.id)} lang={lang} onGo={() => go(r.id)} sheet={isMobile}
-    href={hrefOf(r.id)} current={hrefOf(r.id) !== undefined && pathname === hrefOf(r.id)} />)
+  const glyph = (r: GroupRow): LucideIcon | null => r.id === 'hardware' ? Cpu : r.id === 'autonomous' ? AUTONOMOUS_ICON : r.id === 'live' ? Radio
+    : r.id === 'calls' ? (surfaceGlyph(rails.find(s => s.id === r.surfaceId)?.icon) ?? Phone) : null
+  // Inside a session the Live row is a button (it opens the preview over the session), never a link away.
+  const hrefOf = (r: GroupRow): string | undefined => r.id === 'autonomous' ? '/leadership/away' : r.id === 'vault' ? '/vault'
+    : r.id === 'live' ? (focusSessionId ? undefined : pathOfView('live')) : r.id === 'calls' && r.surfaceId ? surfacePagePath(r.surfaceId) : undefined
+  const rowEls = rows.map(r => <GroupRowButton key={r.surfaceId ?? r.id} row={r} Icon={glyph(r)} lang={lang} onGo={() => go(r)} sheet={isMobile}
+    href={hrefOf(r)} current={hrefOf(r) !== undefined && pathname === hrefOf(r)} />)
 
   const button = (
     <button ref={btn} type="button" className="ag-tap-icon" data-topbar-group data-accent={accented ? 'true' : undefined}
@@ -102,12 +108,14 @@ export function TopBarGroup({ lang, enabled = true, onOpenHardware }: { lang: 'p
         <BottomSheet open={open} onClose={() => setOpen(false)} title={label} lang={lang}>
           <div style={{ padding: '4px 8px 12px', overflowY: 'auto' }}>{rowEls}</div>
         </BottomSheet>
+        <LivePreview lang={lang} open={liveOpen} onClose={closeLive} focusSessionId={focusSessionId} />
       </>
     )
   }
   return (
-    <div style={{ position: 'relative', display: 'flex' }} onMouseEnter={enter} onMouseLeave={leave}
-      onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) leave() }}>
+    <div style={{ position: 'relative', display: 'flex' }}>
+      <div style={{ position: 'relative', display: 'flex' }} onMouseEnter={enter} onMouseLeave={leave}
+        onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) leave() }}>
       {button}
       {open && (
         <div role="menu" data-portalled-menu data-topbar-group-popover aria-label={label}
@@ -118,6 +126,8 @@ export function TopBarGroup({ lang, enabled = true, onOpenHardware }: { lang: 'p
           {rowEls}
         </div>
       )}
+      </div>
+      <LivePreview lang={lang} open={liveOpen} onClose={closeLive} focusSessionId={focusSessionId} />
     </div>
   )
 }
