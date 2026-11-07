@@ -207,6 +207,14 @@ describe('a card never leaves without a word (item r) — one test per path that
     const h = hiddenOf([sub('a', 'done', { deliveredAt: iso(NOW - 30 * H) }), sub('b', 'done', { deliveredAt: iso(NOW - 400 * 24 * H) })])
     expect(h.map(x => [x.key, x.reason])).toEqual([['t1/a', 'published-old']])
   })
+  test('published more than 24 h ago lands in history (newest first), a year-old one does not', () => {
+    const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [
+      sub('a', 'done', { deliveredAt: iso(NOW - 30 * H) }), sub('b', 'done', { deliveredAt: iso(NOW - 5 * 24 * H) }),
+      sub('c', 'done', { deliveredAt: iso(NOW - 400 * 24 * H) }), sub('d', 'done', { deliveredAt: iso(NOW - 2 * H) }),
+    ] as never, sessions: [] as never })] })
+    expect((r.history ?? []).map(x => x.key)).toEqual(['t1/a', 't1/b'])
+    expect(r.deliveries.map(x => x.key)).toEqual(['t1/d'])
+  })
   test('queue entry that lost its staged session -> queue-idle', () => {
     expect(hiddenOf([sub('a', 'todo', { updatedAt: iso(NOW - H) })])).toEqual([expect.objectContaining({ reason: 'queue-idle', stage: 'queue' })])
     expect(hiddenOf([sub('a', 'todo', { updatedAt: iso(NOW - 30 * H) })])).toEqual([])

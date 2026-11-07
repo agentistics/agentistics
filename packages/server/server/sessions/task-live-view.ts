@@ -105,6 +105,8 @@ export interface LiveView {
     nextEta: { atMs: number; title: string; confidence: string } | null
   }
   deliveries: LiveDeliveryView[]
+  /** The Histórico column: published more than 24 h ago (newest first), filtered by `task` like the screen. */
+  history: LiveDeliveryView[]
   leaders: LeaderView[]
 }
 
@@ -183,6 +185,12 @@ export function describeLive(o: {
     // Stage by stage, as the screen's columns are; within a stage the chosen order.
     .sort((a, b) => LIVE_STAGES.indexOf(a.stage) - LIVE_STAGES.indexOf(b.stage) || cmp(a, b))
 
+  // Old publications carry no live agents by definition; they honour the same task filter as the screen.
+  const history: LiveDeliveryView[] = (o.reply.history ?? [])
+    .filter(d => !needle || d.taskId === f.task || d.taskTitle.toLowerCase().includes(needle))
+    .filter(d => !f.stage || d.stage === f.stage)
+    .map(d => ({ ...d, agents: [], liveState: 'none' as LiveState, stalled: false }))
+
   const active = deliveries.filter(d => d.stage !== 'published')
   const etas = active.flatMap(d => d.eta.kind === 'estimate' && d.eta.atMs >= o.nowMs
     ? [{ atMs: d.eta.atMs, title: d.title, confidence: d.eta.confidence }] : [])
@@ -221,7 +229,7 @@ export function describeLive(o: {
       stalled: active.filter(d => d.stalled).length,
       nextEta: etas[0] ?? null,
     },
-    deliveries, leaders,
+    deliveries, history, leaders,
   }
 }
 
