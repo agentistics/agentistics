@@ -47,8 +47,12 @@ export const SOCKET_PATH_MAX = 107
  */
 export const RUN_TMP_PREFIX = '/tmp/agr-'
 
-export function createRunTmp(): string {
-  return mkdtempSync(RUN_TMP_PREFIX)
+export function createRunTmp(env: Record<string, string | undefined> = process.env): string {
+  // Test seam: `AGENTISTICS_RUN_TMP_TAG=<alnum>` makes the dir `/tmp/agr-<tag>-XXXXXX`, so a test can tell ITS run's
+  // dir from every other run's on a shared /tmp. The result still starts with RUN_TMP_PREFIX and sits directly under
+  // /tmp, so `removeRunTmp`'s guard is untouched; anything that is not 1-12 alphanumerics is ignored.
+  const tag = env.AGENTISTICS_RUN_TMP_TAG
+  return mkdtempSync(tag && /^[A-Za-z0-9]{1,12}$/.test(tag) ? `${RUN_TMP_PREFIX}${tag}-` : RUN_TMP_PREFIX)
 }
 
 /** Placeholder for the pure env builder when the caller has no created dir; never created. */
