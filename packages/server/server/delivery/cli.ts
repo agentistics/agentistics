@@ -16,6 +16,7 @@
  *                                  the leader DECLARES what a release contains: each piece → ci (legacy pieces adopted), and → publicado
  *                                  as soon as release.yml is green and the tag exists, with the release's own publish time. Idempotent.
  *   agentop flow tick
+ *   agentop flow calendario [filters]                          the Delivery calendar (read-only), see `delivery/calendar.ts`
  *   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
  *
  * Runs in-process against the same store (cross-process lock), so it works with the server stopped and
@@ -39,13 +40,15 @@ export const DELIVERY_FLOW_HELP = `agentop flow — the DELIVERY verbs (one subt
   agentop flow approve --subtask S --phase P --decision approve|reject [--note …]   (the owner only — the answer to a human gate)
   agentop flow release --version <x.y.z> --merge-sha <main sha> [--repo <owner/name>] --subtask S1 --subtask S2 …   declare what the release contains (→ ci, → publicado when release.yml is green and the tag exists)
   agentop flow tick                                   the minute watch (blocks, ci → publicado)
+  agentop flow calendario [--task T] [--subtask S] [--version V] [--stage a,b] [--harness H] [--priority P] [--from d] [--to d] [--all] [--confirmed]
+                                                      the Delivery calendar as JSON (read-only; same source as the screen and the MCP tool). Dates yyyy-MM-dd are BRT days.
   agentop task stage <subtaskId> --prompt … --harness … --model … --effort … --account … [--cwd …]
 
 Exit codes: 0 passed/moved, 1 refused (the sentence says what is missing), 2 usage, 3 no verdict yet.
 Every gate reads the machine (git, gh, the session registry); nothing here accepts a sha, a session id or a "green" from the caller.
 `
 
-export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'approve', 'release', 'tick'] as const
+export const DELIVERY_FLOW_VERBS = ['gate', 'phase', 'entrega', 'stage', 'qa', 'ajustes', 'wait', 'merge', 'block', 'unblock', 'approve', 'release', 'tick', 'calendario'] as const
 
 /** PURE: is `agentop flow <args>` one of the delivery verbs (handled here, not by the engine)? */
 export function isDeliveryFlowVerb(args: readonly string[]): boolean {
@@ -144,6 +147,15 @@ export async function runDeliveryCli(argv: readonly string[], io: Io = STD, env:
       const r = await svc.release({ version: flags.version, mergeSha: flags.mergeSha, ...(flags.repo ? { repo: flags.repo } : {}), subtaskIds: subs }, actor)
       if (r.ok) { io.out(JSON.stringify({ ok: true, version: r.version, tag: r.tag, mergeSha: r.mergeSha, ...(r.publishedAt ? { publishedAt: r.publishedAt } : {}), pieces: r.pieces, warnings: r.warnings }, null, 2)); return 0 }
       return report(r, io)
+    }
+    case 'calendario': {
+      // The Delivery calendar, filtered — the same read the screen and `agentistics_delivery_calendar` use. Read-only.
+      const { deliveryCalendar, answerCalendar, calendarFiltersOf } = await import('./calendar')
+      const q = new URLSearchParams()
+      for (const [flag, param] of [['task', 'task'], ['subtask', 'subtask'], ['version', 'version'], ['stage', 'stage'], ['harness', 'harness'], ['priority', 'priority'], ['from', 'from'], ['to', 'to']] as const) if (flags[flag]) q.set(param, flags[flag]!)
+      if (flags.all === 'true') q.set('all', '1')
+      if (flags.confirmed === 'true') q.set('confirmed', '1')
+      io.out(JSON.stringify(answerCalendar(await deliveryCalendar(), calendarFiltersOf(q)), null, 2)); return 0
     }
     case 'tick': io.out(JSON.stringify(await svc.tick(), null, 2)); return 0
     default: io.err('unknown delivery verb'); return 2

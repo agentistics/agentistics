@@ -17,7 +17,7 @@ describe("agentistics_live_delivery", () => {
     const src = readFileSync(join(import.meta.dir, "agentistics-mcp.ts"), "utf8");
     const at = src.indexOf('name: "agentistics_live_delivery"');
     expect(at).toBeGreaterThan(0);
-    const block = src.slice(at, at + 2500);
+    const block = src.slice(at, src.indexOf('name: "', at + 10));
     expect(block).toContain("never invent a time");
     expect(block).toContain("leaders");
     expect(block).not.toContain("BETA");
