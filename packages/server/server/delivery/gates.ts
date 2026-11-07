@@ -355,18 +355,28 @@ export async function runGate(name: GateName, r: DeliveryRecord, f: GateFacts): 
         let contained: ReleaseRun[] | undefined
         if (tag && tagSha) {
           const checked = new Map<string, boolean>()
-          const newestFirst = [...runs].filter(x => x.headSha).sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0))
-          for (const run of newestFirst) {
-            const sha = run.headSha!
-            if (!checked.has(sha)) {
-              if (checked.size >= 15) break
-              if (sha === tagSha) checked.set(sha, true)
-              else {
-                const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${repoPath}/compare/${sha}...${tagSha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
-                checked.set(sha, cmp.status === 'ahead' || cmp.status === 'identical')
+          let pageRuns = runs
+          let page = 1
+          while (true) {
+            const newestFirst = [...pageRuns].filter(x => x.headSha).sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0))
+            for (const run of newestFirst) {
+              const sha = run.headSha!
+              if (!checked.has(sha)) {
+                if (sha === tagSha) checked.set(sha, true)
+                else {
+                  const cmp = json<{ status?: string }>(await f.gh(cwd, ['api', `repos/${repoPath}/compare/${sha}...${tagSha}`, '--jq', '{status: .status}']).catch(() => '{}'), {})
+                  checked.set(sha, cmp.status === 'ahead' || cmp.status === 'identical')
+                }
               }
+              if (checked.get(sha)) { contained = [run]; break }
             }
-            if (checked.get(sha)) { contained = [run]; break }
+            if (contained || pageRuns.length < 50) break
+            // gh run list has no page flag. Continue through the workflow API until the tag's run or the end,
+            // rather than making a historical release permanently unreachable behind a fixed search limit.
+            page += 1
+            const older = json<{ workflow_runs?: Array<{ id?: number; status?: string; conclusion?: string | null; head_sha?: string; updated_at?: string }> }>(await f.gh(cwd, ['api', `repos/${repoPath}/actions/workflows/release.yml/runs?per_page=50&page=${page}`]), {})
+            pageRuns = (older.workflow_runs ?? []).map(x => ({ databaseId: x.id, status: x.status, conclusion: x.conclusion ?? undefined, headSha: x.head_sha, updatedAt: x.updated_at }))
+            runs.push(...pageRuns)
           }
         }
         return judgeRelease({ mergeSha: r.mergeSha, runs, ...(contained ? { contained } : {}), tag, tagSha, wanted, declared: Boolean(r.declaredRelease), pr: r.pr ?? null })

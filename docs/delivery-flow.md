@@ -59,6 +59,15 @@ other-task piece refuses the whole batch before anything is written; a piece alr
 release is refused; a second run for the same release changes nothing. Pieces with no record at all keep
 the old git guess as the fallback.
 
+The repository defaults to `agentistics/agentistics`; pass `--repo owner/name` to declare another one.
+Published idempotency requires the same version, full merge SHA and repository, and still refuses board
+statuses `done`, `abandoned` and `blocked`. The host looks up the exact tag and walks workflow run pages
+until it finds that tag's run or reaches the end, without a fixed commit search limit.
+
+Declaration and immediate publication are prepared together, then committed for the entire batch in one
+atomic store write. A write error leaves every piece unchanged and emits no board updates, comments or
+notifications. Board and notification effects run only after that commit and report failures as warnings.
+
 ## Non-blocking
 
 Nothing waits. Each transition wakes whoever owns the next step: ready for QA → the leader; QA
