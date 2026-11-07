@@ -61,7 +61,7 @@ export const windowKey = (w: { kind: PlanWindowKind; scope?: { id: string } }): 
   w.scope ? `${w.kind}:${w.scope.id}` : w.kind
 
 export type PlanLimitSource =
-  | 'claude-stream' | 'claude-usage-api' | 'codex-rollout' | 'codex-app-server' | 'antigravity-quota-api'
+  | 'claude-stream' | 'claude-usage-api' | 'codex-rollout' | 'codex-app-server' | 'antigravity-quota-api' | 'opencode-cost-estimate'
 
 export interface PlanLimits {
   harness: HarnessId

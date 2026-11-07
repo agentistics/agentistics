@@ -291,6 +291,8 @@ if (!TEAM_CENTRAL) {
     void import('./claude-usage').then(m => m.startClaudeUsagePoll()).catch(() => {})
     // agy keeps one weekly quota per model group: read it while an agy process is alive.
     void import('./antigravity-usage').then(m => m.startAntigravityUsagePoll()).catch(() => {})
+    // OpenCode Go: the allowance its responses counted, estimated from the cost OpenCode stamps on each.
+    void import('./opencode-usage').then(m => m.startOpencodeUsagePoll()).catch(() => {})
     // CONTAS.AGENDA-AGENTICA: once a minute, each account's agent schedule writes its effective `available`.
     void import('./agent-schedule-host').then(m => m.startAgentScheduleTicker()).catch(() => {})
     return pl.seedPlanLimits(sd.STRUCTURED_DIR)
@@ -1343,10 +1345,10 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       return await handleUserUiPrefs(req, CORS_HEADERS)
     }
 
-    if (url.pathname === '/api/opencode/auth' || url.pathname.startsWith('/api/opencode/auth/')) {
+    if (url.pathname.startsWith('/api/opencode/')) {
       if (TEAM_CENTRAL) return new Response('Not found', { status: 404, headers: CORS_HEADERS })
-      const { handleOpencodeAuthRequest } = await import('./opencode-auth-web')
-      return handleOpencodeAuthRequest(req, CORS_HEADERS)
+      const { handleOpencodeRequest } = await import('./opencode-web')
+      return handleOpencodeRequest(req, CORS_HEADERS)
     }
 
     if (url.pathname === '/api/accounts' || url.pathname.startsWith('/api/accounts/')) {

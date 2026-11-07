@@ -5,6 +5,7 @@ import { useIsMobile } from '../../hooks/useIsMobile'
 import { HarnessMark } from '../../components/sessions/HarnessMark'
 import { MetricNote } from '../../components/MetricNote'
 import { ConfirmModal, DialogActions, FieldInput, dialogButtonStyle } from './primitives'
+import OpenCodeUsageCard from './OpenCodeUsageCard'
 import { OC_COPY, maybeMisfiledGo, pickerOrder, type OcConnected, type OcProvider } from './opencodeProviderLogic'
 
 interface Answer { installed: boolean; connected: OcConnected[]; providers: OcProvider[] }
@@ -14,12 +15,16 @@ export default function OpenCodeProviders({ lang, show, onChanged }: { lang: 'pt
   const [data, setData] = useState<Answer | null>(null)
   const [open, setOpen] = useState(false), [pick, setPick] = useState('opencode-go'), [key, setKey] = useState('')
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [note, setNote] = useState<string | null>(null)
-  const [removing, setRemoving] = useState<OcConnected | null>(null)
+  const [removing, setRemoving] = useState<OcConnected | null>(null), [version, setVersion] = useState(0)
 
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/opencode/auth')
-      if (res.ok) setData(await res.json())
+      if (res.ok) {
+        const body = await res.json() as Partial<Answer> | null
+        // Only a well-formed answer is drawn: anything else (an older server, a proxy page) leaves the section out.
+        if (body && Array.isArray(body.connected) && Array.isArray(body.providers)) { setData(body as Answer); setVersion(n => n + 1) }
+      }
     } catch { /* offline: the section just stays out of the way */ }
   }, [])
   useEffect(() => { void load() }, [load])
@@ -57,6 +62,7 @@ export default function OpenCodeProviders({ lang, show, onChanged }: { lang: 'pt
 
   return <div data-opencode-providers style={{ marginTop: 14 }}>
     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>{t.section}</div>
+    {(data.installed || data.connected.length > 0) && <OpenCodeUsageCard lang={lang} refreshKey={version} />}
     {data.connected.length === 0 && <MetricNote>{t.none}</MetricNote>}
     {data.connected.map(c => <div key={c.id} data-opencode-provider={c.id} style={{
       display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', marginBottom: 8,

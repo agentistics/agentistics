@@ -221,6 +221,7 @@ export const SOURCE_LABEL: Record<PlanLimitSource, { pt: string; en: string }> =
   'codex-rollout': { pt: 'registro da sessão do Codex', en: 'Codex session log' },
   'codex-app-server': { pt: 'protocolo do Codex', en: 'Codex protocol' },
   'antigravity-quota-api': { pt: 'cota do Antigravity', en: 'Antigravity quota' },
+  'opencode-cost-estimate': { pt: 'custo das respostas do OpenCode (estimado)', en: 'OpenCode response costs (estimated)' },
 }
 
 /** "12 min", "3 h 05", "2 d 4 h". */
