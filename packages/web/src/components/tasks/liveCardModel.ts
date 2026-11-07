@@ -282,7 +282,19 @@ export const BLOCK_WORD: Record<LiveBlock['reason'], { pt: string; en: string }>
   limite: { pt: 'limite de uso / login', en: 'usage limit / login' },
   maquina: { pt: 'máquina sem recursos', en: 'machine out of resources' },
   externo: { pt: 'serviço externo (CI / infra)', en: 'external service (CI / infra)' },
+  fora_das_autorizacoes: { pt: 'fora das autorizações — o líder adiou (caminho seguro)', en: 'outside the authorisations — deferred by the leader (safe path)' },
   decisao_do_dono: { pt: 'decisão do dono', en: 'owner decision' },
+}
+
+/**
+ * PURE: the pre-dispatch line of a queued card — "claude · opus · high · conta X" and the expected slot.
+ * A field nobody staged is left out (never guessed); no staged session at all answers null.
+ */
+export function queueLines(d: Pick<LiveDeliveryRecord, 'staged' | 'slot'>, pt: Pt, accountName?: (harness: string, account: string) => string): { staged: string | null; slot: string | null; slotOk: boolean | null } {
+  const s = d.staged
+  const staged = s ? [s.harness, s.model, s.effort, s.account ? `${pt ? 'conta' : 'account'} ${s.harness && accountName ? accountName(s.harness, s.account) : s.account}` : null].filter(Boolean).join(' · ') || null : null
+  if (!d.slot) return { staged, slot: s ? (pt ? 'vaga: ainda não checada' : 'slot: not checked yet') : null, slotOk: null }
+  return { staged, slot: d.slot.ok ? (pt ? 'vaga: livre agora' : 'slot: free now') : `${pt ? 'vaga' : 'slot'}: ${d.slot.reason ?? (pt ? 'sem vaga' : 'no slot')}`, slotOk: d.slot.ok }
 }
 const UNLOCKER_WORD = { leader: { pt: 'líder', en: 'leader' }, owner: { pt: 'dono', en: 'owner' }, self: { pt: 'destrava sozinho', en: 'lifts by itself' } }
 

@@ -192,9 +192,11 @@ export function nextPhases(from: Phase): Phase[] {
   return Object.keys(EDGES).filter(k => k.startsWith(`${from}>`)).map(k => k.split('>')[1] as Phase)
 }
 
+/** Refusal codes of a transition (never notification codes — they answer the caller). */
+export type RefusalCode = 'fase_pulada' | 'faltando' | 'portao' | 'aguardando_dono' | 'dono_reprovou' | 'fase_desconhecida' | 'bloqueio_invalido'
 export type TransitionRefusal = {
   ok: false
-  code: 'fase_pulada' | 'faltando' | 'portao' | 'aguardando_dono' | 'dono_reprovou' | 'fase_desconhecida' | 'bloqueio_invalido'
+  code: RefusalCode
   sentence: string
   missing: string[]
 }

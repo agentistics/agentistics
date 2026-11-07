@@ -579,6 +579,12 @@ export interface Subtask {
    * tree that MAY hold a session, so it may hold a draft too.
    */
   stagedSession?: StagedSessionDraft
+  /**
+   * FLUXO.ENTREGA-DSL — the CI · publicando signal the delivery flow wrote (`delivery/service.ts`), exactly
+   * the shape `task-live.ts`'s `ciSignalOf` reads. Written by the flow only, never by a person; absent = the
+   * flow said nothing, which the Live renders as nothing.
+   */
+  ci?: { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null }
 }
 
 /**

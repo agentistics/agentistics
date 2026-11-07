@@ -216,3 +216,39 @@ describe('the leaders band', () => {
     expect(v.leaders[0]!.taskId).toBe('t1')
   })
 })
+
+describe('FLUXO.ENTREGA-DSL: the Live is a projection of the delivery record', () => {
+  test('the record phase decides the stage, over the board status', () => {
+    const r = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [sub('a', 'in_progress')] as never, sessions: [sess('s1', 'a')] as never })],
+      deliveries: new Map([['a', { phase: 'qa' }]]),
+    })
+    expect(r.deliveries[0]!.stage).toBe('qa')
+    expect(r.deliveries[0]!.phase).toBe('qa')
+  })
+  test('a blocked record carries its own reason and origin; CI reads the record signal', () => {
+    const blocked = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [sub('a', 'blocked')] as never, sessions: [] })],
+      deliveries: new Map([['a', { phase: 'bloqueado', origin: 'pr_merge', block: { reason: 'fora_das_autorizacoes', text: 'Apple' } }]]),
+    }).deliveries[0]!
+    expect(blocked.block).toMatchObject({ reason: 'fora_das_autorizacoes', unlocker: 'leader', originStage: 'merge' })
+    const ci = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [sub('a', 'ci')] as never, sessions: [] })],
+      deliveries: new Map([['a', { phase: 'ci', ci: { mergedMain: true, releaseGreen: true, tagPublished: false, tag: 'v2.200.8', pr: 9 } }]]),
+    }).deliveries[0]!
+    expect(ci.ci).toEqual({ mergedMain: true, releaseGreen: true, tagPublished: false, tag: 'v2.200.8', pr: 9 })
+  })
+  test('a queued piece shows its pre-dispatch and the expected slot', () => {
+    const q = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [sub('a', 'todo', { stagedSession: { prompt: 'p', harness: 'codex', model: 'gpt-5.5', effort: 'high', account: 'acc_2' } })] as never, sessions: [] })],
+      deliveries: new Map([['a', { phase: 'fila', gates: { vaga: { ok: false, reason: 'no slot: 4 workers running (machine ceiling 4)', at: iso(NOW) } } }]]),
+    }).deliveries[0]!
+    expect(q.stage).toBe('queue')
+    expect(q.staged).toEqual({ harness: 'codex', model: 'gpt-5.5', effort: 'high', account: 'acc_2' })
+    expect(q.slot).toMatchObject({ ok: false })
+  })
+})

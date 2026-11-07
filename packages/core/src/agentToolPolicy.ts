@@ -70,6 +70,9 @@ export const AGENT_TOOL_NAMES = [
   'agentistics_task_edit',
   'agentistics_task_session',
   'agentistics_task_delete',
+  // FLUXO.ENTREGA-DSL (2)
+  'agentistics_task_phase',
+  'agentistics_task_stage',
   // Session groups (3)
   'agentistics_session_groups',
   'agentistics_session_group_create',
@@ -172,6 +175,14 @@ export const AGENT_TOOL_POLICY: Record<AgentToolName, AgentToolPolicy> = {
   agentistics_session_message: {
     ...GROUPS, risk: 'W', routes: ['POST /api/session-message'],
     reason: 'types a message into another session through the composer path; additive, rate-limited, sender verified',
+  },
+  agentistics_task_phase: {
+    ...TASKS, risk: 'W', routes: ['GET /api/deliveries', 'GET /api/deliveries/:subtask', 'POST /api/deliveries/:subtask'],
+    reason: 'reads or moves a delivery through the fixed phase table; a skipped phase is refused (422 fase_pulada) and every gate is checked by the host from evidence, never from the caller',
+  },
+  agentistics_task_stage: {
+    ...TASKS, risk: 'W', routes: ['POST /api/deliveries/:subtask'],
+    reason: 'writes the pre-dispatch (staged session draft) on a subtask and opens its delivery in the queue; nothing starts until stage-run passes the predispatch and vaga gates',
   },
   agentistics_wait: {
     ...GROUPS, risk: 'W', routes: ['POST /api/flows/wait'],

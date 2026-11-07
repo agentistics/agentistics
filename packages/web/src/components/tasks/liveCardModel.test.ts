@@ -322,3 +322,13 @@ describe('Líderes pill counters (item t1) — real worker states, each worker o
     expect(locateWorker({}, shown, all)).toEqual({ kind: 'none' })
   })
 })
+
+describe('queueLines (FLUXO.ENTREGA-DSL "Na fila")', () => {
+  test('pre-dispatch line and slot, nothing guessed', async () => {
+    const { queueLines } = await import('./liveCardModel')
+    expect(queueLines({ staged: { harness: 'claude', model: 'opus', effort: 'high', account: 'acc_1' }, slot: { ok: true, reason: null, at: '' } }, true, () => 'pessoal'))
+      .toEqual({ staged: 'claude · opus · high · conta pessoal', slot: 'vaga: livre agora', slotOk: true })
+    expect(queueLines({ staged: { harness: 'claude', model: null, effort: null, account: null }, slot: null }, false).staged).toBe('claude')
+    expect(queueLines({ staged: null, slot: null }, true)).toEqual({ staged: null, slot: null, slotOk: null })
+  })
+})

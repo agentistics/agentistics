@@ -29,7 +29,7 @@ import {
   isGroupMember, legacyTaskId, marksStart, migratePriority, newCommentId, newEventId, newFileId,
   newLinkId, newSubtaskId, newTaskId, statusAfterAllSubtasksDone, statusAfterAttach, statusAfterHandback,
   statusAfterSubtaskProgress, subtaskDone,
-  type Task, type TaskEvent, type TaskStatus,
+  type Subtask, type Task, type TaskEvent, type TaskStatus,
 } from './task-model'
 import { boardProgress, DEFAULT_LEASE_MS, planNext } from './task-next'
 import { LEADER_ONLY_MESSAGE, checkParentGroup, directFilingAllowed, planAttach, sanitizeSubtaskBlockedBy } from './task-attach'
@@ -86,8 +86,9 @@ async function fileVersion(file: string): Promise<string> {
 
 /** Both the book and registry feed the live line: sessions can change without a book write. */
 async function liveSourceVersion(): Promise<string> {
-  const [tasks, sessions] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE)])
-  return `${tasks}|${sessions}`
+  const { defaultDeliveriesPath } = await import('../delivery/store')
+  const [tasks, sessions, deliveries] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE), fileVersion(defaultDeliveriesPath())])
+  return `${tasks}|${sessions}|${deliveries}`
 }
 
 // A write is the fast invalidation path; the stat key also catches writes made by another process.
@@ -116,7 +117,14 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
       files: [],
     }))
     const labels = new Map(w.book.statuses.map(s => [s.id, s.label]))
-    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id) })
+    // FLUXO.ENTREGA-DSL: the delivery records are the state machine; the Live is their projection.
+    const deliveries = await (async () => {
+      try {
+        const { createDeliveryStore } = await import('../delivery/store')
+        return new Map(Object.entries((await createDeliveryStore().read()).deliveries))
+      } catch { return new Map() }
+    })()
+    const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result
     return result
@@ -1734,4 +1742,25 @@ export async function deleteType(id: string): Promise<
   if (!check.ok) return { ok: false, message: 'in_use', usageCount }
   await w.store.removeType(id)
   return { ok: true }
+}
+
+/**
+ * FLUXO.ENTREGA-DSL — the delivery flow writes the CI · publicando signal onto the subtask (`null` clears it).
+ * Flow-only: no route lets a person set it, because the Live moves a card to Publicado on it.
+ */
+export async function setSubtaskCi(subtaskId: string, ci: Subtask['ci'] | null): Promise<boolean> {
+  const w = await loadTaskWorld()
+  const found = w.book.subtasks.find(t => t.id === subtaskId)
+  if (!found) return false
+  const next: Subtask = { ...found, updatedAt: found.updatedAt }
+  if (ci) next.ci = ci
+  else delete next.ci
+  await w.store.upsertSubtask(next)
+  return true
+}
+
+/** FLUXO.ENTREGA-DSL — a `step` activity event (`to` = the 1-based step of the current phase), read by `task-live.ts`. */
+export async function logSubtaskStep(taskId: string, subtaskId: string, step: number, actor: string): Promise<void> {
+  const w = await loadTaskWorld()
+  await w.store.logEvents([{ ...event(taskId, actor, 'step', { to: String(step), detail: `passo ${step}` }), subtaskId }])
 }

@@ -25,7 +25,7 @@ export type LiveStageEta =
 export type LivePublishEta =
   | { kind: 'estimate'; atMs: number; source: 'stages' | 'total'; n: number; parts: { stage: LiveStage; medianMs: number }[] }
   | { kind: 'none'; reason: 'no-history' | 'beyond-range' | 'not-started' | 'final' }
-export type BlockReason = 'dependencia' | 'pedido_de_bloqueio' | 'limite' | 'maquina' | 'externo' | 'decisao_do_dono'
+export type BlockReason = 'dependencia' | 'pedido_de_bloqueio' | 'limite' | 'maquina' | 'externo' | 'fora_das_autorizacoes' | 'decisao_do_dono'
 export interface LiveBlock { reason: BlockReason; text: string | null; unlocker: 'leader' | 'owner' | 'self'; originStage: LiveStage | null }
 /** The release signal of a piece in "CI · publicando" — stated by the delivery flow, only rendered here. */
 export interface LiveCiSignal { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null }
@@ -43,6 +43,10 @@ export interface LiveDeliveryRecord {
   stageEta?: LiveStageEta; publishEta?: LivePublishEta; block?: LiveBlock | null
   ci?: LiveCiSignal | null; step?: number | null
   lastAction: { text: string; atMs: number; kind?: string } | null; blockedReason: string | null; deliveredAtMs: number | null
+  /** FLUXO.ENTREGA-DSL: the pre-dispatch a queued piece starts with, and the vaga gate's last verdict. */
+  staged?: { harness: string | null; model: string | null; effort: string | null; account: string | null } | null
+  slot?: { ok: boolean; reason: string | null; at: string } | null
+  phase?: string | null
 }
 export type WorkerWord = 'working' | 'needs-you' | 'blocked' | 'delivered' | 'awaiting-review' | 'idle'
 export interface LeaderWorker {

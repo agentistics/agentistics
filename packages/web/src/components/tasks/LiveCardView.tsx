@@ -19,7 +19,7 @@ import { harnessColor, pill, surface } from './board'
 import {
   cardPills, isQueued, queuePosition, STAGE_LABEL, type LiveCard, type LiveStage, type RuntimeFacts,
 } from './liveDeliveryModel'
-import { blockLines, cardPercent, cardStateWord, ciChecklist, etaBoxes, stageBar, timeRow, waitingReason } from './liveCardModel'
+import { blockLines, cardPercent, cardStateWord, ciChecklist, etaBoxes, queueLines, stageBar, timeRow, waitingReason } from './liveCardModel'
 import { LiveOdometer } from './LiveOdometer'
 
 const STATE_COLOR = {
@@ -66,6 +66,7 @@ export function LiveCardView(p: LiveCardViewProps) {
   const stageColor = STAGE_LABEL[d.stage].color
   const pct = cardPercent(d, pt)
   const ci = d.stage === 'ci' && d.ci ? ciChecklist(d.ci, pt) : null
+  const queue = queued ? queueLines(d, pt, (h, a) => accountDisplayName(p.accountLabels, h, a)) : null
 
   return (
     <button
@@ -134,6 +135,8 @@ export function LiveCardView(p: LiveCardViewProps) {
           </span>
         </>
       )}
+      {queue?.staged && <span data-live-staged style={{ fontSize: 11, color: 'var(--text-secondary)', overflowWrap: 'anywhere', lineHeight: 1.3 }}>{queue.staged}</span>}
+      {queue?.slot && <span data-live-slot style={{ fontSize: 10.5, color: queue.slotOk === false ? 'var(--accent-yellow, #e5b341)' : MUTED, overflowWrap: 'anywhere' }}>{queue.slot}</span>}
       {queued && <span data-live-time title={time.title} style={{ fontSize: 10.5, color: MUTED }}>{time.inStage}</span>}
 
       {boxes && !queued && (

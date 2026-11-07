@@ -9,6 +9,7 @@ import { ambienteHostOps } from './ambiente-host'
 import { processHostOps } from './process-ops'
 import { stalledHostOps } from './stalled-host'
 import { pipelineHostOps } from './pipeline-host'
+import { deliveryHostOps } from '../delivery/host-ops'
 
 const exec = promisify(execFile)
 /**
@@ -449,6 +450,8 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
     ...processHostOps(),
     ...stalledHostOps(),
     ...pipelineHostOps(),
+    // FLUXO.ENTREGA-DSL — the delivery state machine's doors for the engine's entrega/demanda/bloqueio flows.
+    ...deliveryHostOps(),
     'alvo-trabalho': async (value: unknown) => {
       const id = sessionOf(value)
       return id ? workTarget(id, workDeps) : refuse('session id is required', ['sessionId'])

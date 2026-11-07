@@ -45,7 +45,7 @@ export type LiveEta =
   | { kind: 'none'; reason: 'no-history' | 'not-started' | 'beyond-range' }
 
 /** Why a piece is blocked (fluxo-entrega-dsl §Bloqueio) and who can lift it. */
-export type BlockReason = 'dependencia' | 'pedido_de_bloqueio' | 'limite' | 'maquina' | 'externo' | 'decisao_do_dono'
+export type BlockReason = 'dependencia' | 'pedido_de_bloqueio' | 'limite' | 'maquina' | 'externo' | 'fora_das_autorizacoes' | 'decisao_do_dono'
 export interface LiveBlock {
   reason: BlockReason
   /** The reason as the book states it, when it says more than the code. */
@@ -109,6 +109,15 @@ export interface LiveDelivery {
   blockedReason: string | null
   /** Set once a published piece leaves the line. */
   deliveredAtMs: number | null
+  /**
+   * FLUXO.ENTREGA-DSL: the pre-dispatch the piece will start with ("Na fila": harness · model · effort · account),
+   * read off the subtask's staged session. Absent fields are null — never guessed.
+   */
+  staged?: { harness: string | null; model: string | null; effort: string | null; account: string | null } | null
+  /** The `vaga` gate's last verdict on the delivery record — the expected slot. Null = not checked yet. */
+  slot?: { ok: boolean; reason: string | null; at: string } | null
+  /** The delivery record's own phase (the state machine), when the piece has one — the stage is its projection. */
+  phase?: string | null
 }
 
 /** A piece the line considered and left off, with the reason — so a card never disappears without a word. */
@@ -201,7 +210,7 @@ export function estimateEta(o: {
 
 // ------------------------------------------------------------------------------------ blocks
 
-const BLOCK_CODES: readonly BlockReason[] = ['dependencia', 'pedido_de_bloqueio', 'limite', 'maquina', 'externo', 'decisao_do_dono']
+const BLOCK_CODES: readonly BlockReason[] = ['dependencia', 'pedido_de_bloqueio', 'limite', 'maquina', 'externo', 'fora_das_autorizacoes', 'decisao_do_dono']
 
 /**
  * PURE: the block a piece sits in. A reason written as `<code>: text` is exact; otherwise the words
@@ -426,6 +435,21 @@ export const HIDDEN_CAP = 300
 /** A piece untouched for longer than this was not on the board a moment ago, so its absence is not a departure. */
 export const RECENT_HIDDEN_MS = 6 * 3600_000
 
+/** What the Live reads off a delivery record (`delivery/machine.ts`), kept structural so this module stays pure. */
+export interface LiveDeliveryFacts {
+  phase: string
+  origin?: string
+  block?: { reason: string; text: string }
+  ci?: unknown
+  step?: number
+  gates?: { vaga?: { ok: boolean; reason?: string; at: string } }
+}
+
+/** PURE: the Live stage a delivery phase projects to. */
+export const PHASE_STAGE: Readonly<Record<string, LiveStage>> = {
+  fila: 'queue', executando: 'running', qa: 'qa', ajuste: 'adjust', revisao_lider: 'leader', pr_merge: 'merge', ci: 'ci', publicado: 'published', bloqueado: 'blocked',
+}
+
 /** PURE: details of the tasks → what the line shows now, plus the history the ETA rests on. */
 export function buildLive(o: {
   details: readonly TaskDetail[]
@@ -433,6 +457,8 @@ export function buildLive(o: {
   nowMs: number
   /** id → label of the board's status vocabulary, for statuses people invented. */
   statusLabel?: (id: string) => string | undefined
+  /** FLUXO.ENTREGA-DSL delivery records by subtask id: when one exists its PHASE decides the stage. */
+  deliveries?: ReadonlyMap<string, LiveDeliveryFacts>
 }): LiveReply {
   const samples: Sample[] = []
   const candidates: Piece[] = []
@@ -476,9 +502,10 @@ export function buildLive(o: {
     hidden.push({ key: p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id, taskId: p.task.id, title: p.sub?.title ?? p.task.title, stage, reason })
   }
   for (const p of candidates) {
-    let stage = stageOfStatus(p.status, o.statusLabel?.(p.status))
+    const rec = p.sub ? o.deliveries?.get(p.sub.id) : undefined
+    let stage = rec ? PHASE_STAGE[rec.phase] ?? null : stageOfStatus(p.status, o.statusLabel?.(p.status))
     const liveSessions = p.sessions.filter(s => s.live)
-    if (stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'
+    if (!rec && stage === 'running' && liveSessions.some(s => s.label && QA_NAME.test(s.label))) stage = 'qa'
     if (stage === null) stage = liveSessions.length > 0 ? 'running' : null
     // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,
     // or a todo nobody staged, was never on the board and fills the reply with nothing anyone is missing.
@@ -499,7 +526,9 @@ export function buildLive(o: {
     // The newest visit is the stage the book says now; when the log is empty or stale for it, the
     // status stamp is the only witness and the trail is left to say what it knows.
     const stageSinceMs = ms(p.updatedAt)
-    const originStage = stage === 'blocked' ? ([...trail].reverse().find(v => v.stage !== 'blocked')?.stage ?? null) : null
+    const originStage = stage === 'blocked'
+      ? (rec?.origin ? PHASE_STAGE[rec.origin] ?? null : ([...trail].reverse().find(v => v.stage !== 'blocked')?.stage ?? null))
+      : null
     // THE REAL WORK OF THIS PIECE: its sessions' active time. Never the task's age (a 52-day-old task
     // with a 4-hour piece is a 4-hour piece) and never the status stamp, which is the task's.
     const spans = p.sessions.map(s => s.startMs).filter((n): n is number => n !== null)
@@ -526,12 +555,18 @@ export function buildLive(o: {
       models: [...new Set(liveSessions.concat(p.sessions).map(s => s.model).filter((m): m is string => !!m))],
       efforts: [...new Set(liveSessions.concat(p.sessions).map(s => s.effort).filter((m): m is string => !!m))],
       eta, workMs, trail, stageEta, publishEta,
-      block: stage === 'blocked' ? blockOf({ text: p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
-      ci: stage === 'ci' ? (ciSignalOf((p.sub ?? p.task) && ((p.sub ?? p.task) as { ci?: unknown }).ci) ?? { mergedMain: true, releaseGreen: false, tagPublished: false, tag: null, pr: null }) : null,
+      block: stage === 'blocked' ? blockOf({ text: rec?.block ? `${rec.block.reason}: ${rec.block.text}` : p.blockedReason, dependsOn: p.dependsOn, originStage }) : null,
+      ci: stage === 'ci' ? (ciSignalOf(rec?.ci ?? ((p.sub ?? p.task) as { ci?: unknown }).ci) ?? { mergedMain: true, releaseGreen: false, tagPublished: false, tag: null, pr: null }) : null,
       step: stage === 'published' || stage === 'queue' ? null : stepOf(eventsBySubject.get(subject) ?? [], stageSinceMs),
       lastAction: ev ? { text: (ev.detail ?? ev.kind).split('\n')[0]!.slice(0, 120), atMs: ms(ev.at) ?? o.nowMs, kind: ev.kind } : null,
       blockedReason: p.blockedReason,
       deliveredAtMs: stage === 'published' ? deliveredAtMs : null,
+      staged: p.sub?.stagedSession ? {
+        harness: p.sub.stagedSession.harness ?? null, model: p.sub.stagedSession.model ?? null,
+        effort: p.sub.stagedSession.effort ?? null, account: p.sub.stagedSession.account ?? null,
+      } : null,
+      slot: rec?.gates?.vaga ? { ok: rec.gates.vaga.ok, reason: rec.gates.vaga.reason ?? null, at: rec.gates.vaga.at } : null,
+      phase: rec?.phase ?? null,
     })
   }
   deliveries.sort((a, b) => (b.stageSinceMs ?? 0) - (a.stageSinceMs ?? 0))

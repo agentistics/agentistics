@@ -1410,6 +1410,17 @@ async function handleRequestInner(req: Request, server: Server<WSData>): Promise
       }
     }
 
+    // FLUXO.ENTREGA-DSL — the delivery state machine (`delivery/`). Not behind the flows flag: refusing a skipped
+    // phase is the point, so the door exists on every build; the engine's timer and flows are what the flag adds.
+    if (url.pathname === '/api/deliveries' || url.pathname.startsWith('/api/deliveries/')) {
+      const [{ deliveryRequest }, { deliveryService }, { verifySessionIdentity }] = await Promise.all([
+        import('./delivery/web'), import('./delivery/host'), import('./sessions/session-identity'),
+      ])
+      const body = req.method === 'POST' ? await req.json().catch(() => ({})) as Record<string, unknown> : {}
+      const out = await deliveryRequest(req.method, url.pathname, body, { service: deliveryService(), verify: (id, token) => verifySessionIdentity(id, token) })
+      return json(out.body, out.status)
+    }
+
     // Experimental deterministic flows. The engine owns execution and durable run records;
     // this thin host door only applies the flag/build gates and forwards typed requests.
     if (url.pathname === '/api/flows' || url.pathname.startsWith('/api/flows/')) {

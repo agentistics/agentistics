@@ -568,6 +568,50 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: { ref: { type: "string" } }, required: ["ref"] },
   },
   {
+    name: "agentistics_task_phase",
+    description:
+      "FLUXO.ENTREGA-DSL — read or move a DELIVERY (one subtask) through its fixed phases: fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado, plus bloqueado (from any phase, back to the stored origin only). Any transition outside that table is REFUSED (422 `fase_pulada`) with a sentence naming what is missing — executando → revisao_lider, ajuste → revisao_lider and every other skip included. The gates each edge needs are run BY THE SERVER from evidence (predispatch, vaga, salvo = sha on origin per ls-remote, qa-modelo = QA model ≠ author model from the registry and never Sonnet over Sonnet, delecoes = no file deleted outright by the PR, release = release.yml green for the merge sha AND the tag exists); you never pass proof. `action`: `get` (default; omit `subtaskId` to list every delivery) | `phase` (`to` + what that edge reads: `verdict` APROVADO/REPROVADO + `findings` from qa, `reviewedSha` = the sha QA approved for revisao_lider → pr_merge, `detail` for a request for change or a failure reason) | `gate` (`name`: run ONE gate and record its evidence) | `block` (`reason` one of dependencia, pedido_de_bloqueio, limite, maquina, externo, fora_das_autorizacoes; `text`) | `unblock` (`detail`) | `step` (`step` 1..9: the step of the current phase, for the Live %) | `configure` (`patch`: versionTarget, humanGates [phases needing the owner's approval — skipped and recorded as 'pulado: modo autônomo' while autonomous mode is on], leaderSessionId, pr, tag, qaSessionId, authorSessionId, allowDeletions {paths, reason}) | `stage-run` (predispatch + vaga gates, then start the staged session and move to executando) | `merge` (delecoes gate, squash-merge the PR, move to ci; a failure goes back to revisao_lider). In autonomous mode nothing here ever asks or waits for the owner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "step", "configure", "stage-run", "merge"] },
+        subtaskId: { type: "string" },
+        to: { type: "string", enum: ["executando", "qa", "ajuste", "revisao_lider", "pr_merge", "ci", "publicado"] },
+        verdict: { type: "string", enum: ["APROVADO", "REPROVADO"] },
+        findings: { type: "string" },
+        reviewedSha: { type: "string" },
+        mergeSha: { type: "string" },
+        detail: { type: "string" },
+        name: { type: "string", enum: ["predispatch", "vaga", "salvo", "qa-modelo", "delecoes", "release"] },
+        reason: { type: "string", enum: ["dependencia", "pedido_de_bloqueio", "limite", "maquina", "externo", "fora_das_autorizacoes"] },
+        text: { type: "string" },
+        step: { type: "number" },
+        patch: { type: "object" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_task_stage",
+    description:
+      "FLUXO.ENTREGA-DSL pre-dispatch — write the STAGED SESSION on a subtask (prompt/brief, harness, model, effort, account, cwd) and open its delivery in `fila` (\"Na fila\"). A leader receiving a request from the owner stages it in the SAME turn: the demand flow reminds the leader (never the owner) after 10 minutes of an owner request with no staged subtask. The fields merge over what the subtask already holds, and the predispatch gate is checked right away (the reply says what is still missing). Nothing starts here — `agentistics_task_phase action=stage-run` starts it once the vaga gate passes. `pedidoId` links the owner request this answers.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subtaskId: { type: "string" },
+        prompt: { type: "string" },
+        harness: { type: "string" },
+        model: { type: "string" },
+        effort: { type: "string" },
+        account: { type: "string" },
+        cwd: { type: "string" },
+        versionTarget: { type: "string" },
+        pedidoId: { type: "string" },
+      },
+      required: ["subtaskId"],
+    },
+  },
+  {
     name: "agentistics_session_groups",
     description:
       "List the user's SESSION GROUPS — the named folders in the Sessions sidebar (\"Saved to later\", \"Pelvie\", …) — with the sessions in each. A group is how a person keeps a fleet of assistants organised; every session belongs to at most one. Each member carries its `id` (the managed session id you can pass to the other tools), `title`, `state` and `harness` when the session is on this machine right now, or only its `key` when it is gone. Call this BEFORE creating a group, so you file a session under an existing one instead of making a near-duplicate. Only works on a machine, not on a central (a central has no local sessions to organise).",
@@ -1209,6 +1253,32 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       case "agentistics_task_delete": {
         const ref = String((args as any)?.ref ?? "");
         const body = await apiSend("DELETE", `/api/tasks/${encodeURIComponent(ref)}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_phase": {
+        const a = (args ?? {}) as any;
+        const action = typeof a.action === "string" ? a.action : "get";
+        if (action === "get") {
+          const body = a.subtaskId
+            ? await apiGet(`/api/deliveries/${encodeURIComponent(String(a.subtaskId))}`)
+            : await apiGet("/api/deliveries");
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (typeof a.subtaskId !== "string" || !a.subtaskId) throw new Error("subtaskId is required");
+        const { subtaskId, action: _a, ...rest } = a;
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(subtaskId)}`, { ...rest, action, session: sessionProof(process.env) });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_stage": {
+        const a = (args ?? {}) as any;
+        if (typeof a.subtaskId !== "string" || !a.subtaskId) throw new Error("subtaskId is required");
+        const draft: Record<string, unknown> = {};
+        for (const k of ["prompt", "harness", "model", "effort", "account", "cwd"]) if (typeof a[k] === "string" && a[k].trim()) draft[k] = a[k];
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(a.subtaskId)}`, {
+          action: "stage", draft, session: sessionProof(process.env),
+          ...(typeof a.versionTarget === "string" ? { versionTarget: a.versionTarget } : {}),
+          ...(typeof a.pedidoId === "string" ? { pedidoId: a.pedidoId } : {}),
+        });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_session_groups": {
