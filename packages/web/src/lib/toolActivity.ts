@@ -30,6 +30,8 @@ export interface ToolCallLike {
   ref?: string
   /** PROPOSED: the call's `tool_result` reported an error. Not on `ChatTurn` yet — see the options doc. */
   failed?: boolean
+  /** What the call printed, already trimmed to its tail by the source (`ChatTurn.tools[].output`). */
+  output?: string
 }
 
 export interface TurnLike {
@@ -50,6 +52,8 @@ export interface ActivityStep {
   detail?: string
   ref?: string
   status: StepStatus
+  /** What the step printed (a command's output), when the source carried it. Shown collapsed under the row. */
+  output?: string
 }
 
 export interface ActivityGroup {
@@ -324,6 +328,7 @@ export function stepsOfTurn(turn: TurnLike): ActivityStep[] {
     return {
       kind, name: c.name, object: objectOf(c, kind),
       ...(c.detail ? { detail: c.detail } : {}), ...(c.ref ? { ref: c.ref } : {}),
+      ...(c.output ? { output: c.output } : {}),
       status: c.failed ? 'error' : running ? 'running' : 'done',
     }
   })

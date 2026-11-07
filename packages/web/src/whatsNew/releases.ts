@@ -19,12 +19,16 @@ export const RELEASES: Record<string, ReleaseNotes> = {
     ],
     fixes: [
       {
-        pt: 'OpenCode: as linhas de ferramenta mostram o que está rodando (o comando, o arquivo) e quando falhou, em vez de só "execute" com um círculo girando.',
-        en: 'OpenCode: tool rows show what is running (the command, the file) and when it failed, instead of just "execute" with a spinner.',
+        pt: 'OpenCode: as linhas de ferramenta mostram o que está rodando (o comando, o arquivo, a pergunta) e quando falhou, em vez de só "execute" com um círculo girando — e um comando mostra a sua saída, recolhida em "saída", enquanto roda e depois.',
+        en: 'OpenCode: tool rows show what is running (the command, the file, the question) and when it failed, instead of just "execute" with a spinner — and a command shows its output, folded under "output", while it runs and after.',
       },
       {
-        pt: 'OpenCode: se um turno fica 90 s sem dar sinal, o chat avisa "Sem resposta do OpenCode há N s", diz qual foi o último passo e lembra que dá para parar.',
-        en: 'OpenCode: if a turn goes 90 s without a sign, the chat says "No answer from OpenCode for N s", names the last step and reminds you that you can stop it.',
+        pt: 'OpenCode: se um turno fica 90 s sem dar sinal, o chat avisa "Sem resposta do OpenCode há N s", diz qual foi o último passo e lembra que dá para parar. O aviso fica no lugar, mesmo quando o comando volta a dar notícia, e responder um formulário recomeça a contagem.',
+        en: 'OpenCode: if a turn goes 90 s without a sign, the chat says "No answer from OpenCode for N s", names the last step and reminds you that you can stop it. The notice stays put even when the command speaks again, and answering a form restarts the count.',
+      },
+      {
+        pt: 'Uma nota que chega no meio de um comando (o aviso de silêncio, uma permissão respondida pelo modo) não apaga mais a si mesma nem deixa um passo "Executando…" fantasma duplicado.',
+        en: 'A note that arrives in the middle of a command (the silence notice, a permission the mode answered) no longer erases itself or leaves a duplicate ghost "Running…" step.',
       },
       {
         pt: 'No compositor, Cmd+Enter (ou Ctrl+Enter) sempre envia, mesmo numa janela estreita; um Enter que só confirma um acento não envia mais a palavra pela metade; e um envio recusado agora diz por quê em vez de ficar mudo.',

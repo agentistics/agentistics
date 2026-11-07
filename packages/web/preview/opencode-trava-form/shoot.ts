@@ -17,6 +17,22 @@ for (const [engine, type] of [['chromium', chromium], ['webkit', webkit]] as con
     await page.goto(base + '/')
     await page.waitForSelector('[data-testid="composer"]')
     const text = (c: string) => page.locator(`[data-case="${c}"]`).innerText()
+    // QA HIGH-1 / MED-1 on the REAL recorded turns: one step (no ghost), the notice kept, in order; the output opens on demand.
+    const order = async (c: string) => page.locator(`[data-case="${c}"] [data-item]`).evaluateAll(els => els.map(e => (e as HTMLElement).dataset.item))
+    const mid = await text('real-mid')
+    check(name, /1 passo/.test(mid) && !/2 passos/.test(mid), 'real-mid: the running command is not exactly one step')
+    check(name, /Sem resposta do OpenCode há 15 s/.test(mid), 'real-mid: the quiet notice is missing')
+    check(name, JSON.stringify(await order('real-mid')) === JSON.stringify(['user', 'activity', 'assistant']), `real-mid order ${JSON.stringify(await order('real-mid'))}`)
+    await page.locator('[data-case="real-mid"] button[aria-label*="saída"]').first().click()
+    check(name, /start-out/.test(await page.locator('[data-case="real-mid"] [data-testid="tool-output"]').innerText()), 'real-mid: output does not open')
+    const end = await text('real-end')
+    check(name, /1 passo · 1 falhou/.test(end), 'real-end: not one failed step')
+    check(name, JSON.stringify(await order('real-end')) === JSON.stringify(['user', 'activity', 'assistant', 'assistant']), `real-end order ${JSON.stringify(await order('real-end'))}`)
+    check(name, end.indexOf('Sem resposta') < end.indexOf('It printed'), 'real-end: the notice is not before the answer')
+    check(name, (await page.locator('[data-case="real-end"] [data-testid="tool-output"]').count()) === 0, 'real-end: output must start collapsed')
+    await page.locator('[data-case="real-end"] button[aria-expanded]').first().click() // open the activity line
+    await page.locator('[data-case="real-end"] button[aria-label*="saída"]').first().click()
+    check(name, /hello-out[\s\S]*nonexistent-dir/.test(await page.locator('[data-case="real-end"] [data-testid="tool-output"]').innerText()), 'real-end: full output does not open')
     check(name, /Executando|Executou|comando/i.test(await text('running')) || /sleep 3/.test(await text('running')), 'running row does not name the command or a run')
     const runningTxt = await text('running')
     check(name, !/^execute/m.test(runningTxt.split('\n').slice(1).join('\n')) || /sleep/.test(runningTxt), 'running row still says only "execute"')
@@ -40,7 +56,8 @@ for (const [engine, type] of [['chromium', chromium], ['webkit', webkit]] as con
     await page.screenshot({ path: `${out}/${name}.png`, fullPage: true })
     await page.close()
   }
-  await browser.close()
+  // WebKit's close can hang under WSL after the last page: bounded, it never holds the result back.
+  await Promise.race([browser.close(), new Promise(r => setTimeout(r, 3000))])
 }
 console.log(errors.length ? errors.join('\n') : 'no errors')
 process.exit(errors.length ? 1 : 0)
