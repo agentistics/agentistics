@@ -323,7 +323,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
     if (sid) setDock(d => openSession(d, sid))
     openEngineSurface(callSurface, { sessionId: sid, sessionKind: 'nay', lang })
   }, [callSurface, callState.active, callState.sessionId, fleet.rows, startNay, lang])
-  useNayCallReport(callSurface !== null, callState, () => { if (!callState.active) void placeCall() })
+  useNayCallReport(callSurface !== null, callState, () => { if (!callState.active || callState.parked) void placeCall() })
 
   const actFleet = useCallback(
     (req: { id: string; action: FleetActionId; text?: string; choice?: number; occurrence?: number }) => act(req),

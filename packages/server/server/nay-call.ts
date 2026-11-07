@@ -14,9 +14,18 @@
  *    same button the person would. With no browser open the request is refused (`no_browser`), never
  *    queued for later: a phone that rings an hour after an agent asked is worse than no call.
  *
- * Who may start: the person (a browser/CLI call, no `session` field) or a VERIFIED leader session — a
- * worker may not ring the owner. Reading the state is open to every authenticated caller.
+ * Who may start: the person's DASHBOARD (a request the browser itself marks same-origin, `dashboardRequest`)
+ * or a VERIFIED leader session (`session` proof + stored role) — a worker may not ring the owner, and a
+ * direct client that sends neither is refused: OMITTING `session` is never proof of being the person (it
+ * was, for one round, and a worker could POST `{}`). Who may REPORT the state: the dashboard only, so a
+ * session cannot forge a call or consume a pending start. Reading the state is open to every authenticated
+ * caller.
+ *
+ * Stated limit: `Sec-Fetch-Site`/`Origin` are headers a same-user process can also forge — they separate a
+ * browser page from an agent's HTTP client, exactly as `csrf.ts` does; they are not a secret. The leader
+ * proof has the same stated limit as every other `session` proof (`session-identity.ts`).
  */
+import { originAllowed } from './cors'
 
 export const STALE_MS = 20_000
 /** A start request nobody collected in this long is forgotten. */
@@ -91,12 +100,13 @@ export function acceptReport(store: NayCallStore, body: unknown, now: number): {
   store.report = r
   const waiting = store.requestedAt !== null && now - store.requestedAt <= REQUEST_TTL_MS
   // A call already in progress satisfies the request; there is nothing left to press.
-  const start = waiting && !r.active
+  // A PARKED call is handed back to like an idle one: "back to the call" is the same button the person presses.
+  const start = waiting && (!r.active || r.parked)
   if (store.requestedAt !== null) store.requestedAt = null
   return { ok: true, start }
 }
 
-export type StartError = 'no_voice' | 'no_browser' | 'unverified_sender' | 'leader_only'
+export type StartError = 'no_voice' | 'no_browser' | 'unverified_sender' | 'leader_only' | 'bad_request'
 export type StartReply =
   | { ok: true; already: boolean; view: NayCallView }
   | { ok: false; error: StartError }
@@ -105,25 +115,81 @@ export interface StartDeps {
   verify: (id: unknown, token: unknown) => Promise<string | null>
   roleOf: (managedId: string) => Promise<'leader' | 'worker' | undefined>
   now: () => number
+  /** The request is the person's dashboard (`dashboardRequest`). */
+  dashboard: boolean
 }
 
 export async function requestStart(store: NayCallStore, surface: CallSurfaceRef | null, body: unknown, deps: StartDeps): Promise<StartReply> {
-  const o = (body && typeof body === 'object' ? body : {}) as { session?: { id?: unknown; token?: unknown } }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, error: 'bad_request' }
+  const o = body as { session?: { id?: unknown; token?: unknown } }
   if (o.session !== undefined) {
+    // An agent: a verified LEADER only. A claimed session never falls back to the dashboard branch.
     const sender = await deps.verify(o.session?.id, o.session?.token)
     if (!sender) return { ok: false, error: 'unverified_sender' }
     if ((await deps.roleOf(sender)) !== 'leader') return { ok: false, error: 'leader_only' }
+  } else if (!deps.dashboard) {
+    // No session proof AND not the dashboard: a direct client with nothing to show.
+    return { ok: false, error: 'unverified_sender' }
   }
   const now = deps.now()
   const view = callView(store, surface, now)
   if (!view.available) return { ok: false, error: 'no_voice' }
   if (!view.browser) return { ok: false, error: 'no_browser' }
-  if (view.call?.active) return { ok: true, already: true, view }
+  // A call on screen is `already`; a PARKED one is returned to, like the button ("Voltar à ligação").
+  if (view.call?.active && !view.call.parked) return { ok: true, already: true, view }
   store.requestedAt = now
   return { ok: true, already: false, view: callView(store, surface, now) }
 }
 
 export function startStatus(r: StartReply | { ok: false; error: 'bad_report' }): number {
   if (r.ok) return 200
-  return r.error === 'unverified_sender' ? 401 : r.error === 'leader_only' ? 403 : r.error === 'bad_report' ? 400 : 409
+  return r.error === 'unverified_sender' ? 401 : r.error === 'leader_only' ? 403 : r.error === 'bad_report' || r.error === 'bad_request' ? 400 : 409
+}
+
+/** The per-request facts `dashboardRequest` reads (the server's own host and allowed origins). */
+export interface OriginCtx { host: string; allowlist: string[]; dev: boolean }
+
+/**
+ * PURE. Did this request come from a page of the dashboard? A browser stamps `Sec-Fetch-Site` itself (a page
+ * script cannot set it): `same-origin` is the dashboard. Without it (an older browser) the `Origin` must be this
+ * server's own or an allowlisted one. A request with neither — curl, a worker's HTTP client, the MCP — is NOT
+ * the dashboard. `none` (an address-bar navigation) is not a fetch from a page and does not count.
+ */
+export function dashboardRequest(h: { secFetchSite: string | null; origin: string | null }, ctx: OriginCtx): boolean {
+  if (h.secFetchSite === 'same-origin') return true
+  if (h.secFetchSite !== null && h.secFetchSite !== 'same-site' && h.secFetchSite !== 'cross-site') return false
+  const o = h.origin
+  if (!o) return false
+  return o === `https://${ctx.host}` || o === `http://${ctx.host}` || originAllowed(o, ctx.allowlist, ctx.dev)
+}
+
+const dashboardOf = (req: Request, ctx: OriginCtx): boolean =>
+  dashboardRequest({ secFetchSite: req.headers.get('sec-fetch-site'), origin: req.headers.get('origin') }, ctx)
+
+/** A state report is a few fields; anything bigger is not one. */
+export const STATE_MAX_BYTES = 1024
+export const START_MAX_BYTES = 2048
+
+async function readSmall(req: Request, max: number): Promise<{ ok: true; value: unknown } | { ok: false; status: number; error: string }> {
+  const { readJsonLimited } = await import('./limits')
+  const r = await readJsonLimited<unknown>(req, max)
+  if (r.ok) return r
+  return { ok: false, status: r.error === 'too_large' ? 413 : 400, error: r.error }
+}
+
+/** PUT /api/nay-call/state — the dashboard only. Returns `{ body, status }`. */
+export async function handleStateWrite(req: Request, store: NayCallStore, ctx: OriginCtx, now: number): Promise<{ body: unknown; status: number }> {
+  if (!dashboardOf(req, ctx)) return { body: { ok: false, error: 'not_dashboard' }, status: 403 }
+  const read = await readSmall(req, STATE_MAX_BYTES)
+  if (!read.ok) return { body: { ok: false, error: read.error }, status: read.status }
+  const out = acceptReport(store, read.value, now)
+  return { body: out, status: out.ok ? 200 : 400 }
+}
+
+/** POST /api/nay-call/start — the dashboard, or a verified leader session. */
+export async function handleStart(req: Request, store: NayCallStore, surface: CallSurfaceRef | null, ctx: OriginCtx, deps: Omit<StartDeps, 'dashboard'>): Promise<{ body: unknown; status: number }> {
+  const read = await readSmall(req, START_MAX_BYTES)
+  if (!read.ok) return { body: { ok: false, error: read.status === 413 ? 'too_large' : 'bad_request' }, status: read.status }
+  const out = await requestStart(store, surface, read.value, { ...deps, dashboard: dashboardOf(req, ctx) })
+  return { body: out, status: startStatus(out) }
 }

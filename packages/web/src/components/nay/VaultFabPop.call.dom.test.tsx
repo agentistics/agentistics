@@ -93,4 +93,7 @@ describe('NayDock wiring', () => {
     // No voice logic of its own: no microphone, no audio, no websocket.
     expect(src).not.toMatch(/getUserMedia|RTCPeerConnection|new WebSocket/)
   })
+  test('an agent start request presses the button for an idle OR a parked call, never for one already on screen', () => {
+    expect(src).toContain('() => { if (!callState.active || callState.parked) void placeCall() }')
+  })
 })
