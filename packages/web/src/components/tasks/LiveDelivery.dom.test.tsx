@@ -354,3 +354,50 @@ test('HIGH 2 (real screen): a queue card\'s own slot line is not a column slot â
   expect(col.querySelectorAll('[data-live-queue-slot]').length).toBe(3)
   expect(col.querySelectorAll('[data-live-slot]').length).toBe(3)
 })
+
+test('MED 6 (live worker fixture): clicking a worker in the leaders strip scrolls the BOARD sideways to its card and never moves the page', async () => {
+  const proto = HTMLElement.prototype as unknown as Record<string, unknown>
+  const had = { rect: proto.getBoundingClientRect, sw: Object.getOwnPropertyDescriptor(proto, 'scrollWidth'), st: proto.scrollTo }
+  const boardScrolls: { left?: number }[] = []
+  const pageScrolls: unknown[] = []
+  const intoView: unknown[] = []
+  // happy-dom has no layout: the board is 1000 wide inside a 3000 wide scroller and the target card sits far to the right.
+  proto.getBoundingClientRect = function (this: HTMLElement) {
+    const card = this.hasAttribute('data-live-card')
+    return { left: card ? 1700 : 0, top: 0, width: card ? 300 : 1000, height: 200, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => ({}) }
+  }
+  Object.defineProperty(proto, 'scrollWidth', { configurable: true, get: () => 3000 })
+  proto.scrollTo = function (o: { left?: number }) { boardScrolls.push(o) }
+  const realWinScroll = window.scrollTo
+  window.scrollTo = ((...a: unknown[]) => { pageScrolls.push(a) }) as never
+  const realIntoView = Element.prototype.scrollIntoView
+  Element.prototype.scrollIntoView = function (this: Element) { intoView.push(this) } as never
+  try {
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    const withLeader = { ...reply, leaders: [
+      { id: 'L', title: 'Motor', harness: 'claude', model: 'claude-opus-5-5', state: 'working', currentAction: null, workers: [{ id: 'w2', title: 'worker b', state: 'working', stage: 'qa', word: 'working', cardKey: 't/b', subtask: 'Piece B' }], awaiting: [] },
+    ] }
+    await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: withLeader as never }))) })
+    await act(async () => (document.getElementById('live-leaders-head') as HTMLElement).click())
+    const leader = document.querySelector('[data-live-leader="L"]')!
+    if (leader.getAttribute('data-open') !== '1') await act(async () => (leader.querySelector('button') as HTMLElement).click())
+    const worker = document.querySelector('[data-live-worker="w2"]') as HTMLElement
+    expect(worker).not.toBeNull()
+    expect(worker.querySelector('[data-live-worker-info]')!.textContent).not.toBe('no card on the board')
+    boardScrolls.length = 0
+    await act(async () => { worker.click(); await new Promise(r => setTimeout(r, 120)) })
+    // the dropdown closed and the board was asked to bring the card into view horizontally: 1700 - (1000 - 300) / 2 = 1350
+    expect(document.querySelector('[data-live-leaders]')!.getAttribute('data-open')).toBe('0')
+    expect(boardScrolls.length).toBeGreaterThan(0)
+    expect(boardScrolls[boardScrolls.length - 1]!.left).toBe(1350)
+    // ... and nothing scrolled the page: neither window.scrollTo nor an element scrollIntoView on the card
+    expect(pageScrolls).toEqual([])
+    expect(intoView.filter(e => (e as HTMLElement).hasAttribute?.('data-live-card'))).toEqual([])
+  } finally {
+    proto.getBoundingClientRect = had.rect
+    if (had.sw) Object.defineProperty(proto, 'scrollWidth', had.sw); else delete proto.scrollWidth
+    proto.scrollTo = had.st
+    window.scrollTo = realWinScroll
+    Element.prototype.scrollIntoView = realIntoView
+  }
+})

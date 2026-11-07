@@ -6,7 +6,8 @@
  * delivery cost", and the two would drift.
  */
 
-import { buildLive, legacyReviewShas } from './task-live'
+import { buildLive, legacyReviewShaPieces } from './task-live'
+import { dirsForShas } from './release-repos'
 import { publishedAmong } from './release-tags'
 import { describeLive, type FleetRowLite, type LiveFilters, type LiveView } from './task-live-view'
 import { stat } from 'node:fs/promises'
@@ -128,7 +129,16 @@ async function liveReplyForBook(): Promise<LiveBuildCache['reply']> {
         return new Map(Object.entries((await createDeliveryStore().read()).deliveries))
       } catch { return new Map() }
     })()
-    const publishedShas = publishedAmong(legacyReviewShas(details, w.book.events, deliveries), nowMs)
+    // Which clones to ask is per commit: the server does not run inside a checkout, so the repositories come from the
+    // sessions' own directories, the task's repository and the repositories agentistics knows (`release-repos.ts`).
+    const pieces = legacyReviewShaPieces(details, w.book.events, deliveries)
+    const taskById = new Map(w.book.tasks.map(t => [t.id, t]))
+    const dirsFor = dirsForShas({
+      pieces,
+      rowsOf: id => { const t = taskById.get(id); return t ? rowsOfTask(t, w.rollupRows, owners) : [] },
+      metas: w.metas.values(),
+    })
+    const publishedShas = publishedAmong([...pieces.keys()], nowMs, undefined, dirsFor)
     const reply = buildLive({ details, events: w.book.events, nowMs, statusLabel: id => labels.get(id), deliveries, publishedShas })
     const result = { key, builtAtMs: Date.now(), reply }
     liveBuildCache = result

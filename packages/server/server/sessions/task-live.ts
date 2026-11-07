@@ -547,13 +547,25 @@ function legacyShaGroups(p: Piece, events: readonly TaskEvent[] | undefined): st
  * them a published release tag contains and hand the answer back as `publishedShas`.
  */
 export function legacyReviewShas(details: readonly TaskDetail[], events: readonly TaskEvent[], deliveries?: ReadonlyMap<string, LiveDeliveryFacts>): string[] {
+  return [...legacyReviewShaPieces(details, events, deliveries).keys()]
+}
+
+/** Where a commit id was named: the piece (task, or one of its subtasks) whose own words carry it. */
+export interface ShaPiece { taskId: string; subtaskId: string | null; repo?: string }
+
+/** PURE: `legacyReviewShas`, with the pieces that named each commit — the caller needs them to know WHICH clones to ask. */
+export function legacyReviewShaPieces(details: readonly TaskDetail[], events: readonly TaskEvent[], deliveries?: ReadonlyMap<string, LiveDeliveryFacts>): Map<string, ShaPiece[]> {
   const { eventsBySubject } = indexEvents(details, events)
-  const out = new Set<string>()
+  const out = new Map<string, ShaPiece[]>()
   for (const d of details) for (const p of piecesOf(d)) {
     if (p.status !== 'in_review' || (p.sub && deliveries?.has(p.sub.id))) continue
-    for (const g of legacyShaGroups(p, eventsBySubject.get(p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id))) for (const sha of g) out.add(sha)
+    const piece: ShaPiece = { taskId: p.task.id, subtaskId: p.sub?.id ?? null, ...(p.task.repo ? { repo: p.task.repo } : {}) }
+    for (const g of legacyShaGroups(p, eventsBySubject.get(p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id))) for (const sha of g) {
+      const l = out.get(sha)
+      if (l) l.push(piece); else out.set(sha, [piece])
+    }
   }
-  return [...out]
+  return out
 }
 
 /** PURE: details of the tasks → what the line shows now, plus the history the ETA rests on. */
