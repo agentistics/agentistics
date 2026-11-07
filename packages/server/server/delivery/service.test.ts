@@ -28,6 +28,10 @@ interface World {
   status?: string
   /** Board subtasks held in `blocked` (BLOQUEIO.ORFAO). */
   blocked?: BlockedSubtaskFact[]
+  /** Board pieces (subtasks or tasks) that are done. */
+  finished?: string[]
+  /** true = every board status write is refused. */
+  boardWriteFails?: boolean
   /** false = the leader cannot be reached. */
   wakeOk?: boolean
   /** gh failure for the check-runs read. */
@@ -82,11 +86,11 @@ function harness(over: Partial<World> = {}, extra: Partial<DeliveryDeps> = {}) {
     store: createDeliveryStore(join(dir, 'deliveries.json')),
     facts,
     board: {
-      setPhaseStatus: async (id, phase) => { calls.status.push({ id, phase }); return { ok: true } },
+      setPhaseStatus: async (id, phase) => { calls.status.push({ id, phase }); return w.boardWriteFails ? { ok: false, message: 'board write failed' } : { ok: true } },
       setCi: async (_id, ci) => { calls.ci.push(ci) },
       logStep: async (_t, _s, n) => { calls.steps.push(n) },
       comment: async (_t, _s, body) => { calls.comments.push(body) },
-      subtaskFinished: async () => false,
+      subtaskFinished: async id => w.finished?.includes(id) ?? false,
       stage: async () => ({ ok: true }),
     },
     notify: {
@@ -882,5 +886,82 @@ describe('BLOQUEIO.ORFAO — a board-blocked piece with no delivery record is ch
     })
     expect(out.map(p => p.id)).toEqual(['g1'])
     expect(out[0]).toMatchObject({ groupMember: false, since: '2026-11-01T00:00:00Z' })
+  })
+
+  // ------------------------------------------------------------------------------------------------ r3 (re-QA findings)
+
+  test('r3 · 1 · an adopted piece that entered the real flow keeps its record when the board later reads done', async () => {
+    const h = harness({ blocked: [orphan({ id: 's1' })] })
+    await h.svc.tick()
+    expect((await h.svc.get('s1'))!.adopted).toBe('board')
+    expect((await h.svc.unblock('s1', 'leader')).ok).toBe(true)
+    await walkToQa(h.svc) // fila → executando → qa: head sha + gate evidence
+    expect((await h.svc.block('s1', 'externo', 'o CI está fora do ar', 'leader')).ok).toBe(true)
+    h.w.blocked = []
+    h.w.status = 'done'
+    await h.svc.tick()
+    const rec = (await h.svc.get('s1'))!
+    expect(rec).not.toBeNull()
+    expect(rec.headSha).toBe('abc123')
+    expect(rec.adopted).toBeUndefined()
+    expect(rec.history.map(x => x.to)).toContain('qa')
+    expect(rec.phase).toBe('bloqueado')
+  })
+
+  test('r3 · 1 · a record that still carries the adoption marker but has real history is never dropped, and loses the marker', async () => {
+    const h = harness({ blocked: [orphan({ id: 's1' })] })
+    await h.svc.tick()
+    expect((await h.svc.unblock('s1', 'leader')).ok).toBe(true)
+    await walkToQa(h.svc)
+    expect((await h.svc.block('s1', 'externo', 'preso', 'leader')).ok).toBe(true)
+    // a record written by an older build: the flow history is real, the marker was never cleared
+    await createDeliveryStore(join(dir, 'deliveries.json')).update(d => { d.deliveries.s1!.adopted = 'board' })
+    h.w.blocked = []
+    h.w.status = 'abandoned'
+    await h.svc.tick()
+    const rec = (await h.svc.get('s1'))!
+    expect(rec).not.toBeNull()
+    expect(rec.headSha).toBe('abc123')
+    expect(rec.adopted).toBeUndefined()
+  })
+
+  test('r3 · 2 · a failed board write on a deferral is retried on the next tick — silently, once per tick — until it lands', async () => {
+    const h = harness({ blocked: [orphan({ id: 't7', taskId: 't7', title: 'tarefa sozinha', since: '2026-11-07T01:00:00Z' })], sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't7' }] })
+    await h.svc.tick()
+    h.w.boardWriteFails = true
+    h.advance(2 * 3600_000)
+    expect((await h.svc.tick()).actions).toEqual(['defer t7'])
+    expect((await h.svc.get('t7'))!.phase).toBe('fila')
+    const writes = h.calls.status.length, comments = h.calls.comments.length, wakes = h.calls.session.length
+    h.advance(60_000)
+    expect((await h.svc.tick()).actions).toEqual([]) // refused again: still pending, nothing said
+    expect(h.calls.status.length).toBe(writes + 1)
+    expect(h.calls.comments.length).toBe(comments)
+    expect(h.calls.session.length).toBe(wakes)
+    h.w.boardWriteFails = false
+    h.advance(60_000)
+    expect((await h.svc.tick()).actions).toEqual(['requeue t7'])
+    expect(h.calls.status.at(-1)).toEqual({ id: 't7', phase: 'fila' })
+    const after = h.calls.status.length
+    h.advance(60_000)
+    expect((await h.svc.tick()).actions).toEqual([])
+    expect(h.calls.status.length).toBe(after) // landed: no more writes
+    expect(h.calls.comments.length).toBe(comments)
+    expect(h.calls.session.length).toBe(wakes)
+  })
+
+  test('r3 · 3 · a blocked task keeps its blockedBy: discovery carries it, and adoption waits for the dependency instead of waking the leader', async () => {
+    const t = { id: 't7', title: 't7', status: 'blocked', updatedAt: '2026-11-07T01:50:00Z', blockedBy: ['t0'] }
+    const [piece] = blockedPiecesOf({ tasks: [t], subtasks: [] })
+    expect(piece).toMatchObject({ id: 't7', blockedBy: ['t0'] })
+    const h = harness({ blocked: [piece!], sessions: [{ id: 'leader', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't7' }] })
+    expect((await h.svc.tick()).actions).toEqual(['adopt t7'])
+    expect((await h.svc.get('t7'))!.block).toMatchObject({ reason: 'dependencia', unlocker: 'self' })
+    expect(h.calls.session).toEqual([])
+    // the dependency finishes: the completed-dependency reconciliation unblocks the task-level record by itself
+    h.w.finished = ['t0']
+    h.advance(60_000)
+    expect((await h.svc.tick()).actions).toContain('unblock t7')
+    expect((await h.svc.get('t7'))!.phase).toBe('fila')
   })
 })

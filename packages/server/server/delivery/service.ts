@@ -18,7 +18,7 @@
  * deferred by the leader, and the only owner-facing output is the INFORMATIONAL "publicado" notice.
  */
 import {
-  EDGES, GATES, adoptPhase, isGate, isPhase, newDelivery, planBlock, planTransition, planUnblock, planWatch,
+  EDGES, GATES, adoptPhase, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
   refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
 } from './machine'
 import { releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
@@ -512,9 +512,12 @@ export function createDeliveryService(d: DeliveryDeps) {
     const doc = await d.store.read()
     for (const r of Object.values(doc.deliveries)) {
       if (r.adopted !== 'board' || r.phase !== 'bloqueado' || stillBlocked.has(r.subtaskId)) continue
+      // A record that has since entered the real flow (history in a real phase, a head sha, gates…) is a delivery, not an adoption:
+      // clear the marker and leave it to the normal flow rules — never delete real history because the board moved on.
+      if (!isPureAdoption(r)) { await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && !isPureAdoption(c)) delete c.adopted }); continue }
       const status = await (d.facts.pieceStatus ? d.facts.pieceStatus(r.subtaskId) : d.facts.subtask(r.subtaskId).then(s => s?.status ?? null)).catch(() => undefined)
       if (status === undefined) continue // the status could not be read either: next tick
-      if (status === null || status === 'done' || status === 'abandoned') { await d.store.update(x => { if (x.deliveries[r.subtaskId]?.adopted === 'board') delete x.deliveries[r.subtaskId] }); continue }
+      if (status === null || status === 'done' || status === 'abandoned') { await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && isPureAdoption(c)) delete x.deliveries[r.subtaskId] }); continue }
       const out = await d.store.update(x => {
         const cur = x.deliveries[r.subtaskId]
         if (!cur || cur.phase !== 'bloqueado') return null
@@ -550,9 +553,30 @@ export function createDeliveryService(d: DeliveryDeps) {
       return true
     })
     if (!moved) return false
-    await d.board.setPhaseStatus(r.subtaskId, 'fila').catch(() => undefined)
+    // The board move is best-effort, but a miss is REMEMBERED: the record is out of Bloqueado and so no longer watched, and a Live
+    // card that kept reading the blocked board status would be the orphan this whole feature exists to end. `retryDeferredBoard`
+    // re-applies it on the next tick.
+    const wrote = await d.board.setPhaseStatus(r.subtaskId, 'fila').then(o => o.ok, () => false)
+    if (!wrote) await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) c.block.boardMovePending = true }).catch(() => undefined)
     await d.board.comment(r.taskId, r.subtaskId, comment).catch(() => undefined)
     return true
+  }
+
+  /**
+   * A deferral whose BOARD write failed leaves a record in `fila` (unwatched) over a piece the board still shows `blocked`. Re-apply
+   * the move once per tick — no comment, no wake, no new message — until it lands, or until the board stops blocking the piece.
+   */
+  const retryDeferredBoard = async (blocked: readonly BlockedSubtaskFact[] | null, actions: string[]): Promise<void> => {
+    if (blocked === null) return
+    const stillBlocked = new Set(blocked.map(b => b.id))
+    const doc = await d.store.read()
+    for (const r of Object.values(doc.deliveries)) {
+      if (r.phase !== 'fila' || !r.block?.boardMovePending) continue
+      const done = !stillBlocked.has(r.subtaskId) || await d.board.setPhaseStatus(r.subtaskId, 'fila').then(o => o.ok, () => false)
+      if (!done) continue
+      await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c?.block) delete c.block.boardMovePending })
+      if (stillBlocked.has(r.subtaskId)) actions.push(`requeue ${r.subtaskId}`)
+    }
   }
 
   const tickOnce = async (): Promise<{ actions: string[] }> => {
@@ -561,6 +585,7 @@ export function createDeliveryService(d: DeliveryDeps) {
     const sessions = await d.facts.sessions().catch(() => null)
     const blocked = d.facts.blockedSubtasks ? await d.facts.blockedSubtasks().catch(() => null) : null
     await reconcileAdopted(blocked, actions)
+    await retryDeferredBoard(blocked, actions)
     await adoptOrphans(blocked ?? [], sessions, actions)
     let doc = await d.store.read()
     // A blocked piece with no leader picks one up as soon as one exists, and one whose leader DIED is handed to the live one
@@ -580,7 +605,8 @@ export function createDeliveryService(d: DeliveryDeps) {
     for (const r of records) {
       if (r.phase !== 'bloqueado' || r.block?.reason !== 'dependencia') continue
       const sub = await d.facts.subtask(r.subtaskId).catch(() => null)
-      const blockers = sub?.blockedBy ?? []
+      // A TASK-level piece is no subtask: its dependencies come from the board's blocked-piece fact (BLOQUEIO.ORFAO r3).
+      const blockers = sub?.blockedBy ?? (blocked ?? []).find(b => b.id === r.subtaskId)?.blockedBy ?? []
       const all = await Promise.all(blockers.map(async id => doc.deliveries[id]?.phase === 'publicado' || await d.board.subtaskFinished(id).catch(() => false)))
       finished.set(r.subtaskId, blockers.length > 0 && all.every(Boolean))
     }

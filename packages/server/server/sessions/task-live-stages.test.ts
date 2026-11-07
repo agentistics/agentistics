@@ -268,6 +268,25 @@ describe('FLUXO.ENTREGA-DSL: the Live is a projection of the delivery record', (
     expect(q.staged).toEqual({ harness: 'codex', model: 'gpt-5.5', effort: 'high', account: 'acc_2' })
     expect(q.slot).toMatchObject({ ok: false })
   })
+  test('BLOQUEIO.ORFAO r3 · a TASK-level record (keyed by the task id) decides the stage of a task with no subtasks, as a subtask record does', () => {
+    // The board still reads `blocked` (e.g. the deferral could not write it) but the record says the piece is back in the queue.
+    const q = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [], sessions: [sess('s1', null)] as never }, { status: 'blocked', blockedReason: 'esperando a chave' })],
+      deliveries: new Map([['t1', { phase: 'fila' }]]),
+    }).deliveries.find(d => d.subtaskId === null)!
+    expect(q.stage).toBe('queue')
+    expect(q.phase).toBe('fila')
+    // and the same record in a real block carries its own reason, not the board's
+    const b = buildLive({
+      nowMs: NOW, events: [],
+      details: [detail({ subtasks: [], sessions: [] }, { status: 'blocked' })],
+      deliveries: new Map([['t1', { phase: 'bloqueado', origin: 'fila', block: { reason: 'externo', text: 'CI fora do ar' } }]]),
+    }).deliveries.find(d => d.subtaskId === null)!
+    expect(b.stage).toBe('blocked')
+    expect(b.block).toMatchObject({ originStage: 'queue' })
+    expect(b.phase).toBe('bloqueado')
+  })
 })
 
 describe('estimates never contradict each other (MED 5)', () => {

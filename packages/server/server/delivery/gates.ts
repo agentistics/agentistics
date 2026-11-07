@@ -37,7 +37,7 @@ export interface BlockedSubtaskFact { id: string; taskId: string; title: string;
 
 /** The board slice `blockedPiecesOf` reads (structural, so a test needs no book). */
 export interface BlockedBook {
-  tasks: ReadonlyArray<{ id: string; title: string; status: string; updatedAt: string; blockedReason?: string }>
+  tasks: ReadonlyArray<{ id: string; title: string; status: string; updatedAt: string; blockedReason?: string; blockedBy?: string[] }>
   subtasks: ReadonlyArray<{ id: string; taskId: string; title: string; status: string; updatedAt: string; isGroup?: boolean; parentGroupId?: string; blockedBy?: string[] }>
 }
 
@@ -65,7 +65,7 @@ export function blockedPiecesOf(book: BlockedBook): BlockedSubtaskFact[] {
   }
   for (const t of book.tasks) {
     if (t.status !== 'blocked' || subtasksOf(t.id).some(s => !s.parentGroupId)) continue
-    out.set(t.id, { id: t.id, taskId: t.id, title: t.title, blockedBy: [], groupMember: false, since: t.updatedAt, ...(t.blockedReason?.trim() ? { reason: t.blockedReason.trim() } : {}) })
+    out.set(t.id, { id: t.id, taskId: t.id, title: t.title, blockedBy: t.blockedBy ?? [], groupMember: false, since: t.updatedAt, ...(t.blockedReason?.trim() ? { reason: t.blockedReason.trim() } : {}) })
   }
   return [...out.values()].sort((a, b) => (Date.parse(a.since) || 0) - (Date.parse(b.since) || 0) || a.id.localeCompare(b.id))
 }

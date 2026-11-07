@@ -78,6 +78,8 @@ export interface DeliveryBlock {
   wakes?: number
   /** Set once the piece was deferred to the next batch (reason 6 under autonomous, or > 2 h). */
   deferredAt?: string
+  /** The deferral could not move the BOARD piece to the queue: the next tick re-applies it (once per tick, silently) until it lands. */
+  boardMovePending?: boolean
 }
 
 export interface QaVerdict { verdict: 'APROVADO' | 'REPROVADO'; findings: string; sha: string; qaSessionId?: string; at: string }
@@ -293,6 +295,7 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
   next.revision = r.revision + 1
   next.updatedAt = ctx.at
   delete next.step
+  delete next.adopted // a real flow transition: this is a delivery now, never a mere adoption (BLOQUEIO.ORFAO r3)
   if (skipped) next.skips = [...next.skips, skipped]
   const d = input.detail?.trim() ?? ''
   if (r.phase === 'qa') {
@@ -326,6 +329,7 @@ export function planBlock(r: DeliveryRecord, reason: unknown, text: string, ctx:
   next.revision = r.revision + 1
   next.updatedAt = ctx.at
   delete next.step
+  delete next.adopted // a block the flow itself made is not the board's orphan any more
   next.block = {
     reason: recorded, text: text.trim(), since: ctx.at, unlocker: unlockerOf(recorded), wakes: 0,
     // Reason 6 with the owner away: the leader does NOT perform the action — the safe path is decided now.
@@ -334,6 +338,18 @@ export function planBlock(r: DeliveryRecord, reason: unknown, text: string, ctx:
   if (recorded === 'fora_das_autorizacoes') next.versionTarget = 'next'
   next.history = [...r.history, { from: r.phase, to: 'bloqueado', at: ctx.at, actor: ctx.actor, detail: `${recorded}: ${text.trim()}`, revision: next.revision }]
   return { ok: true, next, skipped: null }
+}
+
+/**
+ * PURE. Is this `adopted: 'board'` record still ONLY an adoption (BLOQUEIO.ORFAO)? It stops being one the moment it has history in a
+ * real phase, evidence (head sha, gates, sessions, PR) or the machine's own marker was cleared: such a record is a delivery, and the
+ * board going done/abandoned/missing must never delete it.
+ */
+export function isPureAdoption(r: DeliveryRecord): boolean {
+  if (r.adopted !== 'board') return false
+  if (r.headSha || r.branch || r.pr || r.mergeSha || r.authorSessionId || r.qaSessionId || r.qa || r.review || Object.keys(r.gates ?? {}).length > 0) return false
+  const bookkeeping = (p: string) => p === 'fila' || p === 'bloqueado'
+  return r.history.every(h => bookkeeping(h.from) && bookkeeping(h.to))
 }
 
 /** PURE. Leave `bloqueado` — ALWAYS to the stored origin, never anywhere else. */
@@ -346,6 +362,7 @@ export function planUnblock(r: DeliveryRecord, ctx: { at: string; actor: string;
   next.updatedAt = ctx.at
   delete next.origin
   delete next.block
+  if (next.phase !== 'fila') delete next.adopted // unblocked into a real phase: no longer a pure adoption
   next.history = [...r.history, { from: 'bloqueado', to: r.origin, at: ctx.at, actor: ctx.actor, detail: ctx.detail?.trim() || 'desbloqueado', revision: next.revision }]
   return { ok: true, next, skipped: null }
 }
