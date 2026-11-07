@@ -32,6 +32,19 @@ describe('applyHarnessChatDeltas — the one definition of how a receiver applie
     const r = applyHarnessChatDeltas({ turns: [t('a')], older: false }, [{ kind: 'append', turns: [t('b')] }], 5)
     expect(r).toEqual({ turns: [t('a'), t('b')], older: false })
   })
+  test('grow with `back` replaces the turn that many places before the last, never the last (OPENCODE.TRAVA-FORM HIGH-1)', () => {
+    const pending: EngineChatTurn = { role: 'assistant', text: '', pending: true }
+    const r = applyHarnessChatDeltas({ turns: [t('u'), pending, t('note')], older: false }, [{ kind: 'grow', turn: t('done'), back: 1 }], 10)
+    expect(r.turns).toEqual([t('u'), t('done'), t('note')])
+    // back 0 / absent is the last turn, exactly as before
+    expect(applyHarnessChatDeltas({ turns: [t('a'), t('b')], older: false }, [{ kind: 'grow', turn: t('c'), back: 0 }], 10).turns).toEqual([t('a'), t('c')])
+  })
+  test('a `back` above what the receiver holds (dropped from the front) changes nothing; junk reads as the last', () => {
+    const r = applyHarnessChatDeltas({ turns: [t('n1'), t('n2')], older: true }, [{ kind: 'grow', turn: t('done'), back: 2 }], 2)
+    expect(r).toEqual({ turns: [t('n1'), t('n2')], older: true })
+    expect(applyHarnessChatDeltas({ turns: [t('a'), t('b')], older: false }, [{ kind: 'grow', turn: t('c'), back: -1 }], 10).turns).toEqual([t('a'), t('c')])
+    expect(applyHarnessChatDeltas({ turns: [t('a'), t('b')], older: false }, [{ kind: 'grow', turn: t('c'), back: 1.5 }], 10).turns).toEqual([t('a'), t('c')])
+  })
   test('grow replaces the last turn, then an append applies after it', () => {
     const r = applyHarnessChatDeltas(
       { turns: [t('a'), { role: 'assistant', text: '', pending: true }], older: false },

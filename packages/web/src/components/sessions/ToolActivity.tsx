@@ -67,11 +67,50 @@ function StepRow({ step, pt }: { step: ActivityStep; pt: boolean }) {
     fontSize: 12, lineHeight: 1.4, textAlign: 'left',
     border: 'none', background: 'none', font: 'inherit', color: 'inherit',
   }
-  return step.ref
+  const main = step.ref
     ? <button type="button" className="ag-act-row" onClick={() => openArtifacts('live', step.ref)}
         aria-label={`${stepVerb(step, pt)} ${step.object} — ${pt ? 'abrir no Live' : 'open in Live'}`}
         style={{ ...row, cursor: 'pointer', borderRadius: 6 }}>{body}</button>
     : <div style={row}>{body}</div>
+  if (!step.output) return main
+  return <StepWithOutput step={step} pt={pt} isMobile={isMobile} main={main} />
+}
+
+/**
+ * A step that carries what it PRINTED (item 35: "the command and its output, not just 'execute'"): the row as always, plus
+ * a quiet "output" toggle beside it that opens the output below — collapsed by default, its own scroll, the tail already
+ * trimmed by the source. The toggle is a sibling of the row, never inside it (the row is itself a button when it has a ref).
+ */
+function StepWithOutput({ step, pt, isMobile, main }: { step: ActivityStep; pt: boolean; isMobile: boolean; main: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const label = pt ? 'saída' : 'output'
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex' }}>{main}</div>
+        <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+          aria-label={`${open ? (pt ? 'Ocultar' : 'Hide') : (pt ? 'Mostrar' : 'Show')} ${label}: ${step.object}`}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0,
+            border: 'none', background: 'none', font: 'inherit', fontSize: 11, color: SYS_LINK, cursor: 'pointer',
+            padding: isMobile ? '0 10px' : '0 10px 0 4px', minHeight: isMobile ? 44 : 24, ...(isMobile ? { minWidth: 44 } : {}),
+          }}>
+          {label}
+          <ChevronDown size={12} aria-hidden style={{ transition: 'transform 140ms', transform: open ? 'rotate(180deg)' : 'none' }} />
+        </button>
+      </div>
+      {open && (
+        <pre data-testid="tool-output" style={{
+          margin: '2px 10px 6px 32px', padding: '6px 8px', maxHeight: 220, overflow: 'auto',
+          fontFamily: MONO, fontSize: 11, lineHeight: 1.45, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+          // Neutral even on a failed step: the row's icon and verb already say it failed, and most of a failing
+          // command's output is ordinary text — painting all of it in the fault colour drowns the line that matters.
+          color: 'var(--text-secondary)',
+          background: 'var(--bg-base, transparent)', border: '1px solid var(--border)', borderRadius: 6,
+        }}>{step.output}</pre>
+      )}
+    </div>
+  )
 }
 
 function StepsCard({ steps, pt, more, onMore }: { steps: ActivityStep[]; pt: boolean; more?: number; onMore?: () => void }) {

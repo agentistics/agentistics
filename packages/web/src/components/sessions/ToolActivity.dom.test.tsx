@@ -72,3 +72,21 @@ test('the choice persists across live updates and after the run finishes', () =>
   expect(toggle().getAttribute('aria-expanded')).toBe('true')
   expect(stepRows()).toBe(4)
 })
+
+// Item 35 (OPENCODE.TRAVA-FORM MED-1): a command shows what it PRINTED — collapsed by default, opened on demand.
+test('a step that carries output offers it collapsed, and opens it on click', () => {
+  const steps = stepsOfTurn({ role: 'assistant', text: '', pending: true, tools: [{ name: 'bash', canonical: 'execute', detail: 'echo hi; ls /nope', ref: 'c1', output: 'hi\nls: /nope: No such file' }] })
+  act(() => { root.render(createElement(ToolActivity, { group: { key: 'o', steps, running: true }, lang: 'pt', variant: 'live', now: 0 })) })
+  const outToggle = () => Array.from(host.querySelectorAll('button')).find(b => (b.getAttribute('aria-label') ?? '').includes('saída'))!
+  expect(outToggle()).toBeTruthy()
+  expect(outToggle().getAttribute('aria-expanded')).toBe('false')
+  expect(host.querySelector('[data-testid="tool-output"]')).toBeNull()
+  act(() => { outToggle().click() })
+  expect(host.querySelector('[data-testid="tool-output"]')!.textContent).toBe('hi\nls: /nope: No such file')
+  act(() => { outToggle().click() })
+  expect(host.querySelector('[data-testid="tool-output"]')).toBeNull()
+  // a step with no output draws no toggle
+  const bare = stepsOfTurn({ role: 'assistant', text: '', tools: [{ name: 'bash', ref: 'c2' }] })
+  act(() => { root.render(createElement(ToolActivity, { group: { key: 'b', steps: bare, running: false }, lang: 'pt', variant: 'live', now: 0, defaultOpen: true })) })
+  expect(outToggle()).toBeUndefined()
+})
