@@ -4,10 +4,10 @@
  * becomes a list of cards. A row opens its task on the board.
  */
 import { useNavigate } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { NONE_KEY, type MetricRow, type MetricsReply } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { RecordCard } from '../../pages/settings/primitives'
+import { RecordCard, dialogButtonStyle } from '../../pages/settings/primitives'
 import { StageChip } from '../calendar/calendarUi'
 import { harnessName } from '../../lib/evolutionFilters'
 import { QA_LABEL, PRIORITY_NAME } from '../../lib/evolutionFilters'
@@ -73,6 +73,8 @@ const dateOf = (ms: number | null, pt: boolean): string => (ms === null ? '—' 
 export function EvolutionTable({ rows, total, pt, cost, maxHeight }: { rows: MetricRow[]; total: number; pt: boolean; cost: (usd: number) => string; maxHeight: number | null }) {
   const isMobile = useIsMobile()
   const nav = useNavigate()
+  // A phone gets cards, and 70 of them is a 20 000px page: ten at a time.
+  const [more, setMore] = useState(10)
   const open = (r: MetricRow) => nav(`/tasks/${encodeURIComponent(r.taskId)}`)
   const qaText = (r: MetricRow) => pick(QA_LABEL[r.qaResult], pt)
   const model = (r: MetricRow) => (r.authorModel ? r.authorModel : '—')
@@ -80,7 +82,7 @@ export function EvolutionTable({ rows, total, pt, cost, maxHeight }: { rows: Met
   if (isMobile) {
     return (
       <div data-evo-table style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {rows.map(r => (
+        {rows.slice(0, more).map(r => (
           <RecordCard key={r.subtaskId} title={r.title} subtitle={r.taskTitle} badge={<StageChip stage={r.stage} pt={pt} />} onClick={() => open(r)} wrapTitle
             fields={[
               { label: pick(TEXT.colLead, pt), value: fmtDur(r.leadMs, pt) },
@@ -91,6 +93,7 @@ export function EvolutionTable({ rows, total, pt, cost, maxHeight }: { rows: Met
               { label: pick(TEXT.colCost, pt), value: r.costUSD === null ? '—' : cost(r.costUSD) },
             ]} />
         ))}
+        {rows.length > more && <button type="button" data-evo-more onClick={() => setMore(m => m + 10)} style={dialogButtonStyle('secondary', true)}>{pick(TEXT.showMore(Math.min(10, rows.length - more), rows.length - more), pt)}</button>}
         {note}
       </div>
     )

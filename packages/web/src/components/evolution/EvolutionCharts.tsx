@@ -114,7 +114,7 @@ export function StageStack({ groups, pt, height }: { groups: MetricGroup[]; pt: 
         <BarChart data={data} margin={{ right: 8, left: 0 }}>
           <CartesianGrid stroke="var(--border)" vertical={false} />
           <XAxis dataKey="label" tick={AXIS} interval="preserveStartEnd" />
-          <YAxis width={40} tick={AXIS} tickFormatter={v => fmtDur(Number(v) * H, pt)} />
+          <YAxis width={40} tick={AXIS} tickFormatter={v => (Number(v) === 0 ? '0' : fmtDur(Number(v) * H, pt))} />
           <Tooltip contentStyle={TIP} labelFormatter={(_, p) => { const d = p?.[0]?.payload as { full?: string; n?: number } | undefined; return `${d?.full ?? ''} · ${pick(TEXT.publishedN(d?.n ?? 0), pt)}` }}
             formatter={(v, name) => [fmtDur(Number(v) * H, pt), name]} />
           {STAGE_ORDER.map(s => <Bar key={s} dataKey={s} name={stageName(s, pt)} stackId="t" fill={stageColor(s)} isAnimationActive={false} maxBarSize={28} />)}
@@ -154,12 +154,12 @@ function Trend({ id, groups, series, fmt, pt, height, width = 40, emptyText }: {
 }
 
 export function LeadTrend({ reply, pt, height }: { reply: MetricsReply; pt: boolean; height: number }) {
-  return <Trend id="lead" groups={reply.groups} pt={pt} height={height} fmt={v => fmtDur(v, pt)} width={48} emptyText={pick(TEXT.noPublishedChart, pt)}
+  return <Trend id="lead" groups={reply.groups} pt={pt} height={height} fmt={v => (v === 0 ? '0' : fmtDur(v, pt))} width={48} emptyText={pick(TEXT.noPublishedChart, pt)}
     series={[{ key: 'p50', name: 'p50', color: '#f5a623', pick: g => g.metrics.leadP50Ms }, { key: 'p90', name: 'p90', color: '#fbbf77', dash: true, pick: g => g.metrics.leadP90Ms }]} />
 }
 
 export function QualityTrend({ reply, pt, height }: { reply: MetricsReply; pt: boolean; height: number }) {
-  return <Trend id="quality" groups={reply.groups} pt={pt} height={height} fmt={v => fmtPct(v, pt)} emptyText={pick(TEXT.noQaChart, pt)}
+  return <Trend id="quality" groups={reply.trendGroups} pt={pt} height={height} fmt={v => fmtPct(v, pt)} emptyText={pick(TEXT.noQaChart, pt)}
     series={[
       { key: 'rej', name: pick(TEXT.rejectedQa, pt), color: '#ff5f5f', pick: g => g.metrics.qaRejectionRate },
       { key: 'eta', name: pick(TEXT.etaWithin, pt), color: '#b78bff', dash: true, pick: g => g.metrics.etaRate },
@@ -167,6 +167,6 @@ export function QualityTrend({ reply, pt, height }: { reply: MetricsReply; pt: b
 }
 
 export function CostTrend({ reply, pt, height, cost }: { reply: MetricsReply; pt: boolean; height: number; cost: (usd: number) => string }) {
-  return <Trend id="cost" groups={reply.groups} pt={pt} height={height} fmt={cost} width={58} emptyText={pick(TEXT.noCostChart, pt)}
+  return <Trend id="cost" groups={reply.trendGroups} pt={pt} height={height} fmt={cost} width={76} emptyText={pick(TEXT.noCostChart, pt)}
     series={[{ key: 'cost', name: pick(TEXT.costPerDelivery, pt), color: '#818cf8', pick: g => g.metrics.costPerPublishedUSD }]} />
 }

@@ -288,6 +288,15 @@ describe('groups, prior window and the reply', () => {
     expect(Number.isFinite(r.range.days)).toBe(true)
   })
 
+  test('the trend groups are weekly when the axis is day (a day is too few deliveries for a rate), otherwise the same groups', () => {
+    const day = buildMetrics(set, { groupBy: 'day' }, NOW)
+    expect(day.groups.length).toBeGreaterThan(day.trendGroups.length)
+    expect(day.trendGroups.every(g => /^\d{4}-\d{2}-\d{2}$/.test(g.key))).toBe(true)
+    expect(day.trendGroups.reduce((n, g) => n + g.metrics.published, 0)).toBe(day.summary.published) // nothing lost in the regrouping
+    const ver = buildMetrics(set, { groupBy: 'version' }, NOW)
+    expect(ver.trendGroups).toBe(ver.groups)
+  })
+
   test('data exists but the filters leave nothing: anyData stays true', () => {
     const r = buildMetrics(set, { versions: ['9.9.9'] }, NOW)
     expect(r.anyData).toBe(true)

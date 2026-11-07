@@ -361,6 +361,8 @@ export interface MetricsReply {
   /** The window of the same length just before the filtered one; null when the period is open or a version is chosen. */
   prior: Metrics | null
   groups: MetricGroup[]
+  /** The groups the quality and cost TRENDS draw: weekly when `groupBy` is day (a day holds too few deliveries for a rate), else `groups`. */
+  trendGroups: MetricGroup[]
   /** Throughput of published deliveries per 7 days over the range. */
   perWeek: number | null
   funnel: FunnelRow[]
@@ -399,6 +401,7 @@ export function buildMetrics(all: readonly MetricItem[], f: MetricFilters, nowMs
   const days = Math.max(1, Math.round((toMs - fromMs) / DAY))
   const groupBy = effectiveGroupBy(f.groupBy ?? 'day', days)
   const summary = computeMetrics(items)
+  const groups = buildGroups(items, groupBy, { fromMs, toMs })
 
   let prior: Metrics | null = null
   if (f.fromMs !== undefined && f.toMs !== undefined && !f.versions?.length) {
@@ -463,7 +466,8 @@ export function buildMetrics(all: readonly MetricItem[], f: MetricFilters, nowMs
   return {
     generatedAt: new Date(nowMs).toISOString(), nowMs, timezone: 'America/Sao_Paulo', filters: { ...f, groupBy },
     range: { fromMs, toMs, days }, groupBy, summary, prior,
-    groups: buildGroups(items, groupBy, { fromMs, toMs }),
+    groups,
+    trendGroups: groupBy === 'day' ? buildGroups(items, 'week', { fromMs, toMs }) : groups,
     perWeek: summary.published > 0 ? summary.published / (days / 7) : null,
     funnel, bottleneck, qaByAuthor,
     etaPoints: pub.filter(i => i.eta).map(i => ({ subtaskId: i.subtaskId, title: i.title, predictedMs: i.eta!.predictedMs, actualMs: i.eta!.actualMs, model: i.authorModel, confidence: i.eta!.confidence })),

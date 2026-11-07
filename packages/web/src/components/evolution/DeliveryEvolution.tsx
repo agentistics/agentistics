@@ -119,12 +119,12 @@ export function DeliveryEvolution({ lang, filters, currency, brlRate }: { lang: 
           <Step n={3} title={pick(TEXT.step3, pt)} />
           <div style={grid(3)}>
             <Card id="lead" icon={<Clock size={14} />} title={pick(TEXT.leadTitle, pt)} caption={pick(TEXT.leadCap(group), pt)}><LeadTrend reply={reply} pt={pt} height={190} /></Card>
-            <Card id="quality" icon={<RotateCcw size={14} />} title={pick(TEXT.qualityTitle, pt)} caption={pick(TEXT.qualityCap, pt)}><QualityTrend reply={reply} pt={pt} height={190} /></Card>
-            <Card id="cost" icon={<Coins size={14} />} title={pick(TEXT.costTitle, pt)} caption={pick(TEXT.costCap(group), pt)}><CostTrend reply={reply} pt={pt} height={190} cost={cost} /></Card>
+            <Card id="quality" icon={<RotateCcw size={14} />} title={pick(TEXT.qualityTitle, pt)} caption={pick(TEXT.qualityCap(reply.groupBy === 'day'), pt)}><QualityTrend reply={reply} pt={pt} height={190} /></Card>
+            <Card id="cost" icon={<Coins size={14} />} title={pick(TEXT.costTitle, pt)} caption={pick(TEXT.costCap(reply.groupBy === 'day' ? pick(TEXT.weekWord, pt) : group), pt)}><CostTrend reply={reply} pt={pt} height={190} cost={cost} /></Card>
           </div>
 
           <Step n={4} title={pick(TEXT.step4, pt)} />
-          <div style={grid(4)}>
+          <div style={grid(2)}>
             <Card id="qa-by-model" icon={<RotateCcw size={14} />} title={pick(TEXT.qaByModel, pt)} caption={pick(TEXT.qaByModelCap, pt)}>
               <HBars bars={qaBars(reply, pt)} empty={pick(TEXT.noQaBars, pt)} />
             </Card>
