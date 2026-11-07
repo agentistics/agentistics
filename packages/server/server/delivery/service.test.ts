@@ -279,3 +279,14 @@ describe('delivery service', () => {
     expect(calls.emits.find(e => e.type === 'subtarefa.preparada')!.payload).toMatchObject({ subtarefa: 's1', pedido: 'p-1' })
   })
 })
+
+test('two concurrent ticks wake the leader once (the tick is serialised)', async () => {
+  const { svc, calls, advance } = harness()
+  await walkToQa(svc)
+  await svc.block('s1', 'limite', 'conta em 90%', 'leader')
+  const wakesBefore = calls.session.length
+  advance(31 * 60_000)
+  const [a, b] = await Promise.all([svc.tick(), svc.tick()])
+  expect([...a.actions, ...b.actions]).toEqual(['wake s1'])
+  expect(calls.session.length - wakesBefore).toBe(1)
+})

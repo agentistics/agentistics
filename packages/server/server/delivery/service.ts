@@ -353,8 +353,18 @@ export function createDeliveryService(d: DeliveryDeps) {
     return transition(subtaskId, 'ci', { mergeSha: m.mergeSha, detail: `PR #${m.pr} mergeado (${m.mergeSha.slice(0, 9)})` }, actor)
   }
 
-  /** The minute tick: blocked pieces, and CI → publicado on evidence. Idempotent. */
-  const tick = async (): Promise<{ actions: string[] }> => {
+  /**
+   * The minute tick: blocked pieces, and CI → publicado on evidence. Idempotent, and SERIALISED in the process: the
+   * server's own interval and the engine's `entrega-vigiar` timer both call it, and a second tick must read the
+   * `lastWakeAt` the first one wrote rather than wake the leader twice.
+   */
+  let tickChain: Promise<unknown> = Promise.resolve()
+  const tick = (): Promise<{ actions: string[] }> => {
+    const run = tickChain.then(tickOnce, tickOnce)
+    tickChain = run.catch(() => undefined)
+    return run
+  }
+  const tickOnce = async (): Promise<{ actions: string[] }> => {
     const doc = await d.store.read()
     const records = Object.values(doc.deliveries)
     const actions: string[] = []
