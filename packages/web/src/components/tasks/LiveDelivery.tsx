@@ -357,7 +357,12 @@ export function LiveDeliveryView({ lang, reply, replyPeriod, error, nowMs, fleet
   }, [taskIds])
 
   if (error === 'refused') return <Note text={L.refused} />
-  if (reply === null && error !== 'down') return <CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" />
+  if (reply === null && error !== 'down') {
+    // The pop-out (popover, sheet, PiP window) is not the viewport: a `screen` loader centred on the page and
+    // drew beside the popup's middle. Inside it the loader fills the popup's own box instead.
+    if (compact) return <div data-live-loading-box style={{ position: 'relative', height: '100%', minHeight: 240 }}><CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" placement="fill" /></div>
+    return <CenteredLoader size={40} label={L.loading} testId="agentask-live-loading" />
+  }
   if (reply === null) return <Note text={L.down} />
 
   const open = (c: LiveCard) => {
