@@ -209,7 +209,8 @@ export function stageOfStatus(status: string, label?: string): LiveStage | null 
   return null
 }
 
-const QA_NAME = /(^|[^a-z])qa([^a-z]|$)|\bquality\b/i
+const LEADER_NAME = /l[ií]der|leader/i
+const QA_NAME =/(^|[^a-z])qa([^a-z]|$)|\bquality\b/i
 
 interface PieceSession { id: string; harness: string; model: string | null; effort?: string; label?: string; live: boolean; startMs: number | null; activity?: SessionActivity }
 
@@ -677,6 +678,15 @@ export function buildLive(o: {
     const closedWord = /abandon|cancel|closed|encerr|descart|arquiv|won'?t|wont/i
     const closed = p.status === 'abandoned' || closedWord.test(`${p.status} ${o.statusLabel?.(p.status) ?? ''}`)
     if (stage === null) stage = liveSessions.length > 0 && !closed ? 'running' : null
+    // A NEW ROUND on a piece already in review: a live session created AFTER the piece entered review (the book's
+    // own stamp) is new work, so the card follows it — qa for a QA session, running otherwise — and returns to its
+    // review stage by itself when that session ends. A worker that handed back and is still open was created before
+    // review; the leader is never a round. Derived on read only: nothing is written, the delivery record is untouched.
+    if (!rec && p.status === 'in_review' && stage === 'leader') {
+      const since = ms(p.updatedAt)
+      const round = since === null ? [] : liveSessions.filter(s => s.startMs !== null && s.startMs > since && !(s.label && LEADER_NAME.test(s.label)))
+      if (round.length > 0) stage = round.some(s => s.label && QA_NAME.test(s.label)) ? 'qa' : 'running'
+    }
     // LEGACY in-review work (no delivery record): published once a release tag contains the commit it names;
     // with no such commit and nothing alive for 72 h it is not review work any more — it is listed apart, never dropped.
     if (!rec && stage === 'leader' && p.status === 'in_review') {
