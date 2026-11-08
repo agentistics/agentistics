@@ -20,6 +20,11 @@ describe('formatting never turns "not measured" into a number', () => {
     expect(fmtDur(null, true)).toBe('—')
     expect(fmtDur(undefined, false)).toBe('—')
     expect(fmtDur(NaN, true)).toBe('—')
+    // under a minute reads as under a minute — never rounded UP to "1 min"
+    expect(fmtDur(400, true)).toBe('< 1 min')
+    expect(fmtDur(59_000, false)).toBe('< 1 min')
+    expect(fmtDur(60_000, false)).toBe('1 min')
+    expect(fmtDur(0, true)).toBe('0 min')
     expect(fmtDur(20 * 60_000, true)).toBe('20 min')
     expect(fmtDur(90 * 60_000, true)).toBe('1,5 h')
     expect(fmtDur(90 * 60_000, false)).toBe('1.5 h')
@@ -55,6 +60,28 @@ describe('the story built from the reply', () => {
     expect(s).toContain('tempo mediano do pedido até a publicação é de 24 h')
     expect(s).not.toContain('ETA') // no prediction was ever recorded: the clause is absent, not "0%"
     expect(s).not.toContain('custou') // nothing priced
+  })
+  test('under a week there is no "per week on average": the real count and the window are said instead', () => {
+    const DAY = 24 * H
+    const items = buildMetricItems([shipped('a', { createdAtMs: NOW - 2 * DAY, requestedAtMs: null, publishedAtMs: NOW - 2 * DAY + 24 * H, history: [] })], NOW)
+    const r = buildMetrics(items, { fromMs: NOW - 3 * DAY, toMs: NOW }, NOW)
+    expect(r.perWeek).toBeNull()
+    const pt = leadSentence(r, true, cost)
+    expect(pt).not.toContain('por semana')
+    expect(pt).toContain('1 de 1 entregas foram publicadas em 3 dias')
+    const en = leadSentence(r, false, cost)
+    expect(en).not.toContain('per week')
+    expect(en).toContain('1 of 1 deliveries were published in 3 days')
+  })
+  test('one delivery that is not published is said in the singular', () => {
+    const r = reply([shipped('a', { phase: 'qa', publishedAtMs: null, history: [] })])
+    expect(leadSentence(r, false, cost)).toContain('1 delivery in the period, not published yet')
+    expect(leadSentence(r, true, cost)).toContain('1 entrega no período, nenhuma publicada ainda')
+  })
+  test('over a full week the weekly average is stated', () => {
+    const r = reply([shipped('a'), shipped('b')], { fromMs: NOW - 14 * 24 * H, toMs: NOW })
+    expect(r.perWeek).toBe(1)
+    expect(leadSentence(r, false, cost)).toContain('1.0 per week on average')
   })
   test('QA, ETA and cost appear when measured', () => {
     const base = shipped('a', { costUSD: 10, eta: { madeAtMs: T0, predictedAtMs: T0 + 24 * H, confidence: 'high' }, history: [

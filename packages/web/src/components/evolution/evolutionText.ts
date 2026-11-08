@@ -30,6 +30,8 @@ export const TEXT = {
   stable: t('estável', 'stable'),
   noCompare: t('sem comparação neste filtro', 'no comparison for this filter'),
   noPublished: t('Nenhuma publicada no período.', 'None published in the period.'),
+  leadSample: (n: number, of: number) => t(`Medido em ${n} de ${of} publicadas; as outras foram registradas depois de publicar e não têm tempo de espera.`, `Measured on ${n} of ${of} published; the others were recorded after publishing and have no lead time.`),
+  noLeadMeasured: (of: number) => t(`Nenhuma das ${of} publicadas tem tempo de espera medido (foram registradas depois de publicar).`, `None of the ${of} published has a measured lead time (they were recorded after publishing).`),
   noQaYet: t('Nenhuma passou pela QA ainda.', 'None has been through QA yet.'),
   noEtaStored: t('Ainda não há previsões guardadas; o acerto aparece quando as entregas registrarem o ETA previsto.', 'No stored predictions yet; accuracy appears once deliveries record their predicted ETA.'),
   noEtaCount: (n: number) => t(`${n} sem previsão guardada`, `${n} without a stored prediction`),

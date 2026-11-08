@@ -152,7 +152,9 @@ export function buildMetricItems(inputs: readonly MetricInput[], nowMs: number):
     const leftQa = moves.some(m => m.from === 'qa')
     const qaResult: QaResult = !leftQa ? 'pending' : qaRejections === 0 ? 'first_pass' : qaRejections === 1 ? 'rejected_once' : 'rejected_many'
     const published = i.publishedAtMs !== null
-    const leadMs = published ? Math.max(0, i.publishedAtMs! - startMs) : null
+    // A lead time is a span the delivery actually lived. A publish stamped at or before its own start (a backfilled record,
+    // clock skew) has no span: it is UNMEASURED — a clamped 0 would sit in the percentiles as "shipped instantly".
+    const leadMs = published && i.publishedAtMs! > startMs ? i.publishedAtMs! - startMs : null
     // The queue stage includes the wait before the record existed when the owner asked earlier.
     stageMs.queue += Math.max(0, i.createdAtMs - startMs)
     let eta: MetricItem['eta'] = null
@@ -230,6 +232,8 @@ export interface Metrics {
   published: number
   leadP50Ms: number | null
   leadP90Ms: number | null
+  /** Published deliveries whose lead time could be measured (those stamped published at or before their start, e.g. backfilled records, are not) — the sample behind the two percentiles. */
+  leadN: number
   /** Deliveries whose QA verdict is known, how many were sent back at least once, and the rate. */
   qaN: number
   qaRejected: number
@@ -268,7 +272,7 @@ export function computeMetrics(items: readonly MetricItem[]): Metrics {
   for (const b of [...METRIC_STAGES, 'blocked'] as TimeBucket[]) stageAvgMs[b] = pub.length ? sum(pub.map(i => i.stageMs[b])) / pub.length : 0
   return {
     n: items.length, published: pub.length,
-    leadP50Ms: percentile(leads, 0.5), leadP90Ms: percentile(leads, 0.9),
+    leadP50Ms: percentile(leads, 0.5), leadP90Ms: percentile(leads, 0.9), leadN: leads.length,
     qaN: qaDone.length, qaRejected: qaRej.length, qaRejectionRate: rate(qaRej.length, qaDone.length),
     adjustAvg: pub.length ? sum(pub.map(i => i.adjustRounds)) / pub.length : null,
     etaN: etaItems.length, etaHits: etaHits.length, etaRate: rate(etaHits.length, etaItems.length), noEta: pub.length - etaItems.length,
@@ -363,7 +367,7 @@ export interface MetricsReply {
   groups: MetricGroup[]
   /** The groups the quality and cost TRENDS draw: weekly when `groupBy` is day (a day holds too few deliveries for a rate), else `groups`. */
   trendGroups: MetricGroup[]
-  /** Throughput of published deliveries per 7 days over the range. */
+  /** Throughput of published deliveries per 7 days over the range; `null` when the range is under 7 days (then `summary.published` over `range.days` IS the figure). */
   perWeek: number | null
   funnel: FunnelRow[]
   bottleneck: Bottleneck | null
@@ -468,7 +472,9 @@ export function buildMetrics(all: readonly MetricItem[], f: MetricFilters, nowMs
     range: { fromMs, toMs, days }, groupBy, summary, prior,
     groups,
     trendGroups: groupBy === 'day' ? buildGroups(items, 'week', { fromMs, toMs }) : groups,
-    perWeek: summary.published > 0 ? summary.published / (days / 7) : null,
+    // Only over a full week or more: a 3-day window projected to 7 days is a figure nobody measured. Shorter, the reply
+    // carries the real count (`summary.published`) and the window (`range.days`) and no weekly rate.
+    perWeek: summary.published > 0 && days >= 7 ? summary.published / (days / 7) : null,
     funnel, bottleneck, qaByAuthor,
     etaPoints: pub.filter(i => i.eta).map(i => ({ subtaskId: i.subtaskId, title: i.title, predictedMs: i.eta!.predictedMs, actualMs: i.eta!.actualMs, model: i.authorModel, confidence: i.eta!.confidence })),
     blocks,

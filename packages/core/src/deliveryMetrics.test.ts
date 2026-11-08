@@ -279,6 +279,36 @@ describe('groups, prior window and the reply', () => {
     expect(r.blocks[0]!.count).toBe(1)
   })
 
+  test('a window shorter than a week has NO per-week figure (it would project 3 days into 7); a full week or more has one', () => {
+    const DAY = 24 * H
+    const items = buildMetricItems([shipped('a', { base: NOW - 2 * DAY }), shipped('b', { base: NOW - 2 * DAY })], NOW)
+    const short = buildMetrics(items, { fromMs: NOW - 3 * DAY, toMs: NOW }, NOW)
+    expect(short.range.days).toBe(3)
+    expect(short.summary.published).toBe(2)
+    expect(short.perWeek).toBeNull()
+    const week = buildMetrics(items, { fromMs: NOW - 7 * DAY, toMs: NOW }, NOW)
+    expect(week.perWeek).toBe(2)
+    const month = buildMetrics(items, { fromMs: NOW - 28 * DAY, toMs: NOW }, NOW)
+    expect(month.perWeek).toBe(0.5)
+  })
+
+  test('a published delivery with no positive lead (published at or before its start) is UNMEASURED, never a 0 in the percentiles', () => {
+    const bad = shipped('bad', { base: T0, publishedAtMs: T0 })
+    const neg = shipped('neg', { base: T0, publishedAtMs: T0 - H })
+    const items = buildMetricItems([bad, neg], NOW)
+    expect(items.map(i => i.leadMs)).toEqual([null, null])
+    const m = computeMetrics(items)
+    expect(m.published).toBe(2)
+    expect(m.leadN).toBe(0)
+    expect(m.leadP50Ms).toBeNull()
+    expect(m.leadP90Ms).toBeNull()
+    // a measured one beside them is the only one the percentile sees
+    const ok = computeMetrics(buildMetricItems([bad, shipped('ok')], NOW))
+    expect(ok.leadP50Ms).toBe(24 * H)
+    expect(ok.published).toBe(2)
+    expect(ok.leadN).toBe(1)
+  })
+
   test('with no data at all the reply says so', () => {
     const r = buildMetrics([], {}, NOW)
     expect(r.anyData).toBe(false)

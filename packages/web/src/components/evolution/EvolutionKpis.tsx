@@ -76,7 +76,7 @@ export function EvolutionKpis({ reply, pt, cost }: { reply: MetricsReply; pt: bo
       <Kpi hasPrior={p !== null} id="lead" pt={pt} icon={<Clock size={13} />} color="#f5a623" name={pick(TEXT.kpiLead, pt)}
         value={fmtDur(s.leadP50Ms, pt)} unit={s.leadP90Ms !== null ? `p90 ${fmtDur(s.leadP90Ms, pt)}` : undefined}
         delta={p ? deltaOf(s.leadP50Ms, p.leadP50Ms, true) : null} spark={series(m => m.leadP50Ms)}
-        {...(s.published === 0 ? { note: pick(TEXT.noPublished, pt) } : {})} />
+        {...(s.published === 0 ? { note: pick(TEXT.noPublished, pt) } : s.leadN === 0 ? { note: pick(TEXT.noLeadMeasured(s.published), pt) } : s.leadN < s.published ? { note: pick(TEXT.leadSample(s.leadN, s.published), pt) } : {})} />
       <Kpi hasPrior={p !== null} id="published" pt={pt} icon={<CheckCircle2 size={13} />} color="#26b573" name={pick(TEXT.kpiPublished, pt)}
         value={fmtNum(s.published, pt)} unit={pick(TEXT.ofRequested(s.n), pt)}
         delta={p ? deltaOf(s.published, p.published, false) : null} spark={series(m => m.published)} />
