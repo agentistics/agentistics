@@ -691,8 +691,10 @@ export function buildLive(o: {
         // ONE rule with the reconcile (`delivery/antigas.ts`): age alone does not take a delivery still waiting on its leader out of the column.
         let handbackMs: number | null = null
         for (const c of p.comments) if (c.kind === 'handback' && (c.subtaskId ?? null) === (p.sub?.id ?? null)) handbackMs = Math.max(handbackMs ?? 0, ms(c.createdAt) ?? 0)
+        // A task-level piece (no subtask) is never looked up by the reconcile nor decidable by the "old" actions, which are per subtask:
+        // "no proof" was never established for it, so it is `unchecked` (stays in review) rather than old by age alone.
         // A piece the last reconcile proved shipped is on its way to Publicado, not a decision to make.
-        isOld = !(p.sub && o.proven?.has(p.sub.id)) && isAntiga({ hasRecord: false, live: liveSessions.length > 0, updatedMs: ms(p.updatedAt), nowMs: o.nowMs, handbackMs, suggested: !!(p.sub && o.suggestions?.has(p.sub.id)), unchecked: !!(p.sub && o.unchecked?.has(p.sub.id)) })
+        isOld = !(p.sub && o.proven?.has(p.sub.id)) && isAntiga({ hasRecord: false, live: liveSessions.length > 0, updatedMs: ms(p.updatedAt), nowMs: o.nowMs, handbackMs, suggested: !!(p.sub && o.suggestions?.has(p.sub.id)), unchecked: !p.sub || !!o.unchecked?.has(p.sub.id) })
       }
     }
     // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,

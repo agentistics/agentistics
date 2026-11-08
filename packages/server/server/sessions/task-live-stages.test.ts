@@ -389,6 +389,14 @@ describe('Publicado from a release tag, and the legacy review archive (HIGH 3)',
     expect(r.oldReviews).toHaveLength(80)
     expect(r.oldReviews?.[0]).toMatchObject({ old: true, title: 'Sub o0' })
   })
+  test('a task-level piece (no subtasks) is never old by age alone: the reconcile cannot look it up, so "no proof" was never established', () => {
+    const details = [detail({ subtasks: [], sessions: [] }, { status: 'in_review', updatedAt: iso(NOW - 300 * H) })]
+    const r = buildLive({ nowMs: NOW, events: [], details })
+    expect(r.oldReviewsTotal).toBe(0)
+    expect(r.deliveries).toHaveLength(1)
+    expect(r.deliveries[0]).toMatchObject({ stage: 'leader' })
+    expect(r.deliveries[0]!.old).toBeUndefined()
+  })
   test('a fresh review card, or one with a live session, stays in Revisão do líder; a delivery record exempts it', () => {
     const details = [detail({
       subtasks: [reviewSub('fresh', 5), reviewSub('alive', 200), reviewSub('flow', 200)] as never,

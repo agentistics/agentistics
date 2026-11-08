@@ -6,6 +6,7 @@
  * delivery cost", and the two would drift.
  */
 
+import { join } from 'node:path'
 import { buildLive, legacyReviewShaPieces } from './task-live'
 import { dirsForShas } from './release-repos'
 import { publishedAmong } from './release-tags'
@@ -89,8 +90,10 @@ async function fileVersion(file: string): Promise<string> {
 /** Both the book and registry feed the live line: sessions can change without a book write. */
 async function liveSourceVersion(): Promise<string> {
   const { defaultDeliveriesPath } = await import('../delivery/store')
-  const [tasks, sessions, deliveries] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE), fileVersion(defaultDeliveriesPath())])
-  return `${tasks}|${sessions}|${deliveries}`
+  // The reconcile's proof cache decides which pieces are old / proven / unchecked, so a run that rewrites it must not be served a stale split.
+  const proofFile = join(process.env.AGENTISTICS_DIR ?? join(process.env.HOME ?? '', '.agentistics'), 'delivery-proof-cache.json')
+  const [tasks, sessions, deliveries, proofs] = await Promise.all([fileVersion(TASKS_FILE), fileVersion(MANAGED_SESSIONS_FILE), fileVersion(defaultDeliveriesPath()), fileVersion(proofFile)])
+  return `${tasks}|${sessions}|${deliveries}|${proofs}`
 }
 
 // A write is the fast invalidation path; the stat key also catches writes made by another process.

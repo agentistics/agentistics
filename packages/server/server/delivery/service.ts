@@ -1443,7 +1443,8 @@ export function createDeliveryService(d: DeliveryDeps) {
       const live = alive.has(r.subtaskId)
       // H3: somebody is on it. A PR, however well it names the piece, says nothing about what that session is doing now.
       if (live && r.phase !== 'ci') { e.reason = 'sessão viva: fica'; continue }
-      const antiga = () => { if (hasRecord || !isAntiga({ hasRecord, live, updatedMs, nowMs, handbackMs, suggested: !!e.suggestion })) return false; e.bucket = 'antiga'; return true }
+      // A piece this run PROVED shipped is on its way to Published, never "old": the screen and "All" already leave it out, so the count must too.
+      const antiga = () => { if (hasRecord || proofs.outcomes.get(r.subtaskId)?.proven || !isAntiga({ hasRecord, live, updatedMs, nowMs, handbackMs, suggested: !!e.suggestion })) return false; e.bucket = 'antiga'; return true }
       // The quota ran out: what was not reached is not judged. It stays exactly where it is and the next run continues from here.
       // "No proof" is said only of a piece that was LOOKED UP. One that could not be (nothing known about where it worked, gh unreadable, the quota
       // spent) is "could not check": it is not offered as antiga as if it had been, and the next run tries it again.
@@ -1652,6 +1653,8 @@ export function createDeliveryService(d: DeliveryDeps) {
    * below a third) waits longer each time, up to AUTO_BACKOFF_MAX_MS. All of it is kept in the proof cache, so a restart resumes
    * instead of starting over.
    */
+  let antigasRunning: number | null = null // when the running call took the lock
+  const ANTIGAS_LOCK_MS = 10 * 60_000
   let autoRun: Promise<void> | null = null
   const autoReconcile = async (actions: string[]): Promise<void> => {
     if (!(typeof d.autoReconcile === 'function' ? d.autoReconcile() : d.autoReconcile)) return
@@ -1859,10 +1862,16 @@ export function createDeliveryService(d: DeliveryDeps) {
     /** What the last automatic run did and the last run concluded per piece (the Live's suggestion beside an old card). */
     proofOutcomes: async () => { const c = await loadProof(); return { outcomes: c.outcomes, auto: c.auto } },
     antigas: async (o: { action: unknown; ids?: unknown; all?: unknown; version?: unknown; reason?: unknown; expect?: unknown }, actor: string, signal?: AbortSignal): Promise<AntigasReply> => {
+      // ONE run at a time: two writers over the same pieces would count the same piece twice and make the screen's "N of M" a lie.
+      // The lock is this closure's own flag, in memory: a restart starts free, and `finally` frees it on finish, abort and throw alike.
+      // A call that never returns (a hung board write) would hold it for good, so the hold is a lease: past ANTIGAS_LOCK_MS it is stale.
+      if (antigasRunning !== null && d.now() - antigasRunning < ANTIGAS_LOCK_MS) return fail(409, 'antigas_running', 'another run on the old pieces is already going: wait for it to finish, then look again')
+      const mine = d.now()
+      antigasRunning = mine
       try { return await antigas(o, actor, signal) } catch (e) {
         if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
         throw e
-      }
+      } finally { if (antigasRunning === mine) antigasRunning = null }
     },
     queueNext, answerQueue: safe(answerQueue), queueView,
     stage: safe(stage), stageRun: safe(stageRun), dequeue: safe(dequeue), foldGroupMember, qaOpen: safe(qaOpen), ajustesOpen: safe(ajustesOpen), merge: safe(merge), tick,

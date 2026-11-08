@@ -51,6 +51,8 @@ const T = (pt: boolean) => pt ? {
   confirmPublishTitle: (n: number) => `Marcar ${n} ${n === 1 ? 'peça' : 'peças'} como publicadas?`,
   confirmPublish: 'Elas vão para concluídas sem prova, porque você está dizendo que saíram. Uma peça que ainda espera alguém não é tocada.',
   unreachable: 'Não consegui falar com o servidor. Nada mudou nesta peça.',
+  running: 'Já há uma execução em andamento nas peças antigas. Espere ela terminar e confira a lista de novo.',
+  summary: (done: number, left: number, stopped: boolean) => `${stopped ? 'Parado' : 'Terminou'}: ${done} ${done === 1 ? 'peça feita' : 'peças feitas'}, ${left} ${left === 1 ? 'restante' : 'restantes'}.`,
   whyFewer: (shown: number, n: number) => `${shown} ${shown === 1 ? 'peça' : 'peças'} na lista, mas "Todas" age em ${n}: ${shown - n === 1 ? 'a outra é uma tarefa' : `as outras ${shown - n} são tarefas`} sem subtarefas, e essas só se decidem abrindo a tarefa.`,
 } : {
   title: (n: number) => `Old, no record · ${n}`,
@@ -66,6 +68,8 @@ const T = (pt: boolean) => pt ? {
   confirmPublishTitle: (n: number) => `Mark ${n} ${n === 1 ? 'piece' : 'pieces'} as published?`,
   confirmPublish: 'They go to done with no proof, because you are saying they shipped. A piece still waiting on somebody is not touched.',
   unreachable: 'Could not reach the server. Nothing changed on this piece.',
+  running: 'A run on the old pieces is already going. Wait for it to finish, then look at the list again.',
+  summary: (done: number, left: number, stopped: boolean) => `${stopped ? 'Stopped' : 'Finished'}: ${done} ${done === 1 ? 'piece' : 'pieces'} done, ${left} left.`,
   whyFewer: (shown: number, n: number) => `${shown} ${shown === 1 ? 'piece' : 'pieces'} listed, but "All" acts on ${n}: ${shown - n === 1 ? 'the other one is a task' : `the other ${shown - n} are tasks`} with no subtasks, and those can only be decided by opening the task.`,
 }
 
@@ -76,6 +80,7 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [outcomes, setOutcomes] = useState<Record<string, Outcome>>({})
   const [asking, setAsking] = useState<Action | null>(null)
+  const [summary, setSummary] = useState<{ done: number; left: number; stopped: boolean } | null>(null)
   const stopper = useRef<AbortController | null>(null)
   const stopRequested = useRef(false)
   useEffect(() => () => stopper.current?.abort(), [])
@@ -84,7 +89,8 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
   const visible = useMemo(() => items.filter(a => !a.subtaskId || outcomes[a.subtaskId]?.ok !== true), [items, outcomes])
   const actionable = useMemo(() => visible.flatMap(a => (a.subtaskId ? [a.subtaskId] : [])), [visible])
 
-  const send = async (action: Action, ids: readonly string[], chosenVersion: string | undefined, signal?: AbortSignal): Promise<void> => {
+  /** `done` = the pieces the server reported done in this request (its own numbers); `running` = another run holds the lock. */
+  const send = async (action: Action, ids: readonly string[], chosenVersion: string | undefined, signal?: AbortSignal): Promise<{ done: number; running: boolean }> => {
     const fail = (why: string) => setOutcomes(o => ({ ...o, ...Object.fromEntries(ids.map(id => [id, { ok: false, reason: why }])) }))
     try {
       const res = await fetch('/api/deliveries/antigas', {
@@ -92,14 +98,20 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
         body: JSON.stringify({ action, ids, expect: ids.length, ...(action === 'publish' && chosenVersion ? { version: chosenVersion } : {}), ...(action === 'archive' && reason.trim() ? { reason: reason.trim() } : {}) }),
       })
       const body = await res.json().catch(() => ({})) as { done?: Array<{ subtaskId: string; ok: boolean; reason?: string; code?: 'no_session' }>; sentence?: string; error?: string }
-      if (!res.ok) { fail(body.sentence ?? body.error ?? String(res.status)); return }
+      if (!res.ok) {
+        if (body.error === 'antigas_running') { fail(L.running); return { done: 0, running: true } }
+        fail(body.sentence ?? body.error ?? String(res.status)); return { done: 0, running: false }
+      }
       setOutcomes(o => ({ ...o, ...Object.fromEntries((body.done ?? []).map(x => [x.subtaskId, { ok: x.ok, ...(x.reason ? { reason: x.reason } : {}), ...(x.code ? { code: x.code } : {}) }])) }))
+      return { done: (body.done ?? []).filter(x => x.ok).length, running: false }
     } catch (e) {
       if ((e as { name?: string }).name !== 'AbortError') fail(L.unreachable)
+      return { done: 0, running: false }
     }
   }
   const one = async (action: Action, id: string, chosenVersion?: string) => {
     setProgress({ done: 0, total: 1 })
+    setSummary(null)
     await send(action, [id], chosenVersion ?? (version.trim() || undefined))
     setProgress(null)
   }
@@ -109,11 +121,18 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
     stopper.current = ac
     stopRequested.current = false
     setProgress({ done: 0, total: ids.length })
+    setSummary(null)
+    let made = 0
+    let blocked = false
     // "Stop" lets the batch in flight finish, so the list says exactly what happened; leaving the screen aborts it (the server then stops too).
     for (let at = 0; at < ids.length && !stopRequested.current && !ac.signal.aborted; at += ANTIGAS_CHUNK) {
-      await send(action, ids.slice(at, at + ANTIGAS_CHUNK), version.trim() || undefined, ac.signal)
+      const r = await send(action, ids.slice(at, at + ANTIGAS_CHUNK), version.trim() || undefined, ac.signal)
+      made += r.done
+      if (r.running) { blocked = true; break } // another run holds the lock: every further chunk would be refused the same way
       setProgress({ done: Math.min(ids.length, at + ANTIGAS_CHUNK), total: ids.length })
     }
+    // The numbers are the server's own: what it reported done, and what is left of the batch this screen set out to do.
+    if (!ac.signal.aborted) setSummary({ done: made, left: ids.length - made, stopped: stopRequested.current || blocked })
     stopper.current = null
     setProgress(null)
   }
@@ -144,6 +163,7 @@ export function LiveAntigas({ open, items, pt, mobile, onClose, onOpen }: LiveAn
             <input data-live-antigas-reason value={reason} onChange={e => setReason(e.target.value)} placeholder={L.reason} aria-label={L.reason} style={{ ...field, width: mobile ? '100%' : 160 }} />
             <button type="button" data-live-antigas-all-archive disabled={busy || actionable.length === 0} onClick={() => setAsking('archive')} style={btn()}>{L.archive} · {L.all(actionable.length)}</button>
           </div>
+          {summary && !busy && <p role="status" data-live-antigas-summary style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 12 }}>{L.summary(summary.done, summary.left, summary.stopped)}</p>}
           {visible.length !== actionable.length && <p data-live-antigas-why style={{ margin: 0, color: 'var(--text-tertiary)', fontSize: 11.5 }}>{L.whyFewer(visible.length, actionable.length)}</p>}
           {/* On a phone the sheet itself is the one scroller, with its footer pinned; a second one inside it fights the thumb. */}
           <ul className="ag-scroll" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8, ...(mobile ? {} : { maxHeight: 'calc(46vh / var(--ui-zoom, 1))', overflowY: 'auto' as const, overscrollBehavior: 'contain' as const }) }}>

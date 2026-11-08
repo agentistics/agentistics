@@ -370,6 +370,33 @@ test('H6: "All" asks first, sends exactly the ids it counted, answers in batches
   } finally { globalThis.fetch = realFetch; localStorage.clear() }
 })
 
+test('run lock + end of run: a 409 antigas_running stops the batch with one sentence, and the end says how many were done and how many are left', async () => {
+  localStorage.clear()
+  const old = Array.from({ length: 25 }, (_, i) => ({ ...reply.deliveries[0]!, key: `t/o${i}`, subtaskId: `o${i}`, title: `Old review ${i}`, stage: 'leader', sessionIds: [], old: true }))
+  localStorage.setItem('agentask.live.view', JSON.stringify({ tab: 'all' }))
+  let calls = 0
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    calls++
+    const body = JSON.parse(String(init.body)) as { ids: string[] }
+    if (calls === 1) return new Response(JSON.stringify({ ok: true, done: body.ids.map(id => ({ subtaskId: id, ok: true })) }), { status: 200 })
+    return new Response(JSON.stringify({ ok: false, error: 'antigas_running', sentence: 'x' }), { status: 409 })
+  }) as typeof fetch
+  try {
+    const host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+    await act(async () => { root!.render(createElement(Router, null, createElement(Live, { ...props('en'), reply: { ...reply, deliveries: old } as never }))) })
+    await act(async () => (document.querySelectorAll('[data-live-tabs] [role="tab"]')[3] as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-open]') as HTMLElement).click())
+    await act(async () => (document.querySelector('[data-live-antigas-all-archive]') as HTMLElement).click())
+    const buttons = Array.from(document.querySelectorAll('button')).filter(b => b.textContent === 'Archive')
+    await act(async () => { buttons.at(-1)!.click(); await new Promise(r => setTimeout(r, 10)) })
+    expect(calls).toBe(2) // the refused chunk ends the batch: no further request is made
+    const list = document.querySelector('[data-live-antigas]')!
+    expect(list.textContent).toContain('A run on the old pieces is already going')
+    expect(list.querySelector('[data-live-antigas-summary]')!.textContent).toBe('Stopped: 5 pieces done, 20 left.')
+  } finally { globalThis.fetch = realFetch; localStorage.clear() }
+})
+
 test('LOW 11: on a phone the Líderes pill, its rows and the filter chip\'s remove control are 44 px targets', async () => {
   const { LiveLeaders } = await import('./LiveLeaders')
   const { LiveTaskFilter } = await import('./LiveTaskFilter')

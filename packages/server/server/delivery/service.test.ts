@@ -2311,6 +2311,17 @@ describe('reconcile r2: the card\'s repository, the quota, and the buttons', () 
     expect(out.ok && out.summary).toMatchObject({ unknown: 1, ciRed: 0, toCi: 0, published: 0 })
   })
 
+  test('a piece the run PROVED (release unreadable) is not counted antiga: the dry run counts what the screen and "All" count', async () => {
+    const h = harness({ status: 'in_review', sessions: [], batchPrs: { [PUBLIC]: [listing('lists s2')] }, ...GREEN }, { pieceHints: DECLARED(7), reviewPieces: async () => [old] })
+    const real = h.facts.gh
+    h.facts.gh = async (c, args) => { if (args[0] === 'run') throw new Error('gh: HTTP 502'); return real(c, args) }
+    const out = await h.svc.reconcile({}, 'owner')
+    expect(out.ok && out.entries[0]).toMatchObject({ releaseGate: 'unknown' })
+    expect(out.ok && out.entries[0]!.bucket).toBeUndefined()
+    expect(out.ok && out.summary.antigas).toBe(0)
+    expect((await h.svc.proofOutcomes()).outcomes.get('s2')?.proven).toBe(true)
+  })
+
   test('H6: `expect` is the number the person saw: a different one changes nothing', async () => {
     const closed: string[] = []
     const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old], closeLegacy: async id => { closed.push(id); return { ok: true } } })
@@ -2319,6 +2330,36 @@ describe('reconcile r2: the card\'s repository, the quota, and the buttons', () 
     expect(closed).toEqual([])
     expect((await h.svc.antigas({ action: 'archive', all: true, expect: 1 }, 'owner')).ok).toBe(true)
     expect(closed).toEqual(['s2'])
+  })
+
+  test('run lock: a second call while one runs answers 409 antigas_running and changes nothing; the lock frees on finish', async () => {
+    const closed: string[] = []
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    const two = [old, { ...old, id: 's3' }]
+    const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => two, closeLegacy: async id => { closed.push(id); await gate; return { ok: true } } })
+    const first = h.svc.antigas({ action: 'archive', ids: ['s2'] }, 'owner')
+    await new Promise(r => setTimeout(r, 20))
+    const second = await h.svc.antigas({ action: 'archive', ids: ['s3'] }, 'owner')
+    expect(!second.ok && second.status).toBe(409)
+    expect(!second.ok && second.code).toBe('antigas_running')
+    expect(closed).toEqual(['s2'])
+    release()
+    expect((await first).ok).toBe(true)
+    expect((await h.svc.antigas({ action: 'archive', ids: ['s3'] }, 'owner')).ok).toBe(true)
+    expect(closed).toEqual(['s2', 's3'])
+  })
+
+  test('run lock: a throw inside a run (and a client abort) does not leave the lock held', async () => {
+    let boom = true
+    const h = harness({ status: 'in_review', sessions: [] }, { reviewPieces: async () => [old], closeLegacy: ((id: string) => { if (boom) throw new Error('boom'); return Promise.resolve({ ok: true as const }) }) as never })
+    await expect(h.svc.antigas({ action: 'archive', ids: ['s2'] }, 'owner')).rejects.toThrow('boom')
+    boom = false
+    expect((await h.svc.antigas({ action: 'archive', ids: ['s2'] }, 'owner')).ok).toBe(true)
+    const ac = new AbortController(); ac.abort()
+    const stopped = await h.svc.antigas({ action: 'archive', ids: ['s2'] }, 'owner', ac.signal)
+    expect(stopped.ok && stopped.stopped).toBe(true)
+    expect((await h.svc.antigas({ action: 'archive', ids: ['s2'] }, 'owner')).ok).toBe(true)
   })
 
   test('H6: the client gave up: the pieces not reached are left alone, and the reply says so', async () => {
