@@ -28,6 +28,12 @@ describe('matchBatchPr — which merged release PR lists a piece', () => {
     expect(r.ok).toBe(false)
     expect(!r.ok && r.ambiguous).toBe(true)
   })
+  test('a tie at one tier is narrowed by another tier\'s evidence; a tie that stays carries its candidates', () => {
+    const narrowed = matchBatchPr([pr(1, 'lists fix/metricas-soma'), pr(2, 'lists fix/metricas-soma and s-8728082f37')], piece({ branches: ['fix/metricas-soma'] }))
+    expect(narrowed.ok && narrowed.pr.number).toBe(2)
+    const tie = matchBatchPr([pr(1, 'lists s-8728082f37'), pr(2, 'lists s-8728082f37')], piece())
+    expect(!tie.ok && tie.candidates?.map(c => c.number)).toEqual([1, 2])
+  })
   test('the same PR seen twice (two lists) is one candidate, not an ambiguity', () => {
     expect(matchBatchPr([pr(9, 'has s-8728082f37'), pr(9, 'has s-8728082f37')], piece()).ok).toBe(true)
   })
