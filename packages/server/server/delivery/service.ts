@@ -21,7 +21,8 @@ import {
   EDGES, GATES, adoptPhase, isGate, isPhase, isPureAdoption, newDelivery, planBlock, planTransition, planUnblock, planWatch,
   refusalStatus, unlockerOf, type DeliveryCi, type DeliveryRecord, type GateName, type Phase, type TransitionInput, type TransitionRefusal,
 } from './machine'
-import { judgePredispatch, releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
+import { DEFAULT_RELEASE_REPO, findMergedPr, judgePredispatch, releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
+import { MERGE_PHASES, MERGE_SCAN_PER_TICK, currentNote, mergeScanDue, mergeScanOrder, planReviewNudges, type ReconcileEntry } from './ciclo'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 import { sharedQueueArea } from './queue-fit'
 import {
@@ -68,7 +69,13 @@ export interface DeliveryDeps {
   requests?(): Promise<OwnerRequestFact[] | null>
   /** The name a person gave an account ("Vini"); null = none known (the question then leaves the account out, never an id). */
   accountName?(harness: string, account: string): Promise<string | null>
+  /** Board pieces shown In review / PR · merge / CI with NO delivery record yet (the backfill adopts them). Optional. */
+  reviewPieces?(): Promise<Array<{ id: string; taskId: string; title: string; status: string }>>
 }
+
+export type ReconcileReply =
+  | { ok: true; status: 200; apply: boolean; entries: ReconcileEntry[]; moved: number; unproven: number }
+  | Extract<DeliveryReply, { ok: false }>
 
 /** FILA.PRIORIDADE — one queued piece as the Fila tab, the Live card and the MCP read it (ONE source). */
 export interface QueueViewItem {
@@ -122,8 +129,11 @@ const BOARD_MOVE_MAX_TRIES = 10
 /** How many pieces one leader message lists; the rest is a count. */
 const WAKE_LIST_MAX = 5
 
-/** The repository a release belongs to when `flow release` is not given `--repo`. */
-export const DEFAULT_RELEASE_REPO = 'agentistics/agentistics'
+/** The repository a release belongs to when `flow release` is not given `--repo` (defined beside the gates that read it). */
+export { DEFAULT_RELEASE_REPO }
+
+/** The actor the backfill writes as: transitions it makes are recorded, never announced piece by piece. */
+export const RECONCILE_ACTOR = 'flow:reconcile'
 
 const RELEASE_POLL_MIN_MS = 60_000
 const RELEASE_POLL_MAX_MS = 10 * 60_000
@@ -191,8 +201,13 @@ export function createDeliveryService(d: DeliveryDeps) {
     const skipNote = after.skips.length > before.skips.length ? ` Portão humano para ${after.skips.at(-1)!.phase}: pulado: modo autônomo (o líder decide).` : ''
     await guard('comment', () => d.board.comment(after.taskId, after.subtaskId, `[fluxo entrega] ${before.phase} → ${after.phase} (rev ${after.revision}) por ${actor}.${last?.detail ? ` ${last.detail}` : ''}${skipNote}`))
     await guard('emit', () => d.emit('entrega.etapa', { subtarefa: after.subtaskId, taskId: after.taskId, fase: after.phase, de: before.phase, revisao: after.revision, ...(after.origin ? { volta_para: after.origin } : {}), ...(after.block ? { motivo: after.block.reason } : {}) }))
+    // The one-shot backfill (`flow reconcile --release`) only records the past: it wakes nobody and rings no bell per piece —
+    // the report it returns is the one account of what moved.
+    if (actor === RECONCILE_ACTOR) return
     // Each transition fires the next step by itself.
     const t = `${before.phase}>${after.phase}`
+    // Only the tick's own detection is announced: a leader's `flow release` declaration already knows what it did.
+    if (t === 'revisao_lider>ci' && actor === 'flow:entrega') await wake(after,`o PR #${after.pr ?? '?'} já foi mergeado (${after.mergeSha?.slice(0, 9) ?? '?'}): o fluxo moveu a peça para ci sozinho; ela publica quando a primeira tag que contém o merge tiver a release.yml verde.`, warnings)
     const author = after.authorSessionId
     if (t === 'executando>qa' || t === 'ajuste>qa') await wake(after, `pronta para QA no sha ${after.headSha?.slice(0, 9) ?? '?'}. Abra o QA em OUTRO modelo (agentop flow qa open --subtask ${after.subtaskId}); o veredito vai por agentistics_task_phase to=revisao_lider|ajuste.`, warnings)
     if (t === 'qa>revisao_lider') await wake(after, `QA APROVADO no sha ${after.qaSha?.slice(0, 9) ?? '?'} (${after.qaModel ?? '?'} sobre ${after.authorModel ?? '?'}). Revise esse sha e mova para pr_merge (reviewedSha) ou ajuste.`, warnings)
@@ -267,6 +282,7 @@ export function createDeliveryService(d: DeliveryDeps) {
       const cur = doc.deliveries[subtaskId]
       if (!cur) return null
       absorb(cur, name, v)
+      if (!actor.startsWith('flow:')) cur.leaderTouchedAt = iso(d)
       return structuredClone(cur)
     })
     if (!after) return fail(404, 'no_delivery', 'the delivery record vanished')
@@ -371,6 +387,7 @@ export function createDeliveryService(d: DeliveryDeps) {
       const del = patch.allowDeletions as { paths?: unknown; reason?: unknown } | undefined
       if (del && Array.isArray(del.paths) && typeof del.reason === 'string' && del.reason.trim()) cur.allowDeletions = { paths: del.paths.filter((p): p is string => typeof p === 'string'), reason: del.reason.trim() }
       cur.updatedAt = iso(d)
+      if (!actor.startsWith('flow:')) cur.leaderTouchedAt = iso(d) // a leader acting on the piece restarts its reminder clock
       return structuredClone(cur)
     })
     await d.board.comment(after.taskId, subtaskId, `[fluxo entrega] configuração por ${actor}: ${Object.keys(patch).join(', ')}.`).catch(() => undefined)
@@ -1233,6 +1250,153 @@ export function createDeliveryService(d: DeliveryDeps) {
     }
   }
 
+  // ------------------------------------------------------------------------------------ FLUXO.CICLO-COMPLETO
+
+  /** The tick's reason for a piece, recorded only while it is still at the phase/revision it was concluded for. */
+  const writeNote = (r: DeliveryRecord, reason: string, failed: boolean) => d.store.update(x => {
+    const c = x.deliveries[r.subtaskId]
+    if (!c || c.phase !== r.phase || c.revision !== r.revision) return false
+    c.tickNote = { at: iso(d), phase: c.phase, revision: c.revision, reason, ...(failed ? { failed: true } : {}) }
+    return true
+  })
+
+  /**
+   * revisao_lider / pr_merge → ci on evidence: the piece's merged PR, found by `findMergedPr` from what the piece records. The
+   * edge's own gates (`delecoes`, `mergeado`) run inside the transition, so a merge from another sha, a merge not on main or a
+   * PR that deleted files is REFUSED with its sentence (recorded as the tick note) and the piece stays — no loop: the next
+   * look-up waits its back-off and the leader is reminded on the review cadence.
+   */
+  const detectMerges = async (records: readonly DeliveryRecord[], actions: string[]) => {
+    const due = records.filter(r => mergeScanDue(r, d.now())).sort(mergeScanOrder).slice(0, MERGE_SCAN_PER_TICK)
+    for (const r of due) {
+      const found = await findMergedPr(r, d.facts)
+      if (!found.ok) { await writeNote(r, found.reason, false); actions.push(`merge-none ${r.subtaskId}`); continue }
+      const patched = await d.store.update(x => {
+        const c = x.deliveries[r.subtaskId]
+        if (!c || c.phase !== r.phase || c.revision !== r.revision) return false
+        c.pr = found.pr
+        if (found.branch && !c.branch) c.branch = found.branch
+        c.mergeDetected = { at: iso(d), pr: found.pr, via: found.via }
+        return true
+      })
+      if (!patched) continue
+      const out = await transition(r.subtaskId, 'ci', { detail: `PR #${found.pr} mergeado (${found.mergeSha.slice(0, 9)}) — detectado pelo fluxo (${found.via})` }, 'flow:entrega')
+      if (out.ok) { actions.push(`merge-detected ${r.subtaskId}:#${found.pr}`); continue }
+      // Refused: the PR is not proof for THIS piece yet. Keep the PR number (information), drop the detection mark, say why.
+      const cur = await d.store.get(r.subtaskId)
+      if (cur && cur.phase === r.phase) {
+        await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && c.phase === r.phase) delete c.mergeDetected })
+        await writeNote(cur, `PR #${found.pr} mergeado, mas o fluxo não pôde movê-la: ${out.sentence}`, true)
+      }
+      actions.push(`merge-refused ${r.subtaskId}:${out.code}`)
+    }
+  }
+
+  /** The timed reminder to the LIVE leader of each waiting piece (`planReviewNudges`): one message per leader per tick, never the owner. */
+  const nudgeLeaders = async (sessions: readonly SessionFact[] | null, actions: string[]) => {
+    const doc = await d.store.read()
+    const due = planReviewNudges(Object.values(doc.deliveries), d.now())
+    if (due.length === 0) return
+    const batches = new Map<string, typeof due>()
+    const nobody: string[] = []
+    for (const n of due) {
+      const r = doc.deliveries[n.subtaskId]!
+      const recordedAlive = r.leaderSessionId && sessions?.some(s => s.id === r.leaderSessionId && s.alive) ? r.leaderSessionId : null
+      const leader = (sessions ? leaderFor(sessions, r.taskId, r.subtaskId) : null) ?? recordedAlive
+      if (!leader) { nobody.push(n.subtaskId); continue }
+      const list = batches.get(leader) ?? []
+      list.push(n)
+      batches.set(leader, list)
+    }
+    const stamp = (ids: string[], sent: boolean) => ids.length === 0 ? Promise.resolve() : d.store.update(x => {
+      for (const id of ids) {
+        const c = x.deliveries[id]
+        if (!c) continue
+        const cur = c.reviewNudge && c.reviewNudge.phase === c.phase && c.reviewNudge.revision === c.revision ? c.reviewNudge
+          : { phase: c.phase, revision: c.revision, sent: c.phase === 'ci' && c.releaseFailNotice ? 1 : 0 }
+        c.reviewNudge = sent ? { ...cur, sent: cur.sent + 1, lastAt: iso(d) } : { ...cur, lastAttemptAt: iso(d) }
+      }
+    })
+    await stamp(nobody, false)
+    for (const id of nobody) actions.push(`review-nudge-no-leader ${id}`)
+    const PHASE_WORD: Partial<Record<Phase, string>> = { revisao_lider: 'em revisão do líder', pr_merge: 'em PR · merge com portão recusado', ci: 'em CI com a release recusada' }
+    for (const [leader, items] of batches) {
+      const lines: string[] = []
+      for (const n of items.slice(0, WAKE_LIST_MAX)) {
+        const title = (await d.facts.subtask(n.subtaskId).catch(() => null))?.title
+        lines.push(`- ${[n.subtaskId, title].filter(Boolean).join(' ')} — ${PHASE_WORD[n.phase] ?? n.phase} há ${Math.round(n.ageMs / 60_000)} min (lembrete ${n.sent + 1}/3)${n.reason ? `: ${n.reason}` : ''}`)
+      }
+      const text = `[entrega revisão] ${items.length === 1 ? 'Uma peça espera' : `${items.length} peças esperam`} uma ação sua:\n${lines.join('\n')}${items.length > WAKE_LIST_MAX ? `\n… e mais ${items.length - WAKE_LIST_MAX}.` : ''}\nSe o PR já foi mergeado o fluxo move a peça sozinho para ci e depois para publicado pela tag; senão revise e mova (agentistics_task_phase to=pr_merge reviewedSha=<sha do QA> | to=ajuste detail=…). Peças antigas já publicadas: agentop flow reconcile --release (agentistics_task_phase action=reconcile).`
+      const reached = await d.notify.session(leader, text).catch(() => false)
+      await stamp(items.map(i => i.subtaskId), reached)
+      for (const i of items) actions.push(`${reached ? 'review-nudge' : 'review-nudge-failed'} ${i.subtaskId}`)
+    }
+  }
+
+  /**
+   * `agentop flow reconcile --release` (MCP `agentistics_task_phase action=reconcile`): the one-shot BACKFILL. Every piece in
+   * revisao_lider / pr_merge / ci (and every board piece shown there with no record yet) is matched to its merged PR and the
+   * FIRST release tag containing the merge. Dry-run by default: the report says what would move and what cannot be proven, with
+   * the reason. `apply` writes through the ordinary transitions (their gates run; `flow:reconcile` announces nothing per piece).
+   */
+  const reconcile = async (o: { apply?: unknown }, actor: string): Promise<ReconcileReply> => {
+    const apply = o.apply === true || o.apply === 'true'
+    const sessions = await d.facts.sessions().catch(() => [] as SessionFact[])
+    const isLeader = sessions.some(s => s.id === actor && s.role === 'leader')
+    if (apply && !(actor === 'owner' || actor.startsWith('flow:') || isLeader)) return fail(403, 'so_o_lider', 'only a leader (or the owner) applies the reconciliation; a dry run is open to anyone')
+    const doc = await d.store.read()
+    const at = iso(d)
+    const pieces: DeliveryRecord[] = Object.values(doc.deliveries).filter(r => !r.dequeued && (MERGE_PHASES.includes(r.phase) || r.phase === 'ci'))
+    for (const p of (await d.reviewPieces?.().catch(() => []) ?? [])) {
+      if (doc.deliveries[p.id] || !SUB_ID.test(p.id)) continue
+      pieces.push(newDelivery({ subtaskId: p.id, taskId: p.taskId, at, phase: adoptPhase(p.status) }))
+    }
+    const entries: ReconcileEntry[] = []
+    for (const r of pieces.sort((a, b) => a.subtaskId.localeCompare(b.subtaskId))) {
+      const title = (await d.facts.subtask(r.subtaskId).catch(() => null))?.title
+      const e: ReconcileEntry = { subtaskId: r.subtaskId, taskId: r.taskId, ...(title ? { title } : {}), from: r.phase }
+      entries.push(e)
+      let probe: DeliveryRecord = structuredClone(r)
+      if (r.phase !== 'ci' || !r.mergeSha) {
+        const found = await findMergedPr(r, d.facts, { search: true })
+        if (!found.ok) { e.reason = found.reason; continue }
+        Object.assign(e, { pr: found.pr, mergeSha: found.mergeSha, via: found.via })
+        probe = { ...probe, phase: 'ci', pr: found.pr, mergeSha: found.mergeSha, mergeDetected: { at, pr: found.pr, via: found.via }, ...(found.branch && !probe.branch ? { branch: found.branch } : {}) }
+        if (probe.versionTarget === 'next') delete probe.versionTarget
+      } else Object.assign(e, { ...(r.pr ? { pr: r.pr } : {}), mergeSha: r.mergeSha })
+      const v = await runGate('release', probe, d.facts)
+      if (v.ok) { e.to = 'publicado'; if (v.patch?.tag) e.tag = v.patch.tag }
+      else { e.to = r.phase === 'ci' ? undefined : 'ci'; e.reason = `release: ${v.reason ?? 'sem evidência'}`; if (!e.to) continue }
+      if (!apply) continue
+      // ---- write: through the ordinary transitions, each running its own gates.
+      if (!(await leads(r, actor))) { e.applied = false; e.reason = 'only the leader of this task (or the owner) applies it'; continue }
+      const got = await ensure(r.subtaskId)
+      if (isReply(got)) { e.applied = false; e.reason = got.ok ? 'record could not be created' : got.sentence; continue }
+      if (got.phase !== 'ci') {
+        await d.store.update(x => {
+          const c = x.deliveries[r.subtaskId]
+          if (!c) return
+          c.pr = probe.pr; if (probe.branch && !c.branch) c.branch = probe.branch
+          c.mergeDetected = probe.mergeDetected
+          if (c.versionTarget === 'next') delete c.versionTarget
+        })
+        // The merge edge's own gates run; a refusal is reported, never forced.
+        const moved = await transition(r.subtaskId, 'ci', { detail: `reconciliação: PR #${probe.pr} mergeado (${probe.mergeSha!.slice(0, 9)}, ${e.via})` }, RECONCILE_ACTOR)
+        if (!moved.ok) {
+          await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && c.phase !== 'ci') delete c.mergeDetected })
+          e.applied = false; e.reason = moved.sentence; e.to = undefined; continue
+        }
+      }
+      if (e.to === 'publicado') {
+        const pub = await transition(r.subtaskId, 'publicado', { detail: `reconciliação: ${e.tag ?? 'tag'} verde contém o merge` }, RECONCILE_ACTOR, new Map([['release', v]]))
+        e.applied = pub.ok
+        if (!pub.ok) { e.reason = pub.sentence; e.to = 'ci' }
+      } else e.applied = true
+    }
+    const moved = entries.filter(e => e.to && e.applied !== false).length
+    return { ok: true, status: 200, apply, entries, moved, unproven: entries.length - moved }
+  }
+
   const tickOnce = async (): Promise<{ actions: string[] }> => {
     const actions: string[] = []
     await cleanQueue(actions)
@@ -1326,6 +1490,8 @@ export function createDeliveryService(d: DeliveryDeps) {
     }
     // FILA.PRIORIDADE — `fila-proximo`: the next queued piece, when a slot is free. It never breaks the rest of the tick.
     await queueNextOnce(actions).catch(e => { if (e instanceof DeliveryStoreUnreadable) throw e; actions.push(`fila-erro: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`) })
+    // FLUXO.CICLO-COMPLETO — a merged PR moves its piece to ci by itself (the next tick publishes it from the tag).
+    await detectMerges(records, actions).catch(e => { if (e instanceof DeliveryStoreUnreadable) throw e; actions.push(`merge-erro: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`) })
     const releaseVerdicts = new Map<string, GateVerdict>()
     for (const r of records.filter(x => x.phase === 'ci')) {
       // Back off the gh polling: a piece that has sat in `ci` a while is polled less often (a tenth of its age, 1..10 min).
@@ -1342,7 +1508,9 @@ export function createDeliveryService(d: DeliveryDeps) {
         // The verdict just obtained is handed to the transition (one gh poll per piece per tick, not two).
         const out = await transition(r.subtaskId, 'publicado', { detail: 'release.yml verde e tag publicada' }, 'flow:entrega', new Map([['release', v]]))
         actions.push(`publish ${r.subtaskId}:${out.ok}`)
-      } else if (releaseFailed(v) && r.declaredRelease) {
+        if (!out.ok) await writeNote(r, `release verde, mas a publicação foi recusada: ${out.sentence}`, true)
+      } else if (releaseFailed(v) && (r.declaredRelease || r.mergeDetected)) {
+        await writeNote(r, v.reason ?? 'release.yml falhou', true)
         // A piece the leader DECLARED is never sent back to the review by the tick: its release is not a PR merge the flow
         // made, and the leader already knows what is in it. The tag's own run is red, so it stays in `ci` with the reason,
         // and the leader is woken ONCE (`releaseFailNotice`); a later green run publishes it.
@@ -1356,9 +1524,12 @@ export function createDeliveryService(d: DeliveryDeps) {
       else {
         const changed = v.patch?.ci && JSON.stringify(v.patch.ci) !== JSON.stringify(r.ci)
         await d.store.update(x => { const c = x.deliveries[r.subtaskId]; if (c && c.phase === 'ci' && c.revision === r.revision) absorb(c, 'release', v) })
+        await writeNote(r, v.reason ?? 'a release ainda não tem evidência', false)
         if (changed) await d.board.setCi(r.subtaskId, v.patch!.ci!).catch(() => undefined)
       }
     }
+    // FLUXO.CICLO-COMPLETO — whatever still waits on a person is reminded to the task's LIVE leader on a timer.
+    await nudgeLeaders(sessions, actions).catch(e => { if (e instanceof DeliveryStoreUnreadable) throw e; actions.push(`nudge-erro: ${e instanceof Error ? e.message.split('\n')[0] : String(e)}`) })
     return { actions }
   }
 
@@ -1375,6 +1546,12 @@ export function createDeliveryService(d: DeliveryDeps) {
       try { return await release(o, actor) } catch (e) {
         if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
         return fail(500, 'store_erro', `the release could not be written (${e instanceof Error ? e.message.split('\n')[0] : String(e)}); the batch write is all-or-nothing and the verb is idempotent — run it again`) as Extract<DeliveryReply, { ok: false }>
+      }
+    },
+    reconcile: async (o: { apply?: unknown }, actor: string): Promise<ReconcileReply> => {
+      try { return await reconcile(o, actor) } catch (e) {
+        if (e instanceof DeliveryStoreUnreadable) return fail(503, 'store_ilegivel', e.message) as Extract<DeliveryReply, { ok: false }>
+        throw e
       }
     },
     queueNext, answerQueue: safe(answerQueue), queueView,

@@ -11,6 +11,8 @@
  *   POST /api/deliveries/<subtaskId>      { action: phase|gate|block|unblock|dequeue|queue-answer|approve|configure|step|stage|stage-run|merge, … }
  *   GET  /api/deliveries/queue[/<taskId>] the queue in leaving order (FILA.PRIORIDADE), every fact the Fila tab shows
  *   POST /api/deliveries/queue-next       run `fila-proximo` now (a worker ended)
+ *   POST /api/deliveries/reconcile        { apply?: boolean } the one-shot backfill: pieces in revisao_lider/pr_merge/ci matched to
+ *                                         their merged PR and first release tag (dry-run unless `apply`; applying: a leader or the owner)
  */
 import type { DeliveryReply, DeliveryService } from './service'
 
@@ -38,7 +40,8 @@ export async function deliveryRequest(method: string, path: string, body: Record
   }
   if (method === 'GET') {
     const rec = await d.service.get(decodeURIComponent(rest))
-    return rec ? { status: 200, body: { record: rec } } : { status: 404, body: { error: 'no_delivery', sentence: `no delivery record for ${rest} yet` } }
+    // `tickReason`: why the minute tick has not moved the piece (merge not found, a gate refused, the tag not out yet).
+    return rec ? { status: 200, body: { record: rec, ...(rec.tickNote && rec.tickNote.phase === rec.phase && rec.tickNote.revision === rec.revision ? { tickReason: rec.tickNote.reason, tickReasonAt: rec.tickNote.at } : {}) } } : { status: 404, body: { error: 'no_delivery', sentence: `no delivery record for ${rest} yet` } }
   }
   if (method !== 'POST') return { status: 405, body: { error: 'method' } }
   // Who asks. A body naming a session must PROVE it; no session at all is the owner (the board's own rule).
@@ -48,6 +51,12 @@ export async function deliveryRequest(method: string, path: string, body: Record
   const actor = session ?? 'owner'
   if (rest === 'tick') return { status: 200, body: await d.service.tick() }
   if (rest === 'queue-next') return { status: 200, body: await d.service.queueNext() }
+  if (rest === 'reconcile') {
+    const r = await d.service.reconcile({ apply: body.apply }, actor)
+    return r.ok
+      ? { status: 200, body: { ok: true, apply: r.apply, moved: r.moved, unproven: r.unproven, entries: r.entries } }
+      : { status: r.status, body: { ok: false, error: r.code, sentence: r.sentence, missing: r.missing } }
+  }
   if (rest === 'release') {
     const r = await d.service.release({ version: body.version, mergeSha: body.mergeSha, repo: body.repo, subtaskIds: body.subtaskIds }, actor)
     return r.ok

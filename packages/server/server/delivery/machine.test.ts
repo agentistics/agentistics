@@ -18,7 +18,8 @@ function sitting(phase: Phase, extra: Partial<DeliveryRecord> = {}): DeliveryRec
   const ok = (g: GateName) => ({ ok: true, at, revision: r.revision })
   for (const g of ['predispatch', 'vaga', 'salvo', 'qa-modelo', 'cabeca', 'delecoes', 'mergeado', 'release'] as GateName[]) r.gates[g] = ok(g)
   // The `mergeado` gate establishes the merge sha from the PR; a record sitting in pr_merge carries it as the gate would have left it.
-  if (phase === 'pr_merge') r.mergeSha = 'm1'
+  // So does a review the tick found MERGED (FLUXO.CICLO-COMPLETO: revisao_lider → ci).
+  if (phase === 'pr_merge' || phase === 'revisao_lider') r.mergeSha = 'm1'
   return r
 }
 
@@ -27,6 +28,7 @@ const inputFor: Record<string, TransitionInput> = {
   'qa>ajuste': { verdict: 'REPROVADO', findings: 'button misaligned' },
   'revisao_lider>pr_merge': { reviewedSha: 'abc' },
   'revisao_lider>ajuste': { detail: 'rename the flag' },
+  'revisao_lider>ci': { detail: 'PR #7 merged — found by the flow' },
   'pr_merge>revisao_lider': { detail: 'merge conflict' },
   'ci>revisao_lider': { detail: 'release.yml failed' },
 }

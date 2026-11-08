@@ -3,7 +3,7 @@
  *
  *   fila → executando → qa → { aprovado: revisao_lider | reprovado: ajuste }
  *   ajuste → qa                                   (ajuste NEVER goes straight to revisao_lider)
- *   revisao_lider → { ok: pr_merge | pede mudança: ajuste }
+ *   revisao_lider → { ok: pr_merge | pede mudança: ajuste | PR já mergeado (o tick detecta): ci }
  *   pr_merge → { merge ok: ci | falhou: revisao_lider }
  *   ci → { release.yml verde + tag: publicado | falhou: revisao_lider }
  *   bloqueado ← any phase but publicado, and back to the STORED origin phase only.
@@ -172,6 +172,12 @@ export interface DeliveryRecord {
   releaseRepo?: string
   /** Present only for a piece the leader DECLARED through `flow release`. The tick never sends such a piece back to the review. */
   declaredRelease?: { version: string; mergeSha: string; repo: string; at: string; by: string }
+  /**
+   * FLUXO.CICLO-COMPLETO — the flow FOUND this piece's PR merged (the leader merged it without moving the piece). Like a declared
+   * release it is published by the first tag that contains the merge and is never bounced back to the review by a red run of
+   * the merge commit (that would loop: the next tick finds the same merged PR).
+   */
+  mergeDetected?: { at: string; pr: number; via: string }
   /** The tag's own release run was red: the leader was told once (ISO + reason); the piece stays in `ci` until it is green. */
   releaseFailNotice?: { at: string; reason: string }
   gates: Partial<Record<GateName, GateResult>>
@@ -185,6 +191,16 @@ export interface DeliveryRecord {
   allowDeletions?: { paths: string[]; reason: string }
   /** The step of the CURRENT phase last reported (Live per-phase %). */
   step?: number
+  /**
+   * FLUXO.CICLO-COMPLETO — what the minute tick last concluded about this piece in its CURRENT phase (merge detection in
+   * revisao_lider/pr_merge, the release gate in ci): the sentence a reader needs to know why it has not moved. Cleared on
+   * every transition; never a decision, only the tick's reason.
+   */
+  tickNote?: { at: string; phase: Phase; revision: number; reason: string; /** A gate REFUSED (as opposed to "not yet"): the piece waits on the leader. */ failed?: boolean }
+  /** The last time the task's LEADER acted on this piece without moving it (a gate, a configure, a step). Restarts the review clock. */
+  leaderTouchedAt?: string
+  /** FLUXO.CICLO-COMPLETO — the timed reminder to the live leader for a piece waiting on them (one per phase/revision, max 3). */
+  reviewNudge?: { phase: Phase; revision: number; sent: number; lastAt?: string; lastAttemptAt?: string }
   history: DeliveryHistoryEntry[]
   createdAt: string
   updatedAt: string
@@ -268,6 +284,12 @@ export const EDGES: Readonly<Record<string, Edge>> = {
     ],
   },
   'revisao_lider>ajuste': { gates: [], needs: [detail('o pedido de mudança do líder (detail)')] },
+  // FLUXO.CICLO-COMPLETO: the leader merged the PR without moving the piece. The merge IS the leader's review; the same two
+  // merge gates the pr_merge edge reads prove it (the PR is MERGED, on main, from the sha QA approved; nothing deleted outright).
+  'revisao_lider>ci': {
+    gates: ['delecoes', 'mergeado'],
+    needs: [(r) => (r.mergeSha ? null : 'o sha do merge no main (lido do PR pelo portão mergeado)'), detail('como o merge foi encontrado (detail)')],
+  },
   'pr_merge>ci': { gates: ['delecoes', 'mergeado'], needs: [(r) => (r.mergeSha ? null : 'o sha do merge no main (lido do PR pelo portão mergeado)')] },
   'pr_merge>revisao_lider': { gates: [], needs: [detail('o motivo da falha do merge (checagem, conflito ou deleção)')] },
   'ci>publicado': { gates: ['release'], needs: [] },
@@ -347,6 +369,9 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
   delete next.queueAsk // the queue's question and hold belong to the piece's time in `fila`
   delete next.queueHold
   delete next.adopted // a real flow transition: this is a delivery now, never a mere adoption (BLOQUEIO.ORFAO r3)
+  delete next.tickNote // the tick's reason belonged to the phase being left
+  delete next.reviewNudge
+  delete next.leaderTouchedAt
   if (skipped) next.skips = [...next.skips, skipped]
   const d = input.detail?.trim() ?? ''
   if (r.phase === 'qa') {
@@ -354,7 +379,7 @@ export function planTransition(r: DeliveryRecord, to: unknown, input: Transition
     if (to === 'revisao_lider') next.qaSha = r.headSha
     else delete next.qaSha
   }
-  if (r.phase === 'revisao_lider') next.review = { sha: input.reviewedSha ?? '', decision: to === 'pr_merge' ? 'ok' : 'ajustar', detail: d, at: ctx.at, by: ctx.actor }
+  if (r.phase === 'revisao_lider') next.review = { sha: input.reviewedSha ?? (to === 'ci' ? r.qaSha ?? '' : ''), decision: to === 'ajuste' ? 'ajustar' : 'ok', detail: d, at: ctx.at, by: ctx.actor }
   if (to === 'ajuste') { delete next.qaSha; delete next.mergeSha; delete next.ci; delete next.publishedAt }
   if (to === 'ci') {
     next.mergeSha = r.mergeSha
