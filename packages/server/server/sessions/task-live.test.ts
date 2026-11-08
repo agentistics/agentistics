@@ -143,6 +143,12 @@ describe('buildLive', () => {
     const live = r.deliveries.find(d => d.subtaskId === 'live')!
     expect(live.eta.kind).toBe('estimate')
   })
+  test('an abandoned task with a session never marked ended is not running', () => {
+    const d = detail({ subtasks: [], sessions: [sess('s', null, { harness: 'agentistics' })] as never })
+    d.task = { ...d.task, status: 'abandoned' } as never
+    const r = buildLive({ nowMs: NOW, events: [], details: [d] })
+    expect(r.deliveries.find(x => x.key === 't1')).toBeUndefined()
+  })
   test('a task with no subtasks is its own piece', () => {
     const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [], sessions: [sess('s', null)] as never })] })
     expect(r.deliveries).toHaveLength(1)
