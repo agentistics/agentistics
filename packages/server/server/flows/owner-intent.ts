@@ -94,7 +94,8 @@ const INTERROGATIVE_OPENING_RE = new RegExp(
 export function ownerIntent(text: string): OwnerIntent {
   const own = ownerTextWords(text.split('\n').filter(l => !/^\s*>/.test(l)).join('\n'))
   const words = own || ownerTextWords(text)
-  if (!words) return 'work'
+  // Only an attachment (png, voice note, link): no words to act on. The leader answers it; it is not a work card.
+  if (!words) return text.trim() ? 'complaint' : 'work'
   // "pode ser a C" / "pode ser?" answer or ask about an option; they are not a request.
   if (/^pode ser(?![\p{L}\p{N}])/iu.test(words) && words.split(' ').length <= 6) return 'question'
   if (POLITE.test(words)) return 'work'

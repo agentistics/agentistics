@@ -12,9 +12,16 @@ describe('ownerIntent — a deterministic host rule', () => {
       'a passagem de liderança deveria ser um item de sistema e não um pedido do dono porque ela confunde a fila inteira',
     ]) expect(ownerIntent(w)).toBe('work')
   })
-  test('when in doubt it is work: an empty or attachment-only message is never dropped as a question', () => {
+  test('an attachment with no words is for the leader to answer, not a work card (live p-4a1a72afdec7)', () => {
     expect(ownerIntent('')).toBe('work')
-    expect(ownerIntent('/home/me/.agentistics/attachments/158e1f81-image.png')).toBe('work')
+    expect(ownerIntent('/home/me/.agentistics/attachments/158e1f81-image.png')).toBe('complaint')
+    expect(ownerIntent('/home/me/.agentistics/attachments/960742fe-AUDIO-2026-11-08-09-50-56.m4a')).toBe('complaint')
+    expect(ownerIntent('![x](file:abc)')).toBe('complaint')
+  })
+  test('an attachment with a written request stays work; a short real request stays work', () => {
+    expect(ownerIntent('/home/me/.agentistics/attachments/158e1f81-image.png corrige essa tela')).toBe('work')
+    expect(ownerIntent('corrige isso /home/me/.agentistics/attachments/158e1f81-image.png')).toBe('work')
+    expect(ownerIntent('conserta')).toBe('work')
   })
   test('quoted text and attachment paths are not the owner\'s words', () => {
     expect(ownerIntent('> corrige o login\n> faz o deploy\ne agora?')).toBe('question')
