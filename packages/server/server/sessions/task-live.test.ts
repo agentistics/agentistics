@@ -143,6 +143,26 @@ describe('buildLive', () => {
     const live = r.deliveries.find(d => d.subtaskId === 'live')!
     expect(live.eta.kind).toBe('estimate')
   })
+  test('an abandoned task with a session never marked ended is not running', () => {
+    const d = detail({ subtasks: [], sessions: [sess('s', null, { harness: 'agentistics' })] as never })
+    d.task = { ...d.task, status: 'abandoned' } as never
+    const r = buildLive({ nowMs: NOW, events: [], details: [d] })
+    expect(r.deliveries.find(x => x.key === 't1')).toBeUndefined()
+  })
+  test('QA 2.202.1: a DONE task with a session never marked ended is never running (done maps to published, not the fallback)', () => {
+    const d = detail({ subtasks: [], sessions: [sess('s', null, { harness: 'agentistics' })] as never })
+    d.task = { ...d.task, status: 'done' } as never
+    const r = buildLive({ nowMs: NOW, events: [], details: [d] })
+    expect(r.deliveries.find(x => x.key === 't1')?.stage).not.toBe('running')
+  })
+  // QA 2.202.1 OBSERVATION F4 (not blocking): a CUSTOM closing status the vocabulary cannot map (stageOfStatus → null),
+  // e.g. "cancelado", still reaches `running` through the same fallback when a session was never marked ended.
+  test('QA F4: a custom closing status ("cancelado") with an unended session is not running', () => {
+    const d = detail({ subtasks: [], sessions: [sess('s', null, { harness: 'agentistics' })] as never })
+    d.task = { ...d.task, status: 'cancelado' } as never
+    const r = buildLive({ nowMs: NOW, events: [], details: [d] })
+    expect(r.deliveries.find(x => x.key === 't1')?.stage).not.toBe('running')
+  })
   test('a task with no subtasks is its own piece', () => {
     const r = buildLive({ nowMs: NOW, events: [], details: [detail({ subtasks: [], sessions: [sess('s', null)] as never })] })
     expect(r.deliveries).toHaveLength(1)

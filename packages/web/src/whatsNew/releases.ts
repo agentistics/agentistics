@@ -10,6 +10,23 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.202.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Chega de avisos repetidos: uma mensagem sua que o líder já respondeu não volta mais como um novo "Pedido do dono" quando a liderança é passada, e a mesma mensagem não vira dois pedidos.',
+        en: 'No more repeated notices: a message of yours that the leader already answered no longer comes back as a new "Owner request" when leadership is handed over, and one message no longer becomes two requests.',
+      },
+      {
+        pt: 'O pedido de passagem de liderança e o primeiro texto da sessão sucessora deixam de aparecer como pedidos seus, e perguntas simples ("e o deploy?") são marcadas como pergunta, não como trabalho.',
+        en: 'The hand-off request and the successor session\'s first text no longer show up as requests from you, and simple questions ("what about the deploy?") are marked as questions, not as work.',
+      },
+      {
+        pt: 'O lembrete "pré-dispatch incompleto" confere de novo, na hora de enviar, se ainda faz sentido, não se repete a cada troca de líder e mostra só o número do pedido e o começo do texto, sem colar a mensagem inteira (nem os caminhos dos anexos).',
+        en: 'The "incomplete pre-dispatch" reminder now re-checks right before it is sent that it still applies, no longer repeats on every leader change, and shows only the request number and the start of the text, without pasting the whole message (or attachment paths).',
+      },
+    ],
+  },
   '2.202.0': {
     features: [
       {

@@ -75,20 +75,30 @@ export interface CapturedRelay {
   cursor?: string
   awaiting: boolean
   /** Original turns, for the request bus; never reconstruct them from the rendered briefing. */
-  owner?: Array<{ text: string; at?: string }>
+  owner?: Array<{ text: string; at?: string; answered?: boolean }>
   source?: { id: string; conversationId?: string; createdAt?: string }
 }
 
 /** The briefing truncates long quotes; request registration retains the original owner turn. */
-function originalOwners(turns: readonly ChatTurn[], selected: readonly { text: string; at?: string }[]): Array<{ text: string; at?: string }> {
+function originalOwners(turns: readonly ChatTurn[], selected: readonly { text: string; at?: string }[]): Array<{ text: string; at?: string; answered?: boolean }> {
   const used = new Set<ChatTurn>()
   return selected.map(message => {
     const prefix = message.text.replace(/\s*\[…\]$/, '')
     const original = turns.find(t => !used.has(t) && isOwnerTurn(t) && t.at === message.at && t.text.trim().startsWith(prefix))
     if (!original) return message
     used.add(original)
-    return { text: original.text.trim(), ...(original.at ? { at: original.at } : {}) }
+    return { text: original.text.trim(), ...(original.at ? { at: original.at } : {}), ...(ownerTurnAnswered(turns, original) ? { answered: true } : {}) }
   })
+}
+
+/**
+ * FLUXO.AVISOS: the predecessor wrote something to the owner AFTER this turn. A request that already has its answer is
+ * history; replaying it to the successor minted a fresh high-priority "Pedido do dono" for work long since done.
+ * Text, not "any assistant turn": a tool-only turn means the work is under way, which is still an open request.
+ */
+export function ownerTurnAnswered(turns: readonly ChatTurn[], turn: ChatTurn): boolean {
+  const i = turns.indexOf(turn)
+  return i >= 0 && turns.slice(i + 1).some(t => t.role === 'assistant' && t.text.trim().length > 0)
 }
 
 /** The predecessor's owner messages + last reply, as the successor's briefing section. */
@@ -99,7 +109,7 @@ export async function captureHandoffRelay(
   const got = await read(parent)
   if ('unavailable' in got) return { section: relaySection(parent.id, null, got.unavailable), awaiting: false }
   // "Since the predecessor's previous hand-off": a predecessor born from a hand-off starts there.
-  const relay = planRelay(got.turns, parent.handoffFrom ? parent.createdAt : undefined)
+  const relay = planRelay(got.turns, parent.handoffFrom ? parent.createdAt : undefined, parent.handoffFrom ? { spawnedAt: parent.createdAt } : {})
   return {
     section: relaySection(parent.id, relay),
     ...(relay.cursor ? { cursor: relay.cursor } : {}),
