@@ -148,11 +148,19 @@ export async function workTarget(sessionId: string, deps: WorkTargetDeps): Promi
   const start = await real(row.cwd)
   let bare = false
   let startCommon: string | null = null
+  // FLUXO.AVISOS: "the folder is gone" and "the folder is not a repository" are FACTS the engine needs (a handback plus a
+  // stopped session is then the evidence), not a silent `ok` that makes the close flow ask for a commit nobody can make.
+  let unreadable = false
   try {
     bare = (await text(start, ['rev-parse', '--is-bare-repository'])) === 'true'
     startCommon = await real(await text(start, ['rev-parse', '--path-format=absolute', '--git-common-dir']))
-  } catch { /* the start folder is gone or not a repository: nothing to compare against */ }
-  const none = { ok: true, bare, cwd: start }
+  } catch { unreadable = true }
+  const exists = await stat(start).then(s => s.isDirectory(), () => false)
+  const none: Record<string, unknown> = {
+    ok: true, bare, cwd: start,
+    ...(!exists ? { gone: true } : {}),
+    ...(exists && unreadable ? { notRepo: true } : {}),
+  }
   const where = await deps.storedCwd(sessionId, row.conversationId).catch(() => undefined)
   if (!where || !startCommon) return none
   const path = await real(where)
@@ -431,6 +439,10 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps(),
       const key = `${to}\0${flow}\0${body}`
       const last = nudged.get(key)
       if (flow !== 'wait' && last !== undefined && now() - last < NUDGE_REPEAT_MS) return { ok: true, to, deduped: true }
+      // FLUXO.AVISOS: a session that already ENDED is never typed into — the composer's prompt path follows an ended row to
+      // its continuation (or reopens it), so a late nudge (seen 5x on 07-08/11) woke a session somebody had just closed.
+      const target = (await deps.registry().catch(() => [])).find(m => m.id === to)
+      if (target?.endedAt) return { ...refuse('the session already ended; nothing was typed into it', ['live session']), failure: 'ended' as const }
       const sent = await deps.prompt(to, `[from flow ${flow} · nudge]\n${body}`)
       if (sent.ok) {
         nudged.set(key, now())

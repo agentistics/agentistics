@@ -69,7 +69,10 @@ test('trigger host ops: the managed-session universe and a nudge through the com
   ] })
   expect(await ops['cutucar-sessao']({ to: 'live', body: 'commit it', flow: 'trabalho-sem-commit' })).toEqual({ ok: true, to: 'live' })
   expect(prompts[0]).toEqual(['live', '[from flow trabalho-sem-commit · nudge]\ncommit it'])
-  expect(await ops['cutucar-sessao']({ to: 'gone', body: 'x' })).toMatchObject({ refused: true, reason: 'ended' })
+  // FLUXO.AVISOS: an ENDED row is refused before anything is typed (the prompt path would follow/reopen it).
+  const typedBefore = prompts.length
+  expect(await ops['cutucar-sessao']({ to: 'gone', body: 'x' })).toMatchObject({ refused: true, failure: 'ended' })
+  expect(prompts.length).toBe(typedBefore)
   expect(await ops['cutucar-sessao']({ to: '', body: 'x' })).toMatchObject({ refused: true })
   expect(await ops['aviso-ao-dono']({ text: 'Pedido p-1 sem dono' })).toEqual({ ok: true })
   expect(notices).toEqual(['Pedido p-1 sem dono'])
@@ -411,6 +414,23 @@ test('alvo-trabalho: nothing identified is `none` — no store record, the start
   expect(await workTarget('S', f.deps)).not.toHaveProperty('path')
   f.state.stored = join(f.own, 'gone')
   expect(await workTarget('S', f.deps)).not.toHaveProperty('path')
+})
+
+test('alvo-trabalho (FLUXO.AVISOS): a start folder that is gone or is not a repository is SAID, never a plain ok', async () => {
+  const f = workFixture()
+  f.state.stored = undefined
+  const plain = realpathSync(mkdtempSync(join(tmpdir(), 'wt-plain-'))); roots.push(plain)
+  f.state.cwd = plain
+  expect(await workTarget('S', f.deps)).toMatchObject({ ok: true, notRepo: true, cwd: plain })
+  expect(await workTarget('S', f.deps)).not.toHaveProperty('gone')
+  f.state.cwd = join(plain, 'removed-worktree')
+  const gone = await workTarget('S', f.deps)
+  expect(gone).toMatchObject({ ok: true, gone: true })
+  expect(gone).not.toHaveProperty('notRepo')
+  f.state.cwd = f.bare // a real repository carries neither flag
+  const fine = await workTarget('S', f.deps)
+  expect(fine).not.toHaveProperty('gone')
+  expect(fine).not.toHaveProperty('notRepo')
 })
 
 test('alvo-trabalho: an unknown session refuses', async () => {
