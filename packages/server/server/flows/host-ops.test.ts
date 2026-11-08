@@ -433,6 +433,48 @@ test('alvo-trabalho (FLUXO.AVISOS): a start folder that is gone or is not a repo
   expect(fine).not.toHaveProperty('notRepo')
 })
 
+test('alvo-trabalho (FLUXO.AVISOS): a recorded worktree that the session removed itself is named, not guessed', async () => {
+  const f = workFixture()
+  rmSync(f.own, { recursive: true, force: true })
+  const out = await workTarget('S', f.deps)
+  expect(out).toMatchObject({ ok: true, bare: true, goneWorktree: f.own })
+  expect(out).not.toHaveProperty('path')
+})
+
+test('sessao-sem-codigo (FLUXO.AVISOS): QA, probe and no-worktree sessions close on handback + stopped; a worker with its own tree does not', async () => {
+  const f = workFixture()
+  // the real case: a QA session started in the bare main checkout, made a worktree, removed it, and handed back
+  rmSync(f.own, { recursive: true, force: true })
+  const ops = flowHostOps(undefined, undefined, undefined, { ...f.deps, session: async () => ({ cwd: f.state.cwd, conversationId: 'c1', label: 'QA hotfix' }) })
+  expect(await ops['sessao-sem-codigo']({ sessionId: 'S' })).toEqual({ ok: true, noCode: true, reason: 'qa', sessionId: 'S' })
+  const probe = flowHostOps(undefined, undefined, undefined, { ...f.deps, session: async () => ({ cwd: f.state.cwd, label: 'probe de memória' }) })
+  expect(await probe['sessao-sem-codigo']({ sessionId: 'S' })).toMatchObject({ noCode: true, reason: 'probe' })
+  // not named QA, but its folder is bare/gone and it left no worktree: nothing to inspect
+  const nameless = flowHostOps(undefined, undefined, undefined, { ...f.deps, session: async () => ({ cwd: f.state.cwd, label: 'worker' }) })
+  expect(await nameless['sessao-sem-codigo']({ sessionId: 'S' })).toMatchObject({ noCode: true, reason: 'no-worktree' })
+  // a worker whose own linked worktree still exists owns code
+  const live = workFixture()
+  const owner = flowHostOps(undefined, undefined, undefined, { ...live.deps, session: async () => ({ cwd: live.state.cwd, label: 'impl fluxo' }) })
+  expect(await owner['sessao-sem-codigo']({ sessionId: 'S' })).toMatchObject({ noCode: false, reason: 'owns-work' })
+  expect(await owner['sessao-sem-codigo']({})).toMatchObject({ refused: true })
+})
+
+test('cutucar-sessao (FLUXO.AVISOS): re-checks the fleet at send time — a row now exited/lost is not typed into', async () => {
+  const prompts: string[] = []
+  const state: { v: string } = { v: 'working' }
+  const ops = triggerHostOps({
+    registry: async () => [{ id: 'q', cwd: '/w' }],
+    rows: async () => [{ id: 'q', state: state.v }],
+    roles: async () => () => undefined,
+    prompt: async (_id, text) => { prompts.push(text); return { ok: true } },
+    awayNotice: async () => true, kill: async () => ({ ok: true }),
+  })
+  expect(await ops['cutucar-sessao']({ to: 'q', body: 'a', flow: 'fechar-entregue' })).toEqual({ ok: true, to: 'q' })
+  state.v = 'exited' // killed after the flow decided to nudge
+  expect(await ops['cutucar-sessao']({ to: 'q', body: 'b', flow: 'fechar-entregue' })).toMatchObject({ refused: true, failure: 'ended' })
+  expect(prompts).toHaveLength(1)
+})
+
 test('alvo-trabalho: an unknown session refuses', async () => {
   const f = workFixture()
   expect(await workTarget('S', { ...f.deps, session: async () => null })).toMatchObject({ refused: true })

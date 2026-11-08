@@ -127,7 +127,7 @@ export function defaultWorktreeTargetDeps(): WorktreeTargetDeps {
 /** `alvo-trabalho` — where a session's work really is, read only from facts the host already holds. */
 export interface WorkTargetDeps {
   /** The registry row: the cwd the session was STARTED in and its conversation id. */
-  session(sessionId: string): Promise<{ cwd: string; conversationId?: string } | null>
+  session(sessionId: string): Promise<{ cwd: string; conversationId?: string; label?: string } | null>
   /** The cwd the session ENDED UP in (`SessionMeta.current_cwd`, the consolidate store), when it records one. */
   storedCwd(sessionId: string, conversationId?: string): Promise<string | undefined>
   git(cwd: string, args: string[]): Promise<string>
@@ -164,7 +164,9 @@ export async function workTarget(sessionId: string, deps: WorkTargetDeps): Promi
   const where = await deps.storedCwd(sessionId, row.conversationId).catch(() => undefined)
   if (!where || !startCommon) return none
   const path = await real(where)
-  if (path === start || !(await stat(path).then(s => s.isDirectory(), () => false))) return none
+  if (path === start) return none
+  // The worktree the session worked in is recorded and no longer there (it removed it itself): say so, never guess a path.
+  if (!(await stat(path).then(s => s.isDirectory(), () => false))) return { ...none, goneWorktree: path }
   try {
     if ((await text(path, ['rev-parse', '--is-bare-repository'])) === 'true') return none
     const gitDir = await real(await text(path, ['rev-parse', '--path-format=absolute', '--absolute-git-dir']))
@@ -177,11 +179,28 @@ export async function workTarget(sessionId: string, deps: WorkTargetDeps): Promi
   } catch { return none }
 }
 
+/** A session whose NAME says it only reads: a QA or a probe has no code of its own to save. */
+const NO_CODE_LABEL = /(^|[^a-z])(qa|probe|sonda)([^a-z]|$)/i
+
+/**
+ * FLUXO.AVISOS 7 — PURE. Does this session have code of its own that "saved work" could mean something for?
+ *  - `qa` / `probe`: its name says it only reads (a QA session reviews another's branch, a probe measures);
+ *  - `no-worktree`: it started in a bare/shared checkout or a folder that is gone or not a repository and NO worktree of
+ *    its own could be identified (or the one it made is already removed) — there is no tree to inspect.
+ * In both, the final handback plus a stopped session is the whole proof; the engine must not ask for a commit or push.
+ */
+export function ownsNoCode(label: string | undefined, target: Record<string, unknown>): { noCode: boolean; reason: string } {
+  if (label && NO_CODE_LABEL.test(label)) return { noCode: true, reason: /(^|[^a-z])qa([^a-z]|$)/i.test(label) ? 'qa' : 'probe' }
+  const identified = typeof target.path === 'string'
+  if (!identified && (target.gone === true || target.notRepo === true || target.bare === true || typeof target.goneWorktree === 'string')) return { noCode: true, reason: 'no-worktree' }
+  return { noCode: false, reason: 'owns-work' }
+}
+
 export function defaultWorkTargetDeps(): WorkTargetDeps {
   return {
     session: async id => {
       const row = (await (await import('../sessions/registry')).readRegistry()).find(r => r.id === id)
-      return row ? { cwd: row.cwd, ...(row.conversationId ? { conversationId: row.conversationId } : {}) } : null
+      return row ? { cwd: row.cwd, ...(row.conversationId ? { conversationId: row.conversationId } : {}), ...(row.label ? { label: row.label } : {}) } : null
     },
     storedCwd: async (id, conversationId) => {
       const map = await (await import('../consolidate')).loadConsolidated()
@@ -308,6 +327,8 @@ export function judgeStopped(id: string, snapshot: { polledAtMs: number; session
 }
 
 const LIVE_STATES = new Set(['working', 'waiting', 'waiting-approval'])
+/** A row in one of these is not a process to type into (`successorAlive` reads the same words). */
+const DEAD_STATES = new Set(['exited', 'lost', 'closed', 'finished'])
 
 /** What the event-triggered flows need from the host, injected so the mapping is tested without a fleet. */
 export interface TriggerHostDeps {
@@ -441,8 +462,10 @@ export function triggerHostOps(deps: TriggerHostDeps = defaultTriggerHostDeps(),
       if (flow !== 'wait' && last !== undefined && now() - last < NUDGE_REPEAT_MS) return { ok: true, to, deduped: true }
       // FLUXO.AVISOS: a session that already ENDED is never typed into — the composer's prompt path follows an ended row to
       // its continuation (or reopens it), so a late nudge (seen 5x on 07-08/11) woke a session somebody had just closed.
+      // The fleet is re-read RIGHT NOW (not the engine's earlier snapshot): killed since the flow decided to nudge = not typed into.
       const target = (await deps.registry().catch(() => [])).find(m => m.id === to)
-      if (target?.endedAt) return { ...refuse('the session already ended; nothing was typed into it', ['live session']), failure: 'ended' as const }
+      const state = (await deps.rows().catch(() => [])).find(r => r.id === to)?.state
+      if (target?.endedAt || (state !== undefined && DEAD_STATES.has(state))) return { ...refuse('the session already ended; nothing was typed into it', ['live session']), failure: 'ended' as const }
       const sent = await deps.prompt(to, `[from flow ${flow} · nudge]\n${body}`)
       if (sent.ok) {
         nudged.set(key, now())
@@ -482,6 +505,15 @@ export function flowHostOps(triggerDeps?: TriggerHostDeps, worktreeDeps?: Worktr
     'alvo-trabalho': async (value: unknown) => {
       const id = sessionOf(value)
       return id ? workTarget(id, workDeps) : refuse('session id is required', ['sessionId'])
+    },
+    // FLUXO.AVISOS 7: decided here, deterministically — never handed to a model. See `ownsNoCode`.
+    'sessao-sem-codigo': async (value: unknown) => {
+      const id = sessionOf(value)
+      if (!id) return refuse('session id is required', ['sessionId'])
+      const target = await workTarget(id, workDeps)
+      if ('refused' in target) return target
+      const row = await workDeps.session(id).catch(() => null)
+      return { ok: true, ...ownsNoCode(row?.label, target), sessionId: id }
     },
     ...ambienteHostOps(),
     'sessao-parada': async (value: unknown) => {
