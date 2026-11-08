@@ -266,6 +266,48 @@ describe('delivery service', () => {
       h.advance(2 * 60_000)
       expect((await h.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
     })
+
+    // QA r2 — the author rewrote two assertions from "predecessor gone → the new leader hears now" to "waits out the window".
+    // These pin that the rewrite hides no loss: only a nudge that was actually DELIVERED holds the window.
+    const successor = { id: 'leader-b', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1', createdAt: '2026-11-07T03:00:00Z' } as const
+
+    test('QA r2: a send that FAILED records nothing, so the successor hears it on the very next tick', async () => {
+      const h = harness({ wakeOk: false }, { requests: async () => [req()] })
+      expect((await h.svc.tick()).actions).toContain('request-wake-failed leader:p-1')
+      h.w.wakeOk = true
+      h.w.sessions = [...h.w.sessions.map(s => (s.id === 'leader' ? { ...s, alive: false } : s)), successor]
+      expect((await h.svc.tick()).actions).toContain('request-wake leader-b:p-1')
+    })
+
+    test('QA r2: a leader that died BEFORE the send records nothing, so the successor hears it on the next tick', async () => {
+      const h = harness({}, { requests: async () => [req()] })
+      let calls = 0
+      const sessions = h.facts.sessions
+      h.facts.sessions = async () => { calls++; const all = await sessions(); return calls > 1 ? all.map(s => (s.id === 'leader' ? { ...s, alive: false } : s)) : all }
+      expect((await h.svc.tick()).actions.some(a => a.startsWith('request-wake-skipped'))).toBe(true)
+      h.facts.sessions = sessions
+      h.w.sessions = [...h.w.sessions.map(s => (s.id === 'leader' ? { ...s, alive: false } : s)), successor]
+      expect((await h.svc.tick()).actions).toContain('request-wake leader-b:p-1')
+    })
+
+    test('QA r2: a reservation orphaned by a crash (pendingAt, no send) does not hold the 30-minute window', async () => {
+      const h = harness({}, { requests: async () => [req()] })
+      const store = createDeliveryStore(join(dir, 'deliveries.json'))
+      await store.update(x => { (x.requestReminders ??= {})['p-1'] = { pendingAt: new Date(Date.parse('2026-11-07T01:00:00Z')).toISOString(), leaderSessionId: 'leader' } })
+      h.w.sessions = [...h.w.sessions.map(s => (s.id === 'leader' ? { ...s, alive: false } : s)), successor]
+      expect((await h.svc.tick()).actions).toContain('request-wake leader-b:p-1')
+    })
+
+    test('QA r2: the delivered record survives a RESTART with a real elapsed clock, and the window does end', async () => {
+      const requests = async () => [req()]
+      const h = harness({}, { requests })
+      expect((await h.svc.tick()).actions).toContain('request-wake leader:p-1')
+      const restarted = harness({ sessions: [...h.w.sessions.map(s => (s.id === 'leader' ? { ...s, alive: false } : s)), successor] }, { requests })
+      restarted.advance(5 * 60_000)
+      expect((await restarted.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
+      restarted.advance(25 * 60_000)
+      expect((await restarted.svc.tick()).actions).toContain('request-wake leader-b:p-1')
+    })
   })
 
   test('a staged member joining a group is folded into that group once', async () => {

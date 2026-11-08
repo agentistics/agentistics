@@ -9,10 +9,11 @@
  *
  * The rule errs toward `work`: a missed question costs one needless reminder, a missed request costs the
  * owner's work being forgotten.
- *  - a request verb (imperative or "can you …/pode …") anywhere → `work`, even when the text ends in "?"
- *  - otherwise a trailing "?" → `question`
- *  - otherwise a short text (≤ 12 words) with no request verb → `question`
- *  - otherwise (a long statement) → `work`
+ *  - a polite request ("can you …/pode …/quero …/precisa …") → `work`, even when the text ends in "?"
+ *  - a trailing "?" → `question`, unless a verb stands in VERB POSITION ("faz o deploy?")
+ *  - otherwise a strong verb anywhere, or a verb in verb position → `work`
+ *  - otherwise only a tiny text (≤ 3 words: "opcao C", "status") is a `question`; a longer statement is a report → `work`
+ *  - word boundaries are Unicode-aware: "publicação" does not contain the verb "publica"
  */
 
 export type OwnerIntent = 'question' | 'work'
@@ -43,26 +44,39 @@ const IMPERATIVE = [
   'ship', 'deploy', 'release', 'merge', 'push', 'open', 'close', 'kill', 'start', 'stop', 'move', 'rename', 'replace',
   'continue', 'resume', 'check', 'review', 'investigate', 'test', 'show', 'put', 'set', 'use', 'try', 'redo', 'refactor',
 ]
-const POLITE = /\b(?:pode(?:ria|m)?(?!\s+ser\b)|consegue|conseguiria|d[áa] pra|dá para|quero que|preciso que|precisamos|gostaria|can you|could you|would you|will you|please|por favor|i need|i want|we need)\b/i
+const ADDED = [
+  'resolve', 'resolva', 'resolver', 'refatora', 'refatore', 'tenta', 'tente', 'limpa', 'limpe', 'reverte', 'reverta', 'desfaz',
+  'reinicia', 'reinicie', 'instala', 'instale', 'ativa', 'ative', 'desliga', 'desligue', 'gera', 'gere', 'documenta',
+  'documente', 'prepara', 'prepare', 'finaliza', 'finalize', 'termina', 'termine', 'olha', 'olhe', 'procura', 'procure',
+  'pesquisa', 'pesquise', 'estuda', 'estude', 'volta', 'volte', 'renomeia', 'renomeie', 'separa', 'separe', 'alinhar',
+  'alinha', 'alinhe', 'testar',
+]
+const POLITE = /(?<![\p{L}\p{N}])(?:pode(?:ria|m)?(?!\s+ser(?![\p{L}\p{N}]))|consegue|conseguiria|d[áa] pra|dá para|quero|preciso|precisa|precisamos|gostaria|tem que|deve|can you|could you|would you|will you|please|por favor|i need|i want|we need)(?![\p{L}\p{N}])/iu
 
-// Words that are also everyday nouns ("e o deploy?", "and the release?"): they count only in verb position.
 const AMBIGUOUS = new Set(['teste', 'ajuste', 'troca', 'move', 'deploy', 'release', 'build', 'test', 'check', 'review', 'update',
-  'change', 'merge', 'push', 'run', 'start', 'stop', 'set', 'put', 'use', 'show', 'open', 'close', 'ship', 'resume', 'continue', 'try', 'make'])
-const strongVerbs = IMPERATIVE.filter(v => !AMBIGUOUS.has(v))
-// An unambiguous work verb counts anywhere as a whole word (errs toward work); an ambiguous one only at the start,
-// after punctuation or after "e/and/pra/to".
-const IMPERATIVE_RE = new RegExp(
-  `\\b(?:${strongVerbs.join('|')})\\b|(?:^|[.!?;:,\\n]\\s*|\\be\\s+|\\band\\s+|\\bpra\\s+|\\bto\\s+)(?:${IMPERATIVE.join('|')})\\b`, 'i')
+  'change', 'merge', 'push', 'run', 'start', 'stop', 'set', 'put', 'use', 'show', 'open', 'close', 'ship', 'resume', 'continue', 'try', 'make',
+  'vai', 'fix', 'faz', 'continua', 'muda', 'mostra', 'sobe', 'publica', 'libera', 'roda', 'fecha', 'cria'])
+const ALL_VERBS = [...IMPERATIVE, ...ADDED]
+const STRONG_VERBS = ALL_VERBS.filter(v => !AMBIGUOUS.has(v))
+const LB = '(?<![\\p{L}\\p{N}])'
+const RB = '(?![\\p{L}\\p{N}])'
+const FILLERS = 'ok|blz|beleza|mano|cara|agora|então|entao|aí|ai'
+const VERB_POSITION_RE = new RegExp(
+  `(?:^|[.!?;:,\\n]\\s*|${LB}(?:e|and|pra|to|${FILLERS})\\s+)(?:${ALL_VERBS.join('|')})${RB}`, 'iu')
+const STRONG_RE = new RegExp(`${LB}(?:${STRONG_VERBS.join('|')})${RB}`, 'iu')
 
-export const QUESTION_MAX_WORDS = 12
+/** A text this short with no verb and no "?" is a bare answer ("opcao C", "status"); a longer one is a report. */
+export const QUESTION_MAX_WORDS = 3
 
 export function ownerIntent(text: string): OwnerIntent {
-  // What the owner WROTE: lines quoted with ">" are what they pasted (a leader's reply, a log), not what they ask.
   const own = ownerTextWords(text.split('\n').filter(l => !/^\s*>/.test(l)).join('\n'))
   const words = own || ownerTextWords(text)
   if (!words) return 'work'
-  if (IMPERATIVE_RE.test(words) || POLITE.test(words)) return 'work'
-  if (/[?？]\s*["')\]]*$/.test(words)) return 'question'
+  // "pode ser a C" / "pode ser?" answer or ask about an option; they are not a request.
+  if (/^pode ser(?![\p{L}\p{N}])/iu.test(words) && words.split(' ').length <= 6) return 'question'
+  if (POLITE.test(words)) return 'work'
+  if (/[?？]\s*["')\]]*$/.test(words)) return VERB_POSITION_RE.test(words) ? 'work' : 'question'
+  if (VERB_POSITION_RE.test(words) || STRONG_RE.test(words)) return 'work'
   return words.split(' ').length <= QUESTION_MAX_WORDS ? 'question' : 'work'
 }
 
