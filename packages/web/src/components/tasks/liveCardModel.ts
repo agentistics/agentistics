@@ -63,7 +63,12 @@ function questionOf(row: FleetRow | undefined): string | null {
  * nothing is known it says so; it never guesses a reason.
  */
 export function waitingReason(c: LiveCard, fleet: readonly FleetRow[], pt: Pt): string | null {
-  if (isQueued(c)) return pt ? 'esperando vaga na máquina' : 'waiting for a machine slot'
+  if (isQueued(c)) {
+    // The card already says WHY it is not starting when the leader decided (não / agendar / the open question) or when the
+    // slot gate says a slot is free: a generic "waiting for a machine slot" beside either would contradict it.
+    if (c.d.queue || c.d.slot?.ok === true) return null
+    return pt ? 'esperando vaga na máquina' : 'waiting for a machine slot'
+  }
   // A blocked card says WHY in its own block (reason, who lifts it) — a second line would contradict it.
   if (c.d.stage === 'blocked') return null
   if (c.liveState === 'needs-you') {

@@ -38,6 +38,11 @@ describe('what a waiting card waits for (item i)', () => {
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'qa' }, f), f, true)).toBe('esperando a QA')
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'merge' }, f), f, true)).toBe('esperando o CI / merge')
     expect(waitingReason(card({ stage: 'queue' }), [], true)).toBe('esperando vaga na máquina')
+    // FILA.PRIORIDADE: never a generic "waiting for a slot" beside a free slot or beside the leader's own decision
+    const queued = card({ stage: 'queue' })
+    expect(waitingReason({ ...queued, d: { ...queued.d, slot: { ok: true, reason: null, at: '' } } }, [], true)).toBeNull()
+    expect(waitingReason({ ...queued, d: { ...queued.d, slot: { ok: false, reason: 'no slot: x', at: '' } } }, [], true)).toBe('esperando vaga na máquina')
+    expect(waitingReason({ ...queued, d: { ...queued.d, queue: { hold: null, asking: true, approved: false } } }, [], true)).toBeNull()
     const dlg = [row('s', 'waiting-approval', { approvalLines: ['Posso apagar a pasta dist?', '1. Sim'] })]
     expect(waitingReason(card({ sessionIds: ['s'] }, dlg), dlg, true)).toBe('esperando resposta sua (pergunta: Posso apagar a pasta dist?)')
     expect(waitingReason(card({ sessionIds: ['s'], stage: 'running' }, f), f, true)).toBe('esperando (sem motivo conhecido)')
