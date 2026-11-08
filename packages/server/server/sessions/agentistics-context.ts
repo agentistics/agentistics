@@ -41,7 +41,7 @@ export interface ContextInput {
   folder?: { path: string; siblings: readonly string[]; /** A top-level folder: its `siblings` are its sub-folders. */ top?: boolean }
   lang?: ContextLang
   toolNames?: readonly string[]
-  /** AWAY MODE as stored (`server/away.ts`); the line is printed only while it is active at `now`. */
+  /** AUTONOMOUS MODE as stored (`server/away.ts`); the line is printed only while it is active at `now`. */
   away?: AwayState
   /** The clock `away` is judged against (ms). Defaults to `Date.now()`; tests pass it. */
   now?: number
@@ -61,7 +61,7 @@ export interface ContextInput {
 }
 
 /** One line, stated once: who wins when two instructions disagree. */
-export const PRECEDENCE_LINE = 'Precedence when instructions disagree: the owner\'s direct word > away-mode authorisations > the brief you were given > CLAUDE.md/AGENTS.md > memory > this generic briefing and skills.'
+export const PRECEDENCE_LINE = 'Precedence when instructions disagree: the owner\'s direct word > autonomous-mode authorisations > the brief you were given > CLAUDE.md/AGENTS.md > memory > this generic briefing and skills.'
 
 /** The block is fenced so the chat UI can recognise it and render it collapsed. */
 export const CONTEXT_OPEN = '<agentistics-context>'
@@ -86,9 +86,12 @@ const TOOL_GROUPS = {
     'agentistics_task_types', 'agentistics_task_type_edit', 'agentistics_task_status_edit', 'agentistics_task_comment',
     'agentistics_task_subtask', 'agentistics_task_link', 'agentistics_task_blocked_by', 'agentistics_task_next',
     'agentistics_task_claim', 'agentistics_task_activity', 'agentistics_task_edit', 'agentistics_task_session', 'agentistics_task_delete',
+    'agentistics_task_phase', 'agentistics_task_stage', 'agentistics_task_queue', 'agentistics_task_queue_answer',
   ],
   Sessions: ['agentistics_sessions', 'agentistics_session_groups', 'agentistics_session_group_create', 'agentistics_session_group_edit', 'agentistics_session_notify', 'agentistics_session_message', 'agentistics_session_role', 'agentistics_session_away', 'agentistics_session_switch_account', 'agentistics_checkin_report'],
-  Metrics: ['agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_plan_limits', 'agentistics_tags', 'agentistics_tag_detail', 'agentistics_flow_run', 'agentistics_flow_status', 'agentistics_wait'],
+  Metrics: ['agentistics_live_delivery', 'agentistics_summary', 'agentistics_costs', 'agentistics_projects', 'agentistics_repos', 'agentistics_harnesses', 'agentistics_plan_limits', 'agentistics_tags', 'agentistics_tag_detail', 'agentistics_flow_run', 'agentistics_flow_status', 'agentistics_wait'],
+  // COFRE.DESBLOQUEIO: how the vault is protected (never what it holds) — read-only, not listed in the briefing.
+  Vault: ['agentistics_vault_status'],
   Dashboards: ['agentistics_component_catalog', 'agentistics_get_layouts', 'agentistics_create_layout', 'agentistics_add_component', 'agentistics_remove_component', 'agentistics_set_active_layout', 'agentistics_delete_layout', 'agentistics_export_pdf', 'agentistics_build_layout'],
 } as const
 
@@ -123,18 +126,18 @@ export function contextText(i: ContextInput): string {
     PRECEDENCE_LINE,
     'Tools — the "agentistics" MCP server gives you:',
     `- Tasks (Agentask): ${TOOL_GROUPS.Tasks.join(', ')} — plan, claim, edit, link, comment, coordinate, and close work.`,
-    `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, organise sidebar folders, and read or (leaders) set away mode.`,
+    `- Sessions: ${TOOL_GROUPS.Sessions.join(', ')} — list, message another session, notify the user, organise sidebar folders, and read or (leaders) set autonomous mode.`,
     METRICS_DASHBOARDS_LINE,
     briefingText(i.lang ?? 'en', { planLimitsAvailable: planLimits && !worker, away }),
     roleLine(i.role),
-    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits }),
+    ...awayBriefingLines(i.away, i.role, now, { planLimitsInBriefing: planLimits, ruleInBriefing: true }),
     ...flowLines(i.lang ?? 'en', i.role, !!i.taskId),
   ]
   if (i.role !== 'worker') {
     lines.push('Becoming leader: call agentistics_session_role with role "leader" — it stores the role and renames this session to "[ LEADER ] - <title>" (or "[ LÍDER ] - <title>" in a Portuguese UI) for you, keeping the user\'s title. Do not rename it by hand. If you started the session, pick the title. If you replace another live leader on your task, pass its id as `retirePredecessor` so the server closes it when it goes quiet.')
     const how = '`agentop session <harness> --bg --cwd <dir> --name "<title>" --folder "<folder>" -p "<request>"` or `agentop session batch --task "<task>" --folder "<folder>" …` (`agentop session folders` lists them; omitted task, folder and approval mode inherit from a verified parent). Workers inherit the parent task, folder and approval mode, but need their own subtask when applicable. For leader succession run `agentop session <harness> --handoff --bg -p "Read the hand-off file and take over"` from inside the old leader (it keeps your model and approval mode unless you pass `--model`/`--mode`, e.g. `--mode no-questions`); a leader prefix alone does not transfer its state. File each opened session on its subtask and in the task\'s folder. ' + SESSION_VERB_LINE
     lines.push(away
-      ? `Opening workers is pre-authorised within the away limits above (no per-session approval): ${how}`
+      ? `Opening workers is pre-authorised within the autonomous-mode limits above (no per-session approval): ${how}`
       : `Open other sessions only after the user explicitly approves: ${how}`)
     lines.push(`Model/harness balance: use the strongest model for design, coordination, and hard bugs; a mid model for clearly scoped implementation; a light model for probes/screenshots; QA must use a different model from the author. ${away || i.usageRulesSaved ? "Respect the user's saved usage rules." : "No usage rules are saved yet: before proposing sessions, ask the user once what plans, quotas, and preferences they allow."}`)
   }
@@ -152,6 +155,7 @@ export function contextText(i: ContextInput): string {
       `This session belongs to Agentask task ${i.taskId}${i.taskTitle ? ` "${i.taskTitle}"` : ''}${sub}. Record progress there: comment on the subtask (or the task) at each milestone and move its status; never mark it done before the user validates.`,
       'Board lifecycle: you are filed on this task/subtask (in_progress); a handback (kind=handback via agentistics_session_message) moves your subtask to in_review (if the board has that status); it becomes done only after approval.',
     )
+    if (worker && i.subtaskId) lines.push(`Live step: the Live card derives your step by itself from real signals (session open, first edit, a test run, a commit, your handback). When you know better, report it: agentistics_task_phase { subtaskId: "${i.subtaskId}", action: "step", step: <1..5> } — running: 1 reading, 2 implementing, 3 testing, 4 saving (commit), 5 handing over.`)
   } else {
     lines.push('This session is not linked to a task. Follow flow step "Task" above unless this is a quick question.')
   }
@@ -173,19 +177,22 @@ export function contextText(i: ContextInput): string {
     ...(worker
       ? ['- Never start, delegate to or orchestrate another session or harness.']
       : away
-        ? ['- Start sessions only inside the away authorisations and limits above; anything outside them waits in the hand-off file.']
+        ? ['- Start sessions only inside the autonomous-mode authorisations and limits above; anything outside them waits in the hand-off file.']
         : ['- Never start, delegate to or orchestrate another session or harness on your own. You may SUGGEST it (which harness, why, what it would do); start it only after the user explicitly approves in this conversation.']),
     '- Secrets come from the vault: use vault://name references. Never ask the user to paste a key and never print a secret.',
     '- Ports 47291 and 47292 belong to agentistics: never start, stop or bind anything there; never run `agentop upgrade`; never restart the agentistics service.',
     '- Never open public tunnels (ngrok, cloudflared, etc.) to this machine.',
-    `- Do not delete, move or rewrite files outside ${i.cwd} without asking.`,
+    away
+      ? `- Do not delete, move or rewrite files outside ${i.cwd}; defer safely and record the decision instead of addressing the owner.`
+      : `- Do not delete, move or rewrite files outside ${i.cwd} without asking.`,
   )
   if (!worker) lines.push(
-    "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
+    away
+      ? "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove). Defer anything you did not create and record it for the owner's return."
+      : "- Clean up after yourself: when a session you started has finished and its work is committed/pushed, close it (`agentop session kill <id> --folder \"<finished folder>\"`) so it is filed in the task's finished folder; when a git worktree you created has been merged or published, remove it (git worktree remove) — never leave finished sessions, worktrees, temp servers or temp files accumulating on the user's machine. Ask before removing anything you did not create.",
   )
-  lines.push(away
-    ? '- Decisions are yours within the authorisations: record them, never wait on a question.'
-    : '- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.')
+  // The autonomous-mode rule is said once, in the briefing paragraph above — not repeated here.
+  if (!away) lines.push('- To ask the user something, write the question in the conversation and wait; they answer from the agentistics app or their phone.')
   return lines.join('\n')
 }
 

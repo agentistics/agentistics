@@ -1,7 +1,10 @@
 /**
- * Owner decision 2026-10-06 — the per-action authentication policy, enforced by the SERVER gate: every
- * mapped action × every choice its kind allows, the critical kinds never "nothing", changing the policy
- * costs a proof, and a record that cannot be read is read as the strictest. Same fakes as gate.test.ts.
+ * Owner decision 2026-10-06 — the per-action authentication policy, enforced by the SERVER gate — as it
+ * reads since COFRE.DESBLOQUEIO (owner, 2026-11-07): there is no authenticator code any more, so every
+ * kind either asks the person's ONE proof (here Windows Hello) or — for a read, at this computer —
+ * nothing. A stored "code" or "both" from before is that one proof; the critical kinds are never
+ * "nothing"; changing the policy costs the proof; a record that cannot be read is read as the strictest.
+ * Same fakes as gate.test.ts.
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { chmodSync, writeFileSync } from 'node:fs'
@@ -9,11 +12,11 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  ACTION_KINDS, ACTION_KINDS_ORDER, base32Decode, choicesFor, hotp, proofsFor, type ActionKind, type ProofChoice, type Protector, type ProtectorId, type UnwrapResult,
+  ACTION_KINDS, ACTION_KINDS_ORDER, choicesFor, proofsFor, type ActionKind, type ProofChoice, type Protector, type ProtectorId, type UnwrapResult,
 } from '@agentistics/vault'
 import { __resetVaultForTests, __setVaultClockForTests, sealToFile } from './service'
 import {
-  ACTION_KIND_OF, VAULT_ACTION_ROWS, __resetGateForTests, authPolicyView, beginAuthenticator, beginRecoveryKey, confirmAuthenticator, confirmRecoveryKey,
+  ACTION_KIND_OF, VAULT_ACTION_ROWS, __resetGateForTests, acceptSetupCode, authPolicyView, beginRecoveryKey, confirmRecoveryKey,
   enrolPresence, mintSetupCode, policyRow, requirePersonalReveal, requireVaultStepUp, setAuthPolicy, type VaultAction,
 } from './gate'
 import { authPolicyFile, readAuthPolicy, writeAuthPolicy } from './auth-policy'
@@ -37,15 +40,14 @@ function fake(id: ProtectorId): Protector & { gestures: number; cancel: boolean 
 
 let T = 1_800_000_000_000
 const clock = () => T
-const step = () => Math.floor(T / 1000 / 30)
-let seed: Uint8Array
-const code = () => hotp(seed, step())
-const next = () => { T += 30_000 }
 let dir = ''
 let dpapi = fake('dpapi')
 let hello = fake('hello')
+/** A page from ANOTHER device (LAN / tailnet) and a page ON this computer. */
 const S = { session: 'session-A' }
 const L = { ...S, loopback: true }
+/** A code a caller may still send: it is never judged and never helps. */
+const CODE = '123456'
 
 async function ownerMachine(): Promise<void> {
   dir = await mkdtemp(join(tmpdir(), 'agentistics-authpolicy-'))
@@ -54,35 +56,30 @@ async function ownerMachine(): Promise<void> {
   __setVaultClockForTests(clock)
   __resetGateForTests(clock)
   await sealToFile(join(dir, 'gh.sealed'), 'github-backup', 'github-backup', new TextEncoder().encode('TEST-NOT-A-SECRET')) // creates the vault
-  const a = await beginAuthenticator({ ...S, setupCode: mintSetupCode().code }, 'test-box')
-  if (!a.ok) throw new Error(a.sentence)
-  seed = base32Decode(a.secret)
-  expect((await confirmAuthenticator(code(), S)).ok).toBe(true)
-  next()
-  expect((await enrolPresence('hello', { ...S, code: code() })).ok).toBe(true)
-  next()
-  const r = await beginRecoveryKey(S)
+  expect((await acceptSetupCode({ ...L, setupCode: mintSetupCode().code })).ok).toBe(true)
+  expect((await enrolPresence('hello', L)).ok).toBe(true)
+  const r = await beginRecoveryKey(L)
   if (!r.ok) throw new Error(r.sentence)
-  expect((await confirmRecoveryKey(r.positions.map(p => r.words[p - 1]!), S)).ok).toBe(true)
-  next()
+  expect((await confirmRecoveryKey(r.positions.map(p => r.words[p - 1]!), L)).ok).toBe(true)
 }
 
 afterAll(async () => { __resetVaultForTests({ dir: join(await mkdtemp(join(tmpdir(), 'agentistics-authpolicy-done-')), 'vault') }) })
 
 const FULL = { hasAuthenticator: true, hasPresence: true }
+const NOW = { hasAuthenticator: false, hasPresence: true }
 const mapped = Object.entries(ACTION_KIND_OF).filter(([a]) => a !== 'personal-reveal') as [VaultAction, ActionKind][]
 
-describe('the defaults are today\'s rows, exactly', () => {
+describe('the defaults are the table\'s rows, exactly', () => {
   test('policyRow with no policy returns the table\'s row for every action', () => {
     for (const a of Object.keys(VAULT_ACTION_ROWS) as VaultAction[]) {
       expect(policyRow(a, L, null, FULL)).toEqual(VAULT_ACTION_ROWS[a])
     }
   })
-  test('every mapped action\'s row matches its kind\'s default', () => {
-    for (const [a, kind] of Object.entries(ACTION_KIND_OF) as [VaultAction, ActionKind][]) {
-      const row = VAULT_ACTION_ROWS[a]
-      expect(proofsFor(ACTION_KINDS[kind].default, FULL)).toEqual({ code: row.code, gesture: row.gesture })
-    }
+  test('on a vault with no authenticator (every vault now), a "code" choice is the gesture — never nothing', () => {
+    expect(proofsFor('code', NOW)).toEqual({ code: false, gesture: true })
+    expect(proofsFor('both', NOW)).toEqual({ code: false, gesture: true })
+    expect(proofsFor('gesture', NOW)).toEqual({ code: false, gesture: true })
+    expect(proofsFor('none', NOW)).toEqual({ code: false, gesture: false })
   })
 })
 
@@ -93,33 +90,25 @@ describe('the server gate — every mapped action × every allowed choice', () =
     for (const choice of choicesFor(kind)) {
       test(`${action} (${kind}) = ${choice}`, async () => {
         await writeAuthPolicy({ v: 1, choices: { [kind]: choice } })
-        const want = proofsFor(choice, FULL)
         const g0 = hello.gestures
-        if (want.code) {
-          expect(await requireVaultStepUp(action, L)).toMatchObject({ ok: false, code: 'stepup-required' })
-          expect(hello.gestures - g0).toBe(0) // refusing for the code raises no prompt
-          expect((await requireVaultStepUp(action, { ...L, code: code() })).ok).toBe(true)
-          next()
-        } else {
-          expect((await requireVaultStepUp(action, L)).ok).toBe(true)
+        expect((await requireVaultStepUp(action, L)).ok).toBe(true)
+        // ONE proof for anything but "none"; nothing for "none" (a read, at this computer).
+        expect(hello.gestures - g0).toBe(choice === 'none' ? 0 : 1)
+        if (choice !== 'none') {
+          hello.cancel = true
+          expect((await requireVaultStepUp(action, { ...L, code: CODE })).ok).toBe(false) // a code is no proof
+          hello.cancel = false
         }
-        expect(hello.gestures - g0).toBe(want.gesture ? 1 : 0)
       })
     }
   }
 
-  test('a cancelled gesture still refuses when the choice asks the gesture', async () => {
-    await writeAuthPolicy({ v: 1, choices: { 'delete-secret': 'gesture' } })
-    hello.cancel = true
-    expect((await requireVaultStepUp('personal-purge', L)).ok).toBe(false)
-  })
-
-  test('"none" OFF this computer is never nothing: the code (riding the read grant)', async () => {
+  test('"none" OFF this computer is never nothing: the phone\'s biometrics, never a dialog here', async () => {
     await writeAuthPolicy({ v: 1, choices: { use: 'none' } })
-    expect(await requireVaultStepUp('personal-grant', S)).toMatchObject({ ok: false, code: 'stepup-required' })
-    const ok = await requireVaultStepUp('personal-grant', { ...S, code: code() })
-    next()
-    expect(ok.ok && ok.grant).toBeString()
+    const g0 = hello.gestures
+    expect(await requireVaultStepUp('personal-grant', S)).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
+    expect(await requireVaultStepUp('personal-grant', { ...S, code: CODE })).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
+    expect(hello.gestures - g0).toBe(0)
   })
 })
 
@@ -127,35 +116,27 @@ describe('reveal — requirePersonalReveal under each choice', () => {
   beforeEach(async () => { await ownerMachine() })
   const R = { ...L, binding: 'item:value' }
 
-  test('gesture (the default): one Hello, no code', async () => {
+  test('gesture (the default): one Hello', async () => {
     const g0 = hello.gestures
     expect((await requirePersonalReveal(R)).ok).toBe(true)
     expect(hello.gestures - g0).toBe(1)
   })
-  test('none: no code, no prompt — at this computer only', async () => {
+  test('none: no prompt — at this computer only', async () => {
     await writeAuthPolicy({ v: 1, choices: { reveal: 'none' } })
     const g0 = hello.gestures
     expect((await requirePersonalReveal(R)).ok).toBe(true)
     expect(hello.gestures - g0).toBe(0)
-    expect(await requirePersonalReveal({ ...S, binding: 'item:value' })).toMatchObject({ ok: false, code: 'stepup-required' })
+    expect(await requirePersonalReveal({ ...S, binding: 'item:value' })).toMatchObject({ ok: false, code: 'mobile-gesture-required' })
   })
-  test('code: the code, fresh, and no prompt', async () => {
-    await writeAuthPolicy({ v: 1, choices: { reveal: 'code' } })
-    const g0 = hello.gestures
-    expect(await requirePersonalReveal(R)).toMatchObject({ ok: false, code: 'stepup-required' })
-    expect((await requirePersonalReveal({ ...R, code: code() })).ok).toBe(true)
-    next()
-    expect(hello.gestures - g0).toBe(0)
-    expect(await requirePersonalReveal(R)).toMatchObject({ ok: false, code: 'stepup-required' }) // fresh each time
-  })
-  test('both: the code and one Hello', async () => {
-    await writeAuthPolicy({ v: 1, choices: { reveal: 'both' } })
-    const g0 = hello.gestures
-    expect(await requirePersonalReveal(R)).toMatchObject({ ok: false, code: 'stepup-required' })
-    expect((await requirePersonalReveal({ ...R, code: code() })).ok).toBe(true)
-    next()
-    expect(hello.gestures - g0).toBe(1)
-  })
+  for (const choice of ['code', 'both'] as const) {
+    test(`a stored "${choice}" from before is the ONE proof: one Hello, fresh each time`, async () => {
+      await writeAuthPolicy({ v: 1, choices: { reveal: choice } })
+      const g0 = hello.gestures
+      expect((await requirePersonalReveal(R)).ok).toBe(true)
+      expect((await requirePersonalReveal({ ...R, code: CODE })).ok).toBe(true)
+      expect(hello.gestures - g0).toBe(2)
+    })
+  }
   test('"Sempre confirmar" OFF on the secret still wins: the open vault is the proof', async () => {
     await writeAuthPolicy({ v: 1, choices: { reveal: 'both' } })
     const g0 = hello.gestures
@@ -169,27 +150,21 @@ describe('changing the policy (set-auth-policy)', () => {
 
   test('every critical kind refuses "none" — the whole policy, nothing written', async () => {
     for (const k of ACTION_KINDS_ORDER.filter(k => !ACTION_KINDS[k].read)) {
-      expect(await setAuthPolicy({ [k]: 'none' }, { ...L, code: code() })).toMatchObject({ ok: false, code: 'bad-request' })
+      expect(await setAuthPolicy({ [k]: 'none' }, L)).toMatchObject({ ok: false, code: 'bad-request' })
     }
-    expect(await setAuthPolicy({ reveal: 'none', wipe: 'none' }, { ...L, code: code() })).toMatchObject({ ok: false, code: 'bad-request' })
+    expect(await setAuthPolicy({ reveal: 'none', wipe: 'none' }, L)).toMatchObject({ ok: false, code: 'bad-request' })
     expect((await readAuthPolicy()).state).toBe('default')
   })
 
-  test('costs a proof: by default the code AND the gesture; refused without the code', async () => {
-    const g0 = hello.gestures
-    expect(await setAuthPolicy({ reveal: 'none' }, L)).toMatchObject({ ok: false, code: 'stepup-required' })
+  test('costs the proof: one Hello, fresh — cancelled, nothing is written', async () => {
+    hello.cancel = true
+    expect((await setAuthPolicy({ reveal: 'none' }, { ...L, code: CODE })).ok).toBe(false)
     expect((await readAuthPolicy()).state).toBe('default')
-    expect((await setAuthPolicy({ reveal: 'none', settings: 'code' }, { ...L, code: code() })).ok).toBe(true)
-    next()
+    hello.cancel = false
+    const g0 = hello.gestures
+    expect((await setAuthPolicy({ reveal: 'none' }, L)).ok).toBe(true)
     expect(hello.gestures - g0).toBe(1)
-    const r = await readAuthPolicy()
-    expect(r).toEqual({ state: 'stored', policy: { v: 1, choices: { reveal: 'none', settings: 'code' } } })
-    // The next change follows the CHOSEN settings row: the code alone, no prompt — never nothing.
-    const g1 = hello.gestures
-    expect(await setAuthPolicy({ settings: 'both' }, L)).toMatchObject({ ok: false, code: 'stepup-required' })
-    expect((await setAuthPolicy({ settings: 'both' }, { ...L, code: code() })).ok).toBe(true)
-    next()
-    expect(hello.gestures - g1).toBe(0)
+    expect(await readAuthPolicy()).toEqual({ state: 'stored', policy: { v: 1, choices: { reveal: 'none' } } })
   })
 
   test('the record is sealed: its bytes never carry the choices in plain text', async () => {
@@ -199,25 +174,25 @@ describe('changing the policy (set-auth-policy)', () => {
     expect(raw).not.toContain('none')
   })
 
-  test('a record that cannot be opened reads as the STRICTEST: both proofs everywhere', async () => {
+  test('a record that cannot be opened reads as the STRICTEST: the proof everywhere', async () => {
     writeFileSync(authPolicyFile(), 'not a sealed record')
     chmodSync(authPolicyFile(), 0o600)
     const r = await readAuthPolicy()
     expect(r.state).toBe('unreadable')
     const v = await authPolicyView()
-    expect(v.rows.every(x => x.choice === 'both')).toBe(true)
+    expect(v.rows.every(x => x.choice === 'gesture')).toBe(true)
     const g0 = hello.gestures
-    expect(await requirePersonalReveal({ ...L, binding: 'i:v' })).toMatchObject({ ok: false, code: 'stepup-required' })
-    expect((await requirePersonalReveal({ ...L, binding: 'i:v', code: code() })).ok).toBe(true)
-    next()
+    expect((await requirePersonalReveal({ ...L, binding: 'i:v' })).ok).toBe(true)
     expect(hello.gestures - g0).toBe(1)
   })
 
-  test('the view lists every kind with its choices, and no critical kind offers "none"', async () => {
+  test('the view offers only "the proof" or (for a read) "nothing" — never a code — and no critical kind offers "none"', async () => {
     const v = await authPolicyView()
     expect(v.rows.map(r => r.kind)).toEqual([...ACTION_KINDS_ORDER])
     for (const r of v.rows) {
       expect(r.choice).toBe(r.default)
+      expect(r.choices.every(c => c === 'gesture' || c === 'none')).toBe(true)
+      expect(r.choices).toContain('gesture' as ProofChoice)
       if (r.critical) expect(r.choices).not.toContain('none' as ProofChoice)
     }
   })

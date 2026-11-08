@@ -13,9 +13,9 @@ export default function AwayPage() {
 export function AwayContent({ lang, capable }: { lang: 'pt' | 'en'; capable: boolean }) {
   const pt = lang === 'pt'
   const away = useAway()
-  const status = !capable ? (pt ? 'Modo ausente indisponível nesta instância.' : 'Away mode is unavailable on this instance.')
-    : !away.state ? (pt ? 'Carregando modo ausente…' : 'Loading away mode…')
-    : away.active ? `${pt ? 'Ausente' : 'Away'} ${awayUntilLabel(away.state, lang, Date.now())}`
+  const status = !capable ? (pt ? 'Modo autônomo indisponível nesta instância.' : 'Autonomous mode is unavailable on this instance.')
+    : !away.state ? (pt ? 'Carregando modo autônomo…' : 'Loading autonomous mode…')
+    : away.active ? `${pt ? 'Autônomo' : 'Autonomous'} ${awayUntilLabel(away.state, lang, Date.now())}`
     : (pt ? 'Você está presente.' : 'You are present.')
   return <div style={{ minWidth: 0 }}>
     <PageHeader lang={lang} areaId="sessions" pageId="away" status={status} />

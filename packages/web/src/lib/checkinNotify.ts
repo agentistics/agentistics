@@ -101,7 +101,7 @@ export function needsTitle(n: number, lang: 'pt' | 'en'): string {
 }
 
 export function summaryTitle(lang: 'pt' | 'en'): string {
-  return lang === 'pt' ? 'Enquanto você estava fora…' : 'While you were away…'
+  return lang === 'pt' ? 'No modo autônomo…' : 'In autonomous mode…'
 }
 
 // --- one round -----------------------------------------------------------------------------------

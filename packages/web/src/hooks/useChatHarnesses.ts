@@ -32,6 +32,8 @@ export interface HarnessChatStatus {
   label: string
   /** CLI binary is found on PATH. */
   installed: boolean
+  /** Has an integrated installer; otherwise setup.docUrl provides official guidance. */
+  canInstall?: boolean
   /** Auth/config file is present (best-effort). */
   authReady: boolean
   /** installed && authReady — driver is usable. */
@@ -56,17 +58,17 @@ export interface UseChatHarnessesResult {
 }
 
 /**
- * Fetches GET /api/chat-harnesses and returns status for ALL known harnesses,
+ * Fetches chat backends by default; all=true requests the complete session catalog,
  * including those that are not installed or not authenticated.
  */
-export function useChatHarnesses(): UseChatHarnessesResult {
+export function useChatHarnesses(all = false): UseChatHarnessesResult {
   const [harnesses, setHarnesses] = useState<HarnessChatStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [generation, setGeneration] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/chat-harnesses')
+    fetch(all ? '/api/chat-harnesses?all=1' : '/api/chat-harnesses')
       .then(r => r.json() as Promise<HarnessChatStatus[]>)
       .then(data => {
         if (!cancelled) {
@@ -78,7 +80,7 @@ export function useChatHarnesses(): UseChatHarnessesResult {
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [generation])
+  }, [generation, all])
 
   // The badge must flip by itself after an install or a sign-in, so re-check while anything is not
   // ready — and stop the moment everything is, so a settled machine pays nothing.

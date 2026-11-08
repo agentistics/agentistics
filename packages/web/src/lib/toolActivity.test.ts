@@ -11,6 +11,13 @@ describe('kindOf — one rule for every harness', () => {
     // harness names the shared map lacks (measured 2026-10-16)
     [{ name: 'exec' }, 'run'], [{ name: 'rg' }, 'search'], [{ name: 'apply_patch' }, 'edit'],
     [{ name: 'google_web_search' }, 'web'], [{ name: 'save_memory' }, 'memory'], [{ name: 'invoke_subagent' }, 'delegate'],
+    // ACP kinds, as an ACP-driven harness (OpenCode) passes them through `canonical` — the print that read
+    // "execute, execute +6": the kind was unknown, so every step was 'other' and showed only its name
+    [{ name: 'execute', canonical: 'execute' }, 'run'], [{ name: 'bash', canonical: 'execute' }, 'run'],
+    [{ name: 'read', canonical: 'read' }, 'read'], [{ name: 'edit', canonical: 'edit' }, 'edit'],
+    [{ name: 'delete', canonical: 'delete' }, 'edit'], [{ name: 'move', canonical: 'move' }, 'edit'],
+    [{ name: 'grep', canonical: 'search' }, 'search'], [{ name: 'webfetch', canonical: 'fetch' }, 'web'],
+    [{ name: 'think', canonical: 'think' }, 'plan'],
     // MCP in both spellings
     [{ name: 'mcp__agentistics__agentistics_tasks' }, 'mcp'], [{ name: 'mcp_agentistics_agentistics_tasks' }, 'mcp'],
   ] as const)('%o → %s', (call, kind) => expect(kindOf(call)).toBe(kind))

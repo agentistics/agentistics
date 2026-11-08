@@ -14,7 +14,6 @@ import { ArrowLeft, Pencil } from 'lucide-react'
 import { groupStatus, taskProgress, type TaskStatusDef } from '@agentistics/core'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import type { TaskDetail } from '../../lib/tasks'
-import { BetaTag } from '../BetaTag'
 import { NA, button, fmtInt, fmtTokens, harnessColor, statusStyle } from './board'
 import { TaskChips, TaskMoreMenu } from './TaskChips'
 import { RenameInput } from './RenameInput'
@@ -209,7 +208,6 @@ export function TaskHero({ detail, lang, statuses, live, reload, onBack, onAbout
                   className="ag-tap-icon"
                   style={{ display: 'grid', placeItems: 'center', width: isMobile ? 32 : 22, height: isMobile ? 32 : 22, borderRadius: 6, border: 'none', background: 'transparent', color: 'var(--text-tertiary)', cursor: 'pointer', flex: '0 0 auto' }}
                 ><Pencil size={13} /></button>
-                <BetaTag what="Agentask" />
               </>
             )}
           </h1>

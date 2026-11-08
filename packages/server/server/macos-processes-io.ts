@@ -15,55 +15,62 @@
  */
 
 import type { HarnessId } from '@agentistics/core'
+import { realpathSync } from 'node:fs'
 import {
-  harnessOfProcess, isNonInteractiveInvocation, sessionIdFromArgv, sessionIdFromFdPaths, type HarnessProcess,
+  harnessOf, harnessOfProcess, isNonInteractiveInvocation, sessionIdFromArgv, sessionIdFromFdPaths, type HarnessProcess,
 } from './live-sessions'
 import {
-  cwdFromLsof, parseLsofFields, parsePsList, processStartFromEtime, splitPsCommand,
+  cwdFromLsof, executableFromLsofTxt, macExecutable, parseLsofFields, parsePsCommands, parsePsList, processStartFromEtime, splitPsCommand,
 } from './macos-processes'
 
 const JS_RUNTIME_COMMS = new Set(['node', 'bun', 'deno'])
 
-function run(argv: string[], timeoutMs = 4000): { ok: boolean; stdout: string } {
+const realPath = (p: string): string | undefined => { try { return realpathSync(p) } catch { return undefined } }
+
+/** Runs one command and returns its stdout. ASYNC on purpose (MAC.OPENCODE-MUDO): a `spawnSync` of `ps`/`lsof` holds
+ *  the whole server — every HTTP request, the fleet stream, an action's answer — for as long as the command runs,
+ *  and `lsof` on a Mac routinely takes seconds. Bounded by `timeoutMs`; a timeout or a spawn failure is `ok: false`. */
+export type MacRun = (argv: string[], timeoutMs?: number) => Promise<{ ok: boolean; stdout: string }>
+
+export const runAsync: MacRun = async (argv, timeoutMs = 4000) => {
   try {
-    const proc = Bun.spawnSync(argv, { stdout: 'pipe', stderr: 'pipe', timeout: timeoutMs })
-    return { ok: proc.exitCode === 0, stdout: proc.stdout.toString('utf-8') }
+    const proc = Bun.spawn(argv, { stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' })
+    const timer = setTimeout(() => { try { proc.kill() } catch { /* gone */ } }, timeoutMs)
+    try {
+      const [stdout, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+      return { ok: code === 0, stdout }
+    } finally { clearTimeout(timer) }
   } catch {
     return { ok: false, stdout: '' }
   }
 }
 
-/** The full argv for one pid, via a per-pid `ps -o command=` (the bulk scan's `comm` alone is not
- *  enough to identify a script-installed harness or read a `--resume` flag). `undefined` when the
- *  process already exited between the bulk scan and this call. */
-function fullArgv(pid: number): string[] | undefined {
-  const { ok, stdout } = run(['ps', '-p', String(pid), '-o', 'command='])
-  const line = stdout.trim()
-  if (!ok || !line) return undefined
-  return splitPsCommand(line)
+/** Every candidate's full argv in ONE `ps` call (the bulk scan's `comm` alone is not enough to identify a
+ *  script-installed harness or read a `--resume` flag). A pid absent from the answer exited between the reads. */
+async function fullArgvs(run: MacRun, pids: number[]): Promise<Map<number, string[]>> {
+  const out = new Map<number, string[]>()
+  if (pids.length === 0) return out
+  const { stdout } = await run(['ps', '-ww', '-o', 'pid=,command=', '-p', pids.join(',')])
+  // `ps -p` exits 1 when ANY listed pid is gone, while still printing the rest — so the text decides, not the code.
+  for (const [pid, line] of parsePsCommands(stdout)) out.set(pid, splitPsCommand(line))
+  return out
 }
 
 /** Every open file `lsof` names for a set of pids, in ONE call — `-Fpn` gives the parseable field
  *  form and no per-pid round trip. `-a -p <list>` intersects "these pids" with the default filter
  *  (every open file), which is what makes a single call answer for every candidate at once. */
-function openFilesFor(pids: number[]): Map<number, string[]> {
+async function openFilesFor(run: MacRun, pids: number[]): Promise<Map<number, string[]>> {
   if (pids.length === 0) return new Map()
-  const { ok, stdout } = run(['lsof', '-a', '-p', pids.join(','), '-Fpn'])
-  return ok ? parseLsofFields(stdout) : new Map()
+  const { stdout } = await run(['lsof', '-a', '-p', pids.join(','), '-Fpn'])
+  return parseLsofFields(stdout)
 }
 
-/** The cwd for a set of pids, in ONE call — `-d cwd` narrows lsof to just that file descriptor,
- *  so this is cheap even for a large candidate list. */
-function cwdsFor(pids: number[]): Map<number, string[]> {
+/** `lsof` narrowed to one descriptor (`cwd`, `0`) for a set of pids, in ONE call. `lsof` exits 1 when some pid has
+ *  no such descriptor (or is gone) while still printing the others, so its text is parsed whatever the exit code. */
+async function fdFor(run: MacRun, fd: string, pids: number[]): Promise<Map<number, string[]>> {
   if (pids.length === 0) return new Map()
-  const { ok, stdout } = run(['lsof', '-a', '-d', 'cwd', '-p', pids.join(','), '-Fpn'])
-  return ok ? parseLsofFields(stdout) : new Map()
-}
-
-function stdinsFor(pids: number[]): Map<number, string[]> {
-  if (pids.length === 0) return new Map()
-  const { ok, stdout } = run(['lsof', '-a', '-d', '0', '-p', pids.join(','), '-Fpn'])
-  return ok ? parseLsofFields(stdout) : new Map()
+  const { stdout } = await run(['lsof', '-a', '-d', fd, '-p', pids.join(','), '-Fpn'])
+  return parseLsofFields(stdout)
 }
 
 export interface MacScanResult {
@@ -80,8 +87,8 @@ export interface MacScanResult {
 
 /** Read every running harness process via `ps` + `lsof`. Bun's own pid is excluded from
  *  `foreignPids`, matching the Linux reader's own-pid exclusion. */
-export function scanMacProcesses(nowMs: number = Date.now()): MacScanResult {
-  const bulk = run(['ps', '-axwwo', 'pid=,etime=,comm='])
+export async function scanMacProcesses(nowMs: number = Date.now(), run: MacRun = runAsync): Promise<MacScanResult> {
+  const bulk = await run(['ps', '-axwwo', 'pid=,etime=,comm='])
   if (!bulk.ok) return { procs: [], psFailed: true, foreignPids: 0, cwdDenied: false }
 
   const entries = parsePsList(bulk.stdout)
@@ -92,23 +99,47 @@ export function scanMacProcesses(nowMs: number = Date.now()): MacScanResult {
   // for a JS-runtime comm, so a runtime candidate is provisionally kept and resolved below; a comm
   // matching neither a known harness NOR a runtime is dropped here, before any lsof/ps call spends
   // a process on it.
+  // `ps` names the path the process was EXECUTED by — a symlink for an npm/nvm/volta install — while the install
+  // layouts are written against the real file (`/proc/<pid>/exe` on Linux). Resolved only for a name that is a
+  // harness at all, so the rest of the process table costs no syscall.
+  const exeOf = new Map<number, string>()
+  // MAC.OPENCODE r2 — a harness NAME with no path (`ps` printed argv[0] = `opencode`, typed in a shell): only the
+  // kernel knows which file it runs (see `executableFromLsofTxt`). Resolved below in ONE `lsof` for all of them.
+  const bareNamed: typeof entries = []
   const candidates = entries.filter(e => {
     const base = e.comm.slice(e.comm.lastIndexOf('/') + 1)
-    return JS_RUNTIME_COMMS.has(base) || harnessOfProcess(base, e.comm, [e.comm]) !== undefined
+    if (JS_RUNTIME_COMMS.has(base)) return true
+    if (harnessOf(base, e.comm) === undefined) return false
+    // The path as executed first (a Homebrew `/opt/homebrew/bin/<tool>` link is itself a known layout and would
+    // stop being one once resolved into the Cellar), the resolved file second.
+    if (harnessOfProcess(base, e.comm, [e.comm]) !== undefined) return true
+    if (!e.comm.startsWith('/')) { bareNamed.push(e); return false }
+    const exe = macExecutable(e.comm, realPath)
+    if (exe === e.comm || harnessOfProcess(base, exe, [e.comm]) === undefined) return false
+    exeOf.set(e.pid, exe)
+    return true
   })
+  if (bareNamed.length > 0) {
+    const txt = await fdFor(run, 'txt', bareNamed.map(e => e.pid))
+    for (const e of bareNamed) {
+      const exe = executableFromLsofTxt(txt, e.pid, e.comm, path => harnessOfProcess(e.comm, path, [e.comm]) !== undefined)
+      if (!exe) continue
+      exeOf.set(e.pid, exe)
+      candidates.push(e)
+    }
+  }
   if (candidates.length === 0) return { procs: [], psFailed: false, foreignPids, cwdDenied: false }
 
   const pids = candidates.map(c => c.pid)
-  const cwds = cwdsFor(pids)
-  const stdins = stdinsFor(pids)
+  const [cwds, stdins, argvs] = await Promise.all([fdFor(run, 'cwd', pids), fdFor(run, '0', pids), fullArgvs(run, pids)])
   let cwdDenied = false
   const procs: HarnessProcess[] = []
 
   for (const entry of candidates) {
-    const argv = fullArgv(entry.pid)
+    const argv = argvs.get(entry.pid)
     if (!argv || argv.length === 0) continue // exited between the two reads
     const comm = entry.comm.slice(entry.comm.lastIndexOf('/') + 1)
-    const harness: HarnessId | undefined = harnessOfProcess(comm, entry.comm, argv)
+    const harness: HarnessId | undefined = harnessOfProcess(comm, exeOf.get(entry.pid) ?? entry.comm, argv)
     if (!harness) continue
     const stdinPath = cwdFromLsof(stdins, entry.pid)
     const stdinIsTty = stdinPath === undefined ? undefined : /^\/dev\/(ttys?\d*|pts\/)/.test(stdinPath)
@@ -128,7 +159,7 @@ export function scanMacProcesses(nowMs: number = Date.now()): MacScanResult {
   // list. This OUTRANKS the argv-derived id above (the kernel's own open-file record beats a
   // guess read off the command line), so it overwrites rather than only filling gaps.
   if (procs.length > 0) {
-    const openFiles = openFilesFor(procs.map(p => p.pid!))
+    const openFiles = await openFilesFor(run, procs.map(p => p.pid!))
     for (const p of procs) {
       const paths = openFiles.get(p.pid!)
       if (!paths) continue

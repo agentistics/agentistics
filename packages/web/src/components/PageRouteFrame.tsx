@@ -1,4 +1,5 @@
 import React from 'react'
+import { usePageFit } from '../lib/pageFit'
 
 /** Keep routed pages mounted when the viewport changes the surrounding scroll layout. */
 export function PageRouteFrame({ compact, scrollRef, maxWidth, before, footer, children }: {
@@ -9,6 +10,8 @@ export function PageRouteFrame({ compact, scrollRef, maxWidth, before, footer, c
   footer?: React.ReactNode
   children: React.ReactNode
 }) {
+  // A screen that fills the page (the Live board) is the last thing in it: no footer under it, or the page is taller than its panel.
+  const fits = usePageFit()
   return <div ref={scrollRef} data-page-scroller={compact ? undefined : true}
     style={compact ? { display: 'contents' } : { flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
     <div style={compact ? { display: 'contents' } : {
@@ -18,6 +21,6 @@ export function PageRouteFrame({ compact, scrollRef, maxWidth, before, footer, c
       {before}
       {children}
     </div>
-    {!compact && footer}
+    {!compact && !fits && footer}
   </div>
 }

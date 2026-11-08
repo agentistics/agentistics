@@ -231,6 +231,8 @@ export interface SessionView {
   resume?: { sessionId: string; title: string }
   /** Metrics of the conversation behind this row, when it has any. Absent is never zero. */
   tokens?: number
+  /** The model the conversation's own transcript says ANSWERED ("claude-opus-5-5") — what the composer names, as opposed to `model`, which is only what was asked for at spawn. */
+  observedModel?: string
   /** SS-05: the four counters, and the person's turn count — absent where not recorded. */
   tokenParts?: import('./conversations').TokenParts
   turns?: number
@@ -251,7 +253,7 @@ export interface SessionView {
   /** The managed id of the session that started this one — `ManagedSession.parentSessionId`. */
   parentSessionId?: string
   parentConversationId?: string
-  /** `ManagedSession.away` — per-session away mode. */
+  /** `ManagedSession.away` — per-session autonomous mode. */
   away?: boolean
   /** `ManagedSession.handoffSeq` — the leader hand-off generation. */
   handoffSeq?: number
@@ -762,6 +764,7 @@ export function buildSessionViews(o: {
         ? claimResume(r.managed, harness, own?.sessionId)
         : {}),
       ...(conv?.tokens !== undefined ? { tokens: conv.tokens } : {}),
+      ...(conv?.model ? { observedModel: conv.model } : {}),
       ...(conv?.tokenParts ? { tokenParts: conv.tokenParts } : {}),
       ...(conv?.turns ? { turns: conv.turns } : {}),
       ...(conv?.calls ? { calls: conv.calls } : {}),
@@ -830,8 +833,12 @@ export function buildSessionViews(o: {
     // conversation a process is driving: a TUI started by hand beside a managed (ACP) session in the
     // same repository is another conversation, and the directory guess hid it as "closed". Cover it
     // only by the exact `ses_…` id both sides state.
+    // MAC.OPENCODE r2: and only by a row that is actually RUNNING, the rule every other harness follows below. A
+    // conversation the owner once reopened here keeps that (now exited / retired) row carrying its id, and the TUI he
+    // later opened on it in a terminal was hidden behind the dead row — the running process is the truth.
     if (p.harness === 'opencode') {
-      return p.sessionId !== undefined && managed.some(m => m.harness === 'opencode' && m.conversationId === p.sessionId)
+      return p.sessionId !== undefined && managed.some(m => m.harness === 'opencode' && m.conversationId === p.sessionId
+        && (m.status === 'running' || m.status === 'unregistered'))
     }
     return managed.some(m =>
       m.harness === p.harness &&
@@ -880,7 +887,14 @@ export function buildSessionViews(o: {
     // lookup succeeding would leave it correctly listed and anonymously labelled.
     const own = (p.pid !== undefined ? o.harnessSessions?.byPid.get(p.pid) : undefined)
       ?? (p.sessionId ? o.harnessSessions?.byConversation.get(p.sessionId) : undefined)
-    const ownName = chosenName(own)
+    // OPENCODE.ATIVAS-TUI — opencode keeps no per-pid record, so an external opencode row had no name at all and every
+    // tab of a TUI read "opencode in <dir>". When the process NAMED its session (its tabs record, `-s`), the session's
+    // own title is that conversation's exact name — never a directory guess (`conversationForProcess` with a named id
+    // answers that conversation or nothing).
+    const namedConvTitle = p.harness === 'opencode' && (own?.sessionId ?? p.sessionId)
+      ? conversationForProcess(conversations, { harness: p.harness, cwd: p.cwd, namedId: (own?.sessionId ?? p.sessionId)! })?.title
+      : undefined
+    const ownName = chosenName(own) ?? (namedConvTitle && namedConvTitle.trim() !== '' ? namedConvTitle : undefined)
     // What this process appears to be driving. The harness's own `sessionId` outranks the argv one
     // and the directory guess alike: it is what the process is writing to, said by the process.
     const conv = conversationForProcess(conversations, {
@@ -949,8 +963,12 @@ export function buildSessionViews(o: {
   // was running. "Some sessions do not appear" and "some appear twice" were the same bug, seen
   // from its two ends.
   const coveredConv = new Set<string>()
+  // APP.LENTO: a map, not `managed.find` per row — 3.000 × 3.000 comparisons every poll on a real
+  // fleet (6 % of the server's CPU). First occurrence wins, as `find` did.
+  const managedById = new Map<string, SessionView>()
+  for (const v of managed) if (!managedById.has(v.id)) managedById.set(v.id, v)
   for (const r of o.reconciled) {
-    const m = managed.find(v => v.id === r.id)
+    const m = managedById.get(r.id)
     // `exited` and `lost` rows cover nothing: their work IS over, and the conversation belongs in
     // history where it can be reopened.
     if (!m || (m.status !== 'running' && m.status !== 'unregistered')) continue

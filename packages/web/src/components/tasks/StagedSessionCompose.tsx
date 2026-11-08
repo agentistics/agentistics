@@ -87,6 +87,9 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
   const [harnessId, setHarnessId] = useState(p.initial?.harness ?? '')
   const [model, setModel] = useState(p.initial?.model ?? '')
   const [effort, setEffort] = useState(p.initial?.effort ?? '')
+  // FLUXO.ENTREGA-DSL: the account the pre-dispatch gate requires. Kept from the initial draft so an edit here never
+  // drops an account set by the CLI/MCP (`agentop task stage --account`).
+  const [account, setAccount] = useState(p.initial?.account ?? '')
   const [cwd, setCwd] = useState(p.initial?.cwd ?? '')
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -201,6 +204,7 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
       ...(harnessId ? { harness: harnessId } : {}),
       ...(model.trim() ? { model: model.trim() } : {}),
       ...(effort.trim() ? { effort: effort.trim() } : {}),
+      ...(account.trim() ? { account: account.trim() } : {}),
       ...(cwd.trim() ? { cwd: cwd.trim() } : {}),
     }
     const check = validateStagedSessionDraft(draft)
@@ -467,6 +471,19 @@ export function StagedSessionCompose(p: StagedSessionComposeProps) {
               <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-tertiary)' }}>
                 {pt ? `Sem escolha: ${effortUnset}.` : `Left unset: ${effortUnset}.`}
               </div>
+            </div>
+          )}
+
+          {harnessId && (
+            <div>
+              <label htmlFor="staged-account" style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 5 }}>
+                {pt ? 'Conta' : 'Account'}
+              </label>
+              <input
+                id="staged-account" data-staged-account value={account} onChange={e => setAccount(e.target.value)}
+                placeholder={pt ? 'id da conta (acc_…) — o fluxo de entrega exige' : 'account id (acc_…) — the delivery flow requires it'}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: 13, minHeight: 36 }}
+              />
             </div>
           )}
           </>)}

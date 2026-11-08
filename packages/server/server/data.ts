@@ -129,6 +129,8 @@ export async function loadSessionMetas(roots: string[] = [SESSION_META_DIR]): Pr
             languages,
             git_commits: (data.git_commits as number) ?? 0,
             git_pushes: (data.git_pushes as number) ?? 0,
+            // Present only on records WE wrote (the consolidate store); Claude's own session-meta never has it.
+            ...(typeof data.test_runs === 'number' ? { test_runs: data.test_runs } : {}),
             input_tokens: (data.input_tokens as number) ?? 0,
             output_tokens: (data.output_tokens as number) ?? 0,
             first_prompt: (data.first_prompt as string) ?? '',
@@ -248,8 +250,10 @@ async function scanProjectDir(
           // session already carrying `compact_count: 0` must not be enriched again.
           const needsCompaction = metaEntry.compact_count === undefined
           const needsSkills = metaEntry.skill_uses === undefined
+          // Same rule for the Live's test step: presence IS the record of a real read.
+          const needsTestRuns = metaEntry.test_runs === undefined
           if (!needsModel && !needsAgentMetrics && !needsActive && !needsContext
-            && !needsCompaction && !needsSkills) return
+            && !needsCompaction && !needsSkills && !needsTestRuns) return
 
           const enriched = await cachedEnrich(cache, filePath, metaEntry.model ?? '')
           if (!enriched) return
@@ -272,6 +276,7 @@ async function scanProjectDir(
             }
           }
           if (needsSkills) metaEntry.skill_uses = enriched.skillUses
+          if (needsTestRuns) metaEntry.test_runs = enriched.testRuns
         })
       }
       return

@@ -15,6 +15,9 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:cr
 import type { Lang } from '../sentences'
 import { firstLine } from './types'
 
+/** The presence kinds: each wraps the data key under a KEK only a person's proof can produce. */
+export type PresenceKind = 'hello' | 'fido2' | 'touchid' | 'password'
+
 export type PresenceCode =
   | 'presence-cancelled'
   | 'presence-timeout'
@@ -51,6 +54,9 @@ export const PRESENCE_DETAILS = [
   // Portuguese UI ("the Windows security-key bridge (webauthn.dll) is not verified…").
   'bridge-unverified', 'interop-off', 'powershell-missing', 'no-answer', 'no-signature', 'no-key', 'fido2-tools-missing',
   'device-error', 'no-credential-id', 'not-touched', 'no-hmac-output', 'file-missing', 'file-damaged',
+  // COFRE.DESBLOQUEIO (2026-11-07): Touch ID / the Mac's password, and the vault's own password.
+  'touchid-unavailable', 'touchid-not-set-up', 'touchid-locked', 'keychain-failed',
+  'password-required', 'password-wrong', 'password-weak',
 ] as const
 export type PresenceDetail = typeof PRESENCE_DETAILS[number]
 
@@ -75,6 +81,13 @@ const DETAIL_TEXT: Record<PresenceDetail, { en: string; pt: string }> = {
   'no-hmac-output': { en: 'the security key did not return its secret', pt: 'a chave de segurança não devolveu o segredo' },
   'file-missing': { en: 'the file that links it to the vault is missing', pt: 'o arquivo que a liga ao cofre sumiu' },
   'file-damaged': { en: 'the file that links it to the vault is damaged', pt: 'o arquivo que a liga ao cofre está danificado' },
+  'touchid-unavailable': { en: 'macOS did not offer Touch ID or the Mac password to this program', pt: 'o macOS não ofereceu o Touch ID nem a senha do Mac para este programa' },
+  'touchid-not-set-up': { en: 'this Mac has no login password set up', pt: 'este Mac não tem senha de login configurada' },
+  'touchid-locked': { en: 'Touch ID is locked after too many tries; use the Mac password', pt: 'o Touch ID travou depois de muitas tentativas; use a senha do Mac' },
+  'keychain-failed': { en: 'the macOS Keychain did not keep the key; the details are in the agentop log', pt: 'o Keychain do macOS não guardou a chave; os detalhes estão no log do agentop' },
+  'password-required': { en: 'type the vault password', pt: 'digite a senha do cofre' },
+  'password-wrong': { en: 'that is not the vault password', pt: 'essa não é a senha do cofre' },
+  'password-weak': { en: 'the password does not meet the rules', pt: 'a senha não cumpre as regras' },
 }
 
 /** PURE. A reason as words for a PERSON: a key is translated, anything else is the generic line — never repeated. */
@@ -141,7 +154,7 @@ export function presenceSentence(code: PresenceCode, lang: Lang, presence: strin
   }
 }
 
-export function deriveKek(secret: Uint8Array, kid: string, type: 'hello' | 'fido2'): Uint8Array {
+export function deriveKek(secret: Uint8Array, kid: string, type: PresenceKind): Uint8Array {
   return new Uint8Array(hkdfSync('sha256', secret, new TextEncoder().encode(kid), `agentistics/vault/v2/${type}`, 32))
 }
 
@@ -150,14 +163,14 @@ function aad(type: string, kid: string): Uint8Array {
 }
 
 /** `nonce(12) ‖ ciphertext ‖ tag(16)`. */
-export function sealDek(kek: Uint8Array, dek: Uint8Array, type: 'hello' | 'fido2', kid: string): Uint8Array {
+export function sealDek(kek: Uint8Array, dek: Uint8Array, type: PresenceKind, kid: string): Uint8Array {
   const nonce = randomBytes(12)
   const c = createCipheriv('aes-256-gcm', kek, nonce, { authTagLength: 16 })
   c.setAAD(aad(type, kid))
   return new Uint8Array(Buffer.concat([nonce, c.update(dek), c.final(), c.getAuthTag()]))
 }
 
-export function openDek(kek: Uint8Array, wrapped: Uint8Array, type: 'hello' | 'fido2', kid: string): Uint8Array | null {
+export function openDek(kek: Uint8Array, wrapped: Uint8Array, type: PresenceKind, kid: string): Uint8Array | null {
   if (wrapped.length < 12 + 16) return null
   try {
     const d = createDecipheriv('aes-256-gcm', kek, wrapped.subarray(0, 12), { authTagLength: 16 })

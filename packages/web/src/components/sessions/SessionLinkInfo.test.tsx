@@ -174,7 +174,7 @@ describe('per-session away switch', () => {
     expect(off).toContain('aria-checked="false"')
     const on = renderToStaticMarkup(<SessionLinkPanel links={none} sessionId="s1" pt onGo={() => {}} awayId="s1" away />)
     expect(on).toContain('aria-checked="true"')
-    expect(on).toContain('Modo ausente nesta sessão')
+    expect(on).toContain('Modo autônomo nesta sessão')
     expect(renderToStaticMarkup(<SessionLinkPanel links={none} sessionId="s1" pt={false} onGo={() => {}} />)).not.toContain('session-away-row')
   })
 })

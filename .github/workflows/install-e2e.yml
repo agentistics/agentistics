@@ -80,8 +80,11 @@ jobs:
     timeout-minutes: 15
     continue-on-error: ${{ matrix.optional == true }}
     env:
-      API_PORT: 49191
-      WEB_PORT: 49192
+      # Below every OS's ephemeral range (macOS 49152-65535, Linux 32768-60999). The old 49191-49193
+      # sat inside macOS's, and on 2026-11-06 both macOS runners found 49191 already taken at the
+      # server's first bind (EADDRINUSE while this server held the data-dir lock: not an agentop).
+      API_PORT: 28191
+      WEB_PORT: 28192
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -96,17 +99,17 @@ jobs:
       - name: Exercise sh, bash, and zsh installers
         timeout-minutes: 8
         env:
-          AGENTOP_INSTALL_BASE_URL: http://127.0.0.1:49193
+          AGENTOP_INSTALL_BASE_URL: http://127.0.0.1:28193
           AGENTOP_INSTALL_START: yes
           AGENTOP_INSTALL_AUTOSTART: no
           AGENTOP_INSTALL_TTY: /dev/null
-          AGENTOP_INSTALL_PORT: 49192
-          PORT: 49191
-          WEB_PORT: 49192
+          AGENTOP_INSTALL_PORT: 28192
+          PORT: 28191
+          WEB_PORT: 28192
         run: |
           chmod +x "e2e-assets/${{ matrix.asset }}"
           if [ "${{ matrix.asset }}" != agentop ]; then cp "e2e-assets/${{ matrix.asset }}" e2e-assets/agentop; fi
-          python3 -m http.server 49193 --directory e2e-assets >/tmp/install-e2e-http.log 2>&1 &
+          python3 -m http.server 28193 --directory e2e-assets >/tmp/install-e2e-http.log 2>&1 &
           HTTP_PID=$!
           trap 'kill "$HTTP_PID" 2>/dev/null || true' EXIT
           sleep 2
@@ -163,9 +166,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         env:
-          AGENTOP_INSTALL_BASE_URL: http://127.0.0.1:49193
-          PORT: 49191
-          WEB_PORT: 49192
+          AGENTOP_INSTALL_BASE_URL: http://127.0.0.1:28193
+          PORT: 28191
+          WEB_PORT: 28192
         run: |
           roots_status=''
           roots=$(curl --silent --show-error --max-time 30 -o /tmp/login-root-response \
@@ -206,7 +209,10 @@ jobs:
           fi
       - name: Upload failure diagnostics
         if: failure()
-        run: tmux -L agentistics capture-pane -p -S -200 > /tmp/login-pane.txt 2>/dev/null || true
+        run: |
+          tmux -L agentistics capture-pane -p -S -200 > /tmp/login-pane.txt 2>/dev/null || true
+          # Who holds the ports, in any state: the answer a port conflict needs, read on the runner.
+          { lsof -nP -iTCP:"$API_PORT" -iTCP:"$WEB_PORT" || true; echo '--- listeners'; lsof -nP -iTCP -sTCP:LISTEN || true; } > /tmp/install-e2e-ports.txt 2>&1
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
@@ -218,6 +224,7 @@ jobs:
             /github/home/.agentistics/server.log
             /tmp/install-e2e-http.log
             /tmp/login-pane.txt
+            /tmp/install-e2e-ports.txt
           if-no-files-found: ignore
 
   alpine:
@@ -227,8 +234,8 @@ jobs:
     container: alpine:3.21
     timeout-minutes: 15
     env:
-      API_PORT: 49191
-      WEB_PORT: 49192
+      API_PORT: 28191
+      WEB_PORT: 28192
     steps:
       - name: Install Alpine dependencies
         run: apk add --no-cache bash zsh curl jq python3 nodejs npm tmux git
@@ -240,17 +247,17 @@ jobs:
       - name: Exercise musl install and login flow
         timeout-minutes: 8
         env:
-          AGENTOP_INSTALL_BASE_URL: http://127.0.0.1:49193
+          AGENTOP_INSTALL_BASE_URL: http://127.0.0.1:28193
           AGENTOP_INSTALL_START: yes
           AGENTOP_INSTALL_AUTOSTART: no
           AGENTOP_INSTALL_TTY: /dev/null
-          AGENTOP_INSTALL_PORT: 49192
-          PORT: 49191
-          WEB_PORT: 49192
+          AGENTOP_INSTALL_PORT: 28192
+          PORT: 28191
+          WEB_PORT: 28192
         run: |
           cp e2e-assets/agentop-musl e2e-assets/agentop
           chmod +x e2e-assets/agentop
-          python3 -m http.server 49193 --directory e2e-assets >/tmp/install-e2e-http.log 2>&1 &
+          python3 -m http.server 28193 --directory e2e-assets >/tmp/install-e2e-http.log 2>&1 &
           HTTP_PID=$!
           trap 'kill "$HTTP_PID" 2>/dev/null || true' EXIT
           sleep 2
@@ -277,7 +284,10 @@ jobs:
           printf '%s' "$accounts" | jq -e 'all(.accounts[]; .id == "" and .key == "default" and .root == null)' >/dev/null
       - name: Upload Alpine diagnostics
         if: failure()
-        run: tmux -L agentistics capture-pane -p -S -200 > /tmp/login-pane.txt 2>/dev/null || true
+        run: |
+          tmux -L agentistics capture-pane -p -S -200 > /tmp/login-pane.txt 2>/dev/null || true
+          # Who holds the ports, in any state: the answer a port conflict needs, read on the runner.
+          { lsof -nP -iTCP:"$API_PORT" -iTCP:"$WEB_PORT" || true; echo '--- listeners'; lsof -nP -iTCP -sTCP:LISTEN || true; } > /tmp/install-e2e-ports.txt 2>&1
       - name: Upload Alpine failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
@@ -289,6 +299,7 @@ jobs:
             /github/home/.agentistics/server.log
             /tmp/install-e2e-http.log
             /tmp/login-pane.txt
+            /tmp/install-e2e-ports.txt
           if-no-files-found: ignore
 
   gate:

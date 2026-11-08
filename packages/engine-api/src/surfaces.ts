@@ -65,6 +65,8 @@ export interface EngineSurface {
   frameless?: boolean
   /** 1.19: kept-alive inline/side surfaces float when their session leaves; false opts out. */
   floatOnLeave?: boolean
+  /** 1.24, optional: the host marks the surface's entry with its own beta tag (it is still being tried out). */
+  beta?: boolean
 }
 
 /**
@@ -130,6 +132,7 @@ export interface SurfaceMountContext {
    * fleet about it.
    */
   sessionKind?: 'nay' | 'session'
+  /** The app's language. From 1.24 it is LIVE (a getter): read it again after `onLangChange`, not once at mount. */
   lang: 'pt' | 'en'
   reducedMotion: boolean
   /**
@@ -167,6 +170,12 @@ export interface SurfaceMountContext {
   /** 1.18. The callback the indicator's secondary button calls; returns the function that removes it. */
   onIndicatorEnd(fn: () => void): () => void
   /**
+   * 1.24, optional (an older host omits it, and `lang` is then fixed at mount). Calls `fn` with the new language
+   * whenever the app's language changes while the surface is mounted — parked or kept alive included — and returns
+   * the function that removes it. The surface redraws itself; the host never remounts it (a call in progress survives).
+   */
+  onLangChange?(fn: (lang: 'pt' | 'en') => void): () => void
+  /**
    * 1.18, optional (a host may omit it). Navigates the app to the session (`/sessions/<id>`) with the
    * app's own router, without reloading the page, and returns `true`. Returns `false`, doing nothing, when
    * the id is not a short string without `/` (1 to 128 characters, no `/`, `\\`, `?`, `#`, whitespace or
@@ -192,6 +201,7 @@ export type SurfaceRefusalReason =
   | 'bad-layout'
   | 'bad-frameless'
   | 'bad-float-on-leave'
+  | 'bad-beta'
   | 'bad-active'
 
 const ID = /^[a-z][a-z0-9-]{0,39}$/
@@ -243,6 +253,7 @@ export function surfaceRefusals(
       || (s.activeTone !== undefined && !(SURFACE_ACTIVE_TONES as readonly string[]).includes(s.activeTone))
       || (s.activeLabel !== undefined && !(al && labelOk(al.pt) && labelOk(al.en)))) out.push({ id, reason: 'bad-active' })
     if (s.floatOnLeave !== undefined && typeof s.floatOnLeave !== 'boolean') out.push({ id, reason: 'bad-float-on-leave' })
+    if (s.beta !== undefined && typeof s.beta !== 'boolean') out.push({ id, reason: 'bad-beta' })
     if (s.frameless !== undefined && typeof s.frameless !== 'boolean') out.push({ id, reason: 'bad-frameless' })
   }
   return out

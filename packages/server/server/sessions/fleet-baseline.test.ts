@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { cachedBaseline, resetBaselineCache, BASELINE_TTL_MS } from './fleet-baseline'
+import { backgroundBaseline, cachedBaseline, resetBaselineCache, BASELINE_TTL_MS } from './fleet-baseline'
 import type { SessionMeta } from '@agentistics/core'
 
 const NOW = Date.parse('2026-09-08T12:00:00Z')
@@ -71,4 +71,24 @@ describe('cachedBaseline', () => {
     const second = await cachedBaseline(load, NOW + BASELINE_TTL_MS + 1)
     expect(second).toEqual(first)
   })
+})
+
+
+it('does not hold the first fleet read behind a slow baseline and shares the later result', async () => {
+  resetBaselineCache()
+  let resolve!: (rows: SessionMeta[]) => void
+  let started!: () => void
+  const ready = new Promise<void>(r => { started = r })
+  let calls = 0
+  const load = () => { calls++; started(); return new Promise<SessionMeta[]>(r => { resolve = r }) }
+  expect(backgroundBaseline(load, NOW)).toBeUndefined()
+  expect(backgroundBaseline(load, NOW)).toBeUndefined()
+  await ready
+  expect(calls).toBe(1)
+  expect(backgroundBaseline(load, NOW)).toBeUndefined()
+  const full = cachedBaseline(load, NOW)
+  resolve(one())
+  const result = await full
+  expect(backgroundBaseline(load, NOW + 1)).toEqual(result)
+  resetBaselineCache()
 })

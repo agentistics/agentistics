@@ -35,6 +35,26 @@ try {
   for (let i = 0; i < 10; i++) warm.push((await time('/api/data')).ms)
   measured.dataWarmP95Ms = quantiles(warm).p95
 
+  // APP.LENTO: what the server costs when NOTHING changes (no writer, no client) — the owner's
+  // machine sat at ~98 % of a core here — and the two routes every open screen polls.
+  {
+    await Bun.sleep(5_000)
+    const pid = await s.serverPid()
+    const ticks = async () => { const f = (await Bun.file(`/proc/${pid}/stat`).text()).split(') ')[1]!.split(' '); return Number(f[11]) + Number(f[12]) }
+    if (pid && process.platform === 'linux') {
+      const t0 = await ticks(), w0 = performance.now()
+      await Bun.sleep(15_000)
+      measured.idleCpuPct = Math.round(((await ticks()) - t0) / 100 / ((performance.now() - w0) / 1000) * 1000) / 10
+    }
+    const fleet: number[] = [], tasks: number[] = []
+    for (let i = 0; i < 8; i++) {
+      fleet.push((await time('/api/fleet?lang=en&format=compact-v1&closed=60')).ms)
+      tasks.push((await time('/api/tasks')).ms)
+    }
+    measured.fleetPollP95Ms = quantiles(fleet).p95
+    measured.tasksListP95Ms = quantiles(tasks).p95
+  }
+
   const enc = encodeURIComponent(basename(dirname(biggest.path)))
   const paged: number[] = []
   let kb = 0
@@ -85,8 +105,10 @@ try {
 
 let failed = 0
 const rows: string[] = []
+// Measured in a browser by ui-budget.ts, not here.
+const UI_BUDGETS = new Set(['keystrokeEventP95Ms', 'routePaintMaxMs'])
 for (const [k, ceiling] of Object.entries(budgets)) {
-  if (k.startsWith('_')) continue
+  if (k.startsWith('_') || UI_BUDGETS.has(k)) continue
   const v = measured[k]
   const verdict = v === undefined || v === null ? 'SKIPPED' : v <= ceiling ? 'ok' : 'OVER'
   if (verdict === 'OVER') failed++

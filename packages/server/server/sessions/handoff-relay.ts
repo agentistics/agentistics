@@ -25,7 +25,7 @@ export const RELAY_MAX_OWNER_MESSAGES = 10
 export const RELAY_MAX_CHARS = 2_000
 export const RELAY_MAX_REPLY_CHARS = 6_000
 
-const NOT_OWNER = /^(?:\[from session\b|\[from agentistics\b|\[from flow\b|<agentistics-context>|<agent-message(?:\s|>)|Another (?:Claude )?session sent a message:|<task-notification>|<system-reminder>|<local-command|<command-name>|<session_context>|<scheduled-task|<cron\b|<user-prompt-submit-hook|CRON\s+\d{1,2}h\d{2}\b|\[(?:cron|scheduled)\b|\[SCHEDULED\b)/i
+const NOT_OWNER = /^(?:\[from session\b|\[from agentistics\b|\[from flow\b|<agentistics-context>|<agent-message(?:\s|>)|Another (?:Claude )?session sent a message:|<task-notification>|<system-reminder>|<local-command|<command-name>|<session_context>|<scheduled-task|<cron\b|<user-prompt-submit-hook|CRON\s+\d{1,2}h\d{2}\b|\[(?:cron|scheduled)\b|\[SCHEDULED\b|Quero passar a liderança agora\.|Hand off leadership now\.)/i
 
 export function isOwnerTurn(turn: Pick<ChatTurn, 'role' | 'text' | 'system'>): boolean {
   if (turn.role !== 'user' || turn.system) return false
@@ -122,9 +122,16 @@ function lastTurnAt(turns: readonly ChatTurn[]): string | undefined {
  * (its spawn, for a session that was itself a successor) — owner messages before it belong to an
  * older leader and were relayed then.
  */
-export function planRelay(turns: readonly ChatTurn[], since?: string): HandoffRelay {
+export function planRelay(turns: readonly ChatTurn[], since?: string, opts: { spawnedAt?: string } = {}): HandoffRelay {
   const ownerIdx: number[] = []
-  turns.forEach((t, i) => { if (isOwnerTurn(t) && after(t, since)) ownerIdx.push(i) })
+  // A session born from a hand-off opens with its predecessor's words (`--handoff -p "…"`): its first user turn, when it
+  // sits within minutes of the spawn, is the briefing — written by an assistant, never something the owner asked.
+  let first = opts.spawnedAt ? turns.findIndex(t => t.role === 'user' && !t.system) : -1
+  if (first >= 0) {
+    const born = Date.parse(opts.spawnedAt!), at = Date.parse(turns[first]!.at ?? '')
+    if (!(Number.isFinite(born) && Number.isFinite(at) && at <= born + 10 * 60_000)) first = -1
+  }
+  turns.forEach((t, i) => { if (i !== first && isOwnerTurn(t) && after(t, since)) ownerIdx.push(i) })
   const kept = ownerIdx.slice(-RELAY_MAX_OWNER_MESSAGES)
   const owner = kept.map(i => ({ ...(turns[i]!.at ? { at: turns[i]!.at } : {}), text: head(turns[i]!.text, RELAY_MAX_CHARS) }))
   const last = ownerIdx[ownerIdx.length - 1]

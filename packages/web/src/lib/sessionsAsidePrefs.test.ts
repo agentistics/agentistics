@@ -104,6 +104,7 @@ describe('writeAsideGroupPrefs', () => {
       foldedPinned: false,
       foldedGroupsSection: false,
       expandedEndedGroups: [],
+      foldedEndedSections: ['older'],
       sortExplicit: false,
       leadersOnly: false,
       tab: 'active',
@@ -219,6 +220,12 @@ describe('sortExplicit migration and server sync fields', () => {
   test('an explicit false flag is respected even with a non-default sort', () => {
     expect(parseAsideGroupPrefs({ sort: { by: 'name', dir: 'asc' }, sortExplicit: false }).sortExplicit).toBe(false)
   })
+  test('foldedEndedSections defaults to older-only, keeps an explicit empty list, and drops junk', () => {
+    expect(parseAsideGroupPrefs({}).foldedEndedSections).toEqual(['older'])
+    expect(parseAsideGroupPrefs({ foldedEndedSections: [] }).foldedEndedSections).toEqual([])
+    expect(parseAsideGroupPrefs({ foldedEndedSections: ['today', 3] }).foldedEndedSections).toEqual(['today'])
+  })
+
   test('sortExplicit and expandedEndedGroups come through a server document (what the sync applies)', () => {
     const p = parseAsideGroupPrefs({ sortExplicit: true, expandedEndedGroups: ['a', 3, 'b'] })
     expect(p.sortExplicit).toBe(true)

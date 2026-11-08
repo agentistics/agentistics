@@ -1,3 +1,4 @@
+import { INITIAL_SESSION_LIMIT, isInitialSnapshot } from './sessions/boot-fleet'
 import { sessionNotify, type ControlSession } from '@agentistics/tui/control/session-fleet'
 /**
  * cli-start.ts — the logic behind the `agentop` control center.
@@ -102,7 +103,7 @@ import { formatBytes, layerTotal, retainedTotal } from './backup/backup-size'
 import { lastBackup, lastPerHarness, lastBackupRun, loadBackupHistory } from './backup/backup-store'
 import { scheduleStatus } from './backup/schedule'
 import { loadConsolidated } from './consolidate'
-import { cachedBaseline, resetBaselineCache } from './sessions/fleet-baseline'
+import { backgroundBaseline, cachedBaseline, resetBaselineCache } from './sessions/fleet-baseline'
 import { onOutputLine, publishLines, streamCommand } from './cli-stream'
 import {
   composeRebuildCommands,
@@ -142,7 +143,7 @@ import { applyAccountToPlan } from './sessions/account-plan'
 import { ensureClaudeProjectTrusted } from './sessions/claude-trust'
 import { prependContext } from './sessions/agentistics-context'
 import { rootIfLeader } from './sessions/team-links'
-import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './sessions/spawn-context'
+import { buildSpawnContext, pendingContextFor, parentLinkOf, resolveContextAway, resolveContextParent, resolveContextRole, resolveContextTask, resolveAutonomousMode, resolveSpawnAwayFor, withOwnerRequests, withPassagem, writeContextFile } from './sessions/spawn-context'
 import { applyRoleTitle, ensureSpawnRole, markRoleDelivered, rekeyStoredRole, spawnRoleOriginFor, storedRoleFor } from './sessions/session-roles'
 import { availableHarnesses } from './sessions/harness-available'
 import { spawnDeath } from './sessions/spawn-check'
@@ -1594,7 +1595,13 @@ let sessionsPoller: SessionsPoller | null = null
 export function sessionsPollerOptions(backend: SessionBackend): Parameters<typeof createSessionsPoller>[0] {
   return {
     backend, readRegistry, scanProcesses, loadConversations, touchSessions,
-    endSessions: (ids, endedAt) => patchSessions(ids, { endedAt }),
+    ...(isServerProcess() ? { initialSessionLimit: INITIAL_SESSION_LIMIT } : {}),
+    // A worker that ended frees a slot: the queue looks at its next piece now (FILA.PRIORIDADE), not a minute from now.
+    endSessions: async (ids, endedAt) => {
+      const out = await patchSessions(ids, { endedAt })
+      if (isServerProcess()) void import('./delivery/queue-kick').then(m => m.kickQueueNext('sessão encerrada'))
+      return out
+    },
     loadHarnessSessions,
     // CONTA.IDENTIDADE: each row names the account its process runs on (`session-account.ts`).
     readAccountRegistry: async () => (await import('./harness-accounts')).readAccounts(),
@@ -1674,6 +1681,17 @@ export function ensureSessionHub(): Promise<SessionHub> {
       const { fleetHub } = await import('./engine/fleet-hub')
       // Only a FRESH reading says anything new: an `unavailable` snapshot is the previous one again.
       hub.observe(snap => { if (!snap.unavailable) fleetHub.observe(snap.sessions, snap.polledAtMs) })
+      // Let the recent snapshot reach readers before starting the historical scan.
+      if (isServerProcess()) {
+        let first = true
+        hub.observe(snap => {
+          if (!first || snap.unavailable) return
+          first = false
+          setTimeout(() => {
+            if (hub.stats().polls === 1) void hub.refresh().catch(() => {})
+          }, 100)
+        })
+      }
       setProcessSessionHub(hub)
       return hub
     })()
@@ -1953,7 +1971,7 @@ async function spawnRow(a: {
   spawnedAt: string
   req: { harness: HarnessId; cwd: string; label?: string; task?: string; taskId?: string; attemptId?: string; parentSessionId?: string; parentConversationId?: string; mode?: CanonicalMode; inherit?: ManagedSession }
   pendingContext?: string
-  /** Per-session away mode, already resolved (explicit request, else inherited / the replaced row's). */
+  /** Per-session autonomous mode, already resolved (explicit request, else inherited / the replaced row's). */
   away?: boolean
   model?: string
   effort?: string
@@ -2073,7 +2091,7 @@ export async function spawnManaged(req: {
   spawnDoor?: 'engine'
   gateTaskId?: string
   gateSubtaskId?: string
-  /** Per-session away mode: on, off, or inherit a verified away parent's (absent = inherit). */
+  /** Per-session autonomous mode: on, off, or inherit a verified away parent's (absent = inherit). */
   away?: boolean | 'inherit'
   attemptId?: string
   /** The row this spawn REPLACES: its identity (`inheritedIdentity`) is born into the new row. */
@@ -2208,7 +2226,6 @@ export async function spawnManaged(req: {
   const launch = req.resumeId ? inheritedLaunch(req.inherit, req.harness) : {}
   const model = req.model ?? launch.model
   const effort = req.effort ?? launch.effort
-  const mode = req.mode ?? launch.mode
   // Minted BEFORE the plan: the agentistics context tells the harness its own session id.
   const id = newSessionId()
   const offeredConversationId = randomUUID()
@@ -2233,6 +2250,8 @@ export async function spawnManaged(req: {
   const away = req.away === undefined && req.inherit
     ? req.inherit.away === true
     : await resolveSpawnAwayFor(req.away, req.parentSessionId, req.parentVerified === true)
+  // AUTONOMOUS MODE: while on, the session is born in no-questions unless the caller named a mode.
+  const mode = (await resolveAutonomousMode(req.harness, req.mode, away, launch.mode)).mode
   // HANDOFF.RELAY: a leader hand-off's successor is briefed with what the owner said to the
   // predecessor and the predecessor's last reply, so a hand-off can never swallow an answer.
   const handoffParentRow = handoffParentForLink
@@ -3845,7 +3864,9 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // A failed store read costs freshness, never the fleet: the fleet is what this method is for.
       const baseline = await timeFleetPhase(
         'sessions: cachedBaseline',
-        () => cachedBaseline(async () => [...(await loadConsolidated()).values()], Date.now()),
+        () => isServerProcess()
+          ? Promise.resolve(backgroundBaseline(async () => [...(await loadConsolidated()).values()], Date.now()))
+          : cachedBaseline(async () => [...(await loadConsolidated()).values()], Date.now()),
       ).catch(() => undefined)
       // Resolved per session and MEMOIZED by directory: a directory does not change repository, and
       // this poll runs every five seconds over the whole fleet — asking git three times per session
@@ -3866,7 +3887,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       // the offer is a statement about the QUESTION, not about the event.
       const fellAt = snap.fell?.atMs
       const answered = fellAt !== undefined && dismissedFallMs !== null && fellAt <= dismissedFallMs
-      const restorable = answered
+      const restorable = answered || isInitialSnapshot(snap)
         ? []
         : await timeFleetPhase('sessions: restorableSessions', () => restorableSessions(snap.fell?.entries ?? []))
       // NATIVE.LIFE: the engine's own sessions join as ordinary rows (`native-fleet.ts`) — no pane, no
@@ -3878,6 +3899,7 @@ export function createControlHost(initialLang: CliLang, altScreen: Suspendable):
       const nativeAttention = nativeRows.filter(n => n.state === 'waiting' || n.state === 'waiting-approval').length
       return {
         ...(restorable.length > 0 ? { restorable } : {}),
+        historyLoading: isInitialSnapshot(snap),
         sessions: [...snap.sessions.map((v, i) => toControlSession(v, s, facts[i])), ...nativeRows],
         attention: snap.attention + nativeAttention,
         rang: snap.rang,

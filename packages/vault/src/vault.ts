@@ -58,10 +58,24 @@ export interface VaultJson {
   requirePresence?: true
 }
 
-const PROTECTOR_IDS: readonly ProtectorId[] = ['keychain', 'dpapi', 'libsecret', 'systemd-creds', 'passphrase', 'memory', 'hello', 'fido2', 'recovery']
+const PROTECTOR_IDS: readonly ProtectorId[] = ['keychain', 'dpapi', 'libsecret', 'systemd-creds', 'passphrase', 'memory', 'hello', 'fido2', 'touchid', 'password', 'recovery']
 
-/** SECRETS.4 §1.2: the wrappers that open only after a human gesture. */
-export const PRESENCE_IDS: readonly ProtectorId[] = ['hello', 'fido2']
+/**
+ * SECRETS.4 §1.2: the wrappers that open only after a PERSON proves it is them — a gesture (Windows
+ * Hello, Touch ID / the Mac's password, a security key) or, since 2026-11-07, the vault's own password.
+ */
+export const PRESENCE_IDS: readonly ProtectorId[] = ['hello', 'fido2', 'touchid', 'password']
+
+/**
+ * COFRE.DESBLOQUEIO (owner, 2026-11-07): the authenticator app is gone from every flow. A vault that
+ * still records one keeps opening — its code is simply never asked — and the record is dropped the
+ * moment a new way of confirming is set up. PURE: the vault as it is written once that happens.
+ */
+export function withoutAuthenticator(v: VaultJson): VaultJson {
+  if (!v.stepup && !v.unlockPolicy) return v
+  const { stepup: _s, unlockPolicy: _u, ...rest } = v
+  return rest as VaultJson
+}
 /** The OS wrappers any same-user process can ask in silence — removed from the human scope by enrolment. */
 export const SILENT_IDS: readonly ProtectorId[] = ['keychain', 'dpapi', 'libsecret', 'systemd-creds']
 

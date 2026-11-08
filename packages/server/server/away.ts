@@ -1,5 +1,5 @@
 /**
- * away.ts — AWAY MODE on this machine: the owner is out, and every session started meanwhile is told
+ * away.ts — AUTONOMOUS MODE on this machine: the owner is out, and every session started meanwhile is told
  * so in its briefing (`awayBriefingLines`, @agentistics/core). Stored in `preferences.json` (key
  * `away`) because it is a fact about this machine's fleet, not about a browser.
  *
@@ -7,7 +7,7 @@
  * stored role is `leader` (the MCP door). A worker is refused — it would be switching off the very
  * instruction that tells it not to ask the owner. Spec: agentistics-workspace/leader/specs/away-mode-spec.md
  */
-import { AWAY_OFF, awayActive, awayLiveNotice, normalizeAwayInput, normalizeAwayNotice, parseAwayState, redactSecrets, sessionAwayState, type AwayInputError, type AwayState } from '@agentistics/core'
+import { AWAY_OFF, awayActive, awayEffective, awayLiveNotice, awayScheduleEdge, normalizeAwayInput, normalizeAwayNotice, parseAwayState, redactSecrets, sessionAwayState, type AwayEdge, type AwayInputError, type AwayState } from '@agentistics/core'
 import { sessionRunning } from '@agentistics/tui/control/session-dimensions'
 
 export interface AwayView { state: AwayState; active: boolean; activeSessions?: number; cooldownMs?: number }
@@ -122,7 +122,7 @@ export async function flushAwayNotices(now: number, timeoutMs = AWAY_SEND_TIMEOU
 }
 function forThisSession(text: string): string {
   return text
-    .replace(/^\[agentistics · away mode is now (ON|OFF)\]/, '[agentistics · away mode is now $1 for this session]')
+    .replace(/^\[agentistics · autonomous mode is now (ON|OFF)\]/, '[agentistics · autonomous mode is now $1 for this session]')
     .replace('The owner is back:', 'The owner is back for this session:')
 }
 function queueAwayNotice(id: string, before: AwayState | null, after: AwayState | null, role: PendingAway['role'], send: PendingAway['send'], now: number, planLimits = false, perSession = false): void {
@@ -171,6 +171,51 @@ export async function readAwayView(deps: Pick<AwayDeps, 'read' | 'now'> & Pick<P
 }
 
 // Serialize owner changes across both endpoints: a later explicit session ON must survive OFF.
+/**
+ * What the schedule tick last saw (`undefined` = not looked yet). A write through `setAway` records
+ * its own answer here, so the tick never announces as a "window edge" a change a person just made.
+ */
+let lastActive: boolean | undefined
+export function resetAwayScheduleTick(): void { lastActive = undefined }
+
+/**
+ * ONE look at the schedule: when the stored state is scheduled and has crossed a window edge since the
+ * last look, applies what the switch itself applies — the flows, every running session's own flag and a
+ * notice to the running leaders/workers (`notifyLiveSessions`, the same quiet/cooldown path). No edge,
+ * no schedule or a first look: nothing happens. Returns the edge that fired.
+ */
+export function runAwayScheduleTick(deps: AwayDeps, now: number): Promise<AwayEdge> {
+  return mutateAway(async () => {
+    const state = parseAwayState(await deps.read().catch(() => AWAY_OFF))
+    const { active, edge } = awayScheduleEdge(state, lastActive, now)
+    lastActive = active
+    if (!edge) return null
+    const after = awayEffective(state, now)
+    const { schedule: _schedule, ...open } = state
+    const before = edge === 'on' ? { ...AWAY_OFF, since: state.since } : open
+    void import('@agentistics/core').then(c => c.applyAutonomousFlows(active, process.env)).catch(() => {})
+    if (deps.live) await notifyLiveSessions(before, after, deps.live, now)
+    return edge
+  })
+}
+
+export const AWAY_SCHEDULE_TICK_MS = 30_000
+let scheduleTimer: ReturnType<typeof setInterval> | undefined
+/** Starts the window-edge watcher (idempotent, unref'd). `onEdge` lets the host push an SSE `away` event. */
+export function startAwayScheduleTimer(onEdge?: (edge: Exclude<AwayEdge, null>) => void, intervalMs = AWAY_SCHEDULE_TICK_MS): void {
+  if (scheduleTimer) return
+  const tick = async () => {
+    try {
+      const edge = await runAwayScheduleTick(await defaultAwayDeps(), Date.now())
+      if (edge) onEdge?.(edge)
+    } catch { /* a failed look is retried at the next tick */ }
+  }
+  scheduleTimer = setInterval(() => { void tick() }, intervalMs)
+  scheduleTimer.unref?.()
+  void tick()
+}
+export function stopAwayScheduleTimer(): void { if (scheduleTimer) clearInterval(scheduleTimer); scheduleTimer = undefined }
+
 let awayWrites: Promise<unknown> = Promise.resolve()
 function mutateAway<T>(action: () => Promise<T>): Promise<T> {
   const result = awayWrites.then(action)
@@ -193,6 +238,9 @@ async function setAwayMutation(body: unknown, deps: AwayDeps): Promise<AwayReply
   if (!n.ok) return { ok: false, error: n.error, ...(n.detail !== undefined ? { detail: n.detail } : {}) }
   const before = parseAwayState(await deps.read().catch(() => AWAY_OFF))
   await deps.write(n.state)
+  lastActive = awayActive(n.state, now)
+  // Autonomous mode keeps the deterministic flows running by default; off restores the previous state.
+  void import('@agentistics/core').then(c => c.applyAutonomousFlows(c.awayActive(n.state, now), process.env)).catch(() => {})
   if (deps.live) await notifyLiveSessions(before, n.state, deps.live, now, sender)
   return { ok: true, ...awayView(n.state, now) }
 }

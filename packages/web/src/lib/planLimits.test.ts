@@ -1,8 +1,9 @@
-import { afterEach, expect, spyOn, test } from 'bun:test'
+import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 // The store follows the shared SSE stream; nothing streams in a unit test.
 ;(globalThis as { EventSource?: unknown }).EventSource ??= class { addEventListener() {} removeEventListener() {} close() {} }
 import * as events from './eventStream'
 import * as store from './planLimits'
+import { accountDisplayName } from './planLimits'
 const { __setPlanLimitsForTest, failureOfStatus, FETCH_TIMEOUT_MS, planLimitsSnapshot, retryDelayMs, subscribePlanLimits } = store
 
 test('first-answer retry backs off and is capped', () => {
@@ -93,4 +94,26 @@ test('a refusal also cancels a retry already scheduled by an earlier failure', a
     await new Promise(r => setTimeout(r, 1_100))
     expect(calls).toBe(2)
   } finally { off(); subscribe.mockRestore() }
+})
+
+import { subscriptionRows as subscriptionRowsWithAccounts } from './planLimits'
+describe('subscriptionRows — registry accounts with no plan reading', () => {
+  test('are listed with their account id, once', () => {
+    const rows = subscriptionRowsWithAccounts([], [], {}, [{ harness: 'claude', id: 'acc_v', label: 'Vini' }])
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ harness: 'claude', limits: null, account: 'acc_v', accountLabel: 'Vini' })
+  })
+  test('an account that already has a row is not duplicated', () => {
+    const rows = subscriptionRowsWithAccounts([], [{ harness: 'claude', plan: 'max', account: 'acc_v', accountLabel: 'Vini' } as never], {}, [{ harness: 'claude', id: 'acc_v' }])
+    expect(rows.filter(r => r.account === 'acc_v')).toHaveLength(1)
+  })
+})
+
+describe('accountDisplayName (F4)', () => {
+  test('uses the label, falls back across harness spelling, then the raw id', () => {
+    const labels = { 'claude:acc_1': 'Principal' }
+    expect(accountDisplayName(labels, 'claude', 'acc_1')).toBe('Principal')
+    expect(accountDisplayName(labels, 'claude-code', 'acc_1')).toBe('Principal')
+    expect(accountDisplayName(labels, 'claude', 'acc_9')).toBe('acc_9')
+  })
 })

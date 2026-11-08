@@ -2,9 +2,24 @@ import { describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { AUTONOMOUS_APPROVAL_RULE } from '@agentistics/core'
 import { BRIEFING_VERSION, MANAGED_OPEN, PLAN_LIMITS_TOOL, briefingSkills, briefingText, managedBlock, managedTargets, removeManagedBlocks, replaceManagedBlock, skillMarkdown } from './briefing'
 import { flowLines } from './briefing-flow'
 import { ensureBriefingInstalled, installBriefing, uninstallBriefing } from './briefing-installer'
+
+describe('managed skills under autonomous mode', () => {
+  test('the always-installed skills carry the ON approval rule beside the OFF one (one source, pt and en)', () => {
+    expect(AUTONOMOUS_APPROVAL_RULE.pt).toContain('o líder aprova depois do QA por outro modelo')
+    expect(AUTONOMOUS_APPROVAL_RULE.en).toContain('the leader approves after QA by a different model')
+    expect(AUTONOMOUS_APPROVAL_RULE.en).toContain('never marks work done without the owner')
+    const skills = new Map(briefingSkills().map(s => [s.name, s.body]))
+    for (const name of ['agentistics-board-agentask', 'agentistics-qa-releases']) expect(skills.get(name)).toContain(AUTONOMOUS_APPROVAL_RULE.en)
+    // The OFF-mode owner validation is qualified (with the owner present), never an unconditional wait.
+    expect(skills.get('agentistics-qa-releases')).toContain('With the owner present, a release is published only after QA and owner validation')
+    expect(skills.get('agentistics-board-agentask')).toContain('with the owner present, leave it in review')
+    expect(skills.get('agentistics-sessions-hand-offs')).toContain('never wait for the owner')
+  })
+})
 
 describe('managed briefing source', () => {
   test('all skills follow the Agent Skills frontmatter contract', () => {
@@ -48,6 +63,10 @@ describe('managed briefing source', () => {
     expect(briefingText('pt')).toContain('in_progress → in_review → done')
     expect(briefingText('pt')).toContain('Habilidades gerenciadas instaladas:')
     expect(briefingText('pt', { planLimitsAvailable: true })).toContain('Antes de abrir sessões')
+    expect(briefingText('en', { away: true })).toContain('never ask, wait for, or address the owner')
+    expect(briefingText('en', { away: true })).not.toContain('Ask the person in the conversation')
+    expect(briefingText('pt', { away: true })).toContain('nunca pergunte, espere ou se dirija ao dono')
+    expect(briefingText('pt', { away: true })).not.toContain('Pergunte à pessoa na conversa')
   })
 
   test('installer detects plan limits from the actual tool list', async () => {

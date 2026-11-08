@@ -224,8 +224,10 @@ describe('5 · a group reopen with mixed results keeps every typed refusal (D3 f
     const stamp = Date.now()
     const convA = `c-mixA-${stamp}`
     const convC = `c-mixC-${stamp}`
-    const rowA = row({ conversationId: convA, accountId: aId, lastSeenMs: stamp })
-    const rowC = row({ conversationId: convC, accountId: cId, lastSeenMs: stamp })
+    // Born a minute ago: a row still inside its birth window is "being born", never fallen (`crash-group.ts` BORN_GRACE_MS).
+    const bornAt = new Date(stamp - 60_000).toISOString()
+    const rowA = row({ conversationId: convA, accountId: aId, lastSeenMs: stamp, createdAt: bornAt })
+    const rowC = row({ conversationId: convC, accountId: cId, lastSeenMs: stamp, createdAt: bornAt })
     await addSession(rowA)
     await addSession(rowC)
     // Prime the reopen-link memo: both transcripts "exist", so the rows resolve without a tree on disk.

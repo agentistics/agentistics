@@ -624,6 +624,21 @@ describe('a transcript that does not exist YET', () => {
     expect(await resolveChatTranscriptPath(CWD, SESSION_ID, root)).toBe(file)
   })
 
+  test('the misses of one poll share ONE listing of the project directories (APP.LENTO)', async () => {
+    // Two conversations missing from their direct paths, asked in the same instant: the second is
+    // answered from the listing the first one took, so a file placed between them is not seen yet…
+    const other = join(root, '-elsewhere')
+    await mkdir(other, { recursive: true })
+    const A = 'a1b2c3d4-e5f6-4789-a0b1-000000000001', B = 'a1b2c3d4-e5f6-4789-a0b1-000000000002'
+    await writeFile(join(other, `${A}.jsonl`), line({ type: 'user', message: { content: 'a' } }) + '\n')
+    const now = 5_000_000
+    expect(await resolveChatTranscriptPath(CWD, A, root, now)).toBe(join(other, `${A}.jsonl`))
+    await writeFile(join(other, `${B}.jsonl`), line({ type: 'user', message: { content: 'b' } }) + '\n')
+    expect(await resolveChatTranscriptPath(CWD, B, root, now)).toBe(null)
+    // …and a listing older than the window is taken again (past B's own miss TTL).
+    expect(await resolveChatTranscriptPath(CWD, B, root, now + 31_000)).toBe(join(other, `${B}.jsonl`))
+  })
+
   test('a miss does not spend the whole-tree SCAN on every poll', async () => {
     // The reason the `null` was cached at all. The direct path is one `stat` and is always
     // checked; the scan is a readdir plus a stat per project, and stays paced by the miss TTL.

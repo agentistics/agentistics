@@ -29,6 +29,50 @@ function parseJson(text: string): unknown {
   try { return JSON.parse(text) } catch { return undefined }
 }
 
+/**
+ * `opencode.jsonc` allows line comments, block comments and trailing commas. Strips both WITHOUT touching
+ * a string's content (a URL such as "https://x" holds `//`), so the result is plain JSON or junk.
+ */
+export function stripJsonc(text: string): string {
+  let out = ''
+  let i = 0
+  while (i < text.length) {
+    const c = text[i]!
+    const n = text[i + 1]
+    if (c === '"') {
+      let j = i + 1
+      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1
+      out += text.slice(i, j + 1)
+      i = j + 1
+    } else if (c === '/' && n === '/') {
+      while (i < text.length && text[i] !== '\n') i++
+    } else if (c === '/' && n === '*') {
+      const end = text.indexOf('*/', i + 2)
+      i = end < 0 ? text.length : end + 2
+    } else {
+      out += c
+      i++
+    }
+  }
+  // A comma followed (after whitespace) by a closer is a trailing comma. Strings were already
+  // copied whole above, so re-scan with the same string guard rather than a blind regex.
+  let res = ''
+  for (let k = 0; k < out.length; k++) {
+    const c = out[k]!
+    if (c === '"') {
+      let j = k + 1
+      while (j < out.length && out[j] !== '"') j += out[j] === '\\' ? 2 : 1
+      res += out.slice(k, j + 1)
+      k = j
+    } else if (c === ',' && /^\s*[}\]]/.test(out.slice(k + 1))) {
+      continue
+    } else {
+      res += c
+    }
+  }
+  return res
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
@@ -96,13 +140,42 @@ export function parseAgyModels(stdout: string, p: CatalogProvenance): ModelOptio
 const MODEL_ID = /^[\w.:@-]+(?:\/[\w.:@[\]-]+)+$/
 
 /**
- * `opencode models`: one `provider/model` id per line, no display name. ANY line that is not an id
- * makes the whole answer void — a list half made of an error message is worse than the table.
+ * `opencode models`: one `provider/model` id per line, no display name. Lines that are not an id are
+ * DROPPED, not fatal: opencode prints update notices and warnings beside the list, and voiding the
+ * whole answer for one of them sent the picker to the free-only fallback table even though the CLI
+ * had listed every model of the connected subscription. A line that is not an id can never become a
+ * model, so an answer with NO id in it is still no answer (an error sentence alone yields null).
  */
 export function parseOpencodeModels(stdout: string, p: CatalogProvenance): ModelOption[] | null {
-  const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean)
-  if (lines.some(l => !MODEL_ID.test(l))) return null
+  const lines = stdout.split('\n').map(l => l.trim()).filter(l => MODEL_ID.test(l))
   return nonEmpty(uniq(lines.map(id => option(id, id, p))))
+}
+
+/**
+ * `opencode.json`: what the USER declared — the top-level `model` (the default) and every
+ * `provider.<id>.models.<name>` key, as `provider/name`. It is the FALLBACK of `opencode models`
+ * (which also lists the connected and free providers): a list built from it is partial by
+ * nature, so the caller keeps the typed-id box open. A custom provider such as `upx` lives ONLY
+ * here, which is why this beats an empty picker when the CLI cannot be run.
+ */
+export function parseOpencodeConfigModels(json: string, p: CatalogProvenance): ModelOption[] | null {
+  const doc = parseJson(json) ?? parseJson(stripJsonc(json))
+  if (!isRecord(doc)) return null
+  const ids: string[] = []
+  if (typeof doc.model === 'string' && MODEL_ID.test(doc.model.trim())) ids.push(doc.model.trim())
+  // `provider` is the legacy key and `providers` the newer one; a config may carry either or both.
+  for (const key of ['provider', 'providers'] as const) {
+    const block = doc[key]
+    if (!isRecord(block)) continue
+    for (const [prov, def] of Object.entries(block)) {
+      if (!isRecord(def) || !isRecord(def.models)) continue
+      for (const name of Object.keys(def.models)) {
+        const id = `${prov}/${name}`
+        if (MODEL_ID.test(id)) ids.push(id)
+      }
+    }
+  }
+  return nonEmpty(uniq(ids.map(id => option(id, id, p))))
 }
 
 /**

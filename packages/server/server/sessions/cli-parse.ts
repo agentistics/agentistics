@@ -40,7 +40,7 @@ export type SessionCommand =
       force?: boolean
       /** Explicitly declare the spawned session's briefing role. */
       role?: SessionRole
-      /** `--away` / `--no-away`: per-session away mode (absent = inherit a verified away parent's). */
+      /** `--away` / `--no-away`: per-session autonomous mode (absent = inherit a verified away parent's). */
       away?: boolean
       /** `--folder <ref>`: the sidebar folder (id, name or "Parent/Child") the session is filed into at spawn. */
       folder?: string

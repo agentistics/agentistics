@@ -16,7 +16,7 @@ parallel recommendation until renewal, displays the requested planning duration,
 a longer duration does not increase that recommendation. Hold and unmeasured states remain explicit.
 
 The empty history message states the server-lifetime limit once; a populated history places that
-scope in the header. Away mode states the deadline in the page header and permissions in the
+scope in the header. Autonomous mode states the deadline in the page header and permissions in the
 switch description, without another availability heading. Wrapped descriptions use 13px secondary
 text. Nay tabs occupy a full wrapping row, keep their full localized labels, and use 44px targets.
 Billing agent switches align with account titles; KPI header controls wrap before splitting labels.

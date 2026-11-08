@@ -45,6 +45,10 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
     pt: { title: 'Sessão não iniciada', message: 'A subtarefa escolhida não pode receber uma sessão.' },
     en: { title: 'Session not started', message: 'The chosen subtask cannot take a session.' },
   },
+  'worker_needs_subtask': {
+    pt: { title: 'Sessão não iniciada', message: 'Um worker precisa ir para uma subtarefa; só sessões líderes ficam direto na tarefa.' },
+    en: { title: 'Session not started', message: 'A worker must go on a subtask; only leader sessions sit directly on a task.' },
+  },
   'board_unreadable': {
     pt: { title: 'Sessão não iniciada', message: 'Não foi possível ler o quadro para arquivar a sessão.' },
     en: { title: 'Session not started', message: 'The board could not be read to file the session.' },
@@ -237,6 +241,12 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   // Raised once per retroactive removal (never once per cycle — the uploader guards the
   // transition), so a rules change that takes several cycles to land is one "removing" toast and
   // one "done", not a stream of them.
+  // APP.LENTO: `vigia-desempenho` saw a performance budget stay broken. It changed nothing; the profile
+  // it kept (when it could) is the evidence for whoever fixes it.
+  'perf.budget_broken': {
+    pt: { title: 'O agentistics está lento', message: '{whatPt}. Nada foi reiniciado; um perfil de CPU foi guardado em {profile}.' },
+    en: { title: 'agentistics is running slow', message: '{what}. Nothing was restarted; a CPU profile was kept at {profile}.' },
+  },
   'member.rules_proposed': {
     pt: { title: 'Outra máquina sua restringiu repositórios', message: '{name} enviou {count} proposta(s) de regra para {central}. Nada mudou aqui — abra a conexão para decidir.' },
     en: { title: 'Another of your machines restricted repositories', message: '{name} sent {count} rule proposal(s) for {central}. Nothing changed here — open the connection to decide.' },
@@ -322,24 +332,12 @@ export const NOTIFICATION_TEXT: Record<string, { pt: Localized; en: Localized }>
   // placeholders: the singular/plural noun, "and N more" and an optional "Frees ~X. " sentence are
   // WORDING, not a bare value, so `resolveNotification` fills them through
   // `idleSessionNoun`/`idleMoreSuffix`/`idleFreedSentence` before the generic pass ever sees them.
-  // AWAY MODE: a leader's notice to the owner while they are out (`POST /api/away/notice`) — the
+  // AUTONOMOUS MODE: a leader's notice to the owner while they are out (`POST /api/away/notice`) — the
   // warning or decision that cannot wait, sent instead of a question that would block the turn.
   // `{text}` is the leader's own sentence (secrets redacted by the server).
   'away.notice': {
-    pt: { title: 'Aviso do líder (modo ausente)', message: '{text}' },
-    en: { title: 'Leader notice (away mode)', message: '{text}' },
-  },
-  'away.digest_offer': {
-    pt: { title: 'Resumo do modo ausente', message: 'Fiquei fora há mais de 5 horas. Quer que a Nay prepare um resumo do que aconteceu?' },
-    en: { title: 'Away-mode summary', message: 'I’ve been away for more than 5 hours. Would you like Nay to prepare a summary of what happened?' },
-  },
-  'away.digest_failed': {
-    pt: { title: 'Não foi possível abrir o resumo', message: 'Tente novamente em instantes.' },
-    en: { title: 'Could not open the summary', message: 'Please try again shortly.' },
-  },
-  'away.digest_stale': {
-    pt: { title: 'Oferta de resumo expirada', message: 'Esta oferta não está mais disponível.' },
-    en: { title: 'Summary offer expired', message: 'This offer is no longer available.' },
+    pt: { title: 'Aviso do líder (modo autônomo)', message: '{text}' },
+    en: { title: 'Leader notice (autonomous mode)', message: '{text}' },
   },
   'sessions.idle': {
     pt: { title: 'Sessões ociosas', message: '{count} {sessionsNoun} sem mensagem sua há um tempo: {names}{more}. {freed}Clique para revisar.' },
@@ -623,7 +621,12 @@ function apply(next: unknown): void {
     && typeof (x as AppNotification).id === 'string'
     && typeof (x as AppNotification).ts === 'number'
     && typeof (x as AppNotification).type === 'string')
-  items = valid.map(x => ({ ...x, read: x.read === true }))
+  const incoming = valid.map(x => ({ ...x, read: x.read === true }))
+  // APP.LENTO: the bell refreshes on every SSE notification, and the answer is usually the list it
+  // already has. A new array re-rendered every subscriber (the whole Sessions workspace among them,
+  // a ~300 ms long task) for nothing; an identical answer now keeps the identity and emits nothing.
+  if (incoming.length === items.length && JSON.stringify(incoming) === JSON.stringify(items)) return
+  items = incoming
   emit()
 }
 
@@ -703,6 +706,12 @@ function subscribe(cb: () => void): () => void {
  *  React. Components must use `useNotifications()` so they re-render on change. */
 export function readNotifications(): AppNotification[] {
   return items
+}
+
+/** Reactive count of the unread notifications to SHOW — re-renders only when the NUMBER changes. */
+export function useUnreadNotificationCount(): number {
+  const count = () => visible.reduce((n, x) => n + (x.read ? 0 : 1), 0)
+  return useSyncExternalStore(subscribe, count, count)
 }
 
 /** Reactive list of the notifications to SHOW (newest first) — muted categories left out. */

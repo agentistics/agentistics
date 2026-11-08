@@ -3,6 +3,18 @@ import { installedLoginHarnesses } from './account-login'
 import { accountRoots, reloginRoot, reloginSupported, type AccountRootsDeps } from './account-roots'
 import { accountLoginState, listHarnessAccounts, readAccounts, setAccountAvailable, updateAccount, type HarnessAccount } from './harness-accounts'
 import { spawnRowsOf } from './sessions/spawn-account-io'
+import { accountCredentialBroken } from './account-credentials'
+import { parseAgentSchedule, type AgentSchedule, type PlanLimits } from '@agentistics/core'
+import { agentUseView, setAccountAgentSchedule, toggleAccountAgentUse, type AgentUseView } from './agent-schedule-host'
+
+const agentLimits = async (): Promise<readonly PlanLimits[]> =>
+  (await import('./plan-limits')).storedPlanLimits().catch(() => [])
+/** The effective agent-use state and its reason, next to the account (absent without an active schedule). */
+function withAgentUse<T extends HarnessAccount>(a: T, limits: readonly PlanLimits[], now: Date): T & { agentUse?: AgentUseView } {
+  if (!a.id) return a
+  const view = agentUseView(a, limits, now)
+  return view ? { ...a, agentUse: view } : a
+}
 
 /** Mounted after the same capability, CSRF and auth gates as billing detection. */
 export async function handleAccountsRequest(
@@ -79,22 +91,34 @@ export async function handleAccountsRequest(
     const out = await roots.removeRoot(decodeURIComponent(m[1]!), confirm === undefined ? {} : { confirm })
     return out.ok ? json(out) : json({ error: out.reason, message: out.message }, out.status)
   }
-  if (path === '/api/accounts' && req.method === 'GET') return json({ accounts: withLoginState(await listHarnessAccounts(harnesses), await readAccounts().catch(() => null)) })
+  if (path === '/api/accounts' && req.method === 'GET') {
+    const limits = await agentLimits()
+    const now = new Date()
+    return json({ accounts: withLoginState(await listHarnessAccounts(harnesses), await readAccounts().catch(() => null)).map(a => withAgentUse(a, limits, now)) })
+  }
   const idMatch = /^\/api\/accounts\/([^/]+)$/.exec(path)
   if (idMatch) {
     if (req.method !== 'PATCH') return json({ error: 'Method not allowed' }, 405)
-    let id: string, body: { available?: unknown; nickname?: unknown } | null
+    let id: string, body: { available?: unknown; nickname?: unknown; agentSchedule?: unknown } | null
     try {
       id = decodeURIComponent(idMatch[1]!)
       body = await req.json()
     } catch { return json({ error: 'Invalid request' }, 400) }
-    if (!body || Array.isArray(body) || (body.available === undefined && body.nickname === undefined)
+    if (!body || Array.isArray(body) || (body.available === undefined && body.nickname === undefined && body.agentSchedule === undefined)
       || (body.available !== undefined && typeof body.available !== 'boolean')
       || (body.nickname !== undefined && typeof body.nickname !== 'string')) {
-      return json({ error: 'Expected boolean available or string nickname' }, 400)
+      return json({ error: 'Expected boolean available, string nickname or an agentSchedule' }, 400)
     }
-    const account = await updateAccount(id, body as { available?: boolean; nickname?: string })
-    return account ? json({ account }) : json({ error: 'Account not found' }, 404)
+    let schedule: AgentSchedule | null | undefined
+    if (body.agentSchedule !== undefined) {
+      schedule = body.agentSchedule === null ? null : parseAgentSchedule(body.agentSchedule)
+      if (schedule === null && body.agentSchedule !== null) return json({ error: 'Invalid agentSchedule' }, 400)
+    }
+    let account = body.nickname !== undefined ? await updateAccount(id, { nickname: body.nickname as string }) : null
+    if (schedule !== undefined) account = await setAccountAgentSchedule(id, schedule)
+    if (typeof body.available === 'boolean') account = await toggleAccountAgentUse(id, body.available)
+    if (!account) return json({ error: 'Account not found' }, 404)
+    return json({ account: withAgentUse(account, await agentLimits(), new Date()) })
   }
   const match = /^\/api\/accounts\/([^/]+)\/([^/]+)$/.exec(path)
   if (!match) return json({ error: 'Not found' }, 404)
@@ -108,7 +132,14 @@ export async function handleAccountsRequest(
   if (!HARNESS_ORDER.includes(harness) || typeof (body as { available?: unknown } | null)?.available !== 'boolean') {
     return json({ error: 'Expected a harness and boolean available' }, 400)
   }
-  const account = await setAccountAvailable(harness, key, (body as { available: boolean }).available)
+  const desired = (body as { available: boolean }).available
+  // Same override path as PATCH /api/accounts/:id — a bare write here was undone by the next
+  // schedule tick on a scheduled account. Accounts with no id (legacy rows) keep the plain write.
+  const file = await readAccounts().catch(() => null)
+  const found = file?.accounts.find(a => a.harness === harness && a.key === key)
+  const account = found?.id
+    ? await toggleAccountAgentUse(found.id, desired)
+    : await setAccountAvailable(harness, key, desired)
   return account ? json({ account }) : json({ error: 'Account not found' }, 404)
 }
 
@@ -119,13 +150,17 @@ export async function handleAccountsRequest(
  */
 export function withLoginState(
   accounts: readonly HarnessAccount[], file: { accounts: HarnessAccount[]; bindings: Record<string, string> } | null,
-): Array<HarnessAccount & { login?: 'ok' | 'expired' | 'signed_out'; relogin?: boolean }> {
+): Array<HarnessAccount & { login?: 'ok' | 'expired' | 'signed_out'; relogin?: boolean; reloginable?: boolean }> {
   if (!file) return [...accounts]
   const rows = spawnRowsOf(file)
   return accounts.map(a => {
     if (!a.id) return a
-    const login = accountLoginState(a, rows.find(r => r.id === a.id)?.bound ?? false)
+    const row = rows.find(r => r.id === a.id)
+    const login = accountLoginState(a, row?.bound ?? false, row?.bound ? accountCredentialBroken(a, row.root) : false)
     if (!login) return a
-    return { ...a, login, ...(login !== 'ok' ? { relogin: reloginSupported({ ...a, root: reloginRoot(file, a) }) } : {}) }
+    const supported = reloginSupported({ ...a, root: reloginRoot(file, a) })
+    // `relogin` keeps its meaning (a broken login that "Sign in again" fixes); `reloginable` is the
+    // plain capability, so the plan-usage popup can offer "Sign in again" on a working account too.
+    return { ...a, login, ...(login !== 'ok' ? { relogin: supported } : {}), ...(supported ? { reloginable: true } : {}) }
   })
 }

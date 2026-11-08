@@ -26,7 +26,6 @@ import { detachSession, useTaskDetail, useTaskList } from '../../lib/tasks'
 import { DeliveryDetail } from './DeliveryDetail'
 import { SubtaskDetail } from './SubtaskDetail'
 import { SessionFiling } from './SessionFiling'
-import { BetaTag } from '../BetaTag'
 
 export interface SessionTasksTabProps {
   session: { id: string; title: string; harness?: string; task?: string }
@@ -97,7 +96,6 @@ export function SessionTasksTab(p: SessionTasksTabProps) {
           session workspace, and a reader here never passes the Tasks header. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
         <span style={microLabel}>Agentask</span>
-        <BetaTag what={pt ? 'A vinculação de tarefas' : 'Filing sessions under tasks'} />
       </div>
       {p.session.task
         ? (

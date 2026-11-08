@@ -46,7 +46,7 @@ import { forceRowScreen } from './adapter-state-host'
 import {
   buildFleetFrame, closedPage, compactFleetRows, compactFleetSession, compactGetBody, fleetEventsResponse, type FleetFrame,
 } from './fleet-events'
-import { cachedBaseline } from './fleet-baseline'
+import { backgroundBaseline } from './fleet-baseline'
 import { loadConsolidated } from '../consolidate'
 import { readHarnessSkills, skillsReason, type HarnessSkill } from './harness-skills'
 import { HARNESS_CAPABILITIES, HARNESS_LABELS, HARNESS_ORDER, type ModelOption, type Baseline } from '@agentistics/core'
@@ -72,6 +72,7 @@ export type {
 } from './fleet-arrange'
 
 export interface FleetPayload {
+  historyLoading?: boolean
   sessions: FleetRow[]
   /**
    * The SAME rows, unshaped — what the cockpit itself arranges.
@@ -181,6 +182,35 @@ export function __setFleetHostForTest(lang: CliLang, host: StartHost | null): vo
 export async function hostForFleet(lang: CliLang): Promise<StartHost> {
   return hostFor(lang)
 }
+
+/**
+ * The small fleet slice used by Live Delivery. It deliberately stops at the host's already
+ * memoized session rows: building FleetPayload also reads preferences, task names, baselines and
+ * every presentation field needed by the full dashboard, although Live Delivery only needs the
+ * row identity/state/parent relationship. Keeping this door beside hostForFleet makes it impossible
+ * for the live route to accidentally grow a second fleet poller.
+ */
+export async function readLiveFleet(lang: CliLang): Promise<ControlSession[]> {
+  const hub = await fleetSessionHub()
+  const snapshot = hub.last()
+  if (liveFleetCache?.lang === lang && liveFleetCache.snapshot === snapshot) return liveFleetCache.rows
+  if (liveFleetInFlight?.lang === lang && liveFleetInFlight.snapshot === snapshot) return liveFleetInFlight.promise
+  const host = await hostForFleet(lang)
+  const promise = (async () => {
+    const frame = host.sessions ? await host.sessions() : null
+    const rows = frame?.sessions ?? []
+    const result = { lang, snapshot: hub.last(), rows }
+    liveFleetCache = result
+    return rows
+  })()
+  liveFleetInFlight = { lang, snapshot, promise }
+  try { return await promise } finally {
+    if (liveFleetInFlight?.promise === promise) liveFleetInFlight = null
+  }
+}
+
+let liveFleetCache: { lang: CliLang; snapshot: unknown; rows: ControlSession[] } | null = null
+let liveFleetInFlight: { lang: CliLang; snapshot: unknown; promise: Promise<ControlSession[]> } | null = null
 
 /** How long one fleet snapshot serves every route that only needs to find a row in it. */
 const SNAPSHOT_TTL_MS = 1_000
@@ -372,11 +402,12 @@ export async function readFleet(lang: CliLang, view?: FleetViewRequest): Promise
     const tasks = host.sessionTasks ? await host.sessionTasks().catch(() => []) : []
     const finishedTasks = fleet.finishedTasks ?? []
     // A failed store read costs freshness, never the fleet: the fleet is what this route is for.
-    const baseline = await cachedBaseline(
+    const baseline = backgroundBaseline(
       async () => [...(await loadConsolidated()).values()],
       Date.now(),
-    ).catch(() => undefined)
+    )
     return {
+      historyLoading: fleet.historyLoading ?? false,
       sessions: fleet.sessions.map(row => fleetRow(row, s)),
       rows: fleet.sessions,
       attention: fleet.attention,
@@ -759,7 +790,14 @@ async function runFleetActionOnce(
       // queue it records the composer fingerprint, so the chat shows this turn as the person's own
       // message even when the harness stored it as a paste (`recordComposerMessage`).
       const record = async () => {
+        // The common CONFIRMED send path: web, TUI and late acknowledgements all record the request once.
+        try {
+          const m = await import('../flows/owner-message')
+          await m.emitOwnerMessage(req, m.defaultOwnerMessageDeps(), { at: new Date(sentAtMs).toISOString() })
+        } catch { console.warn('[owner-request] confirmed message could not be recorded; check the official request flows') }
         if (req.handoff === true) await patchSession(req.id, { handoffRequestedAt: new Date(sentAtMs).toISOString() })
+        // FLUXO.AVISOS: the newest message typed INTO this session (host op `ultima-mensagem-sessao`).
+        try { (await import('./last-message')).noteMessageTo(req.id, sentAtMs) } catch { /* a view, never the record */ }
         await recordComposerMessage(req.id, text)
         void (async () => {
           try {

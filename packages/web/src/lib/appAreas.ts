@@ -55,10 +55,13 @@ export const APP_AREAS: readonly Area[] = [
     { id: 'leaders', path: '/leadership', labelPt: 'Líderes', labelEn: 'Leaders' },
     { id: 'checkins', path: '/leadership/checkins', labelPt: 'Check-ins', labelEn: 'Check-ins' },
     { id: 'handoffs', path: '/leadership/handoffs', labelPt: 'Passagens', labelEn: 'Hand-offs' },
-    { id: 'away', path: '/leadership/away', labelPt: 'Modo ausente', labelEn: 'Away mode' },
+    { id: 'away', path: '/leadership/away', labelPt: 'Modo autônomo', labelEn: 'Autonomous mode' },
   ] },
-  { id: 'tasks', icon: 'clipboard', labelPt: 'Agentask', labelEn: 'Agentask', beta: true, pages: [
-    { id: 'board', path: '/tasks', labelPt: 'Quadro', labelEn: 'Board' },
+  { id: 'tasks', icon: 'clipboard', labelPt: 'Agentask', labelEn: 'Agentask', pages: [
+    { id: 'board', path: '/tasks/board', also: ['/tasks'], labelPt: 'Quadro', labelEn: 'Board' },
+    { id: 'metrics', path: '/tasks/metrics', labelPt: 'Métricas', labelEn: 'Metrics' },
+    { id: 'table', path: '/tasks/table', labelPt: 'Tabela', labelEn: 'Table' },
+    { id: 'live', path: '/tasks/live', labelPt: 'Live', labelEn: 'Live' },
     { id: 'activity', path: '/tasks/activity', labelPt: 'Atividade', labelEn: 'Activity' },
   ] },
   { id: 'usage', icon: 'gauge', beta: true, labelPt: 'Uso', labelEn: 'Usage', pages: [

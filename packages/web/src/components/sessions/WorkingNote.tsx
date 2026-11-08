@@ -13,6 +13,9 @@
 
 import { Loader } from 'lucide-react'
 
+/** Left inset of the busy line. Zero: it starts where the chat's tool-activity rows start. */
+export const WORKING_NOTE_INSET = 0
+
 export interface WorkingNoteProps {
   lang: 'pt' | 'en'
   /** The tools the newest turn invoked, if any. */
@@ -46,8 +49,9 @@ export function WorkingNote({ lang, tools, thinking, composing }: WorkingNotePro
       role="status"
       style={{
         display: 'flex', alignItems: 'center', gap: 8,
-        // Aligned with the bubbles' text rather than their edge: the 26px mark plus its 10px gap.
-        paddingLeft: 36, minWidth: 0,
+        // The same left edge as the tool-activity row and the injected-note row above it: no inset of
+        // its own (it used to sit 36px in, under the bubbles' text, and read as misaligned).
+        paddingLeft: WORKING_NOTE_INSET, minWidth: 0,
         fontSize: 11.5, color: 'var(--text-tertiary)',
       }}
     >

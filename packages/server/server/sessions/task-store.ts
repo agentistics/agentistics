@@ -300,6 +300,7 @@ function sanitizeEvent(raw: unknown): TaskEvent | null {
     id: e.id, taskId: e.taskId, kind: e.kind,
     at: typeof e.at === 'string' ? e.at : new Date(0).toISOString(),
     actor: typeof e.actor === 'string' ? e.actor : 'unknown',
+    ...(typeof e.subtaskId === 'string' && e.subtaskId ? { subtaskId: e.subtaskId } : {}),
     ...(typeof e.detail === 'string' ? { detail: e.detail } : {}),
     ...(typeof e.from === 'string' ? { from: e.from } : {}),
     ...(typeof e.to === 'string' ? { to: e.to } : {}),
@@ -467,6 +468,8 @@ function sanitizeSubtask(raw: unknown): Subtask | null {
     // this whitelist parses it back. `normalizeStagedSession` is total and never repairs a
     // half-read draft, the same rule `normalizeSessionPresets` applies to a saved preset.
     ...(normalizeStagedSession(t.stagedSession) ? { stagedSession: normalizeStagedSession(t.stagedSession)! } : {}),
+    // FLUXO.ENTREGA-DSL — the delivery flow's CI signal; same whitelist reason as the fields above.
+    ...(t.ci && typeof t.ci === 'object' ? { ci: sanitizeCi(t.ci) } : {}),
   }
 }
 
@@ -547,6 +550,14 @@ function sanitizeFile(raw: unknown): TaskFile | null {
   }
 }
 
+/** Listeners told after every durable book write (status, filing, comment…). The server wires the SSE
+ *  `change` event here so the Live view and the board refresh on the push, not on a heartbeat. */
+const bookWriteListeners = new Set<() => void>()
+export function onBookWrite(fn: () => void): () => void {
+  bookWriteListeners.add(fn)
+  return () => { bookWriteListeners.delete(fn) }
+}
+
 export function createTaskStore(file: string): TaskStore {
   // One in-process writer. Each mutation appends to this chain, so read-modify-write sequences run
   // strictly one after another even when several land at once.
@@ -622,6 +633,7 @@ export function createTaskStore(file: string): TaskStore {
     const tmp = `${file}.tmp`
     await writeFile(tmp, JSON.stringify(book, null, 2), 'utf8')
     await rename(tmp, file)
+    for (const fn of [...bookWriteListeners]) { try { fn() } catch { /* a listener never fails a write */ } }
   }
 
   /** One mutation, under the cross-process lock, re-run once when the lock was contended. */
@@ -1019,5 +1031,15 @@ export function createTaskStore(file: string): TaskStore {
         return true
       })
     },
+  }
+}
+
+/** The CI signal exactly as `task-live.ts` trusts it: booleans, a tag string or null, a PR number or null. */
+function sanitizeCi(raw: unknown): { mergedMain: boolean; releaseGreen: boolean; tagPublished: boolean; tag: string | null; pr: number | null } {
+  const o = raw as Record<string, unknown>
+  return {
+    mergedMain: o.mergedMain === true, releaseGreen: o.releaseGreen === true, tagPublished: o.tagPublished === true,
+    tag: typeof o.tag === 'string' && o.tag ? o.tag : null,
+    pr: typeof o.pr === 'number' && Number.isFinite(o.pr) ? o.pr : null,
   }
 }

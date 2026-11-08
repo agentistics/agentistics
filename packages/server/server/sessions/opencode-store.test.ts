@@ -71,7 +71,8 @@ test('turns: user text, assistant reasoning + failed write tool + text; plumbing
   expect(turns[0]!.text).toBe('Deploy the Docker image')
   expect(turns[1]!.text).toBe('Done: 100% of it_s fine')
   expect(turns[1]!.thinking).toBe('thinking about it')
-  expect(turns[1]!.tools).toEqual([{ name: 'edit', canonical: 'Edit', failed: true, detail: '/w/app/a.ts', writes: ['/w/app/a.ts'], ref: 'p3' }])
+  // OPENCODE.SESSAO: no `writes` beside the path — the files panel read an edit as a NEW file, counted twice.
+  expect(turns[1]!.tools).toEqual([{ name: 'edit', canonical: 'Edit', failed: true, detail: '/w/app/a.ts', ref: 'p3' }])
   expect(readOpencodeTurns(path, 'ses_missing')).toEqual([])
   db.close()
 })

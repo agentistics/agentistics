@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { liveDeliveryQuery } from "./live-delivery-args";
 import { flowStatusRunId } from './flow-status'
 import { sessionRoleBody } from "./session-role-args";
 import "./orphan-guard-boot";
@@ -26,6 +27,7 @@ import { sessionProof } from "./session-proof.js";
 import { nativeVisibleFrom, projectionSurfaceOn, type RouteKind } from "@agentistics/core";
 import { planLimitsTool } from "./plan-limits-tool.js";
 import { harnessesTool } from "./harnesses-tool.js";
+import { vaultStatusTool } from "./vault-tool.js";
 import { legacyCosts, legacyHarnesses, legacyProjects, legacyRepos, legacySummary } from "./legacy-analytics.js";
 import { PROJECTED_TOOLS, ProjectionUnavailable, type MetricsQueryFn, type ProjectedTool } from "./projected-analytics.js";
 
@@ -250,13 +252,13 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_tasks",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. List every task on the ALM board with its rollup (cost, rounds, sessions used, tokens) plus a board-wide overview: tasks in flight, delivered, average cost per task and per task, top models and harnesses. START HERE to see what work exists and what the other assistants are on.",
+      "List every task on the ALM board with its rollup (cost, rounds, sessions used, tokens) plus a board-wide overview: tasks in flight, delivered, average cost per task and per task, top models and harnesses. START HERE to see what work exists and what the other assistants are on.",
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
     name: "agentistics_task",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Open ONE task: its attempts (one per configuration tried), the sessions filed under it with their live state, its comments, subtasks, files, links and full metrics (models, harnesses, agent runs, tokens, delivery time). Comments come twice: `comments` (flat, oldest first, each with `subtaskId` when it was left on a subtask or group) and `commentThreads` — the same comments grouped by their OWN target (`target: {kind: 'task'|'group'|'subtask', id, title}`; the task first, empty targets omitted). `ref` is the task id or its exact title.",
+      "Open ONE task: its attempts (one per configuration tried), the sessions filed under it with their live state, its comments, subtasks, files, links and full metrics (models, harnesses, agent runs, tokens, delivery time). Comments come twice: `comments` (flat, oldest first, each with `subtaskId` when it was left on a subtask or group) and `commentThreads` — the same comments grouped by their OWN target (`target: {kind: 'task'|'group'|'subtask', id, title}`; the task first, empty targets omitted). `ref` is the task id or its exact title.",
     inputSchema: {
       type: "object",
       properties: { ref: { type: "string", description: "Task id or exact title." } },
@@ -266,17 +268,22 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_create",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Create a task. A title is required; a description is optional. Creating a title that already exists returns the existing task rather than a duplicate, so this is safe to call before filing work under a name you are not sure exists.",
+      "Create a task. A title is required; a description is optional. Set `priority` (urgent | high | medium | low — default low, and nobody chose a default) and `type` (an id from agentistics_task_types) when you know them: a board of defaults orders nothing. Creating a title that already exists returns the existing task rather than a duplicate (its priority and type are left alone — use agentistics_task_edit), so this is safe to call before filing work under a name you are not sure exists.",
     inputSchema: {
       type: "object",
-      properties: { title: { type: "string" }, detail: { type: "string" } },
+      properties: {
+        title: { type: "string" },
+        detail: { type: "string" },
+        priority: { type: "string", enum: ["urgent", "high", "medium", "low"], description: "Defaults to low. Decides the order of the queue and of the Live delivery line." },
+        type: { type: "string", description: "A type id from agentistics_task_types (an unknown one is dropped)." },
+      },
       required: ["title"],
     },
   },
   {
     name: "agentistics_task_status",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Move a task to a status. The status VOCABULARY is an editable list now, not a fixed set — call agentistics_task_statuses first if you are unsure what this board currently has; a fresh board starts with exactly `todo`, `in_progress`, `blocked` and `done`. Only `done` stamps a task and closes rounds-to-delivery; `abandoned` (when the board has it) records that the work was given up on, which is a real outcome and not a failure to report — but it is NOT created by default, so use agentistics_task_status_edit to add it (or any other status) first if it is missing. **`blocked` REQUIRES a `reason` or a `blockedBy` list** and is refused (422) without one: it is the status that names a problem somebody has to go and solve, and a blocked card that does not say what it is waiting on cannot be unblocked by anyone but you. **`done` REQUIRES the task to have at least one session filed under it** and is refused (422, `done_needs_session`) without one. A `status` naming nothing this board currently has is refused (400, `unknown_status`). Pass `actor` (who you are) so the move is recorded against you in the activity log.",
+      "Move a task to a status. The status VOCABULARY is an editable list now, not a fixed set — call agentistics_task_statuses first if you are unsure what this board currently has; a fresh board starts with exactly `todo`, `in_progress`, `blocked` and `done`. Only `done` stamps a task and closes rounds-to-delivery; `abandoned` (when the board has it) records that the work was given up on, which is a real outcome and not a failure to report — but it is NOT created by default, so use agentistics_task_status_edit to add it (or any other status) first if it is missing. **`blocked` REQUIRES a `reason` or a `blockedBy` list** and is refused (422) without one: it is the status that names a problem somebody has to go and solve, and a blocked card that does not say what it is waiting on cannot be unblocked by anyone but you. **`done` REQUIRES the task to have at least one session filed under it** and is refused (422, `done_needs_session`) without one. A `status` naming nothing this board currently has is refused (400, `unknown_status`). Pass `actor` (who you are) so the move is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {
@@ -303,19 +310,19 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_statuses",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. List every status this board currently has (id, label, color, and whether it is protected — todo/in_progress/blocked/done can never be deleted or have their id changed, but their label and color can). Call this before agentistics_task_status if you are not sure a status you want to move a task to actually exists.",
+      "List every status this board currently has (id, label, color, and whether it is protected — todo/in_progress/blocked/done can never be deleted or have their id changed, but their label and color can). Call this before agentistics_task_status if you are not sure a status you want to move a task to actually exists.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "agentistics_task_types",
     description:
-      "BETA — Agentask (the task board) is new and still changing. List the task TYPE vocabulary (id, label, color, order, usageCount). A type is a second classification beside the status (e.g. CORE); a task may carry one or none. Call this before setting `type` through agentistics_task_edit.",
+      "List the task TYPE vocabulary (id, label, color, order, usageCount). A type is a second classification beside the status (e.g. CORE); a task may carry one or none. Call this before setting `type` through agentistics_task_edit.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "agentistics_task_type_edit",
     description:
-      "BETA — Agentask (the task board) is new and still changing. Add, rename/recolor, or delete a task type. Pass `label` (and optional `color`, a `#rrggbb` hex string) alone to CREATE a type — its id is derived from the label. Pass `id` with `label` and/or `color` to EDIT. Pass `id` with `remove: true` to DELETE: refused (422, `in_use`, with `usageCount`) while any task still carries it.",
+      "Add, rename/recolor, or delete a task type. Pass `label` (and optional `color`, a `#rrggbb` hex string) alone to CREATE a type — its id is derived from the label. Pass `id` with `label` and/or `color` to EDIT. Pass `id` with `remove: true` to DELETE: refused (422, `in_use`, with `usageCount`) while any task still carries it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -330,7 +337,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_status_edit",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Add, rename/recolor, or delete a status. Pass `label` (and optional `color`, a `#rrggbb` hex string) alone to CREATE a new, non-protected status — its id is derived from the label and returned. Pass `id` with `label` and/or `color` to EDIT an existing status's label/color — works on a protected one too, only its id can never change. Pass `id` with `remove: true` to DELETE it: refused (422, `protected`) for todo/in_progress/blocked/done regardless of usage, and refused (422, `in_use`, with `usageCount`) for any other status still referenced by at least one task or subtask.",
+      "Add, rename/recolor, or delete a status. Pass `label` (and optional `color`, a `#rrggbb` hex string) alone to CREATE a new, non-protected status — its id is derived from the label and returned. Pass `id` with `label` and/or `color` to EDIT an existing status's label/color — works on a protected one too, only its id can never change. Pass `id` with `remove: true` to DELETE it: refused (422, `protected`) for todo/in_progress/blocked/done regardless of usage, and refused (422, `in_use`, with `usageCount`) for any other status still referenced by at least one task or subtask.",
     inputSchema: {
       type: "object",
       properties: {
@@ -344,7 +351,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_comment",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Leave a comment on a task — or on ONE of its subtasks or subtask GROUPS by passing `subtaskId` (a group's own id is allowed; omit it to comment on the task itself). `body` may be empty when `attachments` is given. Comments carry attachments as REFERENCES into the chat's own attachment store (`{name, path}`; agentistics_task returns them on each comment with a `url` that serves the file) — there is no second store. Use it to tell the person and the other assistants what you did, what you found, or what you are blocked on; comment where the work is (the subtask you are on) rather than on the whole task. An unknown, deleted or other task's `subtaskId` is REFUSED with a sentence (422, `no_such_subtask` / `wrong_delivery`) — never silently filed on the task. Threads read downward: a subtask's thread is its own comments, a group's thread is its own plus its members', the task's is everything. The activity log names the target. `author` is free text — say who you are (e.g. 'claude:3f5f'). THREADS: a thread is a topic on the task; post into one with `threadId`, or open one with `threadTitle` (sessions: handbacks and blocks only). A thread is a RECORD, not a chat: a comment there reaches nobody by itself, so never wait for an answer in a thread. When you post in a thread you join it; the person may explicitly SEND a message from it, which arrives in your own chat starting `[Agentask · … · sent by the owner]` — answer there, in your chat, which is where conversations live. If you need something from the person, ask in your own chat as always.",
+      "Leave a comment on a task — or on ONE of its subtasks or subtask GROUPS by passing `subtaskId` (a group's own id is allowed; omit it to comment on the task itself). `body` may be empty when `attachments` is given. Comments carry attachments as REFERENCES into the chat's own attachment store (`{name, path}`; agentistics_task returns them on each comment with a `url` that serves the file) — there is no second store. Use it to tell the person and the other assistants what you did, what you found, or what you are blocked on; comment where the work is (the subtask you are on) rather than on the whole task. An unknown, deleted or other task's `subtaskId` is REFUSED with a sentence (422, `no_such_subtask` / `wrong_delivery`) — never silently filed on the task. Threads read downward: a subtask's thread is its own comments, a group's thread is its own plus its members', the task's is everything. The activity log names the target. `author` is free text — say who you are (e.g. 'claude:3f5f'). THREADS: a thread is a topic on the task; post into one with `threadId`, or open one with `threadTitle` (sessions: handbacks and blocks only). A thread is a RECORD, not a chat: a comment there reaches nobody by itself, so never wait for an answer in a thread. When you post in a thread you join it; the person may explicitly SEND a message from it, which arrives in your own chat starting `[Agentask · … · sent by the owner]` — answer there, in your chat, which is where conversations live. If you need something from the person, ask in your own chat as always.",
     inputSchema: {
       type: "object",
       properties: {
@@ -385,7 +392,8 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_subtask",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Add a subtask, or change one. Pass `title` to add; pass `id` with `done`, `status`, `dueDate`, `startDate`, `blockedBy` or `parentGroupId` to edit one. `startedAt`/`deliveredAt` are system-stamped facts (when real work began / when this piece reached `done`) and are never set through this tool — they are read back on the subtask record. A subtask carries the same columns its parent does; its own cost, tokens, rounds and harness are rolled up from the sessions filed under it — the PARENT task's rollup is the sum of all its subtasks' sessions. A subtask CAN be blocked by another subtask of the SAME parent (pass `blockedBy` as the full list of sibling subtask ids that must be `done` first; a sibling outside this task, or the subtask itself, is dropped rather than accepted) — this is separate from agentistics_task_blocked_by, which blocks a whole TASK on other tasks. **`done` REQUIRES the subtask to have at least one session filed under it** and is refused (422, `done_needs_session`) without one — EXCEPT for a group MEMBER (`parentGroupId` set), which can never hold a session of its own (see below) and therefore reaches `done` through this same edit with no session required; a GROUP itself (`isGroup: true`) and an ordinary loose subtask both still need one. **The moment every one of a task's top-level subtasks (loose subtasks and groups — a group's own members never count separately) reaches `done`, the parent task auto-delivers too.** To put a session ON a subtask use agentistics_task_session with `subtaskId` — a subtask holds ANY NUMBER of sessions, so the link lives on the session, not in a field here. **SUBTASK GROUPS are a real hierarchy level, not a label**: pass `isGroup: true` with `title` to create a GROUP — a peer row that CAN hold a session, exactly like a loose subtask. Pass `id` (a subtask) with `parentGroupId` (a group's own subtask id, from the SAME parent task) to make it a MEMBER of that group — join with the group's id, leave with `parentGroupId: ''`. A refused reference (the id names no subtask, names one that is not `isGroup: true`, names a different task, or the subtask being patched is itself a group) is refused as `invalid_group` (422). **Joining a group is ALSO refused (422, `subtask_has_sessions`) when the subtask already has a session filed on it** — a member gets no rollup bucket of its own, so that session's cost would silently drop out of every visible breakdown while the task's own total kept counting it; detach the session first. **A MEMBER can never hold a session of its own** — filing on one is refused by agentistics_task_session with `subtask_in_group` (422); only the group itself accounts for a session, and a member's own status/dates/comments still exist and feed the group's progress percentage.",
+      "Joining a staged subtask to a group folds its queued delivery and brief into the group, keeping one queue card and an audit reason. " +
+      "Add a subtask, or change one. Pass `title` to add; pass `id` with `done`, `status`, `dueDate`, `startDate`, `blockedBy` or `parentGroupId` to edit one. `startedAt`/`deliveredAt` are system-stamped facts (when real work began / when this piece reached `done`) and are never set through this tool — they are read back on the subtask record. A subtask carries the same columns its parent does; its own cost, tokens, rounds and harness are rolled up from the sessions filed under it — the PARENT task's rollup is the sum of all its subtasks' sessions. A subtask CAN be blocked by another subtask of the SAME parent (pass `blockedBy` as the full list of sibling subtask ids that must be `done` first; a sibling outside this task, or the subtask itself, is dropped rather than accepted) — this is separate from agentistics_task_blocked_by, which blocks a whole TASK on other tasks. **`done` REQUIRES the subtask to have at least one session filed under it** and is refused (422, `done_needs_session`) without one — EXCEPT for a group MEMBER (`parentGroupId` set), which can never hold a session of its own (see below) and therefore reaches `done` through this same edit with no session required; a GROUP itself (`isGroup: true`) and an ordinary loose subtask both still need one. **The moment every one of a task's top-level subtasks (loose subtasks and groups — a group's own members never count separately) reaches `done`, the parent task auto-delivers too.** To put a session ON a subtask use agentistics_task_session with `subtaskId` — a subtask holds ANY NUMBER of sessions, so the link lives on the session, not in a field here. **SUBTASK GROUPS are a real hierarchy level, not a label**: pass `isGroup: true` with `title` to create a GROUP — a peer row that CAN hold a session, exactly like a loose subtask. Pass `id` (a subtask) with `parentGroupId` (a group's own subtask id, from the SAME parent task) to make it a MEMBER of that group — join with the group's id, leave with `parentGroupId: ''`. A refused reference (the id names no subtask, names one that is not `isGroup: true`, names a different task, or the subtask being patched is itself a group) is refused as `invalid_group` (422). **Joining a group is ALSO refused (422, `subtask_has_sessions`) when the subtask already has a session filed on it** — a member gets no rollup bucket of its own, so that session's cost would silently drop out of every visible breakdown while the task's own total kept counting it; detach the session first. **A MEMBER can never hold a session of its own** — filing on one is refused by agentistics_task_session with `subtask_in_group` (422); only the group itself accounts for a session, and a member's own status/dates/comments still exist and feed the group's progress percentage.",
     inputSchema: {
       type: "object",
       properties: {
@@ -399,7 +407,8 @@ const TOOLS: Tool[] = [
         },
         status: {
           type: "string",
-          enum: ["backlog", "todo", "in_progress", "blocked", "in_review", "done", "abandoned"],
+          description:
+            "A status id this board currently has — call agentistics_task_statuses for the live list (the vocabulary is editable, so it is NOT fixed here). The four every board starts with are todo | in_progress | blocked | done.",
         },
         dueDate: { type: "string" },
         startDate: { type: "string" },
@@ -426,7 +435,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_link",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Attach a link to a task — a pull request, an issue, a document. Pass `url` (http/https only) with an optional `label` and `kind` ('pr', 'issue', …). Pass `remove` with a link id to detach one.",
+      "Attach a link to a task — a pull request, an issue, a document. Pass `url` (http/https only) with an optional `label` and `kind` ('pr', 'issue', …). Pass `remove` with a link id to detach one.",
     inputSchema: {
       type: "object",
       properties: {
@@ -442,7 +451,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_blocked_by",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Set which tasks must finish before this one can proceed. Pass the full list of blocker task ids (it replaces, it does not append). A task cannot block itself.",
+      "Set which tasks must finish before this one can proceed. Pass the full list of blocker task ids (it replaces, it does not append). A task cannot block itself.",
     inputSchema: {
       type: "object",
       properties: { ref: { type: "string" }, blockedBy: { type: "array", items: { type: "string" } } },
@@ -452,7 +461,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_next",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. THE ORCHESTRATION CALL: what you can pick up right now. Returns the tasks that are open, not blocked by unfinished work, and not in another agent's hands — most urgent first, numbered from 1. It also returns `withheld`, every task that is NOT available with the reason (closed / blocked / claimed / status), because an agent told 'nothing' learns nothing; and `progress`, which separates 'it is all done' from 'everything is in somebody's hands right now'. Pass `actor` (who you are) so a task you already hold comes back as available to you rather than as taken.",
+      "THE ORCHESTRATION CALL: what you can pick up right now. Returns the tasks that are open, not blocked by unfinished work, and not in another agent's hands — most urgent first, numbered from 1. It also returns `withheld`, every task that is NOT available with the reason (closed / blocked / claimed / status), because an agent told 'nothing' learns nothing; and `progress`, which separates 'it is all done' from 'everything is in somebody's hands right now'. Pass `actor` (who you are) so a task you already hold comes back as available to you rather than as taken.",
     inputSchema: {
       type: "object",
       properties: {
@@ -465,7 +474,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_claim",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. TAKE a task before working on it, so two agents cannot do the same one twice. This is a LEASE, not a lock: it expires (default 30 minutes) and the task returns to the board on its own, so an agent that dies does not hold work forever. Re-claiming as the same `by` REFRESHES the lease — do that while you are still working. Pass `release: true` to give it back when you finish or stop. A refusal names who holds it and until when; `takeover` is for a person overriding a live claim on purpose and an agent should not send it.",
+      "TAKE a task before working on it, so two agents cannot do the same one twice. This is a LEASE, not a lock: it expires (default 30 minutes) and the task returns to the board on its own, so an agent that dies does not hold work forever. Re-claiming as the same `by` REFRESHES the lease — do that while you are still working. Pass `release: true` to give it back when you finish or stop. A refusal names who holds it and until when; `takeover` is for a person overriding a live claim on purpose and an agent should not send it.",
     inputSchema: {
       type: "object",
       properties: {
@@ -484,7 +493,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_activity",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. What has been HAPPENING, newest first — status moves, claims, releases, priority changes, sessions filed. Pass `ref` for one task, or nothing for the whole board. On a board several agents drive this is how you find out what the others did without asking them.",
+      "What has been HAPPENING, newest first — status moves, claims, releases, priority changes, sessions filed. Pass `ref` for one task, or nothing for the whole board. On a board several agents drive this is how you find out what the others did without asking them.",
     inputSchema: {
       type: "object",
       properties: { ref: { type: "string" }, limit: { type: "number" } },
@@ -492,9 +501,26 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: "agentistics_live_delivery",
+    description:
+      "What is being DELIVERED right now — the Live Delivery line, the same source as the screen. Use it to answer \"what is running\", \"when does X ship\" and \"is anything stalled\". Returns a `summary` (active deliveries, agents working, stalled, the next delivery with an estimate), the active `deliveries` with their stage (queue, running, qa, adjust, leader, merge, published), the agents on each (harness, model, account, live state), time in the stage and in total, the step inside the stage (`step`, with `stepSource` = `reported` or `signals` and `stepSignal` naming the observed fact — null `step` means nothing is observable, say so; the screen then draws no percent), the ETA with its source and confidence (`kind: none` means there is NO estimate — say so, never invent a time), the last action, and the `leaders` band (each leader's current action, its workers and what waits on a decision — leaders are never deliveries). Each delivery carries its Agentask `priority` (urgent | high | medium | low; a subtask inherits its task's). Filters: `task` (id or part of the title), `stage`, `stalledOnly`, and the screen's own tabs — `tab`: `active` (Em andamento: only what has an agent working or waiting), `queue` (Na fila), `published` (Publicado) or `all` (Tudo: every piece in its real column, old legacy reviews marked `old`; the default here, while the screen opens on `active`) — and `period`, the Publicado period: `24h` (default), `7d`, `30d` or `all`. The answer's `view` carries `{tab, period, counts, defaulted, capped}`: `tab`/`period` are the EFFECTIVE values (a missing or invalid one falls back to `all` / `24h`, and `defaulted` names which did), `counts` is the count of EVERY tab under the same `task` filter and period, the very numbers the screen's tabs print, and `capped` (`{cap, omitted}`, else null) says the list was cut at 400 pieces per kind and that many older ones are NOT in the answer — then a count is not the total. Plus `sort` (how each stage lists its cards; default `priority`, highest first, ties by longest in the stage). Stage names on screen: queue = Na fila, running = Em desenvolvimento, qa = QA. There is no Histórico column any more: a piece published earlier is in `deliveries` whenever `period` covers it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "A task id or part of its title." },
+        stage: { type: "string", enum: ["queue", "running", "qa", "adjust", "leader", "merge", "published"] },
+        stalledOnly: { type: "boolean", description: "Only deliveries that need a person, lost an agent or are blocked." },
+        tab: { type: "string", enum: ["active", "queue", "published", "all"], description: "The screen's tab: active (Em andamento), queue (Na fila), published (Publicado) or all (Tudo). Default all." },
+        period: { type: "string", enum: ["24h", "7d", "30d", "all"], description: "How far back Publicado reaches. Default 24h." },
+        sort: { type: "string", enum: ["priority", "time-in-stage", "recent"], description: "Order within each stage. Default priority (highest first, ties by longest in the stage)." },
+      },
+      required: [],
+    },
+  },
+  {
     name: "agentistics_task_edit",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`. An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
+      "Set a task's fields: `title`, `detail`, `priority` (urgent | high | medium | low), `type` (an id from agentistics_task_types; empty string clears it), `dueDate` / `startDate` (yyyy-mm-dd), `labels`. An absent field is left alone; an EMPTY STRING clears it. `priority` defaults to `low`; a legacy `none` is stored as `low`. `startedAt`/`deliveredAt` are system-stamped facts and are never set through this tool. Pass `actor` so the change is recorded against you in the activity log.",
     inputSchema: {
       type: "object",
       properties: {
@@ -514,7 +540,7 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_session",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. File a SESSION under a task, which is what makes the task measurable: its cost, tokens, rounds and harness all come from the sessions filed under it. Pass `subtaskId` to file it under one of the task's subtasks (the unit of WORK, for a task broken into steps) — this INCLUDES a subtask GROUP (see agentistics_task_subtask's `isGroup`), which holds a session exactly like any other subtask; omit `subtaskId` to file the session directly on the task itself (the unit of DELIVERY, for a task simple enough not to need subtasks). Both can be used on the same task — some sessions direct, some under subtasks — and each subtask's own rollup plus the directly-filed sessions' own rollup are both readable via agentistics_task's `subtaskRollups` (keyed by subtask id, with `id: null` for the direct ones), so the breakdown never disappears. **Filing on a subtask that is a MEMBER of a group (has a `parentGroupId`) is refused (422, `subtask_in_group`)** — a member can never hold a session, only the group itself can; file on the group's own id instead. Use agentistics_task to read the subtasks, or agentistics_task_subtask to create one, then pass `ref` + `sessionId` (a managed session id) + optionally `subtaskId`. Pass `detach` with a session id to unfile one. The task inherits the session's repository when it has none. **HISTORICAL conversations — pass `conversationId` INSTEAD of `sessionId`** to file a conversation that has NO live/registry row: typically a session that was killed and whose row agentop then purged, leaving its subtask `done` with 0 sessions and its cost missing from every rollup. The conversation must still be in the metrics store (its tokens/cost are what get counted); the link is kept on the board, never in the fleet, so nothing appears in the Sessions workspace and there is nothing to open — the row is marked `historical: true` in agentistics_task's `sessions`. Filing is a MOVE: one link per conversation, so filing it elsewhere replaces the old link and the answer reports `movedFrom: {taskId, subtaskId?}` (a plain `sessionId` filing reports `movedFrom` too when it displaced another filing). It counts everywhere a live session does (rollups, `subtaskRollups`, the board headline, `done_needs_session`, the group-join rule). Refusals: `no_such_conversation` (422 — the store has no record of that id; nothing to price, so nothing is filed), `conversation_in_fleet` (422 — a registry row already exists; the answer carries its `sessionId`, so call again with that as `sessionId`), plus the same target refusals as a session (`no_such_task`, `no_such_subtask`, `wrong_delivery`, `blocked`, `subtask_in_group`). Optional `harness` disambiguates and `note` is kept on the link. To remove a historical link pass `detach` with the conversation id (or the row's `hist:<conversationId>` id).",
+      "File a SESSION under a task, which is what makes the task measurable: its cost, tokens, rounds and harness all come from the sessions filed under it. Pass `subtaskId` to file it under one of the task's subtasks (the unit of WORK, for a task broken into steps) — this INCLUDES a subtask GROUP (see agentistics_task_subtask's `isGroup`), which holds a session exactly like any other subtask; omit `subtaskId` to file the session directly on the task itself (the unit of DELIVERY) — **only LEADER sessions may be filed on the task itself; a worker is refused (422, `leader_only`: only leader sessions are filed on the task itself; file this session on a subtask)**, so pass a `subtaskId` for workers. Both can be used on the same task — some sessions direct, some under subtasks — and each subtask's own rollup plus the directly-filed sessions' own rollup are both readable via agentistics_task's `subtaskRollups` (keyed by subtask id, with `id: null` for the direct ones), so the breakdown never disappears. **Filing on a subtask that is a MEMBER of a group (has a `parentGroupId`) is refused (422, `subtask_in_group`)** — a member can never hold a session, only the group itself can; file on the group's own id instead. Use agentistics_task to read the subtasks, or agentistics_task_subtask to create one, then pass `ref` + `sessionId` (a managed session id) + optionally `subtaskId`. Pass `detach` with a session id to unfile one. The task inherits the session's repository when it has none. **HISTORICAL conversations — pass `conversationId` INSTEAD of `sessionId`** to file a conversation that has NO live/registry row: typically a session that was killed and whose row agentop then purged, leaving its subtask `done` with 0 sessions and its cost missing from every rollup. The conversation must still be in the metrics store (its tokens/cost are what get counted); the link is kept on the board, never in the fleet, so nothing appears in the Sessions workspace and there is nothing to open — the row is marked `historical: true` in agentistics_task's `sessions`. Filing is a MOVE: one link per conversation, so filing it elsewhere replaces the old link and the answer reports `movedFrom: {taskId, subtaskId?}` (a plain `sessionId` filing reports `movedFrom` too when it displaced another filing). It counts everywhere a live session does (rollups, `subtaskRollups`, the board headline, `done_needs_session`, the group-join rule). Refusals: `no_such_conversation` (422 — the store has no record of that id; nothing to price, so nothing is filed), `conversation_in_fleet` (422 — a registry row already exists; the answer carries its `sessionId`, so call again with that as `sessionId`), plus the same target refusals as a session (`no_such_task`, `no_such_subtask`, `wrong_delivery`, `blocked`, `subtask_in_group`, `leader_only`). Optional `harness` disambiguates and `note` is kept on the link. To remove a historical link pass `detach` with the conversation id (or the row's `hist:<conversationId>` id).",
     inputSchema: {
       type: "object",
       properties: {
@@ -549,8 +575,89 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_task_delete",
     description:
-      "BETA — Agentask (the task board) is new and still changing; its shapes may move between releases. Delete a task and its comments, subtasks, files and links. The SESSIONS filed under it are kept — deleting a board entry never deletes work.",
+      "Delete a task and its comments, subtasks, files and links. The SESSIONS filed under it are kept — deleting a board entry never deletes work.",
     inputSchema: { type: "object", properties: { ref: { type: "string" } }, required: ["ref"] },
+  },
+  {
+    name: "agentistics_task_phase",
+    description:
+      "FLUXO.CICLO-COMPLETO — the minute `tick` also moves a piece in revisao_lider or pr_merge to ci BY ITSELF once its PR is merged (found from the piece's PR number, branch, the PR containing the sha QA approved, or its author worktree's branch; the merge gates `delecoes` + `mergeado` still run, and a refusal leaves the piece where it is with the reason), publishes ci pieces from the FIRST tag that contains the merge, and reminds the LIVE leader of the task (never the owner) of a piece waiting on them for 30 min, then every 2 h, at most 3 times. `get` with a `subtaskId` returns `tickReason`: why the tick has not moved it. `reconcile` (no `subtaskId`; `apply` true to write) is the one-shot BACKFILL: every piece in revisao_lider/pr_merge/ci matched to its merged PR and the first release tag containing it — a report of what moves and what cannot be proven, with the reason. " +
+      "`tick` also enables the mandatory owner-request/placement flows through the official engine switches and reads canonical pedidos; after 10 minutes without complete staging it wakes the current live task leader, including after a handoff or restart, and never asks the owner. " +
+      "Queue actions: `dequeue` withdraws a queued piece with a required free-text `reason` (task leader or owner only), keeps the draft/history, and refuses dispatch until explicitly restaged; `tick` reconciles stale queued pieces against board review/done/abandoned and records a comment. Vacancy counts live backend processes; lost/exited/closed sessions reserve no slots. " +
+      "FLUXO.ENTREGA-DSL — read or move a DELIVERY (one subtask) through its fixed phases: fila → executando → qa → (ajuste ⇄ qa) → revisao_lider → pr_merge → ci → publicado, plus bloqueado (from any phase, back to the stored origin only). Any transition outside that table is REFUSED (422 `fase_pulada`) with a sentence naming what is missing — executando → revisao_lider, ajuste → revisao_lider and every other skip included. The gates each edge needs are run BY THE SERVER from evidence (predispatch, vaga, salvo = sha on origin per ls-remote, qa-modelo = QA model ≠ author model from the registry and never Sonnet over Sonnet, cabeca = the pushed branch is still at the sha QA tested, delecoes = no file deleted outright by the PR, mergeado = gh says the PR is MERGED, the merge commit is on origin/main and the PR head is the sha QA approved — the merge sha is READ FROM THE PR, never from you, release = the batch's version tag exists AND the release.yml run that produced it is green, read in the repository the release recorded); salvo needs every check run on the pushed head to have concluded green (pending or absent refuse); you never pass proof. `action`: `get` (default; omit `subtaskId` to list every delivery) | `phase` (`to` + what that edge reads: `verdict` APROVADO/REPROVADO + `findings` from qa, `reviewedSha` = the sha QA approved for revisao_lider → pr_merge, `detail` for a request for change or a failure reason) | `gate` (`name`: run ONE gate and record its evidence) | `block` (`reason` one of dependencia, pedido_de_bloqueio, limite, maquina, externo, fora_das_autorizacoes; `text`) | `unblock` (`detail`; the leader of the task or the owner — an owner-decision block only the owner) | `step` (`step` 1..9: the step of the current phase, for the Live %. The Live already DERIVES the step from real signals — a session open, a file edit, a test run, a commit, the gates, the PR — so report only when you know better; the card shows the larger of the two and says which it is. Works for a legacy piece with no delivery record too: only the board's `step` event is written, nothing is adopted into the flow) | `configure` (the LEADER of the task or the owner only; `patch`: versionTarget, humanGates [phases needing the owner's approval — skipped and recorded as 'pulado: modo autônomo' while autonomous mode is on], leaderSessionId, pr, tag, allowDeletions {paths, reason}; the QA and author sessions are never settable — the host records them from the sessions it opened and the registry) | `approve` (`phase`, `decision` approve|reject, `note`: answers a human gate the owner was ASKED about; a session identity is deliberately not sent, the owner answers through this same door as the Live card button and `agentop flow approve`) | `stage-run` (predispatch + vaga gates, then start the staged session and move to executando) | `merge` (delecoes gate, squash-merge the PR, move to ci; a failure goes back to revisao_lider) | `release` (the LEADER of the task or the owner DECLARES what a release contains: `version` x.y.z, `mergeSha` = the commit on main carrying it (information only; 40 characters, or a short sha the server resolves), optional `repo` = owner/name (default agentistics/agentistics), `subtaskIds` = every piece in it; no `subtaskId`. Each piece gets its record (a legacy one is adopted), versionTarget/mergeSha/tag/repo, goes to ci and then to publicado as soon as the tag `v<version>` exists and the release.yml run that produced it is green — read by the server from the TAG, not from the sha — with the release's own publish time; a declared piece is never sent back to revisao_lider by the tick (a red tag run keeps it in ci and wakes the leader once); done/abandoned/blocked/unknown/other-task pieces refuse the whole batch, which is written in ONE store write; a second run changes nothing). In autonomous mode nothing here ever asks or waits for the owner.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["get", "phase", "gate", "block", "unblock", "dequeue", "tick", "step", "configure", "approve", "stage-run", "merge", "release", "reconcile"] },
+        apply: { type: "boolean", description: "reconcile: write the moves (a leader of the task, or the owner). Absent/false = dry run: the report only" },
+        subtaskId: { type: "string" },
+        version: { type: "string", description: "release: the version the pieces shipped in, x.y.z" },
+        mergeSha: { type: "string", description: "release: the commit on main that carries the release (information only: stored on the record; a short sha is resolved to 40 characters or refused). The publication evidence is the version tag's own green release.yml run" },
+        repo: { type: "string", description: "release: the repository owner/name the release belongs to (default agentistics/agentistics); recorded on every piece, the release gate reads it there" },
+        subtaskIds: { type: "array", items: { type: "string" }, description: "release: every subtask in the release" },
+        to: { type: "string", enum: ["executando", "qa", "ajuste", "revisao_lider", "pr_merge", "ci", "publicado"] },
+        verdict: { type: "string", enum: ["APROVADO", "REPROVADO"] },
+        findings: { type: "string" },
+        reviewedSha: { type: "string" },
+        detail: { type: "string" },
+        name: { type: "string", enum: ["predispatch", "vaga", "salvo", "qa-modelo", "cabeca", "delecoes", "mergeado", "release"] },
+        phase: { type: "string", description: "approve: the phase whose human gate is answered" },
+        decision: { type: "string", enum: ["approve", "reject"] },
+        note: { type: "string" },
+        reason: { type: "string", description: "dequeue: required free-text audit reason (leader only); block: dependencia | pedido_de_bloqueio | limite | maquina | externo | fora_das_autorizacoes" },
+        text: { type: "string" },
+        step: { type: "number" },
+        patch: { type: "object" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "agentistics_task_stage",
+    description:
+      "Placement is deterministic: a queued piece of the same task sharing a file, area tag or UI surface is returned as an `encaixe` warning so you can extend that brief or group the pieces. Withdrawn pieces are excluded. " +
+      "FLUXO.ENTREGA-DSL pre-dispatch — write the STAGED SESSION on a subtask (prompt/brief, harness, model, effort, account, cwd) and open its delivery in `fila` (\"Na fila\"). A leader receiving a request from the owner stages it in the SAME turn: the demand flow reminds the leader (never the owner) after 10 minutes of an owner request with no staged subtask. The fields merge over what the subtask already holds, and the predispatch gate is checked right away (the reply says what is still missing). Nothing starts here — `agentistics_task_phase action=stage-run` starts it once the vaga gate passes. `pedidoId` links the owner request this answers.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subtaskId: { type: "string" },
+        prompt: { type: "string" },
+        harness: { type: "string" },
+        model: { type: "string" },
+        effort: { type: "string" },
+        account: { type: "string" },
+        cwd: { type: "string" },
+        versionTarget: { type: "string" },
+        pedidoId: { type: "string" },
+      },
+      required: ["subtaskId"],
+    },
+  },
+  {
+    name: "agentistics_task_queue",
+    description:
+      "FILA.PRIORIDADE — read the delivery QUEUE (\"Na fila\") exactly as the task page's Fila tab shows it, from the same source, in the order pieces LEAVE: the task's priority (urgent → low), then arrival. " +
+      "Each item: `position` (in its task) and `globalPosition`, `priority`, the subtask/group (with `group.members`), the full PRE-DISPATCH (`predispatch`: harness, model, effort, account and its name, cwd, prompt), the slot gate's last verdict (`slot`; ok=false carries the raw reason such as `no slot: 4 workers running (machine ceiling 4)`), " +
+      "`hold` (the leader said `nao <motivo>` or `agendar <ISO> <motivo>`: kind, reason, until, who, `active`), `ask` (the system question to the leader: when, delivered, approved, `expiresAt` = 10 min, `onTimeout` = `sim` with autonomous mode on, `esperar` with it off), the leader, and the subtask's notes (`notes.last` the newest 3, `notes.total`). " +
+      "`recent` lists pieces the queue opened in the last 24 h with the session they opened. Pass `taskId` for one task's queue. To change the order, change the TASK's priority with `agentistics_task_edit`; to edit a piece's pre-dispatch use `agentistics_task_stage`; to start now / schedule / answer use `agentistics_task_queue_answer`; to withdraw use `agentistics_task_phase action=dequeue`.",
+    inputSchema: { type: "object", properties: { taskId: { type: "string", description: "Only this task's queued pieces. Omit for every task." } }, required: [] },
+  },
+  {
+    name: "agentistics_task_queue_answer",
+    description:
+      "FILA.PRIORIDADE — answer the queue's SYSTEM QUESTION (the message headed `[from flow fila · confirmar]` that arrives in a leader's composer when a slot opens and its piece is next), or act on a queued piece from the Fila tab. Leader of the task or owner only. " +
+      "`answer` is one of: `sim` (open the session now — if no slot is free right now the approval is kept and the next tick starts it; never opens twice), `nao <motivo>` (the piece stays queued with the reason on its card; the flow moves on to the next one), `agendar <ISO> <motivo>` (stays queued, becomes a candidate again only from that FUTURE instant, shown on the card as `começa às HH:MM`). " +
+      "A `nao` or `agendar` without a reason, and an `agendar` in the past, are refused with a sentence. Every decision is recorded as a comment on the subtask (who, why, when). With no answer in 10 minutes: autonomous mode ON → the flow carries on as `sim` and records it; OFF → it keeps waiting and reminds you. " +
+      "Set `runNow: true` instead of `answer` to run the queue flow once right now (what happens automatically when a worker ends and every minute).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        subtaskId: { type: "string" },
+        answer: { type: "string", description: "`sim` | `nao <motivo>` | `agendar <ISO> <motivo>`" },
+        runNow: { type: "boolean", description: "Run the queue flow now instead of answering." },
+      },
+      required: [],
+    },
   },
   {
     name: "agentistics_session_groups",
@@ -609,7 +716,7 @@ const TOOLS: Tool[] = [
         to: { type: "string", description: "The target session reference." },
         kind: { type: "string", enum: ["handback", "block", "question"] },
         body: { type: "string", description: "The message." },
-        awaiting: { type: "string", description: "kind=handback only: what you stopped waiting for (marks the handback as intermediate; the worker is not closed). Omit on a final handback." },
+        awaiting: { type: "string", description: "kind=handback only: what you stopped waiting for (marks the handback as intermediate: the worker is not closed, your subtask stays in_progress and the leader's check-in does not list it as delivered). A text that says it is part N of M (\"parte 2 de 5\", \"2/5\", \"seguindo com…\") with no awaiting is read the same way, and the reply tells you so. Omit on the FINAL handback." },
       },
       required: ["to", "kind", "body"],
     },
@@ -667,18 +774,19 @@ const TOOLS: Tool[] = [
   {
     name: "agentistics_session_away",
     description:
-      "Read or switch AWAY MODE, or send the owner a notice while away — the owner is out (asleep, travelling) and the fleet carries on without asking them. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `on: false` switches it off. Every session started while it is active is told in its briefing. With `target` (a session's managed id or conversation id) `on` switches THAT session's own away mode instead — it alone is told the owner is out, even with the global switch off, and a running one is told the change; sessions it starts inherit it. Ceilings are per PROVIDER: `topCaps` maps a harness (claude, codex, gemini, copilot, antigravity, kimi, opencode) to how many workers may run on its top model tier at once. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
+      "Read or switch AUTONOMOUS MODE, or send the owner a notice while autonomous — the fleet works on its own, without asking permission or questions (the owner may be asleep or travelling). While it is on, every new session is born in the no-questions approval mode unless its caller names a mode. With no `on` it reports the state (`active`, `until`, what is pre-authorised). With `on: true` it switches it on: `until` is an ISO instant (omit = until the owner says they are back), `authorised` lists what the owner pre-approved (releases = publish releases the leader approved; workers = open worker sessions within the plan limits; merges = merge PRs the leader reviewed), `note` is free text. `schedule` makes it SCHEDULED instead of open-ended: `{enabled:true, days:{mon:{windows:[{from:\"09:00\",to:\"18:00\"}]}, tue:{windows:[],allDay:true}}}` (local clock, weekdays mon…sun, hour windows per day, `allDay` = whole day) — it is on only inside those windows. Omitted `authorised` = all three. `on: false` switches it off. Every session started while it is active is told in its briefing. With `target` (a session's managed id or conversation id) `on` switches THAT session's own autonomous mode instead — it alone is told the owner is out, even with the global switch off, and a running one is told the change; sessions it starts inherit it. Ceilings are per PROVIDER: `topCaps` maps a harness (claude, codex, gemini, copilot, antigravity, kimi, opencode) to how many workers may run on its top model tier at once. Only a LEADER session may switch it; use it when the owner tells you they are leaving or are back.",
     inputSchema: {
       type: "object",
       properties: {
-        on: { type: "boolean", description: "true = owner away, false = owner back. Omit to read." },
-        until: { type: "string", description: "ISO instant the away period ends. Omit for 'until I'm back'." },
+        on: { type: "boolean", description: "true = autonomous mode on, false = off. Omit to read." },
+        until: { type: "string", description: "ISO instant the autonomous period ends. Omit for 'until I turn it off'." },
         authorised: { type: "array", items: { type: "string", enum: ["releases", "workers", "merges"] } },
         note: { type: "string", description: "Free text from the owner (max 500 chars)." },
-        maxWorkers: { type: "number", description: "Ceiling of worker sessions at once while away (default 6)." },
-        topCaps: { type: "object", additionalProperties: { type: "number" }, description: "Per provider (harness id → number): ceiling of workers on that provider's top model tier at once (Opus, top GPT tier, Gemini Pro, …). A provider with no entry gets 2." },
-        target: { type: "string", description: "A session's managed id or conversation id: switch only that session's own away mode (with `on`)." },
-        notice: { type: "string", description: "While away: a warning or decision that cannot wait, sent to the owner's bell/Nay as a notice (max 500 chars) instead of a question that blocks your turn. Leaders only; ignores the other fields." },
+        schedule: { type: "object", description: "Optional agenda: {enabled:true, days:{<mon|tue|wed|thu|fri|sat|sun>:{windows:[{from:'HH:MM',to:'HH:MM'}], allDay?:true}}}. Autonomous mode is on only inside the windows (machine-local time; to<=from crosses midnight). Omit for 'until I turn it off'." },
+        maxWorkers: { type: "number", description: "Ceiling of worker sessions at once while autonomous (default 4)." },
+        topCaps: { type: "object", additionalProperties: { type: "number" }, description: "Per provider (harness id → number): ceiling of workers on that provider's top model tier at once (Opus, top GPT tier, Gemini Pro, …). A provider with no entry gets 1." },
+        target: { type: "string", description: "A session's managed id or conversation id: switch only that session's own autonomous mode (with `on`)." },
+        notice: { type: "string", description: "While autonomous: a warning or decision that cannot wait, sent to the owner's bell/Nay as a notice (max 500 chars) instead of a question that blocks your turn. Leaders only; ignores the other fields." },
       },
       required: [],
     },
@@ -907,6 +1015,12 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "agentistics_vault_status",
+    description:
+      "How this machine's vault is protected — never what it holds. Returns the state (open/locked/uninitialized…), the ways to confirm it is you already in use (touchid = Touch ID or the Mac password, hello = Windows Hello, password = the vault's own password, fido2 = a security key), the ways this machine offers (a security key only when its tools are present, marked advanced), whether an old app-code record is still on disk (it is no longer asked; it is deleted once a way to confirm is chosen), whether the 24-word recovery key exists, the auto-lock minutes, and the vault-password rules (the same table the page and the server enforce). Setting up, unlocking and confirming are the person's: on the /vault page or with `agentop vault` — never pass a vault password or recovery words through a tool.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "agentistics_tag_detail",
     description:
       "Get full detail for one tag by name or id: aggregate totals plus per-source breakdown and distributions (top projects, models, harnesses, repos, members/users), daily activity series, and the active date window. Call agentistics_tags first to find the id/name.",
@@ -1000,6 +1114,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const a = args as any;
         const body = await apiSend("POST", "/api/flows/run", {
           name: a?.name,
+          session: sessionProof(process.env),
           ...(a?.inputs && typeof a.inputs === "object" ? { inputs: a.inputs } : {}),
         });
         return text(body);
@@ -1011,7 +1126,12 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       }
       case "agentistics_task_create": {
         const a = args as any;
-        const body = await apiSend("POST", "/api/tasks", { title: a?.title, detail: a?.detail });
+        const body = await apiSend("POST", "/api/tasks", {
+          title: a?.title,
+          detail: a?.detail,
+          ...(typeof a?.priority === "string" ? { priority: a.priority } : {}),
+          ...(typeof a?.type === "string" ? { type: a.type } : {}),
+        });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_task_status": {
@@ -1148,6 +1268,10 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiGet(`/api/tasks/activity${q.toString() ? `?${q}` : ""}`);
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
+      case "agentistics_live_delivery": {
+        const body = await apiGet(`/api/tasks/live${liveDeliveryQuery(args as any)}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
       case "agentistics_task_edit": {
         const a = args as any;
         const ref = encodeURIComponent(String(a?.ref ?? ""));
@@ -1189,6 +1313,63 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
       case "agentistics_task_delete": {
         const ref = String((args as any)?.ref ?? "");
         const body = await apiSend("DELETE", `/api/tasks/${encodeURIComponent(ref)}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_phase": {
+        const a = (args ?? {}) as any;
+        const action = typeof a.action === "string" ? a.action : "get";
+        if (action === "get") {
+          const body = a.subtaskId
+            ? await apiGet(`/api/deliveries/${encodeURIComponent(String(a.subtaskId))}`)
+            : await apiGet("/api/deliveries");
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (action === "release") {
+          // The leader DECLARES what a release contains; the host still reads release.yml and the tag itself.
+          const body = await apiSend("POST", "/api/deliveries/release", {
+            version: a.version, mergeSha: a.mergeSha, repo: a.repo, subtaskIds: a.subtaskIds, session: sessionProof(process.env),
+          });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (action === "reconcile") {
+          // The backfill: same service as `agentop flow reconcile --release`; dry run unless `apply`.
+          const body = await apiSend("POST", "/api/deliveries/reconcile", { apply: a.apply === true, session: sessionProof(process.env) });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (action !== "tick" && (typeof a.subtaskId !== "string" || !a.subtaskId)) throw new Error("subtaskId is required");
+        const { subtaskId: _s, action: _a, ...rest } = a;
+        const subtaskId = action === "tick" ? "tick" : a.subtaskId;
+        // `approve` is the OWNER's answer to a human gate: no session identity travels with it (the server reads "no session proof" as the owner).
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(subtaskId)}`, { ...rest, action, ...(action === "approve" ? {} : { session: sessionProof(process.env) }) });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_stage": {
+        const a = (args ?? {}) as any;
+        if (typeof a.subtaskId !== "string" || !a.subtaskId) throw new Error("subtaskId is required");
+        const draft: Record<string, unknown> = {};
+        for (const k of ["prompt", "harness", "model", "effort", "account", "cwd"]) if (typeof a[k] === "string" && a[k].trim()) draft[k] = a[k];
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(a.subtaskId)}`, {
+          action: "stage", draft, session: sessionProof(process.env),
+          ...(typeof a.versionTarget === "string" ? { versionTarget: a.versionTarget } : {}),
+          ...(typeof a.pedidoId === "string" ? { pedidoId: a.pedidoId } : {}),
+        });
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_queue": {
+        const a = (args ?? {}) as any;
+        // `queue/` with no task = every task's queue (the route reads an empty task as "all").
+        const body = await apiGet(`/api/deliveries/queue/${encodeURIComponent(typeof a.taskId === "string" ? a.taskId : "")}`);
+        return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+      }
+      case "agentistics_task_queue_answer": {
+        const a = (args ?? {}) as any;
+        if (a.runNow === true) {
+          const body = await apiSend("POST", "/api/deliveries/queue-next", { session: sessionProof(process.env) });
+          return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
+        }
+        if (typeof a.subtaskId !== "string" || !a.subtaskId) throw new Error("subtaskId is required");
+        if (typeof a.answer !== "string" || !a.answer.trim()) throw new Error("answer is required: sim | nao <motivo> | agendar <ISO> <motivo>");
+        const body = await apiSend("POST", `/api/deliveries/${encodeURIComponent(a.subtaskId)}`, { action: "queue-answer", answer: a.answer, session: sessionProof(process.env) });
         return { content: [{ type: "text", text: JSON.stringify(body, null, 2) }] };
       }
       case "agentistics_session_groups": {
@@ -1268,6 +1449,7 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
         const body = await apiSend("PUT", "/api/away", {
           on: a.on,
           ...(a.until !== undefined ? { until: a.until } : {}),
+          ...(a.schedule !== undefined ? { schedule: a.schedule } : {}),
           ...(a.authorised !== undefined ? { authorised: a.authorised } : {}),
           ...(a.note !== undefined ? { note: a.note } : {}),
           ...(a.maxWorkers !== undefined ? { maxWorkers: a.maxWorkers } : {}),
@@ -1590,6 +1772,15 @@ async function callTool(req: { params: { name: string; arguments?: Record<string
           window: t.window ?? null,
         }));
         return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
+      }
+
+      case "agentistics_vault_status": {
+        // Raw fetch, not apiGet: an open vault whose list owes a proof answers 401 WITH its view, and
+        // that view is exactly what this tool reduces. Anything else non-2xx is an error.
+        const res = await fetch(`${API}/api/vault`);
+        const body = await res.json().catch(() => ({})) as any;
+        if (!res.ok && !(body && typeof body === "object" && body.view)) throw new Error(`GET /api/vault → HTTP ${res.status}`);
+        return text(vaultStatusTool(body));
       }
 
       case "agentistics_tag_detail": {

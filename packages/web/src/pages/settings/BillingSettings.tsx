@@ -53,8 +53,9 @@ import {
   type PeriodDraft,
 } from './billingForm'
 import { billingNotices, useNoticeSaveState } from '../../lib/billingNotices'
-import { BillingAccountList, loginOff, type BillingRowView } from './AccountRow'
+import { BillingAccountList, loginOff, quietRelogin, type BillingRowView } from './AccountRow'
 import { ReloginModal } from './ReloginModal'
+import { AgentScheduleEditor } from '../../components/AgentScheduleEditor'
 import { AUTH_COPY } from '../../lib/accountRelogin'
 import {
   accountsNeedingPlan, billingRows, closeBefore, defaultStart, limitsForRow, planOptionsFor, detectedPlanId, planDraftWrites, saveErrorPlace, saveThenClose, scopePeriods, toggleAvailability,
@@ -62,6 +63,7 @@ import {
 } from './accountBilling'
 import { createAccountMutator } from './accountMutations'
 import AddAccount from './AddAccount'
+import OpenCodeProviders from './OpenCodeProviders'
 import { addErrorText } from './addAccountLogic'
 import { accountLabelKey, fmtWhen, usePlanLimits } from '../../lib/planLimits'
 import { hasMeasuredPace } from '../../lib/usagePlan'
@@ -217,7 +219,7 @@ export function BillingAccountsPanel() {
     const res = await toggleAvailability(mutator, a)
     setPending(h => { const n = new Set(h); n.delete(k); return n })
     if (res.status === 'ok') {
-      setAccounts(h => h.map(x => x.id === a.id && x.harness === a.harness ? { ...x, ...res.account } : x))
+      setAccounts(h => h.map(x => x.id === a.id && x.harness === a.harness ? { ...x, ...res.account, agentUse: res.account.agentUse } : x))
       setFailed(h => { const n = new Set(h); n.delete(k); return n })
     } else if (res.status === 'failed') setFailed(h => new Set(h).add(k))
   }
@@ -416,6 +418,7 @@ export function BillingAccountsPanel() {
           onClose={() => { setRelogin(null); reloadAccounts() }} onDone={() => reloadAccounts()} />
       )}
       <AddAccount lang={ctx.lang} harnesses={harnesses} onBound={reloadAccounts} />
+      <OpenCodeProviders lang={ctx.lang} show={harnesses.includes('opencode')} onChanged={reloadAccounts} />
       {removeError && <div role="alert" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--accent-red)' }}>{removeError}</div>}
 
       {/* Accounts that load late must not list every account timeline as stray for a moment. */}
@@ -494,11 +497,25 @@ export function BillingAccountsPanel() {
                 </div>
               )
             })()}
+            {row.account && quietRelogin(row) && (
+              <div style={{ marginBottom: 12 }}>
+                <button type="button" data-account-drawer-relogin-quiet onClick={() => setRelogin({ id: row.account!.id, harness: row.harness, who: row.title })}
+                  style={{ ...dialogButtonStyle('secondary', isMobile), alignSelf: 'flex-start', gap: 8 }}>
+                  <KeyRound size={15} aria-hidden />{AUTH_COPY(pt).relogin}
+                </button>
+              </div>
+            )}
             {row.account && (
               <div data-account-agents style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12, minHeight: isMobile ? 44 : undefined }}>
                 <span style={L}>{pt ? 'Uso por agentes' : 'Agent use'}</span>
                 <Toggle on={row.account.available} disabled={pendingIds.has(row.key)} label={`${pt ? 'Agentes' : 'Agents'} · ${row.title}`}
                   onToggle={() => { if (row.account) void toggleAccount(row.account) }} />
+              </div>
+            )}
+            {row.account && row.account.id && (
+              <div data-account-schedule style={{ marginBottom: 14, padding: 12, borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', minWidth: 0 }}>
+                <AgentScheduleEditor accountId={row.account.id} who={row.title} schedule={row.account.agentSchedule} view={row.account.agentUse} lang={ctx.lang} isMobile={isMobile}
+                  onSaved={next => { const a = next as BillingAccount | null; if (a?.id) setAccounts(prev => prev.map(x => x.id === a.id ? { ...x, ...a, agentSchedule: a.agentSchedule, agentUse: a.agentUse } : x)) }} />
               </div>
             )}
             {row.limits && <div data-account-limits style={{ marginBottom: 12 }}><PlanLimitBars limits={row.limits} now={limitsNow} lang={ctx.lang} /></div>}

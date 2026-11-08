@@ -10,7 +10,636 @@ export interface Line { pt: string; en: string }
 export interface ReleaseNotes { features: Line[]; fixes: Line[] }
 
 export const RELEASES: Record<string, ReleaseNotes> = {
+  '2.203.0': {
+    features: [
+      {
+        pt: 'O ciclo das entregas anda sozinho depois da revisão: quando o PR de uma peça é mergeado ela vai para CI, e vira Publicado quando sai a primeira versão com o merge. As peças que ficavam paradas em "Revisão do líder" deixam de depender de alguém movê-las.',
+        en: 'The delivery cycle moves by itself after the review: once a piece\'s PR is merged it goes to CI, and becomes Published when the first release with that merge is out. Pieces no longer wait in "Leader review" for someone to move them.',
+      },
+      {
+        pt: 'Uma peça esperando o líder gera um lembrete ao líder vivo da tarefa depois de 30 min e de novo a cada 2 h, no máximo 3 vezes. Nunca a você.',
+        en: 'A piece waiting on its leader reminds the task\'s live leader after 30 min, then every 2 h, at most 3 times. Never you.',
+      },
+      {
+        pt: 'O Live ganhou abas com contagem (Em andamento, Na fila, Publicado, Tudo), e Publicado tem o próprio período (24 h, 7 dias, 30 dias, tudo). A coluna Histórico saiu, colunas vazias ficam recolhidas, e a prioridade na fila do Live agora é só para leitura. O filtro de tarefas ficou na altura das abas, e o carregamento da janela destacada aparece centralizado.',
+        en: 'Live now has tabs with counts (In progress, Queued, Published, All), and Published has its own period (24 h, 7 days, 30 days, all). The History column is gone, empty columns stay collapsed, and priority in the Live queue is now read-only. The task filter now matches the height of the tabs, and the pop-out window\'s loader is centred.',
+      },
+      {
+        pt: 'Uma mensagem sua que ainda está na fila da sessão agora tem "Enviar agora" e "Interromper" na própria legenda ("entregue à sessão…"). "Enviar agora" aparece onde dá para enviar de verdade (Claude Code, com a sessão no meio de um turno); "Interromper" em qualquer assistente que aceite parar o turno. Onde não funciona, o botão simplesmente não aparece.',
+        en: 'A message of yours that is still queued in the session now has "Send now" and "Interrupt" on its own caption ("delivered to the session…"). "Send now" shows where it can really work (Claude Code, mid-turn); "Interrupt" on any assistant that accepts stopping the turn. Where neither can work, no button is drawn.',
+      },
+      {
+        pt: 'Criar uma tarefa pelo MCP agora aceita prioridade e tipo, e a lista de status de uma subtarefa não é mais fixa — vale a do seu quadro.',
+        en: 'Creating a task through the MCP now accepts a priority and a type, and a subtask\'s status list is no longer fixed — your board\'s own list applies.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'O pré-dispatch deixou de exigir "esforço" e "conta" de assistentes que não usam esses campos: pede só o que o assistente escolhido realmente usa.',
+        en: 'Pre-dispatch no longer demands "effort" and "account" from assistants that do not use them: it asks only for what the chosen assistant really uses.',
+      },
+      {
+        pt: 'Abrir sessões pela linha de comando (iniciar, lote, reabrir) agora respeita o teto de modelos de topo por provedor, como a fila já respeitava; "--force" passa por cima e avisa que passou.',
+        en: 'Opening sessions from the command line (start, batch, reopen) now respects the per-provider cap on top-tier models, as the queue already did; "--force" overrides it and says so.',
+      },
+      {
+        pt: 'A recomendação de limites de uso não sugere mais uma conta cuja leitura está velha ou ausente, e diz quais assistentes não deu para avaliar.',
+        en: 'The usage-limits recommendation no longer suggests an account whose reading is stale or missing, and says which assistants it could not judge.',
+      },
+      {
+        pt: 'Uma entrega parcial ("parte 2 de 5") não manda mais a subtarefa para revisão nem aparece como entregue no check-in: só a entrega final conta.',
+        en: 'A partial handback ("part 2 of 5") no longer moves the subtask to review or shows up as delivered in the check-in: only the final one counts.',
+      },
+      {
+        pt: 'Sessões encerradas (ou que nunca tiveram código próprio, como as de QA) não recebem mais aviso de "fechar entrega", e uma pasta de trabalho que já sumiu deixa de travar o fechamento.',
+        en: 'Sessions that already ended (or never had code of their own, like QA sessions) no longer get a "close delivery" notice, and a work folder that is already gone no longer blocks the close.',
+      },
+      {
+        pt: 'Reclamação, áudio ou anexo sem texto não viram mais um cartão de trabalho: o líder responde na conversa.',
+        en: 'A complaint, a voice note or an attachment with no text no longer becomes a work card: the leader answers in the conversation.',
+      },
+      {
+        pt: 'O lembrete de pedido confere de novo antes de avisar: uma peça com sessão viva, ou retirada da fila para abrir à mão, não é mais tratada como esquecida.',
+        en: 'The request reminder checks again before warning: a piece with a live session, or taken off the queue to be opened by hand, is no longer treated as forgotten.',
+      },
+      {
+        pt: 'Uma nova rodada numa peça em revisão leva o cartão de volta para QA ou Em desenvolvimento enquanto a sessão roda, e uma sessão perdida num reinício não segura mais o cartão ali.',
+        en: 'A new round on a piece under review moves its card back to QA or In development while the session runs, and a session lost in a reboot no longer holds the card there.',
+      },
+    ],
+  },
+  '2.202.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Uma pergunta curta sua é respondida na conversa, sem virar subtarefa nem gerar lembretes. Se o líder perceber que era trabalho, ainda pode ligá-la a uma subtarefa.',
+        en: 'A short question of yours is answered in the conversation, with no subtask and no reminders. If the leader sees it was real work, they can still link it to a subtask.',
+      },
+      {
+        pt: 'Os avisos ao líder citam só o título do seu pedido, não a mensagem inteira, o que gasta menos tokens.',
+        en: 'Notices to the leader quote only the title of your request, not the whole message, which uses fewer tokens.',
+      },
+    ],
+  },
+  '2.202.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Chega de avisos repetidos: uma mensagem sua que o líder já respondeu não volta mais como um novo "Pedido do dono" quando a liderança é passada, e a mesma mensagem não vira dois pedidos.',
+        en: 'No more repeated notices: a message of yours that the leader already answered no longer comes back as a new "Owner request" when leadership is handed over, and one message no longer becomes two requests.',
+      },
+      {
+        pt: 'O pedido de passagem de liderança e o primeiro texto da sessão sucessora deixam de aparecer como pedidos seus, e perguntas simples ("e o deploy?") são marcadas como pergunta, não como trabalho.',
+        en: 'The hand-off request and the successor session\'s first text no longer show up as requests from you, and simple questions ("what about the deploy?") are marked as questions, not as work.',
+      },
+      {
+        pt: 'O lembrete "pré-dispatch incompleto" confere de novo, na hora de enviar, se ainda faz sentido, não se repete a cada troca de líder e mostra só o número do pedido e o começo do texto, sem colar a mensagem inteira (nem os caminhos dos anexos).',
+        en: 'The "incomplete pre-dispatch" reminder now re-checks right before it is sent that it still applies, no longer repeats on every leader change, and shows only the request number and the start of the text, without pasting the whole message (or attachment paths).',
+      },
+    ],
+  },
+  '2.202.0': {
+    features: [
+      {
+        pt: 'A fila agora sai por prioridade e sozinha: quando uma sessão termina e há vaga, o sistema pega o próximo da fila (maior prioridade primeiro) e pergunta ao líder da tarefa — "sim", "não" com motivo, ou "agendar" para uma hora. O "não" fica no cartão com o motivo e o fluxo passa ao próximo; o agendamento mostra "começa às HH:MM". Sem resposta em 10 minutos, com o modo autônomo ligado a sessão abre sozinha e isso fica registrado; com ele desligado o sistema espera e lembra o líder. Tudo vira comentário na subtarefa e os assistentes enxergam e respondem pelo MCP e pelo terminal (agentop flow fila).',
+        en: 'The queue now leaves by priority and by itself: when a session ends and a slot is free, the system takes the next queued piece (highest priority first) and asks the task\'s leader — "yes", "no" with a reason, or "schedule" for a time. A "no" stays on the card with its reason and the flow moves to the next; a schedule shows "starts at HH:MM". With no answer in 10 minutes, autonomous mode on opens the session by itself and records it; off, the system keeps waiting and reminds the leader. Everything is logged as a comment on the subtask, and assistants read and answer it through MCP and the terminal (agentop flow fila).',
+      },
+      {
+        pt: 'A página da tarefa ganhou a aba "Fila": a fila daquela tarefa na ordem de saída, com a prioridade (editável ali mesmo), o pré-dispatch completo, por que a peça espera (vaga, conta, agendamento), as últimas anotações e as ações iniciar agora, agendar, tirar da fila e editar o pré-dispatch. A prioridade também pode ser mudada direto no cartão "Na fila" da Esteira, e o status das subtarefas aparece em português.',
+        en: 'The task page gets a "Queue" tab: that task\'s queue in leaving order, with the priority (editable right there), the full pre-dispatch, why the piece waits (slot, account, schedule), the latest notes and the actions start now, schedule, take off the queue and edit the pre-dispatch. The priority can also be changed straight on the Live "Queued" card, and subtask statuses read in Portuguese.',
+      },
+      {
+        pt: 'A Esteira de entregas ao vivo ganhou uma barra de filtros clara (filtros de um lado, visão e ações do outro), “Apenas ativas” e “Exibir itens na fila”, e uma ordenação que mostra primeiro o que tem a prioridade mais alta — cada cartão traz a prioridade da tarefa. As colunas empilham os cartões na vertical, rolam sozinhas e ganham uma busca quando passam de três cartões fora da vista; “Executando” virou “Em desenvolvimento” e “Em QA” virou “QA”. O motivo de um cartão esperar vaga agora vem em palavras simples, e o seletor de tarefas ficou mais largo e sem texto por cima de texto. Os assistentes também enxergam a prioridade e os mesmos filtros pelo MCP.',
+        en: 'The Live Delivery line gets a clear filter bar (filters on one side, view and actions on the other), “Only active” and “Show queued items”, and an order that lists the highest priority first — every card shows its task’s priority. Columns stack their cards vertically, scroll on their own and gain a search once more than three cards are out of view; “Running” became “In development” and “In QA” became “QA”. Why a card waits for a slot now reads in plain words, and the task picker is wider with no text on top of text. Assistants see the priority and the same filters through MCP too.',
+      },
+      {
+        pt: 'A Esteira ganhou a coluna Histórico (sempre recolhida, abre num clique) com as publicações de mais de 24 h, e cada cartão tem links para abrir a sessão do autor, do QA e do líder.',
+        en: 'The Live line gets a History column (always collapsed, one click to open) with what was published over 24 h ago, and every card links to the author, QA and leader sessions.',
+      },
+      {
+        pt: 'Hardware, Modo autônomo, Cofre, Esteira de entregas e Ligações agora ficam num botão só no topo; ele fica laranja quando há atividade. A janela “Uso dos planos” saiu: contas e APIs estão na página Uso.',
+        en: 'Hardware, Autonomous mode, Vault, Live Delivery and Calls now sit behind one button in the top bar, which turns orange when something is going on. The “Plan usage” window is gone: accounts and APIs live on the Usage page.',
+      },
+      {
+        pt: 'Cofre sem aplicativo autenticador: nenhum QR nem código de 6 dígitos em lugar nenhum. Você confirma que é você com o que o computador já tem — Touch ID ou a senha do Mac, Windows Hello, a digital do celular — ou com uma senha própria do cofre.',
+        en: 'Vault without an authenticator app: no QR and no 6-digit code anywhere. You confirm it is you with what the computer already has — Touch ID or the Mac password, Windows Hello, your phone\'s fingerprint — or with a vault password of your own.',
+      },
+      {
+        pt: 'No Mac o cofre configura sem instalar nada: o Touch ID (ou a senha do Mac) destrava, sem exigir chave de segurança nem libfido2.',
+        en: 'On a Mac the vault sets up with nothing to install: Touch ID (or the Mac password) unlocks it, with no security key or libfido2 required.',
+      },
+      {
+        pt: 'Senha do cofre: pelo menos 9 caracteres, 1 maiúscula, 2 especiais e 1 número, com cada regra marcada enquanto você digita, um botão "Gerar senha aleatória" (mostrada uma vez, com botão de copiar) e um bloco "Como sua senha fica protegida". O servidor confere as mesmas regras e pausa depois de várias tentativas erradas.',
+        en: 'Vault password: at least 9 characters, 1 uppercase, 2 special characters and 1 number, each rule ticked as you type, a "Generate a random password" button (shown once, with a copy button) and a "How your password is protected" block. The server checks the same rules and pauses after several wrong tries.',
+      },
+      {
+        pt: 'A chave de segurança (FIDO) virou opção avançada e só aparece quando o computador tem o que ela precisa. As 24 palavras de recuperação continuam iguais.',
+        en: 'The security key (FIDO) is now an advanced option, shown only when the computer has what it needs. The 24 recovery words stay the same.',
+      },
+      {
+        pt: 'Novo agentistics_vault_status: uma sessão consegue ler como o cofre está protegido (estado, formas de confirmar em uso e disponíveis, regras da senha) sem nunca ver um segredo.',
+        en: 'New agentistics_vault_status: a session can read how the vault is protected (state, ways to confirm in use and available, password rules) without ever seeing a secret.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Peças na fila não somem mais por causa do filtro de agentes: “ativo” agora quer dizer “está numa coluna do fluxo”, não “tem agente rodando”.',
+        en: 'Queued pieces no longer vanish behind the agents filter: “active” now means “sits in a flow column”, not “has a running agent”.',
+      },
+      {
+        pt: 'Os cartões da Live agora mostram a porcentagem da etapa (“passo 2 de 5: implementando”), lida de fatos reais: sessão aberta, primeira edição, testes rodando, commit no ramo, entrega da sessão e os portões da QA, revisão e merge. Sem sinal, a linha continua escondida — nada é chutado.',
+        en: 'Live cards now show the stage percentage (“step 2 of 5: implementing”), read from real facts: session open, first edit, tests running, a commit on the branch, the session’s handback and the QA, review and merge gates. With no signal the line stays hidden — nothing is guessed.',
+      },
+      {
+        pt: 'Cofres que já usavam o código do autenticador continuam abrindo: o código não é mais pedido, e o registro dele é apagado assim que você escolhe uma nova forma de confirmar.',
+        en: 'Vaults that already used the authenticator code keep opening: the code is no longer asked, and its record is deleted as soon as you choose a new way to confirm.',
+      },
+    ],
+  },
+  '2.201.2': {
+    features: [],
+    fixes: [{
+      pt: 'Sessões perdidas ou encerradas deixam de ocupar vagas para iniciar as peças da fila.',
+      en: 'Lost or ended sessions no longer occupy slots needed to start queued work.',
+    }, {
+      pt: 'Peças em revisão ou concluídas saem da fila automaticamente; o líder também pode retirá-las com um motivo registrado.',
+      en: 'Pieces under review or already finished leave the queue automatically; the leader can also withdraw them with a recorded reason.',
+    }, {
+      pt: 'Pedidos ao líder chegam à fila também pelo terminal e pelas passagens de sessão. Um pedido sem pré-dispatch cobra o líder após 10 minutos; peças na mesma área sugerem encaixe e grupos mantêm um único cartão.',
+      en: 'Requests reach the leader’s queue from the terminal and session handoffs too. A request without pre-dispatch reminds the leader after 10 minutes; work in the same area suggests a fit and groups keep one card.',
+    }, {
+      pt: 'A Live agora mostra em "Publicado" as peças de uma versão que entrou como um único commit grande: o líder declara o conteúdo do release (agentop flow release) e as peças vão a Publicado quando a versão sai verde, em vez de o app adivinhar pelo git. A prova é a própria tag da versão, no repositório do release, mesmo quando o commit do merge teve uma execução vermelha corrigida depois.',
+      en: 'Live now shows in "Published" the pieces of a version that landed as one big commit: the leader declares the release contents (agentop flow release) and the pieces move to Published once the version ships green, instead of the app guessing from git. The proof is the version\'s own tag, in the release\'s repository, even when the merge commit had a red run that a later commit fixed.',
+    }],
+  },
+  '2.201.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Um cartão bloqueado no quadro não fica mais parado sem ninguém cobrar: o fluxo de entrega cobra o líder e adia a peça depois de 2 h, como as outras.',
+        en: 'A card blocked on the board no longer sits there with nobody chasing it: the delivery flow reminds the leader and defers the piece after 2 h, like the others.',
+      },
+    ],
+  },
+  '2.201.0': {
+    features: [
+      {
+        pt: 'O agentistics agora vigia o próprio desempenho: se ficar lento por alguns minutos, guarda um retrato do que estava pesando e avisa você uma vez, dizendo o que passou do limite. Não reinicia nada.',
+        en: 'agentistics now watches its own performance: if it stays slow for a few minutes, it keeps a snapshot of what was weighing it down and tells you once, naming what went over the limit. It restarts nothing.',
+      },
+      {
+        pt: 'Live redesenhada: cartões no formato novo (título curto, quem é, estado, o que espera, assistente · modelo · esforço, barra de etapas, tempo nessa etapa e total, duas estimativas: próxima etapa e publicação); coluna Bloqueado; títulos das colunas recolhem e abrem animados (Publicado vem recolhido, com cada item numa linha que abre no lugar); sem rolagem vertical no desktop, com "+N" para o que não cabe; filtro de tarefas múltiplo com "Recentes" no topo, já filtrado pela tarefa da sessão de onde você abriu; botão "abrir janela externa"; e nada some em silêncio: quem sai do quadro deixa "saiu: motivo".',
+        en: 'Live redesigned: cards in the new shape (short title, who it is, state, what it waits for, assistant · model · effort, stage bar, time in this stage and total, two estimates: next stage and publication); a Blocked column; column headers collapse and open with animation (Published starts collapsed, each item one line that opens in place); no vertical scroll on desktop, with a "+N" for what does not fit; multi-select task filter with "Recent" on top, already filtered by the task of the session you opened it from; an "open in a window" button; and nothing disappears silently: whatever leaves the board leaves a "left: reason" line.',
+      },
+      {
+        pt: 'A faixa LÍDERES vem recolhida em uma linha de resumo; aberta, mostra uma linha por líder e, ao clicar, os workers dele.',
+        en: 'The LEADERS band starts closed on one summary line; opened, it shows one row per leader and, on click, its workers.',
+      },
+      {
+        pt: 'Fluxo de entrega obrigatório: toda subtarefa passa por Na fila → Executando → QA → (Ajustes ⇄ QA) → Revisão do líder → PR/merge → CI · publicando → Publicado, e o servidor recusa qualquer salto (por exemplo Executando → Revisão) dizendo o que falta. Cada passagem é checada por evidência — pré-dispatch completo, vaga (limites do plano, até 4 workers, memória), commit enviado, QA em outro modelo (nunca Sonnet sobre Sonnet), PR sem arquivo apagado por engano, release verde com a tag — e a Live mostra exatamente esse estado. Merge ou publicação que falha volta para a revisão do líder. Bloqueios têm motivo fechado, voltam para a etapa de origem e lembram o líder a cada 30 min; passadas 2 h a peça é adiada para o próximo lote. O merge é conferido no GitHub (PR mergeado e commit no main), quem fez o QA e o autor vêm do registro de sessões, e os portões humanos têm botões Aprovar/Reprovar no cartão da Live. Novos: agentistics_task_phase, agentistics_task_stage, agentop flow gate|phase|merge e agentop task stage.',
+        en: 'Mandatory delivery flow: every subtask goes Queued → Running → QA → (Adjustments ⇄ QA) → Leader review → PR/merge → CI · publishing → Published, and the server refuses any skip (e.g. Running → Review), saying what is missing. Each step is checked from evidence — complete pre-dispatch, a slot (plan limits, at most 4 workers, memory), the commit pushed, QA by another model (never Sonnet over Sonnet), a PR deleting no file by accident, a green release with its tag — and Live shows exactly that state. A failed merge or release goes back to the leader review. Blocks have a closed reason, return to the stage they came from and remind the leader every 30 min; after 2 h the piece is deferred to the next batch. The merge is checked on GitHub (PR merged, commit on main), the QA and author come from the session registry, and human gates have Approve/Reject buttons on the Live card. New: agentistics_task_phase, agentistics_task_stage, agentop flow gate|phase|merge and agentop task stage.',
+      },
+      {
+        pt: 'Pré-dispatch: o cartão "Na fila" mostra assistente · modelo · esforço · conta e a vaga esperada. Com o modo autônomo ligado nenhum fluxo chama nem espera o dono — passos que pediriam aprovação são pulados e registrados ("pulado: modo autônomo") e o líder decide; com ele desligado, um fluxo pode ter portões humanos (por exemplo aprovar antes do PR/merge), desligados por padrão.',
+        en: 'Pre-dispatch: the "Queued" card shows assistant · model · effort · account and the expected slot. With autonomous mode on no flow calls or waits for the owner — steps that would ask for approval are skipped and recorded ("skipped: autonomous mode") and the leader decides; with it off, a flow may have human gates (e.g. approve before PR/merge), off by default.',
+      },
+      {
+        pt: 'O raciocínio do modelo agora é uma linha como as de atividade: um cérebro que pulsa com "Raciocinando… · 12 s" enquanto ele pensa e vira "Raciocinou · 12 s" quando termina — clique para ler o texto. Vale para qualquer assistente que envia o raciocínio.',
+        en: 'The model\'s reasoning is now a line like the activity ones: a pulsing brain reading "Reasoning… · 12 s" while it thinks, then "Reasoned · 12 s" when done — click to read the text. It applies to every assistant that sends its reasoning.',
+      },
+      {
+        pt: 'OpenCode: conecte OpenCode Go, Zen ou outro provedor em Uso → Contas com o link do console e a chave colada; a chave vai para o lugar certo do OpenCode sem aparecer em nenhum registro.',
+        en: 'OpenCode: connect OpenCode Go, Zen or another provider in Usage → Accounts with the console link and a pasted key; the key goes to the right place in OpenCode and appears in no log.',
+      },
+      {
+        pt: 'OpenCode Go: o plano e o preço aparecem junto das contas, com anéis de 5 horas, semana e mês em dólares por modelo (estimado a partir do custo de cada resposta). Escolha o seu plano se ele não puder ser deduzido.',
+        en: 'OpenCode Go: the plan and price show beside your accounts, with 5-hour, week and month rings in dollars per model (estimated from each response\'s cost). Pick your plan if it cannot be inferred.',
+      },
+      {
+        pt: 'OpenCode dentro da sessão como o Claude: cada passo diz o que é (criou um arquivo, editou, executou, buscou, delegou), a lista de tarefas aparece com o progresso ("2/3 · item atual") e os itens marcados, uma edição mostra as alterações em cores, um subagente mostra a resposta — e os arquivos criados entram no painel de arquivos e no Live.',
+        en: 'OpenCode inside the session like Claude: every step says what it is (created a file, edited, ran, searched, delegated), the todo list shows its progress ("2/3 · current item") and the checked items, an edit shows its changes in colour, a subagent shows its answer — and the files it creates reach the files panel and Live.',
+      },
+      {
+        pt: 'O modo autônomo ficou simples: um interruptor e "Quando" — "Até eu desligar" ou "Agendado", com os mesmos dias, horários e "Dia inteiro" da agenda de uso por agentes. Fora dos horários as sessões voltam a perguntar; ao abrir e fechar cada janela, as sessões rodando são avisadas. Releases, workers e merges ficam liberados por padrão (até 4 workers, 1 no modelo de topo por provedor) — nada para configurar.',
+        en: 'Autonomous mode is simple now: one switch and "When" — "Until I turn it off" or "Scheduled", with the same days, hours and "All day" as the agent-use schedule. Outside the hours sessions ask you again; when each window opens and closes the running sessions are told. Releases, workers and merges are allowed by default (up to 4 workers, 1 on each provider\'s top model) — nothing to configure.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Agentask abre bem mais rápido: as tarefas abertas e recentes chegam primeiro e o histórico fechado carrega por trás, sem a tela mexer.',
+        en: 'Agentask opens much faster: open and recent tasks arrive first and the closed history loads behind them, without the screen moving.',
+      },
+      {
+        pt: 'O app deixou de ficar lento: o servidor parou de refazer o tempo todo trabalho que não tinha mudado e, parado, usa uma fração do processador que usava. Navegar entre páginas e abrir listas voltou a ser rápido.',
+        en: 'The app is no longer slow: the server stopped redoing, over and over, work that had not changed, and when nothing happens it uses a fraction of the processor it did. Moving between pages and opening lists is quick again.',
+      },
+      {
+        pt: 'Digitar no campo de mensagem não trava mais enquanto as sessões trabalham: as atualizações de fundo esperam você pausar a digitação.',
+        en: 'Typing in the message field no longer stalls while sessions work: background updates wait for you to pause typing.',
+      },
+      {
+        pt: 'Live: o "total" do cartão agora é o trabalho real daquela peça (não a idade da tarefa, que chegava a mostrar 52 dias); o Publicado deixa de esvaziar com filtro de tarefa; o resumo do líder não mostra mais JSON cru; workers parados não aparecem mais como "esperando você"; todo cartão mostra assistente · modelo · esforço.',
+        en: 'Live: a card\'s "total" is now that piece\'s real work (not the task\'s age, which showed up to 52 days); Published no longer empties with a task filter; the leader summary no longer shows raw JSON; idle workers no longer read "waiting for you"; every card shows assistant · model · effort.',
+      },
+      {
+        pt: 'Mac: o cofre volta a abrir. Antes ele se recusava a abrir porque tentava usar uma função que só existe no Linux para proteger a própria memória.',
+        en: 'Mac: the vault opens again. Before, it refused to open because it tried a function that only exists on Linux to protect its own memory.',
+      },
+      {
+        pt: 'A tela do cofre trancado só cita o Windows Hello (ou a chave de segurança) onde essa confirmação existe de verdade; no Mac ela diz apenas "o código".',
+        en: 'The locked-vault screen only mentions Windows Hello (or the security key) where that check really exists; on a Mac it says just "your code".',
+      },
+      {
+        pt: 'OpenCode: o anel de contexto e o contador do líder (a coroa com os tokens) voltam a aparecer; antes sumiam quando o último turno da sessão tinha sido interrompido, e para modelos locais ou personalizados sem janela conhecida.',
+        en: 'OpenCode: the context ring and the leader\'s token counter (the crown) show up again; before, they vanished when the session\'s last turn had been interrupted, and for local or custom models with no known window.',
+      },
+      {
+        pt: 'OpenCode: a janela de contexto de um modelo local ou personalizado agora é lida do seu próprio opencode.json (limit.context), então o anel aparece também para eles.',
+        en: 'OpenCode: the context window of a local or custom model is now read from your own opencode.json (limit.context), so the ring shows for them too.',
+      },
+      {
+        pt: 'OpenCode: as linhas de ferramenta mostram o que está rodando (o comando, o arquivo, a pergunta) e quando falhou, em vez de só "execute" com um círculo girando — e um comando mostra a sua saída, recolhida em "saída", enquanto roda e depois.',
+        en: 'OpenCode: tool rows show what is running (the command, the file, the question) and when it failed, instead of just "execute" with a spinner — and a command shows its output, folded under "output", while it runs and after.',
+      },
+      {
+        pt: 'OpenCode: se um turno fica 90 s sem dar sinal, o chat avisa "Sem resposta do OpenCode há N s", diz qual foi o último passo e lembra que dá para parar. O aviso fica no lugar, mesmo quando o comando volta a dar notícia, e responder um formulário recomeça a contagem.',
+        en: 'OpenCode: if a turn goes 90 s without a sign, the chat says "No answer from OpenCode for N s", names the last step and reminds you that you can stop it. The notice stays put even when the command speaks again, and answering a form restarts the count.',
+      },
+      {
+        pt: 'Uma nota que chega no meio de um comando (o aviso de silêncio, uma permissão respondida pelo modo) não apaga mais a si mesma nem deixa um passo "Executando…" fantasma duplicado.',
+        en: 'A note that arrives in the middle of a command (the silence notice, a permission the mode answered) no longer erases itself or leaves a duplicate ghost "Running…" step.',
+      },
+      {
+        pt: 'No compositor, Cmd+Enter (ou Ctrl+Enter) sempre envia, mesmo numa janela estreita; um Enter que só confirma um acento não envia mais a palavra pela metade; e um envio recusado agora diz por quê em vez de ficar mudo.',
+        en: 'In the composer, Cmd+Enter (or Ctrl+Enter) always sends, even in a narrow window; an Enter that only confirms an accent no longer sends a half-written word; and a refused send now says why instead of staying silent.',
+      },
+      {
+        pt: 'Nova sessão do OpenCode: o seletor lista todos os modelos dos provedores conectados (Go, Zen e os seus), agrupados por provedor, e atualiza sozinho quando você conecta uma chave. Modelos que treinam com seus dados vêm marcados.',
+        en: 'New OpenCode session: the picker lists every model of the connected providers (Go, Zen and yours), grouped by provider, and refreshes by itself when you connect a key. Models that train on your data are marked.',
+      },
+      {
+        pt: 'Uma conta do Claude que perdeu o login (pasta sem credencial) agora aparece como "sem login" no popup de Uso, com o botão "Refazer login", em vez de anéis 0/0; e o roteador não a recomenda mais para novas sessões.',
+        en: 'A Claude account that lost its login (folder with no credential) now shows as "signed out" in the Usage popup, with the "Sign in again" button, instead of 0/0 rings; and the router no longer recommends it for new sessions.',
+      },
+      {
+        pt: 'Refazer login: se o login funcionou mas o app ainda não tinha visto a credencial, a tela não mostra mais "login falhou" — ela segue olhando e conclui sozinha quando a credencial aparece.',
+        en: 'Signing in again: if the login worked but the app had not yet seen the credential, the dialog no longer stays on "sign-in failed" — it keeps looking and finishes by itself once the credential appears.',
+      },
+      {
+        pt: 'Na lista de Sessões, o título de cada sessão ocupa no máximo duas linhas e termina em "…", sem quebrar no meio da palavra; o título inteiro aparece ao passar o mouse.',
+        en: 'In the Sessions list, each session title takes at most two lines and ends in "…", without breaking in the middle of a word; the full title shows on hover.',
+      },
+      {
+        pt: 'Saiu o aviso "Resumo do modo autônomo — Fiquei ausente há mais de 5 horas. Quer que a Nay prepare um resumo?".',
+        en: 'Removed the "Autonomous-mode summary — I\'ve been away for more than 5 hours. Would you like Nay to prepare a summary?" notification.',
+      },
+      {
+        pt: 'No popup de Uso do rodapé, cada anel (Sessão 5 h e Semana) mostra embaixo o horário em que zera, no seu fuso ("zera 18:40", "zera sex 09:00"); some quando o horário não é conhecido.',
+        en: 'In the footer Usage popup, each ring (5 h session and week) shows when it resets, in your local time ("resets 6:40 PM", "resets Fri 9:00 AM"); it is left out when the time is unknown.',
+      },
+      {
+        pt: 'Avisos rápidos como "<sessão> encerrada." agora aparecem embaixo da tela, ficam no máximo 2 segundos com uma barrinha que vai esvaziando, e o X ainda fecha antes (passar o mouse por cima pausa). Avisos com detalhes continuam onde estavam até você fechar.',
+        en: 'Quick notices like "<session> ended." now appear at the bottom of the screen, stay at most 2 seconds with a bar that empties, and the X still closes them early (hovering pauses). Notices with details stay where they were until you close them.',
+      },
+      {
+        pt: 'O aviso "carregando o resto das sessões / resultados parciais" saiu da página de Sessões: ele aparece só como um aviso rápido (2 s) ao entrar em Encerradas, se ainda estiver carregando. Os avisos de carregamento (projetos, sessões e importação do histórico) não aparecem mais na página de Sessões; seguem nas outras páginas, como Métricas, enquanto carregam.',
+        en: 'The "loading the remaining sessions / partial results" warning is gone from the Sessions page: it shows only as a quick (2 s) notice when you enter Ended, if it is still loading. The loading notices (projects, sessions, history import) no longer show on the Sessions page; they stay on the other pages, like Metrics, while they load.',
+      },
+      {
+        pt: 'Na aba Encerradas, os grupos Dormindo, Finalizadas hoje e Antes de hoje agora têm seta para recolher e abrir (com a contagem quando recolhidos) e lembram o estado; "Antes de hoje" começa recolhido.',
+        en: 'In the Ended tab, the Sleeping, Finished today and Before today groups now have a chevron to fold and unfold (with the count while folded) and remember their state; "Before today" starts folded.',
+      },
+      {
+        pt: 'Nos cartões de líder das Sessões, a seta de abrir a equipe fica alinhada com a coroa e a primeira linha do título, mesmo quando o título ocupa várias linhas.',
+        en: 'On leader cards in Sessions, the team chevron now lines up with the crown and the first title line, even when the title wraps over several lines.',
+      },
+      {
+        pt: 'A janela "Continuar em outra conta" ficou mais estreita e organizada: uma coluna só, botões alinhados à direita e, enquanto a troca acontece, a lista de contas continua visível com um indicador de progresso.',
+        en: 'The "Continue on another account" dialog is narrower and tidier: a single column, buttons aligned to the right and, while the switch runs, the account list stays visible with a progress indicator.',
+      },
+      {
+        pt: 'No chat, o aviso "pensando" (e "trabalhando") agora começa na mesma borda esquerda das linhas de comandos executados.',
+        en: 'In the chat, the "thinking" (and "working") line now starts at the same left edge as the executed-commands rows.',
+      },
+      {
+        pt: 'OpenCode: o que ele diz antes e depois de uma ferramenta vira dois parágrafos, em vez de uma frase grudada ("juntos.Você"); e uma conversa reaberta mostra cada passo como foi mostrado ao vivo.',
+        en: 'OpenCode: what it says before and after a tool becomes two paragraphs instead of one glued sentence ("together.You"); and a reopened conversation shows each step as it was shown live.',
+      },
+      {
+        pt: 'OpenCode: uma edição num arquivo que já existia não aparece mais como arquivo novo, nem contada duas vezes, no painel de arquivos.',
+        en: 'OpenCode: an edit to a file that already existed no longer shows up as a new file, nor counted twice, in the files panel.',
+      },
+    ],
+  },
+  '2.200.7': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Nova sessão do OpenCode: o seletor de modelo volta a listar os modelos (os do seu opencode.json e os do OpenCode), mesmo se a primeira leitura falhar; antes a lista ficava vazia por horas.',
+        en: 'New OpenCode session: the model picker lists models again (the ones in your opencode.json and OpenCode\'s own), even if the first read fails; before, the list stayed empty for hours.',
+      },
+      {
+        pt: 'Mac: sessões do OpenCode abertas no terminal (instalado pelo Homebrew ou digitado pelo nome) voltam a aparecer na lista de sessões.',
+        en: 'Mac: OpenCode sessions opened in a terminal (Homebrew install, or started by name) show up in the session list again.',
+      },
+      {
+        pt: 'Uma sessão do OpenCode que você já tinha reaberto pelo agentistics e depois abriu no terminal não fica mais escondida atrás da linha antiga.',
+        en: 'An OpenCode session you once reopened through agentistics and later opened in a terminal is no longer hidden behind the old row.',
+      },
+      {
+        pt: 'Reabrir uma sessão não pisca mais o aviso "reabrir sessões que caíram" enquanto ela ainda está abrindo.',
+        en: 'Reopening a session no longer flashes the "reopen the sessions that fell" offer while it is still starting.',
+      },
+    ],
+  },
+  '2.200.6': {
+    features: [
+      {
+        pt: 'Na agenda de uso por agentes, cada dia tem a opção "Dia inteiro", e há um teto da semana: os agentes param quando a semana chega ao % que você definir. O teto do dia agora diz claramente "gastar no máximo X% da semana neste dia".',
+        en: 'In the agent-use schedule, each day has an "All day" option, and there is a weekly ceiling: agents stop once the week reaches the % you set. The daily ceiling now reads clearly as "spend at most X% of the week on this day".',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Nova sessão volta a mostrar os assistentes como antes; os não instalados aparecem apagados com o botão Instalar.',
+        en: 'New session shows the assistants as before again; the ones not installed appear dimmed with an Install button.',
+      },
+    ],
+  },
+  '2.200.5': {
+    features: [
+      {
+        pt: 'Atalho da Live Delivery no topo das Sessões: passe o mouse para ver a Live ao vivo num popup grande (no celular, toque para abrir uma folha), clique para ir à Live.',
+        en: 'Live Delivery shortcut in the Sessions top bar: hover for a big live preview (on a phone, tap for a sheet), click to open Live.',
+      },
+      {
+        pt: 'A Live agora abre com "só com agentes ativos" ligado, todas as tarefas e todas as etapas; cartões na fila ficam apagados e mostram a posição; modelo e conta em duas etiquetas; colunas maiores com barra de rolagem laranja.',
+        en: 'Live now opens with "only active agents" on, all tasks and all steps; queued cards are dimmed and show their place; model and account in two pills; wider columns with an orange scrollbar.',
+      },
+      {
+        pt: 'O menu do Agentask lista cada visão (Métricas, Quadro, Tabela, Live, Atividade) e destaca a ativa; os prazos estimados mostram só o horário aproximado, sem o selo de confiança.',
+        en: 'The Agentask menu lists every view (Metrics, Board, Table, Live, Activity) and highlights the active one; estimated deadlines show only the approximate time, with no confidence label.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'No Mac, a lista de sessões não trava mais o servidor: a leitura dos processos roda em segundo plano e é compartilhada, então a máquina volta a responder e encerrar ou abrir sessões funciona.',
+        en: 'On a Mac the session list no longer stalls the server: the process scan runs in the background and is shared, so the machine answers again and ending or opening sessions works.',
+      },
+      {
+        pt: 'No Mac, sessões abertas fora do agentistics (OpenCode e outras) voltam a aparecer, inclusive as instaladas em ~/.local/bin.',
+        en: 'On a Mac, sessions opened outside agentistics (OpenCode and others) show up again, including tools installed in ~/.local/bin.',
+      },
+      {
+        pt: 'OpenCode 2.x: a conversa de sessões novas é encontrada de novo (passagem de liderança, histórico), em vez de "o arquivo da conversa não foi encontrado".',
+        en: 'OpenCode 2.x: new sessions\' conversations are found again (leader hand-off, history) instead of "conversation file not found".',
+      },
+      {
+        pt: 'OpenCode 2.x: uma aba de outro terminal no mesmo diretório não troca mais a conversa de uma sessão aberta pelo agentistics.',
+        en: 'OpenCode 2.x: a tab from another terminal in the same folder no longer swaps the conversation of a session agentistics opened.',
+      },
+    ],
+  },
+  '2.200.4': {
+    features: [
+      {
+        pt: 'Atalho da Live Delivery no topo das Sessões: passe o mouse para ver a Live ao vivo num popup grande (no celular, toque para abrir uma folha), clique para ir à Live.',
+        en: 'Live Delivery shortcut in the Sessions top bar: hover for a big live preview (on a phone, tap for a sheet), click to open Live.',
+      },
+      {
+        pt: 'A Live agora abre com "só com agentes ativos" ligado, todas as tarefas e todas as etapas; cartões na fila ficam apagados e mostram a posição; modelo e conta em duas etiquetas; colunas maiores com barra de rolagem laranja.',
+        en: 'Live now opens with "only active agents" on, all tasks and all steps; queued cards are dimmed and show their place; model and account in two pills; wider columns with an orange scrollbar.',
+      },
+      {
+        pt: 'O menu do Agentask lista cada visão (Métricas, Quadro, Tabela, Live, Atividade) e destaca a ativa; os prazos estimados mostram só o horário aproximado, sem o selo de confiança.',
+        en: 'The Agentask menu lists every view (Metrics, Board, Table, Live, Activity) and highlights the active one; estimated deadlines show only the approximate time, with no confidence label.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Entrega ao vivo abre mais rápido, reaproveitando leituras enquanto nada mudou.',
+        en: 'Live Delivery opens faster by reusing reads while nothing has changed.',
+      },
+      {
+        pt: 'A janela de uso dos planos sempre cabe na tela, tem altura limitada e rola por dentro (com barra de rolagem nova), e o "Refazer login" só aparece quando o login da conta expirou.',
+        en: 'The plan usage popup always fits the screen, has a capped height and scrolls inside (with a new scrollbar), and "Sign in again" only shows when that account\'s login has expired.',
+      },
+      {
+        pt: 'Na Entrega ao vivo, a linha "↳ na subtarefa" de cada cartão mostra a última ação daquela subtarefa, não a da tarefa inteira.',
+        en: 'In Live Delivery, each card\'s "↳ on subtask" line shows that subtask\'s last action, not the whole task\'s.',
+      },
+      {
+        pt: 'Uso → APIs não esvazia mais a lista quando o serviço oscila; no iPhone o áudio da ligação libera no primeiro toque.',
+        en: 'Usage → APIs no longer empties the list when the service blips; on iPhone call audio unlocks on the first tap.',
+      },
+      {
+        pt: 'Uso → APIs: a chave da ElevenLabs agora se cadastra, troca e remove direto na linha da ElevenLabs, com o passo a passo, as permissões e o plano necessário.',
+        en: 'Usage → APIs: the ElevenLabs key is now added, changed and removed right on the ElevenLabs row, with the steps, permissions and plan it needs.',
+      },
+      {
+        pt: 'Ligações: etiqueta beta oficial, página acompanha o idioma do app e a amostra de voz mostra um carregando de verdade.',
+        en: 'Calls: official beta tag, the page follows the app language and the voice sample shows a real loading state.',
+      },
+      {
+        pt: 'Ligações: o globo não mostra mais o traçado pontilhado e tocar nele não interrompe a fala.',
+        en: 'Calls: the globe no longer shows the dotted trace, and tapping it does not interrupt the speech.',
+      },
+      {
+        pt: 'Ligações: quando a sessão termina a tarefa, a resposta agora é sempre falada (antes podia ficar presa em "Preparando áudio").',
+        en: 'Calls: when the session finishes its task, the answer is now always spoken (it could get stuck on "Preparing audio").',
+      },
+      {
+        pt: 'Ligações: a voz se configura num painel com quatro partes (quem fala, vozes com busca, conta ElevenLabs, voz local), em tela cheia no celular.',
+        en: 'Calls: voice settings live in a four-part panel (who speaks, voices with search, ElevenLabs account, local voice), full screen on phones.',
+      },
+    ],
+  },
+  '2.200.3': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Na janela de uso dos planos, o botão de ligar/desligar e o "Refazer login" aparecem sempre, até na primeira abertura.',
+        en: 'In the plan usage popup, the on/off switch and "Sign in again" always show up, even on the very first open.',
+      },
+      {
+        pt: 'Contas sem leitura de plano aparecem na janela de uso, com o botão e a agenda, todas com o mesmo aviso "sem leitura do plano".',
+        en: 'Accounts with no plan reading appear in the usage popup, with their switch and schedule, all with the same "no plan reading" note.',
+      },
+      {
+        pt: 'Ligar ou desligar uma conta por um caminho antigo agora respeita a agenda, em vez de ser desfeito no minuto seguinte.',
+        en: 'Switching an account on or off through an older route now respects the schedule instead of being undone a minute later.',
+      },
+      {
+        pt: 'Mexer no quadro de tarefas não recarrega mais todos os dados do painel, e uma sequência longa de alterações continua atualizando o quadro e a Entrega ao vivo.',
+        en: 'Editing the task board no longer reloads all dashboard data, and a long run of changes keeps the board and Live Delivery up to date.',
+      },
+      {
+        pt: 'Na Entrega ao vivo, o cartão sempre pousa no lugar certo, mesmo se o quadro rolar durante o voo.',
+        en: 'In Live Delivery the card always lands on its slot, even if the board scrolls mid-flight.',
+      },
+    ],
+  },
+  '2.200.2': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Quando a porta do app já está ocupada, o aviso agora diz qual programa está usando ela.',
+        en: 'When the app port is already taken, the message now names the program holding it.',
+      },
+      {
+        pt: 'Cancelar uma sessão enquanto ela ainda está começando não deixa mais um processo vivo para trás.',
+        en: 'Cancelling a session while it is still starting no longer leaves a process running behind.',
+      },
+      {
+        pt: 'A instalação de teste no Mac usa portas fora da faixa que o macOS reserva, então não falha mais por porta ocupada.',
+        en: 'The test install on Mac uses ports outside the range macOS reserves, so it no longer fails on a busy port.',
+      },
+    ],
+  },
+  '2.200.1': {
+    features: [],
+    fixes: [
+      {
+        pt: 'Entrega ao vivo atualiza na hora quando uma tarefa muda de etapa, sem esperar o próximo ciclo.',
+        en: 'Live Delivery updates right away when a task changes stage, without waiting for the next cycle.',
+      },
+      {
+        pt: 'Entrega ao vivo cabe inteira numa tela de computador (as 7 etapas), então a animação de merge aparece sem rolar; em telas menores a coluna de destino entra na vista antes da animação.',
+        en: 'Live Delivery fits a desktop screen (all 7 stages), so the merge animation shows without scrolling; on smaller screens the destination column scrolls into view first.',
+      },
+      {
+        pt: 'No celular, a Entrega ao vivo abre na primeira etapa com tarefas, os botões de página ficam maiores e o Esc fecha a folha de visualização.',
+        en: 'On phones, Live Delivery opens on the first stage with tasks, the page buttons are larger and Esc closes the view sheet.',
+      },
+    ],
+  },
+  '2.200.0': {
+    features: [
+      {
+        pt: 'Formulários do OpenCode funcionam de ponta a ponta: perguntas em várias etapas, seleção múltipla e a opção "Outra" com texto livre chegam certinho ao modelo, e dá para cancelar.',
+        en: 'OpenCode forms work end to end: multi-step questions, multiple selection and the "Other" option with free text reach the model correctly, and you can cancel.',
+      },
+      {
+        pt: 'Agentask saiu do beta.',
+        en: 'Agentask is out of beta.',
+      },
+      {
+        pt: 'O quadro mostra 10 tarefas por página por coluna, e dá para escolher 10, 25, 50 ou 100. A escolha fica guardada por pessoa.',
+        en: 'The board shows 10 tasks per page per column, and you can choose 10, 25, 50 or 100. The choice is saved per person.',
+      },
+      {
+        pt: 'Nova visão Entrega ao vivo no Agentask: cada peça aparece na etapa em que está (fila, execução, QA, revisão, ajuste, publicado), com o agente, o tempo e a estimativa com fonte. Os líderes ficam numa faixa própria. Os cards deslizam entre as colunas, e um merge aprovado se desfaz em cinza e reaparece em verde em Publicado. A Nay também consulta essa visão.',
+        en: 'New Live Delivery view in Agentask: each piece appears at the stage it is in (queue, running, QA, review, rework, published), with the agent, the time and a sourced estimate. Leaders sit in their own lane. Cards slide between columns, and an approved merge crumbles to grey and reappears in green under Published. Nay can also look at this view.',
+      },
+      {
+        pt: 'Modo autônomo de ponta a ponta: o líder recebe um aviso quando um worker fica parado há 30 minutos, e a esteira leva cada entrega da sessão à revisão e à limpeza, sem marcar como concluída sozinha.',
+        en: 'End-to-end autonomous mode: the leader gets a notice when a worker has been idle for 30 minutes, and the pipeline takes each delivery from the session through review and cleanup, without marking it done on its own.',
+      },
+      {
+        pt: 'Modo ligação em beta para todos: o botão de ligar e a página Ligações aparecem sem precisar ligar o modo experimental. A chave da ElevenLabs pode ser cadastrada direto no cartão Voz.',
+        en: 'Call mode is now in beta for everyone: the call button and the Calls page show up without turning on experimental mode. The ElevenLabs key can be added right in the Voice card.',
+      },
+      {
+        pt: 'Escolha a voz da ElevenLabs pelo botão de voz da ligação, com amostra que não gasta crédito; o cartão Voz mostra quanto foi usado, quanto sobra e quando renova.',
+        en: 'Pick your ElevenLabs voice from the call voice button, with samples that cost no credits; the Voice card shows how much was used, what is left and when it renews.',
+      },
+      {
+        pt: 'Uso dos planos ganha as seções Contas e APIs: o saldo das chaves de API pagas aparece no painel e na página de uso.',
+        en: 'Plan usage now has Accounts and APIs sections: the balance of paid API keys shows in the panel and on the usage page.',
+      },
+      {
+        pt: 'Quadro de tarefas com uma barra só: busca, painel Visualização, filtros e as visões Métricas, Quadro e Tabela no mesmo lugar. Por padrão aparecem os status bloqueado, a fazer, em andamento, em revisão e concluído; os outros podem ser reexibidos.',
+        en: 'Task board with a single toolbar: search, the View panel, filters and the Metrics, Board and Table views in one place. By default the blocked, to do, in progress, in review and done statuses are shown; the others can be shown again.',
+      },
+      {
+        pt: 'Agenda das contas: cada conta pode ter dias, horários e um teto diário de uso pelos agentes. Fora da agenda, os agentes deixam a conta de lado; ligar ou desligar à mão continua valendo.',
+        en: 'Account schedule: each account can have days, hours and a daily usage ceiling for agents. Outside the schedule, agents leave the account alone; switching it on or off by hand still applies.',
+      },
+      {
+        pt: 'O "modo ausente" agora se chama "modo autônomo": ligado, as sessões trabalham sem pedir permissão e os líderes seguem em frente dentro do que você autorizou.',
+        en: 'Away mode is now "Autonomous mode": while it is on, sessions work without asking permission and leaders keep going within what you authorised.',
+      },
+      {
+        pt: 'Com o modo autônomo ligado, toda sessão nova (Nova sessão, linha de comando, MCP, passagem de líder) já nasce no modo "sem perguntas" — a menos que você escolha outro. A Nova sessão mostra de onde veio o modo.',
+        en: 'With autonomous mode on, every new session (New session, command line, MCP, leader hand-off) is born in "no questions" mode — unless you pick another. New session shows where the mode came from.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Ligação entende português ou inglês sozinha, mesmo com o app em outro idioma, e responde no idioma falado.',
+        en: 'Calls detect whether you speak Portuguese or English on their own, even with the app in another language, and reply in the language spoken.',
+      },
+      {
+        pt: 'Página Ligações com uma ligação em andamento: o cartão mostra o nome da sessão em vez de "Sessão ?", e o botão "Voltar para a ligação" tem o ícone do tamanho certo.',
+        en: 'Calls page with a call in progress: the card shows the session name instead of "Session ?", and the "Back to the call" button has a properly sized icon.',
+      },
+    ],
+  },
+  '2.199.0': {
+    features: [
+      {
+        pt: 'Todo assistente compatível aparece em Nova sessão e em Uso, a partir de um catálogo único.',
+        en: 'Every compatible assistant now shows up in New session and in Usage, from a single catalog.',
+      },
+      {
+        pt: 'Abas do OpenCode abertas fora do app aparecem como sessões que você pode continuar, também no Mac.',
+        en: 'OpenCode tabs opened outside the app appear as sessions you can continue, on Mac too.',
+      },
+      {
+        pt: 'O vidro (menus, barras e janelas translúcidos) agora é parte do app: está sempre ligado e saiu das configurações.',
+        en: 'Glass (translucent menus, bars and dialogs) is now part of the app: always on, and gone from settings.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Contas: duas contas Claude do mesmo plano não se confundem mais — acabou o falso "login expirado", o mesmo uso nas duas e a conta Principal aparecendo desconectada.',
+        en: 'Accounts: two Claude accounts on the same plan are no longer mixed up — no more false "login expired", the same usage on both, or the Principal account shown as disconnected.',
+      },
+    ],
+  },
   '2.198.0': {
+    features: [
+      {
+        pt: 'Agentask: só sessões líderes ficam presas direto na tarefa; os workers vão para as subtarefas. A lista de sessões no fim da tarefa foi redesenhada para dar conta de muitas sessões, com grupos e busca.',
+        en: 'Agentask: only leader sessions are attached straight to a task; workers go on subtasks. The session list at the end of a task is redesigned to handle many sessions, with groups and search.',
+      },
+      {
+        pt: 'OpenCode no Uso: tokens, custo, contexto e número de sessões das versões 1 e 2 agora aparecem, e o filtro Codex + OpenCode soma os dois.',
+        en: 'OpenCode in Usage: tokens, cost, context and session count from versions 1 and 2 now show up, and the Codex + OpenCode filter adds both.',
+      },
+      {
+        pt: 'Sessões do OpenCode 2 abertas fora do app aparecem na lista, ligadas ao processo e com atividade.',
+        en: 'OpenCode 2 sessions opened outside the app show up in the list, linked to their process and with activity.',
+      },
+    ],
+    fixes: [
+      {
+        pt: 'Contas: refazer o login não trava mais o app — a janela de login parava de responder por pedir o status sem parar.',
+        en: 'Accounts: signing in again no longer freezes the app — the sign-in dialog kept polling its status nonstop.',
+      },
+      {
+        pt: 'Quando um líder troca de harness ou de conta, a sessão nova herda os workers do antigo, e as mensagens deles chegam ao líder novo.',
+        en: 'When a leader switches harness or account, the new session inherits the old one\'s workers, and their messages reach the new leader.',
+      },
+      {
+        pt: 'Terminal: o Shell volta a abrir no macOS (zsh de login, Homebrew no PATH), com um carregamento central visível do clique até a primeira tela, e abre bem mais rápido.',
+        en: 'Terminal: the Shell opens on macOS again (login zsh, Homebrew on PATH), with a central loader from the click to the first frame, and it opens much faster.',
+      },
+      {
+        pt: 'O app abre mais rápido: as sessões recentes e ativas aparecem primeiro e o resto carrega por trás.',
+        en: 'The app opens faster: recent and live sessions show first and the rest loads behind.',
+      },
+      {
+        pt: 'Uma pasta criada agora aparece na Nova sessão → Onde.',
+        en: 'A newly created folder now shows up in New session → Where.',
+      },
+      {
+        pt: 'Sessões externas do Codex podem ser tocadas e retomadas pelo app.',
+        en: 'External Codex sessions can be driven and resumed from the app.',
+      },
+    ],
+  },
+  '2.197.4': {
     features: [
       {
         pt: 'OpenCode 2.x: as sessões da versão nova (inclusive as abertas no terminal do OpenCode) voltam a aparecer e abrem com o histórico completo.',

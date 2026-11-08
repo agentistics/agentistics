@@ -27,6 +27,8 @@ import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { HARNESS_ORDER, featureOn, type HarnessId } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, PORT } from './config'
+import { defaultClaudeConfigDir } from './default-claude-root'
+import { claudeCredentialWrittenSince } from './account-credentials'
 import {
   ISOLATION_ENV, IDENTITY_PROBES, bind as bindAccount, byId, forceProbe, readAccounts, retireAccount,
   type AccountIdentity, type HarnessAccount,
@@ -93,7 +95,7 @@ async function hasLoginMarker(harness: HarnessId, root: string): Promise<boolean
 }
 
 const DEFAULT_CONFIG_DIR: Record<HarnessId, () => string> = {
-  claude: () => process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'),
+  claude: () => defaultClaudeConfigDir(process.env, AGENTISTICS_DATA_DIR) ?? join(homedir(), '.claude'),
   codex: () => process.env.CODEX_HOME ?? join(homedir(), '.codex'),
   copilot: () => process.env.COPILOT_HOME ?? join(homedir(), '.copilot'),
   gemini: () => join(process.env.GEMINI_CLI_HOME ?? homedir(), '.gemini'),
@@ -548,12 +550,16 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   const removeRoot = (id: string, body: { confirm?: unknown } = {}) => serialized(() => removeRootUnlocked(id, body))
 
   // ── Sign in again (HOTFIX.LOGIN-EXPIRADO) ────────────────────────────────────────────────────
+  /** How long after a sign-in was declared failed a login that shows up on disk still counts. */
+  const LATE_LOGIN_MS = 5 * 60_000
   interface Relogin {
     accountId: string; harness: HarnessId; root: string | null; pendingId: string
     /** Working folder of a default-root sign-in (the CLI's cwd and private PATH), removed after. */
     scratch?: string
     /** The CLI's own exit status, once it ended by itself (never after we stopped it). */
     exited?: number
+    /** When the pasted code went in: a login written to disk after this moment is the NEW one. */
+    submittedAt?: number
     state: ReloginStatus
     at: number
   }
@@ -615,6 +621,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
         async (reason, detail) => {
           if (relogins.get(account.id) !== entry || entry.state.status !== 'pending') return
           entry.state = { status: 'failed', accountId: account.id, error: reason, message: LOGIN_MESSAGES[reason], ...(detail ? { detail } : {}) }
+          entry.at = Date.now()
           logins.delete(pendingId)
           await dropScratch(entry)
         }, options)
@@ -647,6 +654,7 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
   async function reloginCode(accountId: string, code: unknown) {
     const entry = relogins.get(accountId)
     if (!entry || entry.state.status !== 'pending') return { ok: false as const, reason: 'not_found', message: 'This sign-in is no longer available.' }
+    entry.submittedAt = Date.now()
     return submitCode(entry.pendingId, code)
   }
 
@@ -660,15 +668,23 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     return true
   }
 
-  /** One pass over the sign-ins-again: a CLI that ended with 0 is probed and its login bound in place. */
+  /**
+   * One pass over the sign-ins-again. A sign-in is bound when its CLI ended with 0 OR — the case that
+   * used to read as a failure — when a login was WRITTEN to the folder after the code went in: the CLI
+   * may still be alive, may end with an odd status, or the app's own wait may have given up an instant
+   * before the file appeared (`failed` entries stay watched for `LATE_LOGIN_MS`). A CLI that merely
+   * failed leaves no new credential, so it still never binds.
+   */
   async function pollReloginsUnlocked(): Promise<string[]> {
     const bound: string[] = []
     for (const [accountId, entry] of relogins) {
-      if (entry.state.status !== 'pending') {
+      const failedRecently = entry.state.status === 'failed' && entry.submittedAt !== undefined && Date.now() - entry.at < LATE_LOGIN_MS
+      if (entry.state.status !== 'pending' && !failedRecently) {
         if (Date.now() - entry.at > 900_000) relogins.delete(accountId)
         continue
       }
-      if (entry.exited !== 0) continue
+      const wroteLogin = entry.harness === 'claude' && entry.submittedAt !== undefined && claudeCredentialWrittenSince(entry.root, entry.submittedAt)
+      if (entry.exited !== 0 && !wroteLogin) continue
       const identity = await probe(entry.harness, entry.root as string).catch(() => null)
       if (!identity || identity.key === 'default') continue
       const { account } = await bind(entry.root, { harness: entry.harness, ...identity })
@@ -683,7 +699,8 @@ export function createAccountRoots(deps: AccountRootsDeps = {}) {
     return bound
   }
   const pollRelogins = () => serialized(pollReloginsUnlocked)
-  const reloginPending = () => [...relogins.values()].some(r => r.state.status === 'pending')
+  const reloginPending = () => [...relogins.values()].some(r => r.state.status === 'pending'
+    || (r.state.status === 'failed' && r.submittedAt !== undefined && Date.now() - r.at < LATE_LOGIN_MS))
 
   return { createRoot, startLogin, addRoot, submitCode, verifyPending, list, pollPending, ensurePoller, stopPoller, removeRoot, reregisterMcp, flagOn, relogin, reloginStatus, reloginCode, cancelRelogin, pollRelogins }
 }

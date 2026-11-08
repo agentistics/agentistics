@@ -52,6 +52,17 @@ test('a task whose STATUS is core becomes type=core + in_progress, once', async 
   expect(out).toEqual({ t: [['in_progress', 'core']], types: ['core'] })
 })
 
+test('createTask takes a priority (unknown words fall back to low) and a known type (FLUXO.AVISOS 9)', async () => {
+  const out = await run(`
+    const urgent = await web.createTask({ title: 'A', priority: 'urgent', type: 'core' })
+    const plain = await web.createTask({ title: 'B' })
+    const odd = await web.createTask({ title: 'C', priority: 'whenever', type: 'nonsense' })
+    const again = await web.createTask({ title: 'A', priority: 'low' })
+    console.log(JSON.stringify({ urgent: [urgent.priority, urgent.type], plain: [plain.priority, plain.type ?? null], odd: [odd.priority, odd.type ?? null], again: [again.id === urgent.id, again.priority] }))
+  `)
+  expect(out).toEqual({ urgent: ['urgent', 'core'], plain: ['low', null], odd: ['low', null], again: [true, 'urgent'] })
+})
+
 test('createType derives the id; refuses an empty label and a bad colour', async () => {
   const out = await run(`
     const ok = await web.createType({ label: 'Deep Work', color: '#3b82f6' })

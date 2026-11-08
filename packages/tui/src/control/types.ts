@@ -816,6 +816,8 @@ export interface ControlSession {
    * question about a set — so the host hands the answer down rather than the screen inferring one.
    */
   fell?: boolean
+  /** The model the conversation's transcript says answered (raw id), when this row's conversation is exactly linked. */
+  observedModel?: string
   /** Already-formatted token count, when this row's conversation has metrics. */
   tokens?: string
   /** SS-05: the four counters, formatted; `null` = not recorded by the harness (drawn N/A). */
@@ -935,7 +937,7 @@ export interface ControlSession {
   parentSessionId?: string
   /** The parent's conversation id — the link that survives the parent being reopened. */
   parentConversationId?: string
-  /** Per-session AWAY MODE (`ManagedSession.away`): on for this session alone. Absent = not on its own. */
+  /** Per-session AUTONOMOUS MODE (`ManagedSession.away`): on for this session alone. Absent = not on its own. */
   away?: boolean
   /** Leader hand-off generation (2 = first successor), shown in the ⓘ panel. Absent = never handed off. */
   handoffSeq?: number
@@ -1152,6 +1154,8 @@ export interface TranscriptSearch {
 }
 
 export interface ControlSessions {
+  /** Recent boot window; the history scan is still pending. Older hosts omit it. */
+  historyLoading?: boolean
   sessions: ControlSession[]
   /** How many are waiting on a person. Drives the header counter, from every tab. */
   attention: number
@@ -1992,7 +1996,7 @@ export interface SpawnSessionRequest {
   handoff?: boolean
   /** Explicit briefing role for CLI/web callers. */
   role?: 'leader' | 'worker'
-  /** Per-session away mode: on, off, or inherit a verified away parent's (absent = inherit). */
+  /** Per-session autonomous mode: on, off, or inherit a verified away parent's (absent = inherit). */
   away?: boolean | 'inherit'
   prompt?: string
   model?: string

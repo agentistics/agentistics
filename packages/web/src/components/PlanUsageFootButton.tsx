@@ -4,10 +4,12 @@ import { createPortal } from 'react-dom'
 import { Gauge } from 'lucide-react'
 import { HARNESS_LABELS } from '../lib/harness'
 import { currentUsedPct, limitLevel, limitLevelWord, usePlanLimits, windowLabel } from '../lib/planLimits'
-import { requestPlanUsageModal } from '../lib/planUsageModalRequests'
+import { requestUsagePage } from '../lib/usagePageRequests'
 import { scrollIsOutside } from '../lib/popoverScroll'
-import { PlanUsageSessionSwitch, type PlanUsageSession } from './PlanUsageSessionSwitch'
 import { LimitLevelIcon, PlanUsageSummary } from './PlanLimitMeter'
+import { usePlanAgentUse } from '../lib/usePlanAgentUse'
+import { ReloginModal } from '../pages/settings/ReloginModal'
+import type { HarnessId } from '@agentistics/core'
 
 const POP_W = 344
 const CARET = 10
@@ -28,12 +30,17 @@ export function anchorAbove(btn: { left: number; width: number }, viewportW: num
   return { left, width, caretLeft }
 }
 
+/** PURE. The popup never outgrows the room above its anchor (nor 560px): the list inside scrolls. */
+export function popMaxHeight(room: number): number {
+  return Math.max(160, Math.min(560, Math.floor(room) - EDGE))
+}
+
 /**
  * The sidebar footer's "Uso" button: hover or keyboard focus opens the plan-usage summary in a
  * portaled popover with a caret on the button; click opens the plan-usage modal. Icon only (so the five
  * footer buttons share one width); the level badge appears when a window is at 75% or more.
  */
-export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: { lang: 'pt' | 'en'; collapsed: boolean; footBtn: CSSProperties; openSession?: PlanUsageSession }) {
+export function PlanUsageFootButton({ lang, collapsed, footBtn }: { lang: 'pt' | 'en'; collapsed: boolean; footBtn: CSSProperties }) {
   const pt = lang === 'pt'
   const snap = usePlanLimits()
   const skipReturnFocus = useRef(false)
@@ -41,6 +48,9 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: {
   const popRef = useRef<HTMLDivElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [rect, setRect] = useState<DOMRect | null>(null)
+  // CONTAS.AGENDA-AGENTICA: per account, ONLY the agent-use switch and "Sign in again".
+  const agentUse = usePlanAgentUse(rect !== null, lang)
+  const [relogin, setRelogin] = useState<{ accountId: string; harness: HarnessId; who: string } | null>(null)
   const worst = useMemo(() => (snap.limits ?? []).flatMap(l => l.windows.map(w => ({ l, w, pct: currentUsedPct(w, snap.now) }))).sort((a, b) => b.pct - a.pct)[0], [snap.limits, snap.now])
   const level = limitLevel(worst?.pct ?? null)
   const base = pt ? 'Uso dos planos' : 'Plan usage'
@@ -64,7 +74,7 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: {
   // Tab from the button steps INTO it ("Open ›"); Tab out of it resumes after the button and
   // shift+Tab returns to it. Opening the modal focuses the button first, so the modal hands focus
   // back to the button — not to <body> — when it closes.
-  const openModal = useCallback(() => { btnRef.current?.focus(); requestPlanUsageModal(); close() }, [close])
+  const openModal = useCallback(() => { btnRef.current?.focus(); requestUsagePage(); close() }, [close])
   // Keyboard focus opens the summary; focus handed back by a modal closed with the pointer does not.
   const onBtnFocus = (e: React.FocusEvent<HTMLButtonElement>) => {
     if (skipReturnFocus.current) { skipReturnFocus.current = false; return }
@@ -94,20 +104,17 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: {
 
   let pop: React.ReactNode = null
   if (rect) {
-    const common: CSSProperties = { position: 'fixed', zIndex: 600, background: 'var(--bg-card)', border: '1px solid var(--ag-tint-4)', borderRadius: 12, boxShadow: 'var(--ag-shadow-menu)' }
+    const common: CSSProperties = { display: 'flex', flexDirection: 'column', position: 'fixed', zIndex: 600, background: 'var(--bg-card)', border: '1px solid var(--ag-tint-4)', borderRadius: 12, boxShadow: 'var(--ag-shadow-menu)' }
     const caret: CSSProperties = { position: 'absolute', width: CARET, height: CARET, background: 'var(--bg-card)', transform: 'rotate(45deg)' }
     const { left: popLeft, width: popW, caretLeft } = anchorAbove(rect, window.innerWidth)
     const style: CSSProperties = collapsed
       // Collapsed rail: opens to the RIGHT, caret on the left edge at the button's vertical middle.
-      ? { ...common, left: rect.right + CARET + 4, bottom: Math.max(8, window.innerHeight - rect.bottom - 8), maxWidth: POP_W + 20 }
+      ? { ...common, left: rect.right + CARET + 4, bottom: Math.max(8, window.innerHeight - rect.bottom - 8), maxWidth: POP_W + 20, maxHeight: popMaxHeight(window.innerHeight - Math.max(8, window.innerHeight - rect.bottom - 8)) }
       // Expanded: opens UPWARD, centred on the button and kept inside the viewport, caret under the button's centre.
-      : { ...common, left: popLeft, width: popW, bottom: window.innerHeight - rect.top + CARET + 2 }
+      : { ...common, left: popLeft, width: popW, bottom: window.innerHeight - rect.top + CARET + 2, maxHeight: popMaxHeight(rect.top - CARET - 2) }
     pop = createPortal(
       <div ref={popRef} role="dialog" aria-labelledby="plan-usage-summary-title" data-plan-usage-popover style={style} onMouseEnter={open} onMouseLeave={closeSoon} onFocus={open} onBlur={closeSoon} onKeyDown={onPopKey}>
-        <PlanUsageSummary onOpen={openModal} limits={snap.limits} registered={snap.registered} accountLabels={snap.accountLabels} now={snap.now} lang={lang} />
-        <PlanUsageSessionSwitch lang={lang} session={openSession && { ...openSession, onSwitch: () => {
-          btnRef.current?.focus(); skipReturnFocus.current = true; close(); openSession.onSwitch()
-        } }} />
+        <PlanUsageSummary onOpen={openModal} agentUse={agentUse} onRelogin={r => { close(); setRelogin(r) }} limits={snap.limits} registered={snap.registered} accountLabels={snap.accountLabels} now={snap.now} lang={lang} />
         {collapsed
           ? <span aria-hidden style={{ ...caret, left: -CARET / 2 - 1, bottom: Math.max(4, rect.height / 2 + 8 - CARET / 2 - 8), borderLeft: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />
           : <span aria-hidden style={{ ...caret, bottom: -CARET / 2 - 1, left: caretLeft, borderRight: '1px solid var(--ag-tint-4)', borderBottom: '1px solid var(--ag-tint-4)' }} />}
@@ -131,6 +138,7 @@ export function PlanUsageFootButton({ lang, collapsed, footBtn, openSession }: {
         {level !== 'ok' && <span style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%', background: 'var(--bg-base)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><LimitLevelIcon pct={worst!.pct} size={14} lang={lang} /></span>}
       </button>
       {pop}
+      {relogin && <ReloginModal accountId={relogin.accountId} harness={relogin.harness} who={relogin.who} lang={lang} onClose={() => setRelogin(null)} />}
     </div>
   )
 }

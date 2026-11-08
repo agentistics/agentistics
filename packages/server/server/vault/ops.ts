@@ -51,6 +51,8 @@ import {
 } from './gate'
 import { readVaultView } from './inventory'
 import { setVaultOpHandler, type OpContext, type OpResult } from './socket'
+import { passwordInput, withVaultPassword } from './password-context'
+import { isUnlockMethod } from '@agentistics/vault'
 import { MAX_BODY } from './wire'
 import { realProtectorIo } from './io'
 
@@ -462,7 +464,7 @@ async function opRecoveryConfirm(h: Record<string, unknown>): Promise<OpResult> 
   return { reply: r.ok ? { ok: true } : r }
 }
 async function opPresenceEnroll(h: Record<string, unknown>): Promise<OpResult> {
-  if (h.protector !== 'hello' && h.protector !== 'fido2') return bad()
+  if (!isUnlockMethod(h.protector)) return bad()
   if (h.words !== undefined && !str(h.words, 1024)) return bad()
   // Review S7: the 24 words (typed on the TTY) — only ever from the socket, so the new data key can be
   // wrapped under the recovery key when it was not confirmed in this same setup.
@@ -621,7 +623,9 @@ export const VAULT_OPS = [
 let _installed = false
 export function installVaultOps(): void {
   if (_installed) return
-  setVaultOpHandler(ctx => handleVaultOp(ctx))
+  // COFRE.DESBLOQUEIO: the terminal sends the vault password, when it has one, as the op's `password`
+  // field; it is held for THIS op only (password-context.ts), exactly as the page's header is.
+  setVaultOpHandler(ctx => withVaultPassword(passwordInput(ctx.header.password), () => handleVaultOp(ctx)))
   // The CLI proves the code with each gated op (no grants on the socket: a CLI call is one action).
   setSocketGate(async (action, h) => {
     const map: Record<string, VaultAction> = { 'lock-local': 'lock-local', rekey: 'rekey', 'add-passphrase': 'add-passphrase', reset: 'reset' }

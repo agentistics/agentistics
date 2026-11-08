@@ -69,10 +69,31 @@ test('trigger host ops: the managed-session universe and a nudge through the com
   ] })
   expect(await ops['cutucar-sessao']({ to: 'live', body: 'commit it', flow: 'trabalho-sem-commit' })).toEqual({ ok: true, to: 'live' })
   expect(prompts[0]).toEqual(['live', '[from flow trabalho-sem-commit · nudge]\ncommit it'])
-  expect(await ops['cutucar-sessao']({ to: 'gone', body: 'x' })).toMatchObject({ refused: true, reason: 'ended' })
+  // FLUXO.AVISOS: an ENDED row is refused before anything is typed (the prompt path would follow/reopen it).
+  const typedBefore = prompts.length
+  expect(await ops['cutucar-sessao']({ to: 'gone', body: 'x' })).toMatchObject({ refused: true, failure: 'ended' })
+  expect(prompts.length).toBe(typedBefore)
   expect(await ops['cutucar-sessao']({ to: '', body: 'x' })).toMatchObject({ refused: true })
   expect(await ops['aviso-ao-dono']({ text: 'Pedido p-1 sem dono' })).toEqual({ ok: true })
   expect(notices).toEqual(['Pedido p-1 sem dono'])
+})
+
+test('FLUXO.ENTREGA-DSL audit: the pedidos escalation to the owner is skipped while autonomous mode is on, kept when off', async () => {
+  for (const away of [true, false]) {
+    const notices: string[] = []
+    const ops = triggerHostOps({
+      registry: async () => [], rows: async () => [], roles: async () => () => undefined,
+      prompt: async () => ({ ok: true }), awayNotice: async text => { notices.push(text); return true }, kill: async () => ({ ok: true }),
+      autonomous: async () => away,
+    })
+    const out = await ops['aviso-ao-dono']({ text: 'Pedido p-1 sem dono' }, { step: 'h1-lembrar' })
+    expect(out).toEqual(away ? { ok: true, skipped: 'pulado: modo autônomo' } : { ok: true })
+    expect(notices).toEqual(away ? [] : ['Pedido p-1 sem dono'])
+    // L3: a wait that ended with no leader to tell falls back to the owner — also skipped while autonomous mode is on.
+    expect(await ops['aviso-ao-dono']({ text: 'A espera w-1 disparou' }, { step: 'wait-ended' })).toEqual(away ? { ok: true, skipped: 'pulado: modo autônomo' } : { ok: true })
+    // An informational notice from another flow (an environment's MCP failure) is not a decision request: it always goes.
+    expect(await ops['aviso-ao-dono']({ text: 'AMB_MCP' }, { step: 'ambiente-aviso-dono' })).toEqual({ ok: true })
+  }
 })
 
 test('QA10: roles are re-read for every universe snapshot — a promotion and a demotion count at once', async () => {
@@ -393,6 +414,65 @@ test('alvo-trabalho: nothing identified is `none` — no store record, the start
   expect(await workTarget('S', f.deps)).not.toHaveProperty('path')
   f.state.stored = join(f.own, 'gone')
   expect(await workTarget('S', f.deps)).not.toHaveProperty('path')
+})
+
+test('alvo-trabalho (FLUXO.AVISOS): a start folder that is gone or is not a repository is SAID, never a plain ok', async () => {
+  const f = workFixture()
+  f.state.stored = undefined
+  const plain = realpathSync(mkdtempSync(join(tmpdir(), 'wt-plain-'))); roots.push(plain)
+  f.state.cwd = plain
+  expect(await workTarget('S', f.deps)).toMatchObject({ ok: true, notRepo: true, cwd: plain })
+  expect(await workTarget('S', f.deps)).not.toHaveProperty('gone')
+  f.state.cwd = join(plain, 'removed-worktree')
+  const gone = await workTarget('S', f.deps)
+  expect(gone).toMatchObject({ ok: true, gone: true })
+  expect(gone).not.toHaveProperty('notRepo')
+  f.state.cwd = f.bare // a real repository carries neither flag
+  const fine = await workTarget('S', f.deps)
+  expect(fine).not.toHaveProperty('gone')
+  expect(fine).not.toHaveProperty('notRepo')
+})
+
+test('alvo-trabalho (FLUXO.AVISOS): a recorded worktree that the session removed itself is named, not guessed', async () => {
+  const f = workFixture()
+  rmSync(f.own, { recursive: true, force: true })
+  const out = await workTarget('S', f.deps)
+  expect(out).toMatchObject({ ok: true, bare: true, goneWorktree: f.own })
+  expect(out).not.toHaveProperty('path')
+})
+
+test('sessao-sem-codigo (FLUXO.AVISOS): QA, probe and no-worktree sessions close on handback + stopped; a worker with its own tree does not', async () => {
+  const f = workFixture()
+  // the real case: a QA session started in the bare main checkout, made a worktree, removed it, and handed back
+  rmSync(f.own, { recursive: true, force: true })
+  const ops = flowHostOps(undefined, undefined, undefined, { ...f.deps, session: async () => ({ cwd: f.state.cwd, conversationId: 'c1', label: 'QA hotfix' }) })
+  expect(await ops['sessao-sem-codigo']({ sessionId: 'S' })).toEqual({ ok: true, noCode: true, reason: 'qa', sessionId: 'S' })
+  const probe = flowHostOps(undefined, undefined, undefined, { ...f.deps, session: async () => ({ cwd: f.state.cwd, label: 'probe de memória' }) })
+  expect(await probe['sessao-sem-codigo']({ sessionId: 'S' })).toMatchObject({ noCode: true, reason: 'probe' })
+  // not named QA, but its folder is bare/gone and it left no worktree: nothing to inspect
+  const nameless = flowHostOps(undefined, undefined, undefined, { ...f.deps, session: async () => ({ cwd: f.state.cwd, label: 'worker' }) })
+  expect(await nameless['sessao-sem-codigo']({ sessionId: 'S' })).toMatchObject({ noCode: true, reason: 'no-worktree' })
+  // a worker whose own linked worktree still exists owns code
+  const live = workFixture()
+  const owner = flowHostOps(undefined, undefined, undefined, { ...live.deps, session: async () => ({ cwd: live.state.cwd, label: 'impl fluxo' }) })
+  expect(await owner['sessao-sem-codigo']({ sessionId: 'S' })).toMatchObject({ noCode: false, reason: 'owns-work' })
+  expect(await owner['sessao-sem-codigo']({})).toMatchObject({ refused: true })
+})
+
+test('cutucar-sessao (FLUXO.AVISOS): re-checks the fleet at send time — a row now exited/lost is not typed into', async () => {
+  const prompts: string[] = []
+  const state: { v: string } = { v: 'working' }
+  const ops = triggerHostOps({
+    registry: async () => [{ id: 'q', cwd: '/w' }],
+    rows: async () => [{ id: 'q', state: state.v }],
+    roles: async () => () => undefined,
+    prompt: async (_id, text) => { prompts.push(text); return { ok: true } },
+    awayNotice: async () => true, kill: async () => ({ ok: true }),
+  })
+  expect(await ops['cutucar-sessao']({ to: 'q', body: 'a', flow: 'fechar-entregue' })).toEqual({ ok: true, to: 'q' })
+  state.v = 'exited' // killed after the flow decided to nudge
+  expect(await ops['cutucar-sessao']({ to: 'q', body: 'b', flow: 'fechar-entregue' })).toMatchObject({ refused: true, failure: 'ended' })
+  expect(prompts).toHaveLength(1)
 })
 
 test('alvo-trabalho: an unknown session refuses', async () => {

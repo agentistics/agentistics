@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, markParentVerified, markCallerVerified, roleOp, roleStatus, writeRolesDoc, gateAnswerOf, handoffGateViaServer, type RoleDeps,
+  SESSION_ROLES_FILE, applyRoleTitle, deliverStoredRole, ensureSpawnRole, loadRoles, markRoleDelivered, migrateLegacyRoles, parseRoles, rekeyStoredRole, rekeyStoredRoleBatch, roleOfRow, originOfRow, listRoleOrigins, spawnRoleOrigin, roleSenderFromBody, markParentVerified, markCallerVerified, roleOp, roleStatus, writeRolesDoc, gateAnswerOf, handoffGateViaServer, type RoleDeps,
 } from './session-roles'
 
 let dir = ''
@@ -60,6 +60,70 @@ describe('store + migration', () => {
     expect(roleOfRow({ conv: 'leader' }, { id: 'm1', conversationId: 'conv' })).toBe('leader')
     expect(roleOfRow({ m1: 'worker' }, { id: 'm1', conversationId: 'conv' })).toBe('worker')
     expect(roleOfRow({}, { id: 'm1' })).toBeUndefined()
+  })
+})
+
+describe('registry role repair batch', () => {
+  test('repairs 1,600 identities once and the second boot performs zero rekeys or writes', async () => {
+    const { deps } = fake([])
+    const links = new Map(Array.from({ length: 1600 }, (_, i) => [`managed-${i}`, `conversation-${i}`]))
+    await writeRolesDoc(dir, {
+      version: 1, migrated: true,
+      roles: Object.fromEntries([...links.keys()].map(key => [key, 'worker' as const])),
+      at: Object.fromEntries([...links.keys()].map(key => [key, 10])),
+      origins: Object.fromEntries([...links.keys()].map(key => [key, 'auto' as const])),
+      lastDeliveredRole: Object.fromEntries([...links.keys()].map(key => [key, 'worker' as const])),
+    })
+    expect(await rekeyStoredRoleBatch(links, deps)).toBe(1600)
+    const doc = await loadRoles(deps)
+    for (const [from, to] of links) {
+      expect(doc.roles[from]).toBeUndefined()
+      expect(doc.at?.[from]).toBeUndefined()
+      expect(doc.origins?.[from]).toBeUndefined()
+      expect(doc.lastDeliveredRole?.[from]).toBeUndefined()
+      expect(doc.roles[to]).toBe('worker')
+      expect(doc.at?.[to]).toBe(10)
+      expect(doc.origins?.[to]).toBe('auto')
+      expect(doc.lastDeliveredRole?.[to]).toBe('worker')
+    }
+    const file = join(dir, SESSION_ROLES_FILE)
+    const before = await stat(file)
+    expect(await rekeyStoredRoleBatch(links, deps)).toBe(0)
+    const after = await stat(file)
+    expect([after.ino, after.mtimeMs]).toEqual([before.ino, before.mtimeMs])
+  })
+
+  test('preserves newer assignments, origins, timestamps and delivery-only records', async () => {
+    const { deps } = fake([])
+    await writeRolesDoc(dir, {
+      version: 1, migrated: true,
+      roles: { old: 'worker', conversation: 'leader', newer: 'leader', target: 'worker' },
+      at: { old: 10, conversation: 20, newer: 30, target: 20 },
+      origins: { old: 'auto', conversation: 'manual', newer: 'auto', target: 'manual' },
+      lastDeliveredRole: { old: 'worker', conversation: 'leader', only: 'worker' },
+    })
+    expect(await rekeyStoredRoleBatch(new Map([['old', 'conversation'], ['newer', 'target'], ['only', 'delivered']]), deps)).toBe(3)
+    expect(await loadRoles(deps)).toMatchObject({
+      roles: { conversation: 'leader', target: 'leader' },
+      at: { conversation: 20, target: 30 },
+      origins: { conversation: 'manual', target: 'auto' },
+      lastDeliveredRole: { conversation: 'leader', delivered: 'worker' },
+    })
+    expect(Object.keys((await loadRoles(deps)).roles)).toEqual(['conversation', 'target'])
+  })
+
+  test('serializes a batch with a concurrent role assignment without losing either', async () => {
+    const { deps } = fake([])
+    await writeRolesDoc(dir, { version: 1, migrated: true, roles: { old: 'leader' } })
+    await Promise.all([
+      rekeyStoredRoleBatch(new Map([['old', 'conversation']]), deps),
+      ensureSpawnRole(['unrelated'], 'worker', deps),
+      markRoleDelivered(['conversation'], 'leader', deps),
+    ])
+    expect(await loadRoles(deps)).toMatchObject({
+      roles: { conversation: 'leader', unrelated: 'worker' },
+      lastDeliveredRole: { conversation: 'leader' },
+    })
   })
 })
 

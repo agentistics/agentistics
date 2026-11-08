@@ -569,16 +569,24 @@ export function ShellBand({
   // `&& shellEnabled`: belt and suspenders alongside the two effects above that already keep
   // `target` off `'shell'` while the switch is off — a shell must never be opened or reused for a
   // request this band should not have been able to make in the first place.
+  const provisionStarted = useRef<number | null>(null)
   const wanted = shellResolveWanted(band) && target === 'shell' && shellEnabled && !excludedFromDocked
   const wantedRef = useRef(wanted)
   wantedRef.current = wanted
   useEffect(() => {
     if (!wantedRef.current) return
     let cancelled = false
+    const controller = new AbortController()
+    const started = performance.now()
+    const measure = (stage: string) => performance.measure(`terminal:${stage}`, { start: started, end: performance.now() })
+    provisionStarted.current = started
+    const timeout = setTimeout(() => controller.abort(), 20_000)
     dispatch({ type: 'resolving' })
     void (async () => {
       try {
-        const listed = await fetch(shellApiUrl('/api/shell/list', lang))
+        const listed = await fetch(shellApiUrl('/api/shell/list', lang), { signal: controller.signal })
+        measure('list')
+        if (cancelled) return
         if (listed.ok) {
           const body = await listed.json() as { shells?: (OpenShell & { sessionId?: string })[] }
           const mine = (body.shells ?? []).find(sh => sh.sessionId === sessionId)
@@ -589,10 +597,12 @@ export function ShellBand({
         }
         const res = await fetch(shellApiUrl('/api/shell/open', lang), {
           method: 'POST',
+          signal: controller.signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId }),
         })
-        const body = await res.json().catch(() => ({})) as {
+        measure('open')
+        const body = await res.json() as {
           ok?: boolean; shell?: OpenShell; message?: string; error?: string; reason?: string
         }
         if (cancelled) return
@@ -604,12 +614,14 @@ export function ShellBand({
         else if (body.message) dispatch({ type: 'refused', message: body.message, ...(body.reason ? { reason: body.reason } : {}) })
         else dispatch({ type: 'refused', message: shellErrorText(body.error ?? 'network', lang) })
       } catch {
-        if (!cancelled) dispatch({ type: 'refused', message: shellErrorText('network', lang) })
-      }
+        if (!cancelled) dispatch({ type: 'refused', message: controller.signal.aborted
+          ? (lang === 'pt' ? 'O provisionamento do terminal excedeu 20 segundos. Tente de novo.' : 'Terminal provisioning exceeded 20 seconds. Try again.')
+          : shellErrorText('network', lang) })
+      } finally { clearTimeout(timeout) }
     })()
     // An abandoned attempt is NOT a failure and NOT a silence: it returns to `wanted`, so the next
     // render asks again instead of leaving a spinner over nothing.
-    return () => { cancelled = true; dispatch({ type: 'cancelled' }) }
+    return () => { cancelled = true; clearTimeout(timeout); controller.abort(); dispatch({ type: 'cancelled' }) }
     // `target` IS a dependency, and leaving it out was a measured bug: a band opened on the CLI
     // pane skips the resolve, and switching to the shell moved nothing the effect watches — so the
     // request that had been skipped was never made and the shell never appeared. It is safe to
@@ -661,7 +673,13 @@ export function ShellBand({
   // `null` is what DROPS the subscription — the client half of the unwatch discipline.
   // The remembered geometry rides the OPEN, so the pane is already this box's size on the first
   // frame instead of arriving at whatever width the last viewer left it — see `shellBand.ts`.
-  const { state } = useTerminalStream(watching ? streamId : null, scope, bandGeometry(placement))
+  const { state, reconnect } = useTerminalStream(watching ? streamId : null, scope, bandGeometry(placement))
+  useEffect(() => {
+    if (target === 'shell' && state.frame && provisionStarted.current !== null) {
+      performance.measure('terminal:first-frame', { start: provisionStarted.current, end: performance.now() })
+      provisionStarted.current = null
+    }
+  }, [state.frame, target])
   const write = useTerminalWrite(streamId ?? '', watching && Boolean(streamId), lang, scope)
   // The honesty line must say WHOSE screen this is: "the agent's current screen" over a shell the
   // person opened themselves is simply false, and the reverse is just as wrong.
@@ -1043,12 +1061,29 @@ export function ShellBand({
     </div>
   )
 
+  const provisioning = (
+    <div role="status" aria-live="polite" style={{ flex: 1, minHeight: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 16, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 12 }}>
+      <AgentisticsLoader size={32} />
+      <span>{lang === 'pt' ? 'Provisionando terminal…' : 'Provisioning terminal…'}</span>
+    </div>
+  )
+  const pendingScreen = target === 'shell' && (band.phase === 'wanted' || band.phase === 'opening')
+    ? provisioning
+    : target === 'shell' && band.phase === 'refused'
+      ? <div role="status" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, textAlign: 'center', color: 'var(--accent-red)', fontSize: 12 }}>{band.message}</div>
+      : <div style={{ flex: 1 }} />
   const screen = (
     <div style={{
-      flex: 1, minHeight: 0, borderRadius: 8, overflow: 'hidden',
+      position: 'relative', flex: 1, minHeight: 0, borderRadius: 8, overflow: 'hidden',
       border: '1px solid var(--border-subtle)',
       background: theme === 'light' ? '#ffffff' : '#0e1116',
     }}>
+      {target === 'shell' && !state.frame && (state.phase === 'stalled' || state.phase === 'ended' ? (
+        <div role="status" style={{ position: 'absolute', inset: 0, zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 16, textAlign: 'center' }}>
+          <span>{status.detail}</span>
+          <button type="button" onClick={reconnect} style={{ minHeight: 44 }}>{t.retry}</button>
+        </div>
+      ) : <div style={{ position: 'absolute', inset: 0, zIndex: 1, display: 'flex', pointerEvents: 'none' }}>{provisioning}</div>)}
       <Suspense fallback={<div style={{ padding: 12, fontSize: 12, fontFamily: 'monospace', color: 'var(--text-tertiary)' }}>
         {lang === 'pt' ? 'Carregando o emulador…' : 'Loading the emulator…'}
       </div>}>
@@ -1227,7 +1262,7 @@ export function ShellBand({
                   }}
                 >{lang === 'pt' ? 'Abrir um novo shell' : 'Open a new shell'}</button>
               </div>
-            ) : <div style={{ flex: 1 }} />}
+            ) : pendingScreen}
             {notice}
             {ceilingList}
           </>
@@ -1322,7 +1357,7 @@ export function ShellBand({
             <>
               {/* EXCLUDED (C3): never render the screen for a target the right slot already shows —
                   see `excludedFromDocked` above. */}
-              {streamId && !excludedFromDocked ? screen : <div style={{ flex: 1 }} />}
+              {streamId && !excludedFromDocked ? screen : pendingScreen}
               {notice}
               {ceilingList}
               {strip}
@@ -1430,7 +1465,7 @@ export function ShellBand({
             <>
               {/* EXCLUDED (C3): the right slot already shows this exact target — see
                   `excludedFromDocked` above. Never render the screen for it here too. */}
-              {streamId && !excludedFromDocked ? screen : <div style={{ flex: 1 }} />}
+              {streamId && !excludedFromDocked ? screen : pendingScreen}
               {notice}
               {ceilingList}
             </>

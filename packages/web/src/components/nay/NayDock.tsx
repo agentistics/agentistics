@@ -1,6 +1,6 @@
 import { EngineSurfaceNayBadge } from '../EngineSurfaceNayBadge'
 import { useEngineSurfaces } from '../../hooks/useEngineSurfaces'
-import { endEngineSurfaceFromHost, openEngineSurface, resumeEngineSurface, useMountedEngineSurfaces } from '../../lib/engineSurfaceHost'
+import { endEngineSurfaceFromHost, openEngineSurface, resumeEngineSurface, useActiveComposerSessionIds, useMountedEngineSurfaces } from '../../lib/engineSurfaceHost'
 import { EngineSurfaceNaySlot } from '../EngineSurfaceHost'
 import { NayWindowFrame, IconButton, LabelButton } from './NayWindowFrame'
 /**
@@ -24,8 +24,7 @@ import { NayWindowFrame, IconButton, LabelButton } from './NayWindowFrame'
 
 import { EngineSurfaceButtons } from '../EngineSurfaceButtons'
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { requestPlanUsageModal } from '../../lib/planUsageModalRequests'
-import { subscribeNayRequests } from '../../lib/nayDockRequests'
+import { requestUsagePage } from '../../lib/usagePageRequests'
 import { ArrowLeft, Loader2, MoreVertical, PictureInPicture2, Plus, Power, SquareArrowOutUpRight, X } from 'lucide-react'
 import { isNayCwd, nayPlacementRows, planNayPlacement, sessionIdentityKey, type Filters, type SessionMeta } from '@agentistics/core'
 import type { ControlSession } from '@agentistics/tui/control/session-fleet'
@@ -39,7 +38,6 @@ import { readAsideGroupPrefs, subscribeAsideGroupPrefs } from '../../lib/session
 import { VaultExpiryNotice } from '../vault/VaultExpiryNotice'
 import { VaultUseRequestCard } from '../vault/VaultUseRequestCard'
 import { AgentisticsLoader } from '../AgentisticsLoader'
-import { NayLimitsTab } from './NayLimitsTab'
 import { VaultGlyph } from '../vault/VaultGlyph'
 import { SessionFacts } from '../sessions/SessionFacts'
 import { SessionRowMenu } from '../sessions/SessionRowMenu'
@@ -51,7 +49,7 @@ import { NOTIFY_TOGGLE, notifyMenuExtras, useMutedKeys } from '../../lib/notifyM
 import { toggleSessionMuted } from '../../lib/mutedSessions'
 import { LINK_TASK, NAY_COPY_ID, NAY_GO_TO, UNLINK_TASK, nayRowMenuEntries, type RowVerb } from '../../lib/rowMenu'
 import {
-  clampPanelSize, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
+  applyUndockRequest, clampPanelSize, closeMinimizedWindow, closeWindow, detachSession, dockSession, minimizeWindow, openSession, parseDockState,
   placeWindow, pruneDock, anchorDock, resizeAnchored, PANEL_DEFAULT, dockZIndex, type DockState, type NayWindow, type Size,
 } from '../../lib/nayDock'
 import { SessionChat, type SessionComposerMetrics } from '../sessions/SessionChat'
@@ -85,8 +83,9 @@ import { NAY_UNDOCK_SESSION } from '../../lib/nayDockBridge'
 const QuickVaultBody = lazy(() => import('../../pages/VaultPage').then(m => ({ default: m.QuickVaultBody })))
 
 type Lang = 'pt' | 'en'
-type Tab = 'nay' | 'sessions' | 'vault' | 'limits'
-const DOCK_TABS: readonly Tab[] = ['nay', 'sessions', 'vault', 'limits']
+/** A dock tab is a fixed one or an engine surface announced for the dock's top strip (`engine:<id>`, e.g. Ligações). */
+type Tab = 'nay' | 'sessions' | 'vault' | `engine:${string}`
+const FIXED_TABS = ['nay', 'sessions', 'vault'] as const
 
 const ORANGE = 'var(--anthropic-orange)'
 const ORANGE_DIM = 'var(--anthropic-orange-dim)'
@@ -103,7 +102,7 @@ const ARRIVAL_BUDGET_MS = 20_000
 const windowsStore = createPersonalDoc(WINDOWS_KEY, 'nayDockWindows')
 const tabStore = createSharedPref<Tab>({
   key: TAB_KEY, prefKey: 'nayDockTab', fallback: 'nay', adoptLocalWhenAbsent: true,
-  parse: v => (v === 'sessions' || v === 'nay' || v === 'vault' || v === 'limits' ? v : null),
+  parse: v => (v === 'sessions' || v === 'nay' || v === 'vault' || (typeof v === 'string' && v.startsWith('engine:')) ? (v as Tab) : null),
 })
 
 /** Every storage touch is guarded: a private window makes the accessor itself throw. */
@@ -147,11 +146,15 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   }))
   const engineTabs = useEngineSurfaces('nay-sessions')
   const mountedSurfaces = useMountedEngineSurfaces()
+  const callSessions = useActiveComposerSessionIds()
+  const dockRef = useRef(dock)
+  dockRef.current = dock
   const minimizedSurfaces = mountedSurfaces.filter(s => s.parked && s.layout === 'float')
-  const [tab, setTab] = useState<Tab>(() => tabStore.get())
-  useEffect(() => subscribeNayRequests(requested => {
-    if (requested === 'limits') { setTab('limits'); setDock(d => ({ ...d, open: true, panelSession: null })) }
-  }), [])
+  const [storedTab, setTab] = useState<Tab>(() => tabStore.get())
+  // A remembered engine tab whose surface is not announced (no engine, or the kill switch) reads as Nay.
+  const engineTabLabels = engineTabs.map(surface => ({ id: `engine:${surface.id}` as Tab, surface }))
+  const tab: Tab = storedTab.startsWith('engine:') && !engineTabLabels.some(t => t.id === storedTab) ? 'nay' : storedTab
+  const dockTabs: readonly Tab[] = [...FIXED_TABS, ...engineTabLabels.map(t => t.id)]
   // Follow the server's copy when it lands after mount, or arrives from another device.
   useEffect(() => windowsStore.subscribe(() => {
     const { windows } = parseDockState(windowsStore.get())
@@ -192,7 +195,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   useEffect(() => { setSettingsOpen(false) }, [dock.panelSession, dock.open])
   const setFabPrefs = setNayFabPrefs
   const dockStyle = dockStyleOf(fabPrefs)
-  useEffect(() => { tabStore.set(tab) }, [tab])
+  useEffect(() => { tabStore.set(storedTab) }, [storedTab])
   useEffect(() => { writeStored(SIZE_KEY, size) }, [size])
   useEffect(() => {
     const onResize = () => setSize(s => clampPanelSize(s, viewport()))
@@ -247,8 +250,15 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
   useEffect(() => {
     if (isMobile) return
     const onUndock = (event: Event) => {
-      const id = (event as CustomEvent<{ id?: unknown }>).detail?.id
-      if (typeof id === 'string' && id) setDock(d => detachSession(d, id, viewport()))
+      const detail = (event as CustomEvent<{ id?: unknown; manual?: unknown }>).detail
+      const id = detail?.id
+      const manual = detail?.manual === true
+      if (typeof id !== 'string' || !id) return
+      // Taken: the caller (a call whose session view went away) parks its surface for this window.
+      event.preventDefault()
+      // An AUTOMATIC request (a call left mid-session) must not pop a minimized window back open by
+      // itself; a MANUAL one (the menu's "Open undocked") is a person asking, so it restores it.
+      setDock(d => applyUndockRequest(d, id, viewport(), manual))
     }
     window.addEventListener(NAY_UNDOCK_SESSION, onUndock)
     return () => window.removeEventListener(NAY_UNDOCK_SESSION, onUndock)
@@ -557,11 +567,15 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           {/* The dock's own underline tabs (owner, 2026-10-05: restored — no pill behind them; the selected
               tab is orange text over an orange bar, exactly as before the shared strip replaced them). */}
           <div role="tablist" aria-label={pt ? 'Painel da Nay' : 'Nay panel'} style={{ display: 'flex', flexWrap: 'wrap', flex: '1 1 100%', order: 1, minWidth: 0 }}>
-            {DOCK_TABS.map(id => {
+            {dockTabs.map(id => {
               const on = tab === id && !panelSession
               return (
                 <button key={id} type="button" role="tab" aria-selected={on} data-dock-tab={id}
-                  onClick={() => { setTab(id); setDock(d => ({ ...d, panelSession: null })) }}
+                  onClick={() => {
+                    setTab(id); setDock(d => ({ ...d, panelSession: null }))
+                    const engine = engineTabLabels.find(t => t.id === id)
+                    if (engine) openEngineSurface(engine.surface, { sessionId: null, lang })
+                  }}
                   style={{
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '1 0 auto', gap: 5, minWidth: 44,
                     padding: '6px 10px', minHeight: 44,
@@ -572,7 +586,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                 >
                   {id === 'vault' && <VaultGlyph size={13} />}
                   <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
-                    {id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : id === 'limits' ? (pt ? 'Limites' : 'Limits') : (pt ? 'Sessões' : 'Sessions')}
+                    {id === 'nay' ? 'Nay' : id === 'vault' ? (pt ? 'Cofre' : 'Vault') : id === 'sessions' ? (pt ? 'Sessões' : 'Sessions') : (engineTabLabels.find(t => t.id === id)?.surface.label[lang] ?? id)}
                   </span>
                 </button>
               )
@@ -615,8 +629,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
                 ) : null}
               />
             </>)
-            : tab === 'limits'
-            ? <NayLimitsTab lang={lang} isMobile={isMobile} />
+            : tab.startsWith('engine:')
+            ? <EngineSurfaceNaySlot surfaceId={tab.slice('engine:'.length)} />
             : tab === 'vault'
             ? (
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px' }} data-nay-vault>
@@ -627,13 +641,8 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
             )
             : (
               // Inner gutter, so the aside's cards and search do not run into the panel's edges.
-              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px', display: engineTabs.length ? 'flex' : undefined, flexDirection: engineTabs.length ? 'column' : undefined }}>
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '6px 10px' : '8px 12px' }}>
                 <SessionsAside
-                  extraTabs={engineTabs.map(surface => ({
-                    id: `engine:${surface.id}`, label: surface.label[lang],
-                    onSelect: () => openEngineSurface(surface, { sessionId: null, lang }),
-                    content: <EngineSurfaceNaySlot surfaceId={surface.id} />,
-                  }))}
                   lang={lang}
                   rows={fleet.rows}
                   finishedTasks={fleet.finishedTasks}
@@ -667,7 +676,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
       <VaultExpiryNotice lang={lang} />
       <VaultUseRequestCard lang={lang} />
       <NayNotifyCard lang={lang} isMobile={isMobile} rows={fleet.rows} finishedTasks={fleet.finishedTasks} act={act} fabStyle={cardStyleOf(fabPrefs)} onReply={open} zIndex={dockZ + 1}
-        onOpenLimits={requestPlanUsageModal} noticeHost={dock.open ? noticeHost : null} />
+        onOpenLimits={requestUsagePage} noticeHost={dock.open ? noticeHost : null} />
       {!dock.open && sessionAlerts.length === 0 && renderUpdatePrompt?.('float')}
       {/* The trail/comet outline echoes behind the following dock — drawn by the follow loop. */}
       {echoStyle && [0, 1].map(i => (
@@ -690,6 +699,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
           onGoTo={() => goToSession(w.id)}
           onMinimize={() => setDock(d => minimizeWindow(d, w.id))}
           onClose={() => setDock(d => closeWindow(d, w.id))}
+          canClose={false}
         >
           {renderSession(w.id, next => setDock(d => ({
             ...d, windows: d.windows.map(x => (x.id === w.id ? { ...x, id: next } : x)),
@@ -708,7 +718,7 @@ export function NayDock({ lang, isMobile, ctx, filters, activeOnly, renderUpdate
               pt={pt}
               items={minimized.map(w => ({ id: w.id, row: findSession(w.id) }))}
               onRestore={id => setDock(d => openSession(d, id))}
-              onClose={id => setDock(d => closeWindow(d, id))}
+              onClose={id => setDock(d => closeMinimizedWindow(d, id, callSessions.has(id)))}
               surfaceItems={minimizedSurfaces.map(s => ({
                 id: String(s.nonce),
                 label: s.indicator?.label[lang] ?? s.surface.label[lang],

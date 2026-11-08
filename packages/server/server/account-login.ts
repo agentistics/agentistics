@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import type { HarnessId } from '@agentistics/core'
 import { isSessionGoneError, SHELL_SOCKET } from './sessions/tmux-cli'
 import { findHarnessBinary, harnessSearchPath } from './sessions/user-path'
+import { AGENTISTICS_DATA_DIR } from './config'
+import { defaultClaudeConfigDir } from './default-claude-root'
 
 export type LoginKind = 'paste' | 'device'
 export type LoginError = 'login_unavailable' | 'login_timeout' | 'login_failed' | 'plaintext_refused' | 'invalid_code' | 'keychain_unreadable' | 'login_not_saved' | 'login_unreadable'
@@ -290,6 +292,11 @@ export function parsePaneDead(out: string, settled = true): number | null {
   if (status !== undefined && Number.isInteger(n)) return n
   return settled ? 1 : null
 }
+/** PURE. The exit status a probe wrapper wrote (`<n>\n`), or null while it is absent or half-written. */
+export function parseExitRecord(text: string): number | null {
+  const m = /^(\d+)\n/.exec(text)
+  return m ? Number(m[1]) : null
+}
 /** How long a dead pane may go without an exit status before it is taken as killed by a signal. */
 export const PANE_STATUS_GRACE_MS = 2_000
 
@@ -367,18 +374,24 @@ export async function runClaudeInLoginContext(root: string | null, argv: string[
   if (!executable) return { stdout: '', code: 127 }
   const name = `account-probe-${randomBytes(6).toString('hex')}`
   const probeRoot = root ?? await mkdtemp(join(tmpdir(), 'agentistics-claude-probe-'))
-  const configDir = root ?? process.env.CLAUDE_CONFIG_DIR
+  const configDir = root ?? defaultClaudeConfigDir(process.env, AGENTISTICS_DATA_DIR)
   const { bin, env } = await makeLoginEnvironment(probeRoot, configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}, `.${name}-bin`)
   // Keep the pane alive briefly after the command exits. A very fast fake/real CLI can disappear
   // between new-session and set-option; preserving the original exit status keeps diagnosis exact.
   const invoked = [executable, ...argv.slice(1)].map(quote).join(' ')
-  const command = ['/usr/bin/env', '-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), '/bin/sh', '-c', `${invoked}; code=$?; /bin/sleep 0.2; exit $code`].map(quote).join(' ')
+  // The command records its OWN exit status. tmux publishes `pane_dead_status` only once its server
+  // has reaped the child, and on a loaded GitHub runner a pane was seen dead with no status for the
+  // whole grace window, so a probe that exited 0 was reported as failed (CI flake, 2026-11-06).
+  const exitFile = join(bin, '.exit')
+  const command = ['/usr/bin/env', '-i', ...Object.entries(env).map(([k, v]) => `${k}=${v}`), '/bin/sh', '-c', `${invoked}; code=$?; printf '%s\\n' "$code" > ${quote(exitFile)}; /bin/sleep 0.2; exit $code`].map(quote).join(' ')
   try {
     await tmux(['new-session', '-d', '-s', name, '-x', '240', '-y', '80', '-c', probeRoot, command])
     await tmux(['set-option', '-t', name, 'remain-on-exit', 'on']).catch(() => {})
     const deadline = Date.now() + 15_000
     let firstDead = 0
     while (Date.now() < deadline) {
+      const recorded = parseExitRecord(await readFile(exitFile, 'utf8').catch(() => ''))
+      if (recorded !== null) return { stdout: await tmux(['capture-pane', '-p', '-J', '-t', name, '-S', '-100']).catch(() => ''), code: recorded }
       const paneState = await tmux(['display-message', '-p', '-t', name, '#{pane_dead} #{pane_dead_status}'])
       if (!firstDead && parsePaneDead(paneState, true) !== null) firstDead = Date.now()
       const dead = parsePaneDead(paneState, firstDead > 0 && Date.now() - firstDead >= PANE_STATUS_GRACE_MS)

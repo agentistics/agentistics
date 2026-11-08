@@ -14,7 +14,7 @@ const base: ContextInput = { sessionId: 'abc123', cwd: '/w/proj', now: NOW, tool
 type Pair = { a: RegExp; b: RegExp; why: string }
 /** Two sentences that may not stand in the same briefing. */
 export const FORBIDDEN_PAIRS: Pair[] = [
-  { a: /only after the user explicitly approves/, b: /pre-authorised within the away limits/, why: 'approval required vs pre-authorised' },
+  { a: /only after the user explicitly approves/, b: /pre-authorised within the autonomous-mode limits/, why: 'approval required vs pre-authorised' },
   { a: /never end a turn on a question/, b: /ASK the user|ask the user once|write the question in the conversation and wait/, why: 'never ask vs ask' },
   { a: /Never start, delegate to or orchestrate another session or harness on your own/, b: /Opening workers is pre-authorised/, why: 'cannot open vs may open' },
   { a: /Do not ask the owner/, b: /ASK the user whether|ask the user once|tell the user to open|Ask the person in the conversation|Pergunte à pessoa na conversa/, why: 'away told to ask' },

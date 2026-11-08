@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  CRASH_MAX_AGE_MS, CRASH_WINDOW_MS, HEARTBEAT_MS, OFFER_LIMIT, planCrashGroup, planFellOffer,
+  BORN_GRACE_MS, CRASH_MAX_AGE_MS, CRASH_WINDOW_MS, HEARTBEAT_MS, OFFER_LIMIT, planCrashGroup, planFellOffer,
 } from './crash-group'
 import type { ManagedSession } from './types'
 
@@ -219,5 +219,31 @@ describe('planFellOffer', () => {
 
   it('is empty for an empty fall, without inventing a row', () => {
     expect(planFellOffer({ entries: [], conversationFor: all })).toEqual([])
+  })
+})
+
+describe('planCrashGroup — a row being born is not a fall (MAC.OPENCODE r2)', () => {
+  // `spawnManaged` registers the row (stamped `lastSeenMs` at birth) BEFORE the backend has a pane for it. A poll
+  // landing in that gap read the row as fallen, so clicking Reopen flashed "reopen the sessions that fell" for the
+  // very row being opened, which then "reopened by itself" once its pane appeared.
+  const born = (id: string, ageMs: number) => row(id, { createdAt: new Date(NOW - ageMs).toISOString(), lastSeenMs: NOW - ageMs })
+  it('a reopen whose pane does not exist yet never joins the group, at any point of the birth window', () => {
+    for (const age of [0, 1_000, 5_000, BORN_GRACE_MS - 1]) {
+      expect(planCrashGroup({ now: NOW, entries: [born('fresh', age)], backendIds: new Set() })).toBeNull()
+    }
+  })
+  it('the same row with no pane after the grace is a real fall', () => {
+    expect(ids(planCrashGroup({ now: NOW, entries: [born('stuck', BORN_GRACE_MS)], backendIds: new Set() }))).toEqual(['stuck'])
+  })
+  it('replays a reopen poll by poll: registered → (no pane) → pane up, and the group is empty throughout', () => {
+    const fresh = born('new', 0)
+    const polls: Array<{ at: number; backend: string[] }> = [
+      { at: NOW, backend: [] }, { at: NOW + 2_000, backend: [] }, { at: NOW + 5_000, backend: ['new'] }, { at: NOW + 10_000, backend: ['new'] },
+    ]
+    for (const p of polls) expect(planCrashGroup({ now: p.at, entries: [fresh], backendIds: new Set(p.backend) })).toBeNull()
+  })
+  it('does not shield a genuinely fallen sibling from the same group', () => {
+    const g = planCrashGroup({ now: NOW, entries: [row('old', { lastSeenMs: NOW - 10_000 }), born('fresh', 1_000)], backendIds: new Set() })
+    expect(ids(g)).toEqual(['old'])
   })
 })

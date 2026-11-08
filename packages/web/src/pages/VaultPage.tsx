@@ -8,9 +8,9 @@ import { CenteredLoader } from '../components/CenteredLoader'
  * screen is folded in here (its controls in `vault/VaultAreas.tsx`, its flows in `VaultFlows.tsx`) and
  * its route redirects to the tab that holds them.
  *
- * Nothing here decides what an action asks: every call goes to the server's gate; when it answers
- * `stepup-required` the page asks for the code once and retries (`withStepUp`), and while a request
- * that needs the gesture is in flight the page says "confirm on this computer". A value exists in this
+ * Nothing here decides what an action asks: every call goes to the server's gate; while a request that
+ * needs the vault's confirmation is in flight the page says "confirm on this computer" (the vault
+ * password, when it is the way, is asked by the app's one password prompt). A value exists in this
  * page only after a reveal, in one row's state, for 30 seconds; copying overwrites the clipboard after
  * 30 seconds too.
  */
@@ -25,7 +25,7 @@ import { BandOverflowMenu, type BandOverflowEntry } from '../components/sessions
 import type { AppContext } from '../lib/app-context'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { Err, card, overlay } from '../components/MfaSetup'
-import { codeComplete, loadVault, vaultPost, type Reply, type VaultItem } from '../lib/vaultApi'
+import { loadVault, vaultPost, type Reply, type VaultItem } from '../lib/vaultApi'
 import { itemStateKey, kindKey, orderItems, reasonKey, vt } from '../lib/vaultText'
 
 function resolvePaging(input: { mode: 'maximized'; total: number; page: number; size: number }) {
@@ -47,9 +47,7 @@ import { NEW_TYPE, choiceValue, kindChoices, kindName, resolveChoice, useVaultTy
 import { CreateTypeDialog } from '../components/vault/KindTypes'
 import { NO_SELECTION, clearTicks, leaveMode, selectedVisible, setRows, toggleMode, toggleRow, type Selection } from '../components/tasks/selection'
 import { hasPasskeyHere, mobileState, passkeySupport, phoneGesture, type MobileState } from '../lib/passkey'
-import { CodeField } from '../components/vault/VaultUnlock'
-import { VaultCodeStage, VaultStage } from '../components/vault/VaultStage'
-import { VaultCodeClock } from '../components/vault/VaultCodeClock'
+import { VaultProofStage, VaultStage } from '../components/vault/VaultStage'
 import { lockedPhoneBox, phoneFacts, type PhoneFacts } from '../lib/phoneVault'
 import { VAULT_TABS, parseVaultTab, type VaultTab } from './vault/vaultTabs'
 import { VaultFlowHost, useVaultControls } from './vault/useVaultControls'
@@ -72,9 +70,9 @@ export function usePersonalVault() {
   // files, dates and states, never a value — listed beside the person's own, in ONE list.
   const [systemItems, setSystemItems] = useState<VaultItem[]>([])
   const [busyHello, setBusyHello] = useState(false)
-  // The code dialog the gate asks for: resolved with the typed code, or null when cancelled.
-  const [codeAsk, setCodeAsk] = useState<null | ((code: string | null) => void)>(null)
-  const askCode = useCallback(() => new Promise<string | null>(res => setCodeAsk(() => (c: string | null) => { setCodeAsk(null); res(c) })), [])
+  // COFRE.DESBLOQUEIO: no code dialog any more. The vault password, when it is the way, is asked by the
+  // ONE prompt the app mounts (VaultPasswordPrompt) — `codeAsk` stays null so callers keep their shape.
+  const codeAsk = null as null | ((code: string | null) => void)
   // §7: on a page NOT on this computer (the phone), a gesture is a passkey token, never a Hello prompt.
   const [mobile, setMobile] = useState<MobileState | null>(null)
   const [lockedPhone, setLockedPhone] = useState<PhoneFacts | null>(null)
@@ -82,22 +80,23 @@ export function usePersonalVault() {
   const host = typeof window !== 'undefined' ? window.location.hostname : ''
   const canPasskey = isPhone && passkeySupport(window) === 'ok' && hasPasskeyHere(mobile, host)
   /**
-   * Run a gated call: the code when asked. With `gesture`, on the computer the service raises Windows
-   * Hello ("confirm on this computer"); on the phone the passkey is asked FIRST and its single-use token,
-   * bound to exactly this action + target, rides the call.
+   * Run a gated call. With `gesture`, on the computer the service raises the vault's own confirmation
+   * (Touch ID / Windows Hello / a key — or the vault-password prompt asks); on the phone the passkey is
+   * asked FIRST and its single-use token, bound to exactly this action + target, rides the call.
+   * COFRE.DESBLOQUEIO: no code is ever asked; `run`'s first argument is always undefined.
    */
   const gated = useCallback(async <T,>(run: (code?: string, token?: string) => Promise<Reply<T>>, gesture: false | { action: string; target: string }): Promise<Reply<T>> => {
     if (gesture && canPasskey) {
       setBusyHello(true)
       try {
-        const g = await withStepUp(c => phoneGesture(gesture.action, gesture.target, c), askCode)
+        const g = await phoneGesture(gesture.action, gesture.target)
         if (!g.ok) return g as Reply<T>
-        return await withStepUp(c => run(c, g.gestureToken), askCode)
+        return await run(undefined, g.gestureToken)
       } finally { setBusyHello(false) }
     }
     if (gesture && !isPhone) setBusyHello(true)
-    try { return await withStepUp(c => run(c), askCode) } finally { setBusyHello(false) }
-  }, [askCode, canPasskey, isPhone])
+    try { return await run() } finally { setBusyHello(false) }
+  }, [canPasskey, isPhone])
 
   const load = useCallback(async () => {
     const v = await loadVault()
@@ -149,7 +148,6 @@ export default function VaultPage() {
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 5, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
       <span aria-hidden style={{ width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', background: 'var(--anthropic-orange-dim)', color: 'var(--anthropic-orange)', flexShrink: 0 }}><VaultIcon size={19} /></span>
       <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>{t('title')}</h1>
-      {state.kind === 'ready' && <VaultCodeClock lang={lang} style={{ marginLeft: isMobile ? 0 : 'auto', flexBasis: isMobile ? '100%' : undefined }} />}
     </div>
   )
 
@@ -184,8 +182,8 @@ export default function VaultPage() {
   if (state.kind === 'code') {
     return (
       <div style={pageWrap}>
-        <VaultCodeStage lang={lang} isMobile={isMobile} title={t('codeStageTitle')} sub={t('codeStageSub')} error={state.error} onSubmit={async code => {
-          const r = await vaultPost<{ grant: string }>('/api/vault/stepup', { code })
+        <VaultProofStage lang={lang} isMobile={isMobile} title={t('codeStageTitle')} sub={t('codeStageSub')} error={state.error} onSubmit={async () => {
+          const r = await vaultPost<{ grant: string }>('/api/vault/stepup', {})
           if (!r.ok) { setState({ kind: 'code', error: r.sentence || t('network') }); return }
           await load()
         }} />
@@ -200,7 +198,7 @@ export default function VaultPage() {
       <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: isMobile ? '2px 0 18px' : '0 0 18px' }}>{t('pageIntro')}</p>
 
       {c.showBanner && view && (
-        // The first-time setup (authenticator, personal confirmation, recovery key) — the wizard opens from here.
+        // The first-time setup (how the vault confirms it is you, then the recovery key) — the wizard opens from here.
         <div role="status" style={{ marginBottom: 18 }}>
           <VaultRow data="setup" isMobile={isMobile} icon={<ShieldCheck size={16} />} title={vt('ultraTitle', lang)}
             desc={view.requirePresence ? vt('ultraRequired', lang) : vt('ultraBody', lang)}>
@@ -222,7 +220,6 @@ export default function VaultPage() {
       {tab === 'settings' && <SettingsArea lang={lang} isMobile={isMobile} c={c} isPhone={isPhone} gated={gated} onFlash={flash} />}
 
       <VaultFlowHost c={c} lang={lang} isMobile={isMobile} onChanged={() => { void load() }} />
-      {codeAsk && <CodeDialog lang={lang} isMobile={isMobile} onDone={codeAsk} />}
     </div>
   )
 }
@@ -535,8 +532,8 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
       {/* Locked: the SAME centred safe as the /vault page, scaled for the panel (owner, 2026-10-05). */}
       {state.kind === 'locked' && <VaultStage lang={lang} isMobile={isMobile} compact onOpened={() => { void load() }} />}
       {state.kind === 'code' && (
-        <VaultCodeStage lang={lang} isMobile={isMobile} compact title={t('codeStageTitle')} sub={t('codeStageSub')} error={state.error} onSubmit={async code => {
-          const r = await vaultPost<{ grant: string }>('/api/vault/stepup', { code })
+        <VaultProofStage lang={lang} isMobile={isMobile} compact title={t('codeStageTitle')} sub={t('codeStageSub')} error={state.error} onSubmit={async () => {
+          const r = await vaultPost<{ grant: string }>('/api/vault/stepup', {})
           if (!r.ok) { setState({ kind: 'code', error: r.sentence || t('network') }); return }
           await load()
         }} />
@@ -552,7 +549,6 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
               <VaultIcon size={14} /> {t('quickAll')}
             </button>
           </div>
-          <VaultCodeClock lang={lang} style={{ marginBottom: 10 }} />
           <label style={{ position: 'relative', display: 'block', marginBottom: 10 }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
             <input value={q} onChange={e => setQ(e.target.value)} placeholder={t('search')} aria-label={t('search')} autoFocus={!isMobile}
@@ -578,7 +574,6 @@ export function QuickVaultBody({ lang, isMobile, onNavigate, onAsking }: { lang:
           onClose={() => setEditing(null)} onSaved={m => { setItems(cur => [m, ...cur.filter(y => y.id !== m.id)]); setEditing(null) }}
           onImported={s => { setEditing(null); flash(s); void load() }} />
       )}
-      {codeAsk && <CodeDialog lang={lang} isMobile={isMobile} onDone={codeAsk} />}
     </>
   )
 }
@@ -1044,26 +1039,6 @@ function GroupsDialog({ lang, isMobile, groups, items, gated, onClose, onChanged
       ))}
       {groups.length > 0 && <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6 }}>{t('deleteGroupNote')}</div>}
       {error && <Err text={error} />}
-    </Sheet>
-  )
-}
-
-/** The code the gate asked for in the middle of an action: the app's code field, the dialog footer. */
-function CodeDialog({ lang, isMobile, onDone }: { lang: Lang; isMobile: boolean; onDone: (code: string | null) => void }) {
-  const [code, setCode] = useState('')
-  const ok = codeComplete(code)
-  return (
-    <Sheet closeLabel={pt_('close', lang)} isMobile={isMobile} title={pt_('codeLabel', lang)} onClose={() => onDone(null)}
-      footer={(
-        <DialogActions>
-          <button type="button" onClick={() => onDone(null)} style={dialogButtonStyle('secondary', isMobile)}>{pt_('cancel', lang)}</button>
-          <button type="submit" form="vault-code-form" disabled={!ok} style={dialogButtonStyle('primary', isMobile, !ok)}>{pt_('confirm', lang)}</button>
-        </DialogActions>
-      )}>
-      <form id="vault-code-form" onSubmit={e => { e.preventDefault(); if (ok) onDone(code) }}>
-        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.55 }}>{pt_('needsCode', lang).replace(/ para ver a lista\.| to see the list\./, '.')}</div>
-        <CodeField value={code} onChange={setCode} label={pt_('codeLabel', lang)} autoFocus />
-      </form>
     </Sheet>
   )
 }

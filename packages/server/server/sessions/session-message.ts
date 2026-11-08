@@ -15,6 +15,8 @@
 
 import { resolveSessionForGroup } from '@agentistics/core'
 import type { FleetRowForGroups } from './session-groups-web'
+import { noteMessageTo } from './last-message'
+import { intermediateNote, judgeHandback, type HandbackVerdict } from './handback-intent'
 
 export const MESSAGE_KINDS = ['handback', 'block', 'question'] as const
 export type MessageKind = (typeof MESSAGE_KINDS)[number]
@@ -46,12 +48,14 @@ export interface SenderTask {
 
 export interface MessageDeps {
   rows: () => Promise<readonly FleetRowForGroups[]>
+  /** References kept in a worker's briefing follow a replaced parent's current successor. */
+  resolveTarget?: (reference: string) => Promise<string>
   /** Type the text into one row through the composer's send path. */
   prompt: (rowId: string, text: string) => Promise<{ ok: boolean; message?: string; failure?: 'prompt' | 'ended' | 'unconfirmed' }>
   /** The task/subtask the sender is filed on, from the registry. */
   senderTask: (senderId: string) => Promise<SenderTask>
   /** Record the mirror comment on the board. */
-  comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind } }) => Promise<{ ok: boolean }>
+  comment: (taskId: string, c: { author: string; body: string; subtaskId?: string; kind?: 'handback' | 'block'; session: string; message?: { to: string; kind: MessageKind; intermediate?: boolean } }) => Promise<{ ok: boolean }>
   /** `handback` from a session filed on a subtask: move that subtask in_progress → in_review. */
   handbackSubtask?: (subtaskId: string) => Promise<void>
   /**
@@ -77,7 +81,7 @@ export function handbackFlowEvent(senderId: string, to: string, at: number, file
 }
 
 export type MessageReply =
-  | { ok: true; to: string; kind: MessageKind; delivered: true; message: string; mirrored: boolean }
+  | { ok: true; to: string; kind: MessageKind; delivered: true; message: string; mirrored: boolean; /** FLUXO.AVISOS 8: read as one slice of a longer piece. */ intermediate?: boolean }
   | { ok: false; code: string; message: string; matches?: string[] }
 
 const MESSAGES: Record<string, string> = {
@@ -122,7 +126,8 @@ export async function sendSessionMessage(
   if (req.awaiting !== undefined && req.awaiting !== null && (typeof req.awaiting !== 'string' || (awaiting && (kind !== 'handback' || /[\r\n]/.test(awaiting) || [...awaiting].length > AWAITING_MAX)))) return fail('bad_awaiting')
 
   const rows = await deps.rows().catch(() => [] as FleetRowForGroups[])
-  const r = resolveSessionForGroup(rows, to)
+  const currentTo = deps.resolveTarget ? await deps.resolveTarget(to).catch(() => to) : to
+  const r = resolveSessionForGroup(rows, currentTo)
   if (!r.ok) return fail(r.code, undefined, r.matches)
   const target = r.session
   if (target.id === senderId || (target.conversationId && target.conversationId === senderId)) return fail('self')
@@ -143,8 +148,12 @@ export async function sendSessionMessage(
     return fail('not_delivered', sent.message)
   }
   lastSent.set(pair, t)
+  noteMessageTo(target.id, t, { from: senderId, kind })
 
   let mirrored = false
+  // FLUXO.AVISOS 8: an `awaiting` handback — or one whose text says it is part N of M — is one slice of a longer piece. It is
+  // recorded and delivered, but it does not move the subtask to review and is not listed as delivered in the check-in.
+  const verdict = kind === 'handback' ? judgeHandback(body, awaiting) : { intermediate: false } as HandbackVerdict
   const filed = await deps.senderTask(senderId).catch((): SenderTask => ({}))
   if (filed.taskId) {
     const res = await deps.comment(filed.taskId, {
@@ -153,13 +162,16 @@ export async function sendSessionMessage(
       ...(filed.subtaskId ? { subtaskId: filed.subtaskId } : {}),
       ...(kind !== 'question' ? { kind } : {}),
       session: senderId,
-      message: { to: target.id, kind },
+      message: { to: target.id, kind, ...(verdict.intermediate ? { intermediate: true } : {}) },
     }).catch(() => ({ ok: false }))
     mirrored = res.ok
-    if (kind === 'handback' && filed.subtaskId && deps.handbackSubtask) await deps.handbackSubtask(filed.subtaskId).catch(() => {})
+    if (kind === 'handback' && !verdict.intermediate && filed.subtaskId && deps.handbackSubtask) await deps.handbackSubtask(filed.subtaskId).catch(() => {})
   }
-  if (kind === 'handback' && deps.handbackEvent) void deps.handbackEvent(handbackFlowEvent(senderId, target.id, t, filed, { text: body.slice(0, HANDBACK_TEXT_MAX), ...(awaiting ? { awaiting } : {}) })).catch(() => {})
-  return { ok: true, to: target.id, kind, delivered: true, message: sent.message ?? 'Delivered.', mirrored }
+  // The engine reads `awaiting` as "do not close this worker between phases": an inferred slice is sent the same way.
+  const eventAwaiting = awaiting || (verdict.source === 'inferred' ? `progress: ${verdict.marker}`.slice(0, AWAITING_MAX) : '')
+  if (kind === 'handback' && deps.handbackEvent) void deps.handbackEvent(handbackFlowEvent(senderId, target.id, t, filed, { text: body.slice(0, HANDBACK_TEXT_MAX), ...(eventAwaiting ? { awaiting: eventAwaiting } : {}) })).catch(() => {})
+  const note = verdict.source === 'inferred' && verdict.marker ? ` ${intermediateNote(verdict.marker)}` : ''
+  return { ok: true, to: target.id, kind, delivered: true, message: `${sent.message ?? 'Delivered.'}${note}`, mirrored, ...(verdict.intermediate ? { intermediate: true } : {}) }
 }
 
 export function messageStatus(out: MessageReply): number {
@@ -178,6 +190,13 @@ export function messageStatus(out: MessageReply): number {
 export async function defaultMessageDeps(): Promise<MessageDeps> {
   return {
     rows: async () => (await (await import('./fleet-web')).readFleet('en')).rows,
+    resolveTarget: async reference => {
+      const { readRegistry } = await import('./registry')
+      const { messageTargetFor } = await import('./team-links')
+      // Registry, not the fleet: the retired parent can already be absent from it. Matches by managed
+      // or conversation id only, and redirects only a retired leader to a LIVE successor.
+      return messageTargetFor(await readRegistry(), reference)
+    },
     prompt: async (rowId, text) => {
       const { runFleetAction } = await import('./fleet-web')
       const out = await runFleetAction('en', { action: 'prompt', id: rowId, text })

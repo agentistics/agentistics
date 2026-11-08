@@ -14,7 +14,8 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseClaudeUsageResponse, type PlanLimits } from '@agentistics/core'
-import { HOME_DIR } from './config'
+import { AGENTISTICS_DATA_DIR, HOME_DIR } from './config'
+import { defaultClaudeConfigDir } from './default-claude-root'
 import { ingestFromRoot } from './plan-limits'
 
 export const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
@@ -23,7 +24,7 @@ const MAX_BACKOFF_MS = 30 * 60_000
 const EXPIRY_MARGIN_MS = 60_000
 
 export const claudeCredentialsFile = (): string =>
-  join(process.env.CLAUDE_CONFIG_DIR || join(HOME_DIR, '.claude'), '.credentials.json')
+  join(defaultClaudeConfigDir(process.env, AGENTISTICS_DATA_DIR) || join(HOME_DIR, '.claude'), '.credentials.json')
 
 /** An extra account root's credential file — the root IS that login's `CLAUDE_CONFIG_DIR`. */
 const readCredentialAt = (root: string): Promise<string | null> =>
@@ -69,6 +70,12 @@ export interface UsageDeps {
   accountRoots?: () => Promise<string[]>
   readCredentialAt?: (root: string) => Promise<string | null>
   ingest?: (limits: PlanLimits, root: string | null) => Promise<unknown>
+  /** Settles the default home's account binding before its reading is attributed. Default: the identity probe (skipped when `ingest` is injected). */
+  confirmDefaultBinding?: () => Promise<unknown>
+  /** How long a tick waits for the default binding to settle before skipping the default reading (default 1500). */
+  bindingBoundMs?: number
+  /** Poll interval override (tests). */
+  pollMs?: number
   fetchImpl?: (url: string, init: RequestInit) => Promise<Response>
   now?: () => number
 }
@@ -101,10 +108,13 @@ export async function fetchClaudeUsage(deps: UsageDeps = {}): Promise<UsageResul
  */
 export function startClaudeUsagePoll(deps: UsageDeps = {}): () => void {
   if (process.env.AGENTISTICS_CLAUDE_USAGE === '0') return () => {}
-  let delay = CLAUDE_USAGE_POLL_MS
+  const pollMs = deps.pollMs ?? CLAUDE_USAGE_POLL_MS
+  let delay = pollMs
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
   const ingest = deps.ingest ?? ((l: PlanLimits, root: string | null) => ingestFromRoot(l, root))
+  const confirmDefaultBinding = deps.confirmDefaultBinding
+    ?? (deps.ingest ? async () => {} : async () => { await (await import('./harness-accounts')).current('claude', null) })
   const tick = async (): Promise<void> => {
     let limited = false
     for (const root of [null, ...await claudeAccountRoots(deps)]) {
@@ -113,10 +123,25 @@ export function startClaudeUsagePoll(deps: UsageDeps = {}): () => void {
         readCredential: () => (deps.readCredentialAt ?? readCredentialAt)(root),
       }).catch((): UsageResult => ({ skip: 'network' }))
       // Attributed by the ROOT it was read from: the default home's binding, or that root's account.
-      if ('limits' in r) await ingest(r.limits, root).catch(() => false)
+      if ('limits' in r) {
+        // The default home's reading is attributed by its binding: settle the binding (the identity
+        // probe) first, or the first read after a restart lands on a stale one. Asked only when there
+        // IS a reading to attribute (a machine with no credential never spawns the probe, so boot stays
+        // quiet), and bounded: a slow probe delays this reading, never the tick behind it.
+        // On a timeout the default reading is SKIPPED for this tick (the probe keeps running and settles the
+        // binding; the next tick attributes it): ingesting under a stale binding is the misattribution.
+        if (root === null) {
+          const settled = await Promise.race([
+            confirmDefaultBinding().then(() => true, () => true),
+            new Promise<boolean>(res => { setTimeout(() => res(false), deps.bindingBoundMs ?? 1500).unref?.() }),
+          ])
+          if (!settled) continue
+        }
+        await ingest(r.limits, root).catch(() => false)
+      }
       if ('skip' in r && r.skip === 'rate-limited') limited = true
     }
-    delay = limited ? Math.min(MAX_BACKOFF_MS, delay * 2) : CLAUDE_USAGE_POLL_MS
+    delay = limited ? Math.min(MAX_BACKOFF_MS, delay * 2) : pollMs
     if (stopped) return
     timer = setTimeout(() => { void tick() }, delay)
     timer.unref?.()

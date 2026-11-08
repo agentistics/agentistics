@@ -372,6 +372,22 @@ describe('AGY.MULTICHILD — generations on the durable transport (real relay)',
     await until(() => [...relays, ...children].every(p => !pidAlive(p)), 5000, 'every process gone')
   }, 40_000)
 
+  test('12. a terminate right after a launch waits for the booting relay: no relay or child is left', async () => {
+    // The relay publishes relay.pid only once it is up; a terminate before that used to find nothing,
+    // answer true, and leave the relay to boot and start its child (test 9's CI leak, 2026-11-06).
+    for (let i = 0; i < 3; i++) {
+      const root = mkdtempSync(path.join(tmpdir(), 'structured-mc-'))
+      roots.push(root)
+      const store = durableStore(path.join(root, 'structured'))
+      const id = `boot-${i}`
+      store.create(id, { v: 1, harness: 'antigravity', spawn: { id, harness: 'antigravity', cwd: root }, backend: { id, cwd: root } })
+        .launch('bun', ['run', AGENT], root)
+      expect(existsSync(path.join(store.dirOf(id), 'relay.pid'))).toBe(false)
+      expect(await store.terminate(id, 10_000)).toBe(true)
+      expect(await survivingFixtures(root, 1500)).toEqual([])
+    }
+  }, 40_000)
+
   test('11. a generation\'s socket stays inside the unix socket path limit', () => {
     // sun_path is 108 bytes on Linux (104 on macOS); `g<k>/` adds at most a few bytes to the session's own.
     const store = durableStore('/home/a-long-user-name/.agentistics/structured')

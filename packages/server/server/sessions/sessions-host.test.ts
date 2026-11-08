@@ -1220,3 +1220,80 @@ describe('REABRIR.OPENCODE — a claude record never re-links a row of another h
     expect(out.sessions.find(s => s.id === 'oc1')?.harnessName).toBeUndefined()
   })
 })
+
+
+describe('recent-first server boot', () => {
+  it('publishes the 15 newest managed rows before opening history, then delivers the rest', async () => {
+    let historyCalls = 0
+    let writes = 0
+    const registry = Array.from({ length: 40 }, (_, i) => managed(`boot-${i}`, {
+      createdAt: new Date(NOW - (40 - i) * 1000).toISOString(), endedAt: new Date(NOW).toISOString(),
+    }))
+    const p = createSessionsPoller({
+      initialSessionLimit: 15,
+      backend: fakeBackend({ sessions: [] }),
+      readRegistry: async () => registry,
+      scanProcesses: async () => ({ procs: [] }),
+      loadConversations: async () => { historyCalls++; return [] },
+      touchSessions: async () => { writes++ },
+      now: () => NOW,
+    })
+    const first = await p.poll()
+    expect(first.unavailable).toBeUndefined()
+    expect(historyCalls).toBe(0)
+    expect(writes).toBe(0)
+    expect(first.sessions).toHaveLength(15)
+    expect(new Set(first.sessions.map(r => r.id))).toEqual(new Set(registry.slice(-15).map(r => r.id)))
+    expect(first.sessions.map(r => r.id)).toEqual(registry.slice(-15).reverse().map(r => r.id))
+    const full = await p.poll()
+    expect(historyCalls).toBe(1)
+    expect(writes).toBe(1)
+    expect(full.sessions).toHaveLength(40)
+    for (const row of first.sessions) expect(full.sessions.some(r => r.id === row.id)).toBe(true)
+  })
+
+  it('retains an old live session while limiting ended rows, and retries a failed first poll', async () => {
+    const registry = Array.from({ length: 20 }, (_, i) => managed(`recent-${i}`, {
+      createdAt: new Date(NOW - (20 - i) * 1000).toISOString(), endedAt: new Date(NOW).toISOString(),
+    }))
+    registry.unshift(managed('old-live', { createdAt: new Date(NOW - 1_000_000).toISOString() }))
+    let fail = true
+    let historyCalls = 0
+    const p = createSessionsPoller({
+      initialSessionLimit: 15,
+      backend: fakeBackend({ sessions: [backendSession('old-live')] }),
+      readRegistry: async () => { if (fail) throw new Error('temporary'); return registry },
+      scanProcesses: async () => ({ procs: [] }),
+      loadConversations: async () => { historyCalls++; return [] },
+      now: () => NOW,
+    })
+    expect((await p.poll()).unavailable).toContain('temporary')
+    fail = false
+    const first = await p.poll()
+    expect(first.sessions).toHaveLength(16)
+    expect(first.sessions.some(r => r.id === 'old-live')).toBe(true)
+    expect(historyCalls).toBe(0)
+    expect((await p.poll()).sessions).toHaveLength(21)
+  })
+})
+
+
+it('keeps the recent rows labeled partial when the history poll fails, then retries', async () => {
+  const { isInitialSnapshot } = await import('./boot-fleet')
+  const registry = Array.from({ length: 30 }, (_, i) => managed(`retry-${i}`, { createdAt: new Date(NOW - i * 1000).toISOString() }))
+  let fail = false
+  const p = createSessionsPoller({
+    initialSessionLimit: 15, backend: fakeBackend({ sessions: [] }),
+    readRegistry: async () => { if (fail) throw new Error('history temporarily unavailable'); return registry },
+    scanProcesses: async () => ({ procs: [] }), loadConversations: async () => [], now: () => NOW,
+  })
+  const first = await p.poll()
+  fail = true
+  const failed = await p.poll()
+  expect(failed.sessions.map(r => r.id)).toEqual(first.sessions.map(r => r.id))
+  expect(isInitialSnapshot(failed)).toBe(true)
+  fail = false
+  const full = await p.poll()
+  expect(full.sessions).toHaveLength(30)
+  expect(isInitialSnapshot(full)).toBe(false)
+})

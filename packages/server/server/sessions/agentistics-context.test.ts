@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { HARNESS_ORDER } from '@agentistics/core'
+import { AUTONOMOUS_ON_RULE, HARNESS_ORDER } from '@agentistics/core'
 import {
   CONTEXT_CLOSE, CONTEXT_HEADER, CONTEXT_LABEL, CONTEXT_OPEN, CONTEXT_SENT_NOTE, contextBlock, contextText, splitContextBlock, stripContextTurns,
   type ContextInput,
@@ -264,6 +264,13 @@ describe('role line follows the stored role', () => {
     expect(contextText({ ...base, role: 'worker' })).not.toContain(marker)
     expect(contextText({ ...base, role: 'leader' })).toContain('Becoming leader: call agentistics_session_role with role "leader"')
   })
+  test('a worker on a subtask is told how to report its Live step; a leader or a taskless worker is not', () => {
+    const w = contextText({ ...base, role: 'worker', taskId: 't1', subtaskId: 'sub1' })
+    expect(w).toContain('Live step:')
+    expect(w).toContain('agentistics_task_phase { subtaskId: "sub1", action: "step"')
+    expect(contextText({ ...base, role: 'worker', taskId: 't1' })).not.toContain('Live step:')
+    expect(contextText({ ...base, role: 'leader', taskId: 't1', subtaskId: 'sub1' })).not.toContain('Live step:')
+  })
   test('the leader briefing points at agentistics_session_role', () => {
     expect(contextText(base)).toContain('agentistics_session_role')
   })
@@ -281,36 +288,48 @@ describe('folders in the briefing', () => {
   })
 })
 
-describe('away mode in the briefing', () => {
+describe('autonomous mode in the briefing', () => {
   const NOW = Date.parse('2026-10-12T03:00:00.000Z')
   const away = { on: true, since: '2026-10-12T02:00:00.000Z', until: '2026-10-12T12:00:00.000Z', authorised: ['releases' as const], maxWorkers: 6, topCaps: {} }
   test('absent, off or expired: no line', () => {
-    expect(contextText({ ...base, now: NOW })).not.toContain('AWAY MODE')
-    expect(contextText({ ...base, now: NOW, away: { ...away, on: false } })).not.toContain('AWAY MODE')
-    expect(contextText({ ...base, now: Date.parse('2026-10-12T13:00:00Z'), away })).not.toContain('AWAY MODE')
+    expect(contextText({ ...base, now: NOW })).not.toContain('AUTONOMOUS MODE')
+    expect(contextText({ ...base, now: NOW, away: { ...away, on: false } })).not.toContain('AUTONOMOUS MODE')
+    expect(contextText({ ...base, now: Date.parse('2026-10-12T13:00:00Z'), away })).not.toContain('AUTONOMOUS MODE')
   })
   test('leader gets the decide-and-record line right after the role line', () => {
     const lines = contextText({ ...base, now: NOW, away, role: 'leader' }).split('\n')
-    const i = lines.findIndex(l => l.startsWith('AWAY MODE'))
+    const i = lines.findIndex(l => l.startsWith('AUTONOMOUS MODE'))
     expect(i).toBeGreaterThan(0)
     expect(lines[i - 1]).toContain('LEADER')
     expect(lines[i]).toContain('until 2026-10-12T12:00:00.000Z')
     expect(lines[i]).toContain('publish releases the leader has approved')
-    expect(lines.slice(i, i + 4).join('\n')).toContain('never end a turn on a question to the owner')
+    expect(lines.slice(i, i + 4).join('\n')).not.toContain('ask the owner')
+  })
+  test('the ON rule is printed exactly once per session (leader and worker, en and pt)', () => {
+    for (const role of ['leader', 'worker'] as const) {
+      for (const lang of ['en', 'pt'] as const) {
+        const text = contextText({ ...base, now: NOW, away, role, lang })
+        expect(text.split(AUTONOMOUS_ON_RULE[lang]).length - 1).toBe(1)
+        // The English rule also reaches a pt session through the away lines only if it is not already in the briefing.
+        expect(text.split(AUTONOMOUS_ON_RULE.en).length - 1).toBe(lang === 'en' ? 1 : 0)
+      }
+    }
   })
   test('on: pacing points at the plan-limits line already in the briefing (said once); off: every away line is gone', () => {
     const tools = [...CONTEXT_TOOL_NAMES]
     const onText = contextText({ ...base, now: NOW, away, role: 'leader', toolNames: tools })
-    expect(onText).toContain('Away pacing')
+    expect(onText).toContain('Autonomous pacing')
     expect(onText).toContain('apply the agentistics_plan_limits rule above')
     expect(onText.match(/5-hour window is at least 85%/g)).toHaveLength(1)
     const offText = contextText({ ...base, now: NOW, away: { ...away, on: false }, role: 'leader', toolNames: tools })
-    for (const w of ['AWAY MODE', 'Away pacing', 'Away quality', 'Away communication']) expect(offText).not.toContain(w)
+    for (const w of ['AUTONOMOUS MODE', 'Autonomous pacing', 'Autonomous quality', 'Autonomous communication']) expect(offText).not.toContain(w)
     expect(offText.match(/5-hour window is at least 85%/g)).toHaveLength(1)
   })
   test('worker is told to report to its leader, not the owner', () => {
     const t = contextText({ ...base, now: NOW, away, role: 'worker', parentId: 'p1' })
-    expect(t).toContain('Do not ask the owner anything')
+    expect(t).toContain('report ONLY to your leader')
+    expect(t).not.toContain('ask the owner')
+    expect(t).not.toContain('wait for approval')
   })
 })
 

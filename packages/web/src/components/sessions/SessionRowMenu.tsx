@@ -14,7 +14,6 @@ import { Pin } from 'lucide-react'
 import { isInsidePortalledMenu, menuMaxHeight, type MenuEntry } from '../../lib/rowMenu'
 import { useIsMobile } from '../../hooks/useIsMobile'
 import { RoleChip } from './RoleChip'
-import { BetaTag } from '../BetaTag'
 import { SESSION_ROW_MENU_Z } from '../../lib/zLayers'
 
 export interface SessionRowMenuProps {
@@ -30,13 +29,6 @@ export interface SessionRowMenuProps {
   triggerRef?: RefObject<HTMLElement | null>
 }
 
-/**
- * The entries that belong to the delivery board rather than to the session itself.
- *
- * `openTask` and `finishTask` were here and are gone with the verbs — a delivery is finished when
- * its session is STOPPED, which is where the question is asked now. Filing is what remains.
- */
-const TASK_ENTRIES = new Set<string>(['link-task', 'unlink-task'])
 
 export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, sessionList = false, triggerRef }: SessionRowMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -118,9 +110,6 @@ export function SessionRowMenu({ x, y, entries, onPick, onClose, below = false, 
             {e.detail && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-tertiary)' }}>{e.detail}</span>}
           </span>
           {e.checked && <span aria-hidden style={{ marginLeft: 'auto', flexShrink: 0, width: 12, color: 'var(--text-primary)', fontWeight: 700, textAlign: 'right' }}>✓</span>}
-          {/* Same rule as the three-dot menu: where the delivery board reaches into a session
-              surface, it says it is in beta. `link-task` is the entry that opens the picker. */}
-          {TASK_ENTRIES.has(e.action) && i === entries.findIndex(x => TASK_ENTRIES.has(x.action)) && <BetaTag what="Tasks" style={{ marginLeft: 'auto', flexShrink: 0 }} />}
         </button>
         </Fragment>
       ))}

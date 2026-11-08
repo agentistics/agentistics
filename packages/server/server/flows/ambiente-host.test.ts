@@ -83,6 +83,12 @@ describe('preflight (I5–I7, I16)', () => {
     expect(refused(await ambienteHostOps(d)['ambiente-preflight']({})).code).toBe('AMB_MEMORIA')
     expect(existsSync(join(d.dataDir, 'flows'))).toBe(false)
   })
+  test('I6 the memory floor is read from the INJECTED env, never the runner\'s own', async () => {
+    // `agentop run` sets AGENTISTICS_RUN_MIN_AVAILABLE_MB for the process running this suite; the
+    // floor used to be read from there, so the 2.5 GiB refusal above passed or failed by host.
+    const lowered = deps({ env: { XDG_RUNTIME_DIR: '/run/user/1', AGENTISTICS_RUN_MIN_AVAILABLE_MB: '1024' }, memAvailable: () => 2.5 * 1024 ** 3 })
+    expect(await ambienteHostOps(lowered)['ambiente-preflight']({})).toMatchObject({ ok: true })
+  })
   test('I7 the third ambiente is refused (AMBIENTE_MAX = 2)', async () => {
     const ops = ambienteHostOps(deps())
     expect(await ops['ambiente-preflight']({ noAr: 1 })).toMatchObject({ ok: true })

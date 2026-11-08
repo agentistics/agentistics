@@ -40,12 +40,17 @@
  */
 
 import { useEscapeOwner } from '../../lib/overlayStack'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ExternalLink, MoreHorizontal, Plus, Unlink, X } from 'lucide-react'
 import { microLabel, pill, surface } from './board'
 import { SessionRef } from './SessionRef'
 import { planSessionCell } from './sessionCellPlan'
+import { StateDot } from './StateDot'
+import { useMoney } from './money'
+import { dotRows, orderRows, summarize } from './sessionsPlan'
+import { sessionsCopy } from './sessionsCopy'
+import { usePlanRows } from './useSessionStates'
 import type { Lang } from './copy'
 import type { TaskSessionRow } from '../../lib/tasks'
 
@@ -136,8 +141,15 @@ export function SubtaskSessions(p: SubtaskSessionsProps) {
   const [step, setStep] = useState<MenuStep>('menu')
   const closeMenu = () => { menu.setOpen(false); setStep('menu') }
 
-  // Only ever opened when `plan.display.kind === 'multi'` — see the render below.
-  const list = usePopover(240)
+  const list = usePopover(260)
+  const sc = sessionsCopy(p.lang)
+  const [showEnded, setShowEnded] = useState(false)
+  const planRows = usePlanRows(plan.sessions)
+  const ordered = useMemo(() => orderRows(planRows), [planRows])
+  const summary = summarize(planRows)
+  const dots = dotRows(planRows)
+  const money = useMoney()
+  const endedCost = (() => { const e = summarize(planRows.filter(r => !r.alive)).costUSD; return e === null ? null : money(e, null) })()
 
   const runLink = () => { closeMenu(); p.onLink(p.subtaskId) }
   const runUnfile = (id: string) => { closeMenu(); p.onUnfile(id) }
@@ -145,56 +157,59 @@ export function SubtaskSessions(p: SubtaskSessionsProps) {
 
   return (
     <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, maxWidth: '100%' }}>
-      {/* One chip, exactly as before — still opens the session on its own click. It shrinks with the
-          column (the chip's label already ellipsises), so the actions button stays inside the cell. */}
-      {plan.display.kind === 'single' && (
-        <span style={{ minWidth: 0, flex: '0 1 auto', overflow: 'hidden', display: 'flex' }}><SessionRef
-          id={plan.display.session.id}
-          title={plan.display.session.label}
-          harness={plan.display.session.harness}
-          lang={p.lang}
-          historical={plan.display.session.historical === true}
-          onOpen={p.onOpen}
-        /></span>
-      )}
-
-      {/* Several: a compact count instead of an unbounded wrap of chips — its OWN small list still
-          lets you open each one, separately from the actions menu below. */}
-      {plan.display.kind === 'multi' && (
+      {/* Option A: dots for the ALIVE sessions + "N alive · M ended · cost". The dots are the only
+          thing that grows with the fleet and they are capped; the click opens ONE small list with the
+          alive sessions and the ended ones folded behind "see N ended". */}
+      {plan.display.kind !== 'empty' && (
         <button
           ref={list.triggerRef}
           onClick={list.toggle}
           className="ag-tap"
+          aria-expanded={list.open}
           style={{
-            ...pill(), cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5,
+            display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0, cursor: 'pointer',
+            fontFamily: 'inherit', fontSize: 11.5, borderRadius: 999, padding: '2px 8px',
             border: '1px solid var(--border)', background: 'var(--bg-elevated)', color: 'var(--text-secondary)',
           }}
         >
-          {plan.sessions.length} {pt ? 'sessões' : 'sessions'}
+          {dots.shown.map(r => <StateDot key={r.row.id} r={r} />)}
+          {dots.more > 0 && <span style={{ fontSize: 10.5 }}>+{dots.more}</span>}
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {sc.aliveShort(summary.alive)} · {sc.endedShort(summary.ended)}
+            {summary.costUSD !== null && ` · ${money(summary.costUSD, null)}`}
+          </span>
         </button>
       )}
 
-      {plan.display.kind === 'multi' && list.open && list.at && createPortal(
+      {plan.display.kind !== 'empty' && list.open && list.at && createPortal(
         <div
           ref={list.boxRef}
           style={{
-            position: 'fixed', left: list.at.left, top: list.at.top, width: 240, zIndex: 60,
-            ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 5,
+            position: 'fixed', left: list.at.left, top: list.at.top, width: 260, zIndex: 60,
+            ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 6,
             boxShadow: 'var(--shadow-elevated)', maxHeight: 'calc(60vh / var(--ui-zoom, 1))', overflowY: 'auto',
           }}
         >
           <span style={microLabel}>{pt ? 'Sessões' : 'Sessions'}</span>
-          {plan.sessions.map(s => (
-            <SessionRef
-              key={s.id}
-              id={s.id}
-              title={s.label}
-              harness={s.harness}
-              lang={p.lang}
-              historical={s.historical === true}
-              onOpen={p.onOpen ? id => { list.setOpen(false); p.onOpen!(id) } : undefined}
-            />
+          {(showEnded ? ordered : ordered.filter(r => r.alive)).map(r => (
+            <span key={r.row.id} style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <StateDot r={r} />
+              <SessionRef
+                id={r.row.id}
+                title={r.row.label}
+                harness={r.row.harness}
+                lang={p.lang}
+                historical={r.row.historical === true}
+                onOpen={p.onOpen ? id => { list.setOpen(false); p.onOpen!(id) } : undefined}
+              />
+            </span>
           ))}
+          {summary.ended > 0 && (
+            <button
+              onClick={() => setShowEnded(v => !v)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5, color: 'var(--anthropic-orange)', textAlign: 'left', padding: '2px 0' }}
+            >{showEnded ? sc.hideEnded : sc.seeEnded(summary.ended, endedCost)}</button>
+          )}
         </div>,
         document.body,
       )}

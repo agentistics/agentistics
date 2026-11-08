@@ -23,10 +23,13 @@ import {
 } from '@agentistics/core'
 import { AGENTISTICS_DATA_DIR, ANTIGRAVITY_DIR, CLAUDE_DIR, CODEX_DIR, CODEX_SESSIONS_DIR, COPILOT_DIR, GEMINI_DIR, HERMES_DIR, KIMI_DIR, OPENCODE_DIR } from './config'
 import {
-  bind, byId, canonicalAccountId, forceProbe, sameLogin, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
+  accountLoginState, bind, byId, canonicalAccountId, forceProbe, sameLogin, hasIdentityProbe, listHarnessAccounts, readAccounts, startSegment, type AccountsFile,
 } from './harness-accounts'
 import { allHistory, dropHistory, moveHistory, pointOf, recordHistory, type HistoryPoint, __resetPlanHistoryForTest } from './plan-history'
 import { withFileLock } from './sessions/file-lock'
+import { spawnRowsOf } from './sessions/spawn-account-io'
+import { accountCredentialBroken } from './account-credentials'
+import { agentUseView, type AgentUseView } from './agent-schedule-host'
 import { defaultHomeAccount, resolveSessionAccount } from './sessions/session-account'
 import { readTailBytes, windowLines } from './sessions/transcript-window'
 import { harnessSpawnabilities, type HarnessSpawnability } from './sessions/harness-spawnable'
@@ -497,6 +500,12 @@ export async function syncPlanLimitsFromFile(): Promise<number> {
   return n
 }
 
+/** Every record held, after taking in what another process wrote (the agent-schedule evaluator reads the weekly window). */
+export async function storedPlanLimits(): Promise<PlanLimits[]> {
+  await syncPlanLimitsFromFile()
+  return Object.values(state.limits)
+}
+
 const fileWatchers = new Set<ReturnType<typeof fsWatch>>()
 
 /** The server watches the shared file so a record another process wrote reaches the browser at once. */
@@ -765,7 +774,7 @@ export async function seedPlanLimits(structuredDir: string): Promise<void> {
   }
 }
 
-export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string; unassignedLive: number }
+export type AccountBudgetRow = ReturnType<typeof planBudget> & ReturnType<typeof planPace> & HarnessSpawnability & { account: string; accountLabel: string; yieldsTo?: string; unassignedLive: number; agentUse?: AgentUseView }
 
 export interface PlanLimitsPayload {
   /** Which harnesses can be spawned here; a harness hidden from agents is absent. */
@@ -929,6 +938,27 @@ export async function planLimitsPayload(
   const visibleBudgets = agentVisible(allBudgets, visibility)
   const shown = new Set(visibleBudgets)
   const hiddenFromAgents = allBudgets.filter(b => !shown.has(b))
+  // CONTAS.AGENDA-AGENTICA: each row says WHY its account is on or off for agents (schedule, manual).
+  {
+    const stored = Object.values(state.limits), at = new Date(nowMs), spawnRows = spawnRowsOf(registry)
+    for (const b of allBudgets) {
+      const rec = registry.accounts.find(a => a.id === canonicalAccountId(registry, b.account))
+      const view = rec ? agentUseView(rec, stored, at) : undefined
+      if (view) b.agentUse = view
+      // A login that is gone (signed out, expired, or a root whose credential file is missing / empty /
+      // invalid) cannot take a session: the router must not recommend it, and the row says why.
+      const row = rec ? spawnRows.find(r => r.id === rec.id) : undefined
+      const login = rec ? accountLoginState(rec, row?.bound ?? false, row?.bound ? accountCredentialBroken(rec, row.root) : false) : undefined
+      if (login === 'expired' || login === 'signed_out') {
+        b.spawnable = false
+        b.unavailableReason = login === 'expired'
+          ? `${b.accountLabel}'s login expired: sign in again to use it`
+          : `${b.accountLabel} has no login: sign in again to use it`
+        b.freeSlots = 0
+        b.suggestedParallel = 0
+      }
+    }
+  }
   // Only rows agents may see compete, and only an account the registry says is the same login.
   const recordOf = (id: string) => registry.accounts.find(a => a.id === id)
   const sameAccount = (x: string, y: string) => {
@@ -999,7 +1029,31 @@ export async function planLimitsPayload(
       .filter(a => a.harness === h && !a.retired)
     return live.length > 0 && live.every(a => !a.available)
   }
-  const publicHarnesses = Object.fromEntries(Object.entries(spawnability).filter(([h]) => !hiddenOutright(h as HarnessId))) as Partial<Record<HarnessId, HarnessSpawnability>>
+  // F3: an all-OFF harness whose every account is off BY SCHEDULE is named, not spawnable, with the
+  // reason — "nothing right now" is not "nothing exists". A manual OFF still hides it outright.
+  const SCHEDULE_OFF: Partial<Record<string, string>> = {
+    'outside-window': 'outside its scheduled hours', 'day-off': 'a day off in its schedule',
+    'daily-cap': 'its daily ceiling was reached', 'weekly-cap': 'its weekly ceiling was reached',
+  }
+  const scheduleOffReason = (h: HarnessId): string | undefined => {
+    const ids = new Set(visibility.map(a => a.id))
+    const live = [...visibility, ...registry.accounts.filter(a => !ids.has(a.id))].filter(a => a.harness === h && !a.retired)
+    const at = new Date(nowMs), stored = Object.values(state.limits)
+    const reasons: string[] = []
+    for (const a of live) {
+      const rec = registry.accounts.find(r => r.id === a.id)
+      const r = rec ? SCHEDULE_OFF[agentUseView(rec, stored, at)?.reason ?? ''] : undefined
+      if (!r) return undefined
+      if (!reasons.includes(r)) reasons.push(r)
+    }
+    return reasons.length ? `every ${h} account is off for agents right now: ${reasons.join('; ')}` : undefined
+  }
+  const publicHarnesses: Partial<Record<HarnessId, HarnessSpawnability>> = {}
+  for (const [h, v] of Object.entries(spawnability) as [HarnessId, HarnessSpawnability][]) {
+    if (!hiddenOutright(h)) { publicHarnesses[h] = v; continue }
+    const why = scheduleOffReason(h)
+    if (why) publicHarnesses[h] = { spawnable: false, unavailableReason: why }
+  }
   return { harnesses: publicHarnesses, limits, registered, budgets, hiddenFromAgents, readings, freeSlots, freeSlotsByHarness, freeSlotsByAccount, unassignedLive, liveSessions: publicLiveSessions, ...(pauseUntil !== undefined ? { pauseUntil } : {}), now: nowMs }
 }
 

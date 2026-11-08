@@ -113,3 +113,18 @@ test("plan limits MCP tool passes scoped fields through untouched", async () => 
   const qa = planLimitsTool({ kind: "qa", authorHarness: "claude" }, { budgets: [budget], now });
   expect(qa.recommendation?.scope).not.toBe("anthropic+openai");
 });
+
+test("plan limits MCP tool states the schedule's effective state and reason per account, without labels", () => {
+  const now = Date.parse("2026-11-02T12:00:00Z");
+  const out = planLimitsTool(undefined, {
+    budgets: [{ harness: "claude", account: "acc_on", accountLabel: "x@y", agentUse: { on: true, reason: "in-window", dayUsedPct: 3 } }],
+    hiddenFromAgents: [
+      { harness: "claude", account: "acc_off", accountLabel: "secret@mail", agentUse: { on: false, reason: "outside-window", dayUsedPct: 0 } },
+      { harness: "codex", account: "acc_plain", accountLabel: "z" },
+    ],
+    now,
+  });
+  expect(out.budgets[0].agentUse.reason).toBe("in-window");
+  expect(out.offBySchedule).toEqual([{ harness: "claude", account: "acc_off", reason: "outside-window" }]);
+  expect(JSON.stringify(out)).not.toContain("secret@mail");
+});

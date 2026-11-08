@@ -22,6 +22,8 @@ import { opInit } from './ops'
 import { uiReply } from './ui-sentence'
 import { handlePersonalHttp } from './personal-http'
 import { handlePhoneHttp } from './phone-http'
+import { passwordInput, withVaultPassword } from './password-context'
+import { isUnlockMethod } from '@agentistics/vault'
 
 export interface VaultHttpEnv {
   /** CORS headers the host adds to every answer. */
@@ -116,8 +118,19 @@ function addHeartbeatCookie(response: Response, token: string | null): Response 
   return response
 }
 
-/** Answers a `/api/vault*` request, or `null` for a path that is not one of ours. */
+/**
+ * Answers a `/api/vault*` request, or `null` for a path that is not one of ours.
+ *
+ * COFRE.DESBLOQUEIO: a vault protected by its own password asks for it wherever a gesture would be
+ * asked. The page sends it in `x-vault-password` (never in a URL, never in a cookie); it is held for
+ * THIS request only (password-context.ts) and read by nothing but the password protector.
+ */
 export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv): Promise<Response | null> {
+  if (!url.pathname.startsWith('/api/vault')) return null
+  return withVaultPassword(passwordInput(req.headers.get('x-vault-password')), () => handleVaultHttpInner(req, url, env))
+}
+
+async function handleVaultHttpInner(req: Request, url: URL, env: VaultHttpEnv): Promise<Response | null> {
   const json = { ...env.cors, 'Content-Type': 'application/json' }
   const noStore = { ...json, 'Cache-Control': 'no-store' }
   const grant = req.headers.get('x-vault-grant')
@@ -163,9 +176,9 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
     return send({ ...(await readVaultView(undefined, undefined, session, loopback)) }, 200, noStore)
   }
   if (path === '/api/vault/stepup' && req.method === 'POST') {
-    const b = await body()
-    if (!str(b.code, 16)) return bad()
-    return reply(await gate.stepUpForRead(b.code, session))
+    // COFRE.DESBLOQUEIO: no code — the person's proof (a gesture here, or the vault password header).
+    await body()
+    return reply(await gate.stepUpForRead({ session, loopback }))
   }
   if (path === '/api/vault/extend' && req.method === 'POST') {
     const b = await body()
@@ -180,7 +193,7 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   }
   if (path === '/api/vault/lock' && req.method === 'POST') {
     const b = await body()
-    const r = await lockVaultNow({ grant, session, code: codeOf(b) })
+    const r = await lockVaultNow({ grant, session, loopback, code: codeOf(b) })
     return r.ok
       ? addHeartbeatCookie(send({ ok: true, vault: await readVaultView([], async () => [], session, loopback) }, 200, noStore), null)
       : send({ error: r.error, code: r.code, sentence: r.error }, statusOf(r.code), noStore)
@@ -230,16 +243,16 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   }
   if (path === '/api/vault/auto-lock' && req.method === 'POST') {
     const b = await body()
-    return reply(await gate.setAutoLockMinutes(b.minutes, { grant, session, code: codeOf(b) }))
+    return reply(await gate.setAutoLockMinutes(b.minutes, { grant, session, loopback, code: codeOf(b) }))
   }
   if (path === '/api/vault/confirm-each-use' && req.method === 'POST') {
     const b = await body()
-    return reply(await gate.setConfirmEachUse(b.enabled, { grant, session, code: codeOf(b) }))
+    return reply(await gate.setConfirmEachUse(b.enabled, { grant, session, loopback, code: codeOf(b) }))
   }
   if (path === '/api/vault/unlock-policy' && req.method === 'POST') {
     // Owner decision 2026-10-02: changing what an unlock asks costs the code AND the gesture, fresh.
     const b = await body()
-    return reply(await gate.setUnlockPolicy({ mode: b.mode, hours: b.hours }, { grant, session, code: codeOf(b) }))
+    return reply(await gate.setUnlockPolicy({ mode: b.mode, hours: b.hours }, { grant, session, loopback, code: codeOf(b) }))
   }
   if (path === '/api/vault/auth-policy' && req.method === 'POST') {
     // Owner decision 2026-10-06: which proof each kind of action asks. The new policy is parsed (a
@@ -354,8 +367,8 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   }
   if (path === '/api/vault/presence/probe' && req.method === 'POST') {
     const b = await body()
-    if (b.protector !== 'hello' && b.protector !== 'fido2') return bad()
-    return reply(await gate.probePresence(b.protector, { code: codeOf(b), session, loopback }))
+    if (!isUnlockMethod(b.protector)) return bad()
+    return reply(await gate.probePresence(b.protector, { code: codeOf(b), session, loopback, ...(str(b.setupCode, 16) ? { setupCode: b.setupCode } : {}) }))
   }
   if (path === '/api/vault/presence/progress' && req.method === 'GET') {
     // Polled by the page while its probe / enrolment request is in flight: "confirmation i of n".
@@ -363,9 +376,9 @@ export async function handleVaultHttp(req: Request, url: URL, env: VaultHttpEnv)
   }
   if (path === '/api/vault/presence/enroll' && req.method === 'POST') {
     const b = await body()
-    if (b.protector !== 'hello' && b.protector !== 'fido2') return bad()
+    if (!isUnlockMethod(b.protector)) return bad()
     // The 24 words are never accepted here; a page may only choose NEW words (leader decision 2).
-    const r = await gate.enrolPresence(b.protector, { code: codeOf(b), session, loopback, ...(b.replaceRecovery === true ? { replaceRecovery: true } : {}) })
+    const r = await gate.enrolPresence(b.protector, { code: codeOf(b), session, loopback, ...(str(b.setupCode, 16) ? { setupCode: b.setupCode } : {}), ...(b.replaceRecovery === true ? { replaceRecovery: true } : {}) })
     return reply(r.ok ? { ok: true, removed: r.removed, recoveryOwed: r.recoveryOwed, ...('held' in r && r.held ? { held: true } : {}) } : r)
   }
   if (path === '/api/vault/presence/disable' && req.method === 'POST') {

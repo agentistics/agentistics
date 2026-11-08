@@ -26,20 +26,6 @@ describe('the quick vault views point to the full list', () => {
   })
 })
 
-describe('the header button', () => {
-  const btn = readFileSync(join(import.meta.dir, '..', 'components', 'vault', 'VaultHeaderButton.tsx'), 'utf8')
-  test('the icon is never orange — no active/route colour override', () => {
-    expect(btn).not.toContain('anthropic-orange')
-    expect(btn).not.toContain('useLocation')
-  })
-  test('the badge sits where the bell wears its own (top-right, -5/-5, 16 px)', () => {
-    const bell = readFileSync(join(import.meta.dir, '..', 'components', 'NotificationBell.tsx'), 'utf8')
-    expect(bell).toContain('top: -5, right: -5')
-    expect(btn).toContain('top: -5, right: -5, width: 16, height: 16')
-    expect(btn).not.toContain('bottom: -5')
-  })
-})
-
 describe('the locked /vault page', () => {
   test('has no page header — the safe in the centre is the title', () => {
     const branch = src.slice(src.indexOf("if (state.kind === 'locked') {"), src.indexOf("if (state.kind === 'code')"))

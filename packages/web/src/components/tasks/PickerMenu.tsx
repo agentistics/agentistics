@@ -63,6 +63,8 @@ interface PickerMenuBase {
   children: React.ReactNode
   title: string
   width?: number
+  /** Ceiling in px; the panel is also clamped to the room left under its trigger. */
+  maxHeight?: number
   triggerStyle?: React.CSSProperties
   /** The reader's language, for the ▲▼ buttons' own `aria-label`s — everything else here (the
    *  title, the note, the trigger's contents) is already text the caller passes in, already
@@ -79,13 +81,15 @@ interface PickerMenuBase {
  * SAME panel, so every popover on the task screens opens, flips and closes the same way.
  */
 export function PanelMenu({
-  children, title, width = 250, triggerStyle, triggerClassName, ariaLabel, align = 'left', render, onOpenChange,
+  children, title, width = 250, maxHeight = 380, triggerStyle, triggerClassName, ariaLabel, align = 'left', render, onOpenChange,
 }: {
   /** The trigger's contents. */
   children: React.ReactNode
   /** A micro-label on top of the panel; absent draws none. */
   title?: string
   width?: number
+  /** Ceiling in px; also clamped to the room left under the trigger. */
+  maxHeight?: number
   triggerStyle?: React.CSSProperties
   /** e.g. `ag-tap`, to project the 44px touch hit area around a small trigger. */
   triggerClassName?: string
@@ -101,6 +105,12 @@ export function PanelMenu({
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v) }
+  const wasOpen = useRef(false)
+  // Closing hands focus back to the button that opened the panel (Esc, outside click, a row that acts).
+  useEffect(() => {
+    if (wasOpen.current && !open) trigger.current?.focus()
+    wasOpen.current = open
+  }, [open])
 
   useEscapeOwner(open, () => setOpen(false))
   useEffect(() => {
@@ -147,7 +157,7 @@ export function PanelMenu({
           <div ref={panel} role="dialog" aria-label={title ?? ariaLabel} style={{
             position: 'fixed', left: at.left, top: at.top, width: Math.min(width, window.innerWidth - 16), zIndex: 1200,
             ...surface, background: 'var(--bg-elevated)', padding: 8, display: 'grid', gap: 2,
-            boxShadow: 'var(--shadow-elevated)', maxHeight: 380, overflowY: 'auto',
+            boxShadow: 'var(--shadow-elevated)', maxHeight: `min(${maxHeight}px, ${Math.max(160, window.innerHeight - at.top - 8)}px)`, overflowY: 'auto',
           }}>
             {title && <div style={{ ...microLabel, marginBottom: 3 }}>{title}</div>}
             {render(() => setOpen(false))}

@@ -94,6 +94,14 @@ export interface ChatTurn {
      * be clicked. Measured on a live session afterwards: 257 tool calls, zero with a ref.
      */
     ref?: string
+    /**
+     * What the call PRINTED, when the source carries it inline — an ACP `tool_call_update`'s
+     * `rawOutput.output` / text `content` (opencode, kimi, gemini, copilot). TRIMMED by the source to
+     * its tail (`TOOL_OUTPUT_MAX`) with a leading `…` when cut, so a build log never rides a chat
+     * delta whole. The chat row shows it collapsed, opened on demand. Absent = the source said
+     * nothing about the output (not "it printed nothing").
+     */
+    output?: string
   }>
   /**
    * The assistant's extended thinking, when the transcript carries it.

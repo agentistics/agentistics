@@ -20,6 +20,19 @@ import type { UsageBudgetRow } from './usagePlan'
  */
 export const accountLabelKey = (harness: string, account: string): string => `${harness}:${account}`
 
+/**
+ * PURE. The label a person gave an account, or the raw id only when nobody named it. Tries the
+ * harness-scoped key first, then any harness's label for that id (a live agent's harness id can differ in
+ * spelling from the registered one, and an account id is an opaque string nobody should read).
+ */
+export function accountDisplayName(labels: Record<string, string>, harness: string, account: string): string {
+  const exact = labels[accountLabelKey(harness, account)]
+  if (exact) return exact
+  const suffix = `:${account}`
+  for (const k of Object.keys(labels)) if (k.endsWith(suffix) && labels[k]) return labels[k]!
+  return account
+}
+
 export type RegisteredPlan = { harness: PlanLimits['harness']; plan: string; account?: string; accountLabel?: string }
 export interface PlanReadings {
   account: string
@@ -208,6 +221,7 @@ export const SOURCE_LABEL: Record<PlanLimitSource, { pt: string; en: string }> =
   'codex-rollout': { pt: 'registro da sessão do Codex', en: 'Codex session log' },
   'codex-app-server': { pt: 'protocolo do Codex', en: 'Codex protocol' },
   'antigravity-quota-api': { pt: 'cota do Antigravity', en: 'Antigravity quota' },
+  'opencode-cost-estimate': { pt: 'custo das respostas do OpenCode (estimado)', en: 'OpenCode response costs (estimated)' },
 }
 
 /** "12 min", "3 h 05", "2 d 4 h". */
@@ -226,6 +240,16 @@ export function fmtWhen(ms: number, now: number, lang: Lang): string {
   if (new Date(now).toDateString() === d.toDateString()) return time
   const day = d.toLocaleDateString(lang === 'pt' ? 'pt-BR' : 'en-US', ms - now < 7 * 86_400_000 ? { weekday: 'short' } : { day: '2-digit', month: '2-digit' })
   return `${day.replace('.', '')} ${time}`
+}
+
+/**
+ * The one-line reset under a ring of the usage popup: "zera 18:40" / "zera sex 09:00" (local time),
+ * `null` when it is not known — a window already renewed has no reset the reading can state, and a
+ * missing or non-finite `resetsAt` says nothing. Never a guessed time.
+ */
+export function ringResetPhrase(w: PlanLimitWindow, now: number, lang: Lang): string | null {
+  if (windowRenewed(w, now) || !Number.isFinite(w.resetsAt) || w.resetsAt <= now) return null
+  return `${lang === 'pt' ? 'zera' : 'resets'} ${fmtWhen(w.resetsAt, now, lang)}`
 }
 
 /** "renova 14:30 (em 2 h 10)" / "renovou" */
@@ -287,7 +311,7 @@ export interface SubscriptionRow {
 }
 
 /** "All subscriptions": every reading, plus every registered plan that has none yet (no ring, no zero). */
-export function subscriptionRows(limits: PlanLimits[] | null, registered: RegisteredPlan[], labels: Record<string, string> = {}): SubscriptionRow[] {
+export function subscriptionRows(limits: PlanLimits[] | null, registered: RegisteredPlan[], labels: Record<string, string> = {}, accounts: readonly { harness: PlanLimits['harness']; id: string; label?: string }[] = []): SubscriptionRow[] {
   const found = new Set((limits ?? []).map(l => l.harness))
   const foundAccount = new Set((limits ?? []).map(l => `${l.harness}:${l.account}`))
   const rows: (SubscriptionRow & { account?: string })[] = [
@@ -296,6 +320,13 @@ export function subscriptionRows(limits: PlanLimits[] | null, registered: Regist
       .filter(r => (r.account ? !foundAccount.has(`${r.harness}:${r.account}`) : !found.has(r.harness)))
       .map(r => ({ harness: r.harness, plan: r.plan as string | undefined, limits: null, accountLabel: r.accountLabel, ...(r.account ? { account: r.account } : {}) })),
   ]
+  // Registry accounts with no plan reading and no registered plan: still listed (switch + agenda), so
+  // an account switched off by its schedule is not reachable only from Usage → Accounts.
+  const listed = new Set(rows.filter(r => r.account).map(r => `${r.harness}:${r.account}`))
+  for (const a of accounts) {
+    if (!a.id || listed.has(`${a.harness}:${a.id}`)) continue
+    rows.push({ harness: a.harness, plan: undefined, limits: null, accountLabel: a.label, account: a.id })
+  }
   const named = rows.map(r => {
     const { account } = r
     const label = (account ? labels[accountLabelKey(r.harness, account)] : undefined) ?? r.accountLabel
