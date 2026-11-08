@@ -21,12 +21,14 @@ import { menuRowStyle, PanelMenu } from './PickerMenu'
 const WORDS = (pt: boolean) => pt ? {
   filters: 'Filtros', actions: 'Visão e ações', tabs: 'O que mostrar',
   tab: { active: 'Em andamento', queue: 'Na fila', published: 'Publicado', all: 'Tudo' } as Record<LiveTab, string>,
+  tabShort: { active: 'Andamento', queue: 'Fila', published: 'Publicado', all: 'Tudo' } as Record<LiveTab, string>,
   sort: 'Ordenar',
   sorts: { priority: 'Prioridade', 'time-in-stage': 'Tempo na etapa', recent: 'Mais recente' } as Record<LiveSortId, string>,
   sortNote: 'Prioridade: da mais alta para a mais baixa; empate pelo que está há mais tempo na etapa.',
 } : {
   filters: 'Filters', actions: 'View and actions', tabs: 'What to show',
   tab: { active: 'In progress', queue: 'Queued', published: 'Published', all: 'All' } as Record<LiveTab, string>,
+  tabShort: { active: 'Active', queue: 'Queued', published: 'Published', all: 'All' } as Record<LiveTab, string>,
   sort: 'Sort',
   sorts: { priority: 'Priority', 'time-in-stage': 'Time in stage', recent: 'Most recent' } as Record<LiveSortId, string>,
   sortNote: 'Priority: highest first; a tie goes to the card that has been in the stage longest.',
@@ -70,8 +72,8 @@ export function LiveToolbar({
           {taskFilter}
           <div data-live-tabs style={mobile ? { minWidth: 0, flex: '1 1 100%' } : { flex: '0 0 auto', width: 'max-content', minWidth: 'max-content' }}>
             <TabStrip<LiveTab>
-              tabs={LIVE_TABS} value={tab} onPick={onTab} label={t => w.tab[t]} count={t => counts[t]}
-              ariaLabel={w.tabs} flush {...(mobile ? { tap: 44, variant: 'underline' as const, gap: 8 } : { natural: true })}
+              tabs={LIVE_TABS} value={tab} onPick={onTab} label={t => (mobile ? w.tabShort : w.tab)[t]} count={t => counts[t]}
+              ariaLabel={w.tabs} flush {...(mobile ? { tap: 44, variant: 'underline' as const, gap: 12 } : { natural: true })}
             />
           </div>
         </div>

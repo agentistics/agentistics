@@ -4,8 +4,7 @@ import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
 
 /**
- * QA LIVE.FILTROS-V2 (e3dce1394). Bug found by this QA, fixed in round 2:
- * it into a plain `test`. On the desktop, a tab with nothing to show draws nine sideways column names and no sentence
+ * QA LIVE.FILTROS-V2 (e3dce1394). Bug found by this QA, fixed in round 2. On the desktop, a tab with nothing to show draws nine sideways column names and no sentence
  * (the phone says "Nada nesta etapa"); "Em andamento" is the tab the screen OPENS on, so this is the first thing a person
  * sees on a quiet machine, and it reads as a board that failed to load.
  */

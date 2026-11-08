@@ -76,7 +76,7 @@ export const LIVE_SORTS: readonly LiveSortId[] = ['priority', 'time-in-stage', '
 export const LIVE_SORT_DEFAULT: LiveSortId = 'priority'
 
 /** The slice of a delivery the order reads. */
-export interface LiveSortable { key: string; priority?: string | null; stageSinceMs: number | null; old?: boolean }
+export interface LiveSortable { key: string; priority?: string | null; stageSinceMs: number | null; old?: boolean; stage?: string; deliveredAtMs?: number | null }
 
 /**
  * PURE: 0 = urgent … last = low. Absent, a legacy `none` and an unknown word rank as `low`, exactly as
@@ -97,12 +97,16 @@ const longestInStage = (a: LiveSortable, b: LiveSortable): number =>
  *   - `time-in-stage` longest in the stage first.
  *   - `recent`        entered the stage most recently first.
  */
+/** Inside Publicado the default order is the most recently PUBLISHED first; 0 when it is not two published pieces (or a tie). */
+const publishedFirst = (a: LiveSortable, b: LiveSortable): number =>
+  a.stage === 'published' && b.stage === 'published' ? (b.deliveredAtMs ?? 0) - (a.deliveredAtMs ?? 0) : 0
+
 export function liveComparator(sort: LiveSortId): (a: LiveSortable, b: LiveSortable) => number {
   const inner = ((): ((a: LiveSortable, b: LiveSortable) => number) => {
     switch (sort) {
       case 'time-in-stage': return (a, b) => longestInStage(a, b) || a.key.localeCompare(b.key)
       case 'recent': return (a, b) => (b.stageSinceMs ?? -Infinity) - (a.stageSinceMs ?? -Infinity) || a.key.localeCompare(b.key)
-      default: return (a, b) => priorityRank(a.priority) - priorityRank(b.priority) || longestInStage(a, b) || a.key.localeCompare(b.key)
+      default: return (a, b) => publishedFirst(a, b) || priorityRank(a.priority) - priorityRank(b.priority) || longestInStage(a, b) || a.key.localeCompare(b.key)
     }
   })()
   // Whatever the sort, inside a column the current cards come before the "antiga" ones: an old legacy review is old BY
@@ -113,4 +117,34 @@ export function liveComparator(sort: LiveSortId): (a: LiveSortable, b: LiveSorta
 /** PURE: a stored/typed sort id → a known one (anything else is the default). */
 export function parseLiveSort(raw: unknown): LiveSortId {
   return (LIVE_SORTS as readonly unknown[]).includes(raw) ? raw as LiveSortId : LIVE_SORT_DEFAULT
+}
+
+/** What the cap cut, in the shape both the server's view and the screen read (structural: core never imports the server's reply). */
+export interface LiveCutFacts {
+  /** Pieces the per-kind cap cut, per task. */
+  cutByTask?: Record<string, { title: string; history: number; oldReviews: number }>
+  /** The kept history's oldest publication (null when none). */
+  oldestKeptMs: number | null
+  /** The board-wide cut counts, used when no filter narrows the answer. */
+  wholeHistory: number
+  wholeOld: number
+}
+
+/**
+ * PURE: how many pieces the cap left out of THIS answer. Without a filter it is the board's own cut; under a task
+ * (`match`), a `stage` or a stalled-only filter only the cut pieces that match count — a task that lost nothing says
+ * nothing. History is `published`, old reviews are `leader`. Stalled-only matches none (cut pieces are old, no live agent).
+ */
+export function liveCapOmitted(o: { facts: LiveCutFacts; tab: LiveTab; period: LivePeriod; nowMs: number; match?: (taskId: string, title: string) => boolean; stage?: string; stalledOnly?: boolean }): number {
+  const { facts: f } = o
+  const filtered = Boolean(o.match || (o.stage && o.stage !== 'all') || o.stalledOnly)
+  const cut = (kind: 'history' | 'oldReviews', stage: string, whole: number): number => {
+    if (!filtered) return whole
+    if (o.stalledOnly || (o.stage && o.stage !== 'all' && o.stage !== stage)) return 0
+    return Object.entries(f.cutByTask ?? {}).reduce((n, [id, c]) => n + (!o.match || o.match(id, c.title) ? c[kind] : 0), 0)
+  }
+  const history = cut('history', 'published', f.wholeHistory)
+  const historyMatters = history > 0 && (o.tab === 'published' || o.tab === 'all')
+    && (o.period === 'all' || (f.oldestKeptMs !== null && inPublishedPeriod(f.oldestKeptMs, o.period, o.nowMs)))
+  return (historyMatters ? history : 0) + (o.tab === 'all' ? cut('oldReviews', 'leader', f.wholeOld) : 0)
 }

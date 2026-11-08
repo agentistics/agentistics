@@ -9,7 +9,7 @@ const d = (over: Partial<LiveDelivery>): LiveDelivery => ({
   lastAction: null, blockedReason: null, deliveredAtMs: null, priority: 'low',
   workMs: null, efforts: [], trail: [], stageEta: { kind: 'none', reason: 'no-history' }, publishEta: { kind: 'none', reason: 'no-history' }, block: null, ci: null, step: null, ...over,
 })
-const reply = (ds: LiveDelivery[]): LiveReply => ({ generatedAt: 'x', deliveries: ds, samples: 0, hidden: [], archived: [], archivedTotal: 0, sessionTasks: {} })
+const reply = (ds: LiveDelivery[]): LiveReply => ({ generatedAt: 'x', deliveries: ds, samples: 0, hidden: [], sessionTasks: {} })
 const row = (id: string, state: string, x: Partial<FleetRowLite> = {}): FleetRowLite => ({ id, title: id, harness: 'claude', state, ...x })
 
 describe('describeLive', () => {

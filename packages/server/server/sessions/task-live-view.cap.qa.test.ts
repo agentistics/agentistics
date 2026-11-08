@@ -3,8 +3,7 @@ import { describeLive } from './task-live-view'
 import type { LiveDelivery, LiveReply } from './task-live'
 
 /**
- * QA LIVE.FILTROS-V2 round 2 (48d03652a). `test.failing` = a bug found by this QA: once fixed, bun reports it and the fix turns
- * it into a plain `test`. `view.capped` is the whole board's number, but the sentence around it (tool description, screen) says
+ * QA LIVE.FILTROS-V2 round 2 (48d03652a); fixed in round 3. `view.capped` is the whole board's number, but the sentence around it (tool description, screen) says
  * THIS answer's count is not the total. Measured on the copy of the real board, MCP and GET alike:
  *   task=t-9e7f358801  → published 62, recount from tasks.json 62, none of it cut, `capped {cap:400, omitted:109}`
  *   stage=queue        → 8 pieces, a stage the cap never touches, `capped {cap:400, omitted:109}`
@@ -21,13 +20,13 @@ const d = (over: Partial<LiveDelivery>): LiveDelivery => ({
 
 const capped = (filters: object) => describeLive({
   // 2 kept (both of task `kept`), 100 more existed: none of those is `kept`'s, because every one of its pieces is in the list.
-  reply: { generatedAt: 'x', deliveries: [d({ key: 'q', taskId: 'kept', stage: 'queue', deliveredAtMs: null })], samples: 0, hidden: [], archived: [], archivedTotal: 0, sessionTasks: {},
-    history: [d({ key: 'a', taskId: 'kept' }), d({ key: 'b', taskId: 'kept' })], historyTotal: 102 } as LiveReply,
+  reply: { generatedAt: 'x', deliveries: [d({ key: 'q', taskId: 'kept', stage: 'queue', deliveredAtMs: null })], samples: 0, hidden: [], sessionTasks: {},
+    history: [d({ key: 'a', taskId: 'kept' }), d({ key: 'b', taskId: 'kept' })], historyTotal: 102, cutByTask: { other: { title: 'Other', history: 100, oldReviews: 0 } } } as LiveReply,
   rows: [], leaderIds: new Set(), nowMs: NOW, filters,
 }).view.capped
 
 describe('the cap notice speaks of THIS answer', () => {
   test('sanity: no filter, the board\'s own cut is stated', () => expect(capped({ tab: 'all', period: 'all' })).toEqual({ cap: 400, omitted: 100 }))
-  test.failing('a stage the cap never touches claims no cut', () => expect(capped({ tab: 'all', period: 'all', stage: 'queue' })).toBeNull())
-  test.failing('a task that lost nothing to the cap claims no cut', () => expect(capped({ tab: 'published', period: 'all', task: 'kept' })).toBeNull())
+  test('a stage the cap never touches claims no cut', () => expect(capped({ tab: 'all', period: 'all', stage: 'queue' })).toBeNull())
+  test('a task that lost nothing to the cap claims no cut', () => expect(capped({ tab: 'published', period: 'all', task: 'kept' })).toBeNull())
 })

@@ -10,7 +10,7 @@
  */
 
 import {
-  humanizeAction, inPublishedPeriod, liveComparator, LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, liveTabCounts, liveTabMatches, plainLeaderName,
+  humanizeAction, inPublishedPeriod, liveCapOmitted, type LiveCutFacts, liveComparator, LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, liveTabCounts, liveTabMatches, plainLeaderName,
   type LiveLang, type LivePeriod, type LiveSortId, type LiveTab,
 } from '@agentistics/core'
 import { HISTORY_CAP, LIVE_STAGES, type LiveDelivery, type LiveReply, type LiveStage } from './task-live'
@@ -113,7 +113,7 @@ export interface LiveView {
    * names the ones that did). `capped` is set when the per-kind cap left older pieces out of this answer, so a
    * count is never mistaken for the total: `omitted` pieces are missing, the oldest ones.
    */
-  view: { tab: LiveTab; period: LivePeriod; counts: Record<LiveTab, number>; defaulted: string[]; capped: { cap: number; omitted: number } | null }
+  view: { tab: LiveTab; period: LivePeriod; counts: Record<LiveTab, number>; defaulted: string[]; capped: { cap: number; omitted: number } | null; capFacts: LiveCutFacts }
   leaders: LeaderView[]
 }
 
@@ -232,13 +232,18 @@ export function describeLive(o: {
   // The 400-per-kind cap cuts the OLDEST published / old-review pieces. Say so when the cut could matter for this
   // tab and period, so a count never passes as the total.
   const keptHistory = o.reply.history ?? []
-  const omittedHistory = Math.max(0, (o.reply.historyTotal ?? keptHistory.length) - keptHistory.length)
-  const oldestKept = keptHistory.reduce<number | null>((m, d) => d.deliveredAtMs === null ? m : m === null ? d.deliveredAtMs : Math.min(m, d.deliveredAtMs), null)
-  const historyMatters = omittedHistory > 0 && (tab === 'published' || tab === 'all')
-    && (period === 'all' || (oldestKept !== null && inPublishedPeriod(oldestKept, period, o.nowMs)))
   const keptOld = o.reply.oldReviews ?? []
-  const omittedOld = tab === 'all' ? Math.max(0, (o.reply.oldReviewsTotal ?? keptOld.length) - keptOld.length) : 0
-  const omitted = (historyMatters ? omittedHistory : 0) + omittedOld
+  const oldestKept = keptHistory.reduce<number | null>((m, d) => d.deliveredAtMs === null ? m : m === null ? d.deliveredAtMs : Math.min(m, d.deliveredAtMs), null)
+  const capFacts: LiveCutFacts = {
+    cutByTask: o.reply.cutByTask, oldestKeptMs: oldestKept,
+    wholeHistory: Math.max(0, (o.reply.historyTotal ?? keptHistory.length) - keptHistory.length),
+    wholeOld: Math.max(0, (o.reply.oldReviewsTotal ?? keptOld.length) - keptOld.length),
+  }
+  const omitted = liveCapOmitted({
+    facts: capFacts,
+    tab, period, nowMs: o.nowMs, stage: f.stage, stalledOnly: f.stalledOnly,
+    match: needle ? (id, title) => id === f.task || title.toLowerCase().includes(needle) : undefined,
+  })
   const capped = omitted > 0 ? { cap: HISTORY_CAP, omitted } : null
 
   return {
@@ -250,7 +255,7 @@ export function describeLive(o: {
       stalled: active.filter(d => d.stalled).length,
       nextEta: etas[0] ?? null,
     },
-    deliveries, view: { tab, period, counts, defaulted, capped }, leaders,
+    deliveries, view: { tab, period, counts, defaulted, capped, capFacts }, leaders,
   }
 }
 

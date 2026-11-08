@@ -9,7 +9,7 @@
 
 import {
   LIVE_PERIOD_DEFAULT, LIVE_SORT_DEFAULT, LIVE_TAB_DEFAULT, liveComparator, liveTabCounts, liveTabMatches,
-  type LivePeriod, type LiveSortId, type LiveTab, type LiveTabbable,
+  type LiveCutFacts, type LivePeriod, type LiveSortId, type LiveTab, type LiveTabbable,
 } from '@agentistics/core'
 import type { FleetRow } from '../../lib/fleet'
 import { modelDisplay } from '../../lib/modelDisplay'
@@ -80,7 +80,7 @@ export interface LeaderRecord {
 export interface LiveReply {
   generatedAt: string; deliveries: LiveDeliveryRecord[]; leaders?: LeaderRecord[]; samples: number
   /** What the server answered for (`?tab=all&period=…`): `capped` is set when the per-kind cap left older pieces out. */
-  view?: { period?: string; capped?: { cap: number; omitted: number } | null }
+  view?: { period?: string; capped?: { cap: number; omitted: number } | null; capFacts?: LiveCutFacts }
   hidden?: LiveHidden[]; sessionTasks?: Record<string, string>; runtime?: Record<string, RuntimeFacts>
 }
 

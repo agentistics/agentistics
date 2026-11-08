@@ -174,17 +174,12 @@ export interface LiveReply {
   historyTotal?: number
   /** Same, for `oldReviews`. */
   oldReviewsTotal?: number
-  /** Legacy reviews nobody is on (the `archived` list, as full pieces marked `old`): drawn only by the "Tudo" tab. */
+  /** The pieces the cap CUT, per task (title kept for a name filter): what a task/stage filter may say is missing. */
+  cutByTask?: Record<string, { title: string; history: number; oldReviews: number }>
+  /** Legacy reviews nobody is on (full pieces marked `old`): drawn only by the "Tudo" tab. */
   oldReviews?: LiveDelivery[]
   /** Pieces left off the line and why (bounded, NEWEST first — the ones that just left are the ones somebody asks about). */
   hidden: LiveHidden[]
-  /**
-   * Legacy pieces still `in_review` with no delivery record, no live session, no known published commit and
-   * nothing for over `LEGACY_REVIEW_MS`: the review column is not the place for 246 of them, and they are not
-   * dropped silently either — the newest are listed here and `archivedTotal` counts them all.
-   */
-  archived: LiveHidden[]
-  archivedTotal: number
   /** Live session id -> the task it is filed on, so a view can ask "which task is this session's". */
   sessionTasks: Record<string, string>
   /** How many delivered pieces fed the ETA — shown so "no estimate" is explainable. */
@@ -512,8 +507,6 @@ export function shasIn(text: string | null | undefined): string[] {
 
 /** The most hidden rows a reply carries — a bound, not a policy: the newest are the ones that just left. */
 export const HIDDEN_CAP = 300
-/** How many archived legacy-review pieces a reply lists (the count is always complete). */
-export const ARCHIVED_CAP = 60
 /** A legacy `in_review` piece (no delivery record) with no live session older than this is "Publicado (antigos)", not review work. */
 export const LEGACY_REVIEW_MS = 72 * 3600_000
 /** A piece untouched for longer than this was not on the board a moment ago, so its absence is not a departure. */
@@ -666,7 +659,6 @@ export function buildLive(o: {
   const history: LiveDelivery[] = []
   const oldReviews: LiveDelivery[] = []
   const hidden: LiveHidden[] = []
-  const archived: LiveHidden[] = []
   const entry = (p: Piece, stage: LiveStage | null, reason: HiddenReason): LiveHidden =>
     ({ key: p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id, taskId: p.task.id, title: p.sub?.title ?? p.task.title, stage, reason, atMs: ms(p.updatedAt) })
   const hide = (p: Piece, stage: LiveStage | null, reason: HiddenReason) => { hidden.push(entry(p, stage, reason)) }
@@ -686,7 +678,7 @@ export function buildLive(o: {
     if (!rec && stage === 'leader' && p.status === 'in_review') {
       const subj = p.sub ? `${p.task.id}/${p.sub.id}` : p.task.id
       if (legacyShaGroups(p, eventsBySubject.get(subj)).some(g => g.every(sha => o.publishedShas?.has(sha)))) stage = 'published'
-      else if (liveSessions.length === 0 && o.nowMs - (ms(p.updatedAt) ?? o.nowMs) > LEGACY_REVIEW_MS) { archived.push(entry(p, 'leader', 'legacy-review-old')); isOld = true }
+      else if (liveSessions.length === 0 && o.nowMs - (ms(p.updatedAt) ?? o.nowMs) > LEGACY_REVIEW_MS) { isOld = true }
     }
     // Only what could have been a card a moment ago is worth a departure line: an abandoned/backlog piece,
     // or a todo nobody staged, was never on the board and fills the reply with nothing anyone is missing.
@@ -777,13 +769,22 @@ export function buildLive(o: {
   deliveries.sort((a, b) => (b.stageSinceMs ?? 0) - (a.stageSinceMs ?? 0))
   const sessionTasks: Record<string, string> = {}
   for (const d of o.details) for (const s of d.sessions) if (!s.historical && !s.endedAt) sessionTasks[s.id] = d.task.id
+  // Published pieces: the most recently published first (the default order of Publicado reads the same way).
+  history.sort((a, b) => (b.deliveredAtMs ?? 0) - (a.deliveredAtMs ?? 0))
+  oldReviews.sort((a, b) => (b.stageSinceMs ?? 0) - (a.stageSinceMs ?? 0))
+  const cutByTask: NonNullable<LiveReply['cutByTask']> = {}
+  const countCut = (cut: LiveDelivery[], kind: 'history' | 'oldReviews') => {
+    for (const d of cut) (cutByTask[d.taskId] ??= { title: d.taskTitle, history: 0, oldReviews: 0 })[kind]++
+  }
+  countCut(history.slice(HISTORY_CAP), 'history')
+  countCut(oldReviews.slice(HISTORY_CAP), 'oldReviews')
   return {
     generatedAt: new Date(o.nowMs).toISOString(), deliveries,
-    history: history.sort((a, b) => (b.deliveredAtMs ?? 0) - (a.deliveredAtMs ?? 0)).slice(0, HISTORY_CAP),
-    oldReviews: oldReviews.sort((a, b) => (b.stageSinceMs ?? 0) - (a.stageSinceMs ?? 0)).slice(0, HISTORY_CAP),
+    history: history.slice(0, HISTORY_CAP),
+    oldReviews: oldReviews.slice(0, HISTORY_CAP),
+    cutByTask,
     historyTotal: history.length, oldReviewsTotal: oldReviews.length,
     samples: samples.length, sessionTasks,
     hidden: hidden.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, HIDDEN_CAP),
-    archived: archived.sort((a, b) => (b.atMs ?? 0) - (a.atMs ?? 0)).slice(0, ARCHIVED_CAP), archivedTotal: archived.length,
   }
 }

@@ -10,7 +10,7 @@ import type { Root } from 'react-dom/client'
  * guard gone and `onPeriod` not called, all at once, 2880 tests over tasks/nav/task-live/core stayed green, because the
  * parity file builds its own request (`filters: {tab:'all', period}`) and nothing watched the one the screen makes.
  *
- * The `test.failing`s are bugs found by this QA: once fixed, bun reports them and the fix turns them into plain `test`.
+ * The last two were `test.failing` (bugs found by this QA) and are plain tests since round 3.
  */
 let root: Root | undefined
 let createRoot: typeof import('react-dom/client').createRoot
@@ -114,7 +114,7 @@ test('HIGH-1 pin: choosing a period on the REAL screen reaches the request', asy
   expect(liveAsked(urls)).toContain('/api/tasks/live?tab=all&period=30d')
 })
 
-test.failing('MED: under a task filter the screen does not claim the whole board\'s cut as this task\'s', async () => {
+test('MED: under a task filter the screen does not claim the whole board\'s cut as this task\'s', async () => {
   // Real board: the chosen task shows 62 of its 62 (recount from tasks.json: 0 of it cut), and the note says 109 are missing and "the numbers above are not the total".
   const reply = replyFor('x', { deliveries: [piece('p', 't1'), piece('o', 't2')], view: { period: 'all', capped: { cap: 400, omitted: 109 } } })
   localStorage.setItem('agentistics.live.view.v2', JSON.stringify({ tab: 'published', period: 'all', sort: 'priority' }))
@@ -123,7 +123,7 @@ test.failing('MED: under a task filter the screen does not claim the whole board
   expect(document.querySelector('[data-live-capped]')?.textContent ?? '').not.toContain('109')
 })
 
-test.failing('LOW: when the new period could not be read, the screen says so instead of showing the old period\'s numbers under the new label', async () => {
+test('LOW: when the new period could not be read, the screen says so instead of showing the old period\'s numbers under the new label', async () => {
   // Measured with the answer aborted: label "30 dias", tab and rows 50 (the 7 d figures), no sentence, until the next heartbeat.
   const reply = replyFor('x', { deliveries: [piece('p', 't1')], view: { period: '7d', capped: null } })
   localStorage.setItem('agentistics.live.view.v2', JSON.stringify({ tab: 'published', period: '30d', sort: 'priority' }))

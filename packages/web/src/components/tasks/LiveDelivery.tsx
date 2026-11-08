@@ -18,7 +18,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, ChevronDown, ExternalLink } from 'lucide-react'
-import { LIVE_PERIODS, plainLeaderName, type LivePeriod, type LiveTab } from '@agentistics/core'
+import { LIVE_PERIODS, liveCapOmitted, plainLeaderName, type LivePeriod, type LiveTab } from '@agentistics/core'
 import { CenteredLoader } from '../CenteredLoader'
 import { useFleet, type FleetRow } from '../../lib/fleet'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -424,10 +424,16 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
       ><span data-live-period-current>{L.periods[period]}</span> <ChevronDown size={12} aria-hidden /></PanelMenu>
     </span>
   )
+  // The answer on screen is for another period than the chosen one: the numbers below are the old ones until it lands.
+  const periodLoading = Boolean(reply.view?.period) && reply.view?.period !== period
   const showPublished = tab === 'all' || tab === 'published'
   // The server cuts each kind at its cap (the oldest go): say so, so a count is never read as the total.
-  const capped = reply.view?.capped
-  const capNote = capped && showPublished ? L.capped(capped.omitted, capped.cap) : null
+  // Under a task or stage filter only the cut pieces that match it count (the server's own rule, `liveCapOmitted`).
+  const capFacts = reply.view?.capFacts
+  const cappedOmitted = capFacts
+    ? liveCapOmitted({ facts: capFacts, tab, period, nowMs, stage: stageFilter, match: taskIds.length ? id => taskIds.includes(id) : undefined })
+    : (taskIds.length || stageFilter !== 'all' ? 0 : (reply.view?.capped?.omitted ?? 0))
+  const capNote = cappedOmitted > 0 && showPublished ? L.capped(cappedOmitted, reply.view?.capped?.cap ?? 400) : null
   // The short line under the title: how many pieces and agents. The ETA and "updated live" are the tooltip.
   const summaryLine = [L.deliveries(sum.deliveries), L.agents(sum.agentsWorking)].join(' · ')
   const summaryTitle = [sum.nextEtaMs !== null ? L.next(fmtClock(sum.nextEtaMs)) : L.noNext, L.live].join(' · ')
@@ -470,6 +476,8 @@ export function LiveDeliveryView({ lang, reply, error, nowMs, fleet, accountLabe
         actions={actions}
       />
       {pipNote && <span role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{L.externalBlocked}</span>}
+      {error === 'down' && <span role="alert" data-live-stale-error style={{ fontSize: 12, color: 'var(--accent-red)' }}>{L.down}</span>}
+      {periodLoading && !error && <CenteredLoader size={40} label={L.loading} testId="agentask-live-period-loading" />}
       {capNote && <span role="status" data-live-capped style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{capNote}</span>}
       {showGone && (
         <ul data-live-gone-list style={{ ...surface, listStyle: 'none', margin: 0, padding: '8px 10px', display: 'grid', gap: 3, fontSize: 11.5 }}>
