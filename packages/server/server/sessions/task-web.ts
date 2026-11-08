@@ -569,7 +569,7 @@ export async function addComment(
     newThread?: { title: string; kind?: ThreadKind }
     /** A VERIFIED session id — the route verifies (`session-identity.ts`), never this function. */
     session?: string
-    message?: { to: string; kind: 'handback' | 'block' | 'question' }
+    message?: { to: string; kind: 'handback' | 'block' | 'question'; /** FLUXO.AVISOS 8: one slice of a longer piece, not the end of it. */ intermediate?: boolean }
     /** The person wrote it on the board (no session identity). */
     owner?: boolean
     /** What the record is (handback, block, decision). Absent = a note. */

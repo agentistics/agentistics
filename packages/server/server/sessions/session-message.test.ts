@@ -69,6 +69,50 @@ describe('handback moves the sender\'s subtask', () => {
   })
 })
 
+describe('FLUXO.AVISOS 8: an intermediate handback is not a final one', () => {
+  const filed = { senderTask: async () => ({ taskId: 't1', subtaskId: 's1' }) }
+  test('awaiting: recorded and delivered, but the subtask stays put and the mirror says intermediate', async () => {
+    const moved: string[] = []
+    const f = fake({ ...filed, handbackSubtask: async id => { moved.push(id) } })
+    const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body: 'Phase 1 done', awaiting: 'engine merged' }, f.deps)
+    expect(out).toMatchObject({ ok: true, delivered: true, intermediate: true })
+    expect(moved).toEqual([])
+    expect(f.comments[0]!.c.message).toEqual({ to: 'parent-1', kind: 'handback', intermediate: true })
+    expect(f.prompts[0]!.text).toContain('Phase 1 done') // still delivered to the leader
+  })
+  test('a progress marker with no awaiting is read as intermediate, says so to the worker and tells the engine', async () => {
+    for (const body of ['parte 2 de 5 pronta', 'Part 3 of 4 done, pushed', 'etapa 2/6 commitada', 'feito 2/5, seguindo com a fila', 'A fila está pronta. Moving on to the QA slice.']) {
+      resetMessageRateLimit()
+      const moved: string[] = []
+      const events: Array<{ payload: Record<string, unknown> }> = []
+      const f = fake({ ...filed, handbackSubtask: async id => { moved.push(id) }, handbackEvent: async e => { events.push(e as never) } })
+      const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body }, f.deps)
+      expect(out).toMatchObject({ ok: true, intermediate: true })
+      expect((out as { message: string }).message).toContain('INTERMEDIATE handback')
+      expect(moved).toEqual([])
+      expect(String(events[0]!.payload.awaiting)).toMatch(/^progress: /)
+    }
+  })
+  test('a final handback — even one with numbers in it — still moves the subtask and carries no awaiting', async () => {
+    for (const body of ['Entregue. 12/12 testes passando, tsc limpo.', 'done: 14/14 tests pass', 'parte 5 de 5 pronta', 'Final handback: parte 2 de 5 era a última; tudo pronto', 'Pushed abc123; 3 files changed.']) {
+      resetMessageRateLimit()
+      const moved: string[] = []
+      const events: Array<{ payload: Record<string, unknown> }> = []
+      const f = fake({ ...filed, handbackSubtask: async id => { moved.push(id) }, handbackEvent: async e => { events.push(e as never) } })
+      const out = await sendSessionMessage('child-1', { to: 'parent-1', kind: 'handback', body }, f.deps)
+      expect(out).toMatchObject({ ok: true }); expect(out).not.toHaveProperty('intermediate')
+      expect(moved).toEqual(['s1'])
+      expect(events[0]!.payload).not.toHaveProperty('awaiting')
+    }
+  })
+  test('the check-in does not list an intermediate handback as delivered', async () => {
+    const { checkinActivity } = await import('../checkin')
+    const mk = (id: string, intermediate: boolean) => ({ id, kind: 'comment', at: '2026-11-08T00:00:00Z', taskId: 't1', actor: 'session:abcd', detail: JSON.stringify({ message: { to: 'lead', kind: 'handback', from: 'x', ...(intermediate ? { intermediate: true } : {}) } }) })
+    const out = checkinActivity([mk('final', false), mk('slice', true)] as never, 'lead') as Array<{ id: string }>
+    expect(out.map(e => e.id)).toEqual(['final'])
+  })
+})
+
 describe('SESSÕES.FECHAR: a delivered handback becomes the session.handback flows event', () => {
   test('handback → one event naming the sender, the target and the sender\'s task', async () => {
     const events: unknown[] = []
