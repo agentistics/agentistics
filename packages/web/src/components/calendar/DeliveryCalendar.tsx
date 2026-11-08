@@ -6,18 +6,19 @@
  * action on a delivery (the card, its session and its verbs live on the Live line; a detail panel leads there).
  */
 import { useCallback, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { CalendarDays, ChevronLeft, ChevronRight, Download } from 'lucide-react'
-import { brtDay, filterCalendar, HARNESS_LABELS, type CalMark } from '@agentistics/core'
+import { brtDay, brtDayStartMs, filterCalendar, HARNESS_LABELS, type CalMark } from '@agentistics/core'
 import { BetaTag } from '../BetaTag'
 import { CenteredLoader } from '../CenteredLoader'
 import { SegmentedTabs } from '../nav/SegmentedTabs'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { rangeLabel, stepAnchor, viewWindow, weekDays, type CalView } from '../../lib/calendarModel'
+import { addDays, rangeLabel, stepAnchor, viewWindow, weekDays, type CalView } from '../../lib/calendarModel'
 import { dialogButtonStyle } from '../../pages/settings/primitives'
 import { STAGE_LABEL } from '../tasks/liveDeliveryModel'
 import { AgendaView } from './AgendaView'
 import { CalendarDetail, type Anchor, type CalSelection } from './CalendarDetail'
-import { CalendarFilters, DEFAULT_FILTERS, toCalFilters, type UiFilters } from './CalendarFilters'
+import { CalendarFilters, readCalendarFilters, toCalFilters, type UiFilters } from './CalendarFilters'
 import { TEXT, VIEW_LABEL, pick } from './calendarText'
 import { DayView } from './DayView'
 import { MonthView } from './MonthView'
@@ -25,9 +26,10 @@ import { ScheduleView } from './ScheduleView'
 import { useDeliveryCalendar } from './useDeliveryCalendar'
 import { useFitHeight } from './useFitHeight'
 import { VersionCards } from './VersionCards'
+import { MobileCalendar, type PhoneView } from './MobileCalendar'
 
 const DESKTOP_VIEWS: CalView[] = ['month', 'week', 'day', 'schedule']
-const MOBILE_VIEWS: CalView[] = ['agenda', 'week', 'month', 'schedule']
+const MOBILE_VIEWS: CalView[] = ['day', 'agenda', 'week', 'month', 'schedule']
 
 /** The query the .ics export of the CURRENT filtered view asks the route for. */
 export function icsQuery(f: UiFilters, win: { fromMs: number; toMs: number }): string {
@@ -46,12 +48,18 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
   const pt = lang === 'pt'
   const isMobile = useIsMobile()
   const { reply, error, nowMs, reload } = useDeliveryCalendar()
-  const [view, setView] = useState<CalView>(() => (isMobile ? 'agenda' : 'month'))
-  const [anchor, setAnchor] = useState(() => brtDay(Date.now()))
-  const [filters, setFilters] = useState<UiFilters>(DEFAULT_FILTERS)
+  const [query, setQuery] = useSearchParams()
+  const phoneView = (['day', 'three', 'week', 'month', 'schedule', 'agenda'].includes(query.get('calView') ?? '') ? query.get('calView') : 'day') as PhoneView
+  const [desktopView, setView] = useState<CalView>('month')
+  const view: CalView = isMobile ? phoneView === 'three' ? 'day' : phoneView : desktopView
+  const dateParam = query.get('calDay') ?? ''
+  const anchor = /^\d{4}-\d{2}-\d{2}$/.test(dateParam) && Number.isFinite(Date.parse(`${dateParam}T03:00:00Z`)) && brtDay(Date.parse(`${dateParam}T03:00:00Z`)) === dateParam ? dateParam : brtDay(Date.now())
+  const setAnchor = (next: string | ((day: string) => string)) => setQuery(q => { q.set('calDay', typeof next === 'function' ? next(anchor) : next); return q }, { replace: true })
+  const filters = useMemo(() => readCalendarFilters(query.get('calFilters')), [query])
+  const setFilters = (f: UiFilters) => setQuery(q => { q.set('calFilters', JSON.stringify(f)); return q }, { replace: true })
   const [sel, setSel] = useState<CalSelection | null>(null)
   const [point, setPoint] = useState<Anchor | null>(null)
-  const { ref, height } = useFitHeight<HTMLDivElement>(isMobile ? 480 : 520, isMobile)
+  const { ref, height } = useFitHeight<HTMLDivElement>(isMobile ? 0 : 520, isMobile)
   const today = brtDay(nowMs)
 
   const shown = useMemo(() => (reply ? filterCalendar(reply, toCalFilters(filters)) : null), [reply, filters])
@@ -65,7 +73,9 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
 
   const exportIcs = () => {
     const a = document.createElement('a')
-    a.href = `/api/deliveries/calendar?${icsQuery(filters, viewWindow(activeView === 'agenda' ? 'day' : activeView, anchor))}`
+    const win = viewWindow(activeView === 'agenda' ? 'day' : activeView, anchor)
+    if (isMobile && phoneView === 'three') win.toMs = brtDayStartMs(addDays(anchor, 3)) - 1
+    a.href = `/api/deliveries/calendar?${icsQuery(filters, win)}`
     a.download = 'entregas.ics'
     a.click()
   }
@@ -90,7 +100,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
 
   const body = (() => {
     if (!reply || !shown) return null
-    if (empty) return (
+    if (empty && !isMobile) return (
       <div data-cal-empty style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, color: 'var(--text-secondary)', textAlign: 'center', padding: 24 }}>
         <b style={{ color: 'var(--text-primary)' }}>{pick(reply.pieces.length === 0 && reply.versions.length === 0 ? TEXT.emptyAll : TEXT.emptyTitle, pt)}</b>
         <span style={{ fontSize: 12 }}>{pick(TEXT.emptyHint, pt)}</span>
@@ -99,7 +109,7 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
     const common = { nowMs, versions: shown.versions, pieces: shown.pieces, marks: shown.marks, pt, selected: selectedId }
     switch (activeView) {
       case 'month': return <MonthView {...common} anchor={anchor} onPickDay={d => { setAnchor(d); setView(isMobile ? 'agenda' : 'day'); setSel(null) }} onOpenVersion={handlers.onOpenVersion} onOpenMark={handlers.onOpenMark} />
-      case 'schedule': return <ScheduleView {...common} anchor={anchor} {...handlers} />
+      case 'schedule': return <ScheduleView {...common} anchor={anchor} {...handlers} mobile={isMobile} />
       case 'day': return <DayView {...common} day={anchor} {...handlers} />
       case 'week': return isMobile
         ? <AgendaView {...common} mode="agenda" anchor={weekDays(anchor)[0]!} span={7} {...handlers} />
@@ -107,6 +117,15 @@ export function DeliveryCalendar({ lang }: { lang: 'pt' | 'en' }) {
       default: return <AgendaView {...common} mode="agenda" anchor={anchor} {...handlers} />
     }
   })()
+
+  if (isMobile) return <div ref={ref} data-cal-root style={{ height: height ?? undefined, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <MobileCalendar anchor={anchor} onDay={d => { setAnchor(d); setSel(null) }} view={phoneView} onView={v => { setQuery(q => { q.set('calView', v); return q }, { replace: true }); setSel(null) }}
+      nowMs={nowMs} pt={pt} versions={shown?.versions ?? []} pieces={shown?.pieces ?? []} marks={shown?.marks ?? []} onOpen={open} ready={!!shown}
+      filterCount={Number(filters.tasks !== 'active') + filters.versions.length + filters.stages.length + filters.harnesses.length + filters.priorities.length + Number(filters.confirmedOnly)}
+      exportIcs={exportIcs} filters={reply && <CalendarFilters value={filters} onChange={setFilters} pieces={reply.pieces} harnessOf={harnessOf} versionList={versionList} pt={pt} mobile={false} shown={caption} />}
+      body={shown ? body : error ? <div role="alert" style={{ padding: 20 }}><p>{pick(TEXT.loadError, pt)}</p><button className="cal-phone-button" type="button" onClick={() => void reload()}>{pick(TEXT.retry, pt)}</button></div> : <CenteredLoader placement="area" />} />
+    {sel && reply && shown && <CalendarDetail selection={sel} anchor={point} pieces={reply.pieces} versions={reply.versions} marks={reply.marks} nowMs={nowMs} pt={pt} isMobile onClose={close} onSelect={setSel} />}
+  </div>
 
   return (
     <div ref={ref} data-cal-root style={{ height: height ?? undefined, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0 }}>

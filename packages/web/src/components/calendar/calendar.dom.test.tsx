@@ -2,10 +2,12 @@ import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
-import { buildCalendar, filterCalendar, type CalendarReply } from '@agentistics/core'
+import { brtDayStartMs, buildCalendar, filterCalendar, type CalendarReply } from '@agentistics/core'
 import { stripVersions, versionWhen } from './VersionCards'
 import { icsQuery } from './DeliveryCalendar'
-import { DEFAULT_FILTERS, filtersActive, toCalFilters } from './CalendarFilters'
+import { DEFAULT_FILTERS, filtersActive, readCalendarFilters, toCalFilters } from './CalendarFilters'
+import { MobileDayGrid, phoneEvents } from './MobileDayGrid'
+import { MobileCalendar } from './MobileCalendar'
 
 const NOW = Date.parse('2026-11-07T18:40:00.000Z') // Sat 07/11 15h40 BRT
 const H = 3600_000
@@ -106,4 +108,56 @@ test('filters: the UI shape converts to core filters; the default is "tasks bein
   expect(filtersActive(f)).toBe(true)
   const q = new URLSearchParams(icsQuery(f, { fromMs: 0, toMs: 1000 }))
   expect(q.get('format')).toBe('ics'); expect(q.get('task')).toBe('t'); expect(q.get('version')).toBe('2.202.0'); expect(q.get('confirmed')).toBe('1'); expect(q.get('all')).toBe('1')
+  expect(readCalendarFilters(JSON.stringify(f))).toEqual(f)
+  expect(readCalendarFilters('{')).toEqual(DEFAULT_FILTERS)
+  expect(readCalendarFilters(JSON.stringify({ ...f, stages: ['not-a-stage'] }))).toEqual(DEFAULT_FILTERS)
+  expect(readCalendarFilters(JSON.stringify({ ...f, versions: [null] }))).toEqual(DEFAULT_FILTERS)
+})
+
+test('phone grid: one card per piece on this day, including published pieces, and timed versions are not all-day duplicates', async () => {
+  const events = phoneEvents('2026-11-07', common)
+  expect(events.filter(e => e.selection.kind === 'piece').map(e => e.id).sort()).toEqual(view.pieces.map(p => p.key).sort())
+  expect(new Set(events.map(e => e.id)).size).toBe(events.length)
+  let selection: unknown = null
+  await mount(createElement(MobileDayGrid, { ...common, anchor: '2026-11-07', span: 1, onDay: noop, onOpen: s => { selection = s } }))
+  expect(document.querySelectorAll('[data-cal-phone-event]').length).toBe(events.length)
+  expect(document.querySelector('[data-cal-allday-band]')!.textContent).not.toContain('2.201.1')
+  await act(async () => { (document.querySelector('[data-cal-phone-event="t/a"]') as HTMLButtonElement).click() })
+  expect(selection).toEqual({ kind: 'piece', key: 't/a' })
+})
+
+test('phone card membership matches the API date window, including past work and pieces without an estimate', () => {
+  const sample = { ...reply, pieces: view.pieces.map(p => ({ ...p, startedAtMs: NOW - 30 * H })) }
+  for (const day of ['2026-11-06', '2026-11-07', '2026-11-08']) {
+    const expected = filterCalendar(sample, { fromMs: brtDayStartMs(day), toMs: brtDayStartMs(day) + 86400_000 - 1 }).pieces.map(p => p.key).sort()
+    const actual = phoneEvents(day, { ...sample, nowMs: NOW }).filter(e => e.selection.kind === 'piece').map(e => e.id).sort()
+    expect(actual).toEqual(expected)
+  }
+})
+
+test('phone empty days retain the hour grid and week view has seven real day columns', async () => {
+  await mount(createElement(MobileDayGrid, { ...common, pieces: [], versions: [], marks: [], anchor: '2026-11-07', span: 7, onDay: noop, onOpen: noop }))
+  expect(document.querySelectorAll('[data-cal-grid-day]').length).toBe(7)
+  expect(document.querySelector('[data-cal-hour-scroller]')!.textContent).toContain('23:00')
+  expect(document.querySelector('[data-cal-now]')).not.toBeNull()
+  expect(document.querySelectorAll('[data-cal-phone-event]').length).toBe(0)
+})
+
+test('phone header keeps filters behind a sheet; month day selection opens Day', async () => {
+  let picked = '', mode = ''
+  await mount(createElement(MobileCalendar, { ...common, anchor: '2026-11-07', view: 'month', ready: true, body: null, filters: createElement('div', { 'data-test-filters': true }, 'Filters'), filterCount: 2, exportIcs: noop, onOpen: noop, onDay: d => { picked = d }, onView: v => { mode = v } }))
+  expect(document.querySelector('[data-test-filters]')).toBeNull()
+  expect(document.querySelectorAll('[data-cal-week-strip] button').length).toBe(7)
+  await act(async () => { (document.querySelector('[data-cal-day="2026-11-10"]') as HTMLButtonElement).click() })
+  expect(picked).toBe('2026-11-10'); expect(mode).toBe('day')
+  await act(async () => { (document.querySelector('[data-cal-filter-trigger]') as HTMLButtonElement).click() })
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  expect(document.querySelector('[data-test-filters]')).not.toBeNull()
+})
+
+test('phone schedule reserves scrollable space after the timeline for its final labels', async () => {
+  await mount(createElement(Schedule, { ...common, anchor: '2026-11-07', mobile: true, onOpenPiece: noop, onOpenVersion: noop, onOpenMark: noop }))
+  const track = document.querySelector<HTMLElement>('[data-cal-schedule-track]')!
+  expect(track.style.paddingRight).toBe('220px')
+  expect(track.style.paddingBottom).toBe('64px')
 })

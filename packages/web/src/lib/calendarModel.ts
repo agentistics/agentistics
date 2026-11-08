@@ -14,6 +14,30 @@ import {
 export type CalView = 'month' | 'week' | 'day' | 'schedule' | 'agenda'
 export const DAY_MS = 86_400_000
 
+/** Horizontal swipes preserve the selected weekday; vertical scrolling never changes the date. */
+export function swipeDay(day: string, dx: number, dy: number, span: number): string {
+  return Math.abs(dx) >= 48 && Math.abs(dx) > Math.abs(dy) * 1.5 ? addDays(day, dx < 0 ? span : -span) : day
+}
+
+/** Interval partitioning. Touching endpoints reuse a lane; disconnected groups regain full width. */
+export function packIntervals<T extends { fromMs: number; toMs: number }>(events: readonly T[]): (T & { lane: number; lanes: number })[] {
+  const sorted = [...events].sort((a, b) => a.fromMs - b.fromMs || b.toMs - a.toMs)
+  const out: (T & { lane: number; lanes: number })[] = []
+  let group: typeof out = [], ends: number[] = [], groupEnd = -Infinity
+  const finish = () => { for (const e of group) e.lanes = ends.length; group = []; ends = [] }
+  for (const e of sorted) {
+    if (e.fromMs >= groupEnd) finish()
+    let lane = ends.findIndex(end => end <= e.fromMs)
+    if (lane < 0) lane = ends.length
+    ends[lane] = e.toMs
+    const placed = { ...e, lane, lanes: 1 }
+    out.push(placed); group.push(placed)
+    groupEnd = Math.max(groupEnd, e.toMs)
+  }
+  finish()
+  return out
+}
+
 // ------------------------------------------------------------------------------------------ day arithmetic
 
 /** `yyyy-MM-dd` + n days (calendar arithmetic on the string; no zone involved). */

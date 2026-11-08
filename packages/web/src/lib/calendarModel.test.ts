@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { CalPiece, CalVersion } from '@agentistics/core'
 import {
   addDays, addMonths, agendaOf, byPriority, dayBlocks, fitWeek, monthCells, pieceSegments, rangeLabel, stepAnchor, versionDays,
-  weekDays, weekRibbons, weekdayMon0,
+  weekDays, weekRibbons, weekdayMon0, packIntervals, swipeDay,
 } from './calendarModel'
 
 const NOW = Date.parse('2026-11-07T18:40:00.000Z') // Sat 07/11 15h40 BRT
@@ -13,6 +13,19 @@ const piece = (o: Partial<CalPiece> & { key: string }): CalPiece => ({
   publishedAtMs: null, dueDate: null, confirmed: false, late: false, ...o,
 })
 const version = (o: Partial<CalVersion> & { version: string }): CalVersion => ({ state: 'planned', atMs: null, basis: 'none', confidence: null, pieceKeys: [], stageCounts: {}, ...o })
+
+test('phone swipes ignore vertical gestures and cross month/year boundaries by calendar days', () => {
+  expect(swipeDay('2026-12-31', -80, 10, 1)).toBe('2027-01-01')
+  expect(swipeDay('2026-12-31', -80, 10, 7)).toBe('2027-01-07')
+  expect(swipeDay('2026-12-31', 80, 100, 7)).toBe('2026-12-31')
+  expect(swipeDay('2026-12-31', 10, 0, 1)).toBe('2026-12-31')
+})
+
+test('phone overlapping intervals share columns only in their connected group', () => {
+  const packed = packIntervals([{ fromMs: 0, toMs: 10 }, { fromMs: 5, toMs: 15 }, { fromMs: 10, toMs: 20 }, { fromMs: 20, toMs: 30 }])
+  expect(packed.map(e => [e.lane, e.lanes])).toEqual([[0, 2], [1, 2], [0, 2], [0, 1]])
+  expect(packIntervals([])).toEqual([])
+})
 
 describe('day arithmetic', () => {
   test('Monday-first weeks: 2026-11-07 is a Saturday (5)', () => {

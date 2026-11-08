@@ -8,6 +8,9 @@ const t = (pt: string, en: string): L => ({ pt, en })
 export const TEXT = {
   title: t('Calendário de entregas', 'Delivery calendar'),
   today: t('Hoje', 'Today'),
+  filters: t('Filtros', 'Filters'),
+  threeDays: t('3 dias', '3 days'),
+  collapse: t('Recolher', 'Collapse'),
   prev: t('Anterior', 'Previous'),
   next: t('Próximo', 'Next'),
   exportIcs: t('Exportar .ics', 'Export .ics'),

@@ -20,7 +20,8 @@ const span = (fromMs: number, toMs: number, w0: number, w1: number): { left: str
   return { left: `${pct(a, w0, w1)}%`, width: `${pct(b, w0, w1) - pct(a, w0, w1)}%` }
 }
 
-export function ScheduleView({ anchor, nowMs, versions, pieces, marks, pt, onOpenPiece, onOpenVersion, onOpenMark, selected }: {
+export function ScheduleView({ anchor, nowMs, versions, pieces, marks, pt, onOpenPiece, onOpenVersion, onOpenMark, selected, mobile = false }: {
+  mobile?: boolean
   anchor: string; nowMs: number; versions: readonly CalVersion[]; pieces: readonly CalPiece[]; marks: readonly CalMark[]; pt: boolean
   onOpenPiece: (key: string, e: React.MouseEvent) => void
   onOpenVersion: (version: string, e: React.MouseEvent) => void
@@ -41,14 +42,14 @@ export function ScheduleView({ anchor, nowMs, versions, pieces, marks, pt, onOpe
     <div style={{ position: 'relative', flex: 1, height: h, minWidth: 0 }}>{children}</div>
   )
   const grid = (
-    <div aria-hidden style={{ position: 'absolute', top: 0, bottom: 0, left: LABEL_W, right: 0, zIndex: 0, pointerEvents: 'none' }}>
+    <div aria-hidden style={{ position: 'absolute', top: 0, bottom: 0, left: LABEL_W, right: mobile ? 220 : 0, zIndex: 0, pointerEvents: 'none' }}>
       {ticks.map(ms => <i key={ms} style={{ position: 'absolute', top: 0, bottom: 0, left: `${pct(ms, w0, w1)}%`, borderLeft: `1px solid ${brtDay(ms) !== brtDay(ms - 1) && (ms - w0) % DAY_MS === 0 ? 'var(--border)' : 'var(--border-subtle)'}` }} />)}
     </div>
   )
 
   return (
     <div data-cal-schedule style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-card)', position: 'relative' }}>
-      <div style={{ position: 'relative', minWidth: 760, paddingBottom: 34 }}>
+      <div data-cal-schedule-track style={{ position: 'relative', minWidth: mobile ? 980 : 760, paddingRight: mobile ? 220 : undefined, paddingBottom: mobile ? 64 : 34 }}>
         {grid}
         {/* header: the two days and the hours */}
         <div style={{ display: 'flex', height: 44, borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 4, background: 'var(--bg-card)' }}>
@@ -156,7 +157,7 @@ export function ScheduleView({ anchor, nowMs, versions, pieces, marks, pt, onOpe
         })}
 
         {nowVisible && (
-          <div data-cal-now aria-hidden style={{ position: 'absolute', top: 0, bottom: 0, left: LABEL_W, right: 0, pointerEvents: 'none', zIndex: 5 }}>
+          <div data-cal-now aria-hidden style={{ position: 'absolute', top: 0, bottom: 0, left: LABEL_W, right: mobile ? 220 : 0, pointerEvents: 'none', zIndex: 5 }}>
             <i style={{ position: 'absolute', top: 0, bottom: 0, left: `${nowPct}%`, borderLeft: '1.5px solid var(--accent-red)' }} />
             <span style={{ position: 'absolute', bottom: 6, left: `${nowPct}%`, transform: 'translateX(-50%)', background: 'var(--accent-red)', color: '#fff', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 9, whiteSpace: 'nowrap' }}>{pick(TEXT.now, pt)} {clock(nowMs)}</span>
           </div>

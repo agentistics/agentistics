@@ -24,6 +24,17 @@ export interface UiFilters {
 }
 export const DEFAULT_FILTERS: UiFilters = { tasks: 'active', versions: [], stages: [], harnesses: [], priorities: [], confirmedOnly: false }
 
+/** URL data is untrusted; unknown stage/priority names must never reach the label lookup. */
+export function readCalendarFilters(raw: string | null): UiFilters {
+  try {
+    const f = JSON.parse(raw ?? 'null')
+    if (!f || typeof f.tasks !== 'string' || !(f.tasks === 'active' || f.tasks === 'all' || f.tasks.startsWith('task:')) || typeof f.confirmedOnly !== 'boolean') return DEFAULT_FILTERS
+    if (!['versions', 'stages', 'harnesses', 'priorities'].every(k => Array.isArray(f[k]) && f[k].every((v: unknown) => typeof v === 'string'))) return DEFAULT_FILTERS
+    if (!f.stages.every((v: CalStage) => CAL_STAGES.includes(v)) || !f.priorities.every((v: CalPriority) => CAL_PRIORITIES.includes(v))) return DEFAULT_FILTERS
+    return f
+  } catch { return DEFAULT_FILTERS }
+}
+
 export function toCalFilters(f: UiFilters): CalFilters {
   const one = f.tasks.startsWith('task:')
   return {
