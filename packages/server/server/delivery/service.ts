@@ -1034,27 +1034,46 @@ export function createDeliveryService(d: DeliveryDeps) {
     const obsolete = Object.keys(doc.requestReminders ?? {}).filter(id => !liveIds.has(id))
     if (obsolete.length) await d.store.update(x => { for (const id of obsolete) delete x.requestReminders![id] })
     /** Is this request still waiting for a COMPLETE pre-dispatch? Facts are read fresh every time it is asked. */
-    const requestIncomplete = async (p: OwnerRequestFact, book: Awaited<ReturnType<typeof d.store.read>>): Promise<boolean> => {
+    // FLUXO.ALARMES: 'ok' = nothing to chase; 'missing' = no complete pre-dispatch (chased on the usual cadence); 'orphan' = the
+    // only thing wrong is a piece the leader DEQUEUED (opened by hand) that has no live session and no draft — said ONCE, after 10 min.
+    type Completeness = 'ok' | 'missing' | 'orphan'
+    const requestCompleteness = async (p: OwnerRequestFact, book: Awaited<ReturnType<typeof d.store.read>>, sessions: readonly SessionFact[]): Promise<Completeness> => {
       const ids = [...new Set([...p.linkedSubtaskIds, ...Object.values(book.deliveries).filter(r => r.pedidoIds?.includes(p.id) && !r.dequeued).map(r => r.subtaskId)])]
-      let missing = ids.length === 0
+      const liveOn = (subtaskId: string) => sessions.some(s => s.alive && s.role !== 'leader' && s.subtaskId === subtaskId)
+      let result: Completeness = ids.length === 0 ? 'missing' : 'ok'
       for (const id of ids) {
         let sub = await d.facts.subtask(id).catch(() => null)
         if (sub && ['in_review', 'done', 'abandoned'].includes(sub.status)) continue
+        // A piece (or the group carrying it) with a LIVE session is running: it is neither "unstaged" nor "dequeued and forgotten".
+        if (liveOn(id) || (sub?.parentGroupId && liveOn(sub.parentGroupId))) continue
         if (sub?.parentGroupId) sub = await d.facts.subtask(sub.parentGroupId).catch(() => null)
         if (sub && ['in_review', 'done', 'abandoned'].includes(sub.status)) continue
-        if (!sub || sub.taskId !== p.taskId || book.deliveries[sub.id]?.dequeued || !judgePredispatch(sub).ok) missing = true
+        if (!sub || sub.taskId !== p.taskId) { result = 'missing'; continue }
+        const dequeued = book.deliveries[sub.id]?.dequeued
+        if (dequeued) {
+          // Dequeued = the leader took it out of the queue on purpose (the dequeue carries a reason). It only becomes a problem
+          // when nothing carries the work 10 minutes later: no session, no staged draft.
+          const age = d.now() - Date.parse(dequeued.at)
+          if (!sub.staged && Number.isFinite(age) && age >= 10 * 60_000 && result !== 'missing') result = 'orphan'
+          continue
+        }
+        if (!judgePredispatch(sub).ok) result = 'missing'
       }
-      return missing
+      return result
     }
+    const requestIncomplete = async (p: OwnerRequestFact, book: Awaited<ReturnType<typeof d.store.read>>, sessions: readonly SessionFact[]) => (await requestCompleteness(p, book, sessions)) !== 'ok'
     const batches = new Map<string, OwnerRequestFact[]>()
     for (const p of pending) {
       if (!p.taskId || !Number.isFinite(Date.parse(p.at)) || d.now() - Date.parse(p.at) < 10 * 60_000) continue
-      if (!(await requestIncomplete(p, doc))) continue
+      const completeness = await requestCompleteness(p, doc, sessions)
+      if (completeness === 'ok') continue
       const leader = leaderFor(sessions, p.taskId, '')
       if (!leader) continue
       const reserved = await d.store.update(x => {
         const clocks = x.requestReminders ??= {}
         const last = clocks[p.id]
+        // A dequeued piece nobody carries is said ONCE: the leader decided to take it out, so repeating it is the nag of row 23.
+        if (completeness === 'orphan' && last?.at) return false
         // ONE reminder cadence per PEDIDO, not per leader: a leader change used to reset the clock and re-send at once.
         // A normal hand-off closes the predecessor minutes later, so the record survives it: the successor is not nudged again.
         if (last?.at && d.now() - Date.parse(last.at) < 30 * 60_000) return false
@@ -1070,12 +1089,13 @@ export function createDeliveryService(d: DeliveryDeps) {
       // the leader, and drop whatever is no longer open, no longer work or no longer incomplete; the leader must still be alive.
       const freshRequests = await d.requests!().catch(() => null)
       const freshBook = await d.store.read()
-      const freshLeaderAlive = (await d.facts.sessions().catch(() => null))?.some(s => s.alive && s.id === leader)
+      const freshSessions = await d.facts.sessions().catch(() => null)
+      const freshLeaderAlive = freshSessions?.some(s => s.alive && s.id === leader)
       const pedidos: OwnerRequestFact[] = []
-      if (freshRequests && freshLeaderAlive) {
+      if (freshRequests && freshSessions && freshLeaderAlive) {
         for (const p of reserved) {
           const now = freshRequests.find(r => r.id === p.id)
-          if (now && isPending(now) && await requestIncomplete(now, freshBook)) pedidos.push(now)
+          if (now && isPending(now) && await requestIncomplete(now, freshBook, freshSessions)) pedidos.push(now)
         }
       }
       const release = (sent: boolean) => d.store.update(x => {
