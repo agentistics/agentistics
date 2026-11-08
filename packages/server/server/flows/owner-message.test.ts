@@ -83,6 +83,88 @@ test('a trusted relay preserves the original conversation and time; ordinary ses
   expect(events).toHaveLength(2)
 })
 
+/** FLUXO.AVISOS — deps wired to a real (temp-file) ledger, the retired leader `old` handing over to `lead`. */
+function ledgerDeps(over: Partial<OwnerMessageDeps> = {}) {
+  const { createOwnerLedger } = require('./owner-ledger') as typeof import('./owner-ledger')
+  const { mkdtempSync } = require('node:fs') as typeof import('node:fs')
+  const { tmpdir } = require('node:os') as typeof import('node:os')
+  const { join } = require('node:path') as typeof import('node:path')
+  const ledger = createOwnerLedger(join(mkdtempSync(join(tmpdir(), 'owner-ledger-')), 'owner-messages.json'))
+  let clock = Date.parse('2026-11-08T04:00:00.000Z')
+  const base = deps({
+    // The composer typed into the retired `old`; the registry resolves it forward to `lead`.
+    row: async id => (id === 'old' || id === 'lead' ? { id: 'lead', conversationId: 'conv-new', taskId: 't-1' } : undefined),
+    addressed: async id => (id === 'old' ? { id: 'old', conversationId: 'conv-old' } : id === 'lead' ? { id: 'lead', conversationId: 'conv-new' } : undefined),
+    seen: (scope, text, withinMs) => ledger.has(scope, text, clock, withinMs),
+    remember: (scopes, text, at) => ledger.add(scopes, text, at),
+    now: () => clock,
+    ...over,
+  })
+  return { ...base, tick: (ms: number) => { clock += ms } }
+}
+
+test('FLUXO.AVISOS item 2: a hand-off request is the system, not the owner — nothing is emitted', async () => {
+  const { d, events } = deps()
+  expect(await emitOwnerMessage({ action: 'prompt', id: 'lead', text: 'Faça a passagem de liderança agora', handoff: true }, d)).toBe('handoff')
+  expect(events).toHaveLength(0)
+})
+
+test('FLUXO.AVISOS item 2: the event carries the intent and a clean title (no attachment path, no quote prefix)', async () => {
+  const { d, events } = deps()
+  await emitOwnerMessage({ action: 'prompt', id: 'lead', text: 'e o deploy?' }, d)
+  await emitOwnerMessage({ action: 'prompt', id: 'lead', text: '> a coluna está cortada\ncorrige /home/me/.agentistics/attachments/158e1f81-image.png' }, d)
+  expect(events.map(e => e.payload.intent)).toEqual(['question', 'work'])
+  expect(events[1]!.payload.title).toBe('a coluna está cortada corrige')
+  expect(events[1]!.payload.text).toContain('/attachments/158e1f81-image.png') // the literal text is untouched
+})
+
+test('FLUXO.AVISOS item 1: a turn the predecessor already answered is not replayed; an unanswered one is', async () => {
+  const { d, events } = deps()
+  await emitRelayedOwnerMessages('lead', { id: 'old', conversationId: 'original' }, [
+    { at: '2026-11-08T03:00:00.000Z', text: 'corrige a coluna', answered: true },
+    { at: '2026-11-08T03:30:00.000Z', text: 'agora manda o relatório' },
+  ], d)
+  expect(events.map(e => e.payload.text)).toEqual(['agora manda o relatório'])
+})
+
+test('FLUXO.AVISOS item 1: a queued message answered later is not re-queued — the transcript clock is minutes off the composer clock', async () => {
+  const x = ledgerDeps()
+  // The composer confirmed the send at 04:00:00 …
+  expect(await emitOwnerMessage({ action: 'prompt', id: 'old', text: 'corrige a coluna de histórico' }, x.d, { at: '2026-11-08T04:00:00.000Z' })).toBe('emitted')
+  x.tick(60_000)
+  // … the relay replays it from the TRANSCRIPT, stamped 7 minutes later (it had been queued behind a running turn).
+  await emitRelayedOwnerMessages('lead', { id: 'old', conversationId: 'conv-old' }, [{ at: '2026-11-08T04:07:00.000Z', text: 'corrige a coluna de histórico' }], x.d)
+  expect(x.events).toHaveLength(1)
+})
+
+test('FLUXO.AVISOS item 2 addendum: two leaders alive, ONE owner message — exactly one pedido, per message and not per receiving session', async () => {
+  const x = ledgerDeps()
+  // The owner typed into the retired leader (its conversation `conv-old`); the registry resolves it to the successor `conv-new`.
+  expect(await emitOwnerMessage({ action: 'prompt', id: 'old', text: 'faz o deploy do 2.202.1' }, x.d, { at: '2026-11-08T04:00:00.000Z' })).toBe('emitted')
+  x.tick(20_000)
+  // 20 s later the relay forwards the very same turn (conversation `conv-old`, another clock): no second pedido.
+  await emitRelayedOwnerMessages('lead', { id: 'old', conversationId: 'conv-old' }, [{ at: '2026-11-08T04:00:20.000Z', text: 'faz o deploy do 2.202.1' }], x.d)
+  // And the same words typed again into the successor within minutes are the same request, not a second one.
+  expect(await emitOwnerMessage({ action: 'prompt', id: 'lead', text: 'faz o deploy do 2.202.1' }, x.d, { at: '2026-11-08T04:00:40.000Z' })).toBe('duplicate')
+  expect(x.events).toHaveLength(1)
+  // A day later it is a new request.
+  x.tick(24 * 60 * 60_000)
+  expect(await emitOwnerMessage({ action: 'prompt', id: 'lead', text: 'faz o deploy do 2.202.1' }, x.d)).toBe('emitted')
+  expect(x.events).toHaveLength(2)
+})
+
+test('FLUXO.AVISOS: workers of one task still each receive a broadcast — the task-wide duplicate window is for leaders', async () => {
+  const events: Array<{ type: string; id: string; payload: Record<string, unknown> }> = []
+  const x = ledgerDeps({
+    row: async id => ({ id, conversationId: `conv-${id}`, taskId: 't-1', subtaskId: `s-${id}` }),
+    addressed: async id => ({ id, conversationId: `conv-${id}` }),
+    roleOf: async () => 'worker',
+    emit: async e => { events.push(e) },
+  })
+  for (const id of ['w1', 'w2', 'w3']) expect(await emitOwnerMessage({ action: 'prompt', id, text: 'commita agora' }, x.d)).toBe('emitted')
+  expect(events).toHaveLength(3)
+})
+
 test('requests to a retired leader resolve through handoff and a reopened managed id, inheriting its task', () => {
   const rows = [{ id: 'old', taskId: 't1', handoffTo: 'successor', endedAt: 'x' }, { id: 'successor', conversationId: 'conv', endedAt: 'x' }, { id: 'new-id', conversationId: 'conv' }] as ManagedSession[]
   expect(ownerMessageTarget('old', rows)).toMatchObject({ id: 'new-id', taskId: 't1' })

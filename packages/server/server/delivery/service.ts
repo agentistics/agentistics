@@ -24,6 +24,8 @@ import {
 import { judgePredispatch, releaseFailed, runGate, type BlockedSubtaskFact, type GateFacts, type GateVerdict, type SessionFact } from './gates'
 import { DeliveryStoreUnreadable, type DeliveryStore } from './store'
 import { sharedQueueArea } from './queue-fit'
+import { ownerIntent } from '../flows/owner-intent'
+import { requestReminderText } from './request-reminder'
 import {
   ASK_TIMEOUT_MS, holdState, orderQueue, parseQueueAnswer, planQueue, QUEUE_HEADER, questionText, reminderDue, startClaimLive, whyNext,
   type QueueAnswer, type QueueItem,
@@ -1022,47 +1024,72 @@ export function createDeliveryService(d: DeliveryDeps) {
     if (!d.requests || !sessions) return
     const requests = await d.requests().catch(() => null)
     if (!requests) { actions.push('requests-unavailable'); return }
-    const pending = requests.filter(p => /^p-[\w-]{1,100}$/.test(p.id) && ['open', 'linked'].includes(p.state))
+    // FLUXO.AVISOS: only WORK is chased. A question ("e o deploy?") is answered by the leader's reply — it never gets a
+    // subtask, so "pre-dispatch incomplete" is meaningless for it (it was nagged 8 times in an hour). The engine receives
+    // the same host classification as `intent` on `owner.message`; a request the host rule calls a question is skipped here too.
+    const isPending = (p: OwnerRequestFact) => /^p-[\w-]{1,100}$/.test(p.id) && ['open', 'linked'].includes(p.state) && ownerIntent(p.text) === 'work'
+    const pending = requests.filter(isPending)
     const liveIds = new Set(pending.map(p => p.id))
     const doc = await d.store.read()
     const obsolete = Object.keys(doc.requestReminders ?? {}).filter(id => !liveIds.has(id))
     if (obsolete.length) await d.store.update(x => { for (const id of obsolete) delete x.requestReminders![id] })
-    const batches = new Map<string, OwnerRequestFact[]>()
-    for (const p of pending) {
-      if (!p.taskId || !Number.isFinite(Date.parse(p.at)) || d.now() - Date.parse(p.at) < 10 * 60_000) continue
-      const ids = [...new Set([...p.linkedSubtaskIds, ...Object.values(doc.deliveries).filter(r => r.pedidoIds?.includes(p.id) && !r.dequeued).map(r => r.subtaskId)])]
+    /** Is this request still waiting for a COMPLETE pre-dispatch? Facts are read fresh every time it is asked. */
+    const requestIncomplete = async (p: OwnerRequestFact, book: Awaited<ReturnType<typeof d.store.read>>): Promise<boolean> => {
+      const ids = [...new Set([...p.linkedSubtaskIds, ...Object.values(book.deliveries).filter(r => r.pedidoIds?.includes(p.id) && !r.dequeued).map(r => r.subtaskId)])]
       let missing = ids.length === 0
       for (const id of ids) {
         let sub = await d.facts.subtask(id).catch(() => null)
         if (sub && ['in_review', 'done', 'abandoned'].includes(sub.status)) continue
         if (sub?.parentGroupId) sub = await d.facts.subtask(sub.parentGroupId).catch(() => null)
         if (sub && ['in_review', 'done', 'abandoned'].includes(sub.status)) continue
-        if (!sub || sub.taskId !== p.taskId || doc.deliveries[sub.id]?.dequeued || !judgePredispatch(sub).ok) missing = true
+        if (!sub || sub.taskId !== p.taskId || book.deliveries[sub.id]?.dequeued || !judgePredispatch(sub).ok) missing = true
       }
-      if (!missing) continue
+      return missing
+    }
+    const batches = new Map<string, OwnerRequestFact[]>()
+    for (const p of pending) {
+      if (!p.taskId || !Number.isFinite(Date.parse(p.at)) || d.now() - Date.parse(p.at) < 10 * 60_000) continue
+      if (!(await requestIncomplete(p, doc))) continue
       const leader = leaderFor(sessions, p.taskId, '')
       if (!leader) continue
       const reserved = await d.store.update(x => {
         const clocks = x.requestReminders ??= {}
         const last = clocks[p.id]
-        if (last?.leaderSessionId === leader && last.at && d.now() - Date.parse(last.at) < 30 * 60_000) return false
+        // ONE reminder cadence per PEDIDO, not per leader: a leader change used to reset the clock and re-send at once.
+        // Only a predecessor that is no longer alive (it never saw the reminder to act on) lets the new leader hear it now.
+        const lastAlive = !!last?.leaderSessionId && sessions.some(s => s.alive && s.id === last.leaderSessionId)
+        if (last?.at && d.now() - Date.parse(last.at) < 30 * 60_000 && (last.leaderSessionId === leader || lastAlive)) return false
         if (last?.pendingAt && d.now() - Date.parse(last.pendingAt) < 60_000) return false
         clocks[p.id] = { ...(last?.leaderSessionId === leader ? last : {}), pendingAt: iso(d), leaderSessionId: leader }
         return true
       })
       if (reserved) { const list = batches.get(leader) ?? []; list.push(p); batches.set(leader, list) }
     }
-    for (const [leader, pedidos] of batches) {
-      const body = `[entrega pedidos] Pedidos do dono sem pré-dispatch completo há pelo menos 10 min:\n${pedidos.map(p => `- ${p.id}: «${p.text}»`).join('\n')}\nCrie ou encaixe a subtarefa/grupo e prepare com agentistics_task_stage (prompt, harness, model, effort, account, pedidoId). Decida e registre; o dono não é chamado.`
-      const sent = await d.notify.session(leader, body).catch(() => false)
-      await d.store.update(x => {
-        for (const p of pedidos) {
+    for (const [leader, reserved] of batches) {
+      // FLUXO.AVISOS: completeness was judged in the loop above, possibly minutes before this send (a leader staged the
+      // piece in between and still got "incomplete" — twice). Re-read the requests and the facts RIGHT before typing into
+      // the leader, and drop whatever is no longer open, no longer work or no longer incomplete; the leader must still be alive.
+      const freshRequests = await d.requests!().catch(() => null)
+      const freshBook = await d.store.read()
+      const freshLeaderAlive = (await d.facts.sessions().catch(() => null))?.some(s => s.alive && s.id === leader)
+      const pedidos: OwnerRequestFact[] = []
+      if (freshRequests && freshLeaderAlive) {
+        for (const p of reserved) {
+          const now = freshRequests.find(r => r.id === p.id)
+          if (now && isPending(now) && await requestIncomplete(now, freshBook)) pedidos.push(now)
+        }
+      }
+      const release = (sent: boolean) => d.store.update(x => {
+        for (const p of reserved) {
           const clock = x.requestReminders?.[p.id]
           if (!clock || clock.leaderSessionId !== leader) continue
-          if (sent) clock.at = iso(d)
+          if (sent && pedidos.some(q => q.id === p.id)) clock.at = iso(d)
           delete clock.pendingAt
         }
       })
+      if (pedidos.length === 0) { await release(false); actions.push(`request-wake-skipped ${leader}:${reserved.map(p => p.id).join(',')}`); continue }
+      const sent = await d.notify.session(leader, requestReminderText(pedidos)).catch(() => false)
+      await release(sent)
       actions.push(`${sent ? 'request-wake' : 'request-wake-failed'} ${leader}:${pedidos.map(p => p.id).join(',')}`)
     }
   }

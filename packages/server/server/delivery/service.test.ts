@@ -190,6 +190,65 @@ describe('delivery service', () => {
     expect(await ops['predispatch-completo']({ subtaskIds: ['s1'] })).toEqual({ ok: true, complete: ['s1'], incomplete: [] })
   })
 
+  describe('FLUXO.AVISOS — the owner-request reminder', () => {
+    const req = (over: Record<string, unknown> = {}) => ({ id: 'p-1', taskId: 't1', sessionId: 'old', text: 'Fix the queue', at: '2026-11-07T01:00:00.000Z', state: 'open', linkedSubtaskIds: [] as string[], ...over })
+
+    test('a QUESTION is answered by the leader, never chased as a pending pre-dispatch', async () => {
+      const h = harness({}, { requests: async () => [req({ text: 'e o deploy?' })] })
+      expect((await h.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
+      expect(h.calls.session).toEqual([])
+    })
+
+    test('completeness is judged AGAIN right before the send: a piece staged in between cancels the reminder (item 3)', async () => {
+      const request = req({ state: 'linked', linkedSubtaskIds: ['s1'] })
+      const h = harness({}, { requests: async () => [request] })
+      const base = h.facts.subtask
+      // The loop's read says "no staging"; by the time the reminder would be typed, the leader has staged it.
+      let reads = 0
+      h.facts.subtask = async id => { const s = await base(id); reads++; return s && reads <= 1 ? { ...s, staged: undefined } : s }
+      const out = await h.svc.tick()
+      expect(h.calls.session).toEqual([])
+      expect(out.actions.some(a => a.startsWith('request-wake-skipped leader:p-1'))).toBe(true)
+      // The reservation was released: the clock holds no pending mark and no delivered mark.
+      const clock = (await createDeliveryStore(join(dir, 'deliveries.json')).read()).requestReminders?.['p-1']
+      expect(clock?.pendingAt).toBeUndefined()
+      expect(clock?.at).toBeUndefined()
+    })
+
+    test('a leader that died between the loop and the send is not typed into', async () => {
+      const h = harness({}, { requests: async () => [req()] })
+      let calls = 0
+      const sessions = h.facts.sessions
+      h.facts.sessions = async () => { calls++; const all = await sessions(); return calls > 1 ? all.map(s => (s.id === 'leader' ? { ...s, alive: false } : s)) : all }
+      const out = await h.svc.tick()
+      expect(h.calls.session).toEqual([])
+      expect(out.actions.some(a => a.startsWith('request-wake-skipped'))).toBe(true)
+    })
+
+    test('ONE cadence per pedido: a newer leader does not re-send while the previous one is alive; it does once the previous one is gone', async () => {
+      const h = harness({}, { requests: async () => [req()] })
+      expect((await h.svc.tick()).actions).toContain('request-wake leader:p-1')
+      h.w.sessions = [...h.w.sessions, { id: 'leader-b', harness: 'claude', role: 'leader', alive: true, cwd: '/r', worktree: false, taskId: 't1', createdAt: '2026-11-07T03:00:00Z' }]
+      h.advance(60_000)
+      expect((await h.svc.tick()).actions.filter(a => a.startsWith('request-wake'))).toEqual([])
+      h.w.sessions = h.w.sessions.map(s => (s.id === 'leader' ? { ...s, alive: false } : s))
+      h.advance(60_000)
+      expect((await h.svc.tick()).actions).toContain('request-wake leader-b:p-1')
+      expect(h.calls.session.map(c => c.id)).toEqual(['leader', 'leader-b'])
+    })
+
+    test('the reminder quotes the id and the first ~80 characters, never the whole owner message (item 11)', async () => {
+      const text = `Fix the queue /home/me/.agentistics/attachments/158e1f81-image.png ${'very long pasted log line '.repeat(60)}`
+      const h = harness({}, { requests: async () => [req({ text })] })
+      await h.svc.tick()
+      const body = h.calls.session[0]!.text
+      expect(body).toContain('p-1')
+      expect(body).toContain('Fix the queue')
+      expect(body).not.toContain('attachments')
+      expect(body.length).toBeLessThan(500)
+    })
+  })
+
   test('a staged member joining a group is folded into that group once', async () => {
     const h = harness()
     await h.svc.stage('s1', {}, 'leader')
